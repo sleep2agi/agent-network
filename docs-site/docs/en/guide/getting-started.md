@@ -6,7 +6,7 @@
      version being published against these stamps and blocks the release, listing every line to update.
      Change the prose, change the stamp — the gate also fails when the two disagree.
      Only "current state" claims are stamped; historical references (e.g. `<= 2.3.0-preview.37`) are not. -->
-<!-- version-claim: package=agent-network channel=latest version=2.2.21 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.47 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.65 -->
 
 The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + one verification per step.
@@ -25,8 +25,9 @@ Skip this page and go to the [Upgrade Guide](/en/guide/upgrade) (usually `anet u
 
 - **Node.js ≥ 22.13.0**
 - **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun that step always fails**, but how depends on the channel:
-  · **latest (currently `2.2.21`)**: a bare `Error: spawn bunx ENOENT` plus a Node stack trace;
-  · **preview (`2.3.0-preview.x`)**: refused before launch with `❌ anet hub start requires the Bun runtime` (exit code 1). After installing, `bun --version` should print a version.
+  · **builds that carry the preflight** (measured 2026-08-30: `latest` = `2.3.0-preview.47`, and `preview`): refused before launch with `❌ anet hub start requires the Bun runtime` (exit code 1);
+  · **older builds without it** (measured on `2.2.21`): a bare `Error: spawn bunx ENOENT` plus a Node stack trace.
+  After installing, `bun --version` should print a version.
 
 With both installed, `commhub-server` / `agent-node` are auto-fetched on first use — you don't install them manually.
 
@@ -144,7 +145,7 @@ On stable, `anet node create` lists **4 production runtimes** (`claude-agent-sdk
 Start the node:
 
 ::: warning Fresh install + claude-agent-sdk / codex-sdk? Install agent-node first
-These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but on **stable `@latest` (currently `2.2.21`) and preview `≤ 2.3.0-preview.37`** the startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware — [#450](https://github.com/sleep2agi/agent-network/issues/450) is the precise filing, #237 is the umbrella). **Root fix** is [PR #239](https://github.com/sleep2agi/agent-network/pull/239) (commit `1eff3a4d`, merged 2026-06-28); Vincent's 2026-08-09 audit verified the fix in an isolated Docker probe on `2.3.0-preview.38` reaching SSE connected. **`@preview` contains this fix; `@latest` does not** (check yours with `anet -v`; check where the channels point with `npm view @sleep2agi/agent-network dist-tags`) — [#450](https://github.com/sleep2agi/agent-network/issues/450) is still `open` pending 4 acceptance gates before latest promotion. **Workarounds** (in verified-strength order): upgrade to `@sleep2agi/agent-network@preview`; or stay on `@latest` but pre-install `agent-node` so the binary is already there:
+These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but on **builds `≤ 2.3.0-preview.37`** (including the older `2.2.21`) the startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware — [#450](https://github.com/sleep2agi/agent-network/issues/450) is the precise filing, #237 is the umbrella). **Root fix** is [PR #239](https://github.com/sleep2agi/agent-network/pull/239) (commit `1eff3a4d`, merged 2026-06-28); Vincent's 2026-08-09 audit verified the fix in an isolated Docker probe on `2.3.0-preview.38` reaching SSE connected. **the fix has been in builds since `2.3.0-preview.38`** (check yours with `anet -v`; check where the channels point with `npm view @sleep2agi/agent-network dist-tags` — measured 2026-08-30, `latest` is already `2.3.0-preview.47`, i.e. **past that floor**) — [#450](https://github.com/sleep2agi/agent-network/issues/450) is still `open` pending 4 acceptance gates before latest promotion. **Workarounds** (in verified-strength order): upgrade to `@sleep2agi/agent-network@preview`; or stay on `@latest` but pre-install `agent-node` so the binary is already there:
 
 ```bash
 npm install -g @sleep2agi/agent-node
