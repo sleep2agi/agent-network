@@ -31,6 +31,11 @@ declare -A SRC=()
 while IFS='=' read -r k v; do [ -n "${k:-}" ] && SRC["$k"]="$v"; done < <(
   { grep -hoE 'const PINNED_[A-Z_]+ *= *"[^"]+"' "$ROOT/agent-network/bin/cli.ts" 2>/dev/null
     grep -hoE 'const OPENCODE_[A-Z_]*VERSION *= *"[^"]+"' "$ROOT/agent-network/src/opencode-agent-node-pair.ts" 2>/dev/null
+    # 🔴 #1430: 也抽 PAIRED_* —— 它们是 `export const PAIRED_AGENT_NODE_VERSION = "..."`
+    #    的字符串字面量,tsc 会把值原样写进 .d.ts(literal type),已发布产物里可读。
+    #    此前只抽 PINNED_SERVER_VERSION(非导出、只在混淆 cli.js、读不到)⇒ 覆盖恒 0 ⇒
+    #    rc=3 零覆盖把真漂移(如 published 钉 .47、源码 .48)也一起掩盖了。
+    grep -hoE 'const PAIRED_AGENT_(NODE|NETWORK)_VERSION *= *"[^"]+"' "$ROOT/agent-network/src/opencode-agent-node-pair.ts" 2>/dev/null
   } | sed -E 's/const ([A-Z_]+) *= *"([^"]+)"/\1=\2/'
 )
 
