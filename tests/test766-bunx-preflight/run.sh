@@ -86,7 +86,7 @@ probe_bunx(){
   [[ "$(sed -n '1p' "$capture" 2>/dev/null || true)" == "--bun" ]] || rc=1
   # 🔴 这一行写死了 PINNED_SERVER_VERSION —— 每次 bump 都必须同步改，否则本套件红。
   #    判据就是「CLI 传给 bunx 的包版本 == cli.ts 里的 PINNED」,所以它只能是字面量。
-  grep -Fxq '@sleep2agi/commhub-server@0.9.0-preview.38' "$capture" || rc=1
+  grep -Fxq '@sleep2agi/commhub-server@0.9.0-preview.39' "$capture" || rc=1
   grep -Fq 'Server running on http://127.0.0.1:27668' "$log" || rc=1
 
   kill "$cli_pid" 2>/dev/null || true
