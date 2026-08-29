@@ -6027,6 +6027,11 @@ async function processRestartOnly(): Promise<void> {
 //      markStable → backoff doubles` in supervise-child.test.ts pins
 //      this contract so a future patch can't re-introduce the hot loop.
 const recentlyHandledCreateRequestIds = new Set<string>();
+// #1448 — 与 create 同样的去重集合，stop/delete 与 start 各一套。live 门铃 handler
+// 和 SSE 重连补偿(reconcilePendingLifecycleRequestsOnConnect)共享它，防同一 request
+// 被两条路径各处理一次。
+const recentlyHandledStopRequestIds = new Set<string>();
+const recentlyHandledStartRequestIds = new Set<string>();
 async function connectSSE() {
   const sseUrl = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
   const ABANDON_AFTER_MS = 60 * 60 * 1_000;  // 1h continuous failure → give up
@@ -6113,6 +6118,35 @@ async function connectSSE() {
                     ),
                   }).catch((e: any) => warn(`create-node pending reconcile failed: ${e?.message || e}`));
                 }).catch((e: any) => warn(`create-node-daemon import for reconcile failed: ${e?.message || e}`));
+              }
+              // #1448 — 同 create：拉本 daemon 名下 pending 的 stop/delete/start
+              // 请求，补回 SSE 断连期(hub 重启/网络抖/boot 窗口)漏掉的门铃。
+              // 注入 handleStop/StartDoorbell(deps 与下方 live 门铃处理一致)。
+              if (fileConfig.role === "host_supervisor") {
+                Promise.all([
+                  import("./runtime/lifecycle-reconcile.js"),
+                  import("./runtime/stop-daemon.js"),
+                  import("./runtime/start-daemon.js"),
+                ]).then(([{ reconcilePendingLifecycleRequestsOnConnect }, { handleStopDoorbell }, { handleStartDoorbell }]) => {
+                  return reconcilePendingLifecycleRequestsOnConnect({
+                    callCommHub,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                    recentlyHandledStopRequestIds,
+                    recentlyHandledStartRequestIds,
+                    handleStopDoorbell: (event: { request_id: string }) => handleStopDoorbell(event, {
+                      callCommHub,
+                      log: (m: string) => log(m),
+                      warn: (m: string) => warn(m),
+                    }),
+                    handleStartDoorbell: (event: { request_id: string }) => handleStartDoorbell(event, {
+                      callCommHub,
+                      workDir: process.cwd(),
+                      log: (m: string) => log(m),
+                      warn: (m: string) => warn(m),
+                    }),
+                  });
+                }).catch((e: any) => warn(`lifecycle pending reconcile failed: ${e?.message || e}`));
               }
               continue;
             }
@@ -6201,30 +6235,42 @@ async function connectSSE() {
             // an unrecognized child_node_id acks 'noop_not_my_child'.
             if (ev.type === "stop_node" && fileConfig.role === "host_supervisor") {
               log(`← SSE stop_node ${ev.request_id || ""}`);
-              import("./runtime/stop-daemon.js").then(({ handleStopDoorbell }) => {
-                handleStopDoorbell(
-                  { request_id: ev.request_id },
+              // #1448 — 与重连补偿共享去重集合：live 门铃先占位,重连 reconcile 就
+              // 不会再重放同一 request。失败则移除,让下一次 connected 能重试。
+              const stopReqId: string = ev.request_id;
+              if (stopReqId && !recentlyHandledStopRequestIds.has(stopReqId)) {
+                recentlyHandledStopRequestIds.add(stopReqId);
+                import("./runtime/stop-daemon.js").then(({ handleStopDoorbell }) => handleStopDoorbell(
+                  { request_id: stopReqId },
                   {
                     callCommHub,
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
                   },
-                ).catch((e: any) => warn(`stop-daemon failed: ${e?.message || e}`));
-              }).catch((e: any) => warn(`stop-daemon import failed: ${e?.message || e}`));
+                )).catch((e: any) => {
+                  recentlyHandledStopRequestIds.delete(stopReqId);
+                  warn(`stop-daemon failed: ${e?.message || e}`);
+                });
+              }
             }
             if (ev.type === "start_node" && fileConfig.role === "host_supervisor") {
               log(`← SSE start_node ${ev.request_id || ""}`);
-              import("./runtime/start-daemon.js").then(({ handleStartDoorbell }) => {
-                handleStartDoorbell(
-                  { request_id: ev.request_id },
+              const startReqId: string = ev.request_id;
+              if (startReqId && !recentlyHandledStartRequestIds.has(startReqId)) {
+                recentlyHandledStartRequestIds.add(startReqId);
+                import("./runtime/start-daemon.js").then(({ handleStartDoorbell }) => handleStartDoorbell(
+                  { request_id: startReqId },
                   {
                     callCommHub,
                     workDir: process.cwd(),
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
                   },
-                ).catch((e: any) => warn(`start-daemon failed: ${e?.message || e}`));
-              }).catch((e: any) => warn(`start-daemon import failed: ${e?.message || e}`));
+                )).catch((e: any) => {
+                  recentlyHandledStartRequestIds.delete(startReqId);
+                  warn(`start-daemon failed: ${e?.message || e}`);
+                });
+              }
             }
             // RFC-028 P1 — provider probe daemon doorbell (host_supervisor only).
             if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {

@@ -3320,6 +3320,53 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
 
+  // #1448 — stop/delete/start 门铃的 SSE 重连补偿，镜像 create 的
+  // list_my_pending_create_requests(#1394)。pushEvent(push.ts) 是纯内存
+  // fan-out：派发门铃那刻若 daemon 无 live SSE 订阅者(hub 重启/网络抖/boot
+  // 窗口)就静默丢弃、不入队，于是 node_stop_requests/node_start_requests 的行
+  // 永远停在 pending、节点卡死 stopping/deleting/starting。daemon 每次 SSE
+  // connected 调本工具把漏掉的门铃拉回来重放(reconcilePendingLifecycleRequestsOnConnect)。
+  //
+  // 统一一个工具返回两张表的 pending 行(stop 表用 action 区分 stop/delete)，
+  // 省一次往返。鉴权同 create：token-bound daemon 身份(alias 不是安全边界)，
+  // 只返回绑定到本 daemon + 本网络的 pending 行。
+  server.tool(
+    "list_my_pending_lifecycle_requests",
+    "Daemon lists pending stop/delete/start requests bound to itself for SSE reconnect compensation. Mirrors list_my_pending_create_requests (#1394/#1448).",
+    {},
+    async () => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      const stop_requests = db.all<{ request_id: string; action: string; child_node_id: string; child_alias: string; created_at: number }>(
+        `SELECT request_id, action, child_node_id, child_alias, created_at
+           FROM node_stop_requests
+          WHERE daemon_node_id = ?1
+            AND network_id = ?2
+            AND status = 'pending'
+          ORDER BY created_at ASC`,
+        callerDaemon.daemonNodeId, callerDaemon.networkId,
+      );
+      const start_requests = db.all<{ request_id: string; child_node_id: string; child_alias: string; created_at: number }>(
+        `SELECT request_id, child_node_id, child_alias, created_at
+           FROM node_start_requests
+          WHERE daemon_node_id = ?1
+            AND network_id = ?2
+            AND status = 'pending'
+          ORDER BY created_at ASC`,
+        callerDaemon.daemonNodeId, callerDaemon.networkId,
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        stop_count: stop_requests.length,
+        start_count: start_requests.length,
+        stop_requests,
+        start_requests,
+      }) }] };
+    },
+  );
+
   // §2.5 step 3 — daemon-facing pull. Returns full spec + env_blob +
   // child_ntok in one shot. Map evicted on take (one-shot consume).
   //
