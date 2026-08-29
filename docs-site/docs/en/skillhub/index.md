@@ -18,6 +18,19 @@ Published versions are immutable. Content corrections should use a new version.
 The build regenerates the catalog, and `skillhub:check` rejects stale or
 manually edited catalog output.
 
+## Browse from the command line
+
+With `@sleep2agi/agent-network` installed you can browse the public SkillHub straight
+from a terminal (it reads the same `/skillhub/catalog.json`, no login needed):
+
+```bash
+anet skill ls              # list every public skill: slug / name / description / version
+anet skill show <slug>     # print a skill's SKILL.md (verified against content_sha256 on download)
+```
+
+`anet doctor` also reports one line on whether the SkillHub catalog is reachable and how many skills it has.
+Point at a different catalog (e.g. a private mirror) with the `ANET_SKILL_CATALOG_URL` env var.
+
 [How to contribute a public skill →](/en/skillhub/contribute)
 
 <PublicSkillHub lang="en" />
