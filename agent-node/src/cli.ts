@@ -6136,6 +6136,7 @@ async function connectSSE() {
                     recentlyHandledStartRequestIds,
                     handleStopDoorbell: (event: { request_id: string }) => handleStopDoorbell(event, {
                       callCommHub,
+                      workDir: process.cwd(),
                       log: (m: string) => log(m),
                       warn: (m: string) => warn(m),
                     }),
@@ -6244,6 +6245,7 @@ async function connectSSE() {
                   { request_id: stopReqId },
                   {
                     callCommHub,
+                    workDir: process.cwd(),
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
                   },

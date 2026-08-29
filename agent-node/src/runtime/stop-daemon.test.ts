@@ -241,6 +241,47 @@ describe("handleStopDoorbell — delete action with delete_config", () => {
   });
 });
 
+// #1474 finding-1(安全) — delete/stop 的 workdir 根从 deps.workDir(=create 用的
+// cwd 基准)派生,不硬编码 homedir()。daemon 从非 $HOME 目录跑时,create 落
+// $CWD/.anet/nodes(含 child ntok+env 密钥),按 homedir 去搬会扑空 → warn → 仍 ack
+// stopped → hub 以为删了、密钥原地残留(违背"删后密钥不残留")。
+//
+// witnessed-red:workDir 设成一个 ≠ homedir 的临时目录、**不**注入 workdirRoot/
+// deletedRoot(强制走派生),盘上放好 config。改后:密钥目录被搬进 <workDir>/.anet/
+// deleted、原地清空;改前(homedir 派生)扑空 → childDir 仍在(残留)、无 backup_path。
+describe("#1474 finding-1 — workdir root derives from workDir, not homedir (secret residue)", () => {
+  test("delete with no injected root cleans $workDir/.anet/nodes/<alias> (not $HOME)", async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "anet-1474-cwd-"));   // ≠ homedir
+    const alias = "cwd-child-1474";
+    const childDir = join(workDir, ".anet", "nodes", alias);
+    mkdirSync(childDir, { recursive: true });
+    writeFileSync(join(childDir, "config.json"), JSON.stringify({ token: "ntok_secret", env_local: "leak" }), { mode: 0o600 });
+
+    const acks: any[] = [];
+    const deps: any = {
+      workDir,   // ← create 的 cwd 基准;故意不注入 workdirRoot/deletedRoot → 测派生
+      callCommHub: async (tool: string, args: any) => {
+        if (tool === "get_stop_request") {
+          return { ok: true, request_id: "sr_cwd", child_node_id: "node_cwd", child_alias: alias, action: "delete", delete_config: true, grace_seconds: 10, force: false };
+        }
+        acks.push(args); return { ok: true };
+      },
+      signalProcess: () => {}, log: () => {}, warn: () => {},
+    };
+    await handleStopDoorbell({ request_id: "sr_cwd" }, deps);
+
+    expect(acks.at(-1)!.status).toBe("stopped");
+    // 密钥目录被清出 $workDir/.anet/nodes(改前 homedir 派生 → 扑空 → 仍在 → 红)
+    expect(existsSync(childDir)).toBe(false);
+    // 搬进了从 workDir 派生的回收站(不是 homedir)
+    const trash = join(workDir, ".anet", "deleted");
+    expect(existsSync(trash) && readdirSync(trash).some(n => n.endsWith(alias))).toBe(true);
+    expect((acks.at(-1)!.backup_path as string | undefined)?.startsWith(trash)).toBe(true);
+
+    rmSync(workDir, { recursive: true, force: true });
+  });
+});
+
 describe("handleStopDoorbell — real subprocess primitive (no mocks)", () => {
   // Mirror PR3 #338 discipline: lock the actual kill-0 + signal
   // semantics against a real node subprocess so a runtime drift
