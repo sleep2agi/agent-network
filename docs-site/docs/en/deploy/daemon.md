@@ -110,6 +110,18 @@ To background it, see [Keeping a daemon alive](#keep-daemon-alive) below.
 **Only run one on a machine you trust to act on your behalf.** To tighten it, edit
 `.anet/nodes/daemon/config.json`.
 
+::: info A daemon is a **pure-program** supervisor, not a chat agent
+A `host_supervisor` daemon's job is **deterministic node lifecycle** — create / stop /
+restart / delete / probe other nodes — all driven by structured doorbells the hub sends
+(RFC-026/027/028). It is a plain program executor and **does not use a model to interpret
+free-text tasks** you send it. The `[claude-agent-sdk]` in the startup banner is only its
+default runtime label; the daemon does not load a model to handle lifecycle commands.
+
+So: **to get AI work done, send the task to a real agent node**, not the daemon. Sending a
+natural-language task (`commhub_send_task`) to a daemon just gets you a short reply saying
+it is a program node — use structured commands instead.
+:::
+
 ### 3.5 Keeping a daemon alive {#keep-daemon-alive}
 
 `anet daemon start` runs in the foreground. **If you started it over SSH, it dies with the
