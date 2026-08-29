@@ -86,6 +86,15 @@ anet node stop grok-demo
 
 The next `anet node start grok-demo` resumes the same `grokCliSession`. The runtime never silently falls back to headless mode or guesses another session. If the process crashes during a network turn, that task fails instead of being replayed across a possible side-effect boundary.
 
+## Switching models inside the co-presence TUI
+
+The co-presence TUI is **one input box shared by a human and the agent**: every keystroke you type reaches the agent's session, so leading-slash commands are blocked as a class by default (palette completion could turn a short prefix + Enter into `/always-approve`, bypassing the approval gate). There are two safe ways to change the model:
+
+- **Type `/model <model>` right in the TUI** (agent-node `2.5.0-preview.45`+): a pristine `/model <id>` line is **proxied out-of-band** — the keystrokes are still cancelled (the slash palette never sees an Enter), the switch runs through the guarded entry, and the result is printed straight into the TUI (`[anet] 已代为切换模型 → <model>`). Extra tokens, a bare `/model`, or a line touched by arrow-key edits are not proxied and stay blocked.
+- **From another terminal: `anet grok model <node> <model>`** — works on any version, even while attached; the session restarts on the new model.
+
+Run `anet grok attach` from the node's working directory (nodes resolve by cwd, see [#1402](https://github.com/sleep2agi/agent-network/issues/1402)).
+
 ## Legacy headless mode
 
 To launch a separate non-interactive Grok process for each network task:
@@ -102,9 +111,19 @@ Headless nodes cannot use `anet grok attach`. Existing profiles without `grokCop
 
 Run `grok --version`. Co-presence only accepts the exact builds on the verified list (currently `0.2.93 (f00f96316d)` and `1.0.5 (5115b46bc909)`). Install a listed build before starting; do not bypass the gate. On 1.0.5, sandbox and leader mode are mutually exclusive — the runtime adjusts its launch flags per version automatically.
 
-### An existing bare grok session cannot join co-presence
+### An existing bare grok session cannot join co-presence by default (but can be transplanted)
 
-Sessions created in plain `grok` (sandbox=off) **cannot** be resumed into a co-presence node: the runtime enforces a sandbox profile and grok refuses cross-profile resume (`cannot resume this session under sandbox profile … it was created with 'off'`), with no supported way to disable the sandbox. Pinning such a session into `grokCliSession` yields repeated `Grok recovery TUI exited before recovery drain` (diagnosability follow-up: [#1400](https://github.com/sleep2agi/agent-network/issues/1400)). Instead let the node create a fresh sandboxed session (drop the pinned id, or use `--new-session`); the old session stays intact and can still be viewed with `grok --resume <id>`.
+Sessions created in plain `grok` (sandbox=off) **cannot by default** be resumed into a co-presence node: the runtime enforces a sandbox profile and grok refuses cross-profile resume (`cannot resume this session under sandbox profile … it was created with 'off'`). Pinning such a session directly into `grokCliSession` yields repeated `Grok recovery TUI exited before recovery drain` (diagnosability follow-up: [#1400](https://github.com/sleep2agi/agent-network/issues/1400)).
+
+**Verified transplant** (keeps all history, no need to disable the sandbox, see [#1409](https://github.com/sleep2agi/agent-network/issues/1409)): the refusal only keys off the session metadata recording `created with 'off'`, so **clone** the session and flip that one field —
+
+1. Copy the old session directory (`sessions/<cwd-key>/<old-id>/`, whole tree: `chat_history.jsonl`/`events.jsonl`/`compaction/`) to a new UUID; delete the `*.lock` files.
+2. In the clone's `summary.json`, change `sandbox_profile`: `"off"` → the node's current workspace profile (like `anet-<hash>-workspace`; it is the only occurrence of that field in the tree).
+3. Point the node config's `grokCliSession` at the new id and restart the node.
+
+grok then resumes the clone cleanly; recent technical context comes back intact (early/low-frequency content may fall outside the active window due to grok's session compaction). The original session is never touched and can still be viewed with `grok --resume <old-id>`. If you prefer not to transplant, let the node create a fresh sandboxed session (drop the pinned id, or `--new-session`).
+
+> ⚠️ Don't let `auto_update` push grok off the verified list: an unverified build (e.g. `1.0.13`) makes co-presence fail with `requires a verified grok build`. Pin a verified build with `GROK_BINARY`, or disable `auto_update` in the node's private `GROK_HOME` ([#1409](https://github.com/sleep2agi/agent-network/issues/1409)).
 
 ### `Installed agent-node does not support grok-build-cli`
 
