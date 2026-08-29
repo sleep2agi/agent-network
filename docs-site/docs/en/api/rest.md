@@ -760,6 +760,69 @@ The `nodes` table is **persistent node identity** (written at creation, deleted 
 
 ---
 
+### GET /api/host-supervisors
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) · RFC-026 §9.2.2 / #338
+
+List the **host_supervisor daemons** in this network (the node kind that `anet daemon` starts). This is the **REST mirror of the `list_host_supervisors` MCP tool**, for callers that don't speak MCP — the Dashboard's create-node wizard reads it to offer a server.
+
+```bash
+curl "http://localhost:9200/api/host-supervisors" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+**How the network is resolved** (you don't pass `network_id`):
+
+| Case | Behaviour |
+|---|---|
+| ntok bound to a network, or one explicitly requested and access-verified | use that network |
+| utok user belongs to **exactly one** network | use it (safe, unambiguous fallback) |
+| user belongs to **zero or ≥2** networks | **400 — it will not guess** |
+
+🔴 **With multiple memberships it does not pick one for you.** It returns 400 and separates the two causes with distinct errors, so a client can recover (retry with an explicit `network_id`):
+
+| Status | Response | When |
+|---|---|---|
+| 400 | `{"ok":false,"error":"network_id_required_multi","memberships":N}` | member of N ≥ 2 networks |
+| 400 | `{"ok":false,"error":"missing_network_id","memberships":0}` | no accessible network |
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "daemons": [
+    {
+      "daemon_node_id": "node_daemon_xxxxx",
+      "alias": "daemon",
+      "hostname": "build-1",
+      "online": true,
+      "last_seen_at": "2026-08-30 10:00:00",
+      "runtimes_supported": ["claude-agent-sdk", "codex-sdk", "grok-build-acp"],
+      "allowed_secret_keys": [],
+      "host_telemetry": {
+        "alert_level": "green",
+        "cpu_cores": 8,
+        "mem_gb": 16,
+        "ip_internal": "10.x.x.x"
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+🔴 **`host_telemetry` is masked by role.** Everyone sees `alert_level` (`green` = online, `gray` = not). Only a network `admin` / `owner` — or a network-token caller — receives `cpu_cores` / `mem_gb` / `ip_internal`. For an ordinary member those keys are **absent**, not null.
+
+🔴 **The `online` window is 5 minutes**, not the heartbeat period. agent-node's `report_status` fires every **3 minutes**, and the window must exceed it — otherwise a daemon would flap to `offline` for the 60–180 s after every heartbeat.
+
+**Only daemons with a live token are listed**: the SQL requires an `EXISTS` match on a non-revoked `node:<alias>` token. Revoked (or deleted) rows drop out, and a daemon whose token was rotated still appears only once.
+
+**Network scope**: the REST auth pipeline's `restScope` (SEC-1).
+
+
+---
+
 ### DELETE /api/nodes/:ref
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)

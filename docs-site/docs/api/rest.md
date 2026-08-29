@@ -749,6 +749,69 @@ curl http://localhost:9200/api/nodes \
 
 ---
 
+### GET /api/host-supervisors
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) · RFC-026 §9.2.2 / #338
+
+列出本网络里的 **host_supervisor daemon**（`anet daemon` 起的那种节点）。这是 `list_host_supervisors` **MCP 工具的 REST 镜像**，给不走 MCP 的调用方用（Dashboard 的「建节点向导」选服务器就是读它）。
+
+```bash
+curl "http://localhost:9200/api/host-supervisors" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+**网络怎么定**（不用传 `network_id`）：
+
+| 情况 | 行为 |
+|---|---|
+| ntok 绑定了网络，或已显式指定并验证过访问权 | 用那个网络 |
+| utok 用户**只属于 1 个**网络 | 用那个网络（安全的无歧义兜底） |
+| 用户属于 **0 个或 ≥2 个**网络 | **400，不猜** |
+
+🔴 **属于多个网络时不会替你挑一个** —— 返回 400，并用两个不同的 error 把原因分开，客户端据此可以恢复（显式带上 `network_id` 再来一次）：
+
+| 状态 | 响应 | 何时 |
+|---|---|---|
+| 400 | `{"ok":false,"error":"network_id_required_multi","memberships":N}` | 属于 N ≥ 2 个网络 |
+| 400 | `{"ok":false,"error":"missing_network_id","memberships":0}` | 没有可访问的网络 |
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "daemons": [
+    {
+      "daemon_node_id": "node_daemon_xxxxx",
+      "alias": "daemon",
+      "hostname": "build-1",
+      "online": true,
+      "last_seen_at": "2026-08-30 10:00:00",
+      "runtimes_supported": ["claude-agent-sdk", "codex-sdk", "grok-build-acp"],
+      "allowed_secret_keys": [],
+      "host_telemetry": {
+        "alert_level": "green",
+        "cpu_cores": 8,
+        "mem_gb": 16,
+        "ip_internal": "10.x.x.x"
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+🔴 **`host_telemetry` 按角色遮蔽**：所有人都能看到 `alert_level`（`green` = 在线 / `gray` = 不在线）；**只有该网络的 `admin` / `owner`（或用 network token 调用）**才拿得到 `cpu_cores` / `mem_gb` / `ip_internal`。普通成员看到的 `host_telemetry` 里**只有 `alert_level`**，不是这些字段为 null。
+
+🔴 **`online` 的窗口是 5 分钟**，不是心跳周期本身。agent-node 的 `report_status` 每 **3 分钟**一次，窗口必须大于它 —— 否则每次心跳之后的 60~180 秒必然抖成 `offline`。
+
+**只列"还有活 token"的 daemon**：SQL 里的 `EXISTS` 子查询要求存在未吊销的 `node:<alias>` token。吊销过（或行已被删）的不会出现；同一个 daemon 轮换过 token 也只出现一次。
+
+**网络作用域**：走 REST auth pipeline 的 `restScope`（SEC-1）。
+
+
+---
+
 ### DELETE /api/nodes/:ref
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
