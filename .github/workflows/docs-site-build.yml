@@ -65,6 +65,14 @@ jobs:
           python3 scripts/check-doc-version-claims.py --selftest
           python3 scripts/check-doc-version-claims.py
 
+      # #1487 孤儿页棘轮:基线为 0,新增「侧边栏没有、也没人链」的页面就红。
+      # 🔴 两个都要跑:selftest 只喂判据,真仓那次才会走取集 ——
+      #    本门第一版正是 selftest 8/8 全绿、真仓 3 个假阳性。
+      - name: 站点孤儿页棘轮（基线 0）
+        run: |
+          python3 .github/scripts/check-docs-site-orphans.py --selftest
+          python3 .github/scripts/check-docs-site-orphans.py
+
       - name: Install (locked)
         run: npm ci
         working-directory: docs-site
