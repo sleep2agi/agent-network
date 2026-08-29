@@ -75,6 +75,7 @@ import {
   PendingReplyQueue,
   type PendingReply,
 } from "./reply-reliability";
+import { isTelemetrySchemaRejection, withoutOptionalTelemetry } from "./register-telemetry-fallback";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
 import {
   GROK_COPRESENCE_PROFILE_ENV,
@@ -1402,7 +1403,7 @@ const register = async () => {
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
     : SESSION_ID || undefined;
-  const result = await callCommHub("report_status", {
+  const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
@@ -1425,7 +1426,23 @@ const register = async () => {
       ownerControlEnabled: OWNER_SCHEDULE_CONTROL_ENABLED,
       ownerNodeId: NODE_ID || undefined,
     }),
-  });
+  };
+  // 🔴 启动注册是 `await register()`（本文件底部、顶层、**无 catch**），所以这里
+  //    抛出什么都会让整个进程退出。#1225 实测到的那次就是这样：hub 的
+  //    `host.ip` 少了 `.nullable()`，一台没有非回环 IPv4 的机器上节点直接起不来。
+  //    hub 与 agent-node 分开发版，谁先升都可能出现遥测字段形状对不上 ——
+  //    一个纯展示用的字段不该有能力让节点起不来。
+  //    判据刻意窄（见 register-telemetry-fallback.ts）：只在 -32602 且被拒路径
+  //    落在可选遥测块里才兜底；必需字段被拒仍然照抛 —— 那是本节点自己的 bug，
+  //    盖住它比崩掉更糟。
+  let result;
+  try {
+    result = await callCommHub("report_status", payload);
+  } catch (e) {
+    if (!isTelemetrySchemaRejection(e)) throw e;
+    warn(`[register] hub 拒了可选遥测字段(${e instanceof Error ? e.message : String(e)})；去掉遥测重试一次`);
+    result = await callCommHub("report_status", withoutOptionalTelemetry(payload));
+  }
   // Server is authoritative: if it told us a canonical alias different
   // from what we just sent, treat that as a snapshot update so the
   // resolver doesn't wait another 30 s to reflect it.
