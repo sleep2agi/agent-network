@@ -6,6 +6,7 @@ import {
   loadAndVerifyAnetBin,
   ensureGlobalAnetConfig,
   reconcilePendingCreateRequestsOnConnect,
+  resolveChildHome,
   _resetWindowsPosixModeWarnLatchForTest,
 } from "./create-node-daemon.js";
 import { win32 as pathWin32 } from "node:path";
@@ -582,6 +583,111 @@ describe("minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable)",
       expect(m[0]).toContain("process.execPath");
       expect(m[0]).not.toMatch(/process\.env\.PATH/);   // explicit anti-C1 invariant
     }
+  });
+});
+
+// #1490 — Windows daemon spawned children got HOME=undefined because
+// Windows doesn't populate env.HOME (USERPROFILE / HOMEDRIVE+HOMEPATH
+// instead). Same class as #1290: POSIX-only assumption in code that
+// must also run on Windows. Follow #1290's platform-param injection so
+// the Windows branch runs on the Linux CI runner too.
+describe("#1490 minimalEnv — cross-platform HOME resolution", () => {
+  // 🔴 witnessed-red: Windows env cascade must find USERPROFILE.
+  // Under the old `process.env.HOME!` it would have returned undefined
+  // for a Windows parent env that has no HOME key.
+  test("🔴 witnessed-red: Windows parent env with USERPROFILE only → child HOME = USERPROFILE", () => {
+    const parentEnv = { USERPROFILE: "C:\\Users\\alice" };
+    const env = minimalEnv({}, "win32", parentEnv);
+    expect(env.HOME).toBe("C:\\Users\\alice");
+    expect(env.USERPROFILE).toBe("C:\\Users\\alice");
+    // HOMEDRIVE / HOMEPATH derived from the drive-letter split so
+    // .bat wrappers and legacy Windows APIs still resolve %HOMEPATH%.
+    expect(env.HOMEDRIVE).toBe("C:");
+    expect(env.HOMEPATH).toBe("\\Users\\alice");
+  });
+
+  test("Windows: HOMEDRIVE+HOMEPATH-only parent env resolves via that cascade branch", () => {
+    const parentEnv = { HOMEDRIVE: "D:", HOMEPATH: "\\Users\\bob" };
+    const env = minimalEnv({}, "win32", parentEnv);
+    expect(env.HOME).toBe("D:\\Users\\bob");
+    expect(env.USERPROFILE).toBe("D:\\Users\\bob");
+    expect(env.HOMEDRIVE).toBe("D:");
+    expect(env.HOMEPATH).toBe("\\Users\\bob");
+  });
+
+  test("Windows: stripped env (no USERPROFILE / HOME / HOMEDRIVE) THROWS with a diagnostic message", () => {
+    // Fail-closed. A silently-empty HOME just moves the crash from
+    // minimalEnv() to the child's first path operation; catching it
+    // here makes the misconfiguration attributable.
+    expect(() => minimalEnv({}, "win32", {})).toThrow(/cannot resolve Windows child HOME/);
+  });
+
+  test("POSIX (explicit 'linux'): env.HOME resolution unchanged, no Windows-only keys leak", () => {
+    // Explicit 'linux' param so a future refactor that accidentally
+    // defaults to 'win32' fails here loudly — same defensive pattern
+    // as #1290's POSIX-mode gate test.
+    const env = minimalEnv({}, "linux", { HOME: "/home/user" });
+    expect(env.HOME).toBe("/home/user");
+    expect(env.USERPROFILE).toBeUndefined();
+    expect(env.HOMEDRIVE).toBeUndefined();
+    expect(env.HOMEPATH).toBeUndefined();
+  });
+
+  test("POSIX (explicit 'linux'): missing env.HOME THROWS (fail-closed, not undefined-passthrough)", () => {
+    expect(() => minimalEnv({}, "linux", {})).toThrow(/cannot resolve POSIX child HOME/);
+  });
+
+  test("Windows: USERPROFILE is a fixed key on that platform — smuggling it in extra THROWS", () => {
+    // Same guarantee as PATH on POSIX: a caller cannot override the
+    // trust-root home path via extra. On POSIX USERPROFILE is not fixed
+    // (POSIX doesn't use it) so the check must be platform-branched.
+    expect(() =>
+      minimalEnv(
+        { USERPROFILE: "C:\\Users\\attacker" },
+        "win32",
+        { USERPROFILE: "C:\\Users\\alice" },
+      ),
+    ).toThrow(/fixed env key/);
+  });
+
+  test("POSIX (explicit 'linux'): USERPROFILE is NOT fixed there — passes through as ordinary extra", () => {
+    // Symmetric to the previous test: platform-branched fixed set.
+    // A POSIX child that happens to want USERPROFILE forwarded (unusual,
+    // but not a supply-chain risk on POSIX) can receive it.
+    const env = minimalEnv(
+      { USERPROFILE: "/some/path" },
+      "linux",
+      { HOME: "/home/user" },
+    );
+    expect(env.USERPROFILE).toBe("/some/path");
+    expect(env.HOME).toBe("/home/user");
+  });
+
+  test("resolveChildHome: Windows cascade priority USERPROFILE > HOME > HOMEDRIVE+HOMEPATH", () => {
+    // Direct unit test on the helper. USERPROFILE wins because that's
+    // what os.homedir() and every modern Windows tool reads first.
+    expect(
+      resolveChildHome(
+        {
+          USERPROFILE: "C:\\Users\\up",
+          HOME: "C:\\Users\\h",
+          HOMEDRIVE: "D:",
+          HOMEPATH: "\\Users\\hd",
+        },
+        "win32",
+      ),
+    ).toBe("C:\\Users\\up");
+    // Missing USERPROFILE: HOME wins.
+    expect(
+      resolveChildHome(
+        { HOME: "C:\\Users\\h", HOMEDRIVE: "D:", HOMEPATH: "\\Users\\hd" },
+        "win32",
+      ),
+    ).toBe("C:\\Users\\h");
+    // Missing USERPROFILE + HOME: HOMEDRIVE+HOMEPATH is the last resort.
+    expect(
+      resolveChildHome({ HOMEDRIVE: "D:", HOMEPATH: "\\Users\\hd" }, "win32"),
+    ).toBe("D:\\Users\\hd");
   });
 });
 

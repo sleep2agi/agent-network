@@ -277,7 +277,61 @@ export function _resetAnetBinAbsForTest(): void { _anetBinAbs = null; }
 // ── §4.2.6 B1 — minimalEnv (filter + fixed-keys-last + throw-on-collision) ──
 
 const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-const FIXED_ENV_KEYS = new Set(["PATH", "HOME", "LANG"]);
+// #1490 — fixed env keys split by platform. Windows children need
+// USERPROFILE / HOMEDRIVE / HOMEPATH populated to resolve the home
+// directory; POSIX children only need HOME. Both platforms get PATH +
+// HOME + LANG. Extra keys passed to minimalEnv must NOT collide with any
+// key we own — smuggling USERPROFILE on Windows would let an untrusted
+// caller point the child at a different home, so it's fixed there too.
+const FIXED_ENV_KEYS_POSIX = new Set(["PATH", "HOME", "LANG"]);
+const FIXED_ENV_KEYS_WIN32 = new Set(["PATH", "HOME", "LANG", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]);
+function fixedEnvKeysFor(platform: NodeJS.Platform): ReadonlySet<string> {
+  return platform === "win32" ? FIXED_ENV_KEYS_WIN32 : FIXED_ENV_KEYS_POSIX;
+}
+// Back-compat export for anything still reading the old constant (kept
+// as the union of both sets — matches "what keys minimalEnv WILL fix"
+// across all supported platforms, which is what a caller sanity-checking
+// the denylist actually wants).
+const FIXED_ENV_KEYS = new Set([...FIXED_ENV_KEYS_POSIX, ...FIXED_ENV_KEYS_WIN32]);
+
+/** #1490 — resolve the correct home directory for a spawned child, per
+ *  platform. Windows populates USERPROFILE / HOMEDRIVE+HOMEPATH, NOT
+ *  HOME — the existing `process.env.HOME!` was undefined-passed-through
+ *  and crashed the child on the first path operation. Precedent + comment
+ *  in agent-node/src/runtime/grok-child-env.ts:53-58.
+ *
+ *  Throws when no home can be resolved (rare — stripped env / non-root
+ *  container / etc). Fail-closed is correct here: silently forking a
+ *  child with an unresolved home leads to the same undefined-path crash
+ *  we're trying to eliminate, just later.
+ *
+ *  Takes env as a parameter (not process.env directly) so the Windows
+ *  branch can be exercised on a Linux CI runner via unit test injection —
+ *  same testability pattern used by #1290's platform-param plumb-through.
+ */
+export function resolveChildHome(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+  if (platform === "win32") {
+    const home = env.USERPROFILE
+      || env.HOME
+      || (env.HOMEDRIVE && env.HOMEPATH ? env.HOMEDRIVE + env.HOMEPATH : "");
+    if (!home) {
+      throw new Error(
+        "minimalEnv: cannot resolve Windows child HOME " +
+        "(USERPROFILE, HOME, and HOMEDRIVE+HOMEPATH all missing). " +
+        "Configure at least USERPROFILE for the daemon service account.",
+      );
+    }
+    return home;
+  }
+  const home = env.HOME;
+  if (!home) {
+    throw new Error(
+      "minimalEnv: cannot resolve POSIX child HOME (env.HOME missing). " +
+      "Ensure the daemon service unit sets HOME.",
+    );
+  }
+  return home;
+}
 
 /** #301 nvm fix (issue: spawned child shebang `#!/usr/bin/env node`
  *  finds no node when daemon runs under nvm / pnpm / Bun / custom
@@ -301,23 +355,51 @@ function computeChildPath(): string {
   return `${execDir}:${SAFE_PATH}`;
 }
 
-export function minimalEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+export function minimalEnv(
+  extra: Record<string, string> = {},
+  platform: NodeJS.Platform = process.platform,
+  parentEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
   const filtered: Record<string, string> = {};
+  const fixedKeys = fixedEnvKeysFor(platform);
   for (const [k, v] of Object.entries(extra)) {
     if (isReservedEnvKey(k)) {
       throw new Error(`minimalEnv: reserved env key ${k} reached fork (denylist gap — investigate)`);
     }
-    if (FIXED_ENV_KEYS.has(k)) {
+    if (fixedKeys.has(k)) {
       throw new Error(`minimalEnv: fixed env key ${k} reached fork`);
     }
     filtered[k] = v;
   }
-  return {
+  const home = resolveChildHome(parentEnv, platform);
+  const base: NodeJS.ProcessEnv = {
     ...filtered,
     PATH: computeChildPath(),
-    HOME: process.env.HOME!,
-    LANG: process.env.LANG || "C.UTF-8",
+    HOME: home,
+    LANG: parentEnv.LANG || "C.UTF-8",
   };
+  if (platform === "win32") {
+    // #1490 — Windows-only. Node's os.homedir() and most tools read
+    // USERPROFILE first; grok / claude / codex CLIs invoked as
+    // grandchildren also need HOMEDRIVE+HOMEPATH to resolve %HOMEPATH%
+    // in .bat wrappers and legacy Windows APIs.
+    base.USERPROFILE = home;
+    if (/^[A-Za-z]:/.test(home)) {
+      // Standard drive-letter path — split at the 2nd char.
+      // C:\Users\alice → HOMEDRIVE=C: HOMEPATH=\Users\alice
+      base.HOMEDRIVE = home.slice(0, 2);
+      base.HOMEPATH = home.slice(2);
+    } else if (parentEnv.HOMEDRIVE && parentEnv.HOMEPATH) {
+      // Non-drive-letter home (UNC path, weird service context) — fall
+      // back to whatever the daemon inherited, on the assumption that
+      // if the daemon is running with those values the child needs the
+      // same. If neither branch fires the child just doesn't get
+      // HOMEDRIVE/HOMEPATH — tools that need them will fail loudly.
+      base.HOMEDRIVE = parentEnv.HOMEDRIVE;
+      base.HOMEPATH = parentEnv.HOMEPATH;
+    }
+  }
+  return base;
 }
 
 // ── §4.2.2 daemon-side spec validators (mirror of create-node-validate) ──
@@ -572,7 +654,10 @@ export async function handleCreateNodeDoorbell(
 
   // P1: ensure global ~/.anet/config.json has hub so `anet node start`
   // can resolve the hub even when called from minimalEnv. Idempotent.
-  try { ensureGlobalAnetConfig(process.env.HOME!, deps.hubUrl); }
+  // #1490 — was `process.env.HOME!` which passed undefined on Windows and
+  // crashed the write with `undefined/.anet/config.json`. resolveChildHome
+  // reads Windows env cascade (USERPROFILE / HOMEDRIVE+HOMEPATH / HOME).
+  try { ensureGlobalAnetConfig(resolveChildHome(process.env, process.platform), deps.hubUrl); }
   catch (e: any) { deps.warn(`[create-node] global config write failed (continuing): ${e?.message || e}`); }
 
   // Step 1 — write child config.json directly.
