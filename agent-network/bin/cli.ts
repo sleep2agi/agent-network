@@ -15416,6 +15416,21 @@ async function doctorCommand() {
     info(".mcp.json", "not found in current directory");
   }
 
+  // #1188 — surface SkillHub in `anet doctor` so it is discoverable, not just a
+  // page that exists. Reuses loadSkillCatalog (network → cache fallback). Non-
+  // fatal: an unreachable catalog is a warning, never a doctor failure.
+  try {
+    const { catalog, sourceUrl, fromCache, cachedAt } = await loadSkillCatalog(false);
+    const nSkills = catalog.skills?.length ?? 0;
+    if (fromCache) {
+      info("SkillHub catalog", `${nSkills} skill(s) (cached${cachedAt ? ` ${cachedAt}` : ""}; ${sourceUrl}) — browse: anet skill ls`);
+    } else {
+      check("SkillHub catalog", true, `${nSkills} skill(s) available (${sourceUrl}) — browse: anet skill ls`);
+    }
+  } catch (e: any) {
+    warning("SkillHub catalog", `unreachable (${e?.message || e}); set ANET_SKILL_CATALOG_URL or check network — browse: anet skill ls`);
+  }
+
   // 6. Telegram channel env (silent token loss is a known foot-gun)
   const tgEnv = join(home, ".claude", "channels", "telegram", ".env");
   if (existsSync(tgEnv)) {
