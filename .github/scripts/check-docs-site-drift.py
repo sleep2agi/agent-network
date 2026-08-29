@@ -168,6 +168,12 @@ def added_lines(rel: str, commits: int = 40) -> list[str]:
 
 def fingerprint(text: str) -> str | None:
     """挑一句足够独特、且不含 markdown 结构字符的正文。"""
+    # 🔴 剥掉 HTML 注释块再挑指纹。VitePress 渲染时会丢弃 `<!-- ... -->`,
+    #    所以注释里的任何一行**永远不会**出现在线上页面上。旧代码只跳过
+    #    以 `<` 开头的行(注释首行),漏了多行注释的**续行**(strip 后不以 `<`
+    #    开头)——于是把 getting-started 里那段 version-claim 说明的续行当指纹,
+    #    对着线上永远找不到 ⇒ 恒 MISS 的假漂移(#1424 的戳改动实测中招)。
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     for raw in text.split("\n"):
         line = raw.strip()
         # 🔴 按 **UTF-8 字节** 卡长度,不按字符数。这个仓的文档以中文为主,
@@ -226,6 +232,20 @@ def run() -> int:
         # 只从「最近新增的行」里选指纹 —— 见 added_lines 的注释。
         # 拿不到新增行时退回整份文件,但那种情况下这一页只能证明"站点还活着"。
         recent = added_lines(rel)
+        # Drop any added line that lives inside an HTML comment in the current
+        # file — it never renders, so verifying it against the live page is a
+        # guaranteed false MISS (see fingerprint()).
+        try:
+            _ftext = (DOCS / rel).read_text(encoding="utf-8", errors="replace")
+            _clines = set()
+            for _blk in re.findall(r"<!--.*?-->", _ftext, flags=re.DOTALL):
+                for _cl in _blk.split("\n"):
+                    _s = _cl.strip()
+                    if _s:
+                        _clines.add(_s)
+            recent = [l for l in recent if l.strip() not in _clines]
+        except OSError:
+            pass
         fp = fingerprint("\n".join(recent)) if recent else None
         source = "recent-added"
         if fp is None:
@@ -362,6 +382,17 @@ def selftest() -> int:
     check("HTML 实体解码后指纹可命中",
           "[anet] \"<alias>\" is not running locally" in ent_text, f"got={ent_text!r}")
     check("太短的行不被选中", fingerprint("短句。\n") is None)
+
+    # 🔴 多行 HTML 注释的续行(strip 后不以 `<` 开头)必须被跳过 —— 它渲染后
+    #    不出现在页面上,选它当指纹就是恒 MISS 的假漂移(#1424 实测中招)。
+    comment_text = ("<!-- 🔴 这两条戳被脚本读取,渲染出来看不见。\n"
+                    "     release gate 会拿正在发的版本和这两条戳比对,不一致就拦下发布。 -->\n"
+                    "这是渲染后真的会出现在页面上的一句普通正文,足够长且不含链接强调。\n")
+    fp_c = fingerprint(comment_text)
+    check("指纹跳过多行注释的续行,选中真正文",
+          fp_c == "这是渲染后真的会出现在页面上的一句普通正文,足够长且不含链接强调。", f"got={fp_c!r}")
+    check("整块都是注释时返回 None",
+          fingerprint("<!-- release gate 会拿正在发的版本和这两条戳比对,不一致就拦下发布并列出。 -->\n") is None)
 
     for name, ok, detail in cases:
         print(f"  {'ok  ' if ok else 'FAIL'} {name}   {detail}")
