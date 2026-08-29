@@ -2207,7 +2207,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     // History never reaches the TUI, and safe cursor edits reject any slash
     // before or after cursor divergence. Overflow remains unsafe because the
     // complete editor contents can no longer be reconstructed.
-    return this.humanComposerLeadingSlash || this.humanComposerAuditTainted || this.humanComposerAuditUnsafe;
+    return this.humanComposerLeadingSlash || this.humanComposerAuditUnsafe;
   }
 
   private resetHumanComposerAudit(): void {
@@ -2222,7 +2222,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private warnBlockedPermissionModeChange(route: string): void {
     const warning = `${route} was blocked: Grok co-presence keeps its runtime-owned always-approve policy immutable`;
     this.warn(`[grok-copresence] ${warning}`);
-    if (route === "slash command") {
+    if (/slash/.test(route)) {
       this.attach?.broadcastOutput(
         "\r\n[anet] 斜杠命令在共存会话被禁用；换模型请另开终端: anet grok model <node> <model>\r\n",
       );

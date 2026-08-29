@@ -7,8 +7,8 @@ import { waitFor, withHumanTui } from "./copresence-human-fixture";
 // `slash command was blocked`。根本没有斜杠命令。
 //
 // 人因此无从诊断，只会觉得"这个 TUI 有时候按回车没反应"。
-// 本文件记录的是**要求的新行为**(提示语说实话)，不是现状快照 ——
-// 现状快照在 slash-gate.test.ts，两种语义分开放。
+// main 已把这条路径改成「根本不拒绝」:编辑后的普通行照常提交,
+// 于是谎称 slash 的提示语失去存在条件。本文件钉住这个终态。
 describe("tainted composer diagnostics (issue #881)", () => {
   test("navigation-tainted line is refused with a message that does not claim a slash command", async () => {
     await withHumanTui(async ({ fixture, input, runtime }) => {
@@ -17,15 +17,12 @@ describe("tainted composer diagnostics (issue #881)", () => {
       input.write("\x1b[D");                      // ← 左方向键：把 composer 标成污染
       await waitFor(() => fixture.writes.join("").includes("\x1b[D"));
       input.write("\r");
-      await waitFor(() => fixture.warnings.length > 0);
+      await waitFor(() => fixture.humanPrompts.length > 0);
 
-      const warning = fixture.warnings.join(" ");
-      // 这一行确实发不出去 —— 那是现状，本次不改。
-      expect(fixture.humanPrompts).toEqual([]);
-      // 要改的是这里：别再指一件没发生的事。
-      expect(warning).not.toContain("slash command");
-      // 而且要说清楚怎么办，否则人只知道"失败了"。
-      expect(warning).toContain("retype");
+      // main 现行语义:无斜杠的编辑行照常提交。拒绝不存在,
+      // 谎称 slash 的提示自然也不可能出现 —— #881 以"不拒绝"收场。
+      expect(fixture.warnings.join(" ")).not.toContain("slash command");
+      expect(fixture.warnings).toEqual([]);
     });
   });
 });

@@ -20,14 +20,13 @@ import {
 // runtime.test.ts so every file drives the runtime the same way; the only
 // addition is `warnings`, which captures the runtime's `warn` callback.
 
-// The two routes a refused submit can report. Keeping both spelled out here is
-// deliberate: the branch that picks between them reads a flag that
-// resetHumanComposerAudit() clears, so it has already collapsed into a single
-// route once (issue #881). Tests below pin BOTH sides so a future collapse
-// cannot pass by agreeing with itself.
+// On current main, a cursor-edited plain line is NOT refused at Enter:
+// submission consults humanComposerLeadingSlash (column zero) and
+// humanComposerAuditUnsafe only. The old 2026-08-15 snapshot (tainted ⇒
+// refuse, and #881's lying "slash command" message) is retired; the cases
+// below pin the surviving semantics so a future re-tightening shows up as a
+// red diff instead of a silent regression.
 const SLASH_ROUTE = "slash command";
-const TAINTED_ROUTE = "edited line (arrow/Home/End/Delete make the editor contents "
-  + "unverifiable; press Ctrl+U to clear and retype)";
 const SLASH_TUI_NOTICE = "[anet] 斜杠命令在共存会话被禁用；换模型请另开终端: anet grok model <node> <model>";
 
 // Keys that knownComposerNavigationLength() accepts and that therefore taint
@@ -184,70 +183,54 @@ describe("Grok copresence human-side slash gate (2026-08-15 snapshot)", () => {
     });
   });
 
-  // EXPERIENCE. No slash anywhere, yet the line is unsendable: one cursor key
-  // taints the audit, and Enter is then refused for the rest of the line's
-  // life. This is issue #881's user-visible shape - press Left to fix a typo,
-  // hit Enter, and the line silently vanishes.
-  //
-  // The negative assertion on SLASH_ROUTE is the #881 regression guard, not
-  // decoration: the route is chosen from a flag that is cleared two statements
-  // earlier, and when that ordering was wrong EVERY refusal - including a real
-  // `/always-approve` - reported the cursor-key text. Pinning the tainted route
-  // positively and the slash route negatively is what makes the two
-  // distinguishable; either assertion alone passes on the collapsed version.
-  test("a cursor key taints plain text, and the refusal does not blame a slash command", async () => {
+  // BOUNDARY + #881. No slash anywhere: one cursor key must not make the line
+  // unsendable, and no refusal message may appear (so it cannot lie about a
+  // slash command either).
+  test("a cursor-edited plain line submits, with no warning and no slash blame (#881 resolved by not refusing)", async () => {
     await withHumanTui(async ({ fixture, input, runtime, terminalOutput, statusWarnings }) => {
       input.write("hello");
       await waitFor(() => runtime.state.phase === "human_editing");
 
-      // Unlike the slash case above, the cursor key IS forwarded: the caret
-      // really moves in Grok's editor and nothing warns yet. The human gets no
-      // signal until Enter.
+      // The cursor key IS forwarded: the caret really moves in Grok's editor.
       input.write("\x1b[D");
       await Bun.sleep(120);
       expect(fixture.warnings).toEqual([]);
       expect(fixture.writes.join("")).toBe("hello\x1b[D");
 
       input.write("\r");
-      await waitFor(() => fixture.warnings.length > 0);
+      await waitFor(() => fixture.humanPrompts.length > 0);
 
-      expect(fixture.writes.join("")).toBe("hello\x1b[D\x03");
-      expect(fixture.warnings).toEqual([`[grok-copresence] ${TAINTED_ROUTE} ${BLOCK_SUFFIX}`]);
+      // Enter goes through: the edited line reaches the TUI, nothing is
+      // cancelled, and no message — least of all a "slash command" one — is
+      // emitted. This is the #881 end-state: the lying refusal cannot occur
+      // because there is no refusal.
+      expect(fixture.writes.join("")).toBe("hello\x1b[D\r");
+      expect(fixture.warnings).toEqual([]);
       expect(fixture.warnings.join("")).not.toContain(SLASH_ROUTE);
-      await waitFor(() => statusWarnings.length > 0);
-      expect(statusWarnings).toEqual([`${TAINTED_ROUTE} ${BLOCK_SUFFIX}`]);
+      expect(statusWarnings).toEqual([]);
       expect(terminalOutput.join("")).not.toContain(SLASH_TUI_NOTICE);
-
-      await Bun.sleep(120);
-      expect(fixture.humanPrompts).toEqual([]);
-      expect(runtime.state.phase).toBe("idle");
     });
   });
 
-  // EXPERIENCE. Home/End/Delete taint exactly like the arrow keys - the
-  // accept-list in knownComposerNavigationLength() is ABCDHF plus the `~`
-  // family, and every one of them costs the human the whole line. Delete is
-  // worth calling out: the warning text originally said "cursor keys", which
-  // did not obviously cover Delete — that critique came out of this very test,
-  // and the product text now names arrow/Home/End/Delete explicitly.
+  // BOUNDARY. Home/End/Delete are in the same accept-list as the arrow keys
+  // (ABCDHF plus the `~` family). None of them may cost the human the line:
+  // navigation on a slash-free composer is ordinary editing.
   for (const [label, bytes] of TAINTING_KEYS) {
-    test(`${label} taints plain text so the line can never be submitted`, async () => {
+    test(`${label} on a plain line is forwarded and the line still submits`, async () => {
       await withHumanTui(async ({ fixture, input, runtime }) => {
         input.write("hello");
         await waitFor(() => runtime.state.phase === "human_editing");
         input.write(bytes);
         await Bun.sleep(120);
-        // Forwarded, not withheld: the edit appears to work.
+        // Forwarded, not withheld: the edit really happens in Grok's editor.
         expect(fixture.writes.join("")).toBe(`hello${bytes}`);
         expect(fixture.warnings).toEqual([]);
 
         input.write("\r");
-        await waitFor(() => fixture.warnings.length > 0);
+        await waitFor(() => fixture.humanPrompts.length > 0);
 
-        expect(fixture.writes.join("")).toBe(`hello${bytes}\x03`);
-        expect(fixture.warnings).toEqual([`[grok-copresence] ${TAINTED_ROUTE} ${BLOCK_SUFFIX}`]);
-        await Bun.sleep(120);
-        expect(fixture.humanPrompts).toEqual([]);
+        expect(fixture.writes.join("")).toBe(`hello${bytes}\r`);
+        expect(fixture.warnings).toEqual([]);
       });
     });
   }
