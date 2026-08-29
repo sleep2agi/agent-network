@@ -463,3 +463,4 @@ curl -fsS http://127.0.0.1:9200/health
 - [升级指南](/guide/upgrade)
 - [故障排查](/troubleshooting)
 - [`deploy/` — 本仓部署资产的 Git 权威](https://github.com/sleep2agi/agent-network/blob/main/deploy)
+- [daemon ↔ hub 生命周期请求的可靠性模型](https://github.com/sleep2agi/agent-network/blob/main/docs/daemon-lifecycle-reliability.md) —— 开发者向:门铃为什么会丢、重连补偿怎么补、三个 stuck-state 各自的收敛路径

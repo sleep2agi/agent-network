@@ -498,3 +498,4 @@ unclear, stop and identify which supervisor controls the Hub first.
 - [Upgrade guide](/en/guide/upgrade)
 - [Troubleshooting](/en/troubleshooting)
 - [`deploy/` — the Git authority for this repo's deployment assets](https://github.com/sleep2agi/agent-network/blob/main/deploy)
+- [Lifecycle-request reliability model (daemon ↔ hub)](https://github.com/sleep2agi/agent-network/blob/main/docs/daemon-lifecycle-reliability.md) — developer-facing: why a doorbell can be dropped, how reconnect compensation replays it, and how each of the three stuck states converges
