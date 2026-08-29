@@ -9444,7 +9444,18 @@ Stop a running agent node.
       const prior = readLifecycleOwner(resolved.id);
       stopGeneration = prior?.generation || randomUUID();
       let roots = prior?.processes || [];
-      if (roots.some(p => !p.birth)) throw new Error("NODE_OWNER_BIRTH_UNAVAILABLE");
+      // 🔴 这一条与下面 alias-fallback 支里的 NODE_OWNER_BIRTH_UNAVAILABLE 是**两件事**,
+      // 原先共用同一句错误 —— 于是 CI 上只看错误文本分不出是哪一种,#1422 的定位
+      // 因此走过弯路。两者的成因完全不同:
+      //   本条(RECEIPT):**收据里已记录**的某个 process 缺 birth 字段 —— 是持久化
+      //     记录不完整,与当前进程是否存活无关。
+      //   下面那条(带 `: pid=<n>`):ps 发现之后**现在读不到** /proc/<pid>/stat ——
+      //     多半是那个 pid 已经退出(#1422 的 TOCTOU)。
+      // 分开命名,让 CI 输出自身就能回答「是哪一种」。
+      const missingBirth = roots.filter(p => !p.birth).map(p => p.pid);
+      if (missingBirth.length > 0) {
+        throw new Error(`NODE_OWNER_BIRTH_UNAVAILABLE_RECEIPT: pids=${missingBirth.join(",")}`);
+      }
       // One-time migration for pre-receipt generations: discover by alias only
       // while holding stop-intent, then freeze exact identities. Reaping never
       // rescans by alias, so a later same-name generation cannot be adopted.
