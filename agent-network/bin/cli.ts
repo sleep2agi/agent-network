@@ -35,6 +35,7 @@ import {
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
+import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -5331,6 +5332,31 @@ async function createCommand(idOverride?: string) {
         saveGlobal(gc);
       }
     } catch {}
+  }
+
+  // #1390 — --resume / --resume-latest imply claude-code-cli. The create
+  // command used to gate its whole session-binding block on
+  // runtime===claude-code-cli, so `anet node create X --resume <id>` WITHOUT
+  // an explicit --runtime silently dropped --resume AND left the node on the
+  // default claude-agent-sdk (user asked for A, got B). Decision extracted to
+  // resolveRuntimeForResume (unit-tested, hub-free): infer claude-code-cli when
+  // runtime is unset, fail loud on an explicit conflicting runtime.
+  {
+    const decision = resolveRuntimeForResume({
+      resume: opts.resume,
+      resumeLatest: opts["resume-latest"] === "true",
+      session: opts.session,
+      explicitRuntime: opts.runtime ? normalizeRuntime(opts.runtime) : "",
+    });
+    if (decision.conflictError) {
+      console.error(`[anet] ❌ ${decision.conflictError}`);
+      console.error(`[anet]    去掉 --runtime（会自动推断为 claude-code-cli），或去掉 --resume`);
+      process.exit(1);
+    }
+    if (decision.inferredRuntime) {
+      opts.runtime = decision.inferredRuntime;
+      console.log(`[anet] --resume 推断 runtime=${decision.inferredRuntime}`);
+    }
   }
 
   // #115 — bind an existing Claude session at create time (claude-code-cli only).
