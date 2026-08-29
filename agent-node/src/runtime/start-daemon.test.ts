@@ -81,6 +81,8 @@ describe("handleStartDoorbell", () => {
       workDir: root, nodesRoot: root, anetBin: () => "/trusted/anet",
       spawnChild: () => { spawns++; return { pid: 8181, unref() {} }; },
       signalProcess: () => {}, log: () => {}, warn: () => {},
+      // #1448 finding-6 — legit replay: 同一个 agent-node 进程还活着,cmdline 精确匹配。
+      readProcCmdline: (pid: number) => pid === 8181 ? "node\0/x/cli.js\0--alias\0child-a\0" : null,
       callCommHub: async (tool: string) => {
         if (tool === "get_start_request") return { ok: true, child_node_id: "node_child_a", child_alias: "child-a" };
         if (tool === "ack_start_request" && firstAck) { firstAck = false; throw new Error("network lost"); }
@@ -91,5 +93,33 @@ describe("handleStartDoorbell", () => {
     await handleStartDoorbell({ request_id: "str_replay" }, deps);
     expect(spawns).toBe(1);
     expect(getChildrenSnapshot()[0].pid).toBe(8181);
+  });
+
+  // #1448 finding-6 — witnessed-red：recorded.pid 通过 kill-0,但 /proc/<pid>/cmdline
+  // 不再是那个 agent-node(pid 被无关进程复用)。改前:直接 ack started + 用复用的 pid,
+  // node 被标 active 而实际没跑(假 started)。改后:cmdline 复验失败 → 走真启动、ack 用
+  // 新 pid、不冒充。
+  test("PID reuse (cmdline no longer matches) → re-starts instead of false 'started' ack", async () => {
+    writeConfig(); let spawns = 0; let firstAck = true; const acks: any[] = [];
+    const deps: any = {
+      workDir: root, nodesRoot: root, anetBin: () => "/trusted/anet",
+      spawnChild: () => { spawns++; return { pid: spawns === 1 ? 8181 : 9999, unref() {} }; },
+      signalProcess: () => {}, log: () => {}, warn: () => {},
+      // pid 8181 现在是别的进程(如 sshd)——kill-0 过,但 cmdline 不含 --alias child-a。
+      readProcCmdline: (_pid: number) => "/usr/sbin/sshd\0-D\0",
+      callCommHub: async (tool: string, args: any) => {
+        if (tool === "get_start_request") return { ok: true, child_node_id: "node_child_a", child_alias: "child-a" };
+        if (tool === "ack_start_request") {
+          if (firstAck) { firstAck = false; throw new Error("network lost"); }
+          acks.push(args);
+        }
+        return { ok: true };
+      },
+    };
+    await handleStartDoorbell({ request_id: "str_reuse" }, deps);   // spawn 8181, ack throws
+    await handleStartDoorbell({ request_id: "str_reuse" }, deps);   // replay: cmdline mismatch → re-start
+    expect(spawns).toBe(2);                                          // 真的重启了,没拿复用 pid 冒充
+    expect(acks.at(-1)).toMatchObject({ status: "started", child_pid: 9999 });   // ack 用新 pid,不是复用的 8181
+    expect(getChildrenSnapshot()[0].pid).toBe(9999);
   });
 });
