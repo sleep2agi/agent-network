@@ -38,6 +38,7 @@ import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
+import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -4106,6 +4107,16 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   }
   const runtime = runtimeForExecution(opts.runtime, "create node");
   const defaultModel = defaultCodexModelForRuntime(runtime);
+  // #1469 finding-3 — validate opts.model in place before the profile
+  // literal below builds { model: opts.model || defaultModel }. Mutating
+  // opts.model here keeps the downstream `opts.model || defaultModel`
+  // idiom byte-identical, which test697's L5 mutation guard pins by
+  // literal string (`explicit-model-overwritten`). Validation is not-
+  // empty-after-trim + no-embedded-whitespace — no known-model allowlist
+  // (models are vendor-defined and evolve independently; dispatch
+  // explicitly warned against over-restricting). See src/tool-allowlist.ts
+  // for the rationale + tests.
+  if (opts.model) opts.model = validateModel(opts.model);
   const nodeId = generateNodeId();
   const grokHeadless = opts["grok-headless"] === "true";
   if (grokHeadless && runtime !== "grok-build-cli") {
@@ -4123,7 +4134,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     ...(gc.network_id ? { network_id: gc.network_id } : {}),
     ...(opts.hub ? { hub } : {}),
     ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
-    ...(opts.tools ? { tools: opts.tools.split(",").map((s: string) => s.trim()) } : {}),
+    ...(opts.tools ? { tools: parseAndValidateTools(opts.tools, runtime) } : {}),
     channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
     env: envMap,
     flags: {
@@ -5268,7 +5279,9 @@ async function createCommand(idOverride?: string) {
   } else if (opts.runtime === "grok-build-acp" || opts.runtime === "grok-build-cli") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok login");
     if (opts.runtime === "grok-build-cli") {
-      const requestedTools = opts.tools ? opts.tools.split(",").map((tool) => tool.trim()) : undefined;
+      // #1469 finding-3 — validate here too so a typo fails at the interactive
+      // grok warning rather than passing through and only tripping at persist.
+      const requestedTools = opts.tools ? parseAndValidateTools(opts.tools, "grok-build-cli") : undefined;
       printGrokCopresenceWarning(id, requestedTools, "configured");
     }
   } else if (opts.runtime === "opencode-cli") {
