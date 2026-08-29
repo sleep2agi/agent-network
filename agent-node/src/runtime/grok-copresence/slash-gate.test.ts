@@ -60,21 +60,25 @@ describe("Grok copresence human-side slash gate (2026-08-15 snapshot)", () => {
     });
   });
 
-  test("/model is cancelled like other TUI slash commands and points to anet grok model", async () => {
-    await withHumanTui(async ({ fixture, input, terminalOutput, statusWarnings }) => {
+  test("a pristine /model <id> is cancelled at the TUI but proxied out-of-band (#879)", async () => {
+    await withHumanTui(async ({ fixture, input, terminalOutput }) => {
       input.write("/model grok-4-fast\r");
-      await waitFor(() => terminalOutput.join("").includes(SLASH_TUI_NOTICE));
+      await waitFor(() => terminalOutput.join("").includes("已代为切换模型 → grok-4-fast"));
 
+      // The keystrokes are still cancelled — the TUI's slash palette never
+      // sees an Enter, so completion cannot turn the prefix into anything.
       expect(fixture.writes.join("")).toBe("/model grok-4-fast\x03");
-      expect(fixture.acpModelSwitchCalls).toEqual([]);
+      // The switch went through the same guarded entry `anet grok model` uses.
+      expect(fixture.acpModelSwitchCalls).toHaveLength(1);
+      expect(fixture.acpModelSwitchCalls[0]?.params?.modelId).toBe("grok-4-fast");
       expect(fixture.spawnedArgs).toHaveLength(1);
-      expect(fixture.warnings).toEqual([`[grok-copresence] slash command ${BLOCK_SUFFIX}`]);
-      expect(statusWarnings).toContain(`slash command ${BLOCK_SUFFIX}`);
-      expect(terminalOutput.join("")).toContain(SLASH_TUI_NOTICE);
+      // A proxied switch is not a blocked command: no block warning is raised.
+      expect(fixture.warnings).toEqual([]);
+      expect(terminalOutput.join("")).not.toContain(SLASH_TUI_NOTICE);
     });
   });
 
-  test("/model never falls through to restart+resume from the TUI slash gate", async () => {
+  test("a proxied /model falls back to restart+resume when ACP refuses (#879)", async () => {
     await withHumanTui(async ({ fixture, input, terminalOutput }) => {
       fixture.acpModelSwitch = async () => {
         const error = new Error("incompatible-agent: model requires new session");
@@ -83,12 +87,42 @@ describe("Grok copresence human-side slash gate (2026-08-15 snapshot)", () => {
       };
 
       input.write("/model grok-4.5\r");
-      await waitFor(() => terminalOutput.join("").includes(SLASH_TUI_NOTICE));
+      await waitFor(() => terminalOutput.join("").includes("已代为切换模型 → grok-4.5"), 5_000);
+      await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
 
       expect(fixture.writes.join("")).toBe("/model grok-4.5\x03");
+      const respawn = fixture.spawnedArgs[1];
+      expect(respawn[respawn.indexOf("--model") + 1]).toBe("grok-4.5");
+      // 🔴 The conversation has to survive the restart route.
+      expect(respawn).toContain("--resume");
+      expect(respawn).not.toContain("--session-id");
+    });
+  });
+
+  test("/model with extra tokens is NOT proxied and stays blocked", async () => {
+    await withHumanTui(async ({ fixture, input, terminalOutput }) => {
+      input.write("/model grok-4.5 --yolo\r");
+      await waitFor(() => terminalOutput.join("").includes(SLASH_TUI_NOTICE));
+
       expect(fixture.acpModelSwitchCalls).toEqual([]);
       expect(fixture.spawnedArgs).toHaveLength(1);
       expect(fixture.warnings).toEqual([`[grok-copresence] slash command ${BLOCK_SUFFIX}`]);
+    });
+  });
+
+  test("a bare /model and a /model-prefixed command are NOT proxied", async () => {
+    await withHumanTui(async ({ fixture, input, terminalOutput }) => {
+      input.write("/model\r");
+      await waitFor(() => terminalOutput.join("").includes(SLASH_TUI_NOTICE));
+      input.write("/models grok-4.5\r");
+      await waitFor(() => fixture.warnings.length === 2);
+
+      expect(fixture.acpModelSwitchCalls).toEqual([]);
+      expect(fixture.spawnedArgs).toHaveLength(1);
+      expect(fixture.warnings).toEqual([
+        `[grok-copresence] slash command ${BLOCK_SUFFIX}`,
+        `[grok-copresence] slash command ${BLOCK_SUFFIX}`,
+      ]);
     });
   });
 
