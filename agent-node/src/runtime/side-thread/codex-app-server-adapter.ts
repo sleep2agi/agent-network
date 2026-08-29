@@ -373,7 +373,23 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     }
     if (p.item.type === "agentMessage" && typeof p.item.text === "string") {
       const execution = this.byTurn.get(turnKey(p.threadId, p.turnId));
-      if (execution) execution.text = p.item.text; else this.dropped("unowned-agent-message");
+      if (!execution) { this.dropped("unowned-agent-message"); return; }
+      // #1449 — 一个 turn 会发多条 agentMessage（带工具调用时的典型形状是
+      // 「前言 → 工具 → 最终答案」）。原来无条件赋值，等于让**最后到达的那条**
+      // 成为答案；顺序一旦不是「前言在前」，最终答案就被过程文本盖掉，
+      // 连累积的 delta 也一起丢。
+      //
+      // 主任务路径早就按 phase 过滤（codex-app-server-bridge.ts:834、:844），
+      // 这里对齐它：只有最终答案能覆盖缓冲区。
+      //
+      // 🔴 但比主路径宽一格，而且是**朝安全方向宽**：线上 phase 的类型是
+      // `MessagePhase | null`（types/codex/v2/ThreadItem.ts），严格要求
+      // `=== "final_answer"` 会把 null / 缺失那种判成前言，终态就变成空串 ——
+      // 而空串会被上层读成「失败」。所以只在 phase **明确是别的相位**时才跳过。
+      const phase = (p.item as { phase?: unknown }).phase;
+      const isNonFinalPhase = typeof phase === "string" && phase !== "final_answer";
+      if (isNonFinalPhase) return;
+      execution.text = p.item.text;
     }
   };
 
