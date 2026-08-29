@@ -169,11 +169,32 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/troubleshooting/codex-tui-node-restart.md
 #     docs-site/docs/en/troubleshooting/codex-tui-node-restart.md
 #   抬分母(123 → 125),覆盖面变大;CI 先红("预期扫 123,实际 125")才来抬,顺序对。
+# 2026-08-30:uniq 11 → 9,occ 28 → 24。files 仍 127。与 2026-08-18(第二次)#810
+#   同一类改造:把**指错代码的**行号锚点换成符号锚点(链接保留,不再钉行号)。
+#   逐条数得出来 —— 2 个唯一 pin × 中英各一份 = 4 处出现:
+#
+#     server/src/db.ts#L94    ×2(docs-site/docs/{,en/}guide/dashboard.md)
+#     server/src/db.ts#L201   ×2(docs-site/docs/{,en/}api/rest.md)
+#
+#   🔴 这两条**在 main 上就一直指错**,不是本次改动弄坏的:
+#     · L94 被 dashboard.md 说成「tasks 的 8 个状态」,实际是 sessions 表
+#       ALTER 列表结尾的 `]) {` —— 一直被 baseline 豁免着,所以没人看见。
+#     · L201 被 rest.md 说成「audit_log 表 schema」,而 audit_log 实际在
+#       main 的第 737 行 —— 差 500 多行。
+#   🔴 更要紧的是 L201 差点**因为错误的原因变绿**:#1459 P1 移除两个索引之后,
+#      L201 恰好落到一行 `CREATE INDEX ... idx_inbox_from` 上 —— 仍是错的代码,
+#      但不再是空行/括号,而 broken 判据只看「是不是 trivial 行」。
+#      门会绿,文档继续说谎。所以这次是**根治**(去行号)而不是重新校准行号。
+#
+#   ⚠️ 分母确实变小了(9/24 < 11/28)。按本文件的规矩这是"要停下来查"的方向,
+#      所以理由写在上面:换掉的 4 处**全部指向错误代码**,用 4 个假锚换 2 个
+#      drift-proof 的符号锚。`broken_pins` 与 origin/main 持平(都是 1,即那条基线)。
+#
 # 🔴 下面三条是 `-eq`(精确相等),**不是下界** —— job 名里的 "floor" 会误导。
 #    新增/删除文档都会让 files 变,必须回来按实际值更新,并写清变的是哪个数、为什么。
 [[ "$files" -eq 127 ]] || fail "预期扫 127 个文档文件(= git ls-files 的结果),实际 $files"
-[[ "$uniq"  -eq 11  ]] || fail "预期 11 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 28 ]] || fail "预期 28 处原始出现,实际 $occ"
+[[ "$uniq"  -eq 9  ]] || fail "预期 9 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 24 ]] || fail "预期 24 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------

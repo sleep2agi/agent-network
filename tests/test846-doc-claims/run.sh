@@ -47,9 +47,9 @@ python3 - "$DOC" <<'PYX'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-old = "server/src/db.ts :: 395 :: ADD COLUMN team"
-assert t.count(old) == 1, "清单里的锚点不唯一,变异会不准"
-p.write_text(t.replace(old, "server/src/db.ts :: 396 :: ADD COLUMN team"), encoding="utf-8")
+old = "server/src/db.ts :: 418 :: ADD COLUMN team"
+assert t.count(old) == 1, f"清单里的锚点应恰好出现 1 次,实际 {t.count(old)} 次 —— 0 次通常意味着清单行号被更新过而这里没跟；>1 次才是不唯一"
+p.write_text(t.replace(old, "server/src/db.ts :: 419 :: ADD COLUMN team"), encoding="utf-8")
 PYX
 set +e; mut=$(python3 "$CHECK" "$ROOT" 2>&1); rc=$?; set -e
 cp /tmp/doc.bak "$DOC"
@@ -88,7 +88,7 @@ python3 - "$DOC" <<'PYX'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-old = "server/src/db.ts :: 395 :: ADD COLUMN team"
+old = "server/src/db.ts :: 418 :: ADD COLUMN team"
 p.write_text(t.replace(old, old + "\n../../etc/passwd :: 1 :: root"), encoding="utf-8")
 PYX
 set +e; mut3=$(python3 "$CHECK" "$ROOT" 2>&1); rc3=$?; set -e
