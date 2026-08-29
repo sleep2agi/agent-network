@@ -86,6 +86,9 @@ export interface StopDoorbellDeps {
   // spawning real subprocesses. Production wires these to node:process
   // / setTimeout / Date.now / node:fs.
   signalProcess?: (pid: number, signal: NodeJS.Signals | 0) => void;
+  // #1474 finding-2 — 解析某 pid 的真实进程组 id(pgrp)。默认读 /proc/<pid>/stat;
+  // 可注入以便测试。返回 null=解析不到(退回 pgid==pid 的旧假设)。
+  readPgid?: (pid: number) => number | null;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;          // virtual clock for tests; defaults to Date.now
   renameDir?: (src: string, dst: string) => void;
@@ -261,9 +264,22 @@ export async function handleStopDoorbell(
   // platforms where negative-PID isn't supported. The kill-0 liveness
   // check stays bare-PID since the wrapper PID's existence is the
   // authoritative "is the chain still up" signal.
+  // #1474 finding-2 — 解析 pid 的真实 pgid,**不**假设 pgid==pid。
+  // live 路径记的是 `anet node start` wrapper(detached→session leader,pgid==pid),
+  // 但 boot rebuild 用 pgrep 记的是 `agent-node --alias` 孙子(它继承 wrapper 的
+  // pgid,孙子.pid≠pgid)。对孙子 `kill(-孙子pid)` 命中一个不存在的进程组 → ESRCH →
+  // 下面被静默吞 → wrapper 未收信号、可重生 child → daemon 重启后 stop/delete 不可靠。
+  // 读 /proc/<pid>/stat 的 pgrp 字段拿真 pgid:wrapper 和孙子同组,解析哪个 pid 都得
+  // 同一组、都能一网打尽。解析不到就退回旧假设(pgid==pid)。
+  const resolvePgid = (pid: number): number => {
+    const read = deps.readPgid ?? defaultReadProcPgid;
+    const pgid = read(pid);
+    return (pgid && pgid > 0) ? pgid : pid;
+  };
   const sendGroupSignal = (pid: number, sig: NodeJS.Signals | 0) => {
+    const pgid = resolvePgid(pid);
     try {
-      signalProcess(-pid, sig);
+      signalProcess(-pgid, sig);
     } catch (e: any) {
       if (e?.code === "ESRCH") return;     // group gone — caller will see via isAlive
       if (e?.code === "EPERM" || e?.code === "EINVAL") {
@@ -282,7 +298,7 @@ export async function handleStopDoorbell(
     if (isAlive(entry.pid, signalProcess)) {
       sendGroupSignal(entry.pid, "SIGTERM");
       exit_signal = "SIGTERM";
-      deps.log(`[stop-daemon] sent SIGTERM to pgid=${entry.pid} alias=${entry.alias} grace=${grace_seconds}s (covers wrapper + agent-node grandchild)`);
+      deps.log(`[stop-daemon] sent SIGTERM to pgid=${resolvePgid(entry.pid)} (from recorded pid=${entry.pid}) alias=${entry.alias} grace=${grace_seconds}s (covers wrapper + agent-node grandchild)`);
       const reaped = await waitForExit(entry.pid, grace_seconds * 1000, signalProcess, sleep, now);
       if (!reaped) {
         sendGroupSignal(entry.pid, "SIGKILL");
@@ -483,6 +499,20 @@ function defaultReadProcStatState(pid: number): string | null {
     if (close < 0) return null;
     const tail = stat.slice(close + 1).trim().split(/\s+/);
     return tail[0] || null;
+  } catch { return null; }
+}
+
+/** #1474 finding-2 — /proc/<pid>/stat 的 pgrp(进程组 id)。格式
+ *  "PID (comm) STATE PPID PGRP SESSION ..."；comm 可含空格/括号,从末尾 ) 后切,
+ *  切片索引 0=STATE、1=PPID、2=PGRP。 */
+function defaultReadProcPgid(pid: number): number | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
+    const close = stat.lastIndexOf(")");
+    if (close < 0) return null;
+    const tail = stat.slice(close + 1).trim().split(/\s+/);
+    const pgrp = parseInt(tail[2] || "", 10);
+    return Number.isFinite(pgrp) && pgrp > 0 ? pgrp : null;
   } catch { return null; }
 }
 
