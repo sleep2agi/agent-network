@@ -975,6 +975,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private currentModel?: string;
   /** Set only while a `switchModel()` re-spawn is the reason the TUI exited. */
   private modelSwitchInFlight: string | null = null;
+  /** Set when a terminal client attaches; consumed on its first resize to force a one-shot grok repaint (#1412). */
+  private pendingRedrawOnResize = false;
   /**
    * argv of the most recent spawn, kept so a model switch can be checked
    * against what actually reached the process rather than against a second
@@ -1344,6 +1346,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         sessionId: this.sessionId,
         onInput: (data) => this.onHumanInput(data),
         onResize: (cols, rows) => this.onResize(cols, rows),
+        onTerminalAttached: () => { this.pendingRedrawOnResize = true; },
         onDetach: () => this.onHumanDetach(),
         onSetModel: (model) => this.onAttachSetModel(model),
       });
@@ -2298,7 +2301,21 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   }
 
   private onResize(cols: number, rows: number): void {
-    try { this.pty?.resize(cols, rows); } catch (error) {
+    try {
+      this.pty?.resize(cols, rows);
+      // One-shot redraw for a freshly attached terminal (#1412). grok does not
+      // repaint on attach, and a plain resize to the client's own size is a
+      // no-op that raises no SIGWINCH — so an idle TUI stays blank. A one-row
+      // jitter forces grok to repaint the full screen (verified: ~14KB of
+      // redraw output). Do it only on the first resize after attach, and only
+      // if the PTY is still ours.
+      if (this.pendingRedrawOnResize && this.pty) {
+        this.pendingRedrawOnResize = false;
+        const jitterRows = rows > 1 ? rows - 1 : rows + 1;
+        this.pty.resize(cols, jitterRows);
+        this.pty.resize(cols, rows);
+      }
+    } catch (error) {
       this.warn(`[grok-copresence] resize failed: ${errorMessage(error)}`);
     }
   }
