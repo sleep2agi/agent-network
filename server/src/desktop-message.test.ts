@@ -284,3 +284,85 @@ describe("#1459 send_desktop_message 返回值反映真实投递态", () => {
     expect(offline.delivered).not.toBe(online.delivered);
   });
 });
+
+// #1459 ① P2 —— 写入持久化。
+describe("#1459 ① P2 send_desktop_message 持久化", () => {
+  const rowsFor = (mid: string) =>
+    db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE message_id = ?1", mid)?.n ?? 0;
+
+  test("🔴 发一条消息 ⇒ user_inbox 落一行，字段与事件一致", async () => {
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const r = await call(tools.send_desktop_message, {
+      to_user_id: TARGET_A, message: "persist me", severity: "warning", title: "T", kind: "agent_message",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.persisted).toBe(true);
+    const row = db.get<any>("SELECT * FROM user_inbox WHERE message_id = ?1", r.message_id);
+    expect(row).toBeTruthy();
+    expect(row.user_id).toBe(TARGET_A);
+    expect(row.content).toBe("persist me");
+    expect(row.severity).toBe("warning");
+    expect(row.title).toBe("T");
+    expect(row.from_session).toBe("node-a");
+    expect(row.network_id).toBe(NET_A);
+    expect(row.acked).toBe(0);
+  });
+
+  test("🔴 没有活订阅者时也要落库 —— 「丢了」变成「待补投」的那一格", async () => {
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const r = await call(tools.send_desktop_message, { to_user_id: TARGET_A, message: "offline body" });
+    expect(r.delivered).toBe(false);
+    expect(r.reason).toBe("no_live_subscriber");
+    expect(r.persisted).toBe(true);
+    expect(rowsFor(r.message_id)).toBe(1);
+  });
+
+  test("🔴 zod 默认值不可依赖：直接调 handler 不传 kind/severity 也必须落库", async () => {
+    // 测试与未来的内部调用方绕过 MCP 的 zod .default()，拿到的是 undefined。
+    // 列上虽有 DEFAULT，但显式传 NULL 会覆盖它 —— 所以写入侧要自己兜。
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const r = await call(tools.send_desktop_message, { to_user_id: TARGET_A, message: "no kind given" });
+    expect(rowsFor(r.message_id)).toBe(1);
+    const row = db.get<any>("SELECT kind, severity FROM user_inbox WHERE message_id = ?1", r.message_id);
+    expect(row.kind).toBe("agent_message");
+    expect(row.severity).toBe("info");
+  });
+
+  test("audit_log 与 user_inbox 同生共死（同一事务，条数一致）", async () => {
+    const before = auditCount();
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const r = await call(tools.send_desktop_message, { to_user_id: TARGET_A, message: "paired" });
+    expect(auditCount()).toBe(before + 1);
+    expect(rowsFor(r.message_id)).toBe(1);
+  });
+});
+
+// #1459 ① P2 —— 幂等写法的选择本身要被钉住。
+//
+// 🔴 实现时踩到的：最初用 `INSERT OR IGNORE`，它对「重投同一 message_id」是对的，
+//    但**连 NOT NULL 违规也一起吞掉** —— kind 为 undefined 时整行被静默丢弃，
+//    而工具照样返回 persisted:true。**一条消息凭空消失且报告成功**，正是本
+//    issue 要消灭的那个形状。改成 ON CONFLICT(message_id) DO NOTHING：
+//    只赦免主键冲突，别的约束照常抛。
+describe("#1459 ① P2 幂等写法：赦免重复，但不吞约束错误", () => {
+  const stmt = `INSERT INTO user_inbox
+      (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+    ON CONFLICT(message_id) DO NOTHING`;
+
+  test("重复的 message_id ⇒ 不抛错、也不产生第二行", () => {
+    const mid = `dm_dup_${Date.now()}`;
+    const ins = () => db.run(stmt, [mid, NET_A, TARGET_A, "node-a", "info", null, "body", "info", null]);
+    ins();
+    expect(() => ins()).not.toThrow();
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE message_id = ?1", mid)?.n).toBe(1);
+  });
+
+  test("🔴 NOT NULL 违规必须抛出来 —— 不能像 OR IGNORE 那样静默丢行", () => {
+    const mid = `dm_bad_${Date.now()}`;
+    expect(() =>
+      db.run(stmt, [mid, NET_A, TARGET_A, "node-a", null, null, "body", "info", null]),
+    ).toThrow();
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE message_id = ?1", mid)?.n).toBe(0);
+  });
+});
