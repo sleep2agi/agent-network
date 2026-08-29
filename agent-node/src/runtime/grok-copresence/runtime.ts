@@ -93,6 +93,10 @@ const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 const MAX_LIFECYCLE_LINE_BYTES = 256 * 1024;
 const MAX_PENDING_AUTOMATIC_PERMISSIONS = 64;
 const MAX_RESUME_AUDIT_BYTES = 64 * 1024 * 1024;
+// #1416 review — bounded grace after a hot model-switch ack before the tail-
+// tamper window closes, so a rotation grok emits a few ms AFTER the ACP
+// set_model ack is still recovered-by-rearm instead of hitting failFatal.
+const MODEL_SWITCH_HOT_GRACE_MS = 3000;
 const UNIX_SOCKET_PATH_MAX_BYTES = 100;
 const GROK_TUI_READY_TEXT = "Shift+Tab:mode";
 const GROK_TUI_SHORTCUTS_TEXT = "Ctrl+x:shortcuts";
@@ -975,6 +979,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private currentModel?: string;
   /** Set only while a `switchModel()` re-spawn is the reason the TUI exited. */
   private modelSwitchInFlight: string | null = null;
+  // #1416 review — timer that closes the hot-path model-switch window after a
+  // grace period; token-guarded so a newer switch is never closed by it.
+  private modelSwitchWindowTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set when a terminal client attaches; consumed on its first resize to force a one-shot grok repaint (#1412). */
   private pendingRedrawOnResize = false;
   /**
@@ -1132,19 +1139,65 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     }
 
     const hot = decideGrokModelSwitch({ sessionId: this.sessionId, modelId: normalized.model });
+    // 🔴 #1413: open the model-switch window BEFORE the ACP set_model call. grok
+    // rotates/truncates its chat_history JSONL when it changes model, and the
+    // poll loop would otherwise read that rotation as a tampered tail and self-
+    // destruct. The window makes the poll fallback (and the explicit re-arm
+    // below) treat this one rotation as expected. Every exit from here clears
+    // it — a leaked window would disable the tamper check for later reads.
+    if (this.modelSwitchWindowTimer) { clearTimeout(this.modelSwitchWindowTimer); this.modelSwitchWindowTimer = null; }
+    this.modelSwitchInFlight = normalized.model;
     try {
       if (hot.kind !== "hot") throw new Error("unexpected non-hot Grok model switch decision");
       const sender = this.opts.acpModelSwitch ?? ((request) => this.defaultAcpModelSwitch(request));
       await sender({ method: hot.method, params: hot.params });
       this.currentModel = normalized.model;
+      this.rearmJsonlTailsAfterModelSwitch();
+      // #1416 review — do NOT clear the window synchronously. On the hot path
+      // grok may ack set_model and rotate/truncate chat_history a few ms LATER;
+      // clearing now would let that late rotation hit failFatal (the #1413
+      // crash). Hold the window open for a bounded grace so a late boundary
+      // error is recovered-by-rearm. Token-guarded so a newer switch is safe.
+      this.scheduleHotModelSwitchWindowClose(normalized.model);
       return { ok: true, model: normalized.model, route: "hot", resume: true };
     } catch (error) {
-      if (!isGrokModelSwitchFallbackError(error)) throw error;
+      if (!isGrokModelSwitchFallbackError(error)) {
+        this.modelSwitchInFlight = null;
+        throw error;
+      }
       const fallback = fallbackGrokModelSwitchRestart();
-      if (fallback.kind !== "restart") throw new Error("unexpected non-restart Grok model switch fallback");
+      if (fallback.kind !== "restart") {
+        this.modelSwitchInFlight = null;
+        throw new Error("unexpected non-restart Grok model switch fallback");
+      }
+      // restartTuiForModelSwitch re-sets modelSwitchInFlight and recoverFromExit
+      // clears it, so the window stays open across the restart on purpose.
       await this.restartTuiForModelSwitch(normalized.model);
       return { ok: true, model: normalized.model, route: "restart", resume: true };
     }
+  }
+
+  /**
+   * Re-anchor both JSONL tails to the current file end after a model switch
+   * rotated them (#1413), and reset the reducer state so the fresh session's
+   * lines are framed from a clean slate. Runs synchronously — no await — so it
+   * cannot interleave with a poll callback.
+   */
+  // #1416 review — bounded grace before the hot-path model-switch window closes.
+  private scheduleHotModelSwitchWindowClose(token: string): void {
+    if (this.modelSwitchWindowTimer) clearTimeout(this.modelSwitchWindowTimer);
+    const timer = setTimeout(() => {
+      this.modelSwitchWindowTimer = null;
+      if (this.modelSwitchInFlight === token) this.modelSwitchInFlight = null;
+    }, MODEL_SWITCH_HOT_GRACE_MS);
+    timer.unref?.();
+    this.modelSwitchWindowTimer = timer;
+  }
+
+  private rearmJsonlTailsAfterModelSwitch(): void {
+    this.chatTail?.rearm();
+    this.eventsTail?.rearm();
+    this.logState = newGrokJsonlState();
   }
 
   private async restartTuiForModelSwitch(model: string): Promise<void> {
@@ -1468,6 +1521,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.closing = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
+    if (this.modelSwitchWindowTimer) { clearTimeout(this.modelSwitchWindowTimer); this.modelSwitchWindowTimer = null; }
     for (const [taskId, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(new GrokCopresenceFailure(
@@ -2446,6 +2500,17 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         () => this.flushSettledCompletion(),
       );
     } catch (error) {
+      // 🔴 #1413: a boundary hit DURING a model-switch window we ourselves
+      // opened is an expected rotation (grok resets its JSONL when the TUI
+      // restarts on a new model), not tampering — re-anchor instead of dying.
+      // This is a fallback for the case where poll observes the rotation before
+      // switchModel's own re-arm runs. Outside the window (modelSwitchInFlight
+      // === null) the original fatal path is unchanged: the tamper check holds.
+      if (this.modelSwitchInFlight !== null && error instanceof GrokJsonlTailBoundaryError) {
+        this.rearmJsonlTailsAfterModelSwitch();
+        this.log("[grok-copresence] re-armed JSONL tail after model-switch rotation (#1413)");
+        return;
+      }
       const failureSubcode = error instanceof GrokJsonlTailBoundaryError
         ? reviewedGrokJsonlTailFailureSubcode(error.failureSubcode)
         : "unknown";
@@ -3332,6 +3397,24 @@ class SafeJsonlTail {
     this.identity = null;
     this.observedSizeFloor = 0;
     if (fd !== null) this.closeFd(fd);
+  }
+
+  /**
+   * Re-anchor to the current end of the file after a model switch rotated it
+   * (#1413). grok truncates/rotates its chat_history/events JSONL when the TUI
+   * restarts on a new model; that is an expected, runtime-initiated rotation,
+   * not tampering. Close the old fd, drop the decoder's partial-line state, and
+   * re-arm to the current file end (arm resets identity/offset/floor).
+   *
+   * 🔴 Callers must only invoke this inside a model-switch window they
+   * themselves initiated. Outside that window a rotated/truncated tail is still
+   * a boundary failure — this method re-anchors on demand, it does not relax
+   * the tamper check.
+   */
+  rearm(): void {
+    this.dispose();
+    this.decoder = new StringDecoder("utf8");
+    this.arm(false);
   }
 
   private rebindPrefixPreservingReplacement(expected: Stats): "ready" | "racing" | false {

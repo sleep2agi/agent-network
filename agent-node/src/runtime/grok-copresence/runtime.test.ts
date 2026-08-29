@@ -862,6 +862,72 @@ describe("Grok copresence runtime integration", () => {
     }
   }, 20_000);
 
+  test("a model switch that truncates chat_history re-arms the tail instead of dying (#1413)", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      await waitFor(() => runtime!.tuiReady);
+      // Run a completed turn so fake grok writes chat_history and the tail
+      // advances its offset past zero — a later truncate then regresses size.
+      await runtime.submit({ taskId: "warm", from: "reviewer", text: "hi", timeoutMs: 4_000 });
+      const chatPath = join(
+        grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
+        "chat_history.jsonl",
+      );
+      await waitFor(() => existsSync(chatPath) && readFileSync(chatPath).length > 0);
+      await Bun.sleep(150); // let poll read past the written bytes
+
+      // grok truncates its chat_history when it restarts on a new model. Inside
+      // the switchModel window this must re-arm, NOT kill the node.
+      fixture.acpModelSwitch = async () => { truncateSync(chatPath, 0); };
+      const decision = await runtime.switchModel("grok-4.6");
+      expect(decision).toMatchObject({ ok: true, route: "hot" });
+
+      await Bun.sleep(250); // let poll run several cycles over the rotated file
+      expect(runtime.isRunning).toBe(true); // 🔴 did NOT self-destruct
+      expect(runtime.model).toBe("grok-4.6");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 15_000);
+
+  test("a chat_history rotation that lands AFTER the switch ack (during grace) re-arms, not dies (#1416 review)", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({ ...fixture.options(), model: "grok-4.5" });
+      await waitFor(() => runtime!.tuiReady);
+      await runtime.submit({ taskId: "warm", from: "reviewer", text: "hi", timeoutMs: 4_000 });
+      const chatPath = join(
+        grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
+        "chat_history.jsonl",
+      );
+      await waitFor(() => existsSync(chatPath) && readFileSync(chatPath).length > 0);
+      await Bun.sleep(150); // let poll advance its offset past the warm-turn bytes
+
+      // Real grok may ack set_model FIRST and rotate/truncate chat_history a few
+      // ms LATER. The sync-truncate #1413 test can't reach this: it truncates
+      // inside the sender, so the proactive re-arm absorbs it before any poll.
+      // Here the sender does NOT truncate; the rotation lands AFTER switchModel
+      // returns, while the hot-path grace window is still open. That drives the
+      // poll-fallback recovery branch (untested before this) — the node must
+      // re-arm, NOT self-destruct as in #1413.
+      const decision = await runtime.switchModel("grok-4.6");
+      expect(decision).toMatchObject({ ok: true, route: "hot" });
+
+      // Late rotation, after the ack, inside the grace window.
+      truncateSync(chatPath, 0);
+      await Bun.sleep(300); // let poll see size regress below its offset
+      expect(runtime.isRunning).toBe(true); // 🔴 did NOT self-destruct
+      expect(runtime.model).toBe("grok-4.6");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 15_000);
+
   test("continues exactly once across prefix-preserving atomic chat rewrites", async () => {
     const fixture = new RuntimeFixture();
     let runtime: GrokCopresenceRuntimeSession | undefined;
