@@ -5,7 +5,7 @@ import {
   handleStopDoorbell,
   recordSpawnedChild,
 } from "./stop-daemon";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -108,8 +108,12 @@ describe("recordSpawnedChild + map shape", () => {
   });
 });
 
-describe("handleStopDoorbell — noop_not_my_child", () => {
-  test("unknown child_node_id → degraded ack (not error)", async () => {
+describe("handleStopDoorbell — stop without map entry converges (#1448 finding-3)", () => {
+  // 改前(#1286 前的对称缺口)：stop 未命中 map ack `noop_not_my_child`,hub 侧
+  // 留在 stopping 卡死。改后：与 delete 一样 sweep(按 alias 找并 SIGTERM 任何还
+  // 在跑的子进程)+ ack `stopped` 收敛。这条断言 expect "stopped" 在改前会红
+  // (拿到 "noop_not_my_child")——witnessed-red。
+  test("unknown/absent child on stop → sweep + ack stopped (not noop)", async () => {
     const { acks, deps } = makeDeps({
       getStopReturn: {
         ok: true, request_id: "sr_x",
@@ -120,7 +124,8 @@ describe("handleStopDoorbell — noop_not_my_child", () => {
     await handleStopDoorbell({ request_id: "sr_x" }, deps);
     expect(acks.length).toBe(1);
     expect(acks[0].tool).toBe("ack_stop_request");
-    expect(acks[0].args.status).toBe("noop_not_my_child");
+    expect(acks[0].args.status).toBe("stopped");
+    expect(acks[0].args.backup_path).toBeUndefined();   // stop 不搬 config
   });
 });
 
@@ -568,15 +573,30 @@ describe("#1286 handleStopDoorbell — stop 之后再 delete", () => {
     expect(statSync(join(workdirRoot, alias)).isDirectory()).toBe(true);
   });
 
-  test("回归钉：action=stop 未命中时行为不变，仍是 noop_not_my_child", async () => {
-    const h = makeDeps({
+  // #1448 finding-3 — stop 的收敛路径**绝不**动 config 目录(那是 delete 的语义)——即使盘上有目录、
+  // 即使请求误带 delete_config,stop 都必须原样保留。
+  test("#1448 finding-3: stop 未命中 map 时,盘上 config 目录被保留(不搬进回收站)", async () => {
+    const workdirRoot = join(scratch, "nodes-f3-stop");
+    const deletedRoot = join(scratch, "deleted-f3-stop");
+    mkdirSync(workdirRoot, { recursive: true });
+    const childDir = join(workdirRoot, "alias-f3-keep");
+    mkdirSync(childDir);
+    writeFileSync(join(childDir, "config.json"), JSON.stringify({ token: "ntok_keep" }), { mode: 0o600 });
+
+    const { acks, deps } = makeDeps({
+      workdirRoot, deletedRoot,
       getStopReturn: {
-        ok: true, request_id: "req-stop-miss", child_node_id: "node_absent", child_alias: "absent-1286",
-        action: "stop", delete_config: false, grace_seconds: 10, force: false,
+        ok: true, request_id: "req-stop-keep", child_node_id: "node_keep", child_alias: "alias-f3-keep",
+        // 故意把 delete_config 设 true 也不能让 stop 搬目录——action 门挡住。
+        action: "stop", delete_config: true, grace_seconds: 10, force: false,
       },
     });
-    await handleStopDoorbell({ request_id: "req-stop-miss" }, h.deps as any);
-    expect(h.acks.at(-1)!.args.status).toBe("noop_not_my_child");
+    await handleStopDoorbell({ request_id: "req-stop-keep" }, deps);
+    expect(acks.at(-1)!.args.status).toBe("stopped");
+    expect(acks.at(-1)!.args.backup_path).toBeUndefined();
+    // 原目录仍在，回收站没有它
+    expect(statSync(childDir).isDirectory()).toBe(true);
+    expect(existsSync(deletedRoot) ? readdirSync(deletedRoot).length : 0).toBe(0);
   });
 });
 
