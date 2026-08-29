@@ -7,6 +7,7 @@ import {
   ensureGlobalAnetConfig,
   reconcilePendingCreateRequestsOnConnect,
   resolveChildHome,
+  defaultPathConf,
   _resetWindowsPosixModeWarnLatchForTest,
 } from "./create-node-daemon.js";
 import { win32 as pathWin32 } from "node:path";
@@ -688,6 +689,116 @@ describe("#1490 minimalEnv — cross-platform HOME resolution", () => {
     expect(
       resolveChildHome({ HOMEDRIVE: "D:", HOMEPATH: "\\Users\\hd" }, "win32"),
     ).toBe("D:\\Users\\hd");
+  });
+});
+
+// #1491 — Windows daemon default ANET_DAEMON_PATH_CONF was
+// `/etc/anet-daemon/path.conf` — a POSIX-only path that never resolves
+// on Windows filesystems, so the default silently failed and users
+// had to know about the ANET_BIN_ABS + ANET_DAEMON_ALLOW_ENV_BIN=1
+// env fallback (documented per #1291) to make anything work. Same
+// class as #1290 / #1490 — POSIX-only default in code that must also
+// run on Windows.
+describe("#1491 defaultPathConf — platform-aware ANET path.conf trust root", () => {
+  // 🔴 witnessed-red — the reported symptom is that the default on
+  // Windows was the POSIX literal. Assert the platform-branch fixes it.
+  test("🔴 witnessed-red: Windows default is under %ProgramData%, NOT /etc/", () => {
+    const conf = defaultPathConf({ PROGRAMDATA: "C:\\ProgramData" }, "win32");
+    // Cross-platform assertion: win32.join produces backslash separators
+    // on any host, so this check is portable to Linux CI.
+    expect(conf).toBe("C:\\ProgramData\\anet-daemon\\path.conf");
+    expect(conf).not.toBe("/etc/anet-daemon/path.conf");
+    expect(conf.startsWith("/etc/")).toBe(false);
+  });
+
+  test("Windows: PROGRAMDATA unset falls back to C:\\ProgramData", () => {
+    // Stripped-env service context — Windows normally sets PROGRAMDATA
+    // but a bare fork/exec with a scrubbed env can lose it. The fallback
+    // keeps the daemon addressable rather than throwing.
+    const conf = defaultPathConf({}, "win32");
+    expect(conf).toBe("C:\\ProgramData\\anet-daemon\\path.conf");
+  });
+
+  test("Windows: non-default PROGRAMDATA is honored (Server Core / relocated system drive)", () => {
+    // Some Windows Server installs relocate ProgramData to D:\ etc.
+    // The default must follow the OS's own PROGRAMDATA, not hardcode C:.
+    const conf = defaultPathConf({ PROGRAMDATA: "D:\\ProgramData" }, "win32");
+    expect(conf).toBe("D:\\ProgramData\\anet-daemon\\path.conf");
+  });
+
+  test("POSIX (explicit 'linux'): default is /etc/anet-daemon/path.conf (unchanged from pre-#1491)", () => {
+    // Explicit 'linux' so a future refactor that accidentally defaults
+    // to 'win32' fails here loudly — same defensive pattern as #1290 /
+    // #1490's POSIX-branch tests. PROGRAMDATA is (rightly) ignored on POSIX.
+    expect(defaultPathConf({}, "linux")).toBe("/etc/anet-daemon/path.conf");
+    expect(defaultPathConf({ PROGRAMDATA: "C:\\ProgramData" }, "linux")).toBe(
+      "/etc/anet-daemon/path.conf",
+    );
+  });
+
+  test("POSIX (explicit 'darwin'): default is /etc/anet-daemon/path.conf (unchanged)", () => {
+    // macOS daemons follow the POSIX branch — no separate macOS path
+    // (there's no equivalent to the POSIX-vs-Windows split for macOS
+    // that would warrant a third case).
+    expect(defaultPathConf({}, "darwin")).toBe("/etc/anet-daemon/path.conf");
+  });
+
+  test("loadAndVerifyAnetBin: Windows error mentions the %ProgramData% trust root, NOT /etc/", () => {
+    // The diagnostic thrown when no pin resolves. Before this fix the
+    // message hardcoded /etc/anet-daemon/path.conf, which is nonsense
+    // to a Windows operator trying to figure out where to write it.
+    // Env fallback disabled + no ANET_BIN_ABS → the "no ANET_BIN_ABS
+    // resolved from <trust root>" branch fires.
+    try {
+      loadAndVerifyAnetBin(
+        { PROGRAMDATA: "C:\\ProgramData" },
+        "win32",
+      );
+      throw new Error("expected loadAndVerifyAnetBin to throw");
+    } catch (e: any) {
+      expect(e.message).toMatch(/C:\\ProgramData\\anet-daemon\\path\.conf/);
+      // 🔴 anti-regression: the message must NOT still carry the POSIX
+      // literal on Windows. Catching this if a future refactor
+      // inlines the string constant back.
+      expect(e.message).not.toMatch(/\/etc\/anet-daemon/);
+    }
+  });
+
+  test("loadAndVerifyAnetBin: POSIX error still mentions /etc/anet-daemon (unchanged)", () => {
+    try {
+      loadAndVerifyAnetBin({}, "linux");
+      throw new Error("expected loadAndVerifyAnetBin to throw");
+    } catch (e: any) {
+      expect(e.message).toMatch(/\/etc\/anet-daemon\/path\.conf/);
+      // Anti-cross-contamination: the POSIX branch must NOT leak
+      // Windows path syntax.
+      expect(e.message).not.toMatch(/ProgramData/);
+    }
+  });
+
+  test("loadAndVerifyAnetBin: Windows Fix command uses PowerShell (Set-Content), NOT sudo/tee", () => {
+    // Downstream of the trust-root platform branch: telling a Windows
+    // operator to run `sudo tee /etc/...` is nonsense. Anti-regression
+    // for the paired Fix command.
+    try {
+      loadAndVerifyAnetBin({ PROGRAMDATA: "C:\\ProgramData" }, "win32");
+      throw new Error("expected loadAndVerifyAnetBin to throw");
+    } catch (e: any) {
+      expect(e.message).toMatch(/Set-Content/);
+      expect(e.message).not.toMatch(/sudo tee/);
+      expect(e.message).not.toMatch(/install -d -m 0755/);
+    }
+  });
+
+  test("loadAndVerifyAnetBin: POSIX Fix command is unchanged sudo/tee shell recipe", () => {
+    try {
+      loadAndVerifyAnetBin({}, "linux");
+      throw new Error("expected loadAndVerifyAnetBin to throw");
+    } catch (e: any) {
+      expect(e.message).toMatch(/sudo tee/);
+      expect(e.message).toMatch(/install -d -m 0755/);
+      expect(e.message).not.toMatch(/Set-Content/);
+    }
   });
 });
 

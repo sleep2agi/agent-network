@@ -183,23 +183,55 @@ export function _resetWindowsPosixModeWarnLatchForTest(): void {
   _windowsPosixModeCheckWarned = false;
 }
 
+/** #1491 — platform-aware default for the ANET path.conf trust root.
+ *
+ *  POSIX: `/etc/anet-daemon/path.conf` (unchanged — the value that has
+ *   shipped since RFC-026 §4.2.6 B2 and that install scripts write).
+ *
+ *  Windows: `%ProgramData%\anet-daemon\path.conf`, falling back to
+ *   `C:\ProgramData\anet-daemon\path.conf` if `PROGRAMDATA` isn't set
+ *   (rare — Windows always sets it on interactive sessions, but a
+ *   stripped-env service context can lack it). `%ProgramData%` is the
+ *   documented Windows location for system-wide daemon config
+ *   (equivalent role to `/etc` on POSIX).
+ *
+ *  Before this fix the POSIX literal was the default on every platform,
+ *  so on Windows the default `confPath` pointed at `/etc/anet-daemon/...`
+ *  — a path that cannot exist on Windows filesystems and never
+ *  resolves. Users had to know about the `ANET_BIN_ABS` +
+ *  `ANET_DAEMON_ALLOW_ENV_BIN=1` env fallback (documented per #1291) to
+ *  get anywhere. This makes the default do the right thing.
+ */
+export function defaultPathConf(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+  if (platform === "win32") {
+    const programData = env.PROGRAMDATA || "C:\\ProgramData";
+    return win32.join(programData, "anet-daemon", "path.conf");
+  }
+  return "/etc/anet-daemon/path.conf";
+}
+
 export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {
   let pin: PathPin | null = null;
-  const confPath = env.ANET_DAEMON_PATH_CONF || "/etc/anet-daemon/path.conf";
+  const trustRoot = defaultPathConf(env, platform);
+  const confPath = env.ANET_DAEMON_PATH_CONF || trustRoot;
   pin = readPathConf(confPath);
   if (!pin && env.ANET_BIN_ABS && env.ANET_DAEMON_ALLOW_ENV_BIN === "1") {
     pin = { abs: env.ANET_BIN_ABS, sha256: env.ANET_BIN_SHA256 };
   }
   if (!pin && env.ANET_BIN_ABS) {
     throw unsafePathHelp("anet_bin_source",
-      "ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is /etc/anet-daemon/path.conf)",
-      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+      `ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is ${trustRoot})`,
+      platform === "win32"
+        ? `New-Item -ItemType Directory -Force -Path "${win32.dirname(trustRoot)}" | Out-Null; "ANET_BIN_ABS=<absolute path to anet.cjs>" | Set-Content -Path "${trustRoot}" -Encoding ascii`
+        : "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   if (!pin) {
     throw unsafePathHelp("anet_bin_source",
-      "no ANET_BIN_ABS resolved from /etc/anet-daemon/path.conf; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1",
-      "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+      `no ANET_BIN_ABS resolved from ${trustRoot}; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1`,
+      platform === "win32"
+        ? `New-Item -ItemType Directory -Force -Path "${win32.dirname(trustRoot)}" | Out-Null; "ANET_BIN_ABS=<absolute path to anet.cjs>" | Set-Content -Path "${trustRoot}" -Encoding ascii`
+        : "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   // ① absolute — cross-platform. Was `startsWith("/")` which returned
