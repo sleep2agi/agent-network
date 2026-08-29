@@ -35,6 +35,7 @@ import {
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
+import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
@@ -1674,10 +1675,18 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   const bridgeSession = `${displayName}-桥`;
   const tuiSession = displayName;
   const attachScript = join(nodesDir(), resolved.id, "opencode-attach.sh");
+  // 🔴 bridge 的输出必须落盘，不能只留在 tmux pane 里。判失败时 bridge 会话
+  //    往往**已经没了**（等待循环的退出条件之一就是它），会话一没，
+  //    `capture-pane` 必然是空 —— #1225 那次就是这样：用户只拿到一行泛泛的
+  //    超时，真正的死因（agent-node 崩在 `host.ip` 上，#1498）谁都看不到。
+  const nodeLogDir = join(nodesDir(), resolved.id, "logs");
+  const bridgeLog = join(nodeLogDir, "copresence-bridge.log");
+  mkdirSync(nodeLogDir, { recursive: true });
   for (const name of [bridgeSession, tuiSession]) {
     if (tmuxSessionRunning(name)) killTmuxSession(name);
   }
   rmSync(attachScript, { force: true });
+  rmSync(bridgeLog, { force: true });
 
   const cliEntry = resolve(process.argv[1]);
   const bridgeCommand = [
@@ -1689,6 +1698,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
       ? [`export ANET_OPENCODE_SAFE_BASE=${shellQuote(process.env.ANET_OPENCODE_SAFE_BASE)}`]
       : []),
     `export ANET_OPENCODE_MODE=copresence`,
+    `exec > >(tee -a ${shellQuote(bridgeLog)}) 2>&1`,
     `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
   ].join(" ; ");
@@ -1702,17 +1712,22 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   if (!existsSync(attachScript)) {
-    let tail = "";
+    const bridgeAlive = tmuxSessionRunning(bridgeSession);
+    let paneTail = "";
     try {
       const bridgePane = tmuxPaneTarget(bridgeSession);
-      tail = bridgePane ? execFileSync("tmux", ["capture-pane", "-p", "-t", bridgePane, "-S", "-80"], {
+      paneTail = bridgePane ? execFileSync("tmux", ["capture-pane", "-p", "-t", bridgePane, "-S", "-80"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).slice(-3_000) : "";
     } catch {}
+    let logTail = "";
+    try { logTail = readFileSync(bridgeLog, "utf8").slice(-3_000); } catch {}
     killTmuxSession(bridgeSession);
-    console.error(`[anet] ❌ OpenCode copresence server did not produce its attach launcher within 30s.`);
-    if (tail) console.error(tail);
+    for (const line of describeCopresenceStartupFailure({
+      attachScript, bridgeLog, nodeLogDir, bridgeAlive,
+      waitedSeconds: 30, logTail, paneTail,
+    })) console.error(line);
     process.exit(1);
   }
 
