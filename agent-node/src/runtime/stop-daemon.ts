@@ -198,45 +198,36 @@ export async function handleStopDoorbell(
   const { child_node_id, child_alias, action, delete_config = true, grace_seconds = 10 } = req;
 
   const entry = childrenMap.get(child_node_id);
-  if (!entry && action !== "delete") {
-    // §2.4 — degraded path, not an error. Daemon restart + pre-boot-
-    // rebuild scenario. Nothing to signal, so ack and let hub move on.
-    //
-    // 🔴 This early return is correct for `stop` and wrong for `delete`.
-    // childrenMap tracks RUNNING PROCESSES; a delete also has to remove an
-    // ON-DISK config directory, and those two have different lifetimes.
-    // Letting a process table decide a filesystem cleanup is a category
-    // error. See the delete branch below.
-    deps.log(`[stop-daemon] child not in map (likely daemon-restarted): ${child_node_id}`);
-    await deps.callCommHub("ack_stop_request", {
-      request_id, status: "noop_not_my_child",
-      error: "child not in children_map; daemon likely restarted before rebuild",
-    }).catch(() => { /* ack failure → next sweeper picks up */ });
-    return;
-  }
   if (!entry) {
-    // #1286 — delete without a map entry. This is not the rare
-    // daemon-restart case: a successful `stop` removes the entry, so
-    // stop-then-delete makes the miss GUARANTEED, not incidental.
+    // #1286 (delete) + #1448 finding-3 (stop): no map entry, for BOTH actions.
     //
-    // Nothing here needs the map. `child_alias` comes from the hub request
-    // (not from `entry`), and sweepOrphansForAlias finds processes by alias.
-    // The map only ever supplied `entry.pid`, which just the pgid signal in
-    // `stop` requires. So do the work instead of returning.
-    deps.log(`[stop-daemon] delete without map entry (expected after stop): ${child_node_id}`);
+    // entry 缺失不是罕见事：成功 stop 会删 map 条目、子节点自己崩了 rebuild 的
+    // pgrep 也找不到 → stop-then-delete 或 crash-then-stop 时 miss 是必然的。
+    //
+    // #1286 把 delete 从「ack noop_not_my_child、留 hub 卡 deleting」修成了
+    // 「sweep + (delete 才)搬 workdir + ack stopped」收敛。但当时只改了 delete,
+    // 对称的 stop 路径仍走老的 noop 分支 → hub 卡 stopping(finding-3 的症状)。
+    //
+    // 这里两个 action 统一收敛:map 只提供过 entry.pid(命中路径的 pgid 信号用),
+    // child_alias 来自 hub 请求、sweepOrphansForAlias 按 alias(pgrep+/proc token
+    // 精确)找进程——所以「daemon 重启但子节点还在跑」这种情况 sweep 会把它 SIGTERM
+    // 掉,ack stopped 才是诚实的;子节点已崩则 sweep 无命中、ack stopped 同样诚实。
+    // 🔴 workdir 只在 action==='delete' 时搬(stop 保留 config);stop 的 delete_config
+    //    本就是 false,这里再叠一层 action 显式门,防任何 stop 请求误带 delete_config。
+    deps.log(`[stop-daemon] ${action} without map entry (expected after stop / crash): ${child_node_id}`);
     if (child_alias) {
-      await sweepOrphansForAlias(child_alias, signalProcess, deps, "delete without map entry");
+      await sweepOrphansForAlias(child_alias, signalProcess, deps, `${action} without map entry`);
     }
-    const backup = (delete_config && child_alias)
+    const backup = (action === "delete" && delete_config && child_alias)
       ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
       : null;
-    // Ack `stopped` either way: the child is not running and its config is
-    // not in place, which IS delete's end state, so the hub must converge
-    // (row deleted + ntok revoked). Acking noop_not_my_child here would
-    // leave lifecycle_state stuck at 'deleting' — the reported symptom.
-    // `backup_path` present vs absent is what distinguishes "moved it" from
-    // "nothing was on disk"; a failed move is surfaced by warn, matching the
-    // stance the hit path already takes.
+    // Ack `stopped` either way: the child is not running (swept) and — for
+    // delete — its config is not in place, which IS each action's end state,
+    // so the hub must converge (stop→stopped / delete→row gone + ntok revoked).
+    // Acking noop_not_my_child would leave lifecycle_state stuck at
+    // 'stopping'/'deleting' — the reported symptom. `backup_path` present vs
+    // absent distinguishes "moved it" from "nothing was on disk"; a failed
+    // move is surfaced by warn, matching the hit path's stance.
     await deps.callCommHub("ack_stop_request", {
       request_id, status: "stopped", ...(backup ? { backup_path: backup } : {}),
     }).catch((e: any) => {
