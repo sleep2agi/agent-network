@@ -731,6 +731,81 @@ describe("list_my_pending_create_requests HANDLER (#1362 SSE reconnect compensat
   });
 });
 
+describe("list_my_pending_lifecycle_requests HANDLER (#1448 SSE reconnect compensation)", () => {
+  function seedStop(reqId: string, daemonId: string, status: string, action: string, ageMs: number) {
+    db.run(
+      `INSERT INTO node_stop_requests (request_id, network_id, daemon_node_id, child_node_id,
+         child_alias, action, delete_config, created_by_token, status, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'tok_test', ?7, ?8)`,
+      [reqId, NET_A, daemonId, CHILD_A_ID, CHILD_A_ALIAS, action, status, Date.now() - ageMs],
+    );
+  }
+  // child_node_id parameterized: node_start_requests has a partial-unique
+  // index on child_node_id WHERE status IN ('pending','delivered'), so the
+  // "mine" and "other" pending start rows must target different children.
+  function seedStart(reqId: string, daemonId: string, childId: string, status: string, ageMs: number) {
+    db.run(
+      `INSERT INTO node_start_requests (request_id, network_id, daemon_node_id, child_node_id,
+         child_alias, created_by_token, status, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, 'tok_test', ?6, ?7)`,
+      [reqId, NET_A, daemonId, childId, CHILD_A_ALIAS, status, Date.now() - ageMs],
+    );
+  }
+
+  test("daemon-bound caller gets only its own PENDING stop/delete + start (excludes delivered + other daemon)", async () => {
+    setupAlphaNetwork();
+    const otherDaemonId = "node_sd_daemon_other";
+    seedDaemon(NET_A, otherDaemonId, "sd-daemon-other", USER_A_ID, "tok_sd_daemon_other");
+    // mine — should be returned (stop + delete, oldest first)
+    seedStop("sr_pending_stop", DAEMON_A_ID, "pending", "stop", 30);
+    seedStop("sr_pending_delete", DAEMON_A_ID, "pending", "delete", 20);
+    seedStart("str_pending_mine", DAEMON_A_ID, CHILD_A_ID, "pending", 25);
+    // excluded — delivered (already pulled) + other daemon's pending
+    seedStop("sr_delivered_mine", DAEMON_A_ID, "delivered", "stop", 40);
+    seedStop("sr_pending_other", otherDaemonId, "pending", "stop", 10);
+    seedStart("str_pending_other", otherDaemonId, "node_sd_child_other", "pending", 10);
+
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    const res = await call(daemonTools.list_my_pending_lifecycle_requests, {});
+    expect(res.ok).toBe(true);
+    expect(res.stop_count).toBe(2);
+    expect((res.stop_requests as Array<{ request_id: string }>).map(x => x.request_id))
+      .toEqual(["sr_pending_stop", "sr_pending_delete"]);   // oldest-first, action preserved
+    expect(res.start_count).toBe(1);
+    expect((res.start_requests as Array<{ request_id: string }>).map(x => x.request_id))
+      .toEqual(["str_pending_mine"]);
+  });
+
+  // Witnessed-red 的核心链：真实 stop_node 派发时 daemon 无 SSE 订阅者 →
+  // pushEvent 静默丢门铃 → 行卡 pending / 节点卡 stopping（缺陷态）。修复后这条
+  // pending 行会被 list_my_pending_lifecycle_requests 列出 → 重连 reconcile 能重放。
+  // 改前（无此工具）该行永远无人发现、节点永久卡 stopping。
+  test("stuck-pending after a dropped doorbell IS surfaced for reconnect replay", async () => {
+    setupAlphaNetwork();
+    const userTools = buildHandlers(USER_A_ID);
+    // 无 SSE 订阅者：dispatch 建 pending 行 + pushEvent 丢弃（测试进程里没有 client）
+    const disp = await call(userTools.stop_node, { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A });
+    expect(disp.ok).toBe(true);
+    const reqId = disp.request_id as string;
+    // 缺陷态：行 pending、节点 stopping（门铃没送达，无人推进）
+    const row = db.get<{ status: string }>("SELECT status FROM node_stop_requests WHERE request_id = ?1", reqId);
+    expect(row?.status).toBe("pending");
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("stopping");
+    // 修复：pending 行经新工具对本 daemon 可见 → 重连补偿能拿到并重放
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    const r = await call(daemonTools.list_my_pending_lifecycle_requests, {});
+    expect(r.ok).toBe(true);
+    expect((r.stop_requests as Array<{ request_id: string }>).map(x => x.request_id)).toContain(reqId);
+  });
+
+  test("non-daemon caller (utok) refused", async () => {
+    setupAlphaNetwork();
+    const userTools = buildHandlers(USER_A_ID);
+    const r = await call(userTools.list_my_pending_lifecycle_requests, {});
+    expect(r.ok).toBe(false);
+  });
+});
+
 // ─── PR1.2a — restart_node resets lifecycle_state ──────────────────
 //
 // 通信龙 #346 ack latent: without this, a stopped node restart-ed via
