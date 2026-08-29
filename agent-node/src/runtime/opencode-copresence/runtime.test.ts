@@ -12,6 +12,7 @@ import {
 import {
   OPENCODE_COMMHUB_TOKEN_ENV,
   openVettedOpenCodeCopresence,
+  parseMessageReply,
   requireOpenCodeCopresenceModel,
   wireOpenCodeCommhubMcp,
   wireOpenCodeDefaultModel,
@@ -423,4 +424,86 @@ describe("OpenCode native serve+attach copresence", () => {
       }
     }
   }, 5_000);
+});
+
+// #1451: parseMessageReply used to return "" when a completed opencode turn
+// contained only non-text parts (a pure tool-call turn). The caller then
+// threw "returned no assistant text", reporting a valid outcome to CommHub
+// as a failure. The fix synthesizes a marker naming the emitted part types
+// so the caller always receives a non-empty reply and the throw was removed.
+//
+// The part-type universe checked here comes from opencode 1.18.1's own
+// OpenAPI /doc schema (probed 2026-08-30 against a real 1.18.1 binary):
+// TextPart is one of 13 variants (Tool, Reasoning, File, Patch,
+// StepStart, StepFinish, Snapshot, Agent, Retry, Compaction, Subtask,
+// FilePartSource[Text]). A completed turn with zero TextPart is a
+// canonical shape, not a bug.
+describe("parseMessageReply (#1451)", () => {
+  test("joins and trims text when TextPart present (existing behavior preserved)", () => {
+    const msg = { parts: [
+      { type: "step-start" },
+      { type: "text", text: "hello " },
+      { type: "text", text: "world  " },
+      { type: "step-finish" },
+    ] };
+    expect(parseMessageReply(msg)).toBe("hello world");
+  });
+
+  test("tool-only turn returns non-empty marker naming the tool part (would have thrown at caller before #1451)", () => {
+    const msg = { parts: [
+      { type: "step-start" },
+      { type: "tool", tool: "bash", state: { output: "ok" } },
+      { type: "step-finish" },
+    ] };
+    const reply = parseMessageReply(msg);
+    // The critical assertion — the whole point of the fix: not "" so caller
+    // does not throw and CommHub does not see a false failure.
+    expect(reply.length).toBeGreaterThan(0);
+    expect(reply).toContain("tool");
+    // step-{start,finish} are book-ends and are deliberately omitted from
+    // the marker (they say nothing about what the model did on their own).
+    expect(reply).not.toContain("step-start");
+    expect(reply).not.toContain("step-finish");
+    expect(reply).toContain("no text");
+  });
+
+  test("multiple non-text part types are deduped, sorted, and named", () => {
+    const msg = { parts: [
+      { type: "reasoning", text: "thinking" },
+      { type: "tool", tool: "read" },
+      { type: "tool", tool: "grep" },
+      { type: "patch" },
+      { type: "reasoning", text: "more thinking" },
+    ] };
+    const reply = parseMessageReply(msg);
+    // Dedup: "reasoning" and "tool" appear twice each; marker names each once.
+    expect(reply).toContain("patch");
+    expect(reply).toContain("reasoning");
+    expect(reply).toContain("tool");
+    // Sorted (alphabetical) — stable output across runs regardless of
+    // whatever order opencode happens to emit part types in.
+    const patchIdx = reply.indexOf("patch");
+    const reasoningIdx = reply.indexOf("reasoning");
+    const toolIdx = reply.indexOf("tool");
+    expect(patchIdx).toBeLessThan(reasoningIdx);
+    expect(reasoningIdx).toBeLessThan(toolIdx);
+  });
+
+  test("empty parts array or missing parts still returns non-empty marker (never throws)", () => {
+    expect(parseMessageReply({ parts: [] })).toBe("[opencode: assistant returned no reply]");
+    expect(parseMessageReply({})).toBe("[opencode: assistant returned no reply]");
+    expect(parseMessageReply(null)).toBe("[opencode: assistant returned no reply]");
+    expect(parseMessageReply(undefined)).toBe("[opencode: assistant returned no reply]");
+  });
+
+  test("text falsiness — a TextPart with empty text falls through to the marker path, not empty return", () => {
+    const msg = { parts: [
+      { type: "text", text: "   " },  // whitespace-only trims to ""
+      { type: "tool", tool: "bash" },
+    ] };
+    // Whitespace-only text is treated as "no text", so we still get the
+    // non-text marker rather than an empty reply.
+    const reply = parseMessageReply(msg);
+    expect(reply).toContain("tool");
+  });
 });
