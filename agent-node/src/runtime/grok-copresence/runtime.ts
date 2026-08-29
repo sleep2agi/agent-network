@@ -1132,19 +1132,48 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     }
 
     const hot = decideGrokModelSwitch({ sessionId: this.sessionId, modelId: normalized.model });
+    // 🔴 #1413: open the model-switch window BEFORE the ACP set_model call. grok
+    // rotates/truncates its chat_history JSONL when it changes model, and the
+    // poll loop would otherwise read that rotation as a tampered tail and self-
+    // destruct. The window makes the poll fallback (and the explicit re-arm
+    // below) treat this one rotation as expected. Every exit from here clears
+    // it — a leaked window would disable the tamper check for later reads.
+    this.modelSwitchInFlight = normalized.model;
     try {
       if (hot.kind !== "hot") throw new Error("unexpected non-hot Grok model switch decision");
       const sender = this.opts.acpModelSwitch ?? ((request) => this.defaultAcpModelSwitch(request));
       await sender({ method: hot.method, params: hot.params });
       this.currentModel = normalized.model;
+      this.rearmJsonlTailsAfterModelSwitch();
+      this.modelSwitchInFlight = null;
       return { ok: true, model: normalized.model, route: "hot", resume: true };
     } catch (error) {
-      if (!isGrokModelSwitchFallbackError(error)) throw error;
+      if (!isGrokModelSwitchFallbackError(error)) {
+        this.modelSwitchInFlight = null;
+        throw error;
+      }
       const fallback = fallbackGrokModelSwitchRestart();
-      if (fallback.kind !== "restart") throw new Error("unexpected non-restart Grok model switch fallback");
+      if (fallback.kind !== "restart") {
+        this.modelSwitchInFlight = null;
+        throw new Error("unexpected non-restart Grok model switch fallback");
+      }
+      // restartTuiForModelSwitch re-sets modelSwitchInFlight and recoverFromExit
+      // clears it, so the window stays open across the restart on purpose.
       await this.restartTuiForModelSwitch(normalized.model);
       return { ok: true, model: normalized.model, route: "restart", resume: true };
     }
+  }
+
+  /**
+   * Re-anchor both JSONL tails to the current file end after a model switch
+   * rotated them (#1413), and reset the reducer state so the fresh session's
+   * lines are framed from a clean slate. Runs synchronously — no await — so it
+   * cannot interleave with a poll callback.
+   */
+  private rearmJsonlTailsAfterModelSwitch(): void {
+    this.chatTail?.rearm();
+    this.eventsTail?.rearm();
+    this.logState = newGrokJsonlState();
   }
 
   private async restartTuiForModelSwitch(model: string): Promise<void> {
@@ -2446,6 +2475,17 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         () => this.flushSettledCompletion(),
       );
     } catch (error) {
+      // 🔴 #1413: a boundary hit DURING a model-switch window we ourselves
+      // opened is an expected rotation (grok resets its JSONL when the TUI
+      // restarts on a new model), not tampering — re-anchor instead of dying.
+      // This is a fallback for the case where poll observes the rotation before
+      // switchModel's own re-arm runs. Outside the window (modelSwitchInFlight
+      // === null) the original fatal path is unchanged: the tamper check holds.
+      if (this.modelSwitchInFlight !== null && error instanceof GrokJsonlTailBoundaryError) {
+        this.rearmJsonlTailsAfterModelSwitch();
+        this.log("[grok-copresence] re-armed JSONL tail after model-switch rotation (#1413)");
+        return;
+      }
       const failureSubcode = error instanceof GrokJsonlTailBoundaryError
         ? reviewedGrokJsonlTailFailureSubcode(error.failureSubcode)
         : "unknown";
@@ -3332,6 +3372,24 @@ class SafeJsonlTail {
     this.identity = null;
     this.observedSizeFloor = 0;
     if (fd !== null) this.closeFd(fd);
+  }
+
+  /**
+   * Re-anchor to the current end of the file after a model switch rotated it
+   * (#1413). grok truncates/rotates its chat_history/events JSONL when the TUI
+   * restarts on a new model; that is an expected, runtime-initiated rotation,
+   * not tampering. Close the old fd, drop the decoder's partial-line state, and
+   * re-arm to the current file end (arm resets identity/offset/floor).
+   *
+   * 🔴 Callers must only invoke this inside a model-switch window they
+   * themselves initiated. Outside that window a rotated/truncated tail is still
+   * a boundary failure — this method re-anchors on demand, it does not relax
+   * the tamper check.
+   */
+  rearm(): void {
+    this.dispose();
+    this.decoder = new StringDecoder("utf8");
+    this.arm(false);
   }
 
   private rebindPrefixPreservingReplacement(expected: Stats): "ready" | "racing" | false {
