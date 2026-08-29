@@ -14,9 +14,7 @@
 
 qa-222-cross-host-attachments
 qa-hub-18-delivery-semantics
-qa-rfc024-config-apply
 qa-rfc026-create-node
-qa-rfc027-stop-delete
 qa-rfc028-provider-probe
 test-rfc029-pr1-registration
 test-rfc029-pr2-acp-shim
