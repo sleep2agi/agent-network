@@ -1110,6 +1110,108 @@ SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_
 
 ---
 
+### GET /api/messages?scope=user
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) · 自 `@sleep2agi/commhub-server` `0.9.0-preview.41` 起
+
+**按用户读的收件箱**，与上面那节按 alias 寻址的分支是两条路：上面那条给 Dashboard 读全网 inbox，这条给**某个人**读自己的私信（桌面端未读角标的数据源）。
+
+```bash
+curl "http://localhost:9200/api/messages?scope=user&unacked=1&limit=50" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+🔴 **收件人取自鉴权上下文，不接受 query 指定。** 传 `?user_id=<别人>` **不会生效** —— 否则任何人都能读走别人的私信。没有用户上下文时返回 **401** `{"ok":false,"error":"auth_required"}`。
+
+**查询参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `scope=user` | **必须**，否则走上面那条按 alias 的分支 |
+| `unacked=1` | 只返回未 ack 的（**严格等于 `1`** 才生效） |
+| `limit` | 最大条数，默认 100，最大 500 |
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "message_id": "dm_abc123",
+      "network_id": "net_xxxxx",
+      "user_id": "u_xxxxx",
+      "from_session": "代码1号",
+      "kind": "dm",
+      "title": "构建失败",
+      "content": "……",
+      "severity": "info",
+      "meta_json": null,
+      "acked": 0,
+      "created_at": "2026-08-30 10:00:00",
+      "acked_at": null
+    }
+  ],
+  "unread": 3,
+  "pending_count": 3
+}
+```
+
+🔴 **`unread` 与 `pending_count` 恒等** —— 是**同一个数的两个名字**（`unread` 给角标读，`pending_count` 与上面 alias 分支的字段名保持一致），**一处计算**，不是两处实现。**不要拿它们互相比对**去判断状态。
+
+字段对照 server SELECT：`message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json, acked, created_at, acked_at`，按 `created_at DESC` 排序。主键是 **`message_id`**（不是上面那节的 `id`）。
+
+**数据源**：`user_inbox` 表，主键 `message_id`（同一条 send 重投是幂等的），索引 `idx_user_inbox_user_acked(user_id, acked, created_at)`。
+
+**网络作用域**：与 alias 分支复用同一个 `addNetworkScope` 助手 —— 列表与未读数用**同一个 `user_id` + 同一个 scope 助手**计算，避免两处口径漂开。
+
+::: danger 回读脱敏（redact-at-read）
+写入方是 agent，**不受信任**。回读时对 `content` / `title` / `meta_json` 做凭据形状遮蔽，**存储侧留原文**：
+
+| 形状 | 说明 |
+|---|---|
+| `(ntok_\|utok_\|atok_)[A-Za-z0-9_-]{6,}` | 本仓自己的 token |
+| `(github_pat_)[A-Za-z0-9_]{20,}` | GitHub fine-grained PAT |
+| `(ghp_)[A-Za-z0-9]{20,}` | GitHub classic PAT |
+| `(xox[bpoars]-)[A-Za-z0-9-]{10,}` | Slack |
+| `(sk-)[A-Za-z0-9_-]{16,}` | OpenAI 风格 |
+
+替换成 `<前缀>***redacted***` —— **保留前缀**，让读者知道被遮的是哪一类凭据。
+:::
+
+---
+
+### POST /api/messages/ack
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) · 自 `0.9.0-preview.41` 起
+
+把自己收件箱里的消息标记为已读。
+
+```bash
+curl -X POST "http://localhost:9200/api/messages/ack" \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"message_ids": ["dm_abc123", "dm_def456"]}'
+```
+
+**请求体**：`{"message_id": "dm_x"}` 或 `{"message_ids": ["dm_x", "dm_y"]}`（二选一，后者**上限 500 条**）。
+
+**响应**：`{"ok": true, "acked": 2}` —— `acked` 是**实际改动的行数**，不是你传了几个 id。已经 ack 过的、不属于你的、不存在的，都不计入。
+
+**错误**：
+
+| 状态 | 响应 | 何时 |
+|---|---|---|
+| 401 | `{"ok":false,"error":"auth_required"}` | 没有用户上下文 |
+| 400 | `{"ok":false,"error":"message_id_required"}` | 两个字段都没给，或给了空数组 |
+| 400 | `{"ok":false,"error":"too_many_ids","limit":500}` | `message_ids` 超过 500 |
+
+🔴 **隔离**：UPDATE 带 `AND user_id = <鉴权上下文>`。传别人的 `message_id` 进来**匹配不到行** —— 所以既改不到别人的状态，**也不会因为返回值不同而泄漏那条消息是否存在**（不存在和不属于你，返回都是 `acked: 0`）。
+
+同网络的两个成员之间，`WHERE user_id = ?` 是**唯一**的隔离依据：admin 绕过 network scope，但仍然只能读/改自己 `user_id` 的行。
+
+---
+
 ### GET /api/completions
 
 

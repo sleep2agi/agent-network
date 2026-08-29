@@ -1061,6 +1061,108 @@ The SELECT doesn't include `in_reply_to` yet; reply-polling uses a heuristic of 
 
 ---
 
+### GET /api/messages?scope=user
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) · since `@sleep2agi/commhub-server` `0.9.0-preview.41`
+
+**Per-user inbox read.** This is a different path from the alias-addressed branch above: that one lets the Dashboard read the network-wide inbox, this one lets **one person** read their own direct messages (it is the data source for the desktop unread badge).
+
+```bash
+curl "http://localhost:9200/api/messages?scope=user&unacked=1&limit=50" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+🔴 **The recipient comes from the authentication context and cannot be set by query.** Passing `?user_id=<someone else>` **has no effect** — otherwise anyone could read anyone's direct messages. With no user context the response is **401** `{"ok":false,"error":"auth_required"}`.
+
+**Query parameters**:
+
+| Parameter | Meaning |
+|---|---|
+| `scope=user` | **Required**; without it you get the alias-addressed branch above |
+| `unacked=1` | Only un-acked rows (**must equal `1` exactly**) |
+| `limit` | Max rows, default 100, capped at 500 |
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "message_id": "dm_abc123",
+      "network_id": "net_xxxxx",
+      "user_id": "u_xxxxx",
+      "from_session": "代码1号",
+      "kind": "dm",
+      "title": "Build failed",
+      "content": "…",
+      "severity": "info",
+      "meta_json": null,
+      "acked": 0,
+      "created_at": "2026-08-30 10:00:00",
+      "acked_at": null
+    }
+  ],
+  "unread": 3,
+  "pending_count": 3
+}
+```
+
+🔴 **`unread` and `pending_count` are always equal** — they are **two names for one number** (`unread` reads naturally for a badge; `pending_count` matches the field name used by the alias branch above). It is computed **once**, not twice. **Do not compare them against each other** to infer state.
+
+Field mapping to the server `SELECT`: `message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json, acked, created_at, acked_at`, ordered by `created_at DESC`. The primary key is **`message_id`** (not `id`, as in the section above).
+
+**Data source**: the `user_inbox` table, primary key `message_id` (so re-delivering the same send is idempotent), index `idx_user_inbox_user_acked(user_id, acked, created_at)`.
+
+**Network scope**: reuses the same `addNetworkScope` helper as the alias branch — and the list and the unread count are computed from **the same `user_id` and the same scope helper**, so the two cannot drift apart.
+
+::: danger Redact-at-read
+The writer is an agent and is **not trusted**. On read, credential-shaped strings in `content` / `title` / `meta_json` are masked; **storage keeps the original**:
+
+| Shape | What it is |
+|---|---|
+| `(ntok_\|utok_\|atok_)[A-Za-z0-9_-]{6,}` | this repo's own tokens |
+| `(github_pat_)[A-Za-z0-9_]{20,}` | GitHub fine-grained PAT |
+| `(ghp_)[A-Za-z0-9]{20,}` | GitHub classic PAT |
+| `(xox[bpoars]-)[A-Za-z0-9-]{10,}` | Slack |
+| `(sk-)[A-Za-z0-9_-]{16,}` | OpenAI-style |
+
+Replaced with `<prefix>***redacted***` — **the prefix is kept** so the reader still knows which class of credential was masked.
+:::
+
+---
+
+### POST /api/messages/ack
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) · since `0.9.0-preview.41`
+
+Mark messages in your own inbox as read.
+
+```bash
+curl -X POST "http://localhost:9200/api/messages/ack" \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"message_ids": ["dm_abc123", "dm_def456"]}'
+```
+
+**Body**: either `{"message_id": "dm_x"}` or `{"message_ids": ["dm_x", "dm_y"]}` (the latter **capped at 500**).
+
+**Response**: `{"ok": true, "acked": 2}` — `acked` is the number of rows **actually changed**, not how many ids you sent. Rows already acked, not yours, or nonexistent do not count.
+
+**Errors**:
+
+| Status | Response | When |
+|---|---|---|
+| 401 | `{"ok":false,"error":"auth_required"}` | no user context |
+| 400 | `{"ok":false,"error":"message_id_required"}` | neither field given, or an empty array |
+| 400 | `{"ok":false,"error":"too_many_ids","limit":500}` | `message_ids` longer than 500 |
+
+🔴 **Isolation**: the UPDATE carries `AND user_id = <auth context>`. Someone else's `message_id` simply **matches no row** — so it can neither change their state **nor leak whether that message exists** (nonexistent and not-yours both return `acked: 0`).
+
+Between two members of the same network, `WHERE user_id = ?` is the **only** isolation: admin bypasses network scope but still reads and writes only rows carrying their own `user_id`.
+
+---
+
 ### GET /api/completions
 
 
