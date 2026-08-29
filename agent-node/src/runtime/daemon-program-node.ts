@@ -5,12 +5,18 @@
 // probe — driven by structured SSE doorbells (RFC-026 create_node, RFC-027
 // stop_node, RFC-028 probe_provider) that never touch a model.
 //
-// The one path that could still drag a model into the daemon is its inbox:
-// if a *free-text* task lands there (someone sent the daemon a message as if
-// it were an agent), the normal node would run an LLM turn (processTask →
-// processWithClaude → `await import("@anthropic-ai/claude-agent-sdk")`). That
-// import is lazy, so short-circuiting free-text tasks here means a daemon
-// process never loads or runs an LLM at all.
+// Two paths could still drag a model into the daemon; both are gated on this
+// same predicate in cli.ts:
+//   1. The inbox: a *free-text* task (someone messaged the daemon as if it were
+//      an agent) would otherwise run an LLM turn (processTask → processWithClaude
+//      → `await import("@anthropic-ai/claude-agent-sdk")`). The inbox guard
+//      short-circuits it before processTask.
+//   2. The goal scheduler: a goal wake also calls processTask. runGoalSchedulerTick
+//      early-returns for a daemon, and the tick is not armed at boot for one —
+//      so even a node hot-promoted agent→host_supervisor (RFC-024) with
+//      pre-existing active goals stops running LLM turns from promotion onward.
+// The claude-agent-sdk import is lazy, so with both paths gated a node born and
+// kept as host_supervisor never loads or runs an LLM.
 //
 // Kept as a small, unit-tested module rather than an inline check inside the
 // big CLI script so the "a daemon never invokes the runtime" guarantee has a

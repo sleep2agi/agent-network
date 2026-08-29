@@ -1905,6 +1905,14 @@ function buildCodexWakeDeps(): CodexWakeDeps {
 }
 
 async function runGoalSchedulerTick() {
+  // #1417 — A host_supervisor daemon is a pure-program node and must never run
+  // an LLM turn. A goal wake calls processTask (an LLM turn), so a daemon must
+  // not tick the scheduler — even if it was armed at boot as an agent and then
+  // hot-promoted to host_supervisor (RFC-024), or held active goals from before
+  // promotion. Checked live here (not just at boot) so promotion takes effect at
+  // once. The inbox guard blocks *new* daemon goals; this blocks *existing* ones
+  // from ever firing.
+  if (isDaemonPureProgramNode(fileConfig.role)) return;
   if (goalTickRunning) return;
   goalTickRunning = true;
   try {
@@ -6521,9 +6529,12 @@ import("./runtime/fetch-attachment.js").then(({ startAttachmentCacheSweeper }) =
   log(`[attachment-cache] sweeper started (hourly tick, 24h TTL, dir=${cacheDir})`);
 }).catch((e: any) => warn(`attachment-cache sweeper import failed: ${e?.message || e}`));
 
-if (goalsSchedulerEnabled) {
+if (goalsSchedulerEnabled && !isDaemonPureProgramNode(fileConfig.role)) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
   runGoalSchedulerTick().catch(() => {});
+} else if (goalsSchedulerEnabled && isDaemonPureProgramNode(fileConfig.role)) {
+  // host_supervisor daemon: pure-program node, scheduler intentionally not armed.
+  log(`[goals] scheduler suppressed — host_supervisor daemon runs no LLM turns`);
 }
 
 // RFC-025 M2/M3 — loops HTTP MCP server for codex-sdk + grok-build-acp.
