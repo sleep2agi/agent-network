@@ -50,3 +50,60 @@ describe("start_node Hub -> daemon lifecycle", () => {
     expect((await call(u.start_node, { child_node_id: CHILD, daemon_node_id: "node_wrong", network_id: NET })).error).toBe("daemon_child_mismatch");
   });
 });
+
+// #1448 finding-2 — stale-starting reaper（对齐 update_node_config/restart_node 的 60s
+// single-flight stale-supersede）。start 只受理 stopped;卡在 starting 的节点(门铃丢 /
+// daemon 在 UPDATE starting 后死)改前永远 start 不了(gate 返 node_not_stopped)、也无
+// reaper 拉回 → 永久卡死。改后:in-flight start 请求晾过 60s ⇒ 标 timeout 超越 + 放行
+// 重派;未过阈值 ⇒ 拒 node_already_starting。
+describe("start_node — stale-starting reaper (#1448 finding-2)", () => {
+  function seedStartReq(reqId: string, status: string, ageMs: number) {
+    db.run(
+      `INSERT INTO node_start_requests(request_id,network_id,daemon_node_id,child_node_id,child_alias,created_by_token,status,created_at)
+       VALUES(?1,?2,?3,?4,?5,'t',?6,?7)`,
+      [reqId, NET, DAEMON, CHILD, CHILD_ALIAS, status, Date.now() - ageMs],
+    );
+  }
+
+  test("starting + FRESH in-flight start (< 60s) → refused node_already_starting (not superseded)", async () => {
+    db.run(`UPDATE nodes SET lifecycle_state='starting' WHERE node_id=?1`, CHILD);
+    seedStartReq("str_fresh", "delivered", 5_000);   // 5s old — within threshold
+    const u = handlers(USER);
+    const r = await call(u.start_node, { child_node_id: CHILD, network_id: NET });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_already_starting");
+    expect(r.existing_request_id).toBe("str_fresh");
+    expect(typeof r.age_ms).toBe("number");
+    // old request untouched, no new dispatch
+    expect(db.get<any>(`SELECT status FROM node_start_requests WHERE request_id='str_fresh'`)?.status).toBe("delivered");
+  });
+
+  // witnessed-red：改前 gate 直接 `!== 'stopped' → node_not_stopped`，一个 stale 的
+  // 'starting' 节点返回 node_not_stopped、永远卡死。改后应超越重派(ok:true)。
+  test("starting + STALE in-flight start (> 60s) → supersede old + re-dispatch (converges)", async () => {
+    db.run(`UPDATE nodes SET lifecycle_state='starting' WHERE node_id=?1`, CHILD);
+    seedStartReq("str_stale", "delivered", 61_000);   // 61s old — past 60s threshold
+    const u = handlers(USER);
+    const r = await call(u.start_node, { child_node_id: CHILD, network_id: NET });
+    expect(r.ok).toBe(true);
+    expect(r.lifecycle_state).toBe("starting");
+    expect(typeof r.request_id).toBe("string");
+    expect(r.request_id).not.toBe("str_stale");                       // fresh request
+    // old stale request superseded → terminal, unblocks the child-inflight unique index
+    expect(db.get<any>(`SELECT status FROM node_start_requests WHERE request_id='str_stale'`)?.status).toBe("timeout");
+    // exactly one non-terminal start request now (the new one)
+    const live = db.all<any>(`SELECT request_id FROM node_start_requests WHERE child_node_id=?1 AND status IN ('pending','delivered')`, CHILD);
+    expect(live.map((x:any)=>x.request_id)).toEqual([r.request_id]);
+    // audit records the real prior state
+    const aud = db.get<any>(`SELECT detail FROM audit_log WHERE target_id=?1`, r.request_id);
+    expect(JSON.parse(aud.detail).lifecycle_state_before).toBe("starting");
+  });
+
+  test("starting + NO in-flight row (orphaned state) → self-heals by re-dispatching", async () => {
+    db.run(`UPDATE nodes SET lifecycle_state='starting' WHERE node_id=?1`, CHILD);
+    const u = handlers(USER);
+    const r = await call(u.start_node, { child_node_id: CHILD, network_id: NET });
+    expect(r.ok).toBe(true);
+    expect(r.lifecycle_state).toBe("starting");
+  });
+});
