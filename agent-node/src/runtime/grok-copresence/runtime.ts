@@ -93,6 +93,10 @@ const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 const MAX_LIFECYCLE_LINE_BYTES = 256 * 1024;
 const MAX_PENDING_AUTOMATIC_PERMISSIONS = 64;
 const MAX_RESUME_AUDIT_BYTES = 64 * 1024 * 1024;
+// #1416 review — bounded grace after a hot model-switch ack before the tail-
+// tamper window closes, so a rotation grok emits a few ms AFTER the ACP
+// set_model ack is still recovered-by-rearm instead of hitting failFatal.
+const MODEL_SWITCH_HOT_GRACE_MS = 3000;
 const UNIX_SOCKET_PATH_MAX_BYTES = 100;
 const GROK_TUI_READY_TEXT = "Shift+Tab:mode";
 const GROK_TUI_SHORTCUTS_TEXT = "Ctrl+x:shortcuts";
@@ -975,6 +979,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private currentModel?: string;
   /** Set only while a `switchModel()` re-spawn is the reason the TUI exited. */
   private modelSwitchInFlight: string | null = null;
+  // #1416 review — timer that closes the hot-path model-switch window after a
+  // grace period; token-guarded so a newer switch is never closed by it.
+  private modelSwitchWindowTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set when a terminal client attaches; consumed on its first resize to force a one-shot grok repaint (#1412). */
   private pendingRedrawOnResize = false;
   /**
@@ -1138,6 +1145,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     // destruct. The window makes the poll fallback (and the explicit re-arm
     // below) treat this one rotation as expected. Every exit from here clears
     // it — a leaked window would disable the tamper check for later reads.
+    if (this.modelSwitchWindowTimer) { clearTimeout(this.modelSwitchWindowTimer); this.modelSwitchWindowTimer = null; }
     this.modelSwitchInFlight = normalized.model;
     try {
       if (hot.kind !== "hot") throw new Error("unexpected non-hot Grok model switch decision");
@@ -1145,7 +1153,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       await sender({ method: hot.method, params: hot.params });
       this.currentModel = normalized.model;
       this.rearmJsonlTailsAfterModelSwitch();
-      this.modelSwitchInFlight = null;
+      // #1416 review — do NOT clear the window synchronously. On the hot path
+      // grok may ack set_model and rotate/truncate chat_history a few ms LATER;
+      // clearing now would let that late rotation hit failFatal (the #1413
+      // crash). Hold the window open for a bounded grace so a late boundary
+      // error is recovered-by-rearm. Token-guarded so a newer switch is safe.
+      this.scheduleHotModelSwitchWindowClose(normalized.model);
       return { ok: true, model: normalized.model, route: "hot", resume: true };
     } catch (error) {
       if (!isGrokModelSwitchFallbackError(error)) {
@@ -1170,6 +1183,17 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
    * lines are framed from a clean slate. Runs synchronously — no await — so it
    * cannot interleave with a poll callback.
    */
+  // #1416 review — bounded grace before the hot-path model-switch window closes.
+  private scheduleHotModelSwitchWindowClose(token: string): void {
+    if (this.modelSwitchWindowTimer) clearTimeout(this.modelSwitchWindowTimer);
+    const timer = setTimeout(() => {
+      this.modelSwitchWindowTimer = null;
+      if (this.modelSwitchInFlight === token) this.modelSwitchInFlight = null;
+    }, MODEL_SWITCH_HOT_GRACE_MS);
+    timer.unref?.();
+    this.modelSwitchWindowTimer = timer;
+  }
+
   private rearmJsonlTailsAfterModelSwitch(): void {
     this.chatTail?.rearm();
     this.eventsTail?.rearm();
@@ -1497,6 +1521,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.closing = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
+    if (this.modelSwitchWindowTimer) { clearTimeout(this.modelSwitchWindowTimer); this.modelSwitchWindowTimer = null; }
     for (const [taskId, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(new GrokCopresenceFailure(
