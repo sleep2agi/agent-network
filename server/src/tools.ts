@@ -3769,6 +3769,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const now = Date.now();
     const newState = args.action === "stop" ? "stopping" : "deleting";
 
+    // #1448 finding-5 — 记下该 child **当前活着的** ntok 的 token_id,让 ack 精确按
+    // token_id 撤销,而非按 name='node:<alias>' 广撤。后者会在「同 alias 节点在这次
+    // delete 未收敛的窗口内被重建(拿到同名新 token)」时,把新 token 一并误撤。这里
+    // 在派发时刻定住身份;若此刻没有活 token(异常),存 null,ack 退回按 name 撤(旧语义)。
+    const childTokenRow = db.get<{ token_id: string }>(
+      `SELECT token_id FROM api_tokens WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
+      node.network_id, `node:${node.alias}`,
+    );
+    const childTokenId = childTokenRow?.token_id ?? null;
+
     // §4.5 D8 — lifecycle UPDATE + audit INSERTs + request INSERT atomic.
     // PR1.1: use db.transaction() (SQLiteAdapter wraps better-sqlite3's
     // native transaction; PgAdapter ships a real BEGIN/COMMIT/ROLLBACK
@@ -3779,12 +3789,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       db.transaction(() => {
       db.run(
         `INSERT INTO node_stop_requests
-           (request_id, network_id, daemon_node_id, child_node_id, child_alias, action,
+           (request_id, network_id, daemon_node_id, child_node_id, child_alias, child_token_id, action,
             delete_config, grace_seconds, force, in_flight_at_dispatch, created_by_token,
             status, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', ?12)`,
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'pending', ?13)`,
         [
-          requestId, node.network_id, args.daemon_node_id, node.node_id, node.alias, args.action,
+          requestId, node.network_id, args.daemon_node_id, node.node_id, node.alias, childTokenId, args.action,
           args.delete_config ? 1 : 0, args.grace_seconds, args.force ? 1 : 0, inFlight,
           callerTokenId || "unknown", now,
         ],
@@ -3965,9 +3975,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       const row = db.get<{
         daemon_node_id: string; status: string; network_id: string;
-        child_node_id: string; child_alias: string; action: string;
+        child_node_id: string; child_alias: string; child_token_id: string | null; action: string;
         in_flight_at_dispatch: number; force: number;
-      }>(`SELECT daemon_node_id, status, network_id, child_node_id, child_alias, action,
+      }>(`SELECT daemon_node_id, status, network_id, child_node_id, child_alias, child_token_id, action,
                  in_flight_at_dispatch, force
             FROM node_stop_requests WHERE request_id = ?1`, request_id);
       if (!row) {
@@ -4008,14 +4018,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               },
             });
           } else if (status === "stopped" && row.action === "delete") {
-            // Revoke the child's ntok (name='node:<alias>') in the daemon's
-            // network, then DELETE the nodes row. Token revoke pattern mirrors
-            // ack_create_request's terminal path.
-            db.run(
-              `UPDATE api_tokens SET revoked_at = datetime('now')
-                 WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
-              [row.network_id, `node:${row.child_alias}`],
-            );
+            // Revoke the child's ntok, then DELETE the nodes row.
+            // #1448 finding-5 — 精确按派发时定住的 child_token_id 撤(镜像
+            // ack_create_request 的 token_id 精撤)。旧行(升级前派发,child_token_id
+            // 为 NULL)fallback 回按 name='node:<alias>' 撤——旧语义,不引入回归。
+            // 按 token_id 撤避免了「同 alias 在本次 delete 窗口内被重建、拿到同名新
+            // token」时把新 token 一并误撤。
+            if (row.child_token_id) {
+              db.run(
+                `UPDATE api_tokens SET revoked_at = datetime('now')
+                   WHERE token_id = ?1 AND revoked_at IS NULL`,
+                [row.child_token_id],
+              );
+            } else {
+              db.run(
+                `UPDATE api_tokens SET revoked_at = datetime('now')
+                   WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
+                [row.network_id, `node:${row.child_alias}`],
+              );
+            }
             db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
             auditCreateNodeStrict({
               action: "delete_node_completed",

@@ -431,6 +431,29 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
     expect((await call(u.stop_node, { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A })).ok).toBe(true);
   });
 
+  // #1448 finding-5 — delete 完成时按派发时定住的 token_id 精确撤 ntok,而非按
+  // name='node:<alias>' 广撤。改前:同 alias 在 delete 未收敛窗口内被重建、拿到同名新
+  // token,ack 会把新 token 一并误撤(下面 REBUILT_TOK 断言 not revoked 会红)。
+  test("#1448 finding-5: delete revokes by token_id, spares a same-alias rebuilt token", async () => {
+    setupAlphaNetwork();
+    const userTools = buildHandlers(USER_A_ID);
+    const dispatch = await call(userTools.delete_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A, confirm_alias: CHILD_A_ALIAS,
+    });
+    expect(dispatch.ok).toBe(true);
+    // 派发后、ack 前:同 alias 节点被重建,拿到**同名**新 ntok(不同 token_id,仍 active)。
+    const REBUILT_TOK = "tok_sd_child_a_rebuilt";
+    db.run(
+      `INSERT INTO api_tokens (token_id, user_id, network_id, scope, name, token_hash, expires_at, revoked_at)
+       VALUES (?1, ?2, ?3, 'network', ?4, ?5, NULL, NULL)`,
+      [REBUILT_TOK, USER_A_ID, NET_A, `node:${CHILD_A_ALIAS}`, `hash_${REBUILT_TOK}`],
+    );
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    await call(daemonTools.ack_stop_request, { request_id: dispatch.request_id as string, status: "stopped", exit_signal: "SIGTERM" });
+    expect(readToken(CHILD_TOK_A_ID)?.revoked_at).not.toBeNull();   // 原 token 撤销(精确命中)
+    expect(readToken(REBUILT_TOK)?.revoked_at).toBeNull();          // 重建的同名新 token 未被误撤(改前按 name 广撤会红)
+  });
+
   test("daemon ack 'stop_failed' → lifecycle_state=stop_failed, request error captured", async () => {
     setupAlphaNetwork();
     const userTools = buildHandlers(USER_A_ID);
