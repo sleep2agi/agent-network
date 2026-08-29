@@ -2121,6 +2121,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         // The text is already visible in Grok's editor. Cancel it locally
         // instead of submitting a slash command that would pre-authorize a
         // later network turn.
+        //
+        // Exactly one command is proxied instead of merely blocked: a pristine
+        // `/model <id>` line (#879). Read it BEFORE the audit reset below; the
+        // keystrokes are still cancelled either way, so the TUI's slash
+        // palette never sees an Enter and cannot complete the prefix into
+        // something else — the switch runs out-of-band via switchModel(),
+        // the same guarded entry `anet grok model` uses.
+        const proxiedModel = this.matchExactHumanModelCommand();
         const blockRoute = this.humanComposerLeadingSlash
           ? "slash command"
           : "edited line (arrow/Home/End/Delete make the editor contents unverifiable; press Ctrl+U to clear and retype)";
@@ -2129,7 +2137,15 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         if (this.arbitration.phase === "human_editing") {
           this.transition({ type: "human_input_cancelled" });
         }
-        this.warnBlockedPermissionModeChange(blockRoute);
+        if (proxiedModel !== null) {
+          this.log(`[grok-copresence] in-TUI /model proxied out-of-band (#879): ${proxiedModel}`);
+          // Runs synchronously up to switchModel's first await, so its
+          // idle-phase check happens before scheduleNetworkIfIdle() below can
+          // hand the turn to a network task.
+          void this.proxyHumanModelSwitch(proxiedModel);
+        } else {
+          this.warnBlockedPermissionModeChange(blockRoute);
+        }
         if (offset < input.length) {
           // Same-frame bytes are not a new, intentional composer action.
           this.attach?.broadcastStatus({
@@ -2199,6 +2215,55 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.humanComposerAuditUnsafe = true;
       }
     }
+  }
+
+  /**
+   * The single slash command the human composer proxies instead of blocking
+   * (#879): a pristine `/model <id>` line.
+   *
+   * "Pristine" is load-bearing. The audit mirror only equals the editor's
+   * contents while no unmodelled edit happened, so any taint/unsafe/overflow
+   * state disqualifies the line — those fall through to the generic block.
+   * Exactly one operand is accepted; the id itself is re-validated by
+   * `normalizeGrokModelSwitchRequest` before it can reach argv.
+   */
+  private matchExactHumanModelCommand(): string | null {
+    if (!this.humanComposerLeadingSlash) return null;
+    if (
+      this.humanComposerAuditTainted
+      || this.humanComposerAuditUnsafe
+      || this.humanComposerAuditOverflow
+    ) return null;
+    const match = /^\s*\/model[ \t]+(\S+)[ \t]*$/.exec(this.humanComposerAudit);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Run a human-typed `/model <id>` through the same guarded out-of-band
+   * entry the attach transport uses, and answer in the TUI itself — the
+   * person who typed it is watching the terminal, not the status stream.
+   */
+  private async proxyHumanModelSwitch(model: string): Promise<void> {
+    let decision: GrokModelSwitchResult;
+    try {
+      decision = await this.switchModel(model);
+    } catch (error) {
+      const message = errorMessage(error);
+      this.warn(`[grok-copresence] in-TUI /model switch to ${model} failed: ${message}`);
+      this.attach?.broadcastOutput(`\r\n[anet] 模型未切换（failed）：${message}\r\n`);
+      this.attach?.broadcastStatus({ ...this.attachStatus(), modelSwitch: { ok: false, code: "failed", message } });
+      return;
+    }
+    if (decision.ok) {
+      this.log(`[grok-copresence] model switch accepted: ${decision.model}`);
+      this.attach?.broadcastOutput(
+        `\r\n[anet] 已代为切换模型 → ${decision.model}（${decision.route === "hot" ? "热切换" : "重启续会话"}）\r\n`,
+      );
+    } else {
+      this.warn(`[grok-copresence] model switch refused (${decision.code}): ${decision.message}`);
+      this.attach?.broadcastOutput(`\r\n[anet] 模型未切换（${decision.code}）：${decision.message}\r\n`);
+    }
+    this.attach?.broadcastStatus({ ...this.attachStatus(), modelSwitch: decision });
   }
 
   private isForbiddenHumanModeCommand(): boolean {
