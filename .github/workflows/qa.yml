@@ -176,6 +176,7 @@ on:
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
@@ -340,6 +341,7 @@ on:
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test631-private-config-permissions/**'
@@ -1171,6 +1173,7 @@ jobs:
           - test697-codex-default-model
           - test698-atomic-peer-reply
           - test750-codex-copresence-onecommand
+          - test1225-opencode-copresence-onecommand
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
           - test1271-daemon-start-node
