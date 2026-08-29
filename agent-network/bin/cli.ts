@@ -37,6 +37,7 @@ import {
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
+import { serializeProfileForConfigJson } from "../src/profile-serialize";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -2268,50 +2269,7 @@ function saveProfile(id: string, profile: Profile) {
     ensurePrivateDirectory(dir);
   }
   const normalized = normalizeStoredProfile(id, profile);
-  const toSave: Record<string, any> = {
-    anet_version: normalized.anet_version,
-    node_id: normalized.node_id,
-    node_name: normalized.node_name,
-    runtime: normalized.runtime,
-    ...(normalized.hub ? { hub: normalized.hub } : {}),
-    ...(normalized.token ? { token: normalized.token } : {}),
-    ...(normalized.model ? { model: normalized.model } : {}),
-    ...(normalized.tools ? { tools: normalized.tools } : {}),
-    channels: normalized.channels || [],
-    env: normalized.env || {},
-    flags: normalized.flags || {},
-    ...(normalized.session ? { session: normalized.session } : {}),
-    ...((normalized.codexAppServerUrl ?? profile.codexAppServerUrl)
-      ? { codexAppServerUrl: normalized.codexAppServerUrl ?? profile.codexAppServerUrl }
-      : {}),
-    ...((normalized.codexThreadId ?? profile.codexThreadId)
-      ? { codexThreadId: normalized.codexThreadId ?? profile.codexThreadId }
-      : {}),
-    ...((normalized.opencodeMode ?? profile.opencodeMode)
-      ? { opencodeMode: normalized.opencodeMode ?? profile.opencodeMode }
-      : {}),
-    ...(normalized.grokSession ? { grokSession: normalized.grokSession } : {}),
-    ...(normalized.grokCliSession ? { grokCliSession: normalized.grokCliSession } : {}),
-    ...(typeof normalized.grokCopresence === "boolean"
-      ? { grokCopresence: normalized.grokCopresence }
-      : {}),
-    ...(typeof (normalized.codexCopresence ?? profile.codexCopresence) === "boolean"
-      ? { codexCopresence: normalized.codexCopresence ?? profile.codexCopresence }
-      : {}),
-    ...(typeof (normalized.codexCopresenceFullAccess ?? profile.codexCopresenceFullAccess) === "boolean"
-      ? { codexCopresenceFullAccess: normalized.codexCopresenceFullAccess ?? profile.codexCopresenceFullAccess }
-      : {}),
-    ...(normalized.grokLeaderSocket ? { grokLeaderSocket: normalized.grokLeaderSocket } : {}),
-    ...(normalized.grokAttachSocket ? { grokAttachSocket: normalized.grokAttachSocket } : {}),
-    // RFC-008 / issue #51 team-scale demo metadata. Optional on every node;
-    // present only when set by `anet demo sci-team` (Phase 1 scaffold) or
-    // a future RFC-008 client. Without this persist, agent-node reads back a
-    // config.json missing systemPrompt / team / role and the scaffold's
-    // placeholder leader/researcher prompts are silently dropped.
-    ...(normalized.systemPrompt ? { systemPrompt: normalized.systemPrompt } : {}),
-    ...(normalized.team ? { team: normalized.team } : {}),
-    ...(normalized.role ? { role: normalized.role } : {}),
-  };
+  const toSave = serializeProfileForConfigJson(normalized, profile);
   const body = JSON.stringify(toSave, null, 2) + "\n";
   if (isOpencode) {
     // The profile contains the node ntok_. Never replace through a
