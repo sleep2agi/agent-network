@@ -12,8 +12,7 @@
   ],
   "scripts": {
     "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify",
-    "prepublishOnly": "npm run build",
-    "postinstall": "node -e \"try{const fs=require('fs'),p=require('path');for(const a of ['darwin-arm64','darwin-x64']){const f=p.join(__dirname,'node_modules','node-pty','prebuilds',a,'spawn-helper');if(fs.existsSync(f))fs.chmodSync(f,0o755)}}catch(e){}\""
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "agent",
