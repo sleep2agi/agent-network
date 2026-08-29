@@ -76,7 +76,7 @@ block-beta
 | From | 发送者别名 |
 | To | 接收者别名 |
 | Priority | 优先级（high / normal / low） |
-| Status | 状态（`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` 共 **8 个状态**；verify [`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`；`cancel_task` 4 个 cancellable 状态含 `created`；完整状态机见 [Task 生命周期](/concepts/task-lifecycle)） |
+| Status | 状态（`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` 共 **8 个状态**；verify [`server/src/db.ts` 的 `CREATE TABLE ... tasks` → `status` 列](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) `status TEXT NOT NULL DEFAULT 'created'`；`cancel_task` 4 个 cancellable 状态含 `created`；完整状态机见 [Task 生命周期](/concepts/task-lifecycle)） |
 | Content | 任务内容预览 |
 | Created | 创建时间 |
 | Duration | 从创建到完成的耗时 |
@@ -206,7 +206,7 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 | 10:00:10 | alice | `network_renamed` | dev → development |
 | 10:00:15 | alice | `member_added` | u_bob_xxx as member |
 
-原 doc 示例「`create_network`」action **不存在**。[`security.md` 审计日志](/concepts/security#审计日志) 已校准 —— [`POST /api/networks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) **不调** `logAudit`，所以 audit_log 里**不会**有 `create_network` 或 `network_created` 行。实际 19 个 action（RFC-010 节点改名加了 3 个 `node_rename_*` action；18 个通过 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1558) + 1 个 `password_reset_by_admin` 走 [`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 直接 INSERT）: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / node_rename_prepared / node_rename_committed / node_rename_aborted / invite_created`。
+原 doc 示例「`create_network`」action **不存在**。[`security.md` 审计日志](/concepts/security#审计日志) 已校准 —— [`POST /api/networks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts) **不调** `logAudit`，所以 audit_log 里**不会**有 `create_network` 或 `network_created` 行。实际 19 个 action（RFC-010 节点改名加了 3 个 `node_rename_*` action；18 个通过 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L1581) + 1 个 `password_reset_by_admin` 走 [`auth.ts` `resetUserPassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 直接 INSERT）: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / node_rename_prepared / node_rename_committed / node_rename_aborted / invite_created`。
 ### Settings（设置）
 
 设置页面管理用户个人配置：

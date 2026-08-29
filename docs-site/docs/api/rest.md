@@ -1344,7 +1344,7 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 }
 ```
 
-字段名是 `logs` + `count`（**不是** `audit_log`，之前 doc 误写）。`audit_log` **表** schema 见 [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201) 完整 10 列（含 `ip` + `network_id`）。**完整 action 值列表 + 触发场景**见 [安全设计 — 审计日志](/concepts/security#审计日志)。
+字段名是 `logs` + `count`（**不是** `audit_log`，之前 doc 误写）。`audit_log` **表** schema 见 [`server/src/db.ts` 的 `CREATE TABLE ... audit_log`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 完整 10 列（含 `ip` + `network_id`）。**完整 action 值列表 + 触发场景**见 [安全设计 — 审计日志](/concepts/security#审计日志)。
 
 ::: warning `create_network` 不审计
 POST `/api/networks` 不调 `logAudit`，所以 audit_log 里**不会**有 `create_network` 行。看 network 创建请走 [`GET /api/networks`](#get-api-networks) 列表对比，或借 `target_type='network' + action='network_renamed'` 间接推断（跟 [security.md 审计](/concepts/security#审计日志) `::: info` 一致）。
