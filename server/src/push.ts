@@ -464,6 +464,20 @@ export function pushNetworkObserverEvent(
 /** Push an event to every active Desktop/web client for one user in one
  *  network. No-op for falsy network/user ids; auth must be enforced by
  *  the caller before invoking this helper. */
+/** 这个用户此刻是否真的有活着的 SSE 订阅者。
+ *
+ *  与 alias 版 `hasSubscribers` 同形状：投递可达性的**实测**，
+ *  调用方据此把「送到了」和「没人听」区分开，而不是一律报成功。 */
+export function hasUserSubscribers(
+  networkId: string | null | undefined,
+  userId: string | null | undefined,
+): boolean {
+  if (!networkId || !userId) return false;
+  const arr = clients.get(userKey(networkId, userId));
+  if (!arr) return false;
+  return arr.some((c) => !c.closed);
+}
+
 export function pushUserEvent(
   networkId: string | null | undefined,
   userId: string | null | undefined,

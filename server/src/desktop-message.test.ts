@@ -220,3 +220,67 @@ describe("send_desktop_message", () => {
     expect(auditCount()).toBe(0);
   });
 });
+
+// #1459 —— 返回值必须反映真实投递态。
+//
+// send_desktop_message 是 fire-and-forget：只 INSERT audit_log（不写 inbox），
+// 再 pushUserEvent 扇出；而 pushUserEvent 在没有订阅者时静默 return。
+// 用户 dashboard 离线/重连时消息永久丢（无 DB 行 ⇒ 无从 reconcile，
+// /api/messages 只 SELECT ... FROM inbox），而调用方拿到的是 ok:true。
+//
+// 本 PR 只做「让丢失可见」这一半：不碰 schema，返回值说实话。
+// 持久化 + 重连补投（让丢失不发生）是另一条，方向已定为按 user_id 寻址的新表。
+describe("#1459 send_desktop_message 返回值反映真实投递态", () => {
+  test("🔴 无活跃订阅者 ⇒ delivered:false + 可判读的 reason，而不是笼统 ok:true", async () => {
+    // 故意不建 SSE 流：这正是用户 dashboard 关着的情形
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const before = auditCount();
+    const result = await call(tools.send_desktop_message, {
+      to_user_id: TARGET_A,
+      message: "nobody is listening",
+      severity: "info",
+    });
+
+    // ok 仍为 true：调用被接受、审计已落库 —— 这一格没变
+    expect(result.ok).toBe(true);
+    expect(result.message_id).toStartWith("dm_");
+    expect(auditCount()).toBe(before + 1);
+
+    // 新增的那一格：投递态
+    expect(result.delivered).toBe(false);
+    expect(result.reason).toBe("no_live_subscriber");
+  });
+
+  test("有活跃订阅者 ⇒ delivered:true 且不带 reason", async () => {
+    const stream = createUserEventStream(NET_A, TARGET_A);
+    const reader = stream.body!.getReader();
+    await readFrame(reader);
+
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const result = await call(tools.send_desktop_message, {
+      to_user_id: TARGET_A,
+      message: "someone is listening",
+      severity: "info",
+    });
+
+    expect(result.delivered).toBe(true);
+    expect(result.reason).toBeUndefined();
+    // 前提断言：这一条真的送到了订阅者手上，否则 delivered:true 就是空话
+    const evt = await readFrame(reader);
+    expect(evt.message).toBe("someone is listening");
+    await reader.cancel();
+  });
+
+  test("🔴 两种情形必须给出不同读数 —— 防止判据退化成恒真", async () => {
+    const tools = buildHandlers({ netId: NET_A, userId: NODE_USER, alias: "node-a", isNetwork: true });
+    const offline = await call(tools.send_desktop_message, { to_user_id: TARGET_A, message: "off", severity: "info" });
+
+    const stream = createUserEventStream(NET_A, TARGET_A);
+    const reader = stream.body!.getReader();
+    await readFrame(reader);
+    const online = await call(tools.send_desktop_message, { to_user_id: TARGET_A, message: "on", severity: "info" });
+    await reader.cancel();
+
+    expect(offline.delivered).not.toBe(online.delivered);
+  });
+});
