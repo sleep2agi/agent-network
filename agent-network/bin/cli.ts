@@ -36,7 +36,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
-import { processVanished, resolveOwnedRoots } from "../src/owned-roots";
+import { processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -8681,6 +8681,70 @@ async function sweepMcpOrphansForAlias(force: boolean, ...aliases: string[]): Pr
 // #180 R3 caveat: alias tokenisation assumes node names conforming to
 // validateNodeName() (no whitespace/quotes) — the entire current node
 // population. A hand-edited legacy alias containing whitespace would not match.
+// #1438 — anet node stop alias fallback needs (pid, birth) from the SAME `ps`
+// snapshot to defeat pid-reuse: findNodeProcessesByAlias + processBirth are
+// two separate reads, and the pid can be recycled between them. This helper
+// captures both in one atomic `ps` call. lstart is a 24-char fixed-width
+// timestamp ("Www Mmm dd HH:MM:SS YYYY"), stable per process incarnation.
+//
+// Kept separate from findNodeProcessesByAlias so the rename lane callers
+// (L8961/L9205) — which have the same class of bug but need their own audit
+// pass — are not silently rewired.
+function findNodeStopCandidates(alias: string): OwnedRootCandidate[] | null {
+  if (!alias) return [];
+  let out = "";
+  try {
+    out = execFileSync("ps", ["-eww", "-o", "pid=", "-o", "lstart=", "-o", "args="], { encoding: "utf-8" }).toString();
+  } catch { return null; }  // #180 R2 — process table unavailable; caller fails closed
+  const candidates = new Map<number, OwnedRootCandidate>();
+  // Regex: pid (leading ws + digits) + lstart (fixed 24 chars: 3-letter weekday,
+  // space, 3-letter month, space, 1-2 digit day right-padded to 2, space,
+  // HH:MM:SS, space, 4-digit year) + args (rest of line).
+  const LINE_RE = /^\s*(\d+)\s+([A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9]\d \d\d:\d\d:\d\d \d{4})\s+(.+)$/;
+  for (const line of out.split("\n")) {
+    const m = line.match(LINE_RE);
+    if (!m) continue;
+    const pid = parseInt(m[1], 10);
+    if (isNaN(pid) || pid === process.pid) continue;
+    const discoveredBirth = m[2];
+    const tok = m[3].split(/\s+/);
+    // Same identity rules as findNodeProcessesByAlias (#180 R1 / #146 PR-3):
+    // command line must be an actual agent process, and the alias must be
+    // in the argv (`-n <alias>` / `--alias <alias>` / `node start <alias>`).
+    const isForegroundStart = tok.some((x, i) => x === "node" && tok[i + 2] === "node" && tok[i + 3] === "start")
+      || tok.some((x, i) => (x.endsWith("/anet") || x === "anet") && tok[i + 1] === "node" && tok[i + 2] === "start");
+    const isAgentProc = isForegroundStart || tok.some(x => {
+      const base = x.split("/").pop() || x;
+      return base === "claude" || base === "agent-node"
+        || base === "codex" || base === "grok"
+        || x.includes("@anthropic-ai/claude-code") || x.includes("@sleep2agi/agent-node")
+        || x.includes("@openai/codex") || x.includes("@openai/codex-sdk");
+    });
+    if (!isAgentProc) continue;
+    let aliasMatch = false;
+    for (let i = 0; i < tok.length - 1; i++) {
+      if ((tok[i] === "-n" || tok[i] === "--alias") && tok[i + 1] === alias) { aliasMatch = true; break; }
+      if (tok[i] === "start" && tok[i - 1] === "node" && tok[i + 1] === alias) { aliasMatch = true; break; }
+    }
+    if (!aliasMatch) continue;
+    candidates.set(pid, { pid, discoveredBirth });
+  }
+  return [...candidates.values()];
+}
+
+// #1438 — read lstart via `ps -p <pid>` so we compare against the SAME format
+// findNodeStopCandidates captured. If pid was recycled between discovery and
+// this call, ps will return the NEW process's lstart (different string) and
+// resolveOwnedRoots' equality check catches it. Returns null on any error
+// (pid gone / ps unavailable / anything else) — resolveOwnedRoots then
+// falls back to the vanished() fail-closed path.
+function probeCurrentBirthSignature(pid: number): string | null {
+  try {
+    const out = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf-8" }).trim();
+    return out || null;
+  } catch { return null; }
+}
+
 function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
   const wanted = new Set(aliases.filter(Boolean));
   if (wanted.size === 0) return [];
@@ -9460,15 +9524,24 @@ Stop a running agent node.
       // while holding stop-intent, then freeze exact identities. Reaping never
       // rescans by alias, so a later same-name generation cannot be adopted.
       if (roots.length === 0) {
-        const legacy = findNodeProcessesByAlias(displayName);
+        // #1438 — findNodeStopCandidates captures (pid, discoveredBirth) in
+        // ONE `ps` snapshot; the (pid, birth) pair has no TOCTOU window
+        // between the two fields. resolveOwnedRoots then verifies via
+        // currentBirthSignature that the pid we're about to freeze still
+        // belongs to the SAME incarnation — if it was recycled to another
+        // process B between discovery and here, the mismatch check rejects
+        // pid so reap does not kill B.
+        const legacy = findNodeStopCandidates(displayName);
         if (legacy === null) throw new Error("NODE_PROCESS_TABLE_UNAVAILABLE");
-        // #1422 — `ps` 拿到 pid 与读 `/proc/<pid>/stat` 之间有一个窗口:进程可能
-        // 已经退出。旧代码把「读不到 birth」一律当致命错误,于是 `anet node stop`
-        // 以 exit(1) 结束(test225 报 `node stop failed for <X>`)。
-        // 🔴 那不是失败 —— **stop 的目的就是让进程没了**,「它在我读它之前先退了」
-        // 正是想要的结果。resolveOwnedRoots 只放过**确证已消失**的(processVanished
-        // 仅在 ESRCH 时为真),进程仍在却读不到 birth 依旧抛。
-        roots = resolveOwnedRoots(legacy, { birth: processBirth, vanished: (pid) => processVanished(pid) });
+        // #1422 (window with /proc read collapsing to no-op) is orthogonal:
+        // if pid vanished cleanly between discovery and here, that's the
+        // stop-outcome we wanted. probes.vanished (ESRCH-based) still
+        // handles that path.
+        roots = resolveOwnedRoots(legacy, {
+          birth: processBirth,
+          vanished: (pid) => processVanished(pid),
+          currentBirthSignature: probeCurrentBirthSignature,
+        });
       }
       stopProcesses = snapshotOwnedProcessTree(roots);
       writeLifecycleOwner(resolved.id, {
