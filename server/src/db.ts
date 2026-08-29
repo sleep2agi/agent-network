@@ -432,6 +432,36 @@ db.exec(`
 db.exec(`CREATE INDEX IF NOT EXISTS idx_stop_req_daemon ON node_stop_requests(daemon_node_id, status)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_stop_req_child ON node_stop_requests(child_node_id)`);
 
+// Daemon-mediated start request. Kept separate from node_stop_requests:
+// the deployed stop table has a CHECK(action IN ('stop','delete')) and
+// rebuilding that table in-place would be a risky migration for an additive
+// lifecycle operation.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS node_start_requests (
+    request_id TEXT PRIMARY KEY,
+    network_id TEXT NOT NULL,
+    daemon_node_id TEXT NOT NULL,
+    child_node_id TEXT NOT NULL,
+    child_alias TEXT NOT NULL,
+    created_by_token TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT,
+    child_pid INTEGER,
+    created_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    acked_at INTEGER
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_start_req_daemon ON node_start_requests(daemon_node_id, status)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_start_req_child ON node_start_requests(child_node_id)`);
+try {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_start_req_child_inflight
+             ON node_start_requests(child_node_id)
+          WHERE status IN ('pending', 'delivered')`);
+} catch (e: any) {
+  if (!/unique constraint/i.test(e?.message || "")) throw e;
+}
+
 // `node_config_updates` — pending + history. One row per dashboard write.
 // At most one row per node may be in a non-terminal state at a time
 // (single-flight enforced at the tool layer; this table just stores).

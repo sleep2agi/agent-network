@@ -40,7 +40,7 @@ feasibility probe for the proposed wrapper and a source inventory gate.
 | Agent lifecycle | `report_status`, `report_completion`, `get_inbox`, `ack_inbox`, `get_all_status`, `get_session_status` | `agent-network`, `agent-node`, test/legacy packages | High; old long-running binaries are present in production |
 | Messaging/task | `send_task`, `send_message`, `send_reply`, `send_ack`, `retry_task`, `get_task`, `list_tasks`, `cancel_task`, `reassign_task`, `broadcast`, `get_completions` | LLM MCP calls, node bridges, SDK client, Dashboard flows | Highest; LLM-generated arguments and third-party clients are open-ended |
 | Node config | `update_node_config`, `get_config_update`, `ack_config_update`, `restart_node`, `list_host_supervisors` | Dashboard/Hub and agent-node | Medium; version skew is known |
-| Daemon create/stop | `create_node`, `get_create_request`, `ack_create_request`, `stop_node`, `delete_node`, `get_stop_request`, `ack_stop_request`, `list_my_children` | agent-node daemon and Hub | High; cross-version orchestration must keep working |
+| Daemon create/start/stop | `create_node`, `get_create_request`, `ack_create_request`, `start_node`, `get_start_request`, `ack_start_request`, `stop_node`, `delete_node`, `get_stop_request`, `ack_stop_request`, `list_my_children` | agent-node daemon and Hub | High; cross-version orchestration must keep working |
 | Secrets/providers | `upsert_network_secret`, `list_network_secrets`, `upsert_provider`, `list_providers`, `probe_provider_model`, `get_probe_results`, `get_probe_request` | Dashboard/Hub and probe daemon | High; never log values, and retain nested strict schemas |
 
 Static source calls cover only first-party code. They cannot prove that an LLM,

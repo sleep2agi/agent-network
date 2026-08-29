@@ -17,6 +17,7 @@ const expectedTools = [
   "update_node_config", "get_config_update", "ack_config_update", "restart_node",
   "list_host_supervisors", "create_node", "list_my_pending_create_requests", "get_create_request", "ack_create_request",
   "stop_node", "delete_node", "get_stop_request", "ack_stop_request",
+  "start_node", "get_start_request", "ack_start_request",
   "list_my_children", "upsert_network_secret", "list_network_secrets", "upsert_provider",
   "update_provider", "list_providers", "probe_provider_model", "get_probe_results",
   "get_probe_request", "ack_probe_request",

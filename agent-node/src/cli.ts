@@ -6223,6 +6223,20 @@ async function connectSSE() {
                 ).catch((e: any) => warn(`stop-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`stop-daemon import failed: ${e?.message || e}`));
             }
+            if (ev.type === "start_node" && fileConfig.role === "host_supervisor") {
+              log(`← SSE start_node ${ev.request_id || ""}`);
+              import("./runtime/start-daemon.js").then(({ handleStartDoorbell }) => {
+                handleStartDoorbell(
+                  { request_id: ev.request_id },
+                  {
+                    callCommHub,
+                    workDir: process.cwd(),
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                  },
+                ).catch((e: any) => warn(`start-daemon failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`start-daemon import failed: ${e?.message || e}`));
+            }
             // RFC-028 P1 — provider probe daemon doorbell (host_supervisor only).
             if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {
               log(`← SSE probe_provider ${ev.probe_id || ""}`);

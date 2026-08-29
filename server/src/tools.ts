@@ -3927,6 +3927,138 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
 
+  // start_node is deliberately daemon-mediated. A stopped child has no SSE
+  // consumer of its own, so restart_node's self-doorbell cannot revive it.
+  server.tool(
+    "start_node",
+    "Start a stopped child through its host supervisor daemon. daemon_node_id is auto-resolved from the original create request.",
+    {
+      child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ child_node_id, daemon_node_id, network_id: clientNetId }) => {
+      const resolvedDaemonId = daemon_node_id ?? resolveDaemonForChild(child_node_id);
+      if (!resolvedDaemonId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false, error: "daemon_not_resolvable",
+          message: "no create request maps this child to a daemon",
+        }) }] };
+      }
+      const scope = resolveReadScope(clientNetId);
+      if (scope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "forbidden_cross_tenant" }) }] };
+      const q: any[] = [child_node_id];
+      const child = db.get<{ node_id: string; alias: string; network_id: string; lifecycle_state: string | null }>(
+        addReadScope(`SELECT node_id, alias, network_id, lifecycle_state FROM nodes WHERE node_id = ?1`, q, scope), ...q,
+      );
+      if (!child) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "forbidden_cross_tenant" }) }] };
+      if (!canWrite(child.network_id)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if ((child.lifecycle_state ?? "active") !== "stopped") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_stopped", current_state: child.lifecycle_state ?? "active" }) }] };
+      }
+      // The caller may provide daemon_node_id, but it cannot override the
+      // authoritative child->daemon relationship recorded at creation.
+      const authoritativeDaemonId = resolveDaemonForChild(child_node_id);
+      if (!authoritativeDaemonId || authoritativeDaemonId !== resolvedDaemonId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_child_mismatch" }) }] };
+      }
+      const daemon = db.get<{ node_id: string; alias: string; network_id: string }>(
+        `SELECT node_id, alias, network_id FROM nodes WHERE node_id = ?1`, resolvedDaemonId,
+      );
+      if (!daemon) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_not_found" }) }] };
+      if (daemon.network_id !== child.network_id) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_cross_tenant" }) }] };
+      }
+      const requestId = generateId("str");
+      const now = Date.now();
+      try {
+        db.transaction(() => {
+          db.run(
+            `INSERT INTO node_start_requests
+               (request_id, network_id, daemon_node_id, child_node_id, child_alias,
+                created_by_token, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)`,
+            [requestId, child.network_id, daemon.node_id, child.node_id, child.alias, callerTokenId || "unknown", now],
+          );
+          db.run(`UPDATE nodes SET lifecycle_state = 'starting' WHERE node_id = ?1 AND lifecycle_state = 'stopped'`, [child.node_id]);
+          auditCreateNodeStrict({
+            action: "start_node_dispatched", user_id: enforceUserId,
+            network_id: child.network_id, target_id: requestId,
+            detail: { child_node_id: child.node_id, child_alias: child.alias, daemon_node_id: daemon.node_id,
+              lifecycle_state_before: "stopped", lifecycle_state_after: "starting", ts_request: now },
+          });
+        });
+      } catch (e: any) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "dispatch_tx_failed", message: e?.message || String(e) }) }] };
+      }
+      pushEvent(daemon.alias, { type: "start_node", request_id: requestId }, child.network_id);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, lifecycle_state: "starting" }) }] };
+    },
+  );
+
+  server.tool(
+    "get_start_request",
+    "Host supervisor pulls an authenticated pending start request.",
+    { request_id: z.string().min(1).max(200) },
+    async ({ request_id }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      const row = db.get<{ daemon_node_id: string; network_id: string; child_node_id: string; child_alias: string; status: string }>(
+        `SELECT daemon_node_id, network_id, child_node_id, child_alias, status FROM node_start_requests WHERE request_id = ?1`, request_id,
+      );
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      if (row.network_id !== callerDaemon.networkId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      if (!['pending', 'delivered'].includes(row.status)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_startable", status: row.status }) }] };
+      db.run(`UPDATE node_start_requests SET status='delivered', delivered_at=?1 WHERE request_id=?2 AND status='pending'`, [Date.now(), request_id]);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id, child_node_id: row.child_node_id, child_alias: row.child_alias }) }] };
+    },
+  );
+
+  server.tool(
+    "ack_start_request",
+    "Host supervisor reports start completion or failure.",
+    {
+      request_id: z.string().min(1).max(200),
+      status: z.enum(["started", "start_failed"]),
+      child_pid: z.number().int().positive().optional(),
+      error: z.string().max(1000).optional(),
+    },
+    async ({ request_id, status, child_pid, error: ackError }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      const row = db.get<{ daemon_node_id: string; network_id: string; child_node_id: string; child_alias: string; status: string }>(
+        `SELECT daemon_node_id, network_id, child_node_id, child_alias, status FROM node_start_requests WHERE request_id=?1`, request_id,
+      );
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      if (row.network_id !== callerDaemon.networkId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      if (row.status === "started" || row.status === "start_failed") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: row.status, idempotent: true }) }] };
+      }
+      if (!['pending', 'delivered'].includes(row.status)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_ackable", status: row.status }) }] };
+      }
+      if (status === "started" && !child_pid) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "child_pid_required" }) }] };
+      }
+      const now = Date.now();
+      try {
+        db.transaction(() => {
+          db.run(`UPDATE node_start_requests SET status=?1,error=?2,child_pid=?3,acked_at=?4 WHERE request_id=?5`, [status, ackError || null, child_pid || null, now, request_id]);
+          db.run(`UPDATE nodes SET lifecycle_state=?1 WHERE node_id=?2`, [status === "started" ? "active" : "stopped", row.child_node_id]);
+          if (status === "started") auditCreateNodeStrict({
+            action: "start_node_completed", network_id: row.network_id, target_id: request_id,
+            detail: { child_node_id: row.child_node_id, child_alias: row.child_alias, child_pid, lifecycle_state_after: "active", ts_daemon_ack: now },
+          });
+        });
+      } catch (e: any) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "finalize_tx_failed", message: e?.message || String(e) }) }] };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+    },
+  );
+
   // RFC-027 PR1.1 — list_my_children: daemon-only query. Returns the
   // {child_node_id, alias, lifecycle_state} tuples for nodes whose
   // active create-request has this daemon as daemon_node_id. Used at
