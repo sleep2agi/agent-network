@@ -3706,6 +3706,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       return { ok: false, error: "daemon_cross_tenant", message: "daemon and child are in different networks" };
     }
 
+    // #1448 finding-4 — daemon 必须是该 child 的**权威创建者**,镜像 start_node 的
+    // daemon_child_mismatch。此前 stop/delete 接受调用方传入的 daemon_node_id,只校验
+    // 它存在 + 同网,不验它真的创建了这个 child。同网调用方传错 daemon_node_id → 门铃
+    // 路由到错 daemon。🔴 f3(#1453) 合入后更糟:错 daemon 无该 child 的 map entry → 走
+    // 收敛分支 sweep(错机器 pgrep 空) + ack stopped → hub 假收敛 stopped、child 仍在
+    // 正确机器上跑(旧 noop 至少留下可见的卡死态)。网络 scope 只挡跨租户,网内是 footgun。
+    //
+    // 用「确定性不匹配」判据:authority 已知(child 有 create 记录)且不等 → 拒。不对
+    // authority==null(create 记录被裁剪的旧 child)加拒,避免给它们的 stop/delete 引入
+    // 新失败面——handler 的 daemon_node_id??resolveDaemonForChild 已兜住无法解析的情形。
+    const authoritativeDaemonId = resolveDaemonForChild(args.child_node_id);
+    if (authoritativeDaemonId && authoritativeDaemonId !== args.daemon_node_id) {
+      return { ok: false, error: "daemon_child_mismatch", message: "daemon_node_id is not this child's authoritative creator daemon" };
+    }
+
     // State machine gate.
     const state = node.lifecycle_state ?? "active";
     if (args.action === "stop" && state !== "active") {
@@ -3775,6 +3790,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const now = Date.now();
     const newState = args.action === "stop" ? "stopping" : "deleting";
 
+    // #1448 finding-5 — 记下该 child **当前活着的** ntok 的 token_id,让 ack 精确按
+    // token_id 撤销,而非按 name='node:<alias>' 广撤。后者会在「同 alias 节点在这次
+    // delete 未收敛的窗口内被重建(拿到同名新 token)」时,把新 token 一并误撤。这里
+    // 在派发时刻定住身份;若此刻没有活 token(异常),存 null,ack 退回按 name 撤(旧语义)。
+    const childTokenRow = db.get<{ token_id: string }>(
+      `SELECT token_id FROM api_tokens WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
+      node.network_id, `node:${node.alias}`,
+    );
+    const childTokenId = childTokenRow?.token_id ?? null;
+
     // §4.5 D8 — lifecycle UPDATE + audit INSERTs + request INSERT atomic.
     // PR1.1: use db.transaction() (SQLiteAdapter wraps better-sqlite3's
     // native transaction; PgAdapter ships a real BEGIN/COMMIT/ROLLBACK
@@ -3785,12 +3810,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       db.transaction(() => {
       db.run(
         `INSERT INTO node_stop_requests
-           (request_id, network_id, daemon_node_id, child_node_id, child_alias, action,
+           (request_id, network_id, daemon_node_id, child_node_id, child_alias, child_token_id, action,
             delete_config, grace_seconds, force, in_flight_at_dispatch, created_by_token,
             status, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', ?12)`,
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'pending', ?13)`,
         [
-          requestId, node.network_id, args.daemon_node_id, node.node_id, node.alias, args.action,
+          requestId, node.network_id, args.daemon_node_id, node.node_id, node.alias, childTokenId, args.action,
           args.delete_config ? 1 : 0, args.grace_seconds, args.force ? 1 : 0, inFlight,
           callerTokenId || "unknown", now,
         ],
@@ -3971,9 +3996,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       const row = db.get<{
         daemon_node_id: string; status: string; network_id: string;
-        child_node_id: string; child_alias: string; action: string;
+        child_node_id: string; child_alias: string; child_token_id: string | null; action: string;
         in_flight_at_dispatch: number; force: number;
-      }>(`SELECT daemon_node_id, status, network_id, child_node_id, child_alias, action,
+      }>(`SELECT daemon_node_id, status, network_id, child_node_id, child_alias, child_token_id, action,
                  in_flight_at_dispatch, force
             FROM node_stop_requests WHERE request_id = ?1`, request_id);
       if (!row) {
@@ -4014,14 +4039,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               },
             });
           } else if (status === "stopped" && row.action === "delete") {
-            // Revoke the child's ntok (name='node:<alias>') in the daemon's
-            // network, then DELETE the nodes row. Token revoke pattern mirrors
-            // ack_create_request's terminal path.
-            db.run(
-              `UPDATE api_tokens SET revoked_at = datetime('now')
-                 WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
-              [row.network_id, `node:${row.child_alias}`],
-            );
+            // Revoke the child's ntok, then DELETE the nodes row.
+            // #1448 finding-5 — 精确按派发时定住的 child_token_id 撤(镜像
+            // ack_create_request 的 token_id 精撤)。旧行(升级前派发,child_token_id
+            // 为 NULL)fallback 回按 name='node:<alias>' 撤——旧语义,不引入回归。
+            // 按 token_id 撤避免了「同 alias 在本次 delete 窗口内被重建、拿到同名新
+            // token」时把新 token 一并误撤。
+            if (row.child_token_id) {
+              db.run(
+                `UPDATE api_tokens SET revoked_at = datetime('now')
+                   WHERE token_id = ?1 AND revoked_at IS NULL`,
+                [row.child_token_id],
+              );
+            } else {
+              db.run(
+                `UPDATE api_tokens SET revoked_at = datetime('now')
+                   WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
+                [row.network_id, `node:${row.child_alias}`],
+              );
+            }
             db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
             auditCreateNodeStrict({
               action: "delete_node_completed",

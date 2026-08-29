@@ -28,6 +28,24 @@ export interface StartDoorbellDeps {
   anetBin?: () => string;
   spawnChild?: typeof spawn;
   signalProcess?: (pid: number, signal: 0) => void;
+  // #1448 finding-6 — replay 幂等路径复验 recorded.pid 的 /proc/<pid>/cmdline,
+  // 挡 PID 复用假阳。可注入以便测试(默认读真 /proc)。
+  readProcCmdline?: (pid: number) => string | null;
+}
+
+/** #1448 finding-6 — /proc/<pid>/cmdline 是否 token 精确匹配 `--alias <alias>`
+ *  且属于 agent-node/cli。与 stop-daemon 的 rebuild 校验同范式(#1455)。cmdline 是
+ *  NUL 分隔的 argv。 */
+function cmdlineMatchesAlias(cmdline: string | null, alias: string): boolean {
+  if (!cmdline) return false;
+  const argv = cmdline.split("\0").filter(Boolean);
+  const aliasIdx = argv.findIndex((tok, i) => tok === "--alias" && argv[i + 1] === alias);
+  if (aliasIdx < 0) return false;
+  return argv.some(t => t === "agent-node" || t.endsWith("/agent-node") || t.endsWith("/cli.js") || t === "node" || t.endsWith("/node"));
+}
+
+function defaultReadProcCmdline(pid: number): string | null {
+  try { return readFileSync(`/proc/${pid}/cmdline`, "utf-8"); } catch { return null; }
 }
 
 export function verifyStoppedChildConfig(
@@ -97,11 +115,23 @@ export async function handleStartDoorbell(
     }
     try {
       (deps.signalProcess ?? ((p, s) => process.kill(p, s)))(recorded.pid, 0);
-      await deps.callCommHub("ack_start_request", {
-        request_id: event.request_id, status: "started", child_pid: recorded.pid,
-      });
-      deps.log(`[start-daemon] replay acknowledged existing alias=${recorded.alias} pid=${recorded.pid}`);
-      return;
+      // #1448 finding-6 — kill-0 只证明「有进程占了这个 pid」,不证明它还是当初那个
+      // agent-node 子进程。原进程死后 pid 被无关进程复用 → kill-0 照样通过 → 旧代码
+      // 直接 ack started、hub 把 node 标 active 而它实际没跑。复验 /proc/<pid>/cmdline
+      // token 精确匹配 --alias(与 stop-daemon rebuild #1455 同范式)才认;不匹配则当作
+      // 陈旧条目 fall through 走真启动(下方 recordSpawnedChild 幂等覆盖),绝不用错 pid
+      // 冒充 started。
+      const cmdline = (deps.readProcCmdline ?? defaultReadProcCmdline)(recorded.pid);
+      if (!cmdlineMatchesAlias(cmdline, recorded.alias)) {
+        deps.warn(`[start-daemon] recorded pid=${recorded.pid} alias=${recorded.alias} failed /proc cmdline verify (PID reused?) — re-starting instead of false 'started'`);
+        // fall through to a fresh start below
+      } else {
+        await deps.callCommHub("ack_start_request", {
+          request_id: event.request_id, status: "started", child_pid: recorded.pid,
+        });
+        deps.log(`[start-daemon] replay acknowledged existing alias=${recorded.alias} pid=${recorded.pid}`);
+        return;
+      }
     } catch (e: any) {
       if (e?.code !== "ESRCH") {
         deps.warn(`[start-daemon] existing child identity unverifiable: ${e?.message || e}`);

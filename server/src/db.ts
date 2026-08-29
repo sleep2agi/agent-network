@@ -414,6 +414,7 @@ db.exec(`
     daemon_node_id TEXT NOT NULL,
     child_node_id TEXT NOT NULL,
     child_alias TEXT NOT NULL,
+    child_token_id TEXT,
     action TEXT NOT NULL CHECK (action IN ('stop', 'delete')),
     delete_config INTEGER NOT NULL DEFAULT 1,
     grace_seconds INTEGER NOT NULL DEFAULT 10,
@@ -431,6 +432,10 @@ db.exec(`
 `);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_stop_req_daemon ON node_stop_requests(daemon_node_id, status)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_stop_req_child ON node_stop_requests(child_node_id)`);
+// #1448 finding-5 — 存 delete 目标 child 的 token_id,让 ack 精确按 token_id 撤 ntok
+// (而非按 name='node:<alias>' 广撤 → 同 alias 在 delete 窗口内重建会误杀新 token)。
+// 幂等迁移:已有库补列,旧行 child_token_id 为 NULL、ack 时 fallback 回按 name 撤。
+try { db.exec(`ALTER TABLE node_stop_requests ADD COLUMN child_token_id TEXT`); } catch { /* 已存在 */ }
 
 // Daemon-mediated start request. Kept separate from node_stop_requests:
 // the deployed stop table has a CHECK(action IN ('stop','delete')) and
