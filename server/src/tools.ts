@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { getSSEStats, hasSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
+import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { canRestWriteNetwork, getUserNetworkIds, singleNetworkId } from "./network-scope.js";
 import {
@@ -1581,7 +1582,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       );
 
       // 同 send_task：可达性用订阅者注册表判，不用心跳时间戳猜。
-      pushEvent(targetAlias, { type: "new_message", from: from_session, message_id: id, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
+      pushEvent(targetAlias, { type: "new_message", inbox_count: pendingInboxCount(targetAlias, effectiveNetId), from: from_session, message_id: id, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
 
       const offlineReply = deliveryTargetReply(target, { message_id: id });
       if (offlineReply) {
@@ -1893,7 +1894,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       const session = scopedSessionStatus(replyTargetAlias, effectiveNetId);
-      pushEvent(replyTargetAlias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
+      pushEvent(replyTargetAlias, { type: "new_reply", inbox_count: pendingInboxCount(replyTargetAlias, effectiveNetId), from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
       // #461 network observer summary — ids + routing only, no reply text.
       pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: replyTargetAlias, status: replyStatus });
 
@@ -2383,7 +2384,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       for (const t of targets) {
-        pushEvent(t.alias, { type: "broadcast", inbox_count: 1 }, effectiveNetId ?? t.network_id ?? null);
+        const netId = effectiveNetId ?? t.network_id ?? null;
+        pushEvent(t.alias, { type: "broadcast", inbox_count: pendingInboxCount(t.alias, netId) }, netId);
       }
 
       return {

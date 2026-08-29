@@ -9,6 +9,7 @@ import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
+import { pendingInboxCount } from "./inbox-count.js";
 import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -2565,7 +2566,7 @@ return Bun.serve({
         ids.push(id);
       }
       for (const t of targets) {
-        pushEvent(t.alias, { type: "broadcast", inbox_count: 1 }, t.network_id);
+        pushEvent(t.alias, { type: "broadcast", inbox_count: pendingInboxCount(t.alias, t.network_id) }, t.network_id);
       }
       return withCors(req, Response.json({ ok: true, recipients: targets.length, message_ids: ids }));
     }
