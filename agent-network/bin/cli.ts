@@ -4107,6 +4107,16 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   }
   const runtime = runtimeForExecution(opts.runtime, "create node");
   const defaultModel = defaultCodexModelForRuntime(runtime);
+  // #1469 finding-3 — validate opts.model in place before the profile
+  // literal below builds { model: opts.model || defaultModel }. Mutating
+  // opts.model here keeps the downstream `opts.model || defaultModel`
+  // idiom byte-identical, which test697's L5 mutation guard pins by
+  // literal string (`explicit-model-overwritten`). Validation is not-
+  // empty-after-trim + no-embedded-whitespace — no known-model allowlist
+  // (models are vendor-defined and evolve independently; dispatch
+  // explicitly warned against over-restricting). See src/tool-allowlist.ts
+  // for the rationale + tests.
+  if (opts.model) opts.model = validateModel(opts.model);
   const nodeId = generateNodeId();
   const grokHeadless = opts["grok-headless"] === "true";
   if (grokHeadless && runtime !== "grok-build-cli") {
@@ -4123,17 +4133,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     ...grokBuildCliCreationFields(runtime, nodeId, grokHeadless),
     ...(gc.network_id ? { network_id: gc.network_id } : {}),
     ...(opts.hub ? { hub } : {}),
-    // #1469 finding-3 — validate opts.model / opts.tools loudly. Before,
-    // `--tools Bsh,Read` silently persisted the typo and dropped Bash from
-    // the agent's allowlist; `--model "  "` silently persisted whitespace.
-    // Mirrors what #478 did for --runtime via normalizeRuntimeStrict: at
-    // the profile boundary, an unrecognized value is a typo, not an
-    // unknown-future-thing. defaultModel comes from
-    // defaultCodexModelForRuntime and is validated at source, so only
-    // opts.model needs the check here.
-    ...((opts.model ? validateModel(opts.model) : undefined) || defaultModel
-      ? { model: (opts.model ? validateModel(opts.model) : undefined) || defaultModel }
-      : {}),
+    ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
     ...(opts.tools ? { tools: parseAndValidateTools(opts.tools, runtime) } : {}),
     channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
     env: envMap,
