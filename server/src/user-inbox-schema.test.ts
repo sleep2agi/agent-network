@@ -14,32 +14,40 @@ describe("#1459 user_inbox schema (P1)", () => {
     }
   });
 
-  test("message_id is PRIMARY KEY → INSERT OR IGNORE is idempotent on retry", () => {
+  // 注:这条钉的是「主键在我们以为的那一列」(SQLite 行为),**不是**「写入路径幂等」——
+  // 后者要 P2 驱动真实 send_desktop_message 两次来证(SDK马 review)。这里只保证主键选对。
+  test("message_id is PRIMARY KEY → INSERT OR IGNORE dedups on the same id", () => {
     const mid = `dm_test_${Date.now()}`;
-    const ins = () => db.run(
-      `INSERT OR IGNORE INTO user_inbox (message_id, network_id, user_id, from_session, content)
-       VALUES (?1, ?2, ?3, ?4, ?5)`,
-      [mid, "net_test_1459", "u_test_1459", "sender-a", "hello"],
-    );
-    ins();
-    ins();   // 重试:同 message_id 第二次插入应被 IGNORE
-    const n = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE message_id = ?1", mid)?.n ?? 0;
-    expect(n).toBe(1);
-    db.run("DELETE FROM user_inbox WHERE message_id = ?1", mid);
+    try {
+      const ins = () => db.run(
+        `INSERT OR IGNORE INTO user_inbox (message_id, network_id, user_id, from_session, content)
+         VALUES (?1, ?2, ?3, ?4, ?5)`,
+        [mid, "net_test_1459", "u_test_1459", "sender-a", "hello"],
+      );
+      ins();
+      ins();   // 同 message_id 第二次插入应被 IGNORE
+      const n = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE message_id = ?1", mid)?.n ?? 0;
+      expect(n).toBe(1);
+    } finally {
+      db.run("DELETE FROM user_inbox WHERE message_id = ?1", mid);
+    }
   });
 
   test("defaults: acked=0, kind/severity='info'", () => {
     const mid = `dm_def_${Date.now()}`;
-    db.run(
-      `INSERT INTO user_inbox (message_id, user_id, content) VALUES (?1, ?2, ?3)`,
-      [mid, "u_def_1459", "body"],
-    );
-    const row = db.get<{ acked: number; kind: string; severity: string }>(
-      "SELECT acked, kind, severity FROM user_inbox WHERE message_id = ?1", mid,
-    );
-    expect(row?.acked).toBe(0);
-    expect(row?.kind).toBe("info");
-    expect(row?.severity).toBe("info");
-    db.run("DELETE FROM user_inbox WHERE message_id = ?1", mid);
+    try {
+      db.run(
+        `INSERT INTO user_inbox (message_id, user_id, content) VALUES (?1, ?2, ?3)`,
+        [mid, "u_def_1459", "body"],
+      );
+      const row = db.get<{ acked: number; kind: string; severity: string }>(
+        "SELECT acked, kind, severity FROM user_inbox WHERE message_id = ?1", mid,
+      );
+      expect(row?.acked).toBe(0);
+      expect(row?.kind).toBe("info");
+      expect(row?.severity).toBe("info");
+    } finally {
+      db.run("DELETE FROM user_inbox WHERE message_id = ?1", mid);
+    }
   });
 });

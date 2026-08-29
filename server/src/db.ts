@@ -59,6 +59,8 @@ db.exec(`
   -- 用户消息)。单独一张 user_id 寻址表,镜像 inbox 的 acked/count 语义。
   -- message_id 即主键(dm_<uuid>,与 inbox「消息 id 即主键」同形)→ 写入用
   -- INSERT OR IGNORE,send_desktop_message 重试天然幂等,不会插出重复消息行。
+  -- 索引留到 P3:读取查询形状定了再按真实 WHERE 加(SDK马 review:没查询就加索引是猜;
+  -- 部分索引 acked=0 若「近期」读含已 ack 行则用不上)。P1 只落表。
   CREATE TABLE IF NOT EXISTS user_inbox (
     message_id    TEXT PRIMARY KEY,
     network_id    TEXT,
@@ -73,11 +75,6 @@ db.exec(`
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     acked_at      TEXT
   );
-
-  CREATE INDEX IF NOT EXISTS idx_user_inbox_pending
-    ON user_inbox(user_id, acked) WHERE acked = 0;
-  CREATE INDEX IF NOT EXISTS idx_user_inbox_net
-    ON user_inbox(network_id);
 
   CREATE TABLE IF NOT EXISTS completions (
     id               TEXT PRIMARY KEY,
