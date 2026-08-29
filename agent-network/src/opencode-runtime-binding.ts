@@ -18,6 +18,7 @@ import {
 } from "fs";
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
+import { fsyncDirectoryIfSupported } from "./posix-modes";
 
 export const OPENCODE_RUNTIME_BINDING_SCHEMA_VERSION = 1 as const;
 export const OPENCODE_RUNTIME_BINDING_RUNTIME = "opencode-cli" as const;
@@ -406,7 +407,7 @@ function atomicWriteBinding(path: string, body: string): void {
       parent,
       constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
     );
-    try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    try { fsyncDirectoryIfSupported(parentFd); } finally { closeSync(parentFd); }
   } catch (error) {
     if (fd !== undefined) {
       try { closeSync(fd); } catch {}
@@ -567,7 +568,7 @@ export function removeOpencodeRuntimeBinding(
       root,
       constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
     );
-    try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    try { fsyncDirectoryIfSupported(parentFd); } finally { closeSync(parentFd); }
     return true;
   } finally {
     if (fd !== undefined) closeSync(fd);

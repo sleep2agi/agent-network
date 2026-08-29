@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { extname, join } from "node:path";
+import { chmodIfPosix } from "./posix-modes";
 
 const FILE_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
@@ -171,9 +172,9 @@ async function fetchOne(
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
   try {
     writeFileSync(tmp, bytes, { flag: "wx", mode: 0o600 });
-    chmodSync(tmp, 0o600);
+    chmodIfPosix(tmp, 0o600);
     renameSync(tmp, path);
-    chmodSync(path, 0o600);
+    chmodIfPosix(path, 0o600);
   } catch (error) {
     try { rmSync(tmp, { force: true }); } catch {}
     return {

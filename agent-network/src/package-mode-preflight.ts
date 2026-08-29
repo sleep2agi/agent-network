@@ -38,8 +38,26 @@ export function judgeUmask(umask: number): UmaskVerdict {
   };
 }
 
-/** One line for `anet doctor`, or null when there is nothing to say. */
-export function describeUmaskRisk(verdict: UmaskVerdict): string | null {
+/**
+ * One line for `anet doctor`, or null when there is nothing to say.
+ *
+ * 🔴 Windows gets a different sentence, not the same one. There, umask is always
+ *    0000 and this fires on every machine, while both remedies it names —
+ *    `umask 0022` and `chmod -R` — do not exist. The conclusion is still true
+ *    (opencode-cli will refuse), but for another reason entirely: its check is
+ *    `if (runtimeUid === undefined) return false`, and Windows has no getuid.
+ *    An always-on warning whose fix cannot be typed teaches people to ignore
+ *    the warnings that can be.
+ */
+export function describeUmaskRisk(
+  verdict: UmaskVerdict,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  if (platform === "win32") {
+    return `POSIX file modes do not exist on Windows, so this check does not apply here. ` +
+      `opencode-cli is unavailable on this platform for a different reason — its payload ` +
+      `check requires a POSIX uid — and no file-permission change on this host makes it available.`;
+  }
   if (!verdict.willProduceUnsafeModes) return null;
   const who = verdict.leaks.join(" and ");
   return `umask is ${verdict.umaskOctal}, so npm extracts packages ${who}-writable. ` +

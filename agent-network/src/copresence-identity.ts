@@ -114,6 +114,7 @@ import {
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
+import { chmodIfPosix } from "./posix-modes";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -283,7 +284,7 @@ export function writeMarker(
   const body = JSON.stringify(marker, null, 2) + "\n";
   // wx flag = exclusive create (belt-and-suspenders after pre-unlink).
   writeFileSync(tmpPath, body, { mode: 0o600, flag: "wx" });
-  chmodSync(tmpPath, 0o600); // belt-and-suspenders (umask may have masked mode)
+  chmodIfPosix(tmpPath, 0o600); // belt-and-suspenders (umask may have masked mode)
   const fd = openSync(tmpPath, "r");
   try { fsyncSync(fd); } finally { closeSync(fd); }
   renameSync(tmpPath, finalPath);

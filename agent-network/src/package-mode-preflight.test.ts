@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "./package-mode-preflight";
 
 // A umask BIT SET means "withhold". Getting this backwards is the whole reason
@@ -60,4 +60,24 @@ test("someone else's payload is rejected even at a safe mode", () => {
 
 test("nothing extracted yet reports nothing — absence is not a pass", () => {
   expect(rejectedPayloads([], ME)).toHaveLength(0);
+});
+
+describe("windows says something a windows operator can act on", () => {
+  test("🔴 never prescribes umask or chmod there — neither exists", () => {
+    // umask is always 0000 on Windows, so the POSIX branch fires on every
+    // machine and tells the operator to run two commands that do not exist.
+    const msg = describeUmaskRisk(judgeUmask(0o000), "win32")!;
+    expect(msg).not.toContain("umask 0022");
+    expect(msg).not.toContain("chmod");
+    expect(msg).toContain("do not exist on Windows");
+  });
+
+  test("names the real reason opencode-cli is unavailable there", () => {
+    expect(describeUmaskRisk(judgeUmask(0o000), "win32")).toContain("POSIX uid");
+  });
+
+  test("the POSIX branch is unchanged", () => {
+    expect(describeUmaskRisk(judgeUmask(0o002), "linux")).toContain("umask 0022");
+    expect(describeUmaskRisk(judgeUmask(0o022), "linux")).toBeNull();
+  });
 });

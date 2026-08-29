@@ -38,6 +38,7 @@ import {
 } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "path";
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
+import { fsyncDirectoryIfSupported } from "./posix-modes";
 
 export type OpencodePresetId = "anthropic" | "openai";
 
@@ -464,7 +465,7 @@ function atomicWritePrivateFile(path: string, body: string, label: string): void
       parent,
       constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
     );
-    try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    try { fsyncDirectoryIfSupported(parentFd); } finally { closeSync(parentFd); }
   } catch (error) {
     if (fd !== undefined) {
       try { closeSync(fd); } catch {}

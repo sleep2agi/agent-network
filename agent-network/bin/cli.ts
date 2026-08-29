@@ -118,6 +118,8 @@ import {
   isLoopbackHub,
   missingCopresenceDeps,
 } from "../src/copresence-deps";
+import { runLauncherSync, spawnLauncher } from "../src/win-launcher";
+import { chmodIfPosix } from "../src/posix-modes";
 import {
   diagnoseGrokCopresence,
   grokAttachSocketState,
@@ -230,7 +232,7 @@ function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\
  *
  * 🔴 The authority is the guard inside `hub start` itself:
  *       if (!commandExists("bunx"))
- *    Tightened from OR in #766 — the only spawn point is `spawn("bunx", …)`, so
+ *    Tightened from OR in #766 — the only spawn point is `spawnLauncher("bunx", …)`, so
  *    bun alone was never enough. Anything that PREDICTS that guard must route
  *    through here rather than restating the condition: three restatements had
  *    already drifted to the old OR and told bun-only machines they were fine.
@@ -534,7 +536,7 @@ function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
   // observable to any world-readable scan.
   try { unlinkSync(envPath); } catch (err: any) { if (err?.code !== "ENOENT") throw err; }
   writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`, { mode: 0o600, flag: "wx" });
-  chmodSync(envPath, 0o600);  // belt-and-suspenders in case older node ignores mode option
+  chmodIfPosix(envPath, 0o600);  // belt-and-suspenders in case older node ignores mode option
   return envPath;
 }
 
@@ -1234,7 +1236,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       }, join);
       for (const step of plan) {
         copyFileSync(step.src, step.dst);
-        try { chmodSync(step.dst, step.mode); } catch { /* best effort */ }
+        try { chmodIfPosix(step.dst, step.mode); } catch { /* best effort */ }
         console.log(`[anet] staged ${step.name} into the node CODEX_HOME (${step.reason}) — ${step.because}`);
       }
     } else if (!existsSync(join(opts.codexHome, "auth.json"))) {
@@ -2540,7 +2542,7 @@ function resolveGlobalDashboardBinary(): string | null {
 
 function resolveDashboardNpxVersion(tag: string): string | null {
   try {
-    const raw = execFileSync("npm", ["view", `@sleep2agi/agent-network-dashboard@${tag}`, "version", "--json"], {
+    const raw = runLauncherSync("npm", ["view", `@sleep2agi/agent-network-dashboard@${tag}`, "version", "--json"], {
       encoding: "utf-8",
       timeout: 8000,
     }).trim();
@@ -2648,7 +2650,7 @@ function detectCommandVersion(commandName: string, displayName: string, source?:
 
 function detectGlobalNpmPackage(pkgName: string, displayName: string, source = "global"): DetectedVersion {
   try {
-    const output = execFileSync("npm", ["ls", "-g", pkgName, "--depth=0", "--json"], {
+    const output = runLauncherSync("npm", ["ls", "-g", pkgName, "--depth=0", "--json"], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
     });
@@ -2692,7 +2694,7 @@ function detectInstalledPackages() {
     // 🔴 判据必须与 hub 守卫同源,而守卫现在是
     //     if (!commandExists("bunx"))            (cli.ts, hub start)
     // —— **只认 bunx**。#766 把它从 OR 收紧成这样,理由写在那里:唯一的启动方式
-    // 是 `spawn("bunx", …)`,OR 会让 bun-only 的机器通过前置检查然后在 spawn 处
+    // 是 `spawnLauncher("bunx", …)`,OR 会让 bun-only 的机器通过前置检查然后在 spawn 处
     // 失败。这里的 OR 是那次收紧留下的旧副本(#744 复核当时为真,现在为假),它让
     // 自报在 bun-only 机器上说「齐了」,而 `anet hub start` 随后 exit 1。
     // 实测:容器里有 bun 无 bunx,自报通过、hub 起不来,报「找到了 bun,但没有 bunx」。
@@ -2811,7 +2813,7 @@ function isInstalled(pkg: DetectedVersion): boolean {
 }
 
 function installGlobalPackage(pkgName: string) {
-  execFileSync("npm", ["install", "-g", pkgName], { stdio: "inherit" });
+  runLauncherSync("npm", ["install", "-g", pkgName], { stdio: "inherit" });
 }
 
 function printDetectedPackagesForSetup() {
@@ -7470,7 +7472,7 @@ async function serverCommand() {
       // #235 — Preflight bun/bunx presence BEFORE spawn. commhub-server is
       // bun-only (Bun.serve + bun:sqlite, no Node equivalent), so a missing
       // bunx in PATH is a hard prerequisite failure, not a recoverable
-      // runtime hiccup. Without this check, `spawn("bunx", ...)` emits an
+      // runtime hiccup. Without this check, `spawnLauncher("bunx", ...)` emits an
       // ENOENT 'error' event with no listener → Node crashes with an
       // unhandled exception and a 10-line internal stack — user-hostile and
       // misdirects troubleshooting toward Node internals instead of the
@@ -7479,7 +7481,7 @@ async function serverCommand() {
       // The post-spawn 15s /health poll then a Bun-missing check (see
       // ~30 lines down) cannot rescue this — spawn ENOENT throws before
       // the poll loop ever runs.
-      // 🔴 判据必须等于**真实需求**。下面唯一的启动方式是 `spawn("bunx", …)`
+      // 🔴 判据必须等于**真实需求**。下面唯一的启动方式是 `spawnLauncher("bunx", …)`
       // (cli.ts 内 commhub-server 只有这一个 spawn 点),所以「有 bun 就放行」是错的:
       // bun 单独从来不够。原来的 OR 会让 bun-only 的机器通过前置检查,
       // 然后在 spawn 处失败,并报「it disappeared from PATH」—— 而它从来没在过。
@@ -7515,7 +7517,7 @@ async function serverCommand() {
       // Pin to a specific version (module-level constant) — see PINNED_SERVER_VERSION.
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
       if (devOpen) serverArgs.push("--dev-open");
-      child = spawn("bunx", serverArgs, { env, stdio: "inherit" });
+      child = spawnLauncher("bunx", serverArgs, { env, stdio: "inherit" });
       // #235 — Belt-and-braces: even with the preflight above, race
       // conditions (PATH being modified mid-process, partial install) can
       // still produce an async ENOENT 'error' event. Without this handler
@@ -7804,7 +7806,7 @@ async function serverCommand() {
       console.log(JSON.stringify({ ok: true, username: user.username, user_id: user.user_id, password, token, token_id: tokenId, revoked }));
     `;
     try {
-      const out = execFileSync("bun", ["-e", script], {
+      const out = runLauncherSync("bun", ["-e", script], {
         encoding: "utf-8",
         env: { ...process.env, COMMHUB_DB: dbPath, RESET_USERNAME: username },
       }).trim();
@@ -7950,7 +7952,7 @@ async function serverCommand() {
     console.log(`[anet] note: first launch compiles Next.js routes — expect 30-60s before http://${dashHost}:${dashPort} responds.`);
     const dashChild = globalOptIn
       ? spawn(globalBinary!, [], { env, stdio: "inherit" })
-      : spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${tag}`], { env, stdio: "inherit" });
+      : spawnLauncher("npx", ["-y", `@sleep2agi/agent-network-dashboard@${tag}`], { env, stdio: "inherit" });
     dashChild.on("error", () => {
       if (globalOptIn) console.error(`[anet] Failed to start explicit global Dashboard: ${globalBinary}`);
       else {
@@ -10858,7 +10860,7 @@ function detectChannel(version: string): ReleaseChannel {
 // Returns null on any failure; callers degrade gracefully.
 function fetchLatestVersion(pkg: string, channel: ReleaseChannel): string | null {
   try {
-    const out = execFileSync("npm", ["view", `${pkg}@${channel}`, "version"], {
+    const out = runLauncherSync("npm", ["view", `${pkg}@${channel}`, "version"], {
       encoding: "utf-8",
       timeout: 8000,
       stdio: ["ignore", "pipe", "pipe"],
@@ -10876,7 +10878,7 @@ interface NodeCheck { ok: boolean; current: string; required: string; }
 // against the preview dist-tag in upgrade plans. Returns null if not installed.
 function readGlobalPackageVersion(pkgName: string): string | null {
   try {
-    const out = execFileSync("npm", ["ls", "-g", pkgName, "--depth=0", "--json"], {
+    const out = runLauncherSync("npm", ["ls", "-g", pkgName, "--depth=0", "--json"], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000,
     });
     const data = JSON.parse(out);
