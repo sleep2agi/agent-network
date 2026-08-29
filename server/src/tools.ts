@@ -2363,25 +2363,61 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         ...(meta && Object.keys(meta).length ? { meta } : {}),
       };
 
-      db.run(
-        `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
-         VALUES (?1, ?2, 'send_desktop_message', 'user', ?3, ?4, ?5)`,
-        [
-          enforceUserId || null,
-          callerAlias || null,
-          target.user_id,
-          JSON.stringify({
-            message_id: messageId,
-            to_username: target.username,
-            from: from_session,
-            severity,
-            kind,
-            title: title || null,
-            meta_keys: meta && typeof meta === "object" ? Object.keys(meta) : [],
-          }),
-          effectiveNetId,
-        ],
-      );
+      // #1459 ① P2 —— 审计与收件持久化必须同生共死：只落其中一半，就会出现
+      // 「审计说发过、而用户永远收不到」或者反过来。放进同一个事务。
+      db.transaction(() => {
+        db.run(
+          `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+           VALUES (?1, ?2, 'send_desktop_message', 'user', ?3, ?4, ?5)`,
+          [
+            enforceUserId || null,
+            callerAlias || null,
+            target.user_id,
+            JSON.stringify({
+              message_id: messageId,
+              to_username: target.username,
+              from: from_session,
+              severity,
+              kind,
+              title: title || null,
+              meta_keys: meta && typeof meta === "object" ? Object.keys(meta) : [],
+            }),
+            effectiveNetId,
+          ],
+        );
+        // 🔴 `ON CONFLICT(message_id) DO NOTHING`，而不是 `INSERT OR IGNORE`：
+        //   两者对"重投同一个 message_id"效果相同（幂等，不产生重复消息），
+        //   但 OR IGNORE 会**连同其它约束错误一起吞掉** —— 我在实现本段时就
+        //   撞上了：`kind` 为 NULL 触发 NOT NULL，OR IGNORE 静默丢弃整行，
+        //   而工具照样返回 `persisted: true`。**一条消息凭空消失且报告成功**，
+        //   正是本 issue 要消灭的那个形状。
+        //   DO NOTHING 只针对主键冲突，别的约束照常抛出、事务回滚。
+        //
+        //   另：普通 INSERT 会让重试抛主键冲突（无害重试变 500）；
+        //   OR REPLACE 会覆盖旧行、把用户已 ack 的状态冲掉。都不取。
+        db.run(
+          `INSERT INTO user_inbox
+             (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+           ON CONFLICT(message_id) DO NOTHING`,
+          [
+            messageId,
+            effectiveNetId ?? null,
+            target.user_id,
+            from_session,
+            // 🔴 不依赖 zod 的 .default()：直接调用 handler 的调用方（测试、
+            //    未来的内部调用）拿不到 zod 默认值，会把 NULL 写进 NOT NULL 列。
+            //    列上虽有 DEFAULT，但**显式传 NULL 会覆盖列默认值**。
+            kind ?? "agent_message",
+            title || null,
+            message,
+            severity ?? "info",
+            // 存储侧走与 inbox 一致的跨主机脱敏；读取侧另有一道 token 形状
+            // 脱敏（规格 ③ redact-at-read），两层分别防不同的东西。
+            meta && typeof meta === "object" ? normalizeMetaJson(meta) : null,
+          ],
+        );
+      });
       // #1459 — pushUserEvent 在没有订阅者时静默 return，而这个工具既不写
       // inbox、也没有任何 user 级回读路径（/api/messages 只 SELECT FROM inbox）。
       // 也就是说用户 dashboard 关着的时候这条消息就永久没了。
@@ -2395,6 +2431,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       //    变成「已入库、等重连补投」。把值取成 no_live_subscriber 而不是
       //    "lost"/"dropped"，就是为了那天不用改写历史含义 —— 届时按需细分
       //    （如 lost vs queued）即可，现在不预先把语义焊死。
+      // 🔴 push 必须在事务**提交之后**：放进事务里的话，活订阅者可能先收到
+      //    事件、而行还没提交；一旦回滚，用户就看到了一条数据库里不存在的消息。
       const delivered = hasUserSubscribers(effectiveNetId, target.user_id);
       pushUserEvent(effectiveNetId, target.user_id, event);
 
@@ -2402,6 +2440,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         ok: true,
         message_id: messageId,
         delivered,
+        // #1459 ① P2 —— 有了持久化之后，「此刻没人在听」不再等于「丢了」。
+        // `delivered` 说的是实时投递、`persisted` 说的是它已经入库等重连补投。
+        // `reason` 仍报**观测到的事实**而不是它的后果，所以这个中间态没有说错话。
+        persisted: true,
         ...(delivered ? {} : { reason: "no_live_subscriber" }),
         delivered_to_user_id: target.user_id,
         network_id: effectiveNetId,
