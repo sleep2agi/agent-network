@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
-import { getSSEStats, hasSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
+import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
@@ -2382,9 +2382,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           effectiveNetId,
         ],
       );
+      // #1459 — pushUserEvent 在没有订阅者时静默 return，而这个工具既不写
+      // inbox、也没有任何 user 级回读路径（/api/messages 只 SELECT FROM inbox）。
+      // 也就是说用户 dashboard 关着的时候这条消息就永久没了。
+      //
+      // 这里先把**丢失变可见**：`ok` 仍表示「请求被接受、审计已落库」，
+      // 新增 `delivered` 表示「此刻真的有人收到」。判据取自订阅者注册表，
+      // 不是猜的。持久化 + 重连补投是另一条（按 user_id 寻址的新收件表，#1459）。
+      //
+      // 🔴 `reason` 报的是**观测到的事实**（此刻没有活订阅者），不是它的后果。
+      //    今天「没有活订阅者」确实等于「丢了」，但持久化落地之后同一个事实会
+      //    变成「已入库、等重连补投」。把值取成 no_live_subscriber 而不是
+      //    "lost"/"dropped"，就是为了那天不用改写历史含义 —— 届时按需细分
+      //    （如 lost vs queued）即可，现在不预先把语义焊死。
+      const delivered = hasUserSubscribers(effectiveNetId, target.user_id);
       pushUserEvent(effectiveNetId, target.user_id, event);
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, message_id: messageId, delivered_to_user_id: target.user_id, network_id: effectiveNetId }) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        message_id: messageId,
+        delivered,
+        ...(delivered ? {} : { reason: "no_live_subscriber" }),
+        delivered_to_user_id: target.user_id,
+        network_id: effectiveNetId,
+      }) }] };
     },
   );
 
