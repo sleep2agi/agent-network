@@ -66,10 +66,14 @@ text = path.read_text()
 # 而提交进仓的 report 写着 PASS —— 那份 report 是在别的(更旧的)检出上
 # 生成后搬进来的,不是在本分支底上跑出来的。证据要在被评对象上现跑。
 #
-# 变异语义不变:让 fallback 永远不被走到。原 needle 想在 try 里抢先 throw;
-# 这里改成把守卫行换成无条件 throw —— 同样把 fallback 变成死代码。
-needle = "      if (!isGrokModelSwitchFallbackError(error)) throw error;\n      const fallback = fallbackGrokModelSwitchRestart();"
-replacement = "      throw error;\n      const fallback = fallbackGrokModelSwitchRestart();"
+# 变异语义不变:让 fallback 永远不被走到。
+# 🔴 2026-08-29 第二次更新 needle:本分支(#1416/#1413 tail-rearm)把那行守卫从
+#    单行 `if (!isGrokModelSwitchFallbackError(error)) throw error;` 改成了带
+#    modelSwitchInFlight 清理的多行 if 块,旧 needle 不再匹配 → mutation target
+#    not found → CI 红。needle 跟随被评对象(已提交的 runtime.ts)更新;变异仍是
+#    去掉 `if (!...)` 条件、让 catch 无条件 throw,fallback 成为死代码。
+needle = "      if (!isGrokModelSwitchFallbackError(error)) {\n        this.modelSwitchInFlight = null;\n        throw error;\n      }\n      const fallback = fallbackGrokModelSwitchRestart();"
+replacement = "      this.modelSwitchInFlight = null;\n      throw error;\n      const fallback = fallbackGrokModelSwitchRestart();"
 if needle not in text:
     raise SystemExit("mutation target not found")
 path.write_text(text.replace(needle, replacement, 1))
