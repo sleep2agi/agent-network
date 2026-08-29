@@ -66,6 +66,10 @@ set -uo pipefail
 #   内容 = #1448 f1 门铃补偿(#1450) + #1451 opencode 回复解析(#1452) + #1286 对称收敛(#1453)
 #          + start_node stale-starting reaper(#1456) + send_desktop_message 诚实投递态(#1460)
 #   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准)
+# 2026-08-30: preview41 → preview42（跟随 PINNED_SERVER_VERSION；host.ip P bug）
+#   内容 = #1498 report_status 接受 host.ip=null —— 此前没有非回环 IPv4 的机器上
+#          agent-node 一启动就被 MCP -32602 打死（与 runtime 无关）
+#   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准)
 # 2026-08-30: preview40 → preview41（跟随 PINNED_SERVER_VERSION；消息批次）
 #   内容 = #1459 ① 全套：user_inbox 建表(#1481) + 写入落库(#1485)
 #          + ?scope=user 回读/ack/unread/回读脱敏(#1488) + 写读接缝回归(#1492)
@@ -73,7 +77,7 @@ set -uo pipefail
 #   🔴 注意：上面的历史行只记到 preview37，而这一行改动前的值是 preview39 —— 
 #      preview37→39 那两跳没有留下记录。我不补写别人的历史（内容我不知道），
 #      在这里标出来，免得下一个人把这份历史当完整的读。
-RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview41"
+RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview42"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
