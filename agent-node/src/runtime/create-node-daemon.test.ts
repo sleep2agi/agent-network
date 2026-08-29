@@ -626,8 +626,8 @@ describe("#1490 minimalEnv — cross-platform HOME resolution", () => {
     // Explicit 'linux' param so a future refactor that accidentally
     // defaults to 'win32' fails here loudly — same defensive pattern
     // as #1290's POSIX-mode gate test.
-    const env = minimalEnv({}, "linux", { HOME: "/home/carol" });
-    expect(env.HOME).toBe("/home/carol");
+    const env = minimalEnv({}, "linux", { HOME: "/home/user" });
+    expect(env.HOME).toBe("/home/user");
     expect(env.USERPROFILE).toBeUndefined();
     expect(env.HOMEDRIVE).toBeUndefined();
     expect(env.HOMEPATH).toBeUndefined();
@@ -657,10 +657,10 @@ describe("#1490 minimalEnv — cross-platform HOME resolution", () => {
     const env = minimalEnv(
       { USERPROFILE: "/some/path" },
       "linux",
-      { HOME: "/home/carol" },
+      { HOME: "/home/user" },
     );
     expect(env.USERPROFILE).toBe("/some/path");
-    expect(env.HOME).toBe("/home/carol");
+    expect(env.HOME).toBe("/home/user");
   });
 
   test("resolveChildHome: Windows cascade priority USERPROFILE > HOME > HOMEDRIVE+HOMEPATH", () => {
