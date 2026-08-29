@@ -2572,7 +2572,7 @@ return Bun.serve({
       for (const d of delivered) {
         pushEvent(d.alias, { type: "broadcast", inbox_count: pendingInboxCount(d.alias, d.netId) }, d.netId);
       }
-      return withCors(req, Response.json({ ok: true, recipients: targets.length, message_ids: ids }));
+      return withCors(req, Response.json({ ok: true, recipients: ids.length, message_ids: ids }));
     }
 
     // ── REST: tmux capture-pane ──

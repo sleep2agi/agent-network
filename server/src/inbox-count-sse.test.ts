@@ -300,5 +300,11 @@ describe("#1440 broadcast delivery set", () => {
     // message_ids covers only the recipients that actually got a row:
     // RECV + OTHER + SENDER, never STOPPED.
     expect(res.message_ids).toHaveLength(3);
+    // #1440 ③ — `recipients` counted candidates, not deliveries, so it
+    // disagreed with the documented invariant
+    // ("message_ids.length === recipients", docs-site/docs/api/rest.md)
+    // exactly when a node was skipped. 4 sessions, 3 delivered.
+    expect(res.recipients).toBe(res.message_ids.length);
+    expect(res.recipients).toBe(3);
   });
 });

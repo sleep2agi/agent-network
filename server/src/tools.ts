@@ -2398,7 +2398,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ ok: true, recipients: targets.length, message_ids: ids }),
+            text: JSON.stringify({ ok: true, recipients: ids.length, message_ids: ids }),
           },
         ],
       };
