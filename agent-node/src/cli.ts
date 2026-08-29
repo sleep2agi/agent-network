@@ -22,6 +22,7 @@ import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
+import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
@@ -5484,27 +5485,14 @@ interface FeishuBridgeEnvelope {
   outboundDir?: string;
 }
 
-/**
- * Locate the agent-network feishu worker script. Search order:
- *   1. `ANET_FEISHU_WORKER_PATH` env override (explicit).
- *   2. Dev sibling checkout: agent-node and agent-network laid out as siblings.
- *   3. Installed npm package layout (worker lives in @sleep2agi/agent-network).
- */
 function resolveFeishuWorkerPath(): string | null {
-  const candidates: string[] = [];
-  if (process.env.ANET_FEISHU_WORKER_PATH) {
-    candidates.push(process.env.ANET_FEISHU_WORKER_PATH);
-  }
   const here = new URL(".", import.meta.url).pathname;
-  candidates.push(
-    // dev sibling: ../../agent-network/{dist|src}/src/im/feishu/worker.{js|ts}
-    join(here, "..", "..", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
-    join(here, "..", "..", "agent-network", "src", "im", "feishu", "worker.ts"),
-    // installed npm package (agent-network and agent-node share node_modules root)
-    join(here, "..", "..", "..", "@sleep2agi", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
-    // global npm prefix layout
-    join(here, "..", "..", "..", "..", "@sleep2agi", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
-  );
+  const candidates = computeFeishuWorkerCandidates({
+    here,
+    envOverride: process.env.ANET_FEISHU_WORKER_PATH,
+    npmConfigPrefix: process.env.npm_config_prefix,
+    nodeExecPath: process.execPath,
+  });
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
@@ -5538,7 +5526,8 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
   if (!workerPath) {
     warn(
       `[feishu] worker path not found — skipping feishu channel setup. ` +
-        `Override with ANET_FEISHU_WORKER_PATH, or install @sleep2agi/agent-network so dist/src/im/feishu/worker.js is reachable.`,
+        `Override with ANET_FEISHU_WORKER_PATH, or \`npm i -g @sleep2agi/agent-network\` so dist/src/im/feishu/worker.js is reachable ` +
+        `(the resolver now checks the global npm prefix — issue #1379).`,
     );
     return;
   }
