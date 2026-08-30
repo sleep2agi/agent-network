@@ -458,6 +458,33 @@ tar -xzf *.tgz && node -e '
 用 prebuilt 流（见 `deploy/docs-site/README.md`），部署后跑
 `.github/scripts/check-docs-site-drift.py` **按内容**验收，不看状态码。
 
+🔴 **顺序不能反：先发包 → 再验收 → 最后才部署文档。**
+
+版本号 bump 的 PR 一合入，main 上的 `getting-started` 就指向**还没发出去的那个版本**。
+此时若照惯例「合并后立刻部署」，站点会告诉用户装一个 **npm 上不存在的版本** ——
+他照着敲会得到 `npm error`，而站点看起来完全正常。
+
+2026-08-30 实测（`.71`）：bump 合入后、发包前那段时间里
+
+```
+main 上的 getting-started   2.3.0-preview.71
+npm 上实际存在的            只有 .70（`npm view …@.71` 直接报错）
+线上 anet.sh                仍是 .70   ← 没被这个问题命中
+```
+
+**这次没出事，是因为 anet.sh 不接 git 自动部署**（`VERCEL_TOKEN` 未设时那条
+workflow 优雅跳过），main 改了文档不会自动上线。⇒ **一旦 token 设上，
+`deploy-anet-sh.yml` 会在 bump 合入的那一刻就把站点推到「指向不存在的版本」。**
+把这条写在这里，就是为了那一天。
+
+正确顺序：
+```
+1. bump PR 合入            （main 的文档此刻指向未发布版本 —— 正常，别部署）
+2. release-gate 发包       （publish job 绿）
+3. §2.5 四步验收           （尤其 ④：解包 import 跑一次）
+4. **然后**才部署 anet.sh 并按内容验收
+```
+
 ## 3. 跨包同时发版
 
 如果同一个 PR 要发多个包（例如同时升 `agent-network` + `agent-node`）：
