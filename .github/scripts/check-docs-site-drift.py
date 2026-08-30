@@ -217,6 +217,30 @@ def fetch(url: str) -> str:
         raise
 
 
+# 🔴 版本戳是这道门**结构上看不见**的一格，而它恰恰是用户会照着敲的那个数。
+#
+#   实测（2026-08-30，bump 到 .69 之后）：线上 getting-started 仍显示 `.68`，
+#   而这道门报 `every sampled page on the live site matches main` / rc=0。
+#   原因不在采样，getting-started **就在被采样的 6 页里**，原因在 `fingerprint()`：
+#     · 机器戳 `<!-- version-claim: … version=2.3.0-preview.69 -->` 是 HTML 注释
+#       → 在挑指纹之前就被 `re.sub(r"<!--.*?-->", "")` **整段剥掉**；
+#     · 人读那份 `| \`2.3.0-preview.69\`(当前 preview) | …` 是表格行
+#       → 命中 `line.startswith("|")` **被跳过**。
+#   于是它挑中的是同一页里一句与版本无关的正文（实测挑到的是一条 `anet demo` 说明），
+#   那句话在新旧两版里都有 ⇒ **恒绿**。
+#
+#   ⇒ 一个「装 2.3.0-preview.68」的过期指引可以在线上待任意久，而这道门一直是绿的。
+#      用户照着敲，装到的是旧版本。所以这一格单独判，不走 fingerprint 那条路。
+def version_stamps(rel: str) -> list[str]:
+    """这一页 main 上声明的 preview 版本号（机器戳优先，取不到再退回人读表格行）。"""
+    try:
+        text = (DOCS / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    stamps = re.findall(r"version-claim:[^>]*channel=preview[^>]*version=([0-9][0-9A-Za-z.\-]+)", text)
+    return sorted(set(stamps))
+
+
 def run() -> int:
     if not DOCS.is_dir():
         print(f"::error::{DOCS} not found — scope regression, refusing to pass", file=sys.stderr)
@@ -286,7 +310,16 @@ def run() -> int:
         text = re.sub(r"\s*([,;:])\s*", r"\1", text)
         fp_norm = re.sub(r"\s+", " ", html_unescape(fp))
         fp_norm = re.sub(r"\s*([,;:])\s*", r"\1", fp_norm)
-        if fp_norm in text:
+        stale_stamp = None
+        for stamp in version_stamps(rel):
+            # 线上那一页必须出现 main 上声明的同一个版本号。
+            if stamp not in text:
+                stale_stamp = stamp
+                break
+        if stale_stamp:
+            print(f"  MISS {rel}  →  {md_to_url(rel)}   [version-stamp {stale_stamp} 不在线上]")
+            missing.append((rel, md_to_url(rel), f"版本戳 {stale_stamp}（main 上声明的 preview 版本）在线上这一页里找不到"))
+        elif fp_norm in text:
             print(f"  ok   {rel}  →  {md_to_url(rel)}   [{source}]")
         else:
             print(f"  MISS {rel}  →  {md_to_url(rel)}   [{source}]")
