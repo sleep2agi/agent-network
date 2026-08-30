@@ -17,7 +17,7 @@ import {
 } from "fs";
 import { PassThrough } from "stream";
 import { createConnection, type Socket } from "net";
-import { mkdtempSync } from "fs";
+import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { basename, join, resolve } from "path";
 import { describe, expect, test } from "bun:test";
@@ -66,6 +66,7 @@ import {
   type GrokCopresenceRuntimeSession,
   type GrokPtyLike,
   type GrokPtySpawn,
+  describeTuiStartupOutput,
 } from "./runtime";
 import { renderGrokCopresenceAgentProfile } from "./policy";
 
@@ -3814,3 +3815,48 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<voi
   }
   throw new Error(`condition not met within ${timeoutMs}ms`);
 }
+
+// #1400 —— recovery TUI 退出时把 grok 的真实输出透出来，而不是只报一句 opaque 的
+// "exited before recovery drain"。实测那次真因是
+// `error: cannot resume this session under sandbox profile ...`，
+// 而节点日志里没有任何一行说明为什么退，用户看着它空转重试三次。
+describe("#1400 recovery TUI 退出时透出 grok 的真实输出", () => {
+  const SANDBOX_ERROR = "error: cannot resume this session under sandbox profile 'read-only'";
+
+  test("🔴 剥掉 ANSI、保留行结构，取最后几行", () => {
+    const raw = `\u001b[2J\u001b[H${"noise line\r\n".repeat(20)}${SANDBOX_ERROR}\r\n`;
+    const out = describeTuiStartupOutput(raw);
+    expect(out).toContain(SANDBOX_ERROR);
+    expect(out).not.toContain("\u001b");
+    // 只留最后 5 行 ⇒ 前面那 20 行噪音不会把真错挤掉，也不会灌满一屏
+    expect(out.split(" | ")).toHaveLength(5);
+  });
+
+  test("🔴 一整屏 ANSI 也不会把真错挤掉（按行取尾，不按字节）", () => {
+    // grok 崩之前可能刚画过一整屏。按字节取尾会拿到那一行的中段乱码。
+    const wall = `\u001b[38;5;42m${"x".repeat(50_000)}\u001b[0m\r\n`;
+    const out = describeTuiStartupOutput(`${wall}${SANDBOX_ERROR}\r\n`);
+    expect(out).toContain(SANDBOX_ERROR);
+    expect(out.length).toBeLessThan(600);
+  });
+
+  test("超长单行被截断并标记", () => {
+    const out = describeTuiStartupOutput(`${"y".repeat(500)}\r\n`);
+    expect(out.length).toBeLessThanOrEqual(201);
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  test("没有可见输出时返回空串（调用方据此换一句话，而不是打一个空的 grok said:）", () => {
+    expect(describeTuiStartupOutput(undefined)).toBe("");
+    expect(describeTuiStartupOutput("")).toBe("");
+    expect(describeTuiStartupOutput("\u001b[2J\u001b[H   \r\n  \r\n")).toBe("");
+  });
+
+  test("🔴 捕获发生在缓冲被清空**之前**（顺序错了就永远抓到空串）", () => {
+    const src = readFileSync(join(import.meta.dir, "runtime.ts"), "utf8");
+    const capture = src.indexOf("tui.startupOutput = this.tuiReadinessBuffer");
+    const clear = src.indexOf('this.tuiReadinessBuffer = "";', capture);
+    expect(capture).toBeGreaterThan(-1);
+    expect(clear).toBeGreaterThan(capture);   // 先抓，后清
+  });
+});
