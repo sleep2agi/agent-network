@@ -4097,9 +4097,6 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       // 1.0.5 移除了 --no-memory / --no-auto-update 且硬拒未知 flag，
       // argv 必须按观测到的 build 决定。
       grokVersion: version,
-      // 1.0.5 移除了 --no-memory / --no-auto-update 且硬拒未知 flag，
-      // argv 必须按观测到的 build 决定。
-      grokVersion: version,
       env,
       sessionId: grokSessionId || undefined,
       newSession: NEW_SESSION,
