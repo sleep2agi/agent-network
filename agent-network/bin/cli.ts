@@ -38,6 +38,7 @@ import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus } from "../src/session-status-class";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
+import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
@@ -8503,6 +8504,20 @@ async function daemonStartCommand() {
     console.error(`Re-init as daemon: anet daemon init ${id} --force`);
     process.exit(1);
   }
+  // 2026-08-30 —— 在启动的那一刻就说「你装了它,但这台 daemon 看不见它」。
+  //
+  // 真机上的代价:daemon 建出来的 grok 节点报「grok CLI not found」,而 grok
+  // 就装在 ~/.grok/bin。子节点**继承 daemon 的 PATH**,所以问题在 daemon 这边,
+  // 而报错出现在节点那边 —— 中间隔着一次建节点,没人会往这儿想。
+  // 在这里说,修起来只要一行 export;等节点报错再说,已经绕了一大圈。
+  for (const w of daemonPathWarnings({
+    runtimes: ((profile as any)?.runtimes_supported || []) as string[],
+    resolvesOnPath: (bin) => commandExists(bin),
+    existsInHomeDir: (dir, bin) => existsSync(join(homedir(), dir, bin)),
+  })) {
+    console.error(w);
+  }
+
   // Delegate to existing startCommand — it reads args[1] for the node name,
   // which is what we have after the `daemon start` splice in daemonCommand.
   await startCommand();

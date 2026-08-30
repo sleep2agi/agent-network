@@ -270,6 +270,14 @@ create capability: not found — the hub rejected this machine's identity (HTTP 
 too old to tell us*; the latter says *it told us, and the answer is no*. Treating the first
 as the second sends you to repair a machine that is fine.
 
+🔴 **If startup prints an "installed but not on PATH" warning, fix that first.**
+`anet daemon start` checks whether the binaries required by the runtimes this daemon
+claims to support actually resolve on its PATH. It warns **only** when a binary is
+installed but not on PATH — because **child nodes the daemon creates inherit the
+daemon's PATH**, so those children fail with "xxx CLI not found" for something that
+is in fact installed, and reinstalling it changes nothing. (When the binary is genuinely
+absent it stays quiet: the node's own startup error is more specific.)
+
 🔴 **Upgrading alone changes nothing — restart it.** The daemon is a **long-lived process**
 and computes this field in-process, so swapping the package on disk has no effect on a daemon
 that is **already running**: `anet daemon list` keeps printing "unknown". `anet daemon` has no
