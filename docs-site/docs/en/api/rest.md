@@ -805,7 +805,8 @@ curl "http://localhost:9200/api/host-supervisors" \
         "cpu_cores": 8,
         "mem_gb": 16,
         "ip_internal": "10.x.x.x"
-      }
+      },
+      "can_create_nodes": true
     }
   ],
   "count": 1
@@ -813,6 +814,9 @@ curl "http://localhost:9200/api/host-supervisors" \
 ```
 
 🔴 **`host_telemetry` is masked by role.** Everyone sees `alert_level` (`green` = online, `gray` = not). Only a network `admin` / `owner` — or a network-token caller — receives `cpu_cores` / `mem_gb` / `ip_internal`. For an ordinary member those keys are **absent**, not null.
+
+🔴 **`can_create_nodes` / `create_nodes_blocked_reason` (daemon node-creation capability).** The daemon reports it via `report_status.host.daemon_capabilities`; the hub mirrors it here verbatim so the Dashboard "create-node wizard" can decide whether a host is selectable and, if not, why (`create_nodes_blocked_reason` appears **only** when `can_create_nodes === false`).
+🔴 **Both keys are present only if the daemon actually reported them.** A daemon running an older agent-node that does not yet send `daemon_capabilities` omits both keys **entirely** from the response — they are absent, not `false`. Consumers must treat an absent key as "unknown, assume creatable" and must **not** grey out a healthy older daemon by mistaking absence for blocked (`undefined ≠ false`).
 
 🔴 **The `online` window is 5 minutes**, not the heartbeat period. agent-node's `report_status` fires every **3 minutes**, and the window must exceed it — otherwise a daemon would flap to `offline` for the 60–180 s after every heartbeat.
 
