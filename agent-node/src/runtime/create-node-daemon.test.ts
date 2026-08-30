@@ -236,6 +236,44 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     })).toThrow(/anet_bin_unsafe_path.*no ANET_BIN_ABS/);
   });
 
+  // #1353 —— anet_bin_source 的 `Fix:` 那半是用户唯一拿到的修法。它在 2026-08-30 之前
+  // **两处都坏**：shell 语法就不成立（`$( )` 里的 `\"`），以及 `install -d /etc/...` 少了
+  // sudo 导致 `&&` 断链、后面的 `sudo tee` 永不执行。两个坏法的共同点是
+  // **照敲一遍不会报"你没权限"，而是留下一个仍然没修好的系统** —— 用户以为修过了。
+  //
+  // 所以这里断言的不是"文案里有 sudo"这种字面，而是**这条命令的结构性质**：
+  //   ① 创建目录那一步必须带 sudo（否则断链）
+  //   ② 不出现 `$( … \" … )` 这种在命令替换里反斜杠转义引号的形状（bash 直接语法错误）
+  // 平台分支只测 POSIX —— Windows 那条是 PowerShell，不适用本判据。
+  test("anet_bin_source 的修复命令必须可执行：sudo 盖住建目录 + 无 $( \" ) 语法错误 (#1353)", () => {
+    const posixFix = (): string => {
+      try {
+        loadAndVerifyAnetBin({ ANET_DAEMON_PATH_CONF: "/nonexistent" }, "linux");
+      } catch (e: any) {
+        return String(e?.message ?? "");
+      }
+      throw new Error("expected loadAndVerifyAnetBin to throw");
+    };
+    const msg = posixFix();
+    expect(msg).toMatch(/anet_bin_unsafe_path/);
+
+    // ① 建目录必须在 sudo 之下。裸 `install -d /etc/anet-daemon` 普通用户 exit 1。
+    expect(msg).toContain("sudo install -d -m 0755 /etc/anet-daemon");
+    expect(msg).not.toMatch(/(^|[^o] )install -d -m 0755 \/etc\/anet-daemon/);
+
+    // ② node 的内联脚本必须用**单引号**包。坏掉的那一版写成
+    //    `node -e \"console.log(require('fs')…)\"`，而它整个又处在 `$( )` 里、
+    //    外层还有双引号 —— bash 看到的是 `$(node -e \"…`，直接
+    //    `syntax error near unexpected token '('`（实测 `bash -n` rc=2）。
+    //    单引号包脚本、脚本内部用 "fs"，两层引号才不打架。
+    //    🔴 这条断言的第一版写成「命令替换里不出现 \\" 」，看着更"直指语法"，
+    //       但**变异后仍然全绿** —— 因为运行时字符串里根本没有反斜杠，
+    //       那个形状只存在于 TS 源码里。断言要钉运行时真有的性质。
+    const cmd = msg.slice(msg.indexOf("Fix: ") + 5);
+    expect(cmd).toContain("node -e 'console.log(require(");
+    expect(cmd).not.toContain('node -e "console.log');
+  });
+
   test("REJECT: ANET_BIN_ABS env fallback without explicit opt-in", () => {
     cleanup();
     const p = setup("env-fallback-disabled");

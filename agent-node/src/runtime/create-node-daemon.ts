@@ -223,7 +223,18 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
       `ANET_BIN_ABS env fallback disabled (set ANET_DAEMON_ALLOW_ENV_BIN=1 only for Docker/dev/manual ops; production trust root is ${trustRoot})`,
       platform === "win32"
         ? `New-Item -ItemType Directory -Force -Path "${win32.dirname(trustRoot)}" | Out-Null; "ANET_BIN_ABS=<absolute path to anet.cjs>" | Set-Content -Path "${trustRoot}" -Encoding ascii`
-        : "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+        // 🔴 这条命令在 2026-08-30 之前**两处都坏**，而它是 anet_bin_source 唯一给出的修法：
+        //   ① **语法就不成立**：`"$(node -e \\"…\\" …)"` 里的 `\\"` 在 `$( )` 内不是转义、是语法错误，
+        //      `bash -n` 直接 rc=2 —— 用户粘贴进去只会看到 `syntax error near unexpected token '('`。
+        //      改用单引号包 node 脚本，脚本内部才用 `"fs"`，两层引号不再打架。
+        //   ② **sudo 盖错了半边**：`install -d /etc/anet-daemon` 没有 sudo，普通用户下 exit 1
+        //      （实测 `install: cannot change permissions of '/etc/anet-daemon'`），`&&` 当场断链，
+        //      后面的 `sudo tee` **根本不执行**。用户照敲之后 path.conf 依旧不存在。
+        //   一条跑不通的修复建议比没有建议更糟：它让人以为自己已经修过了。
+        //   realpath 先在 sudo **之前**算好并存进变量 —— 否则 root 环境里 `command -v anet`
+        //   可能解析到另一个（或找不到）二进制。
+        //   本行 shell 已用 `bash -n`（rc=0）+ 实跑非 sudo 段验证过。
+        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   if (!pin) {
@@ -231,7 +242,18 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
       `no ANET_BIN_ABS resolved from ${trustRoot}; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1`,
       platform === "win32"
         ? `New-Item -ItemType Directory -Force -Path "${win32.dirname(trustRoot)}" | Out-Null; "ANET_BIN_ABS=<absolute path to anet.cjs>" | Set-Content -Path "${trustRoot}" -Encoding ascii`
-        : "install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$(node -e \\\"console.log(require('fs').realpathSync(process.argv[1]))\\\" $(command -v anet))\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+        // 🔴 这条命令在 2026-08-30 之前**两处都坏**，而它是 anet_bin_source 唯一给出的修法：
+        //   ① **语法就不成立**：`"$(node -e \\"…\\" …)"` 里的 `\\"` 在 `$( )` 内不是转义、是语法错误，
+        //      `bash -n` 直接 rc=2 —— 用户粘贴进去只会看到 `syntax error near unexpected token '('`。
+        //      改用单引号包 node 脚本，脚本内部才用 `"fs"`，两层引号不再打架。
+        //   ② **sudo 盖错了半边**：`install -d /etc/anet-daemon` 没有 sudo，普通用户下 exit 1
+        //      （实测 `install: cannot change permissions of '/etc/anet-daemon'`），`&&` 当场断链，
+        //      后面的 `sudo tee` **根本不执行**。用户照敲之后 path.conf 依旧不存在。
+        //   一条跑不通的修复建议比没有建议更糟：它让人以为自己已经修过了。
+        //   realpath 先在 sudo **之前**算好并存进变量 —— 否则 root 环境里 `command -v anet`
+        //   可能解析到另一个（或找不到）二进制。
+        //   本行 shell 已用 `bash -n`（rc=0）+ 实跑非 sudo 段验证过。
+        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
     );
   }
   // ① absolute — cross-platform. Was `startsWith("/")` which returned
