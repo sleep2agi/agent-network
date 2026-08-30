@@ -61,6 +61,7 @@ import {
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
+import { parseHubTimestamp } from "./hub-timestamp";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -3325,8 +3326,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               "SELECT last_seen_at FROM sessions WHERE node_id = ?1 ORDER BY last_seen_at DESC LIMIT 1",
               daemon_node_id,
             );
-            const t = sess?.last_seen_at ? Date.parse(sess.last_seen_at) : NaN;
-            if (Number.isFinite(t)) heartbeatAgeMs = Math.max(0, Date.now() - t);
+            // #1650 — 这一列是 TEXT(`datetime('now')`),UTC 但不带时区标记。
+            //   Date.parse 会按**本机时区**解析,误差 = 主机偏移(生产 hub 在 UTC+8
+            //   时这个诊断数字整整偏 8 小时)。走 parseHubTimestamp 显式按 UTC 解。
+            const t = parseHubTimestamp(sess?.last_seen_at);
+            if (t !== null) heartbeatAgeMs = Math.max(0, Date.now() - t);
           } catch { /* 取不到就是取不到 —— 下面如实说 unknown,不猜 0 */ }
 
           // 🔴 三种取值,不能塌成两种:
