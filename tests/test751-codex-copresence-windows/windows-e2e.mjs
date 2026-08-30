@@ -69,9 +69,19 @@ function terminal(args, onData, timeoutMs = 45_000) {
       clearTimeout(timer);
       if (exitCode !== 0) {
         const appLog = join(project, ".anet", "nodes", "windows-picker", "windows-appsrv.log");
-        const diagnostics = existsSync(appLog) ? `\n--- app-server log ---\n${readFileSync(appLog, "utf8")}` : "";
-        const rpcDiagnostics = existsSync(rpcLog) ? `\n--- fake rpc log ---\n${readFileSync(rpcLog, "utf8")}` : "";
-        reject(new Error(`PTY failed (${exitCode}): ${args.join(" ")}\n${output}${diagnostics}${rpcDiagnostics}`));
+        // 🔴 #1342 —— 三段诊断原先在文件不存在 / PTY 无输出时**静默降级成空串**,
+        //    于是 CI 上只剩 `PTY failed (1): …` 一行。「有诊断」和「诊断为空」
+        //    在报错文本里长得一模一样,读的人会以为那一行就是全部信息。
+        //    改成显式说明缺席,下一次采样才能分辨「TUI 有输出但没帮助」
+        //    还是「TUI 根本没产出任何东西」—— 两者指向完全不同的根因。
+        const ptyOutput = output ? `\n${output}` : `\n--- PTY 无输出(0 字节) ---`;
+        const diagnostics = existsSync(appLog)
+          ? `\n--- app-server log ---\n${readFileSync(appLog, "utf8")}`
+          : `\n--- app-server log: 不存在 (${appLog}) ---`;
+        const rpcDiagnostics = existsSync(rpcLog)
+          ? `\n--- fake rpc log ---\n${readFileSync(rpcLog, "utf8")}`
+          : `\n--- fake rpc log: 不存在 (${rpcLog}) ---`;
+        reject(new Error(`PTY failed (${exitCode}): ${args.join(" ")}${ptyOutput}${diagnostics}${rpcDiagnostics}`));
       }
       else resolvePromise(output);
     });
