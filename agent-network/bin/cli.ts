@@ -10733,6 +10733,33 @@ Examples:
       attachChannel(storedProfile, "telegram");
     } else {
       // type === "feishu" — RFC-020 §3.1 / §5.1 (#179)
+      //
+      // 🔴 #1259 —— 飞书回合的工具拒绝层(RFC-020 §13 Layer B)**只实现为一个
+      //    `PreToolUse` hook**(agent-node/src/cli.ts 里 checkFeishuToolDeny 的
+      //    **唯一**调用点)，而 PreToolUse 是 claude-agent-sdk 的机制。
+      //    在 codex-sdk / codex-app-server / opencode-cli 节点上，那一层
+      //    **一次都不会被调用** —— 三类拒绝(触达密钥路径的工具、抽取密钥的
+      //    Bash 模式、飞书回合上的 commhub MCP 调用，最重是向任意 alias
+      //    横向 send_task)全部放行，而且**没有任何东西会报错或提示**。
+      //
+      //    所以在这里拒绝，而不是让它配上去之后看起来一切正常。
+      //    形状对齐本文件既有的 runtime 不匹配处理(见 `--copresence requires
+      //    runtime=codex-app-server`)——本仓对 runtime 不匹配的立场就是拒绝并说明。
+      //
+      // 🔴 缺省即 claude-agent-sdk：`agent-node/src/cli.ts` 的
+      //    `opts.runtime || process.env.RUNTIME || fileConfig.runtime || "claude-agent-sdk"`。
+      //    所以 undefined **必须放行** —— 把"没写"当成"不是 claude"会打死
+      //    每一个从来没设过 runtime 的节点。
+      const feishuRuntime = (storedProfile as any)?.runtime || (profile as any)?.runtime || "claude-agent-sdk";
+      if (feishuRuntime !== "claude-agent-sdk") {
+        console.error(`[anet] ❌ feishu 通道目前只支持 runtime=claude-agent-sdk(节点 "${nodeRef}" 是 runtime=${feishuRuntime})。`);
+        console.error(`[anet]    原因:飞书回合的工具拒绝层(RFC-020 §13 Layer B)实现为 claude-agent-sdk 的`);
+        console.error(`[anet]    PreToolUse hook。在其它 runtime 上它**一次都不会触发** —— 通道能配上、`);
+        console.error(`[anet]    看起来正常，但密钥路径工具 / 抽密钥的 Bash / 飞书回合上的 commhub 调用全部放行。`);
+        console.error(`[anet]    见 #1259。要在这个节点上用飞书，改用 claude-agent-sdk 运行时。`);
+        process.exit(1);
+      }
+
       let appId = opts["app-id"];
       let appSecret = opts["app-secret"];
       let allowOpenId = opts.allow;
