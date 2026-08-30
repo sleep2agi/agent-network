@@ -89,6 +89,11 @@ import { GrokAcpClient } from "../grok-build-acp/client";
 const MAX_NETWORK_PROMPT_BYTES = 384 * 1024;
 const MAX_DEFERRED_HUMAN_BYTES = 128 * 1024;
 const MAX_TUI_READINESS_BUFFER = 128 * 1024;
+// #1400 —— TUI 在就绪前退出时，错误里带上它最后几行可见输出。
+// 取「行」不取字节：grok 崩前打的可能是一整屏 ANSI，按字节取尾会拿到一段
+// 中间的乱码，真正的 `error: …` 反而被挤掉（#1225 那次踩过同款）。
+const TUI_EXIT_OUTPUT_LINES = 5;
+const TUI_EXIT_OUTPUT_LINE_CHARS = 200;
 const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 const MAX_LIFECYCLE_LINE_BYTES = 256 * 1024;
 const MAX_PENDING_AUTOMATIC_PERMISSIONS = 64;
@@ -124,6 +129,20 @@ const GROK_TUI_SHORTCUTS_TEXT = "Ctrl+x:shortcuts";
  * cannot hide a marker that spans multiple PTY chunks.
  */
 export function hasGrokTuiReadyMarker(raw: string): boolean {
+  const visible = stripTerminalControl(raw, false);
+  return visible.includes(GROK_TUI_READY_TEXT)
+    && visible.includes(GROK_TUI_SHORTCUTS_TEXT);
+}
+
+/**
+ * 剥掉终端控制序列，只留可见文本（#1400 起从 hasGrokTuiReadyMarker 里抽出来复用）。
+ *
+ * `keepNewlines=false` 是就绪判据原来的行为，**逐字不变**：换行也被丢掉，
+ * 于是一个跨 PTY chunk 被 ANSI 打断的 marker 仍能匹配。
+ * `keepNewlines=true` 给的是**给人读**的那种输出（#1400 把 grok 真 stderr
+ * 透出来时用），行结构必须留着，否则最后 N 行取不出来。
+ */
+function stripTerminalControl(raw: string, keepNewlines: boolean): string {
   let visible = "";
   let state: "text" | "escape" | "csi" | "osc" | "control-string" = "text";
   for (let index = 0; index < raw.length; index += 1) {
@@ -137,6 +156,8 @@ export function hasGrokTuiReadyMarker(raw: string): boolean {
         state = "control-string";
       } else if (code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f)) {
         visible += char;
+      } else if (keepNewlines && (code === 0x0a || code === 0x0d)) {
+        visible += "\n";
       }
       continue;
     }
@@ -161,8 +182,30 @@ export function hasGrokTuiReadyMarker(raw: string): boolean {
       state = "text";
     }
   }
-  return visible.includes(GROK_TUI_READY_TEXT)
-    && visible.includes(GROK_TUI_SHORTCUTS_TEXT);
+  return visible;
+}
+
+/**
+ * 一个 TUI 世代在**就绪之前**就退出时，把它留下的最后几行可见输出整理成
+ * 一句能贴进错误里的话（#1400）。
+ *
+ * 为什么只用就绪前的缓冲：`tuiReadinessBuffer` 只在 composer 就绪之前累积、
+ * 就绪那一刻就被清空。所以它装的正好是**启动期的那点输出** —— 不含人类
+ * 后来打进 TUI 的任何内容。这既是我们要的东西，也顺带把「把用户输入写进
+ * 节点日志」这条风险排除在外。
+ */
+export function describeTuiStartupOutput(raw: string | undefined): string {
+  if (!raw) return "";
+  const lines = stripTerminalControl(raw, true)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return "";
+  return lines.slice(-TUI_EXIT_OUTPUT_LINES)
+    .map((line) => (line.length > TUI_EXIT_OUTPUT_LINE_CHARS
+      ? `${line.slice(0, TUI_EXIT_OUTPUT_LINE_CHARS)}…`
+      : line))
+    .join(" | ");
 }
 const COMPLETION_CHAT_SETTLE_MS = 500;
 
@@ -180,6 +223,8 @@ interface GrokTuiGeneration {
   readonly pty: GrokPtyLike;
   readonly exit: Promise<void>;
   exited: boolean;
+  /** 就绪前的 PTY 可见输出，退出那一刻抓下来（#1400）。 */
+  startupOutput?: string;
 }
 
 export type GrokPtySpawn = (
@@ -1666,6 +1711,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     });
     pty.onExit((event) => {
       tui.exited = true;
+      // 🔴 在下面把 tuiReadinessBuffer 清掉**之前**抓走它（#1400）。
+      //    grok 真正的失败原因（实测那次是 `error: cannot resume this session
+      //    under sandbox profile ...`）就在这段里；原来它在这里被丢掉，recovery
+      //    只抛得出一句 opaque 的 "exited before recovery drain"，节点日志里
+      //    没有任何一行说明为什么退 —— 用户看着它空转重试三次。
+      if (!tui.startupOutput) tui.startupOutput = this.tuiReadinessBuffer;
       resolveExit();
       if (this.activeTui !== tui || generation !== this.ptyGeneration || this.closing) return;
       this.tuiComposerReady = false;
@@ -1944,7 +1995,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private assertLiveTuiGeneration(tui: GrokTuiGeneration, boundary: string): void {
     this.assertOwnedTuiGeneration(tui, boundary);
-    if (tui.exited) throw new Error(`Grok recovery TUI exited before ${boundary}`);
+    if (tui.exited) {
+      const output = describeTuiStartupOutput(tui.startupOutput);
+      throw new Error(output
+        ? `Grok recovery TUI exited before ${boundary}; grok said: ${output}`
+        : `Grok recovery TUI exited before ${boundary} (grok printed nothing before exiting)`);
+    }
   }
 
   private detachTuiGeneration(tui: GrokTuiGeneration | null): void {
