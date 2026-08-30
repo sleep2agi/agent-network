@@ -59,6 +59,14 @@ PIN = re.compile(
     r"\[([^\]\n]{1,120})\]\("
     r"https://github\.com/sleep2agi/agent-network/blob/"
     r"([0-9a-zA-Z._-]+)/([^\s)#\"']+)#L(\d+)\)"
+    # 🔴 链接**之后**的一小段也算锚。本仓写法是把代码片段放在链接后面：
+    #      [`…cli.ts:7882`](…#L7882) `sub === "dashboard"` 分支
+    #    只捕获 `[...]` 里的标签就永远看不到那个片段 —— 而它恰恰是唯一能逐字定位的东西
+    #    （`sub` 在 cli.ts 出现 89 次、`dashboard` 39 次，两个都超 UBIQUITOUS ⇒ 整条 pin
+    #    被归进「跳过」而不告警，实测因此漏掉过一处 36 行的漂移）。
+    # 🔴 `[^\n\[]` 而不是 `[^\n]`：architecture.md 有**同一行两个 pin** 的写法，
+    #    贪婪尾窗会吃掉后一个 pin 的 `[` —— 实测 pin 总数从 15 掉到 13。
+    r"([^\n\[]{0,100})"
 )
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 # 🔴 #1024 —— ref 一直被捕获但从没被用过(那个组以前就叫 `_ref`)。
@@ -107,6 +115,25 @@ def tracked_docs(repo: Path, doc_root: str) -> list[Path]:
     return sorted((repo / doc_root).rglob("*.md"))
 
 
+LITERAL = re.compile(r"`([^`\n]{6,80})`")
+
+
+def candidate_literals(anchor: str) -> list[str]:
+    """锚里可以**逐字**在源文件中定位的代码片段。
+
+    只取含非标识符字符的（纯标识符交给 candidate_symbols，两条路径不重复判同一件事）。
+    """
+    out = []
+    for frag in LITERAL.findall(anchor):
+        frag = frag.strip()
+        if not frag or IDENT.fullmatch(frag):
+            continue
+        if not re.search(r"[^A-Za-z0-9_ ]", frag):
+            continue
+        out.append(frag)
+    return out
+
+
 def candidate_symbols(anchor: str, rel: str) -> list[str]:
     """从锚文本里挑出**可能是符号**的词。
 
@@ -130,13 +157,32 @@ def candidate_symbols(anchor: str, rel: str) -> list[str]:
 
 
 def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
-          lines: list[str], findings: list[str]) -> bool:
+          lines: list[str], findings: list[str], label_only: str = "") -> bool:
     """判一条 pin。返回 True=判定过了(不管漂没漂),False=没能判定。
 
     🔴 两条路径(ref=分支 / ref=commit)共用这一份判据。
        分成两份写的话,以后只会有一份被改到 —— 而两份的输出长得一样。
     """
-    symbols = candidate_symbols(anchor, rel)
+    # 🔴 尾窗**只喂字面量**，不喂标识符。尾窗里的散文常常「提到」并不在 pin 那一行的
+    #    符号，而且常是**否定**语气：
+    #      docs/pitfalls.md    「`get_inbox` **故意不在列**」   ← 说的是它不在
+    #      docs/architecture.md「SSE 推 `new_reply` 不是 `new_task`」← 说的是后果
+    #    把这些当成「锚点名了该符号」会报出**假漂移**（实测一次报出 6 条，全是假的）。
+    for frag in candidate_literals(anchor):
+        hits = [i + 1 for i, line in enumerate(lines) if frag in line]
+        if len(hits) != 1:
+            continue                      # 0 次分不清改写；多次不比标识符精确
+        w = hits[0]
+        if abs(w - n) <= WINDOW:
+            return True
+        findings.append(
+            f"  🔴 {doc.relative_to(repo)}  锚文本逐字点名 `{frag}`，钉在 {rel}#L{n}，"
+            f"但那一行是:\n       {lines[n - 1].strip()[:100]}\n"
+            f"       该片段在该文件**恰好出现一处**，在第 {w} 行:\n"
+            f"         {w:>5}  {lines[w - 1].strip()[:96]}")
+        return True
+
+    symbols = candidate_symbols(label_only or anchor, rel)
     judged = False
     for sym in symbols:
         # 🔴 词边界，不是子串。2026-08-18 实测:`createNetwork` 用子串匹配会命中
@@ -191,7 +237,9 @@ def main() -> int:
             text = doc.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for anchor, ref, rel, lineno in PIN.findall(text):
+        for anchor, ref, rel, lineno, trail in PIN.findall(text):
+            label_only = anchor
+            anchor = anchor + " " + trail
             pins += 1
             if IMMUTABLE_REF.match(ref):
                 # 钉在具体 commit 上 —— 拿那个 commit 的内容判,不拿工作树。
@@ -199,7 +247,7 @@ def main() -> int:
                 if lines_at_ref is None:
                     unresolved += 1
                     continue
-                judged_here = judge(doc, repo, anchor, rel, int(lineno), lines_at_ref, findings)
+                judged_here = judge(doc, repo, anchor, rel, int(lineno), lines_at_ref, findings, label_only)
                 if not judged_here:
                     skipped += 1
                 continue
@@ -218,7 +266,7 @@ def main() -> int:
             if not (1 <= n <= len(lines)):
                 skipped += 1  # 越界同样归另一道门
                 continue
-            if not judge(doc, repo, anchor, rel, n, lines, findings):
+            if not judge(doc, repo, anchor, rel, n, lines, findings, label_only):
                 skipped += 1
 
 
