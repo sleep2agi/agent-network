@@ -242,3 +242,67 @@ describe("#1545 输出宽度 —— 每一行都要塞进 80 列", () => {
     expect(displayWidth("中a")).toBe(3);
   });
 });
+
+/* ────────────────────────────────────────────────────────────────────────
+ * 2026-08-30 —— 「升级」不是一条完整的修法:daemon 是**长驻进程**。
+ *
+ * 起因是一台真机。Mac mini 上 daemon 已经跑了很久,anet 是 preview.59,
+ * 而这一格要 agent-node >= preview.55 才会上报。原文案说的是「升级它才能看到」——
+ * 照着做完,`anet daemon list` **还是显示未知**,因为那个进程里跑的仍是它启动时
+ * 载入的那份代码。`buildCapabilities()` 由常驻 daemon 在**进程内**调用
+ * (config-apply.ts:555,createCapability 是传进去的实参,不是每次 spawn 出来的),
+ * 所以磁盘上换了包,对一个已经在跑的进程**一点影响都没有**。
+ *
+ * 🔴 这条不能写成「凡是提到升级就必须提到重启」。同文件里
+ * 「未知原因代码 …… 升级**本机 anet**」说的是**读的这一端**的 CLI 太旧,
+ * 跟那台机器上的 daemon 重不重启毫无关系 —— 那条不该被罚。
+ * 判别式落在**升级的是哪个包**上:agent-node = daemon 那一侧 ⇒ 必须重启。
+ * ──────────────────────────────────────────────────────────────────────── */
+describe("🔴 说了升级 agent-node 的文案,必须同时说重启", () => {
+  /* 取集:不扫源码文本(那样会连注释一起收进来,而注释不是用户看到的字),
+   * 而是把模块**真正返回**的每一串收齐 —— 和显示层用的是同一个分母。 */
+  const collect = (): string[] => {
+    const rows: any[] = [
+      {},                                                          // never-reported
+      { can_create_nodes: true },                                  // ready-age-unknown
+      { can_create_nodes: true, create_capability_observed_ms_ago: 0, last_seen_at: iso(NOW - 3_000) },
+      { can_create_nodes: false, create_capability_observed_ms_ago: 0, last_seen_at: iso(NOW - 3_000),
+        create_nodes_blocked_reason: "anet_bin_permission" },
+      { can_create_nodes: false, create_nodes_blocked_reason: "legacy_unknown" },
+      { can_create_nodes: false, create_nodes_blocked_reason: "zzz_a_code_this_cli_is_too_old_to_know" },
+    ];
+    const out: string[] = [];
+    for (const code of ["anet_bin_identity", "anet_bin_source", "anet_bin_permission",
+                        "anet_bin_shape", "anet_bin_unknown", "anet_bin_pin_unresolved"]) {
+      rows.push({ can_create_nodes: false, create_nodes_blocked_reason: code });
+    }
+    for (const r of rows) {
+      const v: any = describeCapability(r, NOW);
+      for (const s of [v.line, v.fix?.explain, v.fix?.command]) {
+        if (typeof s === "string" && s.length > 0) out.push(s);
+      }
+    }
+    return out;
+  };
+
+  /* 🔴 先证明分母不是 0。若哪天包改名或这些串挪走了,下面那条断言会**因为收不到东西**
+   * 而恒绿 —— 那和「全都合规」逐字一样。这一条让它改为红。 */
+  test("🔴 分母自证:确实收到了提到 agent-node 的文案", () => {
+    const hits = collect().filter(s => s.includes("agent-node"));
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("🔴 升级 agent-node ⇒ 必须同时出现「重启」", () => {
+    const offenders = collect().filter(
+      s => s.includes("agent-node") && s.includes("升级") && !s.includes("重启"));
+    expect(offenders).toEqual([]);
+  });
+
+  /* 正控:判别式要能把「升级本机 anet」放过去,否则这道门只是「凡升级必重启」,
+   * 会逼着那条文案写上一句与它无关的重启指示。 */
+  test("🔴 正控:「升级本机 anet」这条不提重启,且确实存在", () => {
+    const local = collect().filter(s => s.includes("升级本机 anet"));
+    expect(local.length).toBeGreaterThanOrEqual(1);
+    expect(local.every(s => !s.includes("agent-node"))).toBe(true);
+  });
+});

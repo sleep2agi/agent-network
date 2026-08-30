@@ -259,7 +259,7 @@ create capability: **unavailable** (anet_bin_permission, measured 5s ago)
 create capability: available, but **we do not know when it was measured** — this daemon
   version computes it once at boot and never re-checks. Restart it, or upgrade.
 create capability: unknown — this daemon never reported it (agent-node older than
-  preview.55). Upgrade it to see this.
+  preview.55). Upgrading is not enough — restart the daemon.
 create capability: not found — the hub has no such node_id (never registered, or
   registered into a different network)
 ```
@@ -267,6 +267,17 @@ create capability: not found — the hub has no such node_id (never registered, 
 🔴 **"never reported" is not "unavailable."** The former says *this machine's agent-node is
 too old to tell us*; the latter says *it told us, and the answer is no*. Treating the first
 as the second sends you to repair a machine that is fine.
+
+🔴 **Upgrading alone changes nothing — restart it.** The daemon is a **long-lived process**
+and computes this field in-process, so swapping the package on disk has no effect on a daemon
+that is **already running**: `anet daemon list` keeps printing "unknown". `anet daemon` has no
+`restart` subcommand; restart is two steps (`daemon start` delegates to `node start`, so
+stopping goes through `node` too):
+
+```bash
+anet node stop <name>
+anet daemon start <name>
+```
 
 🔴 **The age is not decoration.** An `unavailable` measured 5s ago and one measured three
 weeks ago are different things — the latter was quite possibly fixed long since, and the
