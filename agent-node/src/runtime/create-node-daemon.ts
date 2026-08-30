@@ -253,7 +253,7 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
         //   realpath 先在 sudo **之前**算好并存进变量 —— 否则 root 环境里 `command -v anet`
         //   可能解析到另一个（或找不到）二进制。
         //   本行 shell 已用 `bash -n`（rc=0）+ 实跑非 sudo 段验证过。
-        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null (needs root). No-root alternative to try first: only `anet daemon init|start|up` auto-declares the pin, so a daemon started via `anet node start` / pm2 / systemd never receives it — restart it with `anet daemon start <name>`.",
     );
   }
   // ① absolute — cross-platform. Was `startsWith("/")` which returned
