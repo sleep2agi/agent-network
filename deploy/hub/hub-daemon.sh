@@ -66,6 +66,15 @@ set -uo pipefail
 #   内容 = #1448 f1 门铃补偿(#1450) + #1451 opencode 回复解析(#1452) + #1286 对称收敛(#1453)
 #          + start_node stale-starting reaper(#1456) + send_desktop_message 诚实投递态(#1460)
 #   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准)
+# 2026-08-30: preview42 → preview43（跟随 PINNED_SERVER_VERSION；daemon 建节点门 + inbox 硬化）
+#   内容 = #1510 create_node 派发按 daemon 自报的 can_create_nodes 设闸(#1353 Fix①)
+#          + #1511 /api/host-supervisors 透出 can_create_nodes/blocked_reason(#1353 Fix②)
+#          + #1516 user_inbox.network_id 升 schema 级 NOT NULL(#1493)
+#   🔴 #1516 带一条 boot 期迁移：遇存量 network_id IS NULL 行会 **warn+skip**（列保持可空、
+#      hub 照常启动），不 abort boot。升级前可在旁路副本上跑
+#      `SELECT COUNT(*) FROM user_inbox WHERE network_id IS NULL`（预期 0；user_inbox 自
+#      preview41 才建表）。详见 deploy/hub/README.md 的 step 4。
+#   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准)
 # 2026-08-30: preview41 → preview42（跟随 PINNED_SERVER_VERSION；host.ip P bug）
 #   内容 = #1498 report_status 接受 host.ip=null —— 此前没有非回环 IPv4 的机器上
 #          agent-node 一启动就被 MCP -32602 打死（与 runtime 无关）
@@ -77,7 +86,7 @@ set -uo pipefail
 #   🔴 注意：上面的历史行只记到 preview37，而这一行改动前的值是 preview39 —— 
 #      preview37→39 那两跳没有留下记录。我不补写别人的历史（内容我不知道），
 #      在这里标出来，免得下一个人把这份历史当完整的读。
-RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview42"
+RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview43"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
