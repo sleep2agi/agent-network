@@ -22,7 +22,7 @@ export type DaemonCapabilityRow = {
 };
 
 export type CapabilityView =
-  /** hub 上根本没有这一格 —— 旧 daemon(preview.55 之前)不上报。 */
+  /** hub 上根本没有这一格 —— 旧 daemon(agent-node ≤ 2.5.0-preview.54)不上报。 */
   | { readonly kind: "never-reported"; readonly line: string }
   /** 报了 ready/blocked,且知道是多久以前测的。 */
   | { readonly kind: "ready" | "blocked"; readonly ageMs: number; readonly line: string; readonly fix?: CapabilityFix }
@@ -92,7 +92,7 @@ const FIX_BY_REASON: Record<string, CapabilityFix> = Object.freeze({
     command: null,
   },
   anet_bin_pin_unresolved: {
-    explain: "旧版 daemon(preview.40 及更早)只报这一个笼统原因。升级该机器的 agent-node 并重启 daemon 后才能拿到具体类别",
+    explain: "旧版 daemon(agent-node 2.5.0-preview.40 及更早)只报这一个笼统原因。升级该机器的 agent-node 并重启 daemon 后才能拿到具体类别",
     command: null,
   },
 });
@@ -145,8 +145,16 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
       return {
         kind: "ready-age-unknown",
         // 🔴 这句必须说清「不知道什么时候测的」**以及为什么**。
-        //    preview.67 及更早的 daemon 在开机时算一次就永久缓存 —— 也就是说
-        //    这个 ready 可能是几周前的事,而二进制早被换掉了。
+        //    **agent-node ≤ 2.5.0-preview.54** 的 daemon 在开机时算一次就永久缓存
+        //    —— 也就是说这个 ready 可能是几周前的事,而二进制早被换掉了。
+        //
+        // 🔴 这个版本号原先写的是「preview.67」,**指向一个不存在的版本**:
+        //    agent-node 已发布的最高 preview 是 2.5.0-preview.56(.67 是
+        //    **agent-network** 的号,两个包的序列被串了)。
+        //    实测边界:agent-node 2.5.0-preview.54 的产物里没有
+        //    `create_capability_observed_ms_ago`,.55 有。
+        //    **所以以后写代际边界一律带包名 + 完整版本号** ——
+        //    裸的 `preview.NN` 在一个有三个包各自独立编号的仓里,不指向任何东西。
         line: ("创建能力:可用\n" +
         "    ⚠ 不知道是什么时候测的 —— 该版本开机只算一次。重启它,或升级。"),
       };
