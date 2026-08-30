@@ -35,6 +35,7 @@ import {
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
+import { classifySessionStatus } from "../src/session-status-class";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
@@ -11843,12 +11844,12 @@ async function statusCommand() {
     const sessions = statusRes.sessions || [];
     const tasks = tasksRes.tasks || [];
 
-    const classifyStatus = (s: any) => {
-      const raw = String(s?.status || "").toLowerCase();
-      if (raw === "offline") return "offline";
-      if (["working", "blocked", "error", "waiting_input", "running", "busy"].includes(raw)) return "working";
-      return "idle";
-    };
+    // 🔴 #1548 —— 分类逻辑抽到 ../src/session-status-class.ts 并加了测试。
+    //    原先这里把 `blocked` / `error` 折进 `working`,于是运维看到「N working」
+    //    时,其中可能有几个是**卡住**或**出错**的。而 #1548 已经证明 `blocked`
+    //    是一个**没有出口**的状态(只有 report_completion 能把它拉回 idle),
+    //    所以一个 agent 可以永远停在那里而被报成「在干活」。
+    const classifyStatus = (s: any) => classifySessionStatus(s?.status);
     const summary = statusRes.summary || sessions.reduce((acc: any, s: any) => {
       acc[classifyStatus(s)]++;
       acc.total++;
@@ -11856,12 +11857,29 @@ async function statusCommand() {
     }, { idle: 0, working: 0, offline: 0, total: 0 });
     const idle = sessions.filter((s: any) => classifyStatus(s) === "idle");
     const working = sessions.filter((s: any) => classifyStatus(s) === "working");
+    const attention = sessions.filter((s: any) => classifyStatus(s) === "attention");
     const offline = sessions.filter((s: any) => classifyStatus(s) === "offline");
 
     console.log(`\n  CommHub: ${hub}`);
-    console.log(`  Agents: ${summary.idle || 0} idle, ${summary.working || 0} working, ${summary.offline || 0} offline`);
+    // 🔴 attention 单独一格。折进 working 会让「需要人看一眼」消失在一个看起来
+    //    正常的数字里 —— 这正是 #1548 那一族问题:两种不同的事渲染成同一个词。
+    const attnCount = summary.attention ?? attention.length;
+    console.log(`  Agents: ${summary.idle || 0} idle, ${summary.working || 0} working`
+      + (attnCount > 0 ? `, ${attnCount} needs attention` : "")
+      + `, ${summary.offline || 0} offline`);
     console.log(`  SSE:    ${sseCount === null ? "unknown" : `${sseCount} connected`}`);
     console.log(`  Tasks:  ${tasks.length} recent\n`);
+
+    if (attention.length > 0) {
+      console.log("  Needs attention (blocked / error — not progressing):");
+      for (const s of attention) {
+        console.log(`    ${String(s.alias).padEnd(16)} ${String(s.status || "").padEnd(8)} ${(s.task || "").slice(0, 48)}`);
+      }
+      // 🔴 状态是**自报**的:它只在 agent 显式上报时才变。一个 `blocked` 可能是
+      //    3 秒前报的,也可能是三周前报的 —— 这里不假装知道哪一种。
+      console.log("    (状态由 agent 自报,不含活性成分;要确认它还在不在,发一条任务试试)");
+      console.log();
+    }
 
     if (working.length > 0) {
       console.log("  Working:");
