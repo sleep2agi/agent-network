@@ -462,6 +462,11 @@ export interface GrokCopresenceRuntimeSession {
   readonly attachSocket: string;
   readonly isRunning: boolean;
   readonly tuiReady: boolean;
+  /** #1548 —— 这个 build 会不会自动起 Leader(`grokBuildAutoLeader`)。
+   *  暴露出来是为了让 liveness 的调用方**不必自己去查版本表** ——
+   *  查两遍就会有两份判据,而 #1548 正是"启动认为不该有 leader.sock、
+   *  liveness 认为必须有"这种自相矛盾造成的。 */
+  readonly autoLeader: boolean;
   readonly state: GrokCopresenceState;
   /** The model the next spawn will request; moves only via `switchModel`. */
   readonly model: string | undefined;
@@ -753,8 +758,13 @@ export const GROK_COPRESENCE_VERIFIED_BUILDS: ReadonlyMap<string, GrokVerifiedBu
   //        并在 reducedGuarantees 里逐条列出;这不是"放松断言",是**如实登记已失去的保证**。
   //   · `--leader` 在 help 里;`--no-memory` / `--no-auto-update` 与 Linux 一样是隐藏 flag
   //   · TUI 能起来:同机 `grok` 起 TUI 正常(Grok 4.6 / Grok Build 1.0.5)
-  //   · 🔴 grok 在 macOS 上是 leaderless —— 跑一次 grok 之后 ~/.grok/leader.sock 与
-  //        leader.lock 都没有被创建(Linux 上两者都在)。autoLeader 沿用 false。
+  //   · 🔴 grok **1.0.5** 是 leaderless —— 跑一次 grok 之后 ~/.grok/leader.sock 与
+  //        leader.lock 都没有被创建。autoLeader 沿用 false。
+  //     🔴 **分界线是版本,不是平台。** 这条原本写作「(Linux 上两者都在)」,
+  //        那句是 **0.2.93 时代在 Linux 上量的**,却写在这张**按版本键**的表旁边,
+  //        读起来像在讲平台。2026-08-30 在 Linux/DEV 上实测
+  //        `grok 1.0.5 (5115b46bc9) [stable]`:**leader.sock 同样不存在**(#1548)。
+  //        照平台去分支会分错 —— 要判就查 `grokBuildAutoLeader(version)`。
   ["grok 1.0.5 (5115b46bc909)", { autoLeader: false }],
   ["grok 1.0.5 (5115b46bc909) [stable]", { autoLeader: false }],
 ]);
@@ -1118,8 +1128,16 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     return this.tuiComposerReady;
   }
 
+  /** #1548 —— 这个 build 会不会自动起 Leader。
+   *  与 `settleLeader()` 用的是**同一个**判据(`grokBuildAutoLeader`),
+   *  不是第二份 —— 两处若各判一次,就会出现"启动认为不该有、liveness 认为必须有"
+   *  这种自相矛盾,而那正是 #1548 的成因。 */
+  get autoLeader(): boolean {
+    return grokBuildAutoLeader(this.opts.grokVersion);
+  }
+
   liveness(): GrokCopresenceLiveness {
-    return describeGrokCopresenceLiveness(this);
+    return describeGrokCopresenceLiveness(this, this.autoLeader);
   }
 
   get state(): GrokCopresenceState {
