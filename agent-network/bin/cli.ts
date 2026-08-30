@@ -939,9 +939,23 @@ async function startWindowsCodexCopresence(
     const tuiHealthDeadline = tuiHealthStart + TUI_HEALTH_MS;
     let tuiConnected = false;
     let tuiProbes = 0;
+    // 🔴 #1342 —— 记下**每次探测本身**花了多久。为什么这一个数字值得单独存:
+    //    五次采样里 `probes` 全都是 1,而 `waited` 是 6.5–9.4 秒。这两个数放在
+    //    一起,只能说明「循环只转了一圈」,分不出到底是
+    //      (a) 探测本身很慢(它每次新起一个 powershell,并在 do{…}while 里
+    //          反复枚举整张 Win32_Process),于是 25 秒预算里只跑得完一次;
+    //      (b) 还是 TUI 无论如何都在 ~7 秒退出,探多少次都一样。
+    //    这两者该查的地方完全相反 —— 前者查探测成本,后者查 TUI。
+    //    加一个数就能分辨,所以加。
+    let probeMsMax = 0;
+    let probeMsLast = 0;
     while (Date.now() < tuiHealthDeadline && tui.exitCode === null) {
       tuiProbes++;
-      if (probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)) {
+      const probeStart = Date.now();
+      const hit = probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port);
+      probeMsLast = Date.now() - probeStart;
+      if (probeMsLast > probeMsMax) probeMsMax = probeMsLast;
+      if (hit) {
         tuiConnected = true;
         break;
       }
@@ -949,7 +963,7 @@ async function startWindowsCodexCopresence(
     }
     if (!tuiConnected) {
       const waited = Date.now() - tuiHealthStart;
-      const looking = `pid=${tui.pid} birth=${tuiCreationDate} port=${port} probes=${tuiProbes} waited=${waited}ms`;
+      const looking = `pid=${tui.pid} birth=${tuiCreationDate} port=${port} probes=${tuiProbes} waited=${waited}ms probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`;
       if (tui.exitCode !== null) {
         throw new Error(
           `TUI second-client health failed: the launched Codex TUI exited (code=${tui.exitCode}) before it connected — ` +
