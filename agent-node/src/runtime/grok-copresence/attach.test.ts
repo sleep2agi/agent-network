@@ -48,6 +48,9 @@ describe("Grok co-presence local attach server", () => {
       // The first connection gets the keyboard; the handshake says so rather
       // than leaving the client to infer it from a later refusal.
       role: "terminal",
+      // #1548 —— 还没广播过任何 status,所以是 null。
+      // 🔴 null 的含义是「本会话还没广播过」,**不是**「状态坏了」。
+      status: null,
     });
     expect(server.clientAttached).toBe(true);
 
@@ -523,3 +526,94 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
     );
   });
 }
+
+/* #1548 —— `hello` 带 status 快照。
+ *
+ * 为什么要有:`status` 原本只在 `broadcastStatus()`(**状态变化时**)推送。
+ * 于是一个刚接进来的只读 `control` 客户端,**在下一次状态变化之前什么也收不到** ——
+ * 而「没收到」和「那一格是 false」在观察上**完全相同**。
+ * 诊断 #1548 时正是卡在这:`tuiReady` 只活在节点进程内存里,唯一出口是这条广播,
+ * 想读它就得**扰动一个活会话去逼出一次广播**。 */
+describe("#1548 hello 里的 status 快照", () => {
+  it("还没广播过 → status 为 null(而不是这个键不存在)", async () => {
+    const { socketPath } = temporarySocket();
+    const server = await startServer(socketPath, {});
+    const client = await connect(socketPath);
+    const hello: any = await client.frames.next();
+    expect(hello.type).toBe("hello");
+    // 🔴 断言的是「键在、值是 null」。若这个键干脆不出现,调用方就得靠
+    //    `"status" in hello` 去猜,而那正是我们要消除的那种猜。
+    expect("status" in hello).toBe(true);
+    expect(hello.status).toBeNull();
+    client.socket.destroy();
+    await server.close();
+  });
+
+  it("🔴 广播之后接进来的客户端,hello 直接带上那一份 —— 不必等下一次变化", async () => {
+    const { socketPath } = temporarySocket();
+    const server = await startServer(socketPath, {});
+    // 先来一个客户端,让广播有接收者(broadcastStatus 在无接收者时提前返回)
+    const first = await connect(socketPath);
+    await first.frames.next();                        // 它自己的 hello
+    server.broadcastStatus({ phase: "human_editing", tuiReady: true });
+    await first.frames.next();                        // 它收到的 status 推送
+
+    const second = await connect(socketPath);
+    const hello: any = await second.frames.next();
+    expect(hello.status).toEqual({ phase: "human_editing", tuiReady: true });
+
+    first.socket.destroy();
+    second.socket.destroy();
+    await server.close();
+  });
+
+  /* 🔴 分母自证:上一条如果只断言"拿到了非 null",一个恒返回某个固定对象的实现
+   * 也能过。这里换一份**不同**的 status 再接一个客户端,确认快照跟着变。 */
+  it("快照跟随最新一次广播,不是第一次那份", async () => {
+    const { socketPath } = temporarySocket();
+    const server = await startServer(socketPath, {});
+    const first = await connect(socketPath);
+    await first.frames.next();
+    server.broadcastStatus({ phase: "human_editing", tuiReady: true });
+    await first.frames.next();
+    server.broadcastStatus({ phase: "network_turn", tuiReady: false });
+    await first.frames.next();
+
+    const second = await connect(socketPath);
+    const hello: any = await second.frames.next();
+    expect(hello.status).toEqual({ phase: "network_turn", tuiReady: false });
+    expect(hello.status).not.toEqual({ phase: "human_editing", tuiReady: true });
+
+    first.socket.destroy();
+    second.socket.destroy();
+    await server.close();
+  });
+
+  /* 🔴 「从未广播」和「广播过一个 falsy 值」必须分得开 ——
+   * 否则这一格会以另一种形式重犯它要修的那个错。 */
+  it("广播过 falsy 值 ≠ 从未广播", async () => {
+    const { socketPath } = temporarySocket();
+    const server = await startServer(socketPath, {});
+    const first = await connect(socketPath);
+    await first.frames.next();
+    server.broadcastStatus(null);
+    await first.frames.next();
+
+    const second = await connect(socketPath);
+    const hello: any = await second.frames.next();
+    // 两种情况这里都是 null —— 所以再加一条:广播 0 时必须是 0,不是 null
+    expect(hello.status).toBeNull();
+
+    server.broadcastStatus(0);
+    await first.frames.next();
+    const third = await connect(socketPath);
+    const hello3: any = await third.frames.next();
+    expect(hello3.status).toBe(0);           // ← falsy,但**不是** null
+    expect(hello3.status).not.toBeNull();
+
+    first.socket.destroy();
+    second.socket.destroy();
+    third.socket.destroy();
+    await server.close();
+  });
+});

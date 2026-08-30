@@ -102,6 +102,18 @@ type ServerFrame =
     alias: string;
     sessionId: string;
     role?: ClientRole;
+    /** #1548 —— 连上时的**当前** status 快照。
+     *
+     * 🔴 在此之前 `status` 只在 `broadcastStatus()`(状态变化时)推送,而 `hello`
+     *    不带它。于是一个刚接进来的 `control` 客户端**在下一次状态变化之前什么也收不到**
+     *    —— 而「没收到」和「那一格是 false」在观察上**完全相同**。
+     *    诊断 #1548 时就卡在这:`tuiReady` 只活在节点进程内存里,唯一的出口是这条广播,
+     *    而想读它就得**扰动一个活会话去逼出一次广播**。
+     *
+     * 🔴 `null` 的含义是「**这个会话还没广播过任何 status**」,**不是**「状态是坏的」。
+     *    两者必须能分开,否则这一格会以另一种形式重犯它要修的那个错。
+     */
+    status?: unknown | null;
   }
   | { type: "output"; data: string; encoding: "base64" }
   | { type: "status"; status: unknown }
@@ -177,6 +189,9 @@ class AttachServer implements GrokCopresenceAttachServer {
    * one-shot in practice.
    */
   private readonly controlClients = new Set<ClientState>();
+  /** #1548 —— 最后一次 `broadcastStatus()` 的内容,用于给新连接补一份快照。
+   *  `undefined` = 本会话从未广播过(与「广播过一个 falsy 值」区分开)。 */
+  private lastBroadcastStatus: unknown | undefined = undefined;
   private identity: SocketIdentity | null = null;
   private started = false;
   private closing = false;
@@ -291,6 +306,11 @@ class AttachServer implements GrokCopresenceAttachServer {
       }
       return false;
     }
+    // #1548 —— 记在**送达之前**:这一份是"节点当前认为的状态",
+    // 与它这一刻有没有客户端无关。记在送达之后的话,
+    // 一次没有任何接收者的广播(上面 `!terminal && controls.length === 0` 已提前返回)
+    // 与一次送达失败的广播,会留下不同的快照 —— 而快照该反映节点,不该反映连接情况。
+    this.lastBroadcastStatus = status;
     let delivered = false;
     for (const recipient of [terminal, ...controls]) {
       if (recipient && this.sendActive(recipient, { type: "status", status })) delivered = true;
@@ -377,6 +397,8 @@ class AttachServer implements GrokCopresenceAttachServer {
       // 🔴 Named in the handshake so a caller learns it did not get the
       // keyboard, instead of discovering it when its first `input` is refused.
       role: client.role,
+      // #1548 —— 见类型定义处的说明:null 表示"本会话还没广播过",不是"状态坏"。
+      status: this.lastBroadcastStatus === undefined ? null : this.lastBroadcastStatus,
     })) {
       this.releaseDisconnected(client);
       return;
