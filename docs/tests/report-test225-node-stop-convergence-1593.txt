@@ -1,0 +1,14 @@
+PASS: test225 foreground startup race converged
+PASS: stale pid did not kill concurrent node
+PASS: surviving leader socket yields typed failure without collateral kill
+PASS: leader and attach sockets are independently authoritative
+PASS: lifecycle lock recovers dead identity and refuses corrupt receipt
+PASS: lifecycle lock distinguishes a missing receipt from a corrupt one
+PASS: single /proc snapshot treats exited process as gone without unverifiable race
+PASS: kill escalation is bounded and alias-owned
+PASS: stop intent rejects late start and releases alias only after completion
+PASS: birth unavailable fails closed and PID reuse is never signalled
+PASS: all three tmux resources are audited
+PASS: Windows uses creation identity and PM2 remains outside alias kill authority
+PASS: #1193 restart shares generation ownership and converges
+Summary: PASS

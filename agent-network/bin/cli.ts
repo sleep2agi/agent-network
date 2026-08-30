@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir, tmpdir } from "os";
@@ -6705,20 +6705,36 @@ function lifecycleOwnerPath(nodeId: string) { return join(nodesDir(), nodeId, ".
 function lifecycleLockPath(nodeId: string) { return join(nodesDir(), nodeId, ".lifecycle-lock"); }
 function lifecycleLockOwnerPath(nodeId: string) { return join(lifecycleLockPath(nodeId), "owner.json"); }
 
+function removeLifecycleLockTree(path: string) {
+  try {
+    if (lstatSync(path).isSymbolicLink()) {
+      let target: string | null = null;
+      try { target = realpathSync(path); } catch {}
+      rmSync(path, { force: true });
+      if (target) rmSync(target, { recursive: true, force: true });
+      return;
+    }
+  } catch {}
+  rmSync(path, { recursive: true, force: true });
+}
+
 async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>, operation = "lifecycle", generation?: string): Promise<T> {
   const lock = lifecycleLockPath(nodeId);
   const deadline = Date.now() + 5_000;
   let missingReceiptSince = 0;
   while (true) {
+    const claim = `${lock}.claim-${process.pid}-${randomUUID()}`;
     try {
-      mkdirSync(lock, { mode: 0o700 });
+      mkdirSync(claim, { mode: 0o700 });
       const birth = processBirth(process.pid);
-      if (!birth) { rmSync(lock, { recursive: true, force: true }); throw new Error("NODE_LIFECYCLE_BIRTH_UNAVAILABLE"); }
-      atomicWritePrivateJson(lifecycleLockOwnerPath(nodeId), { schema: 1, pid: process.pid, birth, operation, ...(generation ? { generation } : {}) });
+      if (!birth) { rmSync(claim, { recursive: true, force: true }); throw new Error("NODE_LIFECYCLE_BIRTH_UNAVAILABLE"); }
+      atomicWritePrivateJson(join(claim, "owner.json"), { schema: 1, pid: process.pid, birth, operation, ...(generation ? { generation } : {}) });
+      symlinkSync(claim, lock, "dir");
       break;
     }
     catch (e: any) {
-      if (e?.code !== "EEXIST") throw e;
+      try { rmSync(claim, { recursive: true, force: true }); } catch {}
+      if (e?.code !== "EEXIST" && e?.code !== "ENOTEMPTY") throw e;
       let owner: LifecycleLockOwner;
       try { owner = JSON.parse(readFileSync(lifecycleLockOwnerPath(nodeId), "utf-8")); }
       catch (readError: any) {
@@ -6769,7 +6785,7 @@ async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>, op
         if (claimedIdentity.kind === "unverifiable" || (claimedIdentity.kind === "live" && claimedIdentity.birth === claimedOwner.birth)) {
           throw new Error(`NODE_LIFECYCLE_LOCK_CLAIM_OWNER_LIVE: pid=${claimedOwner.pid}`);
         }
-        rmSync(claim, { recursive: true, force: true });
+        removeLifecycleLockTree(claim);
         continue;
       }
       if (current.kind === "unverifiable") throw new Error(`NODE_LIFECYCLE_LOCK_OWNER_UNVERIFIABLE: pid=${owner.pid}`);
@@ -6777,7 +6793,7 @@ async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>, op
       await new Promise(r => setTimeout(r, 25));
     }
   }
-  try { return await fn(); } finally { rmSync(lock, { recursive: true, force: true }); }
+  try { return await fn(); } finally { removeLifecycleLockTree(lock); }
 }
 
 function readLifecycleOwner(nodeId: string): LifecycleOwnerRecord | null {
