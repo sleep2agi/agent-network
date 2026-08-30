@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import re
+from html import unescape as html_unescape
 import subprocess
 import sys
 import html as _html
@@ -273,7 +274,19 @@ def run() -> int:
         # 「已经部署好的页」报成 behind main(2026-08-29 两个英文页实测假阳性)。
         text = _html.unescape(text)
         text = re.sub(r"\s+", " ", text)
-        if re.sub(r"\s+", " ", fp) in text:
+        # 🔴 渲染会改写指纹里的字符，比对前两边都要过同一次归一化，否则会报假红：
+        #   ① VitePress 把 `'` 渲染成 `&#39;`（`"` → `&quot;`，`&` → `&amp;`…），
+        #      所以任何**带引号**的源码行（SQL/JSON/命令行里到处都是）永远匹配不上；
+        #   ② 语法高亮把 token 拆进各自的 <span>，去标签后会多出空格
+        #      （`'system',` → `'system' ,`），所以标点前后也要归一。
+        #   实测：`actor TEXT NOT NULL DEFAULT 'system', -- …` 这一行，
+        #   **刚构建出来的本地产物**里也匹配不上 —— 也就是说这条红与线上新旧无关，
+        #   是判据自身的洞。会让人以为"站点没部署"，然后去重复部署（而那不会有任何效果）。
+        text = html_unescape(text)
+        text = re.sub(r"\s*([,;:])\s*", r"\1", text)
+        fp_norm = re.sub(r"\s+", " ", html_unescape(fp))
+        fp_norm = re.sub(r"\s*([,;:])\s*", r"\1", fp_norm)
+        if fp_norm in text:
             print(f"  ok   {rel}  →  {md_to_url(rel)}   [{source}]")
         else:
             print(f"  MISS {rel}  →  {md_to_url(rel)}   [{source}]")
