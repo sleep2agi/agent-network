@@ -190,9 +190,15 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #      所以理由写在上面:换掉的 4 处**全部指向错误代码**,用 4 个假锚换 2 个
 #      drift-proof 的符号锚。`broken_pins` 与 origin/main 持平(都是 1,即那条基线)。
 #
+# 2026-08-30:files 127 → 129。新增 Codex TUI 安全重启 runbook(中英各一份):
+#     docs-site/docs/guide/codex-tui-safe-restart.md
+#     docs-site/docs/en/guide/codex-tui-safe-restart.md
+# 仍然**只有 `files` 变了**,`uniq` 仍 9、`occ` 仍 24(两页都没有 #L 源码行号 pin)。
+# CI 上先红("预期扫 127 …,实际 129")才来抬分母,顺序是对的。
+#
 # 🔴 下面三条是 `-eq`(精确相等),**不是下界** —— job 名里的 "floor" 会误导。
 #    新增/删除文档都会让 files 变,必须回来按实际值更新,并写清变的是哪个数、为什么。
-[[ "$files" -eq 127 ]] || fail "预期扫 127 个文档文件(= git ls-files 的结果),实际 $files"
+[[ "$files" -eq 129 ]] || fail "预期扫 129 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 9  ]] || fail "预期 9 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 24 ]] || fail "预期 24 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
