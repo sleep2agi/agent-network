@@ -280,7 +280,9 @@ absent it stays quiet: the node's own startup error is more specific.)
 
 🔴 **Upgrading alone changes nothing — restart it.** The daemon is a **long-lived process**
 and computes this field in-process, so swapping the package on disk has no effect on a daemon
-that is **already running**: `anet daemon list` keeps printing "unknown". ```bash
+that is **already running**: `anet daemon list` keeps printing "unknown".
+
+```bash
 anet daemon restart <name>
 ```
 
