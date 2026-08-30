@@ -555,5 +555,22 @@ if [[ $FAILED -eq 0 ]]; then
   exit 0
 else
   fail "$FAILED test(s) failed in ${ELAPSED}s"
+  # 🔴 #1627 —— 把「本次跑得慢」这件事放在**失败旁边**,而不是只放在上面那条
+  #    ::warning:: 里。理由是实测出来的:2026-08-31 一天里有三批红,全部是
+  #    「用绝对超时的测试撞上一台慢 runner」,而它们的报错读起来和真缺陷一模一样:
+  #      · `[20832.89ms]` 下一行才是 `^ this test timed out after 20000ms.`
+  #      · `(fail) (unnamed)` 下一行才是 `^ a beforeEach/afterEach hook timed out`
+  #    ——套件名(例:`rest-shape-golden`)是唯一看起来有信息的东西,于是所有人
+  #    先去查 REST 投影。而真正的线索是**这一跑的总耗时**,它当时在几千行之外。
+  if [[ "$L1_SOFT_BUDGET_S" != "0" && $ELAPSED -gt $L1_SOFT_BUDGET_S ]]; then
+    echo "" >&2
+    echo "🔴 本次 L1 用了 ${ELAPSED}s,超过软预算 ${L1_SOFT_BUDGET_S}s —— 判定上面这些失败之前先读这段。" >&2
+    echo "   在偏慢的 runner 上,**用绝对超时的测试**(bun 默认 20000ms、以及" >&2
+    echo "   beforeEach/afterEach 钩子超时)会先红,而报错里点名的是套件名,不是超时。" >&2
+    echo "   先重跑一次。" >&2
+    echo "   ⚠ 若重跑**仍红**:那还不足以判定为真缺陷 —— 再比一次两次 attempt 的" >&2
+    echo "   L1 总耗时和 main 的样本区间;两次都落在慢区间说明重跑并没有换掉那个变量。" >&2
+    echo "   见 #1627。" >&2
+  fi
   exit 1
 fi
