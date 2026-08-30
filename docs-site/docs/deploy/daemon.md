@@ -199,6 +199,20 @@ anet daemon up
 `[create-node] spawned child '<name>' pid=…` 和 `+5000ms capability check OK`,
 且新节点自己注册回 hub。**看不到这两行就是没配对**——它不会重试。
 
+**已经在跑的 daemon 没配对怎么办 —— 先试不需要 root 的那条。**
+只有 `anet daemon init` / `start` / `up` 会自动声明 pin（它们内部调用
+`prepareDaemonAnetBin()`）。用 `anet node start`、pm2、systemd 或手工拼命令起的
+daemon **永远拿不到**，而它照样注册、在线、心跳正常 —— 失败只在建节点那一刻出现。
+
+```bash
+anet node stop <name> && anet daemon start <name>    # 不需要 root
+```
+
+这条不保证成功（binary 若 group/other 可写、不可执行，或不是 anet 包的 bin，
+`anet daemon start` 会自己拒绝并告诉你原因），但它成本低得多，**值得在动 sudo 之前先试**。
+仍然不行再写 `/etc/anet-daemon/path.conf`（生产信任根，见上表）。
+
+
 ### 4. 确认它**进程**起来了
 
 ```bash

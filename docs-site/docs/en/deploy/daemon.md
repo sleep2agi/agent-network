@@ -212,6 +212,22 @@ directly; do not work around it by editing untracked server startup files.
 node must register itself back to the hub. **Without those two lines it is not wired up** —
 it will not retry.
 
+**An already-running daemon that is not wired up — try the no-root path first.**
+Only `anet daemon init` / `start` / `up` auto-declare the pin (they call
+`prepareDaemonAnetBin()` internally). A daemon started via `anet node start`, pm2,
+systemd, or a hand-assembled command **never receives it** — yet it still registers,
+stays online, and heartbeats normally. The failure only surfaces when you create a node.
+
+```bash
+anet node stop <name> && anet daemon start <name>    # no root required
+```
+
+This is not guaranteed to work (`anet daemon start` refuses, and tells you why, if the
+binary is group/other-writable, not executable, or not an anet package bin), but it costs
+far less — **try it before reaching for sudo**. If it still fails, write
+`/etc/anet-daemon/path.conf` (the production trust root, see the table above).
+
+
 ### 4. Confirm the **process** came up
 
 ```bash
