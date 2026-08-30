@@ -56,6 +56,7 @@ import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 import { createProductionSideThreadTransport } from "./side-thread-production.js";
+import { parseHubTimestamp } from "./hub-timestamp";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -1002,9 +1003,13 @@ return Bun.serve({
       if (!license) return withCors(req, Response.json({ ok: true, status: "no_license" }));
       const now = new Date().toISOString().replace("T", " ").slice(0, 19);
       const expired = license.expires_at && license.expires_at < now;
-      const daysLeft = license.expires_at
-        ? Math.max(0, Math.ceil((new Date(license.expires_at).getTime() - Date.now()) / 86400000))
-        : null;
+      // #1650 — licenses.expires_at 是 TEXT(datetime('now') 家族),UTC 但不带时区
+      //   标记;`new Date()` 会按本机时区解析,边界上差一天。parse 失败时返回 null
+      //   而不是 NaN —— JSON.stringify(NaN) 本来也序列化成 null,线上字节不变。
+      const expiresMs = parseHubTimestamp(license.expires_at);
+      const daysLeft = expiresMs === null
+        ? null
+        : Math.max(0, Math.ceil((expiresMs - Date.now()) / 86400000));
       return withCors(req, Response.json({
         ok: true,
         license: { type: license.type, expires_at: license.expires_at, days_left: daysLeft, expired },
