@@ -12,11 +12,11 @@ import {
   type CreateCapabilityLogState,
 } from "./daemon-create-capability.js";
 
-const READY: AnetBinProbeResult = { state: "ready", abs: "/home/vansin/.nvm/versions/node/v24.19.0/lib/node_modules/@sleep2agi/agent-network/dist/bin/cli.js" };
+const READY: AnetBinProbeResult = { state: "ready", abs: "/home/user/.nvm/versions/node/v24/lib/node_modules/@sleep2agi/agent-network/dist/bin/cli.js" };
 const BLOCKED: AnetBinProbeResult = {
   state: "blocked",
   code: "anet_bin_permission",
-  detail: "anet_bin_unsafe_path: group/other-writable. Fix: chmod go-w /home/vansin/.nvm/versions/node/v24.19.0/lib/node_modules/@sleep2agi/agent-network/dist/bin/anet.cjs",
+  detail: "anet_bin_unsafe_path: group/other-writable. Fix: chmod go-w /home/user/.nvm/versions/node/v24/lib/node_modules/@sleep2agi/agent-network/dist/bin/anet.cjs",
 };
 
 function harness(probeResults: AnetBinProbeResult[], opts: { role?: unknown; times?: number[] } = {}) {
@@ -81,9 +81,16 @@ describe("#1545 evaluateCreateCapability —— detail 不得离开本机", () =
     const blob = JSON.stringify(h.run());
     expect(blob).not.toContain("/");
     expect(blob).not.toContain("chmod");
-    expect(blob).not.toContain("vansin");
-    // 正控:detail 本身确实含路径 —— 证明上面三条不是恒真
-    expect(BLOCKED.state === "blocked" && BLOCKED.detail).toContain("/");
+    // 🔴 断言的是**夹具里真实存在的那些片段**。此前这里写的是 not.toContain("vansin"),
+    //    而夹具改成占位符 /home/user/ 之后那条就恒真了 ——
+    //    一条"永远成立"的泄露断言,和"没有泄露"长得一模一样。
+    expect(blob).not.toContain("node_modules");
+    expect(blob).not.toContain(".nvm");
+    // 正控:上面四条不是恒真 —— detail 里这四样确实都在
+    const detail = BLOCKED.state === "blocked" ? BLOCKED.detail : "";
+    for (const frag of ["/", "chmod", "node_modules", ".nvm"]) {
+      expect(detail).toContain(frag);
+    }
   });
 
   test("detail 仍然进本机日志(信息没有被丢掉,只是不上网)", () => {
