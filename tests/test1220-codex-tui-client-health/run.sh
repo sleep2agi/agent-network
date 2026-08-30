@@ -119,9 +119,18 @@ expect_red bridge-identity bun test agent-network/src/codex-tui-client-health.te
 cp /tmp/test1220-health.ts agent-network/src/codex-tui-client-health.ts
 
 echo "L2d witnessed-red: Windows PID attribution cannot be skipped"
+# 🔴 2026-08-31:锚点随 #1342 的诊断改动挪了位置。原来那一行是
+#    `if (probeWindowsOwnedLoopbackConnection(...)) {`;为了给失败诊断记下
+#    **探测本身的耗时**,它被拆成 `const hit = probe(...)` + `if (hit)`。
+#    变异的**语义没变**:把那次探测换成一个不做 PID 归属校验的廉价判断,
+#    于是 windows-codex-copresence.test.ts 里那条按源码文本钉顺序的断言
+#    (它 indexOf 的正是 `probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)`)
+#    找不到该子串 ⇒ 红。
+#    ⚠ 这道变异在锚点找不到时会 `mutation anchor count=0` **大声报错**而不是
+#    静默跳过 —— 那正是它这次抓住我的方式。改 cli.ts 里这一段之前先看这里。
 bun /mutate.ts agent-network/bin/cli.ts \
-  'if (probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)) {' \
-  'if (tui.pid) {'
+  'const hit = probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port);' \
+  'const hit = !!tui.pid;'
 expect_red windows-pid-attribution bun test agent-network/src/windows-codex-copresence.test.ts
 cp /tmp/test1220-cli.ts agent-network/bin/cli.ts
 cp agent-network/src/windows-codex-copresence.ts /tmp/test1220-windows.ts
