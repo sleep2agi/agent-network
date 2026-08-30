@@ -53,7 +53,9 @@ cat > "$BIN/docker" <<'STUB'
 printf 'S %s %s\n' "$(date +%s%N)" "$$" >> "$T823_EV"
 sleep 1.2
 printf 'E %s %s\n' "$(date +%s%N)" "$$" >> "$T823_EV"
-exit 0
+# #1599 —— 让桩能按需失败。qa.sh 的「失败套件也要有 rc」那条断言需要一个
+# 真的非零 docker run,而不是一个逻辑副本。
+exit "${T823_RUN_RC:-0}"
 STUB
 chmod +x "$BIN/docker"
 
@@ -118,6 +120,33 @@ IFS='|' read -r p eff warned <<< "$(run_case cap2 2)"
 say "- cap=2      峰值=$p 生效值=$eff 告警=$warned"
 check cap2 "$eff" 2 "生效上限"
 [[ "$p" -le 2 && "$p" -ge 1 ]] && say "  ok   cap2: 峰值 $p ≤ 2" || { say "  FAIL cap2: 峰值 $p 超过上限 2"; fails=$((fails+1)); }
+
+# ── #1599 —— 失败的套件必须也能报出 rc ────────────────────────────────
+#
+# 🔴 缺陷:qa.sh 第 17 行是 `set -euo pipefail`,而它原来写的是
+#        dockerrun "docker run --rm anet-$t" > … 2>&1
+#        _rc=$?
+#    `docker run` 一旦非零,**子 shell 在第一行就被 set -e 打死** ——
+#    `_rc=$?`、TSV 落盘、`· L1 done … rc=%s` 一行都不会执行。
+#    于是 `rc=%s` 这个占位符**只在 rc=0 时才打得出来**:它只在不需要它的时候工作。
+#    实测(run 33301710195):67 行 `L1 done` **rc 全是 0**,而真正失败的那个套件
+#    **一行都没有**。
+#
+# 两向:先证明失败时能拿到非零 rc,再证明成功时仍是 0(否则一个恒打 rc=1
+# 的实现也能过第一条)。
+say ""
+say "## #1599 失败套件的 rc"
+
+T823_RUN_RC=7 run_case failrc 2 >/dev/null
+_fail_out=/tmp/t823-failrc.log
+_rc_seen=$(sed -n 's/.*· L1 done .* rc=\([0-9][0-9]*\).*/\1/p' "$_fail_out" | sort -u | tr '\n' ',')
+say "- docker run 恒返回 7 时,打印出的 rc 集合 = ${_rc_seen:-（一个 L1 done 都没有）}"
+check failrc_nonzero "$_rc_seen" "7," "失败套件必须打出非零 rc"
+
+_ok_out=/tmp/t823-cap2.log
+_rc_ok=$(sed -n 's/.*· L1 done .* rc=\([0-9][0-9]*\).*/\1/p' "$_ok_out" | sort -u | tr '\n' ',')
+say "- 正常情况下打印出的 rc 集合 = ${_rc_ok:-（无）}"
+check failrc_zero "$_rc_ok" "0," "成功套件仍然是 0(否则恒非零的实现也能过上一条)"
 
 IFS='|' read -r p eff warned <<< "$(run_case bad two)"
 say "- 非法值 two  峰值=$p 生效值=$eff 告警=$warned"
