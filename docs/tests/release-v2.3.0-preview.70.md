@@ -31,6 +31,33 @@ npm view @sleep2agi/agent-network@2.3.0-preview.69 exports
 `doc-symbol-pins` 支持字面量锚并因此捞出一处 85 行的真实漂移（#1566）、
 `check-docs-site-drift` 不再把代码围栏里的行当指纹（#1552）。
 
+## Install
+
+新装（首次使用）：
+
+```bash
+npm i -g @sleep2agi/agent-network@2.3.0-preview.70
+anet --version
+```
+
+## Upgrade
+
+已经装过的：
+
+```bash
+npm i -g @sleep2agi/agent-network@2.3.0-preview.70
+anet --version        # 应显示 2.3.0-preview.70
+```
+
+🔴 **升级完请顺手核一条**，因为这一版存在的全部理由就是那个子路径导出：
+
+```bash
+npm view @sleep2agi/agent-network@2.3.0-preview.70 exports
+# 期望含 "./daemon-capability-display"
+```
+
+`.69` 正是「发布成功、但要的东西不在里面」—— 它的 `exports` 只有 `"."`。
+
 ## 发布方式
 
 `release-gate (v0)` workflow_dispatch，`package=agent-network`、
