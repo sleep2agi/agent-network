@@ -967,6 +967,16 @@ stop_node_checked() {
   if ! anet node stop "$alias" >"$output" 2>&1; then
     fail_with_private_log "node stop failed for $label" "$output"
   fi
+  # 🔴 #1422 —— 把「这次 stop 顺手回收了一个孤儿 socket」记进**报告**。
+  #    没有这一格,那个修复就是一条**没人看得见的成功路径**:
+  #    产品那行走 `anet node stop` 的 stdout,而这里 `>"$output" 2>&1` 把
+  #    stdout+stderr 一起收进 600 私有日志,cleanup 又把它删掉 —— CI 上无迹可寻。
+  #    (所以把产品那行改成 stderr 是没用的,两个都被这条重定向吃掉。)
+  #    报告会被 upload-artifact 传出去,是唯一活得下来的通道。
+  #    只记**事实**不记路径:路径含 $HOME,不进报告。
+  if grep -Fq "reclaimed stale socket:" "$output" 2>/dev/null; then
+    log "diagnostic: node stop 回收了一个孤儿 socket 路径名($label)—— 属主已证死且 /proc/net/unix 无监听者。这说明 agent-node 侧的拆卸链这次没跑完就被 SIGKILL 了(预算错配,见 #1422)。"
+  fi
   scan_fixed_file /tmp/test225-markers "$output" \
     || fail "node stop output exposed a synthetic credential marker for $label"
   scan_fixed_file /tmp/test225-live-credentials "$output" \
