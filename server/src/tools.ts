@@ -2487,9 +2487,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           ],
         );
       });
-      // #1459 — pushUserEvent 在没有订阅者时静默 return，而这个工具既不写
-      // inbox、也没有任何 user 级回读路径（/api/messages 只 SELECT FROM inbox）。
-      // 也就是说用户 dashboard 关着的时候这条消息就永久没了。
+      // #1459 / #1563 — pushUserEvent 在没有订阅者时静默 return。
+      // 🔴 这段注释原先写「本工具既不写 inbox、也没有 user 级回读路径 ⇒ dashboard
+      //    关着时消息永久没了」。**那半句已经不成立** —— 上面 20 行就在
+      //    `INSERT INTO user_inbox`，且 `/api/messages?scope=user` 能回读
+      //    （desktop-message-seam.test.ts 有真实 send → 真实 GET 的端到端断言）。
+      //    留着它会把 debug 未读数的人直接带向错误的一层。
       //
       // 这里先把**丢失变可见**：`ok` 仍表示「请求被接受、审计已落库」，
       // 新增 `delivered` 表示「此刻真的有人收到」。判据取自订阅者注册表，
