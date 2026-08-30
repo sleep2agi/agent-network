@@ -77,7 +77,24 @@ export function probeWindowsOwnedLoopbackConnection(
       `$before=try{[Diagnostics.Process]::GetProcessById(${rootPid}).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}`,
       "if($before-ne$birth){'false';exit 0}",
       `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
-      "do{$n=0;Get-CimInstance Win32_Process|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
+      // 🔴 #1342 —— 整张进程表**只枚举一次**,提到闭包循环之外。
+      //
+      //    原先 `Get-CimInstance Win32_Process` 写在 `do{…}while` **里面**,
+      //    于是每一轮都重新枚举一次整张进程表(至少 2 轮:一轮找到子孙、
+      //    一轮确认不再增长)。这是这次探测的主要成本。
+      //
+      //    实测(2026-08-31,main @ 82820594 的一次真实失败,由 #1628 加的
+      //    `probeMs` 量到):**单次探测 9963ms,占 `waited=10363ms` 的 96%**,
+      //    而那一跑的 job 本身只用了 106 秒 —— **不是机器慢,是这次调用本来就慢**。
+      //    按 ~10 秒/次,`TUI_HEALTH_MS = 25_000` 实际只够 2 次多一点的探测,
+      //    而调用方按 400ms 间隔写的循环期望的是几十次。
+      //
+      //    ⚠️ 语义上有一处**有意的**改变:原先每轮重读进程表,因此循环期间
+      //    **新产生**的子孙会被看见;现在用的是一份快照。对这个用途这是更好的
+      //    性质 —— 它是一次**归属判定**,一份一致的快照比跨轮拼接的视图更难被
+      //    时序戏弄(root 的身份本来就由前后两次 birth 校验夹住)。
+      "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
+      "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
       `$hit=Get-NetTCPConnection -State Established -RemoteAddress 127.0.0.1 -RemotePort ${port} -ErrorAction SilentlyContinue|?{$ids.Contains([int]$_.OwningProcess)}`,
       `$after=try{[Diagnostics.Process]::GetProcessById(${rootPid}).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}`,
       "if($hit-and$after-eq$birth){'true'}else{'false'}",
