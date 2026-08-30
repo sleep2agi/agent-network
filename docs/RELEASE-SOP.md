@@ -471,6 +471,44 @@ tar -xzf *.tgz && node -e '
 `2.3.0-preview.69`，npm 上也是 `2.3.0-preview.69` —— **两个数字逐字相同、内容不同**。
 只比版本号会得出「已经发过了」。**判据必须落在产物内容上。**
 
+### 🔴 想"在产物里 grep 我这次的改动"之前：先看它是不是**混淆过**的
+
+判据落在产物内容上之后，下一个陷阱是**在哪份产物上落**。`agent-network` 的 build 会对
+三个产物跑 `javascript-obfuscator --string-array-encoding base64`：
+
+| 产物 | 混淆 | 能不能裸 grep 字符串 |
+|---|---|---|
+| `dist/bin/cli.js` | **是** | ❌ **不能** |
+| `dist/src/client.js` | **是** | ❌ |
+| `dist/src/node-server.js` | **是** | ❌ |
+| `dist/src/daemon-capability-display.js` | 否（要在浏览器里被 dashboard import） | ✅ |
+| `@sleep2agi/agent-node` 的 `dist/cli.js` | 否（只 `--minify`） | ✅ |
+
+**两个包不一样，判据不能互抄。** `agent-node@2.5.0-preview.56` 的验收用
+`grep dist/cli.js` 是对的；同一招用在 `agent-network` 的 `cli.js` 上**恒 0**。
+
+🔴 **而"恒 0"长得和"这个改动没发出去"一模一样。** 2026-08-30 实测：我去核
+`.73` 里有没有某个新增的启动预检，`grep dist/bin/cli.js` 五条文案**全 0**，
+正控 `host_supervisor` 却 `=1` —— 看起来像"功能没进包"。
+**那个正控站错了边**：它是**属性名**（不进字符串表），而中文文案是**字符串字面量**（进）。
+换一个我确知存在的中文串（另一处守卫的文案）再测，同样 raw=0、base64 也=0
+⇒ **方法本身检测不出已知存在的串**，先前那五个 0 什么都不证明。
+
+**所以：要核"某个改动在不在这一版里"，别 grep 混淆产物，用下面两条之一。**
+
+```bash
+# A. 祖先关系（最省事，且不依赖读产物）——带反向对照，证明判据不是恒真
+BUMP=$(git log origin/main --oneline --grep="<本次版本号>" -1 | cut -d' ' -f1)
+git merge-base --is-ancestor <你那个功能的提交> "$BUMP" && echo "在构建源里"
+git merge-base --is-ancestor <一个该版之后才合的提交> "$BUMP"   && echo "⚠️ 判据恒真,无效" || echo "✅ 判据能分辨"
+
+# B. 落在**没被混淆**的那份产物上（如果你的改动正好在里面）
+grep -c '<你的串>' package/dist/src/daemon-capability-display.js
+```
+
+**A 的反向对照那一步不能省** —— 没有它，`--is-ancestor` 全绿也可能只是因为你挑的两个
+提交都很老。
+
 ## 2.6 发版之后还有两件事没做完
 
 **① 文档里的版本号。** 包发到 npm ≠ 用户会装到它。上手指南若仍写着旧版本，
