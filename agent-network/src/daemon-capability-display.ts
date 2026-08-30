@@ -92,7 +92,7 @@ const FIX_BY_REASON: Record<string, CapabilityFix> = Object.freeze({
     command: null,
   },
   anet_bin_pin_unresolved: {
-    explain: "旧版 daemon(preview.40 及更早)只报这一个笼统原因。升级该机器的 agent-node 后才能拿到具体类别",
+    explain: "旧版 daemon(preview.40 及更早)只报这一个笼统原因。升级该机器的 agent-node 并重启 daemon 后才能拿到具体类别",
     command: null,
   },
 });
@@ -128,7 +128,7 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
     return {
       kind: "never-reported",
       line: ("创建能力:未知 —— 这台 daemon 没报过这一格。\n" +
-        "    (agent-node 版本早于 preview.55;升级它才能看到)"),
+        "    (agent-node 版本早于 preview.55;升级后必须重启 daemon 才生效)"),
     };
   }
 
