@@ -32,6 +32,34 @@ CommHub Server registers **50** MCP Tools, all called through `POST /mcp` (Strea
 |------|------|
 | `send_desktop_message` | Write a pushable message into a desktop user's inbox |
 
+::: tip send_desktop_message — the recipient is a **user identity**, not a node alias
+This is the one thing that is easy to get wrong, and it is the fundamental difference
+from `send_task`:
+
+- `send_task(alias=…)` goes to a **session/node** (something you can look up in the roster);
+- `send_desktop_message(to_user_id=… | to_username=…)` goes to a **logged-in user**, and is
+  pushed to their currently active Desktop / web clients.
+
+**A logged-in user does not necessarily have a corresponding session alias.** Passing an alias
+as the recipient — or the reverse — delivers to the wrong party, and **both calls return
+success**, because each argument is valid under its own meaning.
+
+```jsonc
+// Minimal call: supply either to_user_id or to_username
+{
+  "to_username": "alice",          // or "to_user_id": "u_9f2c1b7ae4d0"
+  "title": "Build finished",       // optional, <=200
+  "message": "v0.9.0-preview.43 is published to npm.",   // required, 1-10000
+  "severity": "success",           // info | success | warning | error, default info
+  "kind": "agent_message"          // default agent_message; clients use it to categorise
+}
+```
+
+Supply **at least one** of `to_user_id` / `to_username`; if both are given they are checked
+against each other and a mismatch is rejected. You normally do not pass `network_id`
+(single-network user tokens auto-resolve; an `ntok` stays bound to its own network).
+:::
+
 **SkillHub** · 4
 
 | Tool | What it does |
