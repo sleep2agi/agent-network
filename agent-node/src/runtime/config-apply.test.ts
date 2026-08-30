@@ -706,7 +706,7 @@ describe("#1353 create_nodes_blocked_reason —— 四类而不是一类", () =>
 
 /* #1545 —— 「能不能」旁边必须带上「**这是什么时候测的**」。
  *
- * 病灶:preview.67 及更早的 daemon 用 `_createCapCache` 在开机时算一次就永久缓存。
+ * 病灶:**agent-node ≤ 2.5.0-preview.54** 的 daemon 用 `_createCapCache` 在开机时算一次就永久缓存。
  * 开机好、之后二进制被 `anet upgrade` 换掉或被 chmod ⇒ 它**永远上报 ready**,
  * 而 create 每次都失败。在 hub 上,那条记录和一条 3 秒前刚测的 ready
  * **在 last_seen_at 上完全一样** —— 心跳是新的,那一格不是。 */
