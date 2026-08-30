@@ -546,8 +546,10 @@ workflow 优雅跳过），main 改了文档不会自动上线。⇒ **一旦 to
 
 ```bash
 # 不要 unpublish（npm 24h 之后禁 unpublish 且影响信誉）
-# 改用 dist-tag 把 latest 指回上一稳定版本：
-npm dist-tag add @sleep2agi/<pkg>@<old-stable> latest
+# 改用 dist-tag 把 latest 指回上一稳定版本 —— 同样走 workflow，不在本机敲：
+gh workflow run promote-latest.yml \
+  -f package=<pkg> -f version=<old-stable> \
+  -f must_contain='<只有 old-stable 才有的串>' -f ack=true --ref main
 # 然后立刻发一个修复版 preview，重走完整 SOP
 ```
 

@@ -76,10 +76,26 @@ Every PR to `main` runs [`bash scripts/qa.sh`](./scripts/qa.sh) (L0 unit + L1 Do
 1. Update version in each affected `package.json` (use `x.y.z-preview.N` for pre-releases)
 2. Update `docs-site/docs/changelog.md`
 3. Tag: `git tag vX.Y.Z`
-4. **`npm publish --tag preview`** first (release-preview-first policy since 2026-05-11 — avoid pushing bugs to all `@latest` users)
-5. After manual smoke test, promote: `npm dist-tag add @sleep2agi/<pkg>@x.y.z latest`
+4. **Publish to the preview channel via GitHub Actions** (release-preview-first policy since 2026-05-11 — avoid pushing bugs to all `@latest` users):
 
-Note: no CI auto-publish workflow yet (`e2e-docker.yml` runs Docker E2E on PRs, `qa.yml` runs `bash scripts/qa.sh` as report-only PR gate); all `npm publish` is manual by a maintainer.
+   ```bash
+   gh workflow run release.yml -f package=<pkg> -f version=<x.y.z-preview.N> -f publish=true --ref main
+   ```
+
+5. After a real-environment smoke test (≥30 min) **and an explicit owner/lead ACK**, promote:
+
+   ```bash
+   gh workflow run promote-latest.yml -f package=<pkg> -f version=<x.y.z-preview.N> \
+     -f must_contain='<a string only that version contains>' -f ack=true --ref main
+   ```
+
+🔴 **Do not publish from a local machine.** No `npm publish`, no `npm dist-tag add`. This rule
+was set on 2026-08-27 after a local `npm publish` that omitted `--tag preview` overwrote the
+`latest` tag. Releases go through Actions, and only from `main`.
+
+Note: `release.yml` has a `publish (preview only)` job that runs **only** when four gates all
+pass; if any gate is red the publish job is skipped, so a half-broken build never reaches npm.
+A local publish has none of that.
 
 ## Where to ask
 
