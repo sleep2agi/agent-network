@@ -37,6 +37,7 @@ import {
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
 import { formatOfflineAges, summarizeOfflineAges } from "../src/offline-age";
+import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
@@ -15914,9 +15915,15 @@ async function doctorCommand() {
   }
 
   // 4. Dependencies
-  try { execSync("claude --version", { stdio: "pipe" }); check("Claude Code CLI", true); } catch { warning("Claude Code CLI", "not found (needed for claude-code-cli runtime)"); }
-  try { execSync("codex --version", { stdio: "pipe" }); check("Codex CLI", true); } catch { warning("Codex CLI", "not found (needed for codex-sdk runtime)"); }
-  try { execSync("bun --version", { stdio: "pipe" }); check("Bun runtime", true); } catch { warning("Bun", "not found (needed for commhub-server)"); }
+  // 🔴 #1645 —— 原先这三行只检查「在不在」,一个**装着但太旧**的 CLI 会拿到 ✅。
+  //    实测:`codex-cli 0.149.1` 解不动上游 models 响应(`unknown variant \`max\``),
+  //    rmcp worker 致命退出,用户看到的是 300s 超时 —— 而 doctor 说一切正常。
+  //    这里把实际版本摆出来。**不做最低版本判定**:够不够由上游返回什么决定,
+  //    不是我们能钉死的常量,猜一个下限会在别人升级后变成误报。
+  const cliVer = (cmd: string) => formatCliVersion(String(execSync(cmd, { stdio: "pipe" })));
+  try { check("Claude Code CLI", true, cliVer("claude --version")); } catch { warning("Claude Code CLI", "not found (needed for claude-code-cli runtime)"); }
+  try { check("Codex CLI", true, cliVer("codex --version")); } catch { warning("Codex CLI", "not found (needed for codex-sdk runtime)"); }
+  try { check("Bun runtime", true, cliVer("bun --version")); } catch { warning("Bun", "not found (needed for commhub-server)"); }
 
   // 5. .mcp.json
   const mcpPath = join(process.cwd(), ".mcp.json");
