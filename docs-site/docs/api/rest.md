@@ -794,7 +794,8 @@ curl "http://localhost:9200/api/host-supervisors" \
         "cpu_cores": 8,
         "mem_gb": 16,
         "ip_internal": "10.x.x.x"
-      }
+      },
+      "can_create_nodes": true
     }
   ],
   "count": 1
@@ -802,6 +803,9 @@ curl "http://localhost:9200/api/host-supervisors" \
 ```
 
 🔴 **`host_telemetry` 按角色遮蔽**：所有人都能看到 `alert_level`（`green` = 在线 / `gray` = 不在线）；**只有该网络的 `admin` / `owner`（或用 network token 调用）**才拿得到 `cpu_cores` / `mem_gb` / `ip_internal`。普通成员看到的 `host_telemetry` 里**只有 `alert_level`**，不是这些字段为 null。
+
+🔴 **`can_create_nodes` / `create_nodes_blocked_reason`（daemon 建节点能力）**：daemon 通过 `report_status.host.daemon_capabilities` 上报，hub 原样镜像进这里 —— Dashboard「建节点向导」据此决定某台服务器能不能选、不能选时给出原因（`create_nodes_blocked_reason` 仅在 `can_create_nodes===false` 时出现）。
+🔴 **只有 daemon 真的上报了才带这两个键**：agent-node 版本较旧、尚未上报 `daemon_capabilities` 的 daemon，响应里这两个键**整个缺席**（不是 `false`）。消费方必须把「键缺席」当作「未知、按可建处理」，**不能**把缺席当成 blocked 而误灰掉一台健康的老 daemon（`undefined ≠ false`）。
 
 🔴 **`online` 的窗口是 5 分钟**，不是心跳周期本身。agent-node 的 `report_status` 每 **3 分钟**一次，窗口必须大于它 —— 否则每次心跳之后的 60~180 秒必然抖成 `offline`。
 
