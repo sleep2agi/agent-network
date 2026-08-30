@@ -56,5 +56,10 @@ jobs:
       # targets were invisible, and both broken links in scope were among them.
       - run: python3 .github/scripts/check-docs-integrity.py --selftest
       - run: python3 .github/scripts/check-docs-integrity.py
+      # #1466 — selftest first. Real scan can be structurally green even
+      # when the parser is wrong: all real SOP paths appear SOMEWHERE in
+      # the file, so a substring-based parser rc=0 either way. The
+      # selftest fixture is the canary that catches parser regression.
+      - run: python3 .github/scripts/check-release-channel-assertions.py --selftest
       - name: 信道断言清单未登记即红
         run: python3 .github/scripts/check-release-channel-assertions.py
