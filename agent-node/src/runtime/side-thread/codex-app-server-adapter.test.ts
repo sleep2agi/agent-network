@@ -234,6 +234,62 @@ describe("CodexAppServerSideThreadAdapter", () => {
     expect(client.calls.filter((x) => x.method === "turn/start")).toHaveLength(1);
   });
 
+  // #1449 f3 —— reconcile 出 turnId 之后，**已存在的 live** 也必须被绑上。
+  // 原来只有 `!live` 分支绑定，于是这条路上终态既不触发、也不计入 dropped：
+  // 订阅方无声地永远等下去。两个到达顺序都要覆盖。
+  test("🔴 reconcile 之后到达的终态必须触发（live 已存在时也要绑 byTurn）", async () => {
+    const { client, adapter } = make({ identityTimeoutMs: 5 });
+    const fork = await adapter.fork({ sideThreadId: "f3a", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    const dropped: string[] = []; const terminal: any[] = [];
+    adapter.subscribeDropped((reason) => dropped.push(reason)); adapter.subscribe((event) => terminal.push(event));
+    client.holdTurnStart = true;
+    const input = { sideThreadId: "f3a", attemptId: "att", derivedThreadId: fork.derivedThreadId, prompt: "q" };
+    await expect(adapter.start(input)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    client.threads.get(fork.derivedThreadId).turns.push({ id: "turn-recovered", items: [{ type: "userMessage", clientId: "anet-side:f3a:att" }] });
+    await expect(adapter.start(input)).resolves.toEqual({ turnId: "turn-recovered" });
+
+    client.emit("turn/completed", { threadId: fork.derivedThreadId, turn: { id: "turn-recovered", status: "completed" } });
+    await Bun.sleep(10);
+    expect(terminal).toHaveLength(1);
+    // 🔴 顺带钉住那个**最难发现**的性质：修复前它既不触发终态、
+    //    也不进 dropped —— 连一个可观测的信号都没有。
+    expect(dropped).not.toContain("unowned-terminal");
+  });
+
+  test("🔴 reconcile **之前**就到的终态被缓冲，绑定之后必须冲出来", async () => {
+    const { client, adapter } = make({ identityTimeoutMs: 5 });
+    const fork = await adapter.fork({ sideThreadId: "f3b", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    const terminal: any[] = [];
+    adapter.subscribe((event) => terminal.push(event));
+    client.holdTurnStart = true;
+    const input = { sideThreadId: "f3b", attemptId: "att", derivedThreadId: fork.derivedThreadId, prompt: "q" };
+    await expect(adapter.start(input)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    client.threads.get(fork.derivedThreadId).turns.push({ id: "turn-early", items: [{ type: "userMessage", clientId: "anet-side:f3b:att" }] });
+
+    // 终态先到（此时还没 reconcile，byTurn 里没有它）
+    client.emit("turn/completed", { threadId: fork.derivedThreadId, turn: { id: "turn-early", status: "completed" } });
+    await Bun.sleep(5);
+    expect(terminal).toHaveLength(0);
+
+    await expect(adapter.start(input)).resolves.toEqual({ turnId: "turn-early" });
+    await Bun.sleep(10);
+    expect(terminal).toHaveLength(1);   // 绑定把缓冲的那条冲了出来
+  });
+
+  test("reconcile 不认领别人的 turn（归属判据与 restoreExecution 一致）", async () => {
+    const { client, adapter } = make({ identityTimeoutMs: 5 });
+    const fork = await adapter.fork({ sideThreadId: "f3c", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });
+    // 另一个 attempt 先把这个 turn 占了
+    const other = { sideThreadId: "f3c", attemptId: "other", derivedThreadId: fork.derivedThreadId, prompt: "q" };
+    const otherStarted = await adapter.start(other);
+    client.holdTurnStart = true;
+    const mine = { sideThreadId: "f3c", attemptId: "mine", derivedThreadId: fork.derivedThreadId, prompt: "q" };
+    await expect(adapter.start(mine)).rejects.toMatchObject({ code: "SIDE_THREAD_AMBIGUOUS" });
+    // 把**别人那条 turn** 伪装成我的 clientId 写进历史
+    client.threads.get(fork.derivedThreadId).turns.push({ id: otherStarted.turnId, items: [{ type: "userMessage", clientId: "anet-side:f3c:mine" }] });
+    await expect(adapter.start(mine)).rejects.toMatchObject({ code: "SIDE_THREAD_CONFLICT" });
+  });
+
   test("accepted and ambiguous start/interrupt/archive/delete operations never repeat their RPC", async () => {
     const { client, adapter } = make({ identityTimeoutMs: 5 });
     const fork = await adapter.fork({ sideThreadId: "ops", sourceThreadId: "main", boundary: { kind: "through", turnId: "done" } });

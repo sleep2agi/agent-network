@@ -551,9 +551,56 @@ export class CodexAppServerSideThreadAdapter implements SideThreadRuntimeAdapter
     if (current.state === "accepted" || current.state === "reconciling") {
       this.put({ ...current, state: "reconciled", result: { ...current.result, turnIdHash: operationHash(turnId) }, updatedAt: this.now() });
     }
+    // #1449 f3 —— `live` 存在时也必须把 turn 绑上去。
+    // 原来只有 `!live` 分支调 restoreExecution，于是「有一个陈旧的 live、但它
+    // 从没回显过身份（live.turnId === undefined）」这条路上：turnId 从持久历史
+    // reconcile 出来了、却没人写进 byTurn，live.turnId 也仍是 undefined。
+    // 之后那条 turn/completed 在 byTurn 里 miss，被当成「身份还没回显」缓冲起来
+    // —— **既不触发终态，也不计入 dropped**，订阅方就这么无声地等下去。
+    // 实测（本文件的 witnessed-red）：byClientId=1 / byTurn=0 / live.turnId=undefined
+    // / terminal=0 / dropped=[]。
     if (!live) this.restoreExecution(input, clientUserMessageId, turnId, matchedTurn);
+    else this.adoptReconciledTurn(live, input, turnId);
     return { turnId };
   }
+  /**
+   * 把 reconcile 出来的 turnId 绑到**已存在的** live execution 上（#1449 f3）。
+   *
+   * 与 restoreExecution 保持同一套归属判据：别人的 turn 不认领；live 自己已经
+   * 有一个不同的身份时也不认领 —— 那说明 reconcile 与回显对不上，宁可失败也
+   * 不要静默改写一个已绑定的身份。
+   */
+  private adoptReconciledTurn(live: Execution, input: { sideThreadId: string; attemptId: string; derivedThreadId: string }, turnId: string): void {
+    const key = turnKey(input.derivedThreadId, turnId);
+    const owned = this.byTurn.get(key);
+    if (owned && owned !== live && (owned.sideThreadId !== input.sideThreadId || owned.attemptId !== input.attemptId)) {
+      throw new SideThreadConflictError("reconciled Codex turn is already owned by another attempt");
+    }
+    if (live.turnId && live.turnId !== turnId) {
+      throw new SideThreadConflictError("reconciled Codex turn contradicts the live execution identity");
+    }
+    live.turnId = turnId;
+    clearTimeout(live.identityTimer);
+    live.resolveIdentity(turnId);
+    this.byTurn.set(key, live);
+    live.readyForTerminal = true;
+    // 终态可能**已经先到**。它会落在两个地方之一，两个都要冲：
+    //   • execution.pendingTerminal —— 已绑定但 readyForTerminal 还是 false 时；
+    //   • earlyTerminals —— byTurn 还没有这个 key 时（本条修复之前，reconcile
+    //     路径上**永远**是这一个；而 earlyTerminals 此前只有 onStarted(:366)
+    //     的身份回显路径会去取，reconcile 路径从不取，于是它就烂在那里）。
+    // 只冲前者的话，这条修复只覆盖「终态后到」那一半。
+    const early = this.earlyTerminals.get(key);
+    if (early !== undefined) {
+      this.earlyTerminals.delete(key);
+      setTimeout(() => this.onCompleted(early), 0);
+    } else if (live.pendingTerminal) {
+      const pending = live.pendingTerminal;
+      live.pendingTerminal = undefined;
+      setTimeout(() => this.onCompleted(pending), 0);
+    }
+  }
+
   private restoreExecution(input: { sideThreadId: string; attemptId: string; derivedThreadId: string },
     clientUserMessageId: string, turnId: string, turn?: RuntimeTurn): void {
     const key = turnKey(input.derivedThreadId, turnId);
