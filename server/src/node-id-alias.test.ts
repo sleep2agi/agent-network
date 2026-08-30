@@ -145,3 +145,44 @@ describe("#1281 real handler path — stop_node routes both names to the same pl
     expect(r.error).toBe("node_id_conflict");
   });
 });
+
+describe("app#196 —— 「解析不到 daemon」的两种情况必须给不同的话", () => {
+  // 🔴 生产实测(2026-08-28):218 个节点里 207 个是 `n_…`(有人直接
+  //    `anet node start` 起的),它们**根本没有 daemon**。原先这两种情况
+  //    打印同一句 `pass daemon_node_id explicitly` —— 对那 207 个来说,
+  //    **这句建议的前提是假的**,照着做只会走进死路。
+  const HAND_STARTED = "n_73687f17";      // 手工起的节点,真实形状
+  const DAEMON_CHILD = "node_test_1281";  // daemon 建的子节点
+
+  test("手工起的节点 → not_daemon_managed,并且**不**建议传 daemon_node_id", async () => {
+    const r = await call("stop_node", { node_id: HAND_STARTED });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("not_daemon_managed");
+    // 🔴 这一条是本组的核心:旧文案的那句建议**不能**再出现在这条路径上。
+    expect(r.message).not.toContain("pass daemon_node_id explicitly");
+    // 而且要告诉他真正能走的那条路。
+    expect(r.message).toContain("anet node stop");
+  });
+
+  test("daemon 建的子节点(无 create-request 行) → 仍是 daemon_not_resolvable", async () => {
+    const r = await call("stop_node", { node_id: DAEMON_CHILD });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("daemon_not_resolvable");
+    expect(r.message).toContain("pass daemon_node_id explicitly");
+  });
+
+  test("delete_node 走同一条判别(两个调用点不能只改一个)", async () => {
+    const r = await call("delete_node", { node_id: HAND_STARTED, confirm_alias: "x" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("not_daemon_managed");
+  });
+
+  // 🔴 反向见证:两种情况必须**真的不同**。若有人把判别改成恒定一支,
+  //    上面三条里至少一条会红 —— 但那还不够明显,所以这里直接断言两者不等。
+  test("两种情况的 error 与 message 都不相同", async () => {
+    const a = await call("stop_node", { node_id: HAND_STARTED });
+    const b = await call("stop_node", { node_id: DAEMON_CHILD });
+    expect(a.error).not.toBe(b.error);
+    expect(a.message).not.toBe(b.message);
+  });
+});
