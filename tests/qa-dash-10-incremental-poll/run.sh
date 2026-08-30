@@ -11,6 +11,39 @@ set -euo pipefail
 # 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
 printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
+# ── #1599 —— 早停出声 ─────────────────────────────────────────────────
+#
+# 🔴 病灶(实测,run 33301710195 / job 99231846024):这个套件那一次红时,
+#    它的 run.log **整份只有上面那一行 `source_commit=`**,再无一字。
+#    对照隔壁通过的套件(`source_commit=` + 一串 PASS),说明它是在
+#    **第一句进度输出(下面的 `echo "[0] start hub"`)之前**就死了。
+#    而 `set -e` 死的时候**一个字都不打** —— 于是「它失败了」有,
+#    「它为什么失败」没有,**连死在哪一行都不知道**。
+#
+# 🔴 这一行同时是一次**判别实验**,不只是修诊断:
+#    下次它再红,若打出行号 ⇒ 确实是 `set -e` 早停,而且直接定位到行;
+#    若**仍然静默** ⇒ 反而排除了「set -e 早停」这个假说
+#    (那时容器被杀 / OOM / 拿不到端口这类死法更可信,它们不走 ERR trap)。
+#    **两种结果都有信息量**,所以不必先在两个假说之间选一个。
+#
+# 🔴 为什么**不加 `set -E`**:实测(bash 5.2)一个 `trap … ERR`,
+#      顶层失败 → 出声;子 shell → 出声;管道 → 出声;
+#      **函数内部失败 → 静默**,只有 `set -E` 才覆盖。
+#    但 `set -E` 会让子 shell 的一次失败**打印两行**(子 shell 一次 + 父 shell 一次),
+#    读的人会以为发生了两次。
+#    而本套件的静默区(下面到 `[0] start hub` 之间)全是顶层语句
+#    (`export` / `source` / `mkdir -p` / `cd`)—— **朴素 trap 就够,不引入那个副作用。**
+#    等真遇到「失败在 helper 函数里」的套件,再单独决定要不要为那一类开 `set -E`。
+#
+# 范本:tests/test225-grok-preview-package-live/run.sh(#1026)——
+# 全仓 224 个 run.sh 里,在早停时报位置的**只有它一个**。
+_QA_TOTAL_LINES=$(wc -l < "$0")
+_early_stop() {
+  printf 'diagnostic: 早停于 run.sh:%s / 共 %s 行 —— 该行之后的判据本次**未执行**,不是通过\n' \
+    "${BASH_LINENO[0]}" "$_QA_TOTAL_LINES" >&2
+}
+trap _early_stop ERR
+
 export HOME=/tmp/anethome
 
 # P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
