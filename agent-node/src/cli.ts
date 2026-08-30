@@ -77,6 +77,7 @@ import {
 } from "./reply-reliability";
 import { isTelemetrySchemaRejection, withoutOptionalTelemetry } from "./register-telemetry-fallback";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
+import { claudeAttemptsDetail, codexTimeoutDetail } from "./runtime/sdk-timeout-detail";
 import {
   GROK_COPRESENCE_PROFILE_ENV,
   selectGrokCopresenceCapabilityProfile,
@@ -2623,6 +2624,12 @@ async function processWithClaude(
   // factory and forward withTimeout's signal into it.
   let lastErr: string = "";
   let timedOutFinal = false;
+  // #1645 —— 超时时原文说「vendor 长时间未响应, 检查 ANTHROPIC_BASE_URL」,后半句是**猜的**。
+  //   这一刻真正拿得到的是:每次尝试各花了多久、是超时还是报错。它是「真的一直没响应」
+  //   和「很快就失败、只是最后一次撞上超时」之间的判别项,两者要查的东西完全不同。
+  //   🔴 必须声明在重试循环**之外** —— 循环内声明的话,下面那个 return 读不到
+  //   (同一个错我在这个文件的 codex 分支上刚犯过一次,typecheck 棘轮门抓的)。
+  const claudeAttempts: { ms: number; timedOut: boolean }[] = [];
   for (let attempt = 0; attempt <= CLAUDE_MAX_RETRIES; attempt++) {
     let timedOut = false;
     const attemptStart = Date.now();
@@ -2804,6 +2811,7 @@ async function processWithClaude(
 
       lastErr = msg;
       timedOutFinal = timedOut;
+      claudeAttempts.push({ ms: attemptDt, timedOut });
       const reason = timedOut ? `timed out after ${attemptDt}ms` : `errored: ${msg.slice(0, 100)}`;
 
       if (attempt < CLAUDE_MAX_RETRIES) {
@@ -2819,7 +2827,7 @@ async function processWithClaude(
     }
   }
   if (timedOutFinal) {
-    return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s × ${CLAUDE_MAX_RETRIES + 1} attempts) — vendor 长时间未响应, 检查 ANTHROPIC_BASE_URL endpoint 或 vendor 负载`;
+    return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s × ${CLAUDE_MAX_RETRIES + 1} attempts) — ${claudeAttemptsDetail(claudeAttempts, CLAUDE_TIMEOUT_MS)}。确切原因见节点日志里 [claude] 开头那几行。`;
   }
   return `执行出错: ${lastErr.slice(0, 200)} (after ${CLAUDE_MAX_RETRIES + 1} attempts)`;
 }
@@ -3000,6 +3008,14 @@ async function processWithCodex(
   const input: any = images?.length
     ? [{ type: "text", text: promptText }, ...images.map(p => ({ type: "local_image", path: p }))]
     : promptText;
+  // #1645 — 超时那一刻,闭包里的 itemCount 已经丢了。把「有没有事件流过」提到
+  //   闭包外:它是「连接/握手层就没通」和「turn 中途停住」之间**唯一**的判别项,
+  //   而这两种要查的东西完全不同。
+  // 🔴 必须声明在 `try` **之外** —— 读它们的是 catch 里的超时分支,
+  //   而 `let` 不跨 try/catch 作用域。放在 try 内会编译过语法、过单测,
+  //   只有 typecheck 会说 `Cannot find name`。
+  let evSeen = 0;
+  let lastEvAt = 0;
   const t0 = Date.now();
   try {
     // #261 P1 redirect (2026-06-28) — wrap the codex turn in withTimeout.
@@ -3016,6 +3032,8 @@ async function processWithCodex(
         let itemCount = 0;
         for await (const ev of events) {
           evidence?.consumed();
+          evSeen++;
+          lastEvAt = Date.now();
           if (ev.type === "item.started") {
             const it = ev.item as any;
             debug(`[codex] ${it.type}${it.command ? `: ${it.command.slice(0, 60)}` : it.tool ? `: ${it.server}/${it.tool}` : ""}`);
@@ -3063,9 +3081,15 @@ async function processWithCodex(
     // errored". Codex SDK aborts cleanly on signal, but the wedged-TCP
     // case (no events flowing) is exactly what the timeout catches.
     if (e instanceof TimeoutError) {
-      log(`[codex] ✗ ${e.message}; reset thread for next turn`);
+      // #1645 — 原先这里印「检查 OPENAI_BASE_URL / vendor 负载」。那是一句**猜测**,
+      //   不是这一刻拿得到的事实。实测一次 300s 超时的真因是:上游 models 响应里
+      //   带了本机 codex 不认识的推理档位(`unknown variant \`max\``),rmcp worker
+      //   因此致命退出 —— OPENAI_BASE_URL 和 vendor 负载**一个都没被牵涉**。
+      //   把人指向没被牵涉的东西,比不给建议更贵。这里只说测到的那一个数。
+      const stallDetail = codexTimeoutDetail(evSeen, Date.now() - lastEvAt);
+      log(`[codex] ✗ ${e.message}; ${stallDetail}; reset thread for next turn`);
       codexThread = null;
-      return `执行出错: codex-sdk 调用超时 (${Math.round(CODEX_TIMEOUT_MS / 1000)}s) — 检查 OPENAI_BASE_URL / vendor 负载`;
+      return `执行出错: codex-sdk 调用超时 (${Math.round(CODEX_TIMEOUT_MS / 1000)}s) — ${stallDetail}。确切原因见节点日志里 [codex] 开头那几行。`;
     }
     // #261 P1 redirect — fast-fail on quota the same way claude does, so
     // a 429-flooded codex node doesn't keep tearing down + rebuilding
