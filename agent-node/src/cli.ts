@@ -3505,8 +3505,12 @@ async function processWithGrok(
     const { execFileSync } = await import("child_process");
     const version = execFileSync("grok", ["--version"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
     debug(`[grok] ${version}`);
-  } catch {
-    throw new Error("grok CLI not found. Install Grok Build CLI and run `grok --version` before starting this node.");
+  } catch (e: any) {
+    // 2026-08-30 —— 这里原来一句话吞掉全部失败:「not found. Install Grok Build CLI」。
+    // 真机上 grok 装着(官方位置 ~/.grok/bin),缺的只是 daemon 的 PATH ——
+    // 照那句话重装十遍也不会好。见 ./runtime/grok-preflight。
+    const { grokPreflightMessage } = await import("./runtime/grok-preflight");
+    throw new Error(grokPreflightMessage(e || {}, String(process.env.PATH || "")));
   }
 
   const { runGrokAcpTurn } = await import("./runtime/grok-build-acp/runtime");
