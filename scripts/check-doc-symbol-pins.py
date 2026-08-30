@@ -167,6 +167,32 @@ def candidate_symbols(anchor: str, rel: str) -> list[str]:
 
 
 
+
+def defines_symbol(line: str, sym: str) -> bool:
+    """这一行是不是在**定义** `sym`(而不是调用它、或在注释里提到它)。
+
+    🔴 判据必须精确到能排除这一行:
+
+        const tag = dashboardReleaseTag();
+
+    它以 `const` 开头,但定义的是 `tag`,不是 `dashboardReleaseTag`。
+    我第一版用「以 const/function 开头」当判据,当场就把它误判成定义 ——
+    而那正是本门一直拒绝自动消歧的理由。所以下面要求符号**紧跟在**
+    声明关键字之后。
+    """
+    t = line.strip()
+    if t.startswith("//") or t.startswith("*") or t.startswith("/*"):
+        return False
+    e = re.escape(sym)
+    pats = (
+        rf"^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*{e}\b",
+        rf"^(?:export\s+)?(?:abstract\s+)?class\s+{e}\b",
+        rf"^(?:export\s+)?(?:const|let|var)\s+{e}\s*[:=]",
+        rf"^(?:export\s+)?(?:type|interface|enum)\s+{e}\b",
+    )
+    return any(re.search(p, t) for p in pats)
+
+
 def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
           lines: list[str], findings: list[str], label_only: str = "",
           fixes: list | None = None) -> bool:
@@ -232,11 +258,28 @@ def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
             #    ⇒ 列出全部候选**并带上行内容**,把消歧交回给人。
             #      只给几个数字是不够的:人还是会挑第一个。
             body = "\n".join(f"         {w:>5}  {lines[w - 1].strip()[:96]}" for w in where)
-            findings.append(
-                f"{head}\n       `{sym}` 在该文件出现 {len(where)} 处，"
-                f"本门**不替你判断**该钉哪一处:\n{body}\n"
-                f"       ⚠ 别直接抄第一个数字 —— 其中很可能有**提到该符号的注释行**。"
-                f"钉到注释上门一样会绿，而文档从此指向一个不相干的位置。")
+            defs = [w for w in where if defines_symbol(lines[w - 1], sym)]
+            if len(defs) == 1:
+                # 🔴 这是对上面那条「不替你判断」的**一处收窄**,不是推翻它。
+                #    多处命中里如果**恰好只有一处是该符号的定义**,那就不是在猜:
+                #    定义是可以按语法判定的(见 defines_symbol),而本门最怕的
+                #    「钉到注释上」恰恰被它排除掉。
+                #    实测依据:`dashboardReleaseTag` 的行号锚从 2026-08-28 起被手工
+                #    改过 2452→2489→2449→2452→2486→2499→2502→2507 共 8 次,
+                #    每一次正确答案都是那唯一的定义行,而其余候选是 1 处调用 + 2 处注释。
+                #    ⚠ 只在 `--fix` 下才会真的改;CI 跑的是不带 --fix 的版本。
+                findings.append(
+                    f"{head}\n       `{sym}` 在该文件出现 {len(where)} 处,"
+                    f"其中**恰好一处是它的定义**:\n{body}\n"
+                    f"       → 第 {defs[0]} 行是定义,--fix 会钉到那里(其余候选是调用/注释)。")
+                if fixes is not None:
+                    fixes.append((doc, rel, n, defs[0]))
+            else:
+                findings.append(
+                    f"{head}\n       `{sym}` 在该文件出现 {len(where)} 处，"
+                    f"本门**不替你判断**该钉哪一处:\n{body}\n"
+                    f"       ⚠ 别直接抄第一个数字 —— 其中很可能有**提到该符号的注释行**。"
+                    f"钉到注释上门一样会绿，而文档从此指向一个不相干的位置。")
         break
     return judged
 
@@ -359,7 +402,8 @@ def main() -> int:
     if do_fix and fixes:
         print(f"\n--fix: 其中 {len(fixes)} 处是「恰好一处」的无歧义漂移,改写如下:")
         apply_fixes(fixes, repo)
-        print("🔴 --fix **不碰**多处命中的那些 —— 那需要人来消歧(理由见脚本里 judge() 的注释)。")
+        print("🔴 --fix 只碰两种:「恰好一处命中」和「多处命中但**恰好一处是定义**」。")
+        print("     其余多处命中的仍然不碰 —— 那需要人来消歧(理由见 judge() 的注释)。")
         print("   改完请重跑一次不带 --fix 的本门确认。")
     elif do_fix:
         print("\n--fix: 没有可自动修的漂移(要么没漂,要么全是需要人消歧的多处命中)。")
