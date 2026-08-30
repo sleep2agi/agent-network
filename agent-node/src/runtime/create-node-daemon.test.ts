@@ -274,6 +274,34 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
     expect(cmd).not.toContain('node -e "console.log');
   });
 
+  // #1353 续 —— `no ANET_BIN_ABS resolved` 这一支（既没有 path.conf、也没有环境变量）
+  // 是实际最常撞到的一支：DEV 上一台已连续在线 15h 的 daemon 就正处在这个状态。
+  // 它原先**只给出那条要 root 的 path.conf 命令**，而代码里其实还有一条不需要任何
+  // 权限的路：`prepareDaemonAnetBin()`（agent-network/bin/cli.ts:8284）会设置
+  // ANET_BIN_ABS + ANET_DAEMON_ALLOW_ENV_BIN，并由 cli.ts:6336 透传进子进程 env；
+  // 而它**只在 `anet daemon init|start|up` 三条命令上被调用**（cli.ts:8346-8348）。
+  // ⇒ 用 `anet node start` / pm2 / systemd 起的 daemon 永远拿不到 pin，
+  //   而重新用 `anet daemon start` 起一次就可能修好，不需要 root。
+  //
+  // 只给一条需要 root 的修法，会把人推去在生产机上求 sudo —— 而更省的那条就在代码里。
+  test("anet_bin_source (no pin at all) 必须同时给出不需要 root 的那条路 (#1353)", () => {
+    let msg = "";
+    try {
+      loadAndVerifyAnetBin({ ANET_DAEMON_PATH_CONF: "/nonexistent" }, "linux");
+      throw new Error("expected loadAndVerifyAnetBin to throw");
+    } catch (e: any) { msg = String(e?.message ?? ""); }
+
+    // 走的确实是「什么 pin 都没有」那一支，不是 env-fallback-disabled 那支
+    expect(msg).toContain("no ANET_BIN_ABS resolved");
+
+    // 需要 root 的那条仍然在（不是替换，是补充）
+    expect(msg).toContain("sudo install -d -m 0755 /etc/anet-daemon");
+    // 不需要 root 的那条必须点名具体命令，且说清为什么它可能有效
+    expect(msg).toContain("anet daemon start");
+    expect(msg).toMatch(/anet daemon init\|start\|up/);
+    expect(msg).toContain("pm2");
+  });
+
   test("REJECT: ANET_BIN_ABS env fallback without explicit opt-in", () => {
     cleanup();
     const p = setup("env-fallback-disabled");
