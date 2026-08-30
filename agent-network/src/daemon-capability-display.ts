@@ -127,7 +127,8 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
   if (typeof row.can_create_nodes !== "boolean") {
     return {
       kind: "never-reported",
-      line: "创建能力:未知 —— 这台 daemon 没报过这一格(agent-node 版本早于 preview.55)。升级它才能看到。",
+      line: ("创建能力:未知 —— 这台 daemon 没报过这一格。\n" +
+        "    (agent-node 版本早于 preview.55;升级它才能看到)"),
     };
   }
 
@@ -146,7 +147,8 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
         // 🔴 这句必须说清「不知道什么时候测的」**以及为什么**。
         //    preview.67 及更早的 daemon 在开机时算一次就永久缓存 —— 也就是说
         //    这个 ready 可能是几周前的事,而二进制早被换掉了。
-        line: "创建能力:可用,但**不知道是什么时候测的** —— 该 daemon 版本在开机时算一次就不再重测。重启它、或升级到会带年龄的版本。",
+        line: ("创建能力:可用\n" +
+        "    ⚠ 不知道是什么时候测的 —— 该版本开机只算一次。重启它,或升级。"),
       };
     }
     return { kind: "ready", ageMs, line: `创建能力:可用(${formatAge(ageMs)}测)` };
@@ -159,7 +161,8 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
     explain: `未知原因代码 ${reason} —— 本 CLI 可能比那台机器的 anet 旧,升级本机 anet 或看它的 daemon 日志`,
     command: null,
   };
-  const where = "完整原文(含真实路径)只在那台机器的 daemon 日志里 —— 它带机器路径,按设计不上报。";
+  // 实测 83 列,80 列终端会折一下;拆成两句,每句都在 80 以内。
+  const where = "完整原文只在那台机器的 daemon 日志里。\n    (它带真实机器路径,按设计不上报)";
   const body = [
     `    原因:${fix.explain}`,
     fix.command ? `    修法(可整行粘贴):${fix.command}` : "    修法:没有单条命令能修,见上。",
@@ -168,7 +171,11 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
   if (ageMs === undefined) {
     return {
       kind: "blocked-age-unknown",
-      line: `创建能力:**不可用**(${reason}),但**不知道是什么时候测的** —— 该 daemon 版本开机只算一次。\n${body}`,
+      // 🔴 首行只放「状态 + 原因码」,把「不知道什么时候测的」挪到缩进行。
+      //    2026-08-30 macOS 真机验收(Mac打包牛)实测:合成一行约 **99 列**,
+      //    80 列终端会折行,而折点落在句子中间。本模块其余细节本来就各占一行,
+      //    这一句原先是唯一的例外。
+      line: `创建能力:**不可用**(${reason})\n    ⚠ 不知道是什么时候测的 —— 该 daemon 版本开机只算一次,之后不再重测。\n${body}`,
       fix,
     };
   }
