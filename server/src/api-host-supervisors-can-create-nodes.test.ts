@@ -267,7 +267,7 @@ describe("#1353 Fix ② — /api/host-supervisors surfaces can_create_nodes + bl
 
 /* #1545 —— `can_create_nodes` 说的是「能不能」,这一组说的是「**那是什么时候测的**」。
  *
- * 为什么非要分开:agent-node 到 preview.67 为止用一个进程级缓存只算一次
+ * 为什么非要分开:agent-node ≤ 2.5.0-preview.54 用一个进程级缓存只算一次
  * (`cli.ts` 的 `_createCapCache`)。开机时二进制好、之后被 chmod 掉 ⇒ 它会
  * **永远上报 ready**。hub 这边,那条记录和一个 3 秒前刚测出来的 ready
  * 在 `last_seen_at` 上一模一样 —— 心跳是新的,那一格不是。

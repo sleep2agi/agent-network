@@ -31,6 +31,7 @@ function cleanup() {
   try { db.run("DELETE FROM node_create_requests WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM audit_log WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM nodes WHERE network_id = ?1", [NET]); } catch {}
+  try { db.run("DELETE FROM sessions WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM api_tokens WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM network_members WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM networks WHERE network_id = ?1", [NET]); } catch {}
@@ -38,6 +39,18 @@ function cleanup() {
 }
 beforeEach(cleanup);
 afterAll(cleanup);
+
+/** #1545 —— 可选:写一条 sessions 心跳行。
+ *  默认**不写**,这样既有那 9 条测试的行为逐字不变;
+ *  只有要断言绝对年龄的用例才显式给 `heartbeatAgoMs`。 */
+function seedHeartbeat(agoMs: number) {
+  const iso = new Date(Date.now() - agoMs).toISOString();
+  db.run(
+    `INSERT INTO sessions (alias, node_id, network_id, status, last_seen_at, updated_at)
+     VALUES (?1, ?2, ?3, 'idle', ?4, ?4)`,
+    [DAEMON_ALIAS, DAEMON_ID, NET, iso],
+  );
+}
 
 function seed(snapshot: object | string | null) {
   db.run(
@@ -227,5 +240,117 @@ describe("#1353 Fix ① — hub gates create_node on daemon-reported can_create_
     seed("{not json");
     const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
     expect(r.error).not.toBe("daemon_cannot_create_nodes");
+  });
+});
+
+/* #1545 —— 拒绝的时候还要说**那个判断是什么时候做出来的**。
+ *
+ * 为什么这一格落在拒绝路径上最要紧:用户被挡住的这一刻,正好在决定"去修哪台机器"。
+ *   刚测的 blocked      ⇒ 去那台机器按 reason 修
+ *   三周前测的 blocked  ⇒ 那台 daemon 是**开机算一次就永久缓存**的旧版本
+ *                        (agent-node ≤ 2.5.0-preview.54),它可能早就好了 —— 先重启/升级它
+ * 只给 `blocked_reason` 的话,这两种情况给用户的字**一模一样**。 */
+describe("#1545 拒绝文案带上「这个判断是多久以前做的」", () => {
+  const blockedSnap = (extra: object) => ({
+    role: "host_supervisor",
+    daemon_capabilities: {
+      can_create_nodes: false,
+      create_nodes_blocked_reason: "anet_bin_permission",
+      ...extra,
+    },
+  });
+
+  /* 🔴 报出去的是**到现在为止**的绝对年龄,不是 daemon 报的那个原始时长。
+   * daemon 报的是「测完到**这份 report 发出**」;直接透传会漏掉心跳那一段,
+   * **朝更新鲜的方向低报** —— 正是这一格要防的方向。
+   *   绝对年龄 = (now − last_seen_at) + daemon 报的时长 */
+  test("daemon 报了年龄 + 有心跳时间 → 补上心跳那一段,标记 known", async () => {
+    seed(blockedSnap({ create_capability_observed_ms_ago: 12_345 }));
+    seedHeartbeat(60_000);            // 上次心跳在 60s 前
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    expect(r.ok).toBe(false);
+    expect(r.blocked_reason).toBe("anet_bin_permission");
+    expect(r.capability_age).toBe("known");
+    // 允许 ±5s 的执行抖动;关键是它**明显大于** 12,345,即心跳那一段确实被加上了
+    const got = r.capability_observed_ms_ago as number;
+    expect(got).toBeGreaterThanOrEqual(12_345 + 60_000 - 5_000);
+    expect(got).toBeLessThanOrEqual(12_345 + 60_000 + 5_000);
+    // 🔴 反向锚:如果实现是"原样透传",这个数会恰好等于 12,345
+    expect(got).not.toBe(12_345);
+  });
+
+  /* 🔴 第三种 unknown,不能和「旧 daemon 没报」塌成同一个:
+   * 它报了,但 hub 这边没有可用的心跳时间 ⇒ **补不出绝对年龄**,而不是"年龄是 0"。 */
+  test("报了年龄但 hub 没有心跳时间 → unknown_no_heartbeat_time(不是 legacy,也不是 0)", async () => {
+    seed(blockedSnap({ create_capability_observed_ms_ago: 12_345 }));
+    // 故意不 seedHeartbeat
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    expect(r.capability_age).toBe("unknown_no_heartbeat_time");
+    expect(r.capability_observed_ms_ago).toBeNull();
+  });
+
+  /* 🔴 本组的重点:年龄未知时给的是**显式 null + 说明为什么的枚举**,
+   * 而不是省略这两个键。省略读起来像"没有这个问题",而调用方(常常是个 agent)
+   * 会默认它是刚测的 —— 那是朝「更可信」方向撒谎,比不给更糟。 */
+  test("🔴 daemon 没报年龄 → 两个键都在:null + unknown_legacy_daemon(不是省略)", async () => {
+    seed(blockedSnap({}));
+    seedHeartbeat(1_000);   // 心跳齐全 ⇒ 唯一缺的就是 daemon 没报那一格
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    expect(r.ok).toBe(false);
+    expect("capability_observed_ms_ago" in r).toBe(true);
+    expect(r.capability_observed_ms_ago).toBeNull();
+    expect(r.capability_age).toBe("unknown_legacy_daemon");
+    // 🔴 绝不能渲染成"刚测的"
+    expect(r.capability_observed_ms_ago).not.toBe(0);
+  });
+
+  test.each([
+    ["负数", -1],
+    ["超过一年", 400 * 24 * 60 * 60 * 1000],
+    ["非数字", "12"],
+    ["null", null],
+  ])("坏值当作没报(不 clamp 成一个看起来正常的年龄):%s", async (_l, v) => {
+    seed(blockedSnap({ create_capability_observed_ms_ago: v }));
+    // 🔴 必须给心跳:否则这几条会因为"没有心跳时间"而变成
+    //    unknown_no_heartbeat_time,**坏值那一维根本没被测到**
+    //    (夹具只该在被测的那一维上不合法)。
+    seedHeartbeat(1_000);
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    expect(r.capability_age).toBe("unknown_legacy_daemon");
+    expect(r.capability_observed_ms_ago).toBeNull();
+    // 分母自证:拒绝本身仍然发生了,不是因为整条路径没走到才"没有年龄"
+    expect(r.error).toBe("daemon_cannot_create_nodes");
+  });
+
+  test("边界:恰好一年被接受 ⇒ 上面那些不是因为恒判 unknown 才绿", async () => {
+    const oneYear = 365 * 24 * 60 * 60 * 1000;
+    seed(blockedSnap({ create_capability_observed_ms_ago: oneYear }));
+    seedHeartbeat(1_000);
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    expect(r.capability_age).toBe("known");
+    expect(r.capability_observed_ms_ago as number).toBeGreaterThanOrEqual(oneYear);
+  });
+
+  /* 🔴 hub 出**代码**,不出渲染好的修法命令 —— 那张 code → 命令 的表只有一个作者
+   * (@sleep2agi/agent-network 的 daemon-capability-display)。抄一份到 hub,
+   * 两份就会各自漂移,而「hub 教的修法」和「CLI 教的修法」不一致时没有任何东西会红。 */
+  test("🔴 hub 不返回具体修法命令,只把人指到那唯一一份", async () => {
+    seed(blockedSnap({ create_capability_observed_ms_ago: 0 }));
+    seedHeartbeat(1_000);
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    const blob = JSON.stringify(r);
+    for (const leaked of ["chmod go-w", "npm i -g", "readlink -f", "/etc/anet-daemon"]) {
+      expect(blob).not.toContain(leaked);
+    }
+    expect(String(r.remediation_hint)).toContain("anet daemon list");
+    // 正控:这四条不是恒真 —— 它们确实是那份表里的真实内容
+    expect("该二进制 group/other 可写。一行修:chmod go-w \"$(command -v anet)\"").toContain("chmod go-w");
+  });
+
+  test("健康 daemon 不受影响:正常派发,不带这两个键", async () => {
+    seed({ role: "host_supervisor", daemon_capabilities: { can_create_nodes: true } });
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    expect(r.ok).not.toBe(false);
+    expect("capability_age" in r).toBe(false);
   });
 });

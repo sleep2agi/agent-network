@@ -665,7 +665,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           ]).optional(),
           // #1545 —— 上面那一格**是什么时候测出来的**。
           //
-          // 🔴 为什么必须有:agent-node 到 preview.67 为止,`daemonCreateCapability()`
+          // 🔴 版本号一律带包名 + 完整版本:仓里三个包各自独立编号,裸的 `preview.NN`
+          //    同时是三个不同的时间点。此处曾写成「preview.67」——
+          //    那是 agent-network 的号,agent-node 根本没有 .67(npm 404,最高 .56)。
+          // 🔴 为什么必须有:**agent-node ≤ 2.5.0-preview.54** 的 `daemonCreateCapability()`
           //    用一个进程级缓存(`_createCapCache`)只算一次。开机时 pin 坏 ⇒ 之后
           //    永远上报 blocked(哪怕运维已经写好 path.conf);开机时好 ⇒ 之后把二进制
           //    chmod 掉也**永远上报 ready**。后者是朝「没问题」方向说谎。
@@ -3291,10 +3294,60 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             && caps.create_nodes_blocked_reason.length > 0)
             ? caps.create_nodes_blocked_reason
             : "anet_bin_unknown";
+          // #1545 —— 光说 `blocked_reason` 不够:**那个判断是什么时候做出来的**
+          // 决定了下一步完全不同的两件事。
+          //   刚测的 blocked      ⇒ 去那台机器按 reason 修
+          //   三周前测的 blocked  ⇒ 那台 daemon 是**开机算一次就永久缓存**的旧版本
+          //                        (agent-node ≤ 2.5.0-preview.54),它可能早就好了 ——
+          //                        先重启/升级它,再谈修 pin
+          // 而在拒绝这一刻,用户正好在决定"去修哪台机器"。
+          //
+          // 🔴 年龄未知时给的是**显式 null + 一个说明为什么的枚举**,不是省略这两个键。
+          //    省略读起来像"没有这个问题",而调用方(常常是个 agent)会默认它是刚测的
+          //    —— 那是朝「更可信」方向撒谎,比不给更糟。
+          const rawAge = caps.create_capability_observed_ms_ago;
+          const reportedAgeOk = typeof rawAge === "number" && Number.isFinite(rawAge)
+            && rawAge >= 0 && rawAge <= 365 * 24 * 60 * 60 * 1000;
+          // 🔴 daemon 报的是「测完到**这份 report 发出**之间隔了多久」,不是「到现在」。
+          //    两者差一个心跳间隔(3 分钟),而对一个已经失联的 daemon 差多少都可能。
+          //    直接把它当成"多久以前测的"渲染,会**朝更新鲜的方向**低报 ——
+          //    正是这一格要防的那个方向。所以在这里补上心跳那一段:
+          //      绝对年龄 = (now − last_seen_at) + daemon 报的时长
+          //    hub 的钟出绝对时间,daemon 只提供时长(它自己的钟偏移污染不了这个数)。
+          //
+          //    这是冷路径(只有被拒时才走),多一次小查询不影响心跳路径。
+          let heartbeatAgeMs: number | null = null;
+          try {
+            const sess = db.get<{ last_seen_at: string | null }>(
+              "SELECT last_seen_at FROM sessions WHERE node_id = ?1 ORDER BY last_seen_at DESC LIMIT 1",
+              daemon_node_id,
+            );
+            const t = sess?.last_seen_at ? Date.parse(sess.last_seen_at) : NaN;
+            if (Number.isFinite(t)) heartbeatAgeMs = Math.max(0, Date.now() - t);
+          } catch { /* 取不到就是取不到 —— 下面如实说 unknown,不猜 0 */ }
+
+          // 🔴 三种取值,不能塌成两种:
+          //    known                      两半都有,可以给绝对年龄
+          //    unknown_legacy_daemon      那台 daemon 根本没报这一格(旧版本)
+          //    unknown_no_heartbeat_time  它报了,但 hub 这边没有可用的心跳时间
+          //                               ⇒ **补不出绝对年龄**,而不是"年龄是 0"
+          const ageKnown = reportedAgeOk && heartbeatAgeMs !== null;
           return { content: [{ type: "text" as const, text: JSON.stringify({
             ok: false,
             error: "daemon_cannot_create_nodes",
             blocked_reason: reason,
+            // 到**现在**为止,这个判断做出来有多久了(毫秒)。null = 补不出来。
+            capability_observed_ms_ago: ageKnown ? heartbeatAgeMs! + (rawAge as number) : null,
+            capability_age: ageKnown
+              ? "known"
+              : (reportedAgeOk ? "unknown_no_heartbeat_time" : "unknown_legacy_daemon"),
+            // 🔴 这里**不复制那张 code → 修法命令 的表**。它只有一个作者,在
+            //    `@sleep2agi/agent-network` 的 daemon-capability-display —— 抄一份到 hub,
+            //    两份就会各自漂移,而「hub 教的修法」和「CLI 教的修法」不一致时,
+            //    没有任何东西会红。这里只把人指到那一份。
+            //    (同 `blocked_reason` 是 z.enum 而不是自由文本的立场:hub 出**代码**,
+            //     渲染留给客户端。)
+            remediation_hint: "run `anet daemon list` where that daemon is configured — it prints the exact, paste-able fix command for this blocked_reason",
             daemon_node_id,
           }) }] };
         }
