@@ -148,3 +148,55 @@ describe("#1545 修法命令 —— 必须能整行粘贴", () => {
     expect(fixOf("anet_bin_permission").command).toContain("command -v anet");
   });
 });
+
+/* 🔴 #1545 —— 这个模块是**跨仓共享**的:Dashboard(另一个仓)通过
+ * `@sleep2agi/agent-network/daemon-capability-display` 子路径导入它,在**浏览器里**跑。
+ *
+ * 共享的不是文案,是**判据**:年龄算法 `(now − last_seen_at) + observed_ms_ago`,
+ * 和 code →(explain, command)映射。两边各写一份就会分叉,而
+ * 「CLI 说 ready、Dashboard 说 blocked」比两边都沉默更难查。
+ *
+ * 下面这组钉的是**让共享成立的那几个前提**。它们平时不会有人想起来,
+ * 而破坏它们的改动看起来都完全正常(加一个 import、给 build 加一条混淆)。 */
+describe("#1545 跨仓共享的前提(Dashboard 在浏览器里 import 这个模块)", () => {
+  const pkg = require("../package.json");
+  const SUBPATH = "./daemon-capability-display";
+
+  test("package.json 暴露了这个子路径(Node 会按 exports 拦掉未声明的子路径)", () => {
+    expect(pkg.exports[SUBPATH]).toBeTruthy();
+    expect(pkg.exports[SUBPATH].import).toBe("./dist/src/daemon-capability-display.js");
+    expect(pkg.exports[SUBPATH].types).toBe("./dist/src/daemon-capability-display.d.ts");
+  });
+
+  test("build 里有对应的独立入口(否则 exports 指向一个不存在的文件)", () => {
+    expect(pkg.scripts.build).toContain("bun build src/daemon-capability-display.ts");
+  });
+
+  /* 🔴 它**不能**被混淆。同 build 里 client.js / cli.js / node-server.js 走
+   * javascript-obfuscator --string-array;把一个给别的仓读的纯格式化函数塞进那条链,
+   * 拿到的是一份连报错都难读的依赖。 */
+  test("它不在 javascript-obfuscator 的目标列表里", () => {
+    const targets = [...String(pkg.scripts.build).matchAll(/javascript-obfuscator (\S+)/g)].map(m => m[1]);
+    expect(targets.length).toBeGreaterThan(0);          // 分母自证:确实抓到了目标列表
+    expect(targets).not.toContain("dist/src/daemon-capability-display.js");
+    // 正控:那三个确实在列 —— 证明上一条不是因为正则没匹配到东西才绿
+    expect(targets).toContain("dist/src/client.js");
+  });
+
+  /* 🔴 最要紧的一条:这个模块**一个 import 都不能有**。
+   * 它要在浏览器里跑;一旦有人加了 `node:fs` / `node:crypto`,
+   * Dashboard 的构建**未必会报错**(打包器可能把它 external 掉),
+   * 而是**运行时才炸** —— 那种错误离这行改动很远,几乎不可能被联想回来。 */
+  test("🔴 源文件没有任何 import / require(它要在浏览器里跑)", () => {
+    const src = require("node:fs").readFileSync(
+      new URL("./daemon-capability-display.ts", import.meta.url), "utf-8") as string;
+    const offenders = src.split("\n")
+      .map((l, i) => [i + 1, l] as const)
+      .filter(([, l]) => /^\s*import\s|require\s*\(/.test(l));
+    expect(offenders).toEqual([]);
+    // 正控:同一个模式在**本测试文件**上必须命中(它有 import),证明不是恒空
+    const self = require("node:fs").readFileSync(
+      new URL("./daemon-capability-display.test.ts", import.meta.url), "utf-8") as string;
+    expect(self.split("\n").filter(l => /^\s*import\s|require\s*\(/.test(l)).length).toBeGreaterThan(0);
+  });
+});
