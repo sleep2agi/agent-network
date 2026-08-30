@@ -63,8 +63,24 @@ export function isNamedGrokCopresenceSocket(path: string, role: "attach" | "lead
   return name === "leader.sock" || name === "l.sock";
 }
 
+/**
+ * #1548 —— `autoLeader` 是**必填**的,故意不给默认值。
+ *
+ * 🔴 背景:有些 grok build **按设计就不建 leader.sock**
+ *    (`runtime.ts` 的能力表里 `autoLeader: false`,例如 1.0.5)。
+ *    `runtime.ts` 的 `settleLeader()` 对这类 build 把 **ENOENT 当成功路径**;
+ *    而本函数此前**无条件**要求 `leaderPresent`,于是这类节点上
+ *    `usable` **结构性恒为 false** ⇒ 心跳的 `idle` 每 3 分钟被改写成 `blocked`,永远。
+ *    实测:名册上 3 个 blocked 全是这类节点,非 grok 节点 0/114(#1548)。
+ *    **同一个仓里两处对"该不该有 leader.sock"判断相反,而 leaderless 这个事实只写在一处。**
+ *
+ * 🔴 为什么必填而不是 `autoLeader = true`:带默认值的话,**漏传会静默恢复成老行为**
+ *    —— 也就是恢复成这个缺陷本身,而且不会有任何东西红。
+ *    做成必填,漏传就是编译错误:把一个安静的运行时缺陷换成一个吵闹的构建失败。
+ */
 export function describeGrokCopresenceLiveness(
   session: GrokCopresenceLivenessSource | null | undefined,
+  autoLeader: boolean,
   inspect: GrokSocketInspector = grokSocketIsPresent,
 ): GrokCopresenceLiveness {
   if (!session) {
@@ -82,12 +98,18 @@ export function describeGrokCopresenceLiveness(
   const leaderPresent = inspect(session.leaderSocket);
   const tuiReady = session.tuiReady === true;
   const childAlive = session.isRunning === true;
+  // 🔴 两个方向都 fail-closed,和 `settleLeader()` 逐条对齐:
+  //    · autoLeader:true  —— socket 必须**在**且名字对(老行为,一格没放松);
+  //    · autoLeader:false —— socket 必须**不在**。它若出现,说明"这个 build 不外派工具"
+  //      这个前提不成立,`settleLeader()` 在启动时就是这么 fail-closed 的
+  //      (「verified as leaderless yet created …」)。这里不比它松。
+  const leaderOk = autoLeader ? (leaderPresent && leaderNamed) : !leaderPresent;
   return {
     tuiReady,
     childAlive,
     attach: { present: attachPresent, named: attachNamed },
     leader: { present: leaderPresent, named: leaderNamed },
-    usable: childAlive && tuiReady && attachPresent && leaderPresent && attachNamed && leaderNamed,
+    usable: childAlive && tuiReady && attachPresent && attachNamed && leaderOk,
   };
 }
 

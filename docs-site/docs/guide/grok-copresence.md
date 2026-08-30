@@ -28,7 +28,18 @@ preview 2.3.0-preview.39    anet grok attach → Usage: anet grok attach <node>
 
 ⇒ **这个命令在 `preview` 里是存在的**,只是 `latest` 里没有。
 **但「命令存在」不等于「这条共存路径可用」** —— 命令注册不等于端到端可用。
-Hub 不得把死掉/未就绪的 TUI 报成 `idle`（#1005：liveness 快照，缺 named socket 或 composer 未就绪时为 `blocked`）。
+Hub 不得把死掉/未就绪的 TUI 报成 `idle`（#1005：liveness 快照，子进程已死 / composer 未就绪 /
+缺 named attach socket 时为 `blocked`）。
+
+🔴 **更正(2026-08-30,#1548)**:这句原本写作「缺 named socket … 为 `blocked`」，
+把 **leader** socket 也算了进去 —— 而**有些 grok build（能力表里 `autoLeader: false`，例如 1.0.5）
+按设计就不建 `leader.sock`**。于是这类节点的 `usable` 结构性恒为假，名册上永远显示 `blocked`，
+而运行时可能完全正常（实测:被标 blocked 之后仍成功接活并回复）。
+
+所以判据现在**按 build 分**：`autoLeader: true` 的 build 仍要求 `leader.sock` 在且命名正确；
+`autoLeader: false` 的 build **要求它不在**（它若出现，说明「这个 build 不外派工具」的前提不成立，
+与 `settleLeader()` 启动时的 fail-closed 同向）。
+**分界线是版本,不是平台** —— 1.0.5 在 macOS 和 Linux 上都不建。
 本页其余的告诫仍然成立:它仍在重新验收,不要当已发布功能用。
 :::
 

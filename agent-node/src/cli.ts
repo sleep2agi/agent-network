@@ -3799,8 +3799,16 @@ async function retireCachedGrokCopresenceRuntime(): Promise<void> {
 
 function resolveReportedStatus(status: string): string {
   if (!GROK_COPRESENCE || !isGrokCopresenceHubStatus(status)) return status;
+  // #1548 —— autoLeader 从会话本身取(它与 settleLeader 用同一个判据)。
+  // 🔴 没有会话时传 `true`:那是**更严**的一侧(要求 leader socket 在),
+  //    而 `describeGrokCopresenceLiveness(null, …)` 本来就直接返回 usable:false,
+  //    所以这个值不影响结论 —— 但即便将来那条捷径被改掉,默认也落在保守那侧,
+  //    不会因为"没有会话"而意外放行。
   return resolveGrokCopresenceHubStatus(
-    describeGrokCopresenceLiveness(grokCopresenceRuntimeSession),
+    describeGrokCopresenceLiveness(
+      grokCopresenceRuntimeSession,
+      grokCopresenceRuntimeSession?.autoLeader ?? true,
+    ),
     status,
   );
 }
