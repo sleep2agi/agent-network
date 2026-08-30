@@ -414,13 +414,30 @@ export interface DaemonCapabilities {
    * 🔴 只报代码,**永远不报原始报错文本**。`unsafePathHelp()` 的消息里带
    *    完整的机器路径,而这个字段会一路走到 hub 和 Dashboard ——
    *    一条「哪台机器的哪个路径缺什么」本身就是一张地图。 */
-  create_nodes_blocked_reason?:
-    | "anet_bin_identity"     // 这个文件不是 anet 的 bin ⇒ 重装或 unset ANET_BIN_ABS
-    | "anet_bin_source"       // pin 从哪来 ⇒ 写 /etc/anet-daemon/path.conf（要 sudo）
-    | "anet_bin_shape"        // 路径形态 ⇒ 换成 realpath
-    | "anet_bin_permission"   // 权限 ⇒ 一行 chmod go-w
-    | "anet_bin_unknown";     // 拿不到类别时的兜底（见下）
+  /** #1353 + #1545 —— `can_create_nodes` 是**多久以前**测出来的(毫秒)。
+   *
+   * 🔴 缺席 ≠ 0。preview.67 及更早的 daemon 在**开机时算一次**就永久缓存,
+   *    它们不发这一格;把缺席渲染成 0 等于替它们宣称"这是刚测的",
+   *    正好朝「没问题」方向说谎。读的人必须能把
+   *    「刚测的」「很久以前测的」「不知道」分成三件事说。
+   *
+   * 为什么是时长不是时间戳:见 buildConfigSnapshot 里的赋值处注释(时钟偏移)。 */
+  create_capability_observed_ms_ago?: number;
+  create_nodes_blocked_reason?: CreateNodesBlockedReason;
 }
+
+/** #1353 —— `can_create_nodes === false` 时的原因代码。
+ *
+ * 🔴 #1545:这个联合**只在这里定义一处**。此前 `agent-node/src/cli.ts` 里另有一份
+ *    同样的 `CreateBlockedReason`,两份会各自漂移 —— 而漂移的表现是「daemon 报了个
+ *    hub enum 里没有的值」,那会被 zod 静默丢掉(daemon_capabilities 非 strict),
+ *    现场看起来像"daemon 明明发了、hub 上没有"。 */
+export type CreateNodesBlockedReason =
+  | "anet_bin_identity"     // 这个文件不是 anet 的 bin ⇒ 重装或 unset ANET_BIN_ABS
+  | "anet_bin_source"       // pin 从哪来 ⇒ 写 /etc/anet-daemon/path.conf（要 sudo）
+  | "anet_bin_shape"        // 路径形态 ⇒ 换成 realpath
+  | "anet_bin_permission"   // 权限 ⇒ 一行 chmod go-w
+  | "anet_bin_unknown";     // 拿不到类别时的兜底（见下）
 
 export interface MaskedSnapshot {
   model?: string | null;
@@ -480,7 +497,17 @@ export function buildConfigSnapshot(
    *
    * `undefined` = 调用方没算(非 daemon 节点,或旧调用点)⇒ 不上报这两格,
    * 与改动前的行为逐字相同。 */
-  createCapability?: { ok: boolean; reason?: "anet_bin_pin_unresolved" },
+  createCapability?: {
+    ok: boolean;
+    /** 兼容:.40 及更早的调用点传 "anet_bin_pin_unresolved"(hub enum 仍收它)。 */
+    reason?: CreateNodesBlockedReason | "anet_bin_pin_unresolved";
+    /** #1545 —— 这次判断是什么时候做出来的(调用方的 `Date.now()`)。
+     *  给了就换算成 `create_capability_observed_ms_ago` 一起上报;
+     *  没给就**不上报那一格**(读的人据此说「年龄未知」)。 */
+    probedAtMs?: number;
+  },
+  /** #1545 测试注入点:默认取 `Date.now()`。**只为可测,不改语义。** */
+  nowMs: number = Date.now(),
 ): MaskedSnapshot {
   const out: MaskedSnapshot = {
     model: typeof fileConfig?.model === "string" ? fileConfig.model : null,
@@ -526,6 +553,23 @@ export function buildConfigSnapshot(
   // 这样旧 hub 和旧调用点的行为逐字不变。
   if (createCapability) {
     caps.can_create_nodes = createCapability.ok;
+    // #1545 —— 「能不能」旁边必须带上「**这是什么时候测的**」。
+    //
+    // 🔴 上报时长而不是绝对时间戳:这个值来自本机的钟,而 hub 拿它去和自己的钟
+    //    比较。时钟偏移下,绝对时间戳算出的年龄既可能"永远新鲜"也可能"来自 1970",
+    //    **错的方向不可预测**。时长对偏移免疫 —— hub 用自己的钟在收到时换算成绝对时间。
+    //
+    // 🔴 `Math.max(0, …)`:系统时钟可能被 NTP 往回拨,那会算出负数年龄。
+    //    夹到 0 是**朝"更旧"方向保守**的那一侧吗?不是 —— 0 表示"刚测的",
+    //    是朝"更新鲜"错。之所以仍然这么写,是因为负数会被 hub 的消毒直接丢掉
+    //    (读取侧对 `rawAge >= 0` 有断言),那等于**整格消失**、读的人退回"年龄未知";
+    //    而时钟回拨的量级(NTP 单次校正通常 < 1s)远小于这一格要分辨的尺度
+    //    (分钟 vs 周)。两害相权,保住这一格。
+    if (typeof createCapability.probedAtMs === "number"
+        && Number.isFinite(createCapability.probedAtMs)) {
+      caps.create_capability_observed_ms_ago =
+        Math.max(0, nowMs - createCapability.probedAtMs);
+    }
     if (!createCapability.ok && createCapability.reason) {
       caps.create_nodes_blocked_reason = createCapability.reason;
     }

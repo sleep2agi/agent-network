@@ -45,7 +45,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-BASELINE = 82   # 2026-08-30, origin/main, strict:true, src/**/*.ts (排除 *.test.ts);
+BASELINE = 81   # 2026-08-30, #1545: 82 → 81。少掉的那一条是 config-apply.ts 的
+                # createCapability.reason 只声明了 "anet_bin_pin_unresolved",而调用方
+                # 传的是五类真实 code —— 把那个联合单一来源化(CreateNodesBlockedReason)
+                # 之后它自然消失了。
+                # 2026-08-30, origin/main, strict:true, src/**/*.ts (排除 *.test.ts);
                 # 环境须与 CI 一致:agent-node 下 npm install --no-save typescript@5.9.3 @types/node@20
 TS_VERSION = "5.9.3"
 TYPES_NODE_VERSION = "20"
