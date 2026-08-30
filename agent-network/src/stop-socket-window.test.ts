@@ -18,7 +18,23 @@ describe("#1385 stop socket residual window", () => {
     expect(tail).not.toContain("Date.now() + 3_000");
   });
 
-  test("residual line carries the age diagnostic (slow-teardown vs leak)", () => {
-    expect(src).toContain("an old-mtime socket that outlives the window is a real leak");
+  // #1422 —— 这条原来钉的是 "an old-mtime socket that outlives the window is a real leak"。
+  // **那句话是错的**:unix socket 的 mtime 定在 bind 那一刻,继续监听不更新它、
+  // close 也不更新(实测:bind 后 0.00s → 监听 3s 后 3.00s → close 后仍 3.00s)。
+  // 所以那个"年龄" ≈ 节点已经运行了多久,它对**任何**残留都会打成"真泄漏" ——
+  // 成功与失败同读数,判别力为零。
+  // 真正能区分"还有人用"与"孤儿路径名"的是 /proc/net/unix,所以改钉 listener=。
+  test("residual line reports the listener state, not an mtime-based verdict", () => {
+    expect(src).toContain("listener=yes");
+    expect(src).toContain("listener=no");
+    expect(src).not.toContain("an old-mtime socket that outlives the window is a real leak");
+  });
+
+  // #1422 —— 属主已证死 + /proc/net/unix 无监听者 ⇒ 回收陈旧路径名。
+  // 少了这一步,那 10 秒窗口是在等一个被 stop 自己 SIGKILL 掉的清扫者。
+  test("stop reclaims an orphan socket pathname before declaring STOP_TIMEOUT", () => {
+    expect(src).toContain("reapStaleSocket");
+    // 路径必须**重新算**而不是信 profile 里存的那个
+    expect(src).toContain("grokCopresenceSocketPaths(resolved.id)");
   });
 });

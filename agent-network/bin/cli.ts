@@ -99,7 +99,9 @@ import {
   grokBuildCliCreationFields,
   prepareGrokPreviewResolverConfigs,
   resolveGrokAttachTarget,
+  grokCopresenceSocketPaths,
 } from "../src/grok-copresence-profile";
+import { reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
 import {
   codexCopresencePosture,
   codexCopresenceCreateFields,
@@ -8847,7 +8849,7 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
   return [...pids];
 }
 
-type StopResidual = { kind: "process" | "socket"; detail: string };
+type StopResidual = { kind: "process" | "socket"; detail: string; path?: string };
 type ProcessIdentitySnapshot =
   | { kind: "gone" }
   | { kind: "unverifiable"; detail: string }
@@ -8892,9 +8894,9 @@ function nodeSocketResiduals(profile: Profile): StopResidual[] {
     if (!path) continue;
     try {
       const st = lstatSync(path);
-      if (st.isSocket()) out.push({ kind: "socket", detail: `${label} socket ${path}` });
+      if (st.isSocket()) out.push({ kind: "socket", detail: `${label} socket ${path}`, path });
     } catch (e: any) {
-      if (e?.code !== "ENOENT") out.push({ kind: "socket", detail: `${label} socket ${path} (${e?.code || "unreadable"})` });
+      if (e?.code !== "ENOENT") out.push({ kind: "socket", detail: `${label} socket ${path} (${e?.code || "unreadable"})`, path });
     }
   }
   return out;
@@ -9826,15 +9828,69 @@ Stop a running agent node.
     await new Promise(r => setTimeout(r, 100));
     socketResiduals = nodeSocketResiduals(resolved.profile);
   }
+  // #1422 —— 走到这里说明属主进程已经被证明消失(上面 reapOwnedGeneration /
+  // clearStoppedIdentityPidFile 都过了),但 socket **路径名**还在。
+  //
+  // 实测(test225 一次确认的红,签名与 08-29 CI 逐字相同):这时的 leader.sock
+  // 在 /proc/net/unix 里**一行都没有**,listeners=0 —— 它是个孤儿路径名,
+  // 不是"还在拆卸"。成因:删它的 removeUnchangedStaleSocket 住在 agent-node
+  // 进程里(grok-copresence/leader-lifecycle.ts:501),而 stop 的
+  // reapOwnedGeneration 是 SIGTERM → 5s → SIGKILL;负载下 agent-node 侧那条
+  // 拆卸链(每段默认 2000ms,最坏 8s)跑不完 5 秒就被 SIGKILL,清理永不执行。
+  // 于是这里的窗口在等一个五秒前被自己杀掉的清扫者 —— 窗口放到多大都等不到,
+  // #1385 把 3s 放到 10s 只压低了命中率。
+  //
+  // 🔴 路径**重新算**,不信 profile 里存的那个:grokCopresenceSocketPaths 是纯函数,
+  //    只有与它算出来的规范路径**完全相等**的残留才允许回收。一个被写坏的
+  //    profile 因此带不进来别处的 socket —— 前缀校验做不到这一点。
+  if (socketResiduals.length > 0) {
+    let canonical: { leaderSocket: string; attachSocket: string } | null = null;
+    try { canonical = grokCopresenceSocketPaths(resolved.id); } catch { canonical = null; }
+    if (canonical) {
+      const reapable = new Set([canonical.leaderSocket, canonical.attachSocket]);
+      const runtimeRoot = dirname(canonical.leaderSocket);
+      for (const residual of socketResiduals) {
+        if (!residual.path || !reapable.has(residual.path)) continue;
+        const outcome = reapStaleSocket(residual.path, {
+          procNetUnix: () => readFileSync("/proc/net/unix", "utf8"),
+          lstat: (target) => {
+            try {
+              const st = lstatSync(target);
+              return { dev: st.dev, ino: st.ino, uid: st.uid, isSocket: st.isSocket() };
+            } catch { return null; }
+          },
+          unlink: (target) => unlinkSync(target),
+          currentUid: () => process.getuid?.() ?? -1,
+        }, { allowedRoot: runtimeRoot });
+        if (outcome.kind === "removed") {
+          console.log(`[anet] reclaimed stale ${residual.kind}: ${residual.path} (owner proven gone, no listener in /proc/net/unix)`);
+        } else if (outcome.kind !== "absent") {
+          console.error(`[anet]    kept ${residual.path}: ${outcome.kind}${"detail" in outcome ? ` — ${outcome.detail}` : ""}`);
+        }
+      }
+      socketResiduals = nodeSocketResiduals(resolved.profile);
+    }
+  }
   if (socketResiduals.length > 0) {
     console.error(`[anet] STOP_TIMEOUT: authoritative local resources survived for "${displayName}" after ${SOCKET_RESIDUAL_WINDOW_MS}ms; hub was not notified offline.`);
     for (const residual of socketResiduals) {
       let age = "unknown-age";
-      try {
-        const m = residual.detail.match(/(\S+\.sock)/);
-        if (m) age = `${Math.round(Date.now() - lstatSync(m[1]).mtimeMs)}ms old`;
-      } catch {}
-      console.error(`[anet]    residual ${residual.kind}: ${residual.detail} (${age}) — an old-mtime socket that outlives the window is a real leak; a fresh one means teardown was still in flight.`);
+      let listener = "listener=unknown";
+      const target = residual.path;
+      if (target) {
+        // 🔴 这个年龄是 **bind 到现在**,不是"残留了多久":unix socket 的 mtime
+        //    定在 bind 那一刻,监听不更新它、close 也不更新(实测)。所以它约等于
+        //    节点已经运行了多久,**不能**用来区分"真泄漏"和"还在拆卸" ——
+        //    #1385 原来的措辞正是这么声称的,对任何残留都会打成"真泄漏"。
+        //    真正能区分的是下面的 listener=。
+        try { age = `${Math.round(Date.now() - lstatSync(target).mtimeMs)}ms since bind`; } catch {}
+        try {
+          listener = unixSocketPathInUse(readFileSync("/proc/net/unix", "utf8"), target)
+            ? "listener=yes — someone still holds it; teardown did not finish"
+            : "listener=no — orphan pathname that was not reclaimed (see kept-line above for why)";
+        } catch (e: any) { listener = `listener=unknown (/proc/net/unix unreadable: ${e?.code || "?"})`; }
+      }
+      console.error(`[anet]    residual ${residual.kind}: ${residual.detail} (${age}, ${listener})`);
     }
     process.exit(1);
   }
