@@ -153,11 +153,26 @@ def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
         judged = True
         if any(abs(w - n) <= WINDOW for w in where):
             break
-        near = min(where, key=lambda w: abs(w - n))
-        findings.append(
-            f"  🔴 {doc.relative_to(repo)}  锚文本点名 `{sym}`，钉在 {rel}#L{n}，"
-            f"但那一行是:\n       {lines[n - 1].strip()[:100]}\n"
-            f"       `{sym}` 现在在第 {near} 行（共 {len(where)} 处）")
+        head = (f"  🔴 {doc.relative_to(repo)}  锚文本点名 `{sym}`，钉在 {rel}#L{n}，"
+                f"但那一行是:\n       {lines[n - 1].strip()[:100]}")
+        if len(where) == 1:
+            findings.append(f"{head}\n       `{sym}` 只出现一处，在第 {where[0]} 行:\n"
+                            f"         {where[0]:>5}  {lines[where[0] - 1].strip()[:96]}")
+        else:
+            # 🔴 多处匹配时**不给单一答案**。此前这里打印
+            #    `min(where, key=|w-n|)`(离原 pin 最近的那处),而"最近"经常是
+            #    **该符号上方的一句注释** —— 注释里自然会提到它。
+            #    照着那个数字改 pin,门**会变绿**,而文档从此指着一句注释。
+            #    2026-08-30 实测:`send_ack` 的注释在 2072、真正的工具注册在 2074,
+            #    两者相距 2 行,谁"更近"完全取决于原 pin 落在哪 —— 而它们的含义天差地别。
+            #    ⇒ 列出全部候选**并带上行内容**,把消歧交回给人。
+            #      只给几个数字是不够的:人还是会挑第一个。
+            body = "\n".join(f"         {w:>5}  {lines[w - 1].strip()[:96]}" for w in where)
+            findings.append(
+                f"{head}\n       `{sym}` 在该文件出现 {len(where)} 处，"
+                f"本门**不替你判断**该钉哪一处:\n{body}\n"
+                f"       ⚠ 别直接抄第一个数字 —— 其中很可能有**提到该符号的注释行**。"
+                f"钉到注释上门一样会绿，而文档从此指向一个不相干的位置。")
         break
     return judged
 
