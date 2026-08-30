@@ -142,3 +142,42 @@ describe("#1342 —— 整张进程表只枚举一次", () => {
     expect(script).toContain("$ids.Contains([int]$_.OwningProcess)");
   });
 });
+
+describe("#1342 —— 探测耗时也要出现在成功路径", () => {
+  const src = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+  const winStart = src.indexOf("async function startWindowsCodexCopresence");
+  const winEnd = src.indexOf("async function startCopresenceOrchestration");
+  const win = src.slice(winStart, winEnd > winStart ? winEnd : undefined);
+
+  test("成功那行带上 probes / probeMsLast / probeMsMax", () => {
+    // 🔴 不能直接 indexOf("connection=pid-attributed") —— 它会先命中**注释里
+    //    提到该子串的那一行**(本文件上游的说明注释就写着它)。
+    //    必须锚在真正的 `console.log(` 那一行上。第一版我就是这么写的,
+    //    这条测试自己把它抓了出来。
+    const at = win.indexOf("console.log(`[anet] client-health role=tui");
+    expect(at).toBeGreaterThan(-1);
+    const line = win.slice(at, win.indexOf("\n", at));
+    expect(line).toContain("probes=");
+    expect(line).toContain("probeMsLast=");
+    expect(line).toContain("probeMsMax=");
+  });
+
+  // 🔴 反向见证:失败路径的那份**不能因此被删掉**。两侧都要有样本,才谈得上前后对比。
+  //
+  //    ⚠️ 第一版我写的是 `expect(win).toContain("probeMsLast=…")` —— **它观察不到**:
+  //    删掉失败侧之后,**成功侧仍含同一个子串**,`toContain` 照样命中,变异不红。
+  //    必须锚在 `const looking =` 那一行本身。这个洞是双向见证抓出来的。
+  test("失败诊断的 [looking] 串里仍带 probeMs", () => {
+    const at = win.indexOf("const looking =");
+    expect(at).toBeGreaterThan(-1);
+    const line = win.slice(at, win.indexOf("\n", at));
+    expect(line).toContain("probeMsLast=");
+    expect(line).toContain("probeMsMax=");
+    expect(line).toContain("probes=");
+  });
+
+  // 🔴 被测试用 indexOf 钉住的那个子串必须原样保留(追加在其后是安全的,替换不是)
+  test("connection=pid-attributed 这个锚点子串没有被改动", () => {
+    expect(win).toContain("connection=pid-attributed");
+  });
+});
