@@ -84,11 +84,20 @@ ADMIN_USER_ID=$(curl -sS "$HUB_BASE/api/auth/me" -H "Authorization: Bearer $UTOK
 REG_M=$(curl -sS -X POST "$HUB_BASE/api/auth/register" -H 'Content-Type: application/json' \
   -d "{\"username\":\"$MEMBER_USER\",\"password\":\"$MEMBER_PW\",\"email\":\"m026@test.local\"}")
 MEMBER_UTOK=$(echo "$REG_M" | jq -r .token)
+# 🔴 取值之后立刻校验形状 —— 否则下面拿它去建成员、而失败会在**场景 B** 才露头,
+#    报的是"角色门没拦住",指向的是错的地方。
+[[ "$MEMBER_UTOK" == utok_* ]] || bad "member utok mint failed: $REG_M"
 MEMBER_USER_ID=$(curl -sS "$HUB_BASE/api/auth/me" -H "Authorization: Bearer $MEMBER_UTOK" | jq -r .user.user_id)
-curl -sS -X POST "$HUB_BASE/api/networks/$NET_ID/members" -H "Authorization: Bearer $UTOK" \
-  -H 'Content-Type: application/json' -d "{\"user_id\":\"$MEMBER_USER_ID\",\"role\":\"member\"}" >/dev/null
+[[ -n "$MEMBER_USER_ID" && "$MEMBER_USER_ID" != "null" ]] \
+  || bad "member user_id not resolved (MEMBER_USER_ID='$MEMBER_USER_ID')"
+ADD_M=$(curl -sS -X POST "$HUB_BASE/api/networks/$NET_ID/members" -H "Authorization: Bearer $UTOK" \
+  -H 'Content-Type: application/json' -d "{\"user_id\":\"$MEMBER_USER_ID\",\"role\":\"member\"}")
 mcp_init_once "$MEMBER_UTOK"
-ok "member user joined network (role=member)"
+# 🔴 这一行原来是**无条件** `ok` —— 不管上面三步有没有成功都打 PASS。
+#    一条无条件的 PASS 不是断言,是一句声明。
+[[ "$(echo "$ADD_M" | jq -r .ok 2>/dev/null)" == "true" ]] \
+  && ok "member user joined network (role=member)" \
+  || bad "member join failed: $ADD_M"
 
 # ── 0.A bring up daemon (used by A + B + C + D + F + K) ───────────
 DAEMON_NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
@@ -187,9 +196,20 @@ ROWS=$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM node_create_requests WHERE child_
 note "C. cross-tenant — stranger network cannot target our daemon"
 # admin creates a 2nd network they own; from the network they own (NET2)
 # try to create on NET_ID's daemon → should be cross_network_node.
-NET2=$(curl -sS -X POST "$HUB_BASE/api/networks" -H "Authorization: Bearer $UTOK" \
-  -H 'Content-Type: application/json' -d '{"network_name":"stranger-net"}' | jq -r .network.network_id)
-[[ -n "$NET2" && "$NET2" != "null" ]] && ok "stranger network = $NET2"
+# 🔴 `POST /api/networks` 返回的是**扁平** {ok, network_id, network_name}
+#    (server.ts: `Response.json(result)`,result 直接来自 createNetwork),
+#    **没有 .network 这一层**。原来取 `.network.network_id` 恒得 null。
+# 🔴 服务端读的是 `body.name`(server.ts: createNetwork(user_id, body.name, body.description)),
+#    夹具原来发的是 `network_name` ⇒ name=undefined ⇒ 建网失败/建出无名网络。
+#    这是 NET2 恒为 null 的**第二层**成因(第一层是 jq 路径多了 .network)。
+NET2_RESP=$(curl -sS -X POST "$HUB_BASE/api/networks" -H "Authorization: Bearer $UTOK" \
+  -H 'Content-Type: application/json' -d '{"name":"stranger-net"}')
+NET2=$(echo "$NET2_RESP" | jq -r .network_id)
+# 🔴 这条以前是 `[[ … ]] && ok "…"` —— **没有 || bad**。于是 NET2 取空时它静默跳过,
+#    下面那条 SEC-1 断言就拿着 network_id=null 去发请求,测的根本不是跨租户。
+#    前置条件不成立必须红,否则后面的断言在测垃圾。
+[[ -n "$NET2" && "$NET2" != "null" ]] && ok "stranger network = $NET2" \
+  || bad "stranger network not created (NET2='$NET2') resp=$NET2_RESP — cross-tenant assertion below would test garbage"
 BODY=$(build_create_node_body "$DAEMON_NODE_ID" "c-noop-child" "claude-agent-sdk" "claude-opus-x" "$NET2")
 RESP=$(mcp_call "$UTOK" "$BODY")
 ERR=$(echo "$RESP" | jq -r .error 2>/dev/null)
