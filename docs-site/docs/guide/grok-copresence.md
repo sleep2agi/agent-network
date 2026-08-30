@@ -4,7 +4,7 @@
 下面的 danger 块记录的是 2026-08-18 的验收状态，**已过时**：`grok-build-cli` 共存路径现已端到端跑通 —— macmini 上用 npm 安装的 `anet 2.3.0-preview.43` + 全局 `agent-node`（grok `1.0.5 (5115b46bc909)`，验证清单内）创建节点、`anet grok attach` 进入共享 TUI、网络任务注入并 19 秒收到回答。当前用法见 [Grok 共存 TUI（grok-build-cli）](/guide/grok-tui)。历史告诫保留如下供追溯。
 :::
 
-::: warning 已知缺陷：名册里的 `blocked` 目前分辨不出真假（2026-08-30 实测，[#1606](https://github.com/sleep2agi/agent-network/issues/1606)）
+::: warning `blocked` 分辨不出真假 —— **从 agent-node `2.5.0-preview.57` 起已修**（[#1606](https://github.com/sleep2agi/agent-network/issues/1606)）
 **用 grok 1.0.5 时这一格恒为 `blocked`，即使节点正在正常干活。**
 
 1.0.5 是 **leaderless** build —— 按设计就不创建 `leader.sock`（能力表里 `autoLeader: false`，macOS 与 Linux 都是），
@@ -12,8 +12,22 @@
 
 实测：被标成 `blocked` 的节点仍然成功注入并返回了网络任务，还回复了发起方。
 
-**看到 `blocked` 先别重建节点。** 修复前请以节点日志为准，不要以名册那一格为准 —— 日志里有
-`injected network task` / `processTask returned` 就说明运行时是好的。
+**看到 `blocked` 先别重建节点。** 先看你的 agent-node 版本：
+
+```bash
+agent-node --version
+```
+
+- **≥ `2.5.0-preview.57`** —— 已修。此时的 `blocked` **是有信息量的**，去查 TUI 子进程、composer 就绪、`attach.sock`。
+- **< `2.5.0-preview.57`** —— 这一格对 leaderless build 恒为假，**不携带任何信息**。以节点日志为准：
+  日志里有 `injected network task` / `processTask returned` 就说明运行时是好的。
+
+🔴 **升级之后必须重启，光换包不够** —— liveness 在**长驻进程内**算：
+
+```bash
+npm i -g @sleep2agi/agent-node@2.5.0-preview.57
+anet daemon restart <daemon>        # 需要 anet ≥ 2.3.0-preview.74
+```
 :::
 
 ::: danger 2026-08-18 时点的旧状态（保留存档）
