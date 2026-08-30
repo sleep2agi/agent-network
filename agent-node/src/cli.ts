@@ -77,7 +77,7 @@ import {
 } from "./reply-reliability";
 import { isTelemetrySchemaRejection, withoutOptionalTelemetry } from "./register-telemetry-fallback";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
-import { codexTimeoutDetail } from "./runtime/codex-timeout-detail";
+import { claudeAttemptsDetail, codexTimeoutDetail } from "./runtime/sdk-timeout-detail";
 import {
   GROK_COPRESENCE_PROFILE_ENV,
   selectGrokCopresenceCapabilityProfile,
@@ -2624,6 +2624,12 @@ async function processWithClaude(
   // factory and forward withTimeout's signal into it.
   let lastErr: string = "";
   let timedOutFinal = false;
+  // #1645 —— 超时时原文说「vendor 长时间未响应, 检查 ANTHROPIC_BASE_URL」,后半句是**猜的**。
+  //   这一刻真正拿得到的是:每次尝试各花了多久、是超时还是报错。它是「真的一直没响应」
+  //   和「很快就失败、只是最后一次撞上超时」之间的判别项,两者要查的东西完全不同。
+  //   🔴 必须声明在重试循环**之外** —— 循环内声明的话,下面那个 return 读不到
+  //   (同一个错我在这个文件的 codex 分支上刚犯过一次,typecheck 棘轮门抓的)。
+  const claudeAttempts: { ms: number; timedOut: boolean }[] = [];
   for (let attempt = 0; attempt <= CLAUDE_MAX_RETRIES; attempt++) {
     let timedOut = false;
     const attemptStart = Date.now();
@@ -2805,6 +2811,7 @@ async function processWithClaude(
 
       lastErr = msg;
       timedOutFinal = timedOut;
+      claudeAttempts.push({ ms: attemptDt, timedOut });
       const reason = timedOut ? `timed out after ${attemptDt}ms` : `errored: ${msg.slice(0, 100)}`;
 
       if (attempt < CLAUDE_MAX_RETRIES) {
@@ -2820,7 +2827,7 @@ async function processWithClaude(
     }
   }
   if (timedOutFinal) {
-    return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s × ${CLAUDE_MAX_RETRIES + 1} attempts) — vendor 长时间未响应, 检查 ANTHROPIC_BASE_URL endpoint 或 vendor 负载`;
+    return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s × ${CLAUDE_MAX_RETRIES + 1} attempts) — ${claudeAttemptsDetail(claudeAttempts, CLAUDE_TIMEOUT_MS)}。确切原因见节点日志里 [claude] 开头那几行。`;
   }
   return `执行出错: ${lastErr.slice(0, 200)} (after ${CLAUDE_MAX_RETRIES + 1} attempts)`;
 }
