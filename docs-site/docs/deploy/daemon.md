@@ -260,12 +260,19 @@ Hub 那一侧每 3 分钟能看到它的心跳：
 
 🔴 **升级完必须重启 —— 光换包不够。** daemon 是**长驻进程**，这一格由它在进程内算出；
 换掉磁盘上的包，对一个**已经在跑**的进程没有任何影响，`anet daemon list` 会照旧显示「未知」。
-`anet daemon` 没有 `restart` 子命令，重启走两步（`daemon start` 委托给 `node start`，停也走 node）：
+```bash
+anet daemon restart <name>
+```
+
+::: tip 你的版本有没有这条？
+跑一下 `anet daemon`（不带子命令）看列表里有没有 `restart`。**没有的话用两步** ——
+因为 `daemon start` 委托给 `node start`，所以停也走 `node`：
 
 ```bash
 anet node stop <name>
 anet daemon start <name>
 ```
+:::
 
 🔴 **年龄那一格不是装饰。** 一个「5s 前测」的 `不可用` 和一个「三周前测」的 `不可用`
 是两件事 —— 后者很可能早就被修好了，只是那台 daemon 用的老版本在开机时算过一次就再没重测。

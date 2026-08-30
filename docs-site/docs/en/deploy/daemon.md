@@ -280,14 +280,22 @@ absent it stays quiet: the node's own startup error is more specific.)
 
 🔴 **Upgrading alone changes nothing — restart it.** The daemon is a **long-lived process**
 and computes this field in-process, so swapping the package on disk has no effect on a daemon
-that is **already running**: `anet daemon list` keeps printing "unknown". `anet daemon` has no
-`restart` subcommand; restart is two steps (`daemon start` delegates to `node start`, so
-stopping goes through `node` too):
+that is **already running**: `anet daemon list` keeps printing "unknown".
+
+```bash
+anet daemon restart <name>
+```
+
+::: tip Does your version have it?
+Run `anet daemon` with no subcommand and check the list for `restart`. **If it is absent,
+use the two-step form** — `daemon start` delegates to `node start`, so stopping goes
+through `node` too:
 
 ```bash
 anet node stop <name>
 anet daemon start <name>
 ```
+:::
 
 🔴 **The age is not decoration.** An `unavailable` measured 5s ago and one measured three
 weeks ago are different things — the latter was quite possibly fixed long since, and the
