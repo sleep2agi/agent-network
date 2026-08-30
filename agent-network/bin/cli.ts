@@ -41,6 +41,7 @@ import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
+import { formatHubVersionDetail } from "../src/hub-version-skew";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
@@ -15771,7 +15772,11 @@ async function doctorCommand() {
   if (gc.hub) {
     try {
       const health = await fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any);
-      check("CommHub reachable", health.ok === true, `${gc.hub} v${health.version || "?"}`);
+      // 🔴 #1595 —— 原先只印 hub 自报的版本,读的人看不到自己这台 CLI 钉的是哪个。
+      //   实测:生产 hub 在 .38,而 PINNED_SERVER_VERSION 是 .44,差 6 个版本。
+      //   只并排摆出两个数,**不判断谁对、不给阈值、不发警告** —— hub 比 pin
+      //   老或新都可能完全合理,猜一个「应该一致」的判据会在正常情况下误报。
+      check("CommHub reachable", health.ok === true, formatHubVersionDetail(gc.hub, health.version, PINNED_SERVER_VERSION));
       if (health.api_version) info("API version", health.api_version);
       info("Sessions", `${health.sessions_count || health.sessions || 0} registered`);
       info("SSE connections", `${health.sse_connections ?? 0} active`); // #473: aggregate stayed on /health
