@@ -200,3 +200,45 @@ describe("#1545 跨仓共享的前提(Dashboard 在浏览器里 import 这个模
     expect(self.split("\n").filter(l => /^\s*import\s|require\s*\(/.test(l)).length).toBeGreaterThan(0);
   });
 });
+
+/* 🔴 2026-08-30 macOS 真机验收(Mac打包牛)发现:合成的首行约 99 列,80 列终端折行,
+ * 而折点落在句子中间。本模块其余细节本来就各占一行 —— 那一句是唯一的例外。
+ * 这条测试把"每一行都要能塞进 80 列"变成常驻判据,而不是靠人再去数一次。
+ * 宽度按**显示列**算:CJK 占 2 列,不是按字符数(按字符数会漏掉正好是这一类问题)。 */
+function displayWidth(s: string): number {
+  let n = 0;
+  for (const ch of s) n += /[\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]/.test(ch) ? 2 : 1;
+  return n;
+}
+
+describe("#1545 输出宽度 —— 每一行都要塞进 80 列", () => {
+  const NOW = 1_760_000_000_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const rows: Array<[string, any]> = [
+    ["blocked",             { can_create_nodes: false, create_nodes_blocked_reason: "anet_bin_permission", create_capability_observed_ms_ago: 0, last_seen_at: iso(NOW - 3000) }],
+    ["blocked-age-unknown", { can_create_nodes: false, create_nodes_blocked_reason: "anet_bin_permission" }],
+    ["ready",               { can_create_nodes: true, create_capability_observed_ms_ago: 0, last_seen_at: iso(NOW - 3000) }],
+    ["ready-age-unknown",   { can_create_nodes: true }],
+    ["never-reported",      {}],
+  ];
+
+  // 🔴 分母自证:这 5 行必须真的产出 5 个**不同**的 kind。
+  //    少一个,下面的宽度检查会不知不觉少覆盖一种情况而仍然全绿。
+  test("五种情况确实产出五个不同的 kind", () => {
+    const kinds = new Set(rows.map(([, r]) => describeCapability(r, NOW).kind));
+    expect(kinds.size).toBe(5);
+  });
+
+  test.each(rows)("%s 的每一行都 <= 80 显示列", (_name, row) => {
+    const lines = describeCapability(row as any, NOW).line.split("\n");
+    expect(lines.length).toBeGreaterThan(0);
+    for (const L of lines) expect(displayWidth(L)).toBeLessThanOrEqual(80);
+  });
+
+  // 正控:证明 displayWidth 不是恒返回小值 —— 一个恒 0 的实现能让上面全绿。
+  test("displayWidth 把 CJK 算成 2 列(否则上面的检查是空的)", () => {
+    expect(displayWidth("abcd")).toBe(4);
+    expect(displayWidth("中文")).toBe(4);
+    expect(displayWidth("中a")).toBe(3);
+  });
+});
