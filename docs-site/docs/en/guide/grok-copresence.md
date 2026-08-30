@@ -35,8 +35,8 @@ anet daemon restart <daemon>        # requires anet >= 2.3.0-preview.74
 grok --version
 ```
 
-grok **updates itself**. Once it moves to a version outside the verified list, co-presence nodes
-**fail to start on the next restart** (fail-closed), while **already-running nodes look completely fine** —
+**The `grok` on `PATH` can become a version outside the verified list** (for example, someone installs a
+newer grok on that machine). Once it does, co-presence nodes **fail to start on the next restart** (fail-closed), while **already-running nodes look completely fine** —
 they are using the process spawned earlier. The problem only surfaces when you run the restart above,
 and by then the node is already stopped.
 
