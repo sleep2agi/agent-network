@@ -12000,13 +12000,19 @@ async function statusCommand() {
     console.log(`  Tasks:  ${tasks.length} recent\n`);
 
     if (attention.length > 0) {
-      console.log("  Needs attention (blocked / error / 未知状态 — not progressing):");
+      console.log("  Needs attention (blocked / error / 未知状态 — 需要有人看一眼):");
       for (const s of attention) {
         console.log(`    ${String(s.alias).padEnd(16)} ${String(s.status || "").padEnd(8)} ${(s.task || "").slice(0, 48)}`);
       }
       // 🔴 状态是**自报**的:它只在 agent 显式上报时才变。一个 `blocked` 可能是
       //    3 秒前报的,也可能是三周前报的 —— 这里不假装知道哪一种。
-      console.log("    (状态由 agent 自报,不含活性成分;要确认它还在不在,发一条任务试试)");
+      // 🔴 不要写「not progressing」:#1548 的实测证据正好相反 —— 一个 blocked 节点
+      //    22 秒答完了一条任务。blocked 说的是「没有出口」(只有 report_completion
+      //    会把它清回 idle),不是「它停了」。这两句话对用户的含义完全不同。
+      console.log("    (🔴 blocked ≠ 停了 —— 实测 blocked 节点仍能秒回任务;它只是没有出口:");
+      console.log("     只有 report_completion 会把 status 清回 idle。状态由 agent 自报,");
+      console.log("     不含活性成分,名册里也没有「何时变成 blocked」这个字段 —— updated_at");
+      console.log("     被心跳一直刷,不是它。要确认它还在不在,发一条任务试试。)");
       console.log();
     }
 
