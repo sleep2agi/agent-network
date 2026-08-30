@@ -26,6 +26,142 @@ export interface CodexCopresenceProfileFields {
   readonly codexCopresence?: boolean;
   readonly codexCopresenceFullAccess?: boolean;
   readonly flags?: Record<string, unknown>;
+  // #1521 — three fields required by `anet node resume <alias>` for
+  // codex-copresence nodes. See docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md
+  //
+  // NONE of the three is read by `anet node create` / `anet node start` — they
+  // are only consulted by `resume`. Old codex-copresence configs without them
+  // continue to `start` normally; `resume` fail-closes with a diagnostic that
+  // names the missing field(s) and prints the JSON patch template (Q7=C).
+  /** Absolute project directory to launch the codex TUI in. Passed as
+   *  `-C <dir>` to `codex resume`. Also cross-checked against hub-reported
+   *  `session.project_dir` in Phase 4.3. */
+  readonly codexProjectDir?: string;
+  /** Which launch adapter to use in Phase 3.2. `"codex-standard"` = stock
+   *  `codex app-server` + `codex resume`; `"codex-custom-wrapper"` = TMHR狗-class
+   *  custom LLM API wrapper (hosted tool / compaction / image-output compat).
+   *  Unknown / absent → Phase 0 fail-closed (unknown adapters must not fall
+   *  through to a default that might not fit the node's real topology). */
+  readonly codexLaunchAdapter?: "codex-standard" | "codex-custom-wrapper";
+  /** Alias of the peer that will verify this node's identity in Phase 6.
+   *  Peer MUST be (a) registered in the same network, (b) online at resume
+   *  time, (c) not this node itself. Identity attestation uses a fresh
+   *  Hub outbound `send_task` from THIS node's Bridge to <codexProbePeer>
+   *  carrying a nonce; peer echoes the nonce back; CLI cross-checks Hub's
+   *  recorded `from_name / from_node_id / to_name / to_node_id`.
+   *
+   *  🔴 self-loop is deliberately not accepted here — it cannot prove
+   *  cross-node routing closure (design v7 Phase 6 = D, per TMHR
+   *  06cfb29a). Single-node users cannot run `anet node resume` in
+   *  this initial cut; tracked at #1527. */
+  readonly codexProbePeer?: string;
+}
+
+/** #1521 — the three fields `anet node resume <alias>` requires on a
+ *  codex-copresence node. Any missing field is a Phase 0 fail-closed with
+ *  actionable diagnostic (see `codexResumeMissingConfigHint`). */
+export type CodexResumeRequiredField =
+  | "codexProjectDir"
+  | "codexLaunchAdapter"
+  | "codexProbePeer";
+
+export const CODEX_RESUME_REQUIRED_FIELDS: readonly CodexResumeRequiredField[] = [
+  "codexProjectDir",
+  "codexLaunchAdapter",
+  "codexProbePeer",
+];
+
+/** Enumerate which of the three resume-required fields are absent /
+ *  wrong-shaped on this profile. Returns [] when all three are present
+ *  and well-shaped. Shape check (string / enum / absolute path) only —
+ *  liveness of `codexProbePeer` (registered + online + non-self) is a
+ *  separate check performed against the hub in Phase 0. */
+export function missingCodexResumeFields(
+  profile: CodexCopresenceProfileFields,
+): CodexResumeRequiredField[] {
+  const missing: CodexResumeRequiredField[] = [];
+  if (typeof profile.codexProjectDir !== "string" || !profile.codexProjectDir.startsWith("/")) {
+    missing.push("codexProjectDir");
+  }
+  const adapter = profile.codexLaunchAdapter;
+  if (adapter !== "codex-standard" && adapter !== "codex-custom-wrapper") {
+    missing.push("codexLaunchAdapter");
+  }
+  if (typeof profile.codexProbePeer !== "string" || profile.codexProbePeer.length === 0) {
+    missing.push("codexProbePeer");
+  }
+  return missing;
+}
+
+/** #1521 — actionable multi-line diagnostic for the Q7=C flow: user hits
+ *  `anet node resume <alias>` on a legacy codex-copresence node that never
+ *  had these fields. Names the missing field(s), the shape requirement,
+ *  and — critically — HOW to obtain a valid value (per 通信龙 df6d26d9
+ *  "指不出下一步的报错等于把人卡在原地"). Modeled on the style adopted
+ *  by #1521 (700b47f6) for `anet_bin_source` diagnostics: every error
+ *  ends in a copy-pasteable next step.
+ *
+ *  Do NOT auto-write the config (TMHR v5 dry-run bonus: "dry-run 是渲染
+ *  不是执行"). Print a JSON patch template + the exact command the user
+ *  runs against it. */
+export function codexResumeMissingConfigHint(
+  alias: string,
+  missing: readonly CodexResumeRequiredField[],
+): string {
+  const lines: string[] = [];
+  lines.push(`anet node resume ${alias}: cannot start — codex-copresence config is missing ${missing.length} required field(s).`);
+  lines.push("");
+  lines.push("Missing:");
+  for (const f of missing) {
+    switch (f) {
+      case "codexProjectDir":
+        lines.push(`  - codexProjectDir : absolute path to the project directory (passed as \`-C <dir>\` to codex resume)`);
+        break;
+      case "codexLaunchAdapter":
+        lines.push(`  - codexLaunchAdapter : "codex-standard" (stock codex app-server) or "codex-custom-wrapper" (TMHR狗-class LLM API wrapper)`);
+        break;
+      case "codexProbePeer":
+        lines.push(`  - codexProbePeer : alias of another node in this network for identity attestation`);
+        lines.push(`      (must be registered + online + NOT this node itself; see #1527 for the single-node case)`);
+        break;
+    }
+  }
+  lines.push("");
+  lines.push("Fix — write a patch file and apply it:");
+  lines.push("");
+  lines.push("  cat > /tmp/codex-resume-patch.json <<'EOF'");
+  lines.push("  {");
+  const patchLines: string[] = [];
+  for (const f of missing) {
+    switch (f) {
+      case "codexProjectDir":
+        patchLines.push(`    "codexProjectDir": "<absolute path, e.g. /home/user/my-project>"`);
+        break;
+      case "codexLaunchAdapter":
+        patchLines.push(`    "codexLaunchAdapter": "codex-standard"`);
+        break;
+      case "codexProbePeer":
+        patchLines.push(`    "codexProbePeer": "<peer alias — run 'anet node ls' to pick an online peer>"`);
+        break;
+    }
+  }
+  lines.push(patchLines.join(",\n"));
+  lines.push("  }");
+  lines.push("  EOF");
+  lines.push("");
+  lines.push(`  anet node config apply ${alias} /tmp/codex-resume-patch.json`);
+  lines.push("");
+  lines.push("Then re-run:");
+  lines.push("");
+  lines.push(`  anet node resume ${alias}`);
+  if (missing.includes("codexProbePeer")) {
+    lines.push("");
+    lines.push("🔴 This command needs ≥2 registered nodes online — the target being resumed,");
+    lines.push("   plus the codexProbePeer that will attest its identity via a fresh Hub outbound");
+    lines.push("   ACK. If you only have one node, see #1527 (single-node attestation is a known");
+    lines.push("   deliberate gap in this initial cut, tracked for a follow-up).");
+  }
+  return lines.join("\n");
 }
 
 export const CODEX_COPRESENCE_RUNTIME = "codex-app-server";
