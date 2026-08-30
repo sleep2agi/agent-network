@@ -28,6 +28,23 @@ agent-node --version
 npm i -g @sleep2agi/agent-node@2.5.0-preview.57
 anet daemon restart <daemon>        # requires anet >= 2.3.0-preview.74
 ```
+
+🔴 **Check your grok version before restarting** ([#1615](https://github.com/sleep2agi/agent-network/issues/1615)):
+
+```bash
+grok --version
+```
+
+grok **updates itself**. Once it moves to a version outside the verified list, co-presence nodes
+**fail to start on the next restart** (fail-closed), while **already-running nodes look completely fine** —
+they are using the process spawned earlier. The problem only surfaces when you run the restart above,
+and by then the node is already stopped.
+
+The error lists the verified versions. The older binary is usually still in `~/.grok/downloads/`:
+
+```bash
+GROK_BINARY=~/.grok/downloads/grok-<verified-version>-<platform> anet node start <name>
+```
 :::
 
 ::: danger Old state as of 2026-08-18 (archived)

@@ -28,6 +28,22 @@ agent-node --version
 npm i -g @sleep2agi/agent-node@2.5.0-preview.57
 anet daemon restart <daemon>        # 需要 anet ≥ 2.3.0-preview.74
 ```
+
+🔴 **重启之前先看一眼 grok 版本**（[#1615](https://github.com/sleep2agi/agent-network/issues/1615)）：
+
+```bash
+grok --version
+```
+
+grok 会**自我更新**。更新到不在验证清单里的版本之后，**共存节点一重启就起不来**
+（fail-closed 拒绝启动），而**在跑的节点看起来完全正常** —— 因为它们用的是启动时那份旧进程。
+也就是说：这个问题只在你执行上面那条 restart 的时候才暴露，而那时节点已经停了。
+
+已验证的版本会列在报错里。旧版二进制通常还在 `~/.grok/downloads/`，可以用它起：
+
+```bash
+GROK_BINARY=~/.grok/downloads/grok-<已验证版本>-<平台> anet node start <name>
+```
 :::
 
 ::: danger 2026-08-18 时点的旧状态（保留存档）
