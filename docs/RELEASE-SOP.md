@@ -306,6 +306,38 @@ git commit -m "chore(release): @sleep2agi/agent-node 2.3.2-preview.0"
 > Conventional Commits：`chore(release): ...` 或 `release: ...`。
 > 不加 `Co-Authored-By` 类 footer（OSS rule，见仓库 commit history）。
 
+### Step 5.5：release notes 的**形状**是一道门，而它只在发版时才跑
+
+`docs/tests/release-v<版本>.md` **必须**有这两节，否则 `release-gate (v0)` 的
+`gate 3 — release notes shape` 会红，`publish` 被跳过：
+
+```markdown
+## Install
+
+```bash
+npm i -g @sleep2agi/<包>@<版本>
+```
+
+## Upgrade
+
+```bash
+npm i -g @sleep2agi/<包>@<版本>
+```
+```
+
+三条要求（门逐条检查，报错会指名缺哪一条）：
+
+1. 有 `## Install` —— 新用户安装路径；
+2. 有 `## Upgrade` —— 老用户升级路径；
+3. **`## Install` 段里必须出现被门的那个版本号**（`@<版本>`）。
+
+🔴 **为什么单独写在这里**：`release.yml` 的触发只有 `push: tags` 和 `workflow_dispatch`，
+**它不在 PR 上跑**。也就是说这条要求在 PR 阶段**没有任何东西会提醒你** ——
+notes 写漏两节的 PR 会一路绿灯合进 main，直到你触发发版才发现 `publish` 被跳过。
+（2026-08-30 的 `.74` 就是这么返工了一轮；当时 SOP 里也没写这一条，所以读文档也躲不掉。）
+
+⇒ 写 notes 时**照着上一版的文件抄形状**，别从空白开始。
+
 ### Step 6：publish preview —— 走 GitHub Actions，**不在本机发**
 
 🔴 **本机不发包。** 这是 Vincent 2026-08-27 定的规则：发版一律走 GitHub Actions，
