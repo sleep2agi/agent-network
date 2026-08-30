@@ -42,6 +42,19 @@
 **那通常是正确状态，不是漏改** —— 它就该滞后到目标版本发布之后。
 （当天有人把这个正常滞后报成了「静默回落」，并"修好"了它，然后被自己修出来的死锁挡住。）
 
+🔴 **而且没有任何东西会在 PR 上拦住你。** 2026-08-30 查过触发条件：
+把 `PINNED_*` 拿去和 npm 比对的是 `scripts/verify-published-pins.sh`，
+它挂在 `published-artifact-drift.yml` 上，而那个 workflow 只在
+**`schedule`（每日 03:17 UTC）/ `workflow_dispatch` / `push` 到 main（且路径限于 4 个脚本文件）**
+下跑 —— **`pull_request` 一次都不跑**。
+
+⇒ 一个把常量提前写成"还没发布的版本"的 PR，**在 PR 上是全绿的**。
+它要么等到**次日的定时任务**红，要么等到**下一次发版的 gate 2** 才炸 ——
+两者都离改动很远，那时人已经不记得是哪一次动的它。
+
+**这就是为什么这个坑值得写在这里靠读**：它不是"忘了改"，是**改早了**，
+而**改早了在当下看起来完全正常**。
+
 > commhub-server 走 `PINNED_SERVER_VERSION` 常量（钉死具体版本号，需随 release sync）；dashboard
 > **不钉版本** —— `dashboardReleaseTag()` 默认拉 `@preview` dist-tag，所以 dashboard 发新 preview 后
 > anet 会自动跟随，无需改 cli.ts。两者都属于 release management 数据，**不是业务逻辑**。
