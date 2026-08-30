@@ -325,6 +325,14 @@ def run() -> int:
         text = re.sub(r"\s*([,;:])\s*", r"\1", text)
         fp_norm = re.sub(r"\s+", " ", html_unescape(fp))
         fp_norm = re.sub(r"\s*([,;:])\s*", r"\1", fp_norm)
+        #   ③ 2026-08-30 —— 指纹句若是**列表项**,源里带 `1. ` / `- ` / `* ` 这些
+        #      Markdown 标记,而渲染成 <li> 之后标记就没了 ⇒ 永远匹配不上。
+        #      实测:`2. 输入框写一句话("现在几点？" / "做个 hello world"), 回车`
+        #      —— 整页其余判据全过、版本戳也在线上,只有这一句 MISS,
+        #      而去掉前导 `2. ` 之后立刻命中(True)。
+        #      同 ① ② 一样是**判据自身的洞**:它会让人以为站点没部署,
+        #      于是去重复部署 —— 而那不会有任何效果。
+        fp_norm = re.sub(r"^\s*(?:\d+[.)]|[-*+])\s+", "", fp_norm)
         stale_stamp = None
         for stamp in version_stamps(rel):
             # 线上那一页必须出现 main 上声明的同一个版本号。
