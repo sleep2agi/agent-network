@@ -196,9 +196,17 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 # 仍然**只有 `files` 变了**,`uniq` 仍 9、`occ` 仍 24(两页都没有 #L 源码行号 pin)。
 # CI 上先红("预期扫 127 …,实际 129")才来抬分母,顺序是对的。
 #
+# 2026-08-30:files 129 → 131。新增一条 public skillhub skill(#1540):
+#     docs-site/docs/public/skillhub/skills/prove-the-fix-executed/1.0.0/SKILL.md
+#     docs-site/docs/public/skillhub/skills/prove-the-fix-executed/1.0.0/metadata.json
+#   🔴 **是 +2 不是 +1**:`check-doc-source-pins.py` 的 `SCANNED_SUFFIXES` 是
+#   (.md .ts .tsx .js .json .vue) —— **.json 也算文档文件**。我第一次看到 +2 时
+#   以为哪里多算了(只加了一个 .md),是去读那个常量才对上的。**别按"我加了几个 .md"推。**
+#   `uniq` 仍 9、`occ` 仍 24(新加的 skill 里没有 #L 源码行号 pin)。
+#   catalog.json 由 scripts/build-public-skillhub.mjs 生成,不是手改。
 # 🔴 下面三条是 `-eq`(精确相等),**不是下界** —— job 名里的 "floor" 会误导。
 #    新增/删除文档都会让 files 变,必须回来按实际值更新,并写清变的是哪个数、为什么。
-[[ "$files" -eq 129 ]] || fail "预期扫 129 个文档文件(= git ls-files 的结果),实际 $files"
+[[ "$files" -eq 131 ]] || fail "预期扫 131 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 9  ]] || fail "预期 9 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 24 ]] || fail "预期 24 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"

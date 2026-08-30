@@ -44,6 +44,26 @@
     },
     {
       "schema_version": 1,
+      "slug": "prove-the-fix-executed",
+      "name": "Prove the fix executed",
+      "description": "An inert fix and a guard that rejects everything look identical; require that the fix fired and the metric moved.",
+      "version": "1.0.0",
+      "license": "Apache-2.0",
+      "publisher": {
+        "name": "Agent Network maintainers",
+        "url": "https://github.com/sleep2agi/agent-network"
+      },
+      "tags": [
+        "testing",
+        "debugging",
+        "regression"
+      ],
+      "published_at": "2026-08-30",
+      "content_sha256": "aebc358363b4bf1525f7d295054b4dfed0213e79373e38c8b2675a39ae13610a",
+      "content_url": "/skillhub/skills/prove-the-fix-executed/1.0.0/SKILL.md"
+    },
+    {
+      "schema_version": 1,
       "slug": "public-skill-review-checklist",
       "name": "Public skill review checklist",
       "description": "Safe promotion checklist from private SkillHub to the public catalog.",
