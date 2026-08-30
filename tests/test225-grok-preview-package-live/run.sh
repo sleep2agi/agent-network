@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 source /test225/lib/safe-rm.sh
+source /test225/lib/anet-failure-code.sh
 
 # test225 runs in the *runtime* stage of its Dockerfile.  That image contains
 # only the globally installed anet candidate, the unpublished agent-node
@@ -170,10 +171,19 @@ fail_with_private_log() {
   #
   # ⚠️ pattern 故意保持通用,不收窄到几个已知码:**这一格的价值正在于它能打出
   # 「意料之外的码」**。如果真凶根本不在我们猜的那一族里,只有通用 pattern 会说出来。
-  if [ -e "$path" ]; then
-    code=$(grep -oE '^\[anet\] [A-Z][A-Z0-9_]+' "$path" 2>/dev/null | head -1)
-    log "diagnostic: private log first anet error code: ${code:-<none matched>}"
-  fi
+  # 🔴 #1422 —— 这里曾经是一段内联的 `code=$(grep … | head -1)`。它有两个缺陷,
+  #    第二个比第一个严重得多:
+  #    ① 判别力:pattern `^\[anet\] [A-Z][A-Z0-9_]+` 只认全大写开头的码。实测
+  #       stopCommand 的 7 条真实失败文案里 **5 条不命中**(以 `⚠`/`❌`/小写开头),
+  #       认出的那 2 条还塌成同一个字符串(regex 停在冒号)。
+  #    ② 致命:套件是 `set -euo pipefail`,grep 不命中时退 1、pipefail 传出去、
+  #       赋值语句退出码=1 → **set -e 当场打死脚本**,下面的 fail() 一行都跑不到。
+  #       于是报告里连 "FAIL: …" 都没有,只剩上面那条 bytes 行。#1422 本地复现
+  #       就是这么死的:整份报告在 L2 断掉,没有原因、没有早停行、没有 Summary。
+  #       **一条"失败时告诉你是哪一种"的诊断,恰恰在不命中时把失败信息本身销毁了。**
+  #    判据与用例见 tests/lib/anet-failure-code.test.sh(两向见证:退回窄 pattern
+  #    → 判别力那条红;去掉 helper 里的 `|| code=''` → 普通语句形状那条红)。
+  log "diagnostic: private log first anet error code: $(anet_first_failure_code "$path")"
   fail "$message"
 }
 

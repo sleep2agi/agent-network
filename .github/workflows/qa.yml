@@ -462,6 +462,34 @@ jobs:
       - name: Run complete agent-node unit domain
         run: docker run --rm anet-test725-agent-node-unit
 
+  test-lib-meta:
+    # tests/lib/ 下的共享 helper 各自带一份元测试。它们此前**一个都没被 CI 跑过** ——
+    # mutation-guard.test.sh(#1454)和 delivery-discrimination.test.sh(#1467)
+    # 全仓零引用:文件在、能过、CI 从不执行。「存在 / 挂上 / 会被触发」是三件事,
+    # 这一格补的是第三件。
+    name: tests/lib 元测试 (host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run every tests/lib/*.test.sh
+        run: |
+          set -uo pipefail
+          # 🔴 分母从「**存在什么**」算,不从「打算跑什么」算;而且 0 个必须红 ——
+          #    一次「一个元测试都没找到」的运行,打印出来和「全部通过」逐字相同。
+          mapfile -t METAS < <(find tests/lib -maxdepth 1 -name '*.test.sh' | sort)
+          if [ "${#METAS[@]}" -eq 0 ]; then
+            echo "::error::tests/lib 下没找到任何 *.test.sh —— 这是取集坏了,不是没有测试"
+            exit 1
+          fi
+          echo "发现 ${#METAS[@]} 个元测试"
+          rc=0
+          for m in "${METAS[@]}"; do
+            echo "──────── $m"
+            bash "$m" || { rc=1; echo "::error::$m 红了"; }
+          done
+          exit $rc
+
   recovered-suites:
     name: recovered suites (Docker)
     runs-on: ubuntu-latest
