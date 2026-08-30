@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { canonicalSocketsForProfile, planReapableSockets, reapStaleSocket, unixSocketPathInUse, type StaleSocketProbes } from "./stale-socket";
 
-const ROOT = "/home/u/.anet-grok/node-abc/run";
+const ROOT = "/home/user/.anet-grok/node-abc/run";
 const SOCK = `${ROOT}/leader.sock`;
 
 // 真实 /proc/net/unix 的样子(表头 + 无路径行 + 有路径行)。
@@ -126,7 +126,7 @@ describe("planReapableSockets —— 只认重新算出来的那两个路径", (
 
   test("🔴 profile 被写坏成别处的路径 ⇒ 一条都不选(前缀校验拦不住这个)", () => {
     expect(planReapableSockets(canonical, ["/run/systemd/private"])).toEqual([]);
-    expect(planReapableSockets(canonical, ["/home/other/.anet-grok/node-zzz/run/leader.sock"])).toEqual([]);
+    expect(planReapableSockets(canonical, ["/home/user/.anet-grok/node-zzz/run/leader.sock"])).toEqual([]);
   });
 
   test("🔴 同目录下的别的 socket 也不选(只认那两个,不认整个目录)", () => {
