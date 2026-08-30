@@ -8333,6 +8333,7 @@ async function daemonCommand() {
 Subcommands:
   init <name>          Create a host_supervisor daemon node (role + defaults)
   start <name>         Start a daemon (delegates to anet node start; verifies role)
+  restart <name>       stop then start (daemon 是长驻进程,换包/改配置都要重启才生效)
   up [<name>]          init + start one-shot (default name: "${DAEMON_DEFAULT_NAME}")
   list                 List locally-configured daemon nodes
 
@@ -8349,11 +8350,12 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
     case "init":  args.splice(0, 1); prepareDaemonAnetBin(); await daemonInitCommand(); break;
     case "start": args.splice(0, 1); prepareDaemonAnetBin(); await daemonStartCommand(); break;
     case "up":    args.splice(0, 1); prepareDaemonAnetBin(); await daemonUpCommand(); break;
+    case "restart": args.splice(0, 1); prepareDaemonAnetBin(); await daemonRestartCommand(); break;
     case "list": case "ls": await daemonListCommand(); break;
     default: {
-      const suggestion = suggestSimilar(sub, ["init", "start", "up", "list"]);
+      const suggestion = suggestSimilar(sub, ["init", "start", "restart", "up", "list"]);
       if (suggestion) console.log(`Unknown daemon subcommand "${sub}". Did you mean: anet daemon ${suggestion}?`);
-      console.log(`Usage: anet daemon <init|start|up|list> [name]`);
+      console.log(`Usage: anet daemon <init|start|restart|up|list> [name]`);
       process.exit(1);
     }
   }
@@ -8520,6 +8522,44 @@ async function daemonStartCommand() {
 
   // Delegate to existing startCommand — it reads args[1] for the node name,
   // which is what we have after the `daemon start` splice in daemonCommand.
+  await startCommand();
+}
+
+/**
+ * `anet daemon restart <name>` —— stop 然后 start。
+ *
+ * 2026-08-30 加的。在此之前重启一台 daemon 要敲两条命令,而且**第二条不在
+ * `anet daemon` 底下**:`anet node stop <name>` + `anet daemon start <name>`。
+ * 因为 `daemon start` 委托给 `node start`,所以停也走 `node`。
+ * 这个「停和起不在同一个命令族里」是实现细节漏到了用户面前。
+ *
+ * 🔴 为什么这一条值得单独加:daemon 是**长驻进程**,而今天已经有两处文案
+ * 要用户「升级后重启 daemon」(换包对已经在跑的进程没有任何影响)。
+ * 一条被反复指示的动作,不该需要用户自己拼两条命令、还得知道停要走 node。
+ */
+async function daemonRestartCommand() {
+  const id = args[1];
+  if (!id || id.startsWith("--")) {
+    console.error("Usage: anet daemon restart <name>");
+    process.exit(1);
+  }
+  const profile = loadProfile(id);
+  if (!profile) {
+    console.error(`Daemon "${id}" not found. Create it first:`);
+    console.error(`  anet daemon init ${id}`);
+    process.exit(1);
+  }
+  if (profile.role !== "host_supervisor") {
+    console.error(`Error: node "${id}" exists but role="${profile.role || "(none)"}", not "host_supervisor".`);
+    console.error(`Re-init as daemon: anet daemon init ${id} --force`);
+    process.exit(1);
+  }
+  // 🔴 停不掉不能当成"那就直接起" —— 那会变成两个同 alias 的进程同时在跑。
+  //    stopCommand() 对「本来就没在跑」是**正常返回**的(它会说 not running locally),
+  //    所以这里只需要让它的**异常**冒出去,不要 catch 成"继续"。
+  console.log(`[anet daemon] restart "${id}" —— 先停`);
+  await stopCommand();
+  console.log(`[anet daemon] restart "${id}" —— 再起`);
   await startCommand();
 }
 
