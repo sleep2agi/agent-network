@@ -3793,6 +3793,38 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     return row?.daemon_node_id ?? null;
   };
 
+  /**
+   * 为什么这里要分两种「解析不到 daemon」(#196 / app 仓)。
+   *
+   * `resolveDaemonForChild` 对两件完全不同的事都返回 `null`:
+   *   ① id 不以 `node_` 开头 —— 这个节点**根本不是 daemon 创建的**,
+   *      是有人在某台机器上直接 `anet node start` 起来的。hub 上没有任何
+   *      daemon 可以代它执行停止,**这条路径对它在概念上就不成立**。
+   *   ② id 以 `node_` 开头,但 `node_create_requests` 里查不到那一行 ——
+   *      它可能确实是 daemon 建的,只是记录缺失,这时「显式传 daemon_node_id」
+   *      是一条真的走得通的路。
+   *
+   * 🔴 原先两种情况打印同一句 `pass daemon_node_id explicitly`。对 ① 来说
+   *    **这句建议的前提是假的** —— 没有 daemon 可传,用户按它做只会走进死路。
+   *    2026-08-28 对生产 hub 实测:218 个节点里 **207 个**是 ① 这种。
+   *
+   * 信息在源头就存在(那个 `startsWith("node_")` 判断),只是被丢在了返回值里。
+   */
+  const explainUnresolvableDaemon = (child_node_id: string) =>
+    child_node_id.startsWith("node_")
+      ? {
+          ok: false, error: "daemon_not_resolvable",
+          message: "no node_create_requests row found for this child_node_id; pass daemon_node_id explicitly",
+        }
+      : {
+          ok: false, error: "not_daemon_managed",
+          message:
+            `node ${child_node_id} was not created by a daemon (it was started by hand with ` +
+            `\`anet node start\` on some machine), so no daemon on the Hub can stop it. ` +
+            `Run \`anet node stop <alias>\` on that machine instead. ` +
+            `Daemon-created children have ids beginning with \`node_\`; this one does not.`,
+        };
+
   const dispatchStopOrDelete = (args: DispatchArgs, clientNetId?: string | null) => {
     // §4.1 — SEC-1 trust-root join: resolve target node row WITHIN the
     // caller's scope. resolveReadScope returns 'denied' if the caller
@@ -4082,10 +4114,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const child_node_id = idArg.node_id;
       const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
       if (!resolved) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({
-          ok: false, error: "daemon_not_resolvable",
-          message: "no node_create_requests row found for this child_node_id; pass daemon_node_id explicitly",
-        }) }] };
+        return { content: [{ type: "text" as const,
+          text: JSON.stringify(explainUnresolvableDaemon(child_node_id)) }] };
       }
       const r = dispatchStopOrDelete(
         { action: "stop", child_node_id, daemon_node_id: resolved, force: force ?? false,
@@ -4114,10 +4144,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const child_node_id = idArg.node_id;
       const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
       if (!resolved) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({
-          ok: false, error: "daemon_not_resolvable",
-          message: "no node_create_requests row found for this child_node_id; pass daemon_node_id explicitly",
-        }) }] };
+        return { content: [{ type: "text" as const,
+          text: JSON.stringify(explainUnresolvableDaemon(child_node_id)) }] };
       }
       const r = dispatchStopOrDelete(
         { action: "delete", child_node_id, daemon_node_id: resolved, force: force ?? false,
