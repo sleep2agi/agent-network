@@ -204,9 +204,20 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   以为哪里多算了(只加了一个 .md),是去读那个常量才对上的。**别按"我加了几个 .md"推。**
 #   `uniq` 仍 9、`occ` 仍 24(新加的 skill 里没有 #L 源码行号 pin)。
 #   catalog.json 由 scripts/build-public-skillhub.mjs 生成,不是手改。
+# 2026-08-31:files 131 → 133。新增「anet doctor 的输出怎么读」(中英各一份):
+#     docs-site/docs/troubleshooting/reading-anet-doctor.md
+#     docs-site/docs/en/troubleshooting/reading-anet-doctor.md
+#   这次是 +2 = 两个 .md,与上一条那个「+2 其实是 1 个 .md + 1 个 .json」不同 ——
+#   上面那条警告仍然成立,只是这次恰好按 .md 数也对。**不要因为这次对了就回去按 .md 推。**
+#   `uniq` 仍 9、`occ` 仍 24:CI 只报了 files 那一条(「预期扫 131 …,实际 133」),
+#   另两条没红 —— 这比我自己去数两页里有没有 #L pin 更可靠。
+#   顺带记一笔:按 `SCANNED_SUFFIXES` 在 docs+docs-site 下自己数是 392 → 394,
+#   与门的 131 → 133 **绝对值不同(门的扫描面更窄),但增量一致都是 +2**。
+#   能确认的是增量,不是绝对值 —— 绝对值以门的输出为准。
+#
 # 🔴 下面三条是 `-eq`(精确相等),**不是下界** —— job 名里的 "floor" 会误导。
 #    新增/删除文档都会让 files 变,必须回来按实际值更新,并写清变的是哪个数、为什么。
-[[ "$files" -eq 131 ]] || fail "预期扫 131 个文档文件(= git ls-files 的结果),实际 $files"
+[[ "$files" -eq 133 ]] || fail "预期扫 133 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 9  ]] || fail "预期 9 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 24 ]] || fail "预期 24 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"

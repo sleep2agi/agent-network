@@ -97,6 +97,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/guide/getting-started.md` | 19–20 | latest `2.2.21` 裸崩 / preview `2.3.0-preview.x` 被拦 |
 > | `docs-site/docs/en/guide/getting-started.md` | 19–20 | 同上(英文) |
 > | `docs-site/docs/troubleshooting/is-this-node-alive.md` | 见门输出 | #895 stdout 假报「`2.3.0-preview.40` 起已修」——修复版本钉死在断言里,promote latest 时核对 latest 是否已含 #895 |
+> | `docs-site/docs/troubleshooting/reading-anet-doctor.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/troubleshooting/reading-anet-doctor.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/troubleshooting/is-this-node-alive.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/troubleshooting/node-stuck-lifecycle.md` | 4–5 | **下界断言**(agent-node ≥ `2.5.0-preview.49` / commhub-server ≥ `0.9.0-preview.40`)——发版**不会**让它变假;要核的是另一件事:**当这两个修复进入 `latest` 时,把页面的指引从「需要 preview」改成「latest 已含」**,否则 latest 用户会以为必须切 preview |
 > | `docs-site/docs/en/troubleshooting/node-stuck-lifecycle.md` | 4–5 | 同上(英文) |
