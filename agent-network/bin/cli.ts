@@ -101,7 +101,7 @@ import {
   resolveGrokAttachTarget,
   grokCopresenceSocketPaths,
 } from "../src/grok-copresence-profile";
-import { reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
+import { planReapableSockets, reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
 import {
   codexCopresencePosture,
   codexCopresenceCreateFields,
@@ -9847,11 +9847,10 @@ Stop a running agent node.
     let canonical: { leaderSocket: string; attachSocket: string } | null = null;
     try { canonical = grokCopresenceSocketPaths(resolved.id); } catch { canonical = null; }
     if (canonical) {
-      const reapable = new Set([canonical.leaderSocket, canonical.attachSocket]);
       const runtimeRoot = dirname(canonical.leaderSocket);
-      for (const residual of socketResiduals) {
-        if (!residual.path || !reapable.has(residual.path)) continue;
-        const outcome = reapStaleSocket(residual.path, {
+      const reapable = planReapableSockets(canonical, socketResiduals.map(r => r.path));
+      for (const target of reapable) {
+        const outcome = reapStaleSocket(target, {
           procNetUnix: () => readFileSync("/proc/net/unix", "utf8"),
           lstat: (target) => {
             try {
@@ -9863,9 +9862,9 @@ Stop a running agent node.
           currentUid: () => process.getuid?.() ?? -1,
         }, { allowedRoot: runtimeRoot });
         if (outcome.kind === "removed") {
-          console.log(`[anet] reclaimed stale ${residual.kind}: ${residual.path} (owner proven gone, no listener in /proc/net/unix)`);
+          console.log(`[anet] reclaimed stale socket: ${target} (owner proven gone, no listener in /proc/net/unix)`);
         } else if (outcome.kind !== "absent") {
-          console.error(`[anet]    kept ${residual.path}: ${outcome.kind}${"detail" in outcome ? ` — ${outcome.detail}` : ""}`);
+          console.error(`[anet]    kept ${target}: ${outcome.kind}${"detail" in outcome ? ` — ${outcome.detail}` : ""}`);
         }
       }
       socketResiduals = nodeSocketResiduals(resolved.profile);

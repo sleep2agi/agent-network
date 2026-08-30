@@ -119,3 +119,28 @@ export function reapStaleSocket(
   probes.unlink(path);
   return { kind: "removed" };
 }
+
+
+/**
+ * 从「本次 stop 看到的残留路径」里挑出**允许回收**的那些。
+ *
+ * 🔴 判据是「与重新算出来的规范路径**完全相等**」,不是前缀、不是包含。
+ *    profile 里存的 socket 路径是**被写坏就会跟着坏**的数据;
+ *    grokCopresenceSocketPaths 是纯函数,同样的 nodeId + home 永远算出同一个值。
+ *    所以这里不问「这条路径看起来对不对」,只问「它是不是我自己算出来的那两个之一」。
+ *    ——一个被污染的 profile 因此一条都带不进来。
+ */
+export function planReapableSockets(
+  canonical: { leaderSocket: string; attachSocket: string },
+  residualPaths: readonly (string | undefined)[],
+): string[] {
+  const allowed = new Set([canonical.leaderSocket, canonical.attachSocket]);
+  const out: string[] = [];
+  for (const path of residualPaths) {
+    if (!path) continue;              // 残留没带路径(读 lstat 时就失败了)⇒ 不碰
+    if (!allowed.has(path)) continue; // 不是我算出来的那两个 ⇒ 不碰
+    if (out.includes(path)) continue; // 去重
+    out.push(path);
+  }
+  return out;
+}

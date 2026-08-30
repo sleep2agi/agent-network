@@ -4,7 +4,7 @@
 // 泄漏/未拆干净变成一次静默的绿。所以每一条负向用例断言的是
 // **unlink 一次都没被调用**,而不只是返回值长得对。
 import { describe, expect, test } from "bun:test";
-import { reapStaleSocket, unixSocketPathInUse, type StaleSocketProbes } from "./stale-socket";
+import { planReapableSockets, reapStaleSocket, unixSocketPathInUse, type StaleSocketProbes } from "./stale-socket";
 
 const ROOT = "/home/u/.anet-grok/node-abc/run";
 const SOCK = `${ROOT}/leader.sock`;
@@ -112,5 +112,32 @@ describe("reapStaleSocket —— 必须拒绝删的那一侧(每条都断言 unl
     });
     expect(reapStaleSocket(SOCK, p, { allowedRoot: ROOT })).toEqual({ kind: "changed" });
     expect(p.unlinked).toEqual([]);
+  });
+});
+
+
+describe("planReapableSockets —— 只认重新算出来的那两个路径", () => {
+  const canonical = { leaderSocket: SOCK, attachSocket: `${ROOT}/attach.sock` };
+
+  test("规范路径的残留会被选中", () => {
+    expect(planReapableSockets(canonical, [SOCK])).toEqual([SOCK]);
+    expect(planReapableSockets(canonical, [`${ROOT}/attach.sock`])).toEqual([`${ROOT}/attach.sock`]);
+  });
+
+  test("🔴 profile 被写坏成别处的路径 ⇒ 一条都不选(前缀校验拦不住这个)", () => {
+    expect(planReapableSockets(canonical, ["/run/systemd/private"])).toEqual([]);
+    expect(planReapableSockets(canonical, ["/home/other/.anet-grok/node-zzz/run/leader.sock"])).toEqual([]);
+  });
+
+  test("🔴 同目录下的别的 socket 也不选(只认那两个,不认整个目录)", () => {
+    expect(planReapableSockets(canonical, [`${ROOT}/somethingelse.sock`])).toEqual([]);
+  });
+
+  test("残留没带路径 ⇒ 跳过,不崩", () => {
+    expect(planReapableSockets(canonical, [undefined, SOCK])).toEqual([SOCK]);
+  });
+
+  test("重复路径只回收一次", () => {
+    expect(planReapableSockets(canonical, [SOCK, SOCK])).toEqual([SOCK]);
   });
 });
