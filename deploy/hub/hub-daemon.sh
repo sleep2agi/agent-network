@@ -86,7 +86,7 @@ set -uo pipefail
 #   🔴 注意：上面的历史行只记到 preview37，而这一行改动前的值是 preview39 —— 
 #      preview37→39 那两跳没有留下记录。我不补写别人的历史（内容我不知道），
 #      在这里标出来，免得下一个人把这份历史当完整的读。
-RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview43"
+RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview44"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
