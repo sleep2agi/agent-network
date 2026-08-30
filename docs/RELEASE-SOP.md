@@ -410,6 +410,54 @@ CLI 都会去拉旧 server，这次发版等于白发，且不产生任何报错
 
 ---
 
+## 2.5 Post-publish 验收：四步，缺一步就有一类失败逃得掉
+
+**「workflow 绿」只说明发布这个动作成功了。** 2026-08-30 实测的 `2.3.0-preview.69`
+就是**发布成功、但要交付的东西不在包里** —— 它的 `exports` 只有 `"."`，
+而那一版存在的理由正是子路径导出。
+
+每一步都堵一类**上一步堵不住**的失败：
+
+```bash
+PKG=@sleep2agi/agent-network
+VER=2.3.0-preview.70
+
+# ① tag 指对了吗 —— 堵「发了但 dist-tag 没动」
+npm view "$PKG" dist-tags.preview          # 期望 == $VER
+
+# ② 声明了吗 —— 堵「版本号对但 package.json 字段没跟上」
+npm view "$PKG@$VER" exports               # 期望含你这一版要交付的入口
+
+# ③ 文件真的在 tarball 里吗 —— 堵「exports 指向一个没被构建出来的文件」
+#    ⚠️ ② 通过而 ③ 不通过时，下游 import 才会炸，而那时离发版已经很远
+cd "$(mktemp -d)" && npm pack "$PKG@$VER" >/dev/null && tar -tzf *.tgz | grep <你的入口>
+
+# ④ 它跑得对吗 —— 堵「构建坏了的产物照样能被 tar 列出来」
+tar -xzf *.tgz && node -e '
+  const m = require("./package/dist/src/<你的入口>.js");
+  console.log(m.<导出名>(<最小输入>));   # 期望拿到有意义的结果，不是 undefined/抛错
+'
+```
+
+🔴 **④ 是 通信SDK马 在 2026-08-30 补的，它不是多余的**：
+`tar -tzf` 只证明**有这个文件名**。一个构建产物可以存在、可以被列出、
+而里面是空的或抛错的。**「文件在包里」和「它能跑出正确结果」是两件事。**
+
+🔴 **别用版本号相互比对当判据。** 同一天实测：`agent-network/package.json` 写
+`2.3.0-preview.69`，npm 上也是 `2.3.0-preview.69` —— **两个数字逐字相同、内容不同**。
+只比版本号会得出「已经发过了」。**判据必须落在产物内容上。**
+
+## 2.6 发版之后还有两件事没做完
+
+**① 文档里的版本号。** 包发到 npm ≠ 用户会装到它。上手指南若仍写着旧版本，
+新用户照着敲就装到旧包。`getting-started.md`（中英两份）里有**机器戳**和**人读表格行**
+两处，`sync-pinned-versions.sh` **都不覆盖**，必须手工改，且 `release-gate` 的 **gate 4**
+会检查机器戳。
+
+**② 站点部署。** 改完文档要真的部署 anet.sh，否则 main 上是新的、线上还是旧的。
+用 prebuilt 流（见 `deploy/docs-site/README.md`），部署后跑
+`.github/scripts/check-docs-site-drift.py` **按内容**验收，不看状态码。
+
 ## 3. 跨包同时发版
 
 如果同一个 PR 要发多个包（例如同时升 `agent-network` + `agent-node`）：
