@@ -40,18 +40,47 @@ const NODE_LEVEL: Record<string, Redirect> = {
  *  只读/销毁意图都不该被导向它们。测试用它做对照。 */
 export const DAEMON_STATE_CHANGING = ["init", "start", "restart", "up"] as const;
 
+/** `anet project` 的候选集是 ["up","restart","down","ls"]。实测 `rm` → `up`
+ *  —— 想删项目,被指去**启动项目里所有节点**。项目级根本没有删除操作。 */
+const PROJECT_LEVEL: Record<string, Redirect> = {
+  rm:      { command: () => "anet project down", note: "项目级没有删除;停掉项目里所有节点用 down,删单个节点用 anet node delete <name>" },
+  remove:  { command: () => "anet project down", note: "项目级没有删除;停掉项目里所有节点用 down,删单个节点用 anet node delete <name>" },
+  delete:  { command: () => "anet project down", note: "项目级没有删除;停掉项目里所有节点用 down,删单个节点用 anet node delete <name>" },
+  stop:    { command: () => "anet project down", note: "项目级的停叫 down" },
+  status:  { command: () => "anet node ls",      note: "看节点在不在跑" },
+  state:   { command: () => "anet node ls",      note: "看节点在不在跑" },
+  stat:    { command: () => "anet node ls",      note: "看节点在不在跑" },
+  ps:      { command: () => "anet node ls",      note: "看节点在不在跑" },
+};
+export const PROJECT_STATE_CHANGING = ["up", "restart"] as const;
+
+/** `anet node` 的候选集里已经有 stop/delete/ls,所以只剩「看状态」那一类会被
+ *  误导:实测 `state` / `stat` → `start`。 */
+const NODE_CMD_LEVEL: Record<string, Redirect> = {
+  status:  { command: () => "anet node ls",  note: "看节点在不在跑" },
+  state:   { command: () => "anet node ls",  note: "看节点在不在跑" },
+  stat:    { command: () => "anet node ls",  note: "看节点在不在跑" },
+  ps:      { command: () => "anet node ls",  note: "看节点在不在跑" },
+  info:    { command: n => `anet info ${n}`, note: "单个节点的详情" },
+};
+export const NODE_STATE_CHANGING = ["create", "start", "restart", "resume", "rename", "loop"] as const;
+
 /**
  * 认得就返回要打印的几行；认不得返回 null（调用方再退回 suggestSimilar）。
  * `name` 缺省时用占位符，保证提示总是可以照抄。
  */
-export function daemonSubcommandRedirect(sub: unknown, name?: unknown): string[] | null {
+function redirectIn(table: Record<string, Redirect>, group: string, sub: unknown, name?: unknown): string[] | null {
   if (typeof sub !== "string") return null;
-  const hit = NODE_LEVEL[sub.trim().toLowerCase()];
+  const hit = table[sub.trim().toLowerCase()];
   if (!hit) return null;
   const n = typeof name === "string" && name.trim() && !name.startsWith("-") ? name.trim() : "<name>";
   return [
-    `"anet daemon ${sub}" 不存在,但你要的动作是有的:`,
+    `"anet ${group} ${sub}" 不存在,但你要的动作是有的:`,
     `  ${hit.command(n)}`,
     `  (${hit.note})`,
   ];
 }
+
+export const daemonSubcommandRedirect = (sub: unknown, name?: unknown) => redirectIn(NODE_LEVEL, "daemon", sub, name);
+export const projectSubcommandRedirect = (sub: unknown, name?: unknown) => redirectIn(PROJECT_LEVEL, "project", sub, name);
+export const nodeSubcommandRedirect = (sub: unknown, name?: unknown) => redirectIn(NODE_CMD_LEVEL, "node", sub, name);

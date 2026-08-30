@@ -39,7 +39,7 @@ import { classifySessionStatus, summarizeSessions } from "../src/session-status-
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
-import { daemonSubcommandRedirect } from "../src/daemon-subcommand";
+import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
@@ -10438,8 +10438,15 @@ async function projectCommand() {
     }
     default: {
       if (sub) {
-        const suggestion = suggestSimilar(sub, ["up", "restart", "down", "ls"]);
-        if (suggestion) console.log(`Unknown project subcommand "${sub}". Did you mean: anet project ${suggestion}?`);
+        // 🔴 同 daemon:先查重定向再退回相似度。实测 `anet project rm` → 建议 `up`,
+        //    而 `up` 会**启动项目里所有节点** —— 想删的人被指去启动。
+        const redirect = projectSubcommandRedirect(sub, args[2]);
+        if (redirect) {
+          for (const line of redirect) console.log(line);
+        } else {
+          const suggestion = suggestSimilar(sub, ["up", "restart", "down", "ls"]);
+          if (suggestion) console.log(`Unknown project subcommand "${sub}". Did you mean: anet project ${suggestion}?`);
+        }
       }
       printProjectUsage();
     }
@@ -16082,8 +16089,13 @@ switch (command) {
       default: {
         const sub = args[1];
         if (sub) {
-          const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "loop"]);
-          if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
+          // 🔴 实测 `anet node state` / `stat` → 建议 `start`(想看状态,被指去启动)。
+          const redirect = nodeSubcommandRedirect(sub, args[2]);
+          if (redirect) { for (const line of redirect) console.log(line); }
+          else {
+            const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "loop"]);
+            if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
+          }
         }
         console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
         break;
