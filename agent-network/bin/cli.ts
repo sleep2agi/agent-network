@@ -5919,6 +5919,20 @@ async function grokCommand() {
   }
 
   printGrokCopresenceWarning(undefined, profile.tools, "resume");
+  // #1412 —— 用**备用屏幕**（alternate screen）承载整个 attach 会话。
+  //
+  // 症状：detach 之后屏幕定格在断开前那一帧，用户以为还连着、继续打字，
+  // 而输入根本没到 runtime（节点日志里没有新记录）。这是"以为还连着"这类
+  // 误解里最贵的一种 —— 它看起来完全像一个活着的会话。
+  //
+  // 进备用屏幕之后，终端会在 detach 时**把 attach 之前的画面原样还回来**，
+  // 而不是留下一屏死掉的 TUI；也不需要粗暴 clear 掉用户自己的 scrollback。
+  // 这是所有全屏 TUI（vim / less / tmux）的标准做法。
+  // 上面已强制要求 stdin/stdout 都是 TTY，所以这里不必再判。
+  //
+  // 与 #1414 的黑屏修复正交：那一条在**服务端**（attach 后首次 resize 做一次
+  // 一行抖动，强制 grok 全量重画）；这一条只管**客户端终端**在断开后的恢复。
+  process.stdout.write("\u001b[?1049h");
   const relay = new PassThrough({ highWaterMark: 64 * 1024 });
   const stdin = process.stdin;
   const wasRaw = stdin.isRaw === true;
@@ -5935,6 +5949,11 @@ async function grokCommand() {
     try { stdin.setRawMode(wasRaw); } catch {}
     if (wasPaused) stdin.pause();
     else stdin.resume();
+    // 回到主屏幕：attach 之前的画面被终端还原，断开前那一帧不会留下。
+    // 然后在**主屏幕**上明确说一句已断开 —— 否则用户只看到画面变了，
+    // 不知道是断开了还是崩了。
+    process.stdout.write("\u001b[?1049l");
+    process.stdout.write(`[anet] detached from Grok TUI "${nodeDisplayName(nodeId, profile)}" — reattach: anet grok attach ${shellQuote(nodeId)}\n`);
   };
   const requestDetach = () => {
     if (detaching) return;

@@ -99,3 +99,42 @@ describe("cli.ts copresence stop wiring (structural gate)", () => {
     expect(removal).toBeLessThan(elseBranch);
   });
 });
+
+describe("grok attach 的备用屏幕（#1412 detach 残留半）", () => {
+  // 只能做源码顺序断言：attach 这条路要 TTY、要 raw mode、结尾 process.exit，
+  // 没法 import 进单测。
+  //
+  // 搜的是 cli.ts 的**源码文本**：那里的 ESC 是字面的 \\u001b（没被解码）。
+  // 测试里若写同样的转义串，TS 会把它解码成真正的 ESC 字符 —— 那个字符在源码
+  // 文本里根本不存在，断言会红得莫名其妙。所以只搜 `[?1049h` 这一段。
+  const body = (() => {
+    const start = CLI.indexOf("async function grokCommand");
+    expect(start).toBeGreaterThan(-1);
+    const rest = CLI.slice(start + 1);
+    const end = rest.search(/\n(?:export )?(?:async )?function /);
+    return end < 0 ? rest : rest.slice(0, end);
+  })();
+
+  test("🔴 进备用屏幕在建立会话之前，离开在 restoreTerminal 里", () => {
+    const enter = body.indexOf("[?1049h");
+    const connect = body.indexOf("connectGrokAttach(");
+    expect(enter).toBeGreaterThan(-1);
+    expect(connect).toBeGreaterThan(enter);   // 先进备用屏，再连
+    expect(body).toContain("[?1049l");
+  });
+
+  test("🔴 离开备用屏幕之后要在主屏幕上说一句已断开", () => {
+    const leave = body.indexOf("[?1049l");
+    const banner = body.indexOf("detached from Grok TUI");
+    expect(leave).toBeGreaterThan(-1);
+    expect(banner).toBeGreaterThan(leave);    // 横幅打在主屏幕上，不是备用屏
+  });
+
+  test("不碰 #1414 的服务端重绘：客户端仍然只发一帧初始 resize", () => {
+    // #1414 的一次性抖动在服务端（attach 后首次 resize 时做）。客户端要是
+    // 自己也抖一次，就是两套重绘叠在一起 —— 冗余，而且会掩盖服务端那条坏掉。
+    const activate = CLI.indexOf("connectGrokAttach(");
+    expect(activate).toBeGreaterThan(-1);
+    expect(CLI).not.toContain("redrawOnAttach");
+  });
+});
