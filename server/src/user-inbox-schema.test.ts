@@ -37,8 +37,9 @@ describe("#1459 user_inbox schema (P1)", () => {
     const mid = `dm_def_${Date.now()}`;
     try {
       db.run(
-        `INSERT INTO user_inbox (message_id, user_id, content) VALUES (?1, ?2, ?3)`,
-        [mid, "u_def_1459", "body"],
+        // #1493 后 network_id 是 NOT NULL,补上(本测试只验其它列的默认值)
+        `INSERT INTO user_inbox (message_id, network_id, user_id, content) VALUES (?1, ?2, ?3, ?4)`,
+        [mid, "net_def_1459", "u_def_1459", "body"],
       );
       const row = db.get<{ acked: number; kind: string; severity: string }>(
         "SELECT acked, kind, severity FROM user_inbox WHERE message_id = ?1", mid,

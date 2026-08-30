@@ -63,7 +63,7 @@ db.exec(`
   -- 部分索引 acked=0 若「近期」读含已 ack 行则用不上)。P1 只落表。
   CREATE TABLE IF NOT EXISTS user_inbox (
     message_id    TEXT PRIMARY KEY,
-    network_id    TEXT,
+    network_id    TEXT NOT NULL,
     user_id       TEXT NOT NULL,
     from_session  TEXT,
     kind          TEXT NOT NULL DEFAULT 'info',
@@ -681,6 +681,81 @@ function migrateNodeCreateRequestsModelNullable() {
   });
 }
 migrateNodeCreateRequestsModelNullable();
+
+// #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,
+// 叠在 send_desktop_message 的代码级三闸之上:canWrite / `!effectiveNetId` return /
+// getUserNetworkRole,tools.ts)。「不产生 network_id=NULL 孤儿」现是代码级保证 + #1492
+// 三道测试;schema 级约束让**任何**未来绕过那三闸写 NULL 的回归在 INSERT 处直接被
+// 数据库拒(而非产出 scoped-unreadable 的静默孤儿)。
+//
+// SQLite 不能 `ALTER COLUMN ADD NOT NULL` → 建新表→copy→drop→rename(与本文件既有
+// recreate-table 迁移同范式);新库的 CREATE 已直接 NOT NULL,迁移检测到就跳过(幂等)。
+function migrateUserInboxNetworkIdNotNull() {
+  if (db.dialect === "postgres") {
+    try { db.exec("ALTER TABLE user_inbox ALTER COLUMN network_id SET NOT NULL"); } catch {}
+    return;
+  }
+  let createSql: string | undefined;
+  try {
+    createSql = db.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_inbox'")?.sql;
+  } catch { return; }
+  if (!createSql) return;                                       // 表不存在:上面的 CREATE 已建成 NOT NULL 新表
+  if (/network_id\s+TEXT\s+NOT\s+NULL/i.test(createSql)) return; // 已是 NOT NULL → 幂等跳过
+
+  // 🔴 迁移前守卫:存量若有 network_id IS NULL 行(按代码级三闸理应 0)→ **大声 warn +
+  // 跳过迁移**(列暂保持可空),hub 照常启动。fail-safe,不 throw(SDK马 review #1516):
+  //   · 这条 NOT NULL 是 belt-and-suspenders,代码级三闸(#1492 三测钉着)已挡新 NULL;
+  //     为一条冗余保险带让**整个舰队的 hub** boot 期停摆,代价与收益不成比例;
+  //   · 生产这个 COUNT 没人量过,而 #1493 第一条原则就是"没量过的数不要动手"——只要生产
+  //     有一行历史 NULL,throw 就把升级变成停机;
+  //   · fail-closed 的真正目的(不盲目清空、不 COALESCE 猜网络)用 warn+skip 一样达到。
+  // ⚠ 校正:本文件既有迁移(migrateNodeCreateRequestsModelNullable 内部 catch{}+return;
+  //   migrateSessionsNetworkAliasUnique 全函数 throw 0 次)都**不**在 boot 期打死 hub——
+  //   "顶层无 try/catch"是真前提,但"所以 throw 符合惯例"是没验的推论(SDK马 量出),撤回。
+  // 孤儿行仍有明确运维信号,三闸仍生效;等人工量过、清干净,下次启动幂等判据自动完成迁移。
+  const nullCount = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE network_id IS NULL")?.n ?? 0;
+  if (nullCount > 0) {
+    console.error(
+      `[migrate #1493] user_inbox 有 ${nullCount} 行 network_id IS NULL —— 与 send_desktop_message ` +
+      `的代码级三闸矛盾,可能存在更早的写路径漏洞;已**跳过** NOT NULL 迁移(列暂保持可空),` +
+      `hub 正常启动。请人工排查这些孤儿行来源、清理后下次启动会自动完成迁移(不要盲目清空)。`,
+    );
+    return;
+  }
+
+  db.transaction(() => {
+    db.exec("DROP TABLE IF EXISTS user_inbox_migrated");
+    db.exec(`
+      CREATE TABLE user_inbox_migrated (
+        message_id    TEXT PRIMARY KEY,
+        network_id    TEXT NOT NULL,
+        user_id       TEXT NOT NULL,
+        from_session  TEXT,
+        kind          TEXT NOT NULL DEFAULT 'info',
+        title         TEXT,
+        content       TEXT NOT NULL,
+        severity      TEXT NOT NULL DEFAULT 'info',
+        meta_json     TEXT,
+        acked         INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        acked_at      TEXT
+      )
+    `);
+    db.exec(`
+      INSERT INTO user_inbox_migrated
+        (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json, acked, created_at, acked_at)
+      SELECT
+        message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json, acked, created_at, acked_at
+      FROM user_inbox
+    `);
+    db.exec("DROP TABLE user_inbox");
+    db.exec("ALTER TABLE user_inbox_migrated RENAME TO user_inbox");
+  });
+}
+migrateUserInboxNetworkIdNotNull();
+// 迁移会 drop 掉旧表上的 idx_user_inbox_user_acked → 重建(IF NOT EXISTS;未迁移时 no-op)。
+db.exec(`CREATE INDEX IF NOT EXISTS idx_user_inbox_user_acked ON user_inbox(user_id, acked, created_at);`);
+
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ncr_daemon_status ON node_create_requests(daemon_node_id, status);
   CREATE INDEX IF NOT EXISTS idx_ncr_network ON node_create_requests(network_id);
