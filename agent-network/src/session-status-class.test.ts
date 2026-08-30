@@ -29,10 +29,32 @@ describe("#1548 anet status 不能把「卡住」显示成「在干活」", () =
     expect(got).toEqual(new Set(["idle", "working", "attention", "offline"]));
   });
 
-  // 正控:大小写与未知值不会被静默归错
-  test("大小写不敏感;未知值归 idle 而不是抛错", () => {
+  // 正控:大小写不会被静默归错
+  test("大小写不敏感", () => {
     expect(classifySessionStatus("BLOCKED")).toBe("attention");
     expect(classifySessionStatus("Working")).toBe("working");
-    expect(classifySessionStatus("some-new-state")).toBe("idle");
+  });
+
+  // 🔴 这一组是本文件从前**反向钉死**的那条:原先断言
+  //    `classifySessionStatus("some-new-state")` 是 `"idle"`,注释还写着
+  //    「未知值不会被静默归错」—— 而那一行做的正是静默归错。
+  //    去修兜底的人会看到一条红测试,以为自己弄坏了有意的设计。
+  test("未知状态归 attention —— 兜底不朝好的一侧", () => {
+    expect(classifySessionStatus("some-new-state")).toBe("attention");
+    // 服务端将来可能加的形状,举几个具体的:
+    expect(classifySessionStatus("paused")).toBe("attention");
+    expect(classifySessionStatus("stopped")).toBe("attention");
+    expect(classifySessionStatus("degraded")).toBe("attention");
+  });
+
+  // 🔴 反向见证:把「缺失」和「有值但不认识」分开。
+  //    缺失(没上报过 / null / 空串)不该报警 —— 它是 idle,这一条**没变**。
+  //    如果有人把兜底改回 `return "idle"`,上面那组会红;
+  //    如果有人图省事把整支都改成 attention,这一组会红。两个方向都有见证。
+  test("缺失(空/null/undefined)仍是 idle,不是 attention", () => {
+    expect(classifySessionStatus("")).toBe("idle");
+    expect(classifySessionStatus(null)).toBe("idle");
+    expect(classifySessionStatus(undefined)).toBe("idle");
+    expect(classifySessionStatus("idle")).toBe("idle");
   });
 });

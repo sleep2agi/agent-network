@@ -11954,7 +11954,7 @@ async function statusCommand() {
     console.log(`  Tasks:  ${tasks.length} recent\n`);
 
     if (attention.length > 0) {
-      console.log("  Needs attention (blocked / error — not progressing):");
+      console.log("  Needs attention (blocked / error / 未知状态 — not progressing):");
       for (const s of attention) {
         console.log(`    ${String(s.alias).padEnd(16)} ${String(s.status || "").padEnd(8)} ${(s.task || "").slice(0, 48)}`);
       }
