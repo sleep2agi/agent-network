@@ -15,6 +15,7 @@ failures — it answers that single question, and **only the last row gives a de
 | Fresh heartbeat (`last_seen_at`) | **Weak** | The heartbeat comes from the outer process. The outer process can be alive while the inner reasoning process is dead. |
 | `send_task` returns `ok` rather than `alias_offline` | **Moderate** | Routing works and the message is queued. **It says nothing about anyone processing it.** |
 | `status = offline` | **moderate (not conclusive)** | Carries more than `idle`, but it is **not enough to conclude the node is dead**. At least one path marks a live node offline — see below. |
+| `status = blocked` | **useless (weaker than `idle`)** | Measured: a `blocked` node answered a dispatched task in **22 seconds**. `blocked` means **there is no exit**, not "it stopped" — see below. |
 | 🔴 **It answered you** | **Hard evidence** | The only signal that does not depend on the observer's vantage point. |
 
 **So: only the last row counts.** All four rows above can be green on a dead node; all four can
@@ -39,6 +40,32 @@ So: **a node shown as offline in the Hub may be working normally.**
 (2–3 containers were running concurrently that time; whether that is the cause is unproven).
 It is written here not because it is common, but because **`offline` is not proof that a node is dead** —
 as with every other row, the verdict still has to come from the last one.
+
+## `status = blocked` does not even mean "it stopped"
+
+Measured on the production hub, 2026-08-31:
+
+| | |
+| --- | --- |
+| Node | an `agent-node:grok-build-cli` |
+| Roster status | `blocked` |
+| Heartbeat | 4 minutes ago |
+| Dispatch a task -> it replies | **22 seconds** |
+
+[#1548](https://github.com/sleep2agi/agent-network/issues/1548) has a second case: the node that builds the
+installers showed `blocked` for **8.3 hours** while being alive the whole time. It has no stand-in, so
+concluding "that lane is down" from the status field was simply wrong.
+
+**Mechanism**: the only path that moves `status` off `blocked` is `report_completion`
+(`server/src/tools.ts`). Once an agent has reported `blocked` via `report_status` and then does all its
+work through `send_task` / terminal `commhub_reply`, it stays `blocked` **forever**.
+
+Do **not** patch around this by showing "how long has it been blocked": the roster has **no**
+"when did it become blocked" field. `updated_at` is refreshed by the heartbeat — the long-blocked node
+above had an `updated_at` of **4 minutes ago**. Using it as a blocked-duration prints "4 minutes ago"
+for a node that has been stuck for hours, which is **worse than showing nothing**.
+
+**As with every other row on this page, only the last row is conclusive.**
 
 ## The four realities behind `status = idle` (measured)
 
