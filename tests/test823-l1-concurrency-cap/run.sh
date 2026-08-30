@@ -91,8 +91,26 @@ say "source_commit=$SRC"
 say "nproc=$nproc_val"
 say ""
 
+# 🔴 #1627 —— 每个用例各自的耗时,写进文件而不是变量。
+#
+#    起因:`L1-TIMING v1` 的第一份数据显示本套件是 L1 里最慢的一个
+#    (119–120s,占 total 的 13.3%)。而本套件跑的是**真的 qa.sh --l1**,
+#    也就是每次都遍历当前全部 68 个套件 —— `run_case` 被调 5 次,
+#    所以 **L1 每加一个套件,这里要多跑它 5 遍**。
+#    那个「每套件约 +1.8s」的边际成本此前是**从总数反推的估计**,不是实测。
+#    这几行让它变成实测。
+#
+#    ⚠️ 为什么写文件而不是数组:`run_case` 的返回值走 stdout
+#    (调用方 `IFS='|' read -r p eff warned <<< "$(run_case …)"`),
+#    所以它是在**命令替换的子 shell** 里跑的 —— 子 shell 里 `ARR+=(…)` 的
+#    修改出了子 shell 就没了。实测:数组写法拿到长度 0,文件写法拿到 1 行。
+#    (同族:退出码穿过管道那一类 —— 都是「看起来执行了,作用域不对」。)
+T823_TIMING=${T823_TIMING:-/tmp/t823-timing.txt}
+: > "$T823_TIMING"
+
 run_case() {                  # $1=用例名 $2=QA_L1_MAX_PAR 取值(空=不设)
   local name=$1 val=${2-}
+  local _t0; _t0=$(date +%s%N)
   : > "$EV"
   local out=/tmp/t823-$name.log
   if [[ -n "${val:-}" || "${2+set}" == "set" ]]; then
@@ -106,6 +124,7 @@ run_case() {                  # $1=用例名 $2=QA_L1_MAX_PAR 取值(空=不设)
   local eff; eff=$(sed -n 's/.*L1 并发上限 = \([0-9][0-9]*\).*/\1/p' "$out" | head -1)
   [[ -n "$eff" ]] || eff="?"
   local warned=0; grep -q '不是非负整数' "$out" && warned=1
+  printf '%s=%sms\n' "$name" "$(( ($(date +%s%N) - _t0) / 1000000 ))" >> "$T823_TIMING"
   echo "$p|$eff|$warned"
 }
 
@@ -169,4 +188,14 @@ say ""
 say "failures=$fails"
 if [[ "$fails" -eq 0 ]]; then say "RESULT: PASS"; else say "RESULT: FAIL"; fi
 cat "$report"
+# 🔴 #1627 —— 一行固定格式的汇总,和 scripts/qa.sh 的 `L1-TIMING v1` 同族:
+#    让「本套件为什么是 L1 里最慢的」可以跨 run 直接 grep,而不必翻日志。
+#    格式一旦定下别改字段顺序 —— 改了,之前所有 run 的日志就对不上了(所以带 v1)。
+#      gh api …/jobs/<id>/logs | grep -o 'T823-TIMING v1 .*'
+if [[ -s "$T823_TIMING" ]]; then
+  _cases=$(tr '\n' ',' < "$T823_TIMING" | sed 's/,$//')
+  _sum=$(sed 's/[^=]*=//; s/ms$//' "$T823_TIMING" | awk '{s+=$1} END{print s+0}')
+  echo "T823-TIMING v1 cases=$(wc -l < "$T823_TIMING" | tr -d ' ') totalMs=${_sum} ${_cases}"
+fi
+
 [[ "$fails" -eq 0 ]]
