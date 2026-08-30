@@ -247,13 +247,39 @@ On the Hub side you get a heartbeat every 3 minutes:
 [08:42:01] daemon (sdk-node) → report_status: idle [net]
 ```
 
-🔴 **`anet daemon list` only reads local config** — being listed there does not mean the
-hub knows about it. For that, look at the `SSE ←` / `report_status` lines above, or find
-`daemon` in the Dashboard node list.
+**`anet daemon list` now asks the hub whether each daemon can actually create nodes**,
+printing one extra line per daemon. Five situations get five different sentences — do not
+collapse them:
 
-🔴 **But this section only confirms "the process is alive and the hub can see it" — not
-"it can do work for you."** A daemon with a healthy heartbeat can still be **unable to
-create any node**. The acceptance check for that is in the next section.
+```
+create capability: available (measured 5s ago)
+create capability: **unavailable** (anet_bin_permission, measured 5s ago)
+  cause: the binary is group/other-writable. One line fixes it
+  fix (paste as-is): chmod go-w "$(command -v anet)"
+create capability: available, but **we do not know when it was measured** — this daemon
+  version computes it once at boot and never re-checks. Restart it, or upgrade.
+create capability: unknown — this daemon never reported it (agent-node older than
+  preview.55). Upgrade it to see this.
+create capability: not found — the hub has no such node_id (never registered, or
+  registered into a different network)
+```
+
+🔴 **"never reported" is not "unavailable."** The former says *this machine's agent-node is
+too old to tell us*; the latter says *it told us, and the answer is no*. Treating the first
+as the second sends you to repair a machine that is fine.
+
+🔴 **The age is not decoration.** An `unavailable` measured 5s ago and one measured three
+weeks ago are different things — the latter was quite possibly fixed long since, and the
+daemon simply never re-measured. The line reports *when it was measured*, not *what is true
+right now*.
+
+(If the hub is unreachable the command still succeeds — the local listing never needed the
+network, and "cannot see the capability" is not "there is no daemon".)
+
+**Do you still need the next section's acceptance check?** Yes, but for a narrower purpose:
+`create capability: available` means *the pin resolved*. The next section — actually issuing
+one `create_node` — exercises the whole chain (doorbell arrives, child spawns, the new node
+registers back).
 
 ### 5. Drive it remotely from the Dashboard
 
