@@ -144,3 +144,50 @@ export function planReapableSockets(
   }
   return out;
 }
+
+
+export interface CanonicalSocketProfile {
+  node_id?: string;
+  grokLeaderSocket?: string;
+  grokAttachSocket?: string;
+}
+
+export type CanonicalSocketsOutcome =
+  | { kind: "ok"; leaderSocket: string; attachSocket: string }
+  /** profile 里没有 node_id —— 算不出来,不动手。 */
+  | { kind: "no-node-id" }
+  /** 重新算出来的与 profile 存的不一致 —— profile 被写坏、HOME 变了、或**调用方喂错了 id**。 */
+  | { kind: "mismatch"; recomputedLeader: string; storedLeader: string };
+
+/**
+ * 从 profile 推出规范 socket 路径,并**与 profile 里存的那份交叉校验**。
+ *
+ * 🔴 这个交叉校验是一次真实缺陷催生的,不是补全性写的:
+ *    我第一版在 cli.ts 里写的是 `grokCopresenceSocketPaths(resolved.id)`,而
+ *    `resolveNodeRef` 返回的 `id` 是**目录名(别名)**,socket 路径却是
+ *    `anet node create` 用 **node_id** 算的。两者哈希不同 ⇒ 算出的路径永远对不上 ⇒
+ *    可回收集合恒为空 ⇒ **一条都回收不了,而且完全静默**(循环体一次都不进)。
+ *    12 轮验收里 4 次红、0 次回收,红话与修复前逐字相同 —— 从外面看,
+ *    「守卫拒绝了一切」和「这个修复不存在」是同一个样子。
+ *
+ *    所以判据不能只是「算一个路径出来」,必须是「算出来的和存着的对得上」。
+ *    对不上就说出来,别静默跳过。
+ */
+export function canonicalSocketsForProfile(
+  profile: CanonicalSocketProfile,
+  compute: (nodeId: string) => { leaderSocket: string; attachSocket: string },
+): CanonicalSocketsOutcome {
+  if (!profile.node_id) return { kind: "no-node-id" };
+  const recomputed = compute(profile.node_id);
+  if (
+    recomputed.leaderSocket !== profile.grokLeaderSocket
+    || recomputed.attachSocket !== profile.grokAttachSocket
+  ) {
+    return {
+      kind: "mismatch",
+      recomputedLeader: recomputed.leaderSocket,
+      storedLeader: profile.grokLeaderSocket ?? "<none>",
+    };
+  }
+  return { kind: "ok", leaderSocket: recomputed.leaderSocket, attachSocket: recomputed.attachSocket };
+}

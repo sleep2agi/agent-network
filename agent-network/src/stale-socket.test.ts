@@ -4,7 +4,7 @@
 // 泄漏/未拆干净变成一次静默的绿。所以每一条负向用例断言的是
 // **unlink 一次都没被调用**,而不只是返回值长得对。
 import { describe, expect, test } from "bun:test";
-import { planReapableSockets, reapStaleSocket, unixSocketPathInUse, type StaleSocketProbes } from "./stale-socket";
+import { canonicalSocketsForProfile, planReapableSockets, reapStaleSocket, unixSocketPathInUse, type StaleSocketProbes } from "./stale-socket";
 
 const ROOT = "/home/u/.anet-grok/node-abc/run";
 const SOCK = `${ROOT}/leader.sock`;
@@ -139,5 +139,52 @@ describe("planReapableSockets —— 只认重新算出来的那两个路径", (
 
   test("重复路径只回收一次", () => {
     expect(planReapableSockets(canonical, [SOCK, SOCK])).toEqual([SOCK]);
+  });
+});
+
+
+// 🔴 这一组是一次**真实缺陷**的回归测试:第一版把别名当成 node_id 喂给了路径计算,
+//    于是可回收集合恒为空 —— 一条都回收不了,而且静默。12 轮验收 4 红 0 回收。
+describe("canonicalSocketsForProfile —— 交叉校验能抓住「喂错 id」", () => {
+  // 模拟真实实现:路径由 node_id 的哈希决定,所以喂不同的 id 会得到不同的路径。
+  const compute = (nodeId: string) => ({
+    leaderSocket: `/h/.anet-grok/node-${nodeId}/run/leader.sock`,
+    attachSocket: `/h/.anet-grok/node-${nodeId}/run/attach.sock`,
+  });
+  const profile = {
+    node_id: "n_real",
+    grokLeaderSocket: "/h/.anet-grok/node-n_real/run/leader.sock",
+    grokAttachSocket: "/h/.anet-grok/node-n_real/run/attach.sock",
+  };
+
+  test("用对 id ⇒ ok", () => {
+    expect(canonicalSocketsForProfile(profile, compute)).toEqual({
+      kind: "ok",
+      leaderSocket: profile.grokLeaderSocket,
+      attachSocket: profile.grokAttachSocket,
+    });
+  });
+
+  test("🔴 profile 的 node_id 与存下来的路径对不上(=调用方当初用别的 id 算的)⇒ mismatch,不是静默的空集", () => {
+    const wrong = { ...profile, node_id: "preview-grok-225" };   // 别名冒充 node_id
+    const out = canonicalSocketsForProfile(wrong, compute);
+    expect(out.kind).toBe("mismatch");
+    if (out.kind === "mismatch") {
+      expect(out.recomputedLeader).not.toBe(out.storedLeader);
+    }
+  });
+
+  test("没有 node_id ⇒ no-node-id(说得出原因,不是悄悄什么都不做)", () => {
+    const { node_id, ...rest } = profile;
+    expect(canonicalSocketsForProfile(rest, compute)).toEqual({ kind: "no-node-id" });
+  });
+
+  test("三种结局互不相同 —— 判别力不为零", () => {
+    const kinds = new Set([
+      canonicalSocketsForProfile(profile, compute).kind,
+      canonicalSocketsForProfile({ ...profile, node_id: "other" }, compute).kind,
+      canonicalSocketsForProfile({ grokLeaderSocket: profile.grokLeaderSocket }, compute).kind,
+    ]);
+    expect(kinds.size).toBe(3);
   });
 });

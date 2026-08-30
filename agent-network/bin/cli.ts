@@ -101,7 +101,7 @@ import {
   resolveGrokAttachTarget,
   grokCopresenceSocketPaths,
 } from "../src/grok-copresence-profile";
-import { planReapableSockets, reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
+import { canonicalSocketsForProfile, planReapableSockets, reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
 import {
   codexCopresencePosture,
   codexCopresenceCreateFields,
@@ -9844,11 +9844,36 @@ Stop a running agent node.
   //    只有与它算出来的规范路径**完全相等**的残留才允许回收。一个被写坏的
   //    profile 因此带不进来别处的 socket —— 前缀校验做不到这一点。
   if (socketResiduals.length > 0) {
+    // 🔴 用 **profile.node_id**,不是 resolved.id。resolveNodeRef 返回的 id 是
+    //    **目录名(别名)**(`loadProfile(ref)` 成功即 `{ id: ref }`),而 socket 路径是
+    //    `anet node create` 用 **node_id** 算的。喂错 id ⇒ 算出的路径永远对不上 ⇒
+    //    一条都回收不了 —— 而且**完全静默**(下面的循环体一次都不进)。
+    //    我第一版就是这么写的,12 轮验收里 4 次红、0 次回收,红话与修复前逐字相同。
+    // 🔴 用 **profile.node_id**,不是 resolved.id。resolveNodeRef 返回的 id 是
+    //    **目录名(别名)**(`loadProfile(ref)` 成功即 `{ id: ref }`),而 socket 路径是
+    //    `anet node create` 用 **node_id** 算的 —— 喂错 id 算出的路径永远对不上,
+    //    可回收集合恒为空,而且**完全静默**。判据与三种结局见
+    //    src/stale-socket.ts 的 canonicalSocketsForProfile(带回归测试)。
+    const canonicalOutcome = canonicalSocketsForProfile(
+      resolved.profile as any,
+      (nodeId) => grokCopresenceSocketPaths(nodeId),
+    );
     let canonical: { leaderSocket: string; attachSocket: string } | null = null;
-    try { canonical = grokCopresenceSocketPaths(resolved.id); } catch { canonical = null; }
+    if (canonicalOutcome.kind === "ok") {
+      canonical = { leaderSocket: canonicalOutcome.leaderSocket, attachSocket: canonicalOutcome.attachSocket };
+    } else if (canonicalOutcome.kind === "mismatch") {
+      console.error(`[anet]    stale-socket reclaim skipped: recomputed canonical socket path does not match the profile's`);
+    } else {
+      console.error(`[anet]    stale-socket reclaim skipped: profile has no node_id`);
+    }
     if (canonical) {
       const runtimeRoot = dirname(canonical.leaderSocket);
       const reapable = planReapableSockets(canonical, socketResiduals.map(r => r.path));
+      if (reapable.length === 0) {
+        // 有残留、却一个都不在可回收集合里 —— 说出来。静默跳过会让"守卫拒绝了一切"
+        // 和"根本没有残留"长得一模一样。
+        console.error(`[anet]    stale-socket reclaim matched none of ${socketResiduals.length} residual(s)`);
+      }
       for (const target of reapable) {
         const outcome = reapStaleSocket(target, {
           procNetUnix: () => readFileSync("/proc/net/unix", "utf8"),

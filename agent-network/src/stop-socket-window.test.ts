@@ -34,7 +34,16 @@ describe("#1385 stop socket residual window", () => {
   // 少了这一步,那 10 秒窗口是在等一个被 stop 自己 SIGKILL 掉的清扫者。
   test("stop reclaims an orphan socket pathname before declaring STOP_TIMEOUT", () => {
     expect(src).toContain("reapStaleSocket");
-    // 路径必须**重新算**而不是信 profile 里存的那个
-    expect(src).toContain("grokCopresenceSocketPaths(resolved.id)");
+    // 路径经 canonicalSocketsForProfile 推出并与 profile 交叉校验
+    expect(src).toContain("canonicalSocketsForProfile");
+  });
+
+  // 🔴 这条是一次真实缺陷的回归钉:第一版写的是
+  //    `grokCopresenceSocketPaths(resolved.id)`,而 resolveNodeRef 返回的 id 是
+  //    **目录名(别名)**,socket 路径却是用 **node_id** 算的 —— 算出的路径永远对不上,
+  //    可回收集合恒为空,一条都回收不了,且完全静默。
+  //    22 轮验收 4 红 0 回收,失败率与修复前(17%)一模一样。
+  test("socket path must NOT be recomputed from resolveNodeRef's id (that is the alias)", () => {
+    expect(src).not.toContain("grokCopresenceSocketPaths(resolved.id)");
   });
 });
