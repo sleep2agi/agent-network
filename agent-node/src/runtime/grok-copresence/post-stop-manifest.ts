@@ -61,11 +61,52 @@ export interface PostStopShape {
   readonly owner: "currentUid";
 }
 
+/**
+ * 这条痕迹来自 `GROK_POST_STOP_CLEANUP_POLICY` 的哪一类。**封闭枚举，不是自由字符串。**
+ *
+ * 🔴 它不只是诊断信息，它是**守卫强度的锚**（见下面 `assertShapeMatchesOrigin`）。
+ *    通信测试马 在扫描自己的套件时量到过这个失效模式的另一面：他问的是
+ *    「这个变量后面**有没有**守卫」，而那条守卫写成 `&& ok "…"` 没有 `|| bad`
+ *    —— **有，但永远不会失败**。他的扫描工具因此犯了它要找的那个错。
+ *
+ *    放到这里就是：一个 `guard: "self-verifying"` 但 shape 写得比该类痕迹**真实
+ *    不变量更弱**的条目，和没有守卫是一回事，**而且更难发现，因为结构里那一栏
+ *    是填了的**。所以 shape 不能由写入方自由填 —— 它必须与 origin 对得上。
+ */
+export type PostStopOrigin =
+  | "stateFiles"
+  | "emptyStateFiles"
+  | "cwdSessionFiles"
+  | "sessionRootFiles"
+  | "transientStateDirectories"
+  | "projectSandboxPlaceholders"
+  | "sandboxBlockedDirectoryBinding"
+  | "nativeLeaderLockBinding";
+
+/**
+ * 每一类**自证型**痕迹必须使用的 shape。写入方不得填一个更弱的。
+ * 目前只有两类是自证型；其余六类是 `premise-only`（正确性押在"属主已证死"上）。
+ */
+export const REQUIRED_SHAPE_BY_ORIGIN: Partial<Record<PostStopOrigin, PostStopShape>> = Object.freeze({
+  projectSandboxPlaceholders: Object.freeze({
+    // 🔴 `single-link-empty-regular-file` 里的"单链 + 空"正是防调包的那一半。
+    //    写成 `regular-file` 就把它丢了 —— 那是"填了但更弱"的典型。
+    type: "single-link-empty-regular-file",
+    mode: "0444",
+    owner: "currentUid",
+  }),
+  nativeLeaderLockBinding: Object.freeze({
+    type: "regular-file",
+    mode: "0600",
+    owner: "currentUid",
+  }),
+} as const);
+
 export interface PostStopManifestEntry {
   /** **绝对**路径，写入时展开。读取方不做任何拼接。 */
   readonly path: string;
-  /** 这条痕迹的来源，仅用于诊断输出；判据不看它。 */
-  readonly origin: string;
+  /** 来自 policy 的哪一类。封闭枚举 —— 见 PostStopOrigin 的注释。 */
+  readonly origin: PostStopOrigin;
   readonly guard: PostStopGuard;
 }
 
@@ -77,6 +118,13 @@ export const POST_STOP_MANIFEST_VERSION = 1 as const;
 
 export const POST_STOP_MANIFEST_FILENAME = "grok-post-stop-manifest.json";
 
+/** 运行期用的 origin 全集；与 `PostStopOrigin` 一一对应。 */
+export const POST_STOP_ORIGINS: readonly PostStopOrigin[] = Object.freeze([
+  "stateFiles", "emptyStateFiles", "cwdSessionFiles", "sessionRootFiles",
+  "transientStateDirectories", "projectSandboxPlaceholders",
+  "sandboxBlockedDirectoryBinding", "nativeLeaderLockBinding",
+]);
+
 /**
  * 🔴 **写入顺序：先写清单，后 spawn。**
  *
@@ -87,13 +135,13 @@ export const POST_STOP_MANIFEST_FILENAME = "grok-post-stop-manifest.json";
  *
  * 但有一格做不到"全部先写"，说清楚而不是含糊过去：
  *
- *   `GROK_POST_STOP_CLEANUP_POLICY` 的七类里，**只有 `sandboxBlockedDirectoryBinding`
+ *   `GROK_POST_STOP_CLEANUP_POLICY` 的**八**类里，**只有 `sandboxBlockedDirectoryBinding`
  *   依赖 PID**（`source: "confirmedTuiProcessIds"`、`prefix: "sandbox-blocked-dir."`），
- *   而 PID 要 spawn 之后才有。其余六类的路径都只由 `stateHome` / `projectCwd` /
+ *   而 PID 要 spawn 之后才有。其余**七**类的路径都只由 `stateHome` / `projectCwd` /
  *   `leaderSocket` 决定，**spawn 之前就能全部算出来**。
  *
  * ⇒ 因此是**两段写**，两段都原子：
- *     phase 1（spawn 之前）：写入那六类的全部绝对路径；
+ *     phase 1（spawn 之前）：写入那七类的全部绝对路径；
  *     phase 2（spawn 之后立刻）：追加 PID 绑定的那一条。
  *
  * ⇒ 残留窗口因此被**收窄到一条**：phase 1 与 phase 2 之间崩溃，只会漏掉
@@ -182,6 +230,10 @@ export function parsePostStopManifest(raw: string): PostStopManifestRead {
  */
 function describeInvalidEntry(entry: unknown): string | null {
   if (!entry || typeof entry !== "object") return "entry is not an object";
+  const origin = (entry as { origin?: unknown }).origin;
+  if (typeof origin !== "string" || !POST_STOP_ORIGINS.includes(origin as PostStopOrigin)) {
+    return `entry has an unknown origin ${JSON.stringify(origin)}`;
+  }
   const path = (entry as { path?: unknown }).path;
   if (typeof path !== "string" || !path.startsWith("/")) {
     return `entry path must be absolute, got ${JSON.stringify(path)}`;
@@ -199,6 +251,16 @@ function describeInvalidEntry(entry: unknown): string | null {
     const { type, mode, owner } = shape as Record<string, unknown>;
     if (typeof type !== "string" || typeof mode !== "string" || owner !== "currentUid") {
       return `entry ${path} has an incomplete shape`;
+    }
+    // 🔴 shape 必须与 origin 对得上。只检查"字段齐全"挡不住"填了但更弱"——
+    //    而"更弱"和"正确"在结构上长得一模一样。
+    const required = REQUIRED_SHAPE_BY_ORIGIN[origin as PostStopOrigin];
+    if (!required) {
+      return `entry ${path} claims self-verifying but origin ${JSON.stringify(origin)} has no self-verifying shape`;
+    }
+    if (type !== required.type || mode !== required.mode) {
+      return `entry ${path} shape is weaker than ${origin} requires `
+        + `(want ${required.type}/${required.mode}, got ${String(type)}/${String(mode)})`;
     }
     return null;
   }

@@ -9,12 +9,12 @@ import {
 
 const selfVerifying: PostStopManifestEntry = {
   path: "/work/.anet/nodes/n1/.grok",
-  origin: "projectSandboxPlaceholders",
+  origin: "projectSandboxPlaceholders" as const,
   guard: { kind: "self-verifying", shape: { type: "single-link-empty-regular-file", mode: "0444", owner: "currentUid" } },
 };
 const premiseOnly: PostStopManifestEntry = {
   path: "/home/u/.grok-home/session_search.sqlite",
-  origin: "sessionRootFiles",
+  origin: "sessionRootFiles" as const,
   guard: { kind: "premise-only", premise: "owner-proven-dead" },
 };
 const manifest: PostStopManifest = {
@@ -54,7 +54,8 @@ describe("#1522 post-stop manifest 契约", () => {
   });
 
   test("未知 guard.kind 被**拒绝**，不是被跳过", () => {
-    const rogue = { ...manifest, entries: [{ path: "/x", origin: "future", guard: { kind: "trust-me" } }] };
+    // origin 必须**合法**，否则先被 origin 那道闸拒掉，这条断言就测不到 guard.kind
+    const rogue = { ...manifest, entries: [{ path: "/x", origin: "stateFiles", guard: { kind: "trust-me" } }] };
     const read = parsePostStopManifest(JSON.stringify(rogue));
     expect(read.kind).toBe("unreadable");
     // 跳过等于"读取方比写入方老时静默少清几样"——而少清没人会发现
@@ -91,6 +92,44 @@ describe("#1522 post-stop manifest 契约", () => {
     const { phase: _drop, ...noPhase } = manifest as unknown as Record<string, unknown>;
     expect(parsePostStopManifest(JSON.stringify(noPhase)).kind).toBe("unreadable");
     expect(parsePostStopManifest(JSON.stringify({ ...manifest, phase: "whenever" })).kind).toBe("unreadable");
+  });
+
+  // 🔴 通信测试马 在自己的扫描工具上量到的那个失效模式，搬到这里：
+  //    「有守卫」和「守卫会失败」是两件事。一个 self-verifying 但 shape 比该类
+  //    痕迹真实不变量更弱的条目，等于没有守卫 —— 而且更难发现，因为结构里
+  //    那一栏是填了的。
+  test("🔴 shape 比 origin 要求的更弱 ⇒ 拒绝（「填了但更弱」和「正确」结构上一样）", () => {
+    const weaker = {
+      ...manifest,
+      entries: [{
+        path: "/work/.grok",
+        origin: "projectSandboxPlaceholders",
+        // 丢掉 "单链 + 空" 那一半 —— 正是防调包的那一半
+        guard: { kind: "self-verifying", shape: { type: "regular-file", mode: "0444", owner: "currentUid" } },
+      }],
+    };
+    const read = parsePostStopManifest(JSON.stringify(weaker));
+    expect(read.kind).toBe("unreadable");
+    expect((read as { detail: string }).detail).toContain("weaker than projectSandboxPlaceholders");
+  });
+
+  test("🔴 premise-only 的类别不许自称 self-verifying", () => {
+    const faking = {
+      ...manifest,
+      entries: [{
+        path: "/home/u/.grok-home/session_search.sqlite",
+        origin: "sessionRootFiles",
+        guard: { kind: "self-verifying", shape: { type: "regular-file", mode: "0600", owner: "currentUid" } },
+      }],
+    };
+    const read = parsePostStopManifest(JSON.stringify(faking));
+    expect(read.kind).toBe("unreadable");
+    expect((read as { detail: string }).detail).toContain("has no self-verifying shape");
+  });
+
+  test("origin 是封闭枚举，自由字符串被拒", () => {
+    const rogue = { ...manifest, entries: [{ ...selfVerifying, origin: "somethingNew" }] };
+    expect(parsePostStopManifest(JSON.stringify(rogue)).kind).toBe("unreadable");
   });
 
   test("坏 JSON / 非对象 ⇒ unreadable 并带原因", () => {
