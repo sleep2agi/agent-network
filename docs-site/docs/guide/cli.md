@@ -194,6 +194,34 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 
 升级细节见 [升级指南](/guide/upgrade)。
 
+### `anet status` 的四个数字怎么读
+
+```
+  CommHub: http://127.0.0.1:9200
+  Agents: 127 idle, 0 working, 1 needs attention, 143 offline
+  SSE:    12 connected
+  Tasks:  10 recent
+```
+
+| 数字 | 含义 |
+|---|---|
+| `idle` | 空闲,等派活 |
+| `working` | **正在推进**一个回合(含 `waiting_input` —— 回合还在,只是在等人) |
+| `needs attention` | **需要人看一眼**:`blocked` / `error`,以及任何本版本不认识的状态 |
+| `offline` | 心跳过期,或已正常停止 |
+
+四个数相加等于节点总数。`needs attention` 为 0 时那一格不显示。
+
+🔴 **`blocked` / `error` 不算在 `working` 里。** 它们的含义是「卡住了」而不是
+「在干活」—— 一个卡住的节点如果被算进 `working`,运维看到「N working」会以为
+一切正常。`needs attention` 大于 0 时,下面会列出是哪几个节点、它们自报的状态、
+以及当时的任务。
+
+⚠️ **这些状态是 agent 自报的,不含活性成分。** 一个进程已经死掉但还没被心跳
+清扫的节点,在这里仍可能显示成 `idle`。要确认它还在不在,**发一条任务试试** ——
+`anet status` 回答的是「它上次说自己怎么样」,不是「它现在还在不在」。
+
+
 ## Preview 专属能力
 
 以下能力存在于当前 preview，不应写成 stable 已支持：

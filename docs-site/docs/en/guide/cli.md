@@ -194,6 +194,35 @@ Channel settings are not hot-reloaded; restart the node after changing them. `an
 
 See the [Upgrade guide](/en/guide/upgrade) for upgrade details.
 
+### Reading the four numbers in `anet status`
+
+```
+  CommHub: http://127.0.0.1:9200
+  Agents: 127 idle, 0 working, 1 needs attention, 143 offline
+  SSE:    12 connected
+  Tasks:  10 recent
+```
+
+| Number | Meaning |
+|---|---|
+| `idle` | Free, waiting for work |
+| `working` | **Actively progressing** a turn (includes `waiting_input` — the turn is alive, just waiting on a human) |
+| `needs attention` | **Someone should look**: `blocked` / `error`, plus any status this version does not recognise |
+| `offline` | Heartbeat expired, or stopped cleanly |
+
+The four add up to the node total. The `needs attention` slot is hidden when it is 0.
+
+🔴 **`blocked` / `error` are not counted as `working`.** They mean "stuck", not
+"making progress" — folding them into `working` would let an operator read
+"N working" as "all fine". When `needs attention` is above 0, the nodes behind it
+are listed with their self-reported status and the task they were on.
+
+⚠️ **These statuses are self-reported and carry no liveness proof.** A node whose
+process died but has not yet been swept can still show as `idle` here. To confirm
+it is still there, **send it a task** — `anet status` answers "what it last said
+about itself", not "whether it is still running".
+
+
 ## Preview-only features
 
 The following commands exist in the current preview and must not be presented as stable features:
