@@ -262,6 +262,8 @@ create capability: unknown — this daemon never reported it (agent-node older t
   preview.55). Upgrading is not enough — restart the daemon.
 create capability: not found — the hub has no such node_id (never registered, or
   registered into a different network)
+create capability: not found — the hub rejected this machine's identity (HTTP 401).
+  The hub is reachable; this is a *credentials* problem, not a network one: run anet login
 ```
 
 🔴 **"never reported" is not "unavailable."** The former says *this machine's agent-node is

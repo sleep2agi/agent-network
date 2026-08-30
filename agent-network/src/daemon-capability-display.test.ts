@@ -7,7 +7,7 @@
 //    不同的话**。全渲染成 "blocked" 的实现能通过任何只检查"有没有输出"的测试。
 
 import { describe, expect, test } from "bun:test";
-import { describeCapability, formatAge } from "./daemon-capability-display.js";
+import { describeCapability, describeFetchFailure, formatAge, type CapabilityFetchFailure } from "./daemon-capability-display.js";
 
 const NOW = 1_700_000_000_000;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -304,5 +304,68 @@ describe("🔴 说了升级 agent-node 的文案,必须同时说重启", () => {
     const local = collect().filter(s => s.includes("升级本机 anet"));
     expect(local.length).toBeGreaterThanOrEqual(1);
     expect(local.every(s => !s.includes("agent-node"))).toBe(true);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────
+ * 2026-08-30 —— 「连不上 hub」这句话,当时说的不是实话。
+ *
+ * Mac mini 上 `anet daemon list` 印「连不上 hub」。同一台机器同一刻实测:
+ *     GET /health                → 200,0.79s     ← hub 完全可达
+ *     GET /api/host-supervisors  → 401
+ * 真实原因是**这台机器的 CLI 没凭据**。而「连不上」会让人去查网络、查隧道、
+ * 查 hub 死没死 —— 全是白查。**一句指错方向的报错,比不报错更贵。**
+ * ──────────────────────────────────────────────────────────────────────── */
+describe("🔴 取不到这一格的五种原因,必须说成五句不同的话", () => {
+  const ALL: CapabilityFetchFailure[] = [
+    { why: "no-hub" },
+    { why: "unauthorized", status: 401 },
+    { why: "http", status: 503 },
+    { why: "bad-body" },
+    { why: "unreachable", detail: "ECONNREFUSED" },
+  ];
+
+  test("五种各说各的(没有两种撞车)", () => {
+    const lines = ALL.map(describeFetchFailure);
+    expect(new Set(lines).size).toBe(ALL.length);
+  });
+
+  /* 🔴 本体。这条在修复前必红:那时五种全渲染成同一句「连不上 hub」。 */
+  test("🔴 只有真连不上才配说「连不上」", () => {
+    const saying = ALL.filter(f => describeFetchFailure(f).includes("连不上"));
+    expect(saying.map(f => f.why)).toEqual(["unreachable"]);
+  });
+
+  /* 🔴 401 是实测那一例。它必须把人指向凭据,而不是网络。 */
+  test("🔴 401 说凭据、给 anet login、且明说 hub 是通的", () => {
+    const s = describeFetchFailure({ why: "unauthorized", status: 401 });
+    expect(s).toContain("401");
+    expect(s).toContain("凭据");
+    expect(s).toContain("anet login");
+    expect(s).toContain("hub 是通的");
+    expect(s).not.toContain("连不上");
+  });
+
+  test("403 走同一条(也是凭据,不是 hub 挂了)", () => {
+    expect(describeFetchFailure({ why: "unauthorized", status: 403 })).toContain("凭据");
+  });
+
+  /* 每一种都得让人知道下一步敲什么 —— 只说「查不到」等于没说。 */
+  test("🔴 每一种都带一个可执行的下一步", () => {
+    const NEXT = ["anet init", "anet login", "hub 日志", "升级 hub", "连不上"];
+    for (const f of ALL) {
+      const s = describeFetchFailure(f);
+      expect(NEXT.some(n => s.includes(n))).toBe(true);
+    }
+  });
+
+  /* 尾巴那句是这条命令没有整个失败的原因:用户看到「查不到」最先怕的
+   * 就是"上面那些是不是也不可信了"。五种都必须留着它。 */
+  test("五种都说明本地清单仍然有效", () => {
+    for (const f of ALL) expect(describeFetchFailure(f)).toContain("仍然有效");
+  });
+
+  test("🔴 分母自证:确实枚举了 5 种 why,不是空跑", () => {
+    expect(new Set(ALL.map(f => f.why)).size).toBe(5);
   });
 });
