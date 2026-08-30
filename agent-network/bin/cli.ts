@@ -978,7 +978,20 @@ async function startWindowsCodexCopresence(
     console.log(freshDeferred
       ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
       : `[anet] client-health role=bridge remote=exact thread=exact`);
-    console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
+    // 🔴 #1342 —— 耗时也打在**成功路径**上,不只打在失败诊断里。
+    //
+    //    #1628 把 `probeMs` 加进了 `if (!tuiConnected)` 的 `[looking]` 串,
+    //    它成功定位了成本(2026-08-31 实测:单次探测 9963ms,占 waited 的 96%)。
+    //    然后 #1636 按它做了优化 —— **而它验不了那个优化**:修好之后就不再失败,
+    //    也就不再打印。**一个只在坏的时候说话的仪表,没法告诉你好是不是真的变好了**,
+    //    而且修得越好它越沉默(拿下一个样本得等 flake 再次触发)。
+    //
+    //    量**错误原因**的诊断打在失败路径就够;量**成本/耗时**的必须两侧都打 ——
+    //    它的用途本来就是前后对比,而对比需要两侧都有样本。
+    //
+    //    ⚠️ `connection=pid-attributed` 这个子串**不能动**:
+    //    windows-codex-copresence.test.ts 用 indexOf 钉它的出现顺序。追加在其后是安全的。
+    console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed probes=${tuiProbes} probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`);
     const code = await new Promise<number>((resolve, reject) => {
       tui.once("exit", (c) => resolve(c ?? 1));
     });
