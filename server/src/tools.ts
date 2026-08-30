@@ -636,6 +636,37 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             "anet_bin_permission",
             "anet_bin_unknown",
           ]).optional(),
+          // #1545 —— 上面那一格**是什么时候测出来的**。
+          //
+          // 🔴 为什么必须有:agent-node 到 preview.67 为止,`daemonCreateCapability()`
+          //    用一个进程级缓存(`_createCapCache`)只算一次。开机时 pin 坏 ⇒ 之后
+          //    永远上报 blocked(哪怕运维已经写好 path.conf);开机时好 ⇒ 之后把二进制
+          //    chmod 掉也**永远上报 ready**。后者是朝「没问题」方向说谎。
+          //    而 hub 这边,一个 3 秒前测的 blocked 和一个三周前测的 blocked,
+          //    在 `last_seen_at` 上长得一模一样 —— 心跳是新的,那一格不是。
+          //
+          // 🔴 为什么是「多久以前」(时长)而不是绝对时间戳:这个值来自**节点自己的钟**。
+          //    时钟偏移下,绝对时间戳会算出一个既可能"永远新鲜"也可能"来自 1970"的年龄,
+          //    而且错的方向不可预测。时长对偏移免疫 —— hub 用自己的钟在收到时换算。
+          //
+          // 🔴 为什么不加 `.min()/.max()/.int()`:**这几个约束都会让整条 report_status 被拒**
+          //    (zod 对象里任何一个已知字段验证失败 = 整份被拒,不是丢掉这一格),
+          //    而这一格是纯诊断信息,不值得拿一台节点的在线状态去换。
+          //    收得宽,**在读取处消毒**(见 /api/host-supervisors)。
+          //    这条不是我新立的:同一个 schema 上方 `anet_bin_pin_unresolved` 那条注释
+          //    记的就是同一次教训 —— 删一个 enum 值会让所有 .40 daemon 失联。
+          //
+          // 🔴 `.catch(null)` 不是装饰:光写 `z.number()` **仍然会拒 NaN**
+          //    (实测:`z.number().nullable().optional()` 对 NaN 抛),而那意味着
+          //    一次算错的时长能让整台节点在 hub 上失联 —— 正是 #1225 里 host.ip
+          //    那个形状。`.catch(null)` 让这一格**在任何输入下都不可能拒掉整份 report**:
+          //    合法数字透传,其余一律变 null(读取侧当作「没报」)。
+          //    类型仍然是 number 而不是 unknown —— 别给一个 attacker daemon
+          //    留下"往快照里塞任意大对象"的口子(同 schema 上方 soft cap 的立场)。
+          //
+          // 不上报这一格 ≠ 0。旧 daemon 压根不发,读的人必须能把
+          // 「刚测的」「很久以前测的」「不知道」分成三件事说。
+          create_capability_observed_ms_ago: z.number().nullable().catch(null).optional(),
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
