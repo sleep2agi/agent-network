@@ -35,7 +35,7 @@ import {
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
-import { classifySessionStatus } from "../src/session-status-class";
+import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
@@ -11933,11 +11933,14 @@ async function statusCommand() {
     //    是一个**没有出口**的状态(只有 report_completion 能把它拉回 idle),
     //    所以一个 agent 可以永远停在那里而被报成「在干活」。
     const classifyStatus = (s: any) => classifySessionStatus(s?.status);
-    const summary = statusRes.summary || sessions.reduce((acc: any, s: any) => {
-      acc[classifyStatus(s)]++;
-      acc.total++;
-      return acc;
-    }, { idle: 0, working: 0, offline: 0, total: 0 });
+    // 🔴 #1625 —— **不再用 `statusRes.summary`**。`/api/status` 总是返回一个
+    //    summary,于是原先的 `statusRes.summary || …` 让本地分类器从不执行,
+    //    屏幕上的数字来自服务端一份停在 #1548 之前的分类(`blocked`/`error`
+    //    被折进 `working`)。症状:一个 blocked 节点同时出现在 `working` 和
+    //    `needs attention` 两格,四个数加起来比 total 多。
+    //    范围等价性已核:该端点只加 `addNetworkScope`、无状态/别名过滤,
+    //    且服务端的 summary 就是从同一个 sessions 数组算的。
+    const summary = summarizeSessions(sessions);
     const idle = sessions.filter((s: any) => classifyStatus(s) === "idle");
     const working = sessions.filter((s: any) => classifyStatus(s) === "working");
     const attention = sessions.filter((s: any) => classifyStatus(s) === "attention");
@@ -11946,7 +11949,7 @@ async function statusCommand() {
     console.log(`\n  CommHub: ${hub}`);
     // 🔴 attention 单独一格。折进 working 会让「需要人看一眼」消失在一个看起来
     //    正常的数字里 —— 这正是 #1548 那一族问题:两种不同的事渲染成同一个词。
-    const attnCount = summary.attention ?? attention.length;
+    const attnCount = summary.attention;
     console.log(`  Agents: ${summary.idle || 0} idle, ${summary.working || 0} working`
       + (attnCount > 0 ? `, ${attnCount} needs attention` : "")
       + `, ${summary.offline || 0} offline`);

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { classifySessionStatus } from "./session-status-class";
+import { classifySessionStatus, summarizeSessions } from "./session-status-class";
 
 describe("#1548 anet status 不能把「卡住」显示成「在干活」", () => {
   // 🔴 这一条是本次修的那个 bug 的红夹具:改之前 blocked/error 返回 "working"
@@ -56,5 +56,47 @@ describe("#1548 anet status 不能把「卡住」显示成「在干活」", () =
     expect(classifySessionStatus(null)).toBe("idle");
     expect(classifySessionStatus(undefined)).toBe("idle");
     expect(classifySessionStatus("idle")).toBe("idle");
+  });
+});
+
+describe("#1625 summarizeSessions —— 屏幕上那几个数字", () => {
+  // 🔴 正控用**当前生产军团的真实构成**(2026-08-31 实测:271 个会话,
+  //    127 idle / 143 offline / 1 blocked)。服务端那份分类会把这 1 个 blocked
+  //    算进 working,于是它同时出现在 working 和 needs attention 两格。
+  const fleet = [
+    ...Array.from({ length: 127 }, () => ({ status: "idle" })),
+    ...Array.from({ length: 143 }, () => ({ status: "offline" })),
+    { status: "blocked" },
+  ];
+
+  test("blocked 只进 attention,不进 working", () => {
+    const s = summarizeSessions(fleet);
+    expect(s.working).toBe(0);
+    expect(s.attention).toBe(1);
+  });
+
+  test("🔴 四个数加起来 == total(原先是 272 > 271)", () => {
+    const s = summarizeSessions(fleet);
+    expect(s.idle + s.working + s.attention + s.offline).toBe(s.total);
+    expect(s.total).toBe(271);
+  });
+
+  // 🔴 这一条钉的是那个「从不执行、一执行就 NaN」的老兜底:
+  //    累加器原先只有 {idle, working, offline, total},`acc["attention"]++`
+  //    得到 NaN,而 `?? ` 不接 NaN ⇒ 屏幕印 `NaN needs attention`。
+  test("attention 是数字,不是 NaN(累加器必须显式初始化它)", () => {
+    const s = summarizeSessions([{ status: "blocked" }, { status: "error" }]);
+    expect(Number.isNaN(s.attention)).toBe(false);
+    expect(s.attention).toBe(2);
+  });
+
+  test("空输入给出全 0,不是 NaN 也不是空对象", () => {
+    expect(summarizeSessions([])).toEqual({ idle: 0, working: 0, attention: 0, offline: 0, total: 0 });
+  });
+
+  test("未知状态进 attention(与 classifySessionStatus 同一套判据)", () => {
+    const s = summarizeSessions([{ status: "some-new-state" }, { status: "" }]);
+    expect(s.attention).toBe(1);
+    expect(s.idle).toBe(1);
   });
 });
