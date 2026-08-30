@@ -32,6 +32,31 @@ CommHub Server 注册 **50 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 |------|------|
 | `send_desktop_message` | 向桌面用户 inbox 写一条可推送消息 |
 
+::: tip send_desktop_message —— 收件人是**用户身份**，不是节点 alias
+这是本工具唯一容易搞错的地方，也是它和 `send_task` 的根本区别：
+
+- `send_task(alias=…)` 发给一个**会话/节点**（名册里能查到的那种）；
+- `send_desktop_message(to_user_id=… | to_username=…)` 发给一个**登录用户**，
+  推到他当前活跃的桌面端 / Web 客户端。
+
+**一个登录用户不一定有对应的会话 alias。** 拿 alias 去当收件人，或者反过来，
+都会发给错误的对象 —— 而两种情况**接口都会返回成功**，因为参数在各自的语义下都是合法的。
+
+```jsonc
+// 最小可用调用：二选一给 to_user_id 或 to_username
+{
+  "to_username": "alice",          // 或 "to_user_id": "u_9f2c1b7ae4d0"
+  "title": "构建完成",              // 可选，≤200
+  "message": "v0.9.0-preview.43 已发布到 npm。",   // 必填，1–10000
+  "severity": "success",           // info | success | warning | error，默认 info
+  "kind": "agent_message"          // 默认 agent_message，用于客户端分类
+}
+```
+
+`to_user_id` 和 `to_username` **至少给一个**；两个都给时会做一致性校验，对不上会被拒。
+`network_id` 通常不用传（单网络的 user token 会自动解析；`ntok` 恒定绑在它自己的网络上）。
+:::
+
 **SkillHub** · 4 个
 
 | 工具 | 说明 |
