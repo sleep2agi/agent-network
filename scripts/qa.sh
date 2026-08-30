@@ -468,8 +468,24 @@ if [[ $RUN_L1 -eq 1 ]]; then
     #    「它前面那个慢套件的结束时刻」—— 数字看起来完全正常,只是错的。
     (
       _s=$(( $(date +%s) - START ))
-      dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1
-      _rc=$?
+      # 🔴 `|| _rc=$?` 不是风格,是这一行**唯一**能拿到非零 rc 的写法。
+      #    本脚本第 17 行是 `set -euo pipefail`。写成
+      #        dockerrun …
+      #        _rc=$?
+      #    时,`docker run` 一旦非零,**子 shell 在第一行就被 set -e 打死**,
+      #    下面的 `_rc=$?`、TSV 落盘、`· L1 done … rc=%s` 一行都不会执行。
+      #    于是:**失败的套件既没有 rc、也没有时间线**,而成功的两样都有。
+      #
+      #    实测(run 33301710195 / job 99231846024):该 job 打出 67 行 `· L1 done`,
+      #    **rc 全部是 0**;而当次真正失败的 qa-dash-10-incremental-poll
+      #    **一行 `L1 done` 都没有**。也就是说 `rc=%s` 这个占位符
+      #    **在它被加进来之后,从来没有打印过 0 以外的值** —— 它只在不需要它的时候工作。
+      #
+      #    这正是本文件上面 #1333 那条注释说的那件事的另一半:
+      #    「唯一需要这条时间线的场合,正是它打不出来的场合」——
+      #    那条讲的是整个 job 被 30 分钟天花板 kill,而**每一次单套件失败也是**。
+      _rc=0
+      dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1 || _rc=$?
       _e=$(( $(date +%s) - START ))
       printf '%s\t%s\t%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv
       # 🔴 **完成即打印**,不要只留给结尾的汇总。
