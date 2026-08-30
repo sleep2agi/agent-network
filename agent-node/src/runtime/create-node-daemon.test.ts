@@ -1058,7 +1058,7 @@ describe("#1545 probeAnetBinReadiness —— 不抛异常地回答「现在能�
   /* 🔴 这条不是补齐分类,是**把一个真实的空白钉住**:sha256 不匹配那条抛的是裸
    * Error、没挂 anetBinCode。所以它只能是 unclassified。哪天有人给它挂上类别,
    * 这条会红 —— 那正是应该有人来读一眼的时刻(而不是让显示层默默替它选一类)。 */
-  test("BLOCKED: sha256 不匹配 → 目前无类别可挂,如实报 anet_bin_unclassified", () => {
+  test("BLOCKED: sha256 不匹配 → 目前无类别可挂,如实报 anet_bin_unknown", () => {
     cleanup();
     const p = setup("hash-mismatch", "actual-bytes");
     const got = probeAnetBinReadiness({
@@ -1069,7 +1069,7 @@ describe("#1545 probeAnetBinReadiness —— 不抛异常地回答「现在能�
     }, "linux");
     expect(got.state).toBe("blocked");
     if (got.state !== "blocked") throw new Error("unreachable");
-    expect(got.code).toBe("anet_bin_unclassified");
+    expect(got.code).toBe("anet_bin_unknown");
     expect(got.detail).toContain("sha256 mismatch");
     cleanup();
   });

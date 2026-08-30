@@ -923,9 +923,14 @@ export async function handleCreateNodeDoorbell(
  *    像已经检查过了。(这是对 problem statement 里「抽出不抛异常的核心」的一处
  *    收窄:包一层比拆开更小、且**逐字不变是构造性的**,不需要靠测试去证明。)
  *
- * 🔴 `code` 允许 `anet_bin_unclassified`,不是占位:`loadAndVerifyAnetBin` 里
- *    **sha256 mismatch 那条抛的是裸 Error、没有挂 anetBinCode**。把它硬塞进上面
- *    四类中的任何一类都是编的 —— 未归类就说未归类,别让显示层替它选一个方向。
+ * 🔴 `code` 的第五个取值**沿用 `anet_bin_unknown`,不新造名字**。#1353 已经在
+ *    `config-apply.ts` 的 `create_nodes_blocked_reason` 里定义了它(「拿不到类别时
+ *    的兜底」),hub 的 zod enum(`server/src/tools.ts`)也已经收这个值。
+ *    我一度想叫 `anet_bin_unclassified` —— 那是**造同义副本**:两个名字同一个含义,
+ *    以后只会有一个被改到。
+ *    它不是占位:`loadAndVerifyAnetBin` 里 **sha256 mismatch 那条抛的是裸 Error、
+ *    没有挂 anetBinCode**(同文件其余 8 个 throw 点都走 `unsafePathHelp`),
+ *    所以确实无类别可挂。把它硬塞进四类中任何一类都是编的。
  *
  * 🔴 这里**没有 unknown 态**。unknown 的含义是「daemon 根本没上报过这一格」,
  *    那是传输/显示层的状态(PR2/PR4),探针跑到了就一定有答案。 */
@@ -933,7 +938,7 @@ export type AnetBinReadiness =
   | { readonly state: "ready"; readonly abs: string }
   | {
       readonly state: "blocked";
-      readonly code: AnetBinFailureCode | "anet_bin_unclassified";
+      readonly code: AnetBinFailureCode | "anet_bin_unknown";
       /** 人读的整句,含解析器给出的 `Fix: …` 那半 —— 不另存一份副本,
        *  否则修法会有两处、而只有一处会被改。 */
       readonly detail: string;
@@ -949,7 +954,7 @@ export function probeAnetBinReadiness(
     const code = (error as AnetBinError | null)?.anetBinCode;
     return {
       state: "blocked",
-      code: code ?? "anet_bin_unclassified",
+      code: code ?? "anet_bin_unknown",
       detail: error instanceof Error ? error.message : String(error),
     };
   }
