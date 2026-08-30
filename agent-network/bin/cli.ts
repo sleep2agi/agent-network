@@ -37,7 +37,7 @@ import {
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus } from "../src/session-status-class";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
-import { describeCapability, type DaemonCapabilityRow } from "../src/daemon-capability-display";
+import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
@@ -8538,7 +8538,8 @@ async function daemonListCommand() {
   //
   // 🔴 hub 不可达时**不让整条命令失败**:本地清单本来就不需要网络,
   //    而"看不到能力"和"没有 daemon"是两件完全不同的事,必须分别说清。
-  const byNodeId = await fetchDaemonCapabilities();
+  const fetched = await fetchDaemonCapabilities();
+  const byNodeId = fetched.ok ? fetched.rows : null;
 
   for (const { id, profile } of daemons) {
     const nid = (profile as any)?.node_id || "(missing)";
@@ -8547,7 +8548,7 @@ async function daemonListCommand() {
     if (byNodeId === null) {
       // hub 不可达/未配置 —— 这是**第四种**情况,和"没报过"不同:
       // 那台 daemon 可能报得好好的,只是我们现在问不到。别把它说成未知能力。
-      console.log(`    创建能力:查不到 —— 连不上 hub(本地清单不需要网络,所以其余信息仍然有效)`);
+      console.log(`    ${describeFetchFailure((fetched as any).failure)}`);
       continue;
     }
     const row = byNodeId.get(nid);
@@ -8562,22 +8563,36 @@ async function daemonListCommand() {
 /** 从 hub 取每台 daemon 自报的创建能力。
  *  返回 null 表示**没问到**(未配置 hub / 连不上 / 响应不可读)——
  *  🔴 和"问到了但那台 daemon 没报过"是两件事,调用方必须分开说。 */
-async function fetchDaemonCapabilities(): Promise<Map<string, DaemonCapabilityRow> | null> {
+// 2026-08-30 —— 以前这五种失败**全部返回 null**,而唯一那句文案说的是「连不上 hub」。
+// Mac mini 上实测到的是 HTTP 401:同机 `/health` 200(0.79s)、`/api/host-supervisors` 401。
+// hub 完全可达,缺的是**这台机器 CLI 的凭据**(daemon 自己带 token 所以注册成功了)。
+// 把「拒绝了你的身份」说成「连不上」,会把人支去查网络/隧道/hub 死活 —— 全白查,
+// 该跑的是 `anet login`。同 #473 给 SSE 明细定的规矩:分不清的两件事不许合并成一句话。
+type CapabilityFetchResult =
+  | { ok: true; rows: Map<string, DaemonCapabilityRow> }
+  | { ok: false; failure: CapabilityFetchFailure };
+
+async function fetchDaemonCapabilities(): Promise<CapabilityFetchResult> {
   const gc = loadGlobal();
   const hub = parseOpts().hub || gc.hub;
-  if (!hub) return null;
+  if (!hub) return { ok: false, failure: { why: "no-hub" } };
   try {
     const res = await fetch(`${hub}/api/host-supervisors`, { headers: authHeaders() });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // 🔴 401/403 单独成一类:它们说的是「凭据」,其余 HTTP 错说的是「hub 那边出事了」。
+      const why = (res.status === 401 || res.status === 403) ? "unauthorized" : "http";
+      return { ok: false, failure: { why, status: res.status } as CapabilityFetchFailure };
+    }
     const body = await res.json() as any;
-    if (!body?.ok || !Array.isArray(body.daemons)) return null;
+    if (!body?.ok || !Array.isArray(body.daemons)) return { ok: false, failure: { why: "bad-body" } };
     const m = new Map<string, DaemonCapabilityRow>();
     for (const d of body.daemons) {
       if (d && typeof d.daemon_node_id === "string") m.set(d.daemon_node_id, d as DaemonCapabilityRow);
     }
-    return m;
-  } catch {
-    return null;
+    return { ok: true, rows: m };
+  } catch (e: any) {
+    // 只有真的没连上才配叫「连不上」。带上 errno/message,否则用户无从下手。
+    return { ok: false, failure: { why: "unreachable", detail: String(e?.message || e).slice(0, 60) } };
   }
 }
 

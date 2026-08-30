@@ -186,3 +186,53 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
     fix,
   };
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+ * 2026-08-30 实测催生 —— 「取不到这一格」有五种原因,以前全说成「连不上 hub」。
+ *
+ * Mac mini 上跑 `anet daemon list`,它印的是「连不上 hub」。同一台机器同一刻:
+ *
+ *     GET /health                 → 200,0.79s      ← hub 完全可达
+ *     GET /api/host-supervisors   → 401 unauthorized
+ *
+ * hub 好得很,是**这台机器的 CLI 没有凭据**(daemon 自己带 token 所以注册成功了,
+ * CLI 没有)。而「连不上」会把人支去查网络、查隧道、查 hub 死没死 —— 全是白查,
+ * 要跑的是 `anet login`。**一句指错方向的报错,比不报错更贵。**
+ *
+ * 🔴 这与 #473 给 SSE 明细定的规矩是同一条,那条注释就在本仓 cli.ts 里:
+ *    「非 admin 拿到 403,把它渲染成 `0 connected` 是个 LIE,读起来像 hub 死了」。
+ *    同一个错误形状,在同一个仓里,已经被解决过一次。
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/** 取 `/api/host-supervisors` 失败时的**原因**。以前这五种共用一个 `null`。 */
+export type CapabilityFetchFailure =
+  | { readonly why: "no-hub" }
+  | { readonly why: "unauthorized"; readonly status: number }
+  | { readonly why: "http"; readonly status: number }
+  | { readonly why: "bad-body" }
+  | { readonly why: "unreachable"; readonly detail?: string };
+
+/** 每一种都必须说出**两件事**:到底是什么挡住了,以及下一步该敲什么。
+ *  尾巴统一带上「本地清单不需要网络」—— 那是这条命令没有整个失败的原因,
+ *  用户看到「查不到」时最先怕的就是"上面那些是不是也不可信了"。 */
+export function describeFetchFailure(f: CapabilityFetchFailure): string {
+  const TAIL = "\n    (本地清单不需要网络,上面那些信息仍然有效)";
+  switch (f.why) {
+    case "no-hub":
+      return "创建能力:查不到 —— 本机还没配 hub 地址。\n"
+        + "    跑 anet init,或这次带上 --hub <url>" + TAIL;
+    case "unauthorized":
+      /* 🔴 这一句是整块的重点:必须明说 hub 是通的,否则读的人还是会去查网络。 */
+      return `创建能力:查不到 —— hub 拒绝了本机的身份(HTTP ${f.status})。\n`
+        + "    hub 是通的,要修的是**凭据**不是网络:跑 anet login" + TAIL;
+    case "http":
+      return `创建能力:查不到 —— hub 返回 HTTP ${f.status}。\n`
+        + "    hub 在,但这个接口没给出结果;看 hub 日志" + TAIL;
+    case "bad-body":
+      return "创建能力:查不到 —— hub 的应答读不懂。\n"
+        + "    多半是 hub 比本机 CLI 旧,升级 hub 或降本机 anet" + TAIL;
+    case "unreachable":
+      return "创建能力:查不到 —— 连不上 hub"
+        + (f.detail ? `(${f.detail})` : "") + "。" + TAIL;
+  }
+}
