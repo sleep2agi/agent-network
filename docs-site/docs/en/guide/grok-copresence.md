@@ -4,6 +4,19 @@
 The danger block below captures the 2026-08-18 qualification state and is **outdated**: the `grok-build-cli` co-presence path now works end to end — on a Mac mini with npm-installed `anet 2.3.0-preview.43` + the global `agent-node` (grok `1.0.5 (5115b46bc909)`, on the verified list), creating the node, entering the shared TUI via `anet grok attach`, and receiving an answer to an injected network task in 19 seconds. For current usage see [Grok Co-presence TUI (grok-build-cli)](/en/guide/grok-tui). The historical warnings are preserved below for the record.
 :::
 
+::: warning Known defect: `blocked` in the roster currently cannot tell real from false (measured 2026-08-30, [#1606](https://github.com/sleep2agi/agent-network/issues/1606))
+**With grok 1.0.5 this cell is permanently `blocked`, even while the node is working normally.**
+
+1.0.5 is a **leaderless** build — by design it never creates `leader.sock` (`autoLeader: false` in the capability
+table, on both macOS and Linux), while the liveness check requires it unconditionally. `usable` is therefore
+structurally false, and the `idle` the heartbeat reports is rewritten to `blocked` every 3 minutes.
+
+Measured: a node marked `blocked` still injected a network task, returned an answer, and replied to the sender.
+
+**Do not rebuild the node when you see `blocked`.** Until this is fixed, judge these nodes by their logs, not by
+that cell — `injected network task` / `processTask returned` in the log means the runtime is fine.
+:::
+
 ::: danger Old state as of 2026-08-18 (archived)
 Do not follow older instructions for the `grok-build-cli` runtime path — do not run `anet node create ... --runtime grok-build-cli`.
 
