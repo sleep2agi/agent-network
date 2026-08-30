@@ -20,6 +20,7 @@ const premiseOnly: PostStopManifestEntry = {
 const manifest: PostStopManifest = {
   version: POST_STOP_MANIFEST_VERSION,
   generation: { bootId: "boot-abc", writtenAtEpochMs: 1_700_000_000_000 },
+  phase: "post-spawn",
   entries: [selfVerifying, premiseOnly],
 };
 
@@ -70,6 +71,26 @@ describe("#1522 post-stop manifest 契约", () => {
   test("self-verifying 但形状不全 ⇒ 拒绝（少一个字段就是少一道闸）", () => {
     const thin = { ...manifest, entries: [{ ...selfVerifying, guard: { kind: "self-verifying", shape: { type: "regular-file" } } }] };
     expect(parsePostStopManifest(JSON.stringify(thin)).kind).toBe("unreadable");
+  });
+
+  // 🔴 两段写：`pre-spawn` 意味着 PID 绑定那一条**还没追加**。读侧必须能把
+  //    "预期内的缺席"和"清单漏列了一样"分开 —— 否则它要么误报、要么把真漏列
+  //    当成正常。契约用 `phase` 字段承担这个区分，而不是让读侧去数条目。
+  test("🔴 phase 区分「PID 那条还没写」与「清单漏列」", () => {
+    const pre = parsePostStopManifest(JSON.stringify({
+      ...manifest, phase: "pre-spawn", entries: [selfVerifying],
+    }));
+    expect(pre.kind).toBe("ok");
+    if (pre.kind !== "ok") throw new Error("unreachable");
+    expect(pre.manifest.phase).toBe("pre-spawn");
+    // post-spawn 的同一份记录含 PID 绑定那条；两者条目数不同是**正常**的
+    expect(pre.manifest.entries).toHaveLength(1);
+  });
+
+  test("phase 缺失或取值非法 ⇒ unreadable（不给它一个默认值）", () => {
+    const { phase: _drop, ...noPhase } = manifest as unknown as Record<string, unknown>;
+    expect(parsePostStopManifest(JSON.stringify(noPhase)).kind).toBe("unreadable");
+    expect(parsePostStopManifest(JSON.stringify({ ...manifest, phase: "whenever" })).kind).toBe("unreadable");
   });
 
   test("坏 JSON / 非对象 ⇒ unreadable 并带原因", () => {

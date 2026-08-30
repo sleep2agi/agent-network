@@ -18,8 +18,8 @@
 //
 // ## 这份记录是什么
 //
-// 由 **agent-node** 在 spawn 之后写下「这一代会留下哪些具体路径、每条用什么守卫
-// 才允许删」，CLI 只读。于是：
+// 由 **agent-node** 写下「这一代会留下哪些具体路径、每条用什么守卫才允许删」，
+// CLI 只读。于是：
 //   • 清单**只有一个作者**（agent-node，policy 本来就是它的知识），不存在第二份可分叉；
 //   • agent-network **不需要 import 任何 agent-node 模块**（当前跨包 import = 0，不新增）；
 //   • stop 被 SIGKILL 掐断也没关系，**记录还在**。
@@ -77,10 +77,46 @@ export const POST_STOP_MANIFEST_VERSION = 1 as const;
 
 export const POST_STOP_MANIFEST_FILENAME = "grok-post-stop-manifest.json";
 
+/**
+ * 🔴 **写入顺序：先写清单，后 spawn。**
+ *
+ * 反过来（spawn 成功再写）会留下一个**这套机制唯一无法覆盖的洞**：spawn 已经
+ * 起来、清单还没落盘的那一瞬崩掉，就产生**一代完全没有记录的痕迹** —— 之后
+ * 无论 CLI 侧还是下次启动都无从知道该清什么。这个洞必须靠**顺序**消除，
+ * 不能靠"概率很小"。
+ *
+ * 但有一格做不到"全部先写"，说清楚而不是含糊过去：
+ *
+ *   `GROK_POST_STOP_CLEANUP_POLICY` 的七类里，**只有 `sandboxBlockedDirectoryBinding`
+ *   依赖 PID**（`source: "confirmedTuiProcessIds"`、`prefix: "sandbox-blocked-dir."`），
+ *   而 PID 要 spawn 之后才有。其余六类的路径都只由 `stateHome` / `projectCwd` /
+ *   `leaderSocket` 决定，**spawn 之前就能全部算出来**。
+ *
+ * ⇒ 因此是**两段写**，两段都原子：
+ *     phase 1（spawn 之前）：写入那六类的全部绝对路径；
+ *     phase 2（spawn 之后立刻）：追加 PID 绑定的那一条。
+ *
+ * ⇒ 残留窗口因此被**收窄到一条**：phase 1 与 phase 2 之间崩溃，只会漏掉
+ *   `sandbox-blocked-dir.<pid>` 这一个目录，而不是整代痕迹。这个窗口是本设计
+ *   已知且**刻意保留**的，写在这里是为了让下一个人知道它存在、以及它有多大 ——
+ *   而不是让他以为洞已经补完了。
+ */
+export type PostStopManifestPhase = "pre-spawn" | "post-spawn";
+
 export interface PostStopManifest {
   readonly version: typeof POST_STOP_MANIFEST_VERSION;
-  /** 写下这份记录的那一代，仅用于诊断；判死亡仍走 boot_id + start-time。 */
+  /**
+   * 写下这份记录的那一代。
+   * 🔴 `bootId` 必须在**写的那一刻**取，不能在清理时反推：跨重启之后 PID 毫无
+   *    意义，`bootId` 是唯一能证明"旧那一代定义上已死"的东西。
+   */
   readonly generation: { readonly bootId: string; readonly writtenAtEpochMs: number };
+  /**
+   * 这份记录写到哪一段了。`pre-spawn` 表示 PID 绑定的那一条还没追加 ——
+   * 读侧据此知道 `sandbox-blocked-dir.<pid>` 的缺席是**预期内**的，
+   * 而不是"清单漏列了一样"。
+   */
+  readonly phase: PostStopManifestPhase;
   readonly entries: readonly PostStopManifestEntry[];
 }
 
@@ -129,6 +165,13 @@ export function parsePostStopManifest(raw: string): PostStopManifestRead {
   const generation = (parsed as { generation?: unknown }).generation;
   if (!generation || typeof generation !== "object") {
     return { kind: "unreadable", detail: "generation is missing" };
+  }
+  // 🔴 phase 不给默认值：缺失就判不可读。给它默认成 "post-spawn" 的话，
+  //    一份 pre-spawn 记录会被读成"完整的"，于是 PID 绑定那条的缺席
+  //    会被当成"这一代没产生它"——而它其实只是还没写。
+  const phase = (parsed as { phase?: unknown }).phase;
+  if (phase !== "pre-spawn" && phase !== "post-spawn") {
+    return { kind: "unreadable", detail: `phase must be pre-spawn or post-spawn, got ${JSON.stringify(phase)}` };
   }
   return { kind: "ok", manifest: parsed as PostStopManifest };
 }
