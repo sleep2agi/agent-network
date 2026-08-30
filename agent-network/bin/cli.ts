@@ -39,6 +39,7 @@ import { classifySessionStatus, summarizeSessions } from "../src/session-status-
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
+import { daemonSubcommandRedirect } from "../src/daemon-subcommand";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
@@ -8384,6 +8385,12 @@ Options:
   --force              Overwrite an existing non-daemon config (init only)
   --allow-secret KEY   Pre-populate allowed_secret_keys (repeatable; init only)
 
+Daemon 就是一个 role=host_supervisor 的 agent-node,所以停 / 删 / 看**没有** daemon 版,
+直接用 node 级命令(anet daemon restart 内部调的也正是其中的 stop):
+  anet node stop <name>      停一个 daemon
+  anet node delete <name>    删掉它
+  anet node ls               看它在不在跑(daemon list 只列本机配置过的 daemon,不含活性)
+
 A "daemon" is an agent-node with role:host_supervisor — receives create_node
 dispatches from the hub/dashboard and forks child agent-nodes on demand.
 Run \`anet hub start\` first if you don't yet have a CommHub.`);
@@ -8396,8 +8403,19 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
     case "restart": args.splice(0, 1); prepareDaemonAnetBin(); await daemonRestartCommand(); break;
     case "list": case "ls": await daemonListCommand(); break;
     default: {
-      const suggestion = suggestSimilar(sub, ["init", "start", "restart", "up", "list"]);
-      if (suggestion) console.log(`Unknown daemon subcommand "${sub}". Did you mean: anet daemon ${suggestion}?`);
+      // 🔴 先查 node 级动作重定向,再退回相似度提示 —— 顺序不能反。
+      //    suggestSimilar 的候选集是 ["init","start","restart","up","list"],
+      //    **全是会改变状态的命令**。实测(用它本身跑的,不是推的):
+      //      anet daemon rm     → 建议 "up"     想删,被指去「创建 + 启动」
+      //      anet daemon state  → 建议 "start"  想看状态,被指去「启动」
+      //    一个把只读/销毁意图导向「动世界」的提示,比不给提示更贵。
+      const redirect = daemonSubcommandRedirect(sub, args[2]);
+      if (redirect) {
+        for (const line of redirect) console.log(line);
+      } else {
+        const suggestion = suggestSimilar(sub, ["init", "start", "restart", "up", "list"]);
+        if (suggestion) console.log(`Unknown daemon subcommand "${sub}". Did you mean: anet daemon ${suggestion}?`);
+      }
       console.log(`Usage: anet daemon <init|start|restart|up|list> [name]`);
       process.exit(1);
     }
