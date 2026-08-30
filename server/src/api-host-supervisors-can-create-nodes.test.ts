@@ -264,3 +264,87 @@ describe("#1353 Fix ② — /api/host-supervisors surfaces can_create_nodes + bl
     expect(rows.find((r: any) => r.alias === "malformed")).toBeUndefined();
   });
 });
+
+/* #1545 —— `can_create_nodes` 说的是「能不能」,这一组说的是「**那是什么时候测的**」。
+ *
+ * 为什么非要分开:agent-node 到 preview.67 为止用一个进程级缓存只算一次
+ * (`cli.ts` 的 `_createCapCache`)。开机时二进制好、之后被 chmod 掉 ⇒ 它会
+ * **永远上报 ready**。hub 这边,那条记录和一个 3 秒前刚测出来的 ready
+ * 在 `last_seen_at` 上一模一样 —— 心跳是新的,那一格不是。
+ *
+ * 🔴 缺席**不得**当成 0。把「没报」渲染成「刚测的」,正好朝「没问题」方向说谎,
+ *    而这正是 #1545 里比沉默更糟的那一半。
+ */
+describe("#1545 /api/host-supervisors —— can_create_nodes 的年龄", () => {
+  test("daemon 报了年龄 → 原样带出", async () => {
+    clearDaemons();
+    seedDaemon("age-fresh", {
+      role: "host_supervisor",
+      daemon_capabilities: {
+        can_create_nodes: false,
+        create_nodes_blocked_reason: "anet_bin_source",
+        create_capability_observed_ms_ago: 12,
+      },
+    });
+    const d = findDaemon(await listDaemons(), "age-fresh");
+    expect(d.create_capability_observed_ms_ago).toBe(12);
+  });
+
+  test("🔴 daemon 没报年龄 → 这一格必须**缺席**,不能是 0/null", async () => {
+    clearDaemons();
+    seedDaemon("age-absent", {
+      role: "host_supervisor",
+      daemon_capabilities: { can_create_nodes: true },
+    });
+    const d = findDaemon(await listDaemons(), "age-absent");
+    // 能力本身照常带出 —— 加年龄这一格不许把旧 daemon 的既有信息弄丢。
+    expect(d.can_create_nodes).toBe(true);
+    expect("create_capability_observed_ms_ago" in d).toBe(false);
+  });
+
+  /* 🔴 消毒**不是 clamp**:clamp 会把一个坏值变成一个看起来正常的年龄,
+   * 而这一格存在的全部意义就是让人分辨新鲜和陈旧。坏值一律当作「没报」。 */
+  test.each([
+    ["负数", -1],
+    ["超过一年", 400 * 24 * 60 * 60 * 1000],
+    ["null(schema 的 .catch 兜底值)", null],
+    ["字符串(直接写库,绕过 schema)", "12"],
+  ])("坏值当作没报,而不是 clamp 成边界:%s", async (label, value) => {
+    clearDaemons();
+    const alias = `age-bad-${String(label).slice(0, 4)}`;
+    seedDaemon(alias, {
+      role: "host_supervisor",
+      daemon_capabilities: {
+        can_create_nodes: true,
+        create_capability_observed_ms_ago: value,
+      },
+    });
+    const d = findDaemon(await listDaemons(), alias);
+    expect(d.can_create_nodes).toBe(true);           // 能力仍在
+    expect("create_capability_observed_ms_ago" in d).toBe(false);  // 年龄不在
+  });
+
+  /* 边界校准:上面用 400 天证明「太旧被丢」,这里用**刚好一年**证明门不是恒丢。
+   * 只验被丢那一侧的话,一个恒丢的实现能全绿通过。 */
+  test("边界:恰好一年被接受 ⇒ 上面那条不是因为恒丢才绿", async () => {
+    clearDaemons();
+    const oneYear = 365 * 24 * 60 * 60 * 1000;
+    seedDaemon("age-boundary", {
+      role: "host_supervisor",
+      daemon_capabilities: { can_create_nodes: true, create_capability_observed_ms_ago: oneYear },
+    });
+    const d = findDaemon(await listDaemons(), "age-boundary");
+    expect(d.create_capability_observed_ms_ago).toBe(oneYear);
+  });
+
+  test("年龄只在 can_create_nodes 存在时出现(旧 daemon 两格都没有)", async () => {
+    clearDaemons();
+    seedDaemon("age-legacy", {
+      role: "host_supervisor",
+      daemon_capabilities: { runtimes_supported: ["claude-agent-sdk"] },
+    });
+    const d = findDaemon(await listDaemons(), "age-legacy");
+    expect("can_create_nodes" in d).toBe(false);
+    expect("create_capability_observed_ms_ago" in d).toBe(false);
+  });
+});

@@ -3152,6 +3152,12 @@ return Bun.serve({
           // upgraded past preview.55.
           let snapCanCreate: boolean | undefined;
           let snapBlockedReason: string | undefined;
+          // #1545 —— 见 report_status schema 里 create_capability_observed_ms_ago 的注释:
+          // 上报侧**故意收得宽**(无 int/min/max,免得一个诊断字段能让整份 report 被拒),
+          // 消毒放在这里。非有限数、负数、超过 1 年的一律当作「没报」——
+          // 🔴 不是 clamp 成边界值:clamp 会把一个坏值变成一个**看起来正常的年龄**,
+          //    而这一格存在的全部意义就是让人分辨新鲜和陈旧。
+          let snapObservedMsAgo: number | undefined;
           if (r.config_snapshot) {
             try {
               const parsed = typeof r.config_snapshot === "string" ? JSON.parse(r.config_snapshot) : r.config_snapshot;
@@ -3164,12 +3170,18 @@ return Bun.serve({
                   && caps.create_nodes_blocked_reason.length > 0) {
                 snapBlockedReason = caps.create_nodes_blocked_reason;
               }
+              const rawAge = caps?.create_capability_observed_ms_ago;
+              if (typeof rawAge === "number" && Number.isFinite(rawAge)
+                  && rawAge >= 0 && rawAge <= 365 * 24 * 60 * 60 * 1000) {
+                snapObservedMsAgo = rawAge;
+              }
             } catch { /* malformed */ }
           }
-          return { row: r, role: snapRole, canCreate: snapCanCreate, blockedReason: snapBlockedReason };
+          return { row: r, role: snapRole, canCreate: snapCanCreate, blockedReason: snapBlockedReason,
+            observedMsAgo: snapObservedMsAgo };
         })
         .filter(({ role }) => role === "host_supervisor")
-        .map(({ row: r, canCreate, blockedReason }) => {
+        .map(({ row: r, canCreate, blockedReason, observedMsAgo }) => {
           let online = false;
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
@@ -3220,6 +3232,18 @@ return Bun.serve({
             // don't confuse consumers with a reason on a healthy daemon.
             if (canCreate === false && blockedReason) {
               out.create_nodes_blocked_reason = blockedReason;
+            }
+            // #1545 —— 只在 daemon 真的报了这一格时才出现。
+            // 🔴 缺席**不能**当成 0:那等于替一个从不重算的旧 daemon 宣称
+            //    「这是刚测的」,正好朝「没问题」方向说谎。缺席就让它缺席,
+            //    读的人据此说「年龄未知」(与 can_create_nodes 本身
+            //    undefined-vs-false 的处理同一条规矩,见上面 #1353 Fix ②)。
+            //
+            // 语义:该能力值是在**这份 report 发出前 N 毫秒**测得的。
+            // 绝对年龄 = (now - last_seen_at) + create_capability_observed_ms_ago。
+            // 用节点自己的钟只量了「多久以前」,绝对时间全部由 hub 的钟出。
+            if (typeof observedMsAgo === "number") {
+              out.create_capability_observed_ms_ago = observedMsAgo;
             }
           }
           return out;

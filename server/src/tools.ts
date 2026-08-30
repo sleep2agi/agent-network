@@ -517,6 +517,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       model: z.string().max(200).optional().describe("AI model name"),
       node_name: z.string().max(200).optional().describe("Stable node display name (may differ from alias)"),
       network_id: z.string().max(200).optional().describe("Network this agent belongs to"),
+      // ╭─ 🔴 往 report_status 里加字段之前先读这一段(#1545 实测,zod 4.3.6)─────────╮
+      // │ **这份 schema 的子对象一半严一半松,而后果完全不同。**
+      // │
+      // │   非 strict:host / process_telemetry / config_snapshot / daemon_capabilities
+      // │   `.strict()`:external_schedules(含其 schedules[] 元素)
+      // │              side_thread_capability(含其 exactBoundary)
+      // │
+      // │ 往**非 strict** 的对象里加一个 hub 还不认识的键 ⇒ zod **静默丢弃**。
+      // │   节点不会掉线,但字段人间蒸发 —— 现场表现为「daemon 明明发了、hub 上没有」,
+      // │   排查起来和 daemon 侧 bug 一模一样。
+      // │ 往**strict** 的对象里加同一个键 ⇒ `unrecognized_keys`,**整份 report_status 被拒**。
+      // │   而 agent-node 的 register() 是 `await` 且无人 catch ⇒ **节点进程当场死掉**
+      // │   (#1225 就是这么全网躺倒的,见下面 host.ip 那段)。
+      // │
+      // │ 所以「新字段能不能 daemon 先发」**没有统一答案,取决于你往哪个子对象里加**:
+      // │   非 strict → 可以先发(会丢,不会死);strict → hub 必须先合,否则升级即失联。
+      // │
+      // │ 🔴 别把这条读成「strict 更危险、都改成非 strict」。两者各有其位:
+      // │   external_schedules / side_thread_capability 是**有界快照**,strict 挡的是
+      // │   「节点往里塞任意键」;daemon_capabilities 是**能力自述**,天然要向前兼容
+      // │   (旧 hub 见到新能力应当忽略而不是拒绝整份上报)。**加字段前先看清你在哪一边。**
+      // ╰──────────────────────────────────────────────────────────────────────────────╯
       host: z.object({
         // 🔴 `.nullable()` 不是防御性冗余,是**发送方声明的类型**:agent-node 的
         //    HostTelemetry 是 `ip: string | null`,`firstNonInternalIPv4()` 在没有
@@ -599,6 +621,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // never saw them, max_concurrent_children stayed default + the
         // allowlists stayed unenforced. PR3 nit ① per 通信龙).
         // Soft caps avoid abuse via attacker daemon.
+        // 🔴 这个对象**故意不是 `.strict()`** —— 能力自述必须向前兼容:
+        //    旧 hub 见到新 daemon 报的新能力,应当忽略那一格,而不是拒掉整份 report
+        //    把节点踢下线。代价是新键在 hub 升级前会被**静默丢弃**(所以新字段仍然
+        //    应当 hub 先合)。同一份 schema 里 side_thread_capability / external_schedules
+        //    是 `.strict()` 的,后果不同 —— 见 `host:` 上方那段方框注释。
         daemon_capabilities: z.object({
           runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
           allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),
@@ -636,6 +663,37 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             "anet_bin_permission",
             "anet_bin_unknown",
           ]).optional(),
+          // #1545 —— 上面那一格**是什么时候测出来的**。
+          //
+          // 🔴 为什么必须有:agent-node 到 preview.67 为止,`daemonCreateCapability()`
+          //    用一个进程级缓存(`_createCapCache`)只算一次。开机时 pin 坏 ⇒ 之后
+          //    永远上报 blocked(哪怕运维已经写好 path.conf);开机时好 ⇒ 之后把二进制
+          //    chmod 掉也**永远上报 ready**。后者是朝「没问题」方向说谎。
+          //    而 hub 这边,一个 3 秒前测的 blocked 和一个三周前测的 blocked,
+          //    在 `last_seen_at` 上长得一模一样 —— 心跳是新的,那一格不是。
+          //
+          // 🔴 为什么是「多久以前」(时长)而不是绝对时间戳:这个值来自**节点自己的钟**。
+          //    时钟偏移下,绝对时间戳会算出一个既可能"永远新鲜"也可能"来自 1970"的年龄,
+          //    而且错的方向不可预测。时长对偏移免疫 —— hub 用自己的钟在收到时换算。
+          //
+          // 🔴 为什么不加 `.min()/.max()/.int()`:**这几个约束都会让整条 report_status 被拒**
+          //    (zod 对象里任何一个已知字段验证失败 = 整份被拒,不是丢掉这一格),
+          //    而这一格是纯诊断信息,不值得拿一台节点的在线状态去换。
+          //    收得宽,**在读取处消毒**(见 /api/host-supervisors)。
+          //    这条不是我新立的:同一个 schema 上方 `anet_bin_pin_unresolved` 那条注释
+          //    记的就是同一次教训 —— 删一个 enum 值会让所有 .40 daemon 失联。
+          //
+          // 🔴 `.catch(null)` 不是装饰:光写 `z.number()` **仍然会拒 NaN**
+          //    (实测:`z.number().nullable().optional()` 对 NaN 抛),而那意味着
+          //    一次算错的时长能让整台节点在 hub 上失联 —— 正是 #1225 里 host.ip
+          //    那个形状。`.catch(null)` 让这一格**在任何输入下都不可能拒掉整份 report**:
+          //    合法数字透传,其余一律变 null(读取侧当作「没报」)。
+          //    类型仍然是 number 而不是 unknown —— 别给一个 attacker daemon
+          //    留下"往快照里塞任意大对象"的口子(同 schema 上方 soft cap 的立场)。
+          //
+          // 不上报这一格 ≠ 0。旧 daemon 压根不发,读的人必须能把
+          // 「刚测的」「很久以前测的」「不知道」分成三件事说。
+          create_capability_observed_ms_ago: z.number().nullable().catch(null).optional(),
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
