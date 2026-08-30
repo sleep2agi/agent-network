@@ -4,7 +4,7 @@
 The danger block below captures the 2026-08-18 qualification state and is **outdated**: the `grok-build-cli` co-presence path now works end to end — on a Mac mini with npm-installed `anet 2.3.0-preview.43` + the global `agent-node` (grok `1.0.5 (5115b46bc909)`, on the verified list), creating the node, entering the shared TUI via `anet grok attach`, and receiving an answer to an injected network task in 19 seconds. For current usage see [Grok Co-presence TUI (grok-build-cli)](/en/guide/grok-tui). The historical warnings are preserved below for the record.
 :::
 
-::: warning Known defect: `blocked` in the roster currently cannot tell real from false (measured 2026-08-30, [#1606](https://github.com/sleep2agi/agent-network/issues/1606))
+::: warning `blocked` cannot tell real from false — **fixed from agent-node `2.5.0-preview.57`** ([#1606](https://github.com/sleep2agi/agent-network/issues/1606))
 **With grok 1.0.5 this cell is permanently `blocked`, even while the node is working normally.**
 
 1.0.5 is a **leaderless** build — by design it never creates `leader.sock` (`autoLeader: false` in the capability
@@ -13,8 +13,21 @@ structurally false, and the `idle` the heartbeat reports is rewritten to `blocke
 
 Measured: a node marked `blocked` still injected a network task, returned an answer, and replied to the sender.
 
-**Do not rebuild the node when you see `blocked`.** Until this is fixed, judge these nodes by their logs, not by
-that cell — `injected network task` / `processTask returned` in the log means the runtime is fine.
+**Do not rebuild the node when you see `blocked`.** Check your agent-node version first:
+
+```bash
+agent-node --version
+```
+
+- **≥ `2.5.0-preview.57`** — fixed. A `blocked` here **carries information**: check the TUI child process, composer readiness, and `attach.sock`.
+- **< `2.5.0-preview.57`** — this cell is structurally false for leaderless builds and **carries no information**. Judge by the logs instead: `injected network task` / `processTask returned` means the runtime is fine.
+
+🔴 **Upgrading is not enough — you must restart**, because liveness is computed inside the long-running process:
+
+```bash
+npm i -g @sleep2agi/agent-node@2.5.0-preview.57
+anet daemon restart <daemon>        # requires anet >= 2.3.0-preview.74
+```
 :::
 
 ::: danger Old state as of 2026-08-18 (archived)
