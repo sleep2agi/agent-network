@@ -131,7 +131,7 @@ INSERT INTO tasks (task_id, from_name, to_name, status, content, ...) VALUES (..
 
 Each task has a TTL (Time To Live), defaulting to 1 hour:
 
-```bash
+```text
 # Set TTL
 commhub_send_task(alias="coder-1", task="...", ttl_seconds=7200)  # 2 hours
 ```
@@ -163,7 +163,7 @@ Failed, cancelled, and expired tasks can all be retried:
 The management calls below go through REST `POST /mcp`. The Claude Code channel wrapper exposes communication and status tools, not `cancel_task`, `retry_task`, `reassign_task`, or `get_inbox`.
 :::
 
-```bash
+```text
 # Retry a task (POST /mcp, tool=retry_task)
 retry_task(task_id="t_xxx")
 ```
@@ -191,7 +191,7 @@ flowchart LR
 
 You can cancel tasks that haven't completed yet:
 
-```bash
+```text
 # POST /mcp, tool=cancel_task
 cancel_task(task_id="t_xxx", reason="No longer needed")
 ```
@@ -209,7 +209,7 @@ Cancellable statuses are `created`, `delivered`, `acked`, and `running`. Termina
 
 Transfer a task from one agent to another:
 
-```bash
+```text
 # POST /mcp, tool=reassign_task
 reassign_task(task_id="t_xxx", new_alias="coder-2")
 ```
@@ -300,7 +300,7 @@ Tasks support three priority levels:
 | `normal` | Standard task | Default |
 | `low` | Low priority | Sorted last |
 
-```bash
+```text
 # Send a high-priority task
 commhub_send_task(alias="coder-1", task="Critical fix needed", priority="high")
 ```

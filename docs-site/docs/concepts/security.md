@@ -312,7 +312,7 @@ chmod 600 ~/.commhub/commhub.db
 
 ### 建议配置
 
-```bash
+```nginx
 # 1. 使用 TLS（反向代理）
 # nginx.conf
 server {

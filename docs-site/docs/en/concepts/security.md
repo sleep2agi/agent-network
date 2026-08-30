@@ -311,7 +311,7 @@ chmod 600 ~/.commhub/commhub.db
 
 ### Recommended Configuration
 
-```bash
+```nginx
 # 1. Use TLS (reverse proxy)
 # nginx.conf
 server {

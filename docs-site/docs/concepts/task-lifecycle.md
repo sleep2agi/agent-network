@@ -131,7 +131,7 @@ INSERT INTO tasks (task_id, from_name, to_name, status, content, ...) VALUES (..
 
 每个任务有 TTL（Time To Live），默认 1 小时：
 
-```bash
+```text
 # 设置 TTL
 commhub_send_task(alias="代码1号", task="...", ttl_seconds=7200)  # 2 小时
 ```
@@ -163,7 +163,7 @@ expires_at = datetime('now', '+3600 seconds')
 下面的管理调用走 REST `POST /mcp`。Claude Code channel wrapper 只暴露通信与状态工具，不提供 `cancel_task` / `retry_task` / `reassign_task` / `get_inbox`。
 :::
 
-```bash
+```text
 # 重试任务（POST /mcp，tool=retry_task）
 retry_task(task_id="t_xxx")
 ```
@@ -191,7 +191,7 @@ flowchart LR
 
 可以取消尚未完成的任务：
 
-```bash
+```text
 # POST /mcp，tool=cancel_task
 cancel_task(task_id="t_xxx", reason="不再需要")
 ```
@@ -209,7 +209,7 @@ cancel_task(task_id="t_xxx", reason="不再需要")
 
 将任务从一个 Agent 转给另一个：
 
-```bash
+```text
 # POST /mcp，tool=reassign_task
 reassign_task(task_id="t_xxx", new_alias="代码2号")
 ```
@@ -300,7 +300,7 @@ Task t_a1b2c3d4 events:
 | `normal` | 普通任务 | 默认 |
 | `low` | 低优先级 | 排在最后 |
 
-```bash
+```text
 # 发高优先级任务
 commhub_send_task(alias="代码1号", task="紧急修复", priority="high")
 ```
