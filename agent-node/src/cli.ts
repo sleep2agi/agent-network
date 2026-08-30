@@ -77,6 +77,7 @@ import {
 } from "./reply-reliability";
 import { isTelemetrySchemaRejection, withoutOptionalTelemetry } from "./register-telemetry-fallback";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
+import { codexTimeoutDetail } from "./runtime/codex-timeout-detail";
 import {
   GROK_COPRESENCE_PROFILE_ENV,
   selectGrokCopresenceCapabilityProfile,
@@ -3007,6 +3008,11 @@ async function processWithCodex(
     // outage, dropped TCP) would hang the agent-node forever with no
     // abort path. Codex SDK's `TurnOptions.signal` lets us propagate
     // cancellation cleanly when the deadline fires.
+    // #1645 — 超时那一刻,闭包里的 itemCount 已经丢了。把「有没有事件流过」提到
+    //   闭包外:它是「连接/握手层就没通」和「turn 中途停住」之间**唯一**的判别项,
+    //   而这两种要查的东西完全不同。
+    let evSeen = 0;
+    let lastEvAt = 0;
     const outcome = await withTimeout(
       async (signal) => {
         const { events } = await codexThread.runStreamed(input, { signal });
@@ -3016,6 +3022,8 @@ async function processWithCodex(
         let itemCount = 0;
         for await (const ev of events) {
           evidence?.consumed();
+          evSeen++;
+          lastEvAt = Date.now();
           if (ev.type === "item.started") {
             const it = ev.item as any;
             debug(`[codex] ${it.type}${it.command ? `: ${it.command.slice(0, 60)}` : it.tool ? `: ${it.server}/${it.tool}` : ""}`);
@@ -3063,9 +3071,15 @@ async function processWithCodex(
     // errored". Codex SDK aborts cleanly on signal, but the wedged-TCP
     // case (no events flowing) is exactly what the timeout catches.
     if (e instanceof TimeoutError) {
-      log(`[codex] ✗ ${e.message}; reset thread for next turn`);
+      // #1645 — 原先这里印「检查 OPENAI_BASE_URL / vendor 负载」。那是一句**猜测**,
+      //   不是这一刻拿得到的事实。实测一次 300s 超时的真因是:上游 models 响应里
+      //   带了本机 codex 不认识的推理档位(`unknown variant \`max\``),rmcp worker
+      //   因此致命退出 —— OPENAI_BASE_URL 和 vendor 负载**一个都没被牵涉**。
+      //   把人指向没被牵涉的东西,比不给建议更贵。这里只说测到的那一个数。
+      const stallDetail = codexTimeoutDetail(evSeen, Date.now() - lastEvAt);
+      log(`[codex] ✗ ${e.message}; ${stallDetail}; reset thread for next turn`);
       codexThread = null;
-      return `执行出错: codex-sdk 调用超时 (${Math.round(CODEX_TIMEOUT_MS / 1000)}s) — 检查 OPENAI_BASE_URL / vendor 负载`;
+      return `执行出错: codex-sdk 调用超时 (${Math.round(CODEX_TIMEOUT_MS / 1000)}s) — ${stallDetail}。确切原因见节点日志里 [codex] 开头那几行。`;
     }
     // #261 P1 redirect — fast-fail on quota the same way claude does, so
     // a 429-flooded codex node doesn't keep tearing down + rebuilding
