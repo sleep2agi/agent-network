@@ -109,6 +109,8 @@ import {
   codexCopresenceRequested,
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
+  missingCodexResumeFields,
+  CODEX_COPRESENCE_RUNTIME,
 } from "../src/codex-copresence-profile";
 import {
   codexHomeStagePlan,
@@ -7233,11 +7235,80 @@ async function startCommand() {
 
 // ── resume (continue session) ──
 
+/**
+ * #1521 — codex-copresence safe restart. See design v7 at
+ * docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md for the full
+ * Phase 0–6 orchestration, the six non-negotiable safety boundaries,
+ * and the argument trail through v0–v7 review.
+ *
+ * SCAFFOLD: Phase 0 preflight is fully implemented (config-shape
+ * validation with the actionable Q7=C diagnostic). Phases 1–6 are
+ * stubs that fail-closed with `[Phase N] not-yet-implemented` — they
+ * land in follow-up commits on this same branch. Landing the scaffold
+ * first lets reviewers see the CLI surface + error shapes early;
+ * running `anet node resume <codex-alias>` on an unconfigured node
+ * TODAY prints the Q7=C hint verbatim.
+ */
+async function handleCodexCopresenceResume(
+  nodeId: string,
+  profile: NonNullable<ReturnType<typeof resolveNodeRef>>["profile"],
+): Promise<void> {
+  // Phase 0 — config-shape preflight. Cheap, no side-effect, no network.
+  // Fail-closed with an honest, minimal message when required fields are
+  // absent. The richer operator-facing diagnostic (JSON patch template +
+  // `config apply` verb) that was drafted for Q7=C is deliberately
+  // deferred with its real caller — see TMHR 4bab8196 blocker on the
+  // deleted `codexResumeMissingConfigHint` helper (referenced a command
+  // that doesn't exist in the tree; classic 存在 ≠ 会执行). It lands
+  // in a later PR that either implements `anet node config apply` first,
+  // or reworks the diagnostic to reference only existing commands.
+  const missing = missingCodexResumeFields(profile as any);
+  if (missing.length > 0) {
+    console.error(`[codex_resume/Phase 0] cannot start ${nodeId} — codex-copresence config is missing ${missing.length} required field(s):`);
+    for (const f of missing) console.error(`  - ${f}`);
+    console.error(``);
+    console.error(`See docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md for the required schema.`);
+    console.error(`Edit .anet/nodes/${nodeId}/config.json directly to add the missing field(s).`);
+    console.error(`Refs: #1521 (this feature), #1527 (single-node limitation on codexProbePeer).`);
+    process.exit(2);
+  }
+
+  // Phase 0.3-0.7 preflight (hub liveness / codex_home / auth / AGENTS.md /
+  // rollout freeze), Phase 1 narrow backup, Phase 2 reverse teardown, Phase 3
+  // forward launch, Phase 4 acceptance, Phase 5 rollback, Phase 6 identity
+  // attestation via cross-node send_task ACK.
+  //
+  // Not yet in the scaffold commit. Each phase lands as a follow-up commit on
+  // this branch:
+  //   - Phase 0.3-0.7 + Phase 1 backup: next commit
+  //   - Phase 2/3 orchestration: next
+  //   - Phase 4 acceptance (App Server process-tree writer fd + rollout invariants + hub project_dir cross-check): next
+  //   - Phase 5 rollback: next
+  //   - Phase 6 D (probe via target Bridge + cross-node peer ACK): next
+  //   - test770 Docker suite: next
+  //   - CI gates (witness-lint + no-recent-session-heuristic): next
+  //
+  // See docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md for the
+  // acceptance criteria each of the above must land.
+  console.error(`[codex_resume/scaffold] Phase 0 config preflight PASSED for ${nodeId}`);
+  console.error(`[codex_resume/scaffold] Phase 1–6 orchestration lands in follow-up commits on this branch`);
+  console.error(`[codex_resume/scaffold] See docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md`);
+  process.exit(75); // 75 = EX_TEMPFAIL; distinct from 0/1/2 so scripts don't mistake scaffold for done
+}
+
 async function resumeCommand() {
   const ref = args[1];
   if (!ref) {
-    console.error("Usage: anet node resume <node-name> --session <session-id>");
-    console.error("Daily start/resume: anet node start <node-name>");
+    console.error("Usage: anet node resume <node-name>                              # codex-copresence safe restart (#1521)");
+    console.error("       anet node resume <node-name> --session <session-id>       # grok / claude session pin (legacy)");
+    console.error("");
+    console.error("Prerequisites for codex-copresence resume (`runtime: codex-app-server` + `codexCopresence: true`):");
+    console.error("  - ≥2 registered nodes online in this network (the target + a `codexProbePeer` for identity attestation)");
+    console.error("  - profile has `codexProjectDir`, `codexLaunchAdapter`, `codexProbePeer` (missing fields print a JSON patch)");
+    console.error("  - See docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md for full Phase 0–6 orchestration + safety boundaries");
+    console.error("  - Single-node users cannot complete identity attestation in this initial cut (tracked at #1527)");
+    console.error("");
+    console.error("Daily start (fresh session): anet node start <node-name>");
     return;
   }
 
@@ -7246,6 +7317,32 @@ async function resumeCommand() {
   let profile = resolved?.profile || null;
   const opts = parseOpts();
   const sessionId = opts.session;
+
+  // #1521 — codex-copresence branch: safe restart with Phase 0-6 orchestration.
+  // Distinct from the grok/claude session-pin path below; routing on the config
+  // shape (not a CLI flag) so operators don't need to know which runtime they have.
+  //
+  // Detection: profile.runtime === "codex-app-server" && profile.codexCopresence === true
+  // AND user did NOT pass --session (that keeps the legacy branch for anyone who
+  // scripts against it — grok/claude use --session for pin-and-launch).
+  //
+  // 🔴 All Phase 0-6 semantics are in docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md.
+  // Safety boundaries (non-negotiable, per TMHR ACK v7 44661926 + 通信龙 ACK e113b532):
+  //   1. Token 绝不进 argv/log/dry-run 输出
+  //   2. Exact 36-char session, no "most recent" heuristic (enforced by dedicated CI gate)
+  //   3. Fail-closed, no half-started state
+  //   4. --force removed; working/in_flight/goal-unclear nodes always refused
+  //   5. Rollout fingerprint proves target-home continuity only, NOT cross-home identity
+  //   6. Identity attestation authority = fresh Hub outbound from_name/from_node_id;
+  //      env.ANET_NODE_ID is auxiliary consistency only, NOT identity-bearing
+  //   7. Execution witness — every step "看见做了" (per 通信龙 Δ4 from #1422)
+  //   8. Phase 6 SENT+ACK_timeout → exit 9, no warning-with-exit-0
+  //   9. Source-grep witness literal is LINT only; load-bearing evidence lives in
+  //      test770's structured-event assertions
+  if (!sessionId && profile && profile.runtime === CODEX_COPRESENCE_RUNTIME && profile.codexCopresence === true) {
+    await handleCodexCopresenceResume(nodeId, profile);
+    return;
+  }
 
   if (!sessionId) {
     console.warn(`[deprecated] anet node resume <node-name> without --session is now anet node start <node-name>.`);
