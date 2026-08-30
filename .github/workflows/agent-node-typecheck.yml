@@ -1,0 +1,28 @@
+name: agent-node typecheck ratchet
+
+on:
+  pull_request:
+    paths:
+      - "agent-node/**"
+      - ".github/scripts/check-agent-node-typecheck-ratchet.py"
+      - ".github/workflows/agent-node-typecheck.yml"
+  push:
+    branches: [main]
+
+jobs:
+  ratchet:
+    name: agent-node-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # selftest 先跑。这道门的坏法不在「会不会数错误」,而在「有没有真的检查到源码」:
+      # 少了 @types/node 时 tsc 只报一条 TS2688 就退出,1 条远低于基线 ⇒ 看起来是好结果。
+      # selftest 的取集层专门钉这一条。
+      - run: python3 .github/scripts/check-agent-node-typecheck-ratchet.py --selftest
+      # 门只测量,不安装 —— 装漏时它会判红而不是判绿。
+      - run: npm install --no-save typescript@5.9.3 @types/node@20
+        working-directory: agent-node
+      - run: python3 .github/scripts/check-agent-node-typecheck-ratchet.py
