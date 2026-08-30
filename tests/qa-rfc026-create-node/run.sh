@@ -95,9 +95,22 @@ ADD_M=$(curl -sS -X POST "$HUB_BASE/api/networks/$NET_ID/members" -H "Authorizat
 mcp_init_once "$MEMBER_UTOK"
 # 🔴 这一行原来是**无条件** `ok` —— 不管上面三步有没有成功都打 PASS。
 #    一条无条件的 PASS 不是断言,是一句声明。
-[[ "$(echo "$ADD_M" | jq -r .ok 2>/dev/null)" == "true" ]] \
+#
+# 🔴 而且第一版补的是 `[[ $(jq -r .ok "$ADD_M") == true ]]` —— **那个也不够**:
+#    `addNetworkMember`(auth.ts:481)**不校验 user_id 是否存在**就 INSERT,
+#    所以传一个不存在的 user 照样 `{ok:true}`。**负向控制实测:用
+#    `u_NEGATIVE_CONTROL_DOES_NOT_EXIST` 跑,那条断言照样打 ✓。**
+#    ⇒ 它验的是"接口调用成功",而文案声称的是"这个人成了成员"。
+#
+#    改成回读成员表:`getNetworkMembers` 带 `JOIN users`,伪造的 user_id
+#    **不会出现在结果里**,所以这条才真的在验成员身份。
+#    (脏库上重跑会红:重复加成员返回 {ok:false,"user already a member"};
+#     本套件用独立 DB,但本地拿同一个 DB 重跑的人会看到,别误诊成产品坏了。)
+MEMBERS=$(curl -sS "$HUB_BASE/api/networks/$NET_ID/members" -H "Authorization: Bearer $UTOK")
+echo "$MEMBERS" | jq -e --arg u "$MEMBER_USER_ID" \
+  '.members[]? | select(.user_id==$u and .role=="member")' >/dev/null 2>&1 \
   && ok "member user joined network (role=member)" \
-  || bad "member join failed: $ADD_M"
+  || bad "member not present with role=member (add resp=$ADD_M members=$MEMBERS)"
 
 # ── 0.A bring up daemon (used by A + B + C + D + F + K) ───────────
 DAEMON_NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
