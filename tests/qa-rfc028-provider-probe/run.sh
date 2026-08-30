@@ -65,6 +65,17 @@ cp /tmp/anet-mock-cert.pem /usr/local/share/ca-certificates/anet-mock.crt
 update-ca-certificates >/dev/null 2>&1
 ok "mock cert installed to system trust store (rejectUnauthorized stays真)"
 
+# 🔴 #1541 — 备份必须早于**第一次**修改。
+# 原先最早的备份点在 F 场景那里(暂存 DNS 攻击之前),也就是说它拍到的已经是
+# 「含下面这条 pin」的版本;两处 `cp /tmp/hosts.bak /etc/hosts` 恢复的自然也是含 pin 的状态。
+# ⇒ 一次 exit 0 的**成功**运行也会留下 `127.0.0.1 api.anthropic.com canary.internal`。
+# 容器内无害(销毁即消失),但直接在宿主上跑 run.sh 会永久留下。
+#
+# trap 里的 `|| true` 不能省:EXIT trap 里一个非零退出码会**覆盖脚本真实的退出码**,
+# 那会让整套断言的红绿变得不可读 —— 比它要修的污染严重得多。
+cp /etc/hosts /tmp/hosts.orig
+trap 'cp -f /tmp/hosts.orig /etc/hosts 2>/dev/null || true' EXIT
+
 # Pin DNS: api.anthropic.com → 127.0.0.1 in container's /etc/hosts
 if ! grep -q "api.anthropic.com" /etc/hosts; then
   echo "127.0.0.1 api.anthropic.com canary.internal" >> /etc/hosts
