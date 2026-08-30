@@ -52,6 +52,22 @@ R=$(curl -s -X POST "$HUB_BASE/api/auth/register" -H 'Content-Type: application/
 UTOK=$(echo "$R" | jq -r .token); NTOK=$(echo "$R" | jq -r .network_token); NET_ID=$(echo "$R" | jq -r .network_id)
 [[ "$UTOK" == utok_* ]] && ok "admin registered (net=${NET_ID:0:12})" || { bad "register failed: $R"; exit 1; }
 
+# 🔴 The daemon needs its OWN node-scoped token, minted for $DAEMON_NAME.
+# It used to reuse $NTOK — the network_token that /api/auth/register returns,
+# which is bound to the ADMIN USER's name (t309admin), not to a node. Since
+# the #203 identity guard landed, report_status refuses when the token-bound
+# alias differs from the reported one:
+#   alias_identity_mismatch  token_alias='t309admin'  reported_alias='daemon-309'
+# That guard is correct — it is what stops a network token from silently
+# rebinding its own name (the #203 symptom was grokB's send arriving as
+# from=grokA). The fixture simply predates it. Same mint the main run.sh uses.
+DAEMON_NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
+  -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
+  -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"$DAEMON_NAME\"}")
+DAEMON_NTOK=$(echo "$DAEMON_NTOK_RESP" | jq -r .token)
+[[ "$DAEMON_NTOK" == ntok_* ]] && ok "daemon ntok minted for $DAEMON_NAME" \
+  || { bad "daemon ntok mint failed: $DAEMON_NTOK_RESP"; exit 1; }
+
 note "Stage 1 — daemon node config (host_supervisor role)"
 mkdir -p "$WORK/.anet/nodes/$DAEMON_NAME"
 DAEMON_NODE_ID="node_d309"
@@ -61,7 +77,7 @@ cat > "$WORK/.anet/nodes/$DAEMON_NAME/config.json" <<EOF
   "alias": "$DAEMON_NAME",
   "runtime": "claude-agent-sdk",
   "hub": "$HUB_BASE",
-  "token": "$NTOK",
+  "token": "$DAEMON_NTOK",
   "network_id": "$NET_ID",
   "role": "host_supervisor",
   "flags": {"dangerouslySkipPermissions": true, "teammateMode": true, "goalTickMs": "5000"}
@@ -160,8 +176,20 @@ fi
 
 note "Stage 7 — send-task三连 third leg:真 dispatch + verify child processes"
 # Send a task via /api/task (the same path Vincent/agents would use)
+# 🔴 Must be the USER token here, not $NTOK. POST /api/task now refuses a
+# network-bound token that claims a from_session it cannot prove:
+#   from_session_identity_mismatch — "network token has no resolvable node
+#   alias and may not claim a from_session"  (token_alias="")
+# That guard is correct and deliberately added (server/src/rest-identity.ts):
+#   "POST /api/task did not [enforce it] — it took `body.from` verbatim, so any
+#    node holding its own ntok_ could claim another node's alias. That value is
+#    stored on the task row and, once sender labels reach the copresence TUIs,
+#    rendered to a human as an attribution."
+# A utok_ is not an identity boundary in that sense, so it may carry
+# from="309-smoke" — and it is also the path the comment above describes
+# ("the same path Vincent/agents would use").
 T_RESP=$(curl -sS -X POST "$HUB_BASE/api/task" \
-  -H "Authorization: Bearer $NTOK" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
   -d "{\"alias\":\"$CHILD_NAME\",\"task\":\"ping from 309 review smoke\",\"priority\":\"normal\",\"from\":\"309-smoke\",\"network_id\":\"$NET_ID\"}")
 TASK_OK=$(echo "$T_RESP" | jq -r .ok 2>/dev/null)
 TASK_ID=$(echo "$T_RESP" | jq -r .task_id 2>/dev/null)
