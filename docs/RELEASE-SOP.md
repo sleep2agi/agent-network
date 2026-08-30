@@ -19,6 +19,7 @@
 | `@sleep2agi/commhub-server` | `agent-network/bin/cli.ts` `PINNED_SERVER_VERSION` 常量 | code constant（钉死具体版本）|
 | `@sleep2agi/agent-network-dashboard` | `agent-network/bin/cli.ts` `dashboardReleaseTag()` 函数 | code function（默认返回 npm dist-tag `preview`，`ANET_DASHBOARD_VERSION` env 可覆盖）|
 | `@sleep2agi/commhub-server` | `tests/test766-bunx-preflight/run.sh` 里的 `grep -Fxq '@sleep2agi/commhub-server@<版本>'` | **test fixture**（字面量，漏改则 `L0 + L1` 红，且回显看起来像装包失败）|
+| `@sleep2agi/commhub-server` | `deploy/hub/hub-daemon.sh` 的 `RUNTIME_DIR=…/runtime-v<NN>-preview<MM>` | **启动器实际起哪一版**。🔴 `sync-pinned-versions.sh` **不覆盖它**（它的格式不是标准版本串，是嵌在目录名里的 `preview<MM>` 片段），必须手工改，且**只改 `MM`、不要动 `v<NN>`**。漏改由 `hub-launcher-pin` 拦下，报「仓库内部不一致:启动器起的是 previewNN,而仓库声明的 hub 版本是 preview.MM」|
 
 
 🔴 **「需随 release sync」不等于「跟这次发版一起改」—— 顺序反了会把发版卡死。**
