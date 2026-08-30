@@ -87,10 +87,7 @@ describe("#1521 missingCodexResumeFields — Phase 0 shape validation", () => {
     expect(missing).toEqual(["codexProbePeer"]);
   });
 
-  test("codexProbePeer whitespace-only treated as missing (per TMHR 4bab8196 附加建议 — trim before length check)", () => {
-    // Without .trim(), `" "` would pass the length > 0 check and reach
-    // hub liveness check as an obviously-invalid alias — cheap defensive
-    // filter at the shape layer.
+  test("codexProbePeer whitespace-only treated as missing", () => {
     for (const ws of [" ", "  ", "\t", "\n", " \t \n "]) {
       const missing = missingCodexResumeFields({
         codexProjectDir: "/x",
@@ -101,15 +98,34 @@ describe("#1521 missingCodexResumeFields — Phase 0 shape validation", () => {
     }
   });
 
-  test("codexProbePeer with leading/trailing whitespace but non-empty core is treated as valid (trim, don't reject)", () => {
-    // We trim to check emptiness, we don't mutate the field. A peer alias
-    // like " realalias " passes shape check; Phase 0's hub liveness lookup
-    // is where trimmed vs raw semantics get decided against the hub schema
-    // — not here.
+  test("codexProbePeer with leading/trailing whitespace treated as missing (TMHR 048d0061 R2: Hub exact-alias lookup — must equal its own trim)", () => {
+    // Rationale: codexProbePeer is a Hub exact-lookup key. A value like
+    // " realalias " (or "realalias " / " realalias") will 100% fail the
+    // Hub exact-alias lookup at Phase 0 liveness check, so it's not a
+    // "well-shaped" value — pinning it as valid at the shape layer would
+    // teach readers that shape-OK is meaningful when it isn't. The shape
+    // check now requires `value === value.trim()`.
+    //
+    // This is the witnessed-red canary TMHR 048d0061 R2 asked for.
+    for (const withWs of [" realalias", "realalias ", " realalias ", "\treal\t"]) {
+      const missing = missingCodexResumeFields({
+        codexProjectDir: "/x",
+        codexLaunchAdapter: "codex-standard",
+        codexProbePeer: withWs,
+      });
+      expect(missing).toEqual(["codexProbePeer"]);
+    }
+  });
+
+  test("codexProbePeer with no surrounding whitespace passes shape (positive control for the trim rule)", () => {
+    // Confirms the rule is `value === value.trim()`, not "reject any
+    // string containing whitespace" (which would break aliases with
+    // internal spaces if the Hub ever allowed them — we don't decide
+    // that, we only assert the trim invariant).
     const missing = missingCodexResumeFields({
       codexProjectDir: "/x",
       codexLaunchAdapter: "codex-standard",
-      codexProbePeer: " realalias ",
+      codexProbePeer: "realalias",
     });
     expect(missing).toEqual([]);
   });

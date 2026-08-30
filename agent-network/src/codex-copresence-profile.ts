@@ -31,8 +31,17 @@ export interface CodexCopresenceProfileFields {
   //
   // NONE of the three is read by `anet node create` / `anet node start` — they
   // are only consulted by `resume`. Old codex-copresence configs without them
-  // continue to `start` normally; `resume` fail-closes with a diagnostic that
-  // names the missing field(s) and prints the JSON patch template (Q7=C).
+  // continue to `start` normally.
+  //
+  // Current state in main: the fields exist as OPTIONAL, and `missingCodexResumeFields`
+  // enumerates which are absent — but no code in this PR reads that enumeration.
+  // The resume dispatcher, `--help` copy, and Phase 0 preflight all remain
+  // staged for a follow-up PR (#1528, Draft). Once that PR lands, `resume`
+  // will fail-close with a Phase 0 diagnostic naming the missing field(s);
+  // the diagnostic shape and any operator remediation flow (JSON-patch or
+  // otherwise) will land with the PR that provides its real caller — see
+  // the TMHR 4bab8196 blocker note on `missingCodexResumeFields` below for
+  // why the earlier draft's `codexResumeMissingConfigHint` was removed.
   /** Absolute project directory to launch the codex TUI in. Passed as
    *  `-C <dir>` to `codex resume`. Also cross-checked against hub-reported
    *  `session.project_dir` in Phase 4.3. */
@@ -57,9 +66,12 @@ export interface CodexCopresenceProfileFields {
   readonly codexProbePeer?: string;
 }
 
-/** #1521 — the three fields `anet node resume <alias>` requires on a
- *  codex-copresence node. Any missing field is a Phase 0 fail-closed with
- *  actionable diagnostic (see `codexResumeMissingConfigHint`). */
+/** #1521 — the three fields `anet node resume <alias>` will require on a
+ *  codex-copresence node once the resume dispatcher lands (#1528, Draft).
+ *  In this PR, only shape-level enumeration exists (see
+ *  `missingCodexResumeFields` below); no CLI code reads that enumeration
+ *  and the operator-facing remediation flow is deliberately deferred
+ *  along with its real caller. */
 export type CodexResumeRequiredField =
   | "codexProjectDir"
   | "codexLaunchAdapter"
@@ -82,18 +94,21 @@ export const CODEX_RESUME_REQUIRED_FIELDS: readonly CodexResumeRequiredField[] =
  *      before passing this value to `codex resume -C <dir>` (per TMHR
  *      4bab8196: "startsWith('/') 不是最终安全门").
  *    - codexLaunchAdapter : enum membership.
- *    - codexProbePeer : non-empty AFTER trim. `.trim()` catches whitespace-
- *      only values like `" "` that would otherwise slip through a naive
- *      length check (per TMHR 4bab8196 附加建议). Liveness (registered +
- *      online + non-self) is a separate hub-side check in Phase 0.
+ *    - codexProbePeer : Hub exact-alias lookup, so value MUST equal its own
+ *      trim. Values with leading/trailing whitespace would fail Hub lookup
+ *      100% of the time; rejecting them at the shape layer is a witnessed-red
+ *      canary rather than a permissive pass-through (per TMHR 048d0061 R2:
+ *      "不要 pin 一个必然在 Hub exact lookup 阶段失败的 well-shaped 值").
+ *      Liveness (registered + online + non-self) is a separate hub-side
+ *      check in Phase 0.
  *
- *  Deliberately NOT included: `codexResumeMissingConfigHint` — the earlier
- *  operator-facing diagnostic that referenced a `config apply` verb that
- *  doesn't exist yet. TMHR 4bab8196 blocked it: staging a hint that names
- *  a non-existent command is the exact "存在 ≠ 会执行" antipattern the
- *  gate lessons keep re-teaching. The hint helper lands with its real
- *  caller (either after `config apply` is implemented in a separate PR,
- *  or reworked to reference existing commands only when #1528 lands). */
+ *  Deliberately NOT included: an operator-facing diagnostic helper. An
+ *  earlier draft included `codexResumeMissingConfigHint` that referenced
+ *  a `anet node config apply` verb which does not exist in the tree —
+ *  TMHR 4bab8196 blocked it as the exact "存在 ≠ 会执行" antipattern.
+ *  The diagnostic lands with its real caller in a later PR that either
+ *  (a) implements `anet node config apply` first, or (b) reworks the
+ *  diagnostic to reference existing commands only. */
 export function missingCodexResumeFields(
   profile: CodexCopresenceProfileFields,
 ): CodexResumeRequiredField[] {
@@ -105,8 +120,13 @@ export function missingCodexResumeFields(
   if (adapter !== "codex-standard" && adapter !== "codex-custom-wrapper") {
     missing.push("codexLaunchAdapter");
   }
-  // TMHR 4bab8196: trim before length check. `" "` is not a valid peer alias.
-  if (typeof profile.codexProbePeer !== "string" || profile.codexProbePeer.trim().length === 0) {
+  // TMHR 048d0061 R2: peer alias is a Hub exact-lookup key. Anything that
+  // won't match the raw stored alias — whitespace-only, or with leading/
+  // trailing whitespace — must fail at the shape layer, not silently pass
+  // and 100%-fail later at Hub lookup. Require the value to be its own
+  // trim + non-empty.
+  const peer = profile.codexProbePeer;
+  if (typeof peer !== "string" || peer.length === 0 || peer !== peer.trim()) {
     missing.push("codexProbePeer");
   }
   return missing;

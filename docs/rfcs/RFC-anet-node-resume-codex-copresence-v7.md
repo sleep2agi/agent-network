@@ -135,7 +135,9 @@ Fail-fast 消息 + --dry-run JSON patch bonus 同步更新，operator 一次补�
 
 ## §决策状态
 
-- **TMHR**: ✅ **ACK v7** (44661926) — 加实现要求: 测试 H 静态 grep = lint, 承重必须运行时观测探针发起者 pid + Hub 事件核对 (已并入上文)
-- **通信龙**: **PENDING** — 我 v5 选 A/C 后，TMHR override 到 D；通信龙 需就 Phase 6 A/C vs D 明表态。TMHR 是需求方，我倾向 D。
+- **TMHR**: ✅ **ACK v7** (44661926 + 2bf3c04a) — 加实现要求: 测试 H 静态 grep = lint, 承重必须运行时观测探针发起者 pid + Hub 事件核对
+- **通信龙**: ✅ **ACK v7 = D** (df6d26d9 + e113b532) — 初 v5 选 A/C 便利性理由，读了 TMHR 完整性理由后 explicit 让步："在身份验收这条轴上，完整性压便利性；self-loop 收发两端同一进程，只在自己身上闭合的回路证不了对外可达。他是需求方，不 override"。附三条硬要求已并入 v7：① Phase 0 拒绝须指路 ② --help + docs 明写≥2 节点前置 ③ 单节点缺口单开 issue（→ #1527）
 
-拿到通信龙 ACK → 起 PR draft。v7 稿 `/tmp/claude-1000/.../scratchpad/anet-node-resume-codex-design-v7.md`。
+## Doc drift note
+
+本 RFC 是 v7 定稿的历史记录，随 #1528 全实现落地。**当前 PR (#1538)** 不带任何 CLI surface，只 stage 内部 shape helper + schema fields —— 任何"用户读到"的行为 (Phase 0 诊断、`--help` 前置条件段、resume 分支可达) 都在 #1528，本 RFC 不作为 #1538 的合并依据。
