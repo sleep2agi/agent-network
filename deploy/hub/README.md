@@ -111,11 +111,11 @@ curl -s -H "Authorization: Bearer <verify-token>" localhost:9291/api/status   # 
 # 验完按精确 PID 停掉,删掉验证库
 
 # 4b. 🔴 #1493 fail-closed 迁移预检(升到含 user_inbox NOT NULL 迁移的版本时)
-#   step 4 的旁路 boot 对 DB【副本】启动时,若存量 user_inbox 有 network_id IS NULL 行,
-#   迁移会 **abort boot** 并打印 `[migrate #1493] ... network_id IS NULL`(fail-closed,
-#   故意不静默丢/不 COALESCE)。⇒ step 4 的旁路 boot 起得来 = 无 NULL 孤儿、可安全升级。
-#   起不来且是该错 ⇒ 生产库有 NULL 孤儿(与代码级三闸矛盾、可能更早漏洞),**先查孤儿来源、
-#   别 force 升**。想显式确认可对 DB 副本跑:
+#   若存量 user_inbox 有 network_id IS NULL 行,迁移会 **warn + 跳过**(列暂保持可空)、
+#   hub 照常启动(fail-safe,不停机——SDK马/通信龙 复核:NOT NULL 只是 belt-and-suspenders,
+#   代码级三闸已挡新 NULL,不该为冗余保险带打死全舰 hub)。⇒ step 4 旁路 boot 的日志里若出现
+#   `[migrate #1493] ... 已跳过 ... network_id IS NULL`,说明生产库有 NULL 孤儿(与三闸矛盾、
+#   可能更早漏洞):**先查孤儿来源、清理后下次启动幂等自动完成迁移,别盲清**。想升级前显式确认可对 DB 副本跑:
 COMMHUB_DB=/tmp/verify.db bun -e "console.log(new (require('bun:sqlite').Database)('/tmp/verify.db',{readonly:true}).query('SELECT COUNT(*) AS n FROM user_inbox WHERE network_id IS NULL').get())"
 #   (生产背景:hub 当前 .38、user_inbox 是 .41 才建表 #1495,现在根本没这张表 → 直接建成
 #    NOT NULL 新表、无迁移;经过 .41+ 才有行但代码级三闸从 .41 就在、行应非 NULL → 风险低。)

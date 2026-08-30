@@ -97,6 +97,10 @@ beforeAll(async () => {
   //   · dm_admin_nonet 重锚到 admin **自己网络**的非 NULL 行 dm_admin_own,保住
   //     "admin(scope 助手 no-op)仍只读自己的、不绕过 user_id 过滤"这条覆盖。
   seedMessage("dm_admin_own", adminUserId, adminNet, "admin 自己网络里的私信");
+  // #1493 SDK马 建议:用**非 NULL** 行补回"admin(scope 助手 no-op)能读到别网的自己的行"
+  // 这维覆盖(原先靠 NULL 行,现 NULL 不可能)。对照 dm_a_foreign_net(受限成员读不到),
+  // 两边都不依赖 NULL。
+  seedMessage("dm_admin_foreign_net", adminUserId, bNet, "admin 在别网的自己的私信");
   seedMessage("dm_a_read", aUserId, aNet, "A 已读的一条", undefined, 1);
   seedMessage("dm_a_secret", aUserId, aNet,
     "凭据在正文里 ntok_abcdef123456", JSON.stringify({ k: "ghp_" + "A".repeat(24) }));
@@ -148,8 +152,9 @@ describe("#1459 ① P3 GET /api/messages?scope=user", () => {
   test("admin(scope 助手 no-op)仍受 user_id 限制：只读自己的、不读别人的", async () => {
     const { body } = await get("/api/messages?scope=user", adminToken);
     const ids = body.messages.map((m: any) => m.message_id);
-    expect(ids).toContain("dm_admin_own");   // 读得到自己的
-    expect(ids).not.toContain("dm_a1");       // 承重:admin 不绕过 user_id 过滤读别人的
+    expect(ids).toContain("dm_admin_own");            // 读得到自己的
+    expect(ids).toContain("dm_admin_foreign_net");     // scope 助手 no-op → 跨网也读得到自己的
+    expect(ids).not.toContain("dm_a1");                // 承重:admin 不绕过 user_id 过滤读别人的
     expect(body.messages.every((m: any) => m.user_id === adminUserId)).toBe(true);
   });
 

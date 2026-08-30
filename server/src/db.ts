@@ -702,17 +702,25 @@ function migrateUserInboxNetworkIdNotNull() {
   if (!createSql) return;                                       // 表不存在:上面的 CREATE 已建成 NOT NULL 新表
   if (/network_id\s+TEXT\s+NOT\s+NULL/i.test(createSql)) return; // 已是 NOT NULL → 幂等跳过
 
-  // 🔴 迁移前守卫:存量绝不能有 network_id IS NULL 行。按代码级三闸,生产应为 0;
-  // 若非 0 → 有更早的写路径漏洞产出了 scoped-unreadable 孤儿,**停下 fail-closed**
-  // (抛清晰错误、中止 boot,不静默丢/不 COALESCE 掩盖),人工排查孤儿来源后再迁。
-  // (与本文件既有迁移一致:迁移在模块顶层无 try/catch 调用,throw 即中止启动。)
+  // 🔴 迁移前守卫:存量若有 network_id IS NULL 行(按代码级三闸理应 0)→ **大声 warn +
+  // 跳过迁移**(列暂保持可空),hub 照常启动。fail-safe,不 throw(SDK马 review #1516):
+  //   · 这条 NOT NULL 是 belt-and-suspenders,代码级三闸(#1492 三测钉着)已挡新 NULL;
+  //     为一条冗余保险带让**整个舰队的 hub** boot 期停摆,代价与收益不成比例;
+  //   · 生产这个 COUNT 没人量过,而 #1493 第一条原则就是"没量过的数不要动手"——只要生产
+  //     有一行历史 NULL,throw 就把升级变成停机;
+  //   · fail-closed 的真正目的(不盲目清空、不 COALESCE 猜网络)用 warn+skip 一样达到。
+  // ⚠ 校正:本文件既有迁移(migrateNodeCreateRequestsModelNullable 内部 catch{}+return;
+  //   migrateSessionsNetworkAliasUnique 全函数 throw 0 次)都**不**在 boot 期打死 hub——
+  //   "顶层无 try/catch"是真前提,但"所以 throw 符合惯例"是没验的推论(SDK马 量出),撤回。
+  // 孤儿行仍有明确运维信号,三闸仍生效;等人工量过、清干净,下次启动幂等判据自动完成迁移。
   const nullCount = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE network_id IS NULL")?.n ?? 0;
   if (nullCount > 0) {
-    throw new Error(
+    console.error(
       `[migrate #1493] user_inbox 有 ${nullCount} 行 network_id IS NULL —— 与 send_desktop_message ` +
-      `的代码级三闸矛盾,可能存在更早的写路径漏洞;已停止 NOT NULL 迁移(fail-closed),` +
-      `请人工排查这些孤儿行来源后再迁,不要盲目清空。`,
+      `的代码级三闸矛盾,可能存在更早的写路径漏洞;已**跳过** NOT NULL 迁移(列暂保持可空),` +
+      `hub 正常启动。请人工排查这些孤儿行来源、清理后下次启动会自动完成迁移(不要盲目清空)。`,
     );
+    return;
   }
 
   db.transaction(() => {

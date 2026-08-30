@@ -91,16 +91,24 @@ describe("#1493 user_inbox.network_id NOT NULL (belt-and-suspenders)", () => {
     expect(out.nullRejected).toBe(true);
   });
 
-  test("migration guard: old table with a network_id IS NULL row → fail-closed (throws, boot aborts)", () => {
+  test("migration guard: old table with a network_id IS NULL row → fail-safe (warn + skip, hub boots, data intact)", () => {
     const file = seedOldDb([
       { mid: "dm_ok", net: "net_a", user: "u_1" },
-      { mid: "dm_orphan", net: null, user: "u_2" },   // 理应不可达;若真出现 → 停下报警
+      { mid: "dm_orphan", net: null, user: "u_2" },   // 理应不可达;若真出现 → warn+跳过,不停机
     ]);
-    const r = bootWithDb(file, `console.log("RESULT:booted");`);
-    expect(r.exitCode).not.toBe(0);                      // boot 被中止(fail-closed)
-    expect(r.stderr).toMatch(/migrate #1493/);            // 清晰的守卫错误
+    const r = bootWithDb(file, `
+      const col = db.all("PRAGMA table_info(user_inbox)").find(c => c.name === "network_id");
+      const rows = db.get("SELECT COUNT(*) AS n FROM user_inbox").n;
+      console.log("RESULT:" + JSON.stringify({ notnull: col.notnull, rows }));
+    `);
+    expect(r.exitCode).toBe(0);                          // hub 照常启动(fail-safe,不停机)
+    expect(r.stderr).toMatch(/migrate #1493/);            // 大声 warn(明确运维信号)
     expect(r.stderr).toMatch(/network_id IS NULL/);
-    expect(r.stdout).not.toContain("RESULT:booted");      // 没走到 probe
+    const m = r.stdout.match(/RESULT:(\{.*\})/);
+    expect(m).not.toBeNull();
+    const out = JSON.parse(m![1]);
+    expect(out.notnull).toBe(0);                          // 迁移被跳过 → 列暂保持可空
+    expect(out.rows).toBe(2);                             // 数据没丢(没盲目清空)
   });
 
   test("idempotent: booting an already-migrated (NOT NULL) DB twice is a no-op", () => {
