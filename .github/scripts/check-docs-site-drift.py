@@ -175,8 +175,23 @@ def fingerprint(text: str) -> str | None:
     #    开头)——于是把 getting-started 里那段 version-claim 说明的续行当指纹,
     #    对着线上永远找不到 ⇒ 恒 MISS 的假漂移(#1424 的戳改动实测中招)。
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    in_fence = False
     for raw in text.split("\n"):
         line = raw.strip()
+        # 🔴 跳过代码围栏**内部**的行。围栏起始行以反引号开头,会被下面那条
+        #    startswith 过滤掉;但围栏内部的行不以反引号开头,于是会被选中。
+        #    而 VitePress 给代码块做语法高亮,把每个 token 拆进独立 <span> ——
+        #    渲染后的 HTML 里不存在这样一段**连续**文本,所以永远匹配不上,
+        #    这道门就会报出**假的「落后」**。2026-08-30 #1547 部署后实测到:
+        #    门说 1 page behind,而人工核对内容确实已上线,被选中的指纹正是
+        #    ```bash 围栏里的 `anet node stop <name> && anet daemon start <name>`。
+        #    危险在方向:它把人推去做一次无谓的重新部署。跳过是安全的 ——
+        #    一条指纹都挑不出来时 run() 会明确报错拒绝通过,不会静默放行。
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         # 🔴 按 **UTF-8 字节** 卡长度,不按字符数。这个仓的文档以中文为主,
         # 一句信息量充足的中文常常只有 20-30 个字符 —— 用 `len(line) < 40`
         # 会把几乎所有中文正文都判成"太短"而跳过,最终一条指纹都选不出来。
@@ -419,6 +434,19 @@ def selftest() -> int:
     check("指纹跳过标题/列表/引用/链接,选中正文",
           fp == "这是一句普通正文,长度足够被选中,而且不含任何链接与强调符号。", f"got={fp!r}")
     check("全是结构行时返回 None", fingerprint("# a\n- b\n> c\n") is None)
+
+    # 🔴 本次修的 bug 的红夹具(修之前这三条全 FAIL)
+    fenced = ("```bash\n"
+              "anet node stop <name> && anet daemon start <name>    # 这一行足够长足够长足够长\n"
+              "```\n"
+              "这是围栏之后的一句普通正文,长度足够被选中,不含链接与强调符号。\n")
+    fp2 = fingerprint(fenced)
+    check("指纹跳过代码围栏内部的行,选中围栏之后的正文",
+          fp2 == "这是围栏之后的一句普通正文,长度足够被选中,不含链接与强调符号。", f"got={fp2!r}")
+    check("整段只有围栏时返回 None(而不是选中一条命令)",
+          fingerprint("```bash\nanet node stop <name> && anet daemon start <name>    # 足够长足够长足够长\n```\n") is None)
+    check("~~~ 围栏同样被跳过",
+          fingerprint("~~~sh\nsome very long command line that would otherwise be picked as a fingerprint right here\n~~~\n") is None)
 
     # 🔴 实体解码红夹具(修复前 FAIL):指纹含引号/尖括号时,渲染页给的是实体。
     ent_html = "<p>run [anet] &quot;&lt;alias&gt;&quot; is not running locally now ok</p>"
