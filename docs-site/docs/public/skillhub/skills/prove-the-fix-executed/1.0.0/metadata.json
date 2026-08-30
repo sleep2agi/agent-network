@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "slug": "prove-the-fix-executed",
+  "name": "Prove the fix executed",
+  "description": "An inert fix and a guard that rejects everything look identical; require that the fix fired and the metric moved.",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "publisher": {
+    "name": "Agent Network maintainers",
+    "url": "https://github.com/sleep2agi/agent-network"
+  },
+  "tags": [
+    "testing",
+    "debugging",
+    "regression"
+  ],
+  "published_at": "2026-08-30"
+}
