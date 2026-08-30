@@ -199,6 +199,7 @@ See the [Upgrade guide](/en/guide/upgrade) for upgrade details.
 ```
   CommHub: http://127.0.0.1:9200
   Agents: 127 idle, 0 working, 1 needs attention, 143 offline
+          └─ 18 offline for 1-3 days, 27 offline for more than 3 days
   SSE:    12 connected
   Tasks:  10 recent
 ```
@@ -209,6 +210,23 @@ See the [Upgrade guide](/en/guide/upgrade) for upgrade details.
 | `working` | **Actively progressing** a turn (includes `waiting_input` — the turn is alive, just waiting on a human) |
 | `needs attention` | **Someone should look**: `blocked` / `error`, plus any status this version does not recognise |
 | `offline` | Heartbeat expired, or stopped cleanly |
+
+### The line under `offline`: how long have they been gone
+
+When there are offline nodes, a breakdown line is printed. **"Just stopped" and "gone for three days
+and nobody noticed" used to be the same number.** Measured once over 84 nodes: of 45 offline, 27 had
+been gone more than 3 days, 18 for 1-3 days, and **none within the last 6 hours** — "there is no live
+outage right now" and "45 nodes are down" are two completely different conclusions, and only the
+second one was on screen.
+
+Nodes with no usable timestamp go into their own "no timestamp (we do not know how long)" bucket and
+are **not** folded into the freshest one — "I do not know how long it has been gone" and "it just went
+down" are different things.
+
+🔴 **`blocked` has no matching duration, and should not have one.** The roster has no "when did it
+become blocked" field; `updated_at` keeps being refreshed by the heartbeat, so using it as a
+blocked-duration prints "4 minutes ago" for a node stuck for hours — worse than showing nothing.
+See [Is this node still alive](/en/troubleshooting/is-this-node-alive).
 
 The four add up to the node total. The `needs attention` slot is hidden when it is 0.
 
@@ -230,9 +248,15 @@ The following commands exist in the current preview and must not be presented as
 | Command | Purpose |
 |---|---|
 | `anet daemon up [name]` | Create and start a `host_supervisor` — **preview channel only** |
-| `anet daemon init <name>` / `start <name>` / `list` | Manage local daemons — **preview channel only** |
+| `anet daemon init <name>` / `start <name>` / `restart <name>` / `list` | Manage local daemons — **preview channel only** |
 | `anet node start <name> --copresence` | Start Codex app-server, bridge, and shared TUI |
 | `anet opencode ...` | Manage the preview OpenCode integration |
+
+🔴 **There is no daemon-level stop / delete / status.** A daemon is just an agent-node with
+`role=host_supervisor`, so use the node-level commands: `anet node stop <name>` to stop it,
+`anet node delete <name>` to remove it, `anet node ls` to see whether it is running
+(`anet daemon list` only lists locally configured daemons and carries no liveness).
+`anet daemon restart` calls that same stop internally.
 
 `--copresence` only applies to `runtime=codex-app-server`. Its default sandbox is read-only. Full filesystem and network access requires `--dangerously-allow-full-access`; a TTY requires typing `yes`, and a non-TTY caller must also pass `--yes-danger-full-access`.
 
