@@ -45,7 +45,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-BASELINE = 87   # 2026-08-30, origin/main, strict:true, src/**/*.ts (排除 *.test.ts);
+BASELINE = 86   # 2026-08-30, origin/main, strict:true, src/**/*.ts (排除 *.test.ts);
                 # 环境须与 CI 一致:agent-node 下 npm install --no-save typescript@5.9.3 @types/node@20
 TS_VERSION = "5.9.3"
 TYPES_NODE_VERSION = "20"
