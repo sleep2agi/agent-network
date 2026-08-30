@@ -154,7 +154,7 @@ p.expect(r"选择 runtime"); p.sendline("")  # default
 
 ## 5. Per-preview workflow
 
-1. SDK马/通信牛/N站马 push commit + `npm publish @preview`
+1. SDK马/通信牛/N站马 push commit + 跑 `release.yml`（`publish=true`）发 preview —— 🔴 本机不发包，见 [RELEASE-SOP](../RELEASE-SOP.md)
 2. **PRE-build curl HEAD verify**: `curl -sI .../<pkg>-<ver>.tgz` returns 200 (catch dist-tag-flip-but-tarball-404 per [v0.9.0 Round 5](https://github.com/sleep2agi/agent-network/issues/126#issuecomment-4458336023))
 3. Run A1+A2+B1+B2+C1 = preview ship gate (~5min)
 4. Paste verdict into release PR / issue comment (table with case + verdict + evidence)
