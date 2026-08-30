@@ -149,8 +149,9 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
         //    —— 也就是说这个 ready 可能是几周前的事,而二进制早被换掉了。
         //
         // 🔴 这个版本号原先写的是「preview.67」,**指向一个不存在的版本**:
-        //    agent-node 已发布的最高 preview 是 2.5.0-preview.56(.67 是
-        //    **agent-network** 的号,两个包的序列被串了)。
+        //    agent-node 从来没有过 .67(.67 是 **agent-network** 的号,
+        //    两个包的序列被串了)。**这里不写「当前最高版本」** ——
+        //    那种句子每次发版都会变成假话,而没有任何门会红。
         //    实测边界:agent-node 2.5.0-preview.54 的产物里没有
         //    `create_capability_observed_ms_ago`,.55 有。
         //    **所以以后写代际边界一律带包名 + 完整版本号** ——
