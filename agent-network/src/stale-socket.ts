@@ -157,7 +157,9 @@ export type CanonicalSocketsOutcome =
   /** profile 里没有 node_id —— 算不出来,不动手。 */
   | { kind: "no-node-id" }
   /** 重新算出来的与 profile 存的不一致 —— profile 被写坏、HOME 变了、或**调用方喂错了 id**。 */
-  | { kind: "mismatch"; recomputedLeader: string; storedLeader: string };
+  | { kind: "mismatch"; recomputedLeader: string; storedLeader: string }
+  /** 路径算不出来(grokCopresenceSocketPaths 抛错)—— 不动手,但也不该把 stop 整个弄失败。 */
+  | { kind: "uncomputable"; detail: string };
 
 /**
  * 从 profile 推出规范 socket 路径,并**与 profile 里存的那份交叉校验**。
@@ -178,7 +180,17 @@ export function canonicalSocketsForProfile(
   compute: (nodeId: string) => { leaderSocket: string; attachSocket: string },
 ): CanonicalSocketsOutcome {
   if (!profile.node_id) return { kind: "no-node-id" };
-  const recomputed = compute(profile.node_id);
+  // 🔴 compute 会 throw:grokCopresenceSocketPaths 在两种布局都放不下 100 字节的
+  //    unix 路径时抛错。第一版内联代码有 `try/catch → canonical=null`,
+  //    我抽成这个函数时**把它丢了** —— 于是异常会冒到 cli 顶层 handler,
+  //    把一次本可以「算不出就不动手」的情况变成 `[anet] FATAL` + 非零退出,
+  //    也就是把 stop 从「少做一件事」变成「整个失败」。
+  let recomputed: { leaderSocket: string; attachSocket: string };
+  try {
+    recomputed = compute(profile.node_id);
+  } catch (error: any) {
+    return { kind: "uncomputable", detail: error?.message || String(error) };
+  }
   if (
     recomputed.leaderSocket !== profile.grokLeaderSocket
     || recomputed.attachSocket !== profile.grokAttachSocket

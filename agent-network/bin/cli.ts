@@ -9863,6 +9863,8 @@ Stop a running agent node.
       canonical = { leaderSocket: canonicalOutcome.leaderSocket, attachSocket: canonicalOutcome.attachSocket };
     } else if (canonicalOutcome.kind === "mismatch") {
       console.error(`[anet]    stale-socket reclaim skipped: recomputed canonical socket path does not match the profile's`);
+    } else if (canonicalOutcome.kind === "uncomputable") {
+      console.error(`[anet]    stale-socket reclaim skipped: cannot compute canonical socket paths (${canonicalOutcome.detail})`);
     } else {
       console.error(`[anet]    stale-socket reclaim skipped: profile has no node_id`);
     }

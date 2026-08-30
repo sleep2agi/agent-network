@@ -174,6 +174,12 @@ describe("canonicalSocketsForProfile —— 交叉校验能抓住「喂错 id」
     }
   });
 
+  test("🔴 compute 抛错 ⇒ uncomputable,**不把异常抛给调用方**(否则 stop 整个 FATAL)", () => {
+    const boom = () => { throw new Error("cannot allocate a Grok copresence socket path shorter than 100 bytes"); };
+    const out = canonicalSocketsForProfile(profile, boom as any);
+    expect(out.kind).toBe("uncomputable");
+  });
+
   test("没有 node_id ⇒ no-node-id(说得出原因,不是悄悄什么都不做)", () => {
     const { node_id, ...rest } = profile;
     expect(canonicalSocketsForProfile(rest, compute)).toEqual({ kind: "no-node-id" });
@@ -186,5 +192,8 @@ describe("canonicalSocketsForProfile —— 交叉校验能抓住「喂错 id」
       canonicalSocketsForProfile({ grokLeaderSocket: profile.grokLeaderSocket }, compute).kind,
     ]);
     expect(kinds.size).toBe(3);
+    // uncomputable 也必须是第 4 个不同的结局
+    const boom = () => { throw new Error("nope"); };
+    expect(canonicalSocketsForProfile(profile, boom as any).kind).toBe("uncomputable");
   });
 });
