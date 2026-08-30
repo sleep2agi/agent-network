@@ -22,7 +22,7 @@ export type DaemonCapabilityRow = {
 };
 
 export type CapabilityView =
-  /** hub 上根本没有这一格 —— 旧 daemon(preview.55 之前)不上报。 */
+  /** hub 上根本没有这一格 —— 旧 daemon(agent-node ≤ 2.5.0-preview.54)不上报。 */
   | { readonly kind: "never-reported"; readonly line: string }
   /** 报了 ready/blocked,且知道是多久以前测的。 */
   | { readonly kind: "ready" | "blocked"; readonly ageMs: number; readonly line: string; readonly fix?: CapabilityFix }
@@ -92,7 +92,7 @@ const FIX_BY_REASON: Record<string, CapabilityFix> = Object.freeze({
     command: null,
   },
   anet_bin_pin_unresolved: {
-    explain: "旧版 daemon(preview.40 及更早)只报这一个笼统原因。升级该机器的 agent-node 并重启 daemon 后才能拿到具体类别",
+    explain: "旧版 daemon(agent-node 2.5.0-preview.40 及更早)只报这一个笼统原因。升级该机器的 agent-node 并重启 daemon 后才能拿到具体类别",
     command: null,
   },
 });
@@ -145,8 +145,16 @@ export function describeCapability(row: DaemonCapabilityRow, nowMs: number): Cap
       return {
         kind: "ready-age-unknown",
         // 🔴 这句必须说清「不知道什么时候测的」**以及为什么**。
-        //    preview.67 及更早的 daemon 在开机时算一次就永久缓存 —— 也就是说
-        //    这个 ready 可能是几周前的事,而二进制早被换掉了。
+        //    **agent-node ≤ 2.5.0-preview.54** 的 daemon 在开机时算一次就永久缓存
+        //    —— 也就是说这个 ready 可能是几周前的事,而二进制早被换掉了。
+        //
+        // 🔴 这个版本号原先写的是「preview.67」,**指向一个不存在的版本**:
+        //    agent-node 已发布的最高 preview 是 2.5.0-preview.56(.67 是
+        //    **agent-network** 的号,两个包的序列被串了)。
+        //    实测边界:agent-node 2.5.0-preview.54 的产物里没有
+        //    `create_capability_observed_ms_ago`,.55 有。
+        //    **所以以后写代际边界一律带包名 + 完整版本号** ——
+        //    裸的 `preview.NN` 在一个有三个包各自独立编号的仓里,不指向任何东西。
         line: ("创建能力:可用\n" +
         "    ⚠ 不知道是什么时候测的 —— 该版本开机只算一次。重启它,或升级。"),
       };
@@ -235,4 +243,83 @@ export function describeFetchFailure(f: CapabilityFetchFailure): string {
       return "创建能力:查不到 —— 连不上 hub"
         + (f.detail ? `(${f.detail})` : "") + "。" + TAIL;
   }
+}
+
+// ── #1545 —— hub 拒绝 create_node 时那条载荷的渲染 ────────────────────────
+
+/**
+ * `create_node` 被拒时 hub 返回的形状(`server/src/tools.ts` 的
+ * `daemon_cannot_create_nodes` 分支)。
+ *
+ * 🔴 它和 `DaemonCapabilityRow` **不是同一个形状**,所以单独一个入口 ——
+ *    在调用方做一次字段映射,等于开出**第二个理解这些字段含义的地方**。
+ */
+export type CreateRejectionPayload = {
+  readonly error?: string;
+  readonly blocked_reason?: string;
+  /** 🔴 已经是**到现在为止**的绝对年龄(hub 在拒绝时把心跳那一段补上了)。
+   *  null = 补不出来 —— 见 `capability_age`。 */
+  readonly capability_observed_ms_ago?: number | null;
+  readonly capability_age?: string;
+};
+
+/**
+ * 把拒绝载荷渲染成人能读的一段。不是这类拒绝就返回 null,调用方走它原来的通用文案。
+ *
+ * 🔴 **这里没有第二份年龄公式。** `describeCapability` 里那段
+ * `(now − last_seen_at) + observed` 是给「列 daemon」那条路用的;
+ * 拒绝这条路上,**hub 已经算好了绝对年龄**(它手里有心跳时间)。
+ * 所以这里只做格式化,复用同一个 `formatAge`。
+ * 两份年龄算法一旦并排存在,出现分歧时不会有任何东西红。
+ *
+ * 🔴 **没有新增第六种 kind**,这是刻意的:
+ *   `kind` 是**呈现分桶**(禁不禁用、什么色调),不是完整语义。
+ *   「daemon 没报年龄」和「hub 没有它的心跳时间」在 UI 上要的处理**完全一样**
+ *   (都是 blocked、都给不出年龄),差别在**说哪句话** —— 那放在 `line` 里。
+ *   反过来,给共享联合加第六个值,会让所有既有消费者的映射多一个
+ *   它们没写过的分支,而**落进 default 的那一支通常是"看起来最正常"的那个**。
+ *   区分没有丢:两种 unknown 的 `line` 逐字不同,并有测试钉住。
+ */
+export function describeCreateRejection(
+  payload: CreateRejectionPayload,
+): CapabilityView | null {
+  if (payload?.error !== "daemon_cannot_create_nodes") return null;
+
+  const reason = payload.blocked_reason || "anet_bin_unknown";
+  const fix: CapabilityFix = FIX_BY_REASON[reason] ?? {
+    explain: `未知原因代码 ${reason} —— 本端可能比那台机器的 anet 旧,升级本端或看它的 daemon 日志`,
+    command: null,
+  };
+  const where = "完整原文(含真实路径)只在那台机器的 daemon 日志里 —— 它带机器路径,按设计不上报。";
+  const body = [
+    `原因:${fix.explain}`,
+    fix.command ? `修法(可整行粘贴):${fix.command}` : "修法:没有单条命令能修,见上。",
+    where,
+  ].join("\n");
+
+  const age = payload.capability_observed_ms_ago;
+  const ageKnown = payload.capability_age === "known"
+    && typeof age === "number" && Number.isFinite(age) && age >= 0;
+
+  if (ageKnown) {
+    return {
+      kind: "blocked",
+      ageMs: age as number,
+      line: `这台 daemon 报告它现在**建不了节点**(${reason},${formatAge(age as number)}测)\n${body}`,
+      fix,
+    };
+  }
+
+  // 🔴 两种"给不出年龄",必须说成两句不同的话:动作差一台机器。
+  //    legacy       → 去**升级/重启那台 daemon**(它的版本只在开机时算一次)
+  //    no-heartbeat → 那台 daemon **报了**,是 hub 这边没有它的心跳时间;
+  //                   别去升级它,先看它还在不在线
+  const why = payload.capability_age === "unknown_no_heartbeat_time"
+    ? "**它报了这个判断,但 hub 这边没有它的心跳时间**,所以算不出是多久以前的 —— 先看这台 daemon 是否还在线,别急着升级它"
+    : "**不知道是多久以前测的** —— 该 daemon 版本在开机时算一次就不再重测,这个结论可能早就过期了。重启或升级它";
+  return {
+    kind: "blocked-age-unknown",
+    line: `这台 daemon 报告它现在**建不了节点**(${reason});${why}\n${body}`,
+    fix,
+  };
 }

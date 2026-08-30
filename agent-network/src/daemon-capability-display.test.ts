@@ -7,7 +7,7 @@
 //    不同的话**。全渲染成 "blocked" 的实现能通过任何只检查"有没有输出"的测试。
 
 import { describe, expect, test } from "bun:test";
-import { describeCapability, describeFetchFailure, formatAge, type CapabilityFetchFailure } from "./daemon-capability-display.js";
+import { describeCapability, describeFetchFailure, formatAge, type CapabilityFetchFailure, describeCreateRejection } from "./daemon-capability-display.js";
 
 const NOW = 1_700_000_000_000;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -367,5 +367,96 @@ describe("🔴 取不到这一格的五种原因,必须说成五句不同的话"
 
   test("🔴 分母自证:确实枚举了 5 种 why,不是空跑", () => {
     expect(new Set(ALL.map(f => f.why)).size).toBe(5);
+  });
+});
+
+/* #1545 —— hub 拒绝 create_node 时那条载荷的渲染。
+ *
+ * 缺口是实测的:代理路由 `app/api/anet/node-create/route.ts` **已经把 hub 的完整
+ * `result` 透传出来**,而向导只渲染 `创建失败:${data.error}` ⇒ 用户看到的是裸的
+ * `创建失败:daemon_cannot_create_nodes`,hub 辛苦算出来的 reason/年龄全被丢掉。 */
+describe("#1545 describeCreateRejection —— 拒绝载荷的渲染", () => {
+  const base = { error: "daemon_cannot_create_nodes", blocked_reason: "anet_bin_permission" };
+
+  test("不是这类拒绝 → 返回 null(调用方走它自己的通用文案)", () => {
+    expect(describeCreateRejection({ error: "node_name_conflict" })).toBeNull();
+    expect(describeCreateRejection({})).toBeNull();
+  });
+
+  test("年龄已知 → kind=blocked,并把年龄写进句子", () => {
+    const v = describeCreateRejection({ ...base, capability_age: "known", capability_observed_ms_ago: 65_000 })!;
+    expect(v.kind).toBe("blocked");
+    expect(v.line).toContain("1m 前");
+    expect(v.line).toContain("anet_bin_permission");
+  });
+
+  /* 🔴 本组的重点:两种「给不出年龄」必须是**两句不同的话**,因为动作差一台机器。
+   *   legacy       → 去升级/重启那台 daemon
+   *   no-heartbeat → 它报了,是 hub 没有心跳时间 —— 别急着升级,先看它在不在线 */
+  test("🔴 两种 unknown 的 line 逐字不同", () => {
+    const legacy = describeCreateRejection({ ...base, capability_age: "unknown_legacy_daemon", capability_observed_ms_ago: null })!;
+    const noHb = describeCreateRejection({ ...base, capability_age: "unknown_no_heartbeat_time", capability_observed_ms_ago: null })!;
+    expect(legacy.line).not.toBe(noHb.line);
+    expect(noHb.line).toContain("心跳");
+    expect(noHb.line).toContain("别急着升级");
+    expect(legacy.line).toContain("开机时算一次");
+    // 反向锚:legacy 那句**不**该出现"心跳",否则上面的区分只是碰巧
+    expect(legacy.line).not.toContain("心跳");
+  });
+
+  /* 两种 unknown 的 **kind 相同**是刻意的:kind 是呈现分桶(禁不禁用/什么色调),
+   * 而这两种在 UI 上要的处理完全一样。区分放在 line 里(上一条已钉)。
+   * 写成断言,是为了让下一个人知道这不是漏了,而是选的。 */
+  test("两种 unknown 的 kind 相同(呈现分桶一致,语义差别在 line 里)", () => {
+    const a = describeCreateRejection({ ...base, capability_age: "unknown_legacy_daemon" })!;
+    const b = describeCreateRejection({ ...base, capability_age: "unknown_no_heartbeat_time" })!;
+    expect(a.kind).toBe("blocked-age-unknown");
+    expect(b.kind).toBe("blocked-age-unknown");
+  });
+
+  test("capability_age 说 known 但数字不合法 → 退回 age-unknown,不渲染成刚测的", () => {
+    for (const bad of [null, undefined, Number.NaN, -1]) {
+      const v = describeCreateRejection({ ...base, capability_age: "known", capability_observed_ms_ago: bad as number })!;
+      expect(v.kind).toBe("blocked-age-unknown");
+    }
+    // 正控:合法值确实走 blocked —— 证明上面不是恒真
+    expect(describeCreateRejection({ ...base, capability_age: "known", capability_observed_ms_ago: 0 })!.kind).toBe("blocked");
+  });
+
+  /* 🔴 「判据只有一个作者」的可执行断言:同一个 code,拒绝路径给出的修法
+   * 必须和列 daemon 那条路径**逐字相同**。哪天有人只改了一处,这条会红。 */
+  test("🔴 修法与 describeCapability 同源(同一个 code → 逐字相同的 fix)", () => {
+    for (const code of ["anet_bin_identity", "anet_bin_source", "anet_bin_shape",
+                        "anet_bin_permission", "anet_bin_unknown", "anet_bin_pin_unresolved"]) {
+      const viaList: any = describeCapability(
+        { can_create_nodes: false, create_nodes_blocked_reason: code }, NOW);
+      const viaReject: any = describeCreateRejection(
+        { error: "daemon_cannot_create_nodes", blocked_reason: code });
+      expect(viaReject.fix).toEqual(viaList.fix);
+    }
+  });
+
+  test("未知 code → 不套用任何已知修法(本端可能比那台机器旧)", () => {
+    const v: any = describeCreateRejection({ error: "daemon_cannot_create_nodes", blocked_reason: "anet_bin_future" });
+    expect(v.fix.command).toBeNull();
+    expect(v.fix.explain).toContain("anet_bin_future");
+  });
+
+  test("🔴 渲染里不含任何机器路径", () => {
+    for (const code of ["anet_bin_identity", "anet_bin_source", "anet_bin_shape", "anet_bin_permission"]) {
+      const v = describeCreateRejection({ error: "daemon_cannot_create_nodes", blocked_reason: code })!;
+      expect(v.line).not.toContain("/home/");
+      expect(v.line).not.toContain("/Users/");
+      expect(v.line).not.toContain("node_modules");
+    }
+    // 正控:上面不是恒真 —— 通用修法确实引用了 anet 的位置,只是现解析
+    expect(describeCreateRejection({ error: "daemon_cannot_create_nodes", blocked_reason: "anet_bin_permission" })!
+      .line).toContain("command -v anet");
+  });
+
+  test("没有 blocked_reason → 兜底到 anet_bin_unknown(不猜一个具体类别)", () => {
+    const v: any = describeCreateRejection({ error: "daemon_cannot_create_nodes" });
+    expect(v.line).toContain("anet_bin_unknown");
+    expect(v.fix.command).toBeNull();
   });
 });
