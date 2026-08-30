@@ -30,6 +30,10 @@ let userNetworkId = "";
 let userName = "";
 let adminToken = "";
 
+// 30s 而不是 bun 默认的 5s:这个 hook 跑 register()(KDF)+bootServer(),
+// 本机空载基线 ~620ms,而 2026-08-17 与 2026-08-31 两次 CI 上它被 5s 上限打死
+// (0 pass / 1 fail / Ran 1 test —— 见 #928、#1627)。5247ms 是**被截断的下界**,
+// 不是测量值,所以余量按基线的 ~48x 取,而不是按那个数取。
 beforeAll(async () => {
   process.env.COMMHUB_DB = process.env.COMMHUB_DB || SERVER_DB;
   process.env.HOST = "127.0.0.1";
@@ -72,7 +76,7 @@ beforeAll(async () => {
   if (res.status !== 200) throw new Error("SSE subscribe failed: " + res.status);
   sseReader = res.body!.getReader();
   await sseReader.read(); // consume the connected frame → registration done
-});
+}, 30_000);
 
 afterAll(() => {
   try { sseReader?.cancel(); } catch {}

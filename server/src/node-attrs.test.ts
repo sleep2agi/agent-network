@@ -45,6 +45,10 @@ const LEGACY_ALIAS = "attrs-legacy-node";
 let token = "";
 let server: { stop: (force?: boolean) => void } | null = null;
 
+// 30s 而不是 bun 默认的 5s:这个 hook 跑 register()(KDF)+bootServer(),
+// 本机空载基线 ~620ms,而 2026-08-17 与 2026-08-31 两次 CI 上它被 5s 上限打死
+// (0 pass / 1 fail / Ran 1 test —— 见 #928、#1627)。5247ms 是**被截断的下界**,
+// 不是测量值,所以余量按基线的 ~48x 取,而不是按那个数取。
 beforeAll(async () => {
   db.run(`INSERT INTO users (user_id, username, password_hash, role) VALUES (?1, 'attrs-user', 'x', 'user')`, [USER]);
   db.run(`INSERT INTO networks (network_id, network_name, owner_id) VALUES (?1, 'attrs-net', ?2)`, [NET, USER]);
@@ -58,7 +62,7 @@ beforeAll(async () => {
   token = issueUserToken(USER, "attrs-test").token;
   server = bootServer({ port: PORT, hostname: "127.0.0.1" }) as never;
   await new Promise((r) => setTimeout(r, 120));
-});
+}, 30_000);
 
 afterAll(() => {
   try { server?.stop(true); } catch { /* already down */ }

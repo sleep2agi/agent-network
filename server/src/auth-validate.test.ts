@@ -10,13 +10,17 @@ import { register } from "./auth.js";
 
 // First user gets RELAXED rules (admin bootstrap allows 4-char "anethub" etc.)
 // To test full-strength rules, seed a dummy admin first.
+// 30s 而不是 bun 默认的 5s:这个 hook 跑 register()(KDF)+bootServer(),
+// 本机空载基线 ~620ms,而 2026-08-17 与 2026-08-31 两次 CI 上它被 5s 上限打死
+// (0 pass / 1 fail / Ran 1 test —— 见 #928、#1627)。5247ms 是**被截断的下界**,
+// 不是测量值,所以余量按基线的 ~48x 取,而不是按那个数取。
 beforeAll(() => {
   // Idempotent: if DB file already has users (from a previous run on the
   // same temp path), this errors with "username already taken" → that's
   // fine, the goal is just "ensure at least one user exists so subsequent
   // registers hit the strict path".
   register("_seed_admin", "BootstrapPw1", undefined, "seed");
-});
+}, 30_000);
 
 describe("register — username rules", () => {
   it("rejects empty username", () => {
