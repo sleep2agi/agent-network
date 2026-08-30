@@ -3291,10 +3291,34 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             && caps.create_nodes_blocked_reason.length > 0)
             ? caps.create_nodes_blocked_reason
             : "anet_bin_unknown";
+          // #1545 —— 光说 `blocked_reason` 不够:**那个判断是什么时候做出来的**
+          // 决定了下一步完全不同的两件事。
+          //   刚测的 blocked      ⇒ 去那台机器按 reason 修
+          //   三周前测的 blocked  ⇒ 那台 daemon 是**开机算一次就永久缓存**的旧版本
+          //                        (preview.67 及更早),它可能早就好了 ——
+          //                        先重启/升级它,再谈修 pin
+          // 而在拒绝这一刻,用户正好在决定"去修哪台机器"。
+          //
+          // 🔴 年龄未知时给的是**显式 null + 一个说明为什么的枚举**,不是省略这两个键。
+          //    省略读起来像"没有这个问题",而调用方(常常是个 agent)会默认它是刚测的
+          //    —— 那是朝「更可信」方向撒谎,比不给更糟。
+          const rawAge = caps.create_capability_observed_ms_ago;
+          const ageKnown = typeof rawAge === "number" && Number.isFinite(rawAge)
+            && rawAge >= 0 && rawAge <= 365 * 24 * 60 * 60 * 1000;
           return { content: [{ type: "text" as const, text: JSON.stringify({
             ok: false,
             error: "daemon_cannot_create_nodes",
             blocked_reason: reason,
+            // 这个判断是**多久以前**做出来的(毫秒)。null = 那台 daemon 没报这一格。
+            capability_observed_ms_ago: ageKnown ? rawAge : null,
+            capability_age: ageKnown ? "known" : "unknown_legacy_daemon",
+            // 🔴 这里**不复制那张 code → 修法命令 的表**。它只有一个作者,在
+            //    `@sleep2agi/agent-network` 的 daemon-capability-display —— 抄一份到 hub,
+            //    两份就会各自漂移,而「hub 教的修法」和「CLI 教的修法」不一致时,
+            //    没有任何东西会红。这里只把人指到那一份。
+            //    (同 `blocked_reason` 是 z.enum 而不是自由文本的立场:hub 出**代码**,
+            //     渲染留给客户端。)
+            remediation_hint: "run `anet daemon list` where that daemon is configured — it prints the exact, paste-able fix command for this blocked_reason",
             daemon_node_id,
           }) }] };
         }
