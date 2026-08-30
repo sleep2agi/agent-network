@@ -118,7 +118,7 @@ def tracked_docs(repo: Path, doc_root: str) -> list[Path]:
 LITERAL = re.compile(r"`([^`\n]{6,80})`")
 
 
-def candidate_literals(anchor: str) -> list[str]:
+def candidate_literals(anchor: str, rel: str = "") -> list[str]:
     """锚里可以**逐字**在源文件中定位的代码片段。
 
     只取含非标识符字符的（纯标识符交给 candidate_symbols，两条路径不重复判同一件事）。
@@ -128,8 +128,19 @@ def candidate_literals(anchor: str) -> list[str]:
         frag = frag.strip()
         if not frag or IDENT.fullmatch(frag):
             continue
-        if not re.search(r"[^A-Za-z0-9_ ]", frag):
-            continue
+        # 🔴 只认**真的像代码**的片段。第一版只要求「含非标识符字符」,于是收进了
+        #    文件名、URL 路径、线格式字符串,在 docs-site 那个 doc-root 上报出 5 条假漂移:
+        #      `auth.ts`              ← 文件名(含 `.` 就过了第一版)
+        #      `/events/<username>`   ← URL 路径
+        #      `: keepalive\n\n`      ← 线格式字面量
+        #    它们在目标文件里恰好出现一次是**巧合**(出现在注释或字符串里),
+        #    而 pin 指的是那段逻辑,不是那处提及。
+        if "/" in frag:
+            continue                       # 路径/URL,不是代码片段
+        if not re.search(r"[(){}=;]|=>|&&|\|\|", frag):
+            continue                       # 没有任何代码语法
+        if any(part and part in frag for part in Path(rel).name.split(".")):
+            continue                       # 片段里带着被引用文件自己的名字
         out.append(frag)
     return out
 
@@ -168,7 +179,7 @@ def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
     #      docs/pitfalls.md    「`get_inbox` **故意不在列**」   ← 说的是它不在
     #      docs/architecture.md「SSE 推 `new_reply` 不是 `new_task`」← 说的是后果
     #    把这些当成「锚点名了该符号」会报出**假漂移**（实测一次报出 6 条，全是假的）。
-    for frag in candidate_literals(anchor):
+    for frag in candidate_literals(anchor, rel):
         hits = [i + 1 for i, line in enumerate(lines) if frag in line]
         if len(hits) != 1:
             continue                      # 0 次分不清改写；多次不比标识符精确
