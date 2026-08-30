@@ -3207,6 +3207,41 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
       }
 
+      // #1353 Fix ① — daemon self-declared "I can't create nodes right now"
+      // is now a dispatch-time gate, not just a stored fact. Before this,
+      // daemon reported `daemon_capabilities.can_create_nodes=false` (via
+      // #1371 + #1377), hub stored it in config_snapshot, and then no
+      // consumer read it — dispatch still returned `{ok:true, request_id}`
+      // and pushed an SSE doorbell to the broken daemon. That's the exact
+      // "在线但静默失败" case the issue title reports.
+      //
+      // Vincent's own 2026-08-28 comment on #1353 authorizes this shape:
+      // "daemon 侧确知不可用时,hub 应当**拒绝派发**并返回可操作的错误,
+      //  而不是发一个注定失败的 doorbell".
+      //
+      // 🔴 Pre-#1371 compat: a daemon that has NOT reported
+      // `can_create_nodes` at all leaves the field UNDEFINED in the
+      // snapshot. Do NOT fail-closed on undefined — that would silently
+      // start rejecting every daemon on the old (preview.10 through .55
+      // roughly) shape. Only `=== false` gates; `=== true` and `undefined`
+      // both pass through (new-guard-matches-existing-stance).
+      try {
+        const snap = daemon.config_snapshot ? JSON.parse(daemon.config_snapshot) : null;
+        const caps = snap?.daemon_capabilities;
+        if (caps && caps.can_create_nodes === false) {
+          const reason: string = (typeof caps.create_nodes_blocked_reason === "string"
+            && caps.create_nodes_blocked_reason.length > 0)
+            ? caps.create_nodes_blocked_reason
+            : "anet_bin_unknown";
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: false,
+            error: "daemon_cannot_create_nodes",
+            blocked_reason: reason,
+            daemon_node_id,
+          }) }] };
+        }
+      } catch { /* malformed snapshot: permissive, mirrors L3230 fallthrough */ }
+
       // Read daemon's host_supervisor capability + allowlist from its
       // last reported config_snapshot. PR3 (#338) canonical path is
       // `daemon_capabilities.runtimes_supported` (RFC-026 §9.3).
