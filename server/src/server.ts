@@ -3135,16 +3135,41 @@ return Bun.serve({
       const daemons = sqlRows
         .map(r => {
           let snapRole: string | null = null;
+          // #1353 Fix ② — surface daemon self-reported create-node
+          // capability so dashboard's "选服务器" picker can filter or
+          // dim broken daemons instead of listing them as online.
+          // Fix ① (hub-side dispatch gate, PR #1510) refuses the
+          // request but the picker still lists the daemon and the user
+          // finds out only after clicking. Exposing the fact one layer
+          // earlier lets the picker never surface the daemon in the
+          // first place.
+          //
+          // 🔴 Pre-#1371 daemons don't report either field. Leave the
+          // response keys UNDEFINED in that case (not `false`, not
+          // `null`) — mirrors the Fix ① rule "known-blocked, NOT
+          // unknown-treated-as-blocked". Emitting a fabricated `false`
+          // would silently start dimming every daemon that hasn't
+          // upgraded past preview.55.
+          let snapCanCreate: boolean | undefined;
+          let snapBlockedReason: string | undefined;
           if (r.config_snapshot) {
             try {
               const parsed = typeof r.config_snapshot === "string" ? JSON.parse(r.config_snapshot) : r.config_snapshot;
               snapRole = typeof parsed?.role === "string" ? parsed.role : null;
+              const caps = parsed?.daemon_capabilities;
+              if (caps && typeof caps.can_create_nodes === "boolean") {
+                snapCanCreate = caps.can_create_nodes;
+              }
+              if (caps && typeof caps.create_nodes_blocked_reason === "string"
+                  && caps.create_nodes_blocked_reason.length > 0) {
+                snapBlockedReason = caps.create_nodes_blocked_reason;
+              }
             } catch { /* malformed */ }
           }
-          return { row: r, role: snapRole };
+          return { row: r, role: snapRole, canCreate: snapCanCreate, blockedReason: snapBlockedReason };
         })
         .filter(({ role }) => role === "host_supervisor")
-        .map(({ row: r }) => {
+        .map(({ row: r, canCreate, blockedReason }) => {
           let online = false;
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
@@ -3174,7 +3199,7 @@ return Bun.serve({
             telemetry.mem_gb = r.session_mem_total_gb ?? null;
             telemetry.ip_internal = r.session_ip ?? null;
           }
-          return {
+          const out: Record<string, unknown> = {
             daemon_node_id: r.node_id,
             alias: r.alias,
             hostname: r.hostname,
@@ -3184,6 +3209,20 @@ return Bun.serve({
             allowed_secret_keys: secrets,
             host_telemetry: telemetry,
           };
+          // #1353 Fix ② — only emit the two capability keys when the
+          // daemon actually reported them. Undefined vs. false is a
+          // real distinction here (see Fix ② comment above).
+          if (typeof canCreate === "boolean") {
+            out.can_create_nodes = canCreate;
+            // Blocked reason only meaningful when blocked. Some legacy
+            // shapes could carry a reason without can_create_nodes=false
+            // (defensive fallback in Fix ①); mirror the same choice —
+            // don't confuse consumers with a reason on a healthy daemon.
+            if (canCreate === false && blockedReason) {
+              out.create_nodes_blocked_reason = blockedReason;
+            }
+          }
+          return out;
         });
       return withCors(req, Response.json({ ok: true, daemons, count: daemons.length }));
     }
