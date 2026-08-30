@@ -909,3 +909,53 @@ export async function handleCreateNodeDoorbell(
     request_id, status: "started", child_pid: childPid,
   }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * #1545 PR1 —— 把「能不能起节点」变成一个**可以被问、且会回答**的值。
+ *
+ * 现状:上面那个解析器只有一种表达方式 —— 抛异常。守护进程启动时它抛,进程就退;
+ * 但**没有任何命令能在不引发那次退出的前提下问出同一个判断**,于是 daemon 显示
+ * 在线、`node create` 却必失败,而中间每一层都没有话说(#1545 的 B 路)。
+ *
+ * 🔴 这里**不重写解析逻辑,只把 throw 翻译成 return**。
+ *    理由:判据只能有一个作者。如果探针自己再判一遍,两份判据就会各自漂移 ——
+ *    到那时「探针说 ready、create 仍然失败」会比现在的沉默更难查,因为它看起来
+ *    像已经检查过了。(这是对 problem statement 里「抽出不抛异常的核心」的一处
+ *    收窄:包一层比拆开更小、且**逐字不变是构造性的**,不需要靠测试去证明。)
+ *
+ * 🔴 `code` 的第五个取值**沿用 `anet_bin_unknown`,不新造名字**。#1353 已经在
+ *    `config-apply.ts` 的 `create_nodes_blocked_reason` 里定义了它(「拿不到类别时
+ *    的兜底」),hub 的 zod enum(`server/src/tools.ts`)也已经收这个值。
+ *    我一度想叫 `anet_bin_unclassified` —— 那是**造同义副本**:两个名字同一个含义,
+ *    以后只会有一个被改到。
+ *    它不是占位:`loadAndVerifyAnetBin` 里 **sha256 mismatch 那条抛的是裸 Error、
+ *    没有挂 anetBinCode**(同文件其余 8 个 throw 点都走 `unsafePathHelp`),
+ *    所以确实无类别可挂。把它硬塞进四类中任何一类都是编的。
+ *
+ * 🔴 这里**没有 unknown 态**。unknown 的含义是「daemon 根本没上报过这一格」,
+ *    那是传输/显示层的状态(PR2/PR4),探针跑到了就一定有答案。 */
+export type AnetBinReadiness =
+  | { readonly state: "ready"; readonly abs: string }
+  | {
+      readonly state: "blocked";
+      readonly code: AnetBinFailureCode | "anet_bin_unknown";
+      /** 人读的整句,含解析器给出的 `Fix: …` 那半 —— 不另存一份副本,
+       *  否则修法会有两处、而只有一处会被改。 */
+      readonly detail: string;
+    };
+
+export function probeAnetBinReadiness(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): AnetBinReadiness {
+  try {
+    return { state: "ready", abs: loadAndVerifyAnetBin(env, platform) };
+  } catch (error) {
+    const code = (error as AnetBinError | null)?.anetBinCode;
+    return {
+      state: "blocked",
+      code: code ?? "anet_bin_unknown",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
