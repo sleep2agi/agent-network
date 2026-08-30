@@ -4,6 +4,7 @@ import {
   buildAnetArgsDaemon,
   minimalEnv,
   loadAndVerifyAnetBin,
+  probeAnetBinReadiness,
   ensureGlobalAnetConfig,
   reconcilePendingCreateRequestsOnConnect,
   resolveChildHome,
@@ -991,5 +992,112 @@ describe("RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node
     expect(snap[0].alias).toBe("alias-xyz");
     expect(snap[0].pid).toBe(12345);
     _resetChildrenMapForTest();
+  });
+});
+
+/* #1545 PR1 —— 探针必须**两向都被见证**:blocked 那侧本来就有 6 条 toThrow 在守,
+ * 真正没人守的是「ready 时它确实说 ready」。只验 blocked 一侧的话,一个恒返回
+ * blocked 的实现能全绿通过 —— 而那正是 #1545 里最坏的形态:一个永远说"不行"
+ * 的探针和一个永远沉默的 daemon,对用户是同一件事。 */
+describe("#1545 probeAnetBinReadiness —— 不抛异常地回答「现在能不能起节点」", () => {
+  const FIXTURE_DIR = "/tmp/anet-probe-test-fixtures";
+
+  function setup(name: string, body = "fake-binary-bytes"): string {
+    const binDir = join(FIXTURE_DIR, `${name}-pkg`, "dist", "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(FIXTURE_DIR, `${name}-pkg`, "package.json"), JSON.stringify({
+      name: "@sleep2agi/agent-network",
+      bin: { anet: "dist/bin/anet.cjs" },
+    }));
+    const p = join(binDir, "anet.cjs");
+    writeFileSync(p, body, { mode: 0o755 });
+    return p;
+  }
+  function cleanup() {
+    try { rmSync(FIXTURE_DIR, { recursive: true, force: true }); } catch { /* ok */ }
+  }
+
+  // ── 方向一:ready。这条是本 PR 唯一新增的**正向**见证。
+  test("READY: 合法 pin 下返回 state=ready 且带出解析到的绝对路径", () => {
+    cleanup();
+    const p = setup("ready");
+    const got = probeAnetBinReadiness({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    }, "linux");
+    expect(got.state).toBe("ready");
+    expect(got).toEqual({ state: "ready", abs: p });
+    cleanup();
+  });
+
+  // ── 方向二:blocked,且**类别要说对**。#1545 的痛点不是"有没有报错",
+  //    是报错指错方向(source 让人去建 /etc/…,permission 只要一行 chmod)。
+  test("BLOCKED: env 兜底未显式开启 → code=anet_bin_source,detail 里带得出修法", () => {
+    cleanup();
+    const p = setup("blocked-source");
+    const got = probeAnetBinReadiness({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    }, "linux");
+    expect(got.state).toBe("blocked");
+    if (got.state !== "blocked") throw new Error("unreachable");
+    expect(got.code).toBe("anet_bin_source");
+    expect(got.detail).toContain("ANET_DAEMON_ALLOW_ENV_BIN=1");
+    expect(got.detail).toContain("Fix:");
+    cleanup();
+  });
+
+  test("BLOCKED: 完全没有 ANET_BIN_ABS —— 探针照样返回值而不是抛", () => {
+    const got = probeAnetBinReadiness({ ANET_DAEMON_PATH_CONF: "/nonexistent" }, "linux");
+    expect(got.state).toBe("blocked");
+    if (got.state !== "blocked") throw new Error("unreachable");
+    expect(got.detail).toContain("anet_bin_unsafe_path");
+  });
+
+  /* 🔴 这条不是补齐分类,是**把一个真实的空白钉住**:sha256 不匹配那条抛的是裸
+   * Error、没挂 anetBinCode。所以它只能是 unclassified。哪天有人给它挂上类别,
+   * 这条会红 —— 那正是应该有人来读一眼的时刻(而不是让显示层默默替它选一类)。 */
+  test("BLOCKED: sha256 不匹配 → 目前无类别可挂,如实报 anet_bin_unclassified", () => {
+    cleanup();
+    const p = setup("hash-mismatch", "actual-bytes");
+    const got = probeAnetBinReadiness({
+      ANET_BIN_ABS: p,
+      ANET_BIN_SHA256: createHash("sha256").update("different-bytes").digest("hex"),
+      ANET_DAEMON_ALLOW_ENV_BIN: "1",
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    }, "linux");
+    expect(got.state).toBe("blocked");
+    if (got.state !== "blocked") throw new Error("unreachable");
+    expect(got.code).toBe("anet_bin_unclassified");
+    expect(got.detail).toContain("sha256 mismatch");
+    cleanup();
+  });
+
+  /* 🔴 判据只有一个作者 —— 这条直接断言这件事,而不是断言两边"看起来一致":
+   * 同一份 env 喂给两者,「探针说 blocked」必须**恰好**等于「解析器抛了」。
+   * 有了它,以后任何人想给探针加一条自己的判断,都会在这里撞红。 */
+  test("PARITY: probe 的 blocked ⟺ loadAndVerifyAnetBin 抛异常(同一份 env)", () => {
+    cleanup();
+    const ok = setup("parity-ok");
+    const cases: Array<NodeJS.ProcessEnv> = [
+      { ANET_BIN_ABS: ok, ANET_DAEMON_ALLOW_ENV_BIN: "1", ANET_DAEMON_PATH_CONF: "/nonexistent" },
+      { ANET_BIN_ABS: ok, ANET_DAEMON_PATH_CONF: "/nonexistent" },
+      { ANET_DAEMON_PATH_CONF: "/nonexistent" },
+      { ANET_BIN_ABS: "/definitely/not/here/anet.cjs", ANET_DAEMON_ALLOW_ENV_BIN: "1", ANET_DAEMON_PATH_CONF: "/nonexistent" },
+    ];
+    let readyCount = 0;
+    let blockedCount = 0;
+    for (const env of cases) {
+      let threw = false;
+      try { loadAndVerifyAnetBin(env, "linux"); } catch { threw = true; }
+      const probed = probeAnetBinReadiness(env, "linux");
+      expect(probed.state === "blocked").toBe(threw);
+      if (probed.state === "ready") readyCount += 1; else blockedCount += 1;
+    }
+    // 分母自证:这组用例**两侧都有**。全 blocked 的话上面那个等式恒成立、什么也没测。
+    expect(readyCount).toBe(1);
+    expect(blockedCount).toBe(3);
+    cleanup();
   });
 });
