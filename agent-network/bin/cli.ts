@@ -42,6 +42,7 @@ import { describeCopresenceStartupFailure } from "../src/copresence-startup-diag
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
 import { formatHubVersionDetail } from "../src/hub-version-skew";
+import { nodeCountLine } from "../src/doctor-node-count";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
@@ -15789,7 +15790,13 @@ async function doctorCommand() {
 
   // 3. Nodes — also detect legacy/broken configs and (with --fix) migrate.
   const ids = listProfileIds();
-  check("Nodes configured", ids.length > 0, `${ids.length} node(s)`);
+  // 🔴 0 个节点**不报 error**:那是全新安装的预期状态,把它算成 error 等于在
+  //   新用户的第一次诊断里制造假警报。但也不报 ok —— 同一个 0 对本来有节点的人
+  //   意味着配置目录不见了,而 doctor 手上只有一个数字,分不出这两种。
+  //   ⇒ 两种现实都说出来,各给一个下一步。
+  const nodeLine = nodeCountLine(ids.length);
+  if (nodeLine.ok) check("Nodes configured", true, nodeLine.detail);
+  else info("Nodes configured", nodeLine.info);
   let needsMigration: string[] = [];
   for (const id of ids) {
     const p = loadProfile(id);
