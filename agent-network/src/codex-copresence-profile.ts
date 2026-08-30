@@ -73,9 +73,27 @@ export const CODEX_RESUME_REQUIRED_FIELDS: readonly CodexResumeRequiredField[] =
 
 /** Enumerate which of the three resume-required fields are absent /
  *  wrong-shaped on this profile. Returns [] when all three are present
- *  and well-shaped. Shape check (string / enum / absolute path) only —
- *  liveness of `codexProbePeer` (registered + online + non-self) is a
- *  separate check performed against the hub in Phase 0. */
+ *  and well-shaped.
+ *
+ *  🔴 SHAPE-ONLY validation:
+ *    - codexProjectDir : string starting with `/`. This is a CHEAP typo
+ *      filter, NOT the security gate. Phase 0 (in #1528) MUST additionally
+ *      `realpath`/canonicalize + reject NUL, `/`, and any untrusted target
+ *      before passing this value to `codex resume -C <dir>` (per TMHR
+ *      4bab8196: "startsWith('/') 不是最终安全门").
+ *    - codexLaunchAdapter : enum membership.
+ *    - codexProbePeer : non-empty AFTER trim. `.trim()` catches whitespace-
+ *      only values like `" "` that would otherwise slip through a naive
+ *      length check (per TMHR 4bab8196 附加建议). Liveness (registered +
+ *      online + non-self) is a separate hub-side check in Phase 0.
+ *
+ *  Deliberately NOT included: `codexResumeMissingConfigHint` — the earlier
+ *  operator-facing diagnostic that referenced a `config apply` verb that
+ *  doesn't exist yet. TMHR 4bab8196 blocked it: staging a hint that names
+ *  a non-existent command is the exact "存在 ≠ 会执行" antipattern the
+ *  gate lessons keep re-teaching. The hint helper lands with its real
+ *  caller (either after `config apply` is implemented in a separate PR,
+ *  or reworked to reference existing commands only when #1528 lands). */
 export function missingCodexResumeFields(
   profile: CodexCopresenceProfileFields,
 ): CodexResumeRequiredField[] {
@@ -87,81 +105,11 @@ export function missingCodexResumeFields(
   if (adapter !== "codex-standard" && adapter !== "codex-custom-wrapper") {
     missing.push("codexLaunchAdapter");
   }
-  if (typeof profile.codexProbePeer !== "string" || profile.codexProbePeer.length === 0) {
+  // TMHR 4bab8196: trim before length check. `" "` is not a valid peer alias.
+  if (typeof profile.codexProbePeer !== "string" || profile.codexProbePeer.trim().length === 0) {
     missing.push("codexProbePeer");
   }
   return missing;
-}
-
-/** #1521 — actionable multi-line diagnostic for the Q7=C flow: user hits
- *  `anet node resume <alias>` on a legacy codex-copresence node that never
- *  had these fields. Names the missing field(s), the shape requirement,
- *  and — critically — HOW to obtain a valid value (per 通信龙 df6d26d9
- *  "指不出下一步的报错等于把人卡在原地"). Modeled on the style adopted
- *  by #1521 (700b47f6) for `anet_bin_source` diagnostics: every error
- *  ends in a copy-pasteable next step.
- *
- *  Do NOT auto-write the config (TMHR v5 dry-run bonus: "dry-run 是渲染
- *  不是执行"). Print a JSON patch template + the exact command the user
- *  runs against it. */
-export function codexResumeMissingConfigHint(
-  alias: string,
-  missing: readonly CodexResumeRequiredField[],
-): string {
-  const lines: string[] = [];
-  lines.push(`anet node resume ${alias}: cannot start — codex-copresence config is missing ${missing.length} required field(s).`);
-  lines.push("");
-  lines.push("Missing:");
-  for (const f of missing) {
-    switch (f) {
-      case "codexProjectDir":
-        lines.push(`  - codexProjectDir : absolute path to the project directory (passed as \`-C <dir>\` to codex resume)`);
-        break;
-      case "codexLaunchAdapter":
-        lines.push(`  - codexLaunchAdapter : "codex-standard" (stock codex app-server) or "codex-custom-wrapper" (TMHR狗-class LLM API wrapper)`);
-        break;
-      case "codexProbePeer":
-        lines.push(`  - codexProbePeer : alias of another node in this network for identity attestation`);
-        lines.push(`      (must be registered + online + NOT this node itself; see #1527 for the single-node case)`);
-        break;
-    }
-  }
-  lines.push("");
-  lines.push("Fix — write a patch file and apply it:");
-  lines.push("");
-  lines.push("  cat > /tmp/codex-resume-patch.json <<'EOF'");
-  lines.push("  {");
-  const patchLines: string[] = [];
-  for (const f of missing) {
-    switch (f) {
-      case "codexProjectDir":
-        patchLines.push(`    "codexProjectDir": "<absolute path, e.g. /home/user/my-project>"`);
-        break;
-      case "codexLaunchAdapter":
-        patchLines.push(`    "codexLaunchAdapter": "codex-standard"`);
-        break;
-      case "codexProbePeer":
-        patchLines.push(`    "codexProbePeer": "<peer alias — run 'anet node ls' to pick an online peer>"`);
-        break;
-    }
-  }
-  lines.push(patchLines.join(",\n"));
-  lines.push("  }");
-  lines.push("  EOF");
-  lines.push("");
-  lines.push(`  anet node config apply ${alias} /tmp/codex-resume-patch.json`);
-  lines.push("");
-  lines.push("Then re-run:");
-  lines.push("");
-  lines.push(`  anet node resume ${alias}`);
-  if (missing.includes("codexProbePeer")) {
-    lines.push("");
-    lines.push("🔴 This command needs ≥2 registered nodes online — the target being resumed,");
-    lines.push("   plus the codexProbePeer that will attest its identity via a fresh Hub outbound");
-    lines.push("   ACK. If you only have one node, see #1527 (single-node attestation is a known");
-    lines.push("   deliberate gap in this initial cut, tracked for a follow-up).");
-  }
-  return lines.join("\n");
 }
 
 export const CODEX_COPRESENCE_RUNTIME = "codex-app-server";

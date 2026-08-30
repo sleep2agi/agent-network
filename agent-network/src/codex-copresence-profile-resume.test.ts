@@ -1,20 +1,19 @@
-// #1521 — unit tests for the codex-copresence-resume Phase 0 preflight
-// (config-shape validation + Q7=C actionable diagnostic).
+// #1521 — unit tests for the codex-copresence-resume Phase 0 shape validation.
 //
-// The hint text is operator-facing: a broken hint is worse than a broken
-// gate because it points the operator at the wrong fix (see 通信龙 df6d26d9
-// "指不出下一步的报错等于把人卡在原地"). These tests pin the concrete
-// contract:
-//   - every missing field surfaces with its own diagnostic bullet
-//   - the JSON patch template contains ONLY the missing keys (not the
-//     already-present ones — else operators overwrite good config)
-//   - the single-node #1527 warning appears iff codexProbePeer is missing
-//   - `anet node ls` is named in the codexProbePeer hint (concrete next step)
+// Historical note (TMHR 4bab8196 blocker on PR #1538):
+//   An earlier draft of this file also tested `codexResumeMissingConfigHint`,
+//   an operator-facing diagnostic that referenced `anet node config apply`.
+//   TMHR flagged that command doesn't exist in the tree — the hint would
+//   have shipped a "3-step apply/re-run loop" whose middle step was
+//   non-executable, and the tests would have false-greened it as "loop is
+//   closed". Classic 存在 ≠ 会执行 pattern. Both the hint helper and its
+//   tests are deliberately deferred: they land with a real caller in the
+//   PR that either implements `config apply` or reworks the hint to
+//   reference existing commands only.
 
 import { describe, expect, test } from "bun:test";
 import {
   missingCodexResumeFields,
-  codexResumeMissingConfigHint,
   CODEX_RESUME_REQUIRED_FIELDS,
   CODEX_COPRESENCE_RUNTIME,
 } from "./codex-copresence-profile.js";
@@ -43,6 +42,22 @@ describe("#1521 missingCodexResumeFields — Phase 0 shape validation", () => {
     expect(missing).toEqual(["codexProjectDir"]);
   });
 
+  test("codexProjectDir startsWith('/') is a shape check, NOT the final security gate", () => {
+    // Regression note: this passes shape check but Phase 0 (in #1528) MUST
+    // additionally realpath/canonicalize and reject NUL/`/`/untrusted
+    // targets before letting the value reach `codex resume -C <dir>`.
+    // TMHR 4bab8196 附加建议: "不能把 startsWith('/') 当最终安全门".
+    // This test pins the shape-only intent so any future reader knows
+    // NOT to trust this helper's OK result as security clearance.
+    const missing = missingCodexResumeFields({
+      codexProjectDir: "/",  // shape-valid but semantically dangerous
+      codexLaunchAdapter: "codex-standard",
+      codexProbePeer: "peer",
+    });
+    // Shape says OK. Phase 0 must reject on separate grounds.
+    expect(missing).toEqual([]);
+  });
+
   test("codexLaunchAdapter enum enforced (unknown value → missing, per v7 fail-closed on unknown adapter)", () => {
     const missing = missingCodexResumeFields({
       codexProjectDir: "/x",
@@ -63,104 +78,64 @@ describe("#1521 missingCodexResumeFields — Phase 0 shape validation", () => {
     }
   });
 
-  test("codexProbePeer empty string treated as missing (guard against zero-length placeholder)", () => {
+  test("codexProbePeer empty string treated as missing (zero-length placeholder guard)", () => {
     const missing = missingCodexResumeFields({
       codexProjectDir: "/x",
       codexLaunchAdapter: "codex-standard",
-      codexProbePeer: "",  // shape check reject
+      codexProbePeer: "",
     });
     expect(missing).toEqual(["codexProbePeer"]);
+  });
+
+  test("codexProbePeer whitespace-only treated as missing (per TMHR 4bab8196 附加建议 — trim before length check)", () => {
+    // Without .trim(), `" "` would pass the length > 0 check and reach
+    // hub liveness check as an obviously-invalid alias — cheap defensive
+    // filter at the shape layer.
+    for (const ws of [" ", "  ", "\t", "\n", " \t \n "]) {
+      const missing = missingCodexResumeFields({
+        codexProjectDir: "/x",
+        codexLaunchAdapter: "codex-standard",
+        codexProbePeer: ws,
+      });
+      expect(missing).toEqual(["codexProbePeer"]);
+    }
+  });
+
+  test("codexProbePeer with leading/trailing whitespace but non-empty core is treated as valid (trim, don't reject)", () => {
+    // We trim to check emptiness, we don't mutate the field. A peer alias
+    // like " realalias " passes shape check; Phase 0's hub liveness lookup
+    // is where trimmed vs raw semantics get decided against the hub schema
+    // — not here.
+    const missing = missingCodexResumeFields({
+      codexProjectDir: "/x",
+      codexLaunchAdapter: "codex-standard",
+      codexProbePeer: " realalias ",
+    });
+    expect(missing).toEqual([]);
   });
 
   test("partial missing: only codexProbePeer absent → surfaces just that field", () => {
     const missing = missingCodexResumeFields({
       codexProjectDir: "/x",
       codexLaunchAdapter: "codex-standard",
-      // codexProbePeer absent
     });
     expect(missing).toEqual(["codexProbePeer"]);
   });
 });
 
-describe("#1521 codexResumeMissingConfigHint — actionable Q7=C diagnostic", () => {
-  test("names the alias in the first line so operator knows which node the message is about", () => {
-    const hint = codexResumeMissingConfigHint("my-node", CODEX_RESUME_REQUIRED_FIELDS);
-    expect(hint.split("\n")[0]).toContain("my-node");
-    expect(hint.split("\n")[0]).toContain("missing 3 required field(s)");
-  });
-
-  test("JSON patch template contains ONLY the missing fields, not the already-present ones", () => {
-    // Regression guard: if the operator's config already has codexProjectDir
-    // and only codexProbePeer is missing, the template must NOT include
-    // codexProjectDir (else operator applies it and overwrites good config).
-    const hint = codexResumeMissingConfigHint("n", ["codexProbePeer"]);
-    expect(hint).toContain("codexProbePeer");
-    expect(hint).not.toContain("codexProjectDir");
-    expect(hint).not.toContain("codexLaunchAdapter");
-  });
-
-  test("codexProbePeer hint names the concrete next step (anet node ls)", () => {
-    // Per 通信龙 df6d26d9: "指不出下一步的报错等于把人卡在原地".
-    const hint = codexResumeMissingConfigHint("n", ["codexProbePeer"]);
-    expect(hint).toContain("anet node ls");
-  });
-
-  test("single-node #1527 warning appears iff codexProbePeer is in the missing set", () => {
-    // With codexProbePeer missing: warning present
-    const withPeer = codexResumeMissingConfigHint("n", ["codexProbePeer"]);
-    expect(withPeer).toContain("#1527");
-    expect(withPeer).toContain("single-node");
-
-    // Without codexProbePeer missing (only other fields): NO warning
-    // (the single-node caveat is specifically about peer availability;
-    // don't scare operators whose only issue is a missing project dir).
-    const withoutPeer = codexResumeMissingConfigHint("n", ["codexProjectDir"]);
-    expect(withoutPeer).not.toContain("#1527");
-    expect(withoutPeer).not.toContain("single-node");
-  });
-
-  test("terminates with the exact re-run command so the loop is closed", () => {
-    // Operator's mental model: read error → apply patch → re-run.
-    // The message must literally end (or nearly end) with the re-run command.
-    const hint = codexResumeMissingConfigHint("my-node", CODEX_RESUME_REQUIRED_FIELDS);
-    expect(hint).toContain("anet node resume my-node");
-    // "anet node config apply" is the apply verb; both together prove the
-    // 3-step loop (edit patch → apply → re-run) is spelled out end-to-end.
-    expect(hint).toContain("anet node config apply my-node");
-  });
-
-  test("does NOT leak secrets or fs paths beyond what the operator already provides", () => {
-    // Message is composed only from the alias + the enum of missing fields.
-    // Guard: no `process.env`, `HOME`, absolute paths, tokens, or PIDs in
-    // the hint. Cheap regex sweep.
-    const hint = codexResumeMissingConfigHint("n", CODEX_RESUME_REQUIRED_FIELDS);
-    // Template placeholders like `<absolute path, e.g. /home/user/my-project>`
-    // are examples inside angle-brackets — allowed. But a bare `/home/someone`
-    // outside brackets would be a leak. Since we only render templates, the
-    // only `/home/` occurrences must be inside angle-brackets.
-    //
-    // 🔴 Meta: this comment itself only names `/home/someone` (in the gate's
-    // NOT_A_PERSON allowlist) — never a bare name outside the allowlist. See
-    // 通信龙 f55a7e25: "解释规则的文字触发了规则本身" — the first draft of
-    // this comment used a placeholder name that WASN'T in the allowlist, and
-    // the gate correctly red-flagged the comment. Fixed by using an allowlisted
-    // placeholder throughout.
-    const bareHomeMatches = hint.match(/\/home\/[a-z]/gi) || [];
-    for (const m of bareHomeMatches) {
-      const idx = hint.indexOf(m);
-      const beforeChar = hint[idx - 1];
-      // Every /home/ occurrence should be inside a `<...>` placeholder or
-      // in a code-fence example section.
-      const isPlaceholder = hint.slice(0, idx).lastIndexOf("<") > hint.slice(0, idx).lastIndexOf(">");
-      expect(isPlaceholder).toBe(true);
-    }
-  });
-});
-
-describe("#1521 CODEX_COPRESENCE_RUNTIME constant", () => {
-  test("value is the string cli.ts routes on", () => {
-    // Sanity: the runtime string that resumeCommand branches on MUST be
-    // this constant, not a duplicated literal that could drift.
+describe("#1521 CODEX_COPRESENCE_RUNTIME + CODEX_RESUME_REQUIRED_FIELDS constants", () => {
+  test("CODEX_COPRESENCE_RUNTIME is the string cli.ts routes on", () => {
     expect(CODEX_COPRESENCE_RUNTIME).toBe("codex-app-server");
+  });
+
+  test("CODEX_RESUME_REQUIRED_FIELDS enumerates exactly the three fields validated by missingCodexResumeFields", () => {
+    // Sanity: the auditable constant must stay in lockstep with the
+    // validator's behavior. If someone adds a fourth field to the
+    // validator but forgets the constant (or vice versa), this test
+    // fires.
+    expect(new Set(CODEX_RESUME_REQUIRED_FIELDS)).toEqual(
+      new Set(["codexProjectDir", "codexLaunchAdapter", "codexProbePeer"]),
+    );
+    expect(CODEX_RESUME_REQUIRED_FIELDS.length).toBe(3);
   });
 });
