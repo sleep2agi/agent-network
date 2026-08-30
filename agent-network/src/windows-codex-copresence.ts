@@ -103,6 +103,38 @@ export function probeWindowsOwnedLoopbackConnection(
   } catch { return false; }
 }
 
+/**
+ * #1342 —— 只在健康检查**即将失败**时跑一次,用来回答一个此前没人量过的问题:
+ * 那 10.5 秒到底花在 **PowerShell 启动**上,还是花在 `Get-CimInstance Win32_Process`
+ * 这个全表查询上?
+ *
+ * 实测背景(由 #1628/#1637 加的 probeMs 量到,2026-08-31):
+ *   probes=1  waited=10897ms  probeMsLast=10490   ← 单次探测吃掉 96% 的预算
+ * 而 #1636 把全表枚举提到循环外之后这个数**没有变小**(9963 → 10490),
+ * 说明成本不在"重复枚举",而在那一次调用本身。但"那一次调用"包含两段:
+ * 起一个 powershell 进程,和在里面跑 CIM 查询。**这两段要查的东西完全不同** ——
+ * 前者是 runner/镜像的问题,后者是查询写法的问题。
+ *
+ * 🔴 这里跑的是一个**什么都不做**的脚本(`'x'`),所以它测到的就是启动那一段的下界。
+ *    只在失败路径调用一次,不进探测循环 —— 不给正常路径增加任何成本,
+ *    也**不可能**改变探测的返回值。
+ *
+ * 拿不到就返回 null(未知),不返回 0 —— 0 会被读成「启动不花时间」。
+ */
+export function measurePowerShellStartupMs(): number | null {
+  try {
+    const t0 = Date.now();
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "'x'"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30_000,
+    });
+    return Date.now() - t0;
+  } catch {
+    return null;
+  }
+}
+
 export function writeWindowsCopresenceRecord(
   nodesDir: string,
   nodeId: string,
