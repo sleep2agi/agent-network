@@ -36,6 +36,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
+import { formatOfflineAges, summarizeOfflineAges } from "../src/offline-age";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
@@ -11996,6 +11997,14 @@ async function statusCommand() {
     console.log(`  Agents: ${summary.idle || 0} idle, ${summary.working || 0} working`
       + (attnCount > 0 ? `, ${attnCount} needs attention` : "")
       + `, ${summary.offline || 0} offline`);
+    // 🔴 #1648 —— 「刚停的」和「掉了三天没人发现的」原先渲染成同一个数字。
+    //    实测(84 台 TM 相关节点):45 台 offline 里 27 台 >3 天、18 台 1-3 天、
+    //    近 6 小时内 **0 台** —— 「当前没有活故障」和「有 45 台掉了」是完全
+    //    不同的两个结论,而屏幕上只有后者。
+    //    与 blocked 不同,这一格是**算得出来的**:offline 节点的 last_seen_at
+    //    就是它最后一次心跳,不像「何时变成 blocked」那样根本没有字段。
+    const offlineDetail = formatOfflineAges(summarizeOfflineAges(offline, Date.now()));
+    if (offlineDetail) console.log(`          └─ ${offlineDetail}`);
     console.log(`  SSE:    ${sseCount === null ? "unknown" : `${sseCount} connected`}`);
     console.log(`  Tasks:  ${tasks.length} recent\n`);
 
