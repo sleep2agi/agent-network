@@ -45,6 +45,23 @@ git log origin/main --since=2026-08-27 --oneline -- server/src/auth.ts   →  0
 
 仍然成立，才搬到 `.74`。
 
+## Install
+
+```bash
+npm i -g @sleep2agi/agent-network@2.3.0-preview.74
+```
+
+## Upgrade
+
+```bash
+npm i -g @sleep2agi/agent-network@2.3.0-preview.74
+# 🔴 本机的 anet 升级即生效;但**远端那台 daemon**要重启才会用新逻辑。
+# 而这一版正好把这件事变简单了(#1601):
+anet daemon restart <daemon>
+# 你的版本里没有 restart 的话(≤ .73)用两步:
+anet node stop <daemon> && anet daemon start <daemon>
+```
+
 ## 发布方式
 
 走 GitHub Actions（`release-gate (v0)` 发 preview）。**不从本机 publish，不从非 main 分支出对外产物。**
