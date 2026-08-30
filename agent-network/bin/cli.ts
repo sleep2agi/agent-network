@@ -3751,6 +3751,14 @@ function printHelp() {
   console.log(`
 anet — AI Agent Network CLI (V2)
 
+Quick start:
+  anet hub start                  Start local hub
+  anet login                      Log in to the hub
+  anet node create my-agent       Create a node
+  anet node start my-agent        Start the node
+  anet demo                       List demos
+  (连别人已有的 hub: anet init --hub <url>)
+
 Node Management:
   anet node create <name>        Create a new agent node
   anet node start <name>         Start a node
@@ -3862,13 +3870,6 @@ Other:
   anet doctor                   System diagnostic check
   anet run                      Standalone SSE agent
   anet -v                       Version + dependency report
-
-Quick start:
-  anet hub start                  Start local hub
-  anet login                      Log in to the hub
-  anet node create my-agent       Create a node
-  anet node start my-agent        Start the node
-  anet demo                       List demos
 
 Legacy aliases:
   anet create <name>              Alias for anet node create
