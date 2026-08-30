@@ -65,7 +65,9 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 
 ## 7. Release SOP（复用现成）
 
-- fresh clone main → 各包 `bun install` → `npm version <精确版> --no-git-tag-version` → `npm publish --tag preview`（prepublishOnly 自动 build）
+- 发版走 `gh workflow run release.yml -f package=<pkg> -f version=<精确版> -f publish=true --ref main`
+  （🔴 **本机不发包**，Vincent 2026-08-27 定；四门全绿才 publish，且只发 preview 通道）
+  权威步骤见 [RELEASE-SOP](../RELEASE-SOP.md)
 - 验：dist 关键串在 + `grep -c 'Bun\.' dist` = 0
 - **npm publish 顺序** = **server → agent-node → agent-network**（被依赖的先发；矩阵新行也按这条顺序试）
 - 每 preview 带一句 changelog；latest 严格两阶段（preview 亲测 + 30min 窗口）

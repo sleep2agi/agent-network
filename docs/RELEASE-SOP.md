@@ -292,20 +292,33 @@ git commit -m "chore(release): @sleep2agi/agent-node 2.3.2-preview.0"
 > Conventional Commits：`chore(release): ...` 或 `release: ...`。
 > 不加 `Co-Authored-By` 类 footer（OSS rule，见仓库 commit history）。
 
-### Step 6：publish preview
+### Step 6：publish preview —— 走 GitHub Actions，**不在本机发**
+
+🔴 **本机不发包。** 这是 Vincent 2026-08-27 定的规则：发版一律走 GitHub Actions，
+本机只开发。规则的来历就是当天的事故 —— `latest` 被一次本机手工 `npm publish`
+（漏了 `--tag preview`）顶掉。一条命令，没有门，没有回退窗口。
 
 ```bash
-cd agent-node
-npm publish --tag preview
+gh workflow run release.yml \
+  -f package=agent-node \
+  -f version=2.3.2-preview.0 \
+  -f publish=true \
+  --ref main
 ```
 
-> 默认就是 `--tag preview`，**永远不要直接 `--tag latest`**。
+- **四道门全绿才会 publish**（`release.yml` 的 `if:` 里逐个断言 success）；
+  任一门红 → `publish` job 直接 skipped，不会发出半成品。
+- 这条工作流**只发 preview 通道，永不发 latest**（见它 `publish` input 自己的描述）。
+- `--ref main`：对外产物一律从 main 出（同日定的第二条规则）；其它分支只做测试验证。
+
+> 本文档早先在这一步写的是 `cd agent-node && npm publish --tag preview`。
+> **那条指令现在是违规的**，已删除 —— 它正是上面那起事故的动作形状。
 
 ### Step 7：等待窗口 ≥ 30 分钟 + owner explicit ACK
 
 两阶段发版规则（release-preview-first，见 [CONTRIBUTING.md §Release process](../CONTRIBUTING.md)）：
 
-- 第一阶段：`npm publish --tag preview` 后，**至少 30 分钟**真实环境烟测
+- 第一阶段：`release.yml`（`publish=true`）发到 preview 通道后，**至少 30 分钟**真实环境烟测
 - 第二阶段：owner 或 lead **显式 ACK** 后才能升 latest
 - 30 分钟内发现 bug：发新 preview 覆盖，不要急着 dist-tag latest
 
@@ -314,10 +327,21 @@ npm publish --tag preview
 ### Step 8：升 latest（owner ACK 之后）
 
 ```bash
-npm dist-tag add @sleep2agi/agent-node@2.3.2-preview.0 latest
-# verify
+gh workflow run promote-latest.yml \
+  -f package=agent-node \
+  -f version=2.3.2-preview.0 \
+  -f must_contain='<只有这个版本才有的符号或字符串>' \
+  -f ack=true \
+  --ref main
+# verify（升完之后核一遍，别只看 workflow 绿）
 npm view @sleep2agi/agent-node dist-tags
 ```
+
+🔴 `must_contain` 不是走形式：它防的是**把 latest 推到一个不含目标改动的旧版本** ——
+这种事故发出去以后，光看版本号看不出来。填一个只有目标版本才有的符号/字符串。
+
+🔴 `ack=true` 的语义是「owner/lead 的显式 ACK」。**你不能替 owner 勾这一格。**
+本机 `npm dist-tag add` 同样属于「本机发包」，一并禁掉。
 
 ### Step 9：通知通信文档马同步 release docs
 
