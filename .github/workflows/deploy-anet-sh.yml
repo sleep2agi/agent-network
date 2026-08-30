@@ -78,3 +78,30 @@ jobs:
             exit 1
           }
           echo "✅ deployed docs-site → anet.sh (prebuilt confirmed)"
+
+      # 🔴 「部署成功」不等于「内容上线了」。上面那条 prebuilt 断言证明的是
+      #    **没有走远端构建**(成本红线),它对「这次改的那句话到底在不在线上」
+      #    一个字都没说。2026-08-30 手工部署时实测过两种假象:
+      #      · 部署确实成功,drift 门却报「落后」——(a) 在带未提交改动的检出上跑门,
+      #        (b) 指纹选中了代码围栏里的行、被语法高亮拆成多个 span 永远匹配不上(#1552 已修);
+      #      · 反过来,`deploy rc=0` 也从不保证被改的页面真的换了内容。
+      #    ⇒ 唯一能回答这个问题的是**按内容比对**,所以在这里跑 drift 门。
+      #
+      #    先 continue-on-error(只报不拦):这一步依赖 CDN 传播,新加的判据在证明自己
+      #    稳定之前不该拦住一次**已经完成**的部署。稳定几天后再去掉 continue-on-error。
+      - name: verify by content (report-only)
+        if: steps.guard.outputs.skip == 'false'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # CDN 传播:重试而不是一次定生死。间隔递增,总计约 45s。
+          for wait in 5 10 30; do
+            sleep "$wait"
+            out=$(python3 .github/scripts/check-docs-site-drift.py 2>&1) && rc=0 || rc=$?
+            printf '%s\n' "$out"
+            [ "$rc" -eq 0 ] && { echo "✅ live site matches main"; exit 0; }
+            echo "— 第 ${wait}s 这轮未通过,可能仍在 CDN 传播,重试…"
+          done
+          echo "::warning::部署已完成,但内容比对在约 45s 内没有通过。"
+          echo "::warning::这一步目前只报不拦。请人工确认:改动是否真的出现在 https://anet.sh 上。"
+          exit 1
