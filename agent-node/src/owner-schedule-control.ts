@@ -5,6 +5,7 @@ import {
   fstatSync,
   fsyncSync,
   lstatSync,
+  type Stats,
   openSync,
   readFileSync,
   rmSync,
@@ -67,7 +68,12 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function sameIdentity(a: ReturnType<typeof lstatSync>, b: ReturnType<typeof lstatSync>): boolean {
+// 🔴 类型用 `Stats` 而不是 `ReturnType<typeof lstatSync>`:后者是**重载的联合**,
+// 含 `throwIfNoEntry: false` 那个重载的 `Stats | undefined`。本文件所有调用点
+// 都是 `lstatSync(path)`(不带该选项),拿不到文件时**抛异常而不是返回 undefined**,
+// 所以 undefined 永远不在这里出现 —— 声明成联合只会让每个使用点都要多一次
+// 与现实无关的判空。(strict 下这行原本产生 4 条 TS18048。)
+function sameIdentity(a: Stats, b: Stats): boolean {
   return a.dev === b.dev && a.ino === b.ino;
 }
 
@@ -80,7 +86,7 @@ function assertPrivateDirectory(path: string): void {
 }
 
 function readJournal(path: string): Journal | null {
-  let before: ReturnType<typeof lstatSync>;
+  let before: Stats;
   try { before = lstatSync(path); } catch (error: any) {
     if (error?.code === "ENOENT") return null;
     throw error;
