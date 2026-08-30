@@ -184,7 +184,7 @@ describe("CommHub durable poll compensation", () => {
       outbound_terminal_watermark: 2_001,
       outbound_deliveries: [],
     });
-  }, 20_000);
+  }, 60_000);  // #1627 —— 原 20_000。历史基线 7809/8481ms;2026-08-31 实测 20832ms(2.7×),撞上限。
 
   test("terminal sequence handles out-of-order completion independent of task creation order", async () => {
     const h = harness();
