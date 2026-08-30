@@ -104,3 +104,41 @@ describe.skipIf(process.platform !== "win32")("Windows native process/ACL smoke"
     expect(output.stdout.toString()).not.toContain("(I)");
   });
 });
+
+describe("#1342 —— 整张进程表只枚举一次", () => {
+  // 🔴 为什么值得一条测试:这是一次**性能**改动,而性能回归不会让任何断言变红。
+  //    把 `Get-CimInstance Win32_Process` 挪回 `do{…}while` 里面,
+  //    功能完全正确、所有现有测试照样绿 —— 只是每次探测又变回 ~10 秒。
+  //    实测那 10 秒占了 `waited` 的 96%(#1628 的 probeMs 量到的)。
+  const script = (() => {
+    let captured = "";
+    probeWindowsOwnedLoopbackConnection(303, "638000000000000000", 24700, (s) => {
+      captured = s; return "true\n";
+    });
+    return captured;
+  })();
+
+  test("枚举被提到闭包循环之外", () => {
+    expect(script).toContain("$procs=Get-CimInstance Win32_Process");
+  });
+
+  test("🔴 do{…}while 的**循环体里**不再有 Get-CimInstance", () => {
+    const doStart = script.indexOf("do{");
+    const whileEnd = script.indexOf("while($n-gt 0)");
+    expect(doStart).toBeGreaterThan(-1);
+    expect(whileEnd).toBeGreaterThan(doStart);
+    expect(script.slice(doStart, whileEnd)).not.toContain("Get-CimInstance");
+  });
+
+  test("整个脚本里 Get-CimInstance 恰好出现一次", () => {
+    expect(script.split("Get-CimInstance").length - 1).toBe(1);
+  });
+
+  // 反向见证:归属判定的三段仍在(提取不能把它们弄丢)
+  test("birth 前后校验与 NetTCPConnection 归属都还在", () => {
+    expect(script).toContain("$before-ne$birth");
+    expect(script).toContain("$after-eq$birth");
+    expect(script).toContain("Get-NetTCPConnection");
+    expect(script).toContain("$ids.Contains([int]$_.OwningProcess)");
+  });
+});
