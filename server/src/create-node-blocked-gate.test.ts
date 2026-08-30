@@ -248,7 +248,7 @@ describe("#1353 Fix ① — hub gates create_node on daemon-reported can_create_
  * 为什么这一格落在拒绝路径上最要紧:用户被挡住的这一刻,正好在决定"去修哪台机器"。
  *   刚测的 blocked      ⇒ 去那台机器按 reason 修
  *   三周前测的 blocked  ⇒ 那台 daemon 是**开机算一次就永久缓存**的旧版本
- *                        (preview.67 及更早),它可能早就好了 —— 先重启/升级它
+ *                        (agent-node ≤ 2.5.0-preview.54),它可能早就好了 —— 先重启/升级它
  * 只给 `blocked_reason` 的话,这两种情况给用户的字**一模一样**。 */
 describe("#1545 拒绝文案带上「这个判断是多久以前做的」", () => {
   const blockedSnap = (extra: object) => ({

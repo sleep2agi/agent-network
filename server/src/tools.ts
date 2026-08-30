@@ -665,7 +665,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           ]).optional(),
           // #1545 —— 上面那一格**是什么时候测出来的**。
           //
-          // 🔴 为什么必须有:agent-node 到 preview.67 为止,`daemonCreateCapability()`
+          // 🔴 版本号一律带包名 + 完整版本:仓里三个包各自独立编号,裸的 `preview.NN`
+          //    同时是三个不同的时间点。此处曾写成「preview.67」——
+          //    那是 agent-network 的号,agent-node 根本没有 .67(npm 404,最高 .56)。
+          // 🔴 为什么必须有:**agent-node ≤ 2.5.0-preview.54** 的 `daemonCreateCapability()`
           //    用一个进程级缓存(`_createCapCache`)只算一次。开机时 pin 坏 ⇒ 之后
           //    永远上报 blocked(哪怕运维已经写好 path.conf);开机时好 ⇒ 之后把二进制
           //    chmod 掉也**永远上报 ready**。后者是朝「没问题」方向说谎。
@@ -3295,7 +3298,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // 决定了下一步完全不同的两件事。
           //   刚测的 blocked      ⇒ 去那台机器按 reason 修
           //   三周前测的 blocked  ⇒ 那台 daemon 是**开机算一次就永久缓存**的旧版本
-          //                        (preview.67 及更早),它可能早就好了 ——
+          //                        (agent-node ≤ 2.5.0-preview.54),它可能早就好了 ——
           //                        先重启/升级它,再谈修 pin
           // 而在拒绝这一刻,用户正好在决定"去修哪台机器"。
           //
