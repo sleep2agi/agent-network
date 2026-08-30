@@ -26,6 +26,110 @@ export interface CodexCopresenceProfileFields {
   readonly codexCopresence?: boolean;
   readonly codexCopresenceFullAccess?: boolean;
   readonly flags?: Record<string, unknown>;
+  // #1521 — three fields required by `anet node resume <alias>` for
+  // codex-copresence nodes. See docs/rfcs/RFC-anet-node-resume-codex-copresence-v7.md
+  //
+  // NONE of the three is read by `anet node create` / `anet node start` — they
+  // are only consulted by `resume`. Old codex-copresence configs without them
+  // continue to `start` normally.
+  //
+  // Current state in main: the fields exist as OPTIONAL, and `missingCodexResumeFields`
+  // enumerates which are absent — but no code in this PR reads that enumeration.
+  // The resume dispatcher, `--help` copy, and Phase 0 preflight all remain
+  // staged for a follow-up PR (#1528, Draft). Once that PR lands, `resume`
+  // will fail-close with a Phase 0 diagnostic naming the missing field(s);
+  // the diagnostic shape and any operator remediation flow (JSON-patch or
+  // otherwise) will land with the PR that provides its real caller — see
+  // the TMHR 4bab8196 blocker note on `missingCodexResumeFields` below for
+  // why the earlier draft's `codexResumeMissingConfigHint` was removed.
+  /** Absolute project directory to launch the codex TUI in. Passed as
+   *  `-C <dir>` to `codex resume`. Also cross-checked against hub-reported
+   *  `session.project_dir` in Phase 4.3. */
+  readonly codexProjectDir?: string;
+  /** Which launch adapter to use in Phase 3.2. `"codex-standard"` = stock
+   *  `codex app-server` + `codex resume`; `"codex-custom-wrapper"` = TMHR狗-class
+   *  custom LLM API wrapper (hosted tool / compaction / image-output compat).
+   *  Unknown / absent → Phase 0 fail-closed (unknown adapters must not fall
+   *  through to a default that might not fit the node's real topology). */
+  readonly codexLaunchAdapter?: "codex-standard" | "codex-custom-wrapper";
+  /** Alias of the peer that will verify this node's identity in Phase 6.
+   *  Peer MUST be (a) registered in the same network, (b) online at resume
+   *  time, (c) not this node itself. Identity attestation uses a fresh
+   *  Hub outbound `send_task` from THIS node's Bridge to <codexProbePeer>
+   *  carrying a nonce; peer echoes the nonce back; CLI cross-checks Hub's
+   *  recorded `from_name / from_node_id / to_name / to_node_id`.
+   *
+   *  🔴 self-loop is deliberately not accepted here — it cannot prove
+   *  cross-node routing closure (design v7 Phase 6 = D, per TMHR
+   *  06cfb29a). Single-node users cannot run `anet node resume` in
+   *  this initial cut; tracked at #1527. */
+  readonly codexProbePeer?: string;
+}
+
+/** #1521 — the three fields `anet node resume <alias>` will require on a
+ *  codex-copresence node once the resume dispatcher lands (#1528, Draft).
+ *  In this PR, only shape-level enumeration exists (see
+ *  `missingCodexResumeFields` below); no CLI code reads that enumeration
+ *  and the operator-facing remediation flow is deliberately deferred
+ *  along with its real caller. */
+export type CodexResumeRequiredField =
+  | "codexProjectDir"
+  | "codexLaunchAdapter"
+  | "codexProbePeer";
+
+export const CODEX_RESUME_REQUIRED_FIELDS: readonly CodexResumeRequiredField[] = [
+  "codexProjectDir",
+  "codexLaunchAdapter",
+  "codexProbePeer",
+];
+
+/** Enumerate which of the three resume-required fields are absent /
+ *  wrong-shaped on this profile. Returns [] when all three are present
+ *  and well-shaped.
+ *
+ *  🔴 SHAPE-ONLY validation:
+ *    - codexProjectDir : string starting with `/`. This is a CHEAP typo
+ *      filter, NOT the security gate. Phase 0 (in #1528) MUST additionally
+ *      `realpath`/canonicalize + reject NUL, `/`, and any untrusted target
+ *      before passing this value to `codex resume -C <dir>` (per TMHR
+ *      4bab8196: "startsWith('/') 不是最终安全门").
+ *    - codexLaunchAdapter : enum membership.
+ *    - codexProbePeer : Hub exact-alias lookup, so value MUST equal its own
+ *      trim. Values with leading/trailing whitespace would fail Hub lookup
+ *      100% of the time; rejecting them at the shape layer is a witnessed-red
+ *      canary rather than a permissive pass-through (per TMHR 048d0061 R2:
+ *      "不要 pin 一个必然在 Hub exact lookup 阶段失败的 well-shaped 值").
+ *      Liveness (registered + online + non-self) is a separate hub-side
+ *      check in Phase 0.
+ *
+ *  Deliberately NOT included: an operator-facing diagnostic helper. An
+ *  earlier draft included `codexResumeMissingConfigHint` that referenced
+ *  a `anet node config apply` verb which does not exist in the tree —
+ *  TMHR 4bab8196 blocked it as the exact "存在 ≠ 会执行" antipattern.
+ *  The diagnostic lands with its real caller in a later PR that either
+ *  (a) implements `anet node config apply` first, or (b) reworks the
+ *  diagnostic to reference existing commands only. */
+export function missingCodexResumeFields(
+  profile: CodexCopresenceProfileFields,
+): CodexResumeRequiredField[] {
+  const missing: CodexResumeRequiredField[] = [];
+  if (typeof profile.codexProjectDir !== "string" || !profile.codexProjectDir.startsWith("/")) {
+    missing.push("codexProjectDir");
+  }
+  const adapter = profile.codexLaunchAdapter;
+  if (adapter !== "codex-standard" && adapter !== "codex-custom-wrapper") {
+    missing.push("codexLaunchAdapter");
+  }
+  // TMHR 048d0061 R2: peer alias is a Hub exact-lookup key. Anything that
+  // won't match the raw stored alias — whitespace-only, or with leading/
+  // trailing whitespace — must fail at the shape layer, not silently pass
+  // and 100%-fail later at Hub lookup. Require the value to be its own
+  // trim + non-empty.
+  const peer = profile.codexProbePeer;
+  if (typeof peer !== "string" || peer.length === 0 || peer !== peer.trim()) {
+    missing.push("codexProbePeer");
+  }
+  return missing;
 }
 
 export const CODEX_COPRESENCE_RUNTIME = "codex-app-server";
