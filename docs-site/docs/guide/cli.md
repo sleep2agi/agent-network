@@ -199,6 +199,7 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 ```
   CommHub: http://127.0.0.1:9200
   Agents: 127 idle, 0 working, 1 needs attention, 143 offline
+          └─ 18 掉线 1-3 天, 27 掉线超过 3 天
   SSE:    12 connected
   Tasks:  10 recent
 ```
@@ -211,6 +212,21 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 | `offline` | 心跳过期,或已正常停止 |
 
 四个数相加等于节点总数。`needs attention` 为 0 时那一格不显示。
+
+### `offline` 下面那一行:它掉了多久
+
+有 offline 节点时会多印一行分档。**「刚停的」和「掉了三天没人发现的」原先是
+同一个数字。**实测过一次(84 台节点):45 台 offline 里 27 台超过 3 天、
+18 台 1-3 天、**近 6 小时内 0 台** —— 「当前没有活故障」和「有 45 台掉了」
+是完全不同的两个结论,而屏幕上原本只有后者。
+
+拿不到时间戳的节点单独归入「无时间戳(不知道掉了多久)」,**不并进最新那一档**
+—— 「我不知道它掉了多久」和「它刚掉」是两件事。
+
+🔴 **`blocked` 没有对应的时长,而且不该有。** 名册里没有「何时变成 blocked」
+这个字段;`updated_at` 被心跳一直刷,拿它当已 blocked 时长,会给一个卡了很久的
+节点印出「4 分钟前」—— 比不显示更糟。详见
+[这个节点还活着吗](/troubleshooting/is-this-node-alive)。
 
 🔴 **`blocked` / `error` 不算在 `working` 里。** 它们的含义是「卡住了」而不是
 「在干活」—— 一个卡住的节点如果被算进 `working`,运维看到「N working」会以为
@@ -229,9 +245,14 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 | 命令 | 作用 |
 |---|---|
 | `anet daemon up [name]` | 创建并启动 `host_supervisor` —— **仅 preview 通道** |
-| `anet daemon init <name>` / `start <name>` / `list` | 管理本机 daemon —— **仅 preview 通道** |
+| `anet daemon init <name>` / `start <name>` / `restart <name>` / `list` | 管理本机 daemon —— **仅 preview 通道** |
 | `anet node start <name> --copresence` | 启动 Codex app-server、桥和共享 TUI |
 | `anet opencode ...` | 管理 OpenCode preview 集成 |
+
+🔴 **停 / 删 / 看没有 daemon 版。** daemon 就是一个 `role=host_supervisor` 的 agent-node,
+所以用 node 级命令:`anet node stop <name>` 停、`anet node delete <name>` 删、
+`anet node ls` 看它在不在跑(`anet daemon list` 只列本机配置过的 daemon,不含活性)。
+`anet daemon restart` 内部调的正是 `anet node stop` 用的那个 stop。
 
 `--copresence` 只适用于 `runtime=codex-app-server`。默认沙箱为只读；开启完整文件系统和网络访问需要 `--dangerously-allow-full-access`。TTY 会要求输入 `yes`，非 TTY 还必须同时提供 `--yes-danger-full-access`。
 
