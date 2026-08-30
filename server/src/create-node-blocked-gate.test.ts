@@ -31,6 +31,7 @@ function cleanup() {
   try { db.run("DELETE FROM node_create_requests WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM audit_log WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM nodes WHERE network_id = ?1", [NET]); } catch {}
+  try { db.run("DELETE FROM sessions WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM api_tokens WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM network_members WHERE network_id = ?1", [NET]); } catch {}
   try { db.run("DELETE FROM networks WHERE network_id = ?1", [NET]); } catch {}
@@ -38,6 +39,18 @@ function cleanup() {
 }
 beforeEach(cleanup);
 afterAll(cleanup);
+
+/** #1545 —— 可选:写一条 sessions 心跳行。
+ *  默认**不写**,这样既有那 9 条测试的行为逐字不变;
+ *  只有要断言绝对年龄的用例才显式给 `heartbeatAgoMs`。 */
+function seedHeartbeat(agoMs: number) {
+  const iso = new Date(Date.now() - agoMs).toISOString();
+  db.run(
+    `INSERT INTO sessions (alias, node_id, network_id, status, last_seen_at, updated_at)
+     VALUES (?1, ?2, ?3, 'idle', ?4, ?4)`,
+    [DAEMON_ALIAS, DAEMON_ID, NET, iso],
+  );
+}
 
 function seed(snapshot: object | string | null) {
   db.run(
@@ -247,13 +260,33 @@ describe("#1545 拒绝文案带上「这个判断是多久以前做的」", () =
     },
   });
 
-  test("daemon 报了年龄 → 原样带出,且标记 known", async () => {
+  /* 🔴 报出去的是**到现在为止**的绝对年龄,不是 daemon 报的那个原始时长。
+   * daemon 报的是「测完到**这份 report 发出**」;直接透传会漏掉心跳那一段,
+   * **朝更新鲜的方向低报** —— 正是这一格要防的方向。
+   *   绝对年龄 = (now − last_seen_at) + daemon 报的时长 */
+  test("daemon 报了年龄 + 有心跳时间 → 补上心跳那一段,标记 known", async () => {
     seed(blockedSnap({ create_capability_observed_ms_ago: 12_345 }));
+    seedHeartbeat(60_000);            // 上次心跳在 60s 前
     const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
     expect(r.ok).toBe(false);
     expect(r.blocked_reason).toBe("anet_bin_permission");
-    expect(r.capability_observed_ms_ago).toBe(12_345);
     expect(r.capability_age).toBe("known");
+    // 允许 ±5s 的执行抖动;关键是它**明显大于** 12,345,即心跳那一段确实被加上了
+    const got = r.capability_observed_ms_ago as number;
+    expect(got).toBeGreaterThanOrEqual(12_345 + 60_000 - 5_000);
+    expect(got).toBeLessThanOrEqual(12_345 + 60_000 + 5_000);
+    // 🔴 反向锚:如果实现是"原样透传",这个数会恰好等于 12,345
+    expect(got).not.toBe(12_345);
+  });
+
+  /* 🔴 第三种 unknown,不能和「旧 daemon 没报」塌成同一个:
+   * 它报了,但 hub 这边没有可用的心跳时间 ⇒ **补不出绝对年龄**,而不是"年龄是 0"。 */
+  test("报了年龄但 hub 没有心跳时间 → unknown_no_heartbeat_time(不是 legacy,也不是 0)", async () => {
+    seed(blockedSnap({ create_capability_observed_ms_ago: 12_345 }));
+    // 故意不 seedHeartbeat
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    expect(r.capability_age).toBe("unknown_no_heartbeat_time");
+    expect(r.capability_observed_ms_ago).toBeNull();
   });
 
   /* 🔴 本组的重点:年龄未知时给的是**显式 null + 说明为什么的枚举**,
@@ -261,6 +294,7 @@ describe("#1545 拒绝文案带上「这个判断是多久以前做的」", () =
    * 会默认它是刚测的 —— 那是朝「更可信」方向撒谎,比不给更糟。 */
   test("🔴 daemon 没报年龄 → 两个键都在:null + unknown_legacy_daemon(不是省略)", async () => {
     seed(blockedSnap({}));
+    seedHeartbeat(1_000);   // 心跳齐全 ⇒ 唯一缺的就是 daemon 没报那一格
     const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
     expect(r.ok).toBe(false);
     expect("capability_observed_ms_ago" in r).toBe(true);
@@ -277,6 +311,10 @@ describe("#1545 拒绝文案带上「这个判断是多久以前做的」", () =
     ["null", null],
   ])("坏值当作没报(不 clamp 成一个看起来正常的年龄):%s", async (_l, v) => {
     seed(blockedSnap({ create_capability_observed_ms_ago: v }));
+    // 🔴 必须给心跳:否则这几条会因为"没有心跳时间"而变成
+    //    unknown_no_heartbeat_time,**坏值那一维根本没被测到**
+    //    (夹具只该在被测的那一维上不合法)。
+    seedHeartbeat(1_000);
     const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
     expect(r.capability_age).toBe("unknown_legacy_daemon");
     expect(r.capability_observed_ms_ago).toBeNull();
@@ -284,12 +322,13 @@ describe("#1545 拒绝文案带上「这个判断是多久以前做的」", () =
     expect(r.error).toBe("daemon_cannot_create_nodes");
   });
 
-  test("边界:恰好一年被接受 ⇒ 上面那条不是因为恒判 unknown 才绿", async () => {
+  test("边界:恰好一年被接受 ⇒ 上面那些不是因为恒判 unknown 才绿", async () => {
     const oneYear = 365 * 24 * 60 * 60 * 1000;
     seed(blockedSnap({ create_capability_observed_ms_ago: oneYear }));
+    seedHeartbeat(1_000);
     const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
     expect(r.capability_age).toBe("known");
-    expect(r.capability_observed_ms_ago).toBe(oneYear);
+    expect(r.capability_observed_ms_ago as number).toBeGreaterThanOrEqual(oneYear);
   });
 
   /* 🔴 hub 出**代码**,不出渲染好的修法命令 —— 那张 code → 命令 的表只有一个作者
@@ -297,6 +336,7 @@ describe("#1545 拒绝文案带上「这个判断是多久以前做的」", () =
    * 两份就会各自漂移,而「hub 教的修法」和「CLI 教的修法」不一致时没有任何东西会红。 */
   test("🔴 hub 不返回具体修法命令,只把人指到那唯一一份", async () => {
     seed(blockedSnap({ create_capability_observed_ms_ago: 0 }));
+    seedHeartbeat(1_000);
     const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
     const blob = JSON.stringify(r);
     for (const leaked of ["chmod go-w", "npm i -g", "readlink -f", "/etc/anet-daemon"]) {

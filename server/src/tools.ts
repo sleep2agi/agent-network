@@ -3303,15 +3303,41 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           //    省略读起来像"没有这个问题",而调用方(常常是个 agent)会默认它是刚测的
           //    —— 那是朝「更可信」方向撒谎,比不给更糟。
           const rawAge = caps.create_capability_observed_ms_ago;
-          const ageKnown = typeof rawAge === "number" && Number.isFinite(rawAge)
+          const reportedAgeOk = typeof rawAge === "number" && Number.isFinite(rawAge)
             && rawAge >= 0 && rawAge <= 365 * 24 * 60 * 60 * 1000;
+          // 🔴 daemon 报的是「测完到**这份 report 发出**之间隔了多久」,不是「到现在」。
+          //    两者差一个心跳间隔(3 分钟),而对一个已经失联的 daemon 差多少都可能。
+          //    直接把它当成"多久以前测的"渲染,会**朝更新鲜的方向**低报 ——
+          //    正是这一格要防的那个方向。所以在这里补上心跳那一段:
+          //      绝对年龄 = (now − last_seen_at) + daemon 报的时长
+          //    hub 的钟出绝对时间,daemon 只提供时长(它自己的钟偏移污染不了这个数)。
+          //
+          //    这是冷路径(只有被拒时才走),多一次小查询不影响心跳路径。
+          let heartbeatAgeMs: number | null = null;
+          try {
+            const sess = db.get<{ last_seen_at: string | null }>(
+              "SELECT last_seen_at FROM sessions WHERE node_id = ?1 ORDER BY last_seen_at DESC LIMIT 1",
+              daemon_node_id,
+            );
+            const t = sess?.last_seen_at ? Date.parse(sess.last_seen_at) : NaN;
+            if (Number.isFinite(t)) heartbeatAgeMs = Math.max(0, Date.now() - t);
+          } catch { /* 取不到就是取不到 —— 下面如实说 unknown,不猜 0 */ }
+
+          // 🔴 三种取值,不能塌成两种:
+          //    known                      两半都有,可以给绝对年龄
+          //    unknown_legacy_daemon      那台 daemon 根本没报这一格(旧版本)
+          //    unknown_no_heartbeat_time  它报了,但 hub 这边没有可用的心跳时间
+          //                               ⇒ **补不出绝对年龄**,而不是"年龄是 0"
+          const ageKnown = reportedAgeOk && heartbeatAgeMs !== null;
           return { content: [{ type: "text" as const, text: JSON.stringify({
             ok: false,
             error: "daemon_cannot_create_nodes",
             blocked_reason: reason,
-            // 这个判断是**多久以前**做出来的(毫秒)。null = 那台 daemon 没报这一格。
-            capability_observed_ms_ago: ageKnown ? rawAge : null,
-            capability_age: ageKnown ? "known" : "unknown_legacy_daemon",
+            // 到**现在**为止,这个判断做出来有多久了(毫秒)。null = 补不出来。
+            capability_observed_ms_ago: ageKnown ? heartbeatAgeMs! + (rawAge as number) : null,
+            capability_age: ageKnown
+              ? "known"
+              : (reportedAgeOk ? "unknown_no_heartbeat_time" : "unknown_legacy_daemon"),
             // 🔴 这里**不复制那张 code → 修法命令 的表**。它只有一个作者,在
             //    `@sleep2agi/agent-network` 的 daemon-capability-display —— 抄一份到 hub,
             //    两份就会各自漂移,而「hub 教的修法」和「CLI 教的修法」不一致时,
