@@ -85,6 +85,24 @@ if [ "$rc2" -eq 0 ] && printf '%s' "$out2" | grep -Fq 'code=<no-log>'; then
   ok "日志不存在报 <no-log> 且不杀调用方"
 else bad "日志不存在这一格不对:rc=$rc2 out='$out2'"; fi
 
+# 🔴 FATAL 细分:`[anet] FATAL:` 只是顶层 catch 的包装,真正的错误名跟在后面。
+#    只吃到 `FATAL` 的话,两个完全不同的致命错误会塌成同一个字符串。
+printf '[anet] FATAL: Error: NODE_STOP_GENERATION_CHANGED\n    at x (/y.js:1:1)\n' > "$WORK/fatal1.log"
+printf '[anet] FATAL: Error: NODE_LIFECYCLE_LOCK_CORRUPT\n' > "$WORK/fatal2.log"
+c1=$(anet_first_failure_code "$WORK/fatal1.log")
+c2=$(anet_first_failure_code "$WORK/fatal2.log")
+if [ "$c1" != "$c2" ] && printf '%s' "$c1" | grep -Fq 'NODE_STOP_GENERATION_CHANGED'; then
+  ok "两个不同的致命错误给出不同标识($c1 / $c2)"
+else
+  bad "FATAL 细分失效:两个致命错误塌成同一个 —— '$c1' vs '$c2'"
+fi
+
+# 🔴 但 FATAL 之后是任意错误文本时**必须退回**,不能把可能含凭据的整行打出来
+printf '[anet] FATAL: Error: connect ECONNREFUSED utok_looks_like_a_token\n' > "$WORK/fatal3.log"
+c3=$(anet_first_failure_code "$WORK/fatal3.log")
+if [ "$c3" = "[anet] FATAL" ]; then ok "FATAL 后是任意文本时退回 [anet] FATAL,不泄漏"
+else bad "白名单漏了:FATAL 后的任意文本被打了出来 → '$c3'"; fi
+
 # 意料之外的码仍要打得出来(这一格丢了,白名单就变成了藏东西的清单)
 printf '[anet] NODE_SOMETHING_BRAND_NEW: x\n' > "$WORK/unexpected.log"
 c=$(anet_first_failure_code "$WORK/unexpected.log")

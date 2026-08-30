@@ -17,7 +17,15 @@
 # 🔴 候选项按「cli.ts 里逐条复核过的字面句」维护,不要换成通用占位符或笛卡尔积
 #    (与 failure-diagnostic.mjs 里 FAILURE_CODES 的维护方式一致)。
 #    末位那条通用全大写形状**必须保留**:它的价值正在于打出**意料之外**的码。
-ANET_FAILURE_CODE_PATTERN='^\[anet\] (STOP_TIMEOUT: authoritative local resources survived|STOP_TIMEOUT: could not prove|STOP_TIMEOUT: Windows ownership could not be proven|STOP_TIMEOUT: Windows managed processes survived|STOP_TIMEOUT: Windows node pid|⚠ identity teardown incomplete|⚠ copresence marker present but refused|⚠ identity gate check crashed|❌ tmux kill-session did not take|❌ this stop command.s ancestry includes|❌ refusing Windows co-presence teardown|❌ taskkill failed for|could not confirm that|[A-Z][A-Z0-9_]{3,})'
+#
+# 🔴 `FATAL` 单独拿出来说:`[anet] FATAL:` 是 cli.ts 顶层 catch 的包装,
+#    **真正的错误名跟在它后面**(`FATAL: Error: NODE_STOP_GENERATION_CHANGED`)。
+#    只吃到 `FATAL` 的话,两个完全不同的致命错误会塌成同一个字符串 ——
+#    实测 NODE_STOP_GENERATION_CHANGED 与 NODE_LIFECYCLE_LOCK_CORRUPT 都打成
+#    `[anet] FATAL`,判别力为零。所以单列一条 `FATAL: <Xxx>: <ALL_CAPS>`。
+#    仍然是白名单:`FATAL:` 之后只吃「首字母词 + 全大写码」这种形状,
+#    任意错误文本(可能含凭据)不会被打出来,退回到 `[anet] FATAL`。
+ANET_FAILURE_CODE_PATTERN='^\[anet\] (FATAL: [A-Za-z]+: [A-Z][A-Z0-9_]{3,}|FATAL: config\.json env\.|STOP_TIMEOUT: authoritative local resources survived|STOP_TIMEOUT: could not prove|STOP_TIMEOUT: Windows ownership could not be proven|STOP_TIMEOUT: Windows managed processes survived|STOP_TIMEOUT: Windows node pid|⚠ identity teardown incomplete|⚠ copresence marker present but refused|⚠ identity gate check crashed|❌ tmux kill-session did not take|❌ this stop command.s ancestry includes|❌ refusing Windows co-presence teardown|❌ taskkill failed for|could not confirm that|[A-Z][A-Z0-9_]{3,})'
 
 # anet_first_failure_code <path> —— 打印标识;文件不存在打 <no-log>,没命中打 <none matched>。
 anet_first_failure_code() {
