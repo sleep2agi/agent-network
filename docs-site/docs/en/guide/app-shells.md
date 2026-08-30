@@ -86,13 +86,23 @@ So the answer to "is there a Mac installer" is **yes** — just not from the she
 describes. Both lines currently coexist; this page does not judge which one is the main line.
 See [issue #233](https://github.com/sleep2agi/agent-network/issues/233).
 
-**Windows is the one genuinely empty cell across all three repositories**: no workflow anywhere
-builds for Windows. The Dashboard's `electron-builder.json` does *configure* a `win: nsis`
-target, but no CI runs it — **a configured target is not a produced artifact.**
+🔴 **Before 2026-08-31 this section claimed "Windows is the one genuinely empty cell across all
+three repositories". That is no longer true**, and it contradicted this site's own Windows
+download button. The current facts:
+
+| Platform | `agent-network-app` packaging | Evidence |
+|---|---|---|
+| Windows | **Yes**, built in CI | `desktop-tauri.yml:100` `runs-on: windows-latest`; `:149` `npx tauri build --bundles nsis,msi` |
+| Artifacts | `.exe` (nsis) + `.msi` (WiX), each with a `.sig` | `desktop-v0.2.41` ships `Agent.Network_0.2.41_x64-setup.exe` (35 MB) and `_x64_en-US.msi` (48 MB) |
+
+**The Dashboard shell still has no Windows CI** — its `electron-builder.json` does *configure* a
+`win: nsis` target, but no CI runs it: **a configured target is not a produced artifact.**
+The two facts used to be merged into one sentence, so "the Dashboard shell has none" was read as
+"the project has none".
 :::
 
 ## Which one should I use
 
 - Just want it on your phone → **PWA**, no build step at all;
-- Handing it to people who do not use a terminal → **desktop installer** (only Linux verified so far);
+- Handing it to people who do not use a terminal → **desktop installer** (the `agent-network-app` line produces macOS / Windows artifacts in CI — see the table above; the Dashboard shell is still Linux-only);
 - Need system capabilities (push, files, camera) → **Capacitor**, which is what needs Xcode / Android Studio.

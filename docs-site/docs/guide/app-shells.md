@@ -75,13 +75,21 @@ npm run app:desktop:pack                                                  # 打�
 所以「有没有 Mac 安装包」这个问题的答案是**有**，只是不在本页说的这个壳里。
 两条线目前并存，本页不判断哪条是主线 —— 见 [issue #233](https://github.com/sleep2agi/agent-network/issues/233)。
 
-**Windows 是三个仓里唯一真正为零的那格**：所有 workflow 里都没有 Windows 打包。
-Dashboard 的 `electron-builder.json` 里**配置**了 `win: nsis`，但没有任何 CI 跑它 ——
-**配置存在不等于产物存在。**
+🔴 **上面这段在 2026-08-31 之前写着「Windows 是三个仓里唯一真正为零的那格」——
+那句已经不成立了**，而且它与本站首页的 Windows 下载按钮自相矛盾。现在的事实：
+
+| 平台 | `agent-network-app` 的打包 | 证据 |
+|---|---|---|
+| Windows | **有**，CI 里跑 | `desktop-tauri.yml:100` `runs-on: windows-latest`；`:149` `npx tauri build --bundles nsis,msi` |
+| 产物 | `.exe`(nsis) + `.msi`(WiX)，各带 `.sig` | `desktop-v0.2.41` 里 `Agent.Network_0.2.41_x64-setup.exe`(35 MB)、`_x64_en-US.msi`(48 MB) |
+
+**Dashboard 那个壳仍然没有 Windows CI** —— 它的 `electron-builder.json` 里**配置**了
+`win: nsis` 但没有任何 CI 跑它，**配置存在不等于产物存在**。
+两件事此前被合并成一句话,于是「Dashboard 壳没有」被读成了「整个项目没有」。
 :::
 
 ## 我该用哪一种
 
 - 只是想在手机上看看 → **PWA**，不需要任何构建；
-- 要推给不会用命令行的人 → **桌面安装包**（目前只有 Linux 经过实测）；
+- 要推给不会用命令行的人 → **桌面安装包**（`agent-network-app` 线的 macOS / Windows 产物在 CI 里出，见上表；Dashboard 壳那条仍只有 Linux 实测过）；
 - 要接系统能力（推送、文件、相机等）→ **Capacitor**，那才需要 Xcode / Android Studio。
