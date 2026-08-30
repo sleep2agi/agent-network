@@ -532,6 +532,26 @@ if [[ $RUN_L1 -eq 1 ]]; then
     echo "L1 时间线（相对 L1 起点，按开始偏移排序）— #1333"
     sort -t$'\t' -k2,2n /tmp/qa-l1-timing.tsv \
       | awk -F'\t' '{printf "  +%4ds .. +%4ds  (%3ds)  %s\n", $2, $3, $3-$2, $1}'
+    # 🔴 #1627 —— 一行**格式固定**的摘要,专门为了「跨 run 比快慢」。
+    #
+    #    今天(2026-08-31)我能判定五次红都是「慢 runner 撞绝对超时」,
+    #    靠的是去 `docs/tests/` 里翻某人手工写进报告的历史耗时
+    #    (`…2000 delivered rows… [7809.55ms]`)。**那不是一个可依赖的机制** ——
+    #    下次没人写,就没有基线可比。
+    #
+    #    而 GitHub 的 job 日志**本身就是历史存储**(`gh api …/jobs/<id>/logs`
+    #    能取到任意历史 run 的全文),它缺的只是「一个稳定的、能 grep 的形状」。
+    #    加这一行之后,拿基线就是一条命令:
+    #      gh api repos/<o>/<r>/actions/jobs/<id>/logs | grep -o 'L1-TIMING v1 .*'
+    #
+    #    格式一旦定下就别改字段顺序 —— 改了,之前所有 run 的日志就对不上了。
+    # ⚠ 时长是**算出来的**($3-$2),不是列 —— 不能直接 `sort -k4`。
+    #   第一版我就这么写了,输出是一串带时长的套件名、**看起来完全合理**,
+    #   实际是原文件顺序(漏掉真正第 3 慢的那个,混进一个 1s 的)。
+    _slowest=$(awk -F'\t' '{print $3-$2"\t"$1}' /tmp/qa-l1-timing.tsv 2>/dev/null \
+      | sort -k1,1nr \
+      | awk -F'\t' 'NR<=5{printf "%s%s=%ds", (NR>1?",":""), $2, $1}')
+    echo "L1-TIMING v1 total=$(( $(date +%s) - START ))s suites=$(wc -l < /tmp/qa-l1-timing.tsv | tr -d ' ') slowest=${_slowest}"
   fi
 fi
 
@@ -555,5 +575,22 @@ if [[ $FAILED -eq 0 ]]; then
   exit 0
 else
   fail "$FAILED test(s) failed in ${ELAPSED}s"
+  # 🔴 #1627 —— 把「本次跑得慢」这件事放在**失败旁边**,而不是只放在上面那条
+  #    ::warning:: 里。理由是实测出来的:2026-08-31 一天里有三批红,全部是
+  #    「用绝对超时的测试撞上一台慢 runner」,而它们的报错读起来和真缺陷一模一样:
+  #      · `[20832.89ms]` 下一行才是 `^ this test timed out after 20000ms.`
+  #      · `(fail) (unnamed)` 下一行才是 `^ a beforeEach/afterEach hook timed out`
+  #    ——套件名(例:`rest-shape-golden`)是唯一看起来有信息的东西,于是所有人
+  #    先去查 REST 投影。而真正的线索是**这一跑的总耗时**,它当时在几千行之外。
+  if [[ "$L1_SOFT_BUDGET_S" != "0" && $ELAPSED -gt $L1_SOFT_BUDGET_S ]]; then
+    echo "" >&2
+    echo "🔴 本次 L1 用了 ${ELAPSED}s,超过软预算 ${L1_SOFT_BUDGET_S}s —— 判定上面这些失败之前先读这段。" >&2
+    echo "   在偏慢的 runner 上,**用绝对超时的测试**(bun 默认 20000ms、以及" >&2
+    echo "   beforeEach/afterEach 钩子超时)会先红,而报错里点名的是套件名,不是超时。" >&2
+    echo "   先重跑一次。" >&2
+    echo "   ⚠ 若重跑**仍红**:那还不足以判定为真缺陷 —— 再比一次两次 attempt 的" >&2
+    echo "   L1 总耗时和 main 的样本区间;两次都落在慢区间说明重跑并没有换掉那个变量。" >&2
+    echo "   见 #1627。" >&2
+  fi
   exit 1
 fi
