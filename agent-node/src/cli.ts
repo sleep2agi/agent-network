@@ -3001,6 +3001,14 @@ async function processWithCodex(
   const input: any = images?.length
     ? [{ type: "text", text: promptText }, ...images.map(p => ({ type: "local_image", path: p }))]
     : promptText;
+  // #1645 — 超时那一刻,闭包里的 itemCount 已经丢了。把「有没有事件流过」提到
+  //   闭包外:它是「连接/握手层就没通」和「turn 中途停住」之间**唯一**的判别项,
+  //   而这两种要查的东西完全不同。
+  // 🔴 必须声明在 `try` **之外** —— 读它们的是 catch 里的超时分支,
+  //   而 `let` 不跨 try/catch 作用域。放在 try 内会编译过语法、过单测,
+  //   只有 typecheck 会说 `Cannot find name`。
+  let evSeen = 0;
+  let lastEvAt = 0;
   const t0 = Date.now();
   try {
     // #261 P1 redirect (2026-06-28) — wrap the codex turn in withTimeout.
@@ -3008,11 +3016,6 @@ async function processWithCodex(
     // outage, dropped TCP) would hang the agent-node forever with no
     // abort path. Codex SDK's `TurnOptions.signal` lets us propagate
     // cancellation cleanly when the deadline fires.
-    // #1645 — 超时那一刻,闭包里的 itemCount 已经丢了。把「有没有事件流过」提到
-    //   闭包外:它是「连接/握手层就没通」和「turn 中途停住」之间**唯一**的判别项,
-    //   而这两种要查的东西完全不同。
-    let evSeen = 0;
-    let lastEvAt = 0;
     const outcome = await withTimeout(
       async (signal) => {
         const { events } = await codexThread.runStreamed(input, { signal });
