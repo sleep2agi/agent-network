@@ -517,6 +517,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       model: z.string().max(200).optional().describe("AI model name"),
       node_name: z.string().max(200).optional().describe("Stable node display name (may differ from alias)"),
       network_id: z.string().max(200).optional().describe("Network this agent belongs to"),
+      // ╭─ 🔴 往 report_status 里加字段之前先读这一段(#1545 实测,zod 4.3.6)─────────╮
+      // │ **这份 schema 的子对象一半严一半松,而后果完全不同。**
+      // │
+      // │   非 strict:host / process_telemetry / config_snapshot / daemon_capabilities
+      // │   `.strict()`:external_schedules(含其 schedules[] 元素)
+      // │              side_thread_capability(含其 exactBoundary)
+      // │
+      // │ 往**非 strict** 的对象里加一个 hub 还不认识的键 ⇒ zod **静默丢弃**。
+      // │   节点不会掉线,但字段人间蒸发 —— 现场表现为「daemon 明明发了、hub 上没有」,
+      // │   排查起来和 daemon 侧 bug 一模一样。
+      // │ 往**strict** 的对象里加同一个键 ⇒ `unrecognized_keys`,**整份 report_status 被拒**。
+      // │   而 agent-node 的 register() 是 `await` 且无人 catch ⇒ **节点进程当场死掉**
+      // │   (#1225 就是这么全网躺倒的,见下面 host.ip 那段)。
+      // │
+      // │ 所以「新字段能不能 daemon 先发」**没有统一答案,取决于你往哪个子对象里加**:
+      // │   非 strict → 可以先发(会丢,不会死);strict → hub 必须先合,否则升级即失联。
+      // │
+      // │ 🔴 别把这条读成「strict 更危险、都改成非 strict」。两者各有其位:
+      // │   external_schedules / side_thread_capability 是**有界快照**,strict 挡的是
+      // │   「节点往里塞任意键」;daemon_capabilities 是**能力自述**,天然要向前兼容
+      // │   (旧 hub 见到新能力应当忽略而不是拒绝整份上报)。**加字段前先看清你在哪一边。**
+      // ╰──────────────────────────────────────────────────────────────────────────────╯
       host: z.object({
         // 🔴 `.nullable()` 不是防御性冗余,是**发送方声明的类型**:agent-node 的
         //    HostTelemetry 是 `ip: string | null`,`firstNonInternalIPv4()` 在没有
@@ -599,6 +621,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // never saw them, max_concurrent_children stayed default + the
         // allowlists stayed unenforced. PR3 nit ① per 通信龙).
         // Soft caps avoid abuse via attacker daemon.
+        // 🔴 这个对象**故意不是 `.strict()`** —— 能力自述必须向前兼容:
+        //    旧 hub 见到新 daemon 报的新能力,应当忽略那一格,而不是拒掉整份 report
+        //    把节点踢下线。代价是新键在 hub 升级前会被**静默丢弃**(所以新字段仍然
+        //    应当 hub 先合)。同一份 schema 里 side_thread_capability / external_schedules
+        //    是 `.strict()` 的,后果不同 —— 见 `host:` 上方那段方框注释。
         daemon_capabilities: z.object({
           runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
           allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),

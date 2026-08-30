@@ -139,3 +139,73 @@ describe("#1545 create_capability_observed_ms_ago —— schema 必须收得宽"
     expect(parsed.daemon_capabilities.create_capability_observed_ms_ago).not.toBe("0");
   });
 });
+
+/* 🔴 #1545 —— 把 `host:` 上方那段方框注释里的表**钉住**。
+ *
+ * 那段注释说的是:这份 schema 的子对象一半 strict 一半不 strict,而「往里加一个
+ * hub 还不认识的键」的后果完全相反 —— 非 strict 静默丢弃(节点活着、字段蒸发),
+ * strict 拒掉整份 report(节点当场失联,#1225 的形状)。
+ *
+ * 注释会烂。这组测试的作用**不是禁止改 strict**(两种都各有其位),而是:谁改了,
+ * 谁就会在这里撞红,从而**被迫连注释一起改**。所以断言写成「和注释里那张表一致」,
+ * 而不是「必须是某个值」。 */
+describe("#1545 report_status 子对象的 strict 分布(注释里那张表的可执行副本)", () => {
+  const rs = () => schemas.report_status;
+  const UNKNOWN = { __hub_does_not_know_this_key__: 1 };
+
+  function acceptsUnknownKey(schema: any, base: object): "dropped" | "rejected" {
+    try {
+      const parsed = schema.parse({ ...base, ...UNKNOWN });
+      return "__hub_does_not_know_this_key__" in parsed ? "rejected" /* 不可能:留着说明它根本没被处理 */ : "dropped";
+    } catch { return "rejected"; }
+  }
+
+  const SIDE_THREAD = {
+    supported: true, runtime: "codex", runtimeVersion: "1.0",
+    topology: "native-exact-fork", evidenceRevision: "r1",
+  };
+  const SNAP_BASE = { flags: {}, config_update_capable: false, peer_reply_inbox_capable: true };
+
+  test.each([
+    ["host", () => rs().host, {}, "dropped"],
+    ["process_telemetry", () => rs().process_telemetry, {}, "dropped"],
+    ["config_snapshot", () => rs().config_snapshot, SNAP_BASE, "dropped"],
+    ["external_schedules", () => rs().external_schedules, { schedules: [] }, "rejected"],
+  ])("%s → 未知键被 %s", (_name, get, base, expected) => {
+    expect(acceptsUnknownKey(get(), base)).toBe(expected as string);
+  });
+
+  test("daemon_capabilities(嵌在 config_snapshot 里)→ 未知键被丢弃,不拒整份", () => {
+    const parsed: any = rs().config_snapshot.parse({
+      ...SNAP_BASE,
+      daemon_capabilities: { can_create_nodes: true, ...UNKNOWN },
+    });
+    expect(parsed.daemon_capabilities.can_create_nodes).toBe(true);
+    expect("__hub_does_not_know_this_key__" in parsed.daemon_capabilities).toBe(false);
+  });
+
+  test("side_thread_capability(同一个 config_snapshot 里)→ 未知键拒掉**整份**", () => {
+    expect(() => rs().config_snapshot.parse({
+      ...SNAP_BASE,
+      side_thread_capability: { ...SIDE_THREAD, ...UNKNOWN },
+    })).toThrow();
+    // 反向锚:去掉那个未知键必须过 —— 否则上面那条可能是被别的必填字段拒的,
+    // 和 strict 无关。
+    expect(() => rs().config_snapshot.parse({
+      ...SNAP_BASE, side_thread_capability: SIDE_THREAD,
+    })).not.toThrow();
+  });
+
+  /* 分母自证:上面这张表**两侧都有**。如果哪天全变成 dropped(或全 rejected),
+   * 那段注释描述的「不对称」就不存在了,而这条会先红。 */
+  test("这张表确实是不对称的(两种后果各至少一个)", () => {
+    const results = [
+      acceptsUnknownKey(rs().host, {}),
+      acceptsUnknownKey(rs().process_telemetry, {}),
+      acceptsUnknownKey(rs().config_snapshot, SNAP_BASE),
+      acceptsUnknownKey(rs().external_schedules, { schedules: [] }),
+    ];
+    expect(results.filter(r => r === "dropped").length).toBeGreaterThan(0);
+    expect(results.filter(r => r === "rejected").length).toBeGreaterThan(0);
+  });
+});
