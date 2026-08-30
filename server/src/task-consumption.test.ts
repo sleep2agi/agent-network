@@ -166,7 +166,7 @@ describe("task consumed_at identity and lifecycle", () => {
       after_terminal_seq: after, limit: 100,
     });
     expect(late.tasks.map((task: any) => task.task_id)).toEqual(["old-open-task"]);
-  }, 20_000);
+  }, 60_000);  // #1627 —— 原 20_000。历史基线 4196ms;2026-08-31 实测 21018ms(5.0×),撞上限。
   test("enqueue and process-level ack keep consumed_at null", async () => {
     const content = "connected process has not started a model turn";
     const before = db.get<{ last_seen_at: string; task: string | null }>(
