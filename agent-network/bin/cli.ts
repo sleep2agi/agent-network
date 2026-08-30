@@ -36,6 +36,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
+import { describeCapability, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
@@ -8527,10 +8528,55 @@ async function daemonListCommand() {
     return;
   }
   console.log(`Local host_supervisor daemons (${daemons.length}):`);
+
+  // #1545 —— 除了"本机配了哪些 daemon",还要说出**它们现在能不能建节点**。
+  //
+  // 在此之前这条链是断的:daemon 从 #1353 起就在上报 can_create_nodes /
+  // create_nodes_blocked_reason,hub 也一路存到 /api/host-supervisors ——
+  // 但 agent-network/ 和 dashboard/ 全仓 0 命中。**不是没人算,是没人念。**
+  //
+  // 🔴 hub 不可达时**不让整条命令失败**:本地清单本来就不需要网络,
+  //    而"看不到能力"和"没有 daemon"是两件完全不同的事,必须分别说清。
+  const byNodeId = await fetchDaemonCapabilities();
+
   for (const { id, profile } of daemons) {
     const nid = (profile as any)?.node_id || "(missing)";
     const runtimes = ((profile as any)?.runtimes_supported || []).join(",") || "(default)";
     console.log(`  ${id.padEnd(24)} node_id=${nid}  runtimes=[${runtimes}]`);
+    if (byNodeId === null) {
+      // hub 不可达/未配置 —— 这是**第四种**情况,和"没报过"不同:
+      // 那台 daemon 可能报得好好的,只是我们现在问不到。别把它说成未知能力。
+      console.log(`    创建能力:查不到 —— 连不上 hub(本地清单不需要网络,所以其余信息仍然有效)`);
+      continue;
+    }
+    const row = byNodeId.get(nid);
+    if (!row) {
+      console.log(`    创建能力:查不到 —— hub 上没有这个 node_id(还没注册过,或注册到了别的网络)`);
+      continue;
+    }
+    console.log(`    ${describeCapability(row, Date.now()).line}`);
+  }
+}
+
+/** 从 hub 取每台 daemon 自报的创建能力。
+ *  返回 null 表示**没问到**(未配置 hub / 连不上 / 响应不可读)——
+ *  🔴 和"问到了但那台 daemon 没报过"是两件事,调用方必须分开说。 */
+async function fetchDaemonCapabilities(): Promise<Map<string, DaemonCapabilityRow> | null> {
+  const gc = loadGlobal();
+  const hub = parseOpts().hub || gc.hub;
+  if (!hub) return null;
+  try {
+    const res = await fetch(`${hub}/api/host-supervisors`, { headers: authHeaders() });
+    if (!res.ok) return null;
+    const body = await res.json() as any;
+    if (!body?.ok || !Array.isArray(body.daemons)) return null;
+    const m = new Map<string, DaemonCapabilityRow>();
+    for (const d of body.daemons) {
+      if (d && typeof d.daemon_node_id === "string") m.set(d.daemon_node_id, d as DaemonCapabilityRow);
+    }
+    return m;
+  } catch {
+    return null;
   }
 }
 
