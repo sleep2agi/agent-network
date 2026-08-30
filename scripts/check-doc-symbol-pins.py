@@ -168,7 +168,8 @@ def candidate_symbols(anchor: str, rel: str) -> list[str]:
 
 
 def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
-          lines: list[str], findings: list[str], label_only: str = "") -> bool:
+          lines: list[str], findings: list[str], label_only: str = "",
+          fixes: list | None = None) -> bool:
     """判一条 pin。返回 True=判定过了(不管漂没漂),False=没能判定。
 
     🔴 两条路径(ref=分支 / ref=commit)共用这一份判据。
@@ -191,6 +192,10 @@ def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
             f"但那一行是:\n       {lines[n - 1].strip()[:100]}\n"
             f"       该片段在该文件**恰好出现一处**，在第 {w} 行:\n"
             f"         {w:>5}  {lines[w - 1].strip()[:96]}")
+        # 🔴 只有「恰好一处」才登记成可自动修。多处命中的那一支**故意不登记** ——
+        #    见下面那段注释:替人挑一个数字会让门变绿而文档指向注释行。
+        if fixes is not None:
+            fixes.append((doc, rel, n, w))
         return True
 
     symbols = candidate_symbols(label_only or anchor, rel)
@@ -215,6 +220,8 @@ def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
         if len(where) == 1:
             findings.append(f"{head}\n       `{sym}` 只出现一处，在第 {where[0]} 行:\n"
                             f"         {where[0]:>5}  {lines[where[0] - 1].strip()[:96]}")
+            if fixes is not None:
+                fixes.append((doc, rel, n, where[0]))
         else:
             # 🔴 多处匹配时**不给单一答案**。此前这里打印
             #    `min(where, key=|w-n|)`(离原 pin 最近的那处),而"最近"经常是
@@ -234,6 +241,67 @@ def judge(doc: Path, repo: Path, anchor: str, rel: str, n: int,
     return judged
 
 
+def apply_fixes(fixes: list, repo: Path) -> int:
+    """把「恰好一处」的漂移 pin 改写到它实际所在的行。返回改了几处。
+
+    🔴 只改**这道门自己判定为无歧义**的那些。多处命中的一律不碰 ——
+       `judge()` 里那段注释已经说清了为什么:替人挑一个数字会让门变绿,
+       而文档从此可能指着一句注释。自动修如果比人更敢猜,就是在放大那个错。
+
+    🔴 改写只发生在 PIN 匹配到的**那一段文本之内**,并且同时改两处:
+         [`agent-network/bin/cli.ts:7882`](…/cli.ts#L7882)
+                                  ^^^^                ^^^^
+       本仓惯例把 `路径:行号` 也写进链接标签。只改 URL 会留下一个
+       **同义副本**,门会变绿而标签仍然写着旧行号 —— 那比不修更糟,
+       因为读文档的人看的是标签。
+
+    🔴 改完之后还会扫一遍**同一个文档里别处出现的那个旧行号**(例如正文里
+       记录漂移史的 `7845→7882`)。那些**不自动改**(有的是有意保留的历史),
+       但必须说出来,否则「门绿了」会被读成「文档一致了」。
+    """
+    from collections import defaultdict
+    by_doc: dict = defaultdict(list)
+    for doc, rel, old_n, new_n in fixes:
+        by_doc[doc].append((rel, old_n, new_n))
+    changed = 0
+    for doc, items in by_doc.items():
+        text = doc.read_text(encoding="utf-8", errors="replace")
+        original = text
+        for rel, old_n, new_n in items:
+            if old_n == new_n:
+                continue
+
+            def rewrite(m: re.Match) -> str:
+                span = m.group(0)
+                if m.group(3) != rel or int(m.group(4)) != old_n:
+                    return span
+                span = span.replace(f"#L{old_n}", f"#L{new_n}")
+                span = span.replace(f":{old_n}", f":{new_n}")
+                return span
+
+            text = PIN.sub(rewrite, text)
+        if text != original:
+            doc.write_text(text, encoding="utf-8")
+            changed += len(items)
+            for rel, old_n, new_n in items:
+                print(f"  ✅ {doc.relative_to(repo)}  {rel}#L{old_n} → #L{new_n}")
+                # 🔴 只报**看起来像行号引用**的残留,不报散文里碰巧出现的同一个数字。
+                #    第一版用 `str(old_n) in line`,在行号是 `2` 这种小数字时
+                #    会把「line2」「第 2 行」全报出来 —— 一个吵到没人看的告警
+                #    等于没有告警。判据:数字两侧不是数字,且紧邻 `:` `L` `#` `→`
+                #    之一(本仓的两种写法:`cli.ts:7882` 和漂移史 `7845→7882`)。
+                leftover_re = re.compile(
+                    rf"(?:[:L#]|→)\s*{old_n}(?![0-9])|(?<![0-9]){old_n}\s*(?:→)")
+                leftovers = [i + 1 for i, line in enumerate(text.split("\n"))
+                             if leftover_re.search(line)]
+                if leftovers:
+                    print(f"     ⚠ 该文档里仍有 {len(leftovers)} 行提到 {old_n}"
+                          f"(第 {', '.join(map(str, leftovers[:6]))} 行)——"
+                          f"**没有自动改**。可能是有意保留的漂移史,也可能是漏网的同义副本,"
+                          f"请人看一眼。")
+    return changed
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     doc_root = "docs"
@@ -241,8 +309,10 @@ def main() -> int:
         doc_root = sys.argv[sys.argv.index("--doc-root") + 1]
     repo = Path(args[0]).resolve() if args else Path.cwd()
 
+    do_fix = "--fix" in sys.argv
     pins = skipped = unresolved = 0
     findings: list[str] = []
+    fixes: list = []
     for doc in tracked_docs(repo, doc_root):
         try:
             text = doc.read_text(encoding="utf-8", errors="replace")
@@ -258,7 +328,7 @@ def main() -> int:
                 if lines_at_ref is None:
                     unresolved += 1
                     continue
-                judged_here = judge(doc, repo, anchor, rel, int(lineno), lines_at_ref, findings, label_only)
+                judged_here = judge(doc, repo, anchor, rel, int(lineno), lines_at_ref, findings, label_only, fixes)
                 if not judged_here:
                     skipped += 1
                 continue
@@ -277,7 +347,7 @@ def main() -> int:
             if not (1 <= n <= len(lines)):
                 skipped += 1  # 越界同样归另一道门
                 continue
-            if not judge(doc, repo, anchor, rel, n, lines, findings, label_only):
+            if not judge(doc, repo, anchor, rel, n, lines, findings, label_only, fixes):
                 skipped += 1
 
 
@@ -286,6 +356,13 @@ def main() -> int:
         return 2
     for f in findings:
         print(f)
+    if do_fix and fixes:
+        print(f"\n--fix: 其中 {len(fixes)} 处是「恰好一处」的无歧义漂移,改写如下:")
+        apply_fixes(fixes, repo)
+        print("🔴 --fix **不碰**多处命中的那些 —— 那需要人来消歧(理由见脚本里 judge() 的注释)。")
+        print("   改完请重跑一次不带 --fix 的本门确认。")
+    elif do_fix:
+        print("\n--fix: 没有可自动修的漂移(要么没漂,要么全是需要人消歧的多处命中)。")
     verdict = "RED" if findings else "OK"
     print(f"SYMBOL-PIN: {verdict}（扫到 {pins} 个 pin，判定 {pins - skipped - unresolved} 个，"
           f"跳过 {skipped} 个，取不到 ref {unresolved} 个，漂移 {len(findings)} 个）")
