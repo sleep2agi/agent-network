@@ -418,7 +418,8 @@ export interface DaemonCapabilities {
    *
    * 🔴 版本号带包名 + 完整版本号:仓里三个包各自独立编号,裸的 `preview.NN`
    *    同时是三个不同的时间点。此处曾写成「preview.67」—— 那是 **agent-network**
-   *    的号,agent-node 根本没有 .67(npm 404,已发布最高 2.5.0-preview.56)。
+   *    的号,agent-node 根本没有 .67(写下时实测 npm 404;
+   *    **别在这里记「当前最高版本」—— 它每次发版都会变成假话**)。
    *    实测边界:.54 的产物里无此字段,.55 起有。
    *
    * 🔴 缺席 ≠ 0。**agent-node ≤ 2.5.0-preview.54** 的 daemon 在**开机时算一次**就永久缓存,
