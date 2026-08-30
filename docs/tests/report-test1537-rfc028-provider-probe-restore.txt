@@ -1,0 +1,52 @@
+Test: #1537 qa-rfc028-provider-probe restore fail-loud guard
+Date: 2026-08-30
+Runner: Docker via sg docker
+Disk precheck:
+  df -h / => /dev/vda3 492G size, 455G used, 18G available, 97%
+
+Change under test:
+  tests/qa-rfc028-provider-probe/run.sh
+  - line 316: fail loud if /etc/hosts restore after F anthropic DNS-attack variant fails.
+  - line 352: fail loud if /etc/hosts restore/cleanup after F.deepseek DNS-attack variant fails.
+
+Witness red 1: missing /tmp/hosts.bak before first restore
+Command:
+  sg docker -c 'docker build -t anet-qa-rfc028-provider-probe:witness-first-fixed -f tests/qa-rfc028-provider-probe/Dockerfile . && docker run --rm anet-qa-rfc028-provider-probe:witness-first-fixed'
+Result:
+  exit 1
+Red point:
+  /tmp/qa-rfc028-witness-first-fixed.log:313 cp: cannot stat '/tmp/hosts.bak': No such file or directory
+  /tmp/qa-rfc028-witness-first-fixed.log:314 ✗ F /etc/hosts restore failed after anthropic variant — abort before DeepSeek variant runs on polluted DNS state
+Notes:
+  F.deepseek did not start after the restore failure.
+
+Witness red 2: missing /tmp/hosts.bak before F.deepseek restore
+Command:
+  sg docker -c 'docker build -t anet-qa-rfc028-provider-probe:witness-deepseek-fixed -f tests/qa-rfc028-provider-probe/Dockerfile . && docker run --rm anet-qa-rfc028-provider-probe:witness-deepseek-fixed'
+Result:
+  exit 1
+Red point:
+  /tmp/qa-rfc028-witness-deepseek-fixed.log:316 cp: cannot stat '/tmp/hosts.bak': No such file or directory
+  /tmp/qa-rfc028-witness-deepseek-fixed.log:317 ✗ F.deepseek /etc/hosts restore/cleanup failed — abort before later assertions run on polluted DNS state
+Notes:
+  G and M did not start after the restore failure.
+
+Final full-suite run:
+Command:
+  sg docker -c 'docker build -t anet-qa-rfc028-provider-probe:final -f tests/qa-rfc028-provider-probe/Dockerfile . && docker run --rm anet-qa-rfc028-provider-probe:final'
+Result:
+  exit 0
+Summary:
+  RFC-028 P1 e2e — PASS=51 FAIL=0 SKIP=0
+Key restore assertions:
+  /tmp/qa-rfc028-final.log:310 ✓ F /etc/hosts restored after anthropic variant
+  /tmp/qa-rfc028-final.log:316 ✓ F.deepseek /etc/hosts restored
+
+--- Addendum (通信龙, backstop commit) -------------------------------
+本 PR 由 通信龙 代为提交：原作者 通信测试牛 的会话在开 PR 前
+codex-sdk 调用超时（300s）中断，改动与证据已完成但滞留在共享检出里未提交。
+
+代提时相对原始工作副本做了一处收窄：原工作副本的基线较旧，其 diff 会连带
+**删除** main 上 :158 的一行注释
+（"本套件绕过 `anet daemon`… 见 #1299"）。该删除不在批准范围内，已剔除。
+本 PR 对 run.sh 的改动经 diff 核对为**恰好 2 行**（两处 restore），注释保留。

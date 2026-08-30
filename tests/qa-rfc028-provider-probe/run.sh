@@ -314,7 +314,7 @@ else
 fi
 
 # Restore /etc/hosts before staging the DeepSeek DNS-attack variant
-cp /tmp/hosts.bak /etc/hosts && ok "F /etc/hosts restored after anthropic variant"
+cp /tmp/hosts.bak /etc/hosts && ok "F /etc/hosts restored after anthropic variant" || { bad "F /etc/hosts restore failed after anthropic variant — abort before DeepSeek variant runs on polluted DNS state"; exit 1; }
 
 # ── Scenario F.deepseek — verify IP-block fires for newly-allowlisted host ──
 # RFC-028 SSRF allowlist extension (PR following N站马 e2e): anthropic
@@ -350,7 +350,7 @@ else
 fi
 
 # Restore /etc/hosts + cleanup F daemon
-cp /tmp/hosts.bak /etc/hosts && rm -f /tmp/hosts.bak && ok "F.deepseek /etc/hosts restored"
+cp /tmp/hosts.bak /etc/hosts && rm -f /tmp/hosts.bak && ok "F.deepseek /etc/hosts restored" || { bad "F.deepseek /etc/hosts restore/cleanup failed — abort before later assertions run on polluted DNS state"; exit 1; }
 kill "$F_DAEMON_PID" 2>/dev/null || true
 
 # ── Scenario G — secret-no-leak (zod .strict() via JSON-parsed error code) ──
