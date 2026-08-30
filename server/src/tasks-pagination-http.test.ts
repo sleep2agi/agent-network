@@ -28,6 +28,10 @@ function seedTask(
   );
 }
 
+// 30s 而不是 bun 默认的 5s:这个 hook 跑 register()(KDF)+bootServer(),
+// 本机空载基线 ~620ms,而 2026-08-17 与 2026-08-31 两次 CI 上它被 5s 上限打死
+// (0 pass / 1 fail / Ran 1 test —— 见 #928、#1627)。5247ms 是**被截断的下界**,
+// 不是测量值,所以余量按基线的 ~48x 取,而不是按那个数取。
 beforeAll(async () => {
   ({ db } = await import("./db.js"));
   ({ register } = await import("./auth.js"));
@@ -54,7 +58,7 @@ beforeAll(async () => {
   const mod = await import("./server.js");
   server = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
   base = `http://127.0.0.1:${server.port}`;
-});
+}, 30_000);
 
 afterAll(() => {
   try { server?.stop(true); } catch {}
