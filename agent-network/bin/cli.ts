@@ -35,7 +35,7 @@ import {
   type SessionInfo,
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
-import { classifySessionStatus } from "../src/session-status-class";
+import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
@@ -939,9 +939,23 @@ async function startWindowsCodexCopresence(
     const tuiHealthDeadline = tuiHealthStart + TUI_HEALTH_MS;
     let tuiConnected = false;
     let tuiProbes = 0;
+    // 🔴 #1342 —— 记下**每次探测本身**花了多久。为什么这一个数字值得单独存:
+    //    五次采样里 `probes` 全都是 1,而 `waited` 是 6.5–9.4 秒。这两个数放在
+    //    一起,只能说明「循环只转了一圈」,分不出到底是
+    //      (a) 探测本身很慢(它每次新起一个 powershell,并在 do{…}while 里
+    //          反复枚举整张 Win32_Process),于是 25 秒预算里只跑得完一次;
+    //      (b) 还是 TUI 无论如何都在 ~7 秒退出,探多少次都一样。
+    //    这两者该查的地方完全相反 —— 前者查探测成本,后者查 TUI。
+    //    加一个数就能分辨,所以加。
+    let probeMsMax = 0;
+    let probeMsLast = 0;
     while (Date.now() < tuiHealthDeadline && tui.exitCode === null) {
       tuiProbes++;
-      if (probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port)) {
+      const probeStart = Date.now();
+      const hit = probeWindowsOwnedLoopbackConnection(tui.pid, tuiCreationDate, port);
+      probeMsLast = Date.now() - probeStart;
+      if (probeMsLast > probeMsMax) probeMsMax = probeMsLast;
+      if (hit) {
         tuiConnected = true;
         break;
       }
@@ -949,7 +963,7 @@ async function startWindowsCodexCopresence(
     }
     if (!tuiConnected) {
       const waited = Date.now() - tuiHealthStart;
-      const looking = `pid=${tui.pid} birth=${tuiCreationDate} port=${port} probes=${tuiProbes} waited=${waited}ms`;
+      const looking = `pid=${tui.pid} birth=${tuiCreationDate} port=${port} probes=${tuiProbes} waited=${waited}ms probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`;
       if (tui.exitCode !== null) {
         throw new Error(
           `TUI second-client health failed: the launched Codex TUI exited (code=${tui.exitCode}) before it connected — ` +
@@ -11949,11 +11963,14 @@ async function statusCommand() {
     //    是一个**没有出口**的状态(只有 report_completion 能把它拉回 idle),
     //    所以一个 agent 可以永远停在那里而被报成「在干活」。
     const classifyStatus = (s: any) => classifySessionStatus(s?.status);
-    const summary = statusRes.summary || sessions.reduce((acc: any, s: any) => {
-      acc[classifyStatus(s)]++;
-      acc.total++;
-      return acc;
-    }, { idle: 0, working: 0, offline: 0, total: 0 });
+    // 🔴 #1625 —— **不再用 `statusRes.summary`**。`/api/status` 总是返回一个
+    //    summary,于是原先的 `statusRes.summary || …` 让本地分类器从不执行,
+    //    屏幕上的数字来自服务端一份停在 #1548 之前的分类(`blocked`/`error`
+    //    被折进 `working`)。症状:一个 blocked 节点同时出现在 `working` 和
+    //    `needs attention` 两格,四个数加起来比 total 多。
+    //    范围等价性已核:该端点只加 `addNetworkScope`、无状态/别名过滤,
+    //    且服务端的 summary 就是从同一个 sessions 数组算的。
+    const summary = summarizeSessions(sessions);
     const idle = sessions.filter((s: any) => classifyStatus(s) === "idle");
     const working = sessions.filter((s: any) => classifyStatus(s) === "working");
     const attention = sessions.filter((s: any) => classifyStatus(s) === "attention");
@@ -11962,7 +11979,7 @@ async function statusCommand() {
     console.log(`\n  CommHub: ${hub}`);
     // 🔴 attention 单独一格。折进 working 会让「需要人看一眼」消失在一个看起来
     //    正常的数字里 —— 这正是 #1548 那一族问题:两种不同的事渲染成同一个词。
-    const attnCount = summary.attention ?? attention.length;
+    const attnCount = summary.attention;
     console.log(`  Agents: ${summary.idle || 0} idle, ${summary.working || 0} working`
       + (attnCount > 0 ? `, ${attnCount} needs attention` : "")
       + `, ${summary.offline || 0} offline`);
@@ -11970,7 +11987,7 @@ async function statusCommand() {
     console.log(`  Tasks:  ${tasks.length} recent\n`);
 
     if (attention.length > 0) {
-      console.log("  Needs attention (blocked / error — not progressing):");
+      console.log("  Needs attention (blocked / error / 未知状态 — not progressing):");
       for (const s of attention) {
         console.log(`    ${String(s.alias).padEnd(16)} ${String(s.status || "").padEnd(8)} ${(s.task || "").slice(0, 48)}`);
       }

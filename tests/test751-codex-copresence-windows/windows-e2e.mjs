@@ -74,13 +74,23 @@ function terminal(args, onData, timeoutMs = 45_000) {
         //    在报错文本里长得一模一样,读的人会以为那一行就是全部信息。
         //    改成显式说明缺席,下一次采样才能分辨「TUI 有输出但没帮助」
         //    还是「TUI 根本没产出任何东西」—— 两者指向完全不同的根因。
-        const ptyOutput = output ? `\n${output}` : `\n--- PTY 无输出(0 字节) ---`;
-        const diagnostics = existsSync(appLog)
-          ? `\n--- app-server log ---\n${readFileSync(appLog, "utf8")}`
-          : `\n--- app-server log: 不存在 (${appLog}) ---`;
-        const rpcDiagnostics = existsSync(rpcLog)
-          ? `\n--- fake rpc log ---\n${readFileSync(rpcLog, "utf8")}`
-          : `\n--- fake rpc log: 不存在 (${rpcLog}) ---`;
+        // 🔴 #1342 补第二层(2026-08-31,在 #1623 的一次真实失败里当场看到):
+        //    上面只分辨了「文件在不在」。**文件在、但读出来是空串**时,
+        //    这里会打印一个只有表头、下面一片空白的段 ——
+        //    与「我打印了它,它确实没内容」逐字相同。那一次 `app-server log`
+        //    正是 0 字节,而 `fake rpc log` 满的:两段并排,读的人无法判断
+        //    前者是「没写」还是「写了但为空」。而这两件事指向不同的根因
+        //    (app-server 没起来 vs 起来了不落盘)。
+        //    ⚠️ 这是同一个缺陷隔了一层 —— 修 A 分支的人天然不会去看 B 分支。
+        const readLog = (label, path) => {
+          if (!existsSync(path)) return `\n--- ${label}: 不存在 (${path}) ---`;
+          const body = readFileSync(path, "utf8");
+          if (body.length === 0) return `\n--- ${label}: 存在但 0 字节 (${path}) ---`;
+          return `\n--- ${label} (${body.length} 字节) ---\n${body}`;
+        };
+        const ptyOutput = output ? `\n--- PTY 输出 (${output.length} 字节) ---\n${output}` : `\n--- PTY 无输出(0 字节) ---`;
+        const diagnostics = readLog("app-server log", appLog);
+        const rpcDiagnostics = readLog("fake rpc log", rpcLog);
         reject(new Error(`PTY failed (${exitCode}): ${args.join(" ")}${ptyOutput}${diagnostics}${rpcDiagnostics}`));
       }
       else resolvePromise(output);
