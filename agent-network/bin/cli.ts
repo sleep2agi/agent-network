@@ -161,6 +161,7 @@ import {
 import {
   closeLog,
   ensureWindowsPrivateDirectory,
+  measurePowerShellStartupMs,
   openPrivateAppendLog,
   probeWindowsCreationDate,
   probeWindowsOwnedLoopbackConnection,
@@ -966,7 +967,11 @@ async function startWindowsCodexCopresence(
     }
     if (!tuiConnected) {
       const waited = Date.now() - tuiHealthStart;
-      const looking = `pid=${tui.pid} birth=${tuiCreationDate} port=${port} probes=${tuiProbes} waited=${waited}ms probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`;
+      // #1342 —— 只在失败时量一次「起一个 powershell 要多久」。它是那 10.5 秒里
+      //   **启动**那一段的下界;剩下的就是 CIM 全表查询那一段。两段要查的东西
+      //   完全不同(runner/镜像 vs 查询写法),而此前日志里分不开。
+      const psStartMs = measurePowerShellStartupMs();
+      const looking = `pid=${tui.pid} birth=${tuiCreationDate} port=${port} probes=${tuiProbes} waited=${waited}ms probeMsLast=${probeMsLast} probeMsMax=${probeMsMax} psStartMs=${psStartMs ?? "?"}`;
       if (tui.exitCode !== null) {
         throw new Error(
           `TUI second-client health failed: the launched Codex TUI exited (code=${tui.exitCode}) before it connected — ` +
