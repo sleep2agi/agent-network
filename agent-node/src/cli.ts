@@ -130,6 +130,11 @@ import {
   type ConfigUpdate,
   type ConfigPatch,
 } from "./runtime/config-apply";
+import {
+  evaluateCreateCapability,
+  type CreateCapabilityLogState,
+  type DaemonCreateCapability,
+} from "./runtime/daemon-create-capability";
 import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 import {
@@ -181,36 +186,45 @@ import {
 // 只对 host_supervisor 算。普通节点返回 undefined ⇒ 快照里完全不出现这两个字段,
 // 行为与改动前逐字相同。
 //
-// 🔴 算一次就缓存:report_status 是心跳路径,而 loadAndVerifyAnetBin() 会做
-//    realpathSync + statSync + 读文件哈希。每次心跳都跑一遍是纯浪费。
-//    代价是 daemon 运行期间修好了 pin 也要重启才会反映 —— 可接受,
-//    因为修 pin 的正规做法(写 /etc/anet-daemon/path.conf)本来就伴随重启。
-type CreateBlockedReason =
-  | "anet_bin_identity" | "anet_bin_source" | "anet_bin_shape"
-  | "anet_bin_permission" | "anet_bin_unknown";
-let _createCapCache: { ok: boolean; reason?: CreateBlockedReason } | null | undefined;
-function daemonCreateCapability(): { ok: boolean; reason?: CreateBlockedReason } | undefined {
-  if (_createCapCache !== undefined) return _createCapCache ?? undefined;
-  if (fileConfig?.role !== "host_supervisor") { _createCapCache = null; return undefined; }
-  try {
+// ── #1545:这里原本「算一次就缓存」,现在改成每次上报重算。下面是为什么 ──
+//
+// 原注释的理由是:「心跳路径上跑 realpathSync + statSync + 读文件哈希是纯浪费;
+// 代价是运行期间修好了 pin 也要重启才反映 —— 可接受,因为修 pin 的正规做法
+// (写 /etc/anet-daemon/path.conf)本来就伴随重启。」
+//
+// 🔴 那个「代价」只说了**一半**,而没说的那一半朝「没问题」方向错:
+//    它论证的是「坏 → 好」要等重启(修 pin 伴随重启,可接受)。
+//    但 pin 也会在**运行期间由好变坏** —— 二进制被 `anet upgrade` / npm 重装换掉、
+//    被 chmod、包目录被移走。这些**都不伴随 daemon 重启**。
+//    于是 daemon 会**永远上报 can_create_nodes:true**,而 create 每次都失败。
+//    「说了但说的是开机那一刻的事」比沉默更糟:沉默至少不误导。
+//
+// 🔴 「纯浪费」这一半是量出来的,不是驳倒的 —— 量完发现它很小:
+//    realpath/stat 是微秒级;唯一重的是 sha256,本机实测 954,122 字节的
+//    read+SHA-256 **median 3.92ms**,按 3 分钟心跳 = 占空比 **0.0022%**。
+//    而且 `ANET_BIN_SHA256` **全仓没有任何代码或安装脚本会写**(readPathConf 里
+//    它是可选键),所以那一支在现场几乎从不进入。
+//    考虑过按 (abs, mtime, size) 缓存哈希 —— **否决**:那是拿一个供应链完整性
+//    校验去换 4ms,而能改写二进制的攻击者同样能改 mtime,缓存键正好被它要防的
+//    那个人控制。
+//
+// 🔴 仍然只对 host_supervisor 算。普通节点返回 undefined ⇒ 快照里完全不出现
+//    这几个字段,行为与改动前逐字相同。
+/** 只用于**日志去重**的状态(见 daemon-create-capability.ts 里的注释)。
+ *  🔴 它不参与任何判断 —— 上报的能力值每次都是现算的。 */
+const _createCapLogState: CreateCapabilityLogState = {};
+function daemonCreateCapability(): DaemonCreateCapability | undefined {
+  return evaluateCreateCapability({
+    role: fileConfig?.role,
     // 同步 require 而不是顶层 import:cli.ts 对 create-node-daemon 一直是按需加载的,
     // 保持一致,也避免非 daemon 节点为这一个函数拉进整个模块。
-    const mod = require("./runtime/create-node-daemon.js");
-    mod.loadAndVerifyAnetBin();
-    _createCapCache = { ok: true };
-  } catch (e) {
-    // 🔴 只报代码,**不报原始报错文本**。unsafePathHelp() 的消息里带完整机器路径,
-    //    而这个字段会一路走到 hub 和 Dashboard —— 一条「哪台机器的哪个路径缺什么」
-    //    本身就是一张地图。原文仍然进 daemon 自己的日志,那里是本地的。
-    // 🔴 从 Error 上读机器可读的类别。拿不到就用 anet_bin_unknown,
-    //    **不猜一个具体类别** —— 猜错会让人按错的方向去修
-    //    (「要 sudo 改系统配置」和「一行 chmod go-w」是完全不同的两件事)。
-    const code = (e as any)?.anetBinCode;
-    const known = ["anet_bin_identity","anet_bin_source","anet_bin_shape","anet_bin_permission"];
-    _createCapCache = { ok: false, reason: known.includes(code) ? code : "anet_bin_unknown" };
-  }
-  return _createCapCache;
+    probe: () => require("./runtime/create-node-daemon.js").probeAnetBinReadiness(),
+    now: () => Date.now(),
+    log,
+    logState: _createCapLogState,
+  });
 }
+
 const home = homedir();
 const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
 

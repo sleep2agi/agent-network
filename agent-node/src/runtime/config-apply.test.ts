@@ -703,3 +703,77 @@ describe("#1353 create_nodes_blocked_reason —— 四类而不是一类", () =>
     expect(set.size).toBe(4);
   });
 });
+
+/* #1545 —— 「能不能」旁边必须带上「**这是什么时候测的**」。
+ *
+ * 病灶:preview.67 及更早的 daemon 用 `_createCapCache` 在开机时算一次就永久缓存。
+ * 开机好、之后二进制被 `anet upgrade` 换掉或被 chmod ⇒ 它**永远上报 ready**,
+ * 而 create 每次都失败。在 hub 上,那条记录和一条 3 秒前刚测的 ready
+ * **在 last_seen_at 上完全一样** —— 心跳是新的,那一格不是。 */
+describe("#1545 buildConfigSnapshot —— can_create_nodes 的年龄", () => {
+  const cfg = { role: "host_supervisor" };
+
+  test("给了 probedAtMs → 换算成 create_capability_observed_ms_ago", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 1,
+      { ok: true, probedAtMs: 1_000_000 }, 1_000_042);
+    expect(s.daemon_capabilities.create_capability_observed_ms_ago).toBe(42);
+  });
+
+  test("刚测的 → 0(不是缺席)", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 1,
+      { ok: true, probedAtMs: 5_000 }, 5_000);
+    expect(s.daemon_capabilities.create_capability_observed_ms_ago).toBe(0);
+  });
+
+  /* 🔴 这条是整组的重点:**缺席和 0 必须是两件事**。
+   * 旧调用点不传 probedAtMs ⇒ 那一格必须不存在,而不是 0。
+   * 渲染成 0 等于替一个从不重算的旧 daemon 宣称"这是刚测的"。 */
+  test("🔴 没给 probedAtMs → 那一格**缺席**,绝不能是 0", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 1, { ok: true });
+    expect(s.daemon_capabilities.can_create_nodes).toBe(true);   // 能力仍在
+    expect("create_capability_observed_ms_ago" in s.daemon_capabilities).toBe(false);
+    expect(s.daemon_capabilities.create_capability_observed_ms_ago).not.toBe(0);
+  });
+
+  test("blocked 时同样带年龄(坏消息也要说是什么时候的)", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 1,
+      { ok: false, reason: "anet_bin_source", probedAtMs: 100 }, 100 + 180_000);
+    expect(s.daemon_capabilities.can_create_nodes).toBe(false);
+    expect(s.daemon_capabilities.create_nodes_blocked_reason).toBe("anet_bin_source");
+    expect(s.daemon_capabilities.create_capability_observed_ms_ago).toBe(180_000);
+  });
+
+  /* 时钟被 NTP 往回拨会让 now < probedAt。夹到 0 而不是让负数流出去:
+   * 负数会被 hub 读取侧的消毒整格丢掉(读的人退回「年龄未知」),
+   * 而回拨量级(通常 < 1s)远小于这一格要分辨的尺度(分钟 vs 周)。 */
+  test("时钟回拨 → 夹到 0,不让负数流到 hub", () => {
+    const s: any = buildConfigSnapshot(cfg, true, 1,
+      { ok: true, probedAtMs: 10_000 }, 9_000);
+    expect(s.daemon_capabilities.create_capability_observed_ms_ago).toBe(0);
+  });
+
+  test("probedAtMs 不是有限数 → 当作没给(缺席),不算出 NaN", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const s: any = buildConfigSnapshot(cfg, true, 1,
+        { ok: true, probedAtMs: bad as number }, 1000);
+      expect("create_capability_observed_ms_ago" in s.daemon_capabilities).toBe(false);
+    }
+  });
+
+  test("🔴 加了年龄也不许夹带路径(沿用 #1353 的立场)", () => {
+    const blob = JSON.stringify(buildConfigSnapshot(cfg, true, 1,
+      { ok: false, reason: "anet_bin_permission", probedAtMs: 1 }, 2));
+    expect(blob).not.toContain("/");
+    expect(blob).not.toContain("\\");
+    // 正控:真会出现在上游 e.message 里的串必须含 "/",证明上面不是恒真
+    expect("chmod go-w '/home/x/anet.cjs'").toContain("/");
+  });
+
+  test("非 daemon 节点(不传能力参数)不受影响 —— 三格都不出现", () => {
+    const s: any = buildConfigSnapshot({ role: "member" }, true, 1);
+    const caps = s.daemon_capabilities ?? {};
+    expect("can_create_nodes" in caps).toBe(false);
+    expect("create_nodes_blocked_reason" in caps).toBe(false);
+    expect("create_capability_observed_ms_ago" in caps).toBe(false);
+  });
+});
