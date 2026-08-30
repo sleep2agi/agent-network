@@ -8560,7 +8560,20 @@ async function daemonRestartCommand() {
   console.log(`[anet daemon] restart "${id}" —— 先停`);
   await stopCommand();
   console.log(`[anet daemon] restart "${id}" —— 再起`);
-  await startCommand();
+  // 🔴 起不来时,daemon 现在是**停着的** —— 而上面那条 "先停" 已经打印过了,
+  //    用户很容易以为 restart 只是"没成功",而不是"我的 daemon 现在没了"。
+  //    2026-08-30 实测两次:先 stop 再发现起不来(一次是 grok 自更新到未验证版本
+  //    #1615,一次是启动进程没活过父会话)。两次都是停掉之后才知道。
+  //    所以这里不吞异常(原样抛出保留退出码与栈),只在抛之前把**当前状态**说清楚。
+  try {
+    await startCommand();
+  } catch (e) {
+    console.error(``);
+    console.error(`🔴 [anet daemon] "${id}" 已经停了,但没能起来 —— 现在它是**停着的**。`);
+    console.error(`   重试:  anet daemon start ${id}`);
+    console.error(`   先看上面的启动报错;常见原因是运行时二进制的版本不在验证清单里(见 #1615)。`);
+    throw e;
+  }
 }
 
 async function daemonUpCommand() {
