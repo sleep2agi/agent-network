@@ -233,8 +233,13 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
         //   一条跑不通的修复建议比没有建议更糟：它让人以为自己已经修过了。
         //   realpath 先在 sudo **之前**算好并存进变量 —— 否则 root 环境里 `command -v anet`
         //   可能解析到另一个（或找不到）二进制。
-        //   本行 shell 已用 `bash -n`（rc=0）+ 实跑非 sudo 段验证过。
-        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null Or keep the pin in a file you own (no /etc, no sudo): ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && mkdir -p \"$HOME/.anet\" && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" > \"$HOME/.anet/path.conf\" && export ANET_DAEMON_PATH_CONF=\"$HOME/.anet/path.conf\" (put ANET_DAEMON_PATH_CONF in the daemon environment so it survives a restart)",
+        //   🔴 说明文字走 `#` 注释行、命令各占一行 —— **整条 Fix 都要能 bash -n 过**。
+        //   2026-08-31 的教训：我曾把说明直接拼在命令后面（`(no /etc, no sudo)` 里的
+        //   括号不配对），整条从 rc=0 变成 rc=2；而当时那条 bash -n 测试只切了我新加的
+        //   那半句去验，**结构上看不见自己要防的缺陷**。现在验的是整条 Fix 尾巴。
+        //   同 CLI 侧 daemon-capability-display.ts 的结论：说明和命令拼成一句之后，
+        //   没有一条能通过 bash -n。
+        : "\n# needs root:\nANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null\n# or keep the pin in a file you own (no /etc, no sudo) — put ANET_DAEMON_PATH_CONF in the daemon environment so it survives a restart:\nANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && mkdir -p \"$HOME/.anet\" && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" > \"$HOME/.anet/path.conf\" && export ANET_DAEMON_PATH_CONF=\"$HOME/.anet/path.conf\"",
     );
   }
   if (!pin) {
@@ -252,8 +257,13 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
         //   一条跑不通的修复建议比没有建议更糟：它让人以为自己已经修过了。
         //   realpath 先在 sudo **之前**算好并存进变量 —— 否则 root 环境里 `command -v anet`
         //   可能解析到另一个（或找不到）二进制。
-        //   本行 shell 已用 `bash -n`（rc=0）+ 实跑非 sudo 段验证过。
-        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null (needs root). No-root alternative to try first: only `anet daemon init|start|up` auto-declares the pin, so a daemon started via `anet node start` / pm2 / systemd never receives it — restart it with `anet daemon start <name>`. Or keep the pin in a file you own (no /etc, no sudo): ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && mkdir -p \"$HOME/.anet\" && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" > \"$HOME/.anet/path.conf\" && export ANET_DAEMON_PATH_CONF=\"$HOME/.anet/path.conf\" (put ANET_DAEMON_PATH_CONF in the daemon environment so it survives a restart)",
+        //   🔴 说明文字走 `#` 注释行、命令各占一行 —— **整条 Fix 都要能 bash -n 过**。
+        //   2026-08-31 的教训：我曾把说明直接拼在命令后面（`(no /etc, no sudo)` 里的
+        //   括号不配对），整条从 rc=0 变成 rc=2；而当时那条 bash -n 测试只切了我新加的
+        //   那半句去验，**结构上看不见自己要防的缺陷**。现在验的是整条 Fix 尾巴。
+        //   同 CLI 侧 daemon-capability-display.ts 的结论：说明和命令拼成一句之后，
+        //   没有一条能通过 bash -n。
+        : "\n# needs root:\nANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null\n# no-root alternative to try first: only `anet daemon init|start|up` auto-declares the pin, so a daemon started via `anet node start` / pm2 / systemd never receives it. Restart it with:\n# anet daemon start <name>\n\n# or keep the pin in a file you own (no /etc, no sudo) — put ANET_DAEMON_PATH_CONF in the daemon environment so it survives a restart:\nANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && mkdir -p \"$HOME/.anet\" && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" > \"$HOME/.anet/path.conf\" && export ANET_DAEMON_PATH_CONF=\"$HOME/.anet/path.conf\"",
     );
   }
   // ① absolute — cross-platform. Was `startsWith("/")` which returned
