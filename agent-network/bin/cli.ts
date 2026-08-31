@@ -3793,46 +3793,46 @@ function printHelp() {
 anet — AI Agent Network CLI (V2)
 
 Quick start:
-  anet hub start                  Start local hub
-  anet login                      Log in to the hub
-  anet node create my-agent       Create a node
-  anet node start my-agent        Start the node
-  anet demo                       List demos
+  anet hub start             Start local hub
+  anet login                 Log in to the hub
+  anet node create my-agent  Create a node
+  anet node start my-agent   Start the node
+  anet demo                  List demos
   (连别人已有的 hub: anet init --hub <url>)
 
 Node Management:
-  anet node create <name>        Create a new agent node
-  anet node start <name>         Start a node
-  anet node start --all          Start every node in cwd (= anet project up)
-  anet node stop <name>          Stop a running node
-  anet node resume <name>        Resume interrupted session
-  anet node delete <name>        Delete node and config
-  anet node rename <ref> <new>   Rename a node
-  anet node ls                   List all nodes
-  anet attach <name>             Attach the node's exact tmux TUI session
+  anet node create <name>       Create a new agent node
+  anet node start <name>        Start a node
+  anet node start --all         Start every node in cwd (= anet project up)
+  anet node stop <name>         Stop a running node
+  anet node resume <name>       Resume interrupted session
+  anet node delete <name>       Delete node and config
+  anet node rename <ref> <new>  Rename a node
+  anet node ls                  List all nodes
+  anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
-  anet goal list [node]          List local scheduled goals
-  anet goal show <node> <id>     Show one goal in detail (progress log)
+  anet goal list [node]         List local scheduled goals
+  anet goal show <node> <id>    Show one goal in detail (progress log)
   anet goal edit <node> <id> ... Edit a goal's interval / text / status
-  anet goal cancel <node> <id>   Mark a scheduled goal cancelled
+  anet goal cancel <node> <id>  Mark a scheduled goal cancelled
 
 Project (cwd-wide):
-  anet project up                Start every node in cwd (skip already-running)
-  anet project restart           Kill existing tmux + start fresh (every node)
-  anet project down              Stop every node + notify hub offline
+  anet project up               Start every node in cwd (skip already-running)
+  anet project restart          Kill existing tmux + start fresh (every node)
+  anet project down             Stop every node + notify hub offline
   --stagger <s>                  Delay between nodes (default: 3, 0 disables)
   --only a,b / --exclude x,y     Filter by alias or node id
 
 Session:
-  anet node create <name> --resume <id>  Bind an existing Claude session
+  anet node create <name> --resume <id>    Bind an existing Claude session
   anet node create <name> --resume-latest  Bind the latest Claude session
-  anet node start <name>                 Start in this terminal (foreground, default)
-  anet node start <name> --tmux          Start in a tmux session (attach with a terminal; detached when headless)
-  anet node start <name> --new-session   Start with fresh Claude session
+  anet node start <name>                   Start in this terminal (foreground, default)
+  anet node start <name> --tmux            Start in a tmux session (attach with a terminal; detached when headless)
+  anet node start <name> --new-session     Start with fresh Claude session
   anet node resume <name> --session <id> Resume specific session
-  anet session ls               List Claude Code sessions
+  anet session ls                          List Claude Code sessions
 
 Co-presence (human TUI + network agent share one thread):
   anet node start <name> --copresence
@@ -3854,38 +3854,38 @@ Grok co-presence (preview only):
                                 Create an experimental shared Grok TUI node
   anet node create <name> --runtime grok-build-cli --tools WebSearch
                                 Opt into general web search (supports basic X URL search)
-  anet grok attach <name>       Attach this terminal (Ctrl-] detaches)
-  anet grok model <name> <id>   Switch the model; works while attached
+  anet grok attach <name>                  Attach this terminal (Ctrl-] detaches)
+  anet grok model <name> <id>              Switch the model; works while attached
   --grok-headless               Use legacy per-turn grok-build-cli instead
   --owner-schedule-control      Opt this node into owner-gated managed-cron edits
   WARNING: network tasks drive the same TUI; use trusted tasks/networks only
 
 Channel:
   anet channel add telegram <name> --bot-token <tok> --allow <uid>
-  anet channel ls [name]        List channels
+  anet channel ls [name]  List channels
 
 Setup:
-  anet init [--hub <url>]       Configure hub URL (global; no token prompt)
+  anet init [--hub <url>]                                 Configure hub URL (global; no token prompt)
   anet init --hub <url> --token <tok>
                                 Legacy master-token compatibility path
-  anet init project             Setup project (channel plugin)
-  anet setup                    Install runtime dependencies
-  anet hub start                 Start CommHub Server + admin bootstrap
-  anet hub dashboard             Start Web Dashboard
-  anet hub config                Show/set server config
-  anet upgrade                  Upgrade all anet packages (channel-aware)
+  anet init project                                       Setup project (channel plugin)
+  anet setup                                              Install runtime dependencies
+  anet hub start                                          Start CommHub Server + admin bootstrap
+  anet hub dashboard                                      Start Web Dashboard
+  anet hub config                                         Show/set server config
+  anet upgrade                                            Upgrade all anet packages (channel-aware)
   anet upgrade --channel preview|latest --dry-run --self  (see flags)
 
 Daemon (host_supervisor — required by the dashboard's node-creation wizard):
-  anet daemon up [name]         Create + start a daemon (one-shot, default: "daemon")
-  anet daemon init <name>       Create a host_supervisor node config
-  anet daemon start <name>      Start an existing daemon
-  anet daemon list              List locally-configured daemons
+  anet daemon up [name]                                   Create + start a daemon (one-shot, default: "daemon")
+  anet daemon init <name>                                 Create a host_supervisor node config
+  anet daemon start <name>                                Start an existing daemon
+  anet daemon list                                        List locally-configured daemons
 
 Config & tokens:
-  anet config [path|json]       Show config summary, path, or raw JSON
-  anet token ls|create|revoke   Manage API tokens
-  anet batch <verb> [prefix]    Manage groups created by create --batch
+  anet config [path|json]      Show config summary, path, or raw JSON
+  anet token ls|create|revoke  Manage API tokens
+  anet batch <verb> [prefix]   Manage groups created by create --batch
 
 OpenCode:
   anet opencode upgrade-pin <v> Verify + pin the exact opencode-ai release
@@ -3893,28 +3893,28 @@ OpenCode:
                                 API-key login for an opencode-cli node
 
 Other:
-  anet import [alias]           Import sessions from CommHub
-  anet register                  Create new account
-  anet login                    Login (username + password)
-  anet login --token <tok>      Login with API token
-  anet logout                   Remove saved token
-  anet passwd                   Change password
-  anet whoami                   Show current user + networks
-  anet network ls               List my networks
-  anet network create <name>    Create a network
-  anet network use <name>       Switch to a network
-  anet skill list               List public SkillHub skills
-  anet skill show <slug>        Print a skill's SKILL.md (sha256 verified)
-  anet license                  Show license status + limits
-  anet activate <key>           Activate license key
-  anet logs <name>              Show recent agent logs
-  anet doctor                   System diagnostic check
-  anet run                      Standalone SSE agent
-  anet -v                       Version + dependency report
+  anet import [alias]         Import sessions from CommHub
+  anet register               Create new account
+  anet login                  Login (username + password)
+  anet login --token <tok>    Login with API token
+  anet logout                 Remove saved token
+  anet passwd                 Change password
+  anet whoami                 Show current user + networks
+  anet network ls             List my networks
+  anet network create <name>  Create a network
+  anet network use <name>     Switch to a network
+  anet skill list             List public SkillHub skills
+  anet skill show <slug>      Print a skill's SKILL.md (sha256 verified)
+  anet license                Show license status + limits
+  anet activate <key>         Activate license key
+  anet logs <name>            Show recent agent logs
+  anet doctor                 System diagnostic check
+  anet run                    Standalone SSE agent
+  anet -v                     Version + dependency report
 
 Legacy aliases:
-  anet create <name>              Alias for anet node create
-  anet start <name>               Alias for anet node start
+  anet create <name>  Alias for anet node create
+  anet start <name>   Alias for anet node start
 `);
 }
 
@@ -8249,11 +8249,11 @@ Options:
   --password <pass>  Bootstrap admin password (default: a random anet-xxxx, printed once)
 
 Example:
-  anet hub start                     # Start server + bootstrap admin account
-  anet hub dashboard                 # Start Dashboard UI
-  anet hub start --host 0.0.0.0      # Allow LAN agents
-  anet hub start --port 8080         # Custom port
-  anet hub config                    # Show config
+  anet hub start                 # Start server + bootstrap admin account
+  anet hub dashboard             # Start Dashboard UI
+  anet hub start --host 0.0.0.0  # Allow LAN agents
+  anet hub start --port 8080     # Custom port
+  anet hub config                # Show config
 `);
 }
 
@@ -8440,9 +8440,9 @@ Options:
 
 Daemon 就是一个 role=host_supervisor 的 agent-node,所以停 / 删 / 看**没有** daemon 版,
 直接用 node 级命令(anet daemon restart 内部调的也正是其中的 stop):
-  anet node stop <name>      停一个 daemon
-  anet node delete <name>    删掉它
-  anet node ls               看它在不在跑(daemon list 只列本机配置过的 daemon,不含活性)
+  anet node stop <name>    停一个 daemon
+  anet node delete <name>  删掉它
+  anet node ls             看它在不在跑(daemon list 只列本机配置过的 daemon,不含活性)
 
 A "daemon" is an agent-node with role:host_supervisor — receives create_node
 dispatches from the hub/dashboard and forks child agent-nodes on demand.
@@ -10233,9 +10233,9 @@ Options (shared):
   --exclude x,y         Skip these aliases (or node ids)
 
 Examples:
-  anet project up                       # 起所有，skip 已跑的
-  anet project restart --stagger 1      # 全重启，1s 错峰
-  anet project down --only commhub_1    # 只停一个
+  anet project up                           # 起所有，skip 已跑的
+  anet project restart --stagger 1          # 全重启，1s 错峰
+  anet project down --only commhub_1        # 只停一个
 `);
 }
 
@@ -10704,7 +10704,7 @@ Examples:
   anet node loop my-codex "monitor #271 PR" --every 5m
   anet node loop researcher "scan twitter for grok updates" --every 30m
   anet node loop daily-bot "post the morning summary" --every 2h
-  anet node loop nightly-bot "rotate logs"                  --every 1d
+  anet node loop nightly-bot "rotate logs"  --every 1d
 
 Interval format: 5m / 2h / 1d (m/h/d suffix required, integer ≥ 1).
 Sub-minute intervals (e.g. 30s) are not accepted — the scheduler tick
@@ -10938,8 +10938,8 @@ Options (feishu, RFC-020 #179):
 
 Examples:
   anet channel add telegram 指挥室 --bot-token 123:ABC --allow <your-numeric-uid>
-  anet channel add feishu  指挥室 --app-id cli_xxx --app-secret yyy --allow ou_zzz
-  anet channel add feishu  指挥室                # 交互式
+  anet channel add feishu                   指挥室 --app-id cli_xxx --app-secret yyy --allow ou_zzz
+  anet channel add feishu                   指挥室                # 交互式
 `);
       return;
     }
@@ -15400,7 +15400,7 @@ async function batchCommand() {
   const sub = args[1];
   if (!sub || sub === "-h" || sub === "--help" || sub.startsWith("-")) {
     console.log(`
-  anet batch <verb> <prefix>   # batch lifecycle ops (issue #55)
+  anet batch <verb> <prefix>                # batch lifecycle ops (issue #55)
 
   Verbs:
     start <prefix>                        re-launch (Phase 1: hint re-run create)
@@ -16336,10 +16336,10 @@ switch (command) {
     // Removed per issue #45. Print migration help and exit non-zero so users
     // notice the breakage instead of silently failing.
     console.error(`[anet] ⚠ 'anet quickstart' 已删除（per #45）。改用现代命令组合:
-  anet hub start          # 起 CommHub Server
-  anet setup              # 装 runtime deps + 选 runtime (wizard)
-  anet register           # 创建账号
-  anet login              # 登录
+  anet hub start                            # 起 CommHub Server
+  anet setup                                # 装 runtime deps + 选 runtime (wizard)
+  anet register                             # 创建账号
+  anet login                                # 登录
   anet node create <name> # 创建 agent
 
 或一键 demo: cd demos/hello-world && docker compose up`);
