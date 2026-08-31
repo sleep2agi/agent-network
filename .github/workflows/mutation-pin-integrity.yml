@@ -1,0 +1,29 @@
+# tests/*/run.sh 里的 `sed -i 's/PAT/…/' <file>` —— PAT 必须还能在目标文件里命中。
+#
+# 🔴 **无 paths 过滤，故意的**（同 proc-gone-assertions.yml 的理由）。
+#    这道门要守的是「**任何**改动是否把某条变异守卫钉住的那一行重构掉了」——
+#    而那一行可以在任何源文件里。设了 paths 就会在真正该跑的时候跑不到，
+#    而一道从不被触发的门，在 PR 页面上和没有这道门长得一模一样。
+#
+# 为什么需要它（2026-08-31 真踩）：test649 的 L5 变异钉着
+# `(t.created_at || "?").padEnd(24)`；那一行被重构后 sed 匹配不到，
+# `grep -Fq` 失败、`set -e` 打死脚本 —— 日志上看是「被测行为回归了」，
+# 实际是**那道变异守卫从此什么也测不到**。它当时只有 Docker 套件能发现，
+# 而 Docker 套件不是每个 PR 都跑；这道纯文本检查几秒钟就跑完。
+name: mutation pin integrity
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  mutation-pins:
+    name: mutation pins still apply
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # 判据自检先跑：一道自己都没被证明会红的门，绿了也不能读。
+      - name: selftest (criterion)
+        run: python3 scripts/check-mutation-pins.py --selftest
+      - name: scan repo
+        run: python3 scripts/check-mutation-pins.py
