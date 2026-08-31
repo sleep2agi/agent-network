@@ -47,6 +47,7 @@ import { formatHubVersionDetail } from "../src/hub-version-skew";
 import { nodeCountLine } from "../src/doctor-node-count";
 import { nodeNotFoundMessage } from "../src/node-not-found";
 import { lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
+import { describeLocalProcess, LOCAL_VS_HUB_NOTE, type LocalProcessState } from "../src/local-process-state";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
@@ -15864,8 +15865,16 @@ async function doctorCommand() {
     const name = nodeDisplayName(id, p);
     const runtime = normalizeRuntime(p || undefined);
     const pid = join(nodesDir(), id, ".pid");
-    const alive = existsSync(pid) ? (() => { try { process.kill(parseInt(readFileSync(pid, "utf-8")), 0); return true; } catch { return false; } })() : false;
-    info(`  ${name}`, `${runtime} ${alive ? "● running" : "○ stopped"} node_id=${p?.node_id || "-"}`);
+    // 🔴 这一列量的是**本机进程**,不是 hub 的看法。原先印无限定的 running/stopped,
+    // 和 `anet node ls` 的 STATUS(来自 CommHub)会给出相反答案而无从分辨。
+    const localState: LocalProcessState = (() => {
+      if (!existsSync(pid)) return { kind: "none" };
+      const raw = parseInt(readFileSync(pid, "utf-8").trim(), 10);
+      if (!Number.isFinite(raw)) return { kind: "none" };
+      try { process.kill(raw, 0); return { kind: "alive", pid: raw }; } catch { return { kind: "stale", pid: raw }; }
+    })();
+    const alive = localState.kind === "alive";
+    info(`  ${name}`, `${runtime} ${describeLocalProcess(localState)} node_id=${p?.node_id || "-"}`);
     if (p && runtime === "codex-app-server") {
       const audit = codexTopologyAudit(p as any, join(nodesDir(), id), process.cwd());
       const verified = audit.lastRecoveryVerification as any;
@@ -15893,6 +15902,9 @@ async function doctorCommand() {
       }
     }
   }
+  // 说清上面那一列量的是什么 —— 否则它和 anet node ls 的 STATUS 是两个
+  // 同样权威、可以互相矛盾的答案。
+  if (ids.length) info("  这一列的含义", LOCAL_VS_HUB_NOTE);
   if (needsMigration.length) {
     if (fix) {
       console.log(`\n  ⚙  Auto-fixing ${needsMigration.length} node(s)...`);
