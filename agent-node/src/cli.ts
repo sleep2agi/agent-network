@@ -20,6 +20,7 @@ import {
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
+import { packageRootFrom } from "./runtime/package-root";
 import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
@@ -2163,8 +2164,13 @@ async function processWithClaude(
   if (!hasBinary && process.platform === "linux") {
     try {
       const { execFileSync } = await import("child_process");
+      const packageRoot = packageRootFrom(import.meta.url, process.argv[1]);
       const install = installPinnedClaudeNativeBinary({
-        prefix: __dirname + "/../",
+        // 🔴 原先是 `__dirname + "/../"`。源码里那是对的(src/.. = 包根),但**打包器把
+        // __dirname 内联成构建期常量** —— 已发布的 dist/cli.js 里它是构建机的目录,
+        // 于是这条兜底在每一台用户机上都拿一个不存在的路径去 npm --prefix,恒失败且不出声。
+        // import.meta.url 打包后仍运行时求值,src/ 与 dist/ 两种布局都推得出同一个包根。见 #1433。
+        prefix: packageRoot ?? __dirname + "/../",
         resolvePackage: (specifier) => require.resolve(specifier),
         runNpm: (args) => execFileSync("npm", args, {
           stdio: "pipe", timeout: 60_000,
