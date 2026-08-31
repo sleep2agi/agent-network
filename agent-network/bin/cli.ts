@@ -12079,8 +12079,9 @@ async function statusCommand() {
     // 🔴 #1548 —— 分类逻辑抽到 ../src/session-status-class.ts 并加了测试。
     //    原先这里把 `blocked` / `error` 折进 `working`,于是运维看到「N working」
     //    时,其中可能有几个是**卡住**或**出错**的。而 #1548 已经证明 `blocked`
-    //    是一个**没有出口**的状态(只有 report_completion 能把它拉回 idle),
-    //    所以一个 agent 可以永远停在那里而被报成「在干活」。
+    //    是一个**长期为真**的状态,所以一个 agent 可以永远停在那里而被报成「在干活」。
+    //    (它并非「没有出口」—— server 的 report_status upsert 里 `status = ?10` 是无条件
+    //     覆盖。真正的机制见下面 Needs attention 那一段的注释与 #1606。)
     const classifyStatus = (s: any) => classifySessionStatus(s?.status);
     // 🔴 #1625 —— **不再用 `statusRes.summary`**。`/api/status` 总是返回一个
     //    summary,于是原先的 `statusRes.summary || …` 让本地分类器从不执行,
@@ -12121,12 +12122,20 @@ async function statusCommand() {
       // 🔴 状态是**自报**的:它只在 agent 显式上报时才变。一个 `blocked` 可能是
       //    3 秒前报的,也可能是三周前报的 —— 这里不假装知道哪一种。
       // 🔴 不要写「not progressing」:#1548 的实测证据正好相反 —— 一个 blocked 节点
-      //    22 秒答完了一条任务。blocked 说的是「没有出口」(只有 report_completion
-      //    会把它清回 idle),不是「它停了」。这两句话对用户的含义完全不同。
-      console.log("    (🔴 blocked ≠ 停了 —— 实测 blocked 节点仍能秒回任务;它只是没有出口:");
-      console.log("     只有 report_completion 会把 status 清回 idle。状态由 agent 自报,");
-      console.log("     不含活性成分,名册里也没有「何时变成 blocked」这个字段 —— updated_at");
-      console.log("     被心跳一直刷,不是它。要确认它还在不在,发一条任务试试。)");
+      //    22 秒答完了一条任务。
+      // 🔴 也不要声称「只有那个终态回调能清」——旧注释里的那句是错的:
+      //    server/src/tools.ts 的 report_status upsert 里 `status = ?10` 是**无条件覆盖**
+      //    (同句其余二十来个字段全是 COALESCE),所以 report_status(status="idle") 就能清。
+      //    grok 共存节点出不来的真正原因在 agent-node 侧:
+      //      runtime/grok-copresence/liveness.ts
+      //        if (!liveness.usable && (requested === "idle" || requested === "working")) return "blocked";
+      //    agent-node 每 3 分钟上报的 idle 在发出前被改写成 blocked —— 见 #1606。
+      console.log("    (🔴 blocked ≠ 停了 —— 实测 blocked 节点仍能秒回任务。状态由 agent 自报,");
+      console.log("     不含活性成分;名册里也没有「何时变成 blocked」这个字段 —— updated_at");
+      console.log("     被心跳一直刷,不是它。要确认它还在不在,发一条任务试试。");
+      console.log("     🔴 grok 共存节点还有一种可能:blocked 表示的是「共存运行时不可用」,");
+      console.log("     而不是「这个 agent 卡住了」—— agent-node 每 3 分钟上报的 idle 会在");
+      console.log("     liveness 判不可用时被改写成 blocked。见 #1606。)");
       console.log();
     }
 
