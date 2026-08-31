@@ -31,6 +31,25 @@ describe("空状态给下一步", () => {
     expect(CODE).toContain('case "loop"');
   });
 
+  it("🔴 tasks 的 0 条要分清「一条都没有」和「这个 status 没有」", () => {
+    // 🔴 只断言"字符串在源码里"是观察不到这个缺陷的:把 `if (status)` 改成 `if (false)`
+    // 之后那两句仍然原样躺在死分支里,断言照样过。所以要连**守卫条件**一起钉。
+    const branch = CODE.slice(CODE.indexOf("if (tasks.length === 0) {"));
+    expect(branch.slice(0, 400)).toMatch(/if \(status\) \{/);
+    expect(branch.slice(0, 400)).toContain('No tasks with status');
+    expect(branch.slice(0, 400)).toContain("去掉过滤看全部: anet tasks");
+    // 不带过滤时仍是原来那句 —— 两支都要在
+    expect(branch.slice(0, 400)).toContain("No tasks found.");
+  });
+
+  it("🔴 没有真实下一步的地方**不编一个** —— anet skill 只有 list/ls/show", () => {
+    const skillFn = CODE.slice(CODE.indexOf("async function skillCommand()"), CODE.indexOf("async function skillCommand()") + 4000);
+    expect(/sub === "(install|add|pull)"/.test(skillFn)).toBe(false);
+    // 所以 "No skills found." 后面**不该**出现一条 anet skill 的安装建议
+    const idx = CODE.indexOf('"No skills found."');
+    expect(/anet skill (install|add|pull)/.test(CODE.slice(idx, idx + 200))).toBe(false);
+  });
+
   it("正控:另外两处既有的空状态提示还在(它们是这条的样板)", () => {
     expect(CODE).toContain("Get started: anet init");
     expect(CODE).toContain("Create some with: anet node create");

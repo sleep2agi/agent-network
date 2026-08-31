@@ -12188,7 +12188,14 @@ async function tasksCommand() {
     const tasks = res.tasks || [];
 
     if (tasks.length === 0) {
-      console.log("\n  No tasks found.\n");
+      // 🔴 「0 条」有两解:真的一条都没有 / 只是**这个 status** 没有。
+      // status 就在手边,说出来比让用户自己猜便宜 —— 同族:#1660(0 节点)、#1667(节点名找不到)。
+      if (status) {
+        console.log(`\n  No tasks with status "${status}".`);
+        console.log("  去掉过滤看全部: anet tasks\n");
+      } else {
+        console.log("\n  No tasks found.\n");
+      }
       return;
     }
 
