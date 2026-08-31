@@ -27,8 +27,8 @@ import { packageRootFrom } from "./runtime/package-root";
 // 那个假设**被构建工具悄悄违反了**:产物里它是构建机的 .../agent-node/src。
 // 这里给它一个真·运行时目录;拿不到就退回 __dirname(不比现状更差)。
 function agentNodeModuleDir(): string {
-  const root = packageRootFrom(import.meta.url, process.argv[1]);
-  return root ? root.replace(/\/+$/, "") + "/dist" : __dirname;
+  const packageRoot = packageRootFrom(import.meta.url, process.argv[1]);
+  return packageRoot ? packageRoot.replace(/\/+$/, "") + "/dist" : __dirname;
 }
 import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
