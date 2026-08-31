@@ -60,7 +60,23 @@ echo "$R" | grep -qE 'error|too long' && pass "long username rejected" || fail "
 
 # Short password
 R=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"shortpw","password":"12"}')
-echo "$R" | grep -q 'at least 6' && pass "short password rejected" || fail "short password accepted"
+# 🔴 2026-08-31：原判据是 `grep -q 'at least 6'` —— 它把断言钉在**服务端的一句文案**上。
+# 服务端此后把策略从 6 收紧成了分档（server/src/auth.ts）：
+#   第一个用户（bootstrap admin，允许好记的默认口令） < 4 → "at least 4 characters"
+#   其余用户                                            < 8 → "at least 8 characters"
+# 于是这条断言红了，而它的名字叫 `short password accepted` —— **读起来像服务端接受了
+# 弱密码，真相相反：策略收紧了，是断言停在旧文案上。** 一个不跑的套件里，
+# 这种断言名比它的代码更危险。
+#
+# 改成判**行为**而不是**文案**：2 位密码必须被拒（ok:false / 有 error），
+# 具体最小长度是几由服务端决定，套件不复述。
+echo "$R" | python3 -c "
+import json,sys
+raw=sys.stdin.read()
+try: d=json.loads(raw)
+except Exception: sys.exit(1)
+sys.exit(0 if (d.get('ok') is False or d.get('error')) else 1)
+" && pass "short password rejected (2 chars)" || fail "short password accepted (2 chars): $R"
 
 # Empty body
 R=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{}')
