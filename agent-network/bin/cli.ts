@@ -8809,7 +8809,15 @@ async function importCommand() {
     ? claudeSessions.filter((s: any) => s.alias === targetAlias)
     : claudeSessions;
 
-  if (toImport.length === 0) { console.log(`No session found for "${targetAlias}".`); return; }
+  if (toImport.length === 0) {
+    // 🔴 可导入的会话就在手边(claudeSessions),只说「没找到」等于把用户手上的
+    // 信息藏起来 —— 同 #1667 的 `Node "x" not found`。把真名给他。
+    const names = claudeSessions.map((s: any) => String(s.alias || "")).filter(Boolean);
+    const shown = names.slice(0, 5).join(", ");
+    const more = names.length > 5 ? `, … (${names.length} total)` : "";
+    console.log(`No session found for "${targetAlias}". ${names.length} importable: ${shown}${more}`);
+    return;
+  }
 
   let created = 0;
   for (const s of toImport) {
@@ -12188,7 +12196,14 @@ async function tasksCommand() {
     const tasks = res.tasks || [];
 
     if (tasks.length === 0) {
-      console.log("\n  No tasks found.\n");
+      // 🔴 「0 条」有两解:真的一条都没有 / 只是**这个 status** 没有。
+      // status 就在手边,说出来比让用户自己猜便宜 —— 同族:#1660(0 节点)、#1667(节点名找不到)。
+      if (status) {
+        console.log(`\n  No tasks with status "${status}".`);
+        console.log("  去掉过滤看全部: anet tasks\n");
+      } else {
+        console.log("\n  No tasks found.\n");
+      }
       return;
     }
 
@@ -12456,7 +12471,15 @@ async function goalCommand() {
         console.log(`  ${short} ${status} ${every} ${due} ${text}`);
       }
     }
-    if (total === 0) console.log("\nNo goals found.\n");
+    if (total === 0) {
+      // 空清单也要给下一步 —— 同一个 CLI 里 `anet node ls`(Get started: anet init)
+      // 和 `anet project up`(Create some with: anet node create <name>) 都这么做,
+      // 只有这里是光秃秃一句。正确写法就在隔壁。
+      // 🔴 `anet goal` **没有创建子命令**(只有 list/show/wake-log/edit/cancel),
+      // 所以这里不能写 `anet goal add` —— 创建路径是 `anet node loop`,已实跑确认。
+      console.log("\nNo goals found.");
+      console.log('Schedule one: anet node loop <node> "<task>" --every 5m\n');
+    }
     else console.log();
     return;
   }
