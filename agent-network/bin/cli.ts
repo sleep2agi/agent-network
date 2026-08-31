@@ -46,7 +46,7 @@ import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
 import { formatHubVersionDetail } from "../src/hub-version-skew";
 import { nodeCountLine } from "../src/doctor-node-count";
 import { nodeNotFoundMessage } from "../src/node-not-found";
-import { lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
+import { columnWidth, lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
 import { describeLocalProcess, LOCAL_VS_HUB_NOTE, type LocalProcessState } from "../src/local-process-state";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
@@ -12121,10 +12121,16 @@ async function statusCommand() {
 
     if (tasks.length > 0) {
       console.log("  Recent Tasks:");
-      console.log("  STATUS     FROM            TO              CONTENT");
-      console.log("  ──────── ─────────────── ─────────────── ────────────────────────");
+      // 🔴 STATUS 列原先写死 8,而 "delivered"/"cancelled"/"completed" 都是 9 —— 
+      // 那些行会把 FROM 往右顶 1 列。而表头和分隔线是两个各写各的字面量,
+      // 实测同一张表出现三个列位:表头 13 / 普通行 11 / delivered 行 12。
+      // 宽度从**要打印的这批行**算(状态值域在另一个包里,CLI import 不到),
+      // 表头/分隔线/数据行共用它。
+      const stW = columnWidth(tasks.map((t: any) => String(t.status || "?")), "STATUS");
+      console.log(`  ${"STATUS".padEnd(stW)} ${"FROM".padEnd(15)} ${"TO".padEnd(15)} CONTENT`);
+      console.log(`  ${"─".repeat(stW)} ${"─".repeat(15)} ${"─".repeat(15)} ${"─".repeat(8)}`);
       for (const t of tasks.slice(0, 10)) {
-        const st = (t.status || "?").padEnd(8);
+        const st = (t.status || "?").padEnd(stW);
         const from = padDisplayEnd(t.from_name || "?", 15);
         const to = padDisplayEnd(t.to_name || "?", 15);
         const content = oneLineCell(t.content, 40);
@@ -12159,10 +12165,16 @@ async function tasksCommand() {
     }
 
     console.log(`\n  Tasks (${tasks.length}):\n`);
-    console.log("  STATUS     FROM            TO              AGE      CONTENT");
-    console.log("  ──────── ─────────────── ─────────────── ──────── ────────────────────────");
+    // 🔴 STATUS 列原先写死 8,而 "delivered"/"cancelled"/"completed" 都是 9 —— 
+    // 那些行会把 FROM 往右顶 1 列。而表头和分隔线是两个各写各的字面量,
+    // 实测同一张表出现三个列位:表头 13 / 普通行 11 / delivered 行 12。
+    // 宽度从**要打印的这批行**算(状态值域在另一个包里,CLI import 不到),
+    // 表头/分隔线/数据行共用它。
+    const stW = columnWidth(tasks.map((t: any) => String(t.status || "?")), "STATUS");
+    console.log(`  ${"STATUS".padEnd(stW)} ${"FROM".padEnd(15)} ${"TO".padEnd(15)} ${"AGE".padEnd(8)} CONTENT`);
+    console.log(`  ${"─".repeat(stW)} ${"─".repeat(15)} ${"─".repeat(15)} ${"─".repeat(8)} ${"─".repeat(8)}`);
     for (const t of tasks) {
-      const st = (t.status || "?").padEnd(8);
+      const st = (t.status || "?").padEnd(stW);
       const from = padDisplayEnd((t.from_name || "?").slice(0, 15), 15);
       const to = padDisplayEnd((t.to_name || "?").slice(0, 15), 15);
       const age = t.created_at ? timeAgo(t.created_at) : "?";
