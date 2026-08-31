@@ -8721,24 +8721,12 @@ async function daemonListCommand() {
   // 🔴 hub 不可达时**不让整条命令失败**:本地清单本来就不需要网络,
   //    而"看不到能力"和"没有 daemon"是两件完全不同的事,必须分别说清。
   const fetched = await fetchDaemonCapabilities();
-  const byNodeId = fetched.ok ? fetched.rows : null;
 
   for (const { id, profile } of daemons) {
     const nid = (profile as any)?.node_id || "(missing)";
     const runtimes = ((profile as any)?.runtimes_supported || []).join(",") || "(default)";
     console.log(`  ${padDisplayEnd(id, 24)} node_id=${nid}  runtimes=[${runtimes}]`);
-    if (byNodeId === null) {
-      // hub 不可达/未配置 —— 这是**第四种**情况,和"没报过"不同:
-      // 那台 daemon 可能报得好好的,只是我们现在问不到。别把它说成未知能力。
-      console.log(`    ${describeFetchFailure((fetched as any).failure)}`);
-      continue;
-    }
-    const row = byNodeId.get(nid);
-    if (!row) {
-      console.log(`    创建能力:查不到 —— hub 上没有这个 node_id(还没注册过,或注册到了别的网络)`);
-      continue;
-    }
-    console.log(`    ${describeCapability(row, Date.now()).line}`);
+    console.log(`    ${daemonCreateCapabilityLine(nid, fetched, Date.now())}`);
   }
 }
 
@@ -8753,6 +8741,19 @@ async function daemonListCommand() {
 type CapabilityFetchResult =
   | { ok: true; rows: Map<string, DaemonCapabilityRow> }
   | { ok: false; failure: CapabilityFetchFailure };
+
+function daemonCreateCapabilityLine(nid: string, fetched: CapabilityFetchResult, nowMs: number): string {
+  if (!fetched.ok) {
+    // hub 不可达/未配置 —— 这是**第四种**情况,和"没报过"不同:
+    // 那台 daemon 可能报得好好的,只是我们现在问不到。别把它说成未知能力。
+    return describeFetchFailure(fetched.failure);
+  }
+  const row = fetched.rows.get(nid);
+  if (!row) {
+    return "创建能力:查不到 —— hub 上没有这个 node_id(还没注册过,或注册到了别的网络)";
+  }
+  return describeCapability(row, nowMs).line;
+}
 
 async function fetchDaemonCapabilities(): Promise<CapabilityFetchResult> {
   const gc = loadGlobal();
@@ -15944,6 +15945,20 @@ async function doctorCommand() {
   // 说清上面那一列量的是什么 —— 否则它和 anet node ls 的 STATUS 是两个
   // 同样权威、可以互相矛盾的答案。
   if (ids.length) info("  这一列的含义", LOCAL_VS_HUB_NOTE);
+
+  const localDaemons = ids
+    .map(id => ({ id, profile: loadProfile(id) }))
+    .filter(({ profile }) => profile?.role === "host_supervisor");
+  if (localDaemons.length) {
+    const fetched = await fetchDaemonCapabilities();
+    const nowMs = Date.now();
+    for (const { id, profile } of localDaemons) {
+      const name = nodeDisplayName(id, profile);
+      const nid = profile?.node_id || "(missing)";
+      info(`    ↳ ${name} create-node`, daemonCreateCapabilityLine(nid, fetched, nowMs));
+    }
+  }
+
   if (needsMigration.length) {
     if (fix) {
       console.log(`\n  ⚙  Auto-fixing ${needsMigration.length} node(s)...`);

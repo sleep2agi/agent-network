@@ -1,0 +1,43 @@
+Issue: #1545 doctor daemon create-node capability
+Date: 2026-08-31
+
+Worktree:
+  <repo>/.worktrees/issue-1545-doctor-capability
+
+Change:
+  anet doctor now prints each local host_supervisor daemon's create-node
+  capability through the same renderer used by anet daemon list.
+
+Build:
+  PATH="$HOME/.nvm/versions/node/v24.19.0/bin:$PATH" bun run build
+  Result: pass
+
+Rendered CLI evidence from built dist/bin/anet.cjs with a temporary project and
+local fake hub returning three daemon capability rows:
+
+  blocked:
+    ℹ      ↳ daemon-blocked create-node: 创建能力:**不可用**(anet_bin_source,1ms 前测)
+      修法(可整行粘贴):sudo install -d -m 755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\n' "$(command -v anet)" | sudo tee /etc/anet-daemon/path.conf
+
+  ready:
+    ℹ      ↳ daemon-ready create-node: 创建能力:可用(1ms 前测)
+
+  unknown:
+    ℹ      ↳ daemon-unknown create-node: 创建能力:未知 —— 这台 daemon 没报过这一格。
+
+Tests:
+  PATH="$HOME/.nvm/versions/node/v24.19.0/bin:$PATH" bun test ./agent-network/src/doctor-daemon-capability-wiring.test.ts ./agent-network/src/daemon-capability-display.test.ts
+  Result: pass
+  Summary: 55 pass, 0 fail, 161 expect() calls.
+
+  PATH="$HOME/.nvm/versions/node/v24.19.0/bin:$PATH" bun test ./agent-network/src/
+  Result: pass
+  Summary: 971 pass, 3 skip, 0 fail, 2773 expect() calls, 974 tests across 105 files.
+
+Checks:
+  python3 scripts/check-doc-symbol-pins.py --fix
+  python3 scripts/check-doc-symbol-pins.py
+  Result: pass, SYMBOL-PIN OK, 0 drift.
+
+  python3 .github/scripts/check-home-path-baseline.py
+  Result: pass, no file is above its baseline.
