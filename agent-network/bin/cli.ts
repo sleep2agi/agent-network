@@ -36,7 +36,7 @@ import {
 } from "../src/copresence-identity";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
-import { formatOfflineAges, summarizeOfflineAges } from "../src/offline-age";
+import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../src/offline-age";
 import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
@@ -9190,7 +9190,12 @@ async function verifyNodeRestarted(
         const res = await fetch(url, { headers: authHeaders(token) }).then(r => r.json() as any);
         const node = (res.sessions || []).find((s: any) => s.alias === newName || s.node_name === newName);
         if (node) {
-          const ts = Date.parse(node.last_seen_at || node.updated_at || "") || 0;
+          // 🔴 #1650 —— 这两列是 hub 的 TEXT 时间戳(`datetime('now')`),UTC 但**不带
+          //   时区标记**。`Date.parse` 会按本机时区解析,误差 = 主机偏移,而且不报错:
+          //     TZ=Asia/Shanghai  -8h → ts 偏早 → fresh 恒 false(只是拿不到强信号)
+          //     TZ=America/*      +7h → ts 偏晚 → **fresh 恒 true** ← 这道校验被静默放行
+          //   西于 UTC 的主机上,「重启后 hub 心跳有没有刷新」这一格等于没在判。
+          const ts = parseHubTimestamp(node.last_seen_at) ?? parseHubTimestamp(node.updated_at) ?? 0;
           fresh = ts >= restartStartedAt;
         }
       } catch {}

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "./offline-age";
 
@@ -94,5 +95,23 @@ describe("formatOfflineAges", () => {
   test("无时间戳那一档要说出「不知道」,不能沉默", () => {
     expect(formatOfflineAges({ under1h: 0, h1to24: 0, d1to3: 0, over3d: 0, unknown: 4, total: 4 }))
       .toContain("不知道掉了多久");
+  });
+});
+
+describe("接线守卫 (#1650)", () => {
+  // 🔴 今天的教训:纯函数的单测**看不见调用点**。这一条读 cli.ts 的字节,
+  //    确保没人把那两个 hub TEXT 时间戳换回裸 Date.parse ——
+  //    换回去在 UTC 的 CI 上照样全绿,只在非 UTC 主机上错,且不报错。
+  //    范围只限这一个文件:全仓级的门在 #1650 里量过,11 命中 / 3 真缺陷,
+  //    73% 误报,不该做;单文件这一格当前是 0 误报。
+  const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+
+  test("cli.ts 不再对 last_seen_at / updated_at 用裸 Date.parse", () => {
+    expect(cli).not.toContain("Date.parse(node.last_seen_at");
+    expect(cli).not.toContain("Date.parse(node.updated_at");
+  });
+
+  test("而且它确实调用了 parseHubTimestamp —— 「没有裸解析」也可能是整段被删了", () => {
+    expect(cli).toContain("parseHubTimestamp(node.last_seen_at)");
   });
 });
