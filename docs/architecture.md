@@ -506,7 +506,10 @@ R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这
 ```
 方式 A: Claude Code + Channel（最优, 现役）
   Agent ←SSE Push→ CommHub    实时，零延迟
-  通过 channel/commhub-channel.ts 暴露 5 个 commhub_* MCP tool 给 Claude Code
+  通过 commhub-channel MCP server 暴露 5 个 commhub_* MCP tool 给 Claude Code
+  🔴 实际随包发布并运行的是 agent-network/src/node-server.ts（本机 ~/.anet/node-server.js）；
+     channel/commhub-channel.ts 是同名的**分叉副本**，不在任何包的 files: 里、无源码 import，
+     只被文档引用。改行为请改前者。分叉已登记为 docs/claude-code-cleanup-review.md 的 C3。
 
 方式 B: agent-node SDK runtime（现役）
   Agent ←SSE Push→ CommHub    实时，agent-node 内部用 claude-agent-sdk / codex-sdk 跑
