@@ -38,7 +38,7 @@
 
 **核心规则：只有 `task` 和 `broadcast` 触发 think，其余只展示/记录。**
 
-> 验证：[`agent-node/src/cli.ts:864`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L864) `if (msgType !== "task" && msgType !== "broadcast") { ... continue; }`（R218 校准：原 doc 行号 886，当前 main 实际 864）。Public docs [concepts/task-lifecycle.md 消息类型](https://anet.sh/concepts/task-lifecycle#消息类型) 表里 task / broadcast 两行 ✓ 触发 AI；reply / message / ack 不触发。
+> 验证：[`agent-node/src/inbox-message-policy.ts:12`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/inbox-message-policy.ts#L12) `inboxDeliveryPolicy(type)` 返回 `{deliverToRuntime, replyExpected}` 两个**分开的**字段：`task`/`broadcast` → `{true, true}`；`reply` → `{true, false}`（进 runtime 但不再回复，否则会重建 peer ping-pong）；其余（含 `message`）→ `{false, false}`。（2026-08-31 校准：原钉 `cli.ts:864` 的 `msgType !== "task" && msgType !== "broadcast"` 判断已不在 `cli.ts` —— 决策移到了本文件，且 `reply` 的两个字段不同向。判据取自 `agent-node/src/inbox-message-policy.test.ts` 的逐条断言，非阅读实现的推测）。Public docs [concepts/task-lifecycle.md 消息类型](https://anet.sh/concepts/task-lifecycle#消息类型) 表里 task / broadcast 两行 ✓ 触发 AI；reply / message / ack 不触发。
 
 ## inbox 表改动
 
@@ -139,7 +139,7 @@ sendReply(target, text, taskId)  → send_reply（新 MCP 工具）
 </channel>
 ```
 
-Claude Code 收到 reply 和 message 时只需要阅读，不需要 send_task 回复（agent-node 侧在 [`cli.ts:864`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L864) 直接跳过非 task/broadcast 类型，channel wrapper 走 `notifications/claude/channel` 让 Claude Code 自己决定是否回复）。
+Claude Code 收到 message 时只需要阅读；收到 reply 时**内容会进 runtime**，但**不应再回复**（`replyExpected: false`，否则会重建 peer ping-pong）（agent-node 侧由 [`inbox-message-policy.ts:12`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/inbox-message-policy.ts#L12) 的 `inboxDeliveryPolicy` 决定，`message` 类 `deliverToRuntime: false`，channel wrapper 走 `notifications/claude/channel` 让 Claude Code 自己决定是否回复）。
 
 ## 向后兼容
 
