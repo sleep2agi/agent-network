@@ -1,0 +1,37 @@
+# 直接把 hub 的无时区时间戳喂给 `new Date(` / `Date.parse(` 的地方只许减少。
+#
+# hub 的 SQLite 列走 `datetime('now')` —— **UTC，但不带时区标记**。`new Date(s)` 遇到
+# 这种串会按**本机时区**解析，误差 = 主机偏移，而且**不报错**。#1650 一次点出 5 处，
+# 其中一处让「重启后心跳有没有刷新」这道校验在西半球主机上恒 true（静默放行）。
+#
+# 🔴 为什么必须是扫描门，而不是测试：**`bun test` 把测试进程时区固定成 UTC**，
+#    在 UTC 下「按 UTC 解析」和「按本地解析」得到同一个数 —— 这一整类缺陷在测试进程里
+#    **结构上不可见**。#1649 实测：拿掉补 `Z` 那一步，11 条针对性测试全绿。
+#    不是「大家忘了写测试」，是「写了也照样绿」。
+#
+# 这道门不改任何行为，也不判断某一处是不是真缺陷（当前基线里的 4 处逐一核过，
+# 没有一处属于这一类）—— 只保证今天的数字是上限，不是起点。
+#
+# 不加 paths 过滤：它守的是四个源码目录的一个不变量，秒级脚本没有省的必要。
+
+name: lint (hub-timestamp ratchet)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ratchet:
+    name: hub-timestamp-ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # selftest 先跑，而且它分**两层**：
+      #   判据层 —— 给它一行，看它报不报（含反例：`new Date(now)` 不许命中，
+      #             否则这道门会把所有 new Date() 都扫进来）
+      #   取集层 —— 造一棵目录树，看「该收的收进来了没有」
+      # 同仓实测过：把 rglob 退回 glob，取集自检红而判据自检全绿 ——
+      # 两层测的不是同一件事，缺一层就有一整类盲区。
+      - run: python3 .github/scripts/check-hub-timestamp-ratchet.py --selftest
+      - run: python3 .github/scripts/check-hub-timestamp-ratchet.py
