@@ -12456,7 +12456,15 @@ async function goalCommand() {
         console.log(`  ${short} ${status} ${every} ${due} ${text}`);
       }
     }
-    if (total === 0) console.log("\nNo goals found.\n");
+    if (total === 0) {
+      // 空清单也要给下一步 —— 同一个 CLI 里 `anet node ls`(Get started: anet init)
+      // 和 `anet project up`(Create some with: anet node create <name>) 都这么做,
+      // 只有这里是光秃秃一句。正确写法就在隔壁。
+      // 🔴 `anet goal` **没有创建子命令**(只有 list/show/wake-log/edit/cancel),
+      // 所以这里不能写 `anet goal add` —— 创建路径是 `anet node loop`,已实跑确认。
+      console.log("\nNo goals found.");
+      console.log('Schedule one: anet node loop <node> "<task>" --every 5m\n');
+    }
     else console.log();
     return;
   }
