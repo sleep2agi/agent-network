@@ -78,6 +78,7 @@ import {
 import { isTelemetrySchemaRejection, withoutOptionalTelemetry } from "./register-telemetry-fallback";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
 import { claudeAttemptsDetail, codexTimeoutDetail } from "./runtime/sdk-timeout-detail";
+import { compactionPressure } from "./runtime/compaction-pressure";
 import {
   GROK_COPRESENCE_PROFILE_ENV,
   selectGrokCopresenceCapabilityProfile,
@@ -3056,6 +3057,13 @@ async function processWithCodex(
     const dt = Date.now() - t0;
     const inTokens = outcome.usage?.input_tokens || 0;
     log(`[codex] done | ${dt}ms | in=${inTokens} out=${outcome.usage?.output_tokens || 0} | items=${outcome.itemCount}`);
+    // #1645 —— 上下文压力打在**成功路径**上。实测那次 300s 卡死的真因链里有
+    //   `remote compaction failed last_api_response_total_tokens=195436`,而那是我们
+    //   自己设的 model_auto_compact_token_limit=200000 的 97.7%。也就是说
+    //   「这条线程马上要 compaction」在**上一回合结束时就可知**,而第一个信号
+    //   却是 300 秒后的超时。只在失败时说话的仪表,警告不了任何人。
+    const pressure = compactionPressure(inTokens, CODEX_CONFIG.model_auto_compact_token_limit);
+    if (pressure.text) log(pressure.text);
     if (codexThread?.id) writebackSession(codexThread.id);
     // Auto-compact 由 Codex CLI 原生处理（model_auto_compact_token_limit=200000）
 
