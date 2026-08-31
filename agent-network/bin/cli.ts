@@ -8711,7 +8711,7 @@ async function daemonListCommand() {
   for (const { id, profile } of daemons) {
     const nid = (profile as any)?.node_id || "(missing)";
     const runtimes = ((profile as any)?.runtimes_supported || []).join(",") || "(default)";
-    console.log(`  ${id.padEnd(24)} node_id=${nid}  runtimes=[${runtimes}]`);
+    console.log(`  ${padDisplayEnd(id, 24)} node_id=${nid}  runtimes=[${runtimes}]`);
     if (byNodeId === null) {
       // hub 不可达/未配置 —— 这是**第四种**情况,和"没报过"不同:
       // 那台 daemon 可能报得好好的,只是我们现在问不到。别把它说成未知能力。
@@ -11065,7 +11065,7 @@ Examples:
         const chatsStr =
           allowChats.length > 0 ? `  chats: ${allowChats.join(", ")}` : "";
         console.log(
-          `  ${label.padEnd(20)} ${t.padEnd(12)} from: ${fromStr}${chatsStr}`,
+          `  ${padDisplayEnd(label, 20)} ${t.padEnd(12)} from: ${fromStr}${chatsStr}`,
         );
       }
     }
@@ -11352,7 +11352,7 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
       case "self-skip":     badge = "(self — see below)"; break;
       case "lookup-failed": badge = "⚠ npm registry lookup failed"; break;
     }
-    console.log(`    ${p.display.padEnd(18)}  ${cur.padEnd(20)}  →  ${tgt.padEnd(20)}  ${badge}`);
+    console.log(`    ${padDisplayEnd(p.display, 18)}  ${cur.padEnd(20)}  →  ${tgt.padEnd(20)}  ${badge}`);
     if (p.note) console.log(`      ${p.note}`);
   }
 }
@@ -12929,7 +12929,7 @@ async function networkCommand() {
         const current = n.network_id === gc.network_id ? " ← current" : "";
         const icon = roleIcon[n.member_role] || " ";
         const role = n.member_role ? ` (${n.member_role})` : "";
-        console.log(`  ${icon} ${n.network_name.padEnd(18)} ${role.padEnd(10)} ${n.network_id.slice(0, 12)}${current}`);
+        console.log(`  ${icon} ${padDisplayEnd(n.network_name, 18)} ${role.padEnd(10)} ${n.network_id.slice(0, 12)}${current}`);
       }
       console.log();
     } catch (e: any) { console.error(friendlyError(e)); }
@@ -13072,7 +13072,7 @@ async function networkCommand() {
       console.log(`\n  Members of ${gc.network_name || netId}:\n`);
       const roleIcon: Record<string, string> = { owner: "⭐", admin: "🔧", member: "👤", viewer: "👁" };
       for (const m of res.members) {
-        console.log(`  ${roleIcon[m.role] || "?"} ${(m.display_name || m.username).padEnd(16)} ${m.role.padEnd(8)} joined ${m.joined_at?.slice(0, 10) || "?"}`);
+        console.log(`  ${roleIcon[m.role] || "?"} ${padDisplayEnd(String(m.display_name || m.username), 16)} ${m.role.padEnd(8)} joined ${m.joined_at?.slice(0, 10) || "?"}`);
       }
       console.log();
     } catch (e: any) { console.error(friendlyError(e)); }
@@ -14182,7 +14182,7 @@ async function runPrReviewOrchestration(input: {
       const t0 = Date.now();
       const reply = await input.invoke(role, alias, reviewerTask);
       const dt = Date.now() - t0;
-      console.log(`        ✓ ${alias.padEnd(28)} ${Math.round(dt / 1000).toString().padStart(3)}s, ${reply.length} 字`);
+      console.log(`        ✓ ${padDisplayEnd(alias, 28)} ${Math.round(dt / 1000).toString().padStart(3)}s, ${reply.length} 字`);
       return { role, alias, text: reply, durationMs: dt };
     });
     const results = await Promise.all(fanouts);
@@ -14925,7 +14925,7 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
       try {
         await ensureNodeToken(profile, alias);
       } catch (e: any) {
-        console.error(`        ❌ ${alias.padEnd(14)} ntok_ 请求失败: ${e.message}`);
+        console.error(`        ❌ ${padDisplayEnd(alias, 14)} ntok_ 请求失败: ${e.message}`);
         failed.push(alias);
         continue;
       }
@@ -14933,7 +14933,7 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
       created.push(alias);
       if (opts.printSummary !== false) {
         const roleTag = opts.leaderAlias ? ` (${role.padEnd(7)})` : "";
-        console.log(`        ✓ ${alias.padEnd(14)}${roleTag}  ${nodeDir}`);
+        console.log(`        ✓ ${padDisplayEnd(alias, 14)}${roleTag}  ${nodeDir}`);
       }
     }
   } finally {
@@ -15494,7 +15494,7 @@ async function infoCommand() {
       if (tasks.tasks?.length > 0) {
         console.log(`\n  Recent Tasks:`);
         for (const t of tasks.tasks) {
-          console.log(`    ${t.status.padEnd(10)} ${(t.from_name || "?").padEnd(12)} ${oneLineCell(t.content, 40)}`);
+          console.log(`    ${t.status.padEnd(10)} ${padDisplayEnd(String(t.from_name || "?"), 12)} ${oneLineCell(t.content, 40)}`);
         }
       }
     } catch {}
