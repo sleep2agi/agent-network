@@ -1334,3 +1334,7 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
     throw error;
   }
 }
+
+// ci-control(临时): 本行只为触发 QA 的 agent-node/** paths 过滤,用于回答
+// 「当前 main 本身能不能过 Windows Codex co-presence native smoke」。
+// 这条分支/PR 是一次性对照,读到结论后即关闭删除。
