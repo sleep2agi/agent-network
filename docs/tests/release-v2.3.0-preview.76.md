@@ -50,6 +50,20 @@
 - **#1636 / #1637 / #1657** Windows 归属探测：整张进程表只枚举一次（实测单次调用占 waited 的 96%），
   且把耗时**打在成功路径上** —— 只在失败时说话的仪表验不了自己促成的修复。
 
+## Install
+
+```bash
+npm i -g @sleep2agi/agent-network@2.3.0-preview.76
+```
+
+## Upgrade
+
+```bash
+npm i -g @sleep2agi/agent-network@2.3.0-preview.76
+# daemon 是长驻进程,换包要重启才生效:
+anet daemon restart <daemon>
+```
+
 ## 边界
 
 - 本条只发 `@sleep2agi/agent-network`。`agent-node`（3 个提交）与 `commhub-server`（2 个提交）
