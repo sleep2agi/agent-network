@@ -234,12 +234,12 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
         //   realpath 先在 sudo **之前**算好并存进变量 —— 否则 root 环境里 `command -v anet`
         //   可能解析到另一个（或找不到）二进制。
         //   本行 shell 已用 `bash -n`（rc=0）+ 实跑非 sudo 段验证过。
-        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null",
+        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null Or keep the pin in a file you own (no /etc, no sudo): ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && mkdir -p \"$HOME/.anet\" && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" > \"$HOME/.anet/path.conf\" && export ANET_DAEMON_PATH_CONF=\"$HOME/.anet/path.conf\" (put ANET_DAEMON_PATH_CONF in the daemon environment so it survives a restart)",
     );
   }
   if (!pin) {
     throw unsafePathHelp("anet_bin_source",
-      `no ANET_BIN_ABS resolved from ${trustRoot}; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1`,
+      `no ANET_BIN_ABS resolved from ${confPath}; env fallback is Docker/dev/manual-ops convenience and requires ANET_DAEMON_ALLOW_ENV_BIN=1`,
       platform === "win32"
         ? `New-Item -ItemType Directory -Force -Path "${win32.dirname(trustRoot)}" | Out-Null; "ANET_BIN_ABS=<absolute path to anet.cjs>" | Set-Content -Path "${trustRoot}" -Encoding ascii`
         // 🔴 这条命令在 2026-08-30 之前**两处都坏**，而它是 anet_bin_source 唯一给出的修法：
@@ -253,7 +253,7 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
         //   realpath 先在 sudo **之前**算好并存进变量 —— 否则 root 环境里 `command -v anet`
         //   可能解析到另一个（或找不到）二进制。
         //   本行 shell 已用 `bash -n`（rc=0）+ 实跑非 sudo 段验证过。
-        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null (needs root). No-root alternative to try first: only `anet daemon init|start|up` auto-declares the pin, so a daemon started via `anet node start` / pm2 / systemd never receives it — restart it with `anet daemon start <name>`.",
+        : "ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && sudo install -d -m 0755 /etc/anet-daemon && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" | sudo tee /etc/anet-daemon/path.conf >/dev/null (needs root). No-root alternative to try first: only `anet daemon init|start|up` auto-declares the pin, so a daemon started via `anet node start` / pm2 / systemd never receives it — restart it with `anet daemon start <name>`. Or keep the pin in a file you own (no /etc, no sudo): ANET_BIN_REAL=\"$(node -e 'console.log(require(\"fs\").realpathSync(process.argv[1]))' \"$(command -v anet)\")\" && mkdir -p \"$HOME/.anet\" && printf 'ANET_BIN_ABS=%s\\n' \"$ANET_BIN_REAL\" > \"$HOME/.anet/path.conf\" && export ANET_DAEMON_PATH_CONF=\"$HOME/.anet/path.conf\" (put ANET_DAEMON_PATH_CONF in the daemon environment so it survives a restart)",
     );
   }
   // ① absolute — cross-platform. Was `startsWith("/")` which returned
