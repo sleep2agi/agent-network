@@ -94,6 +94,51 @@ def collect(root: str):
     return out
 
 
+
+# ── 内联 Python 形态的变异锚点（#1689 实测:sed 形态的取集看不见它）─────────────
+# 形如
+#     TARGET='  anet config [path|json]       Show config summary…'
+#     SRC="$ROOT/server/src/auth.ts"
+#     python3 - "$SRC" "$TARGET" "$MUTATED" <<'__MUT__'
+#         if source.count(target) != 1: raise SystemExit("mutation target count changed")
+# 锚点是**字面量**(不是 BRE),所以判据是 `src.count(target) == 1`,与 sed 那一支不同。
+#
+# 🔴 只判静态可解的:单引号字面量、以及 $'…' 的 ANSI-C 形式。
+#    `TARGET="${arr[1]}"`(shell 变量)与 `TARGET="$X/path.yml"`(目标是文件路径,
+#    语义是"在文件里数路径串")**结构上判不了**,计入 skipped 并说明,不静默丢。
+PY_TARGET = re.compile(
+    r"^TARGET=(?P<q>\$?')(?P<lit>(?:[^'\\]|\\.)*)'\s*$", re.M)
+PY_SRC = re.compile(r"^(?:SRC|MUTANT|FILE)=\"\$ROOT/(?P<file>[^\"]+)\"\s*$", re.M)
+PY_ARG = re.compile(r"python3 - \"\$ROOT/(?P<file>[^\"]+)\"")
+
+
+def ansi_c_unescape(s: str) -> str:
+    return s.replace("\\n", "\n").replace("\\t", "\t").replace("\\'", "'").replace("\\\\", "\\")
+
+
+def collect_inline_python(root: str):
+    """(run.sh, 字面量锚点 or None, 目标文件 or None) —— None 表示结构上判不了。"""
+    out = []
+    for base, _dirs, files in os.walk(os.path.join(root, "tests")):
+        if "run.sh" not in files:
+            continue
+        path = os.path.join(base, "run.sh")
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        if "mutation target count changed" not in text:
+            continue
+        m = PY_TARGET.search(text)
+        if not m:
+            out.append((path, None, None))          # 变量/路径形态 ⇒ 判不了
+            continue
+        lit = m.group("lit")
+        if m.group("q").startswith("$"):
+            lit = ansi_c_unescape(lit)
+        sm = PY_SRC.search(text) or PY_ARG.search(text)
+        out.append((path, lit, sm.group("file") if sm else None))
+    return out
+
+
 def main() -> int:
     pins = collect(ROOT)
     checked = skipped = 0
@@ -112,6 +157,25 @@ def main() -> int:
         checked += 1
         if not rx.search(src):
             dead.append((os.path.relpath(sh, ROOT), target, unescape(pat)))
+    # ── 内联 Python 形态（#1689）：锚点是字面量，判据是 count == 1 ──────────────
+    inline = collect_inline_python(ROOT)
+    inline_checked = inline_skipped = 0
+    for sh, lit, rel in inline:
+        if lit is None or rel is None:
+            inline_skipped += 1
+            continue
+        full = os.path.join(ROOT, rel)
+        if not os.path.isfile(full):
+            inline_skipped += 1
+            continue
+        with open(full, encoding="utf-8", errors="replace") as fh:
+            src = fh.read()
+        inline_checked += 1
+        if src.count(lit) != 1:
+            dead.append((os.path.relpath(sh, ROOT), rel,
+                         f"[inline-python] count={src.count(lit)} (要求 1): {lit[:80]}"))
+    print(f"MUTATION-PIN: 内联 Python 变异 {len(inline)} 条，判定 {inline_checked} 条，"
+          f"跳过 {inline_skipped} 条（TARGET 是 shell 变量或指向文件路径，结构上判不了）")
     print(f"MUTATION-PIN: 扫到 {len(pins)} 条 sed 变异，判定 {checked} 条，跳过 {skipped} 条（非字面量或目标不在仓内）")
     if not dead:
         print("MUTATION-PIN: GREEN —— 每条被判定的变异都还能在目标文件里命中。")
@@ -148,6 +212,22 @@ def selftest() -> int:
     ck("取集扫到 ≥10 条 pin", len(collect(ROOT)) >= 10)
     ck("同名多候选判为歧义(不猜)", resolve_target("src/server.ts") is None)
     ck("唯一候选能解析", resolve_target("agent-network/bin/cli.ts") is not None)
+    # ── #1689：内联 Python 形态的解析自检 ──────────────────────────────
+    # 判据(能不能从 run.sh 里解出锚点)与取集(哪些文件算数)是两层,分开测。
+    for label, sh_text, want in [
+        ("单引号字面量", "mutation target count changed\nTARGET='abc def'\nSRC=\"$ROOT/x/y.ts\"\n", ("abc def", "x/y.ts")),
+        ("ANSI-C 多行",  "mutation target count changed\nTARGET=$'a\\nb'\nSRC=\"$ROOT/p/q.ts\"\n", ("a\nb", "p/q.ts")),
+        ("shell 变量",   "mutation target count changed\nTARGET=\"${arr[1]}\"\n", (None, None)),
+    ]:
+        import tempfile, os as _os
+        d = tempfile.mkdtemp(); _os.makedirs(_os.path.join(d, "tests", "t"), exist_ok=True)
+        with open(_os.path.join(d, "tests", "t", "run.sh"), "w", encoding="utf-8") as fh:
+            fh.write(sh_text)
+        rows = collect_inline_python(d)
+        got = (rows[0][1], rows[0][2]) if rows else (None, None)
+        ck(f"inline: {label} (期望 {want!r} 实得 {got!r})", got == want)
+    # 取集自检:真实仓里必须抓到 >=3 条(否则下面的判定恒真)
+    ck("inline: 真实仓里抓到 >=3 条(否则 collector 空转)", len(collect_inline_python(ROOT)) >= 3)
     print(f"selftest: {ok} ok / {fail} fail")
     return 0 if fail == 0 else 1
 
