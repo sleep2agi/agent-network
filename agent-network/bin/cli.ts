@@ -37,6 +37,7 @@ import {
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
 import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../src/offline-age";
+import { oneLineCell } from "../src/one-line-cell";
 import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
@@ -12050,7 +12051,7 @@ async function statusCommand() {
     if (attention.length > 0) {
       console.log("  Needs attention (blocked / error / 未知状态 — 需要有人看一眼):");
       for (const s of attention) {
-        console.log(`    ${String(s.alias).padEnd(16)} ${String(s.status || "").padEnd(8)} ${(s.task || "").slice(0, 48)}`);
+        console.log(`    ${String(s.alias).padEnd(16)} ${String(s.status || "").padEnd(8)} ${oneLineCell(s.task, 48)}`);
       }
       // 🔴 状态是**自报**的:它只在 agent 显式上报时才变。一个 `blocked` 可能是
       //    3 秒前报的,也可能是三周前报的 —— 这里不假装知道哪一种。
@@ -12067,7 +12068,7 @@ async function statusCommand() {
     if (working.length > 0) {
       console.log("  Working:");
       for (const s of working) {
-        console.log(`    ${s.alias.padEnd(16)} ${(s.task || "").slice(0, 60)}`);
+        console.log(`    ${s.alias.padEnd(16)} ${oneLineCell(s.task, 60)}`);
       }
       console.log();
     }
@@ -12080,7 +12081,7 @@ async function statusCommand() {
         const st = (t.status || "?").padEnd(8);
         const from = (t.from_name || "?").padEnd(15);
         const to = (t.to_name || "?").padEnd(15);
-        const content = (t.content || "").slice(0, 40);
+        const content = oneLineCell(t.content, 40);
         console.log(`  ${st} ${from} ${to} ${content}`);
       }
       console.log();
@@ -12119,7 +12120,7 @@ async function tasksCommand() {
       const from = (t.from_name || "?").slice(0, 15).padEnd(15);
       const to = (t.to_name || "?").slice(0, 15).padEnd(15);
       const age = t.created_at ? timeAgo(t.created_at) : "?";
-      const content = (t.content || "").slice(0, 40);
+      const content = oneLineCell(t.content, 40);
       console.log(`  ${st} ${from} ${to} ${age.padEnd(8)} ${content}`);
     }
     console.log(`\n  Filter: anet tasks replied | anet tasks failed | anet tasks --status delivered\n`);
@@ -15439,7 +15440,7 @@ async function infoCommand() {
       if (tasks.tasks?.length > 0) {
         console.log(`\n  Recent Tasks:`);
         for (const t of tasks.tasks) {
-          console.log(`    ${t.status.padEnd(10)} ${(t.from_name || "?").padEnd(12)} ${(t.content || "").slice(0, 40)}`);
+          console.log(`    ${t.status.padEnd(10)} ${(t.from_name || "?").padEnd(12)} ${oneLineCell(t.content, 40)}`);
         }
       }
     } catch {}
