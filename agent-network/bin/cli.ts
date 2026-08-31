@@ -16213,6 +16213,8 @@ switch (command) {
         "session", "skill", "ls", "list", "status", "tasks", "goal", "doctor", "license",
         "activate", "passwd", "token", "demo", "batch", "logs", "info", "config",
         "login", "register", "logout", "whoami", "network", "run", "version", "help",
+        // 这四个是后加的顶层命令,曾长期漏在本名单外 —— 见 top-commands-coverage.test.ts。
+        "daemon", "grok", "opencode", "quickstart",
       ];
       const suggestion = suggestSimilar(command, TOP_COMMANDS);
       if (suggestion) console.error(`Unknown command "${command}". Did you mean: anet ${suggestion}?`);
