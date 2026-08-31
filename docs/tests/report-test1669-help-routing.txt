@@ -2,7 +2,7 @@ Issue: #1669 anet network/channel/session --help routing
 Date: 2026-08-31
 
 Worktree:
-  /home/vansin/agent-orchestra/.worktrees/issue-1669-help-guards
+  <repo>/.worktrees/issue-1669-help-guards   # 公开仓不写本机绝对路径（check-home-path-baseline）
 
 Before change (origin/main 89837513, built dist/bin/anet.cjs):
   anet network --help  first non-empty line: anet — AI Agent Network CLI (V2)
