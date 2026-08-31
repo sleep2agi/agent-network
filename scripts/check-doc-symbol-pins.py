@@ -354,6 +354,15 @@ def main() -> int:
 
     do_fix = "--fix" in sys.argv
     pins = skipped = unresolved = 0
+    # 🔴 「跳过」此前是一个数，而它底下是**三种含义完全不同**的东西：
+    #   blind      —— 锚文本没点名符号，机器分不清「改名了」和「那不是符号」。**这是真盲区。**
+    #   other-gate —— 文件不存在 / 行号越界，设计上归 check-doc-source-pins.py。**不是盲区。**
+    #   ioerror    —— 读不了，环境问题。
+    # 并成一个数之后，输出里那句「跳过的不是通过」读者**无法据以行动** ——
+    # 他不知道该去补哪一类。这里只做分桶与列表，判据与退出码一个字没动。
+    skipped_by: dict[str, list[str]] = {"blind": [], "other-gate": [], "ioerror": []}
+    def skip(kind: str, doc, rel, lineno) -> None:
+        skipped_by[kind].append(f"{doc.relative_to(repo)}: {rel}#L{lineno}")
     findings: list[str] = []
     fixes: list = []
     for doc in tracked_docs(repo, doc_root):
@@ -374,24 +383,29 @@ def main() -> int:
                 judged_here = judge(doc, repo, anchor, rel, int(lineno), lines_at_ref, findings, label_only, fixes)
                 if not judged_here:
                     skipped += 1
+                    skip("blind", doc, rel, lineno)
                 continue
             target = repo / rel
             if not target.is_file():
                 # 文件不存在是另一道门的活（check-doc-source-pins.py），
                 # 在这里重复报会让两道门的数字互相污染。
                 skipped += 1
+                skip("other-gate", doc, rel, lineno)
                 continue
             try:
                 lines = target.read_text(encoding="utf-8", errors="replace").split("\n")
             except OSError:
                 skipped += 1
+                skip("ioerror", doc, rel, lineno)
                 continue
             n = int(lineno)
             if not (1 <= n <= len(lines)):
                 skipped += 1  # 越界同样归另一道门
+                skip("other-gate", doc, rel, lineno)
                 continue
             if not judge(doc, repo, anchor, rel, n, lines, findings, label_only, fixes):
                 skipped += 1
+                skip("blind", doc, rel, lineno)
 
 
     if pins == 0:
@@ -407,9 +421,28 @@ def main() -> int:
         print("   改完请重跑一次不带 --fix 的本门确认。")
     elif do_fix:
         print("\n--fix: 没有可自动修的漂移(要么没漂,要么全是需要人消歧的多处命中)。")
+    # 🔴 各桶之和必须等于 skipped:将来有人加了新的 skip 点却忘了打标,
+    #    分解会静默少数 —— 那正是「分桶」最容易坏掉又最难发现的方式。
+    _bucketed = sum(len(v) for v in skipped_by.values())
+    if _bucketed != skipped:
+        print(f"::error::SYMBOL-PIN: 跳过分桶不自洽（skipped={skipped} 但分桶只有 {_bucketed} 条）"
+              f"—— 有 skip 点没调 skip()，分解不可信")
+        return 2
     verdict = "RED" if findings else "OK"
     print(f"SYMBOL-PIN: {verdict}（扫到 {pins} 个 pin，判定 {pins - skipped - unresolved} 个，"
           f"跳过 {skipped} 个，取不到 ref {unresolved} 个，漂移 {len(findings)} 个）")
+    if skipped:
+        # 🔴 分桶只为让上面那句「跳过的不是通过」可被据以行动:
+        #    blind 是这道门**真正看不见**的部分,other-gate 是设计上的分工。
+        #    把两者并成一个数,读者会把后者也当成隐患。
+        nb, no_, ni = (len(skipped_by[k]) for k in ("blind", "other-gate", "ioerror"))
+        print(f"   跳过分解：锚文本没点名符号 {nb} 个（**这是本门的真盲区**）、"
+              f"归 check-doc-source-pins.py {no_} 个（文件不存在/行号越界）、读不了 {ni} 个"
+              f"{'' if '--list-skipped' in sys.argv else ' —— 加 --list-skipped 看是哪些'}")
+        if "--list-skipped" in sys.argv:
+            for kind in ("blind", "other-gate", "ioerror"):
+                for item in skipped_by[kind]:
+                    print(f"   [{kind}] {item}")
     if unresolved:
         # 🔴 单列一格,不并进「跳过」。「我没拿到那个 commit」和「锚文本没点名符号」
         #    是两件事,并成一个数之后,浅克隆导致的**全体取不到**会伪装成
