@@ -499,7 +499,7 @@ Agent                    CommHub Server              Hub/指挥室
   ├─────────────────────────►│                          │
 ```
 
-R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这会触发指挥室 think 循环（A 给 B 派任务，B 给 A 回复，A 又 think 又给 B 派任务，A→B→A→B 无限）。V3 已经引入 `send_reply` MCP tool（[tools.ts:589](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589)），关联 `in_reply_to=task_id`，SSE 推 `new_reply` 不是 `new_task`，**接收方不触发 think**（R218 chain message-lifecycle.md 校准）。
+R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这会触发指挥室 think 循环（A 给 B 派任务，B 给 A 回复，A 又 think 又给 B 派任务，A→B→A→B 无限）。V3 已经引入 `send_reply` MCP tool（[tools.ts:2064](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L2064)），关联 `in_reply_to=task_id`，SSE 推 `new_reply` 不是 `new_task`，**接收方不触发 think**（R218 chain message-lifecycle.md 校准）。
 
 ### 三种接入方式对比
 
