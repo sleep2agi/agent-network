@@ -9276,6 +9276,79 @@ async function verifyNodeRestarted(
 // PHASE 1 (prepare) is fully rollback-safe: copy-not-move + rename.lock +
 // commhub prepared rename_txn row, old node untouched. PHASE 2 (commit) is the
 // non-rollbackable point: commhub routing switch → restart agent → delete old.
+// #1698 —— 改一个已存在节点的 runtime。
+//
+// 在此之前 `anet node` 有十个子命令，没有一个能改 runtime：想换只能手改
+// `<project>/.anet/nodes/<name>/config.json` 或删掉重建。而这不是假设的场景 ——
+// `grok-build-cli` 在 Ubuntu 24.04+ 上撞 uid_map 墙时，**产品自己的预检**
+// (agent-node/src/runtime/grok-build-cli.ts) 给出的首选修法就是
+// 「改用 grok-build-acp runtime」。产品给出的修复动作，产品自己没有命令去做。
+//
+// 🔴 校验走 `normalizeRuntimeStrict`，**不在这里写第四份白名单**。
+//    同一个 runtime 全集现在已经有四处（hub 的 create-node-validate.ts、
+//    本文件用的 normalize-runtime.ts、agent-node 的 VALID_RUNTIMES、
+//    桌面端的 CreateNodeWizardScreen.tsx —— 后者今天才补齐第 7 个）。
+//    再抄一份就是给下一次「四处不一致」预定位置。
+//
+// 🔴 空值不当默认：`normalizeRuntimeStrict` 对空串返回 DEFAULT_RUNTIME，
+//    那是给「配置里没写」用的语义。用户显式敲 `--runtime ""` 是打错了，
+//    不该被悄悄解释成 claude-agent-sdk —— 所以这里先自己挡掉空值。
+async function nodeEditCommand() {
+  const ref = args[1];
+  const flagIdx = args.indexOf("--runtime");
+  const raw = flagIdx >= 0 ? args[flagIdx + 1] : undefined;
+  if (!ref || flagIdx < 0) {
+    console.log(`
+anet node edit <node-id|node-name> --runtime <id>
+
+  Change an existing node's runtime. Supported ids:
+    ${SUPPORTED_RUNTIME_NAMES.join(", ")}
+
+  Note: the change is written to the node's config; a running node keeps its
+  current runtime until it is restarted (anet node restart <name>).
+`);
+    return;
+  }
+  if (raw === undefined || raw.trim() === "" || raw.startsWith("--")) {
+    console.error(`--runtime needs a value. Supported: ${SUPPORTED_RUNTIME_NAMES.join(", ")}`);
+    process.exit(1);
+  }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) {
+    console.error(nodeNotFound(ref));
+    process.exit(1);
+  }
+  const profile = loadProfile(resolved.id);
+  if (!profile) {
+    console.error(`Node "${resolved.id}" has no readable config.json — nothing to edit.`);
+    process.exit(1);
+  }
+  let next: RuntimeName;
+  try {
+    next = normalizeRuntimeStrict(raw);
+  } catch (e: any) {
+    console.error(String(e?.message || e));
+    process.exit(1);
+  }
+  const current = normalizeRuntime(profile);
+  if (current === next) {
+    console.log(`${resolved.id} is already on runtime ${next} — nothing to change.`);
+    return;
+  }
+  (profile as any).runtime = next;
+  saveProfile(resolved.id, profile);
+  console.log(`${resolved.id}: runtime ${current} -> ${next}`);
+  // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
+  const running = findNodeStopCandidates(resolved.id);
+  if (running === null) {
+    console.log(`  (could not read the process table — if ${resolved.id} is running, restart it: anet node restart ${resolved.id})`);
+  } else if (running.length > 0) {
+    console.log(`  ${resolved.id} is running on the old runtime. Apply it with: anet node restart ${resolved.id}`);
+  } else {
+    console.log(`  It is not running; the new runtime applies on: anet node start ${resolved.id}`);
+  }
+}
+
 async function renameCommand() {
   const fromRef = args[1];
   const newName = args[2];
@@ -16304,7 +16377,7 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
         await nodeLoopCommand();
         process.exit(0);
       } else {
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|migrate-token-to-envref> [name]`);
       }
       break;
     default:
@@ -16330,6 +16403,7 @@ switch (command) {
       case "resume": args.splice(0, 1); await resumeCommand(); break;
       case "delete": args.splice(0, 1); await deleteCommand(); break;
       case "rename": args.splice(0, 1); await renameCommand(); break;
+      case "edit": args.splice(0, 1); await nodeEditCommand(); break;
       case "loop": args.splice(0, 1); await nodeLoopCommand(); break;
       case "ls": case "list": await lsCommand(); break;
       case "restart": {
@@ -16353,7 +16427,7 @@ switch (command) {
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|migrate-token-to-envref> [name]`);
         break;
       }
     }
