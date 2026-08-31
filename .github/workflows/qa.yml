@@ -687,6 +687,16 @@ jobs:
           set +e
           for f in /tmp/qa-*.log; do
             echo "================ $f ================"
+            # 🔴 先把失败标记行捞出来,再 tail。
+            #    实证(2026-08-31, PR #1680 的 test13-multi-channel):套件自报
+            #    `Results: 17 passed, 1 failed`,而 `tail -60` 那 60 行里
+            #    **一个失败标记都没有** —— 失败发生在前半段,被截掉了。
+            #    于是日志读起来像「全部通过却 rc=1」,排查要翻三层还拿不到名字。
+            #    标记取 `❌|FAIL`:test13 用 `fail(){ echo "  ❌ $1"; }`,
+            #    test225 用 `FAIL: ...` —— 两种写法都覆盖(读源码校准过,不是猜的)。
+            echo "---- failure markers ----"
+            grep -nE '❌|FAIL' "$f" | head -20
+            echo "---- tail -60 ----"
             tail -60 "$f"
           done
 
