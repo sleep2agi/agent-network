@@ -8868,12 +8868,16 @@ function sessionCommand() {
     if (sessions.length === 0) { console.log(`No sessions for ${cwd}`); return; }
 
     console.log(`\nSessions in ${cwd} (${sessions.length} total):\n`);
-    console.log("  SESSION ID                             SIZE      MODIFIED");
-    console.log("  ──────────────────────────────────────  ────────  ────────────────");
+    // 🔴 表头和分隔线原是两个写死的字面量,和数据行对不上:数据行右边缘 38/48/60,
+    // 分隔线 40/50/68,表头的 SIZE 落在 45。数据行彼此是一致的 —— 歪的是这两行。
+    // id 列宽从**本次要打印的会话**算;SIZE 保持右对齐(padStart)因为它是数字。
+    const idW = columnWidth(sessions.map((x) => x.id), "SESSION ID");
+    console.log(`  ${"SESSION ID".padEnd(idW)}  ${"SIZE".padStart(8)}  MODIFIED`);
+    console.log(`  ${"─".repeat(idW)}  ${"─".repeat(8)}  ${"─".repeat(16)}`);
 
     for (const s of sessions) {
       const mtime = new Date(s.mtimeMs).toISOString().replace("T", " ").slice(0, 16);
-      console.log(`  ${s.id}  ${formatSize(s.sizeBytes).padStart(8)}  ${mtime}`);
+      console.log(`  ${s.id.padEnd(idW)}  ${formatSize(s.sizeBytes).padStart(8)}  ${mtime}`);
     }
     console.log();
   } else {
@@ -13190,10 +13194,19 @@ anet token <command>
     if (!res.ok) { console.error(res.error); return; }
     if (!res.tokens?.length) { console.log("\n  No tokens. Create one: anet token create <name>\n"); return; }
     console.log("\n  API Tokens:\n");
-    console.log("  ID                   NAME           CREATED                  LAST USED");
-    console.log("  ──────────────────── ────────────── ──────────────────────── ────────────────────────");
+    // 🔴 表头里 ID 留 20 列,数据行却是 padEnd(22) —— 整张表从第二列起就错开 2。
+    // 三处宽度改为同一组常量。
+    // 🔴 而 name 是用户起的、没有上限:写死 14 时一个长名字就把 CREATED 顶偏(本机实测有一个)。
+    // 三列宽度全部从**本次要打印的这批 token** 算,表头/分隔线/数据行共用同一组。
+    const tW = {
+      id: columnWidth(res.tokens.map((t: any) => String(t.token_id || "?")), "ID"),
+      name: columnWidth(res.tokens.map((t: any) => String(t.name || "?")), "NAME"),
+      created: columnWidth(res.tokens.map((t: any) => String(t.created_at || "?")), "CREATED"),
+    };
+    console.log(`  ${padDisplayEnd("ID", tW.id)} ${padDisplayEnd("NAME", tW.name)} ${padDisplayEnd("CREATED", tW.created)} LAST USED`);
+    console.log(`  ${"─".repeat(tW.id)} ${"─".repeat(tW.name)} ${"─".repeat(tW.created)} ${"─".repeat(9)}`);
     for (const t of res.tokens) {
-      console.log(`  ${(t.token_id || "?").padEnd(22)} ${(t.name || "?").padEnd(14)} ${(t.created_at || "?").padEnd(24)} ${t.last_used_at || "never"}`);
+      console.log(`  ${padDisplayEnd(String(t.token_id || "?"), tW.id)} ${padDisplayEnd(String(t.name || "?"), tW.name)} ${padDisplayEnd(String(t.created_at || "?"), tW.created)} ${t.last_used_at || "never"}`);
     }
     console.log();
   } catch (e: any) { console.error(friendlyError(e)); }
