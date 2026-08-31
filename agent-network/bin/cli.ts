@@ -8843,9 +8843,22 @@ async function importCommand() {
 
 // ── session ──
 
+function printSessionUsage() {
+  console.log(`
+anet session <command>
+
+  ls    List Claude Code sessions in current project
+`);
+}
+
 function sessionCommand() {
   const sub = args[1];
-  if (sub === "ls" || sub === "list" || !sub) {
+  if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+    printSessionUsage();
+    return;
+  }
+
+  if (sub === "ls" || sub === "list") {
     // Scan ~/.claude/projects/{project-key}/ for .jsonl files (#115: shared
     // helper with the `anet node create` resume picker).
     const cwd = process.cwd();
@@ -8863,11 +8876,7 @@ function sessionCommand() {
     }
     console.log();
   } else {
-    console.log(`
-anet session <command>
-
-  ls    List Claude Code sessions in current project
-`);
+    printSessionUsage();
   }
 }
 
@@ -10863,10 +10872,28 @@ Delete a node and its config. Use --force to skip confirmation.
 
 // ── channel ──
 
+function printChannelUsage() {
+  console.log(`
+anet channel <command>
+
+  add <type> <node-id>          Add channel to a node
+  allow feishu <node-id>        Manage feishu allowFrom / allowChats (--add-from/--add-chat/--rm-from/--rm-chat; repeatable)
+  ls [node-id]                  List channels (shows allowFrom + allowChats for feishu)
+  status [node-id]              Show resolved access.json path + allowlist + pending pairings
+
+Data: .anet/nodes/<node-id>/channels/<type>/
+`);
+}
+
 async function channelCommand() {
   // anet channel add telegram <node-id> --bot-token xxx --allow xxx
   // anet channel ls [node-id]
   const sub = args[1];
+  if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+    printChannelUsage();
+    return;
+  }
+
   const opts = parseOpts();
 
   if (sub === "add") {
@@ -11206,16 +11233,7 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
     }
 
   } else {
-    console.log(`
-anet channel <command>
-
-  add <type> <node-id>          Add channel to a node
-  allow feishu <node-id>        Manage feishu allowFrom / allowChats (--add-from/--add-chat/--rm-from/--rm-chat; repeatable)
-  ls [node-id]                  List channels (shows allowFrom + allowChats for feishu)
-  status [node-id]              Show resolved access.json path + allowlist + pending pairings
-
-Data: .anet/nodes/<node-id>/channels/<type>/
-`);
+    printChannelUsage();
   }
 }
 
@@ -12850,8 +12868,29 @@ async function whoamiCommand() {
 
 // ── network ──
 
+function printNetworkUsage() {
+  console.log(`
+anet network <command>
+
+  ls                    List my networks
+  create <name>         Create a new network
+  use <name>            Switch to a network
+  info                  Current network details + stats
+  rename <old> <new>    Rename a network
+  delete <name> --force Delete a network
+  invite                Generate invite code for current network
+  join <code>           Join a network by invite code
+  members               List members of current network
+`);
+}
+
 async function networkCommand() {
   const sub = args[1];
+  if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+    printNetworkUsage();
+    return;
+  }
+
   const gc = loadGlobal();
   const hub = gc.hub;
   const token = gc.token;
@@ -13040,19 +13079,7 @@ async function networkCommand() {
     return;
   }
 
-  console.log(`
-anet network <command>
-
-  ls                    List my networks
-  create <name>         Create a new network
-  use <name>            Switch to a network
-  info                  Current network details + stats
-  rename <old> <new>    Rename a network
-  delete <name> --force Delete a network
-  invite                Generate invite code for current network
-  join <code>           Join a network by invite code
-  members               List members of current network
-`);
+  printNetworkUsage();
 }
 
 // ── logs ──
@@ -16099,10 +16126,19 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       // 直接返回。而 network 一进来就 loadGlobal() 读 hub/token、channel 一进来
       // parseOpts()、session 的 !sub 直接跑 ls —— 那三个没有前置 help 守卫,
       // 路由过去会有副作用,正是 #215 那条 default 要防的东西,留着不动。
-    case "opencode": await opencodeCommand(); process.exit(0);
-    case "goal":     await goalCommand();     process.exit(0);
-    case "token":    await tokenCommand();    process.exit(0);
-    case "batch":    await batchCommand();    process.exit(0);
+    case "opencode": await opencodeCommand(); break;
+    case "goal":     await goalCommand();     break;
+    case "token":    await tokenCommand();    break;
+    case "batch":    await batchCommand();    break;
+    case "network":
+      await networkCommand();
+      break;
+    case "channel":
+      await channelCommand();
+      break;
+    case "session":
+      sessionCommand();
+      break;
     case "daemon":
       // #717 — daemonCommand() already prints its own subcommand help for
       // bare `anet daemon`, but this intercept ran first and bounced to the

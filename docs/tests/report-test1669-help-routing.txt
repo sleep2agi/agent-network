@@ -1,0 +1,32 @@
+Issue: #1669 anet network/channel/session --help routing
+Date: 2026-08-31
+
+Worktree:
+  <repo>/.worktrees/issue-1669-help-guards   # 公开仓不写本机绝对路径（check-home-path-baseline）
+
+Before change (origin/main 89837513, built dist/bin/anet.cjs):
+  anet network --help  first non-empty line: anet — AI Agent Network CLI (V2)
+  anet channel --help  first non-empty line: anet — AI Agent Network CLI (V2)
+  anet session --help  first non-empty line: anet — AI Agent Network CLI (V2)
+
+After change (built dist/bin/anet.cjs):
+  anet network --help  first non-empty line: anet network <command>
+  anet channel --help  first non-empty line: anet channel <command>
+  anet session --help  first non-empty line: anet session <command>
+
+Commands:
+  PATH="$HOME/.nvm/versions/node/v24.19.0/bin:$PATH" bun run build
+  Result: pass
+
+  PATH="$HOME/.nvm/versions/node/v24.19.0/bin:$PATH" bun test ./agent-network/src/
+  Result: fail
+  Summary: 943 pass, 3 skip, 1 fail, 2706 expect() calls, 947 tests across 100 files.
+  Failure: agent-network/src/posix-codex-copresence.test.ts expected probePosixOwnedLoopbackConnection(process.pid, server.port) to be true, received false.
+
+  PATH="$HOME/.nvm/versions/node/v24.19.0/bin:$PATH" bun test ./agent-network/src/top-level-help-contract.test.ts
+  Result: pass
+  Summary: 2 pass, 0 fail, 9 expect() calls.
+
+  python3 scripts/check-doc-symbol-pins.py --fix
+  Result: pass
+  Summary: SYMBOL-PIN OK, 0 drift.
