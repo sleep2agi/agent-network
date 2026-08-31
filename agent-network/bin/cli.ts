@@ -13289,18 +13289,18 @@ function demoListCommand() {
   console.log(`
   Available demos:
 
-  [32m●[0m debate          辩论赛 — 6 agent (主持人 / 正反 4 辩 / 评委), ~10 min
+  ● debate          辩论赛 — 6 agent (主持人 / 正反 4 辩 / 评委), ~10 min
                   anet demo debate --topic "AI 创造的岗位是否比消灭的多"
 
-  [32m●[0m socialmedia     社交媒体内容工厂 — 4 agent (选题/文案/配图/审核), ~3 min
+  ● socialmedia     社交媒体内容工厂 — 4 agent (选题/文案/配图/审核), ~3 min
                   anet demo socialmedia --topic "..." --platform xiaohongshu
 
-  [32m●[0m pr-review       代码 PR 审查室 — 4 agent (安全/性能/风格 3 reviewer 并行 + judge), ~2 min
+  ● pr-review       代码 PR 审查室 — 4 agent (安全/性能/风格 3 reviewer 并行 + judge), ~2 min
                   anet demo pr-review --diff path/to/change.diff
                   anet demo pr-review --pr https://github.com/owner/repo/pull/N
                   anet demo pr-review --ref origin/main
 
-  [32m●[0m sci-team    科研军团 — 1 leader + N-1 worker (默认 10, 5-50 可调) 跑书生模型, Phase 1 scaffold
+  ● sci-team        科研军团 — 1 leader + N-1 worker (默认 10, 5-50 可调) 跑书生模型, Phase 1 scaffold
                   anet demo sci-team
                   anet demo sci-team --count 20 --dir ~/intern-s --intern-api $KEY
                   anet demo sci-team --stop / --restart / --cleanup
