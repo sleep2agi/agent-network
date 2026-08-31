@@ -29,6 +29,15 @@ agent-node/src/runtime/fetch-attachment.ts	1
 agent-node/tests/feishu-tool-deny.test.ts	2
 agent-node/tests/rfc-030-copresence-observer.ts	2
 channel/commhub-channel.ts	1
+# 🔴 deploy/fleet/grok-commdog.md 的 20 处是**事故记录里的既成坐标**,不是可替换的路径:
+#   ① 观测转储 —— `config=`/`cwd=`/`workspace=` 与同一个 ```text 块里的
+#      `config_sha256=`/`config_mode=0600`/`pid` 并列,记录的是当时**实际读到的字符串**;
+#   ② rollback 目录 —— `~/.commhub/rollback-commdog-boundary-20260813T014843Z/` 这类带
+#      时间戳的回滚点,记录的是当时真的落在哪。
+#   改成 $HOME 会削弱证据。而**读者要照着跑的 7 条命令**(mkdir/cd/CONFIG=/-c)已全部改成
+#   $HOME —— 那 7 条不改的话,这份 runbook 对除作者外任何人都跑不通,而它的全部价值就是
+#   「从空机恢复」。来源 PR #808,阻塞原因见其 2026-08-18 的 review。
+deploy/fleet/grok-commdog.md	20
 deploy/dashboard/dash-start.sh	1
 deploy/dashboard/ecosystem.config.cjs	1
 deploy/tunnel/frpc.service	1
