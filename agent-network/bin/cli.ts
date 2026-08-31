@@ -46,6 +46,7 @@ import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
 import { formatHubVersionDetail } from "../src/hub-version-skew";
 import { nodeCountLine } from "../src/doctor-node-count";
 import { nodeNotFoundMessage } from "../src/node-not-found";
+import { lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
@@ -7407,8 +7408,12 @@ async function lsCommand() {
   // Nodes with network status
   if (ids.length > 0) {
     console.log("\nNodes:\n");
-    console.log("  NAME                 RUNTIME        STATUS    SSE  SESSION");
-    console.log("  ──────────────────── ────────────── ──────── ──── ────────");
+    // 🔴 列宽从 SUPPORTED_RUNTIME_NAMES 算,不写死:runtime 名最长 16
+    // (claude-agent-sdk / codex-app-server),原先写死 14 会把 STATUS 顶偏 1–2 列。
+    // 表头 / 分隔线 / 数据行三处用同一个宽度,不再各写各的字面量。
+    const runtimeW = runtimeColumnWidth(SUPPORTED_RUNTIME_NAMES);
+    console.log(lsHeaderRow(runtimeW));
+    console.log(lsSeparatorRow(runtimeW));
     for (const id of ids) {
       const p = loadProfile(id);
       const displayName = nodeDisplayName(id, p);
@@ -7432,7 +7437,7 @@ async function lsCommand() {
                          serverStatus === "working" ? "working" :
                          serverStatus === "offline" ? "offline" :
                          serverStatus;
-      console.log(`  ${padDisplayEnd(displayName, 20)} ${runtime.padEnd(14)} ${statusIcon.padEnd(8)} ${sseConnected.padEnd(4)} ${session}`);
+      console.log(`  ${padDisplayEnd(displayName, 20)} ${padDisplayEnd(runtime, runtimeW)} ${statusIcon.padEnd(8)} ${sseConnected.padEnd(4)} ${session}`);
       if (verbose && p) {
         // #101 verbose — second line shows tools + flags. Width-matched to the
         // header so it lines up under NAME.
