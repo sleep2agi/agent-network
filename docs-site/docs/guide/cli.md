@@ -114,7 +114,7 @@ Token 类型、作用域与兼容规则见 [Token 体系](/concepts/tokens)。
 | `anet node resume <name> [--session <id>]` | 使用保存的会话或指定会话恢复 |
 | `anet node delete <name> --force` | 删除本地节点配置 |
 | `anet node rename <ref> <new>` | 重命名已在 Hub 注册的节点 |
-| `anet node edit <ref> --runtime <id>` | 改已存在节点的 runtime；**要重启才生效** |
+| `anet node edit <ref> [--runtime <id>] [--model <id>]` | 改已存在节点的 runtime / 模型；**要重启才生效** |
 | `anet node ls` | 列出本地节点及网络状态 |
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
