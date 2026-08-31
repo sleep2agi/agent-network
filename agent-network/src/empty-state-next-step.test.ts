@@ -50,6 +50,14 @@ describe("空状态给下一步", () => {
     expect(/anet skill (install|add|pull)/.test(CODE.slice(idx, idx + 200))).toBe(false);
   });
 
+  it("🔴 anet import 找不到 alias 时把可导入的真名列出来 —— 数据就在手边", () => {
+    const i = CODE.indexOf('No session found for');
+    const near = CODE.slice(Math.max(0, i - 400), i + 200);
+    expect(near).toContain("importable");
+    // 连守卫一起钉:名字必须真的从 claudeSessions 取,而不是写死一句话
+    expect(near).toMatch(/claudeSessions\.map\(/);
+  });
+
   it("正控:另外两处既有的空状态提示还在(它们是这条的样板)", () => {
     expect(CODE).toContain("Get started: anet init");
     expect(CODE).toContain("Create some with: anet node create");

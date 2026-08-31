@@ -8809,7 +8809,15 @@ async function importCommand() {
     ? claudeSessions.filter((s: any) => s.alias === targetAlias)
     : claudeSessions;
 
-  if (toImport.length === 0) { console.log(`No session found for "${targetAlias}".`); return; }
+  if (toImport.length === 0) {
+    // 🔴 可导入的会话就在手边(claudeSessions),只说「没找到」等于把用户手上的
+    // 信息藏起来 —— 同 #1667 的 `Node "x" not found`。把真名给他。
+    const names = claudeSessions.map((s: any) => String(s.alias || "")).filter(Boolean);
+    const shown = names.slice(0, 5).join(", ");
+    const more = names.length > 5 ? `, … (${names.length} total)` : "";
+    console.log(`No session found for "${targetAlias}". ${names.length} importable: ${shown}${more}`);
+    return;
+  }
 
   let created = 0;
   for (const s of toImport) {
