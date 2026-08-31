@@ -45,6 +45,7 @@ import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, 
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
 import { formatHubVersionDetail } from "../src/hub-version-skew";
 import { nodeCountLine } from "../src/doctor-node-count";
+import { nodeNotFoundMessage } from "../src/node-not-found";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
@@ -2234,6 +2235,26 @@ function resolveNodeRef(ref: string): { id: string; profile: Profile } | null {
   return null;
 }
 
+// 光一句 `Node "x" not found.` 对用户没用 —— 他敲错了一个字,而这里手里就攥着全部真名。
+// 相似度用**既有的** suggestSimilar(Levenshtein ≤ 2,#214 F7-02 的阈值),不另立一套。
+function nodeNotFound(ref: string): string {
+  const display: string[] = [];
+  const candidates = new Set<string>();
+  try {
+    for (const id of listProfileIds()) {
+      const profile = loadProfile(id);
+      display.push(profile?.node_name || profile?.name || profile?.alias || id);
+      // 🔴 建议的候选集必须等于 resolveNodeRef **实际认的那些键**,不是我想显示的那一个。
+      // 它认 id / node_id / node_name / name / alias 五个;只收显示名的话,用户把
+      // 目录 id 敲错一个字母(codex-new → codex-nex)就永远得不到建议 —— 实测撞到过。
+      for (const k of [id, profile?.node_id, profile?.node_name, profile?.name, profile?.alias]) {
+        if (typeof k === "string" && k) candidates.add(k);
+      }
+    }
+  } catch { /* 读不到配置目录就退化成最朴素的那句,不要在报错路径上自己再抛 */ }
+  return nodeNotFoundMessage(ref, display, suggestSimilar(ref, [...candidates]));
+}
+
 function normalizeNodeName(name: string): string {
   return name.normalize("NFC");
 }
@@ -3889,7 +3910,7 @@ function attachCommand() {
   }
   const resolved = resolveNodeRef(ref);
   if (!resolved) {
-    console.error(`Node "${ref}" not found.`);
+    console.error(nodeNotFound(ref));
     process.exit(1);
   }
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
@@ -5837,7 +5858,7 @@ async function grokModelCommand(ref: string | undefined, model: string | undefin
   }
   const resolved = resolveNodeRef(ref);
   if (!resolved) {
-    console.error(`Node "${ref}" not found.`);
+    console.error(nodeNotFound(ref));
     process.exit(1);
   }
   const { id: nodeId, profile } = resolved;
@@ -9236,7 +9257,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   validateNodeName(newName);
   const resolved = resolveNodeRef(fromRef);
   if (!resolved) {
-    console.error(`Node "${fromRef}" not found.`);
+    console.error(nodeNotFound(fromRef));
     process.exit(1);
   }
   const oldId = resolved.id;
@@ -9791,7 +9812,7 @@ Stop a running agent node.
 
   const resolved = resolveNodeRef(ref);
   if (!resolved) {
-    console.error(`Node "${ref}" not found.`);
+    console.error(nodeNotFound(ref));
     process.exit(1);
   }
 
@@ -10795,7 +10816,7 @@ Delete a node and its config. Use --force to skip confirmation.
 
   const resolved = resolveNodeRef(ref);
   if (!resolved) {
-    console.error(`Node "${ref}" not found.`);
+    console.error(nodeNotFound(ref));
     process.exit(1);
   }
 
@@ -10979,7 +11000,7 @@ Examples:
     const nodeRef = args[2];
     const resolved = nodeRef ? resolveNodeRef(nodeRef) : null;
     if (nodeRef && !resolved) {
-      console.error(`Node "${nodeRef}" not found.`);
+      console.error(nodeNotFound(nodeRef));
       process.exit(1);
     }
     const ids = resolved ? [resolved.id] : listProfileIds();
@@ -11059,7 +11080,7 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
     }
     const resolved = resolveNodeRef(nodeRef);
     if (!resolved) {
-      console.error(`Node "${nodeRef}" not found.`);
+      console.error(nodeNotFound(nodeRef));
       process.exit(1);
     }
     const accessPath = join(nodesDir(), resolved.id, "channels", type, "access.json");
@@ -11145,7 +11166,7 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
     const nodeRef = args[2];
     const resolved = nodeRef ? resolveNodeRef(nodeRef) : null;
     if (nodeRef && !resolved) {
-      console.error(`Node "${nodeRef}" not found.`);
+      console.error(nodeNotFound(nodeRef));
       process.exit(1);
     }
     const ids = resolved ? [resolved.id] : listProfileIds();
@@ -12337,7 +12358,7 @@ async function goalCommand() {
       ? (() => {
           const resolved = resolveNodeRef(nodeRef);
           if (!resolved) {
-            console.error(`Node "${nodeRef}" not found.`);
+            console.error(nodeNotFound(nodeRef));
             process.exit(1);
           }
           return [resolved];
@@ -12385,7 +12406,7 @@ async function goalCommand() {
     }
     const resolved = resolveNodeRef(nodeRef);
     if (!resolved) {
-      console.error(`Node "${nodeRef}" not found.`);
+      console.error(nodeNotFound(nodeRef));
       process.exit(1);
     }
     const { path, file } = loadGoalsFile(resolved.id);
@@ -12424,7 +12445,7 @@ async function goalCommand() {
     }
     const resolved = resolveNodeRef(nodeRef);
     if (!resolved) {
-      console.error(`Node "${nodeRef}" not found.`);
+      console.error(nodeNotFound(nodeRef));
       process.exit(1);
     }
     const { path, file } = loadGoalsFile(resolved.id);
@@ -12455,7 +12476,7 @@ async function goalCommand() {
     const opts = parseOpts();
     const resolved = resolveNodeRef(nodeRef);
     if (!resolved) {
-      console.error(`Node "${nodeRef}" not found.`);
+      console.error(nodeNotFound(nodeRef));
       process.exit(1);
     }
     const { path, file } = loadGoalsFile(resolved.id);
@@ -12504,7 +12525,7 @@ async function goalCommand() {
     const opts = parseOpts();
     const resolved = resolveNodeRef(nodeRef);
     if (!resolved) {
-      console.error(`Node "${nodeRef}" not found.`);
+      console.error(nodeNotFound(nodeRef));
       process.exit(1);
     }
     const { path, file } = loadGoalsFile(resolved.id);
@@ -13038,7 +13059,7 @@ function logsCommand() {
     return;
   }
   const resolved = resolveNodeRef(ref);
-  if (!resolved) { console.error(`Node "${ref}" not found.`); process.exit(1); }
+  if (!resolved) { console.error(nodeNotFound(ref)); process.exit(1); }
 
   const logDir = join(nodesDir(), resolved.id, "logs");
   if (!existsSync(logDir)) { console.log("No logs yet."); return; }
@@ -15376,7 +15397,7 @@ async function infoCommand() {
   const ref = args[1];
   if (!ref) { console.log("\nanet info <node-name>   Detailed node information\n"); return; }
   const resolved = resolveNodeRef(ref);
-  if (!resolved) { console.error(`Node "${ref}" not found.`); process.exit(1); }
+  if (!resolved) { console.error(nodeNotFound(ref)); process.exit(1); }
   const { id: nodeId, profile } = resolved;
   const displayName = nodeDisplayName(nodeId, profile);
 
@@ -15472,7 +15493,7 @@ async function migrateTokenToEnvRefCommand() {
     return;
   }
   const resolved = resolveNodeRef(ref);
-  if (!resolved) { console.error(`Node "${ref}" not found.`); process.exit(1); }
+  if (!resolved) { console.error(nodeNotFound(ref)); process.exit(1); }
   const { id: nodeId, profile } = resolved;
   const envMap: any = profile.env;
   if (!envMap || typeof envMap !== "object") {
