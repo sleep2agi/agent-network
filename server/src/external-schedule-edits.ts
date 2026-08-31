@@ -2,6 +2,7 @@ import { db } from "./db.js";
 import { getUserNetworkRole } from "./auth.js";
 import { pushEvent } from "./push.js";
 import { parseExternalSchedulePatch, type ExternalSchedulePatch } from "./shared/external-schedule-contract.js";
+import { parseHubTimestamp } from "./hub-timestamp";
 
 type Auth = {
   userId: string;
@@ -109,6 +110,18 @@ function reportedSchedule(node: NodeRow, scheduleId: string): Record<string, unk
   }
 }
 
+// 🔴 #1650 —— 这些列是 SQLite `datetime('now')` 家族:**UTC 但不带时区标记**。
+//   `new Date("2026-08-30 21:04:11")` 会按**本机时区**解析(ES 规范:带时间且无偏移
+//   的形式视为本地时间),而且不报错 —— 于是发给 API 消费方的是一个错的时刻,
+//   误差就是这台机器的 offset。
+//   另外原写法在字段是垃圾串时 `new Date(x).toISOString()` 会**抛 RangeError**,
+//   足以把这个接口打成 500;`parseHubTimestamp` 解析失败返回 null,这里也返回 null。
+//   复用 server.ts:1010 已在用的那个 helper,不自造第二套判据。
+function hubIso(raw: unknown): string | null {
+  const ms = parseHubTimestamp(raw);
+  return ms === null ? null : new Date(ms).toISOString();
+}
+
 function publicEdit(row: EditRow): Record<string, unknown> {
   let patch: ExternalSchedulePatch = {};
   try { patch = JSON.parse(row.patch_json); } catch {}
@@ -119,10 +132,10 @@ function publicEdit(row: EditRow): Record<string, unknown> {
     base_revision: row.base_revision,
     patch,
     status: row.status,
-    expires_at: new Date(row.expires_at).toISOString(),
-    created_at: new Date(row.created_at).toISOString(),
-    delivered_at: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
-    acked_at: row.acked_at ? new Date(row.acked_at).toISOString() : null,
+    expires_at: hubIso(row.expires_at),
+    created_at: hubIso(row.created_at),
+    delivered_at: hubIso(row.delivered_at),
+    acked_at: hubIso(row.acked_at),
     result_revision: row.result_revision,
     error_code: row.error_code,
   };
