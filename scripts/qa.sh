@@ -91,6 +91,7 @@ L1_TESTS=(
   "qa-hub-07-sse-reconnect"
   "qa-hub-08-restart-persistence"
   "qa-hub-09-task-state-machine"
+  "qa-hub-11-user-unread"
   # 2026-08-19 补注册。它一直是孤儿(docs/test-suite-orphan-baseline.txt),
   # 而在此之前套件里有 3 处字面量随一次改名过期(#1072):1 条 production grep
   # 0 命中、2 条变异锚点 0 命中 ⇒ 变异是 no-op。修好之后它有三条成立的见证红,
