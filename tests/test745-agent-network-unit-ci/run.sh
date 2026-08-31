@@ -104,7 +104,7 @@ AGENT_NETWORK_TESTS_FLOOR=15
 }
 
 echo "[L1] witnessed-red: top-level config help must match the implemented parser"
-TARGET='  anet config [path|json]       Show config summary, path, or raw JSON'
+TARGET='  anet config [path|json]      Show config summary, path, or raw JSON'
 MUTATED='  anet config get|set          Inspect or edit config'
 before=$(sha256sum "$ROOT/agent-network/bin/cli.ts" | cut -d' ' -f1)
 python3 - "$ROOT/agent-network/bin/cli.ts" "$TARGET" "$MUTATED" <<'PY'
