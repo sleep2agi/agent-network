@@ -39,6 +39,7 @@ import { classifySessionStatus, summarizeSessions } from "../src/session-status-
 import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../src/offline-age";
 import { oneLineCell } from "../src/one-line-cell";
 import { padDisplayEnd } from "../src/display-width";
+import { formatHubTime } from "../src/hub-time-display";
 import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
@@ -12283,7 +12284,7 @@ function printGoalShow(goal: LocalGoal, displayName: string, path: string) {
   if (goal.parent_task_id) console.log(`  Parent:   ${goal.parent_task_id}`);
   if (goal.report_to) console.log(`  ReportTo: ${goal.report_to}`);
   console.log(`  Created:  ${goal.created_at || "-"}`);
-  console.log(`  Updated:  ${goal.updated_at || "-"}`);
+  console.log(`  Updated:  ${formatHubTime(goal.updated_at)}`);
   console.log(`  File:     ${path}`);
   const log = Array.isArray(goal.progress_log) ? goal.progress_log : [];
   if (log.length === 0) {
@@ -15450,7 +15451,7 @@ async function infoCommand() {
         console.log(`\n  Server Status:`);
         console.log(`    status:   ${session.status}`);
         console.log(`    task:     ${(session.task || "-").slice(0, 60)}`);
-        console.log(`    updated:  ${session.updated_at || "-"}`);
+        console.log(`    updated:  ${formatHubTime(session.updated_at)}`);
       } else {
         console.log(`\n  Server: not registered`);
       }
