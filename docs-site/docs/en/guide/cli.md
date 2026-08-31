@@ -114,7 +114,7 @@ See [Token model](/en/concepts/tokens) for token types, scopes, and compatibilit
 | `anet node resume <name> [--session <id>]` | Resume the saved or specified session |
 | `anet node delete <name> --force` | Delete local node configuration |
 | `anet node rename <ref> <new>` | Rename a node already registered with the Hub |
-| `anet node edit <ref> --runtime <id>` | Change an existing node's runtime; **takes effect on restart** |
+| `anet node edit <ref> [--runtime <id>] [--model <id>]` | Change an existing node's runtime / model; **takes effect on restart** |
 | `anet node ls` | List local nodes and network state |
 | `anet info <name>` | Show node configuration, process, and recent tasks |
 | `anet logs <name> [--follow]` | Read or follow node logs |

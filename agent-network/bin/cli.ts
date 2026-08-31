@@ -9297,20 +9297,39 @@ async function nodeEditCommand() {
   const ref = args[1];
   const flagIdx = args.indexOf("--runtime");
   const raw = flagIdx >= 0 ? args[flagIdx + 1] : undefined;
-  if (!ref || flagIdx < 0) {
+  // #1698 —— `--model` 与 `--runtime` 同一条路：都复用**创建路径已经在用的**那个
+  // 校验器，不新增第 N 份判据。`anet node create` 走的是
+  // `validateModel`（cli.ts 的 create 分支，#1469 finding-3），这里照用。
+  //
+  // 🔴 触发这一格的是 TM 的一条真实 P0：节点撞上
+  //    "Selected model is at capacity"，而**换模型没有命令可用** ——
+  //    与 #1698 里 grok 撞 uid_map 墙时「产品给出的修法产品自己做不到」同形。
+  const modelIdx = args.indexOf("--model");
+  const rawModel = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
+  if (!ref || (flagIdx < 0 && modelIdx < 0)) {
     console.log(`
-anet node edit <node-id|node-name> --runtime <id>
+anet node edit <node-id|node-name> [--runtime <id>] [--model <id>]
 
-  Change an existing node's runtime. Supported ids:
+  Change an existing node's runtime and/or model. Supported runtime ids:
     ${SUPPORTED_RUNTIME_NAMES.join(", ")}
 
+  --model takes any id the runtime accepts; it is validated the same way
+  'anet node create --model' validates it (non-empty, no whitespace).
+
   Note: the change is written to the node's config; a running node keeps its
-  current runtime until it is restarted (anet node restart <name>).
+  current runtime/model until it is restarted (anet node restart <name>).
 `);
     return;
   }
-  if (raw === undefined || raw.trim() === "" || raw.startsWith("--")) {
+  if (flagIdx >= 0 && (raw === undefined || raw.trim() === "" || raw.startsWith("--"))) {
     console.error(`--runtime needs a value. Supported: ${SUPPORTED_RUNTIME_NAMES.join(", ")}`);
+    process.exit(1);
+  }
+  // 🔴 同 --runtime：先自己挡掉空值/漏值。validateModel 对空串是**抛错**的，
+  //    但 `--model --runtime x` 这种漏值形态会把下一个 flag 当成模型名，
+  //    那是 validateModel 看不出来的（"--runtime" 没有空白、非空）。
+  if (modelIdx >= 0 && (rawModel === undefined || rawModel.trim() === "" || rawModel.startsWith("--"))) {
+    console.error("--model needs a value (an id the runtime accepts).");
     process.exit(1);
   }
   const resolved = resolveNodeRef(ref);
@@ -9323,29 +9342,53 @@ anet node edit <node-id|node-name> --runtime <id>
     console.error(`Node "${resolved.id}" has no readable config.json — nothing to edit.`);
     process.exit(1);
   }
-  let next: RuntimeName;
-  try {
-    next = normalizeRuntimeStrict(raw);
-  } catch (e: any) {
-    console.error(String(e?.message || e));
-    process.exit(1);
+  // 🔴 两个字段都可能改,所以先把「改成什么」全算出来、全校验完,**再一次写盘**。
+  //    分两次写会在第二次校验失败时留下一个只改了一半的 config。
+  const changes: string[] = [];
+  if (flagIdx >= 0) {
+    let next: RuntimeName;
+    try {
+      next = normalizeRuntimeStrict(raw);
+    } catch (e: any) {
+      console.error(String(e?.message || e));
+      process.exit(1);
+    }
+    const current = normalizeRuntime(profile);
+    if (current !== next) {
+      (profile as any).runtime = next;
+      changes.push(`runtime ${current} -> ${next}`);
+    }
   }
-  const current = normalizeRuntime(profile);
-  if (current === next) {
-    console.log(`${resolved.id} is already on runtime ${next} — nothing to change.`);
+  if (modelIdx >= 0) {
+    let nextModel: string;
+    try {
+      // 与 `anet node create --model` 同一个校验器(#1469 finding-3):
+      // 非字符串 / trim 后为空 / 含空白 → 抛错。**不在这里另写一套。**
+      nextModel = validateModel(rawModel as string);
+    } catch (e: any) {
+      console.error(String(e?.message || e));
+      process.exit(1);
+    }
+    const currentModel = (profile as any).model as string | undefined;
+    if (currentModel !== nextModel) {
+      (profile as any).model = nextModel;
+      changes.push(`model ${currentModel ?? "(unset)"} -> ${nextModel}`);
+    }
+  }
+  if (changes.length === 0) {
+    console.log(`${resolved.id} already matches what you asked for — nothing to change.`);
     return;
   }
-  (profile as any).runtime = next;
   saveProfile(resolved.id, profile);
-  console.log(`${resolved.id}: runtime ${current} -> ${next}`);
+  for (const c of changes) console.log(`${resolved.id}: ${c}`);
   // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
   const running = findNodeStopCandidates(resolved.id);
   if (running === null) {
     console.log(`  (could not read the process table — if ${resolved.id} is running, restart it: anet node restart ${resolved.id})`);
   } else if (running.length > 0) {
-    console.log(`  ${resolved.id} is running on the old runtime. Apply it with: anet node restart ${resolved.id}`);
+    console.log(`  ${resolved.id} is still running with the old settings. Apply them with: anet node restart ${resolved.id}`);
   } else {
-    console.log(`  It is not running; the new runtime applies on: anet node start ${resolved.id}`);
+    console.log(`  It is not running; the new settings apply on: anet node start ${resolved.id}`);
   }
 }
 

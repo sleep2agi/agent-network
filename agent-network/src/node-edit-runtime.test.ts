@@ -55,6 +55,33 @@ describe("#1698 校验判据只有一份", () => {
   });
 });
 
+describe("#1698 --model：与 --runtime 走同一条路", () => {
+  // 触发这一格的是 TM 的一条真实 P0：节点撞上
+  // "Selected model is at capacity"，而换模型**没有命令可用**。
+  test("挂在同一个子命令上，两个 flag 至少给一个", () => {
+    expect(body).toContain('args.indexOf("--model")');
+    expect(body).toContain("flagIdx < 0 && modelIdx < 0");
+  });
+  // 🔴 复用创建路径已经在用的那个校验器（#1469 finding-3），不新写一套。
+  test("校验走 validateModel，不自造", () => {
+    expect(body).toContain("validateModel(");
+    // 自己写长度/字符判断就是新开一份判据
+    expect(body).not.toMatch(/model[^\n]*\.length\s*[<>]/);
+  });
+  test("--model 也先自己挡掉空值/漏值", () => {
+    expect(body).toContain('rawModel.startsWith("--")');
+  });
+  // 🔴 两个字段都可能改 ⇒ 必须**先全校验完再一次写盘**，
+  //    否则第二个字段校验失败时会留下只改了一半的 config。
+  test("先全校验再一次写盘：saveProfile 只出现一次，且在两次校验之后", () => {
+    expect((body.match(/saveProfile\(/g) || []).length).toBe(1);
+    const iModel = body.indexOf("validateModel(");
+    const iSave = body.indexOf("saveProfile(");
+    expect(iModel).toBeGreaterThan(-1);
+    expect(iSave).toBeGreaterThan(iModel);
+  });
+});
+
 describe("#1698 兜底方向", () => {
   // normalizeRuntimeStrict("") === DEFAULT_RUNTIME —— 先把这个前提钉住，
   // 否则下面那条「必须先挡空值」的断言会失去理由。
@@ -74,11 +101,15 @@ describe("#1698 说清何时生效", () => {
     expect(body).toContain("anet node restart ");        // 在跑
     expect(body).toContain("anet node start ");          // 没在跑
   });
-  test("同值是 no-op，不重写配置", () => {
-    expect(body).toContain("current === next");
-    // 切到那一支的 `return;` 为止 —— 用 indexOf("}") 会切在
-    // `${resolved.id}` 的模板闭合括号上（第一版就是这么错的）。
-    const noop = body.slice(body.indexOf("current === next"));
-    expect(noop.slice(0, noop.indexOf("return;"))).toContain("nothing to change");
+  // 🔴 第一版这条钉的是 `current === next` 这个**变量名** —— 实现从单字段
+  //    （只改 runtime）扩成多字段（runtime + model）之后它就红了，而**行为没变**。
+  //    断言要钉的是「同值时不写盘、并且说清没有变化」这个行为，不是某一行的写法。
+  test("同值是 no-op：不调 saveProfile，并说清没有变化", () => {
+    const noop = body.slice(body.indexOf("nothing to change"));
+    // 「nothing to change」那句之后必须紧跟 return —— 也就是这条路径不落盘。
+    const upToReturn = noop.slice(0, noop.indexOf("return;"));
+    expect(upToReturn).not.toContain("saveProfile(");
+    // 而正常路径是会落盘的（否则上面那条会因为整段都没有 saveProfile 而恒真）。
+    expect(body).toContain("saveProfile(");
   });
 });
