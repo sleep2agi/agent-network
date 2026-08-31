@@ -7,10 +7,21 @@ Thanks for considering a contribution. This document covers how to set up, propo
 ```bash
 git clone https://github.com/sleep2agi/agent-network.git
 cd agent-network
-bun install
+
+# 🔴 仓库根目录**没有** package.json —— 依赖是按子包各装各的。
+# 在根目录跑 `bun install` 会直接失败:
+#   error: Bun could not find a package.json file to install from
+cd <子包目录> && bun install
 ```
 
-Each subproject (`agent-network/`, `server/`, `agent-node/`) has its own `bun run` scripts — see the `package.json` in that directory.
+仓库有五个子包,各有自己的 `package.json`、依赖和 `bun run` 脚本 ——
+`agent-network/`(anet CLI)、`server/`(CommHub 服务端)、`agent-node/`(节点运行时)、
+`channel/`、`docs-site/`(https://anet.sh)。脚本以那个目录的 `package.json` 为准。
+
+🔴 `git worktree add` **不带 `node_modules`**。忘了装依赖时,失败签名
+**看起来像功能坏了**(`expect(result.code).toBe(0)`,一个字不提依赖) ——
+判据:失败全部集中在会 `spawnSync` 真 CLI 的用例上,纯读源码的测试照常全绿。
+完整说明见仓库根的 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ## Found a bug?
 
