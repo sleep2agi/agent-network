@@ -275,6 +275,9 @@ When the layer-by-layer pass above does not settle it, each of these targets one
   goes unanswered, answer "can it still do work" first. Includes a table ordered by how much each
   signal is worth (`status = idle` covers four different realities; only "it answered you" is hard
   evidence).
+- [**Reading `anet doctor` output**](/en/troubleshooting/reading-anet-doctor) — what the four
+  prefixes mean, why the version lines report instead of judging, and which questions it
+  **cannot** answer.
 - [Connectivity: channels and MCP](/en/troubleshooting/connectivity-channels-mcp)
 - [CLI login on a remote node](/en/troubleshooting/remote-node-cli-login)
 - [Case: Feishu silently denies](/en/troubleshooting/case-feishu-silent-deny)

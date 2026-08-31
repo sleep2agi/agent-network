@@ -274,6 +274,8 @@ docker compose logs --tail=200 <service>
 - [**这个节点还活着吗**](/troubleshooting/is-this-node-alive) —— 派出去的任务没有回音时，
   先回答「它还能不能干活」。附一张按可信度排序的判据表（`status = idle` 覆盖四种现实，
   只有「它自己回一句话」算硬证据）。
+- [**`anet doctor` 的输出怎么读**](/troubleshooting/reading-anet-doctor) —— 四种前缀分别代表什么、
+  为什么版本那几行只报不判、以及它**回答不了**哪些问题。
 - [连通性：Channel 与 MCP](/troubleshooting/connectivity-channels-mcp)
 - [远端节点的 CLI 登录](/troubleshooting/remote-node-cli-login)
 - [案例：飞书静默拒绝](/troubleshooting/case-feishu-silent-deny)
