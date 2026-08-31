@@ -11,6 +11,15 @@ echo ""
 echo "═══ Test 3: Security + Boundaries ═══"
 echo ""
 
+# 🔴 这一行不是装饰：门（check-l1-sha-binding）要的是「这次运行钉在哪个提交上」。
+# 照 tests/test746-setup-bun-pin/run.sh:8 的最强写法 —— 断言 40 位小写十六进制，
+# 拿不到就退出；否则 qa.sh 不传 --build-arg 时会**静默**跑在一个钉不住的构建上。
+[[ "${SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "❌ SOURCE_COMMIT must be one full lowercase Git SHA (got: ${SOURCE_COMMIT:-<unset>})" >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+
 BASE="http://127.0.0.1:9200"
 
 cd /app/server && COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" bun run src/index.ts &
@@ -60,7 +69,23 @@ echo "$R" | grep -qE 'error|too long' && pass "long username rejected" || fail "
 
 # Short password
 R=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"shortpw","password":"12"}')
-echo "$R" | grep -q 'at least 6' && pass "short password rejected" || fail "short password accepted"
+# 🔴 2026-08-31：原判据是 `grep -q 'at least 6'` —— 它把断言钉在**服务端的一句文案**上。
+# 服务端此后把策略从 6 收紧成了分档（server/src/auth.ts）：
+#   第一个用户（bootstrap admin，允许好记的默认口令） < 4 → "at least 4 characters"
+#   其余用户                                            < 8 → "at least 8 characters"
+# 于是这条断言红了，而它的名字叫 `short password accepted` —— **读起来像服务端接受了
+# 弱密码，真相相反：策略收紧了，是断言停在旧文案上。** 一个不跑的套件里，
+# 这种断言名比它的代码更危险。
+#
+# 改成判**行为**而不是**文案**：2 位密码必须被拒（ok:false / 有 error），
+# 具体最小长度是几由服务端决定，套件不复述。
+echo "$R" | python3 -c "
+import json,sys
+raw=sys.stdin.read()
+try: d=json.loads(raw)
+except Exception: sys.exit(1)
+sys.exit(0 if (d.get('ok') is False or d.get('error')) else 1)
+" && pass "short password rejected (2 chars)" || fail "short password accepted (2 chars): $R"
 
 # Empty body
 R=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{}')

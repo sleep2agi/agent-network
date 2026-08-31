@@ -92,6 +92,20 @@ L1_TESTS=(
   "qa-hub-08-restart-persistence"
   "qa-hub-09-task-state-machine"
   "qa-hub-14-user-unread"
+  # #1532 补注册。它是 58 个孤儿之一,而且是**名字就写着用途**的那种
+  # (本套件与 test9-perm* 在按关键词分档时得分 0 —— 它们的断言
+  #  是 `no token → 401` 这种形式,词表里没有 401。#1532 记过这个 24% 的漏检)。
+  #
+  # 接回来之前先做了两件事(照 test236 的先例):
+  #   ① 修掉一条**过时到会误导人**的断言:原判据 `grep -q 'at least 6'` 把断言钉在
+  #      服务端的一句文案上,而策略此后收紧成分档(auth.ts:首用户<4 / 其余<8),
+  #      于是它红,名字却叫 `short password accepted` —— 读起来像服务端接受了弱密码,
+  #      **真相相反**。改成判行为(ok:false / 有 error),不判文案。
+  #   ② 两向见证:改测试发的密码为合法长度 ⇒ 该断言翻红(带响应原文);还原 ⇒ 20/20。
+  #
+  # 按 qa.sh 的真实调法实测:`docker build --no-cache` **21s**、`docker run --rm` **3s**、
+  # rc=0、20 条断言全过。(L1 软预算 900s,main 上余量 4-6%;这 24s 在余量内。)
+  "test3-security"
   # 2026-08-19 补注册。它一直是孤儿(docs/test-suite-orphan-baseline.txt),
   # 而在此之前套件里有 3 处字面量随一次改名过期(#1072):1 条 production grep
   # 0 命中、2 条变异锚点 0 命中 ⇒ 变异是 no-op。修好之后它有三条成立的见证红,

@@ -45,7 +45,6 @@ test292-e2e-contract-drift
 test292-e2e-identity-fixtures
 test292-e2e-rename-command
 test292-e2e-residual-fixtures
-test3-security
 test30-mock-llm-smoke
 test31-claude-code-cli-resume
 test313-test-all-v3-fixtures
