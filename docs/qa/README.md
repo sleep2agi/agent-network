@@ -66,6 +66,53 @@ job 里还含 checkout / Setup Bun / 依赖安装,那些不受那个上限管(#9
 **Report-only**：失败时 PR 显示红 ✕，但**不阻塞合并**（branch protection 未加这个 check）。
 目的是让大家看见结果，不当拦路虎。详见 [strategy.md §4](strategy.md#4-ci-gate渐进三档)。
 
+## `L0 + L1 (report-only)` 红了怎么读
+
+**四种完全不同的失败，在 `gh pr checks` 那一行上逐字相同**：
+
+```
+L0 + L1 (report-only)   fail   <时长>
+```
+
+2026-08-31 一天内四种全撞到了。分辨只靠日志里的**三个信号**：
+
+| # | 日志签名 | 真相 | 该做什么 |
+|---|---|---|---|
+| ① | `✓ ALL PASS in <N>s` + `L1-TIMING v1 total=<N>s suites=70` | **跑完了**，只是慢（当日 1777s ≈ 2 倍） | 不动闸。`timeout-minutes` 是 runaway 守卫，不是性能预算（见 `qa.yml` 该 job 的注释） |
+| ② | **没有 `L1-TIMING`**；最后一条输出之后长时间静默 | **某个套件挂住**，被 30 分钟守卫掐 | 找「build 了但没 done」的那个（下面有命令） |
+| ③ | `L1-TIMING` 有，但 **`suites=` 比平时少** + `failed to solve` / `failed to build` | **构建阶段就没起来**，那个套件根本没跑 | 常见成因：Dockerfile 里未 pin 的 `curl https://bun.sh/install`（存量豁免见 `docs/bun-install-pin-baseline.txt`，跟踪在 #728） |
+| ④ | `L1-TIMING` 有、`suites=` 正常，某条测试打出断言失败 | **真的测试红** | 按测试立案（#1593 在统计这一类的红率） |
+
+### 取这三个信号
+
+```bash
+# run 未跑完时这个接口常取不到（会返回一小段错误 XML）——等 job completed 再取
+gh api "repos/sleep2agi/agent-network/actions/jobs/<job-id>/logs" > /tmp/l.log
+
+grep -oE 'L1-TIMING v1 [^ ]* [^ ]*' /tmp/l.log     # 有 = 跑完；无 = 挂住
+grep -cE 'failed to solve|failed to build' /tmp/l.log   # >0 = 构建阶段没起来
+# suites= 与当前值比：`bash scripts/qa.sh --list | grep -c '^  - tests/'`
+```
+
+**挂住时，找是哪个套件**（两侧都取自**同一份日志**，不引外部名单）：
+
+```bash
+grep -oE '· build [a-z0-9-]+' /tmp/l.log | sed 's/· build //' | sort -u > /tmp/b
+grep -oE '(· L1 done|✓ L1) [a-z0-9-]+' /tmp/l.log | sed -E 's/^(· L1 done|✓ L1) //' | sort -u > /tmp/d
+comm -23 /tmp/b /tmp/d      # build 了但没 done 的 —— 就是它
+```
+
+🔴 **几条踩过的坑**：
+
+- **算 job 年龄用 `jobs[].started_at`，不要用 `runs[].created_at`** —— 后者含排队时间，
+  会把「刚跑 11 分钟」读成「已经 33 分钟」，从而误判成撞了守卫。
+- **`gh pr checks` 的耗时列在 `pending` 时是 `0`**，不能拿来算年龄。
+- **判「跑没跑完」用 `status != "completed"`，不要用 `conclusion == null`** ——
+  `gh` 对进行中的 run 返回的是**空串 `""`**。
+- **比对套件名要比全名**：`test225-node-stop-convergence` 与
+  `test225-grok-preview-package-live` 是两个不同套件，只比 `test225` 会把结论带偏。
+
+
 ## 文档导航
 
 - **[strategy.md](strategy.md)** — 哲学 / 分层 / 资源 / 节奏
