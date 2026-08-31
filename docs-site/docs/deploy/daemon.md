@@ -188,6 +188,21 @@ anet daemon up
 | `/etc/anet-daemon/path.conf` | 生产信任根；存在时优先于环境变量 |
 | `ANET_BIN_ABS` 环境变量 | Docker、开发机或手工运维的便利通道 |
 
+🔴 **第 ① 条不一定要写 `/etc`,也就不一定要 root。** 它的位置由
+`ANET_DAEMON_PATH_CONF` 决定 —— 没设时才回落到 `/etc/anet-daemon/path.conf`
+(Windows 是 `%ProgramData%\anet-daemon\path.conf`)。把它指到一个你自己有权限的文件,
+就得到一条**免 root、且活得过重启**的路(与 `ANET_BIN_ABS` 不同,后者只活在那一个进程里):
+
+```bash
+ANET_BIN_REAL="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' "$(command -v anet)")" \
+  && mkdir -p "$HOME/.anet" \
+  && printf 'ANET_BIN_ABS=%s\n' "$ANET_BIN_REAL" > "$HOME/.anet/path.conf" \
+  && export ANET_DAEMON_PATH_CONF="$HOME/.anet/path.conf"
+```
+
+把 `ANET_DAEMON_PATH_CONF` 放进 daemon 自己的环境(systemd 的 `Environment=`、
+pm2 的 `env`、或启动它的那个 shell 的 profile),否则重启后又会回落到 `/etc`。
+
 `ANET_BIN_ABS` 只有在 `ANET_DAEMON_ALLOW_ENV_BIN=1` 时才会被 runtime 接受。
 `anet daemon init` / `start` / `up` 会自己设置这个声明,所以上面的 quickstart
 不需要你手工加环境变量；只有绕过 `anet daemon`、直接拼 daemon 启动命令时才需要自己声明。

@@ -199,6 +199,23 @@ The `anet` path has two sources with different trust levels:
 | `/etc/anet-daemon/path.conf` | Production trust root; when present, it wins over the environment |
 | `ANET_BIN_ABS` environment variable | Docker, development machines, or manual operations convenience |
 
+🔴 **Source ① does not have to live in `/etc`, so it does not have to need root.**
+Its location comes from `ANET_DAEMON_PATH_CONF`; only when that is unset does it
+fall back to `/etc/anet-daemon/path.conf` (`%ProgramData%\anet-daemon\path.conf` on
+Windows). Point it at a file you own and you get a **root-free pin that survives a
+restart** — unlike `ANET_BIN_ABS`, which lives only in that one process:
+
+```bash
+ANET_BIN_REAL="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' "$(command -v anet)")" \
+  && mkdir -p "$HOME/.anet" \
+  && printf 'ANET_BIN_ABS=%s\n' "$ANET_BIN_REAL" > "$HOME/.anet/path.conf" \
+  && export ANET_DAEMON_PATH_CONF="$HOME/.anet/path.conf"
+```
+
+Put `ANET_DAEMON_PATH_CONF` in the daemon's own environment (systemd `Environment=`,
+pm2 `env`, or the profile of the shell that starts it) — otherwise a restart falls
+back to `/etc` again.
+
 The runtime accepts `ANET_BIN_ABS` only when `ANET_DAEMON_ALLOW_ENV_BIN=1` is also set.
 `anet daemon init` / `start` / `up` sets that declaration itself, so the quickstart above
 does not need a manual environment variable. You only need to set it yourself when bypassing
