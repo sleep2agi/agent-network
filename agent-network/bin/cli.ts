@@ -47,7 +47,7 @@ import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
 import { formatHubVersionDetail } from "../src/hub-version-skew";
 import { nodeCountLine } from "../src/doctor-node-count";
 import { nodeNotFoundMessage } from "../src/node-not-found";
-import { lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
+import { columnWidth, lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
 import { describeLocalProcess, LOCAL_VS_HUB_NOTE, type LocalProcessState } from "../src/local-process-state";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
@@ -8869,12 +8869,16 @@ function sessionCommand() {
     if (sessions.length === 0) { console.log(`No sessions for ${cwd}`); return; }
 
     console.log(`\nSessions in ${cwd} (${sessions.length} total):\n`);
-    console.log("  SESSION ID                             SIZE      MODIFIED");
-    console.log("  ──────────────────────────────────────  ────────  ────────────────");
+    // 🔴 表头和分隔线原是两个写死的字面量,和数据行对不上:数据行右边缘 38/48/60,
+    // 分隔线 40/50/68,表头的 SIZE 落在 45。数据行彼此是一致的 —— 歪的是这两行。
+    // id 列宽从**本次要打印的会话**算;SIZE 保持右对齐(padStart)因为它是数字。
+    const idW = columnWidth(sessions.map((x) => x.id), "SESSION ID");
+    console.log(`  ${"SESSION ID".padEnd(idW)}  ${"SIZE".padStart(8)}  MODIFIED`);
+    console.log(`  ${"─".repeat(idW)}  ${"─".repeat(8)}  ${"─".repeat(16)}`);
 
     for (const s of sessions) {
       const mtime = new Date(s.mtimeMs).toISOString().replace("T", " ").slice(0, 16);
-      console.log(`  ${s.id}  ${formatSize(s.sizeBytes).padStart(8)}  ${mtime}`);
+      console.log(`  ${s.id.padEnd(idW)}  ${formatSize(s.sizeBytes).padStart(8)}  ${mtime}`);
     }
     console.log();
   } else {
@@ -12122,10 +12126,16 @@ async function statusCommand() {
 
     if (tasks.length > 0) {
       console.log("  Recent Tasks:");
-      console.log("  STATUS     FROM            TO              CONTENT");
-      console.log("  ──────── ─────────────── ─────────────── ────────────────────────");
+      // 🔴 STATUS 列原先写死 8,而 "delivered"/"cancelled"/"completed" 都是 9 —— 
+      // 那些行会把 FROM 往右顶 1 列。而表头和分隔线是两个各写各的字面量,
+      // 实测同一张表出现三个列位:表头 13 / 普通行 11 / delivered 行 12。
+      // 宽度从**要打印的这批行**算(状态值域在另一个包里,CLI import 不到),
+      // 表头/分隔线/数据行共用它。
+      const stW = columnWidth(tasks.map((t: any) => String(t.status || "?")), "STATUS");
+      console.log(`  ${"STATUS".padEnd(stW)} ${"FROM".padEnd(15)} ${"TO".padEnd(15)} CONTENT`);
+      console.log(`  ${"─".repeat(stW)} ${"─".repeat(15)} ${"─".repeat(15)} ${"─".repeat(8)}`);
       for (const t of tasks.slice(0, 10)) {
-        const st = (t.status || "?").padEnd(8);
+        const st = (t.status || "?").padEnd(stW);
         const from = padDisplayEnd(t.from_name || "?", 15);
         const to = padDisplayEnd(t.to_name || "?", 15);
         const content = oneLineCell(t.content, 40);
@@ -12160,10 +12170,16 @@ async function tasksCommand() {
     }
 
     console.log(`\n  Tasks (${tasks.length}):\n`);
-    console.log("  STATUS     FROM            TO              AGE      CONTENT");
-    console.log("  ──────── ─────────────── ─────────────── ──────── ────────────────────────");
+    // 🔴 STATUS 列原先写死 8,而 "delivered"/"cancelled"/"completed" 都是 9 —— 
+    // 那些行会把 FROM 往右顶 1 列。而表头和分隔线是两个各写各的字面量,
+    // 实测同一张表出现三个列位:表头 13 / 普通行 11 / delivered 行 12。
+    // 宽度从**要打印的这批行**算(状态值域在另一个包里,CLI import 不到),
+    // 表头/分隔线/数据行共用它。
+    const stW = columnWidth(tasks.map((t: any) => String(t.status || "?")), "STATUS");
+    console.log(`  ${"STATUS".padEnd(stW)} ${"FROM".padEnd(15)} ${"TO".padEnd(15)} ${"AGE".padEnd(8)} CONTENT`);
+    console.log(`  ${"─".repeat(stW)} ${"─".repeat(15)} ${"─".repeat(15)} ${"─".repeat(8)} ${"─".repeat(8)}`);
     for (const t of tasks) {
-      const st = (t.status || "?").padEnd(8);
+      const st = (t.status || "?").padEnd(stW);
       const from = padDisplayEnd((t.from_name || "?").slice(0, 15), 15);
       const to = padDisplayEnd((t.to_name || "?").slice(0, 15), 15);
       const age = t.created_at ? timeAgo(t.created_at) : "?";
@@ -13179,10 +13195,19 @@ anet token <command>
     if (!res.ok) { console.error(res.error); return; }
     if (!res.tokens?.length) { console.log("\n  No tokens. Create one: anet token create <name>\n"); return; }
     console.log("\n  API Tokens:\n");
-    console.log("  ID                   NAME           CREATED                  LAST USED");
-    console.log("  ──────────────────── ────────────── ──────────────────────── ────────────────────────");
+    // 🔴 表头里 ID 留 20 列,数据行却是 padEnd(22) —— 整张表从第二列起就错开 2。
+    // 三处宽度改为同一组常量。
+    // 🔴 而 name 是用户起的、没有上限:写死 14 时一个长名字就把 CREATED 顶偏(本机实测有一个)。
+    // 三列宽度全部从**本次要打印的这批 token** 算,表头/分隔线/数据行共用同一组。
+    const tW = {
+      id: columnWidth(res.tokens.map((t: any) => String(t.token_id || "?")), "ID"),
+      name: columnWidth(res.tokens.map((t: any) => String(t.name || "?")), "NAME"),
+      created: columnWidth(res.tokens.map((t: any) => String(t.created_at || "?")), "CREATED"),
+    };
+    console.log(`  ${padDisplayEnd("ID", tW.id)} ${padDisplayEnd("NAME", tW.name)} ${padDisplayEnd("CREATED", tW.created)} LAST USED`);
+    console.log(`  ${"─".repeat(tW.id)} ${"─".repeat(tW.name)} ${"─".repeat(tW.created)} ${"─".repeat(9)}`);
     for (const t of res.tokens) {
-      console.log(`  ${(t.token_id || "?").padEnd(22)} ${(t.name || "?").padEnd(14)} ${(t.created_at || "?").padEnd(24)} ${t.last_used_at || "never"}`);
+      console.log(`  ${padDisplayEnd(String(t.token_id || "?"), tW.id)} ${padDisplayEnd(String(t.name || "?"), tW.name)} ${padDisplayEnd(String(t.created_at || "?"), tW.created)} ${t.last_used_at || "never"}`);
     }
     console.log();
   } catch (e: any) { console.error(friendlyError(e)); }

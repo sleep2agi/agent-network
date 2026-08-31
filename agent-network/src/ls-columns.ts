@@ -11,14 +11,29 @@ import { displayWidth } from "./display-width";
 // 表头和分隔线也从同一个宽度生成 —— 原先它们是两个各自写死的字符串字面量,
 // 三处宽度靠人对齐,任何一处改了另外两处不会跟。
 
-export function runtimeColumnWidth(names: readonly string[], header = "RUNTIME"): number {
+/**
+ * 一列该多宽:装得下表头,也装得下这一列里最长的那个值。
+ *
+ * 🔴 两处用它的地方来源不同,但问题一样:
+ *  - `anet node ls` 的 RUNTIME 列:值域来自 `SUPPORTED_RUNTIME_NAMES`(唯一真源);
+ *  - `anet status` / `anet tasks` 的 STATUS 列:值域散在 server/ 里(另一个包),
+ *    CLI 没法 import —— 但**要打印的那些行就在手上**,直接从数据算。
+ *
+ * 两种情况都不该写死一个数:写死的那个,下一次加 runtime / 加状态时就漂了。
+ */
+export function columnWidth(values: readonly unknown[], header: string): number {
   let w = displayWidth(header);
-  for (const n of names) {
-    if (typeof n !== "string") continue;
-    const d = displayWidth(n);
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    const d = displayWidth(v);
     if (d > w) w = d;
   }
   return w;
+}
+
+/** RUNTIME 列的专用入口 —— 保留原名,调用点不用改。 */
+export function runtimeColumnWidth(names: readonly string[], header = "RUNTIME"): number {
+  return columnWidth(names, header);
 }
 
 const NAME_W = 20;

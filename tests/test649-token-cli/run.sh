@@ -127,8 +127,12 @@ echo "MUTATION_RED: parsed-name-bypassed rc=$name_rc"
 cp /tmp/test649-cli.ts agent-network/bin/cli.ts
 
 echo "L5 witnessed-red: omit created_at from rendered list"
-sed -i 's/(t.created_at || "?")\.padEnd(24)/"".padEnd(24)/' agent-network/bin/cli.ts
-grep -Fq '"".padEnd(24)' agent-network/bin/cli.ts
+# 🔴 这条变异钉的是**源码字面量**。列宽改成从数据算之后(见 anet status/tasks/session/token
+# 四张表统一列宽那条 PR),原来的 `(t.created_at || "?").padEnd(24)` 不存在了 ——
+# sed 匹配不到 ⇒ 下一行 grep 失败 ⇒ set -e 打死脚本,**看起来像被测行为回归了,其实是变异打不进去**。
+# 重新指向新文本,语义一字不变:把 created_at 换成空串,日期必须从输出里消失。
+sed -i 's/padDisplayEnd(String(t.created_at || "?"), tW.created)/padDisplayEnd("", tW.created)/' agent-network/bin/cli.ts
+grep -Fq 'padDisplayEnd("", tW.created)' agent-network/bin/cli.ts
 build_cli
 run_cli token ls >/tmp/test649-created-mutation.out
 set +e
