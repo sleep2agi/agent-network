@@ -3762,7 +3762,20 @@ async function skillCommand() {
     const { catalog, sourceUrl } = await loadSkillCatalog(verbose);
     const entry = (catalog.skills || []).find(s => s.slug === slug);
     if (!entry) {
-      console.error(`Skill not found: ${slug}`);
+      // 🔴 全部 slug 就在上一行的 catalog.skills 里 —— 只说「没找到」等于把用户
+      // 手上的信息藏起来。同 #1667(节点名) 与 anet import(会话名)。
+      // 相似度复用既有的 suggestSimilar(Levenshtein ≤ 2,#214 F7-02 的阈值),不另立一套。
+      const slugs = (catalog.skills || []).map(s => String(s.slug || "")).filter(Boolean);
+      const near = suggestSimilar(String(slug), slugs);
+      if (near) {
+        console.error(`Skill not found: ${slug}. Did you mean "${near}"? (anet skill ls lists all ${slugs.length})`);
+      } else if (slugs.length) {
+        const shown = slugs.slice(0, 5).join(", ");
+        const more = slugs.length > 5 ? `, … (${slugs.length} total)` : "";
+        console.error(`Skill not found: ${slug}. ${slugs.length} available: ${shown}${more}`);
+      } else {
+        console.error(`Skill not found: ${slug}. The catalog is empty.`);
+      }
       process.exit(1);
     }
     const text = await fetchSkillContent(entry, sourceUrl);
