@@ -9,7 +9,7 @@ RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx \
     && test "$(bunx --version)" = "1.3.14"
 
 WORKDIR /app
-COPY tests/qa-hub-11-user-unread/run.sh /app/run.sh
+COPY tests/qa-hub-14-user-unread/run.sh /app/run.sh
 COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 RUN chmod +x /app/run.sh
 

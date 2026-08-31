@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qa-hub-11-user-unread — send_desktop_message → /api/messages?scope=user 的 unread 角标链
+# qa-hub-14-user-unread — send_desktop_message → /api/messages?scope=user 的 unread 角标链
 #
 # 🔴 为什么加这个套件(#1563)：服务端那条链五段齐全(写/推/读/计数/返回)，
 #    客户端也已接到渲染那一行(AgentsScreen.tsx 的 badge=…)，**但两半之间的接缝
