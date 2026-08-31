@@ -80,6 +80,36 @@ to you.
 
 ⇒ When chasing "this feature behaves wrong against this Hub", read how far apart these two are first.
 
+## The `grok build` line: it is about the **next restart**, not about now
+
+Only nodes whose runtime is `grok-build-cli` / `grok-build-acp` get this row.
+
+The grok CLI **updates itself**. After it does, a **running node is unaffected** — it
+uses the process it started with, and the roster still shows `idle`. **Only a restart
+picks up the new version on PATH**, and restarting is exactly what an agent-node
+upgrade requires (#1615).
+
+This row compares the grok the node **started with** against the grok **now on PATH**:
+
+| What you see | What it means |
+| --- | --- |
+| `ℹ … (same as when this node started)` | No drift |
+| `ℹ … (same build, channel label differs)` | Only a ` [stable]`-style channel label differs — **same build**, not drift |
+| `⚠ started with X → PATH now has Y` | **Drift.** The running process is unaffected, but the next restart uses Y; if Y is not on the verified list the node refuses to start |
+| `⚠ cannot read the grok version on PATH` | `grok` is not on PATH, or `--version` output is an unknown shape — **this is not "fine"** |
+| `⚠ no startup banner in the node log` | The log rotated away, or it never started successfully — **also not "fine"** |
+
+When you do hit drift, the older binary is usually still under `~/.grok/downloads/`:
+
+```bash
+GROK_BINARY=~/.grok/downloads/grok-<old-version>-<platform> anet node start <node>
+```
+
+🔴 This row does **not** judge whether a version is valid. The verified list lives in
+`agent-node`, and the `anet` package does not depend on it — rather than copy a list
+that would silently drift, it only reports **changed / unchanged**. "Changed" is enough
+to make you careful before restarting.
+
 ## What it **cannot** answer
 
 This section matters more than the ones above — the most dangerous way to use a diagnostic is

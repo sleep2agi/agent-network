@@ -2171,6 +2171,7 @@ import {
   type RuntimeName,
 } from "../src/normalize-runtime";
 import { findEnvironAliasMatches } from "../src/environ-alias";
+import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
 export { normalizeRuntime, type RuntimeName };
 
 function runtimeForExecution(
@@ -15953,6 +15954,38 @@ async function doctorCommand() {
       info(`    ↳ ${name} topology`, `${audit.launchMode}; cwd=${audit.cwd}; CODEX_HOME=${audit.codexHome}; remote=${audit.remote || "-"}; thread=${audit.threadId || "-"}; model=${audit.model || "-"}; flags=${JSON.stringify(audit.flags)}`);
       if (audit.threadId && !verified) warning(`    ↳ ${name} recovery`, "stored thread has no successful thread/read history verification");
       else if (verified) info(`    ↳ ${name} recovery`, `${verified.method} verified ${verified.verifiedAt}; turns=${verified.historyTurnCount}; fingerprint=${String(verified.historyFingerprint).slice(0, 12)}`);
+    }
+    // #1615 —— grok 共存节点的「下次重启会挂」在重启前**没有任何信号**：
+    //   grok CLI 自我更新 → 名册仍 idle（跑的是老进程）→ 只有重启才暴露，
+    //   而重启正是升级 agent-node 之后必须做的动作。
+    //
+    // 🔴 这里判的是**漂移**不是**合法性**：「这版本合不合法」要 agent-node 的
+    //    GROK_COPRESENCE_VERIFIED_BUILDS，而 agent-network 不依赖 agent-node。
+    //    抄一份就是本仓第五份白名单。改判「PATH 上的 grok 与该节点启动时用的
+    //    是不是同一个」—— 判据完全在本包内，也不需要知道哪个版本合法。
+    if (p && (runtime === "grok-build-cli" || runtime === "grok-build-acp")) {
+      const current = (() => {
+        try {
+          return parseGrokBuildFromVersionOutput(
+            execFileSync(process.env.GROK_BINARY || "grok", ["--version"],
+              { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).toString());
+        } catch { return undefined; }
+      })();
+      const started = (() => {
+        try {
+          const dir = join(nodesDir(), id, "logs");
+          // 最新的那份日志优先；它没有横幅时再往前找（日志按天切，横幅只在启动那天）。
+          const files = readdirSync(dir).filter(f => f.endsWith(".log")).sort().reverse();
+          for (const f of files) {
+            const hit = parseGrokBuildFromLog(readFileSync(join(dir, f), "utf-8"));
+            if (hit) return hit;
+          }
+        } catch { /* 读不到就是读不到 —— 下面如实说,不猜 */ }
+        return undefined;
+      })();
+      const d = describeGrokBuildDrift(started, current);
+      if (d.kind === "match") info(`    ↳ ${name} grok build`, d.line);
+      else warning(`    ↳ ${name} grok build`, d.line);
     }
     const diag = diagnoseNode(id);
     if (diag && diag.issues.length) {
