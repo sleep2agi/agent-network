@@ -21,6 +21,15 @@ import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
+
+// 🔴 这三处原先都喂 `__dirname`,而打包器把它内联成构建期常量 —— 见 #1433。
+// `resolveAgentNodeDir` 的注释里写着「运行时 thisModuleDir 是 .../agent-node/dist」,
+// 那个假设**被构建工具悄悄违反了**:产物里它是构建机的 .../agent-node/src。
+// 这里给它一个真·运行时目录;拿不到就退回 __dirname(不比现状更差)。
+function agentNodeModuleDir(): string {
+  const root = packageRootFrom(import.meta.url, process.argv[1]);
+  return root ? root.replace(/\/+$/, "") + "/dist" : __dirname;
+}
 import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
@@ -1910,7 +1919,7 @@ async function loadCodexSdkModule(): Promise<any> {
       log,
       warn,
     },
-    resolveAgentNodeDir(__dirname),
+    resolveAgentNodeDir(agentNodeModuleDir()),
   );
   _codexSdkModuleCache = sdkMod;
   return sdkMod;
@@ -2979,7 +2988,7 @@ async function processWithCodex(
         log,
         warn,
       },
-      resolveAgentNodeDir(__dirname),
+      resolveAgentNodeDir(agentNodeModuleDir()),
     );
     Codex = sdkMod.Codex;
   }

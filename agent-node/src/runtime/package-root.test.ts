@@ -36,3 +36,28 @@ describe("packageRootFrom", () => {
     expect(a).not.toBe(b);
   });
 });
+
+// ── 与 resolveAgentNodeDir 的组合 ──
+// cli.ts 传的是 `<包根>/dist`,而 resolveAgentNodeDir 取它的 dirname ⇒ 得到包根。
+// 那个 `/dist` 只是为了满足既有契约(它从不被当成真实路径去访问),
+// 所以源码布局和产物布局都得到同一个答案 —— 这一点必须钉住。
+import { resolveAgentNodeDir } from "./codex-dep-loader";
+
+describe("packageRootFrom + resolveAgentNodeDir 的组合", () => {
+  const compose = (moduleUrl: string) => {
+    const root = packageRootFrom(moduleUrl);
+    return resolveAgentNodeDir(root!.replace(/\/+$/, "") + "/dist");
+  };
+
+  it("源码布局与产物布局给出同一个包根", () => {
+    const fromSrc = compose("file:///opt/x/agent-node/src/cli.ts");
+    const fromDist = compose("file:///opt/x/agent-node/dist/cli.js");
+    expect(fromSrc).toBe("/opt/x/agent-node");
+    expect(fromDist).toBe(fromSrc);
+  });
+
+  it("🔴 换一台机器的路径必须得到不同答案 —— 证明它不是构建期常量", () => {
+    expect(compose("file:///home/builder/agent-node/src/cli.ts"))
+      .not.toBe(compose("file:///usr/lib/node_modules/@sleep2agi/agent-node/dist/cli.js"));
+  });
+});
