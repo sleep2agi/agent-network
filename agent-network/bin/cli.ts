@@ -38,6 +38,7 @@ import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
 import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../src/offline-age";
 import { oneLineCell } from "../src/one-line-cell";
+import { padDisplayEnd } from "../src/display-width";
 import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
@@ -7410,7 +7411,7 @@ async function lsCommand() {
                          serverStatus === "working" ? "working" :
                          serverStatus === "offline" ? "offline" :
                          serverStatus;
-      console.log(`  ${displayName.padEnd(20)} ${runtime.padEnd(14)} ${statusIcon.padEnd(8)} ${sseConnected.padEnd(4)} ${session}`);
+      console.log(`  ${padDisplayEnd(displayName, 20)} ${runtime.padEnd(14)} ${statusIcon.padEnd(8)} ${sseConnected.padEnd(4)} ${session}`);
       if (verbose && p) {
         // #101 verbose — second line shows tools + flags. Width-matched to the
         // header so it lines up under NAME.
@@ -12051,7 +12052,7 @@ async function statusCommand() {
     if (attention.length > 0) {
       console.log("  Needs attention (blocked / error / 未知状态 — 需要有人看一眼):");
       for (const s of attention) {
-        console.log(`    ${String(s.alias).padEnd(16)} ${String(s.status || "").padEnd(8)} ${oneLineCell(s.task, 48)}`);
+        console.log(`    ${padDisplayEnd(String(s.alias), 16)} ${String(s.status || "").padEnd(8)} ${oneLineCell(s.task, 48)}`);
       }
       // 🔴 状态是**自报**的:它只在 agent 显式上报时才变。一个 `blocked` 可能是
       //    3 秒前报的,也可能是三周前报的 —— 这里不假装知道哪一种。
@@ -12068,7 +12069,7 @@ async function statusCommand() {
     if (working.length > 0) {
       console.log("  Working:");
       for (const s of working) {
-        console.log(`    ${s.alias.padEnd(16)} ${oneLineCell(s.task, 60)}`);
+        console.log(`    ${padDisplayEnd(s.alias, 16)} ${oneLineCell(s.task, 60)}`);
       }
       console.log();
     }
@@ -12079,8 +12080,8 @@ async function statusCommand() {
       console.log("  ──────── ─────────────── ─────────────── ────────────────────────");
       for (const t of tasks.slice(0, 10)) {
         const st = (t.status || "?").padEnd(8);
-        const from = (t.from_name || "?").padEnd(15);
-        const to = (t.to_name || "?").padEnd(15);
+        const from = padDisplayEnd(t.from_name || "?", 15);
+        const to = padDisplayEnd(t.to_name || "?", 15);
         const content = oneLineCell(t.content, 40);
         console.log(`  ${st} ${from} ${to} ${content}`);
       }
@@ -12117,8 +12118,8 @@ async function tasksCommand() {
     console.log("  ──────── ─────────────── ─────────────── ──────── ────────────────────────");
     for (const t of tasks) {
       const st = (t.status || "?").padEnd(8);
-      const from = (t.from_name || "?").slice(0, 15).padEnd(15);
-      const to = (t.to_name || "?").slice(0, 15).padEnd(15);
+      const from = padDisplayEnd((t.from_name || "?").slice(0, 15), 15);
+      const to = padDisplayEnd((t.to_name || "?").slice(0, 15), 15);
       const age = t.created_at ? timeAgo(t.created_at) : "?";
       const content = oneLineCell(t.content, 40);
       console.log(`  ${st} ${from} ${to} ${age.padEnd(8)} ${content}`);
