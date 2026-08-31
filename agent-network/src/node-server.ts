@@ -149,6 +149,29 @@ const OUTBOUND_ONLY = process.env.ANET_COMMHUB_MODE === "outbound-only";
 // into .anet/nodes/<ALIAS>/logs/ (UTC-dated file, same as agent-node _log);
 // stderr remains the primary sink and file failures are swallowed inside.
 const activityLog = createActivityLogSink(process.cwd(), ALIAS);
+
+// 🔴 名册里 `config_path` 这一格,`claude-code` 族 63 个节点全是空的
+//    (2026-08-31 实测:agent-node:* 各族 100% 有,claude-code 0/63)。
+//    hub 的 report_status schema 早就收这个字段(`server/src/tools.ts` 里
+//    `config_path: z.string().max(1000).optional()`),只是这边没填。
+//
+//    后果不是"少一格显示":排查一个 offline 节点时,第一个要回答的问题是
+//    **「它还能不能一键起回来」** —— 而那要看 config 还在不在。
+//    #1648 里本机 23 个 offline 的 TM 节点,我能对 12 个给出答案,
+//    剩下 11 个全是这一族,只能写「判不了」。
+//
+//    路径与上面 activityLog 用的是同两个值(cwd + ALIAS),不另外猜。
+//    **不存在就不发这个字段** —— 发一个不存在的路径比不发更糟:
+//    读的人会以为"配置在那儿但坏了",而真相是"这个节点没有本地配置"。
+function nodeConfigPath(): string | undefined {
+  try {
+    const p = join(process.cwd(), ".anet", "nodes", ALIAS, "config.json");
+    return existsSync(p) ? p : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const CONFIG_PATH = nodeConfigPath();
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
   const line = `[${ts}] [commhub] ${msg}`;
@@ -478,6 +501,7 @@ async function reregister(): Promise<void> {
       hostname: hostname(),
       agent: "claude-code",
       project_dir: process.cwd(),
+      config_path: CONFIG_PATH,
       tmux_name: TMUX_NAME || undefined,
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
@@ -659,6 +683,7 @@ async function main() {
     hostname: hostname(),
     agent: "claude-code",
     project_dir: process.cwd(),
+    config_path: CONFIG_PATH,
     tmux_name: TMUX_NAME || undefined,
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
@@ -674,6 +699,7 @@ async function main() {
       hostname: hostname(),
       agent: "claude-code",
       project_dir: process.cwd(),
+      config_path: CONFIG_PATH,
       tmux_name: TMUX_NAME || undefined,
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
