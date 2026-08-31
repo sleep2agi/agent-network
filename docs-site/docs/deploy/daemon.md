@@ -265,7 +265,11 @@ anet daemon restart <name>
 ```
 
 ::: tip 你的版本有没有这条？
-跑一下 `anet daemon`（不带子命令）看列表里有没有 `restart`。**没有的话用两步** ——
+`restart` 从 **2.3.0-preview.73**（#1601）起才有。🔴 **`npm i -g` 装到的 `latest` 目前是
+2.3.0-preview.47 —— 还没有这条**，所以默认安装的用户现在走的就是下面这两步。
+（两个端点都实跑过：`.47` 报 `Unknown daemon subcommand "restart"`，`.75` 正常。）
+
+拿不准就跑 `anet daemon`（不带子命令）看列表里有没有 `restart`。**没有就用两步** ——
 因为 `daemon start` 委托给 `node start`，所以停也走 `node`：
 
 ```bash

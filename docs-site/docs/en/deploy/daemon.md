@@ -287,9 +287,14 @@ anet daemon restart <name>
 ```
 
 ::: tip Does your version have it?
-Run `anet daemon` with no subcommand and check the list for `restart`. **If it is absent,
-use the two-step form** — `daemon start` delegates to `node start`, so stopping goes
-through `node` too:
+`restart` landed in **2.3.0-preview.73** (#1601). 🔴 **The `latest` tag that `npm i -g`
+installs is currently 2.3.0-preview.47 — it does not have it yet**, so a default install
+takes the two-step form below. (Both endpoints were actually run: `.47` prints
+`Unknown daemon subcommand "restart"`, `.75` works.)
+
+If unsure, run `anet daemon` with no subcommand and check the list for `restart`.
+**If it is absent, use the two-step form** — `daemon start` delegates to `node start`,
+so stopping goes through `node` too:
 
 ```bash
 anet node stop <name>
