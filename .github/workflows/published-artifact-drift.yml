@@ -198,3 +198,41 @@ jobs:
       - name: re-raise the check's exit code
         if: always()
         run: exit ${{ steps.drift.outputs.rc }}
+
+  # #1693 —— 这个 workflow 有四个 job，报的是**三件互不相关的真事**，
+  # 但只有 `docs-site-drift` 那一条会落成 issue（它带 docs-site-drift-notify.sh）。
+  # 另外两条只是 CI 里的一个红点，而三个 job 共用同一个红点 ⇒ 看到红的人很容易
+  # 读成「就是那条 docs-site 的老问题」，**两条真问题就此隐身**。
+  # 其中一条报的是**已发布 npm 包里带构建机路径**（#1433）——它从 08-30 起连红 6 次，
+  # 没有任何人被通知到。
+  #
+  # 🔴 这里**不加**第二个自动开 issue 的 tracker：#1692 那种 tracker 已经每天更新一次，
+  #    再加两个是提高告警密度，那是产品姿态判断，不该由一道 CI 改动顺手决定。
+  #    这个 job 只做一件事：**把红点点开就能看到是哪几条**。
+  #    它不改任何判据、不新增失败模式（`if: always()` + 自身恒成功）。
+  drift-summary:
+    name: drift-summary
+    needs: [published-pins, published-build-paths, docs-site-drift]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 把三条结论写进 run summary
+        env:
+          R_PINS: ${{ needs.published-pins.result }}
+          R_PATHS: ${{ needs.published-build-paths.result }}
+          R_DOCS: ${{ needs.docs-site-drift.result }}
+        run: |
+          set -uo pipefail
+          mark() { case "$1" in success) echo '✅';; failure) echo '🔴';; skipped) echo '⏭️';; *) echo "❔($1)";; esac; }
+          {
+            echo "## published artifact drift —— 三条互不相关的检查"
+            echo
+            echo "| job | 结果 | 它在报什么 |"
+            echo "|---|---|---|"
+            echo "| \`published-pins\` | $(mark "$R_PINS") | 源码里的版本戳 vs **已发布产物里的版本**（对不上通常意味着某个包还没发） |"
+            echo "| \`published-build-paths\` | $(mark "$R_PATHS") | 已发布的 npm 包里有没有**构建机的绝对路径**（#1433） |"
+            echo "| \`docs-site-drift\` | $(mark "$R_DOCS") | anet.sh 落后于 main（这一条**会**自动开/更新 issue） |"
+            echo
+            echo "🔴 只有最后一条会落成 issue。前两条红的时候，除了这个红点没有别的地方会说。"
+            echo "点开对应 job 的日志看具体一行。"
+          } >> "$GITHUB_STEP_SUMMARY"
