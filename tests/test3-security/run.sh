@@ -11,6 +11,15 @@ echo ""
 echo "═══ Test 3: Security + Boundaries ═══"
 echo ""
 
+# 🔴 这一行不是装饰：门（check-l1-sha-binding）要的是「这次运行钉在哪个提交上」。
+# 照 tests/test746-setup-bun-pin/run.sh:8 的最强写法 —— 断言 40 位小写十六进制，
+# 拿不到就退出；否则 qa.sh 不传 --build-arg 时会**静默**跑在一个钉不住的构建上。
+[[ "${SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "❌ SOURCE_COMMIT must be one full lowercase Git SHA (got: ${SOURCE_COMMIT:-<unset>})" >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+
 BASE="http://127.0.0.1:9200"
 
 cd /app/server && COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" bun run src/index.ts &
