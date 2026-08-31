@@ -3809,6 +3809,9 @@ Node Management:
   anet node resume <name>       Resume interrupted session
   anet node delete <name>       Delete node and config
   anet node rename <ref> <new>  Rename a node
+  anet node edit <ref>          Change a node's runtime or model
+  anet node restart <name>      Stop then start a node
+  anet node loop <name> ...     Schedule a recurring goal on a node
   anet node ls                  List all nodes
   anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
@@ -16466,7 +16469,7 @@ switch (command) {
           const redirect = nodeSubcommandRedirect(sub, args[2]);
           if (redirect) { for (const line of redirect) console.log(line); }
           else {
-            const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "loop"]);
+            const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop"]);
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }
