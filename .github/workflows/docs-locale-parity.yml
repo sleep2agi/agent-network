@@ -1,0 +1,41 @@
+# docs-site 的中英页面必须一一对应 —— 只许对称，不许一边多出来。
+#
+# 新增一页文档时，中文那份几乎总会先写，英文那份靠人记得补。
+# **漏补不会红**：站点照样构建、链接照样通、既有的 docs 门全绿，
+# 只是英文读者少一页。2026-08-31 实测：`.github/scripts` + `scripts` 共 32 道
+# check-* 门，提到 `en/` 的 5 道逐个读过，判的都是别的事（符号锚点 / 发版信道断言 /
+# 版本号 / MCP tool 锚点 / MCP tool 索引）—— **对称这件事没有任何东西在拦**。
+#
+# 立门时的实测：排除 `docs-site/docs/public/**`（skillhub 的 SKILL.md 等静态载荷，
+# 按设计只有一份）之后中英各 54 页、差集为空；不排除会有 7 个假阳。
+#
+# 加 paths 过滤：它只守 docs-site 的一个不变量，别的改动不必跑。
+
+name: lint (docs locale parity)
+
+on:
+  pull_request:
+    paths:
+      - 'docs-site/docs/**'
+      - '.github/scripts/check-docs-locale-parity.py'
+      - '.github/workflows/docs-locale-parity.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs-site/docs/**'
+      - '.github/scripts/check-docs-locale-parity.py'
+      - '.github/workflows/docs-locale-parity.yml'
+
+jobs:
+  parity:
+    name: docs-locale-parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # selftest 先跑，而且它分**两层**：
+      #   判据层 —— 对称→0 / 中文多→1 / 补上→0 / 英文多→1
+      #   取集层 —— 深层目录收得到（rglob 而非 glob）、public/ 排掉、分母对
+      # 同仓实测过：把 rglob 退回 glob，取集自检红而判据自检全绿。
+      # 外加一条空目录 → rc=2 的失败关闭：0 页和「全对称」退出码不能一样。
+      - run: python3 .github/scripts/check-docs-locale-parity.py --selftest
+      - run: python3 .github/scripts/check-docs-locale-parity.py
