@@ -31,7 +31,7 @@ describe("packageRootFrom", () => {
   });
 
   it("🔴 结果绝不能是构建期常量 —— 拿两个不同的 moduleUrl 必须得到不同答案", () => {
-    const a = packageRootFrom("file:///home/builder/agent-node/src/cli.ts");
+    const a = packageRootFrom("file:///home/user/agent-node/src/cli.ts");
     const b = packageRootFrom("file:///usr/lib/node_modules/agent-node/dist/cli.js");
     expect(a).not.toBe(b);
   });
@@ -57,7 +57,7 @@ describe("packageRootFrom + resolveAgentNodeDir 的组合", () => {
   });
 
   it("🔴 换一台机器的路径必须得到不同答案 —— 证明它不是构建期常量", () => {
-    expect(compose("file:///home/builder/agent-node/src/cli.ts"))
+    expect(compose("file:///home/user/agent-node/src/cli.ts"))
       .not.toBe(compose("file:///usr/lib/node_modules/@sleep2agi/agent-node/dist/cli.js"));
   });
 });
