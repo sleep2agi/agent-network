@@ -16061,6 +16061,22 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
     case "grok":
       console.log("Usage: anet grok attach <node>");
       break;
+      // #1668 — 同一个 bug 的第三次:opencode / goal / token / batch **各自都在
+      // 自己的命令里写了 `sub === "--help"` 分支**,而这个拦截器先命中 default,
+      // 于是那四段 help 一次都没被执行过 —— 被写了四遍的死代码。
+      //
+      // 🔴 这里**不剥 --help**(和下面 daemon 那支不同):`tokenCommand` 的守卫只认
+      // `sub === "--help"`,不认 `!sub` —— 剥掉之后它反而不打帮助了。四个的守卫都
+      // 直接认这个 flag,原样传进去即可。
+      //
+      // 🔴 只收这四个是有判据的,不是挑的:它们的 --help 分支是 console.log 之后
+      // 直接返回。而 network 一进来就 loadGlobal() 读 hub/token、channel 一进来
+      // parseOpts()、session 的 !sub 直接跑 ls —— 那三个没有前置 help 守卫,
+      // 路由过去会有副作用,正是 #215 那条 default 要防的东西,留着不动。
+    case "opencode": await opencodeCommand(); process.exit(0);
+    case "goal":     await goalCommand();     process.exit(0);
+    case "token":    await tokenCommand();    process.exit(0);
+    case "batch":    await batchCommand();    process.exit(0);
     case "daemon":
       // #717 — daemonCommand() already prints its own subcommand help for
       // bare `anet daemon`, but this intercept ran first and bounced to the
