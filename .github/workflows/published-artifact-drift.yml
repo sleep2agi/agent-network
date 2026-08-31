@@ -58,6 +58,12 @@ on:
       - '.github/scripts/check-docs-site-drift.py'
       - 'scripts/verify-published-pins.sh'
       - 'scripts/verify-release-tag.sh'
+      # 🔴 下面两个脚本的**唯一**调用方就是本 workflow，而它们原先不在 paths 里 ——
+      #    改了它们、合进 main，那次 push 不会跑本 workflow，最长空窗到次日 03:17 UTC 的定时跑。
+      #    (另外两个曾被怀疑漏掉的其实有第二入口:check-docs-site-drift.py 已在上面列出;
+      #     check-doc-version-claims.py 由 docs-site-build.yml 在**每个 PR** 上跑。)
+      - '.github/scripts/check-published-build-paths.py'
+      - '.github/scripts/docs-site-drift-notify.sh'
       - '.github/workflows/published-artifact-drift.yml'
 
 jobs:
