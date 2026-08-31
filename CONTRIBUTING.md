@@ -7,10 +7,44 @@ Thanks for considering a contribution. This document covers how to set up, propo
 ```bash
 git clone https://github.com/sleep2agi/agent-network.git
 cd agent-network
-bun install
+
+# 🔴 仓库根目录**没有** package.json —— 依赖是按子包各装各的。
+# 在根目录跑 `bun install` 会直接失败:
+#   error: Bun could not find a package.json file to install from
+cd agent-network && bun install     # anet CLI(这个子目录与仓库同名)
 ```
 
-Each subproject (`agent-network/`, `server/`, `agent-node/`) has its own `bun run` scripts — see the `package.json` in that directory.
+装哪个子包取决于你要改什么 —— 五个子包各有自己的 `package.json`、依赖和 `bun run` 脚本：
+
+| 子包 | 是什么 | 常用脚本 |
+|---|---|---|
+| `agent-network/` | `anet` CLI | `build` / `typecheck` |
+| `server/` | CommHub 服务端 | `dev` / `start` / `test` |
+| `agent-node/` | 节点运行时 | `build` |
+| `channel/` | MCP channel | — |
+| `docs-site/` | https://anet.sh 文档站 | — |
+
+脚本以那个目录的 `package.json` 为准，上表只是索引。
+
+### 🔴 在新建的 `git worktree` 里跑测试之前
+
+`git worktree add` **不会**带上 `node_modules`。忘了装依赖时，失败长这样：
+
+```
+(fail) #518 node start help ... > real `anet node start --help` names ...
+       expect(result.code).toBe(0)
+```
+
+**报错里一个字都不会提依赖** —— 因为那几个用例 `spawnSync` 真 CLI，拿到的只是退出码。
+自己手跑一次才看得见真因：
+
+```bash
+$ bun bin/cli.ts node start --help
+error: Cannot find module '@inquirer/prompts'
+```
+
+判据:失败**全部**集中在会 spawn 真 CLI 的用例上,纯读源码的测试照常全绿。
+先 `cd <子包> && bun install` 再跑。
 
 ## Found a bug?
 
