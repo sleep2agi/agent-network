@@ -378,7 +378,7 @@ gh workflow run release.yml \
 gh workflow run promote-latest.yml \
   -f package=agent-node \
   -f version=2.3.2-preview.0 \
-  -f must_contain='<只有这个版本才有的符号或字符串>' \
+  -f must_contain='<只有这个版本才有的字符串常量 —— 不是函数名，见下>' \
   -f ack=true \
   --ref main
 # verify（升完之后核一遍，别只看 workflow 绿）
@@ -386,7 +386,29 @@ npm view @sleep2agi/agent-node dist-tags
 ```
 
 🔴 `must_contain` 不是走形式：它防的是**把 latest 推到一个不含目标改动的旧版本** ——
-这种事故发出去以后，光看版本号看不出来。填一个只有目标版本才有的符号/字符串。
+这种事故发出去以后，光看版本号看不出来。
+
+🔴 **别填函数名。** 断言是对 `npm pack` 出来的 tarball 跑 `grep -rq -- '<串>' package/`，
+而**局部函数名会被 bundler 压掉**。2026-08-31 实测 `agent-node@2.5.0-preview.57`：
+
+```
+resolveGrokCopresenceHubStatus   ❌ 不在字节里   ← 那个版本修的就是它
+GROK_COPRESENCE                  ✅ 但 .34 里也有 —— 零判别力
+2.5.0-preview.57                 ✅ 只证明「版本对」，不证明「含新成果」
+```
+
+填了函数名会拿到 `::error:: '…' 不在字节里` —— **读起来像「版本有问题」，
+其实是「候选串选错了」**，于是 promote 被无谓地搁置。
+
+要一个**双向验过**（旧版 miss、新版 HIT）的候选，跑：
+
+```bash
+python3 scripts/suggest-must-contain.py <pkg> <当前 latest> <要推的版本>
+# 例：python3 scripts/suggest-must-contain.py agent-node 2.5.0-preview.34 2.5.0-preview.57
+```
+
+它对两个 tarball 求字符串差集，用**门自己那行 grep 的原形**复核，并排除依赖库串
+（只证明依赖升级了）与测试夹具串。
 
 🔴 `ack=true` 的语义是「owner/lead 的显式 ACK」。**你不能替 owner 勾这一格。**
 本机 `npm dist-tag add` 同样属于「本机发包」，一并禁掉。
@@ -635,7 +657,7 @@ workflow 优雅跳过），main 改了文档不会自动上线。⇒ **一旦 to
 # 改用 dist-tag 把 latest 指回上一稳定版本 —— 同样走 workflow，不在本机敲：
 gh workflow run promote-latest.yml \
   -f package=<pkg> -f version=<old-stable> \
-  -f must_contain='<只有 old-stable 才有的串>' -f ack=true --ref main
+  -f must_contain='<只有 old-stable 才有的字符串常量；可用 scripts/suggest-must-contain.py 反着挑>' -f ack=true --ref main
 # 然后立刻发一个修复版 preview，重走完整 SOP
 ```
 
