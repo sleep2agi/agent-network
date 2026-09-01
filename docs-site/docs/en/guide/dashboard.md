@@ -257,7 +257,7 @@ docker compose up dashboard
 
 # Or deploy to Vercel
 cd agent-network-dashboard
-vercel deploy --prebuilt --prod
+vercel deploy --prebuilt --prod --scope <vercel-team>
 ```
 
 The standalone Dashboard requires the following environment variables:

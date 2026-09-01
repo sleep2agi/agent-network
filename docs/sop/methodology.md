@@ -404,7 +404,7 @@ Step 5: docs swap (§2.5)
 
 Step 6: Vercel deploy (§2.6)
   ├─ npm run build (本地 prebuilt)
-  └─ vercel deploy --prebuilt --prod
+  └─ vercel deploy --prebuilt --prod --scope <vercel-team>
 
 Step 7: post-promote
   ├─ 测试马 latest install smoke verify (real-world `npm i -g`)

@@ -61,7 +61,10 @@ ln -sfn <主checkout>/docs-site/node_modules node_modules
 npm run build          # ignoreDeadLinks 未设,有死链会 fail —— 别带着死链上线
 # 🔴 必须走预构建:绝不让 Vercel 远端 build(成本红线 #1163)
 vercel build --prod
-vercel deploy --prebuilt --prod --yes
+# 🔴 --scope 不能少:登录身份默认是**个人**作用域,而 .vercel/project.json 的
+#    orgId 是 team_…。不带 scope 时 vercel deploy 直接返回 Not authorized ——
+#    读起来像没权限,其实是找错了作用域。团队 id 用 `vercel teams ls` 查。
+vercel deploy --prebuilt --prod --yes --scope <vercel-team>
 # 期望 Aliased: https://www.anet.sh
 # 🔴 且日志里必须出现 Using prebuilt build artifacts —— 没有它就是走了远端构建
 \`\`\`
