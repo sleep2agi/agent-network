@@ -16,6 +16,18 @@ export const BOOLEAN_FLAGS = new Set([
   "--dry-run",
   "--f",
   "--follow",
+  // 🔴 #1736 —— 这两个以前**没登记**,于是 `--force <token>` / `--yes <token>`
+  //    会把下一个 token 当成它们的值吃掉。实测:
+  //      parseCliOptions(["init","--force","myname"]) → {"force":"myname"}
+  //    后果不是「标志没生效」,是**命令作用在别的对象上**:
+  //    cli.ts 的 `args[1] && !args[1].startsWith("--") ? args[1] : DAEMON_DEFAULT_NAME`
+  //    于是落到默认名 `daemon` —— 用户以为在改 myname。
+  //    而且同一个 --force 在两处判真法相反:
+  //      cli.ts:8495/:8512  `!opts.force`            → "myname" 是真值 ⇒ 认为开了
+  //      cli.ts:11044       `opts.force !== "true"`  → 认为没开
+  //    登记进来之后值恒为 "true",两种判法同时正确,也不再吞参数。
+  //    已核:全仓没有任何一处读它们的**值**(force 3 处、yes 2 处,全是布尔式)。
+  "--force",
   "--grok-headless",
   "--new-session",
   "--no-auto-self",
@@ -23,6 +35,7 @@ export const BOOLEAN_FLAGS = new Set([
   "--resume-latest",
   "--self",
   "--tmux",
+  "--yes",
   "--yes-danger-full-access",
 ]);
 

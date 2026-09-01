@@ -11,6 +11,11 @@ const formerlyMissingBooleanFlags = [
   "resume-latest",
   "self",
   "f",
+  // #1736 —— 同一类 bug 的第二批。--force 的后果尤其重:
+  // cli.ts 取 args[1] 当节点名,吞掉之后落到默认名 daemon,
+  // 于是「命令成功了,但作用在别的机器上」。
+  "force",
+  "yes",
 ];
 
 describe("CLI argument parsing", () => {
@@ -24,6 +29,7 @@ describe("CLI argument parsing", () => {
       "--dry-run",
       "--f",
       "--follow",
+      "--force",
       "--grok-headless",
       "--new-session",
       "--no-auto-self",
@@ -31,6 +37,7 @@ describe("CLI argument parsing", () => {
       "--resume-latest",
       "--self",
       "--tmux",
+      "--yes",
       "--yes-danger-full-access",
     ]);
   });
