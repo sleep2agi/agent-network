@@ -8709,12 +8709,21 @@ async function daemonListCommand() {
   const daemons = ids
     .map(id => ({ id, profile: loadProfile(id) }))
     .filter(({ profile }) => profile && profile.role === "host_supervisor");
+  // #1722 —— 这条命令的「locally」指的是**当前目录**,不是这台机器:
+  // `listProfileIds()` 读的是 `nodesDir()` = `join(process.cwd(), ".anet", "nodes")`。
+  // 在别的目录跑,同一台机器上的 daemon 就一个都看不见 —— 而原来的输出里
+  // 没有任何东西说得出这一点,读的人会以为「这台机器上没有 daemon」。
+  // 🔴 "No host_supervisor daemons" 这个子串被 tests/qa-anet-daemon-cmd/run.sh
+  //    钉着,只能在其后追加行,不能改它。
   if (daemons.length === 0) {
     console.log("No host_supervisor daemons configured locally.");
+    console.log(`  scanned: ${nodesDir()}`);
+    console.log("  (节点配置按目录存放 —— 换个目录跑，看到的是另一份清单)");
     console.log("Create one: anet daemon init <name>");
     return;
   }
   console.log(`Local host_supervisor daemons (${daemons.length}):`);
+  console.log(`  scanned: ${nodesDir()}`);
 
   // #1545 —— 除了"本机配了哪些 daemon",还要说出**它们现在能不能建节点**。
   //
