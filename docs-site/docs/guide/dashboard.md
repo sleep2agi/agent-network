@@ -256,7 +256,7 @@ docker compose up dashboard
 
 # 或 Vercel 部署
 cd agent-network-dashboard
-vercel deploy --prebuilt --prod
+vercel deploy --prebuilt --prod --scope <vercel-team>
 ```
 
 独立 Dashboard 需要配置以下环境变量：
