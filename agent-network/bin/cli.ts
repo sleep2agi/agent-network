@@ -10297,8 +10297,13 @@ Stop a running agent node.
   // 在 /proc/net/unix 里**一行都没有**,listeners=0 —— 它是个孤儿路径名,
   // 不是"还在拆卸"。成因:删它的 removeUnchangedStaleSocket 住在 agent-node
   // 进程里(grok-copresence/leader-lifecycle.ts:501),而 stop 的
-  // reapOwnedGeneration 是 SIGTERM → 5s → SIGKILL;负载下 agent-node 侧那条
-  // 拆卸链(每段默认 2000ms,最坏 8s)跑不完 5 秒就被 SIGKILL,清理永不执行。
+  // reapOwnedGeneration 是 SIGTERM → 宽限 → SIGKILL。**#1522 之前那个宽限是 5s**,
+  // 而负载下 agent-node 侧那条拆卸链(每段默认 2000ms,最坏 8s)跑不完 5 秒就被
+  // SIGKILL,清理永不执行。
+  // 🔴 #1751 已从另一端修掉:宽限 5s → 10s(10 > 8),并加了
+  //    agent-network/src/stop-grace-covers-teardown.test.ts 钉住
+  //    「CLI 宽限 > timeoutMs × 4」。下面这段窗口的历史成因保留在这里,
+  //    因为它解释了 #1385 当年为什么放大窗口也没用。
   // 于是这里的窗口在等一个五秒前被自己杀掉的清扫者 —— 窗口放到多大都等不到,
   // #1385 把 3s 放到 10s 只压低了命中率。
   //

@@ -10,11 +10,14 @@
 // 也就是说残留的是一个**没有任何监听者的孤儿路径名**,不是"还在拆卸"。
 // 成因:删这个 socket 的 `removeUnchangedStaleSocket` 住在 agent-node 进程里
 // (grok-copresence/leader-lifecycle.ts:501),而 CLI 的 stop 走
-// `reapOwnedGeneration`:SIGTERM → 5s → SIGKILL。负载下 agent-node 侧那条
+// `reapOwnedGeneration`:SIGTERM → 宽限 → SIGKILL。**#1522 之前那个宽限是 5s**,
+// 而负载下 agent-node 侧那条
 // 拆卸链(每段默认 2000ms,最坏 2+2+2+2=8s)跑不完 5 秒就被 SIGKILL,
 // **清理代码永远不会执行**。于是 CLI 回到自己那 10 秒窗口,
 // 等一个五秒前被自己杀掉的清扫者 —— 窗口放到多大都等不到。
 // (#1385 把窗口 3s→10s 只压低了命中率,原理上修不掉。)
+// 🔴 #1751 从另一端修掉了它:宽限 5s → 10s(10 > 8),并用
+//    agent-network/src/stop-grace-covers-teardown.test.ts 钉住这条不等式。
 //
 // 🔴 判据取**最保守**的一版:只有 `/proc/net/unix` 里**完全找不到**这个路径
 //    才允许 unlink。仓里现有两个谓词各自更松一点 ——
