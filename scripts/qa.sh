@@ -567,7 +567,29 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     #    **仍然返回成功** ⇒ 轮询版会让每个套件都白等满 300s,把 14 分钟变成几小时。
     #    而那个失效**在本地测不出来**(本地跑得快,僵尸窗口极短),只会在 CI 上
     #    表现成"又打满守卫"——与它本要修的症状一模一样。
-    ( sleep "$L1_WAIT_TIMEOUT"; kill -9 "$pid" 2>/dev/null ) & _l1_wd=$!
+    # 🔴 2026-09-01 修我自己在 #1732 引入的泄漏:原写法是
+    #        ( sleep "$L1_WAIT_TIMEOUT"; kill -9 "$pid" ) & _l1_wd=$!
+    #    收尾 `kill "$_l1_wd"` 杀的是**子 shell**,而它阻塞在 sleep 上时
+    #    那个 sleep 会被孤儿化 —— 实测:改动前 `Terminate orphan process` = 0,
+    #    改动后 = **70**(= L1 套件数),全是 `(sleep)`,日志从 55K 涨到 352K。
+    #    它不会让任何 job 变红,所以只能靠对比两份日志才看得见。
+    #
+    #    换成「标志文件 + 短 sleep 循环」:收尾 `rm -f` 之后看门狗 1 秒内自退,
+    #    残留的 `sleep 1` 也会自己结束。本地两向见证(基线 6 个 sleep):
+    #      快任务 rc=0   残留回到 6      ← 不误杀、不泄漏
+    #      慢任务 rc=137 耗时=阈值 残留 6 ← 准时开火、事后仍不泄漏
+    #    ⚠️ 试过但被否掉的写法:`sleep N & _sl=$!; { wait "$_sl" && kill …; } &`
+    #       —— 不泄漏,但**永不开火**:那个 `wait` 等的是**兄弟进程**,
+    #       而 `wait` 只能等自己的孩子,立即返回错误于是 && 短路。
+    _l1_wd_flag="/tmp/qa-l1-wd-$$-$t"
+    : > "$_l1_wd_flag"
+    (
+      _i=0
+      while [ -e "$_l1_wd_flag" ]; do
+        sleep 1; _i=$(( _i + 1 ))
+        [ "$_i" -ge "$L1_WAIT_TIMEOUT" ] && { kill -9 "$pid" 2>/dev/null; break; }
+      done
+    ) & _l1_wd=$!
     if wait "$pid"; then
       ok "L1 $t ($(tail -1 /tmp/qa-l1-$t-run.log))${_w:+ [$_w]}"
     else
@@ -582,7 +604,7 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       FAILED=$((FAILED+1))
     fi
     # 看门狗还活着就收掉它,别让它在后面某个时刻打死一个无关的 pid。
-    kill "$_l1_wd" 2>/dev/null || true
+    rm -f "$_l1_wd_flag"          # ← 看门狗看到标志没了,1 秒内自退,不留孤儿
     wait "$_l1_wd" 2>/dev/null || true
   done
   # 汇总一张按开始偏移排序的表:红的时候一眼看出「它排在第几批、L1 跑了多久时炸的」。
