@@ -8493,9 +8493,20 @@ async function daemonInitCommand() {
   const existing = loadProfile(id);
   if (existing) {
     if (existing.role === "host_supervisor" && !opts.force) {
+      // 🔴 这个绿勾以前会被读成「配置是新的」——它只说明「这个名字已经是 daemon」。
+      //    本分支**一个字节都没写**：token 没重签、runtime 清单没刷新、
+      //    max_concurrent_children 没动。而 #1298（2026-08-28）把默认 runtime 清单
+      //    从 3 个放开到 SUPPORTED_RUNTIME_NAMES 全体之后，**在那之前 init 的 daemon
+      //    永远停在旧清单上** —— 症状是客户端「选服务器」里那台机器可选 runtime 比别人少。
+      //    (#1731 让 `anet daemon list` 会主动报这件事；这里补上另一半:
+      //     用户手里最可能敲的就是 `daemon init`,那它自己得说清「我没改」。)
       console.log(`[anet daemon] ✓ "${id}" already a host_supervisor daemon`);
       console.log(`              config: .anet/nodes/${id}/config.json`);
       console.log(`              start:  anet daemon start ${id}`);
+      console.log(`              ⚠ 本次**没有改动配置** —— token / runtime 清单 / 并发上限都保持原样。`);
+      console.log(`                要用当前默认值重写（含 ${SUPPORTED_RUNTIME_NAMES.length} 个 runtime 的清单）:`);
+      console.log(`                  anet daemon init ${id} --force`);
+      console.log(`                （保留 node_id，但会重新签发 token；改完要重启该 daemon 才生效）`);
       return;
     }
     if (existing.role !== "host_supervisor" && !opts.force) {
