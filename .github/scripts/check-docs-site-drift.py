@@ -208,6 +208,17 @@ def fingerprint(text: str) -> str | None:
         # 渲染后 markdown 强调符号会消失,挑不含它们的句子
         if any(c in line for c in "*_`"):
             continue
+        # 🔴 渲染成 HTML 后这些字符会变实体(" → &quot;),原样比对必然落空。
+        #    实测:en/api/rest 的指纹只差一个 `"` —— 换成 &quot; 就命中。
+        if any(c in line for c in '"\'&<>'):
+            continue
+        # 🔴 YAML frontmatter 的键行永远不作为正文渲染。实测 en/skillhub/contribute
+        #    选中了 `description: Export a reviewed…`,去掉键之后才命中。
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*:\s", line):
+            continue
+        # 🔴 有序列表前缀渲染后消失(`1. x` → `<li>x`)。
+        if re.match(r"^\d+\.\s", line):
+            continue
         return line
     return None
 
@@ -286,6 +297,11 @@ def run() -> int:
             recent = [l for l in recent if l.strip() not in _clines]
         except OSError:
             pass
+        # 🔴 「最近新增」不等于「现在还在」。加了又删的行仍出现在 diff 的 `+` 行里,
+        #    拿它当指纹会让这一页**永久 MISS**,输出与「站点没更新」完全相同。
+        #    实测 deploy/daemon.md 与 en/deploy/daemon.md 都栽在这一条。
+        _current_src = (DOCS / rel).read_text(encoding="utf-8", errors="replace")
+        recent = [ln for ln in recent if ln.strip() and ln.strip() in _current_src]
         fp = fingerprint("\n".join(recent)) if recent else None
         source = "recent-added"
         if fp is None:
@@ -464,6 +480,20 @@ def selftest() -> int:
     check("HTML 实体解码后指纹可命中",
           "[anet] \"<alias>\" is not running locally" in ent_text, f"got={ent_text!r}")
     check("太短的行不被选中", fingerprint("短句。\n") is None)
+
+    # 🔴 下面四条是本次修的三类假 MISS 的红夹具 —— 修之前它们全部 FAIL,
+    #    而 FAIL 的样子与「站点真的没更新」逐字相同(都是 MISS + 一句 ::error)。
+    check("含双引号的句子不被选中(渲染后会变 &quot;)",
+          fingerprint('这句话里带了一个 "引号" 所以渲染成 HTML 之后原样比对一定找不到它。\n') is None)
+    check("含尖括号的句子不被选中",
+          fingerprint('这句话里带了一个 <标签> 所以渲染之后原样比对一定会落空掉。\n') is None)
+    check("YAML frontmatter 的键行不被选中(只作为 meta,不作为正文)",
+          fingerprint("description: Export a reviewed private skill and submit it to the public hub\n") is None)
+    check("有序列表前缀不被选中(渲染后 `1. ` 会消失)",
+          fingerprint("1. 拒绝这种写法,因为有序列表的编号在渲染成 li 之后就不存在了呀。\n") is None)
+    # 正控:同样长度、同样是中文正文,只是不含上面那些形态 —— 必须仍被选中
+    check("正控:干净的中文正文仍被选中",
+          fingerprint("这是一句干净的中文正文,长度足够而且不含引号尖括号编号或者冒号键名。\n") is not None)
 
     # 🔴 多行 HTML 注释的续行(strip 后不以 `<` 开头)必须被跳过 —— 它渲染后
     #    不出现在页面上,选它当指纹就是恒 MISS 的假漂移(#1424 实测中招)。
