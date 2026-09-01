@@ -122,6 +122,13 @@ See [Token model](/en/concepts/tokens) for token types, scopes, and compatibilit
 
 `node delete` does not automatically revoke the node's issued `ntok_`. To invalidate it completely, also run `anet token revoke <token-id>`.
 
+`anet node stop` sends **SIGTERM** only and waits up to **8 seconds**. It never escalates to
+SIGKILL — there is no `--force` on `stop`. If the node has not exited by then, anet prints
+`pid <n> survived SIGTERM`, **keeps the pidfile**, and exits 1: it reports the failure rather
+than claiming the node stopped, because a surviving process keeps heart-beating and would
+revert a rename. For the same reason `node restart` and `node delete` refuse to proceed.
+The only command that sends SIGKILL is `anet node rename --force`.
+
 `COMMHUB_TOKEN` is not a CLI option, and there is no `anet node start --token`. Node authentication resolves in this order: node config, global config, then the legacy `COMMHUB_TOKEN` environment fallback. `anet login --token` logs in the CLI user; it does not inject a temporary node token into `node start`.
 
 Common creation options:
