@@ -93,7 +93,22 @@ function terminal(args, onData, timeoutMs = 45_000) {
         const rpcDiagnostics = readLog("fake rpc log", rpcLog);
         reject(new Error(`PTY failed (${exitCode}): ${args.join(" ")}${ptyOutput}${diagnostics}${rpcDiagnostics}`));
       }
-      else resolvePromise(output);
+      else {
+        // 🔴 #1342 —— 成功路径上把**耗时那一行**捞出来。
+        //
+        //   cli.ts 已经有意把 probeMs 打在成功路径上(那里的注释写着:「一个只在
+        //   坏的时候说话的仪表,没法告诉你好是不是真的变好了」),但它写在 PTY
+        //   输出里,而 PTY 输出**只在失败时**被 dump —— 于是那half 好意在这里被
+        //   吞掉了:仪表说了话,收集它的人没转述。
+        //
+        //   量成本的数必须两侧都有样本,否则「改完之后变快了没有」永远答不了。
+        for (const line of String(output).split(/\r?\n/)) {
+          if (line.includes("client-health") && line.includes("probeMs")) {
+            console.log(`  [health] ${line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim()}`);
+          }
+        }
+        resolvePromise(output);
+      }
     });
   });
 }

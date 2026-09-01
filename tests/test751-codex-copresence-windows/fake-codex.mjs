@@ -125,7 +125,24 @@ if (args[0] === "app-server") {
   // WMI CreationDate and Get-NetTCPConnection snapshots. This applies after
   // both the short probe and the long-turn fixture: completing the synthetic
   // human turn must not make the second client disappear before attestation.
-  await Bun.sleep(5_000);
+  // 🔴 #1342 —— 这个窗口必须**盖住检查器的预算**,不是随手取的 5 秒。
+  //
+  //   检查器(agent-network/bin/cli.ts):
+  //     const TUI_HEALTH_MS = 25_000;
+  //     while (Date.now() < tuiHealthDeadline && tui.exitCode === null) { …probe… }
+  //                                              ↑ TUI 一退出,循环立刻结束
+  //   同一段代码里记着一次实测:**单次探测 9963ms**(占 waited 的 96%)。
+  //
+  //   于是:检查器愿意等 25 秒,而这个夹具原来只多活 5 秒。探测慢的那些跑
+  //   (~10s 一次)还没探完,夹具已经**正常退出**了 —— 检查器看到 exitCode 非 null,
+  //   报「exited (code=0) before it connected」。那句话是**推论**:它其实连上了,
+  //   只是没活到被拍到。快的跑里探测在 5 秒内返回,于是绿 —— 这就是那条 ~8% 的尾巴。
+  //
+  //   窗口取 25s + 5s 余量。改 TUI_HEALTH_MS 时**这里要跟着改**,两个数是一对。
+  const HOLD_MS = 30_000;
+  log(`tui-hold:enter ms=${HOLD_MS} ${new Date().toISOString()}`);
+  await Bun.sleep(HOLD_MS);
+  log(`tui-hold:leave ${new Date().toISOString()}`);
   ws.close();
 } else if (args[0] === "--version") {
   console.log("codex-cli 1.0.0");
