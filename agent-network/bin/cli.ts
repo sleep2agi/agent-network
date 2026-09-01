@@ -16124,6 +16124,19 @@ async function doctorCommand() {
     })();
     const alive = localState.kind === "alive";
     info(`  ${name}`, `${runtime} ${describeLocalProcess(localState)} node_id=${p?.node_id || "-"}`);
+    // #1259 —— 飞书桥经 parent IPC 交给 think()，而 think() 是所有 runtime 共用的入口：
+    //   **没有任何东西阻止** codex / opencode 节点开飞书通道，**也没有任何东西验证过它能工作**。
+    //   更要紧的是该 issue 评论里的一格：飞书的工具拒绝层在其余 runtime 上根本不会触发。
+    //   #1575 是预防性的（挡住新配），**已经配好的组合仍在裸奔** —— 所以要有一条只读盘点。
+    //
+    // 🔴 用 ⚠ 不用 ❌：这是「没验过 + 拦截层不生效」，不是「一定坏」。
+    // 🔴 判据用目录存在性（channels/feishu/），与 cli.ts 里 channelDir 的算法同源，不另拼路径。
+    if (p && runtime !== "claude-agent-sdk"
+        && existsSync(join(nodesDir(), id, "channels", "feishu"))) {
+      warning(`    ↳ ${name} feishu`,
+        `runtime=${runtime} 配了飞书通道，而只有 claude-agent-sdk 验过；`
+        + `其余 runtime 上飞书的工具拒绝层不会触发（#1259）`);
+    }
     if (p && runtime === "codex-app-server") {
       const audit = codexTopologyAudit(p as any, join(nodesDir(), id), process.cwd());
       const verified = audit.lastRecoveryVerification as any;
@@ -16221,6 +16234,16 @@ async function doctorCommand() {
       info("→ run", `anet doctor --fix  to auto-migrate ${needsMigration.length} node(s)`);
     }
   }
+
+  // #1259 —— 🔴 **空集也要出声。**
+  //   上面那条飞书盘点只在命中时打印。0 命中和「这台机器没有节点目录」「跑在另一棵
+  //   .anet 树里」输出一模一样，而 doctor 全绿会被读成「全网没问题」。
+  //   #1259 的作者为此专门写了一句：一台机器的盘点**不能推广成「全网没有」**，
+  //   并附了他因「局部样本 + 全称措辞」栽过两次的记录。
+  //   ⇒ 无论命中与否，都把**这次扫的是哪一棵树**说出来（口径与 `anet daemon list`
+  //     的 `scanned:` 一致，#1725）。
+  info("Feishu × runtime 盘点", `扫了 ${nodesDir()} 下 ${ids.length} 个节点配置`
+    + `；这只是**这一棵 .anet 树**，同一台机器上可能还有别的（见 #1259）`);
 
   // #125 — scan all nodes for plain-secret env values still persisted in
   // config.json. Migration is per-node (`anet node migrate-token-to-envref
