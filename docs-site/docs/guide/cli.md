@@ -261,6 +261,17 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 `anet node ls` 看它在不在跑(`anet daemon list` 只列本机配置过的 daemon,不含活性)。
 `anet daemon restart` 内部调的正是 `anet node stop` 用的那个 stop。
 
+::: warning daemon 的两个反直觉之处
+**① 对已存在的 daemon，`anet daemon init <name>` 什么都不改。** 它打印
+`✓ "<name>" already a host_supervisor daemon` 后直接返回 —— 一个绿色的对勾，
+配置一个字节没动。要改配置必须带 `--force`（保留 `node_id`，但**会重新签发
+token**，且改完要重启该 daemon 才生效）。
+
+**② 配置里的 runtime 清单是写入那一刻的快照，不会自愈。** 之后新增的 runtime
+不会补进已有 daemon 的配置，表现为客户端「选服务器」里那台机器可选的 runtime
+比别人少。`anet daemon list` 发现这种情况时会直接打出缺哪几个和回填命令。
+:::
+
 `--copresence` 只适用于 `runtime=codex-app-server`。默认沙箱为只读；开启完整文件系统和网络访问需要 `--dangerously-allow-full-access`。TTY 会要求输入 `yes`，非 TTY 还必须同时提供 `--yes-danger-full-access`。
 
 恢复共存节点时仍应使用 `anet node start <name> --copresence`，不能改用普通 `node start`。
