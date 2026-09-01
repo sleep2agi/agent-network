@@ -2170,6 +2170,7 @@ import {
   type ReusedLogin,
   type RuntimeName,
 } from "../src/normalize-runtime";
+import { describeStaleRuntimeSupport } from "../src/daemon-runtime-staleness";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
 export { normalizeRuntime, type RuntimeName };
@@ -8741,6 +8742,15 @@ async function daemonListCommand() {
     const nid = (profile as any)?.node_id || "(missing)";
     const runtimes = ((profile as any)?.runtimes_supported || []).join(",") || "(default)";
     console.log(`  ${padDisplayEnd(id, 24)} node_id=${nid}  runtimes=[${runtimes}]`);
+    // #1298 只改了**写入**路径：在它之前 init 的 daemon，配置里仍是旧的三元组，
+    // 而在此之前没有任何东西说得出这件事 —— 用户在客户端「选服务器」里看到
+    // 某台机器少几个 runtime，既不知道为什么，也不知道该做什么。
+    const staleHint = describeStaleRuntimeSupport(
+      (profile as any)?.runtimes_supported,
+      SUPPORTED_RUNTIME_NAMES,
+      id,
+    );
+    if (staleHint) console.log(`    ${staleHint}`);
     console.log(`    ${daemonCreateCapabilityLine(nid, fetched, Date.now())}`);
   }
 }
