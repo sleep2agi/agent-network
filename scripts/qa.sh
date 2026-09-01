@@ -447,11 +447,20 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
       [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
     fi
+    # 🔴 #1593 —— build 的耗时必须**自己报**,不能靠相邻 note 行的时间差去推。
+    #    2026-09-01 整晚我都在用「相邻 `build` 行的间隔」当作单个套件的 build 耗时,
+    #    那个数把 build **和它后面那段发射/等待逻辑**混在一起 —— 够用来分「今天整体慢没慢」
+    #    (绿 11.9-12.3s vs 撞守卫 25.2-29.0s,两簇分得很开),但**答不了「慢在谁身上」**。
+    #    当晚 9 次 L0+L1 里 5 次撞 30 分钟守卫、152 分钟零产出(74%),
+    #    而唯一能下钻的量都还是推出来的。加这一行,下次就是读数不是推算。
+    _b0=$SECONDS
     if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
+      printf '· build fail %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
       FAILED=$((FAILED+1))
       continue
     fi
+    printf '· build done %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
     # Run in background —— 但要有并发上限。
     #
     # 原来这里是无节制后台化:L1_TESTS 有多少条,就同时拉起多少个容器。
