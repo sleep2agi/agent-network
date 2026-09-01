@@ -373,6 +373,41 @@ and [#1290](https://github.com/sleep2agi/agent-network/issues/1290). Until #1290
 Windows machine can run a daemon, but **do not expect it to fork child nodes**.
 :::
 
+::: warning ⚠️ Which nodes a daemon can reach: **only the ones in its own workspace**
+
+This is the easiest thing to misread here, and when you hit it, it does not look like a
+failure — it looks like the feature was never built.
+
+A daemon's workspace (`workDir`) is **whatever directory it happened to be started from**
+(`process.cwd()`). Every child node it creates or starts lives under
+`<workDir>/.anet/nodes/` — see `nodesRoot = join(deps.workDir, ".anet", "nodes")` in
+`agent-node/src/runtime/start-daemon.ts`.
+
+⇒ **Pre-existing nodes you created by hand somewhere else are out of reach.** It is not a
+permission problem; they are simply not in the directory the daemon searches. No amount of
+Dashboard buttons will start them. For a real-world shape see
+[#1648](https://github.com/sleep2agi/agent-network/issues/1648): daemon online with its CWD
+at the user's home directory, while three offline nodes had `project_dir` on two other
+drives and a WSL path.
+
+**How to tell which workspace a given daemon has** (`<pid>` from `anet node list` or `ps`):
+
+```bash
+ls -l /proc/<pid>/cwd            # Linux: read its cwd directly
+lsof -a -p <pid> -d cwd          # macOS
+ls <workDir>/.anet/nodes/        # the nodes it can reach are exactly these
+```
+
+⇒ **Starting two daemons from two different directories on the same machine gives you two
+node sets that cannot see each other.** To have a daemon manage a given set of nodes,
+start it from that workspace.
+
+(RFC-026 specifies `workDir` as a fixed `~/.anet/daemon/workspaces/<network_id>/`; the
+current implementation uses `process.cwd()`. The gap and three possible fixes are tracked
+in [#1722](https://github.com/sleep2agi/agent-network/issues/1722).)
+:::
+
+
 ---
 
 
