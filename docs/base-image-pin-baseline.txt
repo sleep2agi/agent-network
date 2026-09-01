@@ -1,0 +1,5 @@
+# 存量豁免：完全浮动的基础镜像 tag（:latest 或无 tag）。只禁新增，见 #1740。
+# 生成方式：check-base-image-pin.py 的 offenders() 自己算出来的，不手写。
+docs/tests/p-179-feishu-smoke/harness/Dockerfile
+tests/Dockerfile.npm
+tests/test-rename-identity/Dockerfile
