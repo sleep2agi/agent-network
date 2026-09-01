@@ -122,6 +122,12 @@ Token 类型、作用域与兼容规则见 [Token 体系](/concepts/tokens)。
 
 `node delete` 不会自动撤销该节点已签发的 `ntok_`；需要彻底失效时另行执行 `anet token revoke <token-id>`。
 
+`anet node stop` 只发 **SIGTERM**，最多等 **8 秒**，**不会升级到 SIGKILL**（它没有 `--force`）。
+节点在 8 秒内没退出时，anet 打印 `pid <n> survived SIGTERM`、**保留 pidfile**、退出码 1 ——
+它宁可报错也不谎称已停，因为一个还活着的旧进程会继续心跳并把 rename 顶回去。
+同样的原因，`node restart` 和 `node delete` 这时也会**拒绝执行**。
+唯一会主动发 SIGKILL 的是 `anet node rename --force`。
+
 `COMMHUB_TOKEN` 不是 CLI 参数，也不存在 `anet node start --token`。节点鉴权按节点配置、全局配置、legacy `COMMHUB_TOKEN` 环境变量的顺序取值；`anet login --token` 登录的是 CLI 用户，不是向 `node start` 临时注入节点 token。
 
 创建节点时常用参数：
