@@ -102,6 +102,21 @@ TOK_BEFORE="$TOK"
 NID_BEFORE="$NODE_ID"
 OUT=$(anet daemon init "$DAEMON_NAME" 2>&1)
 echo "$OUT" | grep -q "already a host_supervisor" && ok "init reports 'already a daemon' on second run" || bad "re-init didn't surface idempotence: $OUT"
+
+# 🔴 那个绿勾以前只说「这个名字已经是 daemon」,读的人会当成「配置是新的」。
+#    实际这一支 early-return,**一个字节都没写** —— token 没重签、runtime 清单
+#    没刷新。#1298 把默认 runtime 清单放开到 SUPPORTED_RUNTIME_NAMES 全体之后,
+#    在那之前 init 的 daemon 永远停在旧清单上,症状是客户端「选服务器」里
+#    那台机器可选 runtime 比别人少。所以这条提示必须在,且必须说清后果。
+echo "$OUT" | grep -q "没有改动配置" \
+  && ok "re-init 明说本次没有改动配置" \
+  || bad "re-init 只报了幂等,没说清「一个字节都没改」: $OUT"
+echo "$OUT" | grep -q -- "--force" \
+  && ok "re-init 给出了重写配置的命令(--force)" \
+  || bad "re-init 没有给出 --force 的出口: $OUT"
+echo "$OUT" | grep -q "重新签发 token" \
+  && ok "re-init 说清了 --force 的后果(重签 token)" \
+  || bad "re-init 没说 --force 会重签 token,用户照做会撞上没预告的变化: $OUT"
 TOK_AFTER=$(jq -r '.token' "$WORK/.anet/nodes/$DAEMON_NAME/config.json")
 NID_AFTER=$(jq -r '.node_id' "$WORK/.anet/nodes/$DAEMON_NAME/config.json")
 [[ "$TOK_BEFORE" == "$TOK_AFTER" ]] && ok "token NOT re-minted on idempotent init (no churn)" || bad "token churned despite idempotence"
