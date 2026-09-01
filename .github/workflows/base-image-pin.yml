@@ -1,0 +1,34 @@
+# 新增的 Dockerfile 不许再用完全浮动的基础镜像 tag（`:latest` 或不带 tag）。见 #1740。
+#
+# 🔴 刻意不加 paths 过滤 —— 两条理由与 `bun-install-pin.yml` 完全相同，
+#   照抄它，不重新决定：
+#   ① 新 Dockerfile 可能出现在任何目录（实测 260 个 tracked Dockerfile 散在
+#      tests/ docs/ deploy/ agent-network/ 下）。按路径过滤等于提前假设它们
+#      会出现在哪儿 —— 那正是「改扫描范围让门悄悄失效」的形状。
+#   ② 带 paths 过滤的 workflow **结构上当不了 required check**：在不匹配的 PR 上
+#      根本不产生 check，分支保护会永远停在 "Expected — Waiting for status"。
+#
+# 🔴 这道门只判「完全浮动」（`:latest` / 无 tag），**不判浮动大版本**（`:1` / `:22`）。
+#   实测 278 条 FROM 里浮动大版本有 128 条，一次性收紧会让这道门第一周就被关掉。
+
+name: lint (base image pin)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    # 这个 name 是 GitHub 上 check 的名字，也是分支保护里 required check 唯一能写的
+    # 标识符，必须全仓唯一。
+    name: base-image-pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 先跑自检。这道门最可能的坏法不是判据写错，是**一个 Dockerfile 都没扫到**
+      # 然后打印一片绿 —— 那种假绿和真绿逐字相同。主程序对此 exit 2 而不是 exit 0。
+      # selftest 分两层：判据层（11 条，含 5 条负向）+ 取集层（4 条，含后缀式
+      # `playwright.Dockerfile`）。
+      - run: python3 .github/scripts/check-base-image-pin.py --selftest
+      - run: python3 .github/scripts/check-base-image-pin.py
