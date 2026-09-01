@@ -125,6 +125,36 @@ to ask it something it never judged.
   their config directory is gone. doctor cannot tell these apart, so it states both and does not
   pick one for you.
 
+## The two Feishu x runtime lines (2.3.0-preview.76+)
+
+Every node that has a Feishu channel configured while its runtime is **not**
+`claude-agent-sdk` gets one line:
+
+```
+↳ <node> feishu
+  runtime=<runtime> has a Feishu channel configured, but only claude-agent-sdk
+  has been verified; the Feishu tool-refusal layer does not fire on the others (#1259)
+```
+
+**It says "this combination has never been verified", not "it is broken".**
+Whether to act depends on whether that node's Feishu channel is actually used.
+
+At the end there is an inventory line that is printed **whether or not anything matched**:
+
+```
+Feishu x runtime inventory — scanned N node config(s) under <dir>;
+this is only **this one .anet tree**, the machine may hold others
+```
+
+🔴 **The denominator matters more than the verdict.** A check that only speaks
+when something is wrong cannot verify itself; with `N` present, "0 matches" and
+"scanned nothing at all" stop looking identical.
+
+🔴 **`0 matches` does not mean the machine is clean.** doctor scans
+`<current working directory>/.anet/nodes` — **that tree only**. Nodes started
+elsewhere on the same machine are out of reach; run it again from that directory
+to cover them.
+
 ## `--fix` changes things
 
 `anet doctor --fix` runs compatibility migrations and re-issues node tokens the Hub rejected.
