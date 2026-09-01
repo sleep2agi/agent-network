@@ -9250,7 +9250,21 @@ async function reapOwnedGeneration(owned: readonly LifecycleProcessIdentity[]): 
   const unknown = unverifiable();
   if (unknown.length) return [{ kind: "process", detail: `birth unavailable for owned pids ${unknown.map(p => p.pid).join(",")}` }];
   signalOwned("SIGTERM");
-  const termDeadline = Date.now() + 5_000;
+  // #1522 —— 这个宽限必须**大于** agent-node 那条拆卸链的最坏耗时,否则下面的
+  // SIGKILL 会把正在做清理的进程打断,留下 post-stop 残留(实测症状:
+  // `post-stop cleanup retained pinned project sandbox placeholder: .grok`)。
+  //
+  // 最坏耗时来自 agent-node/src/runtime/grok-copresence/leader-lifecycle.ts 的
+  // `terminateOwnedGrokLeader(identity, timeoutMs = 2_000)`:
+  //   SIGTERM 等 2s → 重验身份 → SIGKILL 等 2s   = 一次调用最坏 4s
+  //   该函数在拆卸链里被调用两次                  = **最坏 8s**
+  //
+  // 🔴 不要反过来去缩短那 2_000:它是 SIGKILL 升级前重做完整身份绑定的窗口,
+  //    用来挡同 UID 的 PID 复用竞态(Node 无 pidfd_send_signal)。缩它会削弱那道保护。
+  //
+  // 这里是**上限不是固定等待** —— 下面的循环在 survivors() 清空时立刻返回,
+  // 正常路径上进程 SIGTERM 后很快就退出,用户感觉不到差别。
+  const termDeadline = Date.now() + 10_000;
   while (Date.now() < termDeadline) {
     await new Promise(r => setTimeout(r, 100));
     const unknownNow = unverifiable();
