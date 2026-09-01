@@ -533,6 +533,14 @@ if [[ $RUN_L1 -eq 1 ]]; then
   for pid in "${pids[@]}"; do
     t="${pid_to_test[$pid]}"
     _w=$(_l1_window "$t")
+    # 🔴 #1593 —— 这一行只在「wait 挂住」时才有用,而那正是它存在的理由。
+    #    实测两次(run 33486670271,同一 PR 连续两次):所有套件都打完
+    #    `· L1 done … rc=0`,随后这个循环静默 15 分钟,直到 30 分钟守卫把 job 掐死,
+    #    runner 收尾时打出 `Terminate orphan process: pid (bash)/(docker)` ——
+    #    也就是说**有子进程不退出,而 wait 在等它**。当时日志里没有任何东西
+    #    说得出「在等谁」,只能靠事后 diff 两份 30 分钟的日志去猜。
+    #    打出正在等的那个套件名,下次红的时候第一行就能看见。
+    printf '· L1 wait %s\n' "$t"
     if wait "$pid"; then
       ok "L1 $t ($(tail -1 /tmp/qa-l1-$t-run.log))${_w:+ [$_w]}"
     else
