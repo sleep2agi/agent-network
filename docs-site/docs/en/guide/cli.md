@@ -266,6 +266,18 @@ The following commands exist in the current preview and must not be presented as
 (`anet daemon list` only lists locally configured daemons and carries no liveness).
 `anet daemon restart` calls that same stop internally.
 
+::: warning Two counter-intuitive things about daemons
+**1. On an existing daemon, `anet daemon init <name>` changes nothing.** It prints
+`✓ "<name>" already a host_supervisor daemon` and returns — a green check mark with
+not one byte written. Changing the config requires `--force` (keeps `node_id`, but
+**re-mints the token**, and the daemon must be restarted for it to take effect).
+
+**2. The runtime list in the config is a write-time snapshot; it does not self-heal.**
+Runtimes added later are not back-filled into existing daemon configs, which shows up
+as that machine offering fewer runtimes in the client's server picker. `anet daemon list`
+now prints which ones are missing and the command to back-fill.
+:::
+
 `--copresence` only applies to `runtime=codex-app-server`. Its default sandbox is read-only. Full filesystem and network access requires `--dangerously-allow-full-access`; a TTY requires typing `yes`, and a non-TTY caller must also pass `--yes-danger-full-access`.
 
 Resume a co-presence node with `anet node start <name> --copresence`; do not replace it with a normal `node start`.
