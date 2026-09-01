@@ -182,6 +182,19 @@ p.expect(r"选择 runtime"); p.sendline("")  # default
 14. **tmux server freezes its environment at first-use** ([#146 gate catch](https://github.com/sleep2agi/agent-network/issues/146#issuecomment-4505347972)) → the tmux server captures its environment the first time any `tmux new-session` runs; every later session inherits **that frozen env**, not the caller's current env. `anet node rename` restarts a running node via a tmux session, and #125 envRef gives each node a unique `ANTHROPIC_AUTH_TOKEN_N_<hash>` var — so a per-node var exported *after* the first rename is invisible to later restarts, which FATAL on the missing var (the renamed node never re-registers). **Fix**: create **all** nodes (and export every `ANTHROPIC_AUTH_TOKEN_N_*` var) in a Phase 0, before the first rename starts the tmux server.
 15. **#125 envRef: `--env` secrets migrate to a ref-var that must be exported before `anet node start`** ([#146 gate catch](https://github.com/sleep2agi/agent-network/issues/146#issuecomment-4505347972)) → `anet node create --env ANTHROPIC_AUTH_TOKEN=sk-...` does not store the secret in `config.json`; it stores `{"_envRef": "ANTHROPIC_AUTH_TOKEN_N_<hash>"}` and prints `export ANTHROPIC_AUTH_TOKEN_N_<hash>='sk-...'` in the create output. `anet node start` then FATALs (`references env var "..." but it is not set in this shell`) unless that ref-var is exported. The `<hash>` is unique per create invocation. **Fix**: after each `anet node create`, parse the ref-var name from the create log (`grep -oE 'ANTHROPIC_AUTH_TOKEN_N_[A-Za-z0-9]+'`) and `export` it with the secret value before `anet node start`.
 
+16. **`promote to latest` 的 `must_contain` 不能填函数名** (2026-09-02 实测) → 闸 4 的判据是
+    `npm pack "$P@<ver>" && tar -xzf && grep -rq -- '<must_contain>' package/`,
+    而 **`dist/` 是打包压缩产物,内部函数名已被压掉**。实测 `@sleep2agi/agent-node` 的
+    `2.5.0-preview.34` 与 `.57` 两版:`resolveGrokCopresenceHubStatus` / `resolveReportedStatus` /
+    `grokCopresenceLiveness` / `leaderNamed` / `attachNamed` **五个函数名两版全部 0 命中**;
+    只有**字符串字面量**活得下来(如 `peer_reply_inbox_capable`,两版各 1)。
+    🔴 失败长相有误导性:闸 4 会报「'X' 不在该版本的字节里」,读起来像**改动没进包**,
+    实际是**它在字节里根本不以那个名字存在**。
+    **做法**:挑一条目标版本**新增的字符串字面量**,并按闸 4 的原样命令两向见证 ——
+    旧版没命中、新版命中。实测例:`.34` 无 / `.57` 有 `GrokModelSwitchArgvError`。
+    🔴 再一层:源码里同一句话常有**两处** —— 一处在注释、一处在字符串。注释不进 `dist`,
+    挑中它同样会被拒。选串前先逐行标出它落在注释还是代码里。
+
 ---
 
 ## 7. Family ownership
