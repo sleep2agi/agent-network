@@ -6,6 +6,14 @@
 # 测的是 CLI binary 这一层 — 输出格式 + 本地 config 落地 + REST 调用。
 # REST 本身已被 qa-hub-05 覆盖，这条专测 CLI 包装层。
 set -euo pipefail
+
+# 🔴 死得出声（#990）：本文件 set -e + pipefail，任何一条管道返回非零都会
+#    **当场打死脚本，且一个字都不打印** —— 2026-09-01 这个套件就这么红过一次：
+#    退出码 141（=128+13 SIGPIPE），run.log 只有 7 行，「failure markers」段全空。
+#    没有行号，只能靠人去猜是哪条管道，而三条候选实测各 20000 次都不会触发。
+#    这个 trap 不改任何判据、不吞任何退出码（`exit $_rc` 原样传出），
+#    只保证下一次同样的红**自己说出是第几行**。
+trap '_rc=$?; echo "🔴 run.sh 第 $LINENO 行以 rc=$_rc 非零退出（141=128+13 即 SIGPIPE，见 #990）"; exit $_rc' ERR
 # 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
 printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
