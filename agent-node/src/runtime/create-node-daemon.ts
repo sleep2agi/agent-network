@@ -303,11 +303,23 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env, platf
       );
     }
     // ④ not group/other writable
+    //
+    // 🔴 #1353 —— `chmod go-w` 修的是**结果**,不是原因。若这个二进制是 npm 装的,
+    //    它的权限由**安装时那个 shell 的 umask** 决定:npm 以 0777/0666 建文件再由
+    //    umask 掩掉,所以 `umask 0002` 恒得 775/664(实测:775 的可执行 + 664 的
+    //    package.json 就是这一对的指纹),而 775 & 0o022 !== 0 必然落到这里。
+    //    ⇒ chmod 之后**下一次 `npm install -g` 会原样改回去**。持久修法是让安装
+    //    发生在 `umask 0022` 下。两条都给,让读的人知道自己在选哪一种。
     if ((st.mode & 0o022) !== 0) {
       const before = (st.mode & 0o777).toString(8);
+      const groupWritable = (st.mode & 0o020) !== 0;
       throw unsafePathHelp("anet_bin_permission",
         `writable by group/other (mode=${before})`,
-        `chmod go-w ${quoteSh(pin.abs)}`,
+        `chmod go-w ${quoteSh(pin.abs)}` +
+        (groupWritable
+          ? `   # 立即可用,但若它是 npm 装的,下次 \`npm install -g\` 会按安装时的 umask 改回去;` +
+            ` 持久修法是在 \`umask 0022\` 下重装(见 #1353)`
+          : ""),
       );
     }
     // ⑤ executable
