@@ -399,6 +399,17 @@ if [[ $RUN_L1 -eq 1 ]]; then
   # `value too great for base` 并返回非零 —— 闸门照样静默失效。
   # 这个洞是写完上面那段校验之后、跑对照表时才发现的(用例里放了 08)。
   QA_L1_MAX_PAR=$((10#$QA_L1_MAX_PAR))
+
+# 🔴 #1593 —— 单个 L1 套件的 wait 硬超时(秒)。见下面 wait 处的长注释。
+#    默认 300 = L1 最慢套件(test823-l1-concurrency-cap, 125s)的 2.4 倍。
+#    只接受纯数字;写坏了就退回默认,**不让一个笔误把超时变成 0**(0 会让看门狗
+#    立刻杀掉每一个套件,而那个失效读起来像"所有套件都挂了")。
+L1_WAIT_TIMEOUT="${L1_WAIT_TIMEOUT:-300}"
+case "$L1_WAIT_TIMEOUT" in
+  ''|*[!0-9]*) L1_WAIT_TIMEOUT=300 ;;
+esac
+[ "$L1_WAIT_TIMEOUT" -lt 1 ] && L1_WAIT_TIMEOUT=300
+note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)"
   note "L1 并发上限 = ${QA_L1_MAX_PAR}(0 = 不限;用 QA_L1_MAX_PAR 覆盖)"
   rm -f /tmp/qa-l1-timing.tsv
   pids=()
@@ -541,13 +552,38 @@ if [[ $RUN_L1 -eq 1 ]]; then
     #    说得出「在等谁」,只能靠事后 diff 两份 30 分钟的日志去猜。
     #    打出正在等的那个套件名,下次红的时候第一行就能看见。
     printf '· L1 wait %s\n' "$t"
+    # 🔴 #1593 —— 给这个 wait 加一道**硬超时**。
+    #    实测(2026-09-01,同一天六次运行):test225-node-stop-convergence 正常
+    #    59-63s 完成,挂起时让整个 job 耗满 30 分钟守卫被 cancel —— 差 30 倍。
+    #    它不是"变慢",是**彻底不返回**,所以任何"比平时慢"的判据都抓不到它。
+    #    代价还不止 30 分钟 runner:job 被守卫杀掉时,**另外 69 个套件的结果一起没了**。
+    #
+    #    阈值 300s 的依据:L1 里最慢的套件是 test823-l1-concurrency-cap(125s),
+    #    300 是它的 2.4 倍 —— 用的是本文件上面那条注释里已经写明的原则
+    #    (「timeout-minutes 是 runaway 守卫,不是性能预算,该在典型值的 2-3 倍」)。
+    #
+    # 🔴 为什么是看门狗而不是轮询 `kill -0`:
+    #    bash 的后台子进程退出后、被 wait 收割前是**僵尸**,而 `kill -0` 对僵尸
+    #    **仍然返回成功** ⇒ 轮询版会让每个套件都白等满 300s,把 14 分钟变成几小时。
+    #    而那个失效**在本地测不出来**(本地跑得快,僵尸窗口极短),只会在 CI 上
+    #    表现成"又打满守卫"——与它本要修的症状一模一样。
+    ( sleep "$L1_WAIT_TIMEOUT"; kill -9 "$pid" 2>/dev/null ) & _l1_wd=$!
     if wait "$pid"; then
       ok "L1 $t ($(tail -1 /tmp/qa-l1-$t-run.log))${_w:+ [$_w]}"
     else
-      fail "L1 $t — see /tmp/qa-l1-$t-run.log${_w:+ [$_w]}"
+      _rc_wait=$?
+      # 137 = 128+9 ⇒ 被我们的看门狗 SIGKILL 掉的,说清是超时而不是套件自己失败。
+      if [ "$_rc_wait" = "137" ]; then
+        fail "L1 $t — **超过 ${L1_WAIT_TIMEOUT}s 未返回**,已终止并按失败计(不是套件自身断言失败)${_w:+ [$_w]}"
+      else
+        fail "L1 $t — see /tmp/qa-l1-$t-run.log${_w:+ [$_w]}"
+      fi
       tail -10 /tmp/qa-l1-$t-run.log | sed 's/^/    /'
       FAILED=$((FAILED+1))
     fi
+    # 看门狗还活着就收掉它,别让它在后面某个时刻打死一个无关的 pid。
+    kill "$_l1_wd" 2>/dev/null || true
+    wait "$_l1_wd" 2>/dev/null || true
   done
   # 汇总一张按开始偏移排序的表:红的时候一眼看出「它排在第几批、L1 跑了多久时炸的」。
   if [ -s /tmp/qa-l1-timing.tsv ]; then
