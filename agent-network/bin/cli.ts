@@ -8955,9 +8955,17 @@ async function terminateNodeProcess(pid: number, force: boolean): Promise<boolea
   if (!pidAlive(pid)) return true;
   try { process.kill(pid, "SIGTERM"); } catch {}
   if (await waitForPidExit(pid, 8000)) return true;
+  // #1422 — everything below here is the diagnosable path, and until now it
+  // was silent: a reader of the logs could not tell how long we waited, nor
+  // whether a SIGKILL was ever sent. Both branches now say so, because
+  // SIGKILL is --force-only and the absence of one is the more surprising
+  // half. Quiet on the happy path (SIGTERM reaped within 8s) by design.
   if (force) {
+    console.warn(`[anet] ⚠ pid ${pid} outlived the 8s SIGTERM grace — escalating to SIGKILL (--force).`);
     try { process.kill(pid, "SIGKILL"); } catch {}
     if (await waitForPidExit(pid, 3000)) return true;
+  } else {
+    console.warn(`[anet] ⚠ pid ${pid} outlived the 8s SIGTERM grace. No SIGKILL was sent — escalation requires --force.`);
   }
   return !pidAlive(pid);
 }
@@ -9757,7 +9765,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       }
       if (!(await terminateNodeProcess(pid, force))) {
         oldSurvivors.push(pid);
-        console.error(`[anet] ✗ old agent process (pid ${pid}) did not exit after SIGTERM + SIGKILL.`);
+        console.error(`[anet] ✗ old agent process (pid ${pid}) did not exit after SIGTERM${force ? " + SIGKILL" : " (no SIGKILL — that needs --force)"}.`);
       }
     }
     oldProcessConfirmedDead = oldSurvivors.length === 0;
