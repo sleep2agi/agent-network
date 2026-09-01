@@ -8656,6 +8656,19 @@ async function daemonStartCommand() {
     console.error(w);
   }
 
+  // 2026-09-02 #1722 —— 在启动的那一刻说清「这台 daemon 管得到哪些节点」。
+  //
+  //   daemon 的 workDir 就是它**启动那一刻所在的目录**(process.cwd())，它 fork 出的
+  //   子节点全部落在 `<workDir>/.anet/nodes/` 下(start-daemon.ts 的
+  //   `nodesRoot = join(deps.workDir, ".anet", "nodes")`)。**别处的存量节点够不着** ——
+  //   不是权限问题，是不在搜索范围里，而 Dashboard 上点它们只会毫无反应。
+  //
+  //   `anet daemon list` 已经打了 `scanned:`(#1725)，但**启动**这一刻才是 workDir 被
+  //   固定下来的时刻 —— 与上面那段 PATH 警告同一个道理:在这里说一句，
+  //   胜过用户在 Dashboard 上点半天再回头猜 daemon 是从哪个目录起的。
+  console.error(`  workdir: ${process.cwd()}`);
+  console.error(`  (它只管得到 ${nodesDir()} 里的节点;别处的存量节点够不着 —— 见 #1722)`);
+
   // Delegate to existing startCommand — it reads args[1] for the node name,
   // which is what we have after the `daemon start` splice in daemonCommand.
   await startCommand();
