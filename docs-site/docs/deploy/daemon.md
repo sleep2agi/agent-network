@@ -341,6 +341,35 @@ tail -f ~/daemon-<name>.log        # 或你启动时重定向到的那个文件
 在 #1290 修好之前，Windows 机器可以跑 daemon，但**不要指望它 fork 出子节点**。
 :::
 
+::: warning ⚠️ daemon 管得到哪些节点：**只有它自己工作区里的**
+
+这一条最容易误解，而且踩到时**不像故障、像功能没做**。
+
+daemon 的工作区（`workDir`）**是它启动那一刻所在的目录**（`process.cwd()`），
+它创建和启动的子节点都落在 `<workDir>/.anet/nodes/` 下
+（`agent-node/src/runtime/start-daemon.ts` 里 `nodesRoot = join(deps.workDir, ".anet", "nodes")`）。
+
+⇒ **你在别的目录里手工建的存量节点，daemon 够不着** —— 不是权限问题，是**根本不在它的搜索范围里**。
+Dashboard 上再加什么按钮都拉不起它们。真实形状见
+[#1648](https://github.com/sleep2agi/agent-network/issues/1648)：一台机器上 daemon 在线、
+CWD 是用户主目录，而三个离线节点的 `project_dir` 分别在两个别的盘符和一个 WSL 路径里。
+
+**怎么判断某个 daemon 的工作区是哪儿**（Linux/macOS，`<pid>` 用 `anet node list` 或 `ps` 拿）：
+
+```bash
+ls -l /proc/<pid>/cwd            # Linux：直接看它的 cwd
+lsof -a -p <pid> -d cwd          # macOS
+ls <workDir>/.anet/nodes/        # 它管得到的节点就是这里面的
+```
+
+⇒ **同一台机器上从不同目录起两次 daemon，会得到两个互相看不见的节点集合。**
+要让 daemon 管某批节点，就**从那批节点所在的工作区启动它**。
+
+（RFC-026 原本规定 `workDir` 固定在 `~/.anet/daemon/workspaces/<network_id>/`；
+当前实现取 `process.cwd()`。差异与三条改法见
+[#1722](https://github.com/sleep2agi/agent-network/issues/1722)。）
+:::
+
 ---
 
 
