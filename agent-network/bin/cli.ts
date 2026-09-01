@@ -8281,14 +8281,16 @@ Example:
 //   - profile exists with different/no role → REFUSE unless --force
 //   - profile absent → mint ntok + write config + log next step
 //
-// Defaults (matching RFC-026 §9.3 daemon-self-declare scaffolding —
-// PR3 will land the schema for `runtimes_supported` / `allowed_secret_keys`
-// to be reported via report_status; we already write the fields so
-// the daemon ships ready for the next PR's hub-side wiring):
+// Defaults (RFC-026 §9.3 daemon-self-declare):
 //   role: "host_supervisor"
 //   runtime: "claude-agent-sdk"  (lightest, just the SSE doorbell loop)
-//   runtimes_supported: [claude-agent-sdk, codex-sdk, grok-build-acp]
-//     (declares; PR3 daemon-side fail-fast catches binary-missing at spawn)
+//   runtimes_supported: [...SUPPORTED_RUNTIME_NAMES]
+//     🔴 不要在这里重抄那个列表。#1298 之前它是硬编码的三元组,于是
+//     grok-build-cli / codex-app-server / opencode-cli 三个共存 runtime
+//     永远不出现在 daemon 的能力声明里,hub 据此把 create_node 拒掉。
+//     唯一真源是 agent-network/src/normalize-runtime.ts 的
+//     SUPPORTED_RUNTIME_NAMES —— 抄一份在注释里,它就会再漂一次。
+//     (声明 ≠ 真能跑;daemon 侧 spawn 时 fail-fast 兜住 binary-missing。)
 //   allowed_secret_keys: []
 //     (fail-closed; operator adds via `anet daemon init --allow-secret KEY`
 //     or by hand-editing — strict-by-default per RFC-026 §9.7)
