@@ -8442,7 +8442,11 @@ Subcommands:
   list                 List locally-configured daemon nodes
 
 Options:
-  --force              Overwrite an existing non-daemon config (init only)
+  --force              init only。两种用法,第二种是产品自己给出的修法却没人写在这里:
+                       ① 覆盖一个**非** daemon 的同名配置;
+                       ② 对**已经是** daemon 的配置重跑一次 init —— 回填后来新增的
+                          runtime(\`anet daemon list\` 报「少 N 个」时走这条)。
+                       保留 node_id,但**会重新签发 token**,改完要重启该 daemon 才生效。
   --allow-secret KEY   Pre-populate allowed_secret_keys (repeatable; init only)
 
 Daemon 就是一个 role=host_supervisor 的 agent-node,所以停 / 删 / 看**没有** daemon 版,
