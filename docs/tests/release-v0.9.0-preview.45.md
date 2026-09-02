@@ -50,7 +50,7 @@ grep -rc 'daemon_cannot_create_nodes'  package/src   # 正控:期望 >0
 ```
 .44:  read_node_rules_file        = 0    ← 目标串上一版确实不存在
 .44:  node_rules_requests         = 0    ← 同上
-.44:  daemon_cannot_create_nodes  = 10   ← 正控:grep 在这份产物上确实有效
+.44:  daemon_cannot_create_nodes  = 11   ← 正控:grep 在这份产物上确实有效
 ```
 
 这个包 `files: ["src","bin"]`、没有 build 脚本，发的是 TypeScript 源码，可以裸 grep；
