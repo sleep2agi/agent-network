@@ -3002,6 +3002,240 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
 
+  // ── app#225 — 节点规则文件（AGENTS.md / CLAUDE.md）远程读写 ──
+  //
+  // 形状照抄 RFC-024 config-apply：客户端调 read_node_rules_file /
+  // write_node_rules_file 落一行 node_rules_requests + 门铃 {type:"rules_file"}；
+  // 节点收到门铃后 get_rules_file_request 拉（和 get_config_update 同一道
+  // F-A 闸：网络 token + alias），做完 ack_rules_file_request 回报；客户端
+  // 轮询 get_rules_file_result。
+  //
+  // 🔴 安全（#225 验收第 5 条）：整条链路**没有路径参数**。文件名由节点按
+  // 自己的 RUNTIME 决定（claude → CLAUDE.md，其余 → AGENTS.md），目录固定是
+  // 节点进程的 cwd（agent-node/src/runtime/rules-file.ts）。hub 只传 op +
+  // content，客户端连文件名都指定不了，所以不存在「借路径参数写任意文件」。
+  // 读和写都要 canWrite：规则文件是节点行为的一部分，读它等于读节点配置。
+  const RULES_FILE_MAX_BYTES = 256 * 1024;
+  const RULES_REQUEST_STALE_MS = 60_000;
+
+  const enqueueRulesFileRequest = (
+    op: "read" | "write",
+    a: { node_id?: string; child_node_id?: string; network_id?: string; content?: string },
+  ) => {
+    const idArg = resolveNodeIdArg({ node_id: a.node_id, child_node_id: a.child_node_id });
+    if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
+    const nodeId = idArg.node_id;
+    const effectiveNetId = getNetworkId(a.network_id);
+    if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, `${op} rules file`);
+
+    const { row: node, sec1Ok } = resolveTargetNode(nodeId, effectiveNetId);
+    if (!node) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: nodeId }) }] };
+    }
+    if (!sec1Ok) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node", message: "node belongs to another network" }) }] };
+    }
+    if (op === "write") {
+      if (typeof a.content !== "string") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_content", reason: "content must be a string" }) }] };
+      }
+      const bytes = Buffer.byteLength(a.content, "utf8");
+      if (bytes > RULES_FILE_MAX_BYTES) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "content_too_large", bytes, max_bytes: RULES_FILE_MAX_BYTES }) }] };
+      }
+    }
+
+    // 单飞 + 陈旧回收，同 update_node_config 的 F-B：节点掉线时旧行永远
+    // 非终态，不回收就把这个节点锁死。
+    const inFlight = db.get<{ request_id: string; created_at: number; pulled_at: number | null }>(
+      "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') ORDER BY created_at DESC LIMIT 1",
+      nodeId,
+    );
+    if (inFlight) {
+      const age = Date.now() - (inFlight.pulled_at ?? inFlight.created_at);
+      if (age <= RULES_REQUEST_STALE_MS) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_in_flight", existing_request_id: inFlight.request_id, age_ms: age }) }] };
+      }
+      db.run(
+        "UPDATE node_rules_requests SET status = 'timeout', acked_at = ?1, error = ?2 WHERE request_id = ?3",
+        [Date.now(), `superseded after ${age}ms (> ${RULES_REQUEST_STALE_MS}ms) — node did not answer`, inFlight.request_id],
+      );
+    }
+
+    const requestId = `rf_${uuidv4()}`;
+    const networkId = node.network_id || "default";
+    db.run(
+      `INSERT INTO node_rules_requests (request_id, node_id, network_id, op, content, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
+      [requestId, nodeId, networkId, op, op === "write" ? a.content! : null, Date.now(), callerTokenId || "unknown"],
+    );
+    pushEvent(node.alias, { type: "rules_file", request_id: requestId }, networkId);
+    return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, op }) }] };
+  };
+
+  server.tool(
+    "read_node_rules_file",
+    "Ask a node to send back its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) from its working directory. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
+    { ...NODE_ID_ALIAS_FIELDS, network_id: z.string().max(200).optional() },
+    async ({ node_id, child_node_id, network_id }) => enqueueRulesFileRequest("read", { node_id, child_node_id, network_id }),
+  );
+
+  server.tool(
+    "write_node_rules_file",
+    "Ask a node to overwrite its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) in its working directory with `content`. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      content: z.string().max(RULES_FILE_MAX_BYTES).describe("Full new file content (UTF-8). The node writes it atomically."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, content, network_id }) => enqueueRulesFileRequest("write", { node_id, child_node_id, content, network_id }),
+  );
+
+  server.tool(
+    "get_rules_file_request",
+    "Node pulls its oldest pending rules-file request (called from agent-node when the SSE rules_file doorbell arrives). app#225.",
+    {},
+    async () => {
+      // 同 get_config_update 的 F-A 闸：必须是网络 token + alias。
+      if (!callerTokenIsNetwork || !enforceNetworkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "network_token_required" }) }] };
+      }
+      if (!callerAlias) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
+      }
+      const node = db.get<any>(
+        "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
+        callerAlias,
+        enforceNetworkId,
+      );
+      if (!node) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request: null }) }] };
+      }
+      const req = db.get<any>(
+        "SELECT request_id, op, content FROM node_rules_requests WHERE node_id = ?1 AND status = 'pending' ORDER BY created_at ASC LIMIT 1",
+        node.node_id,
+      );
+      if (!req) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request: null }) }] };
+      }
+      db.run(
+        "UPDATE node_rules_requests SET status = 'in_progress', pulled_at = ?1 WHERE request_id = ?2 AND status = 'pending'",
+        [Date.now(), req.request_id],
+      );
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: true,
+            request: {
+              request_id: req.request_id,
+              op: req.op,
+              ...(req.op === "write" ? { content: req.content ?? "" } : {}),
+            },
+          }),
+        }],
+      };
+    },
+  );
+
+  server.tool(
+    "ack_rules_file_request",
+    "Node reports the outcome of a rules-file request — done (with content for reads) or failed (with error). app#225.",
+    {
+      request_id: z.string().min(1).max(200),
+      status: z.enum(["done", "failed"]),
+      file_name: z.string().max(64).optional(),
+      exists: z.boolean().optional(),
+      content: z.string().max(RULES_FILE_MAX_BYTES).optional(),
+      error: z.string().max(2000).optional(),
+    },
+    async ({ request_id: requestId, status, file_name: fileName, exists, content, error: ackError }) => {
+      if (!callerTokenIsNetwork || !enforceNetworkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "network_token_required" }) }] };
+      }
+      if (!callerAlias) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
+      }
+      const node = db.get<any>(
+        "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
+        callerAlias,
+        enforceNetworkId,
+      );
+      if (!node) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "alias_unknown" }) }] };
+      }
+      const req = db.get<any>(
+        "SELECT request_id, node_id, status FROM node_rules_requests WHERE request_id = ?1",
+        requestId,
+      );
+      // 跨租户闸：只能 ack 自己的请求；别人的当不存在处理。
+      if (!req || req.node_id !== node.node_id) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "unknown_or_foreign_request" }) }] };
+      }
+      if (req.status === "done" || req.status === "failed" || req.status === "timeout") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "already_terminal", current_status: req.status }) }] };
+      }
+      db.run(
+        `UPDATE node_rules_requests SET status = ?1, acked_at = ?2, file_name = ?3, file_exists = ?4, result_content = ?5, error = ?6 WHERE request_id = ?7`,
+        [
+          status,
+          Date.now(),
+          fileName ?? null,
+          typeof exists === "boolean" ? (exists ? 1 : 0) : null,
+          status === "done" ? (content ?? null) : null,
+          status === "failed" ? (ackError || "node reported failure without a reason") : null,
+          requestId,
+        ],
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, status }) }] };
+    },
+  );
+
+  server.tool(
+    "get_rules_file_result",
+    "Poll the outcome of a read_node_rules_file / write_node_rules_file request. Returns status pending|in_progress|done|failed|timeout, the file name the node used, and (for reads) the content. app#225.",
+    { request_id: z.string().min(1).max(200), network_id: z.string().max(200).optional() },
+    async ({ request_id: requestId, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "read rules file result");
+      const row = db.get<any>(
+        "SELECT request_id, node_id, network_id, op, status, file_name, file_exists, result_content, error, created_at, pulled_at, acked_at FROM node_rules_requests WHERE request_id = ?1",
+        requestId,
+      );
+      // SEC-1：结果行的网络必须等于调用方作用域，否则当不存在。
+      if (!row || row.network_id !== (effectiveNetId || "default")) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found", request_id: requestId }) }] };
+      }
+      let status: string = row.status;
+      const ageMs = Date.now() - (row.pulled_at ?? row.created_at);
+      if ((status === "pending" || status === "in_progress") && ageMs > RULES_REQUEST_STALE_MS) {
+        status = "timeout";
+        db.run(
+          "UPDATE node_rules_requests SET status = 'timeout', acked_at = ?1, error = ?2 WHERE request_id = ?3 AND status IN ('pending', 'in_progress')",
+          [Date.now(), `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`, requestId],
+        );
+        row.error = `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`;
+      }
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: true,
+            request_id: row.request_id,
+            node_id: row.node_id,
+            op: row.op,
+            status,
+            file_name: row.file_name ?? null,
+            exists: row.file_exists === null || row.file_exists === undefined ? null : row.file_exists === 1,
+            ...(status === "done" && row.op === "read" ? { content: row.result_content ?? "" } : {}),
+            error: row.error ?? null,
+            age_ms: ageMs,
+          }),
+        }],
+      };
+    },
+  );
+
+
   server.tool(
     "restart_node",
     "Trigger a node restart without changing config. RFC-024 Vincent 2026-06-28 increment. Network-scoped (SEC-1); member+ role suffices (lifecycle ops are not privilege elevation).",

@@ -21,6 +21,7 @@ import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
+import { processRulesFileRequests } from "./runtime/rules-file";
 
 // 🔴 这三处原先都喂 `__dirname`,而打包器把它内联成构建期常量 —— 见 #1433。
 // `resolveAgentNodeDir` 的注释里写着「运行时 thisModuleDir 是 .../agent-node/dist」,
@@ -6271,7 +6272,14 @@ async function connectSSE() {
                 warn(`config-apply failed: ${e?.message || e}`),
               );
             }
-            if (ev.type === "restart") {
+            // app#225 — 规则文件（CLAUDE.md / AGENTS.md）远程读写门铃。文件名由
+      // 本节点按 RUNTIME 决定、目录固定 cwd，见 runtime/rules-file.ts 顶部。
+      if (ev.type === "rules_file") {
+        log(`[rules-file] doorbell received`);
+        processRulesFileRequests({ callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn })
+          .catch((e: any) => warn(`[rules-file] doorbell handler failed: ${e?.message || e}`));
+      }
+      if (ev.type === "restart") {
               log(`← SSE restart ${ev.update_id || ""}`);
               processRestartOnly().catch((e: any) =>
                 warn(`restart-apply failed: ${e?.message || e}`),

@@ -540,6 +540,37 @@ try {
   console.warn(`[commhub] partial unique index uniq_ncu_node_inflight skipped: ${e?.message || e}`);
 }
 
+// ── app#225: 节点规则文件（AGENTS.md / CLAUDE.md）远程读写请求 ──
+//
+// 形状照抄 node_config_updates（上面）：客户端落一行 + 门铃，节点拉走做完回报，
+// 客户端轮询结果。network_id 同样在插入时从 nodes 反规范化。
+//
+// 🔴 这张表**故意没有路径列**：文件名由节点按自己的 RUNTIME 决定
+// （claude → CLAUDE.md，其余 → AGENTS.md），目录固定是节点进程的 cwd。
+// hub 侧只存 op + 内容，客户端连文件名都指定不了（#225 验收第 5 条）。
+// file_name 是节点**回报**的实际文件名，只用于显示。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS node_rules_requests (
+    request_id       TEXT PRIMARY KEY,
+    node_id          TEXT NOT NULL,
+    network_id       TEXT NOT NULL,
+    op               TEXT NOT NULL,
+    content          TEXT,
+    status           TEXT NOT NULL,
+    file_name        TEXT,
+    file_exists      INTEGER,
+    result_content   TEXT,
+    error            TEXT,
+    created_at       INTEGER NOT NULL,
+    created_by_token TEXT NOT NULL,
+    pulled_at        INTEGER,
+    acked_at         INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_nrr_node_status ON node_rules_requests(node_id, status);
+  CREATE INDEX IF NOT EXISTS idx_nrr_network ON node_rules_requests(network_id);
+`);
+
 // ── V3: networks table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS networks (
