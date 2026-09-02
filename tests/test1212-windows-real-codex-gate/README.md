@@ -38,3 +38,11 @@ Linux host evidence. Neither is relabelled as Windows real-Codex evidence.
 Only `result.json` and `report.txt` are uploaded. They contain no credential,
 raw terminal/app-server/bridge log, absolute private path, or raw thread/turn
 ID. The entire private root is ACL-restricted and deleted after the run.
+
+## Failure evidence (#1749)
+
+When the journey fails, `result.json` is still written — with `phase` (which of the 9 steps),
+`error.message`, and for ConPTY failures `conpty.{exitCode, elapsedMs, timedOut, outputTail}`.
+Everything passes through `failure-evidence.mjs` first: this run's token, `COMMHUB_AUTH_TOKEN`,
+the private root, `HOME` and `CODEX_HOME` are replaced, and token-shaped strings are masked.
+`report.txt` carries the same in prose. `static-contract.mjs` checks the redaction both ways.
