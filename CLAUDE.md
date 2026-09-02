@@ -313,6 +313,16 @@ bash scripts/qa.sh --l0                                    # 登记完要真跑,
 ## 项目信息
 
 - 仓库：https://github.com/sleep2agi/agent-network
+- **通信团队维护的仓库与对外产物（2026-09-02 Vincent 问「写进 CLAUDE.md 了吗」—— 之前没写）**：
+
+  | 仓库 | 对外产物 | 发布方式 | 近 7 天合并 PR（09-02 量） |
+  |---|---|---|---|
+  | `sleep2agi/agent-network`（本仓） | npm `@sleep2agi/agent-network`(anet CLI) / `@sleep2agi/agent-node` / `@sleep2agi/commhub-server`；文档站 anet.sh（`docs-site/`） | `release-gate (v0)` 发 preview → `promote-latest` 升 latest（owner ACK）；anet.sh **不是**合 main 自动部署，要按 `docs/sop/methodology.md` 从 `docs-site/` 跑 `vercel deploy --prebuilt --prod --scope <vercel-team>` | 100 |
+  | `sleep2agi/agent-network-app` | 桌面端（Tauri，macOS `.dmg`/Windows `.exe`+`.msi`，自带更新） | `release-desktop-auto-update`（`commit` 必须 40 位 main sha；产物是 **draft** release，最后「发布 draft」在 GitHub 页面点） | 41 |
+  | `sleep2agi/agent-network-dashboard` | npm `@sleep2agi/agent-network-dashboard`（`anet hub dashboard` 用）；生产实例见下面「Dashboard 分三种」 | 该仓自己的发布流程 | 3 |
+
+  生产 hub（DEV 机 `127.0.0.1:9200`，pm2 `commhub-hub`）换版本照 `deploy/hub/README.md`「换版本」六步，
+  **以机器上的 `~/.local/bin/hub-daemon.sh` 为准判断当前版本**（09-02 实测：仓里写 preview44，机器跑的是 preview38）。
 - Dashboard：**分三种,别混**(这一层最容易判断错,见 `deploy/tunnel/README.md` 顶部的红字警告)
   1. **项目自营的生产实例**(权威):`公网 ─ Caddy :3000 / frpc :3100 → 127.0.0.1:3001`
      (Next.js,pm2 托管)。拓扑与运维见 `deploy/dashboard/README.md`、`deploy/tunnel/README.md`。
