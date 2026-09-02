@@ -31,7 +31,7 @@ features:
 
 <section class="desktop-download" aria-labelledby="desktop-download-title">
   <div class="desktop-download-copy">
-    <span class="eyebrow">DESKTOP APP · v0.2.41</span>
+    <span class="eyebrow">DESKTOP APP · v0.2.43</span>
     <h2 id="desktop-download-title">下载后，直接开始协作</h2>
     <p>原生桌面体验，已签名发布。Mac 与 Windows 使用同一套 Hub、账号和会话。</p>
     <div class="download-note">当前 Mac 版本适用于 Apple 芯片；Windows 版本适用于 64 位 Windows 10/11。</div>

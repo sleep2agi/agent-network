@@ -31,7 +31,7 @@ features:
 
 <section class="desktop-download" aria-labelledby="desktop-download-title">
   <div class="desktop-download-copy">
-    <span class="eyebrow">DESKTOP APP · v0.2.41</span>
+    <span class="eyebrow">DESKTOP APP · v0.2.43</span>
     <h2 id="desktop-download-title">Download and start collaborating</h2>
     <p>A signed native desktop experience. Mac and Windows connect to the same Hubs, accounts, and conversations.</p>
     <div class="download-note">The current Mac build supports Apple Silicon. The Windows build supports 64-bit Windows 10/11.</div>
