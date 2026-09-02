@@ -86,7 +86,12 @@ set -uo pipefail
 #   🔴 注意：上面的历史行只记到 preview37，而这一行改动前的值是 preview39 —— 
 #      preview37→39 那两跳没有留下记录。我不补写别人的历史（内容我不知道），
 #      在这里标出来，免得下一个人把这份历史当完整的读。
-RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview44"
+# 2026-09-02: preview44 → preview45（跟随 PINNED_SERVER_VERSION；app#225 节点规则文件）
+#   内容 = #1755 五个规则文件工具(read/write_node_rules_file、get_rules_file_result、
+#          get/ack_rules_file_request) + 表 node_rules_requests(启动时 CREATE TABLE IF NOT EXISTS,
+#          无迁移) + 门铃 rules_file；另 #1687/#1651 UTC 时间解析、#1632 daemon 报错文案
+#   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准)
+RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview45"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
