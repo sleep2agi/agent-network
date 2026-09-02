@@ -52,3 +52,34 @@ let reads = 0;
 const late = await pollCompletedAssistant(async () => ({ turns: [reads++ < 2 ? promptOnly : { ...promptOnly, items: [...promptOnly.items, { id: "a1", type: "agentMessage", text: `${nonce} HUMAN_DONE` }] }] }), "t", before, nonce, { timeoutMs: 1000, intervalMs: 1 });
 requireContract(late.item.id === "a1" && reads === 3, "bounded poll did not wait for late assistant");
 console.log(`PASS test1212 LF+CRLF + prompt-only red + late-assistant green + ${mutations.length} mutations red`);
+
+// ── #1749 失败证据:journey 失败时 result.json 必须带脱敏后的定位信息 ─────────
+import { attachConptyDiag, failureEvidence, failureReport, outputTail, redactForArtifact } from "./failure-evidence.mjs";
+{
+  const j = journey;
+  requireContract(/attachConptyDiag\(new Error\(`ConPTY exit \$\{exitCode\}`\)/.test(j) && /attachConptyDiag\(new Error\("ConPTY timeout"\)/.test(j), "ConPTY failures do not carry exit/elapsed/tail diag");
+  requireContract(/\} catch \(error\) \{[\s\S]*failureEvidence\(\{ error, phase/.test(j) && /failureReport\(ev\)/.test(j), "journey catch does not write failure evidence");
+  requireContract((j.match(/^\s*phase = "/gm) || []).length >= 8, "fewer than 8 phase markers — a FAIL would not say where");
+  requireContract(/redact: \{ secrets: \[token, process\.env\.COMMHUB_AUTH_TOKEN\], paths: \[privateRoot, home, codexHome\] \}/.test(j), "failure evidence not redacted against this run's token and private paths");
+
+  // 功能:脱敏两向。正例每种形状都要变成占位;负控:普通文本逐字不变。
+  const priv = "C:\\Users\\x\\AppData\\Local\\Temp\\t1212";
+  const red = redactForArtifact(`ntok_abcdef123456 utok_zzzzzz9999 Bearer QWxhZGRpbjpvcGVu sk-abcdefghijkl ghp_abcdefghijklmnop path=${priv}\\work also ${priv.replaceAll("\\", "/")}/hub.db secret=super-secret-value`, { secrets: ["super-secret-value"], paths: [priv] });
+  for (const bad of ["ntok_abcdef123456", "utok_zzzzzz9999", "QWxhZGRpbjpvcGVu", "sk-abcdefghijkl", "ghp_abcdefghijklmnop", priv, "super-secret-value", "Temp/t1212"]) requireContract(!red.includes(bad), `leak survived redaction: ${bad}`);
+  requireContract(red.includes("<redacted-token>") && red.includes("<private-path>") && red.includes("<redacted-secret>"), "redaction placeholders missing");
+  const plain = "ConPTY exit 1 after opening Codex TUI; node start windows-real --no-inherit-codex-home";
+  requireContract(redactForArtifact(plain, { secrets: [], paths: [] }) === plain, "negative control: plain diagnostic text was altered");
+
+  // 输出尾巴:去 ANSI、有界。
+  const tail = outputTail("\x1b[2J\x1b[1;1H" + "x".repeat(5000) + "\r\nlast line", 100);
+  requireContract(!tail.includes("\x1b") && tail.length === 100 && tail.endsWith("last line"), "outputTail must strip ANSI and keep the last N chars");
+
+  // 证据形状:conpty 尾巴也走脱敏;phase/error 齐全;report 可读。
+  const err = attachConptyDiag(new Error("ConPTY exit 1"), { exitCode: 1, elapsedMs: 10500, out: "boot\nToken ntok_leakleakleak here\nerror: spawn EPERM", timedOut: false });
+  const ev = failureEvidence({ error: err, phase: "first-node-start-conpty", base: { schema: "anet/windows-real-codex-gate/v1", sourceSha: "deadbeef", notInCi: true }, redact: { secrets: [], paths: [] } });
+  requireContract(ev.result === "FAIL" && ev.phase === "first-node-start-conpty" && ev.conpty.exitCode === 1 && ev.conpty.elapsedMs === 10500 && ev.conpty.timedOut === false, "failure evidence shape wrong");
+  requireContract(!JSON.stringify(ev).includes("ntok_leakleakleak") && ev.conpty.outputTail.includes("spawn EPERM"), "conpty tail must be redacted but keep the error line");
+  const rep = failureReport(ev);
+  requireContract(/result: FAIL/.test(rep) && /phase: first-node-start-conpty/.test(rep) && /exit=1 elapsedMs=10500/.test(rep) && !rep.includes("ntok_leakleakleak"), "report.txt shape wrong");
+  console.log("#1749 failure-evidence contracts: ok");
+}
