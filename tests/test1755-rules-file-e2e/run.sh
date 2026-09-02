@@ -54,14 +54,18 @@ REG=$(curl -fsS -X POST "$BASE/api/auth/register" -H 'Content-Type: application/
 UTOK=$(jq -r '.token // empty' <<<"$REG")
 NET=$(jq -r '.network_id // empty' <<<"$REG")
 [[ "$UTOK" == utok_* && -n "$NET" ]] || fail 'admin registration'
+# 🔴 节点只有在 config 里带 node_id 时才会在 hub 的 nodes 表里有一行(report_status 里
+# `if (node_id) upsertNodeWithSec1Guard`);没有这一行,桌面端拿不到权威 node_id,
+# 规则文件工具也定位不到它。所以像 qa-rfc024 那样预先指定一个,并绑进 token。
+NODE_ID="node_test1755_$(date +%s%N | sha256sum | head -c 12)"
 NTOK=$(curl -fsS -X POST "$BASE/api/auth/node-token" -H "Authorization: Bearer $UTOK" \
-  -H 'Content-Type: application/json' -d "{\"network_id\":\"$NET\",\"node_name\":\"$ALIAS\"}" | jq -r '.token // empty')
+  -H 'Content-Type: application/json' -d "{\"network_id\":\"$NET\",\"node_name\":\"$ALIAS\",\"node_id\":\"$NODE_ID\"}" | jq -r '.token // empty')
 [[ "$NTOK" == ntok_* ]] || fail 'node token mint'
 ok 'network-scoped node token minted'
 
 CFG="$WORK/node/config.json"
 cat >"$CFG" <<JSON
-{"alias":"$ALIAS","runtime":"claude-agent-sdk","model":"claude-sonnet-4-6","hub":"$BASE","token":"$NTOK","network_id":"$NET"}
+{"alias":"$ALIAS","node_id":"$NODE_ID","runtime":"claude-agent-sdk","model":"claude-sonnet-4-6","hub":"$BASE","token":"$NTOK","network_id":"$NET"}
 JSON
 
 start_node() {
@@ -125,8 +129,9 @@ wait_result() {
 }
 
 start_node
-NODE_ID=$(wait_node_registered) || { dump_diag; fail 'node never registered'; }
-ok "real agent-node registered as $ALIAS"
+SEEN_ID=$(wait_node_registered) || { dump_diag; fail 'node never registered'; }
+[[ "$SEEN_ID" == "$NODE_ID" ]] || fail "hub shows node_id $SEEN_ID, expected pre-assigned $NODE_ID"
+ok "real agent-node registered as $ALIAS with the pre-assigned node_id"
 ARGS=$(jq -nc --arg id "$NODE_ID" --arg n "$NET" '{node_id:$id,network_id:$n}')
 
 # ── 1. 读:文件还不存在 → exists:false,content 空,文件名按 claude 运行时 = CLAUDE.md ──
@@ -143,7 +148,9 @@ RID=$(jq -r '.request_id // empty' <<<"$ENQ"); [[ "$RID" == rf_* ]] || fail "wri
 RES=$(wait_result "$RID") || { tail -60 "$WORK/node.log"; fail "write never reached a terminal state: $RES"; }
 jq -e '.status=="done" and .file_name=="CLAUDE.md" and (.content==null)' >/dev/null <<<"$RES" || fail "write result: $RES"
 [[ -f "$WORK/cwd/CLAUDE.md" ]] || fail 'CLAUDE.md not written into node cwd'
-[[ "$(cat "$WORK/cwd/CLAUDE.md")" == "$BODY" ]] || fail "CLAUDE.md content differs: $(head -c 200 "$WORK/cwd/CLAUDE.md")"
+# 🔴 逐字节比:`$(cat …)` 会吃掉末尾换行,而末尾换行也是文件的一部分。
+printf '%s' "$BODY" >"$WORK/expected.md"
+cmp -s "$WORK/cwd/CLAUDE.md" "$WORK/expected.md" || fail "CLAUDE.md bytes differ from what was sent: $(od -c "$WORK/cwd/CLAUDE.md" | tail -3 | tr '\n' ' ')"
 # 节点自己会在 cwd 下建 .anet/(日志目录),所以分开看:非隐藏项只能是规则文件,
 # 隐藏项只能是 .anet —— 任何别的东西(含隐藏的)都算「写到了别处」。
 LISTING=$(ls "$WORK/cwd" | sort | tr '\n' ' ')
@@ -155,7 +162,7 @@ ok 'write lands verbatim in node cwd as CLAUDE.md and nothing else appears'
 # ── 3. 再读:回传逐字相同 ──
 ENQ=$(mcp_call read_node_rules_file "$ARGS"); RID=$(jq -r '.request_id' <<<"$ENQ")
 RES=$(wait_result "$RID") || fail "re-read: $RES"
-[[ "$(jq -r '.content' <<<"$RES")" == "$BODY" ]] || fail "re-read content differs"
+jq -e --arg b "$BODY" '.content == $b' >/dev/null <<<"$RES" || fail "re-read content differs: $(jq -c '.content' <<<"$RES" | head -c 200)"
 jq -e '.exists==true' >/dev/null <<<"$RES" || fail "re-read exists flag"
 ok 'read after write returns the exact content'
 
