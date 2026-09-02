@@ -220,10 +220,30 @@ try {
   if (agent.exitCode !== null) throw new Error(`agent-node exited during startup rc=${agent.exitCode}`);
 
   await waitFor(() => direct.query<{ acked: number }, [string]>("SELECT acked FROM inbox WHERE id=?1").get(startupInbox)?.acked === 1, "startup reply ACK", 300);
-  const startupState = direct.query<{ status: string }, [string]>("SELECT status FROM tasks WHERE task_id=?1").get(startupTask);
-  const startupChildren = direct.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1").get(startupTask)?.n;
-  if (startupState?.status !== "delivered" || startupChildren !== 0) {
-    throw new Error(`terminal reply generated egress status=${startupState?.status} children=${startupChildren}`);
+  // #1753 —— 「终态回复不该产生外发」是一条「不存在」断言,而 ACK 发生在节点处理
+  // 这一轮的**中途**(acknowledge 回调),错误的外发(变异 cli-terminal-reply-egress-restored
+  // 让它继续往下走 send_reply)落在 ACK **之后**几毫秒到几百毫秒。之前 ACK 一到就查,
+  // 慢机器上偶发在外发落库之前查完 → MUTATION_SURVIVED(同一 commit 两次结果相反)。
+  // 现在 ACK 之后再观察一个固定的沉降窗口:窗口内任何时刻出现外发都算红,窗口走完
+  // 仍无外发才算绿。窗口 3000ms ≫ 外发落库的本地延迟(同机 hub,毫秒级),且每次
+  // 都把观察到的值打出来,红时能读出是哪一种。
+  const egressSnapshot = () => ({
+    status: direct.query<{ status: string }, [string]>("SELECT status FROM tasks WHERE task_id=?1").get(startupTask)?.status,
+    children: direct.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1").get(startupTask)?.n ?? 0,
+    // 种子里那条 inbox(startupInbox)本身就是 in_reply_to=startupTask,要排除掉;
+    // 剩下的才是节点自己发出去的回复(变异后会多出来的那种)。
+    replies: direct.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND id<>?2").get(startupTask, startupInbox)?.n ?? 0,
+  });
+  const settleMs = 3000, settleStart = Date.now();
+  let seen = egressSnapshot();
+  while (Date.now() - settleStart < settleMs) {
+    seen = egressSnapshot();
+    if (seen.status !== "delivered" || seen.children !== 0 || seen.replies !== 0) break;
+    await Bun.sleep(100);
+  }
+  console.log(`[test698] terminal-reply egress watch: ${JSON.stringify(seen)} after ${Date.now() - settleStart}ms (window ${settleMs}ms)`);
+  if (seen.status !== "delivered" || seen.children !== 0 || seen.replies !== 0) {
+    throw new Error(`terminal reply generated egress ${JSON.stringify(seen)} within ${Date.now() - settleStart}ms of ACK`);
   }
 
   await waitFor(() => direct.query<{ status: string }, [string, string]>(
