@@ -6184,6 +6184,10 @@ async function connectSSE() {
               scheduleWorkInboxDrain();
               scheduleInformationalInboxDrain();
               commhubCompensation?.trigger("sse-reconnect");
+              // app#225 —— 断线/未连上期间桌面端可能已发起规则文件请求(hub 侧 60s 内
+              // 仍 pending,门铃却没人听);连上后补拉一次,没有就是一次空拉。
+              processRulesFileRequests({ callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn })
+                .catch((e: any) => warn(`[rules-file] connect catch-up failed: ${e?.message || e}`));
               if (fileConfig.role === "host_supervisor") {
                 import("./runtime/create-node-daemon.js").then(({ handleCreateNodeDoorbell, reconcilePendingCreateRequestsOnConnect, serializeEnvLocalDaemon }) => {
                   reconcilePendingCreateRequestsOnConnect({
