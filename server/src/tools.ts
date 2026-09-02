@@ -598,7 +598,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // can grey out remote-restart for them.
       config_snapshot: z.object({
         model: z.string().max(200).optional().nullable(),
-        flags: z.record(z.unknown()).optional(),
+        flags: z.record(z.string(), z.unknown()).optional(),
         config_revision: z.number().int().min(0).optional(),
         config_update_capable: z.boolean().optional(),
         peer_reply_inbox_capable: z.literal(true).optional(),
@@ -2377,7 +2377,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       message: z.string().min(1).max(10000),
       severity: z.enum(["info", "success", "warning", "error"]).optional().default("info"),
       kind: z.string().min(1).max(80).optional().default("agent_message"),
-      meta: z.record(z.unknown()).optional(),
+      meta: z.record(z.string(), z.unknown()).optional(),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens; ntok stays bound to its network)."),
     },
@@ -2674,7 +2674,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       base_revision: z.number().int().min(0).describe("Current revision per the dashboard's last GET — 409 if hub's current revision differs."),
       patch: z.object({
         model: z.string().max(200).optional(),
-        flags: z.record(z.unknown()).optional(),
+        flags: z.record(z.string(), z.unknown()).optional(),
         // #260 P5 — channel enable/disable. Restart-tier field (agent-node
         // reads config.channels once at boot to fork per-channel workers,
         // so the swap takes effect via process restart). Not
@@ -2682,7 +2682,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // (network scope) only.
         //
         // Deliberately `z.array(z.unknown()).max(16)` (mirrors flags's
-        // `z.record(z.unknown())`): trust nothing at the wire boundary,
+        // `z.record(z.string(), z.unknown())`): trust nothing at the wire boundary,
         // narrow the same way `narrowChannelsPatch` narrows raw untrusted
         // JSON (typeof + allowlist + dedup + case-fold). A strict
         // `z.array(z.string())` would fail-fast on a single non-string
@@ -3477,7 +3477,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         name: z.string().min(1).max(64),
         runtime: z.string().min(1).max(64),
         model: z.string().min(1).max(100).optional().nullable(),
-        flags: z.record(z.unknown()).optional(),
+        flags: z.record(z.string(), z.unknown()).optional(),
         env_refs: z.array(z.string().max(64)).optional(),
         channels: z.array(z.unknown()).optional(),
       }),
