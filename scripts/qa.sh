@@ -357,7 +357,11 @@ if [[ $RUN_L0 -eq 1 ]]; then
       # call register() depend on a clean DB to avoid 'username already
       # taken' on rerun (auth-validate). Cleared by removing before each run.
       rm -f /tmp/qa-l0-$name.db
-      if (cd server && COMMHUB_DB=/tmp/qa-l0-$name.db bun test "${path#server/}" \
+      # 按路径首段进对应的包目录跑(server / agent-node / agent-network):bun test
+      # 只在当前包里找文件,从 server/ 里传一个 agent-node/... 路径会被当成
+      # 过滤器,匹配 0 个文件而报错(app#225 那条 L0 在 CI 首跑就是这么红的)。
+      pkg="${path%%/*}"
+      if (cd "$pkg" && COMMHUB_DB=/tmp/qa-l0-$name.db bun test "${path#$pkg/}" \
             >/tmp/qa-l0-$name.log 2>&1); then
         ok "L0 $name"
       else
