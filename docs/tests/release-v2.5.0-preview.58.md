@@ -27,6 +27,25 @@
 没升到 `.58` 的节点：桌面端会在 60 s 后显示「节点没有响应：可能离线，或它的
 agent-node 版本还不支持规则文件（需要 2.5.0-preview.58+）」，其它功能不受影响。
 
+## Install
+
+```bash
+npm i -g @sleep2agi/agent-node@2.5.0-preview.58
+```
+
+## Upgrade
+
+```bash
+npm i -g @sleep2agi/agent-node@2.5.0-preview.58
+# 🔴 门铃处理器在**长驻进程内** —— 换包对已经在跑的节点没有任何影响,必须重启:
+anet daemon restart <daemon>        # 需要 anet ≥ 2.3.0-preview.74
+# 早于 .74 的 anet 用两步:
+anet node stop <name> && anet node start <name>
+```
+
+升级并重启之后,桌面端节点详情的「节点规则」区块从「节点没有响应」变成能读到内容;
+没重启的节点表现和没升级一样(60 s timeout)。
+
 ## 证据
 
 - `tests/test1755-rules-file-e2e`（真 hub + 真 agent-node，Docker）：10/10，含离线 60 s timeout
