@@ -57,11 +57,14 @@ commhub_get_all_status()
 - **所有测试在 Docker 里跑**：不碰本地环境，不改生产
 - **测试可以自己跑**（早期"测试1-3号"分工已撤销；新增套件必须注册进 CI，见 check-test-suite-registration）
 - **发版一律走 GitHub Actions**（Vincent 2026-08-27 定：本机只开发不发包）：`release-gate (v0)` 发 preview，`promote to latest` 升 latest（要 owner ACK）
+  - 发 preview 前 `docs/tests/release-v<版本>.md` 必须有 `## Install` 和 `## Upgrade` 两段且 Install 段含 `@<版本>`（闸 3；09-02 只抄了上一版说明的上半就红了一次）。先 `git show origin/main:docs/tests/release-v<上一版>.md | grep '^## '` 把骨架抄全。
+  - `promote-latest` 的 `must_contain` 只能填**字符串字面量**（函数名会被 dist 压掉），且**不能含正则元字符**（闸 4 是 `grep -rq` 无 `-F`，`[rules-file]` 会被当字符集）；发前用闸原样命令在目标版和上一版各跑一次，两向都对再填。
+  - 生产 hub 换版本以**机器上的** `~/.local/bin/hub-daemon.sh` 判断当前版本；`.38 → .45` 这种多跳先在备用端口 + DB 副本旁路 boot（`deploy/hub/README.md` step 4）。
 - **对外发布一律从 main 分支出**（Vincent 2026-08-27 定）：npm 包、exe/安装包等所有对外产物必须由 main 分支构建发布；其他分支只做测试验证、只出测试性产物，不得对外发布。（当日教训：latest 曾被一次本地手工 `npm publish` 未带 `--tag preview` 顶上去——工作流 + main-only 双约束堵住这类事故）
 - **测试结果保存**：docs/tests/report-testN.txt
 - **每个测试套件独立 Dockerfile**：可并行构建和运行
 
-## 复核纪律（六条，前五条由 2026-08-18、第六条由 2026-08-27 的真实翻车催生）
+## 复核纪律（八条，前五条由 2026-08-18、第六条由 2026-08-27、第七第八条由 08-30 / 09-02 的真实翻车催生）
 
 下面六条**不是提醒，是真实翻车催生的**：前五条来自 2026-08-18 那一天（我各踩了两到三次），
 第六条来自 2026-08-27。它们的共同点：**命令全部成功、输出看起来完全合理，
@@ -290,9 +293,39 @@ grep -nE 'from "\./cli(\.|")'      # 模式要钉边界,别让 cli 命中 client
 一个"发现了事故"的测量不会有人去质疑它。**朝哪个方向错，不改变它是否需要验。**
 
 
+**⑧ 本地跑门，用 CI 那一行的命令和参数；填给闸的判据，用闸自己的命令量。**
+
+2026-09-02 一天四次，形状相同：**同一道门/同一个串，我这边绿，CI 红**。
+
+| 我跑的 | CI/闸跑的 | 结果 |
+|---|---|---|
+| `check-doc-symbol-pins.py`（无参） | `… . --doc-root docs-site` | 无参 rc=0；带参抓到 `logAudit` 行号 pin 漂了 |
+| `qa.sh --list` 里看见新条目 | `qa.sh --l0` 真跑 | L0 写死 `cd server`，agent-node 路径被当过滤器匹配 0 个文件 |
+| `check-hub-launcher-pin.py` 没跑 | CI 跑了 | `PINNED_SERVER_VERSION` 改了、启动器 `RUNTIME_DIR` 没跟 |
+| `grep -F '[rules-file] doorbell received'` 两向都对 | 闸 4 `grep -rq -- '<串>'`（**无 -F**） | `[rules-file]` 成字符集 ⇒ 0 命中 ⇒ promote 拒 |
+
+四次都不是判据错，是**我量的那条命令和门跑的那条不是同一条**。无参默认往往取「较小的集合」，
+输出格式逐字相同，读不出区别。
+
+```bash
+grep -rn '<脚本名>' .github/workflows/*.yml | grep run     # 先抄 CI 那一行,原样跑
+bash scripts/qa.sh --l0                                    # 登记完要真跑,看自己那条打 ✓,不是看 --list
+# must_contain:避开 [ ] ( ) . * + ? ^ $ | \ { },并用闸原样命令(不加 -F)在目标版和上一版各跑一次
+```
+
 ## 项目信息
 
 - 仓库：https://github.com/sleep2agi/agent-network
+- **通信团队维护的仓库与对外产物（2026-09-02 Vincent 问「写进 CLAUDE.md 了吗」—— 之前没写）**：
+
+  | 仓库 | 对外产物 | 发布方式 | 近 7 天合并 PR（09-02 量） |
+  |---|---|---|---|
+  | `sleep2agi/agent-network`（本仓） | npm `@sleep2agi/agent-network`(anet CLI) / `@sleep2agi/agent-node` / `@sleep2agi/commhub-server`；文档站 anet.sh（`docs-site/`） | `release-gate (v0)` 发 preview → `promote-latest` 升 latest（owner ACK）；anet.sh **不是**合 main 自动部署，要按 `docs/sop/methodology.md` 从 `docs-site/` 跑 `vercel deploy --prebuilt --prod --scope <vercel-team>` | 100 |
+  | `sleep2agi/agent-network-app` | 桌面端（Tauri，macOS `.dmg`/Windows `.exe`+`.msi`，自带更新） | `release-desktop-auto-update`（`commit` 必须 40 位 main sha；产物是 **draft** release，最后「发布 draft」在 GitHub 页面点） | 41 |
+  | `sleep2agi/agent-network-dashboard` | npm `@sleep2agi/agent-network-dashboard`（`anet hub dashboard` 用）；生产实例见下面「Dashboard 分三种」 | 该仓自己的发布流程 | 3 |
+
+  生产 hub（DEV 机 `127.0.0.1:9200`，pm2 `commhub-hub`）换版本照 `deploy/hub/README.md`「换版本」六步，
+  **以机器上的 `~/.local/bin/hub-daemon.sh` 为准判断当前版本**（09-02 实测：仓里写 preview44，机器跑的是 preview38）。
 - Dashboard：**分三种,别混**(这一层最容易判断错,见 `deploy/tunnel/README.md` 顶部的红字警告)
   1. **项目自营的生产实例**(权威):`公网 ─ Caddy :3000 / frpc :3100 → 127.0.0.1:3001`
      (Next.js,pm2 托管)。拓扑与运维见 `deploy/dashboard/README.md`、`deploy/tunnel/README.md`。
