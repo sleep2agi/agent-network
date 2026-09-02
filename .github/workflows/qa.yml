@@ -27,6 +27,7 @@ on:
       - 'docs/qa/**'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
@@ -203,6 +204,7 @@ on:
       - 'scripts/qa.sh'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
@@ -463,6 +465,27 @@ jobs:
 
       - name: Run complete agent-node unit domain
         run: docker run --rm anet-test725-agent-node-unit
+
+  test1755-rules-file-e2e:
+    # app#225 —— 节点规则文件(CLAUDE.md/AGENTS.md)端到端:真 hub + 真 agent-node
+    # 同镜像,桌面端同款 tools/call。验单测验不了的那几条(远端节点可用 / 文件落在
+    # 节点 cwd 且只多出那一个 / 离线 60s timeout / witnessed-red)。冷构建含两次
+    # bun install,不进 L1 的 5 分钟预算,独立 job(同 server unit 的形状)。
+    name: rules-file e2e (Docker, real hub + agent-node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact rules-file e2e image
+        run: |
+          docker build \
+            --build-arg TEST1755_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test1755-rules-file-e2e \
+            -f tests/test1755-rules-file-e2e/Dockerfile .
+
+      - name: Run rules-file e2e
+        run: docker run --rm anet-test1755-rules-file-e2e
 
   test-lib-meta:
     # tests/lib/ 下的共享 helper 各自带一份元测试。它们此前**一个都没被 CI 跑过** ——

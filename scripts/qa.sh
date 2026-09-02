@@ -53,6 +53,10 @@ L0_TESTS=(
   "observer-push:server/src/observer-push.test.ts"
   "avatar-validate:server/src/avatar-validate.test.ts"
   "rest-write-scope:server/src/rest-write-network-resolution.test.ts"
+  # app#225 —— 节点规则文件(CLAUDE.md/AGENTS.md)读写的安全边界:只依赖 node 内置模块,
+  # 无需 bun install,ms 级。hub 侧那半在 server/src/rules-file-transport.test.ts,
+  # 由 test798(server unit)按 find *.test.ts 自动收进去。
+  "rules-file:agent-node/src/runtime/rules-file.test.ts"
   # observer-avatar-http.test.ts 不进 L0：它启真 HTTP server，import 链需要
   # MCP SDK，而 CI 的 L0 层按设计不跑 bun install（ms 级零依赖预算）。
   # 它的 CI 归属是会安装依赖的层级；本地跑法见该文件头注释的门禁命令。
@@ -353,7 +357,11 @@ if [[ $RUN_L0 -eq 1 ]]; then
       # call register() depend on a clean DB to avoid 'username already
       # taken' on rerun (auth-validate). Cleared by removing before each run.
       rm -f /tmp/qa-l0-$name.db
-      if (cd server && COMMHUB_DB=/tmp/qa-l0-$name.db bun test "${path#server/}" \
+      # 按路径首段进对应的包目录跑(server / agent-node / agent-network):bun test
+      # 只在当前包里找文件,从 server/ 里传一个 agent-node/... 路径会被当成
+      # 过滤器,匹配 0 个文件而报错(app#225 那条 L0 在 CI 首跑就是这么红的)。
+      pkg="${path%%/*}"
+      if (cd "$pkg" && COMMHUB_DB=/tmp/qa-l0-$name.db bun test "${path#$pkg/}" \
             >/tmp/qa-l0-$name.log 2>&1); then
         ok "L0 $name"
       else

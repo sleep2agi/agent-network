@@ -83,6 +83,11 @@ CommHub Server 注册 **50 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 |------|------|
 | `get_config_update` | 节点拉取待应用的配置更新 |
 | `ack_config_update` | 节点回报配置更新结果 |
+| `read_node_rules_file` | 请节点回传其工作目录下的规则文件（claude → CLAUDE.md，其余 → AGENTS.md）；无路径参数，结果用 `get_rules_file_result` 轮询（app#225） |
+| `write_node_rules_file` | 请节点用 `content` 覆盖其规则文件；无路径参数，256 KB 上限（app#225） |
+| `get_rules_file_result` | 轮询规则文件请求结果：pending / in_progress / done / failed / timeout（60 s 无回应自动 timeout） |
+| `get_rules_file_request` | 节点拉取待处理的规则文件请求（网络 token + alias） |
+| `ack_rules_file_request` | 节点回报规则文件请求结果（读时带内容） |
 | `list_my_pending_create_requests` | daemon 在 SSE 重连后补偿拉取待处理建节点请求 |
 | `list_my_pending_lifecycle_requests` | daemon 在 SSE 重连后补偿拉取待处理停/删/启动请求 |
 | `get_create_request` | daemon 拉取待处理的建节点请求 |

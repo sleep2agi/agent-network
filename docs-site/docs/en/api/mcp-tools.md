@@ -86,6 +86,11 @@ against each other and a mismatch is rejected. You normally do not pass `network
 |------|------|
 | `get_config_update` | Node pulls its pending config update |
 | `ack_config_update` | Node reports the config-update outcome |
+| `read_node_rules_file` | Ask a node to send back the rules file in its working directory (claude → CLAUDE.md, others → AGENTS.md); no path argument, poll `get_rules_file_result` (app#225) |
+| `write_node_rules_file` | Ask a node to overwrite its rules file with `content`; no path argument, 256 KB cap (app#225) |
+| `get_rules_file_result` | Poll a rules-file request: pending / in_progress / done / failed / timeout (auto-timeout after 60 s of silence) |
+| `get_rules_file_request` | Node pulls its pending rules-file request (network token + alias) |
+| `ack_rules_file_request` | Node reports the outcome of a rules-file request (content included for reads) |
 | `list_my_pending_create_requests` | Daemon compensates after SSE reconnect by listing pending create-node requests |
 | `list_my_pending_lifecycle_requests` | Daemon compensates after SSE reconnect by listing pending stop/delete/start requests |
 | `get_create_request` | Daemon pulls a pending create-node request |
