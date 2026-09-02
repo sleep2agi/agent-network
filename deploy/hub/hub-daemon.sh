@@ -51,11 +51,6 @@ set -uo pipefail
 #   回滚目标 = runtime-v32-run-terminal-d5199bc9，目录仍在；hub-daemon 备份见 rollback-693-*
 # 2026-08-13 00:5x: runtime-v33 → runtime-v34-preview29(0.9.0-preview.29;含 #698 peer-reply 终结原任务、#697 model 注入)
 #   回滚目标 = runtime-v33-upload-bridge-17b8223f(0.9.0-preview.27),目录仍在
-# 2026-09-02: preview44 → preview45（跟随 PINNED_SERVER_VERSION；app#225 节点规则文件）
-#   内容 = #1755 五个规则文件工具(read/write_node_rules_file、get_rules_file_result、
-#          get/ack_rules_file_request) + 表 node_rules_requests(启动时 CREATE TABLE IF NOT EXISTS,
-#          无迁移) + 门铃 rules_file；另 #1687/#1651 UTC 时间解析、#1632 daemon 报错文案
-#   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准)
 # 2026-08-28: preview29 → preview34（对齐 PINNED_SERVER_VERSION）
 #   🔴 这一条不是一次真实的机器升级记录,是**把仓库这份对齐到仓库自己声明的版本**。
 #      在此之前仓库启动器写 preview29、PINNED_SERVER_VERSION 写 preview.34,
@@ -91,6 +86,11 @@ set -uo pipefail
 #   🔴 注意：上面的历史行只记到 preview37，而这一行改动前的值是 preview39 —— 
 #      preview37→39 那两跳没有留下记录。我不补写别人的历史（内容我不知道），
 #      在这里标出来，免得下一个人把这份历史当完整的读。
+# 2026-09-02: preview44 → preview45（跟随 PINNED_SERVER_VERSION；app#225 节点规则文件）
+#   内容 = #1755 五个规则文件工具(read/write_node_rules_file、get_rules_file_result、
+#          get/ack_rules_file_request) + 表 node_rules_requests(启动时 CREATE TABLE IF NOT EXISTS,
+#          无迁移) + 门铃 rules_file；另 #1687/#1651 UTC 时间解析、#1632 daemon 报错文案
+#   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准)
 RUNTIME_DIR="$HOME/.commhub/runtime-v34-preview45"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
 ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
