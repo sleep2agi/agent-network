@@ -31,6 +31,7 @@ import { StringDecoder } from "string_decoder";
 import { startGrokAttachServer, type GrokAttachServer } from "./attach";
 import { resolveGrokCommhubMcpCommand } from "../grok-build-cli-home";
 import { describeStuckPhase } from "./stuck-phase-alarm";
+import { describeStalledNetworkTurn } from "./stalled-network-turn";
 import { describeBlockedKey } from "./blocked-key-name";
 import {
   newGrokJsonlState,
@@ -1036,6 +1037,9 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   // moved on an actual phase change, so receiving a task while busy cannot
   // reset the clock that is supposed to reveal being stuck.
   private phaseSince = Date.now();
+  // #870 —— 超时后放弃回合要用的两个观测量。
+  private lastPtyOutputAt = Date.now();
+  private timedOutNetworkTask: { taskId: string; at: number; timeoutMs: number } | null = null;
   private logState: GrokJsonlState = newGrokJsonlState();
   private pty: GrokPtyLike | null = null;
   private activeTui: GrokTuiGeneration | null = null;
@@ -1557,6 +1561,12 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     return new Promise<GrokCopresenceThinkResult>((resolveTask, rejectTask) => {
       const timer = setTimeout(() => {
         this.pending.delete(opts.taskId);
+        // #870 —— 记下「这条正在网络回合里的任务超时了」;后面 reapStalledNetworkTurn 用它
+        //    决定要不要放弃那一轮。只记当前活动回合的那条,排队中的超时与此无关。
+        if (this.arbitration.phase === "network_turn" && this.arbitration.activeTurn?.owner === "network"
+          && this.arbitration.activeTurn.task.taskId === opts.taskId) {
+          this.timedOutNetworkTask = { taskId: opts.taskId, at: Date.now(), timeoutMs };
+        }
         // A queued timeout must never execute later. An already-active turn
         // cannot be cancelled safely: it may have side effects, so retain the
         // active boundary until its real turn_ended event arrives.
@@ -1724,6 +1734,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.activeTui = tui;
     pty.onData((data) => {
       if (this.activeTui !== tui || generation !== this.ptyGeneration || this.closing) return;
+      this.lastPtyOutputAt = Date.now();
       this.observeTuiReadiness(generation, data);
       this.attach?.broadcastOutput(data);
     });
@@ -2575,8 +2586,30 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     }
   }
 
+  /** #870 —— 有上限的等待 + PTY 安静观测,两者都满足才把卡住的网络回合拉回 idle。 */
+  private reapStalledNetworkTurn(): void {
+    const active = this.arbitration.phase === "network_turn" && this.arbitration.activeTurn?.owner === "network"
+      ? this.arbitration.activeTurn.task.taskId : null;
+    const stalled = describeStalledNetworkTurn({
+      phase: this.arbitration.phase,
+      activeTaskId: active,
+      timedOutTaskId: this.timedOutNetworkTask?.taskId ?? null,
+      timedOutAt: this.timedOutNetworkTask?.at ?? null,
+      now: Date.now(),
+      taskTimeoutMs: this.timedOutNetworkTask?.timeoutMs ?? 0,
+      lastPtyOutputAt: this.lastPtyOutputAt,
+    });
+    if (!stalled || !active) return;
+    this.warn(`[grok-copresence] ${stalled}`);
+    unregisterOwnedNetworkTask(this.logState, active);
+    this.timedOutNetworkTask = null;
+    const result = this.transition({ type: "network_turn_abandoned", taskId: active });
+    if (result.accepted) setImmediate(() => this.replayDeferredHumanOrSchedule());
+  }
+
   private pollLogs(): void {
     if (this.closing) return;
+    this.reapStalledNetworkTurn();
     try {
       // Always consume chat first. If events wins a filesystem flush race,
       // the reducer retains pending completion until the next assistant line.
@@ -3098,7 +3131,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     } else if (result.accepted && event.type === "human_input_submitted") {
       this.activeTurnTerminalEventSeen = false;
     }
-    if (result.accepted && event.type === "turn_completed") this.clearApprovalCorrelation(true);
+    if (result.accepted && (event.type === "turn_completed" || event.type === "network_turn_abandoned")) {
+      this.clearApprovalCorrelation(true);
+      if (event.type === "turn_completed") this.timedOutNetworkTask = null;
+    }
     if (result.accepted) this.broadcastState();
     return result;
   }

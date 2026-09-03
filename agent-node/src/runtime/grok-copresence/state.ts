@@ -56,6 +56,8 @@ export type GrokCopresenceEvent =
   | { type: "human_input_cancelled" }
   | { type: "schedule_network" }
   | { type: "turn_completed"; owner: GrokCopresenceTurnOwner }
+  /** #870 —— 超时后 turn_ended 迟迟不来且 PTY 安静:显式放弃那一轮(只对同一个 taskId 生效)。 */
+  | { type: "network_turn_abandoned"; taskId: string }
   | { type: "disconnected" }
   | { type: "reconnected" }
   | { type: "approval_requested" }
@@ -65,6 +67,7 @@ export type GrokCopresenceEvent =
 export type GrokCopresenceEffect =
   | { type: "inject_network_task"; task: GrokCopresenceNetworkTask }
   | { type: "network_turn_completed"; task: GrokCopresenceNetworkTask }
+  | { type: "network_turn_abandoned"; task: GrokCopresenceNetworkTask }
   | { type: "human_turn_completed" };
 
 export interface GrokCopresenceTransition {
@@ -165,6 +168,18 @@ export function reduceGrokCopresenceState(
         state,
         { phase: "idle", activeTurn: null, waitingHuman: false },
         [{ type: "network_turn_completed", task }],
+      );
+    }
+
+    case "network_turn_abandoned": {
+      // 只在「网络回合仍是这条任务」时放行:换了一轮、或已经 idle,都不动。
+      if (state.phase !== "network_turn" || state.activeTurn?.owner !== "network") return ignored(state);
+      if (state.activeTurn.task.taskId !== event.taskId) return ignored(state);
+      const task = copyTask(state.activeTurn.task);
+      return changed(
+        state,
+        { phase: "idle", activeTurn: null, waitingHuman: false },
+        [{ type: "network_turn_abandoned", task }],
       );
     }
 
