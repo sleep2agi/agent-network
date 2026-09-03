@@ -1058,6 +1058,8 @@ async function startGrokCopresenceOrchestration(
     for (const line of diag.lines) console.error(line);
     process.exit(1);
   }
+  // #1768 —— 能跑但少内核层保证的平台(darwin/win32):说一句,不拦。
+  for (const line of diag.notices) console.error(line);
   const attachSocket: string = profile.grokAttachSocket;
 
   // One preflight naming every gap, not one exit per gap — same contract the

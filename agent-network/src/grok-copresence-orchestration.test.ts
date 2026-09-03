@@ -71,19 +71,37 @@ describe("grok co-presence: diagnosis names every gap at once", () => {
 
   test("🔴 an unsupported platform is named up front, not after a full install", () => {
     // Measured on a real Mac mini: anet installed, agent-node installed, node
-    // created, started — and only then did agent-node refuse with
-    // "平台 darwin 尚未验证过共存所需的 PTY / IPC / 隔离原语". A one-command
-    // launcher that lets someone get that far has saved them nothing.
+    // created, started — and only then did agent-node refuse. A one-command
+    // launcher that lets someone get that far has saved them nothing. (#1768:
+    // darwin is no longer that platform — agent-node runs it with reduced
+    // guarantees — so the witness is a platform agent-node really refuses.)
     const d = diagnoseGrokCopresence({
-      runtime: "grok-build-cli", displayName: "mac", grokCopresence: true,
-      grokAttachSocket: "/run/a.sock", platform: "darwin",
+      runtime: "grok-build-cli", displayName: "bsd", grokCopresence: true,
+      grokAttachSocket: "/run/a.sock", platform: "freebsd",
     });
     expect(d.ok).toBe(false);
-    expect(d.lines.join("\n")).toContain("darwin");
+    expect(d.lines.join("\n")).toContain("freebsd");
+  });
+
+  test("#1768 darwin / win32 run with a non-blocking reduced-guarantee notice, not a refusal", () => {
+    for (const platform of ["darwin", "win32"] as const) {
+      const d = diagnoseGrokCopresence({
+        runtime: "grok-build-cli", displayName: "mac", grokCopresence: true,
+        grokAttachSocket: "/run/a.sock", platform,
+      });
+      expect(d.ok, platform).toBe(true);
+      expect(d.lines, platform).toEqual([]);
+      expect(d.notices.join("\n"), platform).toContain(`co-presence on ${platform} runs without kernel-enforced isolation`);
+    }
+    // linux: no notice at all — nothing was lost there.
+    const linux = diagnoseGrokCopresence({
+      runtime: "grok-build-cli", displayName: "box", grokCopresence: true, grokAttachSocket: "/run/a.sock", platform: "linux",
+    });
+    expect(linux.notices).toEqual([]);
   });
 
   test("the platform gate does not shadow the other gaps — both are reported", () => {
-    const d = diagnoseGrokCopresence({ runtime: "claude-code-cli", displayName: "mac", platform: "darwin" });
+    const d = diagnoseGrokCopresence({ runtime: "claude-code-cli", displayName: "bsd", platform: "freebsd" });
     expect(d.lines.filter((l) => l.includes("❌")).length).toBe(2);
   });
 
@@ -91,7 +109,7 @@ describe("grok co-presence: diagnosis names every gap at once", () => {
     const d = diagnoseGrokCopresence({
       runtime: "grok-build-cli", displayName: "戊", grokCopresence: true, grokAttachSocket: "/run/a.sock", platform: "linux",
     });
-    expect(d).toEqual({ ok: true, lines: [] });
+    expect(d).toEqual({ ok: true, lines: [], notices: [] });
   });
 });
 
