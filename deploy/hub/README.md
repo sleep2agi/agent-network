@@ -41,6 +41,23 @@ test "$(git hash-object deploy/hub/hub-daemon.sh)" = \
 bash -n "$HOME/.local/bin/hub-daemon.sh"
 ```
 
+### Bun 版本与 panic(#1769)
+
+- **事实**:2026-09-02 生产 hub 升到 commhub-server `.45` 后,Bun **1.3.14** 在 `uWS HttpContext::onClose`
+  连续 panic 三次(`Segmentation fault`,pm2 自动拉起,restart_time 10 → 13)。当晚 23:03 只换 bun 不换 hub:
+  `~/.commhub/hub.env` 追加 `BUN_BIN=<nvm node v24>/bin/bun`(**1.4.0**),`pm2 restart commhub-hub`
+  (不加 `--update-env`),之后再无重启。启动器 `_resolve_bun` 先看 `BUN_BIN`,再看 PATH。
+- **上面的 `BUN_VERSION=1.3.14` 是空机安装的钉**,生产实际跑的是 1.4.0。要不要把钉改成 1.4.0,
+  按下面的判据 24 h 干净之后再改(单独一个 PR,改这一行 + 记录时间)。
+- **稳定性判据只认两个数**,不要数错误日志里的 panic 行(pm2 日志会轮转,2026-09-03 复核时那份日志已经找不到了):
+
+  ```bash
+  pm2 jlist | python3 -c "import json,sys,time;[print(a['name'],a['pm2_env']['status'],'restarts='+str(a['pm2_env'].get('restart_time',0)),'up_h=%.1f'%((time.time()*1000-a['pm2_env'].get('pm_uptime',0))/3.6e6)) for a in json.load(sys.stdin) if a['name']=='commhub-hub']"
+  # 判据:restart_time 不变 + up_h 单调增长;真跑的 bun 用 /proc/<pid>/exe 看,不看 `bun --version`
+  ```
+
+- **回滚**:删掉 hub.env 里的 `BUN_BIN` 行(或恢复 `hub.env.bak-bun1314-20260902-230319`)+ `pm2 restart commhub-hub`。
+
 ### secret 与数据不在 Git
 
 `$HOME/.commhub/hub.env` 必须是 owner-only（建议 `0600`），至少提供非空的
