@@ -65,6 +65,27 @@ describe("Grok co-presence arbitration", () => {
     expect(h.state.phase).toBe("network_turn");
   });
 
+  it("#870: network_turn_abandoned only releases the exact stuck turn, then the FIFO continues", () => {
+    const h = harness();
+    h.send({ type: "network_task_received", task: task("n1") });
+    h.send({ type: "network_task_received", task: task("n2") });
+    expect(h.send({ type: "schedule_network" }).effects).toEqual([{ type: "inject_network_task", task: task("n1") }]);
+    expect(h.state.phase).toBe("network_turn");
+    // 超时把 n1 的 promise 取消掉了,但状态机故意不回 idle(共享 TUI 可能还在跑)。
+    // 错的 taskId / 不在 network_turn 时都不能放行 —— 放弃的必须正是卡住的那一轮。
+    expect(h.send({ type: "network_turn_abandoned", taskId: "n2" })).toMatchObject({ accepted: false, effects: [] });
+    expect(h.state.phase).toBe("network_turn");
+    const abandoned = h.send({ type: "network_turn_abandoned", taskId: "n1" });
+    expect(abandoned.accepted).toBe(true);
+    expect(abandoned.effects).toEqual([{ type: "network_turn_abandoned", task: task("n1") }]);
+    expect(h.state).toMatchObject({ phase: "idle", activeTurn: null });
+    // 排在后面的 n2 现在能注入了 —— 这正是 #870 缺的那条出路。
+    expect(h.send({ type: "schedule_network" }).effects).toEqual([{ type: "inject_network_task", task: task("n2") }]);
+    // idle 时再来一次放弃是空操作。
+    h.send({ type: "turn_completed", owner: "network" });
+    expect(h.send({ type: "network_turn_abandoned", taskId: "n2" })).toMatchObject({ accepted: false, effects: [] });
+  });
+
   it("gives a newly active human composer priority over an existing FIFO", () => {
     const h = harness();
     h.send({ type: "network_task_received", task: task("n1") });
