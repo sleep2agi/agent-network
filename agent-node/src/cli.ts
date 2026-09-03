@@ -19,6 +19,7 @@ import {
 } from "./runtime/grok-copresence/platform";
 import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copresence/active-network-task-marker.js";
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
+import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
@@ -3037,6 +3038,9 @@ async function processWithCodex(
     // resume 会以 unknown variant 致命退出、表现为 300s 超时。只警告,不拦。
     for (const line of describeUnknownReasoningEfforts()) warn(line);
     if (SESSION_ID) {
+      // #1645 —— 线程有多大在 resume 前就写在 codex 的 rollout 文件里;太大的线程 resume 时
+      // 上游 compaction 常失败、表现为 300s 超时。这里先说一句,不拦。
+      for (const line of describeLargeCodexThreadBeforeResume(SESSION_ID)) warn(line);
       codexThread = codex.resumeThread(SESSION_ID, codexOpts);
       log(`codex resumed thread: ${SESSION_ID}`);
     } else {
