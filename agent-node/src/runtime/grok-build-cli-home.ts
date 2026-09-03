@@ -1162,7 +1162,8 @@ function validateCommhubMcpConfig(
       throw new Error(`grok-build-cli commhub MCP ${label} is invalid`);
     }
   }
-  return { command, serverPath, envFile, alias: config.alias, resumeId: config.resumeId };
+  // #1770 —— 这里是显式重建,不是 spread:新字段不写进来就会在此静默消失。
+  return { command, serverPath, envFile, alias: config.alias, resumeId: config.resumeId, activeTaskFile: config.activeTaskFile };
 }
 
 /**
