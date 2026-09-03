@@ -362,6 +362,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     return sql;
   };
 
+  /** #1548 —— 把一个还标着 blocked 的会话拉回 idle。只在「它刚发出终态回复 / 刚派了任务」这两个活性证据处调用。 */
+  const releaseBlockedSession = (alias: string | null | undefined, networkId: string | null | undefined): void => {
+    if (!alias) return;
+    const params: any[] = [alias];
+    let sql = "UPDATE sessions SET status = 'idle', updated_at = datetime('now') WHERE alias = ?1 AND status = 'blocked'";
+    sql = addScope(sql, params, networkId ?? null);
+    try {
+      db.run(sql, params);
+    } catch {
+      // 展示层的一次修正失败不能影响主路径。
+    }
+  };
+
   type ReadScope = { networkId?: string | null; networkIds?: string[] | null; denied?: string };
 
   // Delegates to the shared membership query (network-scope.ts) — was a
@@ -1598,6 +1611,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
         touchSql = addScope(touchSql, touchParams, effectiveNetId);
         db.run(touchSql, touchParams);
+        // #1548 —— 能派活的发送方不可能真的 blocked;此处出 blocked → idle。
+        releaseBlockedSession(from_session, effectiveNetId);
       });
       logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${targetAlias} (parent=${parentTaskId.slice(0,8)})` : `→ ${targetAlias}`);
       // Only stamp the dedup index after the inbox/tasks transaction
@@ -1938,6 +1953,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             throw new Error(`reply_atomic_cas_failed:${in_reply_to}`);
           }
           syncScheduledRunForTask(in_reply_to, effectiveNetId);
+          // #1548 —— 终态回复是最强的活性证据:一个还标着 blocked 的发送方在此回到 idle。
+          //   只出 blocked;working 可能真在忙别的任务,不碰。
+          releaseBlockedSession(from_session, effectiveNetId);
           return { ok: true as const, replyLogged: true };
         }
         return { ok: true as const, replyLogged: false };
