@@ -29,6 +29,7 @@ import {
   resolveGrokCommhubMcpCommand,
   canTrustGrokProjectCwd,
   isOverBroadGrokTrustTarget,
+  reclaimStaleProjectSandboxPlaceholders,
 } from "./grok-build-cli-home";
 import { assertGrokCopresenceAgentProfile } from "./grok-copresence/policy";
 
@@ -342,6 +343,54 @@ describe("prepareGrokCliHome", () => {
       denyPaths: [secretDir],
     })).toThrow("project executable configuration");
     expect(existsSync(resumedStateHome)).toBe(false);
+  });
+
+  it("#1767 a start after an interrupted stop admits the exact stale placeholders instead of refusing", () => {
+    // SIGTERM (or a tmux kill) before post-stop cleanup leaves the five 0-byte
+    // 0444 placeholders in the project; the next start used to refuse with
+    // "expected a real directory" and needed a human to delete them.
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-stale-placeholders-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateHome = join(root, "state");
+    const project = join(root, "project");
+    const secretDir = join(project, ".anet");
+    for (const directory of [sourceHome, stateHome, secretDir]) mkdirSync(directory, { recursive: true, mode: 0o700 });
+    for (const name of [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"]) {
+      writeFileSync(join(project, name), "", { mode: 0o444 });
+      chmodSync(join(project, name), 0o444);
+    }
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      projectCwd: project,
+      useLeader: true,
+      denyPaths: [secretDir],
+    })).not.toThrow();
+
+    // Reclaim (the runtime does this right after it holds the project turn lock):
+    // exactly the five pinned names go, an unknown 0444 file and a real dir stay.
+    const unknown = join(project, ".grok-future-placeholder");
+    writeFileSync(unknown, "", { mode: 0o444 });
+    chmodSync(unknown, 0o444);
+    expect(reclaimStaleProjectSandboxPlaceholders(project).sort()).toEqual([".claude", ".cursor", ".envrc", ".grok", ".mcp.json"]);
+    for (const name of [".grok", ".claude", ".cursor", ".mcp.json", ".envrc"]) {
+      expect(existsSync(join(project, name)), name).toBe(false);
+    }
+    expect(existsSync(unknown)).toBe(true);
+    expect(reclaimStaleProjectSandboxPlaceholders(project)).toEqual([]);
+
+    // A real regular file at one of those names is not a placeholder: still refused.
+    writeFileSync(join(project, ".envrc"), "export X=1\n", { mode: 0o644 });
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      projectCwd: project,
+      useLeader: true,
+      denyPaths: [secretDir],
+    })).toThrow("project executable configuration");
   });
 
   it("validates every exact project placeholder before unlinking any sibling", () => {

@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { createHash, randomBytes } from "crypto";
 import { spawn } from "child_process";
 import {
@@ -533,6 +534,35 @@ function openOwnedProjectDirectoryForPostStop(path: string): {
   }
 }
 
+/** #1767 —— 「本人留下的 0 字节 0444 单链接普通文件」这个精确形状,不抛异常的判断。 */
+function isExactProjectSandboxPlaceholderStat(stat: Stats, uid: number | undefined): boolean {
+  if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size !== 0) return false;
+  if (posixFileModes() && (stat.mode & 0o7777) !== 0o444) return false;
+  if (uid !== undefined && stat.uid !== uid) return false;
+  return true;
+}
+
+function isStaleProjectSandboxPlaceholder(path: string): boolean {
+  const stat = lstatIfPresent(path);
+  if (!stat) return false;
+  return isExactProjectSandboxPlaceholderStat(stat as Stats, process.getuid?.());
+}
+
+/**
+ * #1767 —— 上一次进程被 SIGTERM / tmux kill 打断在 post-stop 清理之前,项目里会留下
+ * 五个占位;下一次启动曾被它们拒绝(expected a real directory),要人手删。
+ * 这里只回收**精确占位形状**的那五个名字,走与 post-stop 同一条校验链
+ * (任一候选不是占位就整批拒绝,不做部分清理);其余文件一律不碰。
+ * 调用方必须已持有项目 turn lock(同一项目不可能有另一个活着的 TUI)。
+ */
+export function reclaimStaleProjectSandboxPlaceholders(projectCwd: string): string[] {
+  const present = GROK_POST_STOP_CLEANUP_POLICY.projectSandboxPlaceholders.basenames
+    .filter((name) => isStaleProjectSandboxPlaceholder(join(projectCwd, name)));
+  if (present.length === 0) return [];
+  removeExactProjectSandboxPlaceholders(resolve(projectCwd));
+  return [...present];
+}
+
 function assertExactProjectSandboxPlaceholder(
   path: string,
   stat: ReturnType<typeof lstatSync>,
@@ -1059,7 +1089,8 @@ export function assertNoProjectGrokExecutableSources(cwd: string, strictFolderTr
     // Grok process so they cannot be planted after this admission check.
     const grokDir = join(directory, ".grok");
     const grokStat = lstatIfPresent(grokDir);
-    if (grokStat && (grokStat.isSymbolicLink() || !grokStat.isDirectory())) {
+    // #1767 —— 上次没清掉的精确占位不是可执行来源;runtime 拿到 turn lock 后会回收它。
+    if (grokStat && (grokStat.isSymbolicLink() || !grokStat.isDirectory()) && !isStaleProjectSandboxPlaceholder(grokDir)) {
       throw new Error(
         `grok-build-cli refuses project policy state at ${grokDir}: expected a real directory`,
       );
@@ -1068,6 +1099,8 @@ export function assertNoProjectGrokExecutableSources(cwd: string, strictFolderTr
     // plugins are always refused, but other project compatibility state stays
     // governed by Grok's normal untrusted-folder behavior.
     for (const executableSource of [".grok/hooks", ".grok/plugins"]) {
+      // #1767 —— .grok 是上次留下的 0 字节占位时,它底下不可能有 hooks/plugins(lstat 会 ENOTDIR)。
+      if (grokStat && !grokStat.isDirectory() && isStaleProjectSandboxPlaceholder(grokDir)) break;
       const candidate = join(directory, executableSource);
       if (!lstatIfPresent(candidate)) continue;
       throw new Error(
@@ -1084,12 +1117,12 @@ export function assertNoProjectGrokExecutableSources(cwd: string, strictFolderTr
     for (const policyDirectory of [".grok", ".claude", ".cursor"]) {
       const candidate = join(directory, policyDirectory);
       const stat = lstatIfPresent(candidate);
-      if (stat && (stat.isSymbolicLink() || !stat.isDirectory())) {
+      if (stat && (stat.isSymbolicLink() || !stat.isDirectory()) && !isStaleProjectSandboxPlaceholder(candidate)) {
         throw new Error(
           `grok-build-cli refuses project policy state at ${candidate}: expected a real directory`,
         );
       }
-      if (stat && readdirSync(candidate).length !== 0) {
+      if (stat && stat.isDirectory() && readdirSync(candidate).length !== 0) {
         throw new Error(
           `grok-build-cli refuses project executable configuration at ${candidate}: `
           + "shared-TUI folder trust requires an empty project extension directory",
@@ -1099,6 +1132,7 @@ export function assertNoProjectGrokExecutableSources(cwd: string, strictFolderTr
     for (const source of [".mcp.json", ".envrc"]) {
       const candidate = join(directory, source);
       if (!lstatIfPresent(candidate)) continue;
+      if (isStaleProjectSandboxPlaceholder(candidate)) continue; // #1767
       throw new Error(
         `grok-build-cli refuses project executable configuration at ${candidate}: `
         + "folder trust would activate code outside the model tool sandbox",
