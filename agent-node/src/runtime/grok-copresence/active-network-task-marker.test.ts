@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ACTIVE_NETWORK_TASK_FILE,
   activeNetworkTaskMarkerPath,
+  activeNetworkTaskMarkerPathInCredentialDir,
   clearActiveNetworkTaskMarker,
   writeActiveNetworkTaskMarker,
 } from "./active-network-task-marker.js";
@@ -16,6 +17,16 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 describe("active network task marker", () => {
   test("path lives next to node-server's .env under <cwd>/.anet", () => {
     expect(activeNetworkTaskMarkerPath("/work/p")).toBe(join("/work/p", ".anet", ACTIVE_NETWORK_TASK_FILE));
+  });
+  test("#1770 the credential-dir path matches prepareGrokCliHome's credentialDir layout", () => {
+    expect(activeNetworkTaskMarkerPathInCredentialDir("/home/u", "node-abc")).toBe(join("/home/u", ".anet-grok-credentials", "node-abc", ACTIVE_NETWORK_TASK_FILE));
+  });
+  test("#1770 cli.ts hands the SAME path to the mcp env (reader) and the runtime (writer)", () => {
+    // 真机第二次探针:mcp env 有路径、runtime 没拿到 activeNetworkTaskMarkerPath,标记从未写出。
+    const cli = readFileSync(join(import.meta.dir, "..", "..", "cli.ts"), "utf8");
+    expect(cli).toContain("activeTaskFile: activeNetworkTaskMarker,");
+    expect(cli).toContain("activeNetworkTaskMarkerPath: activeNetworkTaskMarker,");
+    expect(cli).not.toContain("activeNetworkTaskMarkerPath(grokCwd)");
   });
   test("write creates the directory, is 0600 and round-trips the three fields", () => {
     const path = activeNetworkTaskMarkerPath(dir);

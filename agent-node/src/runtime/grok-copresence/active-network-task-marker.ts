@@ -21,6 +21,15 @@ export function activeNetworkTaskMarkerPath(projectCwd: string): string {
   return join(projectCwd, ".anet", ACTIVE_NETWORK_TASK_FILE);
 }
 
+/**
+ * 真机(#1770 评论)证明项目 .anet/ 不是好位置:它对沙箱里的 grok 及其子进程 node-server 是 deny 的,
+ * 读方永远读不到。node-server 已经在读 `<home>/.anet-grok-credentials/<key>/.env`,标记放同一目录。
+ * 这里的拼法必须与 grok-build-cli-home.ts 里 credentialDir 的拼法一致(dirname(stateRoot) + basename(stateHome))。
+ */
+export function activeNetworkTaskMarkerPathInCredentialDir(home: string, grokHomeKey: string): string {
+  return join(home, ".anet-grok-credentials", grokHomeKey, ACTIVE_NETWORK_TASK_FILE);
+}
+
 /** 原子写(tmp + rename),0600;目录不存在就建(0700)。 */
 export function writeActiveNetworkTaskMarker(path: string, marker: ActiveNetworkTaskMarker): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });

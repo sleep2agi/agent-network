@@ -17,7 +17,7 @@ import {
   assertCopresenceSupported as assertGrokCopresenceSupported,
   copresenceDowngradeNotice as grokCopresenceDowngradeNotice,
 } from "./runtime/grok-copresence/platform";
-import { activeNetworkTaskMarkerPath } from "./runtime/grok-copresence/active-network-task-marker.js";
+import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copresence/active-network-task-marker.js";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
@@ -4022,6 +4022,11 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     const grokHomeKey = grokCliStateKey(NODE_ID || ALIAS || "default");
     const stateGrokRoot = join(home, ".anet-grok");
     const stateGrokHome = join(stateGrokRoot, grokHomeKey);
+    // #1770 —— 当前网络任务标记。放在 node-server 已经在读 .env 的那个凭据目录里
+    // (prepareGrokCliHome 的 credentialDir = <home>/.anet-grok-credentials/<key>),
+    // 而不是项目 .anet/:后者对沙箱里的 grok(及其子进程 node-server)是 deny 的。
+    // 同一个路径同时交给 mcp env(读方)和 runtime(写方);两边不一致就等于没接。
+    const activeNetworkTaskMarker = activeNetworkTaskMarkerPathInCredentialDir(home, grokHomeKey);
     const commhubMcpServer = resolve(grokCwd, ".anet", "node-server.js");
     const commhubMcpEnv = resolve(grokCwd, ".anet", ".env");
     const runtimeDir = join(stateGrokHome, "run");
@@ -4060,7 +4065,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
           envFile: commhubMcpEnv,
           alias: currentAlias(),
           resumeId: `grok-cli-${NODE_ID || grokHomeKey}`,
-          activeTaskFile: activeNetworkTaskMarkerPath(grokCwd),
+          activeTaskFile: activeNetworkTaskMarker,
         },
         denyPaths: grokCliDenyPaths({
           projectCwd: grokCwd,
@@ -4196,6 +4201,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
     }
     const session = await openGrokCopresenceRuntime({
       binary: grokBinary,
+      activeNetworkTaskMarkerPath: activeNetworkTaskMarker,
       cwd: grokCwd,
       grokHome: grokCliHome.home,
       // 1.0.5 移除了 --no-memory / --no-auto-update 且硬拒未知 flag，
