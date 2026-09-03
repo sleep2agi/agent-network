@@ -39,6 +39,9 @@ export const GROK_COPRESENCE_CHILD_ENV = "ANET_COPRESENCE_BRIDGE";
 export interface GrokCopresenceDiagnosis {
   readonly ok: boolean;
   readonly lines: readonly string[];
+  /** #1768 —— 非阻断提示:平台能跑,但 agent-node 的能力表说它少了内核层保证。
+   *  ok=true 时也可能非空;调用方打印它,不退出。 */
+  readonly notices: readonly string[];
 }
 
 /** One block naming every reason this node cannot run the shared TUI, not one
@@ -55,7 +58,13 @@ export interface GrokCopresenceDiagnosis {
  *  create the node, start it — and only then find out the platform is refused.
  *  A one-command launcher that lets someone get that far has not saved them
  *  anything, so say it in the same breath as every other gap. */
-export const GROK_COPRESENCE_PLATFORMS: readonly NodeJS.Platform[] = ["linux"];
+// #1768 —— 这张表必须和 agent-node `copresenceCapabilities(platform).supported` 一致
+// (grok-copresence-platform-pin.test.ts 直接读那份源码核对)。原来只写 linux,
+// 而 agent-node 早已按 darwin/win32 的能力表起共存,于是 Mac 上跑了三天的节点
+// 升级 anet 后下次重启被 CLI 拒,文案还把拒绝归到 agent-node 头上。
+export const GROK_COPRESENCE_PLATFORMS: readonly NodeJS.Platform[] = ["linux", "darwin", "win32"];
+/** 能跑但没有内核层强制的平台 —— agent-node 启动时逐条打印 reducedGuarantees,这里只提前说一句。 */
+export const GROK_COPRESENCE_REDUCED_GUARANTEE_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "win32"];
 
 export function diagnoseGrokCopresence(input: {
   runtime: string;
@@ -65,11 +74,14 @@ export function diagnoseGrokCopresence(input: {
   platform?: NodeJS.Platform;
 }): GrokCopresenceDiagnosis {
   const lines: string[] = [];
+  const notices: string[] = [];
   const platform = input.platform ?? process.platform;
   if (!GROK_COPRESENCE_PLATFORMS.includes(platform)) {
-    lines.push(`[anet] ❌ grok co-presence does not run on ${platform} — the PTY / IPC / isolation primitives it needs are unvalidated there.`);
-    lines.push(`[anet]    agent-node refuses this at startup; nothing on this machine can change that.`);
+    lines.push(`[anet] ❌ grok co-presence does not run on ${platform} — agent-node's capability table has not validated the PTY / IPC / isolation primitives there.`);
     lines.push(`[anet]    Supported today: ${GROK_COPRESENCE_PLATFORMS.join(", ")}.`);
+  } else if (GROK_COPRESENCE_REDUCED_GUARANTEE_PLATFORMS.includes(platform)) {
+    notices.push(`[anet] ⚠ grok co-presence on ${platform} runs without kernel-enforced isolation (no per-turn user namespace, no /proc checks; the isolated HOME does not hide vendor skills).`);
+    notices.push(`[anet]    agent-node prints the exact reduced guarantees at startup. Use it only for trusted tasks in trusted networks.`);
   }
   if (input.runtime !== "grok-build-cli") {
     lines.push(`[anet] ❌ grok --copresence requires runtime=grok-build-cli (node "${input.displayName}" is runtime=${input.runtime}).`);
@@ -84,7 +96,7 @@ export function diagnoseGrokCopresence(input: {
     lines.push(`[anet] ❌ node "${input.displayName}" has no grokAttachSocket in its config — refusing to guess the bridge identity.`);
     lines.push(`[anet]    Run \`anet doctor --fix\`, or recreate the node.`);
   }
-  return { ok: lines.length === 0, lines };
+  return { ok: lines.length === 0, lines, notices };
 }
 
 /** True when a plain `anet node start <name>` (no flag) should bring the shared
