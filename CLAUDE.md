@@ -62,6 +62,8 @@ commhub_get_all_status()
   - 生产 hub 换版本以**机器上的** `~/.local/bin/hub-daemon.sh` 判断当前版本；`.38 → .45` 这种多跳先在备用端口 + DB 副本旁路 boot（`deploy/hub/README.md` step 4）。
 - **对外发布一律从 main 分支出**（Vincent 2026-08-27 定）：npm 包、exe/安装包等所有对外产物必须由 main 分支构建发布；其他分支只做测试验证、只出测试性产物，不得对外发布。（当日教训：latest 曾被一次本地手工 `npm publish` 未带 `--tag preview` 顶上去——工作流 + main-only 双约束堵住这类事故）
 - **测试结果保存**：docs/tests/report-testN.txt
+- **发 agent-node 或改 PINNED_SERVER_VERSION 的同一天必须发 agent-network preview**（2026-09-03 量出来的）：`published-artifact-drift` 的 `published-pins` 每天拿 main 的 `PAIRED_AGENT_NODE_VERSION` / `PINNED_SERVER_VERSION` 比 npm preview 的 anet 产物，钉动了 anet 没发就连红（当天 agent-node 四版只发了两版 anet，门红 3 天）。pin-only 的 bump 也要写 Install/Upgrade，promote 判据用 `2.5.0-preview.NN` / `commhub-server@…` 这类字面量。
+- **改 `server/src/tools.ts` / `agent-node/src/cli.ts` 加行后，doc-symbol-pins 两种参数都跑**（`python3 scripts/check-doc-symbol-pins.py .` 与 `… . --doc-root docs-site` 是两个 workflow，各管 docs/ 与 docs-site/）；`--fix` 只修"恰好一处定义"的 pin，`send_reply` 这种 12 处的它明说不替你判断——手工钉到**注册行**（`grep -n '^\s*"send_reply",$'`），别钉注释或 console.log。
 - **每个测试套件独立 Dockerfile**：可并行构建和运行
 
 ## 复核纪律（八条，前五条由 2026-08-18、第六条由 2026-08-27、第七第八条由 08-30 / 09-02 的真实翻车催生）
