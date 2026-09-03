@@ -17,7 +17,7 @@ import {
 } from "fs";
 import { PassThrough } from "stream";
 import { createConnection, type Socket } from "net";
-import { mkdtempSync, readFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { basename, join, resolve } from "path";
 import { describe, expect, test } from "bun:test";
@@ -1657,6 +1657,42 @@ describe("Grok copresence runtime integration", () => {
       expect(internals.ownedAnyTuiGeneration).toBe(true);
       expect(internals.pendingTuiProcessIds.size).toBe(0);
       for (const path of footprint.removedPaths) expect(existsSync(path), path).toBe(false);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 10_000);
+
+  test("#1770 writes the active network task marker on injection and clears it when the turn ends", async () => {
+    const fixture = new RuntimeFixture();
+    const markerPath = join(fixture.cwd, ".anet", ".active-network-task.json");
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await openGrokCopresenceRuntime({
+        ...fixture.options(),
+        activeNetworkTaskMarkerPath: markerPath,
+      });
+      expect(existsSync(markerPath)).toBe(false);
+      const consumed: string[] = [];
+      const pending = runtime.submit({
+        taskId: "marker-1",
+        from: "通信龙",
+        text: "HOLD_OPEN",
+        timeoutMs: 4_000,
+        onConsumed: () => consumed.push("consumed"),
+      });
+      await waitFor(() => consumed.length === 1);
+      // 回合进行中:node-server 据此把模型对「通信龙」的 send_task/send_message 改写成进度上报。
+      const marker = JSON.parse(readFileSync(markerPath, "utf8")) as { taskId: string; from: string; startedAt: number };
+      expect(marker.taskId).toBe("marker-1");
+      expect(marker.from).toBe("通信龙");
+      expect(typeof marker.startedAt).toBe("number");
+
+      const sessionDir = grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION);
+      appendJson(join(sessionDir, "chat_history.jsonl"), { type: "assistant", content: "FINAL marker-1" });
+      appendJson(join(sessionDir, "events.jsonl"), { type: "turn_ended", outcome: "completed" });
+      expect((await pending).replyText).toBe("FINAL marker-1");
+      await waitFor(() => !existsSync(markerPath));
     } finally {
       await runtime?.close();
       await fixture.close();
