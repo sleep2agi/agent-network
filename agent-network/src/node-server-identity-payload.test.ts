@@ -57,6 +57,8 @@ describe("node-server 的身份载荷(三处)", () => {
     // 三处身份载荷少任何一处,那条路径上的节点在 Dashboard 就只剩「在线」。
     for (const b of blocks) expect(b).toContain("host: getHostTelemetry()");
     for (const b of blocks) expect(b).toContain("process_telemetry: getProcessTelemetry()");
+    // #171 —— 配置里的 model 报给 hub(claude-code 族此前 0/38 有 model)。
+    for (const b of blocks) expect(b).toContain("model: NODE_MODEL");
   });
 
   it("🔴 三处都带 config_path —— 加第四处注册点时漏了会红", () => {
