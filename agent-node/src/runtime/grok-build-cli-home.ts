@@ -52,6 +52,8 @@ export interface GrokCommhubMcpConfig {
   envFile: string;
   alias: string;
   resumeId: string;
+  /** #1770 —— 运行时写的当前网络任务标记;交给 node-server 做出站去重。 */
+  activeTaskFile?: string;
 }
 
 /**
@@ -1589,7 +1591,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
       "[mcp_servers.commhub]",
       `command = ${JSON.stringify(commhubMcp.command)}`,
       `args = [${JSON.stringify(commhubMcp.serverPath)}]`,
-      `env = { ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubMcp.envFile)}, ANET_COMMHUB_MODE = "outbound-only", COMMHUB_ALIAS = ${JSON.stringify(commhubMcp.alias)}, COMMHUB_RESUME_ID = ${JSON.stringify(commhubMcp.resumeId)} }`,
+      `env = { ANET_COMMHUB_ENV_FILE = ${JSON.stringify(commhubMcp.envFile)}, ANET_COMMHUB_MODE = "outbound-only", ${commhubMcp.activeTaskFile ? `ANET_ACTIVE_NETWORK_TASK_FILE = ${JSON.stringify(commhubMcp.activeTaskFile)}, ` : ""}COMMHUB_ALIAS = ${JSON.stringify(commhubMcp.alias)}, COMMHUB_RESUME_ID = ${JSON.stringify(commhubMcp.resumeId)} }`,
       "enabled = true",
       "",
     ] : []),

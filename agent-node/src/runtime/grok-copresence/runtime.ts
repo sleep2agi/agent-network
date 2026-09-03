@@ -28,6 +28,7 @@ import {
 import { createServer as createNetServer } from "node:net";
 import { setTimeout as delay } from "timers/promises";
 import { StringDecoder } from "string_decoder";
+import { clearActiveNetworkTaskMarker, writeActiveNetworkTaskMarker } from "./active-network-task-marker.js";
 import { startGrokAttachServer, type GrokAttachServer } from "./attach";
 import { resolveGrokCommhubMcpCommand } from "../grok-build-cli-home";
 import { describeStuckPhase } from "./stuck-phase-alarm";
@@ -242,6 +243,9 @@ export type GrokPtySpawn = (
 ) => GrokPtyLike | Promise<GrokPtyLike>;
 
 export interface GrokCopresenceOpenOptions {
+  /** #1770 —— 有值时,注入网络任务写 `{taskId, from, startedAt}` 到这里,回合结束删掉;
+   *  node-server(outbound-only)据此把模型对发起方的重复出站改写成进度上报。 */
+  activeNetworkTaskMarkerPath?: string;
   /** 观测到的 `grok --version` 原文，用于按 build 决定 argv 里的旧开关。 */
   grokVersion?: string;
   binary?: string;
@@ -2567,6 +2571,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           from: effect.task.from,
           taskId: effect.task.taskId,
         });
+        this.writeActiveNetworkTaskMarker(effect.task);
         this.pty.write(formatNetworkTuiInput(effect.task));
         const pending = this.pending.get(effect.task.taskId);
         if (pending && !pending.submitted) {
@@ -3156,9 +3161,31 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     if (result.accepted && (event.type === "turn_completed" || event.type === "network_turn_abandoned")) {
       this.clearApprovalCorrelation(true);
       if (event.type === "turn_completed") this.timedOutNetworkTask = null;
+      if (event.type === "network_turn_abandoned" || event.owner === "network") this.clearActiveNetworkTaskMarker();
     }
     if (result.accepted) this.broadcastState();
     return result;
+  }
+
+  // #1770 —— 标记文件的读写失败不能影响回合本身:写不下去只少了一层去重,回合照跑。
+  private writeActiveNetworkTaskMarker(task: { taskId: string; from: string }): void {
+    const path = this.opts.activeNetworkTaskMarkerPath;
+    if (!path) return;
+    try {
+      writeActiveNetworkTaskMarker(path, { taskId: task.taskId, from: task.from, startedAt: Date.now() });
+    } catch (error) {
+      this.warn(`[grok-copresence] could not write active network task marker: ${errorMessage(error)}`);
+    }
+  }
+
+  private clearActiveNetworkTaskMarker(): void {
+    const path = this.opts.activeNetworkTaskMarkerPath;
+    if (!path) return;
+    try {
+      clearActiveNetworkTaskMarker(path);
+    } catch (error) {
+      this.warn(`[grok-copresence] could not clear active network task marker: ${errorMessage(error)}`);
+    }
   }
 
   private clearApprovalCorrelation(_clearSettled = false): void {

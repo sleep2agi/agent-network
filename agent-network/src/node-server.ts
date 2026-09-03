@@ -103,6 +103,7 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { decideReplyAlias, replyAliasArgs } from "./reply-originator.js";
+import { clampOutboundPriority, decideOutboundRewrite, parseActiveNetworkTask } from "./active-network-task.js";
 
 // ── Load ~/.anet/config.json for token fallback ──────
 function loadAnetConfig(): Record<string, string> {
@@ -149,6 +150,36 @@ const AUTH_TOKEN = process.env.COMMHUB_TOKEN || ANET_CONFIG.token || "";
 // registration/heartbeat/offline report. Keep the legacy full channel mode as
 // the default for Claude Code installations that launch this same artifact.
 const OUTBOUND_ONLY = process.env.ANET_COMMHUB_MODE === "outbound-only";
+// #1770 —— 运行时写的「当前网络任务」标记(仅共存/outbound-only 布局会给这个路径)。
+const ACTIVE_NETWORK_TASK_FILE = process.env.ANET_ACTIVE_NETWORK_TASK_FILE || "";
+function readActiveNetworkTask() {
+  if (!OUTBOUND_ONLY || !ACTIVE_NETWORK_TASK_FILE) return null;
+  let raw: string | null = null;
+  try {
+    raw = readFileSync(ACTIVE_NETWORK_TASK_FILE, "utf-8");
+  } catch {
+    return null;
+  }
+  return parseActiveNetworkTask(raw, Date.now());
+}
+// 改写成的是非终态进度(report_status),与 commhub_reply(status=in_progress) 同一条路:
+// 不推送、只入库;运行时随后的终态 reply 仍是唯一推到发起方的那条。
+async function reportProgressOfActiveTask(taskId: string, text: string) {
+  const result = await callCommHub("report_status", {
+    resume_id: RESUME_ID,
+    alias: ALIAS,
+    status: "working",
+    task: text.slice(0, 200),
+    output: text,
+  });
+  return {
+    ok: true,
+    rewritten: "progress_of_active_task",
+    task_id: taskId,
+    note: "recorded as progress of the task you are currently handling; the runtime sends the final reply — do not send it again",
+    upstream: result,
+  };
+}
 
 // #1345 — claude-code-cli nodes have no agent-node process, so this proxy is
 // the only place a per-alias node log can come from. Mirror every log line
@@ -442,7 +473,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
   }
 
   if (name === "commhub_send_task") {
-    const { alias, task, priority, attachments } = args as any;
+    const { alias, task, priority: rawPriority, attachments } = args as any;
+    const rewrite = decideOutboundRewrite("commhub_send_task", args as any, readActiveNetworkTask());
+    if (rewrite.kind === "progress_of_active_task") {
+      return { content: [{ type: "text", text: JSON.stringify(await reportProgressOfActiveTask(rewrite.taskId, rewrite.text)) }] };
+    }
+    const priority = clampOutboundPriority(rawPriority, OUTBOUND_ONLY);
     const parsedTaskAttachments = normalizeOutboundAttachments(attachments);
     if (!parsedTaskAttachments.ok) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: parsedTaskAttachments.error }) }] };
@@ -463,6 +499,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
 
   if (name === "commhub_send_message") {
     const { alias, message } = args as any;
+    const rewrite = decideOutboundRewrite("commhub_send_message", args as any, readActiveNetworkTask());
+    if (rewrite.kind === "progress_of_active_task") {
+      return { content: [{ type: "text", text: JSON.stringify(await reportProgressOfActiveTask(rewrite.taskId, rewrite.text)) }] };
+    }
     const result = await callCommHub("send_message", {
       alias,
       message,

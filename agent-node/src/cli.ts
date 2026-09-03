@@ -17,6 +17,7 @@ import {
   assertCopresenceSupported as assertGrokCopresenceSupported,
   copresenceDowngradeNotice as grokCopresenceDowngradeNotice,
 } from "./runtime/grok-copresence/platform";
+import { activeNetworkTaskMarkerPath } from "./runtime/grok-copresence/active-network-task-marker.js";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
@@ -4059,6 +4060,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
           envFile: commhubMcpEnv,
           alias: currentAlias(),
           resumeId: `grok-cli-${NODE_ID || grokHomeKey}`,
+          activeTaskFile: activeNetworkTaskMarkerPath(grokCwd),
         },
         denyPaths: grokCliDenyPaths({
           projectCwd: grokCwd,
