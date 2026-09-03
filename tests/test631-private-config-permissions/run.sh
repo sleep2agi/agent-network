@@ -29,7 +29,12 @@ grep -q 'atomicWritePrivateFile(dotenvPath, body)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateFile(anetEnvPath, envContent)' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(p);' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(path);' agent-network/bin/cli.ts
-test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 5
+test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 6
+# #1615 grok binary pin adds one config write (grokBinary + grokBinaryVersion). Same
+# private atomic choke point; the count alone would not prove the sixth write is the
+# pin, so bind it to the function the same way the Codex pending record is bound below.
+grep -A12 'function writebackGrokBinaryPin' agent-node/src/cli.ts \
+  | grep -q 'atomicWriteJson(configFilePath, cfg)'
 # Deferred Codex co-presence adds one token-preserving config write before the
 # exact thread is resumable. It must use the same private atomic choke point;
 # counting five alone would not prove that the new write is the pending record.

@@ -22,6 +22,7 @@ import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
 import { processRulesFileRequests } from "./runtime/rules-file";
+import { chooseGrokBinary, grokBinaryPinToRecord } from "./runtime/grok-binary-pin";
 
 // 🔴 这三处原先都喂 `__dirname`,而打包器把它内联成构建期常量 —— 见 #1433。
 // `resolveAgentNodeDir` 的注释里写着「运行时 thisModuleDir 是 .../agent-node/dist」,
@@ -928,6 +929,26 @@ function writebackSession(sessionId: string) {
     debug(`session 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
   } catch (e: any) {
     warn(`writebackSession failed: ${e.message}`);
+  }
+}
+
+// #1615 —— 把启动时真正通过校验的 grok 可执行文件(绝对路径 + 版本横幅)写回 config,
+// 下次 chooseGrokBinary 优先用它。裸名先按当时的 PATH 解析;解析不出就不记(不猜)。
+function writebackGrokBinaryPin(binary: string, versionLine: string, pathEnv: string | undefined) {
+  if (!configFilePath) return;
+  try {
+    const { resolveGrokCommhubMcpCommand } = require("./runtime/grok-build-cli-home");
+    const absolute = isAbsolute(binary) ? binary : resolveGrokCommhubMcpCommand(binary, String(pathEnv ?? process.env.PATH ?? ""));
+    const record = grokBinaryPinToRecord(absolute, versionLine);
+    if (!record) return;
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    if (cfg.grokBinary === record.grokBinary && cfg.grokBinaryVersion === record.grokBinaryVersion) return;
+    cfg.grokBinary = record.grokBinary;
+    cfg.grokBinaryVersion = record.grokBinaryVersion;
+    atomicWriteJson(configFilePath, cfg);
+    log(`[grok] pinned binary written back: ${record.grokBinary} (${record.grokBinaryVersion})`);
+  } catch (e: any) {
+    warn(`writebackGrokBinaryPin failed: ${e?.message || e}`);
   }
 }
 
@@ -3929,7 +3950,12 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       );
     }
 
-    const grokBinary = process.env.GROK_BINARY || "grok";
+    // #1615 —— 优先用 config 里上次启动钉住的绝对路径(GROK_BINARY 仍然最优先),
+    //    daemon 自动拉起 / anet daemon restart 这些没法带环境变量的路径上也能钉住版本。
+    const grokChoice = chooseGrokBinary({ env: process.env as { GROK_BINARY?: string }, config: fileConfig as any, existsSync });
+    if (grokChoice.warning) warn(`[grok-copresence] ${grokChoice.warning}`);
+    const grokBinary = grokChoice.binary;
+    log(`[grok-copresence] grok binary: ${grokBinary} (from ${grokChoice.source})`);
     // 🔴 2026-08-20：共存把 process.cwd() 整个交给 grok 的 folder trust，而那道闸
     //    拒绝 $HOME 与文件系统根；而 `anet node create` 的注册表是 cwd 相对的
     //    （agent-network/bin/cli.ts:145 nodesDir() = <cwd>/.anet/nodes）。
@@ -4076,6 +4102,8 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       assertGrokCliVersion(version);
       assertGrokCopresenceVersion(version);
       assertGrokCopresenceFeatures(help);
+      // #1615 —— 校验通过的这个文件就是下次要钉的:裸名先解析成绝对路径再记。
+      writebackGrokBinaryPin(grokBinary, version, initialRuntime.env.PATH);
     } catch (error: any) {
       throw new Error(
         `Grok CLI is missing or too old for co-presence (${error?.message || error}). `
@@ -4381,7 +4409,11 @@ async function processWithGrokCli(
     warn(`[grok-cli] image attachments are not wired into --prompt-json yet; sending text-only prompt`);
   }
 
-  const grokBinary = process.env.GROK_BINARY || "grok";
+  // #1615 —— 同共存路径:config 钉的绝对路径优先于 PATH 裸名(GROK_BINARY 最优先)。
+  const grokChoice = chooseGrokBinary({ env: process.env as { GROK_BINARY?: string }, config: fileConfig as any, existsSync });
+  if (grokChoice.warning) warn(`[grok-cli] ${grokChoice.warning}`);
+  const grokBinary = grokChoice.binary;
+  log(`[grok-cli] grok binary: ${grokBinary} (from ${grokChoice.source})`);
   // Unlike ACP, the CLI lane is a coding runtime: it must operate in the real
   // worktree so git metadata and atomic writes retain normal semantics.
   const grokCwd = process.cwd();
@@ -4484,6 +4516,8 @@ async function processWithGrokCli(
       });
       assertGrokCliVersion(version);
       assertGrokCliFeatures(help);
+      // #1615 —— 同共存路径:校验通过的这个文件写回 config 作为下次的钉。
+      writebackGrokBinaryPin(grokBinary, version, initialRuntime.env.PATH);
       validatedGrokCliBinary = grokBinary;
       debug(`[grok-cli] ${version}`);
     } catch (error: any) {
