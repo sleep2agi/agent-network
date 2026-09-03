@@ -104,6 +104,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { decideReplyAlias, replyAliasArgs } from "./reply-originator.js";
 import { clampOutboundPriority, decideOutboundRewrite, parseActiveNetworkTask } from "./active-network-task.js";
+import { getHostTelemetry } from "./host-telemetry.js";
+import { getProcessTelemetry } from "./process-telemetry.js";
 
 // ── Load ~/.anet/config.json for token fallback ──────
 function loadAnetConfig(): Record<string, string> {
@@ -562,6 +564,10 @@ async function reregister(): Promise<void> {
       agent: "claude-code",
       project_dir: process.cwd(),
       config_path: CONFIG_PATH,
+      // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
+      // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
+      host: getHostTelemetry(),
+      process_telemetry: getProcessTelemetry(),
       tmux_name: TMUX_NAME || undefined,
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
@@ -744,6 +750,10 @@ async function main() {
     agent: "claude-code",
     project_dir: process.cwd(),
     config_path: CONFIG_PATH,
+    // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
+    // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
+    host: getHostTelemetry(),
+    process_telemetry: getProcessTelemetry(),
     tmux_name: TMUX_NAME || undefined,
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
@@ -760,6 +770,10 @@ async function main() {
       agent: "claude-code",
       project_dir: process.cwd(),
       config_path: CONFIG_PATH,
+      // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
+      // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
+      host: getHostTelemetry(),
+      process_telemetry: getProcessTelemetry(),
       tmux_name: TMUX_NAME || undefined,
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
