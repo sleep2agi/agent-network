@@ -211,6 +211,18 @@ function nodeConfigPath(): string | undefined {
   }
 }
 const CONFIG_PATH = nodeConfigPath();
+// #171 —— claude-code 族在名册里 model 全空(在线 38/38):节点配置里 `anet node create --model X`
+// 写下的 `model` 从没被报给 hub。读一次配置,有就报;没有就照旧为空(不编一个默认值)。
+function nodeModelFromConfig(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  try {
+    const cfg = JSON.parse(readFileSync(path, "utf-8")) as { model?: unknown };
+    return typeof cfg.model === "string" && cfg.model.trim() ? cfg.model.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const NODE_MODEL = nodeModelFromConfig(CONFIG_PATH);
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
   const line = `[${ts}] [commhub] ${msg}`;
@@ -564,6 +576,7 @@ async function reregister(): Promise<void> {
       agent: "claude-code",
       project_dir: process.cwd(),
       config_path: CONFIG_PATH,
+      model: NODE_MODEL,
       // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
       // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
       host: getHostTelemetry(),
@@ -750,6 +763,7 @@ async function main() {
     agent: "claude-code",
     project_dir: process.cwd(),
     config_path: CONFIG_PATH,
+    model: NODE_MODEL,
     // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
     // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
     host: getHostTelemetry(),
@@ -770,6 +784,7 @@ async function main() {
       agent: "claude-code",
       project_dir: process.cwd(),
       config_path: CONFIG_PATH,
+      model: NODE_MODEL,
       // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
       // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
       host: getHostTelemetry(),
