@@ -1,3 +1,4 @@
+import { buildServeErrorResponse } from "./serve-error.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
@@ -786,6 +787,9 @@ return Bun.serve({
   // route. Default Bun ceiling is 128 MiB which is too permissive for
   // a hub now exposed to the public internet.
   maxRequestBodySize: MAX_REQUEST_CONTENT_LENGTH,
+  // #695 —— fetch 处理器抛出时不要让 Bun 回默认的非 JSON 500;带上异常 message,
+  //   /mcp 客户端按 JSON-RPC 读 error.message,REST 客户端按 { ok:false, message } 读。
+  error: (err) => buildServeErrorResponse(err),
 
   async fetch(req, server) {
     const url = new URL(req.url, `http://localhost:${PORT}`);
