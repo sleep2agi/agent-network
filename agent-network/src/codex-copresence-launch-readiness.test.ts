@@ -29,6 +29,18 @@ describe("Codex co-presence launch readiness", () => {
     }
   });
 
+  test("#849 POSIX app-server readiness probes the loopback port, not a pane string the binary never prints", () => {
+    const start = cli.indexOf("async function startCopresenceOrchestration(");
+    const end = cli.indexOf("\nasync function ", start + 1);
+    const body = cli.slice(start, end);
+    const appsrvProbe = body.indexOf("const bound = await waitForLoopbackPort(port, 25_000);");
+    const bridgeSpawn = body.indexOf("const bridgeReady = await waitForTmuxPaneText(");
+    expect(appsrvProbe).toBeGreaterThan(0);
+    expect(bridgeSpawn).toBeGreaterThan(appsrvProbe);
+    // strings -a <codex binary> | grep -c 'listening on: ' → 0 (#849 评论);等它等于等满超时。
+    expect(body).not.toContain("`listening on: ${wsUrl}`");
+  });
+
   test("POSIX waits for the shared bridge protocol boundary before creating the TUI", () => {
     const start = cli.indexOf("async function startCopresenceOrchestration(");
     const end = cli.indexOf("async function startOpencodeCopresenceOrchestration(", start);

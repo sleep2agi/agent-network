@@ -1448,7 +1448,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
   console.log(`[anet] ① app-server tmux=${appsrvSession} listening ${wsUrl} (sandbox=${sandboxMode})…`);
-  const bound = await waitForTmuxPaneText(appsrvSession, `listening on: ${wsUrl}`, 25_000);
+  // #849 —— 别等 pane 里出现「listening on: <url>」:钉住的 codex 原生二进制里根本没有这个
+  //   前缀(strings 取证 0 命中),于是每次都等满 25 s 判失败,而 app-server 1.1 s 就绑上了。
+  //   Windows 启动器早就按端口探(同文件 windowsManagedProcess 那段),POSIX 这里对齐。
+  const bound = await waitForLoopbackPort(port, 25_000);
   if (!bound) {
     console.error(`[anet] ❌ app-server did not bind ${wsUrl} within 25s.`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
