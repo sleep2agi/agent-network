@@ -32,6 +32,7 @@ import { startGrokAttachServer, type GrokAttachServer } from "./attach";
 import { resolveGrokCommhubMcpCommand } from "../grok-build-cli-home";
 import { describeStuckPhase } from "./stuck-phase-alarm";
 import { describeStalledNetworkTurn } from "./stalled-network-turn";
+import { describeAbandonedHumanEditing } from "./abandoned-human-editing";
 import { describeBlockedKey } from "./blocked-key-name";
 import {
   newGrokJsonlState,
@@ -1039,6 +1040,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
   private phaseSince = Date.now();
   // #870 —— 超时后放弃回合要用的两个观测量。
   private lastPtyOutputAt = Date.now();
+  // #880 —— 人最后一次按键的时刻;human_editing 里 10 分钟没按键且有任务在等就取消草稿。
+  private lastHumanInputAt = Date.now();
   private timedOutNetworkTask: { taskId: string; at: number; timeoutMs: number } | null = null;
   private logState: GrokJsonlState = newGrokJsonlState();
   private pty: GrokPtyLike | null = null;
@@ -2123,6 +2126,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private onHumanInput(data: Buffer): void {
     if (!data.length || this.closing) return;
+    this.lastHumanInputAt = Date.now();
     if (!this.pty) {
       this.deferHumanInput(data);
       return;
@@ -2607,9 +2611,27 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     if (result.accepted) setImmediate(() => this.replayDeferredHumanOrSchedule());
   }
 
+  /** #880 —— 人敲了字走开:安静 ≥10 分钟且有任务在等,替人按一下 Ctrl-C(和被拦截的斜杠输入同一条路)。 */
+  private reapAbandonedHumanEditing(): void {
+    if (!this.pty || this.recovering || this.closing) return;
+    const stale = describeAbandonedHumanEditing({
+      phase: this.arbitration.phase,
+      sinceLastHumanInputMs: Date.now() - this.lastHumanInputAt,
+      queued: this.arbitration.queue.length,
+    });
+    if (!stale) return;
+    this.warn(`[grok-copresence] ${stale}`);
+    this.writeHumanBytes(Buffer.from("\x03", "binary"));
+    this.resetHumanComposerAudit();
+    const result = this.transition({ type: "human_input_cancelled" });
+    this.lastHumanInputAt = Date.now();
+    if (result.accepted) setImmediate(() => this.replayDeferredHumanOrSchedule());
+  }
+
   private pollLogs(): void {
     if (this.closing) return;
     this.reapStalledNetworkTurn();
+    this.reapAbandonedHumanEditing();
     try {
       // Always consume chat first. If events wins a filesystem flush race,
       // the reducer retains pending completion until the next assistant line.
