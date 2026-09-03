@@ -1813,7 +1813,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
 // 去 `npm view` 核对,而 publish 要求四门全绿 —— 所以「本次要发的版本」不能提前
 // 写在这里,否则发它的那个 run 会被自己的 pin 卡死(鸡生蛋)。
 // 顺序:先发 commhub-server X → 再把这里改成 X 并发 agent-network。
-const PINNED_SERVER_VERSION = "0.9.0-preview.46";
+const PINNED_SERVER_VERSION = "0.9.0-preview.47";
 
 // Canonical SkillHub URL: https://anet.sh/skillhub/catalog.json currently
 // returns 307 to this www host. Pin the direct 200 URL so catalog fetch
