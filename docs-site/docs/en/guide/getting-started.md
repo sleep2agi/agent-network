@@ -6,7 +6,7 @@
      version being published against these stamps and blocks the release, listing every line to update.
      Change the prose, change the stamp — the gate also fails when the two disagree.
      Only "current state" claims are stamped; historical references (e.g. `<= 2.3.0-preview.37`) are not. -->
-<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.47 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.76 -->
 
 The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + one verification per step.
@@ -25,7 +25,7 @@ Skip this page and go to the [Upgrade Guide](/en/guide/upgrade) (usually `anet u
 
 - **Node.js ≥ 22.13.0**
 - **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun that step always fails**, but how depends on the channel:
-  · **builds that carry the preflight** (measured 2026-08-30: `latest` = `2.3.0-preview.47`, and `preview`): refused before launch with `❌ anet hub start requires the Bun runtime` (exit code 1);
+  · **builds that carry the preflight** (measured 2026-08-30 on `2.3.0-preview.47`; since 2026-09-02 both `latest` and `preview` are `2.3.0-preview.76`, and the preflight has been present since `.47`): refused before launch with `❌ anet hub start requires the Bun runtime` (exit code 1);
   · **older builds without it** (measured on `2.2.21`): a bare `Error: spawn bunx ENOENT` plus a Node stack trace.
   After installing, `bun --version` should print a version.
 
@@ -101,7 +101,7 @@ Measured 2026-08-27 (one `anet hub start` per version in a clean container, no `
 |---|---|
 | `2.3.0-preview.47` (`latest` at the time) | `anet-3ce2750defe04d9ab3baf0` — **random**, with a change-on-first-login notice |
 | `2.3.0-preview.49` (`preview` at the time) | `anet-7fe4eddb08f648dcbd7fcd` — **random**, same notice |
-| `2.3.0-preview.76` (current `preview`) | Also **random** — not re-measured per version: `server/src/auth.ts`, which generates it, has had **zero commits** since `.49` shipped (2026-08-27T02:25Z); the logic is byte-identical |
+| `2.3.0-preview.76` (current `latest` and `preview`) | Also **random** — not re-measured per version: `server/src/auth.ts`, which generates it, has had **zero commits** since `.49` shipped (2026-08-27T02:25Z); the logic is byte-identical |
 
 Neither run printed the literal `anethub` anywhere.
 

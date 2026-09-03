@@ -5,7 +5,7 @@
      同时变假。release gate 会拿正在发的版本和这两条戳比对,不一致就拦下发布并列出
      每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
      只标"现状"断言;讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
-<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.47 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.76 -->
 
 新用户首次跑通的最小路径——**5 步, 5 分钟**。每步一条命令 + 一句验证。
@@ -24,7 +24,7 @@
 
 - **Node.js ≥ 22.13.0**
 - **Bun ≥ 1.2.0** —— 装法 `npm i -g bun`（或 `curl -fsSL https://bun.sh/install | bash`）。第 2 步 `anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 时第 2 步一定失败**，但表现分两条线:
-  · **含 preflight 的构建**（2026-08-30 实测:`latest` = `2.3.0-preview.47`、以及 `preview`）:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`（退出码 1）；
+  · **含 preflight 的构建**（2026-08-30 在 `2.3.0-preview.47` 上实测；2026-09-02 起 `latest` 与 `preview` 都是 `2.3.0-preview.76`，preflight 自 `.47` 起一直在）:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`（退出码 1）；
   · **更早、不含 preflight 的构建**（实测 `2.2.21`）:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈。
   装完 `bun --version` 应有输出。
 
@@ -99,7 +99,7 @@ anet hub dashboard
 |---|---|
 | `2.3.0-preview.47`(当时的 `latest`) | `anet-3ce2750defe04d9ab3baf0` —— **随机串**,并提示首次登录后要改 |
 | `2.3.0-preview.49`(当时的 `preview`) | `anet-7fe4eddb08f648dcbd7fcd` —— **随机串**,同上 |
-| `2.3.0-preview.76`(当前 `preview`) | 同为**随机串** —— 未逐版本重测:生成密码的 `server/src/auth.ts` 自 `.49` 发布(2026-08-27T02:25Z)起**零提交**,逻辑逐字未变 |
+| `2.3.0-preview.76`(当前 `latest` 与 `preview`) | 同为**随机串** —— 未逐版本重测:生成密码的 `server/src/auth.ts` 自 `.49` 发布(2026-08-27T02:25Z)起**零提交**,逻辑逐字未变 |
 
 两次都没有出现字面量 `anethub`。
 
