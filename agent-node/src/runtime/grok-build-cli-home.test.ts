@@ -870,6 +870,22 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain(`ANET_COMMHUB_ENV_FILE = ${JSON.stringify(stagedEnv)}`);
     expect(config).toContain('ANET_COMMHUB_MODE = "outbound-only"');
     expect(readFileSync(stagedServer, "utf8")).toBe("// reviewed commhub MCP server\n");
+    // #1770 —— 运行时把当前网络任务标记的路径交给 node-server;这个字段曾在
+    // 「稳定化」那一步被重建成五个字段而丢掉(真机 config.toml 里没有它,
+    // 三重出站因此没被改写)。断言它逐字进 env。
+    const markerPath = join(root, "project", ".anet", ".active-network-task.json");
+    const withMarker = prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      denyPaths: [secretDir],
+      projectCwd: join(root, "project"),
+      useLeader: true,
+      commhubMcp: { ...commhubMcp, activeTaskFile: markerPath },
+    });
+    expect(withMarker).toBeDefined();
+    const configWithMarker = readFileSync(join(stateHome, "config.toml"), "utf8");
+    expect(configWithMarker).toContain(`ANET_ACTIVE_NETWORK_TASK_FILE = ${JSON.stringify(markerPath)}`);
     expect(readFileSync(stagedEnv, "utf8")).toBe("COMMHUB_TOKEN=ntok_test\n");
     expect(statSync(stagedServer).mode & 0o777).toBe(0o600);
     expect(statSync(stagedEnv).mode & 0o777).toBe(0o600);
