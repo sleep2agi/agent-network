@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { formatHubVersionDetail } from "./hub-version-skew";
 
 const HUB = "http://127.0.0.1:9200";
-const PIN = "0.9.0-preview.45";
+const PIN = "0.9.0-preview.46";
 
 describe("formatHubVersionDetail (#1595)", () => {
   test("一致时不多说一句", () => {
