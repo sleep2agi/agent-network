@@ -18,6 +18,7 @@ import {
   copresenceDowngradeNotice as grokCopresenceDowngradeNotice,
 } from "./runtime/grok-copresence/platform";
 import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copresence/active-network-task-marker.js";
+import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
@@ -3032,6 +3033,9 @@ async function processWithCodex(
       sandboxMode: (typeof cfgFlags.sandboxMode === "string" ? cfgFlags.sandboxMode : "danger-full-access") as any,
       modelReasoningEffort: "low" as const,
     };
+    // #1645 —— 起线程前看一眼 codex 自己的 models 缓存:上游给了本机不认识的档位,
+    // resume 会以 unknown variant 致命退出、表现为 300s 超时。只警告,不拦。
+    for (const line of describeUnknownReasoningEfforts()) warn(line);
     if (SESSION_ID) {
       codexThread = codex.resumeThread(SESSION_ID, codexOpts);
       log(`codex resumed thread: ${SESSION_ID}`);
