@@ -53,6 +53,10 @@ describe("node-server 的身份载荷(三处)", () => {
 
   it("三处都带 project_dir —— 这一格本来就有,当基准", () => {
     for (const b of blocks) expect(b).toContain("project_dir: process.cwd()");
+    // #1727 —— 六个监控字段(uptime/rss/cpu/load/disk/version 里的前五个)由这两把采集器产;
+    // 三处身份载荷少任何一处,那条路径上的节点在 Dashboard 就只剩「在线」。
+    for (const b of blocks) expect(b).toContain("host: getHostTelemetry()");
+    for (const b of blocks) expect(b).toContain("process_telemetry: getProcessTelemetry()");
   });
 
   it("🔴 三处都带 config_path —— 加第四处注册点时漏了会红", () => {
