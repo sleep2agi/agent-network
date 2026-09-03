@@ -30,7 +30,7 @@ import { setTimeout as delay } from "timers/promises";
 import { StringDecoder } from "string_decoder";
 import { clearActiveNetworkTaskMarker, writeActiveNetworkTaskMarker } from "./active-network-task-marker.js";
 import { startGrokAttachServer, type GrokAttachServer } from "./attach";
-import { resolveGrokCommhubMcpCommand } from "../grok-build-cli-home";
+import { reclaimStaleProjectSandboxPlaceholders, resolveGrokCommhubMcpCommand } from "../grok-build-cli-home";
 import { describeStuckPhase } from "./stuck-phase-alarm";
 import { describeStalledNetworkTurn } from "./stalled-network-turn";
 import { describeAbandonedHumanEditing } from "./abandoned-human-editing";
@@ -1414,6 +1414,14 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         flockBinary,
         this.opts.env,
       ));
+      // #1767 —— 锁到手就说明这个项目没有别的活 TUI;上次被打断在 post-stop 之前留下的
+      // 精确占位现在可以安全回收。回收失败只 warn:prepare 已把它们当非可执行来源放行。
+      try {
+        const reclaimed = reclaimStaleProjectSandboxPlaceholders(this.opts.cwd);
+        if (reclaimed.length) this.log(`[grok-copresence] reclaimed ${reclaimed.length} stale project placeholder(s) left by an interrupted stop: ${reclaimed.join(" ")}`);
+      } catch (error) {
+        this.warn(`[grok-copresence] could not reclaim stale project placeholders: ${errorMessage(error)}`);
+      }
       const leaderLockKey = createHash("sha256").update(this.leaderSocket).digest("hex").slice(0, 20);
       const sessionLockDir = join(realpathSync(this.opts.grokHome), "copresence-locks");
       ensurePrivateRuntimeDirectory(sessionLockDir);
