@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { createHash, randomBytes } from "crypto";
 import { spawn } from "child_process";
 import {
@@ -534,7 +535,7 @@ function openOwnedProjectDirectoryForPostStop(path: string): {
 }
 
 /** #1767 —— 「本人留下的 0 字节 0444 单链接普通文件」这个精确形状,不抛异常的判断。 */
-function isExactProjectSandboxPlaceholderStat(stat: ReturnType<typeof lstatSync>, uid: number | undefined): boolean {
+function isExactProjectSandboxPlaceholderStat(stat: Stats, uid: number | undefined): boolean {
   if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size !== 0) return false;
   if (posixFileModes() && (stat.mode & 0o7777) !== 0o444) return false;
   if (uid !== undefined && stat.uid !== uid) return false;
@@ -544,7 +545,7 @@ function isExactProjectSandboxPlaceholderStat(stat: ReturnType<typeof lstatSync>
 function isStaleProjectSandboxPlaceholder(path: string): boolean {
   const stat = lstatIfPresent(path);
   if (!stat) return false;
-  return isExactProjectSandboxPlaceholderStat(stat, process.getuid?.());
+  return isExactProjectSandboxPlaceholderStat(stat as Stats, process.getuid?.());
 }
 
 /**
