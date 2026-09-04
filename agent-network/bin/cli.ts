@@ -34,6 +34,7 @@ import {
   anchorsFromMarker,
   type SessionInfo,
 } from "../src/copresence-identity";
+import { alreadyRunningMessage, runningNodePid } from "../src/node-running-guard";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
 import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../src/offline-age";
@@ -6197,6 +6198,23 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
   const displayName = nodeDisplayName(nodeId, profile);
   const session = profileSession(profile);
   const willResume = !!session && !forceNewSession;
+  // #1130 —— 已经在跑的节点不起第二个:第二个进程会接管 alias,退出时把它报成 offline,
+  //   原进程还活着而 hub 从此不再推送。`anet project up` 早就 skip already-running,这里对齐。
+  //   pid 会被复用,所以除了 kill -0 还要看那个 pid 的命令行是不是 agent-node(读不到就按活着处理)。
+  {
+    const pidFile = join(nodesDir(), nodeId, ".pid");
+    const running = runningNodePid({
+      pidFileContent: existsSync(pidFile) ? readFileSync(pidFile, "utf-8") : null,
+      isAlive: (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } },
+      commandOf: (pid) => {
+        try { return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; }
+      },
+    });
+    if (running !== null) {
+      for (const line of alreadyRunningMessage(displayName, running)) console.error(line);
+      process.exit(1);
+    }
+  }
   const label = willResume ? `Resuming session ${session.slice(0, 8)}...` : "Starting new session";
   console.log(`[anet] ${label} for "${displayName}" [${runtime}]...\n`);
   if (profile.grokCopresence === true) {
