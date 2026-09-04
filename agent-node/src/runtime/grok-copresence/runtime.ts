@@ -1656,6 +1656,23 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       this.retainLocksForUnconfirmedPty = true;
       this.warn(`[grok-copresence] PTY termination failed: ${errorMessage(error)}`);
     });
+    // #1422 —— 占位文件(.grok .claude .cursor .mcp.json .envrc)的回收原本是整条链的最后一步
+    // (finalizeStoppedState → cleanupGrokCliPostStopState)。`anet node stop` 只给 10 s 宽限,
+    // leader 拆卸吃掉宽限就被 SIGKILL,最后一步永远跑不到,项目目录里留下 5 个 0 字节文件
+    // (test225 那条「post-stop cleanup retained pinned project sandbox placeholder」)。
+    // TUI 已证死(terminateOwnedPty 返回且没进 retainLocks),这些文件就没有主人了 ——
+    // 在 leader 拆卸之前先用 #1767 那套只认「0 字节 0444 属主是自己」的回收器收掉。
+    // finalizeStoppedState 里的原路径保留(幂等),兜住 PTY 路径没走到这里的情形。
+    if (this.ownedAnyTuiGeneration && !this.retainLocksForUnconfirmedPty) {
+      try {
+        const reclaimed = reclaimStaleProjectSandboxPlaceholders(this.opts.cwd);
+        if (reclaimed.length > 0) {
+          this.log(`[grok-copresence] reclaimed ${reclaimed.length} project placeholder(s) before leader teardown: ${reclaimed.join(" ")}`);
+        }
+      } catch (error) {
+        this.warn(`[grok-copresence] early placeholder reclaim skipped: ${errorMessage(error)}`);
+      }
+    }
     await this.teardownOwnedLeader().catch((error) => {
       this.retainLocksForUnconfirmedPty = true;
       this.warn(`[grok-copresence] retaining locks: ${errorMessage(error)}`);
