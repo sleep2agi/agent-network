@@ -3468,7 +3468,10 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
       probeEnv: resolverEnv,
     };
     if (planSupportsRuntime(siblingPlan, "grok-build-cli")) {
-      console.log(`[anet] using the agent-node installed beside anet (${sibling.version ?? "version unknown"}): ${sibling.entrypoint}`);
+      // 这一句是 test225 钉住的契约(run.sh assert_installed_candidate_runtime),原样保留;
+      // 路径与版本另起一行。
+      console.log("[anet] using installed agent-node with Grok co-presence capability.");
+      console.log(`[anet]   beside anet: ${sibling.entrypoint} (${sibling.version ?? "version unknown"})`);
       grokAgentNodeLaunchPlan = siblingPlan;
       return siblingPlan;
     }
@@ -3483,7 +3486,8 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
       probeEnv: resolverEnv,
     };
     if (planSupportsRuntime(globalPlan, "grok-build-cli")) {
-      console.log(`[anet] using installed agent-node with Grok co-presence capability: ${describeAgentNodeOnPath(resolverEnv)}`);
+      console.log("[anet] using installed agent-node with Grok co-presence capability.");
+      console.log(`[anet]   from PATH: ${describeAgentNodeOnPath(resolverEnv)}`);
       grokAgentNodeLaunchPlan = globalPlan;
       return globalPlan;
     }
