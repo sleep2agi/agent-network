@@ -269,8 +269,13 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     first5="${missing[*]:0:5}"; more=""
     [ "${#missing[@]}" -gt 5 ] && more=" (+$((${#missing[@]}-5)) more)"
     log "  $proj_name: 缺 ${#missing[@]}/${#aliases[@]} → project up · timeout=${PROJECT_TIMEOUT}s · 缺: $first5$more"
+    # #1332(2026-09-04 事故):`project up` 会把**整个 project** 拉起,包括上面刚判成
+    # 「进程在跑但不在 tmux(不算缺)」的那些 —— 于是给 daemon-dev / grok-vansin 各起了第二份,
+    # 第二份退出时把 hub 行报成 offline(#1130 的接管问题)。sweep 明明算出了缺的是谁,
+    # 就只起那几个:`--only a,b`(anet 自带的别名过滤,见 `anet project up --help`)。
+    only_csv=$(IFS=,; echo "${missing[*]}")
 
-    if ( cd "$proj" && timeout "$PROJECT_TIMEOUT" "$ANET" project up --stagger "$STAGGER" 2>&1 \
+    if ( cd "$proj" && timeout "$PROJECT_TIMEOUT" "$ANET" project up --stagger "$STAGGER" --only "$only_csv" 2>&1 \
           | sed "s|^|      [$proj_name] |" ); then
       round_up=$((round_up+1))
     else
