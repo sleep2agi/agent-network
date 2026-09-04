@@ -74,6 +74,7 @@ import {
   resolveAgentNodePackageEntrypointFromPath,
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
+import { siblingAgentNodeEntrypoint } from "../src/sibling-agent-node";
 import { hardenOpencodeAgentNodeEnv } from "../src/opencode-launch-env";
 import {
   clearOpencodeAuthJson,
@@ -3149,12 +3150,34 @@ function opencodeUsePinSource(): string {
 type AgentNodeLaunchPlan = {
   command: string;
   argsPrefix: string[];
-  source: "explicit" | "global" | "preview" | "paired";
+  source: "explicit" | "sibling" | "global" | "preview" | "paired";
   probeEnv: NodeJS.ProcessEnv;
 };
 
 let opencodeAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
 let grokAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
+
+// #1808 —— 装在 anet 旁边(同一个 node_modules)的 agent-node。隔离前缀 / npx 缓存 / 多棵
+// nvm 树时,PATH 上那份可能是另一棵树里的老版本;旁边这份才是和 anet 一起装的。
+// 返回 null 表示没有(全局散装、或 anet 以源码方式运行),调用方按原逻辑走 PATH / npx。
+function findSiblingAgentNode(): ReturnType<typeof siblingAgentNodeEntrypoint> {
+  const entry = process.argv[1] ? resolve(process.argv[1]) : "";
+  return siblingAgentNodeEntrypoint(entry, {
+    exists: (path) => existsSync(path),
+    readJson: (path) => JSON.parse(readFileSync(path, "utf8")),
+  });
+}
+
+function describeAgentNodeOnPath(env?: NodeJS.ProcessEnv): string {
+  try {
+    const out = process.platform === "win32"
+      ? execFileSync("where", ["agent-node"], { stdio: ["ignore", "pipe", "ignore"], env })
+      : execFileSync("/bin/sh", ["-c", "command -v agent-node"], { stdio: ["ignore", "pipe", "ignore"], env });
+    return String(out).trim().split(/\r?\n/)[0] || "agent-node";
+  } catch {
+    return "agent-node";
+  }
+}
 let codexAgentNodeLaunchPlan: AgentNodeLaunchPlan | null = null;
 
 function agentNodeHelp(plan: AgentNodeLaunchPlan): string {
@@ -3436,6 +3459,22 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
     return plan;
   }
 
+  const sibling = findSiblingAgentNode();
+  if (sibling) {
+    const siblingPlan: AgentNodeLaunchPlan = {
+      command: process.execPath,
+      argsPrefix: [sibling.entrypoint],
+      source: "sibling",
+      probeEnv: resolverEnv,
+    };
+    if (planSupportsRuntime(siblingPlan, "grok-build-cli")) {
+      console.log(`[anet] using the agent-node installed beside anet (${sibling.version ?? "version unknown"}): ${sibling.entrypoint}`);
+      grokAgentNodeLaunchPlan = siblingPlan;
+      return siblingPlan;
+    }
+    console.warn(`[anet] the agent-node beside anet (${sibling.version ?? "?"}) lacks Grok co-presence capability; checking PATH.`);
+  }
+
   if (commandExists("agent-node", resolverEnv)) {
     const globalPlan: AgentNodeLaunchPlan = {
       command: "agent-node",
@@ -3444,7 +3483,7 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
       probeEnv: resolverEnv,
     };
     if (planSupportsRuntime(globalPlan, "grok-build-cli")) {
-      console.log("[anet] using installed agent-node with Grok co-presence capability.");
+      console.log(`[anet] using installed agent-node with Grok co-presence capability: ${describeAgentNodeOnPath(resolverEnv)}`);
       grokAgentNodeLaunchPlan = globalPlan;
       return globalPlan;
     }
@@ -6395,6 +6434,12 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       const plan = resolveCodexAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
+    } else if (findSiblingAgentNode()) {
+      // #1808 —— 旁边那份优先于 PATH 上的(可能是另一棵树里的老版本)。
+      const sibling = findSiblingAgentNode()!;
+      cmd = process.execPath;
+      commandArgs = [sibling.entrypoint, ...agentArgs];
+      console.log(`[anet] using the agent-node installed beside anet (${sibling.version ?? "version unknown"}): ${sibling.entrypoint}`);
     } else try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {
       cmd = "npx";
       commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
