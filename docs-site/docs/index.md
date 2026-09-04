@@ -9,10 +9,10 @@ hero:
   actions:
     - theme: brand
       text: 下载 macOS 版
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_aarch64.dmg
+      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_aarch64.dmg
     - theme: alt
       text: 下载 Windows 版
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_x64-setup.exe
+      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_x64-setup.exe
     - theme: alt
       text: 查看文档
       link: /guide/getting-started
@@ -37,10 +37,10 @@ features:
     <div class="download-note">当前 Mac 版本适用于 Apple 芯片；Windows 版本适用于 64 位 Windows 10/11。</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_aarch64.dmg">
+    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_aarch64.dmg">
       <span class="download-platform">macOS</span><strong>下载 .dmg</strong><small>Apple Silicon · 36.6 MB</small><span class="download-arrow">↓</span>
     </a>
-    <a class="download-card" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_x64-setup.exe">
+    <a class="download-card" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_x64-setup.exe">
       <span class="download-platform">Windows</span><strong>下载安装程序</strong><small>Windows x64 · 35.2 MB</small><span class="download-arrow">↓</span>
     </a>
   </div>

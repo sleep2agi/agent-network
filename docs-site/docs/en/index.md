@@ -9,10 +9,10 @@ hero:
   actions:
     - theme: brand
       text: Download for macOS
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_aarch64.dmg
+      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_aarch64.dmg
     - theme: alt
       text: Download for Windows
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_x64-setup.exe
+      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_x64-setup.exe
     - theme: alt
       text: Read the docs
       link: /en/guide/getting-started
@@ -37,8 +37,8 @@ features:
     <div class="download-note">The current Mac build supports Apple Silicon. The Windows build supports 64-bit Windows 10/11.</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_aarch64.dmg"><span class="download-platform">macOS</span><strong>Download .dmg</strong><small>Apple Silicon · 36.6 MB</small><span class="download-arrow">↓</span></a>
-    <a class="download-card" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.43/Agent.Network_0.2.43_x64-setup.exe"><span class="download-platform">Windows</span><strong>Download installer</strong><small>Windows x64 · 35.2 MB</small><span class="download-arrow">↓</span></a>
+    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_aarch64.dmg"><span class="download-platform">macOS</span><strong>Download .dmg</strong><small>Apple Silicon · 36.6 MB</small><span class="download-arrow">↓</span></a>
+    <a class="download-card" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.46/Agent.Network_0.2.46_x64-setup.exe"><span class="download-platform">Windows</span><strong>Download installer</strong><small>Windows x64 · 35.2 MB</small><span class="download-arrow">↓</span></a>
   </div>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.43">Release notes and checksums</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases">All releases</a></p>
 </section>
