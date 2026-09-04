@@ -1511,6 +1511,10 @@ const reportStatus = async (status: string, task?: string) => {
       : SESSION_ID || undefined;
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
+    // #1809 —— 每次状态上报都带 version(此前只有 3 分钟心跳带)。hub 在同 alias 换
+    // resume_id 时会整行 DELETE+INSERT,没带的列被清成 NULL;.49 之前的 hub 没有接手逻辑,
+    // 这里带上至少让 agent-node 自己的每次上报都把 version 写回去。
+    version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     session_id: activeSessionId,
     config_path: configFilePath || undefined,
