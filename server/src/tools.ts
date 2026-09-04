@@ -836,7 +836,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // COALESCE 在这条路径上一次都不会触发,于是上报里没带的列(version / agent /
         // hostname / 六个遥测字段 / registered_at …)全部变 NULL。2026-09-04 DEV 真机:
         // grok-v1 working 时 version=.64,7 秒后 idle 就成了 NULL,registered_at 被改成
-        // 那一秒。先把要被删的那行读出来,当作本次 INSERT 缺省值 —— 让「换 resume_id」
+        // 那一秒。先把要被删的那行读出来,INSERT 之后把仍为 NULL 的列从它接手 —— 让「换 resume_id」
         // 和「同 resume_id 更新」对描述性列的语义一致:上报了就覆盖,没上报就保留。
         // 状态类列(status / task / output / progress / score)不接手,那是本次上报的事实。
         const handover = db.get<Record<string, unknown>>(
@@ -852,8 +852,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           (fresh ?? (handover?.[column] as T | null | undefined) ?? null);
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, registered_at, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, COALESCE(?36, datetime('now')), datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
              server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
@@ -881,8 +881,38 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              external_schedules = COALESCE(?34, sessions.external_schedules),
              peer_reply_inbox_capable = ?35,
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, effectiveAlias, keep(tmux, "tmux_name"), keep(srv, "server"), keep(hostIp, "ip"), keep(hostHostname, "hostname"), keep(ag, "agent"), keep(pd, "project_dir"), keep(ver, "version"), status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, keep(node_id, "node_id"), keep(session_id, "session_id"), keep(config_path, "config_path"), keep(channels, "channels"), sessionNetId, keep(mdl, "model"), keep(cpuLoad1m, "cpu_load_1min"), keep(cpuCores, "cpu_cores"), keep(memTotalGb, "mem_total_gb"), keep(memUsedGb, "mem_used_gb"), keep(memAvailGb, "mem_avail_gb"), keep(diskTotalGb, "disk_total_gb"), keep(diskUsedGb, "disk_used_gb"), keep(diskAvailGb, "disk_avail_gb"), keep(processRssBytes, "process_rss_bytes"), keep(processRssMb, "process_rss_mb"), keep(processCpuPct, "process_cpu_pct"), keep(processUptimeSeconds, "process_uptime_seconds"), keep(processInFlightCount, "process_in_flight_count"), keep(externalSchedulesJson, "external_schedules"), peerReplyInboxCapable ? 1 : 0, keep<string>(null, "registered_at")]
+          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
         );
+        if (handover) {
+          // 换 resume_id 那条路径上 ON CONFLICT 不会触发;INSERT 完再把没上报(仍为 NULL)的
+          // 描述性列从被替换的那行接手。INSERT 语句与参数列表保持原样 —— test698 的变异
+          // 用 sed 钉着它的字节形状。
+          db.run(
+            `UPDATE sessions SET
+               tmux_name = COALESCE(tmux_name, ?2), server = COALESCE(server, ?3), ip = COALESCE(ip, ?4),
+               hostname = COALESCE(hostname, ?5), agent = COALESCE(agent, ?6), project_dir = COALESCE(project_dir, ?7),
+               version = COALESCE(version, ?8), node_id = COALESCE(node_id, ?9), session_id = COALESCE(session_id, ?10),
+               config_path = COALESCE(config_path, ?11), channels = COALESCE(channels, ?12), model = COALESCE(model, ?13),
+               cpu_load_1min = COALESCE(cpu_load_1min, ?14), cpu_cores = COALESCE(cpu_cores, ?15),
+               mem_total_gb = COALESCE(mem_total_gb, ?16), mem_used_gb = COALESCE(mem_used_gb, ?17),
+               mem_avail_gb = COALESCE(mem_avail_gb, ?18), disk_total_gb = COALESCE(disk_total_gb, ?19),
+               disk_used_gb = COALESCE(disk_used_gb, ?20), disk_avail_gb = COALESCE(disk_avail_gb, ?21),
+               process_rss_bytes = COALESCE(process_rss_bytes, ?22), process_rss_mb = COALESCE(process_rss_mb, ?23),
+               process_cpu_pct = COALESCE(process_cpu_pct, ?24), process_uptime_seconds = COALESCE(process_uptime_seconds, ?25),
+               process_in_flight_count = COALESCE(process_in_flight_count, ?26),
+               external_schedules = COALESCE(external_schedules, ?27),
+               registered_at = COALESCE(?28, registered_at)
+             WHERE resume_id = ?1`,
+            [resume_id, handover.tmux_name ?? null, handover.server ?? null, handover.ip ?? null, handover.hostname ?? null,
+             handover.agent ?? null, handover.project_dir ?? null, handover.version ?? null, handover.node_id ?? null,
+             handover.session_id ?? null, handover.config_path ?? null, handover.channels ?? null, handover.model ?? null,
+             handover.cpu_load_1min ?? null, handover.cpu_cores ?? null, handover.mem_total_gb ?? null, handover.mem_used_gb ?? null,
+             handover.mem_avail_gb ?? null, handover.disk_total_gb ?? null, handover.disk_used_gb ?? null, handover.disk_avail_gb ?? null,
+             handover.process_rss_bytes ?? null, handover.process_rss_mb ?? null, handover.process_cpu_pct ?? null,
+             handover.process_uptime_seconds ?? null, handover.process_in_flight_count ?? null, handover.external_schedules ?? null,
+             handover.registered_at ?? null],
+          );
+        }
         if (host || proc) {
           db.run(
             `INSERT INTO agent_telemetry (id, network_id, resume_id, alias, hostname, ip, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, created_at)
