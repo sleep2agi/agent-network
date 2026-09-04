@@ -830,10 +830,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       db.transaction(() => {
         // Only delete same-alias sessions within the same network
+        // 同一 alias 可以有两个上报者轮流说话(agent-node 自己 `sdk-<node>` +
+        // grok 共存里 TUI 的 MCP `grok-cli-<node>`)。下面这条 DELETE 会把「另一个
+        // resume_id」的那行整行删掉,再 INSERT 一行新的 —— ON CONFLICT 里那一串
+        // COALESCE 在这条路径上一次都不会触发,于是上报里没带的列(version / agent /
+        // hostname / 六个遥测字段 / registered_at …)全部变 NULL。2026-09-04 DEV 真机:
+        // grok-v1 working 时 version=.64,7 秒后 idle 就成了 NULL,registered_at 被改成
+        // 那一秒。先把要被删的那行读出来,当作本次 INSERT 缺省值 —— 让「换 resume_id」
+        // 和「同 resume_id 更新」对描述性列的语义一致:上报了就覆盖,没上报就保留。
+        // 状态类列(status / task / output / progress / score)不接手,那是本次上报的事实。
+        const handover = db.get<Record<string, unknown>>(
+          `SELECT tmux_name, server, ip, hostname, agent, project_dir, version, node_id, session_id, config_path,
+                  channels, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
+                  disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct,
+                  process_uptime_seconds, process_in_flight_count, external_schedules, registered_at
+             FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3
+             ORDER BY updated_at DESC LIMIT 1`,
+          effectiveAlias, resume_id, sessionNetId,
+        ) ?? null;
+        const keep = <T,>(fresh: T | null | undefined, column: string): T | null =>
+          (fresh ?? (handover?.[column] as T | null | undefined) ?? null);
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, registered_at, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, COALESCE(?36, datetime('now')), datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
              server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
@@ -861,7 +881,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              external_schedules = COALESCE(?34, sessions.external_schedules),
              peer_reply_inbox_capable = ?35,
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
+          [resume_id, effectiveAlias, keep(tmux, "tmux_name"), keep(srv, "server"), keep(hostIp, "ip"), keep(hostHostname, "hostname"), keep(ag, "agent"), keep(pd, "project_dir"), keep(ver, "version"), status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, keep(node_id, "node_id"), keep(session_id, "session_id"), keep(config_path, "config_path"), keep(channels, "channels"), sessionNetId, keep(mdl, "model"), keep(cpuLoad1m, "cpu_load_1min"), keep(cpuCores, "cpu_cores"), keep(memTotalGb, "mem_total_gb"), keep(memUsedGb, "mem_used_gb"), keep(memAvailGb, "mem_avail_gb"), keep(diskTotalGb, "disk_total_gb"), keep(diskUsedGb, "disk_used_gb"), keep(diskAvailGb, "disk_avail_gb"), keep(processRssBytes, "process_rss_bytes"), keep(processRssMb, "process_rss_mb"), keep(processCpuPct, "process_cpu_pct"), keep(processUptimeSeconds, "process_uptime_seconds"), keep(processInFlightCount, "process_in_flight_count"), keep(externalSchedulesJson, "external_schedules"), peerReplyInboxCapable ? 1 : 0, keep<string>(null, "registered_at")]
         );
         if (host || proc) {
           db.run(
