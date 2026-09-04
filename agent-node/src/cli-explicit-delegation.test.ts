@@ -54,6 +54,12 @@ describe("extractExplicitDelegation", () => {
 
   it("does not match no alias", () => {
     expect(extractExplicitDelegation("你帮我总结一下")).toBeNull();
+    // #1104 —— 散文中间提到「让/请 X …」不是派单(真实父派单的原文片段,曾各自产出一条幽灵任务)。
+    expect(extractExplicitDelegation("这次改动的价值在于它能让 TM网站运维 免于一次会丢授权的重启,请按这个方案执行。")).toBeNull();
+    expect(extractExplicitDelegation("结论已写在 PR 里,后续如果有疑问请 TM负责人 确认一下再合并。")).toBeNull();
+    // 但真正的祈使派单(开头 / 行首)照旧
+    expect(extractExplicitDelegation("让 通信牛 review #189")).toEqual({ alias: "通信牛", childTask: "review #189" });
+    expect(extractExplicitDelegation("先看下面。\n请 测试马 跑一遍 5-case smoke")).toEqual({ alias: "测试马", childTask: "跑一遍 5-case smoke" });
   });
 
   it("does not match normal Q&A", () => {
