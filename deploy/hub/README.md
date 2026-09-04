@@ -24,7 +24,7 @@
 #    当前生产用 nvm 的 npm 安装,所以 binary 落在当前 node 的 bin 下；换
 #    node 版本后通常要重装。若采用其它布局,必须让 command -v bun 可见,
 #    或在 hub.env 显式设置可执行的 BUN_BIN。
-BUN_VERSION=1.3.14
+BUN_VERSION=1.4.0   # 2026-09-04 改:1.3.14 在 .45 上三次 uWS panic;1.4.0 生产跑满 24 h(31.5 h,restarts 不变)后钉过来
 npm i -g "bun@$BUN_VERSION"
 BUN_BIN="$(command -v bun)"
 test -x "$BUN_BIN"
@@ -47,8 +47,7 @@ bash -n "$HOME/.local/bin/hub-daemon.sh"
   连续 panic 三次(`Segmentation fault`,pm2 自动拉起,restart_time 10 → 13)。当晚 23:03 只换 bun 不换 hub:
   `~/.commhub/hub.env` 追加 `BUN_BIN=<nvm node v24>/bin/bun`(**1.4.0**),`pm2 restart commhub-hub`
   (不加 `--update-env`),之后再无重启。启动器 `_resolve_bun` 先看 `BUN_BIN`,再看 PATH。
-- **上面的 `BUN_VERSION=1.3.14` 是空机安装的钉**,生产实际跑的是 1.4.0。要不要把钉改成 1.4.0,
-  按下面的判据 24 h 干净之后再改(单独一个 PR,改这一行 + 记录时间)。
+- **上面的 `BUN_VERSION=1.4.0` 就是生产实际跑的版本**(2026-09-04 06:31 复核:自 09-02 23:03 起 31.5 h 无重启,pm2 restarts 停在 13),钉与生产对齐。
 - **稳定性判据只认两个数**,不要数错误日志里的 panic 行(pm2 日志会轮转,2026-09-03 复核时那份日志已经找不到了):
 
   ```bash
