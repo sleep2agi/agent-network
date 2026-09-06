@@ -1981,7 +1981,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // against clobbering pre-existing meta_json when this reply
           // brings no attachments (metaJson === null → keep the existing
           // task meta_json unchanged). Reverse-(e) invariant.
-          const updateParams: any[] = [replyStatus, text, metaJson, in_reply_to];
+          // #1823 —— 回复的附件写到 tasks.meta_json.reply_attachments,**不碰** meta_json.attachments:
+          // 那个键是提问者随任务带的附件,客户端把它画在提问者的气泡里。以前这里用回复的 metaJson
+          // 整体 COALESCE 替换,于是 agent 回的图出现在提问者气泡下面、提问者自己带的附件被覆盖
+          // (Vincent 2026-09-06 实测「好像没成功发送给我」)。inbox 行(收件方视角)照旧写 metaJson。
+          const replyTaskMetaJson = (() => {
+            if (!attachmentsResult.attachments.length) return null;
+            const rowParams: any[] = [in_reply_to];
+            let rowSql = "SELECT meta_json FROM tasks WHERE task_id = ?1";
+            rowSql = addScope(rowSql, rowParams, effectiveNetId);
+            const existing = db.get<{ meta_json: string | null }>(rowSql, ...rowParams)?.meta_json ?? null;
+            let base: Record<string, unknown> = {};
+            if (existing) { try { const parsed = JSON.parse(existing); if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) base = parsed; } catch {} }
+            return JSON.stringify({ ...base, reply_attachments: attachmentsResult.attachments });
+          })();
+          const updateParams: any[] = [replyStatus, text, replyTaskMetaJson, in_reply_to];
           let updateSql = `UPDATE tasks
              SET status = ?1,
                  result = ?2,
