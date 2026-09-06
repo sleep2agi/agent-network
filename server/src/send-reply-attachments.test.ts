@@ -175,8 +175,10 @@ describe("#507 — send_reply attachments (positive)", () => {
 
     // Verify persistence — the echo must come from what actually landed on disk.
     const taskMeta = readTaskMeta(taskId);
-    expect(taskMeta?.attachments?.length).toBe(2);
-    expect(taskMeta.attachments.map((a: any) => a.file_id).sort()).toEqual([a1.file_id, a2.file_id].sort());
+    // #1823 —— 任务行上回复附件在 reply_attachments;attachments 键留给提问者自己带的附件
+    expect(taskMeta?.attachments).toBeUndefined();
+    expect(taskMeta?.reply_attachments?.length).toBe(2);
+    expect(taskMeta.reply_attachments.map((a: any) => a.file_id).sort()).toEqual([a1.file_id, a2.file_id].sort());
 
     const inboxMeta = readInboxMeta(reply.message_id!);
     expect(inboxMeta?.attachments?.length).toBe(2);
@@ -196,8 +198,10 @@ describe("#507 — send_reply attachments (positive)", () => {
     expect(reply.ok).toBe(true);
     expect(reply.attachments_saved!.length).toBe(1);
     const persisted = readTaskMeta(taskId);
-    expect(persisted?.attachments?.[0]?.file_id).toBe(a1.file_id);
-    expect(persisted?.other_field).toBe("preserved"); // meta merge preserves siblings
+    expect(persisted?.reply_attachments?.[0]?.file_id).toBe(a1.file_id);
+    expect(persisted?.attachments).toBeUndefined();
+    // #1823 —— 回复 meta 的兄弟字段属于回复(inbox 行),不写进提问者的任务行
+    expect(readInboxMeta(reply.message_id)?.other_field).toBe("preserved");
   });
 
   test("P3: top-level attachments WIN over meta.attachments when both supplied (parity with REST /api/task L2101)", async () => {
@@ -217,9 +221,26 @@ describe("#507 — send_reply attachments (positive)", () => {
     expect(reply.attachments_saved!.length).toBe(1);
     expect(reply.attachments_saved![0].file_id).toBe(topLevel.file_id);
     const persisted = readTaskMeta(taskId);
-    expect(persisted?.attachments?.length).toBe(1);
-    expect(persisted?.attachments?.[0]?.file_id).toBe(topLevel.file_id);
-    expect(persisted?.other).toBe("kept");
+    expect(persisted?.reply_attachments?.length).toBe(1);
+    expect(persisted?.reply_attachments?.[0]?.file_id).toBe(topLevel.file_id);
+    expect(readInboxMeta(reply.message_id)?.other).toBe("kept");
+  });
+
+  // #1823 —— 提问者随任务带的附件必须留在 attachments;回复附件另放 reply_attachments。
+  // (Vincent 2026-09-06:回复的图被画进提问者气泡;以前整体 COALESCE 替换还会把提问者的附件覆盖掉)
+  test("P6 (#1823): asker's attachments survive a reply with attachments; reply goes to reply_attachments", async () => {
+    const { taskId } = seed();
+    const asked = att("11111111111111111111111111111111", { name: "asked.png" });
+    db.run("UPDATE tasks SET meta_json = ?1 WHERE task_id = ?2", [JSON.stringify({ attachments: [asked], origin: "dashboard" }), taskId]);
+    const handler = await getSendReplyHandler();
+    const answer = att("22222222222222222222222222222222", { name: "answer.md" });
+    const reply = await callReply(handler, { alias: AGENT_ALIAS, text: "here", in_reply_to: taskId, status: "replied" as const, attachments: [answer] });
+    expect(reply.ok).toBe(true);
+    const persisted = readTaskMeta(taskId);
+    expect(persisted?.attachments?.map((a: any) => a.file_id)).toEqual([asked.file_id]);
+    expect(persisted?.origin).toBe("dashboard");
+    expect(persisted?.reply_attachments?.map((a: any) => a.file_id)).toEqual([answer.file_id]);
+    expect(readInboxMeta(reply.message_id)?.attachments?.[0]?.file_id).toBe(answer.file_id);
   });
 });
 
