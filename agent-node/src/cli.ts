@@ -92,6 +92,7 @@ import {
 } from "./reply-reliability";
 import { isTelemetrySchemaRejection, withoutOptionalTelemetry } from "./register-telemetry-fallback";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
+import { attachLocalFileLinks } from "./runtime/reply-file-links";
 import { claudeAttemptsDetail, codexTimeoutDetail } from "./runtime/sdk-timeout-detail";
 import { compactionPressure } from "./runtime/compaction-pressure";
 import {
@@ -1578,6 +1579,28 @@ const ackMessage = async (id: string) => {
 // "we need to escalate to the retry-queue" — the prior fire-and-forget
 // shape resolved to undefined in both cases and silently lost reply
 // failures (see #168 paste from designer-poster incident 2026-05-21).
+/** 回复前把本机文件链接上传到 hub(multipart /api/upload,节点 token);根目录 = 节点 cwd + 家目录。任何异常都不阻断回复。 */
+async function prepareReplyAttachments(text: string): Promise<{ text: string; attachments: Array<{ type: "file"; file_id: string; name: string; mime: string; size: number }>; uploaded: number; failed: number }> {
+  try {
+    return await attachLocalFileLinks(text, {
+      roots: [process.cwd(), homedir()],
+      upload: async (f) => {
+        const { readFileSync } = await import("node:fs");
+        const body = new FormData();
+        body.append("file", new Blob([readFileSync(f.realPath)], { type: f.mime }), f.name);
+        const res = await fetch(`${COMMHUB_URL}/api/upload`, { method: "POST", headers: AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}, body, signal: AbortSignal.timeout(60_000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j: any = await res.json();
+        if (!j?.file_id) throw new Error("no file_id in upload response");
+        return { file_id: String(j.file_id), name: f.name, mime: f.mime, size: f.size };
+      },
+    });
+  } catch (e: any) {
+    warn(`[reply-files] skipped: ${e?.message ?? e}`);
+    return { text, attachments: [], uploaded: 0, failed: 0 };
+  }
+}
+
 async function sendReply(
   target: string,
   message: string,
@@ -1589,7 +1612,14 @@ async function sendReply(
   // viewer would see as an orphaned reply from a non-existent sender).
   const fromAlias = await liveAlias();
 
-  const result = taskId
+  // 2026-09-14 —— 回复里指向本机文件的链接自动上传成附件(见 runtime/reply-file-links.ts 顶部的真机案例)。
+  // 有附件时只能走 send_reply(send_peer_reply 没有 attachments 字段)。
+  const prepared = await prepareReplyAttachments(message);
+  message = prepared.text;
+  const attachments = prepared.attachments;
+  if (prepared.uploaded || prepared.failed) log(`[reply-files] uploaded=${prepared.uploaded} failed=${prepared.failed}`);
+
+  const result = taskId && attachments.length === 0
     ? await sendPeerReplyCompatible({ target, text: message, taskId, failed, fromAlias }, {
       sendAtomic: (args) => callCommHub("send_peer_reply", {
         alias: args.target,
@@ -1610,7 +1640,9 @@ async function sendReply(
       alias: target,
       text: message,
       from_session: fromAlias,
+      ...(taskId ? { in_reply_to: taskId } : {}),
       status: failed ? "failed" : "replied",
+      ...(attachments.length ? { attachments } : {}),
     }) };
   // callCommHub now throws on every failure shape (transport, JSON-RPC
   // error envelope, MCP isError, app-level ok:false). Reaching here means
