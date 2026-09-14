@@ -37,6 +37,7 @@ import {
   type KillPrimitive,
   type CopresenceMarker,
   type SessionInfo,
+  partitionMarkerHitsByTree,
 } from "./copresence-identity";
 
 // ─── Test fixtures ──────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ function makeSessions(): CopresenceMarker["sessions"] {
 
 /** In-memory ProcessEnumerator for tests. */
 class MockEnumer implements ProcessEnumerator {
-  procs = new Map<number, { environ: string; stat: { pgid: number; starttime_jiffies: number; ppid: number }; ownerUid?: number; state?: string }>();
+  procs = new Map<number, { environ: string; stat: { pgid: number; starttime_jiffies: number; ppid: number; sid?: number }; ownerUid?: number; state?: string }>();
   listErr: Error | null = null;
   environErrs = new Map<number, Error>();
   statErrs = new Map<number, Error>();
@@ -104,10 +105,10 @@ class MockEnumer implements ProcessEnumerator {
     if (!p) return null;
     return p.state ?? "S"; // default = sleeping (normal running)
   }
-  add(pid: number, environ: string, pgid: number, starttime = 0, ppid = 1, opts: { ownerUid?: number; state?: string } = {}) {
+  add(pid: number, environ: string, pgid: number, starttime = 0, ppid = 1, opts: { ownerUid?: number; state?: string; sid?: number } = {}) {
     this.procs.set(pid, {
       environ,
-      stat: { pgid, starttime_jiffies: starttime, ppid },
+      stat: { pgid, starttime_jiffies: starttime, ppid, ...(opts.sid !== undefined ? { sid: opts.sid } : {}) },
       ownerUid: opts.ownerUid,
       state: opts.state,
     });
@@ -1238,5 +1239,47 @@ describe("Blockers 5+6: prepareIdentityForStart", () => {
   test("refuses an empty uuid (guards against a silently regenerated identity)", async () => {
     const rec = recorder({ read: () => ({ kind: "refuse", cause: "MISSING", detail: "none" }) });
     await expect(prepareIdentityForStart("", rec.deps)).rejects.toThrow();
+  });
+});
+
+
+// ─── #1871 —— 外来 marker 携带者(2026-09-14 生产 hub 被杀)────────────────
+describe("#1871 tree-membership guard: an inherited marker outside this node's tree is reported, not killed", () => {
+  const UUID = "690ba5dc-0000-4000-8000-000000000000";
+  const HOME = "/w/.anet/nodes/x/codex-home";
+  const anchors = { sessions: [{ pid: 100, starttime_jiffies: 500 }, { pid: 200, starttime_jiffies: 600 }, { pid: 300, starttime_jiffies: 700 }] };
+
+  test("pm2-spawned hub carrying the marker (foreign sid/pgid, other CODEX_HOME) is neither signalled nor counted as residual", async () => {
+    const e = new MockEnumer();
+    // the hub: marker inherited via pm2, its own session, no CODEX_HOME
+    e.add(1825544, `ANET_NODE_MARKER=${UUID}\0PM2_HOME=/home/x/.pm2`, 1613, 9999, 1613, { sid: 1613 });
+    const k = new MockKiller();
+    const logs: string[] = [];
+    const r = await reapMarkerGroups(e, k, UUID, { graceMs: 0, logger: (m) => logs.push(m), sleep: async () => {}, anchors, nodeHome: HOME });
+    expect(k.signals).toEqual([]);
+    expect(r.kind).toBe("success");
+    expect(logs.some((l) => l.includes("FOREIGN CARRIER pid=1825544"))).toBe(true);
+  });
+
+  test("an orphaned codex worker whose sid is a recorded pane pid is still reaped; CODEX_HOME match also counts", async () => {
+    const e = new MockEnumer();
+    e.add(4242, `ANET_NODE_MARKER=${UUID}\0FOO=bar`, 4242, 1000, 1, { sid: 300 });           // orphan of the tui pane (sid=300)
+    e.add(4343, `ANET_NODE_MARKER=${UUID}\0CODEX_HOME=${HOME}`, 4343, 1000, 1, { sid: 77 }); // wrapper with the node home
+    e.add(5555, `ANET_NODE_MARKER=${UUID}\0CODEX_HOME=/elsewhere`, 5555, 1000, 1, { sid: 88 }); // foreign
+    const k = new MockKiller();
+    const logs: string[] = [];
+    const r = await reapMarkerGroups(e, k, UUID, { graceMs: 0, logger: (m) => logs.push(m), sleep: async () => {}, anchors, nodeHome: HOME });
+    const termed = k.signals.filter((x) => x.signal === "TERM").map((x) => x.pgid).sort();
+    expect(termed).toEqual([4242, 4343]);
+    expect(k.signals.some((x) => x.pgid === 5555)).toBe(false);
+    // MockEnumer 不会因为 kill 而删掉进程,所以回收器如实报「未回收」—— 但残留名单里只能有本节点树的成员,外来携带者不在其中。
+    expect(r.kind).toBe("failed");
+    if (r.kind === "failed") expect([...r.residualPids].sort()).toEqual([4242, 4343]);
+  });
+
+  test("without nodeHome the guard is inert (old behaviour preserved)", () => {
+    const e = new MockEnumer();
+    e.add(9, `ANET_NODE_MARKER=${UUID}`, 9, 1, 1, { sid: 9 });
+    expect(partitionMarkerHitsByTree(e, [9], anchors, undefined)).toEqual({ members: [9], foreign: [] });
   });
 });

@@ -166,6 +166,9 @@ export interface ProcStat {
   pgid: number;
   starttime_jiffies: number;
   ppid: number;
+  /** /proc/PID/stat 第 6 字段 session id。tmux 每个 pane 的 shell 是 session leader,pane 死后它的孤儿仍保留这个 sid ——
+   *  这是「进程属于本节点哪一段」最稳的证据(2026-09-14 事故:生产 hub 从 pm2 继承了 marker env,光看 env 会把 hub 当上一代杀掉)。 */
+  sid?: number;
 }
 
 /**
@@ -436,11 +439,12 @@ export function realEnumerator(): ProcessEnumerator {
       if (rest.length < 20) throw new Error(`malformed /proc/${pid}/stat: only ${rest.length} fields after comm`);
       const ppid = Number(rest[1]);
       const pgrp = Number(rest[2]);
+      const sid = Number(rest[3]);
       const starttime = Number(rest[19]);
       if (!Number.isFinite(ppid) || !Number.isFinite(pgrp) || !Number.isFinite(starttime)) {
         throw new Error(`malformed /proc/${pid}/stat: non-numeric fields`);
       }
-      return { pgid: pgrp, starttime_jiffies: starttime, ppid };
+      return { pgid: pgrp, starttime_jiffies: starttime, ppid, ...(Number.isFinite(sid) ? { sid } : {}) };
     },
     readOwnerUid(pid: number): number | null {
       // Read the process's REAL uid from /proc/<pid>/status, NOT the owner
@@ -944,6 +948,9 @@ export type ReapResult =
 
 export interface ReapOptions {
   graceMs: number;
+  /** 本节点的 CODEX_HOME 真实路径。给了它,marker 命中的进程还要过一道「树成员」核验:sid/pgid 属于 marker 记录的三段 pane,
+   *  或其环境里 CODEX_HOME 就是这个目录;都不满足的是「外来携带者」(比如从共存 TUI 里重启过的 pm2 及其子进程),只报告、不杀、不算未回收。 */
+  nodeHome?: string;
   logger: (msg: string) => void;
   /**
    * Sleep primitive (grace period). Real code uses setTimeout; tests inject
@@ -979,6 +986,31 @@ export interface ReapOptions {
  *   7. Send SIGKILL to any group still alive.
  *   8. Post-rescan: if any marker-carrying pid alive → preserve marker.
  */
+/** 2026-09-14 事故的护栏:marker 命中 ≠ 本节点的进程。见 ReapOptions.nodeHome。 */
+export function partitionMarkerHitsByTree(
+  enumer: ProcessEnumerator,
+  hits: number[],
+  anchors: ScanAnchors | undefined,
+  nodeHome: string | undefined,
+): { members: number[]; foreign: Array<{ pid: number; reason: string }> } {
+  if (!nodeHome) return { members: hits, foreign: [] };
+  const anchorPids = new Set<number>((anchors?.sessions ?? []).map((a) => a.pid));
+  const members: number[] = [];
+  const foreign: Array<{ pid: number; reason: string }> = [];
+  for (const pid of hits) {
+    let stat: ProcStat | null = null;
+    try { stat = enumer.readStat(pid); } catch { stat = null; }
+    let env: string | null = null;
+    try { env = enumer.readEnviron(pid); } catch { env = null; }
+    const homeMatch = env !== null && env.split("\0").some((kv) => kv === `CODEX_HOME=${nodeHome}`);
+    const sidMatch = stat?.sid !== undefined && anchorPids.has(stat.sid);
+    const pgidMatch = stat !== null && anchorPids.has(stat.pgid);
+    if (homeMatch || sidMatch || pgidMatch) { members.push(pid); continue; }
+    foreign.push({ pid, reason: `marker present but sid=${stat?.sid ?? "?"} pgid=${stat?.pgid ?? "?"} not in this node's panes and CODEX_HOME≠${nodeHome}` });
+  }
+  return { members, foreign };
+}
+
 export async function reapMarkerGroups(
   enumer: ProcessEnumerator,
   killer: KillPrimitive,
@@ -995,7 +1027,9 @@ export async function reapMarkerGroups(
   // recreates Defect A. Instead we return kind:"failed" and preserve the
   // marker for retry.
   const scan = scanEnvironForMarkerFull(enumer, markerUuid, opts.anchors);
-  const pids = scan.hits;
+  const part = partitionMarkerHitsByTree(enumer, scan.hits, opts.anchors, opts.nodeHome);
+  for (const f of part.foreign) opts.logger(`[identity] FOREIGN CARRIER pid=${f.pid} — ${f.reason}; not touching it (inherited marker outside this node's tree)`);
+  const pids = part.members;
   opts.logger(`[identity] environ scan found ${pids.length} marker-carrying pid(s), ${scan.unreadableOwnUid.length} in-scope unreadable, ${scan.unreadableOutOfScope.length} out-of-scope unreadable (informational)`);
   if (pids.length === 0 && scan.unreadableOwnUid.length === 0) {
     return { kind: "success", killedPgids: [], residualPids: [] };
@@ -1067,7 +1101,8 @@ export async function reapMarkerGroups(
 
   // Step 8: post-rescan
   const rescan = scanEnvironForMarkerFull(enumer, markerUuid, opts.anchors);
-  const residual = rescan.hits;
+  const repart = partitionMarkerHitsByTree(enumer, rescan.hits, opts.anchors, opts.nodeHome);
+  const residual = repart.members;
   if (residual.length > 0 || rescan.unreadableOwnUid.length > 0) {
     return {
       kind: "failed",
