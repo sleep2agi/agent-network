@@ -1370,6 +1370,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const identityPrep = await prepareIdentityForStart(identityMarker, {
     readMarker: () => readCopresenceMarker(nodesDir(), resolved.id),
     reap: (uuid, anchors) => reapMarkerGroups(realEnumerator(), realKiller(), uuid, {
+      nodeHome: (() => { try { return realpathSync(opts.codexHome); } catch { return opts.codexHome; } })(),
       graceMs: 3000,
       logger: (m) => console.log(`[anet] ${m}`),
       anchors,
@@ -10937,6 +10938,7 @@ Stop a running agent node.
         process.exit(2);
       }
       const reapResult = await reapMarkerGroups(enumer, killer, uuid, {
+        nodeHome: (() => { const h = join(nodesDir(), resolved.id, "codex-home"); try { return realpathSync(h); } catch { return h; } })(),
         graceMs: 3000,
         logger: (m) => console.log(`[anet] ${m}`),
         // #P3fix必修1+2 — the recorded pane pids anchor the invariant-11
