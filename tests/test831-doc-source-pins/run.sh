@@ -222,7 +222,9 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #
 # 🔴 下面三条是 `-eq`(精确相等),**不是下界** —— job 名里的 "floor" 会误导。
 #    新增/删除文档都会让 files 变,必须回来按实际值更新,并写清变的是哪个数、为什么。
-[[ "$files" -eq 135 ]] || fail "预期扫 135 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-14:files 135 → 137。首页英雄区新增两个主题组件(HeroNetwork.vue / HeroLive.vue,#1868),
+#   git ls-files 把它们算进 docs-site 文件集;pin 计数不变。
+[[ "$files" -eq 137 ]] || fail "预期扫 137 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 9  ]] || fail "预期 9 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 24 ]] || fail "预期 24 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
