@@ -219,6 +219,9 @@
   border: 0 !important;
   box-shadow: 0 8px 28px -8px rgba(180, 83, 9, 0.55), 0 0 0 1px rgba(251, 191, 36, 0.25) inset;
 }
+.dark .VPHero .VPButton.brand {
+  color: #1a1206 !important; /* 黄底配深字:白字在 #fbbf24 上只有 ~1.6:1 */
+}
 .VPHero .VPButton.brand:hover {
   transform: translateY(-1px);
   box-shadow: 0 14px 36px -10px rgba(180, 83, 9, 0.7), 0 0 0 1px rgba(251, 191, 36, 0.35) inset;
@@ -447,7 +450,7 @@
 }
 .install-cmd-copy.is-copied {
   background: rgba(251, 191, 36, 0.25);
-  color: #fff;
+  color: var(--vp-c-text-1);
   border-color: rgba(251, 191, 36, 0.7);
 }
 
@@ -705,7 +708,7 @@
   transform: translateY(-4px);
   border-color: var(--vp-c-brand-1) !important;
   box-shadow:
-    0 24px 48px -24px rgba(0, 184, 148, 0.4),
+    0 24px 48px -24px rgba(180, 83, 9, 0.35),
     0 0 0 1px rgba(251, 191, 36, 0.15) inset;
   background: rgba(255, 255, 255, 0.7) !important;
 }
@@ -912,6 +915,9 @@
   color: #fff !important;
   background: linear-gradient(135deg, var(--vp-c-brand-1), var(--vp-c-brand-2));
   box-shadow: 0 8px 28px -8px rgba(180, 83, 9, 0.55);
+}
+.dark .cta-primary {
+  color: #1a1206 !important;
 }
 .cta-primary:hover {
   transform: translateY(-1px);
@@ -1297,6 +1303,21 @@
 
 
 /* ---------- 2026-09-15 宽屏下实时卡片不再顶进导航栏(VitePress 把 hero image 垂直居中,卡片高就上漂) ---------- */
-.VPHero .image-container { transform: none !important; height: auto !important; margin: 0 auto !important; padding-top: 8px; }
+.VPHero .image-container { transform: none !important; height: auto !important; padding-top: 8px; }
 .VPHero .image-bg { display: none !important; }
-@media (min-width: 960px) { .VPHero .container { align-items: flex-start !important; } .VPHero .image { align-self: flex-start !important; } }
+@media (min-width: 960px) {
+  .VPHero .container { align-items: flex-start !important; }
+  .VPHero .image { align-self: flex-start !important; }
+  .VPHero .image-container { margin: 0 auto !important; } /* 只在宽屏居中;≤720px 沿用上面 24px 0 0 的手机间距 */
+  .VPHero .image-container .hero-live { width: 100% !important; max-width: 100% !important; } /* 卡片跟着列宽走;定宽 520 会把列撑到容器外(1000px 视口实测右边被裁) */
+}
+@media (min-width: 960px) and (max-width: 1279px) {
+  /* 容器只有 ~870–1150px:VitePress 给文字列 2/3 宽,图片列只剩 ~290px;这里改成 55/45,卡片有 390–520px 可用 */
+  .VPHero .main { width: 55% !important; max-width: 560px !important; }
+  .VPHero .image { flex: 1 1 0 !important; min-width: 0 !important; max-width: 520px !important; }
+}
+@media (max-width: 959px) {
+  /* VitePress 默认把 image 排在文字前面并用 -76px 上边距叠上去(给小 logo 用的);实时卡片要排在文字和按钮之后 */
+  .VPHero .image { order: 3 !important; margin: 24px 0 0 !important; }
+  .VPHero .main { margin-top: 24px !important; } /* 标题原本贴着导航栏下沿(实测 titleTop 56 < navBottom 64) */
+}
