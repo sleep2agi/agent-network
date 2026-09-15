@@ -39,6 +39,7 @@ import {
   attachmentsMeta,
   normalizeOutboundAttachments,
 } from "./outbound-attachments";
+import { attachLocalLinks } from "./reply-local-links";
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
 
 // ── .env loader helper ────────────────────────────────
@@ -436,13 +437,28 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
   }
 
   if (name === "commhub_reply") {
-    const { task_id, text, status, attachments } = args as any;
+    const { task_id, status, attachments } = args as any;
+    let text: string = String((args as any).text ?? "");
     // Fail the call rather than dropping a malformed list: an attachment that
     // silently vanishes is indistinguishable from one that was never sent.
     const parsed = normalizeOutboundAttachments(attachments);
     if (!parsed.ok) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: parsed.error }) }] };
     }
+    // 2026-09-15 —— 回复正文里指向本机文件的 markdown 链接自动上传成附件(同 agent-node .69 的行为):
+    // 走同一套受控上传(受控根、12 MiB、拒 symlink),成功的改写成 /api/files/<id>,失败的在链接后注明原因。
+    const linked = await attachLocalLinks(text, async (p) => {
+      const r = await uploadControlledLocalFile(p, {
+        hubUrl: COMMHUB_URL, authToken: AUTH_TOKEN || "", alias: ALIAS, nodeDir: process.env.ANET_NODE_DIR || undefined,
+        allowedRoots: defaultControlledUploadRoots({ alias: ALIAS, nodeDir: process.env.ANET_NODE_DIR || undefined }),
+      });
+      if (!r.ok) throw new Error(`${r.error}: ${r.message ?? ""}`.trim());
+      return { file_id: r.file_id, name: (r as any).name ?? p.split("/").pop() ?? "file", mime: (r as any).mime, size: (r as any).size };
+    });
+    text = linked.text;
+    const seen = new Set(parsed.attachments.map((a) => a.file_id));
+    const mergedAttachments = [...parsed.attachments, ...linked.attachments.filter((a) => !seen.has(a.file_id))];
+    if (linked.uploaded || linked.failed) log(`[reply-links] uploaded=${linked.uploaded} failed=${linked.failed}`);
     // V2: terminal statuses use send_reply to close task lifecycle
     if (status === "completed" || status === "failed" || status === "cancelled") {
       const replyStatus = status === "completed" ? "replied" : status;
@@ -458,7 +474,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
         in_reply_to: task_id || undefined,
         status: replyStatus,
         from_session: ALIAS,
-        ...attachmentsField(parsed.attachments),
+        ...attachmentsField(mergedAttachments),
       });
       if (task_id) taskOriginators.delete(task_id);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };

@@ -114,3 +114,16 @@ for (const [name, good] of checks) {
   console.log(`PASS: ${name}`);
 }
 console.log(`outbound attachments: ${pass} checks passed`);
+
+
+describe("#TM汇报马 2026-09-15 attachments passed as a JSON string", () => {
+  test("a JSON-string array is parsed like the array; an unparseable string fails loudly instead of vanishing", () => {
+    const arr = normalizeOutboundAttachments('[{"type":"file","file_id":"7088236c5f72444ebfc4481944077af8","name":"probe.pptx","size":47340}]');
+    expect(arr.ok).toBe(true);
+    if (arr.ok) expect(arr.attachments).toEqual([{ type: "file", file_id: "7088236c5f72444ebfc4481944077af8", name: "probe.pptx", size: 47340 }]);
+    const bad = normalizeOutboundAttachments("[{file_id: nope");
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain("not valid JSON");
+    expect(normalizeOutboundAttachments("  ")).toEqual({ ok: true, attachments: [] });
+  });
+});
