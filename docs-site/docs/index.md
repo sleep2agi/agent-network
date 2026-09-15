@@ -49,20 +49,20 @@ features:
 
 <section class="mobile-download" aria-labelledby="mobile-download-title">
   <div class="desktop-download-copy">
-    <span class="eyebrow">MOBILE · v0.2.65</span>
+    <span class="eyebrow">MOBILE · v0.2.66</span>
     <h2 id="mobile-download-title">手机上也能盯着你的 Agent</h2>
     <p>与桌面版同一份应用源码，连的是同一个 Hub。</p>
     <div class="download-note">Android 为测试签名安装包，需 Android 7.0 及以上；iOS 通过 TestFlight 分发。</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.65/Agent.Network_0.2.65_android-universal.apk">
+    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.66/Agent.Network_0.2.66_android-universal.apk">
       <span class="download-platform">Android</span><strong>下载 .apk</strong><small>Android 7.0+ · 76.7 MB</small><span class="download-arrow">↓</span>
     </a>
     <div class="download-card download-card-pending" aria-disabled="true">
       <span class="download-platform">iOS</span><strong>TestFlight 处理中</strong><small>公开测试链接即将开放</small>
     </div>
   </div>
-  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.65">查看版本说明与校验信息</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">高级：0.2.32 审计用 .ipa 与 SHA256SUMS</a></p>
+  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.66">查看版本说明与校验信息</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">高级：0.2.32 审计用 .ipa 与 SHA256SUMS</a></p>
   <p class="release-links">iOS 的 <code>.ipa</code> 是 App Store distribution 签名，供审计比对，<strong>不能直接侧载安装</strong>；请等 TestFlight 开放。</p>
 </section>
 
