@@ -43,7 +43,20 @@ const MAX_ATTACHMENTS = 10;
  * without attachments must produce a byte-identical request to before this
  * existed, or every existing reply changes behaviour the day this ships.
  */
+/** 2026-09-15 —— LLM 常把数组参数当成 JSON 字符串传(TM汇报马 真机:attachments 是 "[{...}]" 字符串,回复 ok:true 但 hub 里没有附件)。
+ *  字符串先 parse;parse 不出来是错误,不是「没有附件」。 */
+export function coerceAttachmentsArg(input: unknown): unknown {
+  if (typeof input !== "string") return input;
+  const t = input.trim();
+  if (t === "") return undefined;
+  try { return JSON.parse(t); } catch { return { __unparseable: t.slice(0, 80) }; }
+}
+
 export function normalizeOutboundAttachments(input: unknown): NormalizeResult {
+  input = coerceAttachmentsArg(input);
+  if (input && typeof input === "object" && !Array.isArray(input) && (input as any).__unparseable !== undefined) {
+    return { ok: false, error: `attachments must be an array of { file_id, name?, mime?, size? } — got a string that is not valid JSON: ${(input as any).__unparseable}` };
+  }
   if (input === undefined || input === null) return { ok: true, attachments: [] };
   if (!Array.isArray(input)) {
     return { ok: false, error: "attachments must be an array of { file_id, name?, mime?, size? }" };
