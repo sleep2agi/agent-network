@@ -27,7 +27,7 @@ onMounted(() => {
   }
   resize()
   for (let i = 0; i < N; i++) {
-    nodes.push({ x: rand(0, w), y: rand(0, h), vx: rand(-0.12, 0.12), vy: rand(-0.09, 0.09), r: rand(1.4, 3.2), hue: [170, 190, 235][i % 3] })
+    nodes.push({ x: rand(0, w), y: rand(0, h), vx: rand(-0.12, 0.12), vy: rand(-0.09, 0.09), r: rand(1.4, 3.2), hue: [48, 40, 28][i % 3] })
   }
   type Pulse = { a: number; b: number; t: number; speed: number }
   const pulses: Pulse[] = []
@@ -74,8 +74,8 @@ onMounted(() => {
       const a = nodes[p.a], b = nodes[p.b]
       const x = a.x + (b.x - a.x) * p.t + px, y = a.y + (b.y - a.y) * p.t + py
       const g = ctx.createRadialGradient(x, y, 0, x, y, 9)
-      g.addColorStop(0, dark ? 'rgba(34,211,238,0.95)' : 'rgba(0,158,126,0.9)')
-      g.addColorStop(1, 'rgba(34,211,238,0)')
+      g.addColorStop(0, dark ? 'rgba(250,204,21,0.95)' : 'rgba(180,83,9,0.9)')
+      g.addColorStop(1, 'rgba(250,204,21,0)')
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill()
     }
     if (!reduced) raf = requestAnimationFrame(frame)
