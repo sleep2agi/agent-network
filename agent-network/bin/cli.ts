@@ -36,6 +36,7 @@ import {
   readMarker,
 } from "../src/copresence-identity";
 import { buildReceipt, formatReceiptSummary, writeReceipt, type LifecycleVerb, type ReceiptCheck } from "../src/codex-lifecycle-receipt";
+import { hubHealthTimeoutMs, HUB_HEALTH_TIMEOUT_ENV } from "../src/hub-health-timeout";
 import { evaluateCodexPreflight, evaluateCodexVerify, checkIdentity, checkHome, checkSession } from "../src/codex-lifecycle-preflight";
 import { FORK_HOME_COPY, checkForkIsolation, forkRolloutPath, rewriteRollout, uuidV7 } from "../src/codex-lifecycle-fork";
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
@@ -602,7 +603,7 @@ interface CopresenceOptions {
 
 /** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
  *  to know something is listening, not to read anything from it. */
-async function hubAnswersHealth(hub: string, timeoutMs = 2_000): Promise<boolean> {
+async function hubAnswersHealth(hub: string, timeoutMs = hubHealthTimeoutMs(hub)): Promise<boolean> {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -628,8 +629,9 @@ const ANET_HUB_TMUX_SESSION = "anet-hub";
 async function ensureLocalHubRunning(hub: string): Promise<void> {
   if (await hubAnswersHealth(hub)) return;
   if (!isLoopbackHub(hub)) {
-    console.error(`[anet] ❌ ${hub} is not answering, and it is not a loopback hub — anet will not start someone else's service.`);
+    console.error(`[anet] ❌ ${hub} did not answer /health within ${hubHealthTimeoutMs(hub)}ms, and it is not a loopback hub — anet will not start someone else's service.`);
     console.error(`[anet]    Start it where it lives, or point this node at a hub that is up.`);
+    console.error(`[anet]    If the hub is up but slow from here (WAN), raise the budget: ${HUB_HEALTH_TIMEOUT_ENV}=15000 anet node start …`);
     process.exit(1);
   }
   // 🔴 Tee the hub's own output to a file. `anet hub start` exits 1 on a failed
