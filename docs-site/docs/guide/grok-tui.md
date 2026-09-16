@@ -165,7 +165,9 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 ### 想给节点带项目技能(`.agents/skills/<name>/SKILL.md`),启动时报 `refuses external skills source`
 
-grok 节点(共存 `grok-build-cli` 和 headless `grok-build-acp` 都一样)**不加载技能**:工具清单固定归运行时所有,`SKILL.md` 属于可执行来源。Linux 上隔离 home 之外的技能源在启动前审计就被拒;隔离 home 自己的 `skills/` 目录在每次启动 / 每个回合前会被清空(连同 hooks、plugins、agents、commands、lsp、settings.json、managed_config.toml、requirements.toml),写进去也不生效。要「技能」效果:把内容写成普通项目文档,靠任务提示词让它用 `read_file` 去读;或者换 codex / claude 类节点。
+**共存 `grok-build-cli` 不加载技能**:工具清单固定归运行时所有,`SKILL.md` 属于可执行来源,Linux 上隔离 home 之外的技能源在启动前审计就被拒;隔离 home 自己的 `skills/` 目录每次启动 / 每个回合前会被清空(连同 hooks、plugins、agents、commands、lsp、settings.json、managed_config.toml、requirements.toml),写进去也不生效。要「技能」效果只能把内容写成普通项目文档让它 `read_file`,或换 codex / claude 类节点。
+
+**headless `grok-build-acp` 会加载**项目根的 `.agents/skills/<name>/SKILL.md`(DEV 实测:隔离 home 环境、符号链接 farm 都不影响)。但**技能清单在 grok session 创建时定格**:acp 节点每次都复用 config 里的 `grokSession`,session 建立之后新增的技能看不到。新增或修改技能后:停节点 → 删掉 `.anet/nodes/<name>/config.json` 里的 `grokSession`(和 `session`)→ 起节点(新建 session 并写回新 id)。
 
 ### 共存 TUI 能不能开 always-approve / 全权限
 
