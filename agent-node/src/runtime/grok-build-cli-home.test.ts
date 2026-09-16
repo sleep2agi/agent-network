@@ -393,6 +393,37 @@ describe("prepareGrokCliHome", () => {
     })).toThrow("project executable configuration");
   });
 
+  it("names the chmod 0444 recovery when start refuses an empty wrong-mode placeholder (#1887)", () => {
+    // grok 1.0.5 on a TM cloud host plants the five read-deny files as 0666; the exact 0444 predicate keeps
+    // refusing them (on purpose), so the refusal must say what to run instead of only "expected a real directory".
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-placeholder-0666-hint-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateHome = join(root, "state");
+    const project = join(root, "project");
+    const secretDir = join(project, ".anet");
+    for (const directory of [sourceHome, stateHome, secretDir]) mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(project, ".grok"), "", { mode: 0o666 });
+    chmodSync(join(project, ".grok"), 0o666);
+    const attempt = () => prepareGrokCliHome({
+      sourceHome,
+      stateRoot: dirname(stateHome),
+      stateHome,
+      projectCwd: project,
+      useLeader: true,
+      denyPaths: [secretDir],
+    });
+    expect(attempt).toThrow("expected a real directory");
+    expect(attempt).toThrow("mode 0666");
+    expect(attempt).toThrow("chmod 0444 .grok .claude .cursor .mcp.json .envrc");
+    // still refused (the hint is not a relaxation) and the file is untouched
+    expect(lstatSync(join(project, ".grok")).mode & 0o777).toBe(0o666);
+    // a non-empty .grok file gets no placeholder hint: it is a real foreign file
+    writeFileSync(join(project, ".grok"), "x", { mode: 0o666 });
+    expect(attempt).toThrow("expected a real directory");
+    expect(attempt).not.toThrow("chmod 0444");
+  });
+
   it("validates every exact project placeholder before unlinking any sibling", () => {
     const root = mkdtempSync(join(tmpdir(), "grok-cli-project-placeholders-batch-"));
     roots.push(root);
