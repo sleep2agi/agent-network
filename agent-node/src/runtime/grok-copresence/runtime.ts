@@ -1398,7 +1398,13 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     const sessionDir = grokSessionDirectory(this.opts.grokHome, this.opts.cwd, this.sessionId);
     const resume = this.opts.newSession !== true && existsSync(sessionDir);
     if (this.opts.sessionId && this.opts.newSession !== true && !resume) {
-      throw new Error(`grok copresence cannot resume missing session ${this.sessionId} for cwd ${this.opts.cwd}`);
+      // Fail closed on purpose: silently starting a new session would drop the human's history without
+      // telling anyone. Say how to recover instead of leaving a stale key to block every start (TMHR鲸 2026-09-16).
+      throw new Error(
+        `grok copresence cannot resume missing session ${this.sessionId} for cwd ${this.opts.cwd}; ` +
+        `the session directory is gone. To start a fresh session, remove "grokCliSession" from this node's config.json ` +
+        `(.anet/nodes/<alias>/config.json) and start again.`,
+      );
     }
 
     try {
