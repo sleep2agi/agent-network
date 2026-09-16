@@ -17212,7 +17212,9 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       printProjectUsage();
       break;
     case "grok":
-      console.log("Usage: anet grok attach <node>");
+      // 2026-09-16 TMHR鲸:`anet grok --help` 只打 attach 一行,和裸 `anet grok` 打的两行不一致,
+      // 按 --help 自查会得出「没有 model」的错结论。两处用同一句。
+      console.log("Usage: anet grok attach <node> | anet grok model <node> <model>");
       break;
       // #1668 — 同一个 bug 的第三次:opencode / goal / token / batch **各自都在
       // 自己的命令里写了 `sub === "--help"` 分支**,而这个拦截器先命中 default,
