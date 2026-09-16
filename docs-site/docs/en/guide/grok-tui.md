@@ -157,6 +157,10 @@ That `apt` hint is printed by the grok binary itself and ignores your distributi
 
 A co-presence node reuses the login state left by `grok login` on **this machine** (`~/.grok/`); without it the TUI waits at the login gate. Logging in needs direct reachability of `auth.x.ai` / `api.x.ai` / `grok.com`; on egress-restricted hosts (a corporate proxy tunnels, but x.ai's edge rejects the egress IP) not even the device code is issued. `GROK_OIDC_ISSUER` overrides the issuer for a corporate IdP; it is not a proxy and does not fix egress. Either have the network allow x.ai, or create the node on a machine with direct egress. Do not copy another machine's `~/.grok/auth.json` — the login state is bound to the machine and the account.
 
+### Egress only works through a corporate proxy, and `HTTPS_PROXY` on the node changes nothing
+
+The co-presence runtime hands the grok child a **fixed allowlist** of environment variables (`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` plus `HOME`/`PWD`/`GROK_*`/`ANET_*`); `HTTP(S)_PROXY` is always stripped as part of the sandbox and there is no per-node opt-out. Pushing proxy variables into the node is therefore a dead end. What works on an egress-restricted host is a **host-side** setup: point `auth.x.ai` / `api.x.ai` / `grok.com` at the machine itself in `/etc/hosts` and run a local SNI-based 443 relay that goes out through the corporate proxy, so grok believes it is connecting directly. Acceptance check, with no proxy variables set: `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` returns 200 (verified by the TM team on a cloud host, 2026-09-16).
+
 ### Permission prompts
 
 Only the attached human handles approval prompts. The runtime never selects permanent approval and blocks TUI commands that would change the shared approval policy. At an approval screen, use Enter for allow-once or `Ctrl-C` to reject/cancel.
