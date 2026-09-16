@@ -542,6 +542,23 @@ function isExactProjectSandboxPlaceholderStat(stat: Stats, uid: number | undefin
   return true;
 }
 
+/**
+ * #1887(2026-09-16,TMHR鲸,TM 云 HCE 机):grok 1.0.5 在部分主机把 read-deny 占位显式种成 0666,
+ * 回收只认 0444 ⇒ clean stop 必留残渣,下次启动在这里被拒。判据不放宽(mode 是「我们种的」形状的一半,
+ * 用户自己的空 .envrc 不能被当占位删),但报错要说清怎么恢复,而不是让人对着「expected a real directory」猜。
+ */
+function wrongModePlaceholderHint(path: string): string {
+  const stat = lstatIfPresent(path);
+  if (!stat || !posixFileModes()) return "";
+  const s = stat as Stats;
+  const uid = process.getuid?.();
+  if (s.isSymbolicLink() || !s.isFile() || s.nlink !== 1 || s.size !== 0) return "";
+  if (uid !== undefined && s.uid !== uid) return "";
+  const mode = (s.mode & 0o7777).toString(8).padStart(4, "0");
+  return ` (this is an empty read-deny placeholder with mode ${mode}, not the 0444 grok plants elsewhere; `
+    + "if grok left it, run `chmod 0444 .grok .claude .cursor .mcp.json .envrc` in the project and start again — see issue #1887)";
+}
+
 function isStaleProjectSandboxPlaceholder(path: string): boolean {
   const stat = lstatIfPresent(path);
   if (!stat) return false;
@@ -1092,7 +1109,7 @@ export function assertNoProjectGrokExecutableSources(cwd: string, strictFolderTr
     // #1767 —— 上次没清掉的精确占位不是可执行来源;runtime 拿到 turn lock 后会回收它。
     if (grokStat && (grokStat.isSymbolicLink() || !grokStat.isDirectory()) && !isStaleProjectSandboxPlaceholder(grokDir)) {
       throw new Error(
-        `grok-build-cli refuses project policy state at ${grokDir}: expected a real directory`,
+        `grok-build-cli refuses project policy state at ${grokDir}: expected a real directory${wrongModePlaceholderHint(grokDir)}`,
       );
     }
     // Preserve the pre-preview headless contract: native project hooks and
@@ -1119,7 +1136,7 @@ export function assertNoProjectGrokExecutableSources(cwd: string, strictFolderTr
       const stat = lstatIfPresent(candidate);
       if (stat && (stat.isSymbolicLink() || !stat.isDirectory()) && !isStaleProjectSandboxPlaceholder(candidate)) {
         throw new Error(
-          `grok-build-cli refuses project policy state at ${candidate}: expected a real directory`,
+          `grok-build-cli refuses project policy state at ${candidate}: expected a real directory${wrongModePlaceholderHint(candidate)}`,
         );
       }
       if (stat && stat.isDirectory() && readdirSync(candidate).length !== 0) {
