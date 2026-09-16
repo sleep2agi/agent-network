@@ -157,6 +157,10 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 共存节点复用**这台机器**上 `grok login` 留下的登录态(`~/.grok/`);没有登录态就停在登录门。登录要能直连 `auth.x.ai` / `api.x.ai` / `grok.com`;在出网受限的机器上(公司代理放行了隧道但 x.ai 边缘拒绝出口 IP)设备码都取不到。`GROK_OIDC_ISSUER` 是企业自有 IdP 的 issuer 覆盖,不是代理,解决不了出网。要么让网络侧放行 x.ai,要么把节点建在能直连的机器上;**不要**把别的机器的 `~/.grok/auth.json` 拷过来(登录态绑机器与账号)。
 
+### 出网只能走公司代理,但节点里设 `HTTPS_PROXY` 没用
+
+共存运行时给 grok 子进程的环境是**固定白名单**(`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` + `HOME`/`PWD`/`GROK_*`/`ANET_*`),`HTTP(S)_PROXY` 一律剥掉 —— 这是沙箱的一部分,不会为节点开口子。所以「给节点塞代理变量」在这条路上走不通。出口受限的机器上验证可行的是**主机侧**方案:`/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `grok.com` 指到本机,本机跑一个按 SNI 转发的 443 中继再经公司代理出网 —— grok 以为自己在直连。验收:不带任何代理变量时 `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` 返回 200(TMHR 团队 2026-09-16 在 TM 云机实测)。
+
 ### 权限确认
 
 权限弹窗只由已连接的人类处理。运行时不会替你选择永久允许，并会阻止改变共享审批策略的 TUI 命令。审批界面只使用 Enter（单次允许）或 `Ctrl-C`（拒绝/取消）。
