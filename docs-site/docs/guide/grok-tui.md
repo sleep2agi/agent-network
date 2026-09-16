@@ -147,7 +147,7 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 ### 工作目录里出现 5 个 0 字节文件(`.grok` `.claude` `.cursor` `.mcp.json` `.envrc`)
 
-这是 **grok 二进制自己**在启动时种下的读拒绝占位(不让它读项目里的这些外部面);共存运行时在 `anet node stop` 时只回收「本人、0 字节、单链接、mode 0444」这个精确形状的五个文件(防调包,故意 fail-closed),`agent-node 2.5.0-preview.66` 起正常 stop 是干净的。如果你的文件系统会改写 mode(见到 `refuses post-stop project placeholder … expected … mode 0444`,文件却是 0666),stop 后先 `chmod 0444 .grok .claude .cursor .mcp.json .envrc` 再起,启动会把它们作为 stale placeholder 回收。只有「启动被 kill 后残留 + 更老的版本」才会在下次启动报 `.grok: expected a real directory`,那时删掉这 5 个文件再起。
+这是 **grok 二进制自己**在启动时种下的读拒绝占位(不让它读项目里的这些外部面);共存运行时在 `anet node stop` 时只回收「本人、0 字节、单链接、mode 0444」这个精确形状的五个文件(防调包,故意 fail-closed),`agent-node 2.5.0-preview.66` 起正常 stop 是干净的。但在部分主机上 grok 1.0.5 会把这五个文件**显式种成 0666**(TM 云 HCE 机实测:同一 grok 进程自建的 config/lock 都是 0600,只有占位是 0666;DEV 上同一 build 种的是 0444),于是**每次** stop(正常 stop 也一样)都报 `refuses post-stop project placeholder … expected … mode 0444` 并留下五个 0666 文件,下一次 start 报 `expected a real directory`。处置:stop 后 `chmod 0444 .grok .claude .cursor .mcp.json .envrc` 再起,启动会把它们作为 stale placeholder 回收;`agent-node 2.5.0-preview.70` 起报错里直接带这条命令。跟踪:[#1887](https://github.com/sleep2agi/agent-network/issues/1887)。只有「启动被 kill 后残留 + 更老的版本」才会在下次启动报 `.grok: expected a real directory`,那时删掉这 5 个文件再起。
 
 ### 报 `bwrap exec failed` / 提示 `apt install -y bubblewrap`
 
