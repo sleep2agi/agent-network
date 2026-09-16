@@ -518,7 +518,9 @@ jobs:
   recovered-suites:
     name: recovered suites (Docker)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # 2026-09-16:这个 job 正常 7.3–8.8 min(12 次抽样),但同一天两次在第 12 分钟被 timeout 取消 ——
+    # 步骤全绿、只是 Docker 构建慢了几十秒。12 太贴身,放到 16;真挂死仍会在 16 分钟被杀。
+    timeout-minutes: 16
     steps:
       - uses: actions/checkout@v4
 
