@@ -163,6 +163,18 @@ The co-presence runtime hands the grok child a **fixed allowlist** of environmen
 
 To list subcommands use bare `anet grok` (prints both attach and model); `anet grok --help` on `2.3.0-preview.92` and earlier prints only the attach line, from `.93` both agree.
 
+### Project skills (`.agents/skills/<name>/SKILL.md`) make start fail with `refuses external skills source`
+
+Grok nodes (co-presence `grok-build-cli` and headless `grok-build-acp` alike) **do not load skills**: the tool inventory is fixed and runtime-owned, and `SKILL.md` counts as an executable source. On Linux any skills source outside the isolated home is refused by the pre-spawn audit, and the isolated home's own `skills/` directory is wiped before every start and every turn (together with hooks, plugins, agents, commands, lsp, settings.json, managed_config.toml, requirements.toml), so writing there changes nothing. For the same effect, put the content in plain project documents and have the task prompt tell the agent to `read_file` them, or use a codex / claude node.
+
+### Can the co-presence TUI run always-approve / full access?
+
+No, by design: the TUI is shared between a human and the agent, and any task from the network lands in that same session, so approval has to stay with the person at the TUI. `flags.dangerouslySkipPermissions: true` in the config makes the node refuse to start (`approval decisions must remain owned by the attached human TUI`); `--dangerously-allow-full-access` only applies to codex co-presence. To let grok edit files or run commands, create a separate `grok-build-acp` node (headless; `dangerouslySkipPermissions: true` works there, but nobody can attach to a TUI). A common setup is one TUI node to talk to and one acp node to do the work.
+
+### `grok-build-acp` on a host that must egress through a proxy: ACP initialize never returns, stderr only shows `Settings fetch failed`
+
+The headless path passes your shell's `HTTP(S)_PROXY` straight to grok (the proxy-stripping environment is only used for the TUI); when the corporate proxy cannot reach `*.x.ai` / `*.grok.com`, grok's settings fetch hangs inside initialize. Fix: `NO_PROXY="x.ai,.x.ai,grok.com,.grok.com,localhost,127.0.0.1"` so those hosts go through the host-side `/etc/hosts` pin and relay (previous entry). Note that CIDR entries in `NO_PROXY` (such as `10.0.0.0/8`) do not match literal IPs for curl / reqwest; add the literal too. (TM team, cloud host, 2026-09-16: initialize returned immediately after the change and a task completed in 38 s.)
+
 ### Permission prompts
 
 Only the attached human handles approval prompts. The runtime never selects permanent approval and blocks TUI commands that would change the shared approval policy. At an approval screen, use Enter for allow-once or `Ctrl-C` to reject/cancel.

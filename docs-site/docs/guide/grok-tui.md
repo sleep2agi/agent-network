@@ -163,6 +163,18 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 自查子命令请用**裸** `anet grok`(打印 attach 与 model 两个子命令);`2.3.0-preview.92` 及更早的 `anet grok --help` 只打 attach 一行,`.93` 起两处一致。
 
+### 想给节点带项目技能(`.agents/skills/<name>/SKILL.md`),启动时报 `refuses external skills source`
+
+grok 节点(共存 `grok-build-cli` 和 headless `grok-build-acp` 都一样)**不加载技能**:工具清单固定归运行时所有,`SKILL.md` 属于可执行来源。Linux 上隔离 home 之外的技能源在启动前审计就被拒;隔离 home 自己的 `skills/` 目录在每次启动 / 每个回合前会被清空(连同 hooks、plugins、agents、commands、lsp、settings.json、managed_config.toml、requirements.toml),写进去也不生效。要「技能」效果:把内容写成普通项目文档,靠任务提示词让它用 `read_file` 去读;或者换 codex / claude 类节点。
+
+### 共存 TUI 能不能开 always-approve / 全权限
+
+不能,这是有意的:共存 TUI 是人和 agent 共用一个输入框,网络里任何人派的任务都直达这个会话,所以审批必须留在坐在 TUI 前的人手里。config 里写 `flags.dangerouslySkipPermissions: true` 会直接拒起(`approval decisions must remain owned by the attached human TUI`);`--dangerously-allow-full-access` 只对 codex 共存有效。要让 grok 改文件 / 跑命令,另建一个 `grok-build-acp` 节点(headless,可 `dangerouslySkipPermissions: true`,但人不能 attach 看 TUI),常见做法是一个 TUI 节点给人看、一个 acp 节点干活。
+
+### `grok-build-acp` 在要经代理出网的机器上,ACP initialize 一直不返回,stderr 只有 `Settings fetch failed`
+
+headless 路径把你 shell 里的 `HTTP(S)_PROXY` 原样传给了 grok(共存那套剥代理变量的环境只用于 TUI);公司代理到 `*.x.ai` / `*.grok.com` 不通时,grok 拉 settings 就卡死在 initialize。处置:`NO_PROXY="x.ai,.x.ai,grok.com,.grok.com,localhost,127.0.0.1"`,让这些域名走主机侧 `/etc/hosts` 钉 + 中继(见上一条)。注意 `NO_PROXY` 里的 CIDR(如 `10.0.0.0/8`)对 curl / reqwest 的字面量 IP 不生效,要另补字面量。(TM 团队 2026-09-16 在 TM 云机实测:补 NO_PROXY 后 initialize 秒回,任务 38s 完成。)
+
 ### 权限确认
 
 权限弹窗只由已连接的人类处理。运行时不会替你选择永久允许，并会阻止改变共享审批策略的 TUI 命令。审批界面只使用 Enter（单次允许）或 `Ctrl-C`（拒绝/取消）。
