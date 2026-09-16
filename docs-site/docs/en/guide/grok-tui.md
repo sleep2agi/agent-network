@@ -165,7 +165,9 @@ To list subcommands use bare `anet grok` (prints both attach and model); `anet g
 
 ### Project skills (`.agents/skills/<name>/SKILL.md`) make start fail with `refuses external skills source`
 
-Grok nodes (co-presence `grok-build-cli` and headless `grok-build-acp` alike) **do not load skills**: the tool inventory is fixed and runtime-owned, and `SKILL.md` counts as an executable source. On Linux any skills source outside the isolated home is refused by the pre-spawn audit, and the isolated home's own `skills/` directory is wiped before every start and every turn (together with hooks, plugins, agents, commands, lsp, settings.json, managed_config.toml, requirements.toml), so writing there changes nothing. For the same effect, put the content in plain project documents and have the task prompt tell the agent to `read_file` them, or use a codex / claude node.
+**Co-presence `grok-build-cli` does not load skills**: the tool inventory is fixed and runtime-owned, `SKILL.md` counts as an executable source, on Linux any skills source outside the isolated home is refused by the pre-spawn audit, and the isolated home's own `skills/` directory is wiped before every start and every turn (together with hooks, plugins, agents, commands, lsp, settings.json, managed_config.toml, requirements.toml). For the same effect, put the content in plain project documents and have the task prompt tell the agent to `read_file` them, or use a codex / claude node.
+
+**Headless `grok-build-acp` does load** `.agents/skills/<name>/SKILL.md` from the project root (verified on DEV: the isolated-home environment and the symlink farm cwd change nothing). But **the skill list is frozen when the grok session is created**: an acp node resumes the `grokSession` stored in its config every time, so skills added after that session was created stay invisible. After adding or changing skills: stop the node, delete `grokSession` (and `session`) from `.anet/nodes/<name>/config.json`, start the node again (a new session is created and its id written back).
 
 ### Can the co-presence TUI run always-approve / full access?
 
