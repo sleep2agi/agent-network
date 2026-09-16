@@ -13,6 +13,7 @@
  */
 
 import { inboundChannelMeta } from "./channel-meta.js";
+import { drainInbox } from "./inbox-drain";
 import { readFileSync, existsSync } from "fs";
 import { OUTBOUND_TOOL_NAMES } from "./outbound-tool-names";
 import { parseCommhubToolResult } from "./commhub-response";
@@ -710,48 +711,49 @@ async function handleSSEEvent(event: any) {
   if (event.type === "new_task" || event.type === "broadcast") {
     log(`← ${event.type}: inbox_count=${event.inbox_count} priority=${event.priority || "normal"}`);
 
-    const inbox = await callCommHub("get_inbox", {
-      alias: ALIAS,
-      limit: 5,
-    });
-
-    if (inbox?.ok && inbox.messages?.length > 0) {
-      for (const msg of inbox.messages) {
-        let channelContent = String(msg.content || "");
-        try {
-          const attachments = await downloadChannelAttachments(msg, {
-            hubUrl: COMMHUB_URL,
-            authToken: AUTH_TOKEN,
-            cacheDir: channelAttachmentCacheDir(HOME, ALIAS),
-          });
-          channelContent = appendChannelAttachmentPaths(channelContent, attachments.paths);
-          for (const failure of attachments.failures) {
-            log(`attachment ${failure.fileId || "(legacy)"} not surfaced (${failure.code}): ${failure.message}`);
-          }
-        } catch (error) {
-          // Attachments are additive. Never drop or fail the text task when a
-          // cache/fetch implementation hits an unexpected host error.
-          log(`attachment resolver failed unexpectedly; preserving text-only task: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        const meta = inboundChannelMeta(msg);
-        // V2: remember who sent this task so send_reply knows the target
-        taskOriginators.set(msg.id, msg.from_session || "hub");
-
-        await mcp.notification({
-          method: "notifications/claude/channel",
-          params: {
-            content: channelContent,
-            meta,
-          },
+    // #1900 —— 之前每个事件只取一页(limit 5)就停,节点忙时攒下的第 6 条起要等下一个事件才投。
+    //    现在取到短页/空页为止;hub 一直回同一批(ack 没生效)时停下不空转。
+    const drained = await drainInbox<any>({
+      pageSize: 5,
+      fetchPage: (limit) => callCommHub("get_inbox", { alias: ALIAS, limit }),
+      handle: async (msg) => {
+      let channelContent = String(msg.content || "");
+      try {
+        const attachments = await downloadChannelAttachments(msg, {
+          hubUrl: COMMHUB_URL,
+          authToken: AUTH_TOKEN,
+          cacheDir: channelAttachmentCacheDir(HOME, ALIAS),
         });
+        channelContent = appendChannelAttachmentPaths(channelContent, attachments.paths);
+        for (const failure of attachments.failures) {
+          log(`attachment ${failure.fileId || "(legacy)"} not surfaced (${failure.code}): ${failure.message}`);
+        }
+      } catch (error) {
+        // Attachments are additive. Never drop or fail the text task when a
+        // cache/fetch implementation hits an unexpected host error.
+        log(`attachment resolver failed unexpectedly; preserving text-only task: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const meta = inboundChannelMeta(msg);
+      // V2: remember who sent this task so send_reply knows the target
+      taskOriginators.set(msg.id, msg.from_session || "hub");
 
-        log(`→ injected task ${msg.id.slice(0, 8)} from ${msg.from_session}: ${(msg.content as string).slice(0, 60)}`);
+      await mcp.notification({
+        method: "notifications/claude/channel",
+        params: {
+          content: channelContent,
+          meta,
+        },
+      });
 
+      log(`→ injected task ${msg.id.slice(0, 8)} from ${msg.from_session}: ${(msg.content as string).slice(0, 60)}`);
         await callCommHub("ack_inbox", {
           alias: ALIAS,
           message_id: msg.id,
         });
-      }
+      },
+    });
+    if (drained.pages > 1 || drained.stoppedBy === "no-progress" || drained.stoppedBy === "fetch-error") {
+      log(`inbox drain: delivered=${drained.delivered} pages=${drained.pages} stopped=${drained.stoppedBy}`);
     }
   }
 }
