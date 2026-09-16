@@ -137,6 +137,26 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 该 profile 没有启用共存模式。创建新的 `grok-build-cli` 节点；不要直接复制 socket 路径或猜测配置。
 
+### 启动时报 `<hub> did not answer /health within 2000ms`(跨 WAN 连 hub)
+
+`anet node start` 先探一次 `<hub>/health`。`2.3.0-preview.92` 起:loopback hub 预算 2 秒,非 loopback 默认 10 秒,都可用 `ANET_HUB_HEALTH_TIMEOUT_MS=<1000–60000>` 覆盖。更早的版本对所有 hub 都是 2 秒,跨公网(RTT 2 秒以上)会把好好的 hub 判成没起并退出 —— 升级即可;先 `curl -o /dev/null -w '%{time_total}\n' <hub>/health` 看真实耗时。
+
+### 报 `cannot resume missing session <id>`
+
+节点 config 里的 `grokCliSession` 指向的会话目录已经不在了(被清理或换了 `GROK_HOME`)。运行时**故意**不自动新建(那会静默丢掉人在 TUI 里的历史)。恢复:删掉 `.anet/nodes/<name>/config.json` 里的 `grokCliSession`,再 `anet node start`,会新建一个会话并写回新 id。
+
+### 工作目录里出现 5 个 0 字节文件(`.grok` `.claude` `.cursor` `.mcp.json` `.envrc`)
+
+这是共存运行时**启动时正常生成**的沙箱拒绝锚点(不让 grok 去读项目里的这些外部面),`agent-node 2.5.0-preview.66` 起正常 `anet node stop` 会清掉。只有「启动被 kill 后残留 + 更老的版本」才会在下次启动报 `.grok: expected a real directory`,那时删掉这 5 个文件再起。
+
+### 报 `bwrap exec failed` / 提示 `apt install -y bubblewrap`
+
+那条 `apt` 提示是 grok 二进制自己打的,和发行版无关:dnf/yum 机器(HCE、CentOS、Fedora)装 `bubblewrap` 的 rpm 即可(`sudo dnf install -y bubblewrap`,或离线 rpm)。
+
+### TUI 停在 `Login with Grok`,`grok login --device-auth` 连不上
+
+共存节点复用**这台机器**上 `grok login` 留下的登录态(`~/.grok/`);没有登录态就停在登录门。登录要能直连 `auth.x.ai` / `api.x.ai` / `grok.com`;在出网受限的机器上(公司代理放行了隧道但 x.ai 边缘拒绝出口 IP)设备码都取不到。`GROK_OIDC_ISSUER` 是企业自有 IdP 的 issuer 覆盖,不是代理,解决不了出网。要么让网络侧放行 x.ai,要么把节点建在能直连的机器上;**不要**把别的机器的 `~/.grok/auth.json` 拷过来(登录态绑机器与账号)。
+
 ### 权限确认
 
 权限弹窗只由已连接的人类处理。运行时不会替你选择永久允许，并会阻止改变共享审批策略的 TUI 命令。审批界面只使用 Enter（单次允许）或 `Ctrl-C`（拒绝/取消）。

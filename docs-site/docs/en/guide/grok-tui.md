@@ -137,6 +137,26 @@ Run `anet grok attach` directly in an interactive terminal. Pipes, redirected in
 
 That profile does not enable co-presence. Create a new `grok-build-cli` node; do not copy or guess private socket paths.
 
+### Start fails with `<hub> did not answer /health within 2000ms` (hub across a WAN)
+
+`anet node start` probes `<hub>/health` once. From `2.3.0-preview.92` a loopback hub gets a 2 s budget and any other hub 10 s, and `ANET_HUB_HEALTH_TIMEOUT_MS=<1000–60000>` overrides both. Older versions used 2 s for every hub, so a healthy hub behind a 2 s+ round trip was declared down and the node exited. Upgrade; first check the real latency with `curl -o /dev/null -w '%{time_total}\n' <hub>/health`.
+
+### `cannot resume missing session <id>`
+
+The session directory named by `grokCliSession` in the node config is gone (cleaned up, or `GROK_HOME` changed). The runtime deliberately does not start a new session on its own, because that would silently drop the human's TUI history. Recover by deleting `grokCliSession` from `.anet/nodes/<name>/config.json` and running `anet node start` again; a fresh session is created and its id written back.
+
+### Five zero-byte files appear in the project directory (`.grok` `.claude` `.cursor` `.mcp.json` `.envrc`)
+
+These are sandbox deny anchors the co-presence runtime creates on every start so grok cannot read those external surfaces in the project; since `agent-node 2.5.0-preview.66` a normal `anet node stop` removes them. Only "start was killed and left them behind, on an older version" makes the next start fail with `.grok: expected a real directory` — delete the five files and start again.
+
+### `bwrap exec failed` / a hint to `apt install -y bubblewrap`
+
+That `apt` hint is printed by the grok binary itself and ignores your distribution. On dnf/yum systems (HCE, CentOS, Fedora) install the `bubblewrap` rpm (`sudo dnf install -y bubblewrap`, or an offline rpm).
+
+### The TUI stops at `Login with Grok`, and `grok login --device-auth` cannot connect
+
+A co-presence node reuses the login state left by `grok login` on **this machine** (`~/.grok/`); without it the TUI waits at the login gate. Logging in needs direct reachability of `auth.x.ai` / `api.x.ai` / `grok.com`; on egress-restricted hosts (a corporate proxy tunnels, but x.ai's edge rejects the egress IP) not even the device code is issued. `GROK_OIDC_ISSUER` overrides the issuer for a corporate IdP; it is not a proxy and does not fix egress. Either have the network allow x.ai, or create the node on a machine with direct egress. Do not copy another machine's `~/.grok/auth.json` — the login state is bound to the machine and the account.
+
 ### Permission prompts
 
 Only the attached human handles approval prompts. The runtime never selects permanent approval and blocks TUI commands that would change the shared approval policy. At an approval screen, use Enter for allow-once or `Ctrl-C` to reject/cancel.
