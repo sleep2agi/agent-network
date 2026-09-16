@@ -165,6 +165,7 @@ import {
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
 import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
+import { shouldSkipTerminalTask } from "./runtime/terminal-task-guard";
 import {
   createDetachedInboxDispatcher,
   dispatchInboxBatch,
@@ -5244,6 +5245,19 @@ async function processInbox() {
       // logical task across retry/reassign. Keep ACK on the transport row,
       // but bind runtime evidence and replies to the logical task.
       const logicalTaskId = logicalTaskIdFromInbox(msg);
+      // #1900 —— 串行队列里排了很久的任务可能已被 agent 提前回过(或被别人关掉);出队提交前问 hub 一次,
+      //    已终态就不起 turn(否则这一轮的终态会覆写邻近任务、子任务回件会替答人类)。查不到/失败不拦。
+      if (msgType === "task" || msgType === "broadcast") {
+        const verdict = await shouldSkipTerminalTask(
+          async (id) => parseToolJson(await callCommHub("get_task", { task_id: id })),
+          logicalTaskId,
+        );
+        if (verdict.skip) {
+          log(`← [${from}] skip terminal task ${logicalTaskId.slice(0, 8)} (hub status=${verdict.status}); no turn started`);
+          await ackAndRecordConsumed(msg, "terminal");
+          return;
+        }
+      }
       commhubCompensation?.recordLifecycle(logicalTaskId, "delivered");
       const images = await extractRuntimeAttachmentPaths(msg);
       const inboundLogSuffix = GROK_EXECUTION_MODE === "cli"
