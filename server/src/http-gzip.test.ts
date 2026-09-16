@@ -49,6 +49,12 @@ test("small, streamed, already-encoded, SSE, 204 and HEAD responses are left alo
   const head = json(big);
   expect(await maybeGzipResponse(reqWith("gzip", "HEAD"), head)).toBe(head);
 
+  // /api/files downloads: Range replies and attachments keep their exact byte lengths (CI #509/#514 caught this)
+  const partial = new Response("x".repeat(4096), { status: 206, headers: { "Content-Type": "text/plain", "Content-Range": "bytes 0-4095/8192" } });
+  expect(await maybeGzipResponse(reqWith("gzip"), partial)).toBe(partial);
+  const attachment = new Response("y".repeat(4096), { status: 200, headers: { "Content-Type": "text/plain", "Content-Disposition": "attachment; filename=\"a.txt\"" } });
+  expect(await maybeGzipResponse(reqWith("gzip"), attachment)).toBe(attachment);
+
   const binary = new Response(new Uint8Array(4096), { headers: { "Content-Type": "image/png" } });
   expect(await maybeGzipResponse(reqWith("gzip"), binary)).toBe(binary);
 

@@ -20,8 +20,10 @@ export function wantsGzip(req: Request): boolean {
 }
 
 export function isCompressibleResponse(res: Response): boolean {
-  if (res.status === 204 || res.status === 304 || !res.body) return false;
-  if (res.headers.get("content-encoding")) return false;
+  // 只压完整的 200:206 Partial Content / Content-Range / 附件下载(Content-Disposition)都有自己的
+  // 字节语义(Range 客户端按 Content-Length 数字节),压了就错 —— CI 的 /api/files Range 测试抓到的。
+  if (res.status !== 200 || !res.body) return false;
+  if (res.headers.get("content-encoding") || res.headers.get("content-range") || res.headers.get("content-disposition")) return false;
   const ct = res.headers.get("content-type") || "";
   if (/text\/event-stream/i.test(ct)) return false;
   return COMPRESSIBLE.test(ct);
