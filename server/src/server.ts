@@ -1,4 +1,5 @@
 import { buildServeErrorResponse } from "./serve-error.js";
+import { maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
@@ -792,6 +793,8 @@ return Bun.serve({
   error: (err) => buildServeErrorResponse(err),
 
   async fetch(req, server) {
+    // 2026-09-16 —— 所有 JSON/文本响应在客户端要求时 gzip(见 http-gzip.ts);SSE/流式/二进制原样。
+    return maybeGzipResponse(req, await (async (): Promise<Response | undefined> => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     // ── CORS preflight ──
@@ -1661,7 +1664,8 @@ return Bun.serve({
             alias: s.alias,
             status: s.status,
             agent: s.agent ?? null,
-            task: s.task ?? null,
+            // 列表预览只要一行;全文 task 占 light 载荷 52%(294 节点 128 KB)。全量 /api/status 不变。
+            task: trimLightTask(s.task),
             server: s.server ?? null,
             updated_at: s.updated_at ?? null,
             runtime: normalizeRuntime(s.agent),
@@ -3571,6 +3575,7 @@ Security: ${SECURITY_LABEL}
 `,
       { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } }   // #426
     ));
+    })());
   },
 
   // ── WebSocket handler for tmux terminal streaming ──
