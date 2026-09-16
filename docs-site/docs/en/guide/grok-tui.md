@@ -147,7 +147,7 @@ The session directory named by `grokCliSession` in the node config is gone (clea
 
 ### Five zero-byte files appear in the project directory (`.grok` `.claude` `.cursor` `.mcp.json` `.envrc`)
 
-These are sandbox deny anchors the co-presence runtime creates on every start so grok cannot read those external surfaces in the project; since `agent-node 2.5.0-preview.66` a normal `anet node stop` removes them. Only "start was killed and left them behind, on an older version" makes the next start fail with `.grok: expected a real directory` — delete the five files and start again.
+These read-deny placeholders are planted by the **grok binary itself** at start so it cannot read those external surfaces in the project; on `anet node stop` the co-presence runtime reclaims only the exact shape "owned by me, zero bytes, single link, mode 0444" (deliberately fail-closed against substitution), and since `agent-node 2.5.0-preview.66` a normal stop leaves nothing behind. If your filesystem rewrites modes (you see `refuses post-stop project placeholder … expected … mode 0444` while the files are 0666), run `chmod 0444 .grok .claude .cursor .mcp.json .envrc` after stop and start again; start reclaims them as stale placeholders. Only "start was killed and left them behind, on an older version" makes the next start fail with `.grok: expected a real directory` — delete the five files and start again.
 
 ### `bwrap exec failed` / a hint to `apt install -y bubblewrap`
 
@@ -159,7 +159,9 @@ A co-presence node reuses the login state left by `grok login` on **this machine
 
 ### Egress only works through a corporate proxy, and `HTTPS_PROXY` on the node changes nothing
 
-The co-presence runtime hands the grok child a **fixed allowlist** of environment variables (`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` plus `HOME`/`PWD`/`GROK_*`/`ANET_*`); `HTTP(S)_PROXY` is always stripped as part of the sandbox and there is no per-node opt-out. Pushing proxy variables into the node is therefore a dead end. What works on an egress-restricted host is a **host-side** setup: point `auth.x.ai` / `api.x.ai` / `grok.com` at the machine itself in `/etc/hosts` and run a local SNI-based 443 relay that goes out through the corporate proxy, so grok believes it is connecting directly. Acceptance check, with no proxy variables set: `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` returns 200 (verified by the TM team on a cloud host, 2026-09-16).
+The co-presence runtime hands the grok child a **fixed allowlist** of environment variables (`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` plus `HOME`/`PWD`/`GROK_*`/`ANET_*`); `HTTP(S)_PROXY` is always stripped as part of the sandbox and there is no per-node opt-out. Pushing proxy variables into the node is therefore a dead end. What works on an egress-restricted host is a **host-side** setup: point `auth.x.ai` / `api.x.ai` / `grok.com` at the machine itself in `/etc/hosts` and run a local SNI-based 443 relay that goes out through the corporate proxy, so grok believes it is connecting directly. Verify in two separate steps (TM team, cloud host, 2026-09-16): ① **relay side** — with no proxy variables set, `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` returns 200, which only proves the relay can terminate TLS for x.ai and forward upstream; ② **end to end** — grok inside the node uses normal DNS and normal TLS, so it only works once `/etc/hosts` pins `auth.x.ai` / `api.x.ai` / `cli-chat-proxy.grok.com` / `code.grok.com` to 127.0.0.1; check that the node answers a hub probe. Passing ① does not mean ② passes.
+
+To list subcommands use bare `anet grok` (prints both attach and model); `anet grok --help` on `2.3.0-preview.92` and earlier prints only the attach line, from `.93` both agree.
 
 ### Permission prompts
 

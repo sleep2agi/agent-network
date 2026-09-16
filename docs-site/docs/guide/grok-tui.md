@@ -147,7 +147,7 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 ### 工作目录里出现 5 个 0 字节文件(`.grok` `.claude` `.cursor` `.mcp.json` `.envrc`)
 
-这是共存运行时**启动时正常生成**的沙箱拒绝锚点(不让 grok 去读项目里的这些外部面),`agent-node 2.5.0-preview.66` 起正常 `anet node stop` 会清掉。只有「启动被 kill 后残留 + 更老的版本」才会在下次启动报 `.grok: expected a real directory`,那时删掉这 5 个文件再起。
+这是 **grok 二进制自己**在启动时种下的读拒绝占位(不让它读项目里的这些外部面);共存运行时在 `anet node stop` 时只回收「本人、0 字节、单链接、mode 0444」这个精确形状的五个文件(防调包,故意 fail-closed),`agent-node 2.5.0-preview.66` 起正常 stop 是干净的。如果你的文件系统会改写 mode(见到 `refuses post-stop project placeholder … expected … mode 0444`,文件却是 0666),stop 后先 `chmod 0444 .grok .claude .cursor .mcp.json .envrc` 再起,启动会把它们作为 stale placeholder 回收。只有「启动被 kill 后残留 + 更老的版本」才会在下次启动报 `.grok: expected a real directory`,那时删掉这 5 个文件再起。
 
 ### 报 `bwrap exec failed` / 提示 `apt install -y bubblewrap`
 
@@ -159,7 +159,9 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 ### 出网只能走公司代理,但节点里设 `HTTPS_PROXY` 没用
 
-共存运行时给 grok 子进程的环境是**固定白名单**(`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` + `HOME`/`PWD`/`GROK_*`/`ANET_*`),`HTTP(S)_PROXY` 一律剥掉 —— 这是沙箱的一部分,不会为节点开口子。所以「给节点塞代理变量」在这条路上走不通。出口受限的机器上验证可行的是**主机侧**方案:`/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `grok.com` 指到本机,本机跑一个按 SNI 转发的 443 中继再经公司代理出网 —— grok 以为自己在直连。验收:不带任何代理变量时 `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` 返回 200(TMHR 团队 2026-09-16 在 TM 云机实测)。
+共存运行时给 grok 子进程的环境是**固定白名单**(`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` + `HOME`/`PWD`/`GROK_*`/`ANET_*`),`HTTP(S)_PROXY` 一律剥掉 —— 这是沙箱的一部分,不会为节点开口子。所以「给节点塞代理变量」在这条路上走不通。出口受限的机器上验证可行的是**主机侧**方案:`/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `grok.com` 指到本机,本机跑一个按 SNI 转发的 443 中继再经公司代理出网 —— grok 以为自己在直连。两步分开验收(TMHR 团队 2026-09-16 在 TM 云机实测):①**中继侧**——不带任何代理变量时 `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` 返回 200,只证明中继能替 x.ai 收 TLS 并转上游;②**端到端**——节点里的 grok 走的是正常 DNS + 正常 TLS,靠 `/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `cli-chat-proxy.grok.com` / `code.grok.com` 钉到 127.0.0.1 才通,验收看节点能否回 hub 的探针。①过了不等于②过了。
+
+自查子命令请用**裸** `anet grok`(打印 attach 与 model 两个子命令);`2.3.0-preview.92` 及更早的 `anet grok --help` 只打 attach 一行,`.93` 起两处一致。
 
 ### 权限确认
 
