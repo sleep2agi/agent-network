@@ -12,6 +12,7 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
+import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
 import {
   copresenceCapabilities as grokCopresenceCapabilities,
   assertCopresenceSupported as assertGrokCopresenceSupported,
@@ -4999,7 +5000,11 @@ async function processTask(
     text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
       || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence);
   } catch (err: any) {
-    text = `${RUNTIME} 错误: ${err.message}`;
+    text = runtimeErrorReplyText(RUNTIME, err);
+    if (typeof err?.unverifiedReplyText === "string") {
+      warn(`[unverified-owner] ${err?.ownershipReason ?? "ownership unverified"} | reply=${err.unverifiedReplyText.length}ch parent=${err?.unverifiedParentId ?? "?"} submitted=${err?.submittedMessageId ?? "?"}`);
+      log(`[unverified-owner] reply text: ${err.unverifiedReplyText}`);
+    }
     failed = true;
     if (GROK_COPRESENCE) {
       const reviewed = reviewedGrokCopresenceFailure(
@@ -5077,7 +5082,11 @@ async function processTask(
         }
       }
     } catch (err: any) {
-      text = `${RUNTIME} 错误: ${err.message}`;
+      text = runtimeErrorReplyText(RUNTIME, err);
+      if (typeof err?.unverifiedReplyText === "string") {
+        warn(`[unverified-owner] ${err?.ownershipReason ?? "ownership unverified"} | reply=${err.unverifiedReplyText.length}ch`);
+        log(`[unverified-owner] reply text: ${err.unverifiedReplyText}`);
+      }
       failed = true;
       if (GROK_COPRESENCE) {
         const reviewed = reviewedGrokCopresenceFailure(
