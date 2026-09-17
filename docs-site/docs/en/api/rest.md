@@ -1237,16 +1237,17 @@ curl -X POST "http://localhost:9200/api/messages/ack" \
   -d '{"message_ids": ["dm_abc123", "dm_def456"]}'
 ```
 
-**Body**: either `{"message_id": "dm_x"}` or `{"message_ids": ["dm_x", "dm_y"]}` (the latter **capped at 500**).
+**Body**: either `{"message_id": "dm_x"}` or `{"message_ids": ["dm_x", "dm_y"]}` (the latter **capped at 500**); or, since `0.9.0-preview.55`, `{"agent": "<alias>"}` — marks **every** unread row you received from that agent (both tables; this is the same set `unread_by_agent` counts, whereas ids can only ack the page you fetched). `agent` and ids are mutually exclusive.
 
-**Response**: `{"ok": true, "acked": 2, "acked_user_inbox": 1, "acked_inbox": 1}` — `acked` is the number of rows **actually changed** (sum over both tables; since #1828 the same ids also ack `inbox` rows addressed to your username with `type ∈ reply/task/message`, i.e. agent replies to your tasks; the `inbox` half is skipped when your username collides with a node alias), not how many ids you sent. Rows already acked, not yours, or nonexistent do not count.
+**Response**: `{"ok": true, "scope": "ids", "acked": 2, "acked_user_inbox": 1, "acked_inbox": 1}` (`"scope": "agent", "agent": "<alias>"` for the agent form) — `acked` is the number of rows **actually changed** (sum over both tables; since #1828 the same ids also ack `inbox` rows addressed to your username with `type ∈ reply/task/message`, i.e. agent replies to your tasks; the `inbox` half is skipped when your username collides with a node alias), not how many ids you sent. Rows already acked, not yours, or nonexistent do not count.
 
 **Errors**:
 
 | Status | Response | When |
 |---|---|---|
 | 401 | `{"ok":false,"error":"auth_required"}` | no user context |
-| 400 | `{"ok":false,"error":"message_id_required"}` | neither field given, or an empty array |
+| 400 | `{"ok":false,"error":"message_id_required"}` | none of the three fields given, or an empty array |
+| 400 | `{"ok":false,"error":"ambiguous_ack"}` | `agent` given together with `message_id(s)` |
 | 400 | `{"ok":false,"error":"too_many_ids","limit":500}` | `message_ids` longer than 500 |
 
 🔴 **Isolation**: the UPDATE carries `AND user_id = <auth context>`. Someone else's `message_id` simply **matches no row** — so it can neither change their state **nor leak whether that message exists** (nonexistent and not-yours both return `acked: 0`).

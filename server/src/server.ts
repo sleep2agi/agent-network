@@ -2755,6 +2755,34 @@ return Bun.serve({
       const ids: string[] = Array.isArray(body?.message_ids)
         ? body.message_ids.filter((x: unknown) => typeof x === "string" && x.length > 0)
         : (typeof body?.message_id === "string" && body.message_id ? [body.message_id] : []);
+      // #1909 —— 按 agent 整体 ack:`{ agent: "<alias>" }`。角标的分母是 `unread_by_agent`,
+      //    它数的是**全部**未 ack 行,而客户端一页只看得到最近 200/300 条 ⇒ 老行永远 ack 不到,
+      //    红点永远清不掉(生产 admin:user_inbox 522 + inbox 5660 行)。这一形态把调用者
+      //    收到的、来自该 agent 的两张表全部标已读;同样只动自己的行。
+      const agentRaw = typeof body?.agent === "string" ? body.agent.trim() : "";
+      if (agentRaw && ids.length > 0) {
+        return withCors(req, Response.json({ ok: false, error: "ambiguous_ack" }, { status: 400 }));
+      }
+      if (agentRaw) {
+        const uiParams: any[] = [callerUserId, agentRaw];
+        let uiSql = `UPDATE user_inbox SET acked = 1, acked_at = datetime('now')
+                     WHERE user_id = ?1 AND from_session = ?2 AND acked = 0`;
+        uiSql = addNetworkScope(uiSql, uiParams, restScope);
+        const uiAcked = db.run(uiSql, uiParams).changes ?? 0;
+        let agentInboxAcked = 0;
+        const agentCallerUsername = restAuth?.username ?? "";
+        if (agentCallerUsername && !userInboxAliasCollides(agentCallerUsername, restScope)) {
+          const ibAgentParams: any[] = [agentCallerUsername, agentRaw];
+          let ibAgentSql = `UPDATE inbox SET acked = 1
+                            WHERE session_name = ?1 AND from_session = ?2 AND acked = 0 AND type IN ('reply', 'task', 'message')`;
+          ibAgentSql = addNetworkScope(ibAgentSql, ibAgentParams, restScope);
+          agentInboxAcked = db.run(ibAgentSql, ibAgentParams).changes ?? 0;
+        }
+        return withCors(req, Response.json({
+          ok: true, scope: "agent", agent: agentRaw,
+          acked: uiAcked + agentInboxAcked, acked_user_inbox: uiAcked, acked_inbox: agentInboxAcked,
+        }));
+      }
       if (ids.length === 0) {
         return withCors(req, Response.json({ ok: false, error: "message_id_required" }, { status: 400 }));
       }
@@ -2781,7 +2809,7 @@ return Bun.serve({
         ibSql = addNetworkScope(ibSql, ibParams, restScope);
         inboxAcked = db.run(ibSql, ibParams).changes ?? 0;
       }
-      return withCors(req, Response.json({ ok: true, acked: (res.changes ?? 0) + inboxAcked, acked_user_inbox: res.changes ?? 0, acked_inbox: inboxAcked }));
+      return withCors(req, Response.json({ ok: true, scope: "ids", acked: (res.changes ?? 0) + inboxAcked, acked_user_inbox: res.changes ?? 0, acked_inbox: inboxAcked }));
     }
 
     // ── REST: stats summary ──

@@ -1286,16 +1286,17 @@ curl -X POST "http://localhost:9200/api/messages/ack" \
   -d '{"message_ids": ["dm_abc123", "dm_def456"]}'
 ```
 
-**请求体**：`{"message_id": "dm_x"}` 或 `{"message_ids": ["dm_x", "dm_y"]}`（二选一，后者**上限 500 条**）。
+**请求体**：`{"message_id": "dm_x"}` 或 `{"message_ids": ["dm_x", "dm_y"]}`（二选一，后者**上限 500 条**）；或自 `0.9.0-preview.55` 起 `{"agent": "<alias>"}` —— 把你收到的、来自该 agent 的**全部**未读一次标完（两张表都算；`unread_by_agent` 数的就是这个全集，而按 id 只能 ack 你拉到的那一页）。`agent` 与 id 不能同时给。
 
-**响应**：`{"ok": true, "acked": 2, "acked_user_inbox": 1, "acked_inbox": 1}` —— `acked` 是**实际改动的行数**（两张表之和；#1828 起同一批 id 也会 ack `inbox` 里发给你用户名的 `reply/task/message` 行，即 agent 对你任务的回复；用户名与节点 alias 撞名时 `inbox` 半边跳过），不是你传了几个 id。已经 ack 过的、不属于你的、不存在的，都不计入。
+**响应**：`{"ok": true, "scope": "ids", "acked": 2, "acked_user_inbox": 1, "acked_inbox": 1}`（按 agent 时 `"scope": "agent", "agent": "<alias>"`）—— `acked` 是**实际改动的行数**（两张表之和；#1828 起同一批 id 也会 ack `inbox` 里发给你用户名的 `reply/task/message` 行，即 agent 对你任务的回复；用户名与节点 alias 撞名时 `inbox` 半边跳过），不是你传了几个 id。已经 ack 过的、不属于你的、不存在的，都不计入。
 
 **错误**：
 
 | 状态 | 响应 | 何时 |
 |---|---|---|
 | 401 | `{"ok":false,"error":"auth_required"}` | 没有用户上下文 |
-| 400 | `{"ok":false,"error":"message_id_required"}` | 两个字段都没给，或给了空数组 |
+| 400 | `{"ok":false,"error":"message_id_required"}` | 三个字段都没给，或给了空数组 |
+| 400 | `{"ok":false,"error":"ambiguous_ack"}` | `agent` 与 `message_id(s)` 同时给了 |
 | 400 | `{"ok":false,"error":"too_many_ids","limit":500}` | `message_ids` 超过 500 |
 
 🔴 **隔离**：UPDATE 带 `AND user_id = <鉴权上下文>`。传别人的 `message_id` 进来**匹配不到行** —— 所以既改不到别人的状态，**也不会因为返回值不同而泄漏那条消息是否存在**（不存在和不属于你，返回都是 `acked: 0`）。
