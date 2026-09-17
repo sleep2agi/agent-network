@@ -16,6 +16,7 @@ import {
   resolvePinnedOpencodeBinaryAttestation,
   type PinnedOpencodeBinaryAttestation,
 } from "../opencode-acp/binary";
+import { ownershipChainVerdict, unverifiedOwnerError } from "./reply-ownership";
 import {
   linuxProcessGroupIsGone,
   readLinuxProcessGroupIdentity,
@@ -554,8 +555,22 @@ export async function openVettedOpenCodeCopresence(
               parts: [{ type: "text", text: visiblePrompt }],
             }),
           }, timeoutMs);
-          if (message?.info?.role !== "assistant" || message?.info?.parentID !== messageId) {
-            throw new Error("OpenCode reply was not owned by the submitted network message");
+          if (message?.info?.role !== "assistant") {
+            throw unverifiedOwnerError(parseMessageReply(message), message?.info?.parentID, messageId, "response is not an assistant message");
+          }
+          if (message.info.parentID !== messageId) {
+            // #1910: a compaction/continuation mid-turn re-parents the final
+            // assistant message to a synthetic summary. Walk the session
+            // history back to our submission; only a human user message in
+            // that chain means the reply is not ours. Whatever the verdict,
+            // the answer text travels with the error instead of being lost.
+            const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, timeoutMs).catch(() => null);
+            const verdict = ownershipChainVerdict(Array.isArray(history) ? history : null, messageId, message.info.parentID);
+            if (!verdict.accepted) {
+              warn(`[opencode-copresence] reply ownership refused: ${verdict.reason}`);
+              throw unverifiedOwnerError(parseMessageReply(message), message.info.parentID, messageId, verdict.reason);
+            }
+            log(`[opencode-copresence] reply parent chain verified through ${verdict.hops} intermediate message(s)`);
           }
           // OpenCode 1.18.1 exposes no exact per-message start event on this
           // REST lane. The causally-parented assistant response is later but

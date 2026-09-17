@@ -85,8 +85,20 @@ if (command === "serve") {
       await new Promise(r => setTimeout(r, Number(env.FAKE_TURN_MS || 25)));
       const prompt = json.parts?.[0]?.text || "";
       const reply = "FAKE_REPLY:" + prompt;
-      const parentID = env.FAKE_RACE_HUMAN === "1" ? "msg_human_race" : json.messageID;
+      let parentID = json.messageID;
       messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
+      if (env.FAKE_RACE_HUMAN === "1") {
+        // A human TUI turn won the idle-check -> POST race: it is in history
+        // as a real text user message and the runner answered it.
+        messages[id].push({ info:{role:"user",id:"msg_human_race"}, parts:[{type:"text",text:"human typed this"}] });
+        parentID = "msg_human_race";
+      }
+      if (env.FAKE_COMPACT_MID_TURN === "1") {
+        // Mid-turn compaction: a synthetic summary continuation parented to our
+        // submission; the final assistant message is parented to the summary.
+        messages[id].push({ info:{role:"user",id:"msg_summary_1",parentID:json.messageID,summary:true}, parts:[{type:"compaction"}] });
+        parentID = "msg_summary_1";
+      }
       lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] };
       messages[id].push(lastResponse);
       delete statuses[id];
@@ -352,8 +364,41 @@ describe("OpenCode native serve+attach copresence", () => {
         model: "opencode/fake",
         startupTimeoutMs: 5_000,
       });
-      await expect(runtime.submit("network-must-own-its-reply", 5_000))
-        .rejects.toThrow("not owned by the submitted network message");
+      let caught: any = null;
+      try {
+        await runtime.submit("network-must-own-its-reply", 5_000);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught?.message).toContain("not owned by the submitted network message");
+      // #1910 floor: the refused answer must travel with the error, never vanish.
+      expect(caught?.unverifiedReplyText).toBe("FAKE_REPLY:network-must-own-its-reply");
+      expect(caught?.unverifiedParentId).toBe("msg_human_race");
+      expect(typeof caught?.submittedMessageId).toBe("string");
+      expect(caught?.ownershipReason).toContain("human message msg_human_race");
+    } finally {
+      await runtime?.close();
+      f.close();
+    }
+  }, 15_000);
+
+  test("accepts a reply re-parented by a mid-turn compaction whose chain reaches the submitted message (#1910)", async () => {
+    const f = fixture({ FAKE_COMPACT_MID_TURN: "1" });
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    const logs: string[] = [];
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        model: "opencode/fake",
+        startupTimeoutMs: 5_000,
+        log: (line) => logs.push(line),
+      });
+      const result = await runtime.submit("long-turn", 5_000);
+      expect(result.replyText).toBe("FAKE_REPLY:long-turn");
+      expect(logs.some((l) => l.includes("reply parent chain verified through 1 intermediate"))).toBe(true);
     } finally {
       await runtime?.close();
       f.close();
