@@ -5,23 +5,23 @@
   "platforms": {
     "darwin-aarch64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlhmRmJocEZrMGdtNVAxTHZiUkRaS2UyK09vSnVmdlo4L0pjNmtVYUFPVFhmUWRLVEI0NWZ2N2p2V3BqK0FrcHRTcmRXRldKeFVHYWVpcGRkRlBCUVE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjA5MDgxCWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6ClRTUVZ0dVQ2SlppbHhNR003UmxtTWgwK01HWmpkT2xEWnNMNkNGdlZYbE1yek9WOXZtUEpybXhJY2xXbnpHT29IZmdSUlN4ZW5Wb3EwaUcyMGZjQ0NBPT0K",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/569210828"
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/Agent.Network_0.2.72_aarch64.app.tar.gz"
     },
     "darwin-aarch64-app": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlhmRmJocEZrMGdtNVAxTHZiUkRaS2UyK09vSnVmdlo4L0pjNmtVYUFPVFhmUWRLVEI0NWZ2N2p2V3BqK0FrcHRTcmRXRldKeFVHYWVpcGRkRlBCUVE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjA5MDgxCWZpbGU6QWdlbnQgTmV0d29yay5hcHAudGFyLmd6ClRTUVZ0dVQ2SlppbHhNR003UmxtTWgwK01HWmpkT2xEWnNMNkNGdlZYbE1yek9WOXZtUEpybXhJY2xXbnpHT29IZmdSUlN4ZW5Wb3EwaUcyMGZjQ0NBPT0K",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/569210828"
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/Agent.Network_0.2.72_aarch64.app.tar.gz"
     },
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlVSL1E5eTVTODl1d1FSMkVNdkFqbzdRZXhnU25uNVhBa1NMb3g3aFpZVS94VVFiclRobmkxQ3MwZWxDelp6MDVyak8wQ2k4YzhtRkRtWUtwdjZTUEFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjA5Mzk4CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuNzJfeDY0LXNldHVwLmV4ZQpYUmxaQ2VDQ3c0K3RtK2x5ZHcxUVczZUIrd0pDeWU5NEU1UWdaWnlGNzVmSTVrUHlYL2haV0tyenRkTUtJQ0tWOE5MeWMyVU9CSHd1MmF4amRVQWdDZz09Cg==",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/569217694"
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/Agent.Network_0.2.72_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlVSL1E5eTVTODl1d1FSMkVNdkFqbzdRZXhnU25uNVhBa1NMb3g3aFpZVS94VVFiclRobmkxQ3MwZWxDelp6MDVyak8wQ2k4YzhtRkRtWUtwdjZTUEFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjA5Mzk4CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuNzJfeDY0LXNldHVwLmV4ZQpYUmxaQ2VDQ3c0K3RtK2x5ZHcxUVczZUIrd0pDeWU5NEU1UWdaWnlGNzVmSTVrUHlYL2haV0tyenRkTUtJQ0tWOE5MeWMyVU9CSHd1MmF4amRVQWdDZz09Cg==",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/569217694"
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/Agent.Network_0.2.72_x64-setup.exe"
     },
     "windows-x86_64-msi": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlpSSTlBSjE3eG1KMHA3eVhoRUJoZUtsNDFrTkVaTWVoZmNubmRINDVwYUFyeTRCdys2ZkI2aDZjWFh5RWp5eDFwclN5TTBYQ1RLbjhCVFg2WVI2Z1FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjA5Mzk4CWZpbGU6QWdlbnQgTmV0d29ya18wLjIuNzJfeDY0X2VuLVVTLm1zaQo2bVVZTzltdGNRWklscXNuRFl4Z29pZFFEVTZsM2xIOXNLRzdFeGtTUzkvTHVJVmNhdnBvUTc5TDJaMkZpeGNVOHNLMnIrVlNpVEdpZTE4WEpoWFdCdz09Cg==",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/569217644"
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.72/Agent.Network_0.2.72_x64_en-US.msi"
     }
   }
 }
