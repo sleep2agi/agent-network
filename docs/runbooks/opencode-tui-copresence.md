@@ -161,3 +161,8 @@ sg docker -c 'docker rmi anet-test228:dev'
 - `agent-network/src/opencode-copresence-cli.test.ts`
 
 实机候选节点位于 `/home/vansin/opencode-tui-live`，tmux 为 `opencode-指挥狗` / `opencode-指挥狗-桥`。它使用隔离候选 agent-node，不修改全局 npm 包。
+
+## 接第三方 OpenAI 兼容网关(2026-09-17 实测)
+
+安全模式下 `renderSafeRuntimeConfig`(`agent-node/src/runtime/opencode-acp/child-env.ts`)只保留 `anthropic`/`openai` 两个 provider id 且 `options` 清空,子进程 env 白名单不含 `OPENAI_BASE_URL`;节点目录里的 `opencode.json` 加 baseURL 会在下次 start 被丢掉。可行路径:`flags.opencodeUnsafeTools=true`(不再设 `OPENCODE_DISABLE_PROJECT_CONFIG`,工作区根目录 `opencode.json` 生效)+ `provider.anthropic.options.baseURL` + `provider.anthropic.models.<model>` + `--model anthropic/<model>`。`openai` preset 走 Responses API,兼容网关通常 500;自定义 provider id 被凭据白名单剥掉;内置 id 的 `npm` 不可覆盖。
+部署前置:`opencode-ai@1.18.1` 装在 umask 0022 的独立前缀;无 `/run/user/<uid>` 时用 `ANET_OPENCODE_SAFE_BASE` 指 0700 且父目录不带组写位、不在 `$HOME` 下的目录;agent-node 必须是所用 anet 的精确配对版本。
