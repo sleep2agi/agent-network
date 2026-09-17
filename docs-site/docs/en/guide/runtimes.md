@@ -75,6 +75,31 @@ For the current state of Grok TUI co-presence see the [Grok TUI status page](/en
 > came back as **raw, unexecuted tool-call text**, recorded by the hub as `failed=false`
 > (completed normally). **The dispatcher only finds out by reading the content.**
 
+> 🌐 **Pointing it at a third-party OpenAI-compatible gateway (measured 2026-09-17):** in the default safe mode agent-node
+> re-renders the node's `opencode.json` on every start: `provider` keeps only the `anthropic` / `openai` ids with `options`
+> emptied — base URLs, custom provider packages and headers are dropped — and the child environment is an allowlist
+> (`PATH` / `LANG` / `TZ` / proxy / CA), so `OPENAI_BASE_URL` and friends do not pass through. Hand-editing the node's
+> `opencode.json` to add a `baseURL` therefore does **nothing** in safe mode; the model falls back to the official endpoint.
+>
+> The way in is `flags.opencodeUnsafeTools = true`: it also stops setting `OPENCODE_DISABLE_PROJECT_CONFIG`, so the
+> **workspace root** `opencode.json` is loaded (opencode's log shows `loading path=<workspace>/opencode.json`). Put this there:
+>
+> ```json
+> { "provider": { "anthropic": { "options": { "baseURL": "http://127.0.0.1:<port>/v1" }, "models": { "<model>": {} } } } }
+> ```
+>
+> and start with `--model anthropic/<model>`. **Use the `anthropic` preset, not `openai`**: OpenCode's `openai` preset speaks
+> the Responses API (`/v1/responses`), which most compatible gateways do not implement (they answer 500); a custom provider id
+> is stripped by the credential allowlist, and the `npm` package of a built-in id cannot be overridden. Credentials still go
+> through the `anthropic` preset (`ANTHROPIC_API_KEY` read at create time, or `anet opencode auth-login <node> --provider anthropic`).
+>
+> Three deployment prerequisites measured the same day: ① install `opencode-ai@1.18.1` into a dedicated npm prefix under
+> **umask 0022** (a group-writable prefix fails the package identity check with `unsafe directory ownership or mode`);
+> ② on hosts without `/run/user/<uid>` the default safe root is unavailable — point `ANET_OPENCODE_SAFE_BASE` at a 0700
+> directory outside `$HOME` (which contains `.claude`) whose parents are not group-writable; ③ agent-node must be the
+> **paired version of the anet you run** (each preview pairs exactly; a mismatch fails with
+> `Refusing to start: an unsupported agent-node could silently select another runtime`).
+
 > OpenCode's built-in Anthropic client sends `x-api-key`. Anthropic-compatible gateways that accept only Bearer authentication, such as Kimi coding, return 401 on that preset; use an OpenCode plugin or custom path that supports the gateway's authentication instead.
 
 > Agent Node does not read environment variables literally named `TOOLS` or `SYSTEM_PROMPT`. Set tools with `--tools` or config `tools`, and the system prompt with `--prompt` or config `systemPrompt`.

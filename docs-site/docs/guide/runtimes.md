@@ -75,6 +75,28 @@ Grok TUI 共存的当前状态见 [Grok TUI 状态页](/guide/grok-copresence)�
 > 一段**没被执行的工具调用原文**,而 hub 侧记的是 `failed=false`(正常完成)。
 > **派工的人只有读了内容才知道它其实没干活。**
 
+> 🌐 **接第三方 OpenAI 兼容网关(2026-09-17 实测):** 默认安全模式下,agent-node 每次启动都会把节点的 `opencode.json` 重新渲染:
+> `provider` 只保留 `anthropic` / `openai` 两个 id 且 `options` 清空,base URL、自定义 provider 包、headers 一律丢弃;
+> 子进程环境变量也是白名单(`PATH` / `LANG` / `TZ` / 代理 / CA 证书),`OPENAI_BASE_URL` 之类不透传。
+> 所以「手改节点目录里的 opencode.json 加 baseURL」在安全模式下**无效**,模型会回落到官方端点。
+>
+> 要指向自建网关,入口是 `flags.opencodeUnsafeTools = true`:它同时不再设 `OPENCODE_DISABLE_PROJECT_CONFIG`,
+> 于是**工作区根目录**的 `opencode.json` 会被加载(opencode 日志里能看到 `loading path=<工作区>/opencode.json`)。在那里写:
+>
+> ```json
+> { "provider": { "anthropic": { "options": { "baseURL": "http://127.0.0.1:<port>/v1" }, "models": { "<model>": {} } } } }
+> ```
+>
+> 并用 `--model anthropic/<model>`。**用 `anthropic` 而不是 `openai` preset**:OpenCode 的 `openai` preset 走 Responses API
+> (`/v1/responses`),多数兼容网关只实现了 `/v1/chat/completions` 与 `/v1/messages`,会直接 500;自定义 provider id 会被凭据白名单
+> 剥掉,内置 id 的 `npm` 包也不可覆盖。凭据仍按 `anthropic` preset 走(create 时读 `ANTHROPIC_API_KEY`,
+> 或 `anet opencode auth-login <node> --provider anthropic`)。
+>
+> 同日实测的三条部署前置:① `opencode-ai@1.18.1` 要在 **umask 0022** 的独立 npm 前缀里装(前缀目录带组写位会被包身份校验拒,
+> 报 `unsafe directory ownership or mode`);② 机器上没有 `/run/user/<uid>` 时默认安全根不可用,用 `ANET_OPENCODE_SAFE_BASE`
+> 指定一个 0700、不在 `$HOME`(含 `.claude`)且父目录不带组写位的目录;③ agent-node 必须是**你那份 anet 的配对版本**
+> (不同 preview 各自精确配对;不配对报 `Refusing to start: an unsupported agent-node could silently select another runtime`)。
+
 > OpenCode 内置 Anthropic client 发送 `x-api-key`。只接受 Bearer 的 Anthropic 兼容网关（例如 Kimi coding）会返回 401；这类网关要使用支持对应鉴权的 OpenCode plugin 或自定义路径，不能直接套内置 Anthropic preset。
 
 > Agent Node 不读取名为 `TOOLS` 或 `SYSTEM_PROMPT` 的环境变量。工具列表请用 `--tools` 或配置项 `tools`；系统提示词请用 `--prompt` 或配置项 `systemPrompt`。
