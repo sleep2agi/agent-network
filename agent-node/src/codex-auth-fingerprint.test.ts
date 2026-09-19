@@ -206,6 +206,43 @@ describe("#1918 B — the warning branches on whether the copy is still being re
   });
 });
 
+describe("#1918 a neighbour's recorded expiry is parsed strictly, never guessed", () => {
+  // 🔴 `new Date("2026-09-28 12:32:25")` (hub's unmarked-UTC shape) silently
+  //    means LOCAL time, off by the host's offset, and bun pins tests to UTC so
+  //    the difference is invisible here. check-hub-timestamp-ratchet.py exists
+  //    for that class; this asserts we refuse the ambiguous form outright.
+  test("a record written by us round-trips", () => {
+    const root = mkdtempSync(join(tmpdir(), "anet-1918-iso-"));
+    const exp = Math.floor(new Date("2026-09-28T12:32:25Z").getTime() / 1000);
+    const a = makeNode(root, "n_alpha", "rt-shared-1", exp);
+    const b = makeNode(root, "n_beta", "rt-shared-1", exp);
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    const colliding = checkCodexCredentialSharing({
+      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, say: () => {},
+    });
+    expect(colliding[0]?.accessExpiresAt?.toISOString()).toBe("2026-09-28T12:32:25.000Z");
+  });
+
+  test("🔴 a timezone-less timestamp becomes null, not a local-time guess", () => {
+    const root = mkdtempSync(join(tmpdir(), "anet-1918-naive-"));
+    const a = makeNode(root, "n_alpha", "rt-shared-1");
+    const b = makeNode(root, "n_beta", "rt-shared-1");
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    // Rewrite alpha's published record the way a hub TEXT column would look.
+    const recPath = join(a.nodeDir, CODEX_AUTH_FINGERPRINT_FILE);
+    const rec = JSON.parse(readFileSync(recPath, "utf-8"));
+    writeFileSync(recPath, JSON.stringify({ ...rec, access_expires_at: "2026-09-28 12:32:25" }));
+
+    const colliding = checkCodexCredentialSharing({
+      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, say: () => {},
+    });
+    // Still a collision — the fingerprint is what matches — but the ambiguous
+    // instant is dropped rather than turned into a wrong one.
+    expect(colliding.map((c) => c.alias)).toEqual(["alpha"]);
+    expect(colliding[0]?.accessExpiresAt).toBeNull();
+  });
+});
+
 describe("#1918 agent-node actually calls it (source contract)", () => {
   const src = readFileSync(new URL("./cli.ts", import.meta.url), "utf8").replace(/\r\n?/g, "\n");
 

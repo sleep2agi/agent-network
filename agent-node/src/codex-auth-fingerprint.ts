@@ -172,6 +172,26 @@ export function accessTokenExpiry(authJsonText: string): Date | null {
   }
 }
 
+/**
+ * Parse an instant we wrote ourselves, refusing anything ambiguous.
+ *
+ * 🔴 Deliberately NOT `new Date(value)`. Hub-style timestamps
+ *    (`2026-09-28 12:32:25`, UTC but unmarked) are parsed by `new Date` as
+ *    LOCAL time, silently, and the error is exactly the host's UTC offset —
+ *    `check-hub-timestamp-ratchet.py` exists because that class of bug is
+ *    structurally invisible to tests (bun pins the test process to UTC, where
+ *    "parse as UTC" and "parse as local" agree). Our own records are written
+ *    with `toISOString()` and always carry `Z`, so requiring an explicit
+ *    timezone costs nothing here and makes a foreign, unmarked value fail
+ *    loudly as null instead of becoming a wrong instant.
+ */
+function parseIsoInstant(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export interface NodeFingerprint {
   readonly alias: string;
   /** null when the node has no auth.json, or one we could not read. */
@@ -460,14 +480,14 @@ export function checkCodexCredentialSharing(opts: CodexCredentialSharingCheck): 
       const raw = readFileSync(join(root, entry, CODEX_AUTH_FINGERPRINT_FILE), "utf-8");
       const parsed = JSON.parse(raw) as Partial<CodexAuthFingerprintRecord>;
       if (typeof parsed?.fingerprint !== "string") continue;
-      const expires = typeof parsed.access_expires_at === "string" ? new Date(parsed.access_expires_at) : null;
+      const expires = parseIsoInstant(parsed.access_expires_at);
       others.push({
         alias: typeof parsed.alias === "string" && parsed.alias ? parsed.alias : entry,
         fingerprint: parsed.fingerprint,
         writtenAt: typeof parsed.written_at === "string" ? parsed.written_at : null,
         // v1 records carry neither field; absent stays absent rather than
         // becoming a wrong value.
-        accessExpiresAt: expires && !Number.isNaN(expires.getTime()) ? expires : null,
+        accessExpiresAt: expires,
         codexHome: typeof parsed.codex_home === "string" ? parsed.codex_home : null,
       });
     } catch { /* no record, or unreadable — not a match, and not an error */ }
