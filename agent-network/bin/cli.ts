@@ -142,12 +142,8 @@ import {
   describeCodexTuiNotPainted,
 } from "../src/codex-copresence-preflight";
 import {
-  CODEX_AUTH_FINGERPRINT_FILE,
-  collidingNodes,
+  checkCodexCredentialSharing,
   describeCodexRefreshFailure,
-  fingerprintRefreshToken,
-  sharedCredentialWarningLines,
-  type CodexAuthFingerprintRecord,
   type NodeFingerprint,
 } from "../src/codex-auth-fingerprint";
 import {
@@ -816,68 +812,24 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
  * #1918 — record this node's credential-chain fingerprint and warn when another
  * node on the same `.anet/nodes` root holds the same one.
  *
- * Reads only THIS node's auth.json; every other node is read through its own
- * published 8-hex fingerprint file, never through its credentials. That is the
- * point: a guard against credential sharing must not itself become a reason to
- * open every node's auth.json.
- *
- * Returns the colliding nodes so the caller can name them again later if codex
- * actually fails to refresh.
+ * The operation itself lives in `../src/codex-auth-fingerprint`, byte-identical
+ * to agent-node's copy, because this CLI is only ONE of the two ways a codex
+ * node starts — and on a real 35-node fleet it was the minority one (4 of 35).
+ * Keeping the logic here would have meant two implementations of the same rule
+ * drifting apart; this call site is deliberately a single line.
  */
-function checkCodexCredentialSharing(
+function checkCodexCredentialSharingForNode(
   nodeId: string,
   displayName: string,
   codexHome: string,
   say: (m: string) => void = (m) => console.error(m),
 ): NodeFingerprint[] {
-  let self: NodeFingerprint = { alias: displayName, fingerprint: null };
-  try {
-    self = {
-      alias: displayName,
-      fingerprint: fingerprintRefreshToken(readFileSync(join(codexHome, "auth.json"), "utf-8")),
-    };
-  } catch {
-    // No auth.json yet (or unreadable). Nothing to compare — the sign-in
-    // blocker above already speaks to that case.
-    return [];
-  }
-  if (!self.fingerprint) return [];
-
-  const root = nodesDir();
-  // Publish ours first, so a node that starts second can see this one.
-  try {
-    const record: CodexAuthFingerprintRecord = {
-      schema_version: 1,
-      alias: displayName,
-      fingerprint: self.fingerprint,
-      written_at: new Date().toISOString(),
-    };
-    atomicWritePrivateJson(join(root, nodeId, CODEX_AUTH_FINGERPRINT_FILE), record);
-  } catch (e) {
-    // Observability must never be the reason a node will not start.
-    say(`[anet] ⚠ could not record the codex credential fingerprint: ${(e as Error).message}`);
-  }
-
-  const others: NodeFingerprint[] = [];
-  let entries: string[] = [];
-  try { entries = readdirSync(root); } catch { return []; }
-  for (const entry of entries) {
-    if (entry === nodeId) continue;
-    try {
-      const raw = readFileSync(join(root, entry, CODEX_AUTH_FINGERPRINT_FILE), "utf-8");
-      const parsed = JSON.parse(raw) as Partial<CodexAuthFingerprintRecord>;
-      if (typeof parsed?.fingerprint !== "string") continue;
-      others.push({
-        alias: typeof parsed.alias === "string" && parsed.alias ? parsed.alias : entry,
-        fingerprint: parsed.fingerprint,
-        writtenAt: typeof parsed.written_at === "string" ? parsed.written_at : null,
-      });
-    } catch { /* no record, or unreadable — not a match, and not an error */ }
-  }
-
-  const colliding = collidingNodes(others, self);
-  for (const line of sharedCredentialWarningLines(self, colliding)) say(line);
-  return colliding;
+  return checkCodexCredentialSharing({
+    nodeDir: join(nodesDir(), nodeId),
+    alias: displayName,
+    codexHome,
+    say,
+  });
 }
 
 function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
@@ -1401,7 +1353,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #1918 — staging above shares one login across nodes by design, and refresh
   // tokens are one-time. Say so now, while an operator is watching, instead of
   // days later when the first refresh silently locks everyone else out.
-  const codexCredentialPeers = checkCodexCredentialSharing(resolved.id, displayName, opts.codexHome);
+  const codexCredentialPeers = checkCodexCredentialSharingForNode(resolved.id, displayName, opts.codexHome);
 
   if (process.platform === "win32") {
     try {
