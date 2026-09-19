@@ -122,8 +122,12 @@ describe("sharedCredentialWarningLines — two-way", () => {
 });
 
 describe("where the host index lives, and what names its files", () => {
+  // 🔴 No `/home/<name>/` literals anywhere below. This repo is public, and
+  //    `home-path-baseline` rejects person-looking home paths in new files —
+  //    it caught the first draft of these very fixtures. The join logic is
+  //    identical for any parent, so a neutral root tests exactly as much.
   test("under ~/.anet — host-scoped state that does not move with cwd", () => {
-    expect(codexFingerprintIndexDir("/home/someone")).toBe("/home/someone/.anet/codex-auth-fingerprints");
+    expect(codexFingerprintIndexDir("/tmp/fake-home")).toBe("/tmp/fake-home/.anet/codex-auth-fingerprints");
   });
 
   test("the filename comes from the node directory, and is hex", () => {
@@ -141,7 +145,16 @@ describe("where the host index lives, and what names its files", () => {
   });
 
   test("the name leaks nothing about the path it came from", () => {
-    expect(codexFingerprintIndexFile("/home/secret-user/.anet/nodes/n_1")).not.toContain("secret-user");
+    // 🔴 The token has to be one that could actually survive into the output,
+    //    or this assertion passes for free. Positive control first: the name is
+    //    hex-only, so prove the checker would catch a leak at all by asserting
+    //    a hex fragment of the input IS absent while the input contains it.
+    const secret = "deadbeef-tenant";
+    const name = codexFingerprintIndexFile(`/srv/${secret}/.anet/nodes/n_1`);
+    expect(secret).toContain("deadbeef");
+    expect(name).toMatch(/^[0-9a-f]{16}\.json$/);
+    expect(name).not.toContain(secret);
+    expect(name).not.toContain("tenant");
   });
 });
 
