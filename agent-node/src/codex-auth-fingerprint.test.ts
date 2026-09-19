@@ -21,6 +21,14 @@ function jwt(expSeconds: number): string {
   return `h.${payload}.sig`;
 }
 
+/** 🔴 每个 root 一个隔离的主机索引。下沉到 agent-node 之后读面是**整台主机**
+ *  (`~/.anet/codex-auth-fingerprints`),所以测试若不注入这个目录,① 会写进真实
+ *  用户目录,② 同一次 run 里共用 `rt-shared-1` 的几个用例会**跨 temp root 互相
+ *  命中**,把本应静默的用例变红。 */
+function indexOf(root: string): string {
+  return join(root, "host-index");
+}
+
 /** 造一个节点目录 + 它自己的 CODEX_HOME,返回两者路径。 */
 function makeNode(root: string, dirName: string, refreshToken: string, expSeconds?: number) {
   const nodeDir = join(root, dirName);
@@ -41,7 +49,7 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
 
     const said: string[] = [];
     const colliding = checkCodexCredentialSharing({
-      nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: (m) => said.push(m),
+      nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: (m) => said.push(m),
     });
 
     const recordPath = join(a.nodeDir, CODEX_AUTH_FINGERPRINT_FILE);
@@ -58,7 +66,7 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
     const root = mkdtempSync(join(tmpdir(), "anet-1918-secret-"));
     const token = "rt-do-not-leak-me-9f2b";
     const a = makeNode(root, "n_alpha", token);
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     const raw = readFileSync(join(a.nodeDir, CODEX_AUTH_FINGERPRINT_FILE), "utf-8");
     expect(raw).not.toContain(token);
   });
@@ -68,10 +76,10 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
     const a = makeNode(root, "n_alpha", "rt-shared-1");
     const b = makeNode(root, "n_beta", "rt-shared-1");
 
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     const said: string[] = [];
     const colliding = checkCodexCredentialSharing({
-      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, say: (m) => said.push(m),
+      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, indexDir: indexOf(root), say: (m) => said.push(m),
     });
 
     expect(colliding.map((c) => c.alias)).toEqual(["alpha"]);
@@ -83,10 +91,10 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
     const a = makeNode(root, "n_alpha", "rt-one");
     const b = makeNode(root, "n_beta", "rt-two");
 
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     const said: string[] = [];
     const colliding = checkCodexCredentialSharing({
-      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, say: (m) => said.push(m),
+      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, indexDir: indexOf(root), say: (m) => said.push(m),
     });
     expect(colliding).toEqual([]);
     expect(said).toEqual([]);
@@ -95,12 +103,12 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
   test("recomputes rather than trusting its own stale record", () => {
     const root = mkdtempSync(join(tmpdir(), "anet-1918-rotate-"));
     const a = makeNode(root, "n_alpha", "rt-before");
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     const before = JSON.parse(readFileSync(join(a.nodeDir, CODEX_AUTH_FINGERPRINT_FILE), "utf-8")).fingerprint;
 
     // codex refreshed in place — the chain identity changed under us.
     writeFileSync(join(a.codexHome, "auth.json"), JSON.stringify({ tokens: { refresh_token: "rt-after" } }));
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     const after = JSON.parse(readFileSync(join(a.nodeDir, CODEX_AUTH_FINGERPRINT_FILE), "utf-8")).fingerprint;
 
     expect(after).not.toBe(before);
@@ -112,23 +120,51 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
     mkdirSync(join(nodeDir, "codex-home"), { recursive: true });
     const said: string[] = [];
     const colliding = checkCodexCredentialSharing({
-      nodeDir, alias: "alpha", codexHome: join(nodeDir, "codex-home"), say: (m) => said.push(m),
+      nodeDir, alias: "alpha", codexHome: join(nodeDir, "codex-home"), indexDir: indexOf(root), say: (m) => said.push(m),
     });
     expect(colliding).toEqual([]);
     expect(said).toEqual([]);
+  });
+
+  test("🔴 two no-CLI nodes in DIFFERENT workspaces still find each other", () => {
+    // The blind spot this index closes, on the path that matters: the reference
+    // fleet put 35 nodes in 27 workspaces, and the three nodes on one
+    // byte-identical credential sat in three of them. A sibling scan saw none
+    // of that pair-up; both nodes below have a different `.anet/nodes` parent.
+    const host = mkdtempSync(join(tmpdir(), "anet-1918-xws-"));
+    const indexDir = join(host, "host-index");
+    const mk = (ws: string, name: string) => {
+      const nodeDir = join(host, ws, ".anet", "nodes", name);
+      const codexHome = join(host, ws, "codex-home");
+      mkdirSync(codexHome, { recursive: true });
+      mkdirSync(nodeDir, { recursive: true });
+      writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ tokens: { refresh_token: "rt-xws" } }), { mode: 0o600 });
+      return { nodeDir, codexHome };
+    };
+    const a = mk("ws-client-whale", "n_alpha");
+    const b = mk("ws-infra-whale-2", "n_beta");
+
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "TMA客户端鲸", codexHome: a.codexHome, indexDir, say: () => {} });
+    const said: string[] = [];
+    const colliding = checkCodexCredentialSharing({
+      nodeDir: b.nodeDir, alias: "TM基建鲸2号", codexHome: b.codexHome, indexDir, say: (m) => said.push(m),
+    });
+
+    expect(colliding.map((c) => c.alias)).toEqual(["TMA客户端鲸"]);
+    expect(said.join("\n")).toContain("TM基建鲸2号 shares its codex login with: TMA客户端鲸");
   });
 
   test("a neighbour's credentials are never opened — only its published record", () => {
     const root = mkdtempSync(join(tmpdir(), "anet-1918-peek-"));
     const a = makeNode(root, "n_alpha", "rt-shared-1");
     const b = makeNode(root, "n_beta", "rt-shared-1");
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
 
     // Make alpha's auth.json unreadable; beta must still detect the collision
     // from the published fingerprint, proving it never went for the credential.
     writeFileSync(join(a.codexHome, "auth.json"), "{}", { mode: 0o000 });
     const colliding = checkCodexCredentialSharing({
-      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, say: () => {},
+      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, indexDir: indexOf(root), say: () => {},
     });
     expect(colliding.map((c) => c.alias)).toEqual(["alpha"]);
   });
@@ -216,9 +252,9 @@ describe("#1918 a neighbour's recorded expiry is parsed strictly, never guessed"
     const exp = Math.floor(new Date("2026-09-28T12:32:25Z").getTime() / 1000);
     const a = makeNode(root, "n_alpha", "rt-shared-1", exp);
     const b = makeNode(root, "n_beta", "rt-shared-1", exp);
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     const colliding = checkCodexCredentialSharing({
-      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, say: () => {},
+      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, indexDir: indexOf(root), say: () => {},
     });
     expect(colliding[0]?.accessExpiresAt?.toISOString()).toBe("2026-09-28T12:32:25.000Z");
   });
@@ -227,14 +263,14 @@ describe("#1918 a neighbour's recorded expiry is parsed strictly, never guessed"
     const root = mkdtempSync(join(tmpdir(), "anet-1918-naive-"));
     const a = makeNode(root, "n_alpha", "rt-shared-1");
     const b = makeNode(root, "n_beta", "rt-shared-1");
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     // Rewrite alpha's published record the way a hub TEXT column would look.
     const recPath = join(a.nodeDir, CODEX_AUTH_FINGERPRINT_FILE);
     const rec = JSON.parse(readFileSync(recPath, "utf-8"));
     writeFileSync(recPath, JSON.stringify({ ...rec, access_expires_at: "2026-09-28 12:32:25" }));
 
     const colliding = checkCodexCredentialSharing({
-      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, say: () => {},
+      nodeDir: b.nodeDir, alias: "beta", codexHome: b.codexHome, indexDir: indexOf(root), say: () => {},
     });
     // Still a collision — the fingerprint is what matches — but the ambiguous
     // instant is dropped rather than turned into a wrong one.

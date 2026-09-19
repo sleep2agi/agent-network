@@ -6708,6 +6708,8 @@ log("已注册到 CommHub");
 // 那批)由自定义脚本直起 agent-node。所以它必须在**这里**也跑一次——两条
 // 启动路径共用同一份实现(逐字节复制 + parity 门),调用点各自一行。
 // 只告警、不拦;读邻居**已公布的 8 位指纹文件**,不读任何别的节点的凭据。
+// 比较面是**整台主机**(~/.anet 下的索引),不是本 workspace:同一机群那 35
+// 台分散在 27 个 workspace,只比同根只看得见 8 台共链节点里的 2 台。
 if (RUNTIME === "codex" || RUNTIME === "codex-app-server") {
   const codexHomeForCheck = process.env.CODEX_HOME && process.env.CODEX_HOME.trim()
     ? process.env.CODEX_HOME.trim()
@@ -6717,6 +6719,7 @@ if (RUNTIME === "codex" || RUNTIME === "codex-app-server") {
       nodeDir: NODE_DIR,
       alias: ALIAS,
       codexHome: codexHomeForCheck,
+      nodeId: NODE_ID || null,
       say: warn,
     });
   } catch (e: any) {

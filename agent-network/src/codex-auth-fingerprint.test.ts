@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   CODEX_AUTH_FINGERPRINT_FILE,
   FINGERPRINT_LENGTH,
+  checkCodexCredentialSharing,
+  codexFingerprintIndexDir,
+  codexFingerprintIndexFile,
   collidingNodes,
   describeCodexRefreshFailure,
   fingerprintRefreshToken,
@@ -113,6 +118,199 @@ describe("sharedCredentialWarningLines — two-way", () => {
   test("a node whose own fingerprint is unknown says nothing", () => {
     const self = rec("通信牛", null);
     expect(sharedCredentialWarningLines(self, collidingNodes([self, rec("别的节点", "bbbbbbbb")], self))).toEqual([]);
+  });
+});
+
+describe("where the host index lives, and what names its files", () => {
+  test("under ~/.anet — host-scoped state that does not move with cwd", () => {
+    expect(codexFingerprintIndexDir("/home/someone")).toBe("/home/someone/.anet/codex-auth-fingerprints");
+  });
+
+  test("the filename comes from the node directory, and is hex", () => {
+    expect(codexFingerprintIndexFile("/ws/.anet/nodes/n_1")).toMatch(/^[0-9a-f]{16}\.json$/);
+  });
+
+  test("🔴 same directory ⇒ same name (one record per node, on either launch path)", () => {
+    expect(codexFingerprintIndexFile("/ws/.anet/nodes/n_1"))
+      .toBe(codexFingerprintIndexFile("/ws/.anet/nodes/./n_1"));
+  });
+
+  test("🔴 different directories ⇒ different names, even with the same alias", () => {
+    expect(codexFingerprintIndexFile("/ws-a/.anet/nodes/同名"))
+      .not.toBe(codexFingerprintIndexFile("/ws-b/.anet/nodes/同名"));
+  });
+
+  test("the name leaks nothing about the path it came from", () => {
+    expect(codexFingerprintIndexFile("/home/secret-user/.anet/nodes/n_1")).not.toContain("secret-user");
+  });
+});
+
+describe("🔴 the comparison is host-wide, not workspace-wide", () => {
+  // THE case this index exists for. On the reference fleet, 35 nodes live in 27
+  // workspaces; of the 8 nodes actually sharing credentials, a sibling-only scan
+  // saw 2. The three byte-identical ones sat in three different workspaces and
+  // were invisible. Every test below that matters puts the nodes in SEPARATE
+  // workspace roots, because that is the population that was blind.
+  const auth = (refresh: string, accessExp?: number) => {
+    const access = accessExp === undefined
+      ? "AT"
+      : `h.${Buffer.from(JSON.stringify({ exp: accessExp })).toString("base64url")}.s`;
+    return JSON.stringify({ auth_mode: "chatgpt", tokens: { refresh_token: refresh, access_token: access } });
+  };
+
+  interface Node { nodeDir: string; alias: string; codexHome: string }
+
+  const makeHost = () => {
+    const base = mkdtempSync(join(tmpdir(), "anet-1918c-"));
+    const indexDir = join(base, "host-index");
+    const node = (workspace: string, alias: string, refresh: string, accessExp?: number): Node => {
+      const nodeDir = join(base, workspace, ".anet", "nodes", alias);
+      const codexHome = join(base, workspace, "codex-home");
+      mkdirSync(nodeDir, { recursive: true });
+      mkdirSync(codexHome, { recursive: true });
+      writeFileSync(join(codexHome, "auth.json"), auth(refresh, accessExp));
+      return { nodeDir, alias, codexHome };
+    };
+    const start = (n: Node, now?: Date) => {
+      const said: string[] = [];
+      const colliding = checkCodexCredentialSharing({ ...n, indexDir, say: (m) => said.push(m), now });
+      return { text: said.join("\n"), colliding };
+    };
+    return { base, indexDir, node, start };
+  };
+
+  test("two nodes in DIFFERENT workspaces on one credential find each other", () => {
+    const host = makeHost();
+    const a = host.node("ws-client-whale", "TMA客户端鲸", "SHARED-RT");
+    const b = host.node("ws-infra-whale-2", "TM基建鲸2号", "SHARED-RT");
+
+    expect(host.start(a).text).toBe(""); // first one up has nobody to collide with yet
+    const second = host.start(b);
+    expect(second.colliding.map((c) => c.alias)).toEqual(["TMA客户端鲸"]);
+    expect(second.text).toContain("TM基建鲸2号 shares its codex login with: TMA客户端鲸");
+
+    // …and it is mutual: the first node learns about it on its next start.
+    expect(host.start(a).text).toContain("TM基建鲸2号");
+  });
+
+  test("a same-workspace pair still works (the old scan's case is not lost)", () => {
+    const host = makeHost();
+    const a = host.node("ws-ops", "TMAI负责人", "SHARED-RT");
+    const b = host.node("ws-ops", "TM运维", "SHARED-RT");
+    host.start(a);
+    expect(host.start(b).colliding.map((c) => c.alias)).toEqual(["TMAI负责人"]);
+  });
+
+  test("🔴 different credentials across workspaces ⇒ not one word", () => {
+    const host = makeHost();
+    const a = host.node("ws-one", "节点甲", "RT-ALPHA");
+    const b = host.node("ws-two", "节点乙", "RT-BETA");
+    host.start(a);
+    const second = host.start(b);
+    expect(second.colliding).toEqual([]);
+    expect(second.text).toBe("");
+  });
+
+  test("the index is keyed by directory, so two nodes may share an alias", () => {
+    // Aliases are not unique across workspaces. Keyed by alias, the second node
+    // would overwrite the first's record and neither would ever see a peer —
+    // exactly the blindness this index was added to remove.
+    const host = makeHost();
+    const a = host.node("ws-a", "同名节点", "SHARED-RT");
+    const b = host.node("ws-b", "同名节点", "SHARED-RT");
+    host.start(a);
+    expect(readdirSync(host.indexDir).filter((f) => f.endsWith(".json")).length).toBe(1);
+    const second = host.start(b);
+    expect(readdirSync(host.indexDir).filter((f) => f.endsWith(".json")).length).toBe(2);
+    expect(second.colliding.length).toBe(1);
+    expect(second.text).toContain("同名节点");
+  });
+
+  test("a node never accuses itself, however many times it starts", () => {
+    const host = makeHost();
+    const a = host.node("ws-solo", "独苗", "RT-ONLY");
+    host.start(a);
+    host.start(a);
+    expect(host.start(a).text).toBe("");
+    expect(readdirSync(host.indexDir).filter((f) => f.endsWith(".json")).length).toBe(1);
+  });
+
+  test("records are 0600 and carry no token", () => {
+    const host = makeHost();
+    const a = host.node("ws-mode", "权限节点", "SUPER-SECRET-RT");
+    host.start(a);
+    const file = join(host.indexDir, readdirSync(host.indexDir).find((f) => f.endsWith(".json"))!);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const body = readFileSync(file, "utf-8");
+    expect(body).not.toContain("SUPER-SECRET-RT");
+    expect(JSON.parse(body).node_dir).toBe(realpathSync(a.nodeDir));
+  });
+
+  describe("liveness is existence, not age", () => {
+    test("🔴 a record whose node directory is gone accuses nobody, and is cleaned up", () => {
+      const host = makeHost();
+      const ghost = host.node("ws-deleted", "已删除的节点", "SHARED-RT");
+      host.start(ghost);
+      rmSync(join(host.base, "ws-deleted"), { recursive: true, force: true });
+
+      const live = host.node("ws-live", "还活着", "SHARED-RT");
+      const started = host.start(live);
+      expect(started.colliding).toEqual([]);
+      expect(started.text).toBe("");
+      // the ghost's entry is gone; only the live node's remains
+      const left = readdirSync(host.indexDir).filter((f) => f.endsWith(".json"));
+      expect(left.length).toBe(1);
+      expect(JSON.parse(readFileSync(join(host.indexDir, left[0]), "utf-8")).alias).toBe("还活着");
+    });
+
+    test("🔴 an OLD record whose node still exists DOES warn — age must not hide a real chain", () => {
+      // Two of the three nodes in the field's worst group were not running at
+      // all, and six of 29 credential files were days untouched. An age cutoff
+      // would have hidden exactly the collisions worth reporting.
+      const host = makeHost();
+      const idle = host.node("ws-idle", "很久没起的节点", "SHARED-RT");
+      const longAgo = new Date(Date.now() - 45 * 86_400_000);
+      host.start(idle, longAgo);
+
+      const live = host.node("ws-now", "刚起的节点", "SHARED-RT");
+      const started = host.start(live);
+      expect(started.colliding.map((c) => c.alias)).toEqual(["很久没起的节点"]);
+      // …and the operator is told how old the claim is, rather than it being dropped
+      expect(started.text).toMatch(/很久没起的节点 \(record \d+d.*old\)/);
+    });
+
+    test("a fresh record is named without an age annotation", () => {
+      const host = makeHost();
+      const a = host.node("ws-fresh-1", "甲", "SHARED-RT");
+      const b = host.node("ws-fresh-2", "乙", "SHARED-RT");
+      host.start(a);
+      expect(host.start(b).text).toContain("shares its codex login with: 甲 (refresh");
+    });
+  });
+
+  test("a refreshed credential republishes — a stale fingerprint is a wrong answer", () => {
+    const host = makeHost();
+    const a = host.node("ws-rotate", "轮换节点", "RT-BEFORE");
+    host.start(a);
+    const file = join(host.indexDir, readdirSync(host.indexDir)[0]);
+    const before = JSON.parse(readFileSync(file, "utf-8")).fingerprint;
+
+    writeFileSync(join(a.codexHome, "auth.json"), auth("RT-AFTER"));
+    host.start(a);
+    expect(readdirSync(host.indexDir).filter((f) => f.endsWith(".json")).length).toBe(1);
+    expect(JSON.parse(readFileSync(file, "utf-8")).fingerprint).not.toBe(before);
+  });
+
+  test("an expired shared copy gets the 'stop together' branch across workspaces", () => {
+    const host = makeHost();
+    const past = Math.floor(Date.now() / 1000) - 3 * 86_400;
+    const a = host.node("ws-exp-1", "过期甲", "SHARED-RT", past);
+    const b = host.node("ws-exp-2", "过期乙", "SHARED-RT", past);
+    host.start(a);
+    const text = host.start(b).text;
+    expect(text).toContain("stops together");
+    expect(text).toContain("not a fix");
+    expect(text).not.toContain("refreshes first keeps working");
   });
 });
 
