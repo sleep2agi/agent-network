@@ -13,6 +13,9 @@
 
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
+import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
+import { createStderrTurnAggregator } from "./runtime/stderr-turn-aggregator";
+import { resolveLogLevel } from "./log-level";
 import {
   copresenceCapabilities as grokCopresenceCapabilities,
   assertCopresenceSupported as assertGrokCopresenceSupported,
@@ -903,8 +906,18 @@ const goalStore = new GoalStore(GOALS_PATH, GROK_EXECUTION_MODE === "cli"
 // would be a no-op).
 const loopsCancelTimestamps: number[] = [];
 const loopsConfirmTokens: Set<string> = new Set();
-const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
-const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
+// #1917 ③ — `--log-level` / `LOG_LEVEL` / `config.logLevel` already worked;
+// what was missing is an `ANET_`-prefixed name (where operators look, since
+// every other knob lives there) and any feedback when the value is garbage.
+// The old expression ended in `?? 1`, so `LOG_LEVEL=quiet` silently meant
+// `info` — a knob that lies about being set is worse than no knob.
+const LOG_LEVEL_RESOLUTION = resolveLogLevel({
+  flagValue: opts["log-level"],
+  anetEnvValue: process.env.ANET_LOG_LEVEL,
+  envValue: process.env.LOG_LEVEL,
+  configValue: fileConfig.logLevel,
+});
+const LOG_LEVEL = LOG_LEVEL_RESOLUTION.level;
 const channelSpecs = [
   ...((Array.isArray(fileConfig.channels) ? fileConfig.channels : []) as string[]).filter(ch => !ch.startsWith("server:") && !ch.startsWith("plugin:")),
   ...cliChannels,
@@ -1198,6 +1211,11 @@ const log = (msg: string) => _log("info", 1, msg);
 const debug = (msg: string) => _log("debug", 0, msg);
 const warn = (msg: string) => _log("warn", 2, msg);
 const error = (msg: string) => _log("error", 3, msg);
+// #1917 ③ — say it once, here, where the logger exists. An unreadable
+// log-level value must not stop a node from starting, but it must not be
+// silent either: the operator who typed it is entitled to know it did
+// nothing. `warn` is deliberate — this survives `ANET_LOG_LEVEL=warn`.
+if (LOG_LEVEL_RESOLUTION.warning) warn(`[log] ${LOG_LEVEL_RESOLUTION.warning}`);
 const taskTraceLog = (line: string) => {
   if (process.env.ANET_TASK_TRACE_FORMAT !== "json") return log(line);
   console.log(line);
@@ -3780,7 +3798,18 @@ async function processWithGrok(
 
   const runOnce = async (sessionId?: string, label = "primary") => {
     const t0 = Date.now();
-    const result = await runGrokAcpTurn({
+    // #1917 ① / ② — a long grok turn used to write nothing between "start"
+    // and "done" (observed: 16.4 min, 11 node-log lines, 8–9 of them one
+    // repeated stderr warning), so "looks stuck" and "is stuck" read the
+    // same. The heartbeat speaks every 30–60 s; the aggregator folds the
+    // known-benign stderr that used to drown the real warnings.
+    const heartbeat = startTurnHeartbeat({ emit: log, label: `grok ${label}` });
+    const stderrAggregator = createStderrTurnAggregator("grok", "[grok-stderr]");
+    let lastToolCalls = 0;
+    let lastChunks = 0;
+    let result: Awaited<ReturnType<typeof runGrokAcpTurn>>;
+    try {
+    result = await runGrokAcpTurn({
       prompt: promptPrefix + buildGrokCommhubPrompt(task, from),
       cwd: grokCwd,
       sessionId,
@@ -3800,7 +3829,17 @@ async function processWithGrok(
         defaultMs: 15000,
       }).valueMs,
       onSession: (newSessionId) => writebackGrokSession(newSessionId),
-      onEvent: (_event, state) => {
+      onEvent: (event, state) => {
+        // #1917 ① — the ACP session/update stream is the activity signal the
+        // node log never showed. `onEvent` hands us the raw notification and
+        // the reduced turn state, not the reducer's `kind`, so name the
+        // activity from which counter moved; fall back to the ACP method
+        // when neither did (handshake, session bookkeeping).
+        if (state.toolCalls > lastToolCalls) heartbeat.note(`tool_call (#${state.toolCalls})`);
+        else if (state.chunks > lastChunks) heartbeat.note(`reply_chunk (#${state.chunks})`);
+        else if (event.method) heartbeat.note(event.method);
+        lastToolCalls = state.toolCalls;
+        lastChunks = state.chunks;
         if (state.skippedReplay > 0 && state.skippedReplay % 50 === 0) {
           debug(`[grok] skipped replay chunks=${state.skippedReplay}`);
         }
@@ -3809,17 +3848,23 @@ async function processWithGrok(
       onConsumed: evidence?.consumed,
       // #204 preview.4 — surface Grok stderr (carries MCP subprocess
       // handshake / spawn errors). Lines tagged so `anet logs` filtering
-      // is obvious. Severity routing: lines mentioning error/fail/cannot
-      // go through warn(); everything else goes to debug() to avoid
-      // chatty noise (grok logs are verbose).
+      // is obvious. Severity routing: #1917 ② replaced the blanket keyword
+      // promotion with a per-runtime benign table plus per-turn folding;
+      // anything not in that table keeps the old warn()/debug() split, so
+      // a failure shape nobody has classified yet is never made quiet.
       onStderr: (line) => {
-        if (/error|fail|cannot|denied|enoent|not found/i.test(line)) {
-          warn(`[grok-stderr] ${line}`);
-        } else {
-          debug(`[grok-stderr] ${line}`);
-        }
+        const emission = stderrAggregator.observe(line);
+        if (!emission) return;
+        if (emission.level === "warn") warn(emission.line);
+        else if (emission.level === "info") log(emission.line);
+        else debug(emission.line);
       },
     });
+    } finally {
+      heartbeat.stop();
+      const summary = stderrAggregator.finish();
+      if (summary) log(summary.line);
+    }
     const dt = Date.now() - t0;
     log(`[grok] done ${label} | ${dt}ms | session=${result.sessionId.slice(0, 8)} | chunks=${result.state.chunks} replay_skipped=${result.state.skippedReplay}`);
     let replyText = sanitizeGrokCommhubLeak(result.replyText.trim() || "（无回复）");
@@ -4618,6 +4663,11 @@ async function processWithGrokCli(
 
     const controller = new AbortController();
     activeGrokCliTurns.add(controller);
+    // #1917 ① / ② — same treatment as the ACP runtime above: speak while the
+    // turn is in flight, and fold the known-benign stderr instead of
+    // promoting every occurrence to WARN.
+    const heartbeat = startTurnHeartbeat({ emit: log, label: `grok-cli ${label}` });
+    const stderrAggregator = createStderrTurnAggregator("grok", "[grok-cli-stderr]");
     let result;
     try {
       result = await runGrokCliTurn({
@@ -4645,14 +4695,23 @@ async function processWithGrokCli(
         onSubmitted: evidence?.submitted,
         onConsumed: evidence?.consumed,
         onEvent: (event) => {
+          // #1917 ① — the CLI runtime's own event stream is the activity
+          // signal here; `type` is whatever grok emitted last.
+          if (typeof event.type === "string" && event.type) heartbeat.note(event.type);
           if (event.type === "end") debug(`[grok-cli] end stopReason=${event.stopReason || "unknown"}`);
         },
         onStderr: (line) => {
-          if (/error|fail|cannot|denied|enoent|not found/i.test(line)) warn(`[grok-cli-stderr] ${line}`);
-          else debug(`[grok-cli-stderr] ${line}`);
+          const emission = stderrAggregator.observe(line);
+          if (!emission) return;
+          if (emission.level === "warn") warn(emission.line);
+          else if (emission.level === "info") log(emission.line);
+          else debug(emission.line);
         },
       });
     } finally {
+      heartbeat.stop();
+      const summary = stderrAggregator.finish();
+      if (summary) log(summary.line);
       activeGrokCliTurns.delete(controller);
     }
     writebackGrokSession(result.sessionId);
