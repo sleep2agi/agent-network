@@ -26,13 +26,18 @@
  *    tell "same credential copy" from "different one", not enough to be a
  *    credential. Nothing here returns, logs, or persists the token itself.
  *
- * Note this is a DIFFERENT question from `accountFingerprint` in
- * `codex-lifecycle-account.ts`, which hashes `tokens.account_id`. Two nodes
- * can legitimately share an account_id (same human, two separate logins) and
- * be perfectly fine — they hold different refresh tokens, so neither
- * invalidates the other. The refresh token is what identifies one *chain*.
+ * 🔴 Why this is not `accountFingerprint`. The repo already fingerprints codex
+ *    credentials in `codex-lifecycle-account.ts`, but over `tokens.account_id`
+ *    — "which ACCOUNT is this". That cannot answer this question: two nodes may
+ *    legitimately share an account_id (same human, two separate logins) and be
+ *    perfectly fine, because they hold different refresh tokens and neither
+ *    invalidates the other. The refresh token is what identifies one *chain*.
+ *    So: same hashing primitive (`shortHash`, reused below), different value,
+ *    different question. There is no pre-existing fingerprint over the refresh
+ *    token anywhere in the repo — that, and the cross-node comparison, are what
+ *    is new here.
  */
-import { createHash } from "crypto";
+import { shortHash } from "./codex-lifecycle-account.js";
 
 /** Per-node record, written into the node dir next to the other state files. */
 export const CODEX_AUTH_FINGERPRINT_FILE = ".codex-auth-fingerprint.json";
@@ -78,7 +83,10 @@ export function fingerprintRefreshToken(authJsonText: string): string | null {
   ];
   for (const c of candidates) {
     if (typeof c === "string" && c.trim() !== "") {
-      return createHash("sha256").update(c).digest("hex").slice(0, FINGERPRINT_LENGTH);
+      // Same primitive the account registry uses (`shortHash` =
+      // sha256 → hex → slice), deliberately over a DIFFERENT value — see the
+      // header note on account_id vs refresh token.
+      return shortHash(c, FINGERPRINT_LENGTH);
     }
   }
   return null;
