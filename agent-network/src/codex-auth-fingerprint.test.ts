@@ -121,10 +121,26 @@ describe("the launcher actually calls this (source contract)", () => {
   const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf-8").replace(/\r\n?/g, "\n");
 
   test("the copresence start path checks for a shared login after staging", () => {
-    expect(cli).toContain("checkCodexCredentialSharing(resolved.id, displayName, opts.codexHome)");
+    expect(cli).toContain("checkCodexCredentialSharingForNode(resolved.id, displayName, opts.codexHome)");
     // …and it must run AFTER staging, or it fingerprints a file that is about to change.
-    expect(cli.indexOf("checkCodexCredentialSharing(resolved.id"))
+    expect(cli.indexOf("checkCodexCredentialSharingForNode(resolved.id"))
       .toBeGreaterThan(cli.indexOf("staged ${step.name} into the node CODEX_HOME"));
+  });
+
+  // 🔴 This CLI is only ONE of the two ways a codex node starts, and on a real
+  //    35-node fleet it was the minority one (4 of 35; the other 31 run
+  //    agent-node straight from a script). The logic therefore lives in the
+  //    shared module — if this call site ever re-grows its own copy of the
+  //    read/record/compare steps, the two paths can drift and only one gets fixed.
+  test("the launcher delegates instead of carrying its own copy of the logic", () => {
+    const fn = cli.slice(
+      cli.indexOf("function checkCodexCredentialSharingForNode"),
+      cli.indexOf("function persistCodexRecoveryPoint"),
+    );
+    expect(fn).toContain("checkCodexCredentialSharing({");
+    for (const owned of ["readdirSync(", "fingerprintRefreshToken(", "collidingNodes(", "sharedCredentialWarningLines("]) {
+      expect(fn).not.toContain(owned);
+    }
   });
 
   test("both app-server failure paths explain a spent refresh token", () => {
@@ -134,7 +150,7 @@ describe("the launcher actually calls this (source contract)", () => {
   });
 
   test("the warning never refuses to start", () => {
-    const fn = cli.slice(cli.indexOf("function checkCodexCredentialSharing"), cli.indexOf("function persistCodexRecoveryPoint"));
+    const fn = cli.slice(cli.indexOf("function checkCodexCredentialSharingForNode"), cli.indexOf("function persistCodexRecoveryPoint"));
     expect(fn).not.toContain("process.exit");
   });
 });

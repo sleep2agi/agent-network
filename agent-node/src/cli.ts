@@ -24,6 +24,7 @@ import {
 import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copresence/active-network-task-marker.js";
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
+import { checkCodexCredentialSharing } from "./codex-auth-fingerprint.js";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
@@ -6700,6 +6701,29 @@ if (GROK_COPRESENCE) {
 }
 await register();
 log("已注册到 CommHub");
+
+// #1918 —— 共用同一份 codex 登录态的节点,谁先刷新谁活,其余在几天后报
+// "refresh token was already used"。第一版这道检查只做在 `anet node start`
+// 里,而实测某 35 台机群只有 4 台走那条路:其余 31 台(正是共用一个账号的
+// 那批)由自定义脚本直起 agent-node。所以它必须在**这里**也跑一次——两条
+// 启动路径共用同一份实现(逐字节复制 + parity 门),调用点各自一行。
+// 只告警、不拦;读邻居**已公布的 8 位指纹文件**,不读任何别的节点的凭据。
+if (RUNTIME === "codex" || RUNTIME === "codex-app-server") {
+  const codexHomeForCheck = process.env.CODEX_HOME && process.env.CODEX_HOME.trim()
+    ? process.env.CODEX_HOME.trim()
+    : join(homedir(), ".codex");
+  try {
+    checkCodexCredentialSharing({
+      nodeDir: NODE_DIR,
+      alias: ALIAS,
+      codexHome: codexHomeForCheck,
+      say: warn,
+    });
+  } catch (e: any) {
+    // Observability must never be the reason a node will not start.
+    warn(`[codex] shared-login check skipped: ${e?.message || e}`);
+  }
+}
 // Subscribe before the human TUI starts. Lazy-on-first-task attachment can
 // miss the TUI's turn/started notification; relying on thread/read to recover
 // that in-progress turn is not portable across Windows Codex builds.
