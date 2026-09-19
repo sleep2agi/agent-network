@@ -142,6 +142,15 @@ import {
   describeCodexTuiNotPainted,
 } from "../src/codex-copresence-preflight";
 import {
+  CODEX_AUTH_FINGERPRINT_FILE,
+  collidingNodes,
+  describeCodexRefreshFailure,
+  fingerprintRefreshToken,
+  sharedCredentialWarningLines,
+  type CodexAuthFingerprintRecord,
+  type NodeFingerprint,
+} from "../src/codex-auth-fingerprint";
+import {
   describeMissingDeps,
   isLoopbackHub,
   missingCopresenceDeps,
@@ -803,6 +812,74 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
   rmSync(windowsCopresenceRecordPath(nodesDir(), nodeId), { force: true });
 }
 
+/**
+ * #1918 — record this node's credential-chain fingerprint and warn when another
+ * node on the same `.anet/nodes` root holds the same one.
+ *
+ * Reads only THIS node's auth.json; every other node is read through its own
+ * published 8-hex fingerprint file, never through its credentials. That is the
+ * point: a guard against credential sharing must not itself become a reason to
+ * open every node's auth.json.
+ *
+ * Returns the colliding nodes so the caller can name them again later if codex
+ * actually fails to refresh.
+ */
+function checkCodexCredentialSharing(
+  nodeId: string,
+  displayName: string,
+  codexHome: string,
+  say: (m: string) => void = (m) => console.error(m),
+): NodeFingerprint[] {
+  let self: NodeFingerprint = { alias: displayName, fingerprint: null };
+  try {
+    self = {
+      alias: displayName,
+      fingerprint: fingerprintRefreshToken(readFileSync(join(codexHome, "auth.json"), "utf-8")),
+    };
+  } catch {
+    // No auth.json yet (or unreadable). Nothing to compare — the sign-in
+    // blocker above already speaks to that case.
+    return [];
+  }
+  if (!self.fingerprint) return [];
+
+  const root = nodesDir();
+  // Publish ours first, so a node that starts second can see this one.
+  try {
+    const record: CodexAuthFingerprintRecord = {
+      schema_version: 1,
+      alias: displayName,
+      fingerprint: self.fingerprint,
+      written_at: new Date().toISOString(),
+    };
+    atomicWritePrivateJson(join(root, nodeId, CODEX_AUTH_FINGERPRINT_FILE), record);
+  } catch (e) {
+    // Observability must never be the reason a node will not start.
+    say(`[anet] ⚠ could not record the codex credential fingerprint: ${(e as Error).message}`);
+  }
+
+  const others: NodeFingerprint[] = [];
+  let entries: string[] = [];
+  try { entries = readdirSync(root); } catch { return []; }
+  for (const entry of entries) {
+    if (entry === nodeId) continue;
+    try {
+      const raw = readFileSync(join(root, entry, CODEX_AUTH_FINGERPRINT_FILE), "utf-8");
+      const parsed = JSON.parse(raw) as Partial<CodexAuthFingerprintRecord>;
+      if (typeof parsed?.fingerprint !== "string") continue;
+      others.push({
+        alias: typeof parsed.alias === "string" && parsed.alias ? parsed.alias : entry,
+        fingerprint: parsed.fingerprint,
+        writtenAt: typeof parsed.written_at === "string" ? parsed.written_at : null,
+      });
+    } catch { /* no record, or unreadable — not a match, and not an error */ }
+  }
+
+  const colliding = collidingNodes(others, self);
+  for (const line of sharedCredentialWarningLines(self, colliding)) say(line);
+  return colliding;
+}
+
 function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
   const nodeDir = join(nodesDir(), resolved.id);
   const backup = backupCodexRecoveryState({ nodeDir, codexHome });
@@ -880,6 +957,13 @@ async function startWindowsCodexCopresence(
     // reliably inherit a detached Node file descriptor on Windows, so log
     // text is not a readiness signal. Probe the actual loopback listener.
     if (!await waitForLoopbackPort(port, 25_000)) {
+      // #1918 — two non-obvious reasons the app-server dies at boot both read as
+      // "it just did not start": a refresh token another node already spent, and
+      // a token endpoint this host cannot reach. They need opposite remedies, so
+      // name whichever one the log actually shows instead of handing over a path.
+      let appLogTail = "";
+      try { appLogTail = readFileSync(appLog, "utf-8").slice(-8_000); } catch { /* no log yet */ }
+      for (const line of describeCodexRefreshFailure(appLogTail)?.lines ?? []) console.error(line);
       throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
     }
     const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
@@ -1314,6 +1398,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet] ⚠ could not stage CODEX_HOME state: ${(e as Error).message}`);
   }
 
+  // #1918 — staging above shares one login across nodes by design, and refresh
+  // tokens are one-time. Say so now, while an operator is watching, instead of
+  // days later when the first refresh silently locks everyone else out.
+  const codexCredentialPeers = checkCodexCredentialSharing(resolved.id, displayName, opts.codexHome);
+
   if (process.platform === "win32") {
     try {
       await startWindowsCodexCopresence(resolved, displayName, opts, model);
@@ -1468,6 +1557,12 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   //   Windows 启动器早就按端口探(同文件 windowsManagedProcess 那段),POSIX 这里对齐。
   const bound = await waitForLoopbackPort(port, 25_000);
   if (!bound) {
+    // #1918 — before offering a tmux attach, look at what the pane actually says:
+    // a spent refresh token and an unreachable token endpoint both look exactly
+    // like "it just did not start" from out here, and their remedies differ.
+    for (const line of describeCodexRefreshFailure(capturePane(appsrvSession, 200) ?? "", codexCredentialPeers)?.lines ?? []) {
+      console.error(line);
+    }
     console.error(`[anet] ❌ app-server did not bind ${wsUrl} within 25s.`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
