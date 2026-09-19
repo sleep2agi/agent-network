@@ -221,6 +221,36 @@ anet upgrade --dry-run
 
 OpenCode 当前是任务 runtime，不是共享 TUI；Grok 共享 TUI 尚未发布。以 [Runtime 对比](/guide/runtimes)为准，不要照旧版本或 changelog 历史命令操作。
 
+## 日志
+
+### 节点日志「看着不动」，不知道任务还在不在跑
+
+长任务过去在开始和结束之间可以整段没有输出（实测最长 4492 秒静默），于是「卡住了」和「正在干活」在日志里长得一样。现在跑着的任务每 30–60 秒写一行：
+
+```
+[12:34:56] [INFO ] [my-node] in-flight grok primary: loop=3, elapsed=2m 15s, last=tool_call (#7)
+```
+
+`last=` 是运行时最近一次动作。**看不到这行**说明进程没在推进，可以按卡死排查；看得到就是还在跑，等它。目前 grok 的两个 runtime（ACP 与 CLI）有这行，其它 runtime 后续跟进。
+
+### 日志里全是 `[grok-stderr]` 警告，真正的问题被淹掉
+
+Grok 的沙箱按工作目录拒绝越界路径（`path outside Grok runtime cwd`）是常见且可恢复的，模型会换软链路径重试，任务照样成功。这类已知无害的 stderr 不再每条升一个警告，而是每轮合并成一行：
+
+```
+[grok-stderr] known-benign stderr this turn: 12 (path-outside-cwd 12)
+```
+
+未被归类的失败仍然按原样告警——**没见过的失败永远不会被静音**。
+
+### 调节日志密度
+
+```bash
+ANET_LOG_LEVEL=debug anet node start <alias>   # debug | info | warn | error，默认 info
+```
+
+也可用 `--log-level`、旧的 `LOG_LEVEL` 环境变量或节点配置里的 `logLevel`，优先级依次递减。写错值时不再静默按 `info` 处理，而是先告警再退回默认。
+
 ## 任务和消息
 
 ### 任务没有触发模型

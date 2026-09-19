@@ -221,6 +221,36 @@ anet upgrade --dry-run
 
 OpenCode is currently a task runtime, not a shared TUI. Shared Grok TUI support has not shipped. Follow [Runtimes](/en/guide/runtimes), not old versions or historical changelog commands.
 
+## Logs
+
+### The node log looks frozen — is the task still running?
+
+A long task used to write nothing at all between "started" and "done" (longest silence measured: 4492 seconds), so "stuck" and "working" read identically. A running task now writes one line every 30–60 seconds:
+
+```
+[12:34:56] [INFO ] [my-node] in-flight grok primary: loop=3, elapsed=2m 15s, last=tool_call (#7)
+```
+
+`last=` is the runtime's most recent activity. **No such line** means nothing is advancing — troubleshoot it as a hang. A line means it is still working; wait. Grok's two runtimes (ACP and CLI) emit it today; other runtimes follow later.
+
+### The log is full of `[grok-stderr]` warnings and the real problem is buried
+
+Grok's sandbox refusing a path outside its working directory (`path outside Grok runtime cwd`) is common and recoverable — the model retries through the symlinked path and the task still succeeds. Known-benign stderr of this kind no longer raises one warning per occurrence; it is folded into one line per turn:
+
+```
+[grok-stderr] known-benign stderr this turn: 12 (path-outside-cwd 12)
+```
+
+Anything not in the benign table still warns exactly as before — **an unclassified failure is never silenced**.
+
+### Changing log density
+
+```bash
+ANET_LOG_LEVEL=debug anet node start <alias>   # debug | info | warn | error, default info
+```
+
+`--log-level`, the older `LOG_LEVEL` environment variable and the node config's `logLevel` also work, in that order of precedence. An unrecognised value is no longer treated silently as `info`: it warns once, then falls back to the default.
+
 ## Tasks and messages
 
 ### Work does not invoke the model
