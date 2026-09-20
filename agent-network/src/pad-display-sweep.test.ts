@@ -11,9 +11,9 @@ import { join } from "node:path";
 // 一旦同一张表里既有 `admin` 又有「通信龙」,padEnd 那版就歪 3 列。
 
 describe("padEnd 与 padDisplayEnd 在混合宽度下的差别", () => {
-  // 都装得下 12 显示列的一组（TM开发机Codex 本身就有 13 列,放它会混进
+  // 都装得下 12 显示列的一组（长节点abcdefg 本身就有 13 列,放它会混进
   // 「值比列还宽」这另一件事,所以单独一条测）
-  const rows = ["admin", "通信龙", "TMAI"];
+  const rows = ["admin", "通信龙", "node-c"];
 
   it("🔴 padEnd:同一列的实际显示宽度彼此不同(这就是歪的来源)", () => {
     const widths = rows.map(r => displayWidth(r.padEnd(12)));
@@ -28,10 +28,10 @@ describe("padEnd 与 padDisplayEnd 在混合宽度下的差别", () => {
   });
 
   it("值本身就比列宽时保持原样,不截断 —— 它撑宽那一行,但不丢字", () => {
-    // 第一版我把 TM开发机Codex(13 显示列) 混进「全部相等」那条,红的是**我的期望值**:
+    // 第一版我把 长节点abcdefg(13 显示列) 混进「全部相等」那条,红的是**我的期望值**:
     // padDisplayEnd 补不了负数,它本来就该返回 13。
-    expect(displayWidth("TM开发机Codex")).toBe(13);
-    expect(padDisplayEnd("TM开发机Codex", 12)).toBe("TM开发机Codex");
+    expect(displayWidth("长节点abcdefg")).toBe(13);
+    expect(padDisplayEnd("长节点abcdefg", 12)).toBe("长节点abcdefg");
   });
 
   it("纯 ASCII 时两者逐字相同 —— 所以这次替换对英文场景零影响", () => {

@@ -6,7 +6,7 @@ import { inboundChannelMeta } from "./channel-meta.js";
 // created_at, network_id, meta_json, … FROM inbox WHERE acked = 0).
 const row = {
   id: "f34a68a5-4506-4c3c-95d2-6484e9798a23",
-  from_session: "TMCode负责人",
+  from_session: "node-b",
   priority: "high",
   created_at: "2026-08-19 19:45:13",
 };
@@ -34,9 +34,9 @@ describe("inbound channel meta", () => {
 
   test("keeps the attributes send_reply routing already depends on", () => {
     const m = inboundChannelMeta(row);
-    expect(m.sender).toBe("TMCode负责人");
+    expect(m.sender).toBe("node-b");
     expect(m.sender_id).toBe("commhub");
-    expect(m.user).toBe("TMCode负责人");
+    expect(m.user).toBe("node-b");
     expect(m.priority).toBe("high");
   });
 });
