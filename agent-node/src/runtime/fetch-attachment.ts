@@ -7,7 +7,7 @@
 // response as the hub-machine-local absolute path
 // (`~/.anet/server/uploads/<YYYY-MM-DD>/<file_id><ext>`). When the agent
 // runs on a different host than the hub (Vincent 2026-06-30 实测: agent
-// "TM门户运维" on toodadev2 / 10.110.14.18, hub on home machine), that
+// a partner-team node on a partner-team host at an internal address, hub on home machine), that
 // path string can't be opened — the agent reports "无法访问 /home/.../uploads/...".
 //
 // Fix: prefer `attachment.file_id` over `attachment.path`. When file_id

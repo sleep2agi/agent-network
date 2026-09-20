@@ -31,7 +31,7 @@ describe("formatAttemptOutcome", () => {
 });
 
 describe("the live incident this module exists for", () => {
-  // TMCode副责人, 2026-08-18 02:09 — a node configured with a model name that
+  // a partner-team node, 2026-08-18 02:09 — a node configured with a model name that
   // does not exist. Numbers below are the ones the pane actually printed.
   const observed = { result: "", usage: { input_tokens: 0, output_tokens: 0 }, totalCostUsd: 0 };
 

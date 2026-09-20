@@ -9,7 +9,7 @@
 
 ## 这一版带给用户什么
 
-- 共存节点 `anet node stop` 之后再 `start` 不用再手删 `.grok .claude .cursor .mcp.json .envrc`(TMWork苹果打包狗、grok-v1 各踩过)。
+- 共存节点 `anet node stop` 之后再 `start` 不用再手删 `.grok .claude .cursor .mcp.json .envrc`(外部团队节点、grok-v1 各踩过)。
 - 配合 anet `2.3.0-preview.77`,模型对任务发起方的重复 send_task / send_message 应被改写成不推送的进度上报;`.60`/`.61` 都因为路径没接到位而没生效,这是第一版真正把读写两端接在同一个可读位置的。
 
 ## Install

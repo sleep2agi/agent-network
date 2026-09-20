@@ -3,7 +3,7 @@
 // 一份 receipt = 一次生命周期动作(preflight / verify / start / restart / resume / fork / account / rollback)
 // 的结构化证据。每个不变量一条 check,状态只有三种:pass / fail / unknown。
 // 🔴 整体判定只在**每一条要求的 check 都是 pass** 时才是 PASS;fail 或 unknown 任一条都是 FAIL,
-//    并把阻塞项列出来 —— 「部分成功」不能冒充整体成功(TMHR 派工第 14 条)。
+//    并把阻塞项列出来 —— 「部分成功」不能冒充整体成功(外部团队 派工第 14 条)。
 // 🔴 敏感值(token / 账号 id / 凭据)不进 receipt:调用方只能放 shortFingerprint() 的短指纹。
 //    写盘前再过一遍 redactReceipt(),把漏进来的凭据形状替换掉 —— 双保险,不是替代纪律。
 import { createHash } from "crypto";

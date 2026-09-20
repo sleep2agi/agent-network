@@ -59,7 +59,7 @@ or release-qualified while these gates remain open:
 4. **The staged MCP overwrites presence identity.** Its heartbeat hardcodes
    `agent: "claude-code"`, guesses tmux via ambient tmux state, and omits
    node/model/session/config identity. This currently makes `A站GrokTUI` appear
-   as `TMCode副责人 / claude-code` in status. Removing the second presence
+   as `a partner-team node / claude-code` in status. Removing the second presence
    producer resolves the ownership problem instead of merely making both
    producers write matching fields.
 

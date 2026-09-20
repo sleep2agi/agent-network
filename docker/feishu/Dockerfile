@@ -29,7 +29,7 @@
 # `apt-get update`. `bookworm-slim` strips ca-certs → chicken-and-egg
 # (need certs to fetch certs over HTTPS). Image is ~250 MB bigger, but
 # that's the cost of letting the build work inside enterprise networks
-# where HTTP apt traffic is DPI-blocked (TM门户运维 2026-06-26).
+# where HTTP apt traffic is DPI-blocked (a partner-team node 2026-06-26).
 FROM node:22-bookworm
 
 # Pinned exact preview versions for reproducible images (per 通信龙
@@ -40,7 +40,7 @@ ARG ANET_NODE_VERSION=2.4.15-preview.2
 
 # Optional apt mirror swap — defaults keep the upstream `deb.debian.org`
 # but use HTTPS (works fine, supported upstream + survives the
-# enterprise DPI proxies that drop HTTP apt traffic — TM门户运维 hit
+# enterprise DPI proxies that drop HTTP apt traffic — a partner-team node hit
 # `Clearsigned file isn't valid, got 'NOSPLIT'` on the all-HTTP default).
 # Build-time override for mainland-China hosts:
 #   docker build --build-arg APT_MIRROR_URL=https://mirrors.aliyun.com/debian \

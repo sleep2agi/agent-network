@@ -1,7 +1,7 @@
 /**
  * claude-code-cli 节点(node-server 通道)回复里的「本机文件链接」→ 自动上传成附件。
  * 与 agent-node 的 runtime/reply-file-links.ts 同一形状(两个包不能互相 import,各放一份纯逻辑)。
- * 2026-09-15 真机:TM汇报马 两条带 pptx 的回复到 hub 时附件为空,人只看到「点卡片下载」四个字。
+ * 2026-09-15 真机:外部团队节点 两条带 pptx 的回复到 hub 时附件为空,人只看到「点卡片下载」四个字。
  */
 export const REPLY_LOCAL_LINK_MAX = 6;
 

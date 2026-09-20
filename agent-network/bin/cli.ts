@@ -5873,7 +5873,7 @@ function ensureMcpJson(profile: Profile) {
   // dependency self-healed. The difference is the discovery mechanism:
   //   * claude-code-cli reads cwd `.mcp.json` and finds commhub there
   //   * codex-sdk reads `~/.codex/config.toml [mcp_servers.*]` and CANNOT use
-  //     `.mcp.json` (TMCode负责人 459d1b6c diagnostic confirmed). For codex-sdk
+  //     `.mcp.json` (a partner-team node 459d1b6c diagnostic confirmed). For codex-sdk
   //     anet-node passes a `mcp_servers.commhub` override via the Codex SDK's
   //     `CodexOptions.config` (per-instance, in-memory) — see agent-node/src/cli.ts
   //     `CODEX_CONFIG.mcp_servers` block. That override points at the same
@@ -10154,7 +10154,7 @@ async function nodeEditCommand() {
   // 校验器，不新增第 N 份判据。`anet node create` 走的是
   // `validateModel`（cli.ts 的 create 分支，#1469 finding-3），这里照用。
   //
-  // 🔴 触发这一格的是 TM 的一条真实 P0：节点撞上
+  // 🔴 触发这一格的是 外部团队的一条真实 P0：节点撞上
   //    "Selected model is at capacity"，而**换模型没有命令可用** ——
   //    与 #1698 里 grok 撞 uid_map 墙时「产品给出的修法产品自己做不到」同形。
   const modelIdx = args.indexOf("--model");
@@ -13111,7 +13111,7 @@ async function statusCommand() {
       + (attnCount > 0 ? `, ${attnCount} needs attention` : "")
       + `, ${summary.offline || 0} offline`);
     // 🔴 #1648 —— 「刚停的」和「掉了三天没人发现的」原先渲染成同一个数字。
-    //    实测(84 台 TM 相关节点):45 台 offline 里 27 台 >3 天、18 台 1-3 天、
+    //    实测(84 台 外部团队相关节点):45 台 offline 里 27 台 >3 天、18 台 1-3 天、
     //    近 6 小时内 **0 台** —— 「当前没有活故障」和「有 45 台掉了」是完全
     //    不同的两个结论,而屏幕上只有后者。
     //    与 blocked 不同,这一格是**算得出来的**:offline 节点的 last_seen_at
@@ -17264,7 +17264,7 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       printProjectUsage();
       break;
     case "grok":
-      // 2026-09-16 TMHR鲸:`anet grok --help` 只打 attach 一行,和裸 `anet grok` 打的两行不一致,
+      // 2026-09-16 外部团队节点:`anet grok --help` 只打 attach 一行,和裸 `anet grok` 打的两行不一致,
       // 按 --help 自查会得出「没有 model」的错结论。两处用同一句。
       console.log("Usage: anet grok attach <node> | anet grok model <node> <model>");
       break;

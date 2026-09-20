@@ -7,7 +7,7 @@ type Rpc = { id?: number; method?: string; params?: any; result?: any; error?: a
 const bundle = process.env.CHANNEL_BUNDLE;
 if (!bundle) throw new Error("CHANNEL_BUNDLE is required");
 const token = "ntok_test520_attachment_secret";
-const alias = "TMCode附件测试";
+const alias = "附件测试节点";
 const originalSuccess = "[Dashboard 附件]\n- 附件: image.png (8 B)";
 const originalFailure = "[Dashboard 附件]\n- 附件: missing.png";
 const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

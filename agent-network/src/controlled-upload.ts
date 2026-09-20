@@ -138,7 +138,7 @@ export function defaultControlledUploadRoots(opts: {
       roots.push(cwdReal);
     } else if (existsSync(join(cwdReal, ".anet", "nodes"))) {
       // 2026-09-15 —— 节点的项目目录(含 .anet/nodes 的那个)就是它产出文件的地方;此前只信 ~/.anet、~/.grok、
-      // 缓存与节点目录,claude-code-cli 节点在项目目录里生成的 pptx 一律 path_untrusted(TM汇报马 真机),
+      // 缓存与节点目录,claude-code-cli 节点在项目目录里生成的 pptx 一律 path_untrusted(外部团队节点 真机),
       // 于是它们绕去 REST 或干脆贴本机路径。项目根之外(symlink 逃逸、上级目录)照旧拒绝。
       roots.push(cwdReal);
     }

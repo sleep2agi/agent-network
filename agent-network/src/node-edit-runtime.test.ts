@@ -56,7 +56,7 @@ describe("#1698 校验判据只有一份", () => {
 });
 
 describe("#1698 --model：与 --runtime 走同一条路", () => {
-  // 触发这一格的是 TM 的一条真实 P0：节点撞上
+  // 触发这一格的是 外部团队的一条真实 P0：节点撞上
   // "Selected model is at capacity"，而换模型**没有命令可用**。
   test("挂在同一个子命令上，两个 flag 至少给一个", () => {
     expect(body).toContain('args.indexOf("--model")');

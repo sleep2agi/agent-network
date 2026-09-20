@@ -7,7 +7,7 @@
  * path outside its runtime cwd is an ordinary, recoverable, task-succeeding
  * event that grok itself logs at `info`, yet it carried the same weight as
  * `SSE error: terminated`. On a node with ~30 tasks/day that is ~6 extra
- * WARNs, and the real WARNs drown in them (TMHR鲸's 2026-09-17 reading).
+ * WARNs, and the real WARNs drown in them (a partner-team node's 2026-09-17 reading).
  *
  * The replacement keeps the keyword rule as the *default* and only steps in
  * front of it with an explicit, per-runtime table of patterns that have been

@@ -8,7 +8,7 @@
 //     only knew the dev-channels markers, so it spun until its window expired
 //     while a different prompt sat on screen — the node then hung forever and
 //     the hub showed it offline. Measured 2026-08-17 restoring 97 nodes:
-//     TM智空负责人 died exactly this way and needed two manual Enters.
+//     a partner-team node died exactly this way and needed two manual Enters.
 //
 //  2. When the inner `anet node start` refuses (unsupported runtime, bad
 //     config) the pane holds the only copy of the real reason, and tmux tears

@@ -2290,8 +2290,7 @@ async function processWithClaude(
     ].join("\n");
   }
 
-  // Root-safety log (was a hard-fail before 2026-06-24 — see Vincent toodadev2
-  // incident). Claude Code's security policy rejects `--dangerously-skip-
+  // Root-safety log (was a hard-fail before 2026-06-24 — see the partner-team host incident). Claude Code's security policy rejects `--dangerously-skip-
   // permissions` when running as root, so the old "bypass permissions" path
   // was unreachable on root. Earlier today's commit landed `permissionMode:
   // 'auto'` as a softer alternative that CC DOES accept under root; the
@@ -2764,7 +2763,7 @@ async function processWithClaude(
               // so the line printed the vendor's `subtype` verbatim. A node
               // pointed at a nonexistent model logged `success | $0.0000 | in=0
               // out=0` three times in a row and then `✗ all 3 attempts failed`
-              // (TMCode副责人, 2026-08-18). The verdict already existed one line
+              // (a partner-team node, 2026-08-18). The verdict already existed one line
               // below; it just wasn't the thing being printed.
               const cls =
                 m.subtype === "success"

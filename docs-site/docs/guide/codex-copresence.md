@@ -110,7 +110,7 @@ for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; 
 anet node start codex-human
 ```
 
-这不是理论风险：生产节点 `TM副责人` 因此静默重复运行约 2 天，`A站副责人` 则持续约 9 天（[#535](https://github.com/sleep2agi/agent-network/issues/535)）。
+这不是理论风险：生产节点 `外部团队节点` 因此静默重复运行约 2 天，`A站副责人` 则持续约 9 天（[#535](https://github.com/sleep2agi/agent-network/issues/535)）。
 :::
 
 ### 首次派活前必须看一眼 TUI 是否卡在审批框

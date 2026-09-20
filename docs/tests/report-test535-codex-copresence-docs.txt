@@ -37,7 +37,7 @@ Coverage:
   are documented in both languages.
 - Plain `anet node start` recovery is explicitly rejected.
 - Both production duplicate cases are named with their observed durations:
-  `TM副责人` (~2 days) and `A站副责人` (~9 days).
+  `外部团队节点` (~2 days) and `A站副责人` (~9 days).
 - Complete inherited `COMMHUB_*` identity cleanup is present.
 - app-server cwd, not bridge cwd, is the documented source of thread cwd.
 - Default read-only and full-access double confirmation are documented.

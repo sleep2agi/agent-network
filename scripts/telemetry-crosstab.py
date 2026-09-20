@@ -91,7 +91,7 @@ def report(sessions: list[dict], alias: str, out=sys.stdout) -> int:
 
     # 🔴 两个分组给出**相反判定**时,必须喊出来。
     #
-    #    实测(2026-08-18,TM宿舍马):
+    #    实测(2026-08-18,外部团队节点):
     #      同机 hostname=vanisn  → process_* 判「本节点独空」
     #      同类 agent=claude-code → process_* 判「未上报(整类空)」
     #
