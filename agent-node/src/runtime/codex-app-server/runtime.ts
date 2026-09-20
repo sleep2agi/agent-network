@@ -316,6 +316,18 @@ export function codexAppServerThink(
       bridge.off("drain_deferred", onRequeued);
       bridge.off("steer_deferred", onRequeued);
       if (timer) clearTimeout(timer);
+      if (queueTimer && !queueDeadlineElapsed) {
+        // #1935 — this call is ending while the task never entered a turn: the
+        // admission deadline is still pending and no task_started arrived.
+        // Only the deadline path calls cancelQueuedTask, so the bridge FIFO row
+        // survives here and can still execute later — after which this call's
+        // listeners are gone, so even its task_started logs nothing.
+        //
+        // Without this line that population is invisible in the logs: neither
+        // `在队列中等待 … 仍未开始` nor `queue deadline reached …` is ever
+        // written, so counting either marker yields a lower bound, not a total.
+        log(`[codex-app-server] task ${opts.taskId} settled before admission; FIFO row not cancelled and may still execute`);
+      }
       if (queueTimer) clearTimeout(queueTimer);
       if (reconciliationTimer) clearTimeout(reconciliationTimer);
       resolve(r);
