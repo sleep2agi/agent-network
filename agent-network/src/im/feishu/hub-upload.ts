@@ -1,7 +1,7 @@
 /**
  * RFC-020 §17 — feishu inbound bridge → hub `/api/upload` integration.
  *
- * Vincent 2026-06-30: cross-machine agents (e.g. TM门户运维@toodadev2)
+ * Vincent 2026-06-30: cross-machine agents (e.g. a partner-team node on a partner-team host)
  * delegated by the feishu-local bot can't read inbound attachments
  * because the only thing they get is a host-local path that doesn't
  * exist on the receiver's filesystem. #351 already wired agent-node's

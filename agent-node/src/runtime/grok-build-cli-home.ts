@@ -543,7 +543,7 @@ function isExactProjectSandboxPlaceholderStat(stat: Stats, uid: number | undefin
 }
 
 /**
- * #1887(2026-09-16,TMHR鲸,TM 云 HCE 机):grok 1.0.5 在部分主机把 read-deny 占位显式种成 0666,
+ * #1887(2026-09-16,外部团队,其云主机):grok 1.0.5 在部分主机把 read-deny 占位显式种成 0666,
  * 回收只认 0444 ⇒ clean stop 必留残渣,下次启动在这里被拒。判据不放宽(mode 是「我们种的」形状的一半,
  * 用户自己的空 .envrc 不能被当占位删),但报错要说清怎么恢复,而不是让人对着「expected a real directory」猜。
  */

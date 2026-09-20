@@ -40,14 +40,14 @@ export interface CodexCopresenceProfileFields {
   // will fail-close with a Phase 0 diagnostic naming the missing field(s);
   // the diagnostic shape and any operator remediation flow (JSON-patch or
   // otherwise) will land with the PR that provides its real caller — see
-  // the TMHR 4bab8196 blocker note on `missingCodexResumeFields` below for
+  // the partner team 4bab8196 blocker note on `missingCodexResumeFields` below for
   // why the earlier draft's `codexResumeMissingConfigHint` was removed.
   /** Absolute project directory to launch the codex TUI in. Passed as
    *  `-C <dir>` to `codex resume`. Also cross-checked against hub-reported
    *  `session.project_dir` in Phase 4.3. */
   readonly codexProjectDir?: string;
   /** Which launch adapter to use in Phase 3.2. `"codex-standard"` = stock
-   *  `codex app-server` + `codex resume`; `"codex-custom-wrapper"` = TMHR狗-class
+   *  `codex app-server` + `codex resume`; `"codex-custom-wrapper"` = partner-team-class
    *  custom LLM API wrapper (hosted tool / compaction / image-output compat).
    *  Unknown / absent → Phase 0 fail-closed (unknown adapters must not fall
    *  through to a default that might not fit the node's real topology). */
@@ -60,7 +60,7 @@ export interface CodexCopresenceProfileFields {
    *  recorded `from_name / from_node_id / to_name / to_node_id`.
    *
    *  🔴 self-loop is deliberately not accepted here — it cannot prove
-   *  cross-node routing closure (design v7 Phase 6 = D, per TMHR
+   *  cross-node routing closure (design v7 Phase 6 = D, per the partner team
    *  06cfb29a). Single-node users cannot run `anet node resume` in
    *  this initial cut; tracked at #1527. */
   readonly codexProbePeer?: string;
@@ -91,13 +91,13 @@ export const CODEX_RESUME_REQUIRED_FIELDS: readonly CodexResumeRequiredField[] =
  *    - codexProjectDir : string starting with `/`. This is a CHEAP typo
  *      filter, NOT the security gate. Phase 0 (in #1528) MUST additionally
  *      `realpath`/canonicalize + reject NUL, `/`, and any untrusted target
- *      before passing this value to `codex resume -C <dir>` (per TMHR
+ *      before passing this value to `codex resume -C <dir>` (per the partner team
  *      4bab8196: "startsWith('/') 不是最终安全门").
  *    - codexLaunchAdapter : enum membership.
  *    - codexProbePeer : Hub exact-alias lookup, so value MUST equal its own
  *      trim. Values with leading/trailing whitespace would fail Hub lookup
  *      100% of the time; rejecting them at the shape layer is a witnessed-red
- *      canary rather than a permissive pass-through (per TMHR 048d0061 R2:
+ *      canary rather than a permissive pass-through (per the partner team 048d0061 R2:
  *      "不要 pin 一个必然在 Hub exact lookup 阶段失败的 well-shaped 值").
  *      Liveness (registered + online + non-self) is a separate hub-side
  *      check in Phase 0.
@@ -105,7 +105,7 @@ export const CODEX_RESUME_REQUIRED_FIELDS: readonly CodexResumeRequiredField[] =
  *  Deliberately NOT included: an operator-facing diagnostic helper. An
  *  earlier draft included `codexResumeMissingConfigHint` that referenced
  *  a `anet node config apply` verb which does not exist in the tree —
- *  TMHR 4bab8196 blocked it as the exact "存在 ≠ 会执行" antipattern.
+ *  外部团队 4bab8196 blocked it as the exact "存在 ≠ 会执行" antipattern.
  *  The diagnostic lands with its real caller in a later PR that either
  *  (a) implements `anet node config apply` first, or (b) reworks the
  *  diagnostic to reference existing commands only. */
@@ -120,7 +120,7 @@ export function missingCodexResumeFields(
   if (adapter !== "codex-standard" && adapter !== "codex-custom-wrapper") {
     missing.push("codexLaunchAdapter");
   }
-  // TMHR 048d0061 R2: peer alias is a Hub exact-lookup key. Anything that
+  // the partner team 048d0061 R2: peer alias is a Hub exact-lookup key. Anything that
   // won't match the raw stored alias — whitespace-only, or with leading/
   // trailing whitespace — must fail at the shape layer, not silently pass
   // and 100%-fail later at Hub lookup. Require the value to be its own

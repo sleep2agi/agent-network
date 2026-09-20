@@ -111,7 +111,7 @@ for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; 
 anet node start codex-human
 ```
 
-This is not theoretical: the production node `TM副责人` ran a silent duplicate for about two days, and `A站副责人` did so for about nine days after operators followed the generic hint ([#535](https://github.com/sleep2agi/agent-network/issues/535)).
+This is not theoretical: the production node `外部团队节点` ran a silent duplicate for about two days, and `A站副责人` did so for about nine days after operators followed the generic hint ([#535](https://github.com/sleep2agi/agent-network/issues/535)).
 :::
 
 ### Check the TUI for a pending approval before the first dispatch

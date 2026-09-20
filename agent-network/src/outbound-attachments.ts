@@ -43,7 +43,7 @@ const MAX_ATTACHMENTS = 10;
  * without attachments must produce a byte-identical request to before this
  * existed, or every existing reply changes behaviour the day this ships.
  */
-/** 2026-09-15 —— LLM 常把数组参数当成 JSON 字符串传(TM汇报马 真机:attachments 是 "[{...}]" 字符串,回复 ok:true 但 hub 里没有附件)。
+/** 2026-09-15 —— LLM 常把数组参数当成 JSON 字符串传(外部团队节点 真机:attachments 是 "[{...}]" 字符串,回复 ok:true 但 hub 里没有附件)。
  *  字符串先 parse;parse 不出来是错误,不是「没有附件」。 */
 export function coerceAttachmentsArg(input: unknown): unknown {
   if (typeof input !== "string") return input;

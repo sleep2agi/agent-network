@@ -1,6 +1,6 @@
 // #1856 —— preflight / verify 的纯判定:把「已经量到的事实」变成 receipt checks。
 // 量事实的 IO(fs / tmux / /proc / hub)在 cli.ts 的适配层;这里不碰文件系统,便于用夹具穷举每条不变量的
-// pass / fail / unknown 三态。判据来源:TMHR 2026-09-09 派工的 14 条不变量,逐条注在对应函数上。
+// pass / fail / unknown 三态。判据来源:外部团队 2026-09-09 派工的 14 条不变量,逐条注在对应函数上。
 import type { ReceiptCheck } from "./codex-lifecycle-receipt";
 
 export interface RolloutFact {

@@ -336,7 +336,7 @@ export type TaskAttachment = {
  * returns `{file_id, path}` where `path` is a hub-machine-local
  * absolute path. Senders sometimes echo `path` back into meta.attachments.
  * When the receiving agent runs on a different host (Vincent 2026-06-30
- * toodadev2 case), that path string is meaningless. agent-node's
+ * a partner-team host case), that path string is meaningless. agent-node's
  * fetch-attachment.ts will fetch via `file_id` regardless, but leaving
  * the stale `path` in the JSON misleads any tooling that reads it.
  *

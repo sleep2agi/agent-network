@@ -1,6 +1,6 @@
 // What the attempt line in the node log is allowed to say.
 //
-// Observed on a live node (TMCode副责人, 2026-08-18 02:09), three consecutive
+// Observed on a live node (a partner-team node, 2026-08-18 02:09), three consecutive
 // attempts against a model name that does not exist:
 //
 //   [claude] success | 1927ms  | $0.0000 | in=0 out=0 | turns=1

@@ -10,8 +10,8 @@ test("no filter given means no filtering, not an empty match", () => {
 });
 
 test("a single alias produces one placeholder", () => {
-  const f = parseAliasFilter("TM门户马");
-  expect(f.aliases).toEqual(["TM门户马"]);
+  const f = parseAliasFilter("节点甲");
+  expect(f.aliases).toEqual(["节点甲"]);
   expect(f.sql).toBe(" AND alias IN (?)");
 });
 

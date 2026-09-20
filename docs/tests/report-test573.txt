@@ -4,13 +4,13 @@ Status: PASS (candidate); live node restored on existing production source
 
 Scope
 -----
-TM副责人 accepted CommHub tasks but they did not appear in the attached Codex
+a partner-team node accepted CommHub tasks but they did not appear in the attached Codex
 TUI. Diagnose Hub → inbox → bridge → app-server → shared TUI and prevent one
 missed terminal event from permanently wedging later tasks.
 
 Production facts (read-only diagnosis)
 --------------------------------------
-- Hub session: alias=TM副责人, node_id=n_ace53877, runtime=codex-app-server,
+- Hub session: alias=a partner-team node, node_id=n_ace53877, runtime=codex-app-server,
   app-server ws://127.0.0.1:24702, thread
   019f4af0-177b-75a3-8d40-9251b1e719ee.
 - The TUI command used the same URL and exact thread id; this was not an
@@ -30,13 +30,13 @@ Immediate live recovery
 - Stopped exact bridge PID 331368 with SIGTERM. TUI and app-server were not
   restarted.
 - Restarted bridge from rfc030-work @ 81589a05 in exact tmux
-  `TM副责人-桥`; cleared all inherited COMMHUB_* plus unrelated
+  `外部团队节点-桥`; cleared all inherited COMMHUB_* plus unrelated
   TELEGRAM_STATE_DIR/CODEX_COMPANION_SESSION_ID first.
 - Live send_task 0431779d-d642-4a00-92cf-bd41710ac8d9 was visible in tmux
-  `TM副责人` and returned the exact marker
-  `TM副责人链路恢复-20260803-002` in about five seconds.
+  `a partner-team node` and returned the exact marker
+  `外部团队节点链路恢复-20260803-002` in about five seconds.
 - Post-check: session idle, inbox_pending=0.
-- Subsequent real tasks from TM负责人 and TMCode负责人 also reached the same
+- Subsequent real tasks from two other partner-team nodes also reached the same
   TUI and completed, proving this was not a one-shot self-probe recovery.
 
 Message-type boundary
@@ -46,7 +46,7 @@ Message-type boundary
   receipts to use send_task.
 - Plain `send_message` rows now wake the bridge on new_message (81589a05) but
   remain intentionally ack/log-only in cli.ts; they do not enter the model or
-  TUI. A live TM网站运维 message at 08:28:58 confirmed this exact behavior.
+  TUI. A live partner-team node message at 08:28:58 confirmed this exact behavior.
 - A no-model `thread/inject_items` probe returned success but emitted no item
   notification and did not render live in the attached TUI. It is therefore
   not used as a fake passive-notification mechanism. Turning send_message into

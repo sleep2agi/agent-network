@@ -198,7 +198,7 @@ const activityLog = createActivityLogSink(process.cwd(), ALIAS);
 //
 //    后果不是"少一格显示":排查一个 offline 节点时,第一个要回答的问题是
 //    **「它还能不能一键起回来」** —— 而那要看 config 还在不在。
-//    #1648 里本机 23 个 offline 的 TM 节点,我能对 12 个给出答案,
+//    #1648 里本机 23 个 offline 的 外部团队节点,我能对 12 个给出答案,
 //    剩下 11 个全是这一族,只能写「判不了」。
 //
 //    路径与上面 activityLog 用的是同两个值(cwd + ALIAS),不另外猜。

@@ -12,7 +12,7 @@
 #     3 个当前在 tmux 但无 config 的孤儿：B站开发牛/A站副责人/通信SDK牛 + 6 个更老残留 + 1 个 08-15 有日志
 #     的通信牛）。改 sweep 和 post-flight 都以「有 config.json」为判据，避免"永远红"的假绿反面。
 #     校验：find config.json 119 = 137 - 18 精确对齐。
-#   - v2.3 (2026-08-17 通信龙第四条必改): 全域重名检测。TMCode副责人 有 2 份 config（tmcode=codex-app-server
+#   - v2.3 (2026-08-17 通信龙第四条必改): 全域重名检测。外部团队节点 有 2 份 config（tmcode=codex-app-server
 #     + tmteam=codex-sdk，runtime 不同），sweep 遍历顺序决定哪份生效 → 隐式择一。改为：pre-sweep 建立
 #     alias→paths 映射，双份 config 者进 CONFLICT_ALIASES 集，sweep 和 post-flight 都跳过，计入 conflict_count。
 #     "本次跳过，不猜哪份生效" —— 让人显式决策，别让脚本静默选边。
@@ -164,13 +164,13 @@ PY
   fi
 done < <(find $HOME -maxdepth 5 -path '*/.anet/nodes/*/config.json' -type f 2>/dev/null)
 
-# 计 config 条数（TMCode副责人 有 2 份都通过 3 条件，config 计 2，unique alias 计 1）
+# 计 config 条数（外部团队节点 有 2 份都通过 3 条件，config 计 2，unique alias 计 1）
 _total_valid_configs=0
 for _al in "${!ALIAS_PATHS[@]}"; do
   IFS='|' read -ra _parr <<< "${ALIAS_PATHS[$_al]}"
   _total_valid_configs=$((_total_valid_configs + ${#_parr[@]}))
 done
-log "分母校验（3 条件：有 config + runtime ∈ 支持集 + token=ntok_）：config 条数 = $_total_valid_configs（期望 110）· 唯一 alias = ${#ALIAS_PATHS[@]}（TMCode副责人 2份都过 3 条件 → 差 1 来自这里）"
+log "分母校验（3 条件：有 config + runtime ∈ 支持集 + token=ntok_）：config 条数 = $_total_valid_configs（期望 110）· 唯一 alias = ${#ALIAS_PATHS[@]}（外部团队节点 2份都过 3 条件 → 差 1 来自这里）"
 if [ "${#SKIP_NODES_MAP[@]}" -gt 0 ]; then
   log "🟡 跳过 ${#SKIP_NODES_MAP[@]} 个配置不达 3 条件的节点（不算缺）："
   for al in "${!SKIP_NODES_MAP[@]}"; do

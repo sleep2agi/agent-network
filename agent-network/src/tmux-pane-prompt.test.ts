@@ -3,7 +3,7 @@ import { classifyPanePrompt, extractStartFailureReason } from "./tmux-pane-promp
 
 // Captured from a real `tmux capture-pane -p` while Claude Code 2.1.147 was
 // waiting on the folder-trust prompt in a workspace it had not seen before —
-// the exact state that stalled TM智空负责人 on 2026-08-17.
+// the exact state that stalled a partner-team node on 2026-08-17.
 const FOLDER_TRUST_PANE = `
 ╭──────────────────────────────────────────────╮
 │ Do you trust the files in this folder?       │
@@ -77,7 +77,7 @@ test("the refusal is picked over unrelated scrollback both above and below it", 
     REFUSAL_PANE.trim(),
     "",
     "npm notice Run npm install -g npm@11.0.0 to update",
-    "vansin@toodadev3:~$ ",
+    "vansin@example-host:~$ ",
   ].join("\n");
   expect(extractStartFailureReason(pane)).toContain("unsupported runtime");
 });

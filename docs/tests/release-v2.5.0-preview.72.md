@@ -8,7 +8,7 @@
 
 ## 这一版带给用户什么
 
-opencode 共存节点跑长回合(带工具调用、触发上下文压缩)时,不再出现「活干完了、回件却是一句 `OpenCode reply was not owned by the submitted network message`、真正的答案被丢掉」(TMHR鲸 2026-09-17 一手样本:起跑 05:57:59Z / 推送完成 06:01:44Z / 抛错 06:01:58Z)。仍被拒的场合(人类在 TUI 抢了回合),派单方也能在错误件里看到模型实际回了什么。
+opencode 共存节点跑长回合(带工具调用、触发上下文压缩)时,不再出现「活干完了、回件却是一句 `OpenCode reply was not owned by the submitted network message`、真正的答案被丢掉」(外部团队节点 2026-09-17 一手样本:起跑 05:57:59Z / 推送完成 06:01:44Z / 抛错 06:01:58Z)。仍被拒的场合(人类在 TUI 抢了回合),派单方也能在错误件里看到模型实际回了什么。
 
 ## Install
 

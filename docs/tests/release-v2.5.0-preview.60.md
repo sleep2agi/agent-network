@@ -8,7 +8,7 @@
 
 ## 这一版带给用户什么
 
-共存节点(grok TUI)里模型自己对任务发起方再发一遍 send_message / high send_task,发起方同一句话收三次(09-02 晚 TMWork苹果打包狗 实测)。这一版让运行时把「当前替谁跑哪条任务」写成标记;配合 agent-network `.77` 的 node-server,那两条重复出站会被改写成不推送的进度上报。只升 agent-node 不升 anet:标记会写,但没人读,行为与 `.59` 相同(无害)。
+共存节点(grok TUI)里模型自己对任务发起方再发一遍 send_message / high send_task,发起方同一句话收三次(09-02 晚 外部团队节点 实测)。这一版让运行时把「当前替谁跑哪条任务」写成标记;配合 agent-network `.77` 的 node-server,那两条重复出站会被改写成不推送的进度上报。只升 agent-node 不升 anet:标记会写,但没人读,行为与 `.59` 相同(无害)。
 
 ## Install
 

@@ -9,7 +9,7 @@ import {
 } from "./stderr-classify";
 import { createStderrTurnAggregator } from "./stderr-turn-aggregator";
 
-// The twelve lines TMHR鲸 observed on TMAI狗 on 2026-09-17 (same condition,
+// The twelve lines a partner team observed on one of its nodes on 2026-09-17 (same condition,
 // different paths) — the case that motivated #1917 ②.
 const PATH_OUTSIDE_LINES = Array.from({ length: 12 }, (_, i) =>
   `tool_error: tool_output_error Failed to read file: /data/workspaces/agent-network-tmai-dog/file-${i}.ts, ` +

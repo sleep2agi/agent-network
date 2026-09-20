@@ -66,5 +66,5 @@ Safety
 ------
 All test execution was isolated in Docker. No global npm package, existing node
 process, token, Hub state, remote branch, merge, publish, or deployment was
-changed. The live opencode-指挥狗, 指挥狗, and TM副责人 processes were not restarted
+changed. The live opencode-指挥狗, 指挥狗, and 外部团队节点 processes were not restarted
 or pointed at this candidate.

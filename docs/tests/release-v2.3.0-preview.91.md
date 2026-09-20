@@ -11,7 +11,7 @@
 
 ## 这一版带给用户什么
 
-- claude-code-cli 节点(如 TM汇报马)给人发文件:回复里写 `[名字](/绝对路径)` 即可,自动变附件卡片;`commhub_upload_file` 接受项目目录里的文件;把附件写成字符串也不再丢。
+- claude-code-cli 节点(如 外部团队节点)给人发文件:回复里写 `[名字](/绝对路径)` 即可,自动变附件卡片;`commhub_upload_file` 接受项目目录里的文件;把附件写成字符串也不再丢。
 - `anet node codex restart` 不会再把碰巧继承了节点标记的无关进程当上一代杀掉。
 
 ## Install

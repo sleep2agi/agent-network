@@ -147,7 +147,7 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 ### 工作目录里出现 5 个 0 字节文件(`.grok` `.claude` `.cursor` `.mcp.json` `.envrc`)
 
-这是 **grok 二进制自己**在启动时种下的读拒绝占位(不让它读项目里的这些外部面);共存运行时在 `anet node stop` 时只回收「本人、0 字节、单链接、mode 0444」这个精确形状的五个文件(防调包,故意 fail-closed),`agent-node 2.5.0-preview.66` 起正常 stop 是干净的。但在部分主机上 grok 1.0.5 会把这五个文件**显式种成 0666**(TM 云 HCE 机实测:同一 grok 进程自建的 config/lock 都是 0600,只有占位是 0666;DEV 上同一 build 种的是 0444),于是**每次** stop(正常 stop 也一样)都报 `refuses post-stop project placeholder … expected … mode 0444` 并留下五个 0666 文件,下一次 start 报 `expected a real directory`。处置:stop 后 `chmod 0444 .grok .claude .cursor .mcp.json .envrc` 再起,启动会把它们作为 stale placeholder 回收;`agent-node 2.5.0-preview.70` 起报错里直接带这条命令。跟踪:[#1887](https://github.com/sleep2agi/agent-network/issues/1887)。只有「启动被 kill 后残留 + 更老的版本」才会在下次启动报 `.grok: expected a real directory`,那时删掉这 5 个文件再起。
+这是 **grok 二进制自己**在启动时种下的读拒绝占位(不让它读项目里的这些外部面);共存运行时在 `anet node stop` 时只回收「本人、0 字节、单链接、mode 0444」这个精确形状的五个文件(防调包,故意 fail-closed),`agent-node 2.5.0-preview.66` 起正常 stop 是干净的。但在部分主机上 grok 1.0.5 会把这五个文件**显式种成 0666**(外部团队的云主机实测:同一 grok 进程自建的 config/lock 都是 0600,只有占位是 0666;DEV 上同一 build 种的是 0444),于是**每次** stop(正常 stop 也一样)都报 `refuses post-stop project placeholder … expected … mode 0444` 并留下五个 0666 文件,下一次 start 报 `expected a real directory`。处置:stop 后 `chmod 0444 .grok .claude .cursor .mcp.json .envrc` 再起,启动会把它们作为 stale placeholder 回收;`agent-node 2.5.0-preview.70` 起报错里直接带这条命令。跟踪:[#1887](https://github.com/sleep2agi/agent-network/issues/1887)。只有「启动被 kill 后残留 + 更老的版本」才会在下次启动报 `.grok: expected a real directory`,那时删掉这 5 个文件再起。
 
 ### 报 `bwrap exec failed` / 提示 `apt install -y bubblewrap`
 
@@ -159,7 +159,7 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 ### 出网只能走公司代理,但节点里设 `HTTPS_PROXY` 没用
 
-共存运行时给 grok 子进程的环境是**固定白名单**(`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` + `HOME`/`PWD`/`GROK_*`/`ANET_*`),`HTTP(S)_PROXY` 一律剥掉 —— 这是沙箱的一部分,不会为节点开口子。所以「给节点塞代理变量」在这条路上走不通。出口受限的机器上验证可行的是**主机侧**方案:`/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `grok.com` 指到本机,本机跑一个按 SNI 转发的 443 中继再经公司代理出网 —— grok 以为自己在直连。两步分开验收(TMHR 团队 2026-09-16 在 TM 云机实测):①**中继侧**——不带任何代理变量时 `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` 返回 200,只证明中继能替 x.ai 收 TLS 并转上游;②**端到端**——节点里的 grok 走的是正常 DNS + 正常 TLS,靠 `/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `cli-chat-proxy.grok.com` / `code.grok.com` 钉到 127.0.0.1 才通,验收看节点能否回 hub 的探针。①过了不等于②过了。
+共存运行时给 grok 子进程的环境是**固定白名单**(`PATH`/`TMPDIR`/`LANG`/`LC_*`/`TZ`/`SHELL`/`USER`/`LOGNAME`/`TERM`/`COLORTERM`/`NO_COLOR` + `HOME`/`PWD`/`GROK_*`/`ANET_*`),`HTTP(S)_PROXY` 一律剥掉 —— 这是沙箱的一部分,不会为节点开口子。所以「给节点塞代理变量」在这条路上走不通。出口受限的机器上验证可行的是**主机侧**方案:`/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `grok.com` 指到本机,本机跑一个按 SNI 转发的 443 中继再经公司代理出网 —— grok 以为自己在直连。两步分开验收(外部团队 2026-09-16 在其云主机实测):①**中继侧**——不带任何代理变量时 `curl --connect-to auth.x.ai:443:127.0.0.1:443 https://auth.x.ai/.well-known/openid-configuration` 返回 200,只证明中继能替 x.ai 收 TLS 并转上游;②**端到端**——节点里的 grok 走的是正常 DNS + 正常 TLS,靠 `/etc/hosts` 把 `auth.x.ai` / `api.x.ai` / `cli-chat-proxy.grok.com` / `code.grok.com` 钉到 127.0.0.1 才通,验收看节点能否回 hub 的探针。①过了不等于②过了。
 
 自查子命令请用**裸** `anet grok`(打印 attach 与 model 两个子命令);`2.3.0-preview.92` 及更早的 `anet grok --help` 只打 attach 一行,`.93` 起两处一致。
 
@@ -175,7 +175,7 @@ headless 节点不能使用 `anet grok attach`。缺少 `grokCopresence: true` �
 
 ### `grok-build-acp` 在要经代理出网的机器上,ACP initialize 一直不返回,stderr 只有 `Settings fetch failed`
 
-headless 路径把你 shell 里的 `HTTP(S)_PROXY` 原样传给了 grok(共存那套剥代理变量的环境只用于 TUI);公司代理到 `*.x.ai` / `*.grok.com` 不通时,grok 拉 settings 就卡死在 initialize。处置:`NO_PROXY="x.ai,.x.ai,grok.com,.grok.com,localhost,127.0.0.1"`,让这些域名走主机侧 `/etc/hosts` 钉 + 中继(见上一条)。注意 `NO_PROXY` 里的 CIDR(如 `10.0.0.0/8`)对 curl / reqwest 的字面量 IP 不生效,要另补字面量。(TM 团队 2026-09-16 在 TM 云机实测:补 NO_PROXY 后 initialize 秒回,任务 38s 完成。)
+headless 路径把你 shell 里的 `HTTP(S)_PROXY` 原样传给了 grok(共存那套剥代理变量的环境只用于 TUI);公司代理到 `*.x.ai` / `*.grok.com` 不通时,grok 拉 settings 就卡死在 initialize。处置:`NO_PROXY="x.ai,.x.ai,grok.com,.grok.com,localhost,127.0.0.1"`,让这些域名走主机侧 `/etc/hosts` 钉 + 中继(见上一条)。注意 `NO_PROXY` 里的 CIDR(如 `10.0.0.0/8`)对 curl / reqwest 的字面量 IP 不生效,要另补字面量。(外部团队 2026-09-16 在 外部团队的云主机实测:补 NO_PROXY 后 initialize 秒回,任务 38s 完成。)
 
 ### 权限确认
 

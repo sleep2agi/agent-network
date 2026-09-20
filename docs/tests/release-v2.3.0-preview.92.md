@@ -6,7 +6,7 @@
 
 | PR | 内容 |
 |---|---|
-| #1882 | `anet node start` 的 hub 健康探测:loopback 仍 2s,**非 loopback 默认 10s**,可用 `ANET_HUB_HEALTH_TIMEOUT_MS`(1000–60000)覆盖;fatal 文案带实际预算与覆盖方法。TM 云机到 `y.vansin.top:9300` 响应 2.1–2.7s,2s 预算把好的 hub 判成没起(2026-09-16 TMHR鲸 实测) |
+| #1882 | `anet node start` 的 hub 健康探测:loopback 仍 2s,**非 loopback 默认 10s**,可用 `ANET_HUB_HEALTH_TIMEOUT_MS`(1000–60000)覆盖;fatal 文案带实际预算与覆盖方法。外部团队的云主机到 `y.vansin.top:9300` 响应 2.1–2.7s,2s 预算把好的 hub 判成没起(2026-09-16 外部团队节点 实测) |
 
 ## 这一版带给用户什么
 
