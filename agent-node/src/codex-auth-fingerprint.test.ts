@@ -66,9 +66,20 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
     const root = mkdtempSync(join(tmpdir(), "anet-1918-secret-"));
     const token = "rt-do-not-leak-me-9f2b";
     const a = makeNode(root, "n_alpha", token);
+
+    // 🔴 Positive control FIRST. `not.toContain` is equally true of a record
+    //    that was never written, of a fixture that stopped carrying the token,
+    //    and of a field someone renamed — and all three read exactly like a
+    //    real pass. So pin that the secret really is on the way in, and that
+    //    what came out is a populated record rather than an empty husk.
+    const authOnTheWayIn = readFileSync(join(a.codexHome, "auth.json"), "utf-8");
+    expect(authOnTheWayIn).toContain(token);
+
     checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "alpha", codexHome: a.codexHome, indexDir: indexOf(root), say: () => {} });
     const raw = readFileSync(join(a.nodeDir, CODEX_AUTH_FINGERPRINT_FILE), "utf-8");
+    expect(JSON.parse(raw).fingerprint).toMatch(/^[0-9a-f]{8}$/);
     expect(raw).not.toContain(token);
+    expect(raw).not.toContain(token.slice(0, 12));
   });
 
   test("🔴 two no-CLI nodes on one credential: the second names the first", () => {
@@ -141,17 +152,17 @@ describe("#1918 the no-CLI path — agent-node alone publishes and compares", ()
       writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ tokens: { refresh_token: "rt-xws" } }), { mode: 0o600 });
       return { nodeDir, codexHome };
     };
-    const a = mk("ws-client-whale", "n_alpha");
-    const b = mk("ws-infra-whale-2", "n_beta");
+    const a = mk("ws-one", "n_alpha");
+    const b = mk("ws-two", "n_beta");
 
-    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "TMA客户端鲸", codexHome: a.codexHome, indexDir, say: () => {} });
+    checkCodexCredentialSharing({ nodeDir: a.nodeDir, alias: "节点丁", codexHome: a.codexHome, indexDir, say: () => {} });
     const said: string[] = [];
     const colliding = checkCodexCredentialSharing({
-      nodeDir: b.nodeDir, alias: "TM基建鲸2号", codexHome: b.codexHome, indexDir, say: (m) => said.push(m),
+      nodeDir: b.nodeDir, alias: "节点戊", codexHome: b.codexHome, indexDir, say: (m) => said.push(m),
     });
 
-    expect(colliding.map((c) => c.alias)).toEqual(["TMA客户端鲸"]);
-    expect(said.join("\n")).toContain("TM基建鲸2号 shares its codex login with: TMA客户端鲸");
+    expect(colliding.map((c) => c.alias)).toEqual(["节点丁"]);
+    expect(said.join("\n")).toContain("节点戊 shares its codex login with: 节点丁");
   });
 
   test("a neighbour's credentials are never opened — only its published record", () => {

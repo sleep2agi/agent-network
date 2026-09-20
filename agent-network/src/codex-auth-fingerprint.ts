@@ -111,8 +111,8 @@ export function codexFingerprintIndexDir(home: string = homedir()): string {
  * Index filename for a node.
  *
  * 🔴 Derived from the node's DIRECTORY, never its alias. Aliases are not unique
- *    across workspaces — the reference fleet runs `TMA门户鲸2号` beside
- *    `TMA门户鲸`, and nothing stops two workspaces from using one name — so an
+ *    across workspaces — the reference fleet runs a node beside its own `2号`
+ *    twin, and nothing stops two workspaces from using one name — so an
  *    alias-keyed file would let one node silently overwrite another's record,
  *    re-creating the very blindness this index fixes. A directory cannot be two
  *    nodes.
@@ -646,18 +646,31 @@ export function checkCodexCredentialSharing(opts: CodexCredentialSharingCheck): 
     const path = join(indexDir, entry);
     const found = readRecord(path);
     if (!found) continue;
+    // 🔴 Identity in THIS loop has to be a node directory. The sibling loop
+    //    derives one from the path it walked; here the only thing at hand is
+    //    the index file's own path, which is not a node dir — so a record
+    //    without `node_dir` would take `<index>/<hash>.json` as its identity
+    //    and could neither be de-duplicated against that node's own sibling
+    //    copy nor be recognised as self: a phantom extra node, i.e. a
+    //    collision we invented. It would also skip the liveness test below,
+    //    which needs a directory to stat.
+    //    Unreachable today (v3 always writes `node_dir`, and this index is new
+    //    in v3, so nothing older can be sitting in it) — hardening, not a fix.
+    //    Skipping costs nothing: such a node is still visible through the
+    //    sibling scan, which derives a real directory. The file is left alone
+    //    rather than deleted — a record we cannot interpret is not a record we
+    //    have shown to be dead.
+    if (!found.nodeDir) continue;
     // Existence is the liveness test. A record pointing at a directory that is
     // gone describes a node that is gone: drop it, and clean it up now that we
     // have noticed, so the index does not grow a tail of ghosts.
-    if (found.nodeDir) {
-      try {
-        statSync(found.nodeDir);
-      } catch {
-        try { unlinkSync(path); } catch { /* best effort; a read-only index is still usable */ }
-        continue;
-      }
+    try {
+      statSync(found.nodeDir);
+    } catch {
+      try { unlinkSync(path); } catch { /* best effort; a read-only index is still usable */ }
+      continue;
     }
-    consider(found, resolve(join(indexDir, entry)));
+    consider(found, resolve(found.nodeDir));
   }
 
   const selfDirName = basename(opts.nodeDir);

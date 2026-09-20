@@ -55,7 +55,7 @@ describe("Claude channel attachments", () => {
     }, {
       hubUrl: "http://hub.invalid/",
       authToken: "ntok_test_secret",
-      cacheDir: channelAttachmentCacheDir(root, "TMCode负责人"),
+      cacheDir: channelAttachmentCacheDir(root, "node-b"),
       fetch: (async (input, init) => {
         requests.push({ url: String(input), auth: new Headers(init?.headers).get("authorization") });
         return new Response(png, { headers: { "content-length": String(png.length), "content-type": "image/png" } });

@@ -5,19 +5,19 @@ import { sseAbandonGuidance } from "./sse-recovery-guidance";
 
 describe("sseAbandonGuidance", () => {
   test("states that abandon leaves the current process alive", () => {
-    const text = sseAbandonGuidance("TM副责人", "http://127.0.0.1:9200");
+    const text = sseAbandonGuidance("node-b", "http://127.0.0.1:9200");
     expect(text).toContain("当前 agent-node 实例");
     expect(text).toContain("仍在运行");
-    expect(text).toContain("alias=TM副责人");
+    expect(text).toContain("alias=node-b");
   });
 
   test("requires stop-and-replace instead of starting a duplicate", () => {
-    const text = sseAbandonGuidance("TM副责人", "http://127.0.0.1:9200");
+    const text = sseAbandonGuidance("node-b", "http://127.0.0.1:9200");
     expect(text).toContain("不要另起同 alias 实例");
     expect(text).toContain("重复消费者");
     expect(text).toContain("先停止当前实例");
     expect(text).toContain("替换式重启");
-    expect(text).not.toContain("anet node start TM副责人");
+    expect(text).not.toContain("anet node start node-b");
   });
 
   test("preserves the co-presence launch shape in recovery guidance", () => {

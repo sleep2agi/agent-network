@@ -52,6 +52,9 @@ describe("fingerprintRefreshToken", () => {
   test("🔴 never contains the token — the whole point of hashing it", () => {
     const secret = "sk-super-secret-refresh-token-value";
     const fp = fingerprintRefreshToken(nested(secret))!;
+    // Positive control: a null or empty result would satisfy every `not.toContain`
+    // below for free, and read exactly like a real pass.
+    expect(fp).toMatch(/^[0-9a-f]+$/);
     expect(fp).not.toContain(secret);
     expect(fp).not.toContain(secret.slice(0, 8));
     expect(secret).not.toContain(fp);
@@ -77,32 +80,32 @@ const rec = (alias: string, fingerprint: string | null): NodeFingerprint => ({ a
 
 describe("collidingNodes", () => {
   test("finds the other nodes on the same chain", () => {
-    const self = rec("通信牛", "aaaaaaaa");
-    const all = [self, rec("TMAI负责人", "aaaaaaaa"), rec("TM运维", "aaaaaaaa"), rec("别的节点", "bbbbbbbb")];
-    expect(collidingNodes(all, self).map((r) => r.alias)).toEqual(["TMAI负责人", "TM运维"]);
+    const self = rec("node-a", "aaaaaaaa");
+    const all = [self, rec("node-b", "aaaaaaaa"), rec("node-c", "aaaaaaaa"), rec("别的节点", "bbbbbbbb")];
+    expect(collidingNodes(all, self).map((r) => r.alias)).toEqual(["node-b", "node-c"]);
   });
 
   test("excludes self even when its own record is in the list", () => {
-    const self = rec("通信牛", "aaaaaaaa");
+    const self = rec("node-a", "aaaaaaaa");
     expect(collidingNodes([self], self)).toEqual([]);
   });
 
   test("unknown fingerprints are not matches — on either side", () => {
-    const self = rec("通信牛", "aaaaaaaa");
+    const self = rec("node-a", "aaaaaaaa");
     expect(collidingNodes([self, rec("无凭据", null)], self)).toEqual([]);
-    expect(collidingNodes([rec("别人", "aaaaaaaa")], rec("通信牛", null))).toEqual([]);
+    expect(collidingNodes([rec("别人", "aaaaaaaa")], rec("node-a", null))).toEqual([]);
   });
 });
 
 describe("sharedCredentialWarningLines — two-way", () => {
   test("same fingerprint ⇒ warns, names the other alias, and says what will happen", () => {
-    const self = rec("通信牛", "aaaaaaaa");
-    const lines = sharedCredentialWarningLines(self, [rec("TM运维", "aaaaaaaa"), rec("TMAI负责人", "aaaaaaaa")]);
+    const self = rec("node-a", "aaaaaaaa");
+    const lines = sharedCredentialWarningLines(self, [rec("node-c", "aaaaaaaa"), rec("node-b", "aaaaaaaa")]);
     const text = lines.join("\n");
     expect(lines.length).toBeGreaterThan(0);
-    expect(text).toContain("通信牛");
-    expect(text).toContain("TM运维");
-    expect(text).toContain("TMAI负责人");
+    expect(text).toContain("node-a");
+    expect(text).toContain("node-c");
+    expect(text).toContain("node-b");
     expect(text).toContain("aaaaaaaa");
     expect(text).toContain("already used");
     expect(text).toContain("#1918");
@@ -111,12 +114,12 @@ describe("sharedCredentialWarningLines — two-way", () => {
   });
 
   test("🔴 different fingerprints ⇒ no output at all (the quiet side is a real assertion)", () => {
-    const self = rec("通信牛", "aaaaaaaa");
+    const self = rec("node-a", "aaaaaaaa");
     expect(sharedCredentialWarningLines(self, collidingNodes([self, rec("别的节点", "bbbbbbbb")], self))).toEqual([]);
   });
 
   test("a node whose own fingerprint is unknown says nothing", () => {
-    const self = rec("通信牛", null);
+    const self = rec("node-a", null);
     expect(sharedCredentialWarningLines(self, collidingNodes([self, rec("别的节点", "bbbbbbbb")], self))).toEqual([]);
   });
 });
@@ -194,24 +197,48 @@ describe("🔴 the comparison is host-wide, not workspace-wide", () => {
 
   test("two nodes in DIFFERENT workspaces on one credential find each other", () => {
     const host = makeHost();
-    const a = host.node("ws-client-whale", "TMA客户端鲸", "SHARED-RT");
-    const b = host.node("ws-infra-whale-2", "TM基建鲸2号", "SHARED-RT");
+    const a = host.node("ws-alpha", "节点丁", "SHARED-RT");
+    const b = host.node("ws-beta", "节点戊", "SHARED-RT");
 
     expect(host.start(a).text).toBe(""); // first one up has nobody to collide with yet
     const second = host.start(b);
-    expect(second.colliding.map((c) => c.alias)).toEqual(["TMA客户端鲸"]);
-    expect(second.text).toContain("TM基建鲸2号 shares its codex login with: TMA客户端鲸");
+    expect(second.colliding.map((c) => c.alias)).toEqual(["节点丁"]);
+    expect(second.text).toContain("节点戊 shares its codex login with: 节点丁");
 
     // …and it is mutual: the first node learns about it on its next start.
-    expect(host.start(a).text).toContain("TM基建鲸2号");
+    expect(host.start(a).text).toContain("节点戊");
+  });
+
+  test("🔴 an index record with no node_dir is skipped, not treated as a node", () => {
+    // Hardening: v3 always writes `node_dir`, and this index is new in v3, so
+    // nothing older can be sitting in it. But if such a record ever appeared,
+    // the only identity left would be the index file's own path — which is not
+    // a node directory, so it could neither be de-duplicated against that
+    // node's sibling copy nor be recognised as self. It would show up as an
+    // extra node on the same credential: a collision we invented.
+    const host = makeHost();
+    const a = host.node("ws-solo-index", "节点辛", "RT-PHANTOM");
+    expect(host.start(a).text).toBe("");
+
+    const fingerprint = fingerprintRefreshToken(auth("RT-PHANTOM"))!;
+    expect(fingerprint).toMatch(/^[0-9a-f]{8}$/); // control: same credential, so a phantom WOULD collide
+    writeFileSync(
+      join(host.indexDir, "0123456789abcdef.json"),
+      JSON.stringify({ schema_version: 3, alias: "无目录记录", fingerprint, written_at: new Date().toISOString() }),
+      { mode: 0o600 },
+    );
+
+    const again = host.start(a);
+    expect(again.colliding).toEqual([]);
+    expect(again.text).toBe("");
   });
 
   test("a same-workspace pair still works (the old scan's case is not lost)", () => {
     const host = makeHost();
-    const a = host.node("ws-ops", "TMAI负责人", "SHARED-RT");
-    const b = host.node("ws-ops", "TM运维", "SHARED-RT");
+    const a = host.node("ws-pair", "node-b", "SHARED-RT");
+    const b = host.node("ws-pair", "node-c", "SHARED-RT");
     host.start(a);
-    expect(host.start(b).colliding.map((c) => c.alias)).toEqual(["TMAI负责人"]);
+    expect(host.start(b).colliding.map((c) => c.alias)).toEqual(["node-b"]);
   });
 
   test("🔴 different credentials across workspaces ⇒ not one word", () => {
@@ -255,6 +282,10 @@ describe("🔴 the comparison is host-wide, not workspace-wide", () => {
     const file = join(host.indexDir, readdirSync(host.indexDir).find((f) => f.endsWith(".json"))!);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     const body = readFileSync(file, "utf-8");
+    // Positive control: the secret has to be on the way in, or "it is not in the
+    // output" is a statement about a fixture that never carried it.
+    expect(readFileSync(join(a.codexHome, "auth.json"), "utf-8")).toContain("SUPER-SECRET-RT");
+    expect(JSON.parse(body).fingerprint).toMatch(/^[0-9a-f]{8}$/);
     expect(body).not.toContain("SUPER-SECRET-RT");
     expect(JSON.parse(body).node_dir).toBe(realpathSync(a.nodeDir));
   });
@@ -372,10 +403,10 @@ describe("describeCodexRefreshFailure — two shapes, two remedies", () => {
   const transport = "Failed to refresh token: error sending request for url (https://auth.openai.com/oauth/token)";
 
   test("A rotation conflict is named as one, and points at THIS node's login", () => {
-    const f = describeCodexRefreshFailure(reuse, [rec("TM运维", "aaaaaaaa")])!;
+    const f = describeCodexRefreshFailure(reuse, [rec("node-c", "aaaaaaaa")])!;
     const text = f.lines.join("\n");
     expect(f.kind).toBe("rotation-conflict");
-    expect(text).toContain("TM运维");
+    expect(text).toContain("node-c");
     expect(text).toContain("one-time");
     expect(text).toContain("app-server");
     expect(text).toContain("idle");

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { hubHealthTimeoutMs, HUB_HEALTH_TIMEOUT_ENV, LOOPBACK_HUB_HEALTH_TIMEOUT_MS, REMOTE_HUB_HEALTH_TIMEOUT_MS } from "./hub-health-timeout";
 
-describe("hubHealthTimeoutMs (TMHR鲸 2026-09-16: WAN hub answered in 2.1–2.7s, 2s gate called it dead)", () => {
+describe("hubHealthTimeoutMs (2026-09-16 field report: WAN hub answered in 2.1–2.7s, 2s gate called it dead)", () => {
   test("loopback keeps the 2s budget", () => {
     expect(hubHealthTimeoutMs("http://127.0.0.1:9200", {})).toBe(LOOPBACK_HUB_HEALTH_TIMEOUT_MS);
     expect(hubHealthTimeoutMs("http://localhost:9200", {})).toBe(LOOPBACK_HUB_HEALTH_TIMEOUT_MS);

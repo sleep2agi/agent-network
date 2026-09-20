@@ -1,9 +1,9 @@
 // #1521 — unit tests for the codex-copresence-resume Phase 0 shape validation.
 //
-// Historical note (TMHR 4bab8196 blocker on PR #1538):
+// Historical note (reviewer 4bab8196 blocker on PR #1538):
 //   An earlier draft of this file also tested `codexResumeMissingConfigHint`,
 //   an operator-facing diagnostic that referenced `anet node config apply`.
-//   TMHR flagged that command doesn't exist in the tree — the hint would
+//   the reviewer flagged that command doesn't exist in the tree — the hint would
 //   have shipped a "3-step apply/re-run loop" whose middle step was
 //   non-executable, and the tests would have false-greened it as "loop is
 //   closed". Classic 存在 ≠ 会执行 pattern. Both the hint helper and its
@@ -46,7 +46,7 @@ describe("#1521 missingCodexResumeFields — Phase 0 shape validation", () => {
     // Regression note: this passes shape check but Phase 0 (in #1528) MUST
     // additionally realpath/canonicalize and reject NUL/`/`/untrusted
     // targets before letting the value reach `codex resume -C <dir>`.
-    // TMHR 4bab8196 附加建议: "不能把 startsWith('/') 当最终安全门".
+    // reviewer 4bab8196 附加建议: "不能把 startsWith('/') 当最终安全门".
     // This test pins the shape-only intent so any future reader knows
     // NOT to trust this helper's OK result as security clearance.
     const missing = missingCodexResumeFields({
@@ -98,7 +98,7 @@ describe("#1521 missingCodexResumeFields — Phase 0 shape validation", () => {
     }
   });
 
-  test("codexProbePeer with leading/trailing whitespace treated as missing (TMHR 048d0061 R2: Hub exact-alias lookup — must equal its own trim)", () => {
+  test("codexProbePeer with leading/trailing whitespace treated as missing (reviewer 048d0061 R2: Hub exact-alias lookup — must equal its own trim)", () => {
     // Rationale: codexProbePeer is a Hub exact-lookup key. A value like
     // " realalias " (or "realalias " / " realalias") will 100% fail the
     // Hub exact-alias lookup at Phase 0 liveness check, so it's not a
@@ -106,7 +106,7 @@ describe("#1521 missingCodexResumeFields — Phase 0 shape validation", () => {
     // teach readers that shape-OK is meaningful when it isn't. The shape
     // check now requires `value === value.trim()`.
     //
-    // This is the witnessed-red canary TMHR 048d0061 R2 asked for.
+    // This is the witnessed-red canary reviewer 048d0061 R2 asked for.
     for (const withWs of [" realalias", "realalias ", " realalias ", "\treal\t"]) {
       const missing = missingCodexResumeFields({
         codexProjectDir: "/x",
