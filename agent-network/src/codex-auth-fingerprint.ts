@@ -60,13 +60,85 @@
  *    invalidates the other. The refresh token is what identifies one *chain*.
  *    Measured on that same fleet: 19 nodes on one account held 16 distinct
  *    refresh tokens — fingerprinting the account would have lit up all 19.
+ *
+ * 🔴 WHY THE READ SIDE IS HOST-WIDE, not a sibling scan.
+ *    The first two cuts compared against `dirname(nodeDir)` — the other nodes
+ *    under the same `.anet/nodes/` root. On the reference fleet those 35 nodes
+ *    live in **27 separate workspaces**, 25 of which hold exactly one node. Of
+ *    the 8 nodes in the three real shared-credential groups, a sibling scan can
+ *    see **2** — a single pair that happens to share a workspace. The group that
+ *    prompted all of this (three nodes whose auth.json files are byte-identical)
+ *    is spread across three workspaces and was completely invisible. A guard
+ *    that runs on every launch path but only looks inside its own workspace is
+ *    still blind to the thing it exists to find.
+ *
+ *    So each node also publishes into a host-wide index under `~/.anet/`, which
+ *    this repo already treats as host-scoped, cwd-independent state (the global
+ *    config lives there). The sibling scan is kept as well: it costs one readdir
+ *    and still works for a node whose index write failed. Records from both are
+ *    merged and de-duplicated by canonical node directory.
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 
 /** Per-node record, written into the node dir next to the other state files. */
 export const CODEX_AUTH_FINGERPRINT_FILE = ".codex-auth-fingerprint.json";
+
+/**
+ * Host-wide index of the same records — the read side's source of truth.
+ *
+ * Under `~/.anet/` because that is already this repo's host-scoped state
+ * directory (global config lives there) and it does not move with `cwd`, which
+ * is the entire point: the nodes that need to see each other are in different
+ * workspaces.
+ */
+export function codexFingerprintIndexDir(home: string = homedir()): string {
+  return join(home, ".anet", "codex-auth-fingerprints");
+}
+
+/**
+ * Index filename for a node.
+ *
+ * 🔴 Derived from the node's DIRECTORY, never its alias. Aliases are not unique
+ *    across workspaces — the reference fleet runs `TMA门户鲸2号` beside
+ *    `TMA门户鲸`, and nothing stops two workspaces from using one name — so an
+ *    alias-keyed file would let one node silently overwrite another's record,
+ *    re-creating the very blindness this index fixes. A directory cannot be two
+ *    nodes.
+ *
+ * 🔴 And derived from the directory rather than from `node_id`, even though the
+ *    CLI has one handy: agent-node's `NODE_ID` can be empty (older configs), so
+ *    a node_id key would need a fallback — and then the same node would write
+ *    one filename from one launch path and a different one from the other,
+ *    leaving two records that look like two nodes sharing a credential. One
+ *    deterministic key from an input both call sites already have is worth more
+ *    than a prettier name. `node_id` is still recorded, for humans.
+ */
+export function codexFingerprintIndexFile(nodeDir: string): string {
+  return `${createHash("sha256").update(canonicalDir(nodeDir)).digest("hex").slice(0, 16)}.json`;
+}
+
+/** Stable spelling of a node directory, for keying and for self-exclusion.
+ *  `realpathSync` when it resolves (symlinked workspaces are common), plain
+ *  `resolve` otherwise — a path that does not exist yet still needs a key. */
+function canonicalDir(dir: string): string {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
 
 /** Length of the stored fingerprint. Collisions at 8 hex are ~1 in 4 billion;
  *  a false "these two share a login" warning costs a second look, while the
@@ -78,6 +150,11 @@ export const FINGERPRINT_LENGTH = 8;
  *  shared copy dies" when we have an `exp` but no `iat`. */
 export const ACCESS_TOKEN_LIFETIME_SECONDS = 864_000;
 
+/** Past this, a published record's age is shown beside the alias. It does not
+ *  suppress the warning: a node that has not started in a week still holds the
+ *  shared credential. See the liveness note on `checkCodexCredentialSharing`. */
+export const STALE_RECORD_NOTICE_MS = 7 * 86_400_000;
+
 /** Same computation as `shortHash` in codex-lifecycle-account.ts. Inlined so
  *  this module stays copyable byte-for-byte into agent-node; the equivalence is
  *  pinned by a test rather than by an import. */
@@ -86,7 +163,7 @@ function sha256Hex(value: string): string {
 }
 
 export interface CodexAuthFingerprintRecord {
-  readonly schema_version: 1 | 2;
+  readonly schema_version: 1 | 2 | 3;
   readonly alias: string;
   /** sha256(refresh_token) truncated — never the token. */
   readonly fingerprint: string;
@@ -99,6 +176,14 @@ export interface CodexAuthFingerprintRecord {
    *  one credential" from "two nodes pointed at one directory", which need
    *  different fixes. */
   readonly codex_home?: string | null;
+  /** v3: the node directory this record describes, canonical. Three jobs: it is
+   *  the identity used to de-duplicate the index against the sibling scan and to
+   *  exclude self; and it is the liveness test — if this directory is gone, the
+   *  node is gone and the record must not accuse anyone. */
+  readonly node_dir?: string;
+  /** v3: recorded for humans reading the index by hand. Never the key: it can be
+   *  absent, and a key that is sometimes absent produces two records per node. */
+  readonly node_id?: string | null;
 }
 
 /**
@@ -202,23 +287,32 @@ export interface NodeFingerprint {
   readonly accessExpiresAt?: Date | null;
   /** The CODEX_HOME this fingerprint came from, if known. */
   readonly codexHome?: string | null;
+  /** Canonical node directory — identity for de-duplication and self-exclusion. */
+  readonly nodeDir?: string | null;
 }
 
 /**
  * Other nodes holding the same credential chain as `self`.
  *
  * Records with no fingerprint are skipped rather than grouped: "unknown" is
- * not a match. Self is excluded by alias, so re-reading one's own record is
- * harmless.
+ * not a match.
+ *
+ * 🔴 Self is excluded by node DIRECTORY when both sides carry one, and only
+ *    falls back to alias for pre-v3 records. Once the read side is host-wide,
+ *    alias stops being an identity: two workspaces may each hold a node called
+ *    the same thing, and excluding by name would hide a genuine collision
+ *    between them — the exact failure this index was added to fix.
  */
 export function collidingNodes(
   records: readonly NodeFingerprint[],
   self: NodeFingerprint,
 ): NodeFingerprint[] {
   if (!self.fingerprint) return [];
-  return records.filter(
-    (r) => r.alias !== self.alias && !!r.fingerprint && r.fingerprint === self.fingerprint,
-  );
+  return records.filter((r) => {
+    if (!r.fingerprint || r.fingerprint !== self.fingerprint) return false;
+    if (r.nodeDir && self.nodeDir) return r.nodeDir !== self.nodeDir;
+    return r.alias !== self.alias;
+  });
 }
 
 function humanDuration(ms: number): string {
@@ -262,7 +356,19 @@ export function sharedCredentialWarningLines(
   now: Date = new Date(),
 ): string[] {
   if (colliding.length === 0) return [];
-  const list = colliding.map((c) => c.alias).sort().join(", ");
+  // Age annotates, it never filters — see checkCodexCredentialSharing. A node
+  // idle for a week still holds the shared copy, so the collision is real; the
+  // operator just deserves to know how old the claim is before acting on it.
+  const list = colliding
+    .map((c) => {
+      const written = parseIsoInstant(c.writtenAt);
+      const age = written ? now.getTime() - written.getTime() : 0;
+      return age > STALE_RECORD_NOTICE_MS
+        ? `${c.alias} (record ${humanDuration(age)} old)`
+        : c.alias;
+    })
+    .sort()
+    .join(", ");
   const expiry = self.accessExpiresAt ?? null;
   // "Demonstrably stopped being refreshed" — the observable the unreachable
   // case exhibits. Not a claim about the network, which we do not probe.
@@ -409,10 +515,38 @@ export interface CodexCredentialSharingCheck {
   readonly alias: string;
   /** The CODEX_HOME whose auth.json this node will actually use. */
   readonly codexHome: string;
+  /** Recorded for humans reading the index; never used as a key. Optional
+   *  because agent-node's can be empty on older configs. */
+  readonly nodeId?: string | null;
   /** Where the warning goes. Defaults to stderr. */
   readonly say?: (message: string) => void;
   /** Injected for tests; production passes nothing. */
   readonly now?: Date;
+  /** Injected for tests; production uses the real host index under `~/.anet`. */
+  readonly indexDir?: string;
+}
+
+/** Read one published record into the shape the comparison works on. Returns
+ *  null when the file is absent, unparsable, or carries no fingerprint — all of
+ *  which mean "not a match", never "no collision". */
+function readRecord(path: string): NodeFingerprint | null {
+  let parsed: Partial<CodexAuthFingerprintRecord>;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf-8")) as Partial<CodexAuthFingerprintRecord>;
+  } catch {
+    return null;
+  }
+  if (typeof parsed?.fingerprint !== "string" || !parsed.fingerprint) return null;
+  return {
+    alias: typeof parsed.alias === "string" && parsed.alias ? parsed.alias : basename(dirname(path)),
+    fingerprint: parsed.fingerprint,
+    writtenAt: typeof parsed.written_at === "string" ? parsed.written_at : null,
+    // v1 records carry none of these; absent stays absent rather than becoming
+    // a wrong value.
+    accessExpiresAt: parseIsoInstant(parsed.access_expires_at),
+    codexHome: typeof parsed.codex_home === "string" ? parsed.codex_home : null,
+    nodeDir: typeof parsed.node_dir === "string" ? parsed.node_dir : null,
+  };
 }
 
 /**
@@ -430,6 +564,17 @@ export interface CodexCredentialSharingCheck {
  *    one node in sequence, and whichever runs last must leave the current
  *    value, never an older one.
  *
+ * 🔴 Liveness is EXISTENCE, not age. An index record outlives the node that
+ *    wrote it, and a stale one accusing a node that no longer exists is worse
+ *    than silence — it teaches operators to ignore the warning. So a record
+ *    whose `node_dir` is gone is dropped and its index entry deleted.
+ *    Age deliberately does NOT filter: on the reference fleet two of the three
+ *    nodes in the worst-affected group were not running at all, and six of 29
+ *    credential files had not been touched in days, while still holding the
+ *    shared copy. An age cutoff would have hidden precisely the collisions
+ *    worth reporting. Age is surfaced in the warning instead, so the operator
+ *    can judge how old the claim is.
+ *
  * Never throws and never refuses: observability must not be the reason a node
  * will not start.
  */
@@ -446,54 +591,88 @@ export function checkCodexCredentialSharing(opts: CodexCredentialSharingCheck): 
     return [];
   }
 
+  const selfDir = canonicalDir(opts.nodeDir);
   const self: NodeFingerprint = {
     alias: opts.alias,
     fingerprint: fingerprintRefreshToken(authText),
     accessExpiresAt: accessTokenExpiry(authText),
     codexHome: opts.codexHome,
+    nodeDir: selfDir,
   };
   if (!self.fingerprint) return [];
 
-  const selfDirName = basename(opts.nodeDir);
-  const root = dirname(opts.nodeDir);
+  const indexDir = opts.indexDir ?? codexFingerprintIndexDir();
+  const record: CodexAuthFingerprintRecord = {
+    schema_version: 3,
+    alias: opts.alias,
+    fingerprint: self.fingerprint,
+    written_at: now.toISOString(),
+    access_expires_at: self.accessExpiresAt ? self.accessExpiresAt.toISOString() : null,
+    codex_home: opts.codexHome,
+    node_dir: selfDir,
+    node_id: opts.nodeId ?? null,
+  };
 
-  // Publish ours first, so a node that starts second can see this one.
+  // Publish ours first, so a node that starts second can see this one. The
+  // per-node copy stays: it is the node describing itself, readable where the
+  // node lives, and it is the fallback when the index write fails.
   try {
-    writeRecord(join(opts.nodeDir, CODEX_AUTH_FINGERPRINT_FILE), {
-      schema_version: 2,
-      alias: opts.alias,
-      fingerprint: self.fingerprint,
-      written_at: now.toISOString(),
-      access_expires_at: self.accessExpiresAt ? self.accessExpiresAt.toISOString() : null,
-      codex_home: opts.codexHome,
-    });
+    writeRecord(join(opts.nodeDir, CODEX_AUTH_FINGERPRINT_FILE), record);
   } catch (e) {
     say(`[anet] ⚠ could not record the codex credential fingerprint: ${(e as Error).message}`);
   }
-
-  const others: NodeFingerprint[] = [];
-  let entries: string[] = [];
-  try { entries = readdirSync(root); } catch { return []; }
-  for (const entry of entries) {
-    if (entry === selfDirName) continue;
-    try {
-      const raw = readFileSync(join(root, entry, CODEX_AUTH_FINGERPRINT_FILE), "utf-8");
-      const parsed = JSON.parse(raw) as Partial<CodexAuthFingerprintRecord>;
-      if (typeof parsed?.fingerprint !== "string") continue;
-      const expires = parseIsoInstant(parsed.access_expires_at);
-      others.push({
-        alias: typeof parsed.alias === "string" && parsed.alias ? parsed.alias : entry,
-        fingerprint: parsed.fingerprint,
-        writtenAt: typeof parsed.written_at === "string" ? parsed.written_at : null,
-        // v1 records carry neither field; absent stays absent rather than
-        // becoming a wrong value.
-        accessExpiresAt: expires,
-        codexHome: typeof parsed.codex_home === "string" ? parsed.codex_home : null,
-      });
-    } catch { /* no record, or unreadable — not a match, and not an error */ }
+  try {
+    mkdirSync(indexDir, { recursive: true, mode: 0o700 });
+    writeRecord(join(indexDir, codexFingerprintIndexFile(opts.nodeDir)), record);
+  } catch (e) {
+    say(`[anet] ⚠ could not publish to the host codex fingerprint index: ${(e as Error).message}`);
   }
 
-  const colliding = collidingNodes(others, self);
+  // Host-wide first — this is the set that spans workspaces — then the sibling
+  // scan, which still catches a neighbour whose index write failed. Keyed by
+  // canonical node dir so one node read twice stays one node.
+  const byDir = new Map<string, NodeFingerprint>();
+  const consider = (found: NodeFingerprint | null, fallbackDir: string): void => {
+    if (!found) return;
+    const dir = found.nodeDir ? resolve(found.nodeDir) : fallbackDir;
+    if (dir === selfDir) return;
+    if (!byDir.has(dir)) byDir.set(dir, { ...found, nodeDir: dir });
+  };
+
+  let indexEntries: string[] = [];
+  try { indexEntries = readdirSync(indexDir); } catch { /* no index yet */ }
+  for (const entry of indexEntries) {
+    if (!entry.endsWith(".json")) continue;
+    const path = join(indexDir, entry);
+    const found = readRecord(path);
+    if (!found) continue;
+    // Existence is the liveness test. A record pointing at a directory that is
+    // gone describes a node that is gone: drop it, and clean it up now that we
+    // have noticed, so the index does not grow a tail of ghosts.
+    if (found.nodeDir) {
+      try {
+        statSync(found.nodeDir);
+      } catch {
+        try { unlinkSync(path); } catch { /* best effort; a read-only index is still usable */ }
+        continue;
+      }
+    }
+    consider(found, resolve(join(indexDir, entry)));
+  }
+
+  const selfDirName = basename(opts.nodeDir);
+  const root = dirname(opts.nodeDir);
+  let entries: string[] = [];
+  try { entries = readdirSync(root); } catch { /* node dir has no parent we can read */ }
+  for (const entry of entries) {
+    if (entry === selfDirName) continue;
+    consider(
+      readRecord(join(root, entry, CODEX_AUTH_FINGERPRINT_FILE)),
+      canonicalDir(join(root, entry)),
+    );
+  }
+
+  const colliding = collidingNodes([...byDir.values()], self);
   for (const line of sharedCredentialWarningLines(self, colliding, now)) say(line);
   return colliding;
 }

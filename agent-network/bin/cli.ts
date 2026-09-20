@@ -810,13 +810,17 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
 
 /**
  * #1918 — record this node's credential-chain fingerprint and warn when another
- * node on the same `.anet/nodes` root holds the same one.
+ * node ON THIS HOST holds the same one.
  *
  * The operation itself lives in `../src/codex-auth-fingerprint`, byte-identical
  * to agent-node's copy, because this CLI is only ONE of the two ways a codex
  * node starts — and on a real 35-node fleet it was the minority one (4 of 35).
  * Keeping the logic here would have meant two implementations of the same rule
  * drifting apart; this call site is deliberately a single line.
+ *
+ * "On this host", not "in this workspace": that same fleet spread 35 nodes over
+ * 27 workspaces, so comparing within one `.anet/nodes` root saw 2 of the 8
+ * nodes that were actually sharing credentials.
  */
 function checkCodexCredentialSharingForNode(
   nodeId: string,
@@ -828,6 +832,7 @@ function checkCodexCredentialSharingForNode(
     nodeDir: join(nodesDir(), nodeId),
     alias: displayName,
     codexHome,
+    nodeId,
     say,
   });
 }
