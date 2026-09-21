@@ -389,3 +389,123 @@ describe("C — an acked task past its deadline must converge", () => {
     expect(taskById(t)?.status).toBe("acked");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// E — de-dup must bind the ORIGIN of the result and the event identity,
+//     not "whichever task the walk happens to sit on".
+//
+//     Root cause (review round 2): `recordKey` was `auto-chain:${child}`
+//     where `child` is the loop variable — i.e. the CURRENT hop's child,
+//     not the task that actually produced the result. Walking upwards
+//     therefore burned the ancestor's key under the MIDDLE task's id, and
+//     the middle task's own later completion was swallowed as a "replay".
+// ─────────────────────────────────────────────────────────────────────
+
+describe("E — a descendant notice must not consume the executor's own completion", () => {
+  test("grandparent ← parent ← leaf: leaf notice then parent completion both record", () => {
+    const grandparent = insertTask({
+      from_name: BOSS, to_name: PEER, status: "delivered", content: "cpt-e grandparent",
+    });
+    const parent = insertTask({
+      from_name: PEER, to_name: THIRD, status: "running",
+      content: "cpt-e parent", parent_task_id: grandparent,
+    });
+    const leaf = insertTask({
+      from_name: THIRD, to_name: TARGET, status: "replied",
+      content: "cpt-e leaf", parent_task_id: parent,
+    });
+
+    // (1) the leaf answers the parent; the notice also walks up to the
+    //     grandparent.
+    const early = chainReplyToParent(leaf, "LEAF-EARLY", "replied", 5, NET);
+    expect(early.chained).toBe(true);
+    expect(childNotices("LEAF-EARLY")).toBeGreaterThanOrEqual(1);
+
+    // (2) the parent — a real executor — now finishes for real.
+    db.run("UPDATE tasks SET status = 'replied', result = 'PARENT-FINAL' WHERE task_id = ?1", [parent]);
+    const result = chainReplyToParent(parent, "PARENT-FINAL", "replied", 5, NET);
+
+    // Before the fix the leaf's upward walk had already written
+    // `auto-chain:<parent>` onto the grandparent, so this second call was
+    // deduped away: 0 notices, chained=false.
+    expect(childNotices("PARENT-FINAL")).toBe(1);
+    expect(result.chained).toBe(true);
+
+    // The notices are distinct events, and the parent row is untouched.
+    expect(chainEvents(grandparent)).toBeGreaterThanOrEqual(2);
+    expect(taskById(parent)?.status).toBe("replied");
+    expect(taskById(parent)?.result).toBe("PARENT-FINAL");
+    expect(taskById(grandparent)?.status).toBe("delivered");
+    expect(taskById(grandparent)?.result).toBeNull();
+  });
+
+  test("two different leaves under one parent each keep their own notice", () => {
+    const parent = insertTask({
+      from_name: BOSS, to_name: PEER, status: "delivered", content: "cpt-e shared parent",
+    });
+    const firstLeaf = insertTask({
+      from_name: PEER, to_name: TARGET, status: "replied",
+      content: "cpt-e leaf one", parent_task_id: parent,
+    });
+    const secondLeaf = insertTask({
+      from_name: PEER, to_name: THIRD, status: "replied",
+      content: "cpt-e leaf two", parent_task_id: parent,
+    });
+
+    expect(chainReplyToParent(firstLeaf, "LEAF-ONE", "replied", 5, NET).chained).toBe(true);
+    expect(chainReplyToParent(secondLeaf, "LEAF-TWO", "replied", 5, NET).chained).toBe(true);
+
+    expect(childNotices("LEAF-ONE")).toBe(1);
+    expect(childNotices("LEAF-TWO")).toBe(1);
+    expect(chainEvents(parent)).toBe(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// F — de-dup blocks a re-delivery, it must not swallow a NEW attempt.
+//     `retry_task` reuses the same task_id, so identity must include the
+//     delivery (the attempt), not just (parent, child).
+// ─────────────────────────────────────────────────────────────────────
+
+describe("F — a legal second attempt after retry_task is not swallowed", () => {
+  test("failed attempt → retry_task → completion records a fresh notice", async () => {
+    const parent = insertTask({
+      from_name: BOSS, to_name: PEER, status: "delivered", content: "cpt-f parent",
+    });
+    const child = insertTask({
+      from_name: PEER, to_name: TARGET, status: "failed",
+      content: "cpt-f child", parent_task_id: parent,
+      completed_at: "2026-01-01 00:00:00",
+    });
+
+    // attempt 1 — the child fails and reports.
+    const attemptOne = chainReplyToParent(child, "ATTEMPT-ONE-FAILED", "failed", 5, NET);
+    expect(attemptOne.chained).toBe(true);
+    expect(chainEvents(parent)).toBe(1);
+
+    // retry_task resets the SAME task_id back to delivered.
+    const retried = await call(handlers().retry_task, {
+      task_id: child, from_session: PEER, network_id: NET,
+    });
+    expect(retried.ok).toBe(true);
+    expect(taskById(child)?.status).toBe("delivered");
+    expect(taskById(child)?.completed_at).toBeNull();
+
+    // attempt 2 — the same task_id now completes for real.
+    db.run(
+      "UPDATE tasks SET status = 'replied', result = 'ATTEMPT-TWO-ANSWER', completed_at = '2026-01-02 00:00:00' WHERE task_id = ?1",
+      [child],
+    );
+    const attemptTwo = chainReplyToParent(child, "ATTEMPT-TWO-ANSWER", "replied", 5, NET);
+
+    // A permanent, per-task dedup key would have swallowed this.
+    expect(attemptTwo.chained).toBe(true);
+    expect(childNotices("ATTEMPT-TWO-ANSWER")).toBe(1);
+    expect(chainEvents(parent)).toBe(2);
+
+    // …while a re-delivery of THAT SAME attempt is still deduped.
+    const replay = chainReplyToParent(child, "ATTEMPT-TWO-ANSWER", "replied", 5, NET);
+    expect(replay.chained).toBe(false);
+    expect(chainEvents(parent)).toBe(2);
+  });
+});
