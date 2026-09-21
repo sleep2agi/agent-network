@@ -508,4 +508,49 @@ describe("F — a legal second attempt after retry_task is not swallowed", () =>
     expect(replay.chained).toBe(false);
     expect(chainEvents(parent)).toBe(2);
   });
+
+  // The case above lets the two attempts differ by their delivery timestamp,
+  // which is exactly what hid this bug: `completed_at` is written with
+  // `datetime('now')`, so a fast retry lands back inside the same second and
+  // a delivery-stamp-only key cannot tell the two attempts apart.
+  test("two legitimate attempts completing in the SAME second each keep their own notice", async () => {
+    const SAME_SECOND = "2026-01-01 00:00:00";
+    const parent = insertTask({
+      from_name: BOSS, to_name: PEER, status: "delivered", content: "cpt-f2 parent",
+    });
+    const child = insertTask({
+      from_name: PEER, to_name: TARGET, status: "failed",
+      content: "cpt-f2 child", parent_task_id: parent,
+      completed_at: SAME_SECOND,
+    });
+
+    // attempt 1 — the child fails and reports.
+    expect(chainReplyToParent(child, "SAMESEC-ONE-FAILED", "failed", 5, NET).chained).toBe(true);
+    expect(chainEvents(parent)).toBe(1);
+
+    // retry_task resets the SAME task_id back to delivered and queues a fresh
+    // transport row. `completed_at` is cleared here, but attempt 2 completes
+    // inside the SAME second as attempt 1.
+    const retried = await call(handlers().retry_task, {
+      task_id: child, from_session: PEER, network_id: NET,
+    });
+    expect(retried.ok).toBe(true);
+    db.run(
+      "UPDATE tasks SET status = 'replied', result = 'SAMESEC-TWO-ANSWER', completed_at = ?2 WHERE task_id = ?1",
+      [child, SAME_SECOND],
+    );
+    // Precondition of this test: the two attempts are indistinguishable by
+    // timestamp, so only a real attempt identity can separate them.
+    expect(taskById(child)?.completed_at).toBe(SAME_SECOND);
+
+    const attemptTwo = chainReplyToParent(child, "SAMESEC-TWO-ANSWER", "replied", 5, NET);
+    expect(attemptTwo.chained).toBe(true);
+    expect(childNotices("SAMESEC-TWO-ANSWER")).toBe(1);
+    expect(chainEvents(parent)).toBe(2);
+
+    // …while a re-delivery of THAT SAME attempt is still deduped.
+    const replay = chainReplyToParent(child, "SAMESEC-TWO-ANSWER", "replied", 5, NET);
+    expect(replay.chained).toBe(false);
+    expect(chainEvents(parent)).toBe(2);
+  });
 });

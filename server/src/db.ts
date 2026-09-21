@@ -1771,9 +1771,10 @@ export function chainReplyToParent(
   //   * originChildId / originAlias / originReply — the ONE task whose
   //     result this call carries; fixed for the whole walk.
   //   * originStamp — the DELIVERY of that result (its terminal
-  //     transition). `retry_task` reuses a task_id but resets the row and
-  //     clears `completed_at`, so the next legal attempt gets a fresh
-  //     stamp, while a re-delivery of one attempt keeps the old one.
+  //     transition), kept only as a human-readable audit value.
+  //   * attemptKey — the ATTEMPT that produced the result: the inbox
+  //     transport row that queued it. See the block below for why the
+  //     delivery stamp alone is not usable as the key.
   //   * hopKind — "completion" (the origin's own result reaching its
   //     direct parent) vs "descendant" (a forwarded notice at a higher
   //     ancestor). The two can never share a de-dup slot.
@@ -1791,6 +1792,36 @@ export function chainReplyToParent(
   const originStamp = (origin?.completed_at ?? origin?.delivered_at ?? origin?.started_at ?? "n/a")
     .replace(/[^0-9A-Za-z]/g, "-");
   const originReply = replyText;
+
+  // Node-TMAI#4 (F, round 3): the de-dup key must identify the ATTEMPT, and
+  // no delivery timestamp can do that. `completed_at` / `delivered_at` are
+  // written with `datetime('now')` — second granularity — so two legitimate
+  // attempts of one task_id (the second one created by `retry_task`) can
+  // complete inside the same second and carry an identical stamp. The later
+  // result then looked like a replay of the earlier one and was swallowed.
+  //
+  // A retry or a reassign queues a fresh inbox transport row for the same
+  // task_id, inside the same transaction as the task reset: `retry_task`
+  // first runs `UPDATE tasks SET status='delivered', result=NULL,
+  // completed_at=NULL, ...` and only then `INSERT INTO inbox` with a new id;
+  // `reassign_task` acks the old row, updates the task, then inserts the new
+  // one. db.ts #520 keeps transport-row identity separate from logical task
+  // identity for precisely this reason ("runtime evidence/replies survive
+  // those redeliveries"). This candidate therefore takes the newest
+  // transport row of the task as its attempt identity: it changes on every
+  // retry/reassign and survives a re-delivery of the same attempt, and it
+  // needs no schema change.
+  //
+  // That is the identity source THIS CANDIDATE adopts; it is not a verified
+  // account of every asynchronous late-reply or retention path, and those
+  // are out of scope here. A row that was never dispatched (synthetic or
+  // imported) has no transport row and falls back to its delivery stamp,
+  // which preserves the old behaviour for those.
+  const dispatch = db.get<{ transport_id: string | null }>(
+    "SELECT id AS transport_id FROM inbox WHERE task_id = ?1 ORDER BY rowid DESC LIMIT 1",
+    childTaskId
+  );
+  const attemptKey = dispatch?.transport_id ?? `undispatched-${originStamp}`;
 
   let currentChildId: string | null = childTaskId;
   let depth = 0;
@@ -1845,7 +1876,7 @@ export function chainReplyToParent(
     // triple, must not fan out into a second audit row and a second
     // notification — but a fresh delivery of the same task_id (a legal
     // second attempt after `retry_task`) must still get through.
-    const recordKey = `auto-chain:${hopKind}:${parent.task_id}:${originChildId}:${originStamp}`;
+    const recordKey = `auto-chain:${hopKind}:${parent.task_id}:${originChildId}:${attemptKey}`;
     let recorded = false;
 
     db.transaction(() => {
@@ -1869,7 +1900,7 @@ export function chainReplyToParent(
 
       logTaskEvent(
         parent.task_id, parent.status, parent.status, "auto-chain-append",
-        `${hopKind} recorded: hop-child ${hopChildId.slice(0, 8)} (${child.to_name}), origin ${originChildId.slice(0, 8)} (${originAlias}), delivery=${originStamp}, origin status=${replyStatus}; parent left untouched`,
+        `${hopKind} recorded: hop-child ${hopChildId.slice(0, 8)} (${child.to_name}), origin ${originChildId.slice(0, 8)} (${originAlias}), attempt=${attemptKey}, delivery=${originStamp}, origin status=${replyStatus}; parent left untouched`,
         recordKey,
       );
       // The audit row for this (parent, child) link now exists. Only a call
