@@ -97,7 +97,7 @@ Every refusal logs a `bash_guard_refuse` event to commhub. Operators can see whi
 | 3 (opt-in allow-list) | 通信工程马 | ~2h | After Phase 2 |
 | 4 (telemetry) | 通信工程马 (client) + 通信牛 (server side) | ~3h | After Phase 1 |
 
-**Owner clarification (per 通信龙 dispatch `41c09736`)**: RFC-023 is anet security infrastructure. TMCode 负责人 lane is tmcode-only (CLI + desktop) and does not touch anet. The agent-node Bash tool destructive-command guardrail is 通信工程马's responsibility, gated by Vincent + 通信龙. The original sketch (commit `f16d6b9`) defaulted the implementation column to SDK马 — that was the wrong default-assignment heuristic ("runtime change → SDK马"); corrected here.
+**Owner clarification (per 通信龙 dispatch `41c09736`)**: RFC-023 is anet security infrastructure. the partner team's tmcode lane is tmcode-only (CLI + desktop) and does not touch anet. The agent-node Bash tool destructive-command guardrail is 通信工程马's responsibility, gated by Vincent + 通信龙. The original sketch (commit `f16d6b9`) defaulted the implementation column to SDK马 — that was the wrong default-assignment heuristic ("runtime change → SDK马"); corrected here.
 
 ## Refs
 
