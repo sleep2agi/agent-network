@@ -1799,24 +1799,41 @@ export function chainReplyToParent(
     const marker = `\n\n[via ${childAlias} 子任务结果]\n${currentReply}`;
     const newResult = parent.result ? parent.result + marker : `[via ${childAlias} 子任务结果]\n${currentReply}`;
 
+    // Node-TMAI#4 (D): one child result may be recorded against a parent at
+    // most once. A replayed reply, or a sweep that re-enters this function
+    // with the same (parent, child) pair, must not fan out into a second
+    // audit row and a second "子任务完成" notification.
+    const recordKey = `auto-chain:${currentChildId}`;
+    let recorded = false;
+
     db.transaction(() => {
-      // Bump parent status to replied if still open. The task transition and
-      // its scheduler-run mirror share this transaction, so a crash cannot
-      // leave one terminal while the other remains delivered.
-      if (parent.status === "delivered" || parent.status === "acked" || parent.status === "running" || parent.status === "created") {
-        db.run(
-          "UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now') WHERE task_id = ?3",
-          [replyStatus, newResult.slice(0, 8000), parent.task_id]
-        );
-        syncScheduledRunForTask(parent.task_id, parent.network_id);
-        logTaskEvent(parent.task_id, parent.status, replyStatus, "auto-chain", `from ${childAlias}`);
-      } else {
-        db.run(
-          "UPDATE tasks SET result = ?1, completed_at = datetime('now') WHERE task_id = ?2",
-          [newResult.slice(0, 8000), parent.task_id]
-        );
-        logTaskEvent(parent.task_id, parent.status, parent.status, "auto-chain-append", `from ${childAlias}`);
-      }
+      // Node-TMAI#4 (D): a child result NEVER completes its parent.
+      //
+      // This block used to bump an open parent (created/delivered/acked/
+      // running) to `replied` and, when the parent was already terminal, to
+      // append the child text onto `result` and rewrite `completed_at`. Both
+      // shapes let an unrelated child's output stand as the parent's answer,
+      // and the status bump also reported "a child answered" to the
+      // originator as "the executor finished". Neither is a completion
+      // signal. The parent row's status, result and completed_at are now left
+      // byte-identical in EVERY state, and only the parent's own executor can
+      // complete it. The child result is preserved in the child task row, in
+      // the audit event below, and in the notification to the parent's author.
+      const already = db.get<{ c: number }>(
+        "SELECT COUNT(*) AS c FROM task_events WHERE task_id = ?1 AND event_key = ?2",
+        [parent.task_id, recordKey]
+      );
+      if ((already?.c ?? 0) > 0) return;
+
+      logTaskEvent(
+        parent.task_id, parent.status, parent.status, "auto-chain-append",
+        `child ${currentChildId.slice(0, 8)} (${childAlias}) result recorded; child status=${replyStatus}; parent left untouched`,
+        recordKey,
+      );
+      // The audit row for this (parent, child) link now exists. Only a call
+      // that actually recorded one may unlock the caller's SSE push; a
+      // deduped replay returns early above and leaves this false.
+      recorded = true;
 
       if (parent.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
         try {
@@ -1834,10 +1851,9 @@ export function chainReplyToParent(
       }
     });
 
-    // This iteration actually wrote a parent row (and possibly an
-    // inbox notification). Record that so the caller can gate its
-    // SSE push on a real chain.
-    chained = true;
+    // An audit row (and possibly an inbox notification) was recorded for
+    // this parent-child link. The caller gates its SSE push on this.
+    if (recorded) chained = true;
 
     // Recurse up the chain.
     currentChildId = parent.task_id;
@@ -1932,12 +1948,12 @@ function taskEventTypeForStatus(toStatus: string): string {
   }
 }
 
-export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
+export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string, eventKey?: string) {
   try {
     db.run(
-      `INSERT INTO task_events (task_id, from_status, to_status, event_type, actor, detail, network_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
-      [taskId, fromStatus, toStatus, taskEventTypeForStatus(toStatus), actor, detail ?? null]
+      `INSERT INTO task_events (task_id, from_status, to_status, event_type, event_key, actor, detail, network_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
+      [taskId, fromStatus, toStatus, taskEventTypeForStatus(toStatus), eventKey ?? null, actor, detail ?? null]
     );
   } catch {}
 }
