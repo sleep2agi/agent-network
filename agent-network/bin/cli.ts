@@ -38,7 +38,7 @@ import {
 import { buildReceipt, formatReceiptSummary, writeReceipt, type LifecycleVerb, type ReceiptCheck } from "../src/codex-lifecycle-receipt";
 import { hubHealthTimeoutMs, HUB_HEALTH_TIMEOUT_ENV } from "../src/hub-health-timeout";
 import { evaluateCodexPreflight, evaluateCodexVerify, checkIdentity, checkHome, checkSession } from "../src/codex-lifecycle-preflight";
-import { FORK_HOME_COPY, checkForkIsolation, forkRolloutPath, rewriteRollout, uuidV7 } from "../src/codex-lifecycle-fork";
+import { FORK_HOME_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, forkRolloutPath, readLastTurnContextModel, rewriteRollout, rewriteTrustedProjects, uuidV7 } from "../src/codex-lifecycle-fork";
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
@@ -332,6 +332,16 @@ function tmuxAvailable(): boolean {
 
 const COPRESENCE_PORT_RANGE_START = 24700;
 const COPRESENCE_PORT_RANGE_END = 24799;
+
+/** #1951 gap 4 — `fork` pre-assigns a free loopback port into the target's config (codexAppServerPort) so the receipt
+ * can name it; start/restart use it as the *preferred* port and re-probe when it is taken. `--port` still wins. */
+function preferredCodexPort(nodeId: string): number | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(join(nodesDir(), nodeId, "config.json"), "utf-8"));
+    const p = Number(raw?.codexAppServerPort);
+    return Number.isInteger(p) && p > 0 && p < 65536 ? p : undefined;
+  } catch { return undefined; }
+}
 
 async function findFreeLoopbackPort(preferred?: number): Promise<number> {
   const tryOne = (port: number) => new Promise<number | null>((resolve) => {
@@ -880,7 +890,7 @@ async function startWindowsCodexCopresence(
   if (authoritativeOldPendingMarker) {
     await assertPendingServerQuiesced(recoveryCfg.codexAppServerUrl, (oldPort) => waitForLoopbackPort(oldPort, 750));
   }
-  const port = await findFreeLoopbackPort(opts.port);
+  const port = await findFreeLoopbackPort(opts.port ?? preferredCodexPort(resolved.id));
   const wsUrl = `ws://127.0.0.1:${port}`;
   const posture = codexCopresencePosture(opts.dangerFullAccess, resolved.profile, displayName);
   if (posture.downgradeNotice) console.error(posture.downgradeNotice);
@@ -1461,7 +1471,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     }
   }
 
-  const port = await findFreeLoopbackPort(opts.port);
+  const port = await findFreeLoopbackPort(opts.port ?? preferredCodexPort(nodeId));
   const wsUrl = `ws://127.0.0.1:${port}`;
   // read-only is still the default; flags.sandboxMode never opens it on its
   // own. What changed: an explicit grant is remembered, and a node that asked
@@ -7718,8 +7728,10 @@ async function codexLifecycleCommand() {
     console.error("  restart    确定性状态机(零 LLM):preflight → goal 状态 → 停 Bridge→TUI→App Server → 端口放掉 → 起(App Server→端口→exact TUI→Bridge)→ verify");
     console.error("             --probe-from <peer> [--probe-root <dir>]  用另一本地节点发 nonce 探针做跨节点身份验收(identity_attested;不给则 unknown → FAIL);peer 在别的 .anet 根时给 --probe-root");
     console.error("  start      同 restart 但要求三段都不在;resume --thread <id> 先把 exact thread 写进 config(要求唯一 rollout)再 start");
-    console.error("  fork       fork <source> --name <target> --workdir <dir> [--inherit-full-access]:继承历史,其余全新(node_id/CODEX_HOME/thread/端口/tmux 名);");
+    console.error("  fork       fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>]:继承历史,其余全新(node_id/CODEX_HOME/thread/端口/tmux 名);");
     console.error("             rollout 复制并改写 id,源节点零触碰;之后在 <dir> 里 anet node codex start <target> --probe-from <source>");
+    console.error("             #1951:<dir> 不存在会自动建;config.toml 里 [projects.\"<源工作区>\"] 改写成 <dir>;--model 覆盖源模型(源 rollout 末条 turn_context 不同时告警,provider 块不删);");
+    console.error("             app-server 端口在 fork 时探一个空闲的写进 config(首次 start 优先用它,被占则重探);CODEX_HOME/AGENTS.md 随 fork 走;都记进 receipt 的 fork_options");
     console.error("  account    register <profile-id> --from-codex-home <dir> | list | install <alias> --source codex-login:<profile-id> [--probe-from <peer>]");
     console.error("             登录源是本机受控 registry 的不透明引用(不收路径/stdin/env);install = fresh 模型探针 → 备份 → 0600 安装 → 完整重启 → verify;失败自动回滚");
     console.error("  rollback   rollback <alias> --receipt <id> [--probe-from <peer>]:只认原 install receipt 里的 backup_ref");
@@ -7783,12 +7795,17 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
   const target = String(opts.name ?? "");
   const workdirRaw = String(opts.workdir ?? "");
   if (!target || !workdirRaw) {
-    console.error("Usage: anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--json]");
+    console.error("Usage: anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>] [--json]");
     process.exit(2);
   }
   validateNodeName(target);
-  if (!existsSync(workdirRaw) || !statSync(workdirRaw).isDirectory()) {
-    console.error(`[anet] node codex fork: --workdir ${workdirRaw} is not an existing directory (fork does not create it)`);
+  // #1951 gap 1 — a missing --workdir is created (operators hit the old "does not create it" refusal repeatedly);
+  // a path that exists but is not a directory is still refused.
+  let workdirCreated = false;
+  try {
+    workdirCreated = ensureForkWorkdir(workdirRaw).created;
+  } catch (e: any) {
+    console.error(`[anet] node codex fork: ${e?.message ?? e}`);
     process.exit(2);
   }
   const workdir = realpathSync(workdirRaw);
@@ -7861,6 +7878,12 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
   const staging = join(targetNodesDir, `.fork-${target}-${process.pid}`);
   const stagingHome = join(staging, "codex-home");
   let rewrite: Awaited<ReturnType<typeof rewriteRollout>> | null = null;
+  // #1951 — facts for the receipt's fork_options check.
+  let agentsMdCarried = false, trustedRewritten = 0, trustedDropped = 0;
+  let sourceLastModel: string | null = null;
+  const modelOverride: string | null = typeof opts.model === "string" && opts.model.trim() ? opts.model.trim() : null;
+  // #1951 gap 4 — pre-assign a free loopback port now so the receipt can name it; first start prefers it and re-probes if taken.
+  const assignedPort = await findFreeLoopbackPort();
   try {
     mkdirSync(stagingHome, { recursive: true, mode: 0o700 });
     chmodSync(stagingHome, 0o700);
@@ -7869,13 +7892,35 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
       if (!existsSync(from)) { if (f.required) throw new Error(`${f.name} missing in source CODEX_HOME`); continue; }
       copyFileSync(from, join(stagingHome, f.name));
       chmodSync(join(stagingHome, f.name), f.mode);
+      if (f.name === "AGENTS.md") agentsMdCarried = true;
     }
     const dst = forkRolloutPath(stagingHome, startedAt, newThread);
     // 源 rollout 记的 cwd(session_meta + 每个 turn_context)要改成新 workdir,否则 TUI 恢复后仍在源项目目录里干活。
     const headerCwd = (() => { try { const first = readFileSync(srcRollout.path, "utf-8").split("\n", 1)[0]; return JSON.parse(first)?.payload?.cwd ?? null; } catch { return null; } })();
+    // #1951 gap 2 — the copied config.toml still trusts the *source* workspace; rewrite only that table header.
+    const stagedToml = join(stagingHome, "config.toml");
+    const trustFrom = (typeof sp.codexProjectDir === "string" && sp.codexProjectDir) || (typeof headerCwd === "string" ? headerCwd : null);
+    if (trustFrom && existsSync(stagedToml)) {
+      const r = rewriteTrustedProjects(readFileSync(stagedToml, "utf-8"), trustFrom, workdir);
+      if (r.rewritten + r.dropped > 0) { writeFileSync(stagedToml, r.text, { mode: 0o600 }); chmodSync(stagedToml, 0o600); }
+      trustedRewritten = r.rewritten; trustedDropped = r.dropped;
+      say(`config.toml: ${r.rewritten} [projects."${trustFrom}"] header(s) → ${workdir}${r.dropped ? `, ${r.dropped} dropped (target table already present)` : ""}`);
+    }
+    // #1951 gap 3 — codex resumes on the model named by the rollout's last turn_context unless config overrides it.
+    try { sourceLastModel = readLastTurnContextModel(srcRollout.path).model; } catch { sourceLastModel = null; }
+    if (modelOverride && sourceLastModel && sourceLastModel !== modelOverride) {
+      console.error(`[anet] node codex fork: ⚠ source last ran model ${sourceLastModel}; target config says ${modelOverride} — the resumed session switches on its next turn. Provider blocks in config.toml are kept (app-server refuses to load if one referenced by the rollout is missing).`);
+    }
     rewrite = await rewriteRollout(srcRollout.path, dst, String(sp.codexThreadId), newThread, typeof headerCwd === "string" && headerCwd ? { from: headerCwd, to: workdir } : undefined);
     say(`rollout copied: ${rewrite.lines} lines, ${rewrite.bytesOut} B, ${rewrite.replacements} id rewrites, ${rewrite.cwdReplacements} cwd rewrites (${headerCwd ?? "?"} → ${workdir}) → ${dst}`);
     saveProfile(target, withTok);
+    {
+      // codexAppServerPort is not in the profile whitelist (start writes it raw the same way); keep it raw here too.
+      const rawCfgPath = join(targetNodesDir, target, "config.json");
+      const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+      rawCfg.codexAppServerPort = assignedPort;
+      atomicWritePrivateJson(rawCfgPath, rawCfg);
+    }
     renameSync(stagingHome, join(targetNodesDir, target, "codex-home"));
     rmSync(staging, { recursive: true, force: true });
   } catch (e: any) {
@@ -7914,6 +7959,7 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
   const next = `next (run from ${workdir}):\n  anet node codex start ${shellQuote(target)} --probe-from ${shellQuote(sourceName)}   # first start = verify + nonce attestation`;
   finish(targetDir, withTok.node_id ?? null, [
     checkIdentity(tfacts), checkHome(tfacts), checkSession(tfacts), workdirCheck, isolation,
+    forkGapsCheck({ workdir_created: workdirCreated, trusted_rewritten: trustedRewritten, trusted_dropped: trustedDropped, model_override: modelOverride, source_last_model: sourceLastModel, port: assignedPort, agents_md_carried: agentsMdCarried }),
     { key: "identity_attested", status: "unknown", detail: `not started yet — ${next.split("\n")[1].trim()}` },
   ], next);
 }

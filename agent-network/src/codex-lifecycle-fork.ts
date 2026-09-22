@@ -7,7 +7,7 @@
  * 复制是流式的(真机 rollout 131 MB / 5 万行),第一行必须是 session_meta 且 session_id 等于源 thread,
  * 否则一个字节都不写(fail-closed,不猜)。
  */
-import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync } from "fs";
+import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, mkdirSync, openSync, readSync, statSync } from "fs";
 import { createInterface } from "readline";
 import { join } from "path";
 import type { ReceiptCheck } from "./codex-lifecycle-receipt.js";
@@ -40,6 +40,8 @@ export const FORK_HOME_COPY: readonly { name: string; required: boolean; mode: n
   { name: "auth.json", required: true, mode: 0o600 },
   { name: "config.toml", required: false, mode: 0o600 },
   { name: "version.json", required: false, mode: 0o600 },
+  // #1951 gap 5 — the node-level rules file codex reads from CODEX_HOME. Operators were copying it by hand.
+  { name: "AGENTS.md", required: false, mode: 0o600 },
 ];
 export const FORK_HOME_NEVER_COPY: readonly string[] = [".anet-copresence.env", "history.jsonl", "sessions", "cache", "logs_2.sqlite", "goals_1.sqlite", "installation_id"];
 
@@ -131,4 +133,112 @@ export function checkForkIsolation(s: ForkSides): ReceiptCheck {
   };
   if (bad.length > 0) return { key: "fork_isolation", status: "fail", detail: bad.join("; "), evidence };
   return { key: "fork_isolation", status: "pass", detail: `new node_id / CODEX_HOME / thread / rollout file / tmux names; rollout ${s.rewrite!.lines} lines copied with ${s.rewrite!.replacements} id rewrites and ${s.rewrite!.cwdReplacements} cwd rewrites (byte count as expected)`, evidence };
+}
+
+// ── #1951 —— the five CLI gaps partner operators hit with `fork` ──
+
+/** gap 1 — `--workdir` used to have to pre-exist. Create it (recursively) when missing; still refuse a path that exists
+ * but is not a directory. Returns whether this call created it, so the receipt can say so. */
+export function ensureForkWorkdir(path: string): { created: boolean } {
+  if (existsSync(path)) {
+    if (!statSync(path).isDirectory()) throw new Error(`--workdir ${path} exists but is not a directory`);
+    return { created: false };
+  }
+  mkdirSync(path, { recursive: true, mode: 0o755 });
+  return { created: true };
+}
+
+const TOML_PROJECT_HEADER_RE = /^\s*\[projects\.(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\]\s*(#.*)?$/;
+
+function tomlProjectHeaderPath(line: string): string | null {
+  const m = TOML_PROJECT_HEADER_RE.exec(line);
+  if (!m) return null;
+  if (m[1] !== undefined) {
+    try { return JSON.parse(`"${m[1]}"`); } catch { return null; }
+  }
+  return m[2] ?? null;
+}
+
+/**
+ * gap 2 — codex records trust per workspace as `[projects."<abs path>"]` tables in config.toml. A copied config still
+ * names the **source** workspace, so the target keeps trusting (and, in the TUI, offering) the wrong directory.
+ * Rewrite only the table headers whose quoted path equals `from`, to `to`; every other line is left byte-identical.
+ * If a `[projects."<to>"]` table already exists, the source table is dropped instead of duplicated (TOML forbids
+ * defining a table twice). Line-aware on purpose: no global substitution of the path string elsewhere in the file.
+ */
+export function rewriteTrustedProjects(toml: string, from: string, to: string): { text: string; rewritten: number; dropped: number } {
+  if (from === to) return { text: toml, rewritten: 0, dropped: 0 };
+  const eol = toml.includes("\r\n") ? "\r\n" : "\n";
+  const lines = toml.split(/\r?\n/);
+  const hasTarget = lines.some((l) => tomlProjectHeaderPath(l) === to);
+  const out: string[] = [];
+  let rewritten = 0, dropped = 0, skipping = false;
+  for (const line of lines) {
+    const header = tomlProjectHeaderPath(line);
+    const isAnyHeader = /^\s*\[/.test(line);
+    if (header === from) {
+      if (hasTarget) { skipping = true; dropped += 1; continue; }
+      out.push(line.replace(TOML_PROJECT_HEADER_RE, (whole) => whole.replace(/\[projects\..*\]/, `[projects.${JSON.stringify(to)}]`)));
+      rewritten += 1;
+      continue;
+    }
+    if (skipping) {
+      if (isAnyHeader) skipping = false;
+      else continue;
+    }
+    out.push(line);
+  }
+  return { text: out.join(eol), rewritten, dropped };
+}
+
+/**
+ * gap 3 — the last `turn_context` in a rollout names the model (and provider) the source ran on; codex resumes with
+ * that unless the target config says otherwise. Read it from the tail of the file (rollouts reach hundreds of MB;
+ * never load the whole thing) so `fork --model` can warn when the override differs.
+ */
+export function readLastTurnContextModel(rolloutPath: string, tailBytes = 1 << 20): { model: string | null; provider: string | null } {
+  const fd = openSync(rolloutPath, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - tailBytes);
+    const buf = Buffer.alloc(size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    const lines = buf.toString("utf8").split("\n");
+    for (let i = lines.length - 1; i >= (start === 0 ? 0 : 1); i--) {
+      const line = lines[i];
+      if (!line.includes('"turn_context"')) continue;
+      try {
+        const j = JSON.parse(line);
+        if (j?.type !== "turn_context") continue;
+        const p = j.payload ?? {};
+        return { model: typeof p.model === "string" ? p.model : null, provider: typeof p.model_provider === "string" ? p.model_provider : typeof p.provider === "string" ? p.provider : null };
+      } catch { continue; }
+    }
+    return { model: null, provider: null };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** What the fork receipt records for the #1951 gaps, as one informational check (never blocks; `port` is the
+ * loopback port pre-assigned for the app-server, first start uses it as its preferred port and re-probes if taken). */
+export interface ForkGapFacts {
+  readonly workdir_created: boolean;
+  readonly trusted_rewritten: number;
+  readonly trusted_dropped: number;
+  readonly model_override: string | null;
+  readonly source_last_model: string | null;
+  readonly port: number | null;
+  readonly agents_md_carried: boolean;
+}
+
+export function forkGapsCheck(f: ForkGapFacts): ReceiptCheck {
+  const bits = [
+    f.workdir_created ? "workdir created" : "workdir existed",
+    `${f.trusted_rewritten} trusted-project header(s) rewritten${f.trusted_dropped ? ` (${f.trusted_dropped} dropped as duplicate)` : ""}`,
+    f.model_override ? `model override ${f.model_override}${f.source_last_model && f.source_last_model !== f.model_override ? ` (source last ran ${f.source_last_model})` : ""}` : "model inherited from source",
+    f.port !== null ? `app-server port ${f.port} pre-assigned (free at fork time; first start re-probes)` : "app-server port left to first start",
+    f.agents_md_carried ? "AGENTS.md carried" : "no AGENTS.md in source",
+  ];
+  return { key: "fork_options", status: "pass", detail: bits.join("; "), evidence: { ...f } };
 }

@@ -162,13 +162,15 @@ anet node codex resume  <alias> --thread <36 位 thread id> --probe-from <peer>
 ### fork:继承历史,其余全新
 
 ```bash
-anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access]
+anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>]   # <dir> 不存在会自动建
 cd <dir> && anet node codex start <target> --probe-from <source>      # 首次启动 = verify + nonce 验收
 ```
 
 fork 只读源节点(它的 auth.json / config.toml 和**那一个** rollout),在 `<dir>/.anet/nodes/<target>/` 造一个全新节点:新 `node_id` 与 CommHub 身份、新 `CODEX_HOME`(0700,auth.json 0600)、新 thread id(UUIDv7)、新工作目录、新 tmux 名;端口在首次启动时分配。rollout 是**流式复制并逐处改写 thread id**(定长 36 字符,字节数不变),不是共享同一文件;第一行必须是源 thread 的 `session_meta`,否则一个字节都不写。源节点的 `.anet-copresence.env`(含它的 CommHub token)、history、sqlite、缓存一律不带;完整访问也不继承,除非显式 `--inherit-full-access` 且源节点本来就开着。
 
 receipt 的 `fork_isolation` 要求身份 / HOME / thread / rollout 文件 / tmux 名五处都不同、rollout 等长复制且目标 HOME 里没有 token 文件;`identity_attested` 在 fork 阶段为 unknown(不阻塞),由首次 `start --probe-from` 闭环。`start` / `restart` / `resume` 必须在 `config.codexProjectDir` 记的目录里执行,否则拒绝(三段 tmux 的工作目录与 `.anet/nodes` 都是相对当前目录的)。
+
+fork 顺手把几件以前要手工做的事做了(#1951),都记在 receipt 的 `fork_options` 里:`--workdir` 不存在就建;复制来的 `config.toml` 里 `[projects."<源工作区>"]` 表头改写成 `<dir>`(只改表头,别的行一字不动;目标表已存在则丢掉源表,不重复);`--model <id>` 写进目标配置,源 rollout 末条 `turn_context` 用的模型不同时打一句告警(provider 块保留,删了 app-server 拒载);fork 时探一个空闲回环端口写进 config,首次 `start` 优先用它、被占再探;`CODEX_HOME/AGENTS.md` 随 fork 走。
 
 ### 账号迁移:`account install` 与 `rollback`
 
