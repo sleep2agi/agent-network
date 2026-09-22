@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { FORK_HOME_COPY, FORK_HOME_NEVER_COPY, checkForkIsolation, forkRolloutPath, rewriteRollout, uuidV7 } from "./codex-lifecycle-fork.js";
+import { FORK_HOME_COPY, FORK_HOME_NEVER_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, forkRolloutPath, readLastTurnContextModel, rewriteRollout, rewriteTrustedProjects, uuidV7 } from "./codex-lifecycle-fork.js";
 import { receiptVerdict, type ReceiptCheck } from "./codex-lifecycle-receipt.js";
 
 const SRC = "01a02193-e1fd-70f3-9e16-6fbff295fbae";
@@ -136,5 +136,84 @@ describe("#1856 PR-D config round-trip", () => {
     const { serializeProfileForConfigJson } = await import("./profile-serialize.js");
     const out = serializeProfileForConfigJson({ node_id: "n", runtime: "codex-app-server", codexProjectDir: "/w" } as any, { node_id: "n", runtime: "codex-app-server", codexProjectDir: "/w" } as any);
     expect((out as any).codexProjectDir).toBe("/w");
+  });
+});
+
+describe("#1951 fork CLI gaps", () => {
+  test("gap 1: ensureForkWorkdir creates a missing dir (recursively) and refuses a file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "anet-fork-wd-"));
+    const fresh = join(dir, "a", "b", "c");
+    expect(ensureForkWorkdir(fresh)).toEqual({ created: true });
+    expect(statSync(fresh).isDirectory()).toBe(true);
+    expect(ensureForkWorkdir(fresh)).toEqual({ created: false });
+    const file = join(dir, "not-a-dir");
+    writeFileSync(file, "x");
+    expect(() => ensureForkWorkdir(file)).toThrow(/exists but is not a directory/);
+  });
+
+  test("gap 2: rewriteTrustedProjects renames only the source table header; other tables and values stay byte-identical", () => {
+    const toml = [
+      'model = "gpt-5"',
+      '[projects."/ws/source"]',
+      'trust_level = "trusted"',
+      '',
+      '[projects."/ws/other"]',
+      'trust_level = "trusted"',
+      '# a comment mentioning /ws/source in prose',
+      'note = "/ws/source"',
+      '',
+      '[model_providers.foo]',
+      'base_url = "http://127.0.0.1:1/ws/source"',
+    ].join("\n");
+    const r = rewriteTrustedProjects(toml, "/ws/source", "/ws/target");
+    expect(r.rewritten).toBe(1);
+    expect(r.dropped).toBe(0);
+    const lines = r.text.split("\n");
+    expect(lines[1]).toBe('[projects."/ws/target"]');
+    expect(lines[4]).toBe('[projects."/ws/other"]');
+    expect(lines[6]).toBe('# a comment mentioning /ws/source in prose'); // prose untouched
+    expect(lines[7]).toBe('note = "/ws/source"'); // values untouched
+    expect(lines[10]).toBe('base_url = "http://127.0.0.1:1/ws/source"'); // provider block untouched
+    expect(r.text.split("\n").length).toBe(toml.split("\n").length);
+  });
+
+  test("gap 2: when the target table already exists the source table is dropped, not duplicated", () => {
+    const toml = ['[projects."/ws/source"]', 'trust_level = "trusted"', 'extra = 1', '[projects."/ws/target"]', 'trust_level = "trusted"'].join("\n");
+    const r = rewriteTrustedProjects(toml, "/ws/source", "/ws/target");
+    expect(r.rewritten).toBe(0);
+    expect(r.dropped).toBe(1);
+    expect(r.text).toBe(['[projects."/ws/target"]', 'trust_level = "trusted"'].join("\n"));
+    expect(rewriteTrustedProjects(toml, "/ws/source", "/ws/source").rewritten).toBe(0);
+  });
+
+  test("gap 3: readLastTurnContextModel reads the LAST turn_context from the tail, not the first", () => {
+    const { src } = fixture([
+      meta(SRC),
+      `{"type":"turn_context","payload":{"cwd":"/w","model":"gpt-a","model_provider":"prov-a"}}`,
+      `{"type":"event_msg","payload":{"text":"turn_context in a string must not count"}}`,
+      `{"type":"turn_context","payload":{"cwd":"/w","model":"gpt-b"}}`,
+      `{"type":"event_msg","payload":{"text":"tail"}}`,
+    ]);
+    expect(readLastTurnContextModel(src)).toEqual({ model: "gpt-b", provider: null });
+    expect(readLastTurnContextModel(src, 64)).toEqual({ model: null, provider: null }); // tail window too small → unknown, never a guess
+    const none = fixture([meta(SRC), `{"type":"event_msg","payload":{}}`]);
+    expect(readLastTurnContextModel(none.src)).toEqual({ model: null, provider: null });
+  });
+
+  test("gap 5: AGENTS.md rides along in the CODEX_HOME copy whitelist (optional, 0600)", () => {
+    const entry = FORK_HOME_COPY.find((f) => f.name === "AGENTS.md");
+    expect(entry).toEqual({ name: "AGENTS.md", required: false, mode: 0o600 });
+    expect(FORK_HOME_NEVER_COPY).not.toContain("AGENTS.md");
+  });
+
+  test("gap 4 + receipt: fork_options is informational (pass) and carries every gap fact verbatim", () => {
+    const facts = { workdir_created: true, trusted_rewritten: 1, trusted_dropped: 0, model_override: "gpt-x", source_last_model: "gpt-a", port: 24723, agents_md_carried: true };
+    const c = forkGapsCheck(facts);
+    expect(c.key).toBe("fork_options");
+    expect(c.status).toBe("pass");
+    expect(c.evidence).toEqual(facts);
+    expect(c.detail).toContain("port 24723");
+    expect(c.detail).toContain("source last ran gpt-a");
+    expect(receiptVerdict("fork", [c]).blocking).not.toContain("fork_options");
   });
 });

@@ -163,13 +163,15 @@ Every step of `restart` runs in a fixed order with no reasoning: **preflight (be
 ### fork: inherit the history, renew everything else
 
 ```bash
-anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access]
+anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>]   # <dir> is created when missing
 cd <dir> && anet node codex start <target> --probe-from <source>      # first start = verify + nonce attestation
 ```
 
 `fork` only reads the source node (its auth.json / config.toml and **that one** rollout) and builds a brand-new node under `<dir>/.anet/nodes/<target>/`: a new `node_id` and CommHub identity, a new `CODEX_HOME` (0700, auth.json 0600), a new thread id (UUIDv7), a new workdir and new tmux names; the port is assigned at first start. The rollout is **streamed and copied with every thread id rewritten** (fixed 36 characters, so the byte count is unchanged), never shared; the first line must be the source thread's `session_meta`, otherwise not a single byte is written. The source's `.anet-copresence.env` (its CommHub token), history, sqlite files and caches are never copied; full access is not inherited unless you pass `--inherit-full-access` and the source already has it.
 
 The receipt's `fork_isolation` requires identity / HOME / thread / rollout file / tmux names to all differ, a byte-equal rollout copy and no token file in the target HOME; `identity_attested` stays unknown at fork time (non-blocking) and is closed by the first `start --probe-from`. `start` / `restart` / `resume` must be run from the directory recorded in `config.codexProjectDir`, otherwise they refuse (the three tmux sessions' cwd and `.anet/nodes` are both relative to the current directory).
+
+`fork` also does the chores operators used to do by hand (#1951), all recorded in the receipt's `fork_options` check: a missing `--workdir` is created; the copied `config.toml`'s `[projects."<source workspace>"]` table header is rewritten to `<dir>` (header only, every other line stays byte-identical; if a target table already exists the source table is dropped rather than duplicated); `--model <id>` goes into the target config, with a warning when the source rollout's last `turn_context` ran a different model (provider blocks are kept — app-server refuses to load if one is missing); a free loopback port is probed at fork time and written to the config, first `start` prefers it and re-probes if taken; `CODEX_HOME/AGENTS.md` rides along.
 
 ### Account migration: `account install` and `rollback`
 
