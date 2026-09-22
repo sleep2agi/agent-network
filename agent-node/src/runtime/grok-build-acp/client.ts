@@ -40,6 +40,19 @@ export type JsonRpcMessage =
   | JsonRpcError
   | JsonRpcNotification;
 
+/**
+ * argv for the ACP child. #1958 — `config.model` used to be dropped on the
+ * floor here: the child was always `grok agent stdio`, so the session ran
+ * whatever the CLI/session defaulted to while the hub showed the configured
+ * id. `-m` is a `grok agent` option and must precede the `stdio` subcommand.
+ * The flag alone only sets the CLI-level model (the session may still
+ * report its own); runtime.ts follows up with `session/set_model`.
+ */
+export function grokAgentStdioArgs(model?: string): string[] {
+  const trimmed = model?.trim();
+  return trimmed ? ["agent", "-m", trimmed, "stdio"] : ["agent", "stdio"];
+}
+
 export class GrokAcpClient extends EventEmitter {
   private child: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
@@ -63,11 +76,11 @@ export class GrokAcpClient extends EventEmitter {
     return this.lastIncomingAt;
   }
 
-  start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string } = {}): void {
+  start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string; model?: string } = {}): void {
     if (this.child) throw new Error("GrokAcpClient already started");
     this.cwd = resolve(opts.cwd ?? process.cwd());
     const bin = opts.binary ?? "grok";
-    this.child = spawn(bin, ["agent", "stdio"], {
+    this.child = spawn(bin, grokAgentStdioArgs(opts.model), {
       cwd: this.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],

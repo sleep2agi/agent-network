@@ -1492,7 +1492,8 @@ const register = async () => {
     // /api/nodes lies about the node's actual state. Codex catch on
     // PR #411.
     channels: JSON.stringify(channelSpecs),
-    model: MODEL || undefined,
+    // #1958 — grok: prefer the agent's readback once a turn has run.
+    model: (RUNTIME === "grok" ? grokEffectiveModel : undefined) || MODEL || undefined,
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
@@ -1579,9 +1580,16 @@ const reportStatus = async (status: string, task?: string) => {
     // new child boots .prev → reports OLD snapshot → content-match
     // fails → update stays pending → reaper timeouts → dashboard sees
     // timeout (NOT false ✓).
+    // #1958 — grok: the model the session actually ran with. Hub's report_status
+    // schema already accepts `model`; on a hub that ignores it nothing breaks.
+    ...(RUNTIME === "grok" && grokEffectiveModel ? { model: grokEffectiveModel } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       ...buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
+      // #1958 — informational; the hub's RFC-024 content-match reads
+      // snapshot.model (still the configured value) field-by-field, so extra
+      // keys are safe and older hubs drop them (non-strict object).
+      ...(RUNTIME === "grok" && grokEffectiveModel ? { model_effective: grokEffectiveModel, model_source: grokModelSource } : {}),
     },
   });
 };
@@ -2091,6 +2099,11 @@ async function runGoalSchedulerTick() {
 // ══════════════════════════════════════
 let claudeSessionId: string | undefined = RUNTIME === "claude" ? (SESSION_ID || undefined) : undefined;
 let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
+// #1958 — model the ACP session actually ran with (readback from the agent),
+// and where that knowledge came from. Reported to the hub as `model` so the
+// dashboard shows the running model rather than the configured one.
+let grokEffectiveModel: string | undefined;
+let grokModelSource: "readback" | "argv" | "default" | undefined;
 // RFC-029 PR② — opencode-cli session state.
 // `opencodeSessionId` is persisted across turns; on a supervisor-driven
 // restart runtime.ts will try `session/load` with it before falling
@@ -3815,6 +3828,9 @@ async function processWithGrok(
       prompt: promptPrefix + buildGrokCommhubPrompt(task, from),
       cwd: grokCwd,
       sessionId,
+      // #1958 — was never passed: the child ran `grok agent stdio` and the
+      // session kept whatever model it had while the hub showed config.model.
+      model: MODEL || undefined,
       mcpServers: grokMcpServers,
       timeoutMs: resolveGrokAcpTimeout({
         envValue: process.env.GROK_ACP_TIMEOUT_MS,
@@ -3868,6 +3884,11 @@ async function processWithGrok(
       if (summary) log(summary.line);
     }
     const dt = Date.now() - t0;
+    if (result.effectiveModel !== grokEffectiveModel || result.modelSource !== grokModelSource) {
+      grokEffectiveModel = result.effectiveModel;
+      grokModelSource = result.modelSource;
+      log(`[grok] #1958 model=${result.effectiveModel ?? "(unknown)"} source=${result.modelSource}${MODEL && result.effectiveModel !== MODEL ? ` configured=${MODEL}` : ""}`);
+    }
     log(`[grok] done ${label} | ${dt}ms | session=${result.sessionId.slice(0, 8)} | chunks=${result.state.chunks} replay_skipped=${result.state.skippedReplay}`);
     let replyText = sanitizeGrokCommhubLeak(result.replyText.trim() || "（无回复）");
 

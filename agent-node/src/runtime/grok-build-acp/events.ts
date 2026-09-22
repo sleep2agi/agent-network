@@ -20,6 +20,12 @@ export interface GrokTurnState {
   toolCalls: number;
   lastStopReason?: string;
   warnings: string[];
+  /** #1958 — model id the *session* reports (`model_changed` notification). */
+  modelId?: string;
+  /** #1958 — number of `model_changed` notifications seen; lets the runtime tell a post-`set_model` readback from the one session/new|load emitted. */
+  modelChanges: number;
+  /** #1958 — model id the CLI process reports (`_x.ai/models/update`); informational. */
+  processModelId?: string;
 }
 
 export interface ReduceResult {
@@ -31,7 +37,8 @@ export interface ReduceResult {
     | "prompt_complete"
     | "replay_skipped"
     | "ignored"
-    | "warning";
+    | "warning"
+    | "model_changed";
 }
 
 export function newGrokTurnState(sessionId?: string): GrokTurnState {
@@ -43,6 +50,7 @@ export function newGrokTurnState(sessionId?: string): GrokTurnState {
     chunks: 0,
     toolCalls: 0,
     warnings: [],
+    modelChanges: 0,
   };
 }
 
@@ -50,6 +58,23 @@ export function reduceGrokAcpNotification(
   state: GrokTurnState,
   notification: GrokAcpNotification,
 ): ReduceResult {
+  // #1958 — the session's effective model. Observed on grok 1.0.5: session/new
+  // and session/load each emit `model_changed` with the session's id, and
+  // `session/set_model` emits it again with the id actually applied.
+  if (notification.method === "_x.ai/session_notification") {
+    const params = asRecord(notification.params);
+    const update = asRecord(params?.update);
+    if (update && update.sessionUpdate === "model_changed" && typeof update.model_id === "string") {
+      state.modelId = update.model_id;
+      state.modelChanges++;
+      return { state, consumed: true, kind: "model_changed" };
+    }
+  }
+  if (notification.method === "_x.ai/models/update") {
+    const params = asRecord(notification.params);
+    if (typeof params?.currentModelId === "string") state.processModelId = params.currentModelId;
+    return { state, consumed: true, kind: "ignored" };
+  }
   if (notification.method === "_x.ai/session/prompt_complete") {
     const params = asRecord(notification.params);
     const stopReason = typeof params?.stopReason === "string" ? params.stopReason : undefined;
