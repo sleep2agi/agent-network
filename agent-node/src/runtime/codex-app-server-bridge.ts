@@ -42,6 +42,21 @@ export interface CodexAppServerBridgeOptions {
   fullHistoryReconciliationIntervalMs?: number;
   /** Shared co-presence fresh start: wait for the human TUI to own a thread. */
   deferThreadUntilTui?: boolean;
+  /**
+   * #1930 — consulted when a *queued* row reaches the front of the FIFO,
+   * right before its turn would start. Return false to drop it instead
+   * (the bridge then emits `task_skipped` for that taskId). Rows that start
+   * immediately on submit are never consulted: nothing external can have
+   * changed between arrival and start.
+   *
+   * Why this exists: the model can `ack_inbox` a row on the Hub while that
+   * row is still waiting here (the model's MCP goes straight to the Hub;
+   * agent-node never sees the call). Without this gate the row still runs
+   * one wasted turn when the queue reaches it. The gate is fail-open by
+   * contract: any error or uncertainty must return true — turning a silent
+   * duplicate into a silent drop is the worse defect.
+   */
+  shouldStartQueued?: (task: { taskId: string; text: string; from?: string }) => Promise<boolean>;
   deferredThreadTimeoutMs?: number;
   deferredResumeAttempts?: number;
   deferredResumeGapMs?: number;
@@ -125,6 +140,7 @@ export class CodexBridgeNotReadyError extends Error {
  *   - "task_turn_rebound" → { taskId, fromTurnId, toTurnId } — client-id repair
  *   - "task_reply"        → { taskId, text }  — final agent message
  *   - "task_error"        → { taskId, error }
+ *   - "task_skipped"      → { taskId, reason } — queued row dropped before its turn (#1930)
  *   - "cross_thread_drop" → { event } — event for a thread we don't own
  *   - "unowned_turn_drop" → { turnId, event } — turn started outside this bridge
  */
@@ -144,6 +160,7 @@ export class CodexAppServerBridge extends EventEmitter {
   private readonly deferredResumeGapMs: number;
   private readonly initialDeferredThreadId: string;
   private readonly onDeferredCandidate?: (threadId: string) => void | Promise<void>;
+  private readonly shouldStartQueued?: CodexAppServerBridgeOptions["shouldStartQueued"];
   /**
    * A turn started by the human TUI. Dashboard chat is allowed to steer this
    * turn so a message sent while the human is actively using the TUI does not
@@ -193,6 +210,7 @@ export class CodexAppServerBridge extends EventEmitter {
     this.deferredResumeGapMs = opts.deferredResumeGapMs ?? 200;
     this.initialDeferredThreadId = opts.initialDeferredThreadId ?? "";
     this.onDeferredCandidate = opts.onDeferredCandidate;
+    this.shouldStartQueued = opts.shouldStartQueued;
     this.attachClientListeners();
   }
 
@@ -534,9 +552,28 @@ export class CodexAppServerBridge extends EventEmitter {
   private async drainQueue(): Promise<void> {
     if (this.draining) return;
     if (this.turnClaimed || this.activeTurnId || this.externalActiveTurnId) return;
-    const next = this.taskQueue.shift();
+    let next = this.taskQueue.shift();
     if (!next) return;
     this.draining = true;
+    // #1930 — a queued row may have been acked on the Hub (by the model's own
+    // MCP call) while it sat here. Ask before spending a turn on it. Every
+    // failure of the check counts as "start": the check may only ever remove
+    // work it has positively seen to be gone.
+    while (next && this.shouldStartQueued) {
+      let start = true;
+      try {
+        start = await this.shouldStartQueued(next);
+      } catch {
+        start = true;
+      }
+      if (start) break;
+      this.emit("task_skipped", { taskId: next.taskId, reason: "not-pending-on-hub" });
+      next = this.taskQueue.shift();
+    }
+    if (!next) {
+      this.draining = false;
+      return;
+    }
     try {
       await this.startTaskTurn(next);
     } catch (e) {

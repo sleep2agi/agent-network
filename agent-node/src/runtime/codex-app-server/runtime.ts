@@ -155,6 +155,8 @@ export async function openCodexAppServerRuntime(opts: {
   commhubToken?: string;
   onThread?: (threadId: string, created: boolean) => void | Promise<void>;
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
+  /** #1930 — see CodexAppServerBridgeOptions.shouldStartQueued. */
+  shouldStartQueued?: (task: { taskId: string; text: string; from?: string }) => Promise<boolean>;
   log?: (msg: string) => void;
   warn?: (msg: string) => void;
 }): Promise<CodexAppServerRuntimeSession> {
@@ -208,6 +210,7 @@ export async function openCodexAppServerRuntime(opts: {
       client, threadId: opts.threadId, deferThreadUntilTui: opts.deferThreadUntilTui,
       initialDeferredThreadId: opts.initialDeferredThreadId,
       onDeferredCandidate: opts.onDeferredCandidate,
+      shouldStartQueued: opts.shouldStartQueued,
     });
     bridge.on("thread_waiting", () => log("[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"));
     bridge.on("thread_ready", (e: { threadId: string; created: boolean }) => {
@@ -251,9 +254,27 @@ export interface CodexAppServerThinkResult {
   replyText: string;
   failed: boolean;
   queued: boolean;
+  /**
+   * #1930 — the queued row was dropped before its turn because the Hub no
+   * longer lists it as pending (the model acked it meanwhile). Nothing ran,
+   * nothing to reply; the caller must not deliver a reply for it.
+   */
+  skipped?: boolean;
+}
+
+/** Thrown by codexAppServerReplyOrThrow for a skipped outcome; duck-typed via `code`. */
+export class CodexTaskSkippedError extends Error {
+  readonly code = "codex_task_skipped" as const;
+  constructor(readonly reason: string) {
+    super(`codex-app-server: queued task skipped before its turn (${reason})`);
+    this.name = "CodexTaskSkippedError";
+  }
 }
 
 export function codexAppServerReplyOrThrow(outcome: CodexAppServerThinkResult): string {
+  if (outcome.skipped) {
+    throw new CodexTaskSkippedError("not pending on hub");
+  }
   if (outcome.failed) {
     throw new Error(outcome.replyText.replace(/^codex-app-server 错误:\s*/, ""));
   }
@@ -309,6 +330,7 @@ export function codexAppServerThink(
       if (settled) return;
       settled = true;
       bridge.off("task_reply", onReply);
+      bridge.off("task_skipped", onSkipped);
       bridge.off("task_error", onError);
       bridge.off("task_runtime_submitted", onSubmitted);
       bridge.off("task_started", onStarted);
@@ -316,7 +338,7 @@ export function codexAppServerThink(
       bridge.off("drain_deferred", onRequeued);
       bridge.off("steer_deferred", onRequeued);
       if (timer) clearTimeout(timer);
-      if (queueTimer && !queueDeadlineElapsed) {
+      if (queueTimer && !queueDeadlineElapsed && !r.skipped) {
         // #1935 — this call is ending while the task never entered a turn: the
         // admission deadline is still pending and no task_started arrived, so
         // the bridge FIFO row may still be sitting there.
@@ -349,6 +371,13 @@ export function codexAppServerThink(
       if (ev.taskId !== opts.taskId) return;
       log(`[codex-app-server] task_reply ${ev.taskId} (${ev.text.length}ch)`);
       finish({ replyText: ev.text, failed: false, queued: false });
+    };
+    const onSkipped = (ev: { taskId: string; reason: string }) => {
+      if (ev.taskId !== opts.taskId) return;
+      // #1930 — the bridge dropped our queued row before its turn: the Hub no
+      // longer had it pending. No turn ran, so no reply exists to deliver.
+      log(`[codex-app-server] task ${ev.taskId} skipped before its turn (${ev.reason}); no turn started`);
+      finish({ replyText: "", failed: false, queued: false, skipped: true });
     };
     const onError = (ev: { taskId: string; error: string }) => {
       if (ev.taskId !== opts.taskId) return;
@@ -450,6 +479,7 @@ export function codexAppServerThink(
     };
 
     bridge.on("task_reply", onReply);
+    bridge.on("task_skipped", onSkipped);
     bridge.on("task_error", onError);
     bridge.on("task_runtime_submitted", onSubmitted);
     bridge.on("task_started", onStarted);
