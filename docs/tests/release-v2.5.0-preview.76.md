@@ -40,7 +40,7 @@ npm i -g @sleep2agi/agent-network@2.3.0-preview.100 @sleep2agi/agent-node@2.5.0-
 
 ## 披露
 
-`@sleep2agi/agent-network` 的 `2.3.0-preview.97` 至 `.99`(配对本包 `.73`–`.75`)的 `dist/src/*.d.ts` 注释中含有合作团队的节点别名(分别 10 / 10 / 12 处);本对版本起已改为中性表述。本包(agent-node)的 bundle 会剥注释,`.73`–`.75` 的产物内不含。旧版本**不撤包**:撤包会打断所有钉了版本的使用者,代价大于暴露面。
+`@sleep2agi/agent-network` 的 `2.3.0-preview.97` 至 `.99`(配对本包 `.73`–`.75`)的 `dist/src/*.d.ts` 注释中含有合作团队的节点别名(去重后分别 9 / 9 / 11 处;按「别名模式命中 + 裸团队名」两个集合相加则为 10 / 10 / 12,其中同一行的 `TMHR狗`+`TMHR` 被重复计数);本对版本起已改为中性表述。本包(agent-node)的 bundle 会剥注释,`.73`–`.75` 的产物内不含。旧版本**不撤包**:撤包会打断所有钉了版本的使用者,代价大于暴露面。
 
 ## promote 时的 must_contain
 
