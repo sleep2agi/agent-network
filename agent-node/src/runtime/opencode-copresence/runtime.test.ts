@@ -15,6 +15,9 @@ import {
   parseMessageReply,
   requireOpenCodeCopresenceModel,
   wireOpenCodeCommhubMcp,
+  writeOpenCodeCommhubInstructions,
+  removeOwnOpenCodeCommhubInstructions,
+  renderOpenCodeCommhubInstructions,
   wireOpenCodeDefaultModel,
 } from "./runtime";
 
@@ -230,6 +233,72 @@ describe("OpenCode native serve+attach copresence", () => {
       const rendered = JSON.parse(readFileSync(renderedConfigPath, "utf8"));
       expect(rendered.permission["*"]).toBeUndefined();
       expect(rendered.permission.bash).toBe("deny");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // #1946 — stop/crash/exit-75 restart left the workspace ANET-COMMHUB.md
+  // behind and the next start died on `wx` with EEXIST. Own-generation
+  // files are overwritten; anything else still refuses.
+  test("overwrites its own previous generation's ANET-COMMHUB.md instead of dying with EEXIST (#1946)", () => {
+    const root = mkdtempSync(join(tmpdir(), "opencode-commhub-1946-own-"));
+    try {
+      const path = join(root, "ANET-COMMHUB.md");
+      writeFileSync(path, "You are Agent Network node opencode-test.\nSTALE BODY FROM A PREVIOUS GENERATION\n", { mode: 0o644 });
+      const handle = writeOpenCodeCommhubInstructions(path, "opencode-test");
+      expect(handle.path).toBe(path);
+      expect(readFileSync(path, "utf8")).toBe(renderOpenCodeCommhubInstructions("opencode-test"));
+      expect(readFileSync(path, "utf8")).not.toContain("STALE BODY");
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("still refuses an ANET-COMMHUB.md that names another node or was written by a human (#1946)", () => {
+    const root = mkdtempSync(join(tmpdir(), "opencode-commhub-1946-foreign-"));
+    try {
+      const path = join(root, "ANET-COMMHUB.md");
+      const foreign = "You are Agent Network node someone-else.\nkeep me\n";
+      writeFileSync(path, foreign, { mode: 0o600 });
+      let code: string | undefined;
+      try {
+        writeOpenCodeCommhubInstructions(path, "opencode-test");
+      } catch (error) {
+        code = (error as NodeJS.ErrnoException).code;
+      }
+      expect(code).toBe("EEXIST");
+      expect(readFileSync(path, "utf8")).toBe(foreign);
+
+      const human = "# my notes\nnot an agent file\n";
+      writeFileSync(path, human, { mode: 0o600 });
+      code = undefined;
+      try {
+        writeOpenCodeCommhubInstructions(path, "opencode-test");
+      } catch (error) {
+        code = (error as NodeJS.ErrnoException).code;
+      }
+      expect(code).toBe("EEXIST");
+      expect(readFileSync(path, "utf8")).toBe(human);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("close-time removal deletes exactly the bytes this generation wrote and nothing else (#1946)", () => {
+    const root = mkdtempSync(join(tmpdir(), "opencode-commhub-1946-remove-"));
+    try {
+      const path = join(root, "ANET-COMMHUB.md");
+      const handle = writeOpenCodeCommhubInstructions(path, "opencode-test");
+      expect(removeOwnOpenCodeCommhubInstructions(handle)).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      // already gone → still true (idempotent on the crash+restart path)
+      expect(removeOwnOpenCodeCommhubInstructions(handle)).toBe(true);
+      // someone rewrote it after us → leave it, report false
+      writeFileSync(path, "You are Agent Network node opencode-test.\nedited by a human\n", { mode: 0o600 });
+      expect(removeOwnOpenCodeCommhubInstructions(handle)).toBe(false);
+      expect(readFileSync(path, "utf8")).toContain("edited by a human");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
