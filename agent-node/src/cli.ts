@@ -25,6 +25,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { checkCodexCredentialSharing } from "./codex-auth-fingerprint.js";
+import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
@@ -2163,6 +2164,7 @@ async function ensureCodexAppServerSession(): Promise<
       sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN || undefined,
+      shouldStartQueued: (task) => queuedRowStillPendingOnHub(task.taskId),
       onThread: (threadId) => writebackCodexThread(threadId),
       onExit: (info) => {
         warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
@@ -4977,13 +4979,36 @@ async function extractRuntimeAttachmentPaths(msg: any): Promise<string[]> {
   return resolved;
 }
 
+// #1930 — codex FIFO rows that were acked on the Hub while they waited.
+// The model's own `ack_inbox` goes straight to the Hub MCP endpoint; this
+// process never sees it, so the only place to notice is when the row reaches
+// the front of the bridge queue. `queuedInboxRowByTask` maps the FIFO's task
+// id back to the inbox row that produced it; rows that did not come from the
+// inbox (local / goal tasks) are never in the map and are never gated.
+const queuedInboxRowByTask = new Map<string, string>();
+async function queuedRowStillPendingOnHub(taskId: string): Promise<boolean> {
+  const inboxId = queuedInboxRowByTask.get(taskId);
+  if (!inboxId) return true;
+  let page: unknown;
+  try {
+    page = parseToolJson(await callCommHub("get_inbox", { alias: ALIAS, limit: QUEUED_ROW_CHECK_LIMIT }, 0));
+  } catch {
+    return true;
+  }
+  const verdict = decideQueuedRowStart({ inboxId, page, limit: QUEUED_ROW_CHECK_LIMIT });
+  if (!verdict.start) {
+    log(`[codex-app-server] queued row ${taskId.slice(0, 8)} is no longer pending on hub (${verdict.reason}); dropping it before its turn`);
+  }
+  return verdict.start;
+}
+
 async function processTask(
   task: string,
   from: string,
   taskId: string | null = null,
   images?: string[],
   steerIfExternalTurn = false,
-): Promise<{ text: string; failed: boolean }> {
+): Promise<{ text: string; failed: boolean; skipped?: boolean }> {
   // The experimental Grok CLI lane writes its prompt into the shared TUI
   // session. Never place credential-shaped input there: mask it before the
   // runtime, status preview, logs, and any later durable state see it.
@@ -5030,6 +5055,7 @@ async function processTask(
 
   let text: string;
   let failed = false;
+  let skipped = false;
   let grokFailureCode: string | null = null;
   let grokFailureSubcode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
@@ -5059,6 +5085,13 @@ async function processTask(
     text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
       || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence);
   } catch (err: any) {
+    if (err?.code === "codex_task_skipped") {
+      // #1930 — the queued row was dropped before its turn because the Hub no
+      // longer listed it as pending. Nothing ran; there is nothing to reply.
+      log(`[codex-app-server] ${err.message}`);
+      skipped = true;
+      text = "";
+    } else {
     text = runtimeErrorReplyText(RUNTIME, err);
     if (typeof err?.unverifiedReplyText === "string") {
       warn(`[unverified-owner] ${err?.ownershipReason ?? "ownership unverified"} | reply=${err.unverifiedReplyText.length}ch parent=${err?.unverifiedParentId ?? "?"} submitted=${err?.submittedMessageId ?? "?"}`);
@@ -5074,9 +5107,11 @@ async function processTask(
       grokFailureSubcode = reviewed.subcode;
     }
     error(`✗ ${err.message}`);
+    }
   } finally {
     await reportStatus("idle").catch(() => {});
   }
+  if (skipped) return { text: "", failed: false, skipped: true };
   // Detect API-error markers from think(). These return text (so the SDK
   // didn't throw) but semantically mean "the LLM call failed". Surface as
   // failed so Dashboard shows a real failure instead of pretending success.
@@ -5412,6 +5447,10 @@ async function processInbox() {
       const runtimeContent = runtimeNeedsReadableAttachmentPrompt(RUNTIME)
         ? appendReadableAttachmentPaths(content, images)
         : content;
+      // #1930 — let the codex FIFO gate find this row's inbox id when the row
+      // reaches the front of the queue (see queuedRowStillPendingOnHub).
+      queuedInboxRowByTask.set(logicalTaskId, msg.id);
+      let skippedOnHub = false;
       const inboxTurn = await runInboxTurnByReplyPolicy(
         { id: msg.id, from, content: runtimeContent, taskId: logicalTaskId },
         deliveryPolicy.replyExpected,
@@ -5422,15 +5461,37 @@ async function processInbox() {
             logicalTaskId,
             images,
             interactiveDashboardTask,
-          ),
+          ).then((outcome) => {
+            // Known before `acknowledge` runs: the wrapper awaits this first.
+            skippedOnHub = outcome.skipped === true;
+            return outcome;
+          }),
           acknowledge: async (id) => {
-            await ackMessage(id);
+            try {
+              await ackMessage(id);
+            } catch (e: any) {
+              // The row was dropped because the Hub had already stopped
+              // listing it: "already acknowledged" is the expected answer here,
+              // not a transport failure to retry.
+              if (!skippedOnHub) throw e;
+              debug(`ack after hub-side skip: ${e.message}`);
+            }
             commhubCompensation?.recordConsumed(msg);
           },
         },
       );
       if (inboxTurn.kind === "terminal_peer_reply") return;
       const taskOutcome = inboxTurn.result;
+      if (taskOutcome.skipped) {
+        log(`skip reply: queued row ${logicalTaskId.slice(0, 8)} was no longer pending on hub; no turn ran`);
+        try {
+          await ackMessage(msg.id);
+        } catch (e: any) {
+          debug(`ack after hub-side skip: ${e.message}`);
+        }
+        commhubCompensation?.recordConsumed(msg);
+        return;
+      }
       const failed = taskOutcome.failed;
       const preparedReply = prepareDashboardNativeSlashReply(
         taskOutcome.text,
@@ -5472,6 +5533,7 @@ async function processInbox() {
       }
     } finally {
       inflightMessageIds.delete(msg.id);
+      queuedInboxRowByTask.delete(logicalTaskIdFromInbox(msg));
       // One runtime admission settled: this is a controllable idle boundary
       // for the compensation layer. It still only wakes the existing bridge
       // lane; an active human turn will be steered by that bridge, never forked.

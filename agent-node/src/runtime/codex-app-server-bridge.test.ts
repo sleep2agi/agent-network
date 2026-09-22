@@ -15,7 +15,7 @@
 
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { CodexAppServerClient } from "./codex-app-server-client";
-import { CodexAppServerBridge, CodexBridgeNotReadyError } from "./codex-app-server-bridge";
+import { CodexAppServerBridge, CodexBridgeNotReadyError, type CodexAppServerBridgeOptions } from "./codex-app-server-bridge";
 import {
   codexAppServerThink,
   type CodexAppServerRuntimeSession,
@@ -1703,5 +1703,111 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(bridge.activeTurn()).toBe("turn_d_2");
     await client.close();
     await app.stop();
+  });
+});
+
+// ─────────────────────────────────────────────
+// #1930 — a queued row acked on the Hub while it waited must not spend a turn
+// ─────────────────────────────────────────────
+
+describe("CodexAppServerBridge — #1930 queued rows are re-checked before their turn", () => {
+  let app: FakeApp;
+  let client: CodexAppServerClient;
+
+  const turnStarts = () => app.received.filter((m) => (m as { method?: string }).method === "turn/start");
+  const completeTurn = async (turnId: string) => {
+    app.broadcast({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: THREAD, turn: { id: turnId } } });
+    await tick(20);
+  };
+  const mkBridge = async (shouldStartQueued?: CodexAppServerBridgeOptions["shouldStartQueued"]) => {
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD, shouldStartQueued });
+    await bridge.bootstrap();
+    return bridge;
+  };
+
+  beforeEach(async () => {
+    app = await startFakeApp();
+    client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+  });
+  afterEach(async () => {
+    await client.close().catch(() => undefined);
+    await app.stop();
+  });
+
+  test("reproduction: a row queued behind a live turn, then acked on the Hub, still starts a turn when the gate is absent", async () => {
+    const bridge = await mkBridge(undefined);
+    const turnA = await bridge.startTaskTurn({ taskId: "task_a", text: "first" });
+    const admission = await bridge.submitTask({ taskId: "inbox_reply_row", text: "[peer] pong", from: "peer" });
+    expect(admission.started).toBe(false);
+    // The Hub ack happens here in production (model → Hub MCP `ack_inbox`);
+    // nothing about the FIFO changes, which is the whole point.
+    await completeTurn(turnA);
+    // Without a gate the queued row is drained into a real turn: this is the
+    // wasted turn the field reported, one per queued row.
+    expect(turnStarts()).toHaveLength(2);
+  });
+
+  test("with the gate saying the row is no longer pending, no turn starts and task_skipped is emitted", async () => {
+    const asked: string[] = [];
+    const bridge = await mkBridge(async (task) => { asked.push(task.taskId); return false; });
+    const skipped: Array<{ taskId: string; reason: string }> = [];
+    bridge.on("task_skipped", (e) => skipped.push(e as never));
+    const turnA = await bridge.startTaskTurn({ taskId: "task_a", text: "first" });
+    expect((await bridge.submitTask({ taskId: "inbox_reply_row", text: "[peer] pong" })).started).toBe(false);
+    await completeTurn(turnA);
+    expect(asked).toEqual(["inbox_reply_row"]);
+    expect(turnStarts()).toHaveLength(1);
+    expect(skipped).toEqual([{ taskId: "inbox_reply_row", reason: "not-pending-on-hub" }]);
+    expect(bridge.activeTurn()).toBeNull();
+    expect(bridge.currentStatus()).toBe("idle");
+  });
+
+  test("a row the gate confirms as pending starts exactly as before", async () => {
+    const bridge = await mkBridge(async () => true);
+    const skipped: unknown[] = [];
+    bridge.on("task_skipped", (e) => skipped.push(e));
+    const turnA = await bridge.startTaskTurn({ taskId: "task_a", text: "first" });
+    await bridge.submitTask({ taskId: "still_pending", text: "work" });
+    await completeTurn(turnA);
+    expect(turnStarts()).toHaveLength(2);
+    expect(skipped).toEqual([]);
+  });
+
+  test("the gate is fail-open: a throwing check starts the row", async () => {
+    const bridge = await mkBridge(async () => { throw new Error("hub unreachable"); });
+    const skipped: unknown[] = [];
+    bridge.on("task_skipped", (e) => skipped.push(e));
+    const turnA = await bridge.startTaskTurn({ taskId: "task_a", text: "first" });
+    await bridge.submitTask({ taskId: "unknown_state", text: "work" });
+    await completeTurn(turnA);
+    expect(turnStarts()).toHaveLength(2);
+    expect(skipped).toEqual([]);
+  });
+
+  test("a skipped row does not block the row behind it", async () => {
+    const bridge = await mkBridge(async (task) => task.taskId !== "acked_row");
+    const skipped: Array<{ taskId: string }> = [];
+    bridge.on("task_skipped", (e) => skipped.push(e as never));
+    const started: string[] = [];
+    bridge.on("task_started", (e) => started.push((e as { taskId: string }).taskId));
+    const turnA = await bridge.startTaskTurn({ taskId: "task_a", text: "first" });
+    await bridge.submitTask({ taskId: "acked_row", text: "[peer] pong" });
+    await bridge.submitTask({ taskId: "live_row", text: "real work" });
+    await completeTurn(turnA);
+    expect(skipped.map((s) => s.taskId)).toEqual(["acked_row"]);
+    // task_a is the in-flight turn we started ourselves; acked_row must never
+    // appear between it and the row queued behind it.
+    expect(started).toEqual(["task_a", "live_row"]);
+    expect(turnStarts()).toHaveLength(2);
+  });
+
+  test("the gate is never consulted for a row that starts immediately", async () => {
+    const asked: string[] = [];
+    const bridge = await mkBridge(async (task) => { asked.push(task.taskId); return false; });
+    const admission = await bridge.submitTask({ taskId: "immediate", text: "now" });
+    expect(admission.started).toBe(true);
+    expect(asked).toEqual([]);
+    expect(turnStarts()).toHaveLength(1);
   });
 });
