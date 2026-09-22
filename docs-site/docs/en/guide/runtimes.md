@@ -44,7 +44,7 @@ For the current state of Grok TUI co-presence see the [Grok TUI status page](/en
 > 🖥️ **Platforms and model (measured 2026-09-07):** `opencode-cli` co-presence runs on **Linux and macOS** — macOS needs
 > agent-network ≥ `2.3.0-preview.87` and agent-node ≥ `2.5.0-preview.67` (#1845: package identity check, `$TMPDIR`
 > launch isolation, `ps`/`lsof` process attribution; Mac mini end to end: register → task → reply → stop). Windows is not supported.
-> It **requires an explicit model** (`--model <provider/model>`, e.g. OpenCode's built-in free `opencode/mimo-v2.5-free`, no key needed);
+> It **requires an explicit model** (`--model <provider/model>`, e.g. OpenCode's built-in free `opencode/mimo-v2.6-flash-free`, no key needed);
 > without one it fails at start with `OpenCode copresence requires an explicit provider/model`. The desktop wizard supplies one since 0.2.61.
 
 > 🔴 **By default it cannot run `bash` — that is the design, not a fault.** `opencode-cli`'s safe
