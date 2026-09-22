@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { GrokAcpClient } from "./client";
+import { GrokAcpClient, grokAgentStdioArgs } from "./client";
 
 describe("GrokAcpClient", () => {
   test("starts the ACP server as `grok agent stdio` without inventing a model flag", async () => {
@@ -21,6 +21,27 @@ setTimeout(() => process.exit(0), 20);
     await client.close();
 
     expect(JSON.parse(readFileSync(argsFile, "utf8"))).toEqual(["agent", "stdio"]);
+  });
+
+  // #1958 — config.model was never passed; the child always ran `grok agent stdio`.
+  test("passes -m <model> before the stdio subcommand when a model is configured (#1958)", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "grok-acp-argv-model-"));
+    const argsFile = join(cwd, "args.json");
+    const fake = join(cwd, "fake-grok.js");
+    writeFileSync(fake, `#!/usr/bin/env node
+require("fs").writeFileSync(process.env.ARGS_FILE, JSON.stringify(process.argv.slice(2)));
+setTimeout(() => process.exit(0), 20);
+`);
+    chmodSync(fake, 0o755);
+
+    const client = new GrokAcpClient();
+    client.start({ cwd, binary: fake, model: "grok-4.6", env: { ...process.env, ARGS_FILE: argsFile } });
+    for (let i = 0; i < 50 && !existsSync(argsFile); i++) await Bun.sleep(10);
+    await client.close();
+
+    expect(JSON.parse(readFileSync(argsFile, "utf8"))).toEqual(["agent", "-m", "grok-4.6", "stdio"]);
+    expect(grokAgentStdioArgs("  ")).toEqual(["agent", "stdio"]);
+    expect(grokAgentStdioArgs(undefined)).toEqual(["agent", "stdio"]);
   });
 
   test("handles ACP server-to-client fs and permission requests", async () => {

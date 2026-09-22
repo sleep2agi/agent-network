@@ -57,6 +57,14 @@ export interface GrokAcpTurnOptions {
   prompt: string;
   cwd?: string;
   sessionId?: string;
+  /**
+   * #1958 — model id the node is configured for. Passed as `grok agent -m
+   * <model> stdio` AND applied with `session/set_model` after session/new |
+   * session/load (the flag alone only sets the CLI-level model; a resumed
+   * session keeps its own). The agent's readback must equal this id or the
+   * turn fails closed before any prompt is sent. Undefined = agent default.
+   */
+  model?: string;
   timeoutMs?: number;
   /**
    * #261 P1 redirect (2026-06-28) — handshake deadline (initialize +
@@ -99,11 +107,47 @@ export interface GrokAcpTurnResult {
   stopReason?: string;
   promptResponse: unknown;
   state: GrokTurnState;
+  /** #1958 — model id the session actually ran with, when the agent told us. */
+  effectiveModel?: string;
+  /**
+   * #1958 — where `effectiveModel` comes from:
+   *   readback — agent confirmed it (`session/set_model` Ok / `model_changed` / session response);
+   *   argv     — a model was configured and passed on argv, but this grok build has no
+   *              `session/set_model` and reported nothing, so it is the *requested* id;
+   *   default  — no model configured; the id is whatever the agent reported (or unknown).
+   */
+  modelSource: GrokModelSource;
 }
+
+export type GrokModelSource = "readback" | "argv" | "default";
 
 interface SessionResponse {
   sessionId?: string;
   session_id?: string;
+  models?: { currentModelId?: string; availableModels?: Array<{ modelId?: string }> };
+}
+
+interface SetModelResponse {
+  _meta?: { model?: { Ok?: string } };
+}
+
+/** JSON-RPC error surfaced by GrokAcpClient.request (see client.ts onStdout). */
+function rpcErrorParts(err: unknown): { code?: number; message: string; data?: unknown } {
+  const e = err as { code?: number; message?: string; data?: unknown; rpcCode?: number } | undefined;
+  const code = typeof e?.code === "number" ? e.code : (typeof e?.rpcCode === "number" ? e.rpcCode : undefined);
+  return { code, message: String(e?.message ?? err), data: e?.data };
+}
+
+export class GrokModelMismatchError extends Error {
+  constructor(readonly requested: string, readonly reported: string | undefined, readonly available: string[], detail?: string) {
+    super(
+      `Grok ACP model check failed: configured model "${requested}" but the agent ${reported ? `reports "${reported}"` : "reported no model"}` +
+      (detail ? ` (${detail})` : "") +
+      (available.length ? `; available: ${available.join(", ")}` : "") +
+      ". Refusing to run the turn on a model other than the configured one (#1958).",
+    );
+    this.name = "GrokModelMismatchError";
+  }
 }
 
 interface InitializeResponse {
@@ -155,7 +199,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   if (opts.onStderr) client.on("stderr", onStderr);
 
   try {
-    client.start({ cwd: opts.cwd, env: childEnv, binary: opts.binary });
+    client.start({ cwd: opts.cwd, env: childEnv, binary: opts.binary , model: opts.model });
 
     // #205 RFC-021 Path A — request Grok backend tools (X search, video
     // gen, web search/fetch) via _meta capability hint. ACP spec has no
@@ -250,6 +294,9 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     state.sessionId = sessionId;
     await opts.onSession?.(sessionId);
 
+    // #1958 — pin the session to the configured model and verify the readback.
+    const modelCheck = await applyConfiguredModel(client, sessionId, session, state, opts, handshakeTimeoutMs);
+
     // #211 — session/prompt is the only unbounded request in this flow
     // (the agent streams `session/update` chunks for the entire duration
     // of the LLM turn, which for batch tool runs like video generation
@@ -274,6 +321,8 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       stopReason: state.lastStopReason,
       promptResponse,
       state,
+      effectiveModel: modelCheck.effectiveModel,
+      modelSource: modelCheck.modelSource,
     };
   } finally {
     client.off("notification", onNotification);
@@ -293,6 +342,75 @@ async function waitForPromptDrain(state: GrokTurnState, drainMs: number): Promis
   while (!state.promptComplete && Date.now() - started < drainMs) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+function sessionModels(session: unknown): { current?: string; available: string[] } {
+  const direct = session && typeof session === "object" ? session as SessionResponse : undefined;
+  const models = direct?.models;
+  const available = (models?.availableModels ?? [])
+    .map((m) => m?.modelId)
+    .filter((id): id is string => typeof id === "string");
+  return { current: typeof models?.currentModelId === "string" ? models.currentModelId : undefined, available };
+}
+
+/**
+ * #1958 — after session/new | session/load: if a model is configured, apply it
+ * with `session/set_model` and verify the agent's readback; fail closed on any
+ * disagreement. Observed on grok 1.0.5 (2026-09-23):
+ *   - `-m <id>` on argv sets only the CLI-level model (`_x.ai/models/update`);
+ *     session/new and session/load still report the session's own id in the
+ *     response (`result.models.currentModelId`) and a `model_changed`
+ *     notification — which is how a "grok-4.7" node kept running 4.6.
+ *   - `session/set_model {sessionId, modelId}` → `{_meta:{model:{Ok:"<id>"}}}`
+ *     plus `model_changed`; an unknown id → JSON-RPC -32602 "unknown model id".
+ * A grok build without `session/set_model` (-32601) degrades to argv-only and
+ * says so; nothing else is retried without the model.
+ */
+async function applyConfiguredModel(
+  client: GrokAcpClient,
+  sessionId: string,
+  session: unknown,
+  state: GrokTurnState,
+  opts: GrokAcpTurnOptions,
+  timeoutMs: number,
+): Promise<{ effectiveModel?: string; modelSource: GrokModelSource }> {
+  const { current, available } = sessionModels(session);
+  const requested = opts.model?.trim();
+  if (!requested) {
+    return { effectiveModel: state.modelId ?? current, modelSource: "default" };
+  }
+  let confirmed: string | undefined;
+  // session/new | session/load already emitted one `model_changed` (the
+  // session's own id); only a notification that arrives *after* set_model
+  // is the readback for it.
+  const changesBefore = state.modelChanges;
+  try {
+    const res = await client.request<SetModelResponse>("session/set_model", { sessionId, modelId: requested }, timeoutMs);
+    const ok = res?._meta?.model?.Ok;
+    confirmed = typeof ok === "string" ? ok : undefined;
+  } catch (err) {
+    const { code, message, data } = rpcErrorParts(err);
+    if (code === -32601 || /method not found/i.test(message)) {
+      opts.onStderr?.(
+        `[grok] #1958 this grok build has no session/set_model (${message}); ` +
+        `model "${requested}" was passed on argv only — the session may still run its own model.`,
+      );
+      return { effectiveModel: requested, modelSource: "argv" };
+    }
+    // -32602 "unknown model id" and anything else: fail closed, verbatim.
+    throw new GrokModelMismatchError(requested, state.modelId ?? current, available,
+      `session/set_model rejected: ${message}${data !== undefined ? ` ${typeof data === "string" ? data : JSON.stringify(data)}` : ""}`);
+  }
+  // Prefer the notification that followed set_model; give it a moment to land.
+  const started = Date.now();
+  while (state.modelChanges === changesBefore && Date.now() - started < 1_500) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const reported = state.modelChanges > changesBefore ? state.modelId : (confirmed ?? state.modelId ?? current);
+  if (reported !== requested) {
+    throw new GrokModelMismatchError(requested, reported, available, "after session/set_model");
+  }
+  return { effectiveModel: reported, modelSource: "readback" };
 }
 
 function selectAuthMethod(init: InitializeResponse, env: NodeJS.ProcessEnv): string {
