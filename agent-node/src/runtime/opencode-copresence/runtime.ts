@@ -23,6 +23,12 @@ import {
   signalExactLinuxProcessGroup,
   type LinuxProcessGroupIdentity,
 } from "./process-group";
+import {
+  attachRecordPath,
+  relaunchPreviousAttach,
+  renderAttachRecordShell,
+  stopRecordedAttach,
+} from "./attach-tui";
 
 const USERNAME = "opencode";
 const OUTPUT_LIMIT = 64 * 1024;
@@ -81,6 +87,8 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   model?: string;
   title?: string;
   startupTimeoutMs?: number;
+  /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
+  tmuxRespawn?: (pane: string, scriptPath: string) => void;
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }
@@ -99,6 +107,8 @@ export interface OpenOpenCodeCopresenceOptions {
   commhubToken?: string;
   commhubAlias?: string;
   startupTimeoutMs?: number;
+  /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
+  tmuxRespawn?: (pane: string, scriptPath: string) => void;
   onSession?: (sessionId: string) => void | Promise<void>;
   log?: (message: string) => void;
   warn?: (message: string) => void;
@@ -454,6 +464,7 @@ function writeAttachScript(
   password: string,
   sessionId: string,
   cwd: string,
+  recordDir: string,
 ): void {
   const exported = Object.entries({
     ...env,
@@ -465,6 +476,9 @@ function writeAttachScript(
     "set -eu",
     ...exported.map(([key, value]) => `export ${key}=${shellQuote(value)}`),
     `cd ${shellQuote(cwd)}`,
+    // #1957 — record this launcher's pid/ticks/pane so the runtime can stop
+    // exactly this TUI on close and relaunch the next launcher in its pane.
+    ...renderAttachRecordShell(attachRecordPath(recordDir), sessionId),
     `exec ${shellQuote(binary)} attach ${shellQuote(url)} --session ${shellQuote(sessionId)} --dir ${shellQuote(cwd)} --pure`,
     "",
   ];
@@ -537,8 +551,12 @@ export async function openVettedOpenCodeCopresence(
       password,
       created.id,
       opts.cwd,
+      opts.workDir,
     );
     log(`[opencode-copresence] ready session=${created.id.slice(0, 12)} attach=${attachScriptPath}`);
+    // #1957 — a previous generation's human TUI was stopped on close; put the
+    // regenerated launcher back into its tmux pane, or say how to relaunch.
+    relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn });
 
     const session: OpenCodeCopresenceSession = {
       url,
@@ -654,6 +672,9 @@ export async function openVettedOpenCodeCopresence(
       async close() {
         if (closed) return;
         closed = true;
+        // #1957 — stop the human TUI this launcher recorded (exact pid +
+        // start ticks), before the serve it is attached to goes away.
+        stopRecordedAttach(opts.workDir, { log, warn });
         rmSync(attachScriptPath, { force: true });
         if (identity) await stopProcessGroup(child, identity);
         else try { child.kill("SIGKILL"); } catch {}
@@ -763,6 +784,7 @@ export async function openOpenCodeCopresenceRuntime(
       model,
       title: opts.title,
       startupTimeoutMs: opts.startupTimeoutMs,
+      tmuxRespawn: opts.tmuxRespawn,
       log: opts.log,
       warn: opts.warn,
     });
