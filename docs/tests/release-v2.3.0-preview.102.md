@@ -1,6 +1,6 @@
 # `@sleep2agi/agent-network@2.3.0-preview.102`
 
-`.101` 之后 `agent-network/` **没有功能提交**。本版是**配对 bump**:`PAIRED_AGENT_NODE_VERSION` 指向 `agent-node@2.5.0-preview.78`,以便 `anet` 接受修了 #1946 的 agent-node。
+`.101` 之后 `agent-network/` **没有功能提交**。🔴 **本版号在 npm 上作废**(发布被接受但 registry 从未可见,见 release-v2.3.0-preview.103.md);实际配对版本是 `.103`。本版是**配对 bump**:`PAIRED_AGENT_NODE_VERSION` 指向 `agent-node@2.5.0-preview.78`,以便 `anet` 接受修了 #1946 的 agent-node。
 
 同期合入的三个提交都不进本包:#1950(opencode 共存 `ANET-COMMHUB.md` 生命周期,`agent-node/` 独有)、#1948(`docs-site/` 桌面版 0.2.83 戳)、#1949(`docs/` 披露口径)。
 
