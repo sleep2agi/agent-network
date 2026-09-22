@@ -17,7 +17,6 @@
 import { execFileSync } from "child_process";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { readProcessGroupIdentity } from "./process-group";
 
 export const ATTACH_GEN_ENV = "ANET_OPENCODE_ATTACH_GEN";
 export const ATTACH_RECORD_FILE = "opencode-attach.json";
@@ -31,6 +30,32 @@ export interface AttachRecord {
   pane: string;
   /** The serve generation (session id) the launcher belonged to. */
   gen: string;
+}
+
+/**
+ * Start ticks of one pid: field 22 of /proc/<pid>/stat, read after the
+ * closing paren so a comm containing spaces or parens cannot shift it.
+ * Pid-based on purpose — the launcher's own `$$` read and this live read
+ * are the same field, so a record and a live process can only disagree
+ * when the pid was reused. (process-group.ts's identity helper also demands
+ * pgrp > 1, which is false for any child of a PID-1 test runner inside a
+ * container; that guard is about signalling a *group*, not about identity.)
+ */
+export function readStartTicks(pid: number): string | undefined {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return undefined;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const close = stat.lastIndexOf(")");
+    if (close < 0) return undefined;
+    const ticks = stat.slice(close + 2).trim().split(/\s+/)[19];
+    return /^\d+$/.test(ticks ?? "") ? ticks : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function processExists(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error: any) { return error?.code === "EPERM"; }
 }
 
 export function attachRecordPath(workDir: string): string {
@@ -97,15 +122,17 @@ export function stopRecordedAttach(
   }
   const prev = previousAttachRecordPath(workDir);
   try { renameSync(recordPath, prev); } catch { rmSync(recordPath, { force: true }); }
-  const identity = readProcessGroupIdentity(record.pid);
-  if (!identity) {
+  const liveTicks = readStartTicks(record.pid);
+  if (liveTicks === undefined && !processExists(record.pid)) {
     opts.log?.(`[opencode-copresence] attach TUI pid ${record.pid} already gone`);
     return { action: "gone", pid: record.pid, pane: record.pane };
   }
-  if (record.startTicks === undefined || identity.startTicks !== record.startTicks) {
+  if (record.startTicks === undefined || liveTicks !== record.startTicks) {
     const reason = record.startTicks === undefined
       ? "record carries no start ticks (non-Linux launcher)"
-      : `start ticks differ (record ${record.startTicks}, live ${identity.startTicks}); pid was reused`;
+      : liveTicks === undefined
+        ? "live start ticks unreadable (no /proc); refusing to signal by pid alone"
+        : `start ticks differ (record ${record.startTicks}, live ${liveTicks}); pid was reused`;
     opts.warn?.(`[opencode-copresence] not signalling attach TUI pid ${record.pid}: ${reason}`);
     return { action: "skipped", pid: record.pid, pane: record.pane, reason };
   }

@@ -3,12 +3,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, test } from "bun:test";
-import { readProcessGroupIdentity } from "./process-group";
 import {
   ATTACH_GEN_ENV,
   attachRecordPath,
   previousAttachRecordPath,
   readAttachRecord,
+  readStartTicks,
   relaunchPreviousAttach,
   renderAttachRecordShell,
   stopRecordedAttach,
@@ -24,8 +24,9 @@ function tmp() {
 async function spawnSleeper() {
   const child = spawn("sleep", ["30"], { stdio: "ignore" });
   await new Promise((r) => setTimeout(r, 50));
-  const identity = readProcessGroupIdentity(child.pid!);
-  if (!identity) throw new Error("could not read sleeper identity");
+  const startTicks = readStartTicks(child.pid!);
+  if (startTicks === undefined) throw new Error("could not read sleeper start ticks");
+  const identity = { pid: child.pid!, startTicks };
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
     child.once("exit", (code, signal) => resolve({ code, signal })));
   return { child, identity, exited };
@@ -50,8 +51,8 @@ describe("#1957 attach TUI record / stop / relaunch", () => {
         expect(record?.pid).toBe(child.pid);
         expect(record?.pane).toBe("%42");
         expect(record?.gen).toBe("ses_gen1");
-        const live = readProcessGroupIdentity(child.pid!);
-        expect(record?.startTicks).toBe(live?.startTicks);
+        // same reader on both sides: the launcher's $$ read and the runtime's live read
+        expect(record?.startTicks).toBe(readStartTicks(child.pid!));
       } finally {
         child.kill("SIGKILL");
       }
