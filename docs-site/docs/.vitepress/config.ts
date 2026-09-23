@@ -112,6 +112,7 @@ export default withMermaid(defineConfig({
               { text: 'Grok 共存 TUI（grok-build-cli）', link: '/guide/grok-tui' },
               { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
               { text: 'Codex TUI 安全重启', link: '/guide/codex-tui-safe-restart' },
+              { text: 'DSH 节点', link: '/guide/dsh' },
             ]
           },
           {
@@ -219,6 +220,7 @@ export default withMermaid(defineConfig({
               { text: 'Grok Co-presence TUI (grok-build-cli)', link: '/en/guide/grok-tui' },
               { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
               { text: 'Codex TUI Safe Restart', link: '/en/guide/codex-tui-safe-restart' },
+              { text: 'DSH node', link: '/en/guide/dsh' },
             ]
           },
           {

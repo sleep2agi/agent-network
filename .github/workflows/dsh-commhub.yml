@@ -1,0 +1,27 @@
+name: dsh-commhub plugin tests
+
+on:
+  pull_request:
+    paths:
+      - "integrations/dsh-commhub/**"
+      - ".github/workflows/dsh-commhub.yml"
+  push:
+    branches: [main]
+    paths:
+      - "integrations/dsh-commhub/**"
+      - ".github/workflows/dsh-commhub.yml"
+
+jobs:
+  unit:
+    name: dsh-commhub-unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Core only: the tests exercise the hub client / node loop / tools against an
+      # in-process fake hub. The DSH glue (src/plugin.mjs) is not imported, so no
+      # @deepseek-ai packages are installed here.
+      - run: npm test
+        working-directory: integrations/dsh-commhub

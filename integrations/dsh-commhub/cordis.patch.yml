@@ -1,0 +1,7 @@
+# dsh-commhub bundle patch: mounts the CommHub node plugin on any DSH profile.
+# Configure with ANET_HUB / ANET_ALIAS / ANET_NETWORK_ID and ANET_NODE_TOKEN
+# (or ANET_NODE_TOKEN_FILE). Never put the node token in this file.
+- insert:
+    - id: commhub
+      name: '@sleep2agi/dsh-commhub'
+      inject: [agents, agentDefaultModel, sessions, tools]
