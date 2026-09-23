@@ -3565,7 +3565,10 @@ async function closeOpencodeRuntime(reason: string): Promise<void> {
   }
   if (opencodeCopresenceSession) {
     log(`[opencode-copresence] stopping shared server (${reason})`);
-    await opencodeCopresenceSession.close().catch((e: any) => {
+    // #1957 — a config restart keeps the human's tmux pane alive (placeholder)
+    // so the re-spawned generation can put the new launcher back into it.
+    const restart = reason.startsWith("config restart");
+    await opencodeCopresenceSession.close({ restart }).catch((e: any) => {
       warn(`[opencode-copresence] stop failed: ${e?.message || e}`);
     });
     opencodeCopresenceSession = null;

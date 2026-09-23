@@ -76,7 +76,8 @@ export interface OpenCodeCopresenceSession {
     sender?: string,
     evidence?: { onSubmitted?: () => void; onConsumed?: () => void },
   ): Promise<OpenCodeCopresenceSubmitResult>;
-  close(): Promise<void>;
+  /** `restart: true` keeps the human TUI's tmux pane alive with a placeholder for the next generation (#1957). */
+  close(mode?: { restart?: boolean }): Promise<void>;
 }
 
 export interface OpenVettedOpenCodeCopresenceOptions {
@@ -89,6 +90,8 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   startupTimeoutMs?: number;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
+  /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
+  tmuxRunner?: import("./attach-tui").TmuxRunner;
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }
@@ -109,6 +112,8 @@ export interface OpenOpenCodeCopresenceOptions {
   startupTimeoutMs?: number;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
+  /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
+  tmuxRunner?: import("./attach-tui").TmuxRunner;
   onSession?: (sessionId: string) => void | Promise<void>;
   log?: (message: string) => void;
   warn?: (message: string) => void;
@@ -556,7 +561,7 @@ export async function openVettedOpenCodeCopresence(
     log(`[opencode-copresence] ready session=${created.id.slice(0, 12)} attach=${attachScriptPath}`);
     // #1957 — a previous generation's human TUI was stopped on close; put the
     // regenerated launcher back into its tmux pane, or say how to relaunch.
-    relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn });
+    relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
 
     const session: OpenCodeCopresenceSession = {
       url,
@@ -669,12 +674,14 @@ export async function openVettedOpenCodeCopresence(
         queue = operation.then(() => undefined, () => undefined);
         return operation;
       },
-      async close() {
+      async close(mode?: { restart?: boolean }) {
         if (closed) return;
         closed = true;
         // #1957 — stop the human TUI this launcher recorded (exact pid +
-        // start ticks), before the serve it is attached to goes away.
-        stopRecordedAttach(opts.workDir, { log, warn });
+        // start ticks), before the serve it is attached to goes away. On a
+        // restart the pane is kept alive with a placeholder so the next
+        // generation can respawn the launcher into it.
+        stopRecordedAttach(opts.workDir, { restart: mode?.restart === true, log, warn, tmux: opts.tmuxRunner });
         rmSync(attachScriptPath, { force: true });
         if (identity) await stopProcessGroup(child, identity);
         else try { child.kill("SIGKILL"); } catch {}
@@ -785,6 +792,7 @@ export async function openOpenCodeCopresenceRuntime(
       title: opts.title,
       startupTimeoutMs: opts.startupTimeoutMs,
       tmuxRespawn: opts.tmuxRespawn,
+      tmuxRunner: opts.tmuxRunner,
       log: opts.log,
       warn: opts.warn,
     });
@@ -797,8 +805,8 @@ export async function openOpenCodeCopresenceRuntime(
       notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
       submit: (prompt, timeoutMs, sender, evidence) =>
         core!.submit(prompt, timeoutMs, sender, evidence),
-      async close() {
-        await core!.close();
+      async close(mode?: { restart?: boolean }) {
+        await core!.close(mode);
         removeInstructions();
         if (!cleanup()) {
           opts.warn?.("[opencode-copresence] launch-root cleanup deferred; a live descendant still references it");
