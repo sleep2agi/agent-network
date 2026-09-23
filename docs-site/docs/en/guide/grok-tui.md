@@ -1,4 +1,8 @@
-# Grok Co-presence TUI
+# Grok Co-presence TUI (Preview)
+
+::: danger Preview — for a stable Grok node use `grok-build-acp`
+`grok-build-cli` co-presence is a **preview** capability. Known limits: while a human has text in the TUI input box, network tasks only queue and then time out; after grok self-updates to a version outside the verified list, the node fails on its **next restart** (the error prints a `GROK_BINARY=<verified older build> anet node start <node>` recovery command, and a successful start pins it). For an unattended Grok node that reliably takes work, use `anet node create <name> --runtime grok-build-acp`.
+:::
 
 `grok-build-cli` gives one Agent Network node ownership of the only real Grok TUI. You enter that same interface from another terminal with `anet grok attach`, while CommHub tasks queue into the same session. Human input has priority and network tasks run FIFO.
 

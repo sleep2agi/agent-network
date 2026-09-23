@@ -31,7 +31,7 @@ import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
 import { processRulesFileRequests } from "./runtime/rules-file";
-import { chooseGrokBinary, grokBinaryPinToRecord } from "./runtime/grok-binary-pin";
+import { chooseGrokBinary, grokBinaryPinToRecord, findVerifiedGrokCandidates, grokRecoveryHint } from "./runtime/grok-binary-pin";
 
 // 🔴 这三处原先都喂 `__dirname`,而打包器把它内联成构建期常量 —— 见 #1433。
 // `resolveAgentNodeDir` 的注释里写着「运行时 thisModuleDir 是 .../agent-node/dist」,
@@ -4229,9 +4229,27 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       // #1615 —— 校验通过的这个文件就是下次要钉的:裸名先解析成绝对路径再记。
       writebackGrokBinaryPin(grokBinary, version, initialRuntime.env.PATH);
     } catch (error: any) {
+      // #1615 —— 验证过的旧 build 往往还在本机;找出来写进报错,给一条可复制的恢复命令。
+      let hint = "";
+      try {
+        const { readdirSync, statSync } = await import("fs");
+        const { grokVerifiedBuild } = await import("./runtime/grok-copresence/runtime");
+        const candidates = findVerifiedGrokCandidates({
+          home,
+          listDir: (d) => readdirSync(d),
+          isRegularFile: (p) => { try { return statSync(p).isFile(); } catch { return false; } },
+          probeVersion: (p) => {
+            try { return String(execFileSync(p, ["--version"], { encoding: "utf8", timeout: 5_000 })).trim(); }
+            catch { return undefined; }
+          },
+          isVerified: (v) => grokVerifiedBuild(v) !== undefined,
+          exclude: grokBinary,
+        });
+        hint = " " + grokRecoveryHint(candidates, ALIAS);
+      } catch { /* 提示是锦上添花,找不到就用原文 */ }
       throw new Error(
         `Grok CLI is missing or too old for co-presence (${error?.message || error}). `
-        + "Install the pinned Grok Build CLI and verify `grok --help`.",
+        + "Install the pinned Grok Build CLI and verify `grok --help`." + hint,
       );
     }
 

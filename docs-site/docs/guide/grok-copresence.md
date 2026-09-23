@@ -1,4 +1,8 @@
-# Grok 人机共存 TUI
+# Grok 人机共存 TUI（预览）
+
+::: danger 预览 / Preview —— 要稳定的 Grok 节点请用 `grok-build-acp`
+`grok-build-cli` 共存是预览能力：人在 TUI 输入框里有字时网络任务只会排队、超时后失败；grok 自更新到验证清单外的版本后，下一次重启起不来（报错里给出 `GROK_BINARY=<已验证的旧版本> anet node start <节点>` 恢复命令）。无人值守、要稳定接活，用 `--runtime grok-build-acp`。
+:::
 
 ::: tip 状态更新（2026-08-29 生产实测）
 下面的 danger 块记录的是 2026-08-18 的验收状态，**已过时**：`grok-build-cli` 共存路径现已端到端跑通 —— macmini 上用 npm 安装的 `anet 2.3.0-preview.43` + 全局 `agent-node`（grok `1.0.5 (5115b46bc909)`，验证清单内）创建节点、`anet grok attach` 进入共享 TUI、网络任务注入并 19 秒收到回答。当前用法见 [Grok 共存 TUI（grok-build-cli）](/guide/grok-tui)。历史告诫保留如下供追溯。

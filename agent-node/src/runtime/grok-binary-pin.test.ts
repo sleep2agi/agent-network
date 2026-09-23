@@ -37,3 +37,52 @@ describe("grokBinaryPinToRecord", () => {
       .toEqual({ grokBinary: "/home/u/.grok/downloads/grok-1.0.5", grokBinaryVersion: "grok 1.0.5 (5115b46bc9) [stable]" });
   });
 });
+
+// ── #1615 恢复提示:在本机找验证过的旧 build 并写进报错 ─────────────────────────
+import { findVerifiedGrokCandidates, grokRecoveryHint } from "./grok-binary-pin";
+
+describe("#1615 recovery hint for an unverified PATH grok", () => {
+  const fs: Record<string, string[]> = {
+    "/h/.grok/downloads": ["grok-1.0.13-linux-x86_64", "grok-1.0.5-linux-x86_64", "grok-x.part", "notes.txt"],
+    "/h/.grok/bin": ["grok", "grok-1.0.5"],
+  };
+  const versions: Record<string, string> = {
+    "/h/.grok/downloads/grok-1.0.13-linux-x86_64": "grok 1.0.13 (5e9a58528b76)",
+    "/h/.grok/downloads/grok-1.0.5-linux-x86_64": "grok 1.0.5 (5115b46bc9)",
+    "/h/.grok/bin/grok": "grok 1.0.13 (5e9a58528b76)",
+    "/h/.grok/bin/grok-1.0.5": "grok 1.0.5 (5115b46bc9)",
+  };
+  const verified = new Set(["grok 1.0.5 (5115b46bc9)"]);
+  const base = {
+    home: "/h",
+    listDir: (d: string) => { if (!(d in fs)) throw new Error("ENOENT"); return fs[d]!; },
+    isRegularFile: (p: string) => p in versions,
+    probeVersion: (p: string) => versions[p],
+    isVerified: (v: string) => verified.has(v),
+  };
+
+  test("finds only verified builds, skips partial downloads and the failing binary", () => {
+    const c = findVerifiedGrokCandidates({ ...base, exclude: "/h/.grok/bin/grok" });
+    expect(c.map((x) => x.path)).toEqual(["/h/.grok/downloads/grok-1.0.5-linux-x86_64", "/h/.grok/bin/grok-1.0.5"]);
+    expect(c.every((x) => x.version === "grok 1.0.5 (5115b46bc9)")).toBe(true);
+  });
+
+  test("the hint is a copyable command naming the node alias", () => {
+    const c = findVerifiedGrokCandidates(base);
+    const h = grokRecoveryHint(c, "grok-node-a");
+    expect(h).toContain("GROK_BINARY=/h/.grok/downloads/grok-1.0.5-linux-x86_64 anet node start grok-node-a");
+    expect(h).toContain("pins it on the next successful start");
+  });
+
+  test("missing directories and no verified builds give an explicit no-candidate hint, not a throw", () => {
+    const none = findVerifiedGrokCandidates({ ...base, home: "/nowhere" });
+    expect(none).toEqual([]);
+    expect(grokRecoveryHint(none, undefined)).toContain("No verified grok build was found");
+  });
+
+  test("probe budget bounds the number of --version calls", () => {
+    let calls = 0;
+    findVerifiedGrokCandidates({ ...base, isVerified: () => false, probeVersion: (p) => { calls++; return versions[p]; }, maxProbes: 2 });
+    expect(calls).toBe(2);
+  });
+});
