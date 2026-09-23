@@ -230,10 +230,21 @@ node must register itself back to the hub. **Without those two lines it is not w
 it will not retry.
 
 **An already-running daemon that is not wired up — try the no-root path first.**
-Only `anet daemon init` / `start` / `up` auto-declare the pin (they call
-`prepareDaemonAnetBin()` internally). A daemon started via `anet node start`, pm2,
-systemd, or a hand-assembled command **never receives it** — yet it still registers,
-stays online, and heartbeats normally. The failure only surfaces when you create a node.
+`anet daemon init` / `start` / `up` / `restart` auto-declare the pin. Since **#1353**,
+`anet node start <daemon>` / `anet node restart <daemon>` / `anet project up` (which is how
+the boot sweep starts nodes) also self-resolve and verify the pin **with the same rules**
+when the node is a daemon (`role=host_supervisor`); the start log shows
+`[anet daemon] #1353 "<name>" is a daemon started via node start — pinned anet binary: …`.
+If verification fails it **still starts**, prints the fix, and the daemon reports
+"cannot create nodes" to the hub (the Dashboard greys it out).
+
+The pin is **not persisted**: every start re-resolves it from the running anet package, so
+after upgrading anet, `anet daemon restart <name>` is the re-pin. There is no separate pin
+file to maintain, and the trust root is unchanged.
+
+Only launches that bypass `anet` still **never receive** the pin: pm2 / systemd / a
+hand-assembled command that runs `agent-node` directly. Such a daemon still registers, stays
+online, and heartbeats, and shows "cannot create nodes" on the hub.
 
 ```bash
 anet node stop <name> && anet daemon start <name>    # no root required

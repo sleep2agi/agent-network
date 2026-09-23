@@ -215,9 +215,18 @@ pm2 的 `env`、或启动它的那个 shell 的 profile),否则重启后又会�
 且新节点自己注册回 hub。**看不到这两行就是没配对**——它不会重试。
 
 **已经在跑的 daemon 没配对怎么办 —— 先试不需要 root 的那条。**
-只有 `anet daemon init` / `start` / `up` 会自动声明 pin（它们内部调用
-`prepareDaemonAnetBin()`）。用 `anet node start`、pm2、systemd 或手工拼命令起的
-daemon **永远拿不到**，而它照样注册、在线、心跳正常 —— 失败只在建节点那一刻出现。
+`anet daemon init` / `start` / `up` / `restart` 会自动声明 pin；从 **#1353** 起,
+`anet node start <daemon>` / `anet node restart <daemon>` / `anet project up`(开机 sweep
+就是用它起节点的)在起的是 daemon(`role=host_supervisor`)时也会**按同一套规则**
+自解析并校验 pin,启动日志里会有一行
+`[anet daemon] #1353 "<name>" is a daemon started via node start — pinned anet binary: …`。
+校验不过时它**照常起来**并打出修法,daemon 把「不能建节点」报给 hub(Dashboard 会置灰)。
+
+pin **不落盘**:每次启动都从正在运行的 anet 包重新解析一遍,所以升级 anet 之后
+`anet daemon restart <name>` 就是重新钉死;不存在需要单独维护的 pin 文件,信任根不变。
+
+仍然**拿不到** pin 的只有绕过 `anet` 的起法:pm2 / systemd / 手工直接起 `agent-node`
+的 daemon —— 它照样注册、在线、心跳正常,会在 hub 上显示「不能建节点」。
 
 ```bash
 anet node stop <name> && anet daemon start <name>    # 不需要 root
