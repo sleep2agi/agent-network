@@ -3042,7 +3042,7 @@ async function setupCommand() {
         value: "grok-build-acp",
       },
       {
-        name: `grok-build-cli — Grok 共存 TUI（实验性 preview；仅可接收可信任务）`,
+        name: `grok-build-cli — Grok 共存 TUI（预览 / Preview：人在输入框打字时网络任务会排队，grok 自更新后需重新钉版；要稳定选 grok-build-acp）`,
         value: "grok-build-cli",
       },
       {
@@ -4007,9 +4007,12 @@ Co-presence (human TUI + network agent share one thread):
       prevents \`printf 'yes\\n' |\` from bypassing the prompt.
       Optional: --codex-bin <path> --codex-home <dir> --model <id> --port <p>
 
-Grok co-presence (preview only):
+Grok co-presence (Preview — for a stable Grok node use --runtime grok-build-acp):
   anet node create <name> --runtime grok-build-cli
-                                Create an experimental shared Grok TUI node
+                                Create a preview shared Grok TUI node. Known limits: network
+                                tasks queue while a human is typing in the TUI, and a grok
+                                self-update outside the verified list blocks the next restart
+                                (the error prints a GROK_BINARY recovery command).
   anet node create <name> --runtime grok-build-cli --tools WebSearch
                                 Opt into general web search (supports basic X URL search)
   anet grok attach <name>                  Attach this terminal (Ctrl-] detaches)
@@ -5195,7 +5198,7 @@ function createRuntimeChoices() {
     { value: "codex-sdk", name: "codex-sdk — OpenAI Codex, 复用 `codex login` 登录态" },
     { value: "codex-app-server", name: "codex-cli — Codex 共存 TUI（人和 Agent 共用一个 thread）" },
     { value: "grok-build-acp", name: "grok-build-acp — Grok Build ACP, 复用 `grok` CLI 登录态" },
-    { value: "grok-build-cli", name: "grok-build-cli — Grok 共存 TUI（preview，仅可信任务）" },
+    { value: "grok-build-cli", name: "grok-build-cli — Grok 共存 TUI（预览 / Preview；仅可信任务；要稳定选 grok-build-acp）" },
     { value: "opencode-cli", name: "opencode-cli — 公版 OpenCode CLI, Anthropic/OpenAI preset (RFC-029)" },
   ];
 }

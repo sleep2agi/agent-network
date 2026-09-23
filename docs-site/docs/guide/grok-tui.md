@@ -1,4 +1,8 @@
-# Grok 共存 TUI
+# Grok 共存 TUI（预览）
+
+::: danger 预览 / Preview —— 要稳定的 Grok 节点请用 `grok-build-acp`
+`grok-build-cli` 共存是**预览能力**，已知限制：人在 TUI 输入框里有字时网络任务只会排队，超时后失败；grok 自更新到验证清单外的版本后，节点**下一次重启**起不来（报错会给出一条 `GROK_BINARY=<已验证的旧版本> anet node start <节点>` 恢复命令，成功启动后自动钉版）。需要无人值守、稳定接活的 Grok 节点，用 `anet node create <name> --runtime grok-build-acp`。
+:::
 
 `grok-build-cli` 让一个 Agent Network 节点持有唯一的真实 Grok TUI。你从另一个终端用 `anet grok attach` 进入同一界面；CommHub 网络任务也会排队进入同一会话。人类输入优先，网络任务按 FIFO 执行。
 

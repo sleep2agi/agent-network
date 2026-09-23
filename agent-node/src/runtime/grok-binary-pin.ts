@@ -55,3 +55,64 @@ export function grokBinaryPinToRecord(resolvedAbsolute: string, versionLine: str
   if (!isAbsolute(resolvedAbsolute)) return null;
   return { grokBinary: resolvedAbsolute, grokBinaryVersion: versionLine.trim() };
 }
+
+// ── #1615 恢复提示 ────────────────────────────────────────────────────────────
+// 钉版只在「上次启动成功过」时有东西可钉。第一次撞上自更新(或 config 里没钉)时,
+// 报错原来只说「Install the pinned Grok Build CLI」,而验证过的那个旧二进制**通常还在
+// 本机**(grok 自更新把旧版留在 ~/.grok/downloads/,手工装的常在 ~/.grok/bin/grok-<ver>)。
+// 这里只**找**并**逐个跑 --version 核对验证清单**,把能用的写进报错,给出一条可以直接
+// 复制的恢复命令。不自动换用:fail-closed 语义不变,由人决定用哪一个。
+
+export interface GrokRecoveryCandidate {
+  path: string;
+  version: string;
+}
+
+export function findVerifiedGrokCandidates(input: {
+  home: string;
+  /** 目录下的条目名;目录不存在时返回 []。 */
+  listDir: (dir: string) => string[];
+  isRegularFile: (p: string) => boolean;
+  /** 跑 `<path> --version`,失败返回 undefined。 */
+  probeVersion: (p: string) => string | undefined;
+  isVerified: (versionLine: string) => boolean;
+  /** 已经失败的那个(不再推荐它自己)。 */
+  exclude?: string;
+  /** 最多探测几个文件,防止目录里东西太多时启动报错变慢。 */
+  maxProbes?: number;
+}): GrokRecoveryCandidate[] {
+  const dirs = [`${input.home}/.grok/downloads`, `${input.home}/.grok/bin`];
+  const max = input.maxProbes ?? 12;
+  const seen = new Set<string>();
+  const out: GrokRecoveryCandidate[] = [];
+  let probes = 0;
+  for (const dir of dirs) {
+    let names: string[] = [];
+    try { names = input.listDir(dir); } catch { names = []; }
+    for (const name of [...names].sort().reverse()) {
+      if (!/^grok/.test(name) || name.endsWith(".tmp") || name.endsWith(".part")) continue;
+      const p = `${dir}/${name}`;
+      if (seen.has(p) || p === input.exclude) continue;
+      seen.add(p);
+      if (!input.isRegularFile(p)) continue;
+      if (probes >= max) return out;
+      probes++;
+      const v = input.probeVersion(p);
+      if (v && input.isVerified(v.trim())) out.push({ path: p, version: v.trim() });
+    }
+  }
+  return out;
+}
+
+export function grokRecoveryHint(candidates: GrokRecoveryCandidate[], alias: string | undefined): string {
+  const who = alias && alias.trim() ? alias.trim() : "<alias>";
+  if (candidates.length === 0) {
+    return "No verified grok build was found under ~/.grok/downloads or ~/.grok/bin; install a verified build and point GROK_BINARY at it.";
+  }
+  const first = candidates[0]!;
+  const others = candidates.slice(1).map((c) => `${c.path} (${c.version})`);
+  return `A verified build is still on this machine: ${first.path} (${first.version}). `
+    + `Recover with: GROK_BINARY=${first.path} anet node start ${who}`
+    + (others.length ? ` — other verified builds: ${others.join(", ")}` : "")
+    + ". The node pins it on the next successful start, so later restarts need no variable.";
+}
