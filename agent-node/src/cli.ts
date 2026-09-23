@@ -3138,7 +3138,8 @@ async function processWithCodex(
     };
     // #1645 —— 起线程前看一眼 codex 自己的 models 缓存:上游给了本机不认识的档位,
     // resume 会以 unknown variant 致命退出、表现为 300s 超时。只警告,不拦。
-    for (const line of describeUnknownReasoningEfforts()) warn(line);
+    // #1973 —— 用 #1969 解析出的实际 codex 版本判断,不再只信硬编码的 0.133 档位集合。
+    for (const line of describeUnknownReasoningEfforts(undefined, getCodexBinResolution().version)) warn(line);
     if (SESSION_ID) {
       // #1645 —— 线程有多大在 resume 前就写在 codex 的 rollout 文件里;太大的线程 resume 时
       // 上游 compaction 常失败、表现为 300s 超时。这里先说一句,不拦。
