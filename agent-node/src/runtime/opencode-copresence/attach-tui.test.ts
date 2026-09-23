@@ -1,18 +1,28 @@
-import { spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, test } from "bun:test";
 import {
   ATTACH_GEN_ENV,
+  ATTACH_PLACEHOLDER_MARKER,
   attachRecordPath,
+  paneIsPlaceholder,
   previousAttachRecordPath,
   readAttachRecord,
   readStartTicks,
   relaunchPreviousAttach,
   renderAttachRecordShell,
   stopRecordedAttach,
+  type TmuxRunner,
 } from "./attach-tui";
+
+function tmuxAvailable(): boolean {
+  try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; }
+}
+const tmuxOnly = process.platform === "linux" && tmuxAvailable() ? test : test.skip;
+const noTmux: TmuxRunner = () => { throw Object.assign(new Error("spawn tmux ENOENT"), { code: "ENOENT" }); };
+
 
 const linuxOnly = process.platform === "linux" ? test : test.skip;
 
@@ -65,7 +75,8 @@ describe("#1957 attach TUI record / stop / relaunch", () => {
     try {
       writeFileSync(attachRecordPath(t.root), JSON.stringify({ pid: s.identity.pid, startTicks: s.identity.startTicks, pane: "%7", gen: "ses_a" }));
       const logs: string[] = [];
-      const out = stopRecordedAttach(t.root, { log: (m) => logs.push(m), warn: (m) => logs.push("WARN " + m) });
+      // restart without tmux available → SIGTERM fallback, pane kept in .prev
+      const out = stopRecordedAttach(t.root, { restart: true, tmux: noTmux, log: (m) => logs.push(m), warn: (m) => logs.push("WARN " + m) });
       expect(out.action).toBe("signalled");
       const exit = await s.exited;
       expect(exit.signal).toBe("SIGTERM");
@@ -81,7 +92,7 @@ describe("#1957 attach TUI record / stop / relaunch", () => {
     try {
       writeFileSync(attachRecordPath(t.root), JSON.stringify({ pid: s.identity.pid, startTicks: String(Number(s.identity.startTicks) + 1), pane: "", gen: "ses_a" }));
       const warns: string[] = [];
-      const out = stopRecordedAttach(t.root, { warn: (m) => warns.push(m) });
+      const out = stopRecordedAttach(t.root, { restart: true, tmux: noTmux, warn: (m) => warns.push(m) });
       expect(out.action).toBe("skipped");
       expect(warns.join("\n")).toContain("pid was reused");
       await new Promise((r) => setTimeout(r, 100));
@@ -133,4 +144,69 @@ describe("#1957 attach TUI record / stop / relaunch", () => {
       expect(logs.join("\n")).toContain("pid 4343) stopped; relaunch: /x/opencode-attach.sh");
     } finally { t.close(); }
   });
+
+  linuxOnly("a plain stop (not a restart) SIGTERMs the TUI and leaves no .prev record behind", async () => {
+    const t = tmp();
+    const s = await spawnSleeper();
+    try {
+      writeFileSync(attachRecordPath(t.root), JSON.stringify({ pid: s.identity.pid, startTicks: s.identity.startTicks, pane: "%7", gen: "ses_a" }));
+      const out = stopRecordedAttach(t.root, { restart: false, tmux: noTmux });
+      expect(out.action).toBe("signalled");
+      expect((await s.exited).signal).toBe("SIGTERM");
+      expect(existsSync(previousAttachRecordPath(t.root))).toBe(false);
+    } finally { try { s.child.kill("SIGKILL"); } catch {} t.close(); }
+  });
+
+  tmuxOnly("restart keeps the tmux pane alive with a placeholder, and the ready-time relaunch respawns the new launcher into it", async () => {
+    const t = tmp();
+    const sock = `anet-test-${process.pid}-${Date.now()}`;
+    const tmux: TmuxRunner = (args) => execFileSync("tmux", ["-L", sock, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
+    try {
+      // a launcher that records itself (as the real one does) then becomes the attach process
+      const recordPath = attachRecordPath(t.root);
+      const oldLauncher = join(t.root, "old-launcher.sh");
+      writeFileSync(oldLauncher, ["#!/usr/bin/env bash", "set -eu", ...renderAttachRecordShell(recordPath, "ses_old"), "exec sleep 300", ""].join("\n"), { mode: 0o700 });
+      tmux(["new-session", "-d", "-s", "node-a", "-x", "80", "-y", "24", `bash ${JSON.stringify(oldLauncher)}`]);
+      const deadline = Date.now() + 3_000;
+      while (!existsSync(recordPath) && Date.now() < deadline) Bun.sleepSync(20);
+      const record = readAttachRecord(recordPath)!;
+      expect(record.pane).toMatch(/^%\d+$/);
+      expect(tmux(["display-message", "-p", "-t", record.pane, "#{pane_pid}"]).trim()).toBe(String(record.pid));
+
+      // close() on a config restart
+      const logs: string[] = [];
+      const out = stopRecordedAttach(t.root, { restart: true, tmux, log: (m) => logs.push(m) });
+      expect(out.action).toBe("placeholder");
+      // the pane still exists and shows the placeholder; the old attach pid is gone
+      expect(tmux(["display-message", "-p", "-t", record.pane, "#{pane_current_command}"]).trim()).toBe("sleep");
+      expect(paneIsPlaceholder(tmux, record.pane)).toBe(true);
+      expect(tmux(["display-message", "-p", "-t", record.pane, "#{pane_pid}"]).trim()).not.toBe(String(record.pid));
+      expect(logs.join("\n")).toContain(`replaced attach TUI pid ${record.pid} in tmux pane ${record.pane}`);
+      const shown = tmux(["capture-pane", "-p", "-t", record.pane]);
+      expect(shown).toContain(ATTACH_PLACEHOLDER_MARKER);
+
+      // the next generation is ready: the regenerated launcher goes back into that pane
+      const newLauncher = join(t.root, "opencode-attach.sh");
+      writeFileSync(newLauncher, "#!/usr/bin/env bash\nexec tail -f /dev/null\n", { mode: 0o700 });
+      const relaunch = relaunchPreviousAttach(t.root, newLauncher, { tmux, log: (m) => logs.push(m) });
+      expect(relaunch).toEqual({ action: "respawned", pane: record.pane });
+      const until = Date.now() + 3_000;
+      let current = "";
+      while (Date.now() < until) { current = tmux(["display-message", "-p", "-t", record.pane, "#{pane_current_command}"]).trim(); if (current === "tail") break; Bun.sleepSync(50); }
+      expect(current).toBe("tail");
+      expect(paneIsPlaceholder(tmux, record.pane)).toBe(false);
+
+      // a later plain stop of a node whose restart never reached ready removes a leftover placeholder pane
+      writeFileSync(previousAttachRecordPath(t.root), JSON.stringify({ pid: 4242, startTicks: "1", pane: record.pane, gen: "x" }));
+      tmux(["respawn-pane", "-k", "-t", record.pane, `bash -c 'printf "%s\\n" "${ATTACH_PLACEHOLDER_MARKER}…"; exec sleep 3600'`]);
+      expect(paneIsPlaceholder(tmux, record.pane)).toBe(true);
+      stopRecordedAttach(t.root, { restart: false, tmux });
+      let gone = false;
+      try { tmux(["display-message", "-p", "-t", record.pane, "#{pane_id}"]); } catch { gone = true; }
+      expect(gone).toBe(true);
+    } finally {
+      try { execFileSync("tmux", ["-L", sock, "kill-server"], { stdio: "ignore" }); } catch {}
+      t.close();
+    }
+  }, 20_000);
 });

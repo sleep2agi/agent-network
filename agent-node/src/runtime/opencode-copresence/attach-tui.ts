@@ -99,7 +99,55 @@ export function readAttachRecord(path: string): AttachRecord | undefined {
   }
 }
 
+/** Runs one tmux command; tests substitute a runner bound to a throwaway `-L` server. */
+export type TmuxRunner = (args: string[]) => string;
+
+export const defaultTmuxRunner: TmuxRunner = (args) =>
+  execFileSync("tmux", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
+
+/** Text the placeholder prints; also how a placeholder pane is recognised later. */
+export const ATTACH_PLACEHOLDER_MARKER = "[anet] node restarting, TUI will reattach";
+
+function placeholderCommand(): string {
+  return `bash -c ${shellQuote(`printf '%s\\n' ${shellQuote(ATTACH_PLACEHOLDER_MARKER + "…")}; exec sleep 3600`)}`;
+}
+
+function paneField(tmux: TmuxRunner, pane: string, field: string): string | undefined {
+  try {
+    return tmux(["display-message", "-p", "-t", pane, `#{${field}}`]).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Replace the attach process in its tmux pane with a visible placeholder.
+ * `respawn-pane -k` kills the pane's current command *and keeps the pane*,
+ * which plain SIGTERM does not: with tmux's default `remain-on-exit off`
+ * the pane (and a one-window session) is destroyed the moment the attach
+ * exits, so the ready-time relaunch found nothing to respawn into. The
+ * pane's own pid is compared to the record first so we never `-k` a pane
+ * some other process has since taken over.
+ */
+function replaceWithPlaceholder(tmux: TmuxRunner, pane: string, expectedPid: number): boolean {
+  const panePid = Number(paneField(tmux, pane, "pane_pid"));
+  if (panePid !== expectedPid) return false;
+  try {
+    tmux(["respawn-pane", "-k", "-t", pane, placeholderCommand()]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the pane exists and is running our placeholder (not a human's shell). */
+export function paneIsPlaceholder(tmux: TmuxRunner, pane: string): boolean {
+  const start = paneField(tmux, pane, "pane_start_command") ?? "";
+  return start.includes(ATTACH_PLACEHOLDER_MARKER);
+}
+
 export type StopAttachOutcome =
+  | { action: "placeholder"; pid: number; pane: string }
   | { action: "signalled"; pid: number; pane: string }
   | { action: "gone"; pid: number; pane: string }
   | { action: "skipped"; pid?: number; pane: string; reason: string };
@@ -112,16 +160,38 @@ export type StopAttachOutcome =
  */
 export function stopRecordedAttach(
   workDir: string,
-  opts: { signal?: NodeJS.Signals; log?: (m: string) => void; warn?: (m: string) => void; kill?: (pid: number, signal: NodeJS.Signals) => void } = {},
+  opts: {
+    /** true on a config restart: keep the pane alive with a placeholder for the next generation. */
+    restart?: boolean;
+    signal?: NodeJS.Signals;
+    log?: (m: string) => void;
+    warn?: (m: string) => void;
+    kill?: (pid: number, signal: NodeJS.Signals) => void;
+    tmux?: TmuxRunner;
+  } = {},
 ): StopAttachOutcome {
+  const tmux = opts.tmux ?? defaultTmuxRunner;
   const recordPath = attachRecordPath(workDir);
+  const prev = previousAttachRecordPath(workDir);
+  if (!opts.restart) {
+    // A stopped node must not leave a sleeping placeholder pane behind
+    // (a previous restart that never reached `ready`, then a stop).
+    const stale = readAttachRecord(prev);
+    if (stale?.pane && paneIsPlaceholder(tmux, stale.pane)) {
+      try { tmux(["kill-pane", "-t", stale.pane]); opts.log?.(`[opencode-copresence] removed placeholder pane ${stale.pane}`); } catch {}
+    }
+    rmSync(prev, { force: true });
+  }
   const record = readAttachRecord(recordPath);
   if (!record) {
     rmSync(recordPath, { force: true });
     return { action: "skipped", pane: "", reason: "no attach record (no human TUI was launched from this generation)" };
   }
-  const prev = previousAttachRecordPath(workDir);
-  try { renameSync(recordPath, prev); } catch { rmSync(recordPath, { force: true }); }
+  if (opts.restart) {
+    try { renameSync(recordPath, prev); } catch { rmSync(recordPath, { force: true }); }
+  } else {
+    rmSync(recordPath, { force: true });
+  }
   const liveTicks = readStartTicks(record.pid);
   if (liveTicks === undefined && !processExists(record.pid)) {
     opts.log?.(`[opencode-copresence] attach TUI pid ${record.pid} already gone`);
@@ -135,6 +205,10 @@ export function stopRecordedAttach(
         : `start ticks differ (record ${record.startTicks}, live ${liveTicks}); pid was reused`;
     opts.warn?.(`[opencode-copresence] not signalling attach TUI pid ${record.pid}: ${reason}`);
     return { action: "skipped", pid: record.pid, pane: record.pane, reason };
+  }
+  if (opts.restart && record.pane && replaceWithPlaceholder(tmux, record.pane, record.pid)) {
+    opts.log?.(`[opencode-copresence] replaced attach TUI pid ${record.pid} in tmux pane ${record.pane} with a restart placeholder`);
+    return { action: "placeholder", pid: record.pid, pane: record.pane };
   }
   const signal = opts.signal ?? "SIGTERM";
   try {
@@ -152,8 +226,8 @@ export type RelaunchAttachOutcome =
   | { action: "manual"; reason: string };
 
 /** Runs `tmux respawn-pane`; throws when tmux is missing or the pane is gone. */
-export function defaultTmuxRespawn(pane: string, scriptPath: string): void {
-  execFileSync("tmux", ["respawn-pane", "-k", "-t", pane, `bash ${shellQuote(scriptPath)}`], { stdio: "ignore", timeout: 5_000 });
+export function defaultTmuxRespawn(pane: string, scriptPath: string, tmux: TmuxRunner = defaultTmuxRunner): void {
+  tmux(["respawn-pane", "-k", "-t", pane, `bash ${shellQuote(scriptPath)}`]);
 }
 
 function shellQuote(value: string): string {
@@ -168,7 +242,7 @@ function shellQuote(value: string): string {
 export function relaunchPreviousAttach(
   workDir: string,
   scriptPath: string,
-  opts: { log?: (m: string) => void; warn?: (m: string) => void; respawn?: (pane: string, scriptPath: string) => void } = {},
+  opts: { log?: (m: string) => void; warn?: (m: string) => void; respawn?: (pane: string, scriptPath: string) => void; tmux?: TmuxRunner } = {},
 ): RelaunchAttachOutcome | undefined {
   const prev = previousAttachRecordPath(workDir);
   const record = readAttachRecord(prev);
@@ -180,7 +254,7 @@ export function relaunchPreviousAttach(
     return { action: "manual", reason: "previous attach was not inside a tmux pane" };
   }
   try {
-    (opts.respawn ?? defaultTmuxRespawn)(record.pane, scriptPath);
+    (opts.respawn ?? ((pane, script) => defaultTmuxRespawn(pane, script, opts.tmux)))(record.pane, scriptPath);
   } catch (error: any) {
     const reason = `tmux respawn-pane ${record.pane} failed: ${error?.code === "ENOENT" ? "tmux not found" : (error?.message ?? error)}`;
     opts.warn?.(`[opencode-copresence] ${hint} (${reason})`);
