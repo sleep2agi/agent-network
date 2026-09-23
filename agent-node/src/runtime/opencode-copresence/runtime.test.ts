@@ -324,6 +324,9 @@ describe("OpenCode native serve+attach copresence", () => {
       const launcher = readFileSync(runtime.attachScriptPath, "utf8");
       expect(launcher).toContain("opencode' attach");
       expect(launcher).toContain("--session 'ses_test123'");
+      // #1957 — the launcher records itself so close() can stop exactly that TUI
+      expect(launcher).toContain("export ANET_OPENCODE_ATTACH_GEN='ses_test123'");
+      expect(launcher).toContain("opencode-attach.json");
 
       await runtime.notify("notice:dashboard-message", 5_000);
 
