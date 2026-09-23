@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ReasoningEffort } from "../types/codex/ReasoningEffort.js";
+import { compareCodexVersions } from "./codex-bin.js";
 
 /** 与 types/codex/ReasoningEffort.ts 的联合类型逐项对应(测试钉住)。 */
 export const KNOWN_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const satisfies readonly ReasoningEffort[];
@@ -60,8 +61,19 @@ export function findUnknownReasoningEfforts(
   return { unknown, clientVersion };
 }
 
-/** 读文件 + 判断;任何读/解析失败都返回 null(没证据 ≠ 没问题,但也不能把节点吓停)。 */
-export function describeUnknownReasoningEfforts(path: string = codexModelsCachePath()): string[] {
+/**
+ * 读文件 + 判断;任何读/解析失败都返回 [](没证据 ≠ 没问题,但也不能把节点吓停)。
+ *
+ * #1973 —— `KNOWN_REASONING_EFFORTS` 是 codex 0.133(内置)那一代的集合。#1969 之后节点
+ * 可能跑更新的 codex(`selectedCodexVersion`,来自 codex-bin.ts 的解析结果)。规则:
+ * - 选中的 codex 版本已知且 ≥ 缓存写入者(`client_version`)⇒ 它认得自己写下的档位,不警告;
+ * - 选中的版本比写入者旧 ⇒ 照旧警告,并写明两个版本;
+ * - 任一版本未知 ⇒ 退回硬编码集合的老判断。
+ */
+export function describeUnknownReasoningEfforts(
+  path: string = codexModelsCachePath(),
+  selectedCodexVersion?: string,
+): string[] {
   let cache: unknown;
   try {
     cache = JSON.parse(readFileSync(path, "utf8"));
@@ -70,9 +82,14 @@ export function describeUnknownReasoningEfforts(path: string = codexModelsCacheP
   }
   const report = findUnknownReasoningEfforts(cache);
   if (report.unknown.length === 0) return [];
+  const selected = selectedCodexVersion && selectedCodexVersion.trim() ? selectedCodexVersion.trim() : null;
+  if (selected && report.clientVersion && compareCodexVersions(selected, report.clientVersion) >= 0) return [];
+  const olderThanWriter = !!(selected && report.clientVersion);
+  const who = olderThanWriter
+    ? `本机选中的 codex ${selected} 比写缓存的 codex ${report.clientVersion} 旧,可能不认识`
+    : `本机 codex 可能不认识(只按内置集合 ${KNOWN_REASONING_EFFORTS.join("/")} 判断${report.clientVersion ? `;缓存由 codex ${report.clientVersion} 写下` : ""}${selected ? "" : ";选中的 codex 版本未知"})`;
   return [
-    `[codex] 上游 models 缓存里有本机 codex 不认识的推理档位: ${report.unknown.join(", ")}`
-      + `(本机只认 ${KNOWN_REASONING_EFFORTS.join("/")}${report.clientVersion ? `;缓存由 codex ${report.clientVersion} 写下` : ""})。`,
-    `[codex] resume 线程时 codex 会以 \`unknown variant\` 致命退出,表现为 300s 超时(#1645)。升级 codex-cli 后重启节点;缓存文件: ${path}`,
+    `[codex] 上游 models 缓存里有推理档位: ${report.unknown.join(", ")} —— ${who}。`,
+    `[codex] 若确实不认识,resume 线程时 codex 会以 \`unknown variant\` 致命退出,表现为 300s 超时(#1645)。升级 codex-cli 后重启节点;缓存文件: ${path}`,
   ];
 }
