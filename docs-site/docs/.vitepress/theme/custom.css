@@ -1271,51 +1271,38 @@
 .hero-network { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.9; }
 .VPHero .image { max-width: 520px !important; }
 /* 2026-09-15 v2:两种主题都用深色控制台(浅色页面上的灰底灰字列表被 Vincent 判「特别丑」) */
-.hero-live {
-  --live-bg-a: #101319; --live-bg-b: #0b0d12; --live-line: rgba(251, 191, 36, 0.14);
-  --live-text: #e8eaed; --live-muted: #8a94a3; --live-dim: #5c6675;
-  width: min(480px, 92vw); border-radius: 18px; padding: 14px 16px 12px;
-  color: var(--live-text);
-  background:
-    radial-gradient(120% 80% at 100% 0%, rgba(251, 191, 36, 0.10), transparent 55%),
-    repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,0.012) 3px 4px),
-    linear-gradient(180deg, var(--live-bg-a), var(--live-bg-b));
-  border: 1px solid var(--live-line);
-  box-shadow: 0 30px 80px -30px rgba(245, 158, 11, 0.45), 0 0 0 1px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.05) inset;
-  font-size: 13px; text-align: left; animation: hero-live-in 0.8s cubic-bezier(0.21, 1.02, 0.73, 1) both;
+/* ---------- Hero screenshot (2026-09-23:真实桌面端截图,替代编造的 commhub 终端与数字) ---------- */
+.hero-shot {
+  width: min(560px, 92vw);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b0d12;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 40px 90px -36px rgba(245, 158, 11, 0.38),
+    0 24px 48px -24px rgba(0, 0, 0, 0.7),
+    0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  animation: hero-shot-in 0.3s ease-out both;
+  position: relative;
 }
-.dark .hero-live { --live-bg-a: #13161e; --live-bg-b: #0c0e14; box-shadow: 0 30px 80px -30px rgba(250, 204, 21, 0.4), 0 0 0 1px rgba(255,255,255,0.03) inset; }
-@keyframes hero-live-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-.hero-live-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
-.hero-live-bar .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; opacity: 0.9; }
-.hero-live-bar .dot-r { background: #ff5f57; } .hero-live-bar .dot-y { background: #febc2e; } .hero-live-bar .dot-g { background: #28c840; }
-.hero-live-title { margin-left: 8px; font-family: var(--vp-font-family-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--live-muted); }
-.hero-live-pill { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-family: var(--vp-font-family-mono); font-size: 10.5px; letter-spacing: 0.08em; color: #fbbf24; background: rgba(251, 191, 36, 0.10); border: 1px solid rgba(251, 191, 36, 0.28); }
-.hero-live-pill i { width: 6px; height: 6px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6); animation: hero-live-pulse 1.6s ease-out infinite; }
-@keyframes hero-live-pulse { 0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6); } 100% { box-shadow: 0 0 0 7px rgba(251, 191, 36, 0); } }
-.hero-live-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-height: 248px; position: relative; }
-.hero-live-msg { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; padding: 9px 11px 9px 9px; border-radius: 12px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.05); border-left: 2px solid rgba(251, 191, 36, 0.9); }
-.hero-live-msg.reply { border-left-color: #fb923c; background: rgba(251, 146, 60, 0.06); }
-.hero-live-msg .avatar { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #0b0d12; background: linear-gradient(135deg, hsl(var(--h) 75% 68%), hsl(calc(var(--h) + 30) 75% 55%)); box-shadow: 0 4px 12px -4px hsl(var(--h) 70% 50% / 0.7); }
-.hero-live-msg .body { min-width: 0; }
-.hero-live-msg .meta { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 12px; }
-.hero-live-msg .who { font-weight: 650; color: var(--live-text); }
-.hero-live-msg .who.to { color: #fbbf24; }
-.hero-live-msg .arrow { color: var(--live-dim); }
-.hero-live-msg .kind { font-family: var(--vp-font-family-mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; padding: 1px 6px; border-radius: 5px; color: var(--live-muted); background: rgba(255,255,255,0.06); }
-.hero-live-msg.reply .kind { color: #fdba74; background: rgba(251, 146, 60, 0.14); }
-.hero-live-msg .at { margin-left: auto; font-family: var(--vp-font-family-mono); font-size: 10.5px; color: var(--live-dim); font-variant-numeric: tabular-nums; }
-.hero-live-msg p { margin: 3px 0 0; color: #c9d0da; line-height: 1.5; font-size: 12.5px; overflow-wrap: anywhere; }
-.msg-enter-from { opacity: 0; transform: translateY(12px); }
-.msg-enter-active { transition: all 0.45s cubic-bezier(0.21, 1.02, 0.73, 1); }
-.msg-leave-active { position: absolute; width: 100%; opacity: 0; transition: opacity 0.2s; }
-.msg-move { transition: transform 0.4s; }
-.hero-live-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.07); }
-.hero-live-stats div { display: flex; flex-direction: column; align-items: center; }
-.hero-live-stats strong { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; background: linear-gradient(90deg, #fbbf24, #fb923c); -webkit-background-clip: text; background-clip: text; color: transparent; font-variant-numeric: tabular-nums; }
-.hero-live-stats span { font-size: 11px; color: var(--live-muted); }
-@media (max-width: 959px) { .hero-live { margin: 8px auto 0; } .hero-live-list { min-height: 0; } }
-@media (prefers-reduced-motion: reduce) { .hero-live, .VPHero .name, .VPHero .text, .VPHero .tagline { animation: none !important; } }
+.hero-shot::before {
+  /* 一点点琥珀色的辉光,和标题渐变同色系;只在框外,不盖住截图 */
+  content: ""; position: absolute; inset: -14% -8% auto -8%; height: 60%; z-index: -1; pointer-events: none;
+  background: radial-gradient(60% 70% at 70% 30%, rgba(251, 191, 36, 0.16), transparent 70%);
+  filter: blur(18px);
+}
+@keyframes hero-shot-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.hero-shot-bar {
+  display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px;
+  background: linear-gradient(180deg, #1a1d25, #14171e);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.hero-shot-bar .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.hero-shot-bar .dot-r { background: #ff5f57; } .hero-shot-bar .dot-y { background: #febc2e; } .hero-shot-bar .dot-g { background: #28c840; }
+.hero-shot-title { margin: 0 auto; transform: translateX(-21px); font-size: 12px; letter-spacing: 0.02em; color: #8a94a3; font-weight: 500; }
+.hero-shot-img { display: block; width: 100%; height: auto; aspect-ratio: 1120 / 720; }
+@media (max-width: 959px) { .hero-shot { margin: 8px auto 0; width: 100%; max-width: 640px; } }
+@media (prefers-reduced-motion: reduce) { .hero-shot, .VPHero .name, .VPHero .text, .VPHero .tagline { animation: none !important; } }
 
 
 /* ---------- 2026-09-15 宽屏下实时卡片不再顶进导航栏(VitePress 把 hero image 垂直居中,卡片高就上漂) ---------- */
@@ -1325,7 +1312,7 @@
   .VPHero .container { align-items: flex-start !important; }
   .VPHero .image { align-self: flex-start !important; }
   .VPHero .image-container { margin: 0 auto !important; } /* 只在宽屏居中;≤720px 沿用上面 24px 0 0 的手机间距 */
-  .VPHero .image-container .hero-live { width: 100% !important; max-width: 100% !important; } /* 卡片跟着列宽走;定宽 520 会把列撑到容器外(1000px 视口实测右边被裁) */
+  .VPHero .image-container .hero-shot { width: 100% !important; max-width: 100% !important; } /* 卡片跟着列宽走;定宽 520 会把列撑到容器外(1000px 视口实测右边被裁) */
 }
 @media (min-width: 960px) and (max-width: 1279px) {
   /* 容器只有 ~870–1150px:VitePress 给文字列 2/3 宽,图片列只剩 ~290px;这里改成 55/45,卡片有 390–520px 可用 */
