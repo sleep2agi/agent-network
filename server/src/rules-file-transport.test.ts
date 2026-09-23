@@ -105,8 +105,10 @@ describe("app#225 rules file — schema has no path", () => {
         const shape = schema?.shape ?? schema?._def?.shape?.() ?? schema ?? {};
         return Object.keys(shape).sort();
       };
-      expect(shapeKeys("read_node_rules_file")).toEqual(["child_node_id", "network_id", "node_id"]);
-      expect(shapeKeys("write_node_rules_file")).toEqual(["child_node_id", "content", "network_id", "node_id"]);
+      // `alias` (app#225 follow-up) names a TARGET node/session, not a file —
+      // the no-path regex below still covers it.
+      expect(shapeKeys("read_node_rules_file")).toEqual(["alias", "child_node_id", "network_id", "node_id"]);
+      expect(shapeKeys("write_node_rules_file")).toEqual(["alias", "child_node_id", "content", "network_id", "node_id"]);
       expect(shapeKeys("get_rules_file_request")).toEqual([]);
       // ack 的 file_name 是节点**回报**它用了哪个文件,不是客户端**指定**用哪个文件。
       expect(shapeKeys("ack_rules_file_request")).toEqual(["content", "error", "exists", "file_name", "request_id", "status"]);

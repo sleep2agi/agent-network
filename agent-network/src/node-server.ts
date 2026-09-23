@@ -41,6 +41,7 @@ import {
   normalizeOutboundAttachments,
 } from "./outbound-attachments";
 import { attachLocalLinks } from "./reply-local-links";
+import { drainRulesFileRequests, handleRulesFileEvent } from "./node-server-rules-file";
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
 
 // ── .env loader helper ────────────────────────────────
@@ -599,6 +600,8 @@ async function reregister(): Promise<void> {
       host: getHostTelemetry(),
       process_telemetry: getProcessTelemetry(),
       tmux_name: TMUX_NAME || undefined,
+      // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
+      rules_file_capable: true,
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
   } catch (e) {
@@ -682,8 +685,15 @@ async function connectSSE() {
 async function handleSSEEvent(event: any) {
   if (event.type === "connected") {
     log(`SSE connected as "${ALIAS}"`);
+    // app#225 follow-up —— 断线/未连上期间桌面端可能已发起规则文件请求;连上后补拉一次
+    // (没有就是一次空拉)。不 await:别让 SSE 读循环卡在一次 hub 往返上。
+    void drainRulesFileRequests({ callCommHub, workDir: process.cwd(), log }, "connect catch-up");
     return;
   }
+
+  // app#225 follow-up —— 规则文件(CLAUDE.md)远程读写门铃。文件名固定 CLAUDE.md、
+  // 目录固定本进程 cwd,见 node-server-rules-file.ts。
+  if (await handleRulesFileEvent(event, { callCommHub, workDir: process.cwd(), log })) return;
 
   if (event.type === "new_message") {
     log(`← message from ${event.from}: ${(event.message as string).slice(0, 60)}`);
@@ -787,6 +797,8 @@ async function main() {
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
     tmux_name: TMUX_NAME || undefined,
+    // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
+    rules_file_capable: true,
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
     .catch((e) => log(`warning: could not register: ${e}`));
@@ -808,6 +820,8 @@ async function main() {
       host: getHostTelemetry(),
       process_telemetry: getProcessTelemetry(),
       tmux_name: TMUX_NAME || undefined,
+      // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
+      rules_file_capable: true,
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
 

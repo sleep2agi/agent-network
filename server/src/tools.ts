@@ -713,8 +713,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           create_capability_observed_ms_ago: z.number().nullable().catch(null).optional(),
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
+      // app#225 follow-up — the reporting process answers the `rules_file`
+      // doorbell (agent-node, and the claude-code channel server node-server).
+      // Top-level instead of config_snapshot: claude-code sessions usually have
+      // no `nodes` row, and config_snapshot is persisted per node_id. Only a
+      // node token bound to this same alias can set it; see the UPDATE below.
+      rules_file_capable: z.literal(true).optional(),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -912,6 +918,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              handover.process_uptime_seconds ?? null, handover.process_in_flight_count ?? null, handover.external_schedules ?? null,
              handover.registered_at ?? null],
           );
+        }
+        // app#225 follow-up — separate statement on purpose: the INSERT above is
+        // byte-pinned by test698's mutation harness. Sticky: only ever set to 1,
+        // and only by a node token bound to this alias (a user token or another
+        // node cannot mark someone else's session as able to serve its files).
+        if (rulesFileCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
+          db.run("UPDATE sessions SET rules_file_capable = 1 WHERE resume_id = ?1", [resume_id]);
         }
         if (host || proc) {
           db.run(
@@ -3102,21 +3115,51 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   const enqueueRulesFileRequest = (
     op: "read" | "write",
-    a: { node_id?: string; child_node_id?: string; network_id?: string; content?: string },
+    a: { node_id?: string; child_node_id?: string; alias?: string; network_id?: string; content?: string },
   ) => {
-    const idArg = resolveNodeIdArg({ node_id: a.node_id, child_node_id: a.child_node_id });
-    if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
-    const nodeId = idArg.node_id;
     const effectiveNetId = getNetworkId(a.network_id);
     if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, `${op} rules file`);
 
-    const { row: node, sec1Ok } = resolveTargetNode(nodeId, effectiveNetId);
-    if (!node) {
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: nodeId }) }] };
+    // Target: a `nodes` row by node_id (original path), or — app#225 follow-up —
+    // an alias. An alias resolves to its `nodes` row when there is one; otherwise
+    // to a live session in the caller's network that advertised
+    // rules_file_capable (claude-code sessions mostly have no `nodes` row). The
+    // queue key for such a session is `session:<alias>`, network-scoped.
+    let node: { node_id: string; alias: string; network_id: string | null } | null = null;
+    if (a.node_id || a.child_node_id || !a.alias) {
+      const idArg = resolveNodeIdArg({ node_id: a.node_id, child_node_id: a.child_node_id });
+      if (!idArg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(idArg) }] };
+      const nodeId = idArg.node_id;
+      const resolved = resolveTargetNode(nodeId, effectiveNetId);
+      if (!resolved.row) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: nodeId }) }] };
+      }
+      if (!resolved.sec1Ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node", message: "node belongs to another network" }) }] };
+      }
+      node = resolved.row as any;
+    } else {
+      const scopeNet = effectiveNetId || "default";
+      const byAlias = db.get<{ node_id: string; alias: string; network_id: string | null }>(
+        "SELECT node_id, alias, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
+        a.alias,
+        scopeNet,
+      );
+      if (byAlias) {
+        node = byAlias;
+      } else {
+        const session = db.get<{ alias: string; network_id: string | null }>(
+          "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND rules_file_capable = 1 ORDER BY updated_at DESC LIMIT 1",
+          a.alias,
+          scopeNet,
+        );
+        if (!session) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "rules_file_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve rules files (its channel server may be too old)" }) }] };
+        }
+        node = { node_id: `session:${session.alias}`, alias: session.alias, network_id: session.network_id };
+      }
     }
-    if (!sec1Ok) {
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node", message: "node belongs to another network" }) }] };
-    }
+    const nodeId = node.node_id;
     if (op === "write") {
       if (typeof a.content !== "string") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_content", reason: "content must be a string" }) }] };
@@ -3157,8 +3200,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.tool(
     "read_node_rules_file",
     "Ask a node to send back its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) from its working directory. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
-    { ...NODE_ID_ALIAS_FIELDS, network_id: z.string().max(200).optional() },
-    async ({ node_id, child_node_id, network_id }) => enqueueRulesFileRequest("read", { node_id, child_node_id, network_id }),
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported rules_file_capable (claude-code sessions)."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("read", { node_id, child_node_id, alias, network_id }),
   );
 
   server.tool(
@@ -3166,10 +3213,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node to overwrite its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) in its working directory with `content`. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
     {
       ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported rules_file_capable (claude-code sessions)."),
       content: z.string().max(RULES_FILE_MAX_BYTES).describe("Full new file content (UTF-8). The node writes it atomically."),
       network_id: z.string().max(200).optional(),
     },
-    async ({ node_id, child_node_id, content, network_id }) => enqueueRulesFileRequest("write", { node_id, child_node_id, content, network_id }),
+    async ({ node_id, child_node_id, alias, content, network_id }) => enqueueRulesFileRequest("write", { node_id, child_node_id, alias, content, network_id }),
   );
 
   server.tool(
@@ -3189,12 +3237,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         callerAlias,
         enforceNetworkId,
       );
-      if (!node) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request: null }) }] };
-      }
+      // app#225 follow-up — no `nodes` row: this is a session-only target
+      // (claude-code). Its queue key is `session:<alias>`, always paired with the
+      // caller's network so a same-named alias in another network never matches.
+      const queueKey: string = node ? node.node_id : `session:${callerAlias}`;
       const req = db.get<any>(
-        "SELECT request_id, op, content FROM node_rules_requests WHERE node_id = ?1 AND status = 'pending' ORDER BY created_at ASC LIMIT 1",
-        node.node_id,
+        "SELECT request_id, op, content FROM node_rules_requests WHERE node_id = ?1 AND network_id = ?2 AND status = 'pending' ORDER BY created_at ASC LIMIT 1",
+        queueKey,
+        enforceNetworkId,
       );
       if (!req) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request: null }) }] };
@@ -3242,15 +3292,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         callerAlias,
         enforceNetworkId,
       );
-      if (!node) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "alias_unknown" }) }] };
-      }
+      const queueKey: string = node ? node.node_id : `session:${callerAlias}`;
       const req = db.get<any>(
-        "SELECT request_id, node_id, status FROM node_rules_requests WHERE request_id = ?1",
+        "SELECT request_id, node_id, network_id, status FROM node_rules_requests WHERE request_id = ?1",
         requestId,
       );
-      // 跨租户闸：只能 ack 自己的请求；别人的当不存在处理。
-      if (!req || req.node_id !== node.node_id) {
+      // 跨租户闸：只能 ack 自己的请求；别人的当不存在处理。session 键另外核网络。
+      if (!req || req.node_id !== queueKey || req.network_id !== enforceNetworkId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "unknown_or_foreign_request" }) }] };
       }
       if (req.status === "done" || req.status === "failed" || req.status === "timeout") {
