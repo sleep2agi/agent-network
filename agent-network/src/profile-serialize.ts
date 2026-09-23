@@ -58,6 +58,10 @@ export function serializeProfileForConfigJson(
     ...((normalized.codexProjectDir ?? profile.codexProjectDir)
       ? { codexProjectDir: normalized.codexProjectDir ?? profile.codexProjectDir }
       : {}),
+    // #1969 — codex-sdk 运行时用哪个 codex 可执行文件(agent-node 读 config.codexBin)。漏在白名单里 = 一存就丢。
+    ...((normalized.codexBin ?? profile.codexBin)
+      ? { codexBin: normalized.codexBin ?? profile.codexBin }
+      : {}),
     ...((normalized.opencodeMode ?? profile.opencodeMode)
       ? { opencodeMode: normalized.opencodeMode ?? profile.opencodeMode }
       : {}),

@@ -2240,6 +2240,8 @@ interface Profile {
   codexCopresenceFullAccess?: boolean;
   /** #1856 — 共存节点的工作目录(= 含 .anet 的目录;fork --workdir 写入;lifecycle 命令核对四处一致)。 */
   codexProjectDir?: string;
+  /** #1969 — codex-sdk runtime: explicit codex binary (agent-node passes it as codexPathOverride). */
+  codexBin?: string;
   opencodeMode?: "headless" | "copresence";
   model?: string;
   channels: string[];

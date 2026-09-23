@@ -11,6 +11,15 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
+import {
+  bundledCodexVersion,
+  createCodex,
+  formatCodexBinLog,
+  resolveCodexBin,
+  whichCodexOnPath,
+  type CodexBinResolution,
+} from "./runtime/codex-bin";
+import { accessSync, constants as fsConstants } from "node:fs";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
@@ -2016,11 +2025,33 @@ async function loadCodexSdkModule(): Promise<any> {
   return sdkMod;
 }
 
+// #1969 — which codex binary the codex-sdk runtime spawns. Resolved once per
+// process (config codexBin > env ANET_CODEX_BIN > PATH codex if >= bundled >
+// bundled) and logged once, so the choice is visible without reading
+// node_modules. See runtime/codex-bin.ts.
+let _codexBinResolution: CodexBinResolution | undefined;
+function getCodexBinResolution(): CodexBinResolution {
+  if (_codexBinResolution) return _codexBinResolution;
+  const isExecutable = (p: string) => {
+    try { accessSync(p, fsConstants.X_OK); return true; } catch { return false; }
+  };
+  const r = resolveCodexBin({
+    configBin: (fileConfig as Record<string, unknown>)?.codexBin,
+    envBin: process.env.ANET_CODEX_BIN,
+    pathBin: whichCodexOnPath(process.env.PATH, isExecutable),
+    bundledVersion: bundledCodexVersion(import.meta.url),
+  });
+  for (const line of r.skipped) log(`[codex] binary candidate skipped: ${line}`);
+  log(formatCodexBinLog(r));
+  _codexBinResolution = r;
+  return r;
+}
+
 function buildCodexWakeDeps(): CodexWakeDeps {
   return {
     newCodex: async () => {
       const sdkMod = await loadCodexSdkModule();
-      return new sdkMod.Codex({ config: CODEX_CONFIG });
+      return createCodex(sdkMod.Codex, CODEX_CONFIG, getCodexBinResolution());
     },
     buildOpts: () => {
       // Mirror cli.ts:1417-1424 normal-task codex opts so wake behavior
@@ -3090,7 +3121,7 @@ async function processWithCodex(
   }
 
   if (!codexThread) {
-    const codex = new Codex({ config: CODEX_CONFIG });
+    const codex = createCodex(Codex, CODEX_CONFIG, getCodexBinResolution());
     const codexModel = resolveCodexModel(MODEL);
     // #149 (Vincent 5448) — yolo flags now read from config.json `flags` block
     // (written by anet wizard for codex-sdk runtime), fall back to hardcoded
@@ -3227,7 +3258,7 @@ async function processWithCodex(
       return `执行出错: codex 限流/配额耗尽 (${msg0.slice(0, 80)}) — ${hint}`;
     }
     log(`codex thread error: ${e.message}, 重建`);
-    const codex = new Codex({ config: CODEX_CONFIG });
+    const codex = createCodex(Codex, CODEX_CONFIG, getCodexBinResolution());
     codexThread = codex.startThread({
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,
