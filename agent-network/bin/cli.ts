@@ -11,6 +11,7 @@
  */
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
+import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir, hostname, tmpdir } from "os";
@@ -7182,6 +7183,9 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  // #1353 —— daemon 被 `node start` / `project up`(开机 sweep)/ `node restart` 拉起时,
+  //         pin 与 `anet daemon start` 同源同规则,不再在这些起法下丢失。
+  if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
   let startGeneration: string | undefined;
   if (copresenceFlagPassed && !resolvedForCopresence) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
@@ -9131,92 +9135,8 @@ Example:
 //   pre-#337 dashboard discovery heuristic (no-op cost on post-#337 hubs).
 
 const DAEMON_DEFAULT_NAME = "daemon";
-
-function daemonAnetBinRepairCommand(reason: string, target?: string): string {
-  if (reason === "missing") {
-    return "npm i -g @sleep2agi/agent-network@latest && anet daemon up";
-  }
-  if (reason === "relative") {
-    return "ANET_BIN_ABS=$(node -e \"console.log(require('fs').realpathSync(process.argv[1]))\" $(command -v anet)) anet daemon up";
-  }
-  if (reason === "symlink" && target) {
-    return `ANET_BIN_ABS=${shellQuote(target)} anet daemon up`;
-  }
-  if (reason === "writable" && target) {
-    return `chmod go-w ${shellQuote(target)} && anet daemon up`;
-  }
-  if (reason === "not-executable" && target) {
-    return `chmod +x ${shellQuote(target)} && anet daemon up`;
-  }
-  return "anet daemon up";
-}
-
-function findPackageJsonDirForDaemonBin(start: string): string | null {
-  let dir = dirname(start);
-  for (;;) {
-    if (existsSync(join(dir, "package.json"))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-function verifyDaemonAnetBinIdentity(abs: string): void {
-  const pkgDir = findPackageJsonDirForDaemonBin(abs);
-  if (!pkgDir) {
-    throw new Error(`ANET_BIN_ABS is not an anet package bin: no package.json above ${abs}. Run: unset ANET_BIN_ABS && anet daemon up`);
-  }
-  let pkg: any;
-  try {
-    pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf-8"));
-  } catch (e: any) {
-    throw new Error(`ANET_BIN_ABS is not an anet package bin: cannot read package.json (${e?.message || e}). Run: npm i -g @sleep2agi/agent-network@latest`);
-  }
-  if (pkg?.name !== "@sleep2agi/agent-network") {
-    throw new Error(`ANET_BIN_ABS is not an anet package bin: package name is ${JSON.stringify(pkg?.name)}. Run: unset ANET_BIN_ABS && anet daemon up`);
-  }
-
-  const binRel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.anet;
-  if (binRel) {
-    try {
-      if (realpathSync(resolve(pkgDir, binRel)) === abs) return;
-    } catch { /* fall through to shim marker check */ }
-  }
-
-  // Source-tree/dev fallback: bin/anet.cjs is copied verbatim to dist/bin/anet.cjs
-  // at build time, but package.json points at the dist path.
-  const body = readFileSync(abs, "utf-8");
-  if (abs.endsWith("/anet.cjs") && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
-
-  throw new Error(`ANET_BIN_ABS is not an anet package bin: package.json bin.anet does not point at ${abs}. Run: unset ANET_BIN_ABS && anet daemon up`);
-}
-
-function resolveCurrentAnetBinForDaemon(): string {
-  const fromEnv = process.env.ANET_BIN_ABS;
-  const argvEntry = process.argv[1];
-  const packageBin = argvEntry ? join(dirname(argvEntry), "anet.cjs") : "";
-  // bin/anet.cjs intentionally rewrites argv[1] to dist/bin/cli.js before
-  // importing this file. The daemon must pin the package bin shim itself
-  // (the executable named by package.json), not the ESM implementation file.
-  const candidate = fromEnv || (packageBin && existsSync(packageBin) ? packageBin : "");
-  if (!candidate) {
-    throw new Error(`no self-resolved anet package bin found next to ${argvEntry || "(missing argv[1])"}. Run: ${daemonAnetBinRepairCommand("missing")}`);
-  }
-  if (!isAbsolute(candidate)) {
-    throw new Error(`${fromEnv ? "ANET_BIN_ABS" : "self-resolved anet binary"} is not absolute: ${candidate}. Run: ${fromEnv ? "unset ANET_BIN_ABS && anet daemon up" : daemonAnetBinRepairCommand("relative")}`);
-  }
-  let real: string;
-  try {
-    real = realpathSync(candidate);
-  } catch (e: any) {
-    throw new Error(`cannot resolve anet binary ${candidate}: ${e?.message || e}. Run: ${daemonAnetBinRepairCommand("missing")}`);
-  }
-  if (fromEnv && real !== fromEnv) {
-    throw new Error(`ANET_BIN_ABS points at a symlink: ${fromEnv} -> ${real}. Run: ${daemonAnetBinRepairCommand("symlink", real)}`);
-  }
-  verifyDaemonAnetBinIdentity(real);
-  return real;
-}
+/** Set once the daemon anet-binary pin has been resolved in this process (#1353). */
+let daemonAnetBinPrepared = false;
 
 function prepareDaemonAnetBin(): void {
   if (process.platform === "win32") {
@@ -9224,39 +9144,37 @@ function prepareDaemonAnetBin(): void {
     console.error("[anet daemon] The daemon binary safety checks and child process model are POSIX-only; run this on Linux/macOS or WSL.");
     process.exit(1);
   }
-
-  let anetBin: string;
-  try {
-    anetBin = resolveCurrentAnetBinForDaemon();
-  } catch (e: any) {
-    console.error(`[anet daemon] ${e?.message || e}`);
+  // #1353 —— 解析与校验搬到 src/daemon-anet-bin.ts,`anet node start <daemon>` 共用同一份。
+  const check = checkDaemonAnetBin({ envBin: process.env.ANET_BIN_ABS, argv1: process.argv[1] });
+  if (!check.ok) {
+    check.lines.forEach((line, i) => console.error(`[anet daemon] ${i === 0 && check.code === "writable" ? "refusing to start: " : ""}${line}`));
     process.exit(1);
   }
-
-  const st = statSync(anetBin);
-  if ((st.mode & 0o022) !== 0) {
-    const before = (st.mode & 0o777).toString(8);
-    console.error(`[anet daemon] refusing to start: anet binary is group/other writable (mode=${before}); daemon requires a non-writable binary.`);
-    console.error(`[anet daemon] Run this once, then retry:`);
-    console.error(`[anet daemon]   ${daemonAnetBinRepairCommand("writable", anetBin)}`);
-    process.exit(1);
-  }
-  if ((st.mode & 0o111) === 0) {
-    console.error(`[anet daemon] anet binary is not executable: ${anetBin}`);
-    console.error(`[anet daemon] Run: ${daemonAnetBinRepairCommand("not-executable", anetBin)}`);
-    process.exit(1);
-  }
-  if (st.uid !== 0) {
-    console.log(`[anet daemon] anet binary is owned by uid=${st.uid}; accepting it as a user-managed nvm/homebrew/npm install.`);
-  }
-
-  process.env.ANET_BIN_ABS = anetBin;
+  for (const note of check.notes) console.log(`[anet daemon] ${note}`);
   // #1299 — runtime 只在显式 opt-in 时才认 env 来源的 pin。CLI 正是用 env 把 pin
   // 交给同进程的 daemon(`daemon start/up` 是 `prepareDaemonAnetBin(); await startCommand()`),
   // 所以不声明的话,没有 /etc/anet-daemon/path.conf 的机器上 `anet daemon up` 会被自己拦下。
-  process.env.ANET_DAEMON_ALLOW_ENV_BIN = "1";
-  process.env.ANET_DAEMON_ALLOW_NON_ROOT_BIN = "1";
-  console.log(`[anet daemon] using anet binary: ${anetBin}`);
+  Object.assign(process.env, daemonAnetBinEnv(check.bin));
+  daemonAnetBinPrepared = true;
+  console.log(`[anet daemon] using anet binary: ${check.bin}`);
+}
+
+/** #1353 —— `anet node start` / `project up`(开机 sweep)/ `node restart` 起的是 daemon 时,
+ *  按与 `anet daemon start` 相同的规则自解析 pin。失败**不退出**:daemon 照常起来,
+ *  由 agent-node 把 can_create_nodes=false 报给 hub(#1371/#1510),这里只给一行修法。 */
+function pinDaemonAnetBinForNodeStart(alias: string, role: string | undefined): void {
+  if (!shouldPinDaemonOnNodeStart({ role, alreadyPrepared: daemonAnetBinPrepared })) return;
+  if (process.platform === "win32") return;
+  const check = checkDaemonAnetBin({ envBin: process.env.ANET_BIN_ABS, argv1: process.argv[1] });
+  if (!check.ok) {
+    console.error(`[anet daemon] #1353 "${alias}" is a daemon but its anet binary pin did not verify; starting it anyway — it will report "cannot create nodes" to the hub until fixed:`);
+    for (const line of check.lines) console.error(`[anet daemon]   ${line}`);
+    return;
+  }
+  for (const note of check.notes) console.log(`[anet daemon] ${note}`);
+  Object.assign(process.env, daemonAnetBinEnv(check.bin));
+  daemonAnetBinPrepared = true;
+  console.log(`[anet daemon] #1353 "${alias}" is a daemon started via node start — pinned anet binary: ${check.bin}`);
 }
 
 async function daemonCommand() {
