@@ -1529,25 +1529,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return writeDeniedReply(effectiveNetId, "send_task");
       }
 
-      // Resolve parent_task_id: explicit > inferred (caller's most recent
-      // delivered/started inbox task that's still open). Inference is the
-      // safety net for when the LLM forgets to pass parent_task_id.
+      // Resolve parent_task_id: EXPLICIT ONLY.
       //
-      // round5 F1 fix: the inference SELECT MUST be network-scoped. Without
-      // it, a caller in network B can pick up the parent_task_id of a
-      // network A dispatch and chain-reply into the wrong tenant. The
-      // explicit-parent path is verified below in F2.
+      // round5 F1 used to network-scope an inference here that adopted the
+      // caller's "most recent delivered/started inbox task that's still
+      // open" as the parent. Node-TMAI#4: that inference is blind to *who
+      // the child is answering*. On a session holding two concurrent open
+      // tasks, whichever was dispatched last becomes the parent, and
+      // chainReplyToParent (db.ts) then writes the child's answer into that
+      // unrelated task's `result`. An unparented dispatch is now simply
+      // unparented. Callers must pass parent_task_id explicitly; the
+      // explicit id is still network-verified immediately below in F2.
       let parentTaskId: string | null = parentIn ?? null;
-      if (!parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
-        try {
-          const recentParams: any[] = [from_session];
-          let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered','started')";
-          recentSql = addScope(recentSql, recentParams, effectiveNetId);
-          recentSql += " ORDER BY created_at DESC LIMIT 1";
-          const recent = db.get<{ task_id: string }>(recentSql, ...recentParams);
-          if (recent?.task_id) parentTaskId = recent.task_id;
-        } catch {}
-      }
 
       // round5 F2 fix: an explicit parent_task_id must belong to the
       // caller's network. Otherwise a malicious caller in network B can
@@ -1555,8 +1548,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // (db.ts) write back into A's task result + inbox — cross-tenant
       // write. Verify ownership, reject on mismatch.
       if (parentIn) {
-        const parentRow = db.get<{ network_id: string | null }>(
-          "SELECT network_id FROM tasks WHERE task_id = ?1",
+        const parentRow = db.get<{ network_id: string | null; from_name: string; to_name: string }>(
+          "SELECT network_id, from_name, to_name FROM tasks WHERE task_id = ?1",
           [parentIn]
         );
         if (!parentRow) {
@@ -1571,6 +1564,24 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             ok: false, error: "cross_network_parent",
             message: "parent_task_id belongs to a different network",
           }) }] };
+        } else {
+          // Node-TMAI#4 (E): same-network is NOT sufficient. The dispatcher
+          // must be a party to the task it claims as parent — either its
+          // originator or its assignee. Without this, a same-network caller
+          // could attach its dispatch to any third party's task and the
+          // chain would later surface that child's result to the third
+          // party's originator. Compare canonical aliases so a committed
+          // rename on either side cannot defeat the check.
+          const canonicalParentFrom = resolveCanonicalAlias(effectiveNetId, parentRow.from_name).alias;
+          const canonicalParentTo = resolveCanonicalAlias(effectiveNetId, parentRow.to_name).alias;
+          const canonicalChildFrom = resolveCanonicalAlias(effectiveNetId, from_session).alias;
+          if (canonicalChildFrom !== canonicalParentFrom && canonicalChildFrom !== canonicalParentTo) {
+            console.log(`[${ts()}] 🚫 send_task: non-participant parent rejected, parent=${parentIn.slice(0, 8)} caller=${canonicalChildFrom}`);
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              ok: false, error: "parent_not_participant",
+              message: "parent_task_id is not a task this sender took part in",
+            }) }] };
+          }
         }
       }
 

@@ -206,7 +206,7 @@ describe("chainReplyToParent — cross-network rejection (round5 F2 #3)", () => 
     expect(countInbox("admin-a")).toBe(0);   // no rogue inbox row
   });
 
-  test("legitimate same-network chain still works", () => {
+  test("legitimate same-network chain records the result WITHOUT completing the parent", () => {
     const parentB = insertTask({
       from_name: "admin-b",
       to_name: "worker-b",
@@ -221,11 +221,15 @@ describe("chainReplyToParent — cross-network rejection (round5 F2 #3)", () => 
       parent_task_id: parentB,
     });
 
-    chainReplyToParent(childB, "legitimate result", "replied", 5, "net-B");
+    const res = chainReplyToParent(childB, "legitimate result", "replied", 5, "net-B");
 
+    // Node-TMAI#4 (D): a child result is never a completion signal. The
+    // chain is still recorded for the parent's originator, but the parent
+    // row keeps its status/result and must be completed by its own executor.
+    expect(res.chained).toBe(true);
     const after = getTask(parentB);
-    expect(after?.result).toContain("legitimate result");
-    expect(after?.status).toBe("replied");
+    expect(after?.result).toBeNull();
+    expect(after?.status).toBe("delivered");
     expect(countInbox("admin-b")).toBe(1);
   });
 
@@ -296,12 +300,15 @@ describe("chainReplyToParent — cross-network rejection (round5 F2 #3)", () => 
       parent_task_id: parent,
     });
 
-    chainReplyToParent(child, "result", "replied", 5, "net-B");
+    const res = chainReplyToParent(child, "result", "replied", 5, "net-B");
 
-    // Parent (same network) — chain wrote.
-    expect(getTask(parent)?.result).toContain("result");
-    expect(getTask(parent)?.status).toBe("replied");
-    // Grandparent (foreign network) — chain refused.
+    // Parent (same network) — the link is recorded, but the parent row is
+    // left alone (Node-TMAI#4 D: a child result never completes a parent).
+    expect(res.chained).toBe(true);
+    expect(getTask(parent)?.result).toBeNull();
+    expect(getTask(parent)?.status).toBe("delivered");
+    expect(countInbox("p-admin")).toBe(1);
+    // Grandparent (foreign network) — chain refused, nothing written.
     expect(getTask(grandparent)?.result).toBeNull();
     expect(getTask(grandparent)?.status).toBe("delivered");
     expect(countInbox("gp-admin")).toBe(0);
@@ -327,9 +334,11 @@ describe("chainReplyToParent — cross-network rejection (round5 F2 #3)", () => 
 
     chainReplyToParent(child, "legacy result", "replied"); // no callerNetId
 
-    // Legacy behaviour: writes through regardless of network mismatch.
-    // Documents the back-compat surface so a future tightening is a
-    // deliberate decision.
-    expect(getTask(parent)?.result).toContain("legacy result");
+    // The network-blind escape hatch still lets the link be recorded, but
+    // Node-TMAI#4 (D) removed the parent ROW write for every caller: the
+    // result is preserved as a notice, never as the parent's answer.
+    expect(getTask(parent)?.result).toBeNull();
+    expect(getTask(parent)?.status).toBe("delivered");
+    expect(countInbox("internal-admin")).toBe(1);
   });
 });

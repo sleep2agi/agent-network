@@ -219,7 +219,11 @@ describe("#690 scheduled run follows the real task lifecycle", () => {
     expect(readRun(runId).completed_at).toBeTruthy();
   });
 
-  test("child auto-chain terminalizes a scheduled parent", () => {
+  // Node-TMAI#4 (D): a child result is never a completion signal. The
+  // auto-chain still records the result and notifies the parent's author,
+  // but neither the parent task nor its mirrored scheduled run may be
+  // terminalised by a child — only the task's own executor can close it.
+  test("child auto-chain records the result WITHOUT terminalizing a scheduled parent", () => {
     const { taskId: parentId, runId } = seedScheduledTask();
     const childId = `child_${crypto.randomUUID()}`;
     db.run(
@@ -230,7 +234,12 @@ describe("#690 scheduled run follows the real task lifecycle", () => {
     );
     const result = chainReplyToParent(childId, "news_id=14519", "replied", 5, NET);
     expect(result.chained).toBe(true);
-    expect(readRun(runId).status).toBe("replied");
+    expect(db.get<{ status: string }>("SELECT status FROM tasks WHERE task_id = ?1", parentId)?.status).toBe("delivered");
+    expect(readRun(runId).status).toBe("delivered");
+    const notice = db.get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM inbox WHERE session_name = 'scheduler' AND content LIKE '%news_id=14519%'",
+    );
+    expect(notice?.c).toBe(1);
   });
 
   test("forged metadata cannot cross-bind another task or network run", async () => {

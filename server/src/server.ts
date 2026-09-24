@@ -725,13 +725,13 @@ export function patrolExpiredTasks(): void {
       const due = db.all<{ task_id: string; network_id: string | null }>(
         `SELECT task_id, network_id FROM tasks
           WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
-            AND status IN ('created', 'delivered')`,
+            AND status IN ('created', 'delivered', 'acked')`,
       );
       const changed: Array<{ task_id: string; network_id: string | null }> = [];
       for (const task of due) {
         const result = db.run(
           `UPDATE tasks SET status = 'expired', completed_at = datetime('now')
-            WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
+            WHERE task_id = ?1 AND status IN ('created', 'delivered', 'acked')`,
           [task.task_id],
         );
         // SQLite may include the AFTER UPDATE terminal-journal trigger write
