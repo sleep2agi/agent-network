@@ -123,6 +123,10 @@ for (const col of [
   { name: "process_in_flight_count", def: "INTEGER" },
   { name: "external_schedules", def: "TEXT" },
   { name: "peer_reply_inbox_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // app#225 follow-up — a session (incl. claude-code sessions with no `nodes` row)
+  // that answers the rules-file doorbell. Sticky: set by a bound node token, never
+  // cleared by reports that omit it (agent-node status-only reports do).
+  { name: "rules_file_capable", def: "INTEGER NOT NULL DEFAULT 0" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
