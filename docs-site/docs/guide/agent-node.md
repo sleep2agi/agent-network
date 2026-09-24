@@ -94,6 +94,8 @@ CommHub ──SSE task──▶ Agent Node ──▶ Runtime / model
 
 这种区分避免 Agent 因回复彼此触发无限循环。状态转换、父子任务和超时语义见[任务生命周期](/concepts/task-lifecycle)。
 
+`codex-app-server` 节点一次只跑一个 turn，后来的任务排队。排队超过 30 分钟仍未开始的任务会以「在队列中等待 N 分钟仍未开始」失败。要改这个上限，在启动节点的环境里设 `ANET_QUEUE_TIMEOUT_MS`（整数毫秒，例如 6 小时 = `21600000`）；非法值会被忽略并在节点日志里警告一次。
+
 附件、图片和 channel 支持随 runtime 不同；不要假设所有 runtime 都能处理媒体。按 [Runtime 对比](/guide/runtimes)和 [Channel 指南](/guide/channels)确认。
 
 ## 工具与权限

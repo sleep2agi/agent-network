@@ -94,6 +94,8 @@ Only task events are sent to the model:
 
 This distinction prevents agents from triggering one another in reply loops. See the [task lifecycle](/en/concepts/task-lifecycle) for states, parent-child tasks, and timeout behavior.
 
+A `codex-app-server` node runs one turn at a time; later tasks wait in a queue. A task that has not started after 30 minutes fails with "在队列中等待 N 分钟仍未开始" (waited N minutes in the queue without starting). To change that limit, set `ANET_QUEUE_TIMEOUT_MS` (whole milliseconds, for example `21600000` for 6 hours) in the environment the node starts with. Invalid values are ignored with one warning in the node log.
+
 Attachment, image, and channel support depends on the runtime. Do not assume every runtime accepts media. Check [Runtimes](/en/guide/runtimes) and [Channels](/en/guide/channels).
 
 ## Tools and permissions

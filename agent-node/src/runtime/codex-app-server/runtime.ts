@@ -281,6 +281,37 @@ export function codexAppServerReplyOrThrow(outcome: CodexAppServerThinkResult): 
   return outcome.replyText || "（无回复）";
 }
 
+/** Product default for FIFO admission (a queued task that never starts). */
+export const DEFAULT_CODEX_QUEUE_TIMEOUT_MS = 30 * 60_000;
+/** setTimeout overflows above 2^31-1 ms and would fire immediately. */
+const MAX_TIMER_MS = 2_147_483_647;
+const warnedQueueTimeoutValues = new Set<string>();
+
+/**
+ * Queue admission deadline from `ANET_QUEUE_TIMEOUT_MS` (whole milliseconds).
+ * Unset/empty -> product default. Anything else that is not a positive integer
+ * within the timer range is ignored with one warning per distinct value, so a
+ * typo never silently shortens or disables the deadline.
+ */
+export function resolveCodexQueueTimeoutMs(
+  raw: string | undefined,
+  warn: (m: string) => void = () => {},
+): number {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_CODEX_QUEUE_TIMEOUT_MS;
+  const ms = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (Number.isSafeInteger(ms) && ms > 0 && ms <= MAX_TIMER_MS) return ms;
+  if (!warnedQueueTimeoutValues.has(value)) {
+    warnedQueueTimeoutValues.add(value);
+    warn(`[codex-app-server] ignoring ANET_QUEUE_TIMEOUT_MS=${JSON.stringify(value)} (expected whole milliseconds, 1..${MAX_TIMER_MS}); using default ${DEFAULT_CODEX_QUEUE_TIMEOUT_MS}ms`);
+  }
+  return DEFAULT_CODEX_QUEUE_TIMEOUT_MS;
+}
+
+export function formatQueueTimeoutLabel(ms: number): string {
+  return ms >= 60_000 ? `${Math.ceil(ms / 60_000)} 分钟` : `${Math.ceil(ms / 1000)} 秒`;
+}
+
 /**
  * Run one Agent Network task through the bridge. Submits the task (which
  * queues FIFO if a turn is already in flight) and resolves when THIS task's
@@ -293,7 +324,7 @@ export function codexAppServerThink(
     text: string;
     from?: string;
     timeoutMs?: number;
-    /** FIFO admission deadline, separate from model execution. Default 30m. */
+    /** FIFO admission deadline, separate from model execution. Default: ANET_QUEUE_TIMEOUT_MS, else 30m. */
     queueTimeoutMs?: number;
     /** Test seam; production defaults to a 5s authoritative thread/read. */
     reconciliationIntervalMs?: number;
@@ -309,12 +340,11 @@ export function codexAppServerThink(
   },
 ): Promise<CodexAppServerThinkResult> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
-  const queueTimeoutMs = opts.queueTimeoutMs ?? 30 * 60_000;
-  const queueTimeoutLabel = queueTimeoutMs >= 60_000
-    ? `${Math.ceil(queueTimeoutMs / 60_000)} 分钟`
-    : `${Math.ceil(queueTimeoutMs / 1000)} 秒`;
-  const reconciliationIntervalMs = opts.reconciliationIntervalMs ?? 5_000;
   const log = opts.log ?? (() => {});
+  const queueTimeoutMs = opts.queueTimeoutMs
+    ?? resolveCodexQueueTimeoutMs(process.env.ANET_QUEUE_TIMEOUT_MS, log);
+  const queueTimeoutLabel = formatQueueTimeoutLabel(queueTimeoutMs);
+  const reconciliationIntervalMs = opts.reconciliationIntervalMs ?? 5_000;
   const { bridge } = session;
 
   return new Promise<CodexAppServerThinkResult>((resolve) => {
