@@ -114,7 +114,11 @@ on:
         type: boolean
 
 concurrency:
-  group: release-gate-${{ github.ref }}
+  # Per package: GitHub keeps one running + one pending run per group, and a newer
+  # pending run replaces the older one. With a ref-only group, dispatching
+  # commhub-server, agent-node and agent-network back-to-back silently cancelled
+  # the middle one (agent-node .84 and .85, 2026-09-24; see #1955).
+  group: release-gate-${{ github.ref }}-${{ inputs.package || 'tag-push' }}
   cancel-in-progress: false  # never cancel — even superseded runs surface a verdict
 
 jobs:
