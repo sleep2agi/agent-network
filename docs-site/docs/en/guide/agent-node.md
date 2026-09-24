@@ -96,6 +96,8 @@ This distinction prevents agents from triggering one another in reply loops. See
 
 A `codex-app-server` node runs one turn at a time; later tasks wait in a queue. A task that has not started after 30 minutes fails with "在队列中等待 N 分钟仍未开始" (waited N minutes in the queue without starting). To change that limit, set `ANET_QUEUE_TIMEOUT_MS` (whole milliseconds, for example `21600000` for 6 hours) in the environment the node starts with. Invalid values are ignored with one warning in the node log.
 
+At startup the node resumes the thread it is bound to before it takes any task. For a very large thread (a rollout of hundreds of MB) that can take tens of seconds. Each resume attempt waits up to 120 seconds and is retried once on timeout; if it still fails, the node reports itself offline to the hub and exits. It never falls back to a new thread, which would drop the conversation history. To change the limit, set `ANET_CODEX_RESUME_TIMEOUT_MS` (whole milliseconds, same rules as above).
+
 Attachment, image, and channel support depends on the runtime. Do not assume every runtime accepts media. Check [Runtimes](/en/guide/runtimes) and [Channels](/en/guide/channels).
 
 ## Tools and permissions

@@ -6876,6 +6876,9 @@ if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
     log(`[codex-app-server] client-health role=bridge remote=${codexAppServerUrl} thread=${session.threadId}`);
   } catch (startupError: any) {
     error(`[codex-app-server] shared bridge startup failed: ${startupError?.message || startupError}`);
+    // We registered above, so the hub shows this node idle. Say we are going
+    // away before exiting, or tasks sit unconsumed until the heartbeat lapses.
+    await reportStatus("offline").catch(() => {});
     process.exit(1);
   }
 }
