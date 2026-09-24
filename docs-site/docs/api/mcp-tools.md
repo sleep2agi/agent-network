@@ -85,6 +85,8 @@ CommHub Server 注册 **50 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `ack_config_update` | 节点回报配置更新结果 |
 | `read_node_rules_file` | 请节点回传其工作目录下的规则文件（claude → CLAUDE.md，其余 → AGENTS.md）；无路径参数，结果用 `get_rules_file_result` 轮询（app#225） |
 | `write_node_rules_file` | 请节点用 `content` 覆盖其规则文件；无路径参数，256 KB 上限（app#225） |
+| `list_node_skills` | 请节点列出它的运行时实际加载的技能（`{name, scope, path_rel, description}`，只读）；目录由节点按运行时决定，无路径参数，结果用 `get_rules_file_result` 轮询 |
+| `read_node_skill` | 请节点回传某个技能的 SKILL.md（只读，256 KB 上限）；唯一入参是技能名 `name`（`[A-Za-z0-9._-]{1,64}`），不接受路径 |
 | `get_rules_file_result` | 轮询规则文件请求结果：pending / in_progress / done / failed / timeout（60 s 无回应自动 timeout） |
 | `get_rules_file_request` | 节点拉取待处理的规则文件请求（网络 token + alias） |
 | `ack_rules_file_request` | 节点回报规则文件请求结果（读时带内容） |

@@ -12,6 +12,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { listSkills, readSkill } from "./node-skills";
 
 export const RULES_FILE_MAX_BYTES = 256 * 1024;
 
@@ -89,7 +90,8 @@ export async function writeRulesFile(
 
 export interface RulesFileRequest {
   request_id: string;
-  op: "read" | "write";
+  /** read/write = 规则文件;skills_list/skill_read = 只读技能(node-skills.ts),content 是技能名。 */
+  op: "read" | "write" | "skills_list" | "skill_read";
   content?: string;
 }
 
@@ -99,6 +101,9 @@ export interface ProcessRulesFileDeps {
   workDir: string;
   log: (msg: string) => void;
   warn: (msg: string) => void;
+  /** 技能根目录用;缺省取 os.homedir() / process.env.CODEX_HOME。 */
+  home?: string;
+  codexHome?: string;
 }
 
 /** 一次门铃最多处理这么多条，防止 hub 侧异常堆积把节点拖进死循环。 */
@@ -135,6 +140,26 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
           exists: true,
         });
         deps.log(`[rules-file] wrote ${r.file_name} bytes=${r.bytes} (${req.request_id})`);
+      } else if (req.op === "skills_list") {
+        const skills = await listSkills(deps.runtime, { workDir: deps.workDir, home: deps.home, codexHome: deps.codexHome ?? process.env.CODEX_HOME });
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: "skills",
+          exists: skills.length > 0,
+          content: JSON.stringify({ skills }),
+        });
+        deps.log(`[skills] listed ${skills.length} skill(s) (${req.request_id})`);
+      } else if (req.op === "skill_read") {
+        const r = await readSkill(deps.runtime, { workDir: deps.workDir, home: deps.home, codexHome: deps.codexHome ?? process.env.CODEX_HOME }, req.content);
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: r.name,
+          exists: true,
+          content: JSON.stringify(r),
+        });
+        deps.log(`[skills] read ${r.path_rel} bytes=${Buffer.byteLength(r.content, "utf8")} (${req.request_id})`);
       } else {
         throw new Error(`unknown op ${String((req as any).op)}`);
       }
@@ -145,7 +170,7 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
         await deps.callCommHub("ack_rules_file_request", {
           request_id: req.request_id,
           status: "failed",
-          file_name: rulesFileNameForRuntime(deps.runtime),
+          file_name: req.op === "skills_list" || req.op === "skill_read" ? "skills" : rulesFileNameForRuntime(deps.runtime),
           error: msg,
         });
       } catch (ackErr: any) {

@@ -127,6 +127,9 @@ for (const col of [
   // that answers the rules-file doorbell. Sticky: set by a bound node token, never
   // cleared by reports that omit it (agent-node status-only reports do).
   { name: "rules_file_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // Node skills view — the same session answers skills_list / skill_read on the
+  // rules-file doorbell (node-skills.ts). Sticky, bound-token only, like above.
+  { name: "skills_capable", def: "INTEGER NOT NULL DEFAULT 0" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }

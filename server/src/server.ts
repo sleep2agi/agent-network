@@ -1682,6 +1682,7 @@ return Bun.serve({
           external_schedules: externalSchedules,
           // app#225 follow-up — sqlite INTEGER 0/1 → boolean on the wire.
           rules_file_capable: s.rules_file_capable === 1,
+          skills_capable: s.skills_capable === 1,
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {
