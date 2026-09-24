@@ -602,6 +602,8 @@ async function reregister(): Promise<void> {
       tmux_name: TMUX_NAME || undefined,
       // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
       rules_file_capable: true,
+      // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
+      skills_capable: true,
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
   } catch (e) {
@@ -799,6 +801,8 @@ async function main() {
     tmux_name: TMUX_NAME || undefined,
     // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
     rules_file_capable: true,
+    // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
+    skills_capable: true,
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
     .catch((e) => log(`warning: could not register: ${e}`));
@@ -822,6 +826,8 @@ async function main() {
       tmux_name: TMUX_NAME || undefined,
       // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
       rules_file_capable: true,
+      // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
+      skills_capable: true,
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
 

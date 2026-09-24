@@ -15,6 +15,8 @@ export interface RulesDoorbellDeps {
   callCommHub: (method: string, params: Record<string, unknown>) => Promise<any>;
   workDir: string;
   log: (msg: string) => void;
+  /** 技能的用户级根目录(~/.claude/skills)取自这里;缺省 os.homedir()。测试注入临时目录。 */
+  home?: string;
 }
 
 /** SSE 事件分派:是 rules_file 门铃就处理并返回 true;其它事件原样返回 false。 */
@@ -32,6 +34,7 @@ export async function drainRulesFileRequests(deps: RulesDoorbellDeps, why: strin
       callCommHub: deps.callCommHub,
       runtime: CLAUDE_CODE_RULES_RUNTIME,
       workDir: deps.workDir,
+      home: deps.home,
       log: deps.log,
       warn: deps.log,
     });

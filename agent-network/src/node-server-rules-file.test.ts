@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { drainRulesFileRequests, handleRulesFileEvent } from "./node-server-rules-file";
@@ -71,5 +71,27 @@ describe("node-server rules_file doorbell", () => {
     const n = await drainRulesFileRequests({ callCommHub: async () => { throw new Error("hub down"); }, workDir: tmp(), log: (m) => lines.push(m) }, "connect catch-up");
     expect(n).toBe(0);
     expect(lines.some((l) => l.includes("connect catch-up handler failed") && l.includes("hub down"))).toBe(true);
+  });
+
+  test("skills_list / skill_read: claude skill roots (project .claude/skills + user ~/.claude/skills)", async () => {
+    const dir = tmp();
+    const home = tmp();
+    mkdirSync(join(dir, ".claude", "skills", "ship"), { recursive: true });
+    writeFileSync(join(dir, ".claude", "skills", "ship", "SKILL.md"), "---\ndescription: project ship\n---\nsteps\n");
+    mkdirSync(join(home, ".claude", "skills", "notes"), { recursive: true });
+    writeFileSync(join(home, ".claude", "skills", "notes", "SKILL.md"), "---\ndescription: user notes\n---\n");
+    const hub = fakeHub([
+      { request_id: "s1", op: "skills_list" },
+      { request_id: "s2", op: "skill_read", content: "ship" },
+      { request_id: "s3", op: "skill_read", content: "../CLAUDE.md" },
+    ]);
+    await drainRulesFileRequests({ callCommHub: hub.callCommHub, workDir: dir, home, log: () => {} }, "test");
+    expect(hub.acks.map((a) => [a.request_id, a.status])).toEqual([["s1", "done"], ["s2", "done"], ["s3", "failed"]]);
+    expect(JSON.parse(hub.acks[0].content).skills).toEqual([
+      { name: "ship", scope: "project", path_rel: ".claude/skills/ship/SKILL.md", description: "project ship" },
+      { name: "notes", scope: "user", path_rel: "~/.claude/skills/notes/SKILL.md", description: "user notes" },
+    ]);
+    expect(JSON.parse(hub.acks[1].content).content).toContain("steps");
+    expect(hub.acks[2].error).toBe("invalid skill name");
   });
 });

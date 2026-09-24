@@ -719,8 +719,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // no `nodes` row, and config_snapshot is persisted per node_id. Only a
       // node token bound to this same alias can set it; see the UPDATE below.
       rules_file_capable: z.literal(true).optional(),
+      // Node skills view — same doorbell, ops skills_list / skill_read.
+      skills_capable: z.literal(true).optional(),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -925,6 +927,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // node cannot mark someone else's session as able to serve its files).
         if (rulesFileCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
           db.run("UPDATE sessions SET rules_file_capable = 1 WHERE resume_id = ?1", [resume_id]);
+        }
+        if (skillsCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
+          db.run("UPDATE sessions SET skills_capable = 1 WHERE resume_id = ?1", [resume_id]);
         }
         if (host || proc) {
           db.run(
@@ -3113,12 +3118,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const RULES_FILE_MAX_BYTES = 256 * 1024;
   const RULES_REQUEST_STALE_MS = 60_000;
 
+  // Node skills view — skills_list / skill_read ride the same queue + doorbell.
+  // `content` carries the skill NAME for skill_read (never a path; the node
+  // validates it again against [A-Za-z0-9._-] and resolves it under its own
+  // runtime's skills roots — node-skills.ts).
+  const SKILL_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
+  const isSkillsOp = (op: string) => op === "skills_list" || op === "skill_read";
+
   const enqueueRulesFileRequest = (
-    op: "read" | "write",
+    op: "read" | "write" | "skills_list" | "skill_read",
     a: { node_id?: string; child_node_id?: string; alias?: string; network_id?: string; content?: string },
   ) => {
     const effectiveNetId = getNetworkId(a.network_id);
-    if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, `${op} rules file`);
+    if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, isSkillsOp(op) ? `${op} node skills` : `${op} rules file`);
+    if (op === "skill_read" && (typeof a.content !== "string" || !SKILL_NAME_RE.test(a.content) || a.content === "." || a.content === "..")) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_skill_name", reason: "name must match [A-Za-z0-9._-]{1,64} and not be . or .." }) }] };
+    }
 
     // Target: a `nodes` row by node_id (original path), or — app#225 follow-up —
     // an alias. An alias resolves to its `nodes` row when there is one; otherwise
@@ -3149,12 +3164,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         node = byAlias;
       } else {
         const session = db.get<{ alias: string; network_id: string | null }>(
-          "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND rules_file_capable = 1 ORDER BY updated_at DESC LIMIT 1",
+          isSkillsOp(op)
+            ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND skills_capable = 1 ORDER BY updated_at DESC LIMIT 1"
+            : "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND rules_file_capable = 1 ORDER BY updated_at DESC LIMIT 1",
           a.alias,
           scopeNet,
         );
         if (!session) {
-          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "rules_file_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve rules files (its channel server may be too old)" }) }] };
+          return isSkillsOp(op)
+            ? { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "skills_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve its skills (its channel server may be too old)" }) }] }
+            : { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "rules_file_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve rules files (its channel server may be too old)" }) }] };
         }
         node = { node_id: `session:${session.alias}`, alias: session.alias, network_id: session.network_id };
       }
@@ -3172,8 +3191,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
     // 单飞 + 陈旧回收，同 update_node_config 的 F-B：节点掉线时旧行永远
     // 非终态，不回收就把这个节点锁死。
+    // Separate single-flight lanes: the client opens the rules file and the
+    // skills list together; one must not block the other.
     const inFlight = db.get<{ request_id: string; created_at: number; pulled_at: number | null }>(
-      "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') ORDER BY created_at DESC LIMIT 1",
+      isSkillsOp(op)
+        ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('skills_list', 'skill_read') ORDER BY created_at DESC LIMIT 1"
+        : "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('read', 'write') ORDER BY created_at DESC LIMIT 1",
       nodeId,
     );
     if (inFlight) {
@@ -3191,7 +3214,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const networkId = node.network_id || "default";
     db.run(
       `INSERT INTO node_rules_requests (request_id, node_id, network_id, op, content, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
-      [requestId, nodeId, networkId, op, op === "write" ? a.content! : null, Date.now(), callerTokenId || "unknown"],
+      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" ? a.content! : null, Date.now(), callerTokenId || "unknown"],
     );
     pushEvent(node.alias, { type: "rules_file", request_id: requestId }, networkId);
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, op }) }] };
@@ -3218,6 +3241,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, content, network_id }) => enqueueRulesFileRequest("write", { node_id, child_node_id, alias, content, network_id }),
+  );
+
+  server.tool(
+    "list_node_skills",
+    "Ask a node to list the skills its runtime loads (name, scope project|user|system, display path, frontmatter description). Read-only; no path argument. Poll get_rules_file_result — content is JSON {skills:[…]}.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported skills_capable."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("skills_list", { node_id, child_node_id, alias, network_id }),
+  );
+
+  server.tool(
+    "read_node_skill",
+    "Ask a node for one skill's SKILL.md by name. Read-only; the node resolves the name under its own runtime's skills roots — no path argument. Poll get_rules_file_result — content is JSON {name, scope, path_rel, description, content}.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported skills_capable."),
+      name: z.string().min(1).max(64).describe("Skill directory name, [A-Za-z0-9._-]."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, name, network_id }) => enqueueRulesFileRequest("skill_read", { node_id, child_node_id, alias, content: name, network_id }),
   );
 
   server.tool(
@@ -3261,7 +3307,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             request: {
               request_id: req.request_id,
               op: req.op,
-              ...(req.op === "write" ? { content: req.content ?? "" } : {}),
+              ...(req.op === "write" || req.op === "skill_read" ? { content: req.content ?? "" } : {}),
             },
           }),
         }],
@@ -3356,7 +3402,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             status,
             file_name: row.file_name ?? null,
             exists: row.file_exists === null || row.file_exists === undefined ? null : row.file_exists === 1,
-            ...(status === "done" && row.op === "read" ? { content: row.result_content ?? "" } : {}),
+            ...(status === "done" && row.op !== "write" ? { content: row.result_content ?? "" } : {}),
             error: row.error ?? null,
             age_ms: ageMs,
           }),

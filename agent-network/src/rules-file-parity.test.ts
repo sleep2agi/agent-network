@@ -10,23 +10,31 @@ import { join } from "node:path";
 const HERE = import.meta.dir;
 const AGENT_NODE = join(HERE, "..", "..", "agent-node", "src", "runtime");
 const NAME = "rules-file.ts";
+// 节点技能只读查看(node-skills.ts)走同一条门铃,同样逐字节复制。
+const SHARED = [NAME, "node-skills.ts"];
+// rules-file.ts 唯一允许的非 node: 依赖:同样被本门钉住的兄弟文件。
+const ALLOWED_SIBLINGS = new Set(["./node-skills"]);
 
 describe("app#225 rules-file logic is byte-identical across packages", () => {
-  test(NAME, () => {
-    const ours = readFileSync(join(HERE, NAME), "utf8");
-    const theirs = readFileSync(join(AGENT_NODE, NAME), "utf8");
-    expect(ours.length).toBeGreaterThan(2000);
-    expect(ours).toBe(theirs);
-  });
+  for (const file of SHARED) {
+    test(file, () => {
+      const ours = readFileSync(join(HERE, file), "utf8");
+      const theirs = readFileSync(join(AGENT_NODE, file), "utf8");
+      expect(ours.length).toBeGreaterThan(2000);
+      expect(ours).toBe(theirs);
+    });
+  }
 
   const importSpecs = (src: string): string[] =>
     src.split("\n")
       .map((line) => /^\s*import[^"']*from\s+["']([^"']+)["']/.exec(line)?.[1])
       .filter((spec): spec is string => !!spec);
 
-  test("depends on node builtins only — that is what makes the copy possible", () => {
-    const specs = importSpecs(readFileSync(join(HERE, NAME), "utf8"));
-    expect(specs.length).toBeGreaterThan(0);
-    for (const spec of specs) expect(spec.startsWith("node:")).toBe(true);
+  test("depends on node builtins (plus the parity-pinned sibling) only — that is what makes the copy possible", () => {
+    for (const file of SHARED) {
+      const specs = importSpecs(readFileSync(join(HERE, file), "utf8"));
+      expect(specs.length).toBeGreaterThan(0);
+      for (const spec of specs) expect(spec.startsWith("node:") || ALLOWED_SIBLINGS.has(spec)).toBe(true);
+    }
   });
 });

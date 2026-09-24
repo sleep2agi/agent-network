@@ -1513,6 +1513,8 @@ const register = async () => {
     // app#225 follow-up —— 本进程答 rules_file 门铃(runtime/rules-file.ts);
     // hub 据此让桌面端在只读「节点信息」页也显示规则文件区块。旧 hub 静默丢弃该键。
     rules_file_capable: true,
+    // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
+    skills_capable: true,
   };
   // 🔴 启动注册是 `await register()`（本文件底部、顶层、**无 catch**），所以这里
   //    抛出什么都会让整个进程退出。#1225 实测到的那次就是这样：hub 的
