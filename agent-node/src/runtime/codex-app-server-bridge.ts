@@ -21,6 +21,7 @@
 
 import { EventEmitter } from "events";
 import { CodexAppServerClient } from "./codex-app-server-client";
+import { DEFAULT_RESUME_ATTEMPTS, DEFAULT_RESUME_TIMEOUT_MS } from "./codex-app-server/resume-timeout";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public shapes
@@ -58,6 +59,14 @@ export interface CodexAppServerBridgeOptions {
    */
   shouldStartQueued?: (task: { taskId: string; text: string; from?: string }) => Promise<boolean>;
   deferredThreadTimeoutMs?: number;
+  /**
+   * Deadline for each startup `thread/resume` of a persisted thread. Defaults
+   * to 120 s (see codex-app-server/resume-timeout.ts); the JSON-RPC client's
+   * generic 30 s default is too short for threads with very large rollouts.
+   */
+  resumeTimeoutMs?: number;
+  /** Total startup resume attempts when the resume times out (default 2). */
+  resumeAttempts?: number;
   deferredResumeAttempts?: number;
   deferredResumeGapMs?: number;
   initialDeferredThreadId?: string;
@@ -144,6 +153,22 @@ export class CodexBridgeNotReadyError extends Error {
  *   - "cross_thread_drop" → { event } — event for a thread we don't own
  *   - "unowned_turn_drop" → { turnId, event } — turn started outside this bridge
  */
+/** Startup resume of a persisted thread timed out on every attempt. */
+export class CodexResumeTimeoutError extends Error {
+  constructor(
+    readonly threadId: string,
+    readonly attempts: number,
+    readonly timeoutMs: number,
+    readonly elapsedMs: number,
+  ) {
+    super(
+      `thread/resume ${threadId} timed out ${attempts}x (${timeoutMs}ms each, ${elapsedMs}ms total); ` +
+        `the thread may just be very large — raise ANET_CODEX_RESUME_TIMEOUT_MS`,
+    );
+    this.name = "CodexResumeTimeoutError";
+  }
+}
+
 export class CodexAppServerBridge extends EventEmitter {
   private client: CodexAppServerClient;
   private threadId: string;
@@ -156,6 +181,8 @@ export class CodexAppServerBridge extends EventEmitter {
   private deferredReject: ((error: Error) => void) | null = null;
   private deferredBindingId: string | null = null;
   private readonly deferredThreadTimeoutMs: number;
+  private readonly resumeTimeoutMs: number;
+  private readonly resumeAttempts: number;
   private readonly deferredResumeAttempts: number;
   private readonly deferredResumeGapMs: number;
   private readonly initialDeferredThreadId: string;
@@ -206,6 +233,8 @@ export class CodexAppServerBridge extends EventEmitter {
       opts.fullHistoryReconciliationIntervalMs ?? 60_000;
     this.deferThreadUntilTui = opts.deferThreadUntilTui === true;
     this.deferredThreadTimeoutMs = opts.deferredThreadTimeoutMs ?? 120_000;
+    this.resumeTimeoutMs = opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
+    this.resumeAttempts = Math.max(1, opts.resumeAttempts ?? DEFAULT_RESUME_ATTEMPTS);
     this.deferredResumeAttempts = opts.deferredResumeAttempts ?? 100;
     this.deferredResumeGapMs = opts.deferredResumeGapMs ?? 200;
     this.initialDeferredThreadId = opts.initialDeferredThreadId ?? "";
@@ -257,9 +286,10 @@ export class CodexAppServerBridge extends EventEmitter {
     }
 
     let created = false;
+    let resumeMs: number | undefined;
     if (this.threadId) {
       try {
-        await this.client.request("thread/resume", { threadId: this.threadId });
+        resumeMs = await this.resumeWithDeadline(this.threadId);
       } catch (e) {
         if (!isNoRollout(e)) throw e;
         // Persisted id never got a rollout (e.g. node created but never ran
@@ -282,8 +312,36 @@ export class CodexAppServerBridge extends EventEmitter {
       created = true;
     }
 
-    this.emit("thread_ready", { threadId: this.threadId, created });
+    this.emit("thread_ready", { threadId: this.threadId, created, resumeMs });
     this.setStatus("idle");
+  }
+
+  /**
+   * Startup resume with its own deadline and a bounded retry on timeout.
+   * A timeout is NOT treated like "no rollout": the thread exists and is merely
+   * slow to load, so falling back to a new thread would silently drop its
+   * history. The app-server keeps loading after our request times out, so the
+   * retry usually lands on an already-loaded thread. Other errors propagate
+   * unchanged. Returns the elapsed ms of the successful attempt.
+   */
+  private async resumeWithDeadline(threadId: string): Promise<number> {
+    const startedAt = Date.now();
+    for (let attempt = 1; ; attempt++) {
+      const attemptStartedAt = Date.now();
+      try {
+        await this.client.request("thread/resume", { threadId }, this.resumeTimeoutMs);
+        return Date.now() - attemptStartedAt;
+      } catch (e) {
+        if (!isRequestTimeout(e)) throw e;
+        const elapsedMs = Date.now() - startedAt;
+        this.emit("resume_timeout", {
+          threadId, attempt, attempts: this.resumeAttempts, timeoutMs: this.resumeTimeoutMs, elapsedMs,
+        });
+        if (attempt >= this.resumeAttempts) {
+          throw new CodexResumeTimeoutError(threadId, this.resumeAttempts, this.resumeTimeoutMs, elapsedMs);
+        }
+      }
+    }
   }
 
   private async startNewThread(): Promise<string> {
@@ -1227,6 +1285,12 @@ function isAlreadyInitialized(e: unknown): boolean {
   const msg = (e as { message?: unknown })?.message;
   if (code === -32600) return true;
   return typeof msg === "string" && /already initialized/i.test(msg);
+}
+
+/** A JSON-RPC request that hit CodexAppServerClient's per-request deadline. */
+function isRequestTimeout(e: unknown): boolean {
+  const msg = (e as { message?: unknown })?.message;
+  return typeof msg === "string" && /^codex request '[^']+' \(id=\d+\) timed out after \d+ms$/.test(msg);
 }
 
 /** thread/resume against an id the app-server has no persisted rollout for. */

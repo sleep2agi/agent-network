@@ -21,6 +21,8 @@ import { spawn, type ChildProcess } from "child_process";
 import { CodexAppServerClient, resolveWebSocketCtor } from "../codex-app-server-client";
 import { CodexAppServerBridge } from "../codex-app-server-bridge";
 import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
+import { describeRolloutSize, resolveResumeTimeoutMs } from "./resume-timeout";
+import { resolveTimeoutEnvMs } from "./timeout-env";
 
 export interface CodexAppServerRuntimeSession {
   client: CodexAppServerClient;
@@ -211,13 +213,22 @@ export async function openCodexAppServerRuntime(opts: {
       initialDeferredThreadId: opts.initialDeferredThreadId,
       onDeferredCandidate: opts.onDeferredCandidate,
       shouldStartQueued: opts.shouldStartQueued,
+      resumeTimeoutMs: resolveResumeTimeoutMs(process.env, warn),
+    });
+    bridge.on("resume_timeout", (e: { threadId: string; attempt: number; attempts: number; timeoutMs: number; elapsedMs: number }) => {
+      const next = e.attempt < e.attempts ? "retrying" : "giving up";
+      warn(
+        `[codex-app-server] thread/resume thread=${e.threadId} attempt ${e.attempt}/${e.attempts} ` +
+          `timed out after ${e.timeoutMs}ms (elapsed ${e.elapsedMs}ms)${describeRolloutSize(e.threadId)} — ${next}`,
+      );
     });
     bridge.on("thread_waiting", () => log("[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"));
-    bridge.on("thread_ready", (e: { threadId: string; created: boolean }) => {
+    bridge.on("thread_ready", (e: { threadId: string; created: boolean; resumeMs?: number }) => {
       if (e.created) {
         log(`[codex-app-server] created thread ${e.threadId.slice(0, 12)}…`);
       } else {
-        log(`[codex-app-server] resumed thread ${e.threadId.slice(0, 12)}…`);
+        const took = e.resumeMs === undefined ? "" : ` in ${e.resumeMs}ms${describeRolloutSize(e.threadId)}`;
+        log(`[codex-app-server] resumed thread ${e.threadId.slice(0, 12)}…${took}`);
       }
       if (opts.onThread) void opts.onThread(e.threadId, e.created);
     });
@@ -283,29 +294,18 @@ export function codexAppServerReplyOrThrow(outcome: CodexAppServerThinkResult): 
 
 /** Product default for FIFO admission (a queued task that never starts). */
 export const DEFAULT_CODEX_QUEUE_TIMEOUT_MS = 30 * 60_000;
-/** setTimeout overflows above 2^31-1 ms and would fire immediately. */
-const MAX_TIMER_MS = 2_147_483_647;
 const warnedQueueTimeoutValues = new Set<string>();
 
 /**
  * Queue admission deadline from `ANET_QUEUE_TIMEOUT_MS` (whole milliseconds).
- * Unset/empty -> product default. Anything else that is not a positive integer
- * within the timer range is ignored with one warning per distinct value, so a
- * typo never silently shortens or disables the deadline.
+ * Unset/empty -> product default; invalid values are ignored with one warning
+ * per distinct value (see timeout-env.ts).
  */
 export function resolveCodexQueueTimeoutMs(
   raw: string | undefined,
   warn: (m: string) => void = () => {},
 ): number {
-  const value = raw?.trim();
-  if (!value) return DEFAULT_CODEX_QUEUE_TIMEOUT_MS;
-  const ms = /^\d+$/.test(value) ? Number(value) : NaN;
-  if (Number.isSafeInteger(ms) && ms > 0 && ms <= MAX_TIMER_MS) return ms;
-  if (!warnedQueueTimeoutValues.has(value)) {
-    warnedQueueTimeoutValues.add(value);
-    warn(`[codex-app-server] ignoring ANET_QUEUE_TIMEOUT_MS=${JSON.stringify(value)} (expected whole milliseconds, 1..${MAX_TIMER_MS}); using default ${DEFAULT_CODEX_QUEUE_TIMEOUT_MS}ms`);
-  }
-  return DEFAULT_CODEX_QUEUE_TIMEOUT_MS;
+  return resolveTimeoutEnvMs("ANET_QUEUE_TIMEOUT_MS", raw, DEFAULT_CODEX_QUEUE_TIMEOUT_MS, warnedQueueTimeoutValues, warn);
 }
 
 export function formatQueueTimeoutLabel(ms: number): string {

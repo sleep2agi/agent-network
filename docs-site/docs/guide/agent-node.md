@@ -96,6 +96,8 @@ CommHub ──SSE task──▶ Agent Node ──▶ Runtime / model
 
 `codex-app-server` 节点一次只跑一个 turn，后来的任务排队。排队超过 30 分钟仍未开始的任务会以「在队列中等待 N 分钟仍未开始」失败。要改这个上限，在启动节点的环境里设 `ANET_QUEUE_TIMEOUT_MS`（整数毫秒，例如 6 小时 = `21600000`）；非法值会被忽略并在节点日志里警告一次。
 
+节点启动时要先恢复（resume）它绑定的线程，才开始接任务。线程很大时（rollout 文件上百 MB）这一步可能要几十秒；每次恢复最多等 120 秒，超时重试一次，仍失败就先向 hub 报离线再退出，不会改用新线程（那会丢掉对话历史）。要改这个上限，设 `ANET_CODEX_RESUME_TIMEOUT_MS`（整数毫秒，规则同上）。
+
 附件、图片和 channel 支持随 runtime 不同；不要假设所有 runtime 都能处理媒体。按 [Runtime 对比](/guide/runtimes)和 [Channel 指南](/guide/channels)确认。
 
 ## 工具与权限
