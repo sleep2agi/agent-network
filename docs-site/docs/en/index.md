@@ -40,6 +40,7 @@ features:
     <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.98/Agent.Network_0.2.98_aarch64.dmg"><span class="download-platform">macOS</span><strong>Download .dmg</strong><small>Apple Silicon · 36.8 MB</small><span class="download-arrow">↓</span></a>
     <a class="download-card" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.98/Agent.Network_0.2.98_x64-setup.exe"><span class="download-platform">Windows</span><strong>Download installer</strong><small>Windows x64 · 35.2 MB</small><span class="download-arrow">↓</span></a>
   </div>
+  <p class="release-links">Mirror in China (ModelScope): <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_aarch64.dmg">macOS .dmg</a> · <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_x64-setup.exe">Windows installer</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.98">Release notes and checksums</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases">All releases</a></p>
 </section>
 
@@ -54,6 +55,7 @@ features:
     <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.98/Agent.Network_0.2.98_android-universal.apk"><span class="download-platform">Android</span><strong>Download .apk</strong><small>Android 7.0+ · 77.1 MB</small><span class="download-arrow">↓</span></a>
     <div class="download-card download-card-pending" aria-disabled="true"><span class="download-platform">iOS</span><strong>TestFlight in review</strong><small>Public testing link coming soon</small></div>
   </div>
+  <p class="release-links">Mirror in China (ModelScope): <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_android-universal.apk">Android .apk</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.98">Release notes and checksum</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">Advanced: 0.2.32 audit .ipa and SHA256SUMS</a></p>
   <p class="release-links">The iOS <code>.ipa</code> is App Store distribution-signed, published for auditing only — it <strong>cannot be sideloaded</strong>. Wait for TestFlight.</p>
 </section>

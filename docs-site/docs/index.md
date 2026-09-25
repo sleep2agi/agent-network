@@ -44,6 +44,7 @@ features:
       <span class="download-platform">Windows</span><strong>下载安装程序</strong><small>Windows x64 · 35.2 MB</small><span class="download-arrow">↓</span>
     </a>
   </div>
+  <p class="release-links">国内下载（ModelScope）：<a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_aarch64.dmg">macOS .dmg</a> · <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_x64-setup.exe">Windows 安装程序</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.98">查看版本说明与校验信息</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases">全部历史版本</a></p>
 </section>
 
@@ -62,6 +63,7 @@ features:
       <span class="download-platform">iOS</span><strong>TestFlight 处理中</strong><small>公开测试链接即将开放</small>
     </div>
   </div>
+  <p class="release-links">国内下载（ModelScope）：<a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_android-universal.apk">Android .apk</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.98">查看版本说明与校验信息</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">高级：0.2.32 审计用 .ipa 与 SHA256SUMS</a></p>
   <p class="release-links">iOS 的 <code>.ipa</code> 是 App Store distribution 签名，供审计比对，<strong>不能直接侧载安装</strong>；请等 TestFlight 开放。</p>
 </section>
