@@ -69,6 +69,8 @@ anet node create grok-demo --runtime grok-build-cli
 anet node start grok-demo
 ```
 
+（anet 2.3.0-preview.116 起也可以写成 `--runtime grok --copresence`，效果相同。）
+
 看到下面这行说明 TUI 已就绪：
 
 ```text
