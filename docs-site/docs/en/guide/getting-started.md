@@ -7,7 +7,7 @@
      Change the prose, change the stamp — the gate also fails when the two disagree.
      Only "current state" claims are stamped; historical references (e.g. `<= 2.3.0-preview.37`) are not. -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.115 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.116 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
 
@@ -59,7 +59,7 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-Today's `latest` (`2.3.0-preview.76`) and `preview` (`2.3.0-preview.115`) both print a random password: `anet-` followed by 22 hex characters.
+Today's `latest` (`2.3.0-preview.76`) and `preview` (`2.3.0-preview.116`) both print a random password: `anet-` followed by 22 hex characters.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 
 The credentials are also written to `~/.anet/server/admin-utok.json`, which holds only
