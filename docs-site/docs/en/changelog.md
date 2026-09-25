@@ -707,7 +707,7 @@ Test lead Docker Linux smoke 3/3 PASS (disk 299.8 GB total / 216 used / 71.5 ava
 [#147](https://github.com/sleep2agi/agent-network/issues/147) (acked 5/16) + Option C landed:
 
 - Topology node prefix labels (the node→group edge labels' distinguishability) ship with the Option C design (dashboard team design pass)
-- Disk telemetry hover-card rendering (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health) response)
+- Disk telemetry hover-card rendering (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest-data#get-api-server-host-health) response)
 - 100+ rounds of typography + corner-radius cascade polish
 
 Dashboard team design pass + 4/4 verify (commit `7de97ee` + screenshot evidence, local ship `f9c83cd`).

@@ -41,10 +41,10 @@ run_mutation no-sse-gate src/task-diagnostic.ts src/task-diagnostic.test.ts \
 run_mutation cross-network-sse src/server.ts src/task-diagnostic-http.test.ts \
   "does not count another network's same-alias SSE connection" /tmp/server.orig
 
-grep -q 'MCP-first' /workspace/docs-site/docs/en/api/rest.md
-grep -q 'MCP 优先' /workspace/docs-site/docs/api/rest.md
-grep -q 'does not prove whether MCP tools are mounted' /workspace/docs-site/docs/en/api/rest.md
-grep -q '不能证明外部模型会话是否挂载了 MCP tools' /workspace/docs-site/docs/api/rest.md
+grep -q 'MCP-first' /workspace/docs-site/docs/en/api/rest-data.md
+grep -q 'MCP 优先' /workspace/docs-site/docs/api/rest-data.md
+grep -q 'does not prove whether MCP tools are mounted' /workspace/docs-site/docs/en/api/rest-data.md
+grep -q '不能证明外部模型会话是否挂载了 MCP tools' /workspace/docs-site/docs/api/rest-data.md
 
 printf 'source_commit=%s\n' "$TEST166_SOURCE_COMMIT"
 printf 'RESULT: PASS\n'

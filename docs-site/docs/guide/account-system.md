@@ -118,7 +118,7 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 
 **审计日志**
 - `audit_log` 写入一条 `password_changed`（走 reset-user 路径则是 `password_reset_by_admin`）
-- 通过 REST `GET /api/audit-log` 查看 —— **系统级** `users.role='admin'` 看全部 row，普通用户只看自己的 row（**不是**网络级 owner/admin 权限；详见 [API — audit-log](/api/rest#get-api-audit-log)）
+- 通过 REST `GET /api/audit-log` 查看 —— **系统级** `users.role='admin'` 看全部 row，普通用户只看自己的 row（**不是**网络级 owner/admin 权限；详见 [API — audit-log](/api/rest-data#get-api-audit-log)）
 
 **忘记旧密码怎么办？**
 - 不能用 `anet passwd`（要求输旧密码）
@@ -377,7 +377,7 @@ CLI 不需要你手工输入 role；登录后，Server 依据用户身份和目�
 ### 升降级一个成员的角色
 
 ::: info 当前操作入口
-CLI 可以列成员；改角色和移除成员使用 REST（详见 [API — networks members](/api/rest#get-api-networks-id-members)）。
+CLI 可以列成员；改角色和移除成员使用 REST（详见 [API — networks members](/api/rest-admin#get-api-networks-id-members)）。
 :::
 
 ```bash
@@ -400,7 +400,7 @@ curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
   -H "Authorization: Bearer $UTOK"
 ```
 
-完整 endpoint 文档：[PUT members](/api/rest#put-api-networks-id-members-user-id) / [DELETE members](/api/rest#delete-api-networks-id-members-user-id)。
+完整 endpoint 文档：[PUT members](/api/rest-admin#put-api-networks-id-members-user-id) / [DELETE members](/api/rest-admin#delete-api-networks-id-members-user-id)。
 
 
 ### 角色常见问题 {#role-faq}

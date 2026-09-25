@@ -14,14 +14,14 @@ Dashboard is Agent Network's web management interface, providing real-time monit
 :::
 
 ::: info v0.10.0 / dashboard `0.5.0` new — Hero 3 network/node front-end 8/8 surfaces ✅
-Shipped with [v0.10.0 release Phase 2](/en/changelog#v0-10-0-—-direct-runtime-observability-foundations-2026-05-16-✅-stable-phase-1-3-package-promote): all 8 surfaces complete (§3.A prefix-group fix / §3.B sweep retire / §3.C recent-panel hide / §3.D grid default view / §3.E hover detail card / §3.F server-health ring tint wired to [#99](https://github.com/sleep2agi/agent-network/issues/99) endpoint / §3.G fullscreen mode / §3.I canvas brand mark; §3.H dropped per RFC Q2 review) plus 19+ rounds of typography + corner-radius cascade polish. The server-health ring tint reads from [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health); the agent hover card renders per-agent `process_telemetry` (`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [#142](https://github.com/sleep2agi/agent-network/issues/142) shipped in `agent-node@2.4.0` + server schema aligned in `commhub-server@0.8.2`).
+Shipped with [v0.10.0 release Phase 2](/en/changelog#v0-10-0-—-direct-runtime-observability-foundations-2026-05-16-✅-stable-phase-1-3-package-promote): all 8 surfaces complete (§3.A prefix-group fix / §3.B sweep retire / §3.C recent-panel hide / §3.D grid default view / §3.E hover detail card / §3.F server-health ring tint wired to [#99](https://github.com/sleep2agi/agent-network/issues/99) endpoint / §3.G fullscreen mode / §3.I canvas brand mark; §3.H dropped per RFC Q2 review) plus 19+ rounds of typography + corner-radius cascade polish. The server-health ring tint reads from [`GET /api/server/:host/health`](/en/api/rest-data#get-api-server-host-health); the agent hover card renders per-agent `process_telemetry` (`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [#142](https://github.com/sleep2agi/agent-network/issues/142) shipped in `agent-node@2.4.0` + server schema aligned in `commhub-server@0.8.2`).
 
 **§3.E / §3.F data sources require** `agent-network ≥ 2.2.1` on the default `anet hub start` path ([v0.10.1 hotfix](/en/changelog#v0-10-1-—-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-✅-stable) bumped `PINNED_SERVER_VERSION` from 0.8.0 to 0.8.2). Older versions still launch `commhub-server@0.8.0`, where the #99 endpoint does not exist — the ring-tint data source fails and the hover card's `process_telemetry` is all `null`.
 
 ::: info v0.10.2 Hero D — dashboard `0.5.1` topology prefix label Option C + disk render
 Shipped alongside the [v0.10.2 release](/en/changelog):
 - **Hero D topology node prefix labels — Option C implementation** ([#147](https://github.com/sleep2agi/agent-network/issues/147) acked 5/16 + Option C design pass) — node → group edge label distinguishability finally lands
-- **Disk telemetry hover-card rendering** (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health) response; source is agent-node `≥ 2.4.1` host-telemetry's `df -k` sampling; older agents and Windows render `—` rather than a misleading `0`)
+- **Disk telemetry hover-card rendering** (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest-data#get-api-server-host-health) response; source is agent-node `≥ 2.4.1` host-telemetry's `df -k` sampling; older agents and Windows render `—` rather than a misleading `0`)
 - **100+ rounds of typography + corner-radius cascade polish**
 :::
 
@@ -192,7 +192,7 @@ The Admin panel is visible to users with `users.role='admin'` — that's a **sys
 
 Admin features include:
 
-- **User Management** -- View all registered users (`/api/users` — system-level admin only); role changes currently go through REST `PUT /api/networks/:id/members/:user_id` (owner only — see [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)). CLI has no `promote` / `demote` sub-command yet (queued for v0.11+ / unscheduled).
+- **User Management** -- View all registered users (`/api/users` — system-level admin only); role changes currently go through REST `PUT /api/networks/:id/members/:user_id` (owner only — see [API — PUT members](/en/api/rest-admin#put-api-networks-id-members-user-id)). CLI has no `promote` / `demote` sub-command yet (queued for v0.11+ / unscheduled).
 - **Network Management** -- View all networks, members (plan-quota is **partially enforced** in v0.8: `createNetwork` still enforces `max_networks_owned`; other quota items are dormant — see [networks — quota limits](/en/concepts/networks#quota-limits))
 - **System Statistics** -- Server load, database size, connection count
 - **Audit Log** -- Detailed records of all operations (`/api/audit-log` endpoint + Dashboard Audit Log page; system-level admin sees everything, other roles only see their own rows)
@@ -217,7 +217,7 @@ The settings page manages personal configuration:
 - **Network Settings** -- Current network config (owner/admin only)
   - Rename network
   - Create invite codes
-  - Manage member roles (stable Dashboard `0.6.0` partial; CLI has `anet network invite` but **no** `promote` / `demote` sub-commands — role changes currently go through REST [`PUT /api/networks/:id/members/:user_id`](/en/api/rest#put-api-networks-id-members-user-id). CLI sub-commands queued for v0.11+ / unscheduled.)
+  - Manage member roles (stable Dashboard `0.6.0` partial; CLI has `anet network invite` but **no** `promote` / `demote` sub-commands — role changes currently go through REST [`PUT /api/networks/:id/members/:user_id`](/en/api/rest-admin#put-api-networks-id-members-user-id). CLI sub-commands queued for v0.11+ / unscheduled.)
   - Delete network
 
 Token management interface:
@@ -273,7 +273,7 @@ The standalone Dashboard requires the following environment variables:
 The Dashboard keeps data current through three data surfaces:
 
 1. **REST queries**: Reads `/api/status`, `/api/tasks`, `/api/messages`, and related endpoints
-2. **Dashboard's own SSE**: The Dashboard subscribes to the `/events/<username>` user channel using the logged-in username, receiving server-pushed events directly (e.g. RFC-010's `node.renamed`, the #84 SSE channel fix — see [REST API SSE endpoint](/en/api/rest#sse-endpoint))
+2. **Dashboard's own SSE**: The Dashboard subscribes to the `/events/<username>` user channel using the logged-in username, receiving server-pushed events directly (e.g. RFC-010's `node.renamed`, the #84 SSE channel fix — see [REST API SSE endpoint](/en/api/rest-data#sse-endpoint))
 3. **Agent SSE**: Agents subscribe to `/events/<alias>` with their own node alias; when tasks arrive, agents update Hub state that the Dashboard reads
 
 ::: tip Performance Note
@@ -298,7 +298,7 @@ New capabilities (vs the current stable — the stable dashboard also keeps iter
   - **Grouping**: group-box hover (hovering a group title highlights every member) + dashed separators between groups
   - **Side controls**: minimap (bottom-left thumbnail with draggable viewport box) + cwd tooltip (hover a node to see its `project_dir`) + S/M/L size toggle
   - **Light mode**: 24px pulse on the central hub (fixes stable's "invisible on light mode" P0)
-- **ServersDrawer** ([#119](https://github.com/sleep2agi/agent-network/issues/119)): a right-hand drawer that aggregates agents by physical machine (`hostname` + `ip`) with live CPU load / memory bars and an agent count. Backed by [`GET /api/servers`](/en/api/rest#get-api-servers) (10-min stale-mark side effect + bare JSON array response, [`index.ts` `GET /api/servers`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)). Multiple agents on the same host collapse into one row; older agents without host telemetry are bucketed under an `unknown` host group.
+- **ServersDrawer** ([#119](https://github.com/sleep2agi/agent-network/issues/119)): a right-hand drawer that aggregates agents by physical machine (`hostname` + `ip`) with live CPU load / memory bars and an agent count. Backed by [`GET /api/servers`](/en/api/rest-data#get-api-servers) (10-min stale-mark side effect + bare JSON array response, [`index.ts` `GET /api/servers`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)). Multiple agents on the same host collapse into one row; older agents without host telemetry are bucketed under an `unknown` host group.
 - **Tasks status tabs**: color-coded dots + mobile horizontal scroll
 - **Mobile audit fixes**: banner yields to hamburger / UserBar iconified
 - **Sidebar "Quick search ⌘K" chip**: mobile launcher entry

@@ -4,8 +4,8 @@ WORKDIR /workspace
 COPY server/package.json ./server/package.json
 RUN cd server && bun install --ignore-scripts
 COPY server ./server
-COPY docs-site/docs/api/rest.md ./docs-site/docs/api/rest.md
-COPY docs-site/docs/en/api/rest.md ./docs-site/docs/en/api/rest.md
+COPY docs-site/docs/api/rest-data.md ./docs-site/docs/api/rest-data.md
+COPY docs-site/docs/en/api/rest-data.md ./docs-site/docs/en/api/rest-data.md
 COPY tests/test166-task-diagnostics ./tests/test166-task-diagnostics
 
 ARG TEST166_SOURCE_COMMIT=unknown

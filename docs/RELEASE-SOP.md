@@ -116,6 +116,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/guide/dashboard.md` | 313、328 | `anet -v` 应显示 `2.3.0-preview.N` / preview 不自动 promote |
 > | `docs-site/docs/en/guide/dashboard.md` | 314、329 | 同上(英文) |
 > | `docs-site/docs/api/rest.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/api/rest-data.md` | 见门输出 | 信道断言(REST 参考拆页后从 api/rest.md 移来的数据查询/任务派发段落，由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/en/api/rest-data.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/concepts/security.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/deploy/daemon.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/api/rest.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |

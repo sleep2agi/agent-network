@@ -137,7 +137,7 @@ anet network delete old-network --force
 - **系统级 admin**（`users.role='admin'`，首位注册用户）：看所有人 audit_log
 - **非 admin**（`users.role='user'`）：只看自己的 audit_log（server 自动加 `WHERE user_id = self` 过滤）
 
-这是「**系统级** role」gate，跟「**网络级** role」不同（`whoami` 的 `Role:` 字段也是这个系统级语义）。详见 [REST API → GET /api/audit-log](/api/rest#get-api-audit-log)。
+这是「**系统级** role」gate，跟「**网络级** role」不同（`whoami` 的 `Role:` 字段也是这个系统级语义）。详见 [REST API → GET /api/audit-log](/api/rest-data#get-api-audit-log)。
 :::
 
 ### Dashboard 权限表现
