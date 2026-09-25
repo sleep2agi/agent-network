@@ -90,6 +90,8 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `write_node_rules_file` | Ask a node to overwrite its rules file with `content`; no path argument, 256 KB cap (app#225) |
 | `list_node_skills` | Ask a node to list the skills its runtime actually loads (`{name, scope, path_rel, description}`, read-only); directories are chosen by the node per runtime, no path argument, poll `get_rules_file_result` |
 | `read_node_skill` | Ask a node to send back one skill's SKILL.md (read-only, 256 KB cap); the only input is the skill `name` (`[A-Za-z0-9._-]{1,64}`), never a path |
+| `list_node_files` | Ask a node to list one directory level of its work dir (project folder, read-only): `path` is relative to the work dir (default: root); absolute paths and `..` are refused. Entries are `{name, type, size, mtime}`; secret-looking files are listed by name only (`hidden_reason: "secret"`), `node_modules` / `.git` are not descended, 1000-entry cap. User logins only |
+| `read_node_file` | Ask a node for one text file under its work dir (read-only, 256 KB cap; binary / oversized → size only; `.env`, keys, `auth.json` and other credential files → no content). The node realpath-contains the path in its work dir, so symlinks cannot escape. Only the token that asked can read the result |
 | `get_rules_file_result` | Poll a rules-file request: pending / in_progress / done / failed / timeout (auto-timeout after 60 s of silence) |
 | `get_rules_file_request` | Node pulls its pending rules-file request (network token + alias) |
 | `ack_rules_file_request` | Node reports the outcome of a rules-file request (content included for reads) |

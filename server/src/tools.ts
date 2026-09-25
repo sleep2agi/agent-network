@@ -721,8 +721,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       rules_file_capable: z.literal(true).optional(),
       // Node skills view — same doorbell, ops skills_list / skill_read.
       skills_capable: z.literal(true).optional(),
+      // Project folder view — same doorbell, ops files_list / file_read.
+      files_capable: z.literal(true).optional(),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -930,6 +932,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
         if (skillsCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
           db.run("UPDATE sessions SET skills_capable = 1 WHERE resume_id = ?1", [resume_id]);
+        }
+        if (filesCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
+          db.run("UPDATE sessions SET files_capable = 1 WHERE resume_id = ?1", [resume_id]);
         }
         if (host || proc) {
           db.run(
@@ -3162,11 +3167,42 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const SKILL_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
   const isSkillsOp = (op: string) => op === "skills_list" || op === "skill_read";
 
+  // Project folder view — files_list / file_read ride the same queue + doorbell.
+  // `content` carries a path RELATIVE to the node's work dir. The hub refuses
+  // absolute paths, `..` segments, backslashes and NUL before any row exists;
+  // the node re-validates, realpath-contains the result in its work dir and
+  // refuses secret-looking files (node-files.ts). Stricter than skills on the
+  // caller: a node token may not browse another node's disk, and only the token
+  // that asked can read the answer.
+  const NODE_FILE_PATH_MAX = 1024;
+  const NODE_FILES_RESULT_MAX_CHARS = 1024 * 1024;
+  const isFilesOp = (op: string) => op === "files_list" || op === "file_read";
+  const normalizeNodeRelPath = (raw: unknown): string | null => {
+    if (raw === undefined || raw === null) return "";
+    if (typeof raw !== "string" || raw.length > NODE_FILE_PATH_MAX) return null;
+    if (raw.includes("\0") || raw.includes("\\")) return null;
+    if (raw.startsWith("/") || raw.startsWith("~") || /^[A-Za-z]:/.test(raw)) return null;
+    const segs = raw.split("/").filter((s) => s !== "" && s !== ".");
+    if (segs.some((s) => s === "..")) return null;
+    return segs.join("/");
+  };
+
   const enqueueRulesFileRequest = (
-    op: "read" | "write" | "skills_list" | "skill_read",
+    op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read",
     a: { node_id?: string; child_node_id?: string; alias?: string; network_id?: string; content?: string },
   ) => {
     const effectiveNetId = getNetworkId(a.network_id);
+    if (isFilesOp(op)) {
+      if (callerTokenIsNetwork) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_cannot_browse_files", message: "a node token cannot browse another node's project folder; use a user login" }) }] };
+      }
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, `${op} node files`);
+      const rel = normalizeNodeRelPath(a.content);
+      if (rel === null || (op === "file_read" && rel === "")) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_path", reason: "path must be relative to the node work dir: no leading / or ~, no .. segment, no backslash or NUL, at most 1024 chars" }) }] };
+      }
+      a = { ...a, content: rel };
+    }
     if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, isSkillsOp(op) ? `${op} node skills` : `${op} rules file`);
     if (op === "skill_read" && (typeof a.content !== "string" || !SKILL_NAME_RE.test(a.content) || a.content === "." || a.content === "..")) {
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_skill_name", reason: "name must match [A-Za-z0-9._-]{1,64} and not be . or .." }) }] };
@@ -3197,13 +3233,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         node = byAlias;
       } else {
         const session = db.get<{ alias: string; network_id: string | null }>(
-          isSkillsOp(op)
+          isFilesOp(op)
+            ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND files_capable = 1 ORDER BY updated_at DESC LIMIT 1"
+            : isSkillsOp(op)
             ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND skills_capable = 1 ORDER BY updated_at DESC LIMIT 1"
             : "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND rules_file_capable = 1 ORDER BY updated_at DESC LIMIT 1",
           a.alias,
           scopeNet,
         );
         if (!session) {
+          if (isFilesOp(op)) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "files_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve its project folder (its channel server may be too old)" }) }] };
+          }
           return isSkillsOp(op)
             ? { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "skills_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve its skills (its channel server may be too old)" }) }] }
             : { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "rules_file_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve rules files (its channel server may be too old)" }) }] };
@@ -3227,7 +3268,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // Separate single-flight lanes: the client opens the rules file and the
     // skills list together; one must not block the other.
     const inFlight = db.get<{ request_id: string; created_at: number; pulled_at: number | null }>(
-      isSkillsOp(op)
+      isFilesOp(op)
+        ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('files_list', 'file_read') ORDER BY created_at DESC LIMIT 1"
+        : isSkillsOp(op)
         ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('skills_list', 'skill_read') ORDER BY created_at DESC LIMIT 1"
         : "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('read', 'write') ORDER BY created_at DESC LIMIT 1",
       nodeId,
@@ -3247,7 +3290,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const networkId = node.network_id || "default";
     db.run(
       `INSERT INTO node_rules_requests (request_id, node_id, network_id, op, content, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
-      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" ? a.content! : null, Date.now(), callerTokenId || "unknown"],
+      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" || isFilesOp(op) ? a.content! : null, Date.now(), callerTokenId || "unknown"],
     );
     pushEvent(node.alias, { type: "rules_file", request_id: requestId }, networkId);
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, op }) }] };
@@ -3300,6 +3343,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   );
 
   server.tool(
+    "list_node_files",
+    "Ask a node to list one directory level of its work dir (project folder view, read-only). `path` is relative to the work dir (default: the root); absolute paths and .. are refused. Poll get_rules_file_result — content is JSON {path, entries:[{name,type,size?,mtime?,hidden_reason?,no_descend?}], truncated, total}. User logins only.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported files_capable."),
+      path: z.string().max(NODE_FILE_PATH_MAX).optional().describe("Directory relative to the node's work dir; omit or \"\" for the root."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, path: relPath, network_id }) => enqueueRulesFileRequest("files_list", { node_id, child_node_id, alias, content: relPath ?? "", network_id }),
+  );
+
+  server.tool(
+    "read_node_file",
+    "Ask a node for one text file under its work dir (project folder view, read-only, 256 KiB cap; binary / too large → size only; secret-looking files → name only). `path` is relative to the work dir. Poll get_rules_file_result — content is JSON {path, name, kind, size?, mtime?, content?, hidden_reason?}. User logins only.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported files_capable."),
+      path: z.string().min(1).max(NODE_FILE_PATH_MAX).describe("File path relative to the node's work dir."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, path: relPath, network_id }) => enqueueRulesFileRequest("file_read", { node_id, child_node_id, alias, content: relPath, network_id }),
+  );
+
+  server.tool(
     "get_rules_file_request",
     "Node pulls its oldest pending rules-file request (called from agent-node when the SSE rules_file doorbell arrives). app#225.",
     {},
@@ -3336,7 +3403,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             request: {
               request_id: req.request_id,
               op: req.op,
-              ...(req.op === "write" || req.op === "skill_read" ? { content: req.content ?? "" } : {}),
+              ...(req.op === "write" || req.op === "skill_read" || isFilesOp(req.op) ? { content: req.content ?? "" } : {}),
             },
           }),
         }],
@@ -3352,7 +3419,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       status: z.enum(["done", "failed"]),
       file_name: z.string().max(64).optional(),
       exists: z.boolean().optional(),
-      content: z.string().max(RULES_FILE_MAX_BYTES).optional(),
+      // Files results (JSON listing / a 256 KiB file, escaped) may exceed the rules
+      // cap; the per-op cap is enforced below once the row's op is known.
+      content: z.string().max(NODE_FILES_RESULT_MAX_CHARS).optional(),
       error: z.string().max(2000).optional(),
     },
     async ({ request_id: requestId, status, file_name: fileName, exists, content, error: ackError }) => {
@@ -3365,7 +3434,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const node = resolveCallerNode();
       const queueKey: string = node ? node.node_id : `session:${callerAlias}`;
       const req = db.get<any>(
-        "SELECT request_id, node_id, network_id, status FROM node_rules_requests WHERE request_id = ?1",
+        "SELECT request_id, node_id, network_id, status, op FROM node_rules_requests WHERE request_id = ?1",
         requestId,
       );
       // 跨租户闸：只能 ack 自己的请求；别人的当不存在处理。session 键另外核网络。
@@ -3374,6 +3443,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       if (req.status === "done" || req.status === "failed" || req.status === "timeout") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "already_terminal", current_status: req.status }) }] };
+      }
+      if (typeof content === "string" && !isFilesOp(req.op) && content.length > RULES_FILE_MAX_BYTES) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "content_too_large", max: RULES_FILE_MAX_BYTES }) }] };
       }
       db.run(
         `UPDATE node_rules_requests SET status = ?1, acked_at = ?2, file_name = ?3, file_exists = ?4, result_content = ?5, error = ?6 WHERE request_id = ?7`,
@@ -3399,11 +3471,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(clientNetId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "read rules file result");
       const row = db.get<any>(
-        "SELECT request_id, node_id, network_id, op, status, file_name, file_exists, result_content, error, created_at, pulled_at, acked_at FROM node_rules_requests WHERE request_id = ?1",
+        "SELECT request_id, node_id, network_id, op, status, file_name, file_exists, result_content, error, created_at, pulled_at, acked_at, created_by_token FROM node_rules_requests WHERE request_id = ?1",
         requestId,
       );
       // SEC-1：结果行的网络必须等于调用方作用域，否则当不存在。
-      if (!row || row.network_id !== (effectiveNetId || "default")) {
+      // Project folder results: only the (user) token that asked may read them.
+      const foreignFilesRow = !!row && isFilesOp(row.op) && (callerTokenIsNetwork || row.created_by_token !== (callerTokenId || "unknown"));
+      if (!row || row.network_id !== (effectiveNetId || "default") || foreignFilesRow) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found", request_id: requestId }) }] };
       }
       let status: string = row.status;

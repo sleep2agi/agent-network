@@ -13,6 +13,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listSkills, readSkill } from "./node-skills";
+import { listNodeFiles, readNodeFile } from "./node-files";
 
 export const RULES_FILE_MAX_BYTES = 256 * 1024;
 
@@ -90,8 +91,9 @@ export async function writeRulesFile(
 
 export interface RulesFileRequest {
   request_id: string;
-  /** read/write = 规则文件;skills_list/skill_read = 只读技能(node-skills.ts),content 是技能名。 */
-  op: "read" | "write" | "skills_list" | "skill_read";
+  /** read/write = 规则文件;skills_list/skill_read = 只读技能(node-skills.ts),content 是技能名;
+   *  files_list/file_read = 只读项目文件夹(node-files.ts),content 是相对工作目录的路径。 */
+  op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read";
   content?: string;
 }
 
@@ -160,6 +162,27 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
           content: JSON.stringify(r),
         });
         deps.log(`[skills] read ${r.path_rel} bytes=${Buffer.byteLength(r.content, "utf8")} (${req.request_id})`);
+      } else if (req.op === "files_list") {
+        // 根目录与 resolveRulesFilePath 相同(deps.workDir);边界全在 node-files.ts。
+        const r = await listNodeFiles(deps.workDir, req.content);
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: "files",
+          exists: true,
+          content: JSON.stringify(r),
+        });
+        deps.log(`[files] listed ${r.path || "."} entries=${r.entries.length}/${r.total} (${req.request_id})`);
+      } else if (req.op === "file_read") {
+        const r = await readNodeFile(deps.workDir, req.content);
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: r.name,
+          exists: true,
+          content: JSON.stringify(r),
+        });
+        deps.log(`[files] read ${r.path} kind=${r.kind} (${req.request_id})`);
       } else {
         throw new Error(`unknown op ${String((req as any).op)}`);
       }
@@ -170,7 +193,7 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
         await deps.callCommHub("ack_rules_file_request", {
           request_id: req.request_id,
           status: "failed",
-          file_name: req.op === "skills_list" || req.op === "skill_read" ? "skills" : rulesFileNameForRuntime(deps.runtime),
+          file_name: req.op === "skills_list" || req.op === "skill_read" ? "skills" : req.op === "files_list" || req.op === "file_read" ? "files" : rulesFileNameForRuntime(deps.runtime),
           error: msg,
         });
       } catch (ackErr: any) {

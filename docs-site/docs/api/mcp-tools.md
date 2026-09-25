@@ -87,6 +87,8 @@ CommHub Server 注册 **50 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `write_node_rules_file` | 请节点用 `content` 覆盖其规则文件；无路径参数，256 KB 上限（app#225） |
 | `list_node_skills` | 请节点列出它的运行时实际加载的技能（`{name, scope, path_rel, description}`，只读）；目录由节点按运行时决定，无路径参数，结果用 `get_rules_file_result` 轮询 |
 | `read_node_skill` | 请节点回传某个技能的 SKILL.md（只读，256 KB 上限）；唯一入参是技能名 `name`（`[A-Za-z0-9._-]{1,64}`），不接受路径 |
+| `list_node_files` | 请节点列出其工作目录下某一层目录（项目文件夹，只读）：`path` 相对工作目录（缺省为根），拒绝绝对路径与 `..`；每项 `{name, type, size, mtime}`，凭据类文件只给名字（`hidden_reason: "secret"`），`node_modules` / `.git` 不进入，上限 1000 项。仅用户登录可调用 |
+| `read_node_file` | 请节点回传工作目录下一个文本文件（只读，256 KB 上限；二进制 / 超限只回大小；`.env`、密钥、`auth.json` 等凭据文件不回内容）；节点侧 realpath 收在工作目录内，软链接逃不出去。结果仅发起请求的那个 token 可读 |
 | `get_rules_file_result` | 轮询规则文件请求结果：pending / in_progress / done / failed / timeout（60 s 无回应自动 timeout） |
 | `get_rules_file_request` | 节点拉取待处理的规则文件请求（网络 token + alias） |
 | `ack_rules_file_request` | 节点回报规则文件请求结果（读时带内容） |
