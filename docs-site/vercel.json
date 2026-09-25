@@ -160,6 +160,46 @@
       "source": "/en/preview/",
       "destination": "/en/guide/upgrade#channels",
       "permanent": true
+    },
+    {
+      "source": "/guide/windows",
+      "destination": "/guide/install#windows",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/windows",
+      "destination": "/en/guide/install#windows",
+      "permanent": true
+    },
+    {
+      "source": "/deploy/npm",
+      "destination": "/guide/install#packages",
+      "permanent": true
+    },
+    {
+      "source": "/en/deploy/npm",
+      "destination": "/en/guide/install#packages",
+      "permanent": true
+    },
+    {
+      "source": "/deploy/docker",
+      "destination": "/deploy/clean-server#docker",
+      "permanent": true
+    },
+    {
+      "source": "/en/deploy/docker",
+      "destination": "/en/deploy/clean-server#docker",
+      "permanent": true
+    },
+    {
+      "source": "/guide/one-shot-install",
+      "destination": "/guide/install#setup-anet",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/one-shot-install",
+      "destination": "/en/guide/install#setup-anet",
+      "permanent": true
     }
   ],
   "rewrites": [

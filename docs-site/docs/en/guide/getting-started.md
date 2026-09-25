@@ -1,4 +1,4 @@
-# Getting Started (5 steps)
+# Your First Node in 10 Minutes
 
 <!-- 🔴 Two machine-readable stamps, read by scripts/check-doc-version-claims.py; invisible when rendered.
      This page makes several **version-scoped behavioural claims** (what the very first command does on a
@@ -9,45 +9,17 @@
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.115 -->
 
-The minimum path for a brand-new user — **5 steps, 5 minutes**. One command + one verification per step.
+From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
 
-::: tip Fastest path (recommended) — zero config if you have a Claude subscription
-The easiest route: with Claude Code CLI installed (`npm i -g @anthropic-ai/claude-code`) and `claude auth login` done, pick the **`claude-code-cli` runtime** in Step 4 — no API key, no model picker, just one command to bring a personal AI employee online that does real work and takes orders from your phone. This is the **most stable, least error-prone** path.
+**Before you start**: install Node.js ≥ 22.13, Bun ≥ 1.2 and `anet` as described in [Install](/en/guide/install), and make sure `anet -v` prints normally. Already installed and only upgrading? See the [Upgrade Guide](/en/guide/upgrade).
 
-No Claude subscription? Use `claude-agent-sdk` + one model API key (MiniMax / DeepSeek / InternLM / Xiaomi), see Step 4.
+::: tip Fastest path (recommended): zero config with a Claude subscription
+With Claude Code CLI installed (`npm i -g @anthropic-ai/claude-code`) and `claude auth login` done, pick the **`claude-code-cli` runtime** in step 3: no API key, no model picker. Without a Claude subscription, use `claude-agent-sdk` plus one model API key (MiniMax / DeepSeek / InternLM / Xiaomi); see step 3.
 :::
-
-::: tip Already have anet installed?
-Skip this page and go to the [Upgrade Guide](/en/guide/upgrade) (usually `anet upgrade` + `anet project restart` to restart cwd nodes).
-:::
-
-**Prerequisites** (install both):
-
-- **Node.js ≥ 22.13.0**
-- **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun that step always fails**, but how depends on the build:
-  · **`2.3.0-preview.47` and later** (today's `latest` `2.3.0-preview.76` and `preview` `2.3.0-preview.115` are both in this range): refused before launch with `❌ anet hub start requires the Bun runtime` (exit code 1);
-  · **older builds without the preflight** (such as `2.2.21`): a bare `Error: spawn bunx ENOENT` plus a Node stack trace.
-  After installing, `bun --version` should print a version.
-
-With both installed, `commhub-server` / `agent-node` are auto-fetched on first use — you don't install them manually.
 
 ---
 
-## 1. Install the CLI
-
-```bash
-npm install -g @sleep2agi/agent-network
-```
-
-Verify:
-
-```bash
-anet -v
-```
-
----
-
-## 2. Start the Hub
+## 1. Start the Hub {#start-hub}
 
 Open terminal #1, **keep it running**:
 
@@ -55,7 +27,7 @@ Open terminal #1, **keep it running**:
 anet hub start
 ```
 
-The hub listens on `http://127.0.0.1:9200` by default, the SQLite DB lives at `~/.commhub/commhub.db`, and an admin account **`admin`** is created automatically with a **randomly generated password that is printed only this once** (an `anet-xxxxxxxx…` string, on both the `latest` and `preview` channels). **Save it right away** — step 3 needs it.
+The hub listens on `http://127.0.0.1:9200` by default, the SQLite DB lives at `~/.commhub/commhub.db`, and an admin account **`admin`** is created automatically with a **randomly generated password that is printed only this once** (an `anet-xxxxxxxx…` string, on both the `latest` and `preview` channels). **Save it right away** — step 2 needs it.
 
 ::: warning Change the password before going public
 Your first login prompts you to replace the random password. **Any `--host 0.0.0.0` public deployment must `anet passwd` to a strong password immediately.** To choose the initial password yourself, run `anet hub start --password <pass>` or set `ANET_HUB_BOOTSTRAP_PASSWORD`.
@@ -67,7 +39,7 @@ Your first login prompts you to replace the random password. **Any `--host 0.0.0
 
 ---
 
-## 3. Start the Dashboard + log in
+## 2. Start the Dashboard and log in {#login}
 
 Open terminal #2, **keep it running**:
 
@@ -105,7 +77,7 @@ anet login --hub http://127.0.0.1:9200 --username admin --password <password pri
 
 ---
 
-## 4. Create and start a node
+## 3. Create and start a node {#create-node}
 
 ```bash
 anet node create my-bot
@@ -141,7 +113,7 @@ Clean a half-baked node with `anet node delete <alias>` (run once without `--for
 
 ---
 
-## 5. Use it — dispatch a task from the Dashboard
+## 4. Dispatch a task from the Dashboard {#dispatch}
 
 Back in your browser at `http://localhost:3000`:
 
@@ -152,33 +124,7 @@ Back in your browser at `http://localhost:3000`:
 
 Refresh the page — chat history is preserved.
 
-✅ **5 steps done**.
-
----
-
-## Verified vs not verified
-
-::: info Verified (current stable, real-machine walkthrough)
-Detailed test reports: [Changelog](/en/changelog) + [test reports](https://github.com/sleep2agi/agent-network/tree/main/docs/tests).
-
-- `anet hub start` + automatic default account creation / `anet hub dashboard`
-- `anet login` (with `--hub`) / `anet register` / `anet logout` / `anet whoami`
-- **`claude-code-cli` runtime end-to-end** — runs daily on the production fleet (the easiest path, recommended in Step 4); first run needs a TTY for the dev-channels confirmation
-- `claude-agent-sdk` `node create` (incl. the vendor path: Anthropic / MiniMax / InternLM / Xiaomi MiMo — verified-with-real-call) + `node ls / delete`
-- Dashboard Chat (markdown / Enter-to-send / optimistic echo / source labels / error fallback / persistent history)
-:::
-
-::: warning Has caveats / not verified (use at your own risk)
-- **`claude-agent-sdk` / `codex-sdk` first `node start`**: on latest, `agent-node`'s lazy-fetch isn't awaited and it exits early (`agent-node is not installed...`, [#450](https://github.com/sleep2agi/agent-network/issues/450)). Run `npm i -g @sleep2agi/agent-node` first, then start (see the Step 4 note above).
-- `codex-sdk` runtime end-to-end (real LLM reply) — no OpenAI test key yet, the second half is pending verification
-- `anet license` / `anet activate` — v0.6 legacy, OSS users don't need to touch these (see [troubleshooting](/en/troubleshooting#license-expired-license-expired-legacy-behavior))
-- `anet network create` and cross-user network sharing — code merged but no E2E regression
-- **One-shot install script `setup-anet.sh`** — retired and disabled, do not run an old copy, see [retirement notice](/en/guide/one-shot-install)
-:::
-
-::: tip No hosted service
-The project direction is **Apache 2.0 open source + self-host + courses / consulting**, **no SaaS**. For production deployments see [Docker](/en/deploy/docker) / [Production](/en/deploy/production).
-:::
+✅ **Done.**
 
 ---
 
@@ -201,3 +147,4 @@ anet demo pr-review        # PR review room — 3 reviewers (security/perf/style
 - [Multi-model config](/en/guide/multi-model) — DeepSeek / Kimi / Claude / MiniMax / self-hosted
 - [Architecture overview](/en/guide/architecture)
 - [Upgrade Guide](/en/guide/upgrade) — any older version → latest with a single `anet upgrade`
+- [Production deployment](/en/deploy/production) — there is no hosted Hub; read this before putting a Hub on a server or the internet

@@ -58,14 +58,12 @@ const promotedInstallerClaims = [
 const activeDocs = [
   "docs-site/docs/guide/getting-started.md",
   "docs-site/docs/en/guide/getting-started.md",
-  "docs-site/docs/deploy/docker.md",
-  "docs-site/docs/en/deploy/docker.md",
+  "docs-site/docs/guide/install.md",
+  "docs-site/docs/en/guide/install.md",
   "docs-site/docs/guide/multi-model.md",
   "docs-site/docs/en/guide/multi-model.md",
   "docs-site/docs/guide/account-system.md",
   "docs-site/docs/en/guide/account-system.md",
-  "docs-site/docs/deploy/npm.md",
-  "docs-site/docs/en/deploy/npm.md",
   "docs-site/docs/community.md",
   "docs-site/docs/en/community.md",
 ];
@@ -86,8 +84,9 @@ mutation[0] = [mutation[0][0], `${mutation[0][1]}\n一键安装（实验性）\n
 check(validateActiveDocs(mutation).length === 1, "witnessed-red mutation was not detected exactly once");
 check(validateActiveDocs(documents).length === 0, `stale installer claim remains: ${validateActiveDocs(documents).join("; ")}`);
 
-check(read("docs-site/docs/guide/one-shot-install.md").includes("一键安装脚本已退役"), "Chinese retirement page missing");
-check(read("docs-site/docs/en/guide/one-shot-install.md").includes("One-shot installer retired"), "English retirement page missing");
+// The retirement notice now lives on the install page (docs slimming, 2026-09-25); /guide/one-shot-install redirects there.
+check(read("docs-site/docs/guide/install.md").includes("一键安装脚本已退役"), "Chinese retirement notice missing from install page");
+check(read("docs-site/docs/en/guide/install.md").includes("One-shot installer retired"), "English retirement notice missing from install page");
 check(read("docs-site/docs/public/setup-anet.sh").includes("已退役"), "public compatibility stub is not retired");
 check(read("docs/upgrade-v2.md").includes("本文中的旧版本号只描述当时迁移背景"), "historical upgrade note still presents a stale current version");
 for (const path of ["docs-site/docs/public/upgrade.sh", "docs-site/docs/public/upgrade-preview.sh"]) {
@@ -98,6 +97,8 @@ for (const path of ["docs-site/docs/public/upgrade.sh", "docs-site/docs/public/u
 }
 
 for (const route of [
+  "docs-site/docs/guide/install.md",
+  "docs-site/docs/en/guide/install.md",
   "docs-site/docs/guide/getting-started.md",
   "docs-site/docs/en/guide/getting-started.md",
   "docs-site/docs/deploy/clean-server.md",

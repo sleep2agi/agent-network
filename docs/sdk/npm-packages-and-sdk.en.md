@@ -1,4 +1,6 @@
-# npm Deployment
+# npm packages and SDK (developer reference)
+
+> This developer reference moved from the anet.sh user docs (formerly `/en/deploy/npm`) into the repository on 2026-09-25. To install, see https://anet.sh/en/guide/install . Links starting with `/` refer to pages on anet.sh.
 
 Installing and deploying Agent Network via npm is the simplest approach.
 
