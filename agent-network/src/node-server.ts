@@ -604,6 +604,8 @@ async function reregister(): Promise<void> {
       rules_file_capable: true,
       // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
       skills_capable: true,
+      // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
+      files_capable: true,
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
   } catch (e) {
@@ -803,6 +805,8 @@ async function main() {
     rules_file_capable: true,
     // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
     skills_capable: true,
+    // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
+    files_capable: true,
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
     .catch((e) => log(`warning: could not register: ${e}`));
@@ -828,6 +832,8 @@ async function main() {
       rules_file_capable: true,
       // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
       skills_capable: true,
+      // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
+      files_capable: true,
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
 

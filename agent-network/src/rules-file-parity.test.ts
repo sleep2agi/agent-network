@@ -11,9 +11,10 @@ const HERE = import.meta.dir;
 const AGENT_NODE = join(HERE, "..", "..", "agent-node", "src", "runtime");
 const NAME = "rules-file.ts";
 // 节点技能只读查看(node-skills.ts)走同一条门铃,同样逐字节复制。
-const SHARED = [NAME, "node-skills.ts"];
+// 项目文件夹只读查看(node-files.ts)同理。
+const SHARED = [NAME, "node-skills.ts", "node-files.ts"];
 // rules-file.ts 唯一允许的非 node: 依赖:同样被本门钉住的兄弟文件。
-const ALLOWED_SIBLINGS = new Set(["./node-skills"]);
+const ALLOWED_SIBLINGS = new Set(["./node-skills", "./node-files"]);
 
 describe("app#225 rules-file logic is byte-identical across packages", () => {
   for (const file of SHARED) {

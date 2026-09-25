@@ -130,6 +130,9 @@ for (const col of [
   // Node skills view — the same session answers skills_list / skill_read on the
   // rules-file doorbell (node-skills.ts). Sticky, bound-token only, like above.
   { name: "skills_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // Project folder view — the same session answers files_list / file_read on the
+  // rules-file doorbell (node-files.ts). Sticky, bound-token only, like above.
+  { name: "files_capable", def: "INTEGER NOT NULL DEFAULT 0" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }

@@ -1515,6 +1515,8 @@ const register = async () => {
     rules_file_capable: true,
     // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
     skills_capable: true,
+    // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
+    files_capable: true,
   };
   // 🔴 启动注册是 `await register()`（本文件底部、顶层、**无 catch**），所以这里
   //    抛出什么都会让整个进程退出。#1225 实测到的那次就是这样：hub 的
