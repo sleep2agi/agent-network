@@ -175,6 +175,8 @@ def fingerprint(text: str) -> str | None:
     #    开头)——于是把 getting-started 里那段 version-claim 说明的续行当指纹,
     #    对着线上永远找不到 ⇒ 恒 MISS 的假漂移(#1424 的戳改动实测中招)。
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    # 同理:`<script>` / `<style>` 块(VitePress 的 `<script setup>`)不渲染成正文。
+    text = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", "", text, flags=re.DOTALL | re.IGNORECASE)
     in_fence = False
     for raw in text.split("\n"):
         line = raw.strip()
@@ -503,6 +505,15 @@ def selftest() -> int:
     fp_c = fingerprint(comment_text)
     check("指纹跳过多行注释的续行,选中真正文",
           fp_c == "这是渲染后真的会出现在页面上的一句普通正文,足够长且不含链接强调。", f"got={fp_c!r}")
+    # 🔴 `<script setup>` / `<style>` 块同样不渲染成正文(api/rest.md 用它转发拆页前的旧锚点)。
+    #    块里的 JS 注释行长得像正文,选中它就是恒 MISS 的假漂移(2026-09-25 部署后实测)。
+    script_text = ("<script setup>\n"
+                   "// Old deep links whose section moved to a sub-page when the reference was split: forward them.\n"
+                   "</script>\n"
+                   "这是脚本块之后的一句普通正文,长度足够被选中,不含链接与强调符号。\n")
+    fp4 = fingerprint(script_text)
+    check("指纹跳过 <script> 块内部的行,选中块之后的正文",
+          fp4 == "这是脚本块之后的一句普通正文,长度足够被选中,不含链接与强调符号。", f"got={fp4!r}")
     check("整块都是注释时返回 None",
           fingerprint("<!-- release gate 会拿正在发的版本和这两条戳比对,不一致就拦下发布并列出。 -->\n") is None)
 
