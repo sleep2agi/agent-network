@@ -89,7 +89,8 @@ export default withMermaid(defineConfig({
             text: '部署',
             items: [
               { text: '干净服务器从零部署', link: '/deploy/clean-server' },
-              { text: '让 hub 常驻：进程守护', link: '/deploy/daemon' },
+              { text: '远程机器：anet daemon', link: '/deploy/daemon' },
+              { text: '让 Hub 常驻', link: '/deploy/keep-alive' },
               { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
             ]
           },
@@ -116,7 +117,6 @@ export default withMermaid(defineConfig({
               { text: 'MCP Tools', link: '/api/mcp-tools' },
               { text: 'REST API', link: '/api/rest' },
               { text: '架构概览', link: '/guide/architecture' },
-              { text: '任务生命周期', link: '/concepts/task-lifecycle' },
             ]
           },
         ],
@@ -178,7 +178,8 @@ export default withMermaid(defineConfig({
             text: 'Deployment',
             items: [
               { text: 'Fresh Server From Scratch', link: '/en/deploy/clean-server' },
-              { text: 'Keeping the Hub Alive', link: '/en/deploy/daemon' },
+              { text: 'Remote Machines: anet daemon', link: '/en/deploy/daemon' },
+              { text: 'Keeping the Hub Running', link: '/en/deploy/keep-alive' },
               { text: 'Production / Public Internet', link: '/en/deploy/production' },
             ]
           },
@@ -205,7 +206,6 @@ export default withMermaid(defineConfig({
               { text: 'MCP Tools', link: '/en/api/mcp-tools' },
               { text: 'REST API', link: '/en/api/rest' },
               { text: 'Architecture', link: '/en/guide/architecture' },
-              { text: 'Task Lifecycle', link: '/en/concepts/task-lifecycle' },
             ]
           },
         ],

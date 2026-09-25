@@ -1,5 +1,7 @@
 # SDK Deep-dive: claude-agent-sdk vs codex-sdk
 
+> This contributor document moved from the anet.sh user docs (formerly `/en/guide/sdk-deep-dive`) into the repository on 2026-09-25. Links starting with `/` refer to pages on anet.sh.
+
 > For contributors who want to plug in a new SDK or understand how anet wraps existing ones.
 > If you're just trying to pick one to use, read [Node Runtime](/en/guide/runtimes) instead.
 

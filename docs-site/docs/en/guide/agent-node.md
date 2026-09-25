@@ -38,7 +38,7 @@ File tools use the node's launch directory as their workspace. Create and start 
 anet node start my-agent --tmux
 ```
 
-From a terminal this attaches to tmux; detach with `Ctrl-B D`. Without a TTY it starts detached. See [background operation](/en/deploy/daemon) for long-running and boot-time management.
+From a terminal this attaches to tmux; detach with `Ctrl-B D`. Without a TTY it starts detached. See [Fresh server · persistence](/en/deploy/clean-server#_8-persistence-systemd-tmux) for long-running and boot-time management.
 
 ## Choose a runtime
 

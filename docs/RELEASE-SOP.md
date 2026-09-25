@@ -113,8 +113,6 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/deploy/clean-server.md` | 21–22 | 同上(英文) |
 > | `docs-site/docs/troubleshooting.md` | 29、37 | preview 有 preflight / latest 没有 |
 > | `docs-site/docs/en/troubleshooting.md` | 29、37 | 同上(英文) |
-> | `docs-site/docs/guide/support-matrix.md` | 49 | 脚注 ^1^ 钉了「已在已发布产物 `@sleep2agi/agent-node@2.5.0-preview.34` 里 grep 复核」——**这是一次取证的时间戳，不是「当前通道版本」**；换版本时不要顺手改它，改了就等于把当时的证据改成另一个版本的 |
-> | `docs-site/docs/en/guide/support-matrix.md` | 49 | 同上(英文) |
 > | `docs-site/docs/guide/dashboard.md` | 313、328 | `anet -v` 应显示 `2.3.0-preview.N` / preview 不自动 promote |
 > | `docs-site/docs/en/guide/dashboard.md` | 314、329 | 同上(英文) |
 > | `docs-site/docs/api/rest.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |

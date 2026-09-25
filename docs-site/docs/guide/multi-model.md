@@ -1,261 +1,252 @@
 # 多模型配置
 
-Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所有模型共用同一套通信协议，互相发消息无障碍。
+同一个 Agent Network 里可以同时跑不同厂商、不同模型的节点。所有节点走同一套 CommHub 通信协议，互相派活、回复不受模型影响。
 
-## 支持的模型
+本页说明：支持哪些提供商、每家怎么配、`ANTHROPIC_BASE_URL` 的工作方式、针对个别厂商的行为修正层（vendor adapter），以及混合编队和选型建议。各 runtime 的安装前置见 [Runtime 对比](/guide/runtimes)。
 
-### 国产模型（推荐，国内直连）
+## 支持的提供商 {#supported-providers}
 
-下表是 `anet node create` 供应商选单（cli.ts `VENDORS` 列表）里**内置的国内 provider** —— 每一项的 `baseUrl` + model id 都是**跑通真 API 验证过**才进列表的：
+`anet node create` 的供应商选单（源码中的 `VENDORS` 列表）内置了下面这些提供商。选单里的 model id 只是创建时的预填值，厂商会更新型号，**请以厂商控制台上的当前 model id 为准**。
 
-| 模型 | 服务商 | Runtime | API 地址 | 成本 |
-|------|--------|---------|---------|------|
-| **MiniMax**（`MiniMax-M3` 默认，vision / `MiniMax-M2.7` legacy 纯文本） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 极低 |
-| **DeepSeek**（`deepseek-v4-pro` 默认 / `deepseek-v4-flash`） | DeepSeek | `claude-agent-sdk` | api.deepseek.com/anthropic | 极低 |
-| **书生 Intern-S2-Preview**（`anet node create` vendor 选单默认项，**仅在选 `claude-agent-sdk` runtime 后才出现** —— [#133](https://github.com/sleep2agi/agent-network/issues/133) runtime-first wizard 起 v0.9.2+） | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
-| **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
-| **小米 MiMo**（`mimo-v2.5-pro` 默认 + v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign[^mimo-tts]） | 小米 | `claude-agent-sdk` | token-plan-cn.xiaomimimo.com/anthropic | 低 |
+| 提供商 | Runtime | 认证 | `ANTHROPIC_BASE_URL` | 选单预填的 model |
+|---|---|---|---|---|
+| Anthropic Claude（API） | `claude-agent-sdk` | `ANTHROPIC_API_KEY` | 不设置（官方端点） | Sonnet / Opus / Haiku 系列 |
+| Claude Code | `claude-code-cli` | `claude auth login`（Claude Pro/Team/Max 订阅） | 不适用 | 无选单，跟随订阅 |
+| OpenAI Codex | `codex-sdk` | `codex login` | 不适用 | 内置默认值，可用 `--model` 覆盖 |
+| MiniMax | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | `https://api.minimaxi.com/anthropic` | `MiniMax-M3`（支持图片）、`MiniMax-M2.7`（纯文本） |
+| DeepSeek | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | `https://api.deepseek.com/anthropic` | `deepseek-v4-pro`、`deepseek-v4-flash` |
+| 书生 InternLM | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | `https://chat.intern-ai.org.cn`（裸域名，没有 `/anthropic`） | `intern-s2-preview`、`intern-s1-pro` |
+| 小米 MiMo | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | `https://token-plan-cn.xiaomimimo.com/anthropic` | `mimo-v2.5-pro`、`mimo-v2.5`、`mimo-v2-pro`、`mimo-v2-omni`、`mimo-v2.5-tts-voicedesign` |
+| 自定义（GLM、Kimi、OpenRouter、自部署等） | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | 厂商文档给出的 Anthropic 兼容端点 | 自行填写 |
 
-[^mimo-tts]: `mimo-v2.5-tts-voicedesign` 是 **TTS 语音设计模型**，Anthropic Messages 文本请求大概率 vendor 不支持；文本对话请用前 4 个 model（`mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2-pro` / `mimo-v2-omni`）。v0.10.10 起 wizard 凑齐官方 5 model preset。
+`mimo-v2.5-tts-voicedesign` 是语音设计（TTS）模型；做文本对话的 agent 请选其余四个。
 
-> 验证机制（#104-B 设计调整后）：cli.ts 不再用「`MODEL_PRESETS` + `[UNVERIFIED]` 标记」那套 —— 现在统一是 [`VENDORS` 列表（在 cli.ts 里 grep `const VENDORS`）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)，**进列表 = 已 verified-with-real-call**。**GLM / Kimi / OpenRouter 等未内置的 provider 走下方「自定义」`custom` 供应商接入**（任何 Anthropic 兼容 API 都能用 `custom`；DeepSeek 已内置，无需走 custom）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [小米 MiMo](https://platform.xiaomimimo.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn)）。
+另有两条不走 `ANTHROPIC_BASE_URL` 的路线：
 
-::: tip 任何 Anthropic-compatible 提供商都能接
-上表是常用 provider，但 `claude-agent-sdk` 通过 `ANTHROPIC_BASE_URL` 接入**任何**支持 Anthropic Messages API 的服务商。没列出的服务商（自部署 vLLM / SiliconFlow / 通义千问 Anthropic 兼容端点等）也能用，只需把 `ANTHROPIC_BASE_URL` 指向对应平台的 Anthropic 兼容 endpoint，把 API Key 设到 `ANTHROPIC_AUTH_TOKEN` 即可。详见下方"配置方式"。
+- **xAI Grok**：`grok-build-acp` runtime，复用 `grok login` 的登录态，也可以用 `GROK_CODE_XAI_API_KEY`。见 [grok-build-acp](/guide/runtimes#grok-build-acp)。
+- **OpenCode**：`opencode-cli` runtime，由 opencode CLI 自己对接厂商。见 [Runtime 对比](/guide/runtimes)。
+
+::: tip 任何 Anthropic 兼容服务都能接
+`claude-agent-sdk` 是 Anthropic Messages API 客户端。只要服务商提供 Anthropic 兼容端点（GLM、Kimi、OpenRouter、SiliconFlow、通义千问、自部署 vLLM 等），就能通过选单里的「自定义」接入。端点地址和 model id 以各家文档为准。
 :::
 
-### 海外模型
+## 用向导创建 {#create-with-the-wizard}
 
-| 模型 | 服务商 | Runtime | 认证方式 | 特点 | 成本 |
-|------|--------|---------|---------|------|------|
-| **Claude Sonnet（当前主线）** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 主力推理（具体 ID 查 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)） | 中-高 |
-| **Claude Opus（当前主线）** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 复杂任务 / 长上下文（同上） | 极高 |
-| **Claude Code** | Anthropic | `claude-code-cli` | Claude Max 订阅 | 终端交互 | 订阅制 |
-| **Codex (codex-sdk)** | OpenAI | `codex-sdk` | codex login | 代码生成 | 中 |
-| **OpenRouter（多模型聚合）** | OpenRouter | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | 一个 API Key 用所有模型（GPT-4 / Claude / Gemini / Llama 等），统一计费；**不在内置 `VENDORS` 列表**，走 `custom` 供应商接入（`openrouter.ai/api/v1`）| 跟随上游 |
-| **xAI Grok Build** | xAI | `grok-build-acp` | `grok login` + `GROK_CODE_XAI_API_KEY`（runtime 前置） | xAI Grok Build ACP 协议跨 agent 协作；`anet node create` 4-way runtime picker 可选（v0.10.8 / v0.10.11 起），[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)| 中 |
+在交互终端里不带 `--runtime` 运行，向导会依次询问：
 
-## 配置方式
+```bash
+anet node create writer-1
+# 1. 选择 runtime → claude-agent-sdk
+# 2. 选择供应商 → 例如 MiniMax
+# 3. 选择模型
+# 4. 输入 API Key（选单会提示去哪里注册）
+anet node start writer-1
+```
 
-### 国产模型（MiniMax 为例）
+只有 `claude-agent-sdk` 会弹出供应商选单；`claude-code-cli`、`codex-sdk`、`grok-build-acp` 只提示先登录。
 
-所有国产模型通过 `claude-agent-sdk` + `ANTHROPIC_BASE_URL` 接入，配置方式一样：
+如果当前 shell 里已经导出了 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`，向导会跳过供应商选单。这时请用下一节的命令方式，并显式传 `--model`。
+
+## 按提供商配置 {#configure-per-provider}
+
+### 凭据保存在哪里 {#where-credentials-go}
+
+对 `claude-agent-sdk` 节点，`anet node create` 会把当前 shell 里的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY` 记进节点配置，之后在新 shell 里重启节点也能用。也可以用 `--env KEY=VALUE` 显式传入，显式值优先。
+
+密钥类的值不会以明文写进 `config.json`，而是改成环境变量引用，实际值存在 `.anet/nodes/<alias>/.env`（权限 0600）。不要提交 `.anet/` 目录。详见 [节点文件](/guide/agent-node#节点文件)。
+
+### Claude {#claude}
+
+```bash
+# 方式 1：Anthropic API Key（claude-agent-sdk）
+# --model 填 Anthropic 文档里的当前 model id
+ANTHROPIC_API_KEY=sk-ant-xxx \
+anet node create reasoner --runtime claude-agent-sdk --model <anthropic-model-id>
+
+# 方式 2：Claude Code 订阅（claude-code-cli），无需 API Key
+claude auth login
+anet node create all-rounder --runtime claude-code-cli
+
+anet node start reasoner
+```
+
+当前 model id 见 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)。
+
+### Codex {#codex}
+
+```bash
+codex login
+anet node create coder --runtime codex-sdk            # 使用内置默认模型
+anet node create coder-2 --runtime codex-sdk --model <codex-model-id>
+anet node start coder
+```
+
+`codex-sdk` 不读取 `--tools` 参数。登录方式见 [codex-sdk](/guide/runtimes#codex-sdk)。
+
+### 内置的 Anthropic 兼容提供商 {#built-in-anthropic-compatible}
+
+MiniMax、DeepSeek、书生、小米 MiMo 的配置方式相同，只是 `ANTHROPIC_BASE_URL` 和 model 不同：
 
 ```bash
 # MiniMax
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的MiniMax-API-Key \
-anet node create 文案1号 --runtime claude-agent-sdk
+ANTHROPIC_AUTH_TOKEN=<MiniMax-API-Key> \
+anet node create writer-1 --runtime claude-agent-sdk --model <minimax-model-id>
 
-anet node start 文案1号
-```
-
-::: tip 切换模型只需改两个环境变量
-```bash
 # DeepSeek
 ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的DeepSeek-API-Key \
-anet node create 代码助手 --runtime claude-agent-sdk
+ANTHROPIC_AUTH_TOKEN=<DeepSeek-API-Key> \
+anet node create reviewer --runtime claude-agent-sdk --model <deepseek-model-id>
 
-# GLM
-ANTHROPIC_BASE_URL=https://open.bigmodel.cn/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的智谱-API-Key \
-anet node create 分析师 --runtime claude-agent-sdk
-
-# 书生（注意：裸域名，无 /anthropic 后缀，跟 MiniMax 等不同）
+# 书生：裸域名，没有 /anthropic 后缀
 ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn \
-ANTHROPIC_AUTH_TOKEN=你的书生-API-Key \
-anet node create 研究员 --runtime claude-agent-sdk
+ANTHROPIC_AUTH_TOKEN=<Intern-API-Key> \
+anet node create researcher --runtime claude-agent-sdk --model <intern-model-id>
 
-# Kimi
-ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的Kimi-API-Key \
-anet node create 长文助手 --runtime claude-agent-sdk
-
-# 小米 MiMo（5 个 model：mimo-v2.5-pro 默认 / v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign[TTS]）
+# 小米 MiMo
 ANTHROPIC_BASE_URL=https://token-plan-cn.xiaomimimo.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的MiMo-API-Key \
-anet node create 推理助手 --runtime claude-agent-sdk --model mimo-v2.5-pro
-# 文本对话用前 4 个 model；mimo-v2.5-tts-voicedesign 是 TTS 语音设计模型，Anthropic Messages 文本请求大概率不支持
-
-# OpenRouter（一个 Key 接 GPT-4 / Claude / Gemini / Llama 等所有上游）
-ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
-ANTHROPIC_AUTH_TOKEN=你的OpenRouter-API-Key \
-anet node create 多模型助手 --runtime claude-agent-sdk --model anthropic/claude-sonnet-4
-# OpenRouter model id 用 'provider/model' 格式, 完整列表见 https://openrouter.ai/models
-```
-:::
-
-### Claude（海外）
-
-```bash
-# 方式 1：用 Anthropic API Key
-# --model 填 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview) 上的最新 model id
-ANTHROPIC_API_KEY=sk-ant-xxx \
-anet node create 推理大师 --runtime claude-agent-sdk --model <anthropic-model-id>
-
-# 方式 2：用 Claude Code CLI（需要 Claude Max 订阅）
-anet node create 全能助手 --runtime claude-code-cli
-
-anet node start 推理大师
+ANTHROPIC_AUTH_TOKEN=<MiMo-API-Key> \
+anet node create thinker --runtime claude-agent-sdk --model <mimo-model-id>
 ```
 
-### Codex (codex-sdk)（海外）
+用命令方式创建时请始终带上 `--model`：跳过向导后不会自动填入厂商的默认模型。
+
+获取 API Key 和当前 model id：[MiniMax](https://platform.minimaxi.com)、[DeepSeek](https://platform.deepseek.com)、[书生](https://chat.intern-ai.org.cn/)、[小米 MiMo](https://platform.xiaomimimo.com)。
+
+书生端点会自动启用下文的 [vendor adapter](#vendor-adapters)。
+
+### 自定义 Anthropic 兼容端点 {#custom-endpoint}
+
+GLM（智谱）、Kimi（Moonshot）、OpenRouter、自部署网关等不在内置列表里，走「自定义」：
 
 ```bash
-# 先登录 OpenAI
-codex login
-
-# 创建 Codex Agent
-# --model 填 OpenAI Codex 文档里的最新 model id
-anet node create 代码机器 --runtime codex-sdk --model <codex-model-id> --tools Read,Write,Edit,Bash,Glob,Grep
-
-anet node start 代码机器
+ANTHROPIC_BASE_URL=<厂商文档中的 Anthropic 兼容端点> \
+ANTHROPIC_AUTH_TOKEN=<API-Key> \
+anet node create analyst --runtime claude-agent-sdk --model <厂商的 model id>
 ```
 
-## 混合编队示例
+注意几点：
 
-一个网络里同时跑多个不同模型的 Agent：
+- 端点要填到 Anthropic SDK 会在后面拼 `/v1/messages` 的那一层，以厂商文档为准。
+- model id 的格式由厂商决定，例如 OpenRouter 用 `provider/model`。
+- 创建后先派一个小任务确认能回复，再投入使用。
+
+## ANTHROPIC_BASE_URL 的工作方式 {#how-anthropic-base-url-works}
+
+`claude-agent-sdk` 默认请求 Anthropic 官方 API。设置 `ANTHROPIC_BASE_URL` 后，同样的 Messages API 请求会发往该地址，由对应厂商的模型处理：
+
+```mermaid
+graph LR
+    AN[Agent Node<br/>claude-agent-sdk] -->|ANTHROPIC_BASE_URL| API{端点}
+    API -->|不设置| Claude[Anthropic API]
+    API -->|api.minimaxi.com/anthropic| MM[MiniMax]
+    API -->|api.deepseek.com/anthropic| DS[DeepSeek]
+    API -->|chat.intern-ai.org.cn| IS[书生]
+    API -->|token-plan-cn.xiaomimimo.com/anthropic| MI[小米 MiMo]
+```
+
+因为请求格式不变，切换厂商只需要换 `ANTHROPIC_BASE_URL`、API Key 和 `--model`，节点和网络的其余配置都不用改。
+
+Anthropic 兼容协议只统一了数据格式，不保证各家模型的行为一致，尤其是工具调用。这正是下一节 vendor adapter 要处理的问题。
+
+## Vendor adapter（厂商行为修正层） {#vendor-adapters}
+
+同样的 `tools` + `tool_choice: "auto"` 请求，在不同厂商上表现可能不同：
+
+- Anthropic 官方、MiniMax：正常返回 `tool_use` 内容块。
+- 书生 `intern-s2-preview`：默认输出冗长的「Thinking Process」文本，不返回 `tool_use` 块；强制 `tool_choice` 会被拒绝（错误码 `-20077`）。结果是节点收到任务却派不出活。
+
+为此，agent-node 的 `claude-agent-sdk` runtime 会检查 `ANTHROPIC_BASE_URL`，命中书生端点时，在系统提示词最前面加一段固定的偏置提示，让模型直接返回 `tool_use` 块。这是临时措施，厂商修复默认行为后会移除。
+
+### 触发条件 {#vendor-adapter-trigger}
+
+`ANTHROPIC_BASE_URL` 匹配正则 `/intern-ai\.org\.cn|chat\.intern-ai/i` 时触发，也就是使用内置书生端点 `https://chat.intern-ai.org.cn` 时。其他厂商不受影响。
+
+加上的提示词原文如下：
+
+```text
+When a tool is available and applicable to the user request, you MUST respond by emitting a tool_use content block, not by writing text that describes the tool call. Do not show a verbose thinking process. Do not embed tool-call JSON inside text. Use the tool_use content channel directly. If no tool fits, respond normally with text.
+```
+
+### 副作用 {#vendor-adapter-side-effects}
+
+- **看不到思考过程**：模型跳过书生原本可见的推理，调试时看不到它为什么这样决定。
+- **识别只靠 URL**：自部署的 lmdeploy、经代理访问、经 OpenRouter 等聚合服务访问书生模型时，URL 不匹配，偏置不会生效，工具调用仍可能失败。
+- **注入是隐式的**：实际生效的系统提示词是「偏置 + 你的提示词」，自定义提示词时要记得这一点。
+- **偏向调用工具**：对多 agent 协作有利；但让节点只写一份报告时，模型可能更倾向去调工具。
+
+### 能否关闭 {#vendor-adapter-opt-out}
+
+目前不能。对书生端点，这段偏置总是加在最前面：
+
+- 给节点设置自定义系统提示词（节点 `.anet/nodes/<alias>/config.json` 的 `systemPrompt` 字段，或直接运行 `agent-node --prompt`）只会接在偏置后面，不会替换它。`anet node start` 没有 `--prompt` 参数。
+- 自定义提示词可以引导行为，例如写明「只输出报告，不要调用工具」。
+- 不想要偏置，只能换用非书生的端点。
+
+反过来，如果你通过自部署或代理使用书生模型、URL 不会触发偏置，可以把上面的提示词原文复制到该节点 `config.json` 的 `systemPrompt` 里。
+
+## 混合编队示例 {#mixed-fleet}
+
+一个网络里按任务类型分配不同模型：
 
 ```bash
-# 1. 启动服务器
 anet hub start
 
-# 2. 国产文案组（低成本）
+# 文案、翻译：低成本模型
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的Key \
-anet node create 文案1号 --runtime claude-agent-sdk
+ANTHROPIC_AUTH_TOKEN=<MiniMax-API-Key> \
+anet node create writer-1 --runtime claude-agent-sdk --model <minimax-model-id>
 
+# 代码审查：DeepSeek
 ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的Key \
-anet node create 代码审查 --runtime claude-agent-sdk
+ANTHROPIC_AUTH_TOKEN=<DeepSeek-API-Key> \
+anet node create reviewer --runtime claude-agent-sdk --model <deepseek-model-id>
 
-# 3. 海外代码组（高能力）
+# 编码：Codex
 codex login
-anet node create 架构师 --runtime codex-sdk --model <codex-model-id>
+anet node create coder --runtime codex-sdk
 
-# 4. 全部启动
-anet node start 文案1号
-anet node start 代码审查
-anet node start 架构师
+anet node start writer-1
+anet node start reviewer
+anet node start coder
 ```
 
-::: info 混合编队的好处
-- 文案/翻译用国产模型 → 成本低、速度快、无需科学上网
-- 代码/架构用 Codex (codex-sdk) 或 Claude → 能力强
-- 所有 Agent 在同一个网络里协作，通过 Dashboard 统一指挥
-:::
+节点都在线后，可以在 Dashboard 里给对应节点派活，或者让一个协调节点按任务类型转派。协调节点的分工规则写在它的 `systemPrompt` 里，例如：
 
-## ANTHROPIC_BASE_URL 原理
-
-`claude-agent-sdk` 默认连 Anthropic 官方 API。通过设置 `ANTHROPIC_BASE_URL`，可以将请求路由到任何兼容 Anthropic API 格式的服务商：
-
-```
-请求流程：
-Agent Node → ANTHROPIC_BASE_URL → 服务商 API → AI 模型
-
-示例：
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-  → Agent Node 发请求到 MiniMax
-  → MiniMax 返回 MiniMax-M3 的结果
-  → Agent 以为自己在跟 "Claude" 聊天，实际用的是 MiniMax
+```text
+你是协调者。代码类任务派给 coder，审查类派给 reviewer，文案和翻译派给 writer-1。
+用 commhub_get_all_status 查看谁在线，用 commhub_send_task 派活。
 ```
 
-::: tip 为什么用 Anthropic 兼容格式？
-因为 `claude-agent-sdk` 内部用 Anthropic 的 Messages API 格式。国产服务商提供兼容接口后，不需要改任何代码就能切换模型。这是"一套协议接所有模型"的核心设计。
-:::
+用容器部署节点见 [Docker 部署](/deploy/clean-server#docker)。
 
-## Vendor adapter（行为修正层，v0.9.1+）
+## 选型与成本建议 {#model-selection-and-cost}
 
-Anthropic 兼容协议**只解决数据格式**，**不保证行为一致**。各家厂商 RLHF 微调路径不同，同样的 `tools` + `tool_choice:"auto"` payload 在不同厂商端会产生**行为分歧**：
+| 场景 | 建议 |
+|---|---|
+| 复杂推理、架构设计 | Claude 高端型号，或 Claude Code 订阅 |
+| 写代码、跑命令 | Codex，或 Claude |
+| 翻译、摘要、批量文本 | MiniMax、DeepSeek 等低成本模型 |
+| 需要看图 | 选明确支持图片输入的型号，例如选单里标注 vision 的 MiniMax-M3 或 Claude |
+| 科研类推理 | 书生（注意上面的 vendor adapter） |
 
-- ✅ MiniMax / Anthropic 官方：tool_use content blocks 干净 emit，OOTB 工作
-- ❌ 书生 intern-s2-preview：默认走 verbose "Thinking Process" 文本，**不发** `tool_use` blocks（强制 `tool_choice` 还被 `-20077` 拒）
+控制成本的几个办法：
 
-从 [v0.9.1](/changelog#v0-9-1-—-patch-130-intern-tool-calling-hotfix-promote-2026-05-15-✅-stable)（[#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130)）起 agent-node 引入 **vendor adapter** 检测 `ANTHROPIC_BASE_URL` 后 prepend 一段 system-prompt bias 把厂商行为掰回 Anthropic 标准。
+- **分级派活**：大部分简单任务交给低成本模型，只把少数难任务交给高端模型。各家价格经常调整，做预算前查厂商的官方价目表。
+- **单任务预算上限**（`claude-agent-sdk`）：在 `.anet/nodes/<alias>/config.json` 的 `flags` 里设置 `budget`（美元），修改后重启节点；也可以在直接运行 agent-node 时传 `--max-budget <usd>`。
+- **限制轮数**（`claude-agent-sdk`）：创建时传 `--max-turns <n>`，避免单个任务跑太多轮。
+- **并发**：多数厂商有并发上限，批量起节点前先确认配额，限流报错的处理见 [FAQ](/troubleshooting#faq)。
 
-**当前 adapter（intern）触发条件**：URL 命中 `/intern-ai\.org\.cn|chat\.intern-ai/i` 正则（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/commit/4cd0024)）—— 上面 "书生" 配置示例的 `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn` 会自动触发。
-
-**5 个用户可见副作用**（必读 + opt-out 路径）：
-1. 失去 intern Thinking Process 透明度（model skip thinking）
-2. Detection fragility（自部署 lmdeploy / proxy / aggregator 不命中 regex）
-3. Silent injection（隐式 prepend，debug 困惑）
-4. Tool calling 风格强制（多 Agent 协作净正面 / 单 agent 报告任务偏移）
-5. Tokens 减输出 = 减 explainability
-
-详见 [Vendor 适配层](/concepts/vendor-adapters)（完整机制 + per-副作用 Migration hint + future polish gap）。
-
-**能关掉 bias 吗（当前：不能）**：对 intern endpoint，vendor bias 是**无条件 prepend** 的（`combinedSystemPrompt = internToolUseBias + SYSTEM_PROMPT`）。`anet node start` **没有** `--prompt` flag；给节点设自定义 system prompt（node `config.json` 的 `systemPrompt` 字段 / `agent-node --prompt`）只会**拼在 bias 之后、不移除它**，model **不会**退回原始 RLHF。想不带 bias 只能换非 intern 端点，详见 [Vendor 适配层 — 能不能关掉 bias](/concepts/vendor-adapters)。
-
-## 模型选择建议
-
-| 场景 | 推荐模型 | 理由 |
-|------|---------|------|
-| 日常文案/翻译 | MiniMax M2.7 | 极低成本，中文好 |
-| 代码生成/审查 | DeepSeek V3 或 Codex (codex-sdk) | 代码能力强 |
-| 复杂推理/分析 | Claude Sonnet（主线） | 推理最强 |
-| 长文档处理 | Kimi | 128K 上下文 |
-| 科学研究 | 书生 Intern-S1-Pro | 科研专长 |
-| 预算有限 | MiniMax + DeepSeek 混搭 | 两个都极便宜 |
-| 全能（不差钱） | Claude Opus（主线） | 什么都行 |
-
-## 成本优化策略
-
-### 策略 1：分级路由
-
-把任务按复杂度分发到不同模型，最大化成本效益：
-
-```
-复杂任务 (10%) → Claude Opus     (~$15/M tokens 量级)
-中等任务 (30%) → Codex (codex-sdk) (~$5/M tokens)
-简单任务 (60%) → MiniMax M2.7    (~$0.3/M tokens)
-```
-
-> 上面数字是 2026-05 时点的量级估算；各家定价会调整，做预算前请查 provider 官方价格表。
-
-### 策略 2：预算控制
-
-agent-node 支持 `--max-budget <usd>` 每任务预算上限。`anet node create` 没把它当 flag 透出来 —— 写在 `config.json` 的 `flags.maxBudgetUsd`：
-
-```jsonc
-// ~/.anet/nodes/architect/config.json
+```json
 {
-  "alias": "architect",
-  "runtime": "claude-agent-sdk",
-  "model": "claude-sonnet-4-6",
   "flags": {
-    "maxBudgetUsd": 1.0          // 每任务最多花 $1
+    "budget": 1.0
   }
 }
 ```
 
-或者手动启动 agent-node 时直接传：
+## 下一步 {#next-steps}
 
-```bash
-agent-node --max-budget 1.0 --alias architect --runtime claude-agent-sdk --hub http://127.0.0.1:9200
-```
-
-### 策略 3：批量低成本
-
-重复性任务一次起多个低成本 agent 并行处理：
-
-```bash
-# 起 5 个 MiniMax agent 批量翻译
-for i in 1 2 3 4 5; do
-  ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
-  ANTHROPIC_AUTH_TOKEN=$MINIMAX_KEY \
-  anet node create "translator-${i}" --runtime claude-agent-sdk --model <minimax-model-id>
-  anet node start "translator-${i}" &
-done
-```
-
-## 下一步
-
-**配置和调优**：
-- 钱花在哪儿？看本页上方模型对照表的「成本」列
-- 想把多个 API Key 持久化？看 [Agent Node 配置](/guide/agent-node) 的 env 字段
-- API 限流报错？多数厂商有并发上限，[FAQ](/troubleshooting#faq) 里有应对策略
-
-**深入原理**：
-- 为什么 `ANTHROPIC_BASE_URL` 能切所有国产模型？看上方 [ANTHROPIC_BASE_URL 原理](#anthropic-base-url-原理) 一节
-- 不同 runtime 的区别？看 [Runtimes](/guide/runtimes) — `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` 三选一
+- 各 runtime 的前置条件与差异：[Runtime 对比](/guide/runtimes)
+- 节点文件、环境变量与密钥：[Agent Node](/guide/agent-node)
+- 容器化部署：[Docker 部署](/deploy/clean-server#docker)

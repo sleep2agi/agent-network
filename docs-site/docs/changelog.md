@@ -926,11 +926,11 @@ backward-compat：显式 `--runtime <X>` 仍 skip picker；demo / batch / 已 `-
 
 ### 修复
 
-- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling 真打通**（[commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) ＋ 双 phase publish promote）—— v0.9.0 时 intern-s2-preview 在 Anthropic 协议 `tool_choice: "auto"` 下默认走 verbose Thinking Process 不发 `tool_use` content blocks，强制 `tool_choice` 又被 `-20077` 拒。Hotfix：检测到 `ANTHROPIC_BASE_URL` 命中 `intern-ai.org.cn` / `chat.intern-ai` 时，prepend 一段短 system-prompt bias 让 model 直接发 `tool_use`。curl A/B verified：`stop_reason: max_tokens → tool_use`，`output_tokens: 1024 → 122`。详见 [Vendor 适配层](/concepts/vendor-adapters)（含 5 副作用 + opt-out 路径）。
+- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling 真打通**（[commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) ＋ 双 phase publish promote）—— v0.9.0 时 intern-s2-preview 在 Anthropic 协议 `tool_choice: "auto"` 下默认走 verbose Thinking Process 不发 `tool_use` content blocks，强制 `tool_choice` 又被 `-20077` 拒。Hotfix：检测到 `ANTHROPIC_BASE_URL` 命中 `intern-ai.org.cn` / `chat.intern-ai` 时，prepend 一段短 system-prompt bias 让 model 直接发 `tool_use`。curl A/B verified：`stop_reason: max_tokens → tool_use`，`output_tokens: 1024 → 122`。详见 [Vendor 适配层](/guide/multi-model#vendor-adapters)（含 5 副作用 + opt-out 路径）。
 
 ### 已知 gap 提醒（不阻 promote）
 
-- vendor adapter detection 用 URL regex 检测 vendor —— 自部署 lmdeploy / 走 proxy / 走 aggregator 的 intern endpoint 不命中 bias，需要手动 `--prompt` 复制 bias。详见 [Vendor 适配层 ⚠ 5 副作用](/concepts/vendor-adapters#⚠-副作用-必读)。
+- vendor adapter detection 用 URL regex 检测 vendor —— 自部署 lmdeploy / 走 proxy / 走 aggregator 的 intern endpoint 不命中 bias，需要手动 `--prompt` 复制 bias。详见 [Vendor 适配层 ⚠ 5 副作用](/guide/multi-model#vendor-adapter-side-effects)。
 - `--no-vendor-bias` flag 未实现（P1 polish gap，跟 `bias_active` info display follow-up 一起规划）。
 
 ### 发布流程

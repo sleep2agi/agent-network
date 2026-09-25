@@ -217,5 +217,5 @@ weixin。**这正是那次加固要防的事,而加固没有部署。**
 
 ## 相关
 
-面向用户的进程守护说明见文档站 [部署 / 让 Hub 常驻](https://anet.sh/deploy/daemon)；
+面向用户的进程守护说明见文档站 [部署 / 让 Hub 常驻](https://anet.sh/deploy/keep-alive)；
 本目录是它引用的 **Git 权威**（systemd user unit + 军团启动链）。

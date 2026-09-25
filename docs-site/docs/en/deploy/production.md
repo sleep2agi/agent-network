@@ -115,7 +115,7 @@ At minimum, monitor:
 - the Dashboard Audit Log
 - whether a reliable process manager supervises the Hub
 
-For long-running service and reboot recovery, see [Hub process supervision](/en/deploy/daemon).
+For long-running service and reboot recovery, see [Keeping the Hub running](/en/deploy/keep-alive).
 
 ## Deployment modes
 

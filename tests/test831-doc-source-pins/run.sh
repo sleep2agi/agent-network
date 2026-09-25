@@ -236,7 +236,10 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   docs/sdk/npm-packages-and-sdk.{zh,en}.md(开发者参考)。唯一减少的 pin 是 npm 页里的
 #   agent-network/src/client.ts#L262(中英各 1 处,2 处出现、1 个唯一 pin)—— 它随页面搬进 docs/,
 #   由 `check-doc-symbol-pins.py .`(docs/ 那一侧)继续看着,不是丢失。
-[[ "$files" -eq 105 ]] || fail "预期扫 105 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-25:files 105 → 103。文档站瘦身第 5 步:concepts/vendor-adapters 并入 guide/multi-model,
+#   guide/sdk-deep-dive 移到 docs/sdk/(中英各 −2);deploy/daemon 拆出 deploy/keep-alive(中英各 +1)。
+#   这几页都不含源码行号 pin,uniq/occ 不变。
+[[ "$files" -eq 103 ]] || fail "预期扫 103 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 8  ]] || fail "预期 8 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 22 ]] || fail "预期 22 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"

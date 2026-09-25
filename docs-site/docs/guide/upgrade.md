@@ -159,5 +159,5 @@ anet --version
 ## 相关
 
 - [CLI 命令](/guide/cli)
-- [进程守护](/deploy/daemon)
+- [让 Hub 常驻](/deploy/keep-alive)
 - [故障排查](/troubleshooting)

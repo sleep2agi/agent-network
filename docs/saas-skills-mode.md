@@ -154,7 +154,7 @@ anet 的核心价值是**多 Agent 在 dashboard 里协作**（人类 - planner 
 ## 5. 接下来该读
 
 - [`RFC-003`](rfcs/RFC-003-node-telemetry-layer.md) — 遥测层 RFC（SaaS 前置依赖）
-- [`docs-site/docs/guide/sdk-deep-dive.md`](../docs-site/docs/guide/sdk-deep-dive.md) — 两个 SDK 的能力对比（决定 Skill 用哪个 runtime）
+- [`docs/sdk/sdk-deep-dive.zh.md`](sdk/sdk-deep-dive.zh.md) — 两个 SDK 的能力对比（决定 Skill 用哪个 runtime）
 - [`docs/architecture.md`](architecture.md) — anet 现有架构（commhub + agent-node + dashboard 三层）
 - [`docs-site/docs/guide/runtimes.md`](../docs-site/docs/guide/runtimes.md) — 三种 runtime 的 how-to
 - issue [#18](https://github.com/sleep2agi/agent-network/issues/18) — 本文的研究素材池

@@ -57,8 +57,8 @@ if rg -n 'gpt-5\.5' \
   "$ROOT/docs/batch.md" \
   "$ROOT/docs-site/docs/guide/batch.md" \
   "$ROOT/docs-site/docs/en/guide/batch.md" \
-  "$ROOT/docs-site/docs/guide/sdk-deep-dive.md" \
-  "$ROOT/docs-site/docs/en/guide/sdk-deep-dive.md" \
+  "$ROOT/docs/sdk/sdk-deep-dive.zh.md" \
+  "$ROOT/docs/sdk/sdk-deep-dive.en.md" \
   "$ROOT/docs-site/docs/guide/runtimes.md" \
   "$ROOT/docs-site/docs/en/guide/runtimes.md" \
   "$ROOT/docs-site/docs/guide/architecture.md" \
