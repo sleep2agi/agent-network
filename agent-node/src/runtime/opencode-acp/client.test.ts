@@ -190,6 +190,34 @@ describe("OpencodeAcpClient — process lifecycle", () => {
     expect(thrown!.message).toContain("opencode acp exited");
   });
 
+  test("requestWithIdleTimeout(…, 0) disables the idle deadline (OPENCODE_TIMEOUT_MS=0)", async () => {
+    // Answers after 400ms of total silence; any positive idle budget below
+    // that would reject, and the pre-fix client rejected 0 immediately.
+    const stub = makeStubBinary(`
+      let buf = "";
+      process.stdin.on("data", (chunk) => {
+        buf += chunk;
+        while (buf.includes("\\n")) {
+          const idx = buf.indexOf("\\n");
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          const req = JSON.parse(line);
+          setTimeout(() => {
+            process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { late: true } }) + "\\n");
+          }, 400);
+        }
+      });
+    `);
+    const c = new OpencodeAcpClient();
+    c.start({ binary: stub, env: stubEnv() });
+    try {
+      const r = await c.requestWithIdleTimeout<{ late: boolean }>("session/prompt", {}, 0);
+      expect(r.late).toBe(true);
+      await expect(c.requestWithIdleTimeout("session/prompt", {}, 100)).rejects.toThrow("idle for");
+    } finally { await c.stop(); }
+  });
+
   test("isRunning flips false after stop()", async () => {
     const stub = makeStubBinary(`
       // A stub that just reads and never writes.

@@ -774,7 +774,12 @@ describe("opencodeThink — failed-turn lifecycle", () => {
       } catch (error: any) {
         thrown = error;
       }
-      expect(thrown?.message).toContain("idle for");
+      // The child is killed, so the reply must say the turn was aborted —
+      // not the transport's "background work may still be running".
+      expect(thrown?.message).toContain("已终止该轮");
+      expect(thrown?.message).toContain("OPENCODE_TIMEOUT_MS");
+      expect(thrown?.message).not.toContain("may still be running");
+      expect(String((thrown as any)?.cause?.message)).toContain("idle for");
       expect(session.client.isRunning).toBe(false);
       expect(existsSync(pidPath)).toBe(true);
       const pid = Number(readFileSync(pidPath, "utf8"));

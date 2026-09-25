@@ -52,7 +52,7 @@ describe("OpenCode copresence CommHub message wiring", () => {
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const branch = cli.slice(start, end);
-    expect(branch).toContain("runtime.submit(task, undefined, _from, {");
+    expect(branch).toContain("runtime.submit(task, currentOpencodeTimeout().valueMs, _from, {");
     expect(branch).toContain("onSubmitted: evidence?.submitted");
     expect(branch).toContain("onConsumed: evidence?.consumed");
     expect(branch).not.toContain("runtime.submit(task);");
