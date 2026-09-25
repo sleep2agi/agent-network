@@ -117,7 +117,7 @@ Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). F
 
 **Audit log**
 - `audit_log` records a `password_changed` row (or `password_reset_by_admin` via the reset-user path)
-- Read via REST `GET /api/audit-log` — **system-level** `users.role='admin'` sees all rows, regular users see only their own (**not** a network-level owner/admin gate — see [API — audit-log](/en/api/rest#get-api-audit-log))
+- Read via REST `GET /api/audit-log` — **system-level** `users.role='admin'` sees all rows, regular users see only their own (**not** a network-level owner/admin gate — see [API — audit-log](/en/api/rest-data#get-api-audit-log))
 
 **Forgot the old password?**
 - Can't use `anet passwd` (requires old password)
@@ -376,7 +376,7 @@ The CLI does not ask you to enter a role. After login, the server uses the user 
 ### Promote / demote a member
 
 ::: info Current entry points
-The CLI can list members. Use REST for role changes and member removal (see [API — networks members](/en/api/rest#get-api-networks-id-members)).
+The CLI can list members. Use REST for role changes and member removal (see [API — networks members](/en/api/rest-admin#get-api-networks-id-members)).
 :::
 
 ```bash
@@ -399,7 +399,7 @@ curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
   -H "Authorization: Bearer $UTOK"
 ```
 
-Full endpoint docs: [PUT members](/en/api/rest#put-api-networks-id-members-user-id) / [DELETE members](/en/api/rest#delete-api-networks-id-members-user-id).
+Full endpoint docs: [PUT members](/en/api/rest-admin#put-api-networks-id-members-user-id) / [DELETE members](/en/api/rest-admin#delete-api-networks-id-members-user-id).
 
 
 ### Role FAQ {#role-faq}

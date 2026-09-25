@@ -714,7 +714,7 @@ v0.10.4 Vincent 紧急 ship 跳过 测试团队 Docker smoke gate（不在生产
 [#147](https://github.com/sleep2agi/agent-network/issues/147)（5/16 ack）+ Option C 落地：
 
 - 拓扑节点前缀标签（[节点 → group 边的 label distinguishability）实装 Option C 设计（Dashboard 团队 design pass）
-- disk telemetry hover card 渲染（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 三字段对接 [`GET /api/server/:host/health`](/api/rest#get-api-server-host-health) 响应）
+- disk telemetry hover card 渲染（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 三字段对接 [`GET /api/server/:host/health`](/api/rest-data#get-api-server-host-health) 响应）
 - 100+ 轮 typography + corner-radius cascade polish
 
 Dashboard 团队 design pass + 4/4 verify（commit `7de97ee` + screenshot evidence，local ship `f9c83cd`）。

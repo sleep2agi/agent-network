@@ -80,7 +80,7 @@ The server enables its tmux HTTP/WebSocket endpoints only when `COMMHUB_ENABLE_T
 Leave that variable unset in production; the startup log should show `Tmux: DISABLED`.
 
 If a trusted environment genuinely needs this feature, also configure the IP allowlist and require an admin caller.
-See [REST API: tmux control plane](/en/api/rest#tmux-debug-endpoints-opt-in).
+See [REST API: tmux control plane](/en/api/rest-admin#tmux-debug-endpoints-opt-in).
 
 ### 6. Use invitations
 

@@ -138,7 +138,7 @@ Each user has a role in each network. Four permission levels from highest to low
 - **System admin** (`users.role='admin'`, the first registered user): can read everyone's audit log
 - **Non-admin** (`users.role='user'`): can only see their own audit log (the server auto-adds `WHERE user_id = self`)
 
-This is a **system-level** role gate, not a **network-level** one (the `whoami` `Role:` field carries the same system-level semantics). See [REST API → GET /api/audit-log](/en/api/rest#get-api-audit-log).
+This is a **system-level** role gate, not a **network-level** one (the `whoami` `Role:` field carries the same system-level semantics). See [REST API → GET /api/audit-log](/en/api/rest-data#get-api-audit-log).
 :::
 
 ### Dashboard Permission Behavior

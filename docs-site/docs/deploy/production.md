@@ -80,7 +80,7 @@ anet hub dashboard --host 127.0.0.1
 生产环境不要设置这个变量；启动日志应显示 `Tmux: DISABLED`。
 
 确需在受信环境启用时，同时配置 IP allowlist，并确认调用者是 admin。端点说明见
-[REST API：tmux 控制面](/api/rest#tmux-调试端点-opt-in)。
+[REST API：tmux 控制面](/api/rest-admin#tmux-调试端点-opt-in)。
 
 ### 6. 使用邀请制
 

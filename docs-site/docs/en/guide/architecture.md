@@ -165,7 +165,7 @@ Two new REST endpoints expose **single-host health + per-agent list**, used by t
 
 **v0.10.2 Hero A complement**: `agent-node ≥ 2.4.1` adds host **disk telemetry** — `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` (sampled via `execFileSync('df', ['-k', '/'])`, sharing one POSIX path across Linux + macOS; gracefully `null` on Windows or parse failure) + `alert_level` gains `disk_avail < 1GB critical` / `< 5GB warn` triggers + the 24h history buckets carry `disk_avail_min` / `disk_used_max` extreme-aggregation fields, closing [#99 per-server daemon Phase 2 host metrics, final 10%](https://github.com/sleep2agi/agent-network/issues/99).
 
-The control layer (kill / restart / redeploy) is deferred to v0.11.0. Details: [REST API — server endpoint family](/en/api/rest#get-api-server-host-health).
+The control layer (kill / restart / redeploy) is deferred to v0.11.0. Details: [REST API — server endpoint family](/en/api/rest-data#get-api-server-host-health).
 :::
 
 ### MCP Tool Groups

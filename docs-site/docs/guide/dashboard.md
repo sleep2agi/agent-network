@@ -14,14 +14,14 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 :::
 
 ::: info v0.10.0 / dashboard `0.5.0` 新增 — Hero 3 网络节点前端 8/8 surface ✅
-跟随 [v0.10.0 release Phase 2](/changelog#v0-10-0-—-direct-runtime-observability-foundations-2026-05-16-✅-stable-phase-1-3-包-promote) ship 完整 8 个 surface（§3.A prefix-group fix / §3.B sweep retire / §3.C recent-panel hide / §3.D grid default view / §3.E hover detail card / §3.F server-health ring tint 接 [#99](https://github.com/sleep2agi/agent-network/issues/99) endpoint / §3.G fullscreen mode / §3.I canvas brand mark；§3.H 砍 per RFC Q2 review）+ 随包 19+ 轮 typography + 圆角级联 polish。Server health ring tint 数据源 [`GET /api/server/:host/health`](/api/rest#get-api-server-host-health)；agent hover card 含 per-agent `process_telemetry`（`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`，[#142](https://github.com/sleep2agi/agent-network/issues/142) ship in `agent-node@2.4.0` + server schema align in `commhub-server@0.8.2`）。
+跟随 [v0.10.0 release Phase 2](/changelog#v0-10-0-—-direct-runtime-observability-foundations-2026-05-16-✅-stable-phase-1-3-包-promote) ship 完整 8 个 surface（§3.A prefix-group fix / §3.B sweep retire / §3.C recent-panel hide / §3.D grid default view / §3.E hover detail card / §3.F server-health ring tint 接 [#99](https://github.com/sleep2agi/agent-network/issues/99) endpoint / §3.G fullscreen mode / §3.I canvas brand mark；§3.H 砍 per RFC Q2 review）+ 随包 19+ 轮 typography + 圆角级联 polish。Server health ring tint 数据源 [`GET /api/server/:host/health`](/api/rest-data#get-api-server-host-health)；agent hover card 含 per-agent `process_telemetry`（`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`，[#142](https://github.com/sleep2agi/agent-network/issues/142) ship in `agent-node@2.4.0` + server schema align in `commhub-server@0.8.2`）。
 
 **§3.E / §3.F 数据源生效要求**：`anet hub start` 默认路径需 `agent-network ≥ 2.2.1`（[v0.10.1 hotfix](/changelog#v0-10-1-—-hotfix-pinned-server-version-跟-v0-10-0-ship-chain-bump-2026-05-17-✅-stable) `PINNED_SERVER_VERSION` bump 0.8.0 → 0.8.2）。老版本 `anet hub start` 仍跑 `commhub-server@0.8.0`，#99 endpoint 不存在 → ring tint 数据源失败 / hover card process_telemetry 全 `null`。
 
 ::: info v0.10.2 Hero D — dashboard `0.5.1` 拓扑前缀标签 Option C + disk render
 跟随 [v0.10.2 release](/changelog) ship：
 - **Hero D 拓扑节点前缀标签 Option C 实装**（[#147](https://github.com/sleep2agi/agent-network/issues/147) 5/16 ack + Option C design pass）—— 节点 → group 边的 label distinguishability 终落地
-- **disk telemetry hover card 渲染**（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 对接 [`GET /api/server/:host/health`](/api/rest#get-api-server-host-health) 响应，源 agent-node `≥ 2.4.1` host-telemetry `df -k` 采样；老 agent / Windows 渲染 `—` 不误导成 0）
+- **disk telemetry hover card 渲染**（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 对接 [`GET /api/server/:host/health`](/api/rest-data#get-api-server-host-health) 响应，源 agent-node `≥ 2.4.1` host-telemetry `df -k` 采样；老 agent / Windows 渲染 `—` 不误导成 0）
 - **100+ 轮 typography + 圆角级联 polish**
 :::
 
@@ -192,7 +192,7 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 
 管理功能包括：
 
-- **用户管理** -- 查看所有注册用户（`/api/users` 仅系统级 admin）；修改角色当前走 REST `PUT /api/networks/:id/members/:user_id`（owner only，详见 [API — PUT members](/api/rest#put-api-networks-id-members-user-id)），CLI 暂无 `promote` / `demote` 子命令（排到 v0.11+ / 未排期）
+- **用户管理** -- 查看所有注册用户（`/api/users` 仅系统级 admin）；修改角色当前走 REST `PUT /api/networks/:id/members/:user_id`（owner only，详见 [API — PUT members](/api/rest-admin#put-api-networks-id-members-user-id)），CLI 暂无 `promote` / `demote` 子命令（排到 v0.11+ / 未排期）
 - **网络管理** -- 查看所有网络、成员（配额体系 v0.8 **部分启用**：`createNetwork` 仍 enforces `max_networks_owned`，其他 quota 项 dormant；详见 [networks 配额限制](/concepts/networks#quota-limits)）
 - **系统统计** -- 服务器负载、数据库大小、连接数
 - **审计日志** -- 所有操作的详细记录（`/api/audit-log` 端点 + Dashboard Audit Log 页；系统级 admin 看全部，其他角色看自己 row）
@@ -217,7 +217,7 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 - **网络设置** -- 当前网络的配置（仅 owner/admin）
   - 重命名网络
   - 创建邀请码
-  - 管理成员角色（stable Dashboard `0.6.0` 部分功能未上 UI；CLI 有 `anet network invite` 但**无** `promote` / `demote` 子命令，改角色目前走 REST [`PUT /api/networks/:id/members/:user_id`](/api/rest#put-api-networks-id-members-user-id)；CLI 子命令排在 v0.11+ / 未排期）
+  - 管理成员角色（stable Dashboard `0.6.0` 部分功能未上 UI；CLI 有 `anet network invite` 但**无** `promote` / `demote` 子命令，改角色目前走 REST [`PUT /api/networks/:id/members/:user_id`](/api/rest-admin#put-api-networks-id-members-user-id)；CLI 子命令排在 v0.11+ / 未排期）
   - 删除网络
 
 Token 管理界面：
@@ -272,7 +272,7 @@ vercel deploy --prebuilt --prod --scope <vercel-team>
 Dashboard 通过三类数据面保持更新：
 
 1. **REST 查询**：拉取 `/api/status`、`/api/tasks`、`/api/messages` 等状态
-2. **Dashboard 自身 SSE**：Dashboard 用登录 username 订阅 `/events/<username>` user channel，直接收 server 推的事件（如 RFC-010 的 `node.renamed`，#84 SSE channel fix —— 详见 [REST API SSE 端点](/api/rest#sse-端点)）
+2. **Dashboard 自身 SSE**：Dashboard 用登录 username 订阅 `/events/<username>` user channel，直接收 server 推的事件（如 RFC-010 的 `node.renamed`，#84 SSE channel fix —— 详见 [REST API SSE 端点](/api/rest-data#sse-端点)）
 3. **Agent SSE**：Agent 用自己的 node alias 订阅 `/events/<alias>`，新任务到达后更新 Hub 数据，再被 Dashboard 读取
 
 ::: tip 性能提示
@@ -297,7 +297,7 @@ Dashboard 通过三类数据面保持更新：
   - **分组**：group-box hover（hover group 标题高亮所有成员）+ group 间虚线分隔
   - **副控件**：minimap（左下角缩略图 + 视口框拖动）+ cwd tooltip（hover 节点显示 `project_dir`）+ S/M/L 尺寸 toggle
   - **浅色模式**：中心 hub 24px 脉冲（解决了 stable 浅色不可见问题）
-- **ServersDrawer 服务器抽屉**（[#119](https://github.com/sleep2agi/agent-network/issues/119)）：右侧抽屉按物理机（`hostname` + `ip`）聚合 agent 列表 + 实时 CPU load / 内存柱状图 / agent count，数据来自 [`GET /api/servers`](/api/rest#get-api-servers)（10min stale-mark offline 副作用 + 裸 JSON array 响应，[`index.ts` `GET /api/servers`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。同 host 多 agent 会折叠到同一行；老 agent 没 host telemetry 字段时显示 `unknown` host group。
+- **ServersDrawer 服务器抽屉**（[#119](https://github.com/sleep2agi/agent-network/issues/119)）：右侧抽屉按物理机（`hostname` + `ip`）聚合 agent 列表 + 实时 CPU load / 内存柱状图 / agent count，数据来自 [`GET /api/servers`](/api/rest-data#get-api-servers)（10min stale-mark offline 副作用 + 裸 JSON array 响应，[`index.ts` `GET /api/servers`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。同 host 多 agent 会折叠到同一行；老 agent 没 host telemetry 字段时显示 `unknown` host group。
 - **Tasks 状态 tab**：color-coded 圆点 + 移动端横滚
 - **移动端 audit 修复**：banner 让位 hamburger / UserBar 图标化
 - **Sidebar 底部 "Quick search ⌘K" chip**：移动端 launcher 入口
