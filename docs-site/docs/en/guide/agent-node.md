@@ -45,7 +45,7 @@ From a terminal this attaches to tmux; detach with `Ctrl-B D`. Without a TTY it 
 Do not select a runtime here from an old version number or fixed count. Availability follows the npm release channel:
 
 - Claude Code, Claude Agent SDK, Codex SDK, Grok ACP, and other current paths are listed in [Runtimes](/en/guide/runtimes).
-- Codex TUI co-presence is preview-only and must use the complete `--copresence` start and recovery flow. See [Codex TUI co-presence](/en/guide/codex-copresence).
+- Codex TUI co-presence is a preview feature and must use the complete `--copresence` start and recovery flow. See [Codex TUI co-presence](/en/guide/codex-copresence).
 - OpenCode is currently a task runtime, not a shared TUI.
 - The shared Grok TUI has not shipped. The available `grok-build-acp` runtime cannot attach; see [Grok TUI status](/en/guide/grok-copresence).
 

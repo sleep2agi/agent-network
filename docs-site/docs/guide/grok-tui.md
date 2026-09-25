@@ -6,19 +6,19 @@
 
 `grok-build-cli` 让一个 Agent Network 节点持有唯一的真实 Grok TUI。你从另一个终端用 `anet grok attach` 进入同一界面；CommHub 网络任务也会排队进入同一会话。人类输入优先，网络任务按 FIFO 执行。
 
-::: warning 实验能力（preview 通道可用）
-共存能力已随 npm preview 通道发布（实测 `@sleep2agi/agent-network@2.3.0-preview.59` + `@sleep2agi/agent-node@2.5.0-preview.43` 可用）。它不会替代 `grok-build-acp`。共存只接受**已验证的 grok build**：`0.2.93 (f00f96316d)` 与 `1.0.5 (5115b46bc909)`；清单外的版本会拒绝启动。
+::: warning 实验能力（npm 发布包已包含）
+共存能力已随 npm 发布包提供，`latest` 与 `preview` 两条通道都有（`anet --help` 里的「Grok co-presence」一节）。它是实验能力，不替代默认推荐的 `grok-build-acp`。共存只接受**已验证的 grok build**：`0.2.93 (f00f96316d)` 与 `1.0.5 (5115b46bc909)`；清单外的版本会拒绝启动。
 :::
 
 ## 前置检查
 
 - Linux、macOS 或 WSL；已安装 Node.js、Bun 和原生 `node-pty` 依赖
 - Grok Build CLI 已安装并完成登录
-- 已 clone Agent Network 仓库
+- 只有要跑未发布的源码改动时，才需要 clone Agent Network 仓库；用 npm 装的 `anet` / `agent-node` 可直接跳过下面的「构建源码」一节
 
 ```bash
 grok --version
-# 必须是：grok 0.2.93 (f00f96316d)
+# 必须是验证清单里的 build：grok 0.2.93 (f00f96316d) 或 grok 1.0.5 (5115b46bc909)
 
 grok
 # 首次使用时按界面完成登录，然后退出
@@ -38,7 +38,7 @@ npm run build
 cd ..
 ```
 
-本页后续命令必须调用刚构建的 CLI，而不是 npm stable 的全局 `anet`。在 bash/zsh 中可定义一个仅对当前 shell 有效的函数，并显式指定刚构建的 agent-node：
+如果从源码构建，本页后续命令要调用刚构建的 CLI，而不是全局安装的 `anet`。在 bash/zsh 中可定义一个仅对当前 shell 有效的函数，并显式指定刚构建的 agent-node：
 
 ```bash
 export ANET_SOURCE=/绝对路径/agent-orchestra

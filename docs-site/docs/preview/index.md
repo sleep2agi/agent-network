@@ -1,9 +1,21 @@
-# 预览版文档 — v0.11-preview2
+# 预览版文档 — v0.11-preview2（存档快照，2026-06-28）
 
-::: warning ⚠️ 你正在看 **preview** 版文档
-当前 preview channel = **v0.11-preview2**（npm `@preview` tag）。这一版还**没 promote 到 `@latest`**——稳定生产环境用户请回到 [latest 文档](/)。
+::: danger 这是 2026-06-28 的存档快照，不是当前的 preview
+本页记录的是 2026-06-28 那一版 preview（v0.11-preview2），其中的版本号、「latest 还没有的功能」和安装说明都已过时，**不要照着操作**。
 
-**包含 latest 还没有的功能**：
+现在获取 preview 构建：
+
+- 查通道当前指向：`npm view @sleep2agi/agent-network dist-tags`（`agent-node`、`commhub-server` 同理）
+- 新装：`npm install -g @sleep2agi/agent-network@preview`
+- 已装 anet 时切到 preview：`anet upgrade --channel preview`；切回稳定：`anet upgrade --channel latest`
+
+通道说明见 [版本号体系](/guide/versioning) 和 [升级指南](/guide/upgrade)，变更见 [更新日志](/changelog)。
+:::
+
+::: details 以下为 2026-06-28 快照原文
+当时的 preview channel = **v0.11-preview2**（npm `@preview` tag），当时还没 promote 到 `@latest`。
+
+**当时 latest 还没有的功能**：
 - `anet node loop` CLI + `/aloop` 全 runtime 通（Dashboard 的 `/goal`、`/loop` 保留给目标 runtime）
 - 安全批：cross-tenant 写防护带 + retention sweep + password KDF 强化
 - RFC-024 hub config-apply foundation（4 个新 MCP tools）

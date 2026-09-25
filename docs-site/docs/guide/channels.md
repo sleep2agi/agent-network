@@ -120,7 +120,7 @@ agent-node 会保留消息来源，并把回复路由回原平台。节点只需
 
 ```text
 send_desktop_message(
-  to_username = "vansin",          # 或 to_user_id，二选一必填
+  to_username = "alice",           # 或 to_user_id，二选一必填
   message     = "构建完成，3 个包已发 preview",   # 必填，≤10000 字
   title       = "发版完成",         # 可选，≤200 字
   severity    = "success",         # info(默认) / success / warning / error

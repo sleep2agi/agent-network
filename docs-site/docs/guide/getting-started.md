@@ -24,8 +24,8 @@
 
 - **Node.js ≥ 22.13.0**
 - **Bun ≥ 1.2.0** —— 装法 `npm i -g bun`（或 `curl -fsSL https://bun.sh/install | bash`）。第 2 步 `anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 时第 2 步一定失败**，但表现分两条线:
-  · **含 preflight 的构建**（2026-08-30 在 `2.3.0-preview.47` 上实测；2026-09-02 起 `latest` 与 `preview` 都是 `2.3.0-preview.76`，preflight 自 `.47` 起一直在）:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`（退出码 1）；
-  · **更早、不含 preflight 的构建**（实测 `2.2.21`）:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈。
+  · **`2.3.0-preview.47` 及以后的构建**（现在的 `latest` `2.3.0-preview.76` 与 `preview` `2.3.0-preview.115` 都在此范围）:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`（退出码 1）；
+  · **更早、不含 preflight 的构建**（如 `2.2.21`）:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈。
   装完 `bun --version` 应有输出。
 
 这俩装好就行；`commhub-server` / `agent-node` 首次用时自动拉取，不用手动装。
@@ -54,14 +54,10 @@ anet -v
 anet hub start
 ```
 
-启动后默认监听 `http://127.0.0.1:9200`, SQLite 数据库在 `~/.commhub/commhub.db`, 自动创建默认管理员 **admin / anethub**。
-
-::: warning `@preview` 首次启动打印**一次性随机密码**
-本文档描述的是 npm `latest` 通道的行为。`@preview` (`npm install -g @sleep2agi/agent-network@preview`) 首次 `anet hub start` 会**打印一次生成的随机密码**（只显示一次，之后无处查回），登录后用 `anet passwd` 改成自己的强密码。**preview 上不要写死 `anethub`**——固定密码只在 `latest` 通道成立。
-:::
+启动后默认监听 `http://127.0.0.1:9200`, SQLite 数据库在 `~/.commhub/commhub.db`, 并自动创建管理员 **`admin`**，密码是一个**随机生成、只打印这一次**的 `anet-xxxxxxxx…` 串（`latest` 与 `preview` 两条通道都是这样）。**当场把它存下来**，第 3 步登录要用。
 
 ::: warning 公网部署立刻改密
-默认 `admin / anethub` 仅本机用（latest 通道）。任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码。preview 通道无固定密码，见上一条。
+首次登录后会提示你改掉这个随机密码。任何 `--host 0.0.0.0` 公网部署都要立刻 `anet passwd` 改成自己的强密码。想自己指定初始密码：`anet hub start --password <pass>`，或设环境变量 `ANET_HUB_BOOTSTRAP_PASSWORD`。
 :::
 
 ::: tip 停止 / 查看状态
@@ -90,36 +86,18 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-🔴 **不要照抄下面命令里的 `anethub`。** 现在 `latest` 和 `preview` 两条通道装到的版本
-**都会打印一个随机串**,照抄一定登不进去 —— 唯一可靠的做法是看你自己那次启动的输出。
-
-实测 2026-08-27(在干净容器里各起一次 `anet hub start`,不传 `--password`):
-
-| 装到的版本 | 打印出来的密码 |
-|---|---|
-| `2.3.0-preview.47`(当时的 `latest`) | `anet-3ce2750defe04d9ab3baf0` —— **随机串**,并提示首次登录后要改 |
-| `2.3.0-preview.49`(当时的 `preview`) | `anet-7fe4eddb08f648dcbd7fcd` —— **随机串**,同上 |
-| `2.3.0-preview.76`(当前 `latest`) | 同为**随机串** —— 未逐版本重测:生成密码的 `server/src/auth.ts` 自 `.49` 发布(2026-08-27T02:25Z)起**零提交**,逻辑逐字未变 |
-| `2.3.0-preview.115`(当前 `preview`) | 同为**随机串** —— 未逐版本重测:生成密码的 `server/src/auth.ts` 自 `.49` 发布(2026-08-27T02:25Z)起**零提交**,逻辑逐字未变 |
-
-两次都没有出现字面量 `anethub`。
-
-固定的 `anethub` 只存在于 `2.2.x` 及更早的版本。**这一行按版本写而不按通道写**是有原因的:
-`latest` 会移动 —— 2026-08 之前它指着 `2.2.21`(那时确实是固定密码),现在指着一个
-preview 构建。**"latest 上是固定密码"这句话不是过期,是会随通道移动而变成错的。**
+现在的 `latest`（`2.3.0-preview.76`）与 `preview`（`2.3.0-preview.115`）都打印随机密码，形如 `anet-` 加 22 位十六进制字符。
+固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
 凭据也落在 `~/.anet/server/admin-utok.json`,里面只有
 `username` / `user_id` / `token` / `created_at` —— **密码不在里面**,所以错过了那次输出
-就只能重新 bootstrap。
-
-🔴 另外:**`anet login` 失败时目前仍然退出码 0**(`latest` 与 `preview` 都是,修复已在 main 上,见 #716 / #722)。
-⇒ **不要用 `anet login && 下一步` 来判断登录成功** —— 它会在失败时继续往下走。用 `anet whoami` 确认。
+就只能重新 bootstrap（或在 Hub 所在机器上跑 `anet hub admin reset-user`）。
 :::
 
 第三个终端给 CLI 也登录一次（后续 `anet node ...` 命令带凭证）：
 
 ```bash
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password <anet hub start 打印的密码>
 ```
 
 `anet whoami` 确认身份。
@@ -137,13 +115,13 @@ anet node create my-bot
 ::: tip 新手最省事 — 手动选 `claude-code-cli`
 向导**默认高亮 `claude-agent-sdk`**, 一路 Enter 会落到要填 vendor + API Key 的复杂路径。如果已经 `claude auth login`, **手动选 `claude-code-cli`** = 零配置最快路径。
 
-stable 版 `anet node create` 列出正式版的 runtime（`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`）；完整对照（含预览版 `opencode-cli`，stable 选择器暂不含）见 [Runtime 对比](/guide/runtimes#runtime-对比-canonical-表)。
+`anet node create` 的选单列出全部 7 个 runtime（4 个正式：`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`；3 个预览：`codex-app-server`（选单里叫 `codex-cli`）/ `grok-build-cli` / `opencode-cli`）；完整对照见 [Runtime 对比](/guide/runtimes#runtime-对比-canonical-表)。
 :::
 
 启动节点：
 
 ::: warning 全新安装选了 claude-agent-sdk / codex-sdk？先装 agent-node
-这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，而 **`≤ 2.3.0-preview.37` 的构建**（含旧的 `2.2.21`）的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（真机复现，[#450](https://github.com/sleep2agi/agent-network/issues/450) 精确立案，#237 为同族）。**根因修复**见 [PR #239](https://github.com/sleep2agi/agent-network/pull/239)（commit `1eff3a4d`, merged 2026-06-28），Vincent 2026-08-09 audit 在 `2.3.0-preview.38` 隔离 Docker 里 verified 抵达 SSE connected；**该 fix 自 `2.3.0-preview.38` 起含在构建里**（查自己装的：`anet -v`；查通道当前指向：`npm view @sleep2agi/agent-network dist-tags` —— 2026-08-30 实测 `latest` 已是 `2.3.0-preview.47`，即**已越过这条下界**） —— [#450](https://github.com/sleep2agi/agent-network/issues/450) 仍 `open`，因 promote 到 latest 待 4 项 acceptance gate 真绿。**变通**（按 verified 强度）：升到 `@sleep2agi/agent-network@preview`；或用 `@latest` 但先跑一句让二进制预先就位：
+这两个 runtime 依赖 `agent-node` 包。首次 `node start` 的 npx 自动拉取需要约 1 分钟，而 **`≤ 2.3.0-preview.37` 的构建**（含旧的 `2.2.21`）的启动检查**不等它拉完**就报 `agent-node is not installed or cannot report a version` 退出（[#450](https://github.com/sleep2agi/agent-network/issues/450)）。修复见 [PR #239](https://github.com/sleep2agi/agent-network/pull/239)，**自 `2.3.0-preview.38` 起含在构建里**，现在两条通道都已越过这条下界（查自己装的：`anet -v`；查通道当前指向：`npm view @sleep2agi/agent-network dist-tags`）。如果你装的是更早的构建：`anet upgrade`；或先跑一句让二进制预先就位：
 
 ```bash
 npm install -g @sleep2agi/agent-node

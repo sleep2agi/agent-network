@@ -120,7 +120,7 @@ agent-node preserves the message source and routes the response back to the orig
 
 ```text
 send_desktop_message(
-  to_username = "vansin",          # or to_user_id — one of the two is required
+  to_username = "alice",           # or to_user_id — one of the two is required
   message     = "Build done, 3 packages published to preview",  # required, ≤10000 chars
   title       = "Release finished", # optional, ≤200 chars
   severity    = "success",          # info (default) / success / warning / error

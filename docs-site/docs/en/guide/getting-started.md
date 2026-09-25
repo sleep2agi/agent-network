@@ -24,9 +24,9 @@ Skip this page and go to the [Upgrade Guide](/en/guide/upgrade) (usually `anet u
 **Prerequisites** (install both):
 
 - **Node.js ≥ 22.13.0**
-- **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun that step always fails**, but how depends on the channel:
-  · **builds that carry the preflight** (measured 2026-08-30 on `2.3.0-preview.47`; since 2026-09-02 both `latest` and `preview` are `2.3.0-preview.76`, and the preflight has been present since `.47`): refused before launch with `❌ anet hub start requires the Bun runtime` (exit code 1);
-  · **older builds without it** (measured on `2.2.21`): a bare `Error: spawn bunx ENOENT` plus a Node stack trace.
+- **Bun ≥ 1.2.0** — install with `npm i -g bun` (or `curl -fsSL https://bun.sh/install | bash`). Step 2's `anet hub start` launches `commhub-server` via `bunx`, so **without Bun that step always fails**, but how depends on the build:
+  · **`2.3.0-preview.47` and later** (today's `latest` `2.3.0-preview.76` and `preview` `2.3.0-preview.115` are both in this range): refused before launch with `❌ anet hub start requires the Bun runtime` (exit code 1);
+  · **older builds without the preflight** (such as `2.2.21`): a bare `Error: spawn bunx ENOENT` plus a Node stack trace.
   After installing, `bun --version` should print a version.
 
 With both installed, `commhub-server` / `agent-node` are auto-fetched on first use — you don't install them manually.
@@ -55,14 +55,10 @@ Open terminal #1, **keep it running**:
 anet hub start
 ```
 
-The hub listens on `http://127.0.0.1:9200` by default, the SQLite DB lives at `~/.commhub/commhub.db`, and the default admin account **admin / anethub** is created automatically.
-
-::: warning `@preview` prints a **one-time random password** on first start
-This page describes the npm `latest` channel. On `@preview` (`npm install -g @sleep2agi/agent-network@preview`) the first `anet hub start` **prints a freshly generated random password once** (shown once, not recoverable later); log in with it, then `anet passwd` to your own strong password. **Do NOT hard-code `anethub` for preview** — the fixed password only holds on `latest`.
-:::
+The hub listens on `http://127.0.0.1:9200` by default, the SQLite DB lives at `~/.commhub/commhub.db`, and an admin account **`admin`** is created automatically with a **randomly generated password that is printed only this once** (an `anet-xxxxxxxx…` string, on both the `latest` and `preview` channels). **Save it right away** — step 3 needs it.
 
 ::: warning Change the password before going public
-The default `admin / anethub` is for local quickstart only (latest channel). **Any `--host 0.0.0.0` public deployment must `anet passwd` to a strong password immediately.** Preview channel has no fixed password — see the note above.
+Your first login prompts you to replace the random password. **Any `--host 0.0.0.0` public deployment must `anet passwd` to a strong password immediately.** To choose the initial password yourself, run `anet hub start --password <pass>` or set `ANET_HUB_BOOTSTRAP_PASSWORD`.
 :::
 
 ::: tip Stop / status
@@ -91,38 +87,18 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-🔴 **Do not copy the `anethub` in the command below.** Both `latest` and `preview`
-currently install versions that print a **random** password, so copying it will fail —
-the only reliable move is to read your own startup output.
-
-Measured 2026-08-27 (one `anet hub start` per version in a clean container, no `--password`):
-
-| installed version | printed password |
-|---|---|
-| `2.3.0-preview.47` (`latest` at the time) | `anet-3ce2750defe04d9ab3baf0` — **random**, with a change-on-first-login notice |
-| `2.3.0-preview.49` (`preview` at the time) | `anet-7fe4eddb08f648dcbd7fcd` — **random**, same notice |
-| `2.3.0-preview.76` (current `latest`) | Also **random** — not re-measured per version: `server/src/auth.ts`, which generates it, has had **zero commits** since `.49` shipped (2026-08-27T02:25Z); the logic is byte-identical |
-| `2.3.0-preview.115` (current `preview`) | Also **random** — not re-measured per version: `server/src/auth.ts`, which generates it, has had **zero commits** since `.49` shipped (2026-08-27T02:25Z); the logic is byte-identical |
-
-Neither run printed the literal `anethub` anywhere.
-
-The fixed `anethub` only exists on `2.2.x` and earlier. **This table names versions rather
-than channels on purpose**: `latest` moves — before 2026-08 it pointed at `2.2.21` (which
-really did use a fixed password), and it now points at a preview build. **"latest uses a
-fixed password" is not merely stale; it becomes wrong when the channel moves.**
+Today's `latest` (`2.3.0-preview.76`) and `preview` (`2.3.0-preview.115`) both print a random password: `anet-` followed by 22 hex characters.
+The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 
 The credentials are also written to `~/.anet/server/admin-utok.json`, which holds only
 `username` / `user_id` / `token` / `created_at` — **the password is not in there**, so if you
-miss that one line of output you have to bootstrap again.
-
-🔴 Also: **`anet login` currently exits 0 even when it fails** (both `latest` and `preview`; fixed on main — see #716 / #722).
-⇒ **Do not use `anet login && <next step>` to decide whether login worked** — it will carry on after a failure. Confirm with `anet whoami`.
+miss that one line of output you have to bootstrap again (or run `anet hub admin reset-user` on the Hub machine).
 :::
 
 In terminal #3, log the CLI in too (so subsequent `anet node ...` commands carry the credentials):
 
 ```bash
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password <password printed by anet hub start>
 ```
 
 `anet whoami` confirms your identity.
@@ -140,13 +116,13 @@ The wizard asks: runtime → (only for `claude-agent-sdk`) vendor → model → 
 ::: tip Easiest path for newcomers — pick `claude-code-cli` manually
 The wizard **defaults to highlighting `claude-agent-sdk`**; pressing Enter all the way lands you on the vendor + API-key path. If you've already done `claude auth login`, **manually picking `claude-code-cli`** is the zero-config fastest path.
 
-On stable, `anet node create` lists **4 production runtimes** (`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`); the full comparison (including the preview-only `opencode-cli`, not yet in the stable picker) is here: [Runtime comparison](/en/guide/runtimes#runtimes-—-canonical-table).
+`anet node create` lists all 7 runtimes (4 stable: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`; 3 preview: `codex-app-server` (shown as `codex-cli` in the menu) / `grok-build-cli` / `opencode-cli`); the full comparison is here: [Runtime comparison](/en/guide/runtimes#runtimes-—-canonical-table).
 :::
 
 Start the node:
 
 ::: warning Fresh install + claude-agent-sdk / codex-sdk? Install agent-node first
-These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but on **builds `≤ 2.3.0-preview.37`** (including the older `2.2.21`) the startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` (reproduced on real hardware — [#450](https://github.com/sleep2agi/agent-network/issues/450) is the precise filing, #237 is the umbrella). **Root fix** is [PR #239](https://github.com/sleep2agi/agent-network/pull/239) (commit `1eff3a4d`, merged 2026-06-28); Vincent's 2026-08-09 audit verified the fix in an isolated Docker probe on `2.3.0-preview.38` reaching SSE connected. **the fix has been in builds since `2.3.0-preview.38`** (check yours with `anet -v`; check where the channels point with `npm view @sleep2agi/agent-network dist-tags` — measured 2026-08-30, `latest` is already `2.3.0-preview.47`, i.e. **past that floor**) — [#450](https://github.com/sleep2agi/agent-network/issues/450) is still `open` pending 4 acceptance gates before latest promotion. **Workarounds** (in verified-strength order): upgrade to `@sleep2agi/agent-network@preview`; or stay on `@latest` but pre-install `agent-node` so the binary is already there:
+These runtimes depend on the `agent-node` package. The first `node start` triggers an npx auto-fetch that takes ~1 minute, but on **builds `≤ 2.3.0-preview.37`** (including the older `2.2.21`) the startup check **doesn't wait for it** and exits with `agent-node is not installed or cannot report a version` ([#450](https://github.com/sleep2agi/agent-network/issues/450)). The fix is [PR #239](https://github.com/sleep2agi/agent-network/pull/239), **present in builds since `2.3.0-preview.38`**; both channels are past that floor now (check yours with `anet -v`; check where the channels point with `npm view @sleep2agi/agent-network dist-tags`). If you are on an older build: `anet upgrade`, or pre-install `agent-node` so the binary is already there:
 
 ```bash
 npm install -g @sleep2agi/agent-node

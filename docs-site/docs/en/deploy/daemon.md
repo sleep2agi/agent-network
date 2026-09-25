@@ -36,7 +36,7 @@ npm i -g bun @sleep2agi/agent-network @sleep2agi/agent-node
 ```
 
 🔴 **Versions: a plain install is enough — do not hand-copy a version number.**
-`latest` now ships `anet daemon` (measured: `2.3.0-preview.47`). Check yours with
+`anet daemon` has existed since `2.3.0-preview.39`, and today's `latest` is past that floor. Check yours with
 `anet -v`; if `anet daemon` prints `Unknown command`, your build predates the
 command — see [which versions have it](#which-versions).
 
@@ -315,10 +315,10 @@ anet daemon restart <name>
 ```
 
 ::: tip Does your version have it?
-`restart` landed in **2.3.0-preview.73** (#1601). 🔴 **The `latest` tag that `npm i -g`
-installs is currently 2.3.0-preview.47 — it does not have it yet**, so a default install
-takes the two-step form below. (Both endpoints were actually run: `.47` prints
-`Unknown daemon subcommand "restart"`, `.75` works.)
+`restart` landed in **2.3.0-preview.73** (#1601); earlier builds print
+`Unknown daemon subcommand "restart"`. The `latest` tag that `npm i -g` installs by default
+now includes it (check where the channels point with
+`npm view @sleep2agi/agent-network dist-tags`).
 
 If unsure, run `anet daemon` with no subcommand and check the list for `restart`.
 **If it is absent, use the two-step form** — `daemon start` delegates to `node start`,

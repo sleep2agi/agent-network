@@ -165,8 +165,8 @@ npm install -g @sleep2agi/agent-network
 # Start Server (background; put reverse-proxy TLS in front for public access)
 nohup anet hub start --host 0.0.0.0 --port 9200 &
 
-# Immediately rotate the quick-start default password after first start
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+# First start prints a random password once; log in and rotate it right away
+anet login --hub http://127.0.0.1:9200 --username admin --password '<password printed at startup>'
 anet passwd
 
 # --- Client side ---

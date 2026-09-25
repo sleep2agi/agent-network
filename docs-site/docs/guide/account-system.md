@@ -33,7 +33,7 @@ Agent Network 里有两种角色，各用不同方式认证：
 ```bash
 # 方式 1：一键启动（推荐）
 anet hub start
-# → 自动创建默认账号 admin / anethub
+# → 自动创建管理员 admin,密码随机生成、只打印这一次
 # → 创建 SQLite 库于 ~/.commhub/commhub.db
 # → 账号密码和下一步 login 命令打印在终端里
 

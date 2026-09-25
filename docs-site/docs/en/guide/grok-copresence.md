@@ -1,11 +1,11 @@
-# Grok Co-presence TUI (Preview)
+# Grok Co-presence TUI (Experimental)
 
-::: danger Preview — for a stable Grok node use `grok-build-acp`
-`grok-build-cli` co-presence is a preview capability: while a human has text in the TUI input box, network tasks only queue and then time out; after grok self-updates outside the verified list, the next restart fails (the error prints a `GROK_BINARY=<verified older build> anet node start <node>` recovery command). For an unattended node that reliably takes work, use `--runtime grok-build-acp`.
+::: danger ACP mode `grok-build-acp` is the default and recommended; co-presence `grok-build-cli` is experimental
+Grok nodes default to, and we recommend, `--runtime grok-build-acp` (ACP mode). `grok-build-cli` co-presence is an experimental capability: while a human has text in the TUI input box, network tasks only queue and then time out; after grok self-updates outside the verified list, the next restart fails (the error prints a `GROK_BINARY=<verified older build> anet node start <node>` recovery command). For an unattended node that reliably takes work, use `--runtime grok-build-acp`.
 :::
 
-::: tip Status update (verified in production, 2026-08-29)
-The danger block below captures the 2026-08-18 qualification state and is **outdated**: the `grok-build-cli` co-presence path now works end to end — on a Mac mini with npm-installed `anet 2.3.0-preview.43` + the global `agent-node` (grok `1.0.5 (5115b46bc909)`, on the verified list), creating the node, entering the shared TUI via `anet grok attach`, and receiving an answer to an injected network task in 19 seconds. For current usage see [Grok Co-presence TUI (grok-build-cli)](/en/guide/grok-tui). The historical warnings are preserved below for the record.
+::: tip Current status
+`grok-build-cli` and `anet grok attach` ship in the published npm packages (both the `latest` and `preview` channels; the "Grok co-presence" section of `anet --help` lists them). The status is **experimental**: it works end to end (create the node → `anet grok attach` into the shared TUI → a network task is injected and answered), but it is not the default recommendation. Only grok builds on the verified list are accepted (`0.2.93 (f00f96316d)` and `1.0.5 (5115b46bc909)`). For usage see [Grok Co-presence TUI (grok-build-cli)](/en/guide/grok-tui). The danger block further down records the 2026-08-18 state and is kept for the record.
 :::
 
 ::: warning `blocked` cannot tell real from false — **fixed from agent-node `2.5.0-preview.57`** ([#1606](https://github.com/sleep2agi/agent-network/issues/1606))
@@ -66,11 +66,10 @@ preview 2.3.0-preview.39    anet grok attach → Usage: anet grok attach <node>
 The rest of this page still holds: it is being requalified, do not treat it as released.
 :::
 
-The repository has a candidate implementation for sharing one Grok TUI between a human and network tasks, but it is still being requalified and is not a released feature. Follow [Issue #537](https://github.com/sleep2agi/agent-network/issues/537) and [Draft PR #538](https://github.com/sleep2agi/agent-network/pull/538) for status and test evidence.
-
 ## What works today
 
-- `grok-build-acp`: the current stable Grok runtime. It runs network tasks through `grok agent stdio` and **cannot attach to the same TUI**.
+- `grok-build-acp` (**default, recommended**): the stable Grok runtime. It runs network tasks through `grok agent stdio` and **cannot attach to the same TUI**.
+- `grok-build-cli` (**experimental**): a human and network tasks share one Grok TUI; see [Grok Co-presence TUI](/en/guide/grok-tui).
 - `grok`: you can use the Grok CLI directly in a terminal, but that does not turn the TUI into an Agent Network co-presence node.
 
 ```bash
@@ -79,4 +78,4 @@ anet node create grok-agent --runtime grok-build-acp
 anet node start grok-agent
 ```
 
-Installation and attach steps will return to this page only after the feature ships in a published package. See [version channels](./versioning.md).
+For co-presence node setup and attach steps, see [Grok Co-presence TUI](/en/guide/grok-tui). See [version channels](./versioning.md).

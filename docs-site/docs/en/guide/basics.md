@@ -209,7 +209,7 @@ This is your **Agent Network account**, used for both the CLI and the Dashboard.
 
 | Question | Answer |
 |----------|--------|
-| Where does the account come from? | Auto-created when you run `anet hub start` (default `admin` / `anethub`) |
+| Where does the account come from? | Auto-created when you run `anet hub start` (user `admin`, random password printed once) |
 | What is the username? | Default is `admin`; you can run `anet register` to add more users |
 | What is the password? | The one you set yourself |
 | Are Dashboard and CLI the same account? | Yes, exactly the same |
@@ -282,7 +282,7 @@ Agent Network has two types of Tokens:
 ## Summary: What Do I Do First?
 
 1. **Install CLI**: `npm install -g @sleep2agi/agent-network`
-2. **Start the hub**: `anet hub start` (creates default `admin` / `anethub`)
+2. **Start the hub**: `anet hub start` (creates `admin` with a random password, printed once)
 3. **Start the dashboard**: `anet hub dashboard`
 4. **Login + create an agent**: `anet login` → `anet node create my-bot` → `anet node start my-bot`
 

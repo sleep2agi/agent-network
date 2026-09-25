@@ -5,7 +5,7 @@
 > 与无头的 `codex-sdk` 不同：`codex-sdk` 是后台工作器、没有可共存的活 TUI；`codex-app-server` 才提供 Codex TUI 人机共存。
 
 ::: warning Preview
-这是 **preview-only** 功能。npm `latest` 当前完全不含 `codex-app-server`、`--copresence` 或 `codexAppServerUrl`；装了 `latest` 的用户无法使用本页命令。当前实现还是单机可信形态，不是生产 Policy Gateway；只连接可信 Hub、只接收可信任务。
+这是**预览**功能。`codex-app-server` runtime 与 `anet node start <name> --copresence` 在 npm `latest` 与 `preview` 两条通道的发布包里都有（`anet --help` 会列出「Co-presence」一节）；较新的修复先发到 `preview`，所以下面推荐用 preview 频道。当前实现还是单机可信形态，不是生产 Policy Gateway；只连接可信 Hub、只接收可信任务。
 :::
 
 ## 前置
@@ -17,14 +17,14 @@ npm install -g @openai/codex
 codex login
 ```
 
-- 安装或切换到 preview 频道：
+- 安装或切换到 preview 频道（推荐，修复先到这里）：
 
 ```bash
 npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
 # 已装 anet 时也可让整组组件切到 preview：
 anet upgrade --channel preview
 
-# 自检：输出必须显示 preview 版本，help 必须出现 Co-presence / --copresence
+# 自检：help 必须出现 Co-presence / --copresence
 anet -v
 anet --help
 ```
@@ -110,7 +110,7 @@ for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; 
 anet node start codex-human
 ```
 
-这不是理论风险：生产节点 `外部团队节点` 因此静默重复运行约 2 天，`A站副责人` 则持续约 9 天（[#535](https://github.com/sleep2agi/agent-network/issues/535)）。
+这不是理论风险：生产节点 `外部团队节点` 因此静默重复运行约 2 天，另一个生产节点 `另一团队节点` 则持续约 9 天（[#535](https://github.com/sleep2agi/agent-network/issues/535)）。
 :::
 
 ### 首次派活前必须看一眼 TUI 是否卡在审批框

@@ -16,10 +16,10 @@ It is **not** for users who already have anet installed — that's [Getting Star
 | **Bun** | ≥ 1.2.0 | `npm i -g bun` or `curl -fsSL https://bun.sh/install \| bash` |
 
 ::: warning Bun is non-optional
-`commhub-server` is Bun-shebang TypeScript (launched via `bunx --bun`). **Without Bun, `anet hub start` always fails** — bug #1 from the fresh-server retro. How it fails depends on the channel:
+`commhub-server` is Bun-shebang TypeScript (launched via `bunx --bun`). **Without Bun, `anet hub start` always fails** — bug #1 from the fresh-server retro. How it fails depends on the build:
 
-- **latest (currently `2.2.21`)**: a bare `Error: spawn bunx ENOENT` plus a Node stack trace — the [#235](https://github.com/sleep2agi/agent-network/issues/235) preflight **has not reached latest yet**;
-- **preview (`2.3.0-preview.x`)**: refused before launch with `❌ anet hub start requires the Bun runtime`, exit code 1.
+- **older builds without the preflight (such as `2.2.x`)**: a bare `Error: spawn bunx ENOENT` plus a Node stack trace;
+- **`2.3.0-preview.47` and later (today's `latest` and `preview` are both in this range)**: refused before launch with `❌ anet hub start requires the Bun runtime`, exit code 1.
 
 Verify:
 ```bash
@@ -95,7 +95,7 @@ anet hub start --host 0.0.0.0 --port 9200
 # REST:   http://0.0.0.0:9200/api
 # ✅ Admin account created
 # username: admin
-# password: anethub
+# password: anet-<22 random hex chars>   ← printed only this once; save it
 ```
 
 Press `Ctrl+B` then `D` to **detach the tmux session while keeping it alive**. Come back with `tmux a -t anet-hub`.
@@ -108,10 +108,10 @@ curl -s http://127.0.0.1:9200/health | head -5
 ```
 
 ::: danger Public-internet deploy: change the password immediately
-The default `admin / anethub` is for local quick-start only. **Any `--host 0.0.0.0` public-internet deploy must immediately**:
+The random password from the first start is shown only once. **Any `--host 0.0.0.0` public-internet deploy must immediately** change it to your own strong password:
 
 ```bash
-anet login --username admin --password anethub --hub http://127.0.0.1:9200
+anet login --username admin --password '<password printed at startup>' --hub http://127.0.0.1:9200
 anet passwd          # Interactive password change (≥ 8 chars, not in the weak-password dict)
 ```
 
@@ -148,7 +148,7 @@ tmux a -t anet-hub             # Then Ctrl+C to stop, Ctrl+B D to keep the tmux 
 Open a third terminal (leave the hub's tmux alone):
 
 ```bash
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password '<password printed at startup>'
 ```
 
 After login, the token lives at `~/.anet/config.json` and is auto-attached to every subsequent `anet node ...` command.
@@ -177,7 +177,7 @@ node-name → runtime → (only if claude-agent-sdk) vendor → model → API ke
 | `claude-agent-sdk` | ⭐⭐ | Programmatic access to any Anthropic-compatible API (MiniMax / 书生 / 小米 MiMo / domestic models go here) | **Pops a vendor submenu** → pick vendor → pick model → enter API key | API key |
 | `codex-sdk` | ⭐⭐⭐ | Writing code / running commands via OpenAI Codex | Skips vendor, uses codex's own auth | agent-node + codex CLI + `codex login` |
 | `grok-build-acp` | ⭐⭐⭐ | Running tasks via xAI Grok Build | Skips vendor, uses grok's own auth + `GROK_CODE_XAI_API_KEY` | grok CLI + `grok login` + `GROK_CODE_XAI_API_KEY` |
-| `opencode-cli` **(preview)** | ⭐⭐⭐ | Use the public sst/opencode CLI as a multi-vendor front-end (**preview channel only, not in latest**) | Pick a vendor preset (anthropic / openai), key read from env | `opencode` CLI + Anthropic/OpenAI env key |
+| `opencode-cli` **(preview)** | ⭐⭐⭐ | Use the public sst/opencode CLI as a multi-vendor front-end (preview; in the menu on both `latest` and `preview`) | Pick a vendor preset (anthropic / openai), key read from env | `opencode` CLI + Anthropic/OpenAI env key |
 
 ::: warning Watch out for the default runtime
 The wizard **defaults the first option** (currently `claude-agent-sdk`); a new user pressing Enter all the way lands on the vendor + API-key path. **Manually pick `claude-code-cli`** for the smoothest first-time experience ([#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237), known UX pain — the wizard default will change later).

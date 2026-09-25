@@ -3,7 +3,7 @@
 > 🔴 **这一页讲的是「怎么装、怎么认证」。想知道「哪个功能在哪个 runtime / 操作系统上能不能用」，看 [支持矩阵](/guide/support-matrix)** —— 那张表用三态（✅ 验过 / ❌ 验过不行 / ❓ 没验过），每一格都带证据链接。
 
 
-每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置多种 Runtime（正式版 4 种，预览版另加 2 种），**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
+每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置 7 种 Runtime（4 种正式：`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`；3 种标为预览：`codex-app-server`、`grok-build-cli`、`opencode-cli`），`anet node create` 的选单 7 个全部列出，**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
 
 ## Runtime 对比（canonical 表） {#runtime-对比-canonical-表}
 
@@ -39,7 +39,7 @@ Grok TUI 共存的当前状态见 [Grok TUI 状态页](/guide/grok-copresence)�
 | `codex-cli`（内部存为 `codex-app-server`，preview） | OWNED codex app-server 桥 ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) | Codex TUI 人机共存（人和 agent 共用一个 thread） | OpenAI Codex（默认 gpt-5.6-sol） | 已 `codex login` | 向导选中即启用共存，无第二次模式选择 |
 | `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI, 固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端 (统一 session / auth 抽象, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai), API key 从 env 读、**不 prompt** |
 
-> ⚠️ **`opencode-cli` 仅 preview 渠道**（RFC-029 迭代中）：npm **latest 尚未包含**——装 latest 后 `anet node create` 选单只有正式版的那几个 runtime（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）。稳定后再进 latest。
+> ⚠️ **`opencode-cli` 仍是预览**（RFC-029 迭代中）：它已在 `latest` 与 `preview` 两条通道的 `anet node create` 选单里，但成熟度按预览看待。
 
 > 🖥️ **平台与模型(2026-09-07 实测):** `opencode-cli` 共存在 **Linux 与 macOS** 上可用 —— macOS 需要
 > agent-network ≥ `2.3.0-preview.87` 且 agent-node ≥ `2.5.0-preview.67`(#1845:包身份校验、`$TMPDIR` 启动隔离、

@@ -18,8 +18,8 @@
 ::: warning Bun 必装
 `commhub-server` 是 Bun-shebang TypeScript（用 `bunx --bun` 起），**没装 Bun 时 `anet hub start` 一定失败**，是新机部署 8 坑里第 1 坑。表现分两条线:
 
-- **latest(当前 `2.2.21`)**:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈——[#235](https://github.com/sleep2agi/agent-network/issues/235) 的 preflight **尚未进入 latest**;
-- **preview(`2.3.0-preview.x`)**:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`，退出码 1。
+- **不含 preflight 的旧构建(如 `2.2.x`)**:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈;
+- **`2.3.0-preview.47` 及以后(现在的 `latest` 与 `preview` 都在此范围)**:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`，退出码 1。
 
 验证：
 ```bash
@@ -95,7 +95,7 @@ anet hub start --host 0.0.0.0 --port 9200
 # REST:   http://0.0.0.0:9200/api
 # ✅ Admin account created
 # username: admin
-# password: anethub
+# password: anet-<22 位随机十六进制>   ← 只打印这一次,当场存下
 ```
 
 按 `Ctrl+B` 然后 `D` 把 tmux 会话**断开但保活**。回来用 `tmux a -t anet-hub` 再 attach。
@@ -108,10 +108,10 @@ curl -s http://127.0.0.1:9200/health | head -5
 ```
 
 ::: danger 公网部署立刻改密
-默认 `admin / anethub` 仅供本机快速上手。**任何 `--host 0.0.0.0` 公网部署立刻**：
+首次启动打印的随机密码只显示一次。**任何 `--host 0.0.0.0` 公网部署立刻**改成自己的强密码：
 
 ```bash
-anet login --username admin --password anethub --hub http://127.0.0.1:9200
+anet login --username admin --password '<启动时打印的密码>' --hub http://127.0.0.1:9200
 anet passwd          # 交互改强密码（≥ 8 位 + 非弱密码字典）
 ```
 
@@ -148,7 +148,7 @@ tmux a -t anet-hub             # 然后按 Ctrl+C 停, Ctrl+B D 留 tmux 会话
 第三个终端（保持 hub 那个 tmux 不动）：
 
 ```bash
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet login --hub http://127.0.0.1:9200 --username admin --password '<启动时打印的密码>'
 ```
 
 登录后 Token 写到 `~/.anet/config.json`，后续 `anet node ...` 命令自动带凭证。
@@ -177,7 +177,7 @@ anet node create my-bot
 | `claude-agent-sdk` | ⭐⭐ | 程序化用 Anthropic 兼容 API（MiniMax / 书生 / 小米 MiMo 等国产模型走这里） | **弹 vendor 子菜单** → 选 vendor → 选 model → 填 API Key | API Key |
 | `codex-sdk` | ⭐⭐⭐ | 写代码 / 跑命令，用 OpenAI Codex | 跳过 vendor, 走 codex 登录态 | agent-node + codex CLI + `codex login` |
 | `grok-build-acp` | ⭐⭐⭐ | 用 xAI Grok Build 跑任务 | 跳过 vendor, 走 grok 登录态 + `GROK_CODE_XAI_API_KEY` | grok CLI + `grok login` + `GROK_CODE_XAI_API_KEY` |
-| `opencode-cli` **(preview)** | ⭐⭐⭐ | 用公版 sst/opencode CLI 当多 vendor 前端（**仅 preview 渠道，latest 未含**） | 选 vendor preset (anthropic / openai), key 从 env 读 | `opencode` CLI + Anthropic/OpenAI env key |
+| `opencode-cli` **(preview)** | ⭐⭐⭐ | 用公版 sst/opencode CLI 当多 vendor 前端（预览；`latest` 与 `preview` 的选单里都有） | 选 vendor preset (anthropic / openai), key 从 env 读 | `opencode` CLI + Anthropic/OpenAI env key |
 
 ::: warning runtime 默认项注意
 向导**默认高亮第一项**（当前是 `claude-agent-sdk`），新手一路按 Enter 会落到这条要配 vendor + API Key 的路径上。**建议手动选 `claude-code-cli`** 入门最快（[#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237) 已知 UX 痛点，将来 wizard 默认会调整）。
@@ -371,7 +371,7 @@ sudo systemctl status anet-hub anet-node@my-bot
 | 2 | `anet node create` 选完 runtime → `FATAL: TypeError: fetch failed` | 建节点要连本地 hub，但 hub 没起（多半因为坑 1） | 另开终端先 `anet hub start`，再回这条重试。**[#237](https://github.com/sleep2agi/agent-network/issues/237)** 主条跟进给 fetch 分类报错 |
 | 3 | 一路 Enter 落到要填 vendor + API Key 的复杂路径 | runtime 菜单默认高亮 `claude-agent-sdk`，不是最易上手的 `claude-code-cli` | 建节点时**手动选 `claude-code-cli`**（已 `claude auth login` 直接复用订阅）。中断 vendor 选择如果留下半成品节点，用 `anet node delete <alias>` 清掉重来 |
 | 4 | 建完节点 Telegram 不工作，但向导开头说"optional Telegram channel" | 向导根本不问 Telegram，那行是误导文案 | Telegram 用 `anet channel add telegram <node> --bot-token <tok> --allow <uid>` 单独配（见 [第 6 节](#_6-配-telegram-channel-可选)） |
-| 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx 懒加载没拉到 `@sleep2agi/agent-node`；bug 存于 `@latest` (2.2.21) 与 preview ≤ 2.3.0-preview.37 | 短路: `npm i -g @sleep2agi/agent-node` 让二进制就位；长期: 升到 `@sleep2agi/agent-network@preview`（含 [PR #239](https://github.com/sleep2agi/agent-network/pull/239) fix, `1eff3a4d`, 2026-06-28）。issue [#450](https://github.com/sleep2agi/agent-network/issues/450) 仍 open —— 待 4 项 gate 后 promote latest |
+| 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx 懒加载没拉到 `@sleep2agi/agent-node`；bug 存于 `≤ 2.3.0-preview.37` 的构建（含 `2.2.x`） | 短路: `npm i -g @sleep2agi/agent-node` 让二进制就位；长期: `anet upgrade` 到 `≥ 2.3.0-preview.38` 的构建（含 [PR #239](https://github.com/sleep2agi/agent-network/pull/239) 的修复；查通道指向用 `npm view @sleep2agi/agent-network dist-tags`） |
 | 5.5 | `anet node start` 打 `✅ started detached (tmux session live)` `exit 0`，但 `tmux ls` 找不到 session、进程也不在 | detached 路径的假绿 bug；存于含 [#895](https://github.com/sleep2agi/agent-network/pull/895) 之前的版本，**`2.3.0-preview.40` 起已修**（#895 随 preview.40 发布） | 真判据: `tmux has-session -t "=<alias>"; echo $?` 应输 `0`（`=` 必须）。批量场景用 `anet project up`（退出码自 [#896](https://github.com/sleep2agi/agent-network/pull/896) 起可信，随 preview.40 发布）。装含 fix 的构建前，用 has-session 复核每次启动 |
 | 6 | `claude-code-cli` 节点起来后卡 offline / pane 卡在确认框 | Claude Code 的 `--dangerously-load-development-channels` 确认框等人按 Enter | 用 tmux 前台跑一次手动按 `1` + Enter；后续就不弹了 |
 | 7 | systemd / cron / 新用户启动报一连串 `command not found` | nvm + Bun 各自按用户装，非交互 shell 不加载 | 把 node/npm/bun 软链到 `/usr/local/bin/`，或启动脚本里显式 `source ~/.nvm/nvm.sh` |

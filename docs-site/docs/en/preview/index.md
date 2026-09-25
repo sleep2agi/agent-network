@@ -1,9 +1,21 @@
-# Preview docs — v0.11-preview2
+# Preview docs — v0.11-preview2 (archived snapshot, 2026-06-28)
 
-::: warning ⚠️ You are reading the **preview** documentation
-The current preview channel = **v0.11-preview2** (npm `@preview` tag). This release has **not been promoted to `@latest`** — for stable production use, go back to the [latest documentation](/en/).
+::: danger This is an archived snapshot from 2026-06-28, not the current preview
+This page records the 2026-06-28 preview (v0.11-preview2). Its version numbers, its "not yet in latest" feature list and its install notes are all out of date — **do not follow them**.
 
-**Features available in preview that aren't in latest yet:**
+To get preview builds today:
+
+- See where the channels point: `npm view @sleep2agi/agent-network dist-tags` (same for `agent-node` and `commhub-server`)
+- Fresh install: `npm install -g @sleep2agi/agent-network@preview`
+- Switch an existing install to preview: `anet upgrade --channel preview`; switch back to stable: `anet upgrade --channel latest`
+
+For channels see [Versioning](/en/guide/versioning) and the [Upgrade Guide](/en/guide/upgrade); for changes see the [Changelog](/en/changelog).
+:::
+
+::: details Original 2026-06-28 snapshot text
+At the time, the preview channel = **v0.11-preview2** (npm `@preview` tag), not yet promoted to `@latest`.
+
+**Features that were in preview but not yet in latest at the time:**
 - `anet node loop` CLI + `/aloop` works across all runtimes (Dashboard `/goal` and `/loop` stay native to the target runtime)
 - Security batch: cross-tenant write guards + retention sweep + password KDF strengthening
 - RFC-024 hub config-apply foundation (4 new MCP tools)

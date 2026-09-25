@@ -5,7 +5,7 @@ The `codex-app-server` runtime lets a **human and an Agent share one Codex sessi
 > Unlike the headless `codex-sdk`, which is a background worker without a shareable live TUI, `codex-app-server` provides Codex TUI co-presence.
 
 ::: warning Preview
-This is **preview-only**. npm `latest` currently contains none of `codex-app-server`, `--copresence`, or `codexAppServerUrl`; commands on this page will not work with a `latest` installation. The current implementation is still a trusted single-machine shape, not the production Policy Gateway. Connect only to a trusted Hub and accept only trusted tasks.
+This is a **preview** feature. The `codex-app-server` runtime and `anet node start <name> --copresence` ship in the published packages on both the npm `latest` and `preview` channels (`anet --help` lists a "Co-presence" section); newer fixes land on `preview` first, so the steps below recommend the preview channel. The current implementation is still a trusted single-machine shape, not the production Policy Gateway. Connect only to a trusted Hub and accept only trusted tasks.
 :::
 
 ## Prerequisites
@@ -17,14 +17,14 @@ npm install -g @openai/codex
 codex login
 ```
 
-- Install or switch to the preview channel:
+- Install or switch to the preview channel (recommended; fixes land here first):
 
 ```bash
 npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
 # If anet is already installed, switch the whole component set:
 anet upgrade --channel preview
 
-# Verify: versions must say preview and help must include Co-presence / --copresence
+# Verify: help must include Co-presence / --copresence
 anet -v
 anet --help
 ```
@@ -111,7 +111,7 @@ for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; 
 anet node start codex-human
 ```
 
-This is not theoretical: the production node `外部团队节点` ran a silent duplicate for about two days, and `A站副责人` did so for about nine days after operators followed the generic hint ([#535](https://github.com/sleep2agi/agent-network/issues/535)).
+This is not theoretical: the production node `外部团队节点` ran a silent duplicate for about two days, and another production node, `另一团队节点`, did so for about nine days after operators followed the generic hint ([#535](https://github.com/sleep2agi/agent-network/issues/535)).
 :::
 
 ### Check the TUI for a pending approval before the first dispatch

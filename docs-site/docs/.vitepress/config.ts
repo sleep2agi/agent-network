@@ -49,14 +49,15 @@ export default withMermaid(defineConfig({
             text: '更新日志',
             items: [
               { text: 'Changelog（全部版本）', link: '/changelog' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+              { text: 'npm 版本（anet CLI）', link: 'https://www.npmjs.com/package/@sleep2agi/agent-network?activeTab=versions' },
+              { text: '桌面端 releases（GitHub）', link: 'https://github.com/sleep2agi/agent-network-app/releases' },
             ]
           },
           {
             text: 'latest ▾',
             items: [
               { text: 'latest（稳定版 · npm latest）', link: '/' },
-              { text: 'preview', link: '/preview/' },
+              { text: 'preview（2026-06-28 存档）', link: '/preview/' },
             ]
           },
         ],
@@ -157,14 +158,15 @@ export default withMermaid(defineConfig({
             text: 'Changelog',
             items: [
               { text: 'Changelog (all versions)', link: '/en/changelog' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+              { text: 'npm versions (anet CLI)', link: 'https://www.npmjs.com/package/@sleep2agi/agent-network?activeTab=versions' },
+              { text: 'Desktop releases (GitHub)', link: 'https://github.com/sleep2agi/agent-network-app/releases' },
             ]
           },
           {
             text: 'latest ▾',
             items: [
               { text: 'latest (stable · npm latest)', link: '/en/' },
-              { text: 'preview', link: '/en/preview/' },
+              { text: 'preview (2026-06-28 archive)', link: '/en/preview/' },
             ]
           },
         ],

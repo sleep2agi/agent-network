@@ -32,8 +32,8 @@ npm i -g bun @sleep2agi/agent-network @sleep2agi/agent-node
    (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)
 ```
 
-🔴 **版本：直接裸装即可，不用手写版本号。** `latest` 现在已经带 `anet daemon`
-（实测 `2.3.0-preview.47`）。装完用 `anet -v` 核一眼；若你的版本敲 `anet daemon`
+🔴 **版本：直接裸装即可，不用手写版本号。** `anet daemon` 自 `2.3.0-preview.39`
+起就有，现在的 `latest` 已越过这条下界。装完用 `anet -v` 核一眼；若你的版本敲 `anet daemon`
 得到 `Unknown command`，说明它早于 daemon 进入通道的那一版 —— 见下面的
 [版本对照](#which-versions)。
 
@@ -289,9 +289,9 @@ anet daemon restart <name>
 ```
 
 ::: tip 你的版本有没有这条？
-`restart` 从 **2.3.0-preview.73**（#1601）起才有。🔴 **`npm i -g` 装到的 `latest` 目前是
-2.3.0-preview.47 —— 还没有这条**，所以默认安装的用户现在走的就是下面这两步。
-（两个端点都实跑过：`.47` 报 `Unknown daemon subcommand "restart"`，`.75` 正常。）
+`restart` 从 **2.3.0-preview.73**（#1601）起才有；更早的构建会报
+`Unknown daemon subcommand "restart"`。现在 `npm i -g` 默认装到的 `latest` 已包含它
+（查通道指向：`npm view @sleep2agi/agent-network dist-tags`）。
 
 拿不准就跑 `anet daemon`（不带子命令）看列表里有没有 `restart`。**没有就用两步** ——
 因为 `daemon start` 委托给 `node start`，所以停也走 `node`：

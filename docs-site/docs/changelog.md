@@ -1,5 +1,20 @@
 # 更新日志
 
+::: warning 本页正在补齐
+下面最新的条目停在 2026-08-28，之后的版本正在补写。在补齐之前：
+
+- 查通道当前指向：`npm view @sleep2agi/agent-network dist-tags`（`agent-node`、`commhub-server` 同理）
+- 每一版 npm 包的发布说明在仓库的 [`docs/tests/`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests) 目录，文件名为 `release-v<版本号>.md`（例如 `release-v2.3.0-preview.76.md`）
+- 桌面端的版本说明在 [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)
+:::
+
+## 2026-08-28 之后的通道变化（npm 发布时间）
+
+- **2026-09-02**：`agent-network@2.3.0-preview.76` 与 `agent-node@2.5.0-preview.58` 发布；截至 2026-09-25 它们就是 `latest`。`commhub-server` 的 `latest` 仍是 `0.9.0-preview.30`（2026-08-26 发布）。
+- **截至 2026-09-25**：`preview` 通道为 `agent-network@2.3.0-preview.115`、`agent-node@2.5.0-preview.88`、`commhub-server@0.9.0-preview.60`。
+
+---
+
 ## 可靠性冲刺：删除收敛 + 节点日志 + 超时防线——preview（2026-08-28 晚）
 
 三包配套发布：`commhub-server@0.9.0-preview.36–.38`、`agent-node@2.5.0-preview.40–.43`、`agent-network@2.3.0-preview.54–.59`。
@@ -37,14 +52,14 @@
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
 - **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/versioning) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
-- **当前 preview**：以 npm `preview` dist-tag 为准。2026-08-18 实测 `agent-node@2.5.0-preview.31` 的 `--help` 已列出 `grok-build-cli` + `ANET_CAPABILITY_GROK_COPRESENCE_V2`，`anet@2.3.0-preview.39 grok` 打印 `Usage: anet grok attach <node>`；`@latest` 仍无该命令。Hub idle 诚实度见 #1005。Grok TUI 状态见 [Issue #537](https://github.com/sleep2agi/agent-network/issues/537) / [#1005](https://github.com/sleep2agi/agent-network/issues/1005)
+- **当前 preview**：以 npm `preview` dist-tag 为准。2026-08-18 实测 `agent-node@2.5.0-preview.31` 的 `--help` 已列出 `grok-build-cli` + `ANET_CAPABILITY_GROK_COPRESENCE_V2`，`anet@2.3.0-preview.39 grok` 打印 `Usage: anet grok attach <node>`。现在 `latest` 与 `preview` 都包含 `grok-build-cli` 与 `anet grok attach`（实验能力；默认推荐仍是 `grok-build-acp`），状态见 [Grok TUI 状态页](/guide/grok-copresence)。
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
 ## Grok 人机共存 TUI（`grok-build-cli`）—— preview（2026-07-15）🟡 preview
 
 ::: danger 2026-07-31 更正
-下文记录的是当时的候选里程碑，不是当前可安装能力。重新核验 npm 发布包后，当前 `latest` 与 `preview` 均不含 `grok-build-cli` / `anet grok attach`；其中的安装与运行命令请勿执行。现状见 [Grok TUI 状态页](/guide/grok-copresence)。
+下文记录的是当时的候选里程碑。其中的安装与运行命令是当时的写法，请勿照抄；`grok-build-cli` / `anet grok attach` 后来已进入 npm 发布包（实验能力），现状与用法见 [Grok TUI 状态页](/guide/grok-copresence)。
 :::
 
 **版本同步**（npm `@preview` tag）：
@@ -239,7 +254,7 @@ agent-node --version    # agent-node v2.4.10 ⬆
 
 #### `grok-build-acp` 节点 hang 至 `session/prompt timed out after 300000ms` 根因 + 修复
 
-**症状**：`grok-build-acp` runtime 节点接到第二个 task 后 hang ≈5 min，最终 agent-node 报 `grok ACP request 'session/prompt' timed out after 300000ms` —— ai-insight 用户 `A站Grok`（grok 0.2.29 alpha）2026-06-07 19:53:09 抓到的精确日志：
+**症状**：`grok-build-acp` runtime 节点接到第二个 task 后 hang ≈5 min，最终 agent-node 报 `grok ACP request 'session/prompt' timed out after 300000ms` —— ai-insight 用户的一个 Grok 节点（grok 0.2.29 alpha）2026-06-07 19:53:09 抓到的精确日志：
 
 ```text
 ERROR failed to parse incoming message: invalid type: string 'ENOENT',
@@ -258,7 +273,7 @@ Raw: {'jsonrpc':'2.0','id':5,
 **实战验证**（维护者本机，2026-06-07 19:50–19:55）：
 - 同型 `read_file` 失败重试：立返结构化 `code: -32000` + `data.originalCode: "ENOENT"`
 - grok turn 继续不 hang，任务正常 done/failed（47 s 完成，不到 300 s 超时门）
-- ai-insight `A站Grok` 节点全局装 `2.4.9-preview.0` 后 UAT 通过
+- ai-insight 用户的 Grok 节点全局装 `2.4.9-preview.0` 后 UAT 通过
 
 ### 🐛 Bugs Fixed
 
@@ -298,7 +313,7 @@ anet upgrade
 
 ### 🙏 Credits
 
-bug 复现 + root cause + UAT：本机活体抓 19:53:09 日志 + Vincent `A站Grok` 47 s pilot；fix 实现：commit `4818776` + 2 回归测试；release ops：Method B 两阶段 + Install/Upgrade 分块 release notes。
+bug 复现 + root cause + UAT：本机活体抓 19:53:09 日志 + 一个用户 Grok 节点上的 47 s pilot；fix 实现：commit `4818776` + 2 回归测试；release ops：Method B 两阶段 + Install/Upgrade 分块 release notes。
 
 **Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.12...v0.10.13>
 
