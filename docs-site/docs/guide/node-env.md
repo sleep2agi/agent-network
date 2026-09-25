@@ -48,4 +48,4 @@ hub 对一段连接的判定：
 
 ## 版本
 
-commhub-server `0.9.0-preview.60`、agent-node `2.5.0-preview.89`、anet（agent-network，Claude Code 会话需要）`2.3.0-preview.116` 起。旧节点不上报 `env_capable`，桌面端当场提示升级什么。
+commhub-server `0.9.0-preview.61`、agent-node `2.5.0-preview.89`、anet（agent-network，Claude Code 会话需要）`2.3.0-preview.116` 起。旧节点不上报 `env_capable`，桌面端当场提示升级什么。

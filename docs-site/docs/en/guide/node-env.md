@@ -48,4 +48,4 @@ Sessions started by `anet node start` are supported: the launcher injects the `c
 
 ## Versions
 
-commhub-server `0.9.0-preview.60`, agent-node `2.5.0-preview.89`, anet (agent-network, needed for Claude Code sessions) `2.3.0-preview.116` or newer. Older nodes do not report `env_capable`; the app says right away what to upgrade.
+commhub-server `0.9.0-preview.61`, agent-node `2.5.0-preview.89`, anet (agent-network, needed for Claude Code sessions) `2.3.0-preview.116` or newer. Older nodes do not report `env_capable`; the app says right away what to upgrade.
