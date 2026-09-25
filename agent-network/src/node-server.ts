@@ -226,6 +226,20 @@ function nodeModelFromConfig(path: string | undefined): string | undefined {
   }
 }
 const NODE_MODEL = nodeModelFromConfig(CONFIG_PATH);
+// 节点环境变量(node-env.ts)只认「这个会话自己的」config.json:目录名按 ALIAS 猜出来的那份,
+// 若启动器给了 COMMHUB_NODE_ID,还要和配置里的 node_id 对得上,免得写进同名目录里别人的配置。
+function envConfigPathFor(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const wantId = process.env.COMMHUB_NODE_ID;
+  if (!wantId) return path;
+  try {
+    const cfg = JSON.parse(readFileSync(path, "utf-8")) as { node_id?: unknown };
+    return cfg.node_id === wantId ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const ENV_CONFIG_PATH = envConfigPathFor(CONFIG_PATH);
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
   const line = `[${ts}] [commhub] ${msg}`;
@@ -606,6 +620,8 @@ async function reregister(): Promise<void> {
       skills_capable: true,
       // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
       files_capable: true,
+      // 同一门铃也答 env_list / env_set / env_unset(node-env.ts);只有找得到自己配置文件的会话才答。
+      ...(ENV_CONFIG_PATH ? { env_capable: true } : {}),
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
   } catch (e) {
@@ -691,13 +707,13 @@ async function handleSSEEvent(event: any) {
     log(`SSE connected as "${ALIAS}"`);
     // app#225 follow-up —— 断线/未连上期间桌面端可能已发起规则文件请求;连上后补拉一次
     // (没有就是一次空拉)。不 await:别让 SSE 读循环卡在一次 hub 往返上。
-    void drainRulesFileRequests({ callCommHub, workDir: process.cwd(), log }, "connect catch-up");
+    void drainRulesFileRequests({ callCommHub, workDir: process.cwd(), log, envConfigPath: ENV_CONFIG_PATH }, "connect catch-up");
     return;
   }
 
   // app#225 follow-up —— 规则文件(CLAUDE.md)远程读写门铃。文件名固定 CLAUDE.md、
   // 目录固定本进程 cwd,见 node-server-rules-file.ts。
-  if (await handleRulesFileEvent(event, { callCommHub, workDir: process.cwd(), log })) return;
+  if (await handleRulesFileEvent(event, { callCommHub, workDir: process.cwd(), log, envConfigPath: ENV_CONFIG_PATH })) return;
 
   if (event.type === "new_message") {
     log(`← message from ${event.from}: ${(event.message as string).slice(0, 60)}`);
@@ -807,6 +823,8 @@ async function main() {
     skills_capable: true,
     // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
     files_capable: true,
+    // 同一门铃也答 env_list / env_set / env_unset(node-env.ts);只有找得到自己配置文件的会话才答。
+    ...(ENV_CONFIG_PATH ? { env_capable: true } : {}),
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
     .catch((e) => log(`warning: could not register: ${e}`));
@@ -834,6 +852,8 @@ async function main() {
       skills_capable: true,
       // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
       files_capable: true,
+      // 同一门铃也答 env_list / env_set / env_unset(node-env.ts);只有找得到自己配置文件的会话才答。
+      ...(ENV_CONFIG_PATH ? { env_capable: true } : {}),
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
 

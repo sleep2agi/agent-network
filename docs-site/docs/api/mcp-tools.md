@@ -89,6 +89,9 @@ CommHub Server 注册 **50 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `read_node_skill` | 请节点回传某个技能的 SKILL.md（只读，256 KB 上限）；唯一入参是技能名 `name`（`[A-Za-z0-9._-]{1,64}`），不接受路径 |
 | `list_node_files` | 请节点列出其工作目录下某一层目录（项目文件夹，只读）：`path` 相对工作目录（缺省为根），拒绝绝对路径与 `..`；每项 `{name, type, size, mtime}`，凭据类文件只给名字（`hidden_reason: "secret"`），`node_modules` / `.git` 不进入，上限 1000 项。仅用户登录可调用 |
 | `read_node_file` | 请节点回传工作目录下一个文本文件（只读，256 KB 上限；二进制 / 超限只回大小；`.env`、密钥、`auth.json` 等凭据文件不回内容）；节点侧 realpath 收在工作目录内，软链接逃不出去。结果仅发起请求的那个 token 可读 |
+| `list_node_env` | 列出节点的环境变量（节点自己 `config.json` 的 `env` 块）：**只回键和元数据** `{key, set, length, in_effect, kind}`，永远不回值。立即返回里带 `write_allowed` / `write_blocked`（能不能往这个节点写密钥，见 [节点环境变量](/guide/node-env)）。仅用户登录可调用，结果仅发起请求的那个 token 可读 |
+| `set_node_env` | 设置节点的一个环境变量：原子写入节点 `config.json` 的 `env` 块（0600，保留 `.prev`），**重启后生效**。值只写不读：不回显、不进日志与审计，节点 ack 的那一刻从 hub 删除。键须匹配 `^[A-Z_][A-Z0-9_]{0,127}$` 且不在保留名单（`PATH` / `HOME` / `NODE_OPTIONS` / `LD_*` / `DYLD_*` / `ANET_*` / `COMMHUB_*` …）；值 ≤ 8 KiB、不含 NUL。本次调用或节点到 hub 的连接不是 HTTPS / 本机回环时拒绝（`insecure_transport`）。仅用户登录 |
+| `unset_node_env` | 删除节点的一个环境变量（重启后生效）；不带密钥，明文连接下也允许。仅用户登录 |
 | `get_rules_file_result` | 轮询规则文件请求结果：pending / in_progress / done / failed / timeout（60 s 无回应自动 timeout）。文件内容只短暂保留：首次读到终态后 60 s 清除，或请求 24 h 后无论读没读都清除；之后再轮询返回状态与元数据加 `content_purged: true`，不再带 `content`。整行 30 天后删除 |
 | `get_rules_file_request` | 节点拉取待处理的规则文件请求（网络 token + alias） |
 | `ack_rules_file_request` | 节点回报规则文件请求结果（读时带内容） |

@@ -94,4 +94,30 @@ describe("node-server rules_file doorbell", () => {
     expect(JSON.parse(hub.acks[1].content).content).toContain("steps");
     expect(hub.acks[2].error).toBe("invalid skill name");
   });
+
+  test("env_*: claude-code session writes its own config.json, restart is always manual, no value in logs/acks", async () => {
+    const dir = tmp();
+    const cfg = join(dir, "config.json");
+    const SECRET = "sk-CCSESSION-SECRET-VALUE-do-not-leak";
+    writeFileSync(cfg, JSON.stringify({ alias: "cc1", env: {} }), { mode: 0o600 });
+    const lines: string[] = [];
+    const hub = fakeHub([
+      { request_id: "e1", op: "env_set", content: JSON.stringify({ key: "API_KEY", value: SECRET }) },
+      { request_id: "e2", op: "env_list" },
+    ]);
+    await drainRulesFileRequests({ callCommHub: hub.callCommHub, workDir: dir, log: (m) => lines.push(m), envConfigPath: cfg }, "test");
+    expect(hub.acks.map((a) => a.status)).toEqual(["done", "done"]);
+    expect(JSON.parse(hub.acks[0].content)).toMatchObject({ key: "API_KEY", restart: "manual", requires_restart: true });
+    expect(JSON.parse(hub.acks[1].content)).toMatchObject({ restart: "manual", keys: [{ key: "API_KEY", in_effect: false }] });
+    expect(JSON.parse(readFileSync(cfg, "utf8")).env.API_KEY).toBe(SECRET);
+    expect(existsSync(`${cfg}.prev`)).toBe(true);
+    for (const x of [...hub.acks.map((a) => JSON.stringify(a)), ...lines]) expect(x).not.toContain(SECRET);
+  });
+
+  test("env_*: a session without its own config answers failed (and does not report env_capable)", async () => {
+    const dir = tmp();
+    const hub = fakeHub([{ request_id: "e1", op: "env_list" }]);
+    await drainRulesFileRequests({ callCommHub: hub.callCommHub, workDir: dir, log: () => {} }, "test");
+    expect(hub.acks[0]).toMatchObject({ status: "failed", file_name: "env" });
+  });
 });

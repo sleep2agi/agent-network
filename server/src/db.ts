@@ -133,6 +133,13 @@ for (const col of [
   // Project folder view — the same session answers files_list / file_read on the
   // rules-file doorbell (node-files.ts). Sticky, bound-token only, like above.
   { name: "files_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // Node environment variables — env_list / env_set / env_unset on the same
+  // doorbell (node-env.ts). Sticky, bound-token only, like above.
+  { name: "env_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // How the node's last own report reached the hub: loopback / https / plain.
+  // Re-measured on every report; set_node_env refuses to forward a secret
+  // unless it is loopback or https (node-env.ts envWriteBlock).
+  { name: "env_transport", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
