@@ -962,13 +962,18 @@ describe("delete_node — stale-deleting redispatch exit (#1286)", () => {
 // task already died (retention sweeps only acked=1 rows), so a single
 // dead row pinned the node to node_busy_in_flight forever.
 //
-// Rule under test:
-//   1. type='task' rows are dropped once their task is terminal
-//      (replied / failed / cancelled / expired) — join key is
-//      COALESCE(task_id, id), the same logical id cancel_task uses.
-//   2. every row type has a 60-minute age ceiling (= the default task
-//      TTL): unacked longer than that means nobody pulled it, so it is
-//      not work this node is processing.
+// Rule under test (#2029 review):
+//   1. type='task' rows that join to a tasks row are judged by status
+//      ALONE — terminal (replied / failed / cancelled / expired) is not
+//      counted, anything else is counted with NO age ceiling. agent-node
+//      acks the inbox row only when the task is done, so a 90-minute
+//      (or ttl_seconds>3600) run stays acked=0 the whole time and must
+//      keep the gate closed; expiry is patrolExpiredTasks' job.
+//      Join key is COALESCE(task_id, id), the logical id cancel_task
+//      uses.
+//   2. rows with no status of their own — task rows whose tasks row is
+//      gone, and non-task rows (reply / broadcast / message) — get the
+//      60-minute age ceiling; nothing else will ever retire them.
 //   3. patrolExpiredTasks acks the matching inbox rows in the same
 //      transaction that expires the task.
 
@@ -1056,13 +1061,40 @@ describe("#2022 stop gate — genuinely in-flight rows still block", () => {
   });
 });
 
-describe("#2022 stop gate — age ceiling (60 min = default task TTL)", () => {
-  test("non-terminal task row unacked for 2 hours → not counted (nobody pulled it)", async () => {
+describe("#2022 stop gate — a live task is never aged out (status wins over age)", () => {
+  test("🔴 created 2 hours ago + task.status='running' → still node_busy_in_flight", async () => {
     setupAlphaNetwork();
     seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
-      task_id: "task_2022_stale_running", status: "acked",
+      task_id: "task_2022_running_90m", status: "running",
+      task_age: "-120 minutes", inbox_age: "-120 minutes", expires_in: "-60 minutes",
+    });
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(1);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+  });
+
+  test("task.status='acked' 2 hours old (patrol never expires it) → still blocked", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
+      task_id: "task_2022_acked_120m", status: "acked",
       inbox_age: "-120 minutes", expires_in: "+12 hours",
     });
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(1);
+  });
+});
+
+describe("#2022 stop gate — age ceiling (60 min) for rows with no status", () => {
+  test("orphan task row (tasks row reaped) 8 days old → not counted", async () => {
+    setupAlphaNetwork();
+    db.run(
+      `INSERT INTO inbox (id, task_id, session_name, type, content, from_session, network_id, acked, created_at)
+       VALUES (?1, ?1, ?2, 'task', 'orphan task', 'caller', ?3, 0, datetime('now', '-8 days'))`,
+      [`task_2022_reaped`, CHILD_A_ALIAS, NET_A],
+    );
     const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
     expect(r.ok).toBe(true);
     expect(r.in_flight_at_dispatch).toBe(0);

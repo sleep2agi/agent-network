@@ -4534,27 +4534,31 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // send_reply, send_ack, the TTL patrol all leave inbox alone) and
     // retention sweeps only acked=1 rows, so those rows were counted
     // forever: one dead row pinned this gate to node_busy_in_flight
-    // and force=true was the only way past it. Counting rule — a row is
-    // in flight only while it can still be work; both filters fail
-    // open toward "count it" until then:
-    //   1. type='task' rows — LEFT JOIN tasks on the logical task id
-    //      (COALESCE(task_id, id), the same key cancel_task and
-    //      ack_inbox use: the first deliveries set id == task_id and
-    //      retry/reassign write a fresh transport id) and drop the row
-    //      once its task is terminal: replied / failed / cancelled /
-    //      expired. A task row with no tasks row (reaped, or a legacy
-    //      row carrying no resolvable id) falls through to filter 2.
-    //   2. an age ceiling of IN_FLIGHT_MAX_AGE_MINUTES on
-    //      inbox.created_at, applied to every row type. It equals the
-    //      default task TTL (send_task ttl_seconds = 3600): work that
-    //      was never pulled within a TTL is not work this node is
-    //      processing — acked work has already left this count (it left
-    //      as acked=1). This is also the only exit for task rows the
-    //      TTL patrol never expires (acked/running are outside its
-    //      scope) and for non-task rows (reply / broadcast / message),
-    //      which are judged by age alone.
-    // The count stays a per-alias inbox count: one PK join per row, no
-    // per-row task lookup beyond it.
+    // and force=true was the only way past it.
+    //
+    // Counting rule (#2029 review): a row counts while it can still be
+    // work this node is doing — and the age ceiling must NOT be applied
+    // to a task row whose tasks row we can see. agent-node acks the
+    // inbox row only once the task is done, so a 90-minute (or 3-hour,
+    // or ttl_seconds>3600) task keeps acked=0 for its whole run;
+    // capping it by age would open this gate mid-run, which is exactly
+    // what the gate exists to prevent. So:
+    //   1. type='task' row with a matching tasks row — LEFT JOIN on
+    //      COALESCE(task_id, id), the key cancel_task / ack_inbox use
+    //      (first deliveries set id == task_id; retry/reassign write a
+    //      fresh transport id). Status alone decides: terminal
+    //      (replied / failed / cancelled / expired) → not counted;
+    //      anything else → counted, no age ceiling. Expiry belongs to
+    //      patrolExpiredTasks, which now acks the inbox row in the same
+    //      transaction, so an expired task leaves this count together
+    //      with its rows.
+    //   2. every other row — a task row whose tasks row is gone
+    //      (reaped by retention, or a legacy row whose id resolves to
+    //      nothing) and non-task rows (reply / broadcast / message):
+    //      these carry no status of their own and nothing else will
+    //      ever retire them, so they get the age ceiling
+    //      IN_FLIGHT_MAX_AGE_MINUTES on inbox.created_at.
+    // The count stays a per-alias inbox count: one PK join per row.
     const IN_FLIGHT_MAX_AGE_MINUTES = 60;
     const inFlightRow = db.get<{ n: number }>(
       `SELECT COUNT(*) AS n FROM inbox i
@@ -4563,9 +4567,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           AND t.task_id = COALESCE(i.task_id, i.id)
         WHERE i.session_name = ?1 AND i.acked = 0
           AND COALESCE(i.network_id, ?2) = ?2
-          AND i.created_at >= datetime('now', ?3)
-          AND (i.type <> 'task' OR t.task_id IS NULL
-               OR t.status NOT IN ('replied', 'failed', 'cancelled', 'expired'))`,
+          AND ((t.task_id IS NOT NULL
+                AND t.status NOT IN ('replied', 'failed', 'cancelled', 'expired'))
+            OR (t.task_id IS NULL
+                AND i.created_at >= datetime('now', ?3)))`,
       node.alias, node.network_id, `-${IN_FLIGHT_MAX_AGE_MINUTES} minutes`,
     );
     const inFlight = inFlightRow?.n ?? 0;
