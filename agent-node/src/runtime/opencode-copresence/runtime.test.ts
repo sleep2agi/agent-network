@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, test } from "bun:test";
@@ -659,6 +659,129 @@ describe("OpenCode copresence task deadline", () => {
       f.close();
     }
   }, 20_000);
+});
+
+// #2008 follow-up: on 2.5.0-preview.89 a 30-minute deadline still died at
+// exactly 5:00 with "opencode 错误: fetch failed". Node's built-in fetch
+// (undici) gives up on a response whose headers have not arrived after
+// `headersTimeout` = 300_000 ms, whatever the AbortSignal says, and OpenCode's
+// turn POST sends no headers until the turn ends.
+//
+// Bun ignores `dispatcher` and has no such timer, so this cannot be observed
+// in-process under `bun test`. The production module is bundled for Node (as
+// dist/cli.js is) and driven in a real `node` child, with Node's default
+// global dispatcher scaled from 300 s down to 1 s. The positive control proves
+// the scaled timer is live; the production submit() must then outlive it.
+//
+// The child must be a REAL Node. `oven/bun` images (test230) put a `node` on
+// PATH that is a symlink to bun and reports a Node-like `process.version`
+// (e.g. v24.3.0); there `setGlobalDispatcher` is ignored, the positive
+// control reads "ok", and nothing here is observable. Skip loudly there;
+// test725 (node:22 image) sets ANET_TEST_REQUIRE_REAL_NODE=1 so the skip
+// cannot silently spread to the gate that is meant to run this.
+const REAL_NODE_PROBE = (() => {
+  const probe = spawnSync("node", ["-p", "JSON.stringify({ bun: typeof Bun !== 'undefined', version: process.version })"], { encoding: "utf8" });
+  if (probe.error || probe.status !== 0) return { ok: false, why: `no runnable \`node\` on PATH (${probe.error?.message ?? `exit ${probe.status}`})` };
+  try {
+    const info = JSON.parse(probe.stdout.trim());
+    if (info.bun) return { ok: false, why: `\`node\` on PATH is Bun posing as Node ${info.version}` };
+    return { ok: true, why: `node ${info.version}` };
+  } catch {
+    return { ok: false, why: `unreadable \`node\` probe output: ${probe.stdout}` };
+  }
+})();
+const REQUIRE_REAL_NODE = process.env.ANET_TEST_REQUIRE_REAL_NODE === "1";
+if (!REAL_NODE_PROBE.ok) {
+  console.warn(`[SKIP-LOUD] undici headersTimeout regression (#2026) cannot run: ${REAL_NODE_PROBE.why}. `
+    + `It runs in test725 (real Node); set ANET_TEST_REQUIRE_REAL_NODE=1 to make this a failure.`);
+}
+describe("OpenCode copresence turn transport outlives undici's header timeout (Node)", () => {
+  test("a real Node child is available where the gate requires one", () => {
+    if (REQUIRE_REAL_NODE) expect(REAL_NODE_PROBE.why).toStartWith("node ");
+  });
+
+  test.skipIf(!REAL_NODE_PROBE.ok)("a turn longer than the global headersTimeout returns its reply; a plain fetch dies with the named cause", async () => {
+    const f = fixture({ FAKE_TURN_MS: "3500", FAKE_USER_FIRST: "1" });
+    try {
+      const build = await Bun.build({
+        entrypoints: [join(import.meta.dir, "runtime.ts")],
+        outdir: join(f.root, "bundle"),
+        target: "node",
+        format: "esm",
+      });
+      expect(build.success).toBe(true);
+      const bundle = join(f.root, "bundle", "runtime.js");
+      expect(existsSync(bundle)).toBe(true);
+      // Not require.resolve("undici"): under Bun that names Bun's built-in shim.
+      const undiciEntry = join(import.meta.dir, "..", "..", "..", "node_modules", "undici", "index.js");
+      expect(existsSync(undiciEntry)).toBe(true);
+      const driver = join(f.root, "driver.mjs");
+      writeFileSync(driver, `
+import http from "node:http";
+import { Agent, setGlobalDispatcher } from ${JSON.stringify(undiciEntry)};
+import * as rt from ${JSON.stringify(bundle)};
+const out = { bun: typeof Bun !== "undefined" };
+// The dispatcher's timers must follow the deadline: a default Agent() would
+// pass the 1 s check below yet still die at 300 s in production.
+out.turnOptions = [0, 1_800_000].map((ms) => {
+  const agent = rt.openCodeTurnDispatcher(ms);
+  const key = Object.getOwnPropertySymbols(agent).find((k) => k.description === "options");
+  const o = key ? agent[key] : null;
+  agent.destroy();
+  return o ? { headersTimeout: o.headersTimeout, bodyTimeout: o.bodyTimeout } : null;
+});
+// Node's default is headersTimeout = bodyTimeout = 300_000 ms; scale to 1 s.
+setGlobalDispatcher(new Agent({ headersTimeout: 1_000, bodyTimeout: 1_000 }));
+const srv = http.createServer((req, res) => { req.resume(); setTimeout(() => { try { res.end("{}"); } catch {} }, 3_500); });
+await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+const t0 = Date.now();
+try {
+  await rt.fetchOpenCodeJson("http://127.0.0.1:" + srv.address().port, "pw", "/slow", { method: "POST", body: "{}" }, 20_000);
+  out.control = "ok";
+} catch (e) { out.control = String(e && e.message); }
+out.controlMs = Date.now() - t0;
+srv.closeAllConnections?.(); srv.close();
+const runtime = await rt.openVettedOpenCodeCopresence({
+  binary: process.env.FAKE_BIN, env: process.env, cwd: process.env.FAKE_ROOT, workDir: process.env.FAKE_ROOT,
+  model: "opencode/fake", startupTimeoutMs: 5_000,
+});
+try {
+  out.reply = (await runtime.submit("long turn", 20_000)).replyText;
+} catch (e) { out.error = String(e && e.message); }
+finally { await runtime.close(); }
+console.log("RESULT " + JSON.stringify(out));
+process.exit(0);
+`);
+      const child = spawn("node", [driver], {
+        env: { ...f.env, FAKE_BIN: f.binary, FAKE_ROOT: f.root },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c) => { stdout += c; });
+      child.stderr.on("data", (c) => { stderr += c; });
+      const code = await new Promise<number | null>((r) => child.once("exit", r));
+      const line = stdout.split("\n").find((l) => l.startsWith("RESULT "));
+      if (!line) throw new Error(`node driver produced no RESULT (exit ${code}):\n${stdout}\n${stderr}`);
+      const result = JSON.parse(line.slice("RESULT ".length));
+      // Belt and braces for the PATH probe above: the driver itself ran on Node.
+      expect(result.bun).toBe(false);
+      expect(result.turnOptions).toEqual([
+        { headersTimeout: 0, bodyTimeout: 0 },
+        { headersTimeout: 1_860_000, bodyTimeout: 1_860_000 },
+      ]);
+      // Positive control: the scaled timer fires well before the 20 s signal,
+      // and the error names the undici cause instead of a bare "fetch failed".
+      expect(result.control).toContain("UND_ERR_HEADERS_TIMEOUT");
+      expect(result.control).toContain("OpenCode POST /slow");
+      expect(result.controlMs).toBeLessThan(3_400);
+      // Production path: the turn POST carries its own long-timeout dispatcher.
+      expect(result.error).toBeUndefined();
+      expect(result.reply).toBe("FAKE_REPLY:long turn");
+    } finally {
+      f.close();
+    }
+  }, 30_000);
 });
 
 describe("parseMessageReply (#1451)", () => {

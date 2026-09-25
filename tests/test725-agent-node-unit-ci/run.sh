@@ -27,9 +27,12 @@ AGENT_NODE_SRC_FLOOR=80
   exit 1
 }
 
+# ANET_TEST_REQUIRE_REAL_NODE=1: this image has a real Node, so the opencode
+# undici-headersTimeout regression (#2026) must run here, not skip (it skips
+# loudly only where `node` is Bun, e.g. the oven/bun image of test230).
 echo "[L0] full agent-node/src unit suite as non-root"
 runuser -u node -- env HOME=/home/node \
-  bash -lc 'cd /workspace/agent-node && bun test src/' \
+  bash -lc 'cd /workspace/agent-node && ANET_TEST_REQUIRE_REAL_NODE=1 bun test src/' \
   2>&1 | tee /tmp/test725-green.log
 
 grep -Eq '^[[:space:]]*[1-9][0-9]* pass$' /tmp/test725-green.log || {
