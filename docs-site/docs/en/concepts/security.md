@@ -442,4 +442,4 @@ Or persist it via `flags.maxBudgetUsd` in `config.json`.
 
 **Production deployment checklist**:
 - [Production deployment](/en/deploy/production) — full TLS / firewall / CORS / backup checklist
-- [Docker deployment](/en/deploy/docker) — containerization best practices
+- [Docker deployment](/en/deploy/clean-server#docker) — containerization best practices

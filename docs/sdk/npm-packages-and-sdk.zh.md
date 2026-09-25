@@ -1,4 +1,6 @@
-# npm 部署
+# npm 包与 SDK（开发者参考）
+
+> 这份开发者参考于 2026-09-25 从 anet.sh 用户文档（原 `/deploy/npm`）移到仓库。安装请看 https://anet.sh/guide/install 。文中以 `/` 开头的链接指 anet.sh 上的页面。
 
 通过 npm 安装和部署 Agent Network 是最简单的方式。
 

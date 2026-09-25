@@ -1,4 +1,4 @@
-# 上手指南（5 步跑通）
+# 10 分钟跑通第一个节点
 
 <!-- 🔴 下面这两条戳被 scripts/check-doc-version-claims.py 读取,渲染出来看不见。
      本页有多处**带版本号的行为断言**(某个版本上第一条命令会怎样),它们在发版那一刻
@@ -8,45 +8,17 @@
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.115 -->
 
-新用户首次跑通的最小路径——**5 步, 5 分钟**。每步一条命令 + 一句验证。
+从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。
 
-::: tip 最快路径（推荐）— 有 Claude 订阅就 0 配置
-最省事的走法：本机装好 Claude Code CLI（`npm i -g @anthropic-ai/claude-code`）并 `claude auth login` 后，第 4 步**选 `claude-code-cli` runtime**——全程不用填 API key、不用选模型，一条命令就上线一个"能干活、手机也能指挥"的私人 AI 员工。这是**最稳、最少踩坑**的路径。
+**开始之前**：按[安装](/guide/install)装好 Node.js ≥ 22.13、Bun ≥ 1.2 和 `anet`，`anet -v` 能正常输出。已经装过、只想升级的，走[升级指南](/guide/upgrade)。
 
-没有 Claude 订阅？走 `claude-agent-sdk` + 一个模型 API key（MiniMax / DeepSeek / 书生 / 小米），见第 4 步。
+::: tip 最快路径（推荐）：有 Claude 订阅就零配置
+本机装好 Claude Code CLI（`npm i -g @anthropic-ai/claude-code`）并 `claude auth login` 后，第 3 步**选 `claude-code-cli` runtime**：不用填 API key、不用选模型。没有 Claude 订阅就用 `claude-agent-sdk` + 一个模型 API key（MiniMax / DeepSeek / 书生 / 小米），见第 3 步。
 :::
-
-::: tip 已经装过 anet?
-跳过本页, 走 [升级指南](/guide/upgrade)（通常 `anet upgrade` 一键 + `anet project restart` 重启 cwd 节点）。
-:::
-
-**前置**（两个都要装）：
-
-- **Node.js ≥ 22.13.0**
-- **Bun ≥ 1.2.0** —— 装法 `npm i -g bun`（或 `curl -fsSL https://bun.sh/install | bash`）。第 2 步 `anet hub start` 底层用 `bunx` 起 `commhub-server`，**没装 Bun 时第 2 步一定失败**，但表现分两条线:
-  · **`2.3.0-preview.47` 及以后的构建**（现在的 `latest` `2.3.0-preview.76` 与 `preview` `2.3.0-preview.115` 都在此范围）:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`（退出码 1）；
-  · **更早、不含 preflight 的构建**（如 `2.2.21`）:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈。
-  装完 `bun --version` 应有输出。
-
-这俩装好就行；`commhub-server` / `agent-node` 首次用时自动拉取，不用手动装。
 
 ---
 
-## 1. 安装 CLI
-
-```bash
-npm install -g @sleep2agi/agent-network
-```
-
-验证：
-
-```bash
-anet -v
-```
-
----
-
-## 2. 启动 Hub
+## 1. 启动 Hub {#start-hub}
 
 打开第一个终端, **保持开着**：
 
@@ -54,7 +26,7 @@ anet -v
 anet hub start
 ```
 
-启动后默认监听 `http://127.0.0.1:9200`, SQLite 数据库在 `~/.commhub/commhub.db`, 并自动创建管理员 **`admin`**，密码是一个**随机生成、只打印这一次**的 `anet-xxxxxxxx…` 串（`latest` 与 `preview` 两条通道都是这样）。**当场把它存下来**，第 3 步登录要用。
+启动后默认监听 `http://127.0.0.1:9200`, SQLite 数据库在 `~/.commhub/commhub.db`, 并自动创建管理员 **`admin`**，密码是一个**随机生成、只打印这一次**的 `anet-xxxxxxxx…` 串（`latest` 与 `preview` 两条通道都是这样）。**当场把它存下来**，第 2 步登录要用。
 
 ::: warning 公网部署立刻改密
 首次登录后会提示你改掉这个随机密码。任何 `--host 0.0.0.0` 公网部署都要立刻 `anet passwd` 改成自己的强密码。想自己指定初始密码：`anet hub start --password <pass>`，或设环境变量 `ANET_HUB_BOOTSTRAP_PASSWORD`。
@@ -66,7 +38,7 @@ anet hub start
 
 ---
 
-## 3. 启动 Dashboard + 登录
+## 2. 启动 Dashboard 并登录 {#login}
 
 开第二个终端, **保持开着**：
 
@@ -104,7 +76,7 @@ anet login --hub http://127.0.0.1:9200 --username admin --password <anet hub sta
 
 ---
 
-## 4. 创建并启动节点
+## 3. 创建并启动节点 {#create-node}
 
 ```bash
 anet node create my-bot
@@ -140,7 +112,7 @@ anet node start my-bot
 
 ---
 
-## 5. 用起来 — 从 Dashboard 派任务
+## 4. 从 Dashboard 派任务 {#dispatch}
 
 回浏览器 `http://localhost:3000`：
 
@@ -151,33 +123,7 @@ anet node start my-bot
 
 刷新页面, 聊天历史保留。
 
-✅ **5 步跑通**。
-
----
-
-## 已验证 vs 未验证
-
-::: info 已验证 (当前 stable，真机走查)
-详细测试报告见 [更新日志](/changelog) + [测试报告](https://github.com/sleep2agi/agent-network/tree/main/docs/tests)。
-
-- `anet hub start` + 默认账号自动创建 / `anet hub dashboard`
-- `anet login`（带 `--hub`）/ `anet register` / `anet logout` / `anet whoami`
-- **`claude-code-cli` runtime 端到端** —— 生产 fleet 每天在跑（最省事路径，见步骤 4 推荐）；首跑 dev-channels 确认框需 TTY
-- `claude-agent-sdk` 的 `node create`（含 vendor 路径：Anthropic / MiniMax / 书生 Intern / 小米 MiMo — verified-with-real-call）+ `node ls / delete`
-- Dashboard Chat（markdown / Enter 发 / 乐观回显 / 来源标签 / 错误兜底 / 历史持久）
-:::
-
-::: warning 带坑 / 未验证 (请自行评估)
-- **`claude-agent-sdk` / `codex-sdk` 的首次 `node start`**：latest 上 `agent-node` 懒加载没拉完就退（`agent-node is not installed...`，[#450](https://github.com/sleep2agi/agent-network/issues/450)）。先 `npm i -g @sleep2agi/agent-node` 再启动即可（见上方步骤 4 提示）。
-- `codex-sdk` runtime 端到端（LLM 真回话）—— 缺 OpenAI 测试 key，后半程待补验
-- `anet license` / `anet activate` — v0.6 legacy, OSS 用户无需操作（详 [troubleshooting](/troubleshooting#license-expired-授权过期-legacy-行为)）
-- `anet network create` 跨用户网络共享 — 代码已合并但未做 E2E 回归
-- **一键安装脚本 `setup-anet.sh`** — 已退役停用, 不要运行旧副本, 见 [退役说明](/guide/one-shot-install)
-:::
-
-::: tip 没有官方托管
-项目方向 = **Apache 2.0 开源 + 自部署 + 课程 / 服务咨询**, 不做 SaaS 托管。生产部署见 [Docker](/deploy/docker) / [生产部署](/deploy/production)。
-:::
+✅ **跑通了**。
 
 ---
 
@@ -200,3 +146,4 @@ anet demo pr-review        # PR 评审室 — 3 reviewer（安全/性能/风格�
 - [多模型配置](/guide/multi-model) — DeepSeek / Kimi / Claude / MiniMax / 自部署
 - [架构概览](/guide/architecture)
 - [升级指南](/guide/upgrade) — 任意旧版 → latest 一键 `anet upgrade`
+- [生产部署](/deploy/production) — 项目不提供托管 Hub；把 Hub 放到服务器或公网之前先读这一页

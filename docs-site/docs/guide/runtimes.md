@@ -113,7 +113,7 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 :::
 
 ::: tip wizard 顺序速览
-向导真实顺序: `节点名 → runtime → (仅 claude-agent-sdk) vendor → model → API Key / 鉴权`. runtime 菜单（正式版 4-way / 预览版 6-way）**默认高亮第一项 `claude-agent-sdk`** (要配 vendor + key, 复杂度最高); 新手强烈建议手动选 `claude-code-cli`. 完整步骤见 [上手指南 §5](/guide/getting-started#_4-创建并启动节点).
+向导真实顺序: `节点名 → runtime → (仅 claude-agent-sdk) vendor → model → API Key / 鉴权`. runtime 菜单（正式版 4-way / 预览版 6-way）**默认高亮第一项 `claude-agent-sdk`** (要配 vendor + key, 复杂度最高); 新手强烈建议手动选 `claude-code-cli`. 完整步骤见 [上手指南 §5](/guide/getting-started#create-node).
 :::
 
 ---

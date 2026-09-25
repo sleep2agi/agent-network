@@ -10,73 +10,16 @@
 
 ## 0. 前置
 
-| 依赖 | 推荐版本 | 怎么装 |
-|---|---|---|
-| **Node.js** | ≥ 22.13.0 | 推荐 [nvm](https://github.com/nvm-sh/nvm)；`curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh \| bash` → `nvm install 22 && nvm use 22` |
-| **Bun** | ≥ 1.2.0 | `npm i -g bun` 或 `curl -fsSL https://bun.sh/install \| bash` |
-
-::: warning Bun 必装
-`commhub-server` 是 Bun-shebang TypeScript（用 `bunx --bun` 起），**没装 Bun 时 `anet hub start` 一定失败**，是新机部署 8 坑里第 1 坑。表现分两条线:
-
-- **不含 preflight 的旧构建(如 `2.2.x`)**:裸崩 `Error: spawn bunx ENOENT` + Node 堆栈;
-- **`2.3.0-preview.47` 及以后(现在的 `latest` 与 `preview` 都在此范围)**:启动前被拦下，报 `❌ anet hub start requires the Bun runtime`，退出码 1。
-
-验证：
-```bash
-node --version       # 期望 v22.x 或更新
-bun --version        # 期望 1.2.x 或更新
-```
-
-任何一个报 `command not found` → 先回头装。
-:::
-
-::: details nvm 装的 node 在非交互 shell / 不同用户里失效
-nvm 只在**交互 shell** 自动加载（读 `~/.bashrc`）。如果你打算让 systemd / cron / 不同用户启动节点，nvm 的 PATH 不会自动到位。
-
-兜底：
-1. 把 nvm 的 node bin 路径直接写进 `/usr/local/bin`：`sudo ln -s "$(which node)" /usr/local/bin/node && sudo ln -s "$(which npm)" /usr/local/bin/npm`
-2. 或在 systemd unit / 启动脚本里显式 `source ~/.nvm/nvm.sh`
-
-Bun 一样按用户装（`~/.bun/bin`），换用户 / root 跑前先确认 PATH。
-:::
+按[安装](/guide/install)装好 Node.js ≥ 22.13 和 Bun ≥ 1.2（两个都要装，Hub 由 Bun 运行）。之后要用 systemd、cron 或另一个用户启动 Hub 和节点时，先看安装页里关于 [PATH 的说明](/guide/install#prerequisites)。
 
 ## 1. 安装 anet CLI
 
-只需一个全局包：
-
 ```bash
-npm i -g @sleep2agi/agent-network
-```
-
-验证：
-
-```bash
+npm install -g @sleep2agi/agent-network
 anet -v
 ```
 
-期望输出（版本号以 npm `latest` 为准）：
-
-```text
-anet <current latest>
-Components (auto-fetched on first use, you don't need to install them manually):
-  ✓ agent-node <current latest>
-    └ @anthropic-ai/claude-agent-sdk v0.2.x
-    └ @openai/codex-sdk v0.x.x
-  ○ commhub-server — not installed yet (will fetch via npx on first use)
-
-Optional runtimes (install only what you'll use):
-  ✓ claude CLI v2.1.x        # 已装 + auth login
-  ✓ codex CLI v0.x.x         # 已装 + auth login
-  ...                        # 没装的 runtime 这里不显示, 用到再装 (见 §5)
-
-Nothing is broken — components are fetched the first time you run:
-  anet hub start          # bootstraps commhub-server
-  anet node start <name>  # bootstraps agent-node
-
-Docs: https://anet.sh/guide/getting-started
-```
-
-`anet -v` 自动告诉你 `agent-node` 装没装、`commhub-server` 拉没拉、可选的 `claude` / `codex` CLI 装没装。这是后面任何启动出错时的**第一查点**。
+`anet -v` 会列出 `agent-node`、`commhub-server` 是否已就位（首次使用时自动拉取），以及本机装了哪些可选 runtime CLI。后面任何启动出错，先看这里。
 
 ## 2. 起 Hub（推荐 tmux 挂着）
 
@@ -361,6 +304,16 @@ sudo systemctl status anet-hub anet-node@my-bot
 - `claude-code-cli` runtime 首次跑会弹 dev-channels 确认框（[见 §7 启动节点里的 dev-channels 确认框](#_7-启动节点)），systemd 接管前先 tmux 前台跑一次按掉
 - 想官方 unit / 改进上面这份？欢迎 PR 或来 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 提
 
+## 在容器里跑 {#docker}
+
+仓库目前没有受维护的生产 compose 套件，仓库里的 Dockerfile 和 compose 文件用于测试或特定集成。在容器里跑时，把容器当成「带 Node.js 和 Bun 的 Ubuntu」，上面每一步的命令都一样。可以参考 [`tests/Dockerfile`](https://github.com/sleep2agi/agent-network/blob/main/tests/Dockerfile)（Node.js + Bun + anet 的最小集）起步，生产上自行加多阶段构建、镜像 hash 固定和非 root 用户。
+
+- **启动顺序不变**：Hub → Dashboard → `anet login` → `anet node create` → `anet project up`，容器化只是把它们分到不同 service。
+- **首次启动慢**：第一次 `anet hub start` 会从 npm 拉固定版本的 `commhub-server`，缓存在 `$HOME/.bun/install/cache`，预热这个目录可以显著提速。
+- **容器间互通**：Dashboard 通过 REST + SSE 调 Hub 的 `:9200`，两者要在同一个 docker network，或把 Hub 端口发布到宿主机。容器里的 `localhost` 指容器自己。
+- **持久化**：节点状态在工作目录下的 `.anet/nodes/<alias>/`，Hub 数据在 `~/.commhub/`，都要挂成 volume。
+- **不要让节点进程当 PID 1**：用 `tini` 这类 init 包一层，否则 SIGTERM 会跳过节点的离线通知。
+
 ## 故障排查表（8 坑 mapping）
 
 按今天实测踩过的顺序，**报错 → 原因 → 解法**：
@@ -382,7 +335,7 @@ sudo systemctl status anet-hub anet-node@my-bot
 ## 下一步
 
 - [上手指南](/guide/getting-started) — 已经装好 anet 的端到端走查（笔记本场景）
-- [一键安装脚本退役说明](/guide/one-shot-install) — 旧脚本已停用，请使用本页的分步流程
+- [一键安装脚本退役说明](/guide/install#setup-anet) — 旧脚本已停用，请使用本页的分步流程
 - [生产部署 / 公网部署安全](/deploy/production) — TLS / 防火墙 / 备份 / 公网风险点
 - [Channel 接入](/guide/channels) — 当前渠道状态与 Telegram / 飞书接入；微信尚未发布
 - [节点 Runtime](/guide/runtimes) — runtime 详细对比

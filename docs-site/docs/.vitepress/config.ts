@@ -40,7 +40,7 @@ export default withMermaid(defineConfig({
       themeConfig: {
         nav: [
           { text: '下载桌面版', link: '/#desktop-download-title' },
-          { text: '指南', link: '/guide/getting-started' },
+          { text: '指南', link: '/guide/install' },
           { text: 'SkillHub', link: '/skillhub/' },
           { text: 'API', link: '/api/mcp-tools' },
           { text: '社区与生态', link: '/community' },
@@ -55,50 +55,33 @@ export default withMermaid(defineConfig({
         ],
         sidebar: [
           {
-            text: '快速开始',
+            text: '开始',
             items: [
-              { text: '5 分钟懂 anet', link: '/guide/introduction' },
-              { text: '30 秒上手', link: '/guide/getting-started' },
-              { text: 'Windows 上手', link: '/guide/windows' },
-            ]
-          },
-          {
-            text: '使用指南',
-            items: [
-              { text: '账号体系', link: '/guide/account-system' },
-              { text: 'Dashboard', link: '/guide/dashboard' },
-              { text: '桌面与手机客户端', link: '/guide/desktop-app' },
-              { text: 'CLI 命令', link: '/guide/cli' },
-              { text: 'Agent Node', link: '/guide/agent-node' },
-              { text: 'Goal 与 Loop', link: '/guide/goals-and-loops' },
-              { text: '节点 Runtime', link: '/guide/runtimes' },
-              { text: '支持矩阵', link: '/guide/support-matrix' },
-              { text: '多模型配置', link: '/guide/multi-model' },
-              { text: '升级指南', link: '/guide/upgrade' },
-            ]
-          },
-          {
-            text: '核心概念',
-            items: [
+              { text: '什么是 Agent Network', link: '/guide/introduction' },
               { text: '基本概念', link: '/guide/basics' },
-              { text: '架构概览', link: '/guide/architecture' },
-              { text: '网络隔离', link: '/concepts/networks' },
-              { text: '任务生命周期', link: '/concepts/task-lifecycle' },
-              { text: '安全设计', link: '/concepts/security' },
+              { text: '安装', link: '/guide/install' },
+              { text: '10 分钟跑通第一个节点', link: '/guide/getting-started' },
             ]
           },
           {
-            text: '接入',
+            text: '客户端',
             items: [
+              { text: '桌面与手机客户端', link: '/guide/desktop-app' },
+              { text: 'Web Dashboard', link: '/guide/dashboard' },
+            ]
+          },
+          {
+            text: '节点与 Runtime',
+            items: [
+              { text: 'Agent Node', link: '/guide/agent-node' },
+              { text: '选择 Runtime', link: '/guide/runtimes' },
+              { text: '支持矩阵', link: '/guide/support-matrix' },
+              { text: '模型与供应商', link: '/guide/multi-model' },
+              { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
+              { text: 'Grok 节点', link: '/guide/grok' },
+              { text: 'Goal 与 Loop', link: '/guide/goals-and-loops' },
               { text: 'Channel 接入', link: '/guide/channels' },
               { text: '飞书 Channel', link: '/guide/feishu' },
-            ]
-          },
-          {
-            text: '更多节点类型',
-            items: [
-              { text: 'Grok 节点', link: '/guide/grok' },
-              { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
               { text: 'DSH 节点', link: '/guide/dsh' },
             ]
           },
@@ -106,15 +89,17 @@ export default withMermaid(defineConfig({
             text: '部署',
             items: [
               { text: '干净服务器从零部署', link: '/deploy/clean-server' },
-              { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
               { text: '让 hub 常驻：进程守护', link: '/deploy/daemon' },
+              { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
             ]
           },
           {
-            text: 'API 参考',
+            text: '账号与安全',
             items: [
-              { text: 'MCP Tools', link: '/api/mcp-tools' },
-              { text: 'REST API', link: '/api/rest' },
+              { text: '账号、Token 与角色', link: '/guide/account-system' },
+              { text: '网络隔离', link: '/concepts/networks' },
+              { text: '安全设计', link: '/concepts/security' },
+              { text: '升级与发布通道', link: '/guide/upgrade' },
             ]
           },
           {
@@ -122,6 +107,16 @@ export default withMermaid(defineConfig({
             items: [
               { text: '故障排查', link: '/troubleshooting' },
               { text: '更新日志', link: '/changelog' },
+            ]
+          },
+          {
+            text: '参考',
+            items: [
+              { text: 'CLI 命令', link: '/guide/cli' },
+              { text: 'MCP Tools', link: '/api/mcp-tools' },
+              { text: 'REST API', link: '/api/rest' },
+              { text: '架构概览', link: '/guide/architecture' },
+              { text: '任务生命周期', link: '/concepts/task-lifecycle' },
             ]
           },
         ],
@@ -134,7 +129,7 @@ export default withMermaid(defineConfig({
       themeConfig: {
         nav: [
           { text: 'Download', link: '/en/#desktop-download-title' },
-          { text: 'Guide', link: '/en/guide/getting-started' },
+          { text: 'Guide', link: '/en/guide/install' },
           { text: 'SkillHub', link: '/en/skillhub/' },
           { text: 'API', link: '/en/api/mcp-tools' },
           { text: 'Community', link: '/en/community' },
@@ -151,48 +146,31 @@ export default withMermaid(defineConfig({
           {
             text: 'Getting Started',
             items: [
-              { text: '5-Minute Intro to anet', link: '/en/guide/introduction' },
-              { text: '30-Second Quickstart', link: '/en/guide/getting-started' },
-              { text: 'Windows Setup', link: '/en/guide/windows' },
-            ]
-          },
-          {
-            text: 'User Guide',
-            items: [
-              { text: 'Account System', link: '/en/guide/account-system' },
-              { text: 'Dashboard', link: '/en/guide/dashboard' },
-              { text: 'Desktop & Mobile Clients', link: '/en/guide/desktop-app' },
-              { text: 'CLI Commands', link: '/en/guide/cli' },
-              { text: 'Agent Node', link: '/en/guide/agent-node' },
-              { text: 'Goals and Loops', link: '/en/guide/goals-and-loops' },
-              { text: 'Node Runtime', link: '/en/guide/runtimes' },
-              { text: 'Support Matrix', link: '/en/guide/support-matrix' },
-              { text: 'Multi-Model Config', link: '/en/guide/multi-model' },
-              { text: 'Upgrade Guide', link: '/en/guide/upgrade' },
-            ]
-          },
-          {
-            text: 'Core Concepts',
-            items: [
+              { text: 'What is Agent Network', link: '/en/guide/introduction' },
               { text: 'Basic Concepts', link: '/en/guide/basics' },
-              { text: 'Architecture', link: '/en/guide/architecture' },
-              { text: 'Network Isolation', link: '/en/concepts/networks' },
-              { text: 'Task Lifecycle', link: '/en/concepts/task-lifecycle' },
-              { text: 'Security Design', link: '/en/concepts/security' },
+              { text: 'Install', link: '/en/guide/install' },
+              { text: 'Your First Node in 10 Minutes', link: '/en/guide/getting-started' },
             ]
           },
           {
-            text: 'Integrations',
+            text: 'Clients',
             items: [
+              { text: 'Desktop & Mobile Clients', link: '/en/guide/desktop-app' },
+              { text: 'Web Dashboard', link: '/en/guide/dashboard' },
+            ]
+          },
+          {
+            text: 'Nodes & Runtimes',
+            items: [
+              { text: 'Agent Node', link: '/en/guide/agent-node' },
+              { text: 'Choosing a Runtime', link: '/en/guide/runtimes' },
+              { text: 'Support Matrix', link: '/en/guide/support-matrix' },
+              { text: 'Models & Providers', link: '/en/guide/multi-model' },
+              { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
+              { text: 'Grok Nodes', link: '/en/guide/grok' },
+              { text: 'Goals and Loops', link: '/en/guide/goals-and-loops' },
               { text: 'Channels', link: '/en/guide/channels' },
               { text: 'Feishu Channel', link: '/en/guide/feishu' },
-            ]
-          },
-          {
-            text: 'More Node Types',
-            items: [
-              { text: 'Grok Nodes', link: '/en/guide/grok' },
-              { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
               { text: 'DSH node', link: '/en/guide/dsh' },
             ]
           },
@@ -200,15 +178,17 @@ export default withMermaid(defineConfig({
             text: 'Deployment',
             items: [
               { text: 'Fresh Server From Scratch', link: '/en/deploy/clean-server' },
-              { text: 'Production / Public Internet', link: '/en/deploy/production' },
               { text: 'Keeping the Hub Alive', link: '/en/deploy/daemon' },
+              { text: 'Production / Public Internet', link: '/en/deploy/production' },
             ]
           },
           {
-            text: 'API Reference',
+            text: 'Accounts & Security',
             items: [
-              { text: 'MCP Tools', link: '/en/api/mcp-tools' },
-              { text: 'REST API', link: '/en/api/rest' },
+              { text: 'Accounts, Tokens & Roles', link: '/en/guide/account-system' },
+              { text: 'Network Isolation', link: '/en/concepts/networks' },
+              { text: 'Security Design', link: '/en/concepts/security' },
+              { text: 'Upgrades & Release Channels', link: '/en/guide/upgrade' },
             ]
           },
           {
@@ -216,6 +196,16 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Troubleshooting', link: '/en/troubleshooting' },
               { text: 'Changelog', link: '/en/changelog' },
+            ]
+          },
+          {
+            text: 'Reference',
+            items: [
+              { text: 'CLI Commands', link: '/en/guide/cli' },
+              { text: 'MCP Tools', link: '/en/api/mcp-tools' },
+              { text: 'REST API', link: '/en/api/rest' },
+              { text: 'Architecture', link: '/en/guide/architecture' },
+              { text: 'Task Lifecycle', link: '/en/concepts/task-lifecycle' },
             ]
           },
         ],

@@ -511,7 +511,7 @@ If you still know the old password, run `anet passwd` (it prompts for the old on
 - [Network isolation](/en/concepts/networks) — RBAC permission matrix, invite codes, data isolation
 
 **Hands-on**:
-- [Getting started](/en/guide/getting-started) — first agent after install (the `setup-anet.sh` one-shot script is [retired](/en/guide/one-shot-install))
+- [Install](/en/guide/install) and [Your first node in 10 minutes](/en/guide/getting-started)
 - [Multi-model config](/en/guide/multi-model) — configure different AI models
 - [Dashboard](/en/guide/dashboard) — Web UI for tokens / users / networks
 

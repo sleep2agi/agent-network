@@ -231,9 +231,14 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   troubleshooting/codex-tui-node-restart、app-shells、troubleshooting/node-stuck-lifecycle、
 #   troubleshooting/case-feishu-silent-deny、troubleshooting/remote-node-cli-login、guide/versioning、preview/index、
 #   faq、concepts/tokens、concepts/roles(15 删 + 1 增 = 净 −14/语言)。这些页都不含源码行号 pin,uniq/occ 不变。
-[[ "$files" -eq 111 ]] || fail "预期扫 111 个文档文件(= git ls-files 的结果),实际 $files"
-[[ "$uniq"  -eq 9  ]] || fail "预期 9 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 24 ]] || fail "预期 24 处原始出现,实际 $occ"
+# 2026-09-25:files 111 → 105,uniq 9 → 8,occ 24 → 22。文档站瘦身第 4 步:windows、deploy/docker、
+#   one-shot-install 并入新的 guide/install(中英各 −3 +1),deploy/npm(中英)移出站点到
+#   docs/sdk/npm-packages-and-sdk.{zh,en}.md(开发者参考)。唯一减少的 pin 是 npm 页里的
+#   agent-network/src/client.ts#L262(中英各 1 处,2 处出现、1 个唯一 pin)—— 它随页面搬进 docs/,
+#   由 `check-doc-symbol-pins.py .`(docs/ 那一侧)继续看着,不是丢失。
+[[ "$files" -eq 105 ]] || fail "预期扫 105 个文档文件(= git ls-files 的结果),实际 $files"
+[[ "$uniq"  -eq 8  ]] || fail "预期 8 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 22 ]] || fail "预期 22 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------

@@ -106,25 +106,23 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/guide/grok.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/upgrade.md` | 见门输出 | 初始管理员密码一节写「现在的 `latest` 与 `preview` 都在 `≥ 2.2.22-preview.4` 范围」（原 versioning 页并入）——是下界断言，发新版不会变假 |
 > | `docs-site/docs/en/guide/upgrade.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/install.md` | 见门输出 | 安装页(原 windows / deploy/npm / one-shot-install 并入)：Bun preflight「`2.3.0-preview.47` 及以后」与 Windows 跨盘修复「`2.3.0-preview.29` 及以后」都是下界断言，发新版不会变假 |
+> | `docs-site/docs/en/guide/install.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/troubleshooting/is-this-node-alive.md` 的「节点卡在 stopping / starting」一节 | — | 原 node-stuck-lifecycle 页并入；下界断言(agent-node ≥ `2.5.0-preview.49` / commhub-server ≥ `0.9.0-preview.40`)，这两个修复进 `latest` 时把指引改成「latest 已含」 |
 > | `docs-site/docs/deploy/clean-server.md` | 21–22 | 同上 |
 > | `docs-site/docs/en/deploy/clean-server.md` | 21–22 | 同上(英文) |
 > | `docs-site/docs/troubleshooting.md` | 29、37 | preview 有 preflight / latest 没有 |
 > | `docs-site/docs/en/troubleshooting.md` | 29、37 | 同上(英文) |
-> | `docs-site/docs/guide/windows.md` | 102 | 跨盘 `anet --version` 崩溃是哪个通道的现状 |
 > | `docs-site/docs/guide/support-matrix.md` | 49 | 脚注 ^1^ 钉了「已在已发布产物 `@sleep2agi/agent-node@2.5.0-preview.34` 里 grep 复核」——**这是一次取证的时间戳，不是「当前通道版本」**；换版本时不要顺手改它，改了就等于把当时的证据改成另一个版本的 |
 > | `docs-site/docs/en/guide/support-matrix.md` | 49 | 同上(英文) |
-> | `docs-site/docs/en/guide/windows.md` | 102 | 同上(英文) |
 > | `docs-site/docs/guide/dashboard.md` | 313、328 | `anet -v` 应显示 `2.3.0-preview.N` / preview 不自动 promote |
 > | `docs-site/docs/en/guide/dashboard.md` | 314、329 | 同上(英文) |
 > | `docs-site/docs/api/rest.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/concepts/security.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/deploy/daemon.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
-> | `docs-site/docs/deploy/npm.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/api/rest.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/concepts/security.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/deploy/daemon.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
-> | `docs-site/docs/en/deploy/npm.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/guide/channels.md` | 见门输出 | 信道断言 —— send_desktop_message 一节钉了 `commhub-server@0.9.0-preview.36`(工具引入版本) |
 > | `docs-site/docs/en/guide/channels.md` | 见门输出 | 同上(英文) |

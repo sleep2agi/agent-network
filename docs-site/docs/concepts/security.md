@@ -443,4 +443,4 @@ npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 
 **生产部署清单**：
 - [生产部署指南](/deploy/production) — TLS / 防火墙 / CORS / 备份 完整 checklist
-- [Docker 部署](/deploy/docker) — 容器化最佳实践
+- [Docker 部署](/deploy/clean-server#docker) — 容器化最佳实践

@@ -10,73 +10,16 @@ It is **not** for users who already have anet installed — that's [Getting Star
 
 ## 0. Prerequisites
 
-| Dependency | Recommended | How to install |
-|---|---|---|
-| **Node.js** | ≥ 22.13.0 | [nvm](https://github.com/nvm-sh/nvm) is the easiest: `curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh \| bash` → `nvm install 22 && nvm use 22` |
-| **Bun** | ≥ 1.2.0 | `npm i -g bun` or `curl -fsSL https://bun.sh/install \| bash` |
-
-::: warning Bun is non-optional
-`commhub-server` is Bun-shebang TypeScript (launched via `bunx --bun`). **Without Bun, `anet hub start` always fails** — bug #1 from the fresh-server retro. How it fails depends on the build:
-
-- **older builds without the preflight (such as `2.2.x`)**: a bare `Error: spawn bunx ENOENT` plus a Node stack trace;
-- **`2.3.0-preview.47` and later (today's `latest` and `preview` are both in this range)**: refused before launch with `❌ anet hub start requires the Bun runtime`, exit code 1.
-
-Verify:
-```bash
-node --version       # expect v22.x or newer
-bun --version        # expect 1.2.x or newer
-```
-
-If either says `command not found` → install it before going further.
-:::
-
-::: details nvm-installed node disappears in non-interactive shells / other users
-nvm only loads in an **interactive shell** (reads `~/.bashrc`). If you plan to launch nodes via systemd / cron / a different user, nvm's PATH is not applied automatically.
-
-Fallback:
-1. Symlink the nvm node bins into `/usr/local/bin`: `sudo ln -s "$(which node)" /usr/local/bin/node && sudo ln -s "$(which npm)" /usr/local/bin/npm`
-2. Or in your systemd unit / launch script, explicitly `source ~/.nvm/nvm.sh`
-
-Bun is similar — it installs per user (`~/.bun/bin`); confirm PATH before switching users / running as root.
-:::
+Install Node.js ≥ 22.13 and Bun ≥ 1.2 as described in [Install](/en/guide/install) (you need both; the Hub runs on Bun). If systemd, cron or another user will start the Hub and nodes later, read the [PATH note](/en/guide/install#prerequisites) on that page first.
 
 ## 1. Install the anet CLI
 
-A single global package:
-
 ```bash
-npm i -g @sleep2agi/agent-network
-```
-
-Verify:
-
-```bash
+npm install -g @sleep2agi/agent-network
 anet -v
 ```
 
-Expected output (version numbers track npm `latest`):
-
-```text
-anet <current latest>
-Components (auto-fetched on first use, you don't need to install them manually):
-  ✓ agent-node <current latest>
-    └ @anthropic-ai/claude-agent-sdk v0.2.x
-    └ @openai/codex-sdk v0.x.x
-  ○ commhub-server — not installed yet (will fetch via npx on first use)
-
-Optional runtimes (install only what you'll use):
-  ✓ claude CLI v2.1.x        # installed + auth login completed
-  ✓ codex CLI v0.x.x         # installed + auth login completed
-  ...                        # runtimes you didn't install are simply not listed (see §5)
-
-Nothing is broken — components are fetched the first time you run:
-  anet hub start          # bootstraps commhub-server
-  anet node start <name>  # bootstraps agent-node
-
-Docs: https://anet.sh/guide/getting-started
-```
-
-`anet -v` automatically tells you whether `agent-node` is installed, whether `commhub-server` has been fetched, and whether the optional `claude` / `codex` CLIs are present. This is the **first place to look** whenever anything later breaks.
+`anet -v` shows whether `agent-node` and `commhub-server` are in place (they are fetched on first use) and which optional runtime CLIs are installed. Whenever something fails to start later, look here first.
 
 ## 2. Start the Hub (recommended: under tmux)
 
@@ -357,6 +300,16 @@ sudo systemctl status anet-hub anet-node@my-bot
 - The `claude-code-cli` runtime pops a dev-channels confirmation on first run ([see the dev-channels prompt in §7 Start the Node](#_7-start-the-node)); answer it once under a foreground tmux before handing off to systemd
 - Want an official unit / improvements to the template above? PRs welcome, or open a thread on [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)
 
+## Running in containers {#docker}
+
+There is no maintained production compose bundle yet; the Dockerfiles and compose files in the repository are for tests or specific integrations. In a container, treat it as "Ubuntu with Node.js and Bun": every command above works the same. [`tests/Dockerfile`](https://github.com/sleep2agi/agent-network/blob/main/tests/Dockerfile) (the minimal Node.js + Bun + anet set) is a starting point; for production add multi-stage builds, pinned image hashes and a non-root user yourself.
+
+- **Same start order**: Hub → Dashboard → `anet login` → `anet node create` → `anet project up`; containerizing only splits them into services.
+- **Slow first start**: the first `anet hub start` fetches a pinned `commhub-server` from npm and caches it in `$HOME/.bun/install/cache`; pre-warming that directory speeds things up a lot.
+- **Container networking**: the Dashboard calls the Hub on `:9200` over REST + SSE, so both must share a docker network, or publish the Hub port to the host. Inside a container, `localhost` means that container.
+- **Persistence**: node state lives in `.anet/nodes/<alias>/` under the working directory and Hub data in `~/.commhub/`; mount both as volumes.
+- **Do not run the node process as PID 1**: wrap it in an init such as `tini`, otherwise SIGTERM skips the node's offline notification.
+
 ## Troubleshooting table (8 坑 mapping)
 
 In the order they hit you on a real fresh machine — **symptom → cause → fix**:
@@ -377,7 +330,7 @@ In the order they hit you on a real fresh machine — **symptom → cause → fi
 ## Next
 
 - [Getting Started](/en/guide/getting-started) — end-to-end walkthrough for an already-installed laptop setup
-- [One-shot installer retirement](/en/guide/one-shot-install) — the old script is disabled; use this page's step-by-step flow
+- [One-shot installer retirement](/en/guide/install#setup-anet) — the old script is disabled; use this page's step-by-step flow
 - [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / public-internet risk surface
 - [Channel integration](/en/guide/channels) — current channel status and Telegram / Feishu setup; WeChat has not shipped
 - [Node runtime](/en/guide/runtimes) — detailed comparison of the runtimes
