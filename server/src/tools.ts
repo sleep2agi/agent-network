@@ -4528,10 +4528,50 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // Use COALESCE so a NULL inbox row is counted against the same
     // network as the target node (which is the only safe default
     // — pre-multi-network rows existed in single-network mode).
+    //
+    // #2022 — "unacked" alone is not "in flight". Nothing acks a row
+    // whose task already reached a terminal state (report_completion,
+    // send_reply, send_ack, the TTL patrol all leave inbox alone) and
+    // retention sweeps only acked=1 rows, so those rows were counted
+    // forever: one dead row pinned this gate to node_busy_in_flight
+    // and force=true was the only way past it.
+    //
+    // Counting rule (#2029 review): a row counts while it can still be
+    // work this node is doing — and the age ceiling must NOT be applied
+    // to a task row whose tasks row we can see. agent-node acks the
+    // inbox row only once the task is done, so a 90-minute (or 3-hour,
+    // or ttl_seconds>3600) task keeps acked=0 for its whole run;
+    // capping it by age would open this gate mid-run, which is exactly
+    // what the gate exists to prevent. So:
+    //   1. type='task' row with a matching tasks row — LEFT JOIN on
+    //      COALESCE(task_id, id), the key cancel_task / ack_inbox use
+    //      (first deliveries set id == task_id; retry/reassign write a
+    //      fresh transport id). Status alone decides: terminal
+    //      (replied / failed / cancelled / expired) → not counted;
+    //      anything else → counted, no age ceiling. Expiry belongs to
+    //      patrolExpiredTasks, which now acks the inbox row in the same
+    //      transaction, so an expired task leaves this count together
+    //      with its rows.
+    //   2. every other row — a task row whose tasks row is gone
+    //      (reaped by retention, or a legacy row whose id resolves to
+    //      nothing) and non-task rows (reply / broadcast / message):
+    //      these carry no status of their own and nothing else will
+    //      ever retire them, so they get the age ceiling
+    //      IN_FLIGHT_MAX_AGE_MINUTES on inbox.created_at.
+    // The count stays a per-alias inbox count: one PK join per row.
+    const IN_FLIGHT_MAX_AGE_MINUTES = 60;
     const inFlightRow = db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM inbox WHERE session_name = ?1 AND acked = 0
-         AND COALESCE(network_id, ?2) = ?2`,
-      node.alias, node.network_id,
+      `SELECT COUNT(*) AS n FROM inbox i
+         LEFT JOIN tasks t
+           ON i.type = 'task'
+          AND t.task_id = COALESCE(i.task_id, i.id)
+        WHERE i.session_name = ?1 AND i.acked = 0
+          AND COALESCE(i.network_id, ?2) = ?2
+          AND ((t.task_id IS NOT NULL
+                AND t.status NOT IN ('replied', 'failed', 'cancelled', 'expired'))
+            OR (t.task_id IS NULL
+                AND i.created_at >= datetime('now', ?3)))`,
+      node.alias, node.network_id, `-${IN_FLIGHT_MAX_AGE_MINUTES} minutes`,
     );
     const inFlight = inFlightRow?.n ?? 0;
     if (inFlight > 0 && !args.force) {
