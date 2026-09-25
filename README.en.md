@@ -7,15 +7,13 @@
 **Turn Claude Code, Codex, Grok and OpenCode on many machines into one legion of agents — and run it from a single desktop app.**
 
 [![npm](https://img.shields.io/npm/v/@sleep2agi/agent-network?label=npm&color=009e7e)](https://www.npmjs.com/package/@sleep2agi/agent-network)
-[![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?filter=desktop-v*&label=desktop&color=2f6feb)](https://github.com/sleep2agi/agent-network-app/releases/latest)
+[![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?filter=desktop-v*&label=download&color=2f6feb)](https://github.com/sleep2agi/agent-network-app/releases/latest)
 [![QA](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main)](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml)
 [![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e)](https://anet.sh/en/)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
 [![Stars](https://img.shields.io/github/stars/sleep2agi/agent-network?style=flat&color=yellow)](https://github.com/sleep2agi/agent-network/stargazers)
 
 [Docs](https://anet.sh/en/) · [Download the desktop app](https://github.com/sleep2agi/agent-network-app/releases/latest) · [Get started](https://anet.sh/en/guide/getting-started) · [中文](./README.md) · **English**
-
-<br>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
@@ -43,10 +41,12 @@
 **Option 2: the `anet` CLI** (requires Node.js ≥ 22.13)
 
 ```bash
-curl -fsSL https://anet.sh/install.sh | sh && npm i -g bun   # install anet; the Hub runs on Bun
-anet hub start                                   # terminal 1: keep it running; note the admin password it prints once
-anet login --hub http://127.0.0.1:9200 --username admin      # terminal 2
-anet node create my-bot && anet node start my-bot            # pick a runtime in the wizard (claude-code-cli if you ran `claude auth login`)
+curl -fsSL https://anet.sh/install.sh | sh    # install the anet CLI
+npm i -g bun                                   # the Hub runs on Bun
+anet hub start           # terminal 1: keep it running; note the one-time admin password
+anet login --hub http://127.0.0.1:9200 --username admin     # terminal 2
+anet node create my-bot  # pick a runtime; claude-code-cli if you ran claude auth login
+anet node start my-bot
 ```
 
 `SSE connected` means the node is online. Then chat with it from the desktop app at `http://127.0.0.1:9200`, or run `anet hub dashboard` for the web version (`http://localhost:3000`). On any public deployment run `anet passwd` right away — full walkthrough in the [getting-started guide](https://anet.sh/en/guide/getting-started).
@@ -90,7 +90,7 @@ Per-runtime capabilities and platforms: [Runtimes](https://anet.sh/en/guide/runt
 
 Contributions are welcome! Read [CONTRIBUTING.md](./CONTRIBUTING.md) and the [Code of Conduct](./CODE_OF_CONDUCT.md) first; report security issues privately as described in [SECURITY.md](./SECURITY.md). Questions and feedback: [Issues](https://github.com/sleep2agi/agent-network/issues) · [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [Community](https://anet.sh/en/community).
 
-[![Star History Chart](https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date)](https://star-history.com/#sleep2agi/agent-network&Date)
+<a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
 
 ## License
 
