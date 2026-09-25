@@ -66,6 +66,8 @@ export interface CompensationPollAdapters {
 
 export interface CompensationPoller {
   readonly mode: "probing" | "active" | "realtime-only";
+  /** True once the Hub refused the durable outbox cursor for an unbound legacy token. */
+  readonly outboundDisabled: boolean;
   trigger(trigger: PollTrigger): void;
   recordConsumed(message: InboxObservation): void;
   recordLifecycle(taskId: string, state: "delivered" | "submitted" | "consumed" | "completed"): void;
@@ -148,6 +150,19 @@ function isUnsupportedCapability(error: unknown): boolean {
   const text = String(value?.message ?? error ?? "");
   return value?.code === -32601 || value?.code === -32602
     || /unknown tool|tool .+ not found|method not found|-3260[12]/i.test(text);
+}
+
+// The Hub's durable outbox cursor is bound to the token's immutable node id
+// (RFC-036). Legacy node tokens minted before that binding existed are still
+// valid for SSE, heartbeat and get_inbox, but list_tasks(durable_cursor) will
+// always refuse them. That refusal is permanent for the life of the token, so
+// retrying with backoff only produces an endless warn loop and — because the
+// inbox read shares the same poll — also starves inbox compensation.
+export const UNBOUND_TOKEN_REJECTIONS = new Set(["from_node_id_identity_mismatch", "node_token_required"]);
+
+export function isUnboundTokenRejection(error: unknown): boolean {
+  const value = error as { code?: unknown; appLevel?: unknown } | null;
+  return value?.appLevel === true && typeof value.code === "string" && UNBOUND_TOKEN_REJECTIONS.has(value.code);
 }
 
 class CursorStore {
@@ -247,6 +262,7 @@ export function createCommHubPollCompensator(options: {
   let timer: unknown = null;
   let failureCount = 0;
   let warnedRealtimeOnly = false;
+  let outboundDisabled = false;
   const now = adapters.now ?? Date.now;
   const deliveryLeaseMs = Math.max(30_000, intervalMs * 2);
   const setTimer = adapters.setTimer ?? ((callback, delay) => {
@@ -303,7 +319,18 @@ export function createCommHubPollCompensator(options: {
       const startWatermark = store.snapshot().outbound_terminal_watermark;
       const [inbox, outboundPage] = await Promise.all([
         adapters.getInbox(),
-        adapters.listOutbound(startWatermark),
+        outboundDisabled
+          ? Promise.resolve<OutboundPollPage>({ tasks: [], hasMore: false })
+          : adapters.listOutbound(startWatermark).catch((error: unknown): OutboundPollPage => {
+            if (!isUnboundTokenRejection(error)) throw error;
+            outboundDisabled = true;
+            adapters.warn(
+              `[commhub-compensation] outbound reconciliation disabled: this node's token is not bound to its node_id `
+              + `(${(error as { code?: string }).code}); inbox compensation continues. `
+              + `Re-issue a node-bound token to restore lost-reply reconciliation.`,
+            );
+            return { tasks: [], hasMore: false };
+          }),
       ]);
       const outbound = outboundPage.tasks;
       if (currentMode === "probing") {
@@ -388,6 +415,7 @@ export function createCommHubPollCompensator(options: {
 
   return {
     get mode() { return currentMode; },
+    get outboundDisabled() { return outboundDisabled; },
     trigger,
     recordConsumed,
     recordLifecycle,

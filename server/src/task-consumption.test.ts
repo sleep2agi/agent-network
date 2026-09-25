@@ -126,6 +126,17 @@ describe("task consumed_at identity and lifecycle", () => {
     expect([...first.tasks, ...second.tasks].some((task: any) => task.task_id === "foreign-node-row")).toBe(false);
     expect((await call(handler, { from_node_id: `id_${NODE_B}`, durable_cursor: true, limit: 100 })).error).toBe("from_node_id_identity_mismatch");
   });
+  test("a legacy unbound node token is refused the durable cursor even for its own node", async () => {
+    // Pre-RFC-036 tokens carry no immutable node binding. The durable outbox
+    // cursor must stay closed to them (no bind-on-first-use); agent-node
+    // degrades to inbox-only compensation on this exact error code.
+    db.run("UPDATE api_tokens SET bound_node_id = NULL WHERE token_id = ?1", [`token_${NODE_A}`]);
+    const handler = toolsFor({ alias: NODE_A, nodeToken: true }).list_tasks;
+    expect((await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 10 })).error).toBe("from_node_id_identity_mismatch");
+    expect((await call(handler, { from_node_id: `id_${NODE_B}`, durable_cursor: true, limit: 10 })).error).toBe("from_node_id_identity_mismatch");
+    const bound = db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", `token_${NODE_A}`);
+    expect(bound?.bound_node_id).toBeNull();
+  });
   test("terminal sequence paginates beyond 2000 and admits late completion of an old task", async () => {
     db.run(
       `INSERT INTO tasks (task_id, from_node_id, from_name, to_name, status, content, network_id, created_at)
