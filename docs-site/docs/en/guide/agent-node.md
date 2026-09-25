@@ -98,6 +98,8 @@ A `codex-app-server` node runs one turn at a time; later tasks wait in a queue. 
 
 At startup the node resumes the thread it is bound to before it takes any task. For a very large thread (a rollout of hundreds of MB) that can take tens of seconds. Each resume attempt waits up to 120 seconds and is retried once on timeout; if it still fails, the node reports itself offline to the hub and exits. It never falls back to a new thread, which would drop the conversation history. To change the limit, set `ANET_CODEX_RESUME_TIMEOUT_MS` (whole milliseconds, same rules as above).
 
+An `opencode` node waits up to 30 minutes per task by default. In copresence mode (`opencodeMode: "copresence"`) this is the total time for the task. When it runs out, the bridge stops waiting, but it does not abort the turn in the shared session. The task keeps running to completion in the node's TUI, and the sender's reply says so, but the final result is not sent back later. In headless mode the limit is how long the turn may go without producing any output; when it runs out, the opencode child process is stopped and the turn is aborted. To change the limit, set the `OPENCODE_TIMEOUT_MS` environment variable, or set `flags.timeout` / `flags.opencodeTimeoutMs` in the node's `config.json` (whole milliseconds; `0` = no limit). The environment variable wins, then `flags.timeout`, then `flags.opencodeTimeoutMs`. At startup the node logs a line `[opencode] task timeout=… source=…` with the value in effect and where it came from.
+
 Attachment, image, and channel support depends on the runtime. Do not assume every runtime accepts media. Check [Runtimes](/en/guide/runtimes) and [Channels](/en/guide/channels).
 
 ## Tools and permissions

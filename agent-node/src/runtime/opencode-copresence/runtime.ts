@@ -29,8 +29,49 @@ import {
   renderAttachRecordShell,
   stopRecordedAttach,
 } from "./attach-tui";
+import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
+
+export { OPENCODE_DEFAULT_TASK_TIMEOUT_MS };
 
 const USERNAME = "opencode";
+
+export function formatOpenCodeTimeout(ms: number): string {
+  if (ms > 0 && ms % 60_000 === 0) return `${ms / 60_000} 分钟`;
+  if (ms > 0 && ms % 1_000 === 0) return `${ms / 1_000} 秒`;
+  return `${ms}ms`;
+}
+
+/**
+ * The bridge stopped waiting for a network task. OpenCode 1.18.1 does not
+ * cancel a session turn when the HTTP client of `POST /session/:id/message`
+ * disconnects (verified against the pinned binary: the session stays
+ * `busy` and the provider stream stays open after the client aborts), and
+ * this runtime deliberately never calls `/session/:id/abort` because the
+ * session is shared with the human TUI. So a `phase: "reply"` timeout means
+ * the task is STILL RUNNING in the TUI; `phase: "admission"` means the task
+ * was never submitted. `userReplyText` is the truthful CommHub reply.
+ */
+export class OpenCodeCopresenceTimeoutError extends Error {
+  readonly code = "opencode_copresence_timeout";
+  readonly phase: "admission" | "reply";
+  readonly timeoutMs: number;
+  readonly userReplyText: string;
+  constructor(phase: "admission" | "reply", timeoutMs: number) {
+    const budget = formatOpenCodeTimeout(timeoutMs);
+    const knob = "可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调整（单位 ms，0 = 不设上限）";
+    const userReplyText = phase === "reply"
+      ? `⏳ opencode 任务仍在节点的 TUI 会话里运行，没有被中止；bridge 等待回复已达 ${budget} 上限，停止等待。` +
+        `这一轮的最终结果不会再自动回传到这里，请到节点 TUI 查看进度和结果。${knob}。`
+      : `opencode 任务未提交：共享会话在 ${budget} 内一直处于忙碌状态（可能有人正在 TUI 里跑一轮），本任务没有发出，可稍后重发。${knob}。`;
+    super(phase === "reply"
+      ? `OpenCode reply wait exceeded ${timeoutMs}ms; the turn keeps running in the shared session (not aborted)`
+      : `OpenCode session remained busy for ${timeoutMs}ms; task was not submitted`);
+    this.name = "OpenCodeCopresenceTimeoutError";
+    this.phase = phase;
+    this.timeoutMs = timeoutMs;
+    this.userReplyText = userReplyText;
+  }
+}
 const OUTPUT_LIMIT = 64 * 1024;
 export const OPENCODE_COMMHUB_TOKEN_ENV = "ANET_OPENCODE_COMMHUB_TOKEN";
 const OPENCODE_COMMHUB_INSTRUCTIONS = "ANET-COMMHUB.md";
@@ -305,7 +346,8 @@ async function fetchJson(
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
-    signal: AbortSignal.timeout(timeoutMs),
+    // `timeoutMs <= 0` = no deadline (the operator disabled it).
+    ...(timeoutMs > 0 ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   });
   const text = await response.text();
   if (!response.ok) {
@@ -350,7 +392,8 @@ async function waitUntilSessionIdle(
   sessionId: string,
   timeoutMs: number,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+  // `timeoutMs <= 0` = wait without a deadline.
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY;
   while (Date.now() < deadline) {
     try {
       const statuses = await fetchJson(url, password, "/session/status", {}, 2_000);
@@ -376,7 +419,7 @@ async function waitUntilSessionIdle(
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`OpenCode session remained busy for ${timeoutMs}ms`);
+  throw new OpenCodeCopresenceTimeoutError("admission", timeoutMs);
 }
 
 // OpenCode 1.18.1 message parts are a 13-variant discriminated union (per its
@@ -597,13 +640,17 @@ export async function openVettedOpenCodeCopresence(
       },
       submit(
         prompt: string,
-        timeoutMs = 300_000,
+        timeoutMs = OPENCODE_DEFAULT_TASK_TIMEOUT_MS,
         sender?: string,
         evidence?: { onSubmitted?: () => void; onConsumed?: () => void },
       ) {
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
-          await waitUntilSessionIdle(url, password, created.id, timeoutMs);
+          // One wall-clock budget for the whole task: idle admission and the
+          // reply wait share it (previously each phase got the full value).
+          const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
+          const deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
+          await waitUntilSessionIdle(url, password, created.id, budgetMs);
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
@@ -629,14 +676,36 @@ export async function openVettedOpenCodeCopresence(
           // a later user turn appear already answered. Generate the exact
           // ascending ID shape used by OpenCode 1.18.1 instead.
           const messageId = createOpenCodeAscendingMessageId();
-          const message = await fetchJson(url, password, `/session/${created.id}/message`, {
-            method: "POST",
-            body: JSON.stringify({
-              messageID: messageId,
-              model,
-              parts: [{ type: "text", text: visiblePrompt }],
-            }),
-          }, timeoutMs);
+          if (deadline > 0 && Date.now() >= deadline) {
+            throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+          }
+          let message: any;
+          try {
+            message = await fetchJson(url, password, `/session/${created.id}/message`, {
+              method: "POST",
+              body: JSON.stringify({
+                messageID: messageId,
+                model,
+                parts: [{ type: "text", text: visiblePrompt }],
+              }),
+            }, deadline > 0 ? Math.max(1, deadline - Date.now()) : 0);
+          } catch (error: any) {
+            // Only the bridge's own deadline becomes the "still running"
+            // reply; any other POST failure keeps its real message.
+            if (deadline > 0 && Date.now() >= deadline
+              && (error?.name === "TimeoutError" || error?.name === "AbortError")) {
+              // Say "still running" only when the submission provably landed
+              // in the shared session; a POST that never arrived is "not
+              // submitted". An unreadable history keeps the reply wording
+              // (the bridge never aborts the session either way).
+              const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, 5_000).catch(() => null);
+              const landed = !Array.isArray(history)
+                || history.some((m: any) => m?.info?.id === messageId);
+              warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission ${landed ? "landed — turn continues in the TUI session" : "did not land"}`);
+              throw new OpenCodeCopresenceTimeoutError(landed ? "reply" : "admission", budgetMs);
+            }
+            throw error;
+          }
           if (message?.info?.role !== "assistant") {
             throw unverifiedOwnerError(parseMessageReply(message), message?.info?.parentID, messageId, "response is not an assistant message");
           }
@@ -646,7 +715,7 @@ export async function openVettedOpenCodeCopresence(
             // history back to our submission; only a human user message in
             // that chain means the reply is not ours. Whatever the verdict,
             // the answer text travels with the error instead of being lost.
-            const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, timeoutMs).catch(() => null);
+            const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, 30_000).catch(() => null);
             const verdict = ownershipChainVerdict(Array.isArray(history) ? history : null, messageId, message.info.parentID);
             if (!verdict.accepted) {
               warn(`[opencode-copresence] reply ownership refused: ${verdict.reason}`);

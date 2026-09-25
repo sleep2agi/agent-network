@@ -98,6 +98,8 @@ CommHub ──SSE task──▶ Agent Node ──▶ Runtime / model
 
 节点启动时要先恢复（resume）它绑定的线程，才开始接任务。线程很大时（rollout 文件上百 MB）这一步可能要几十秒；每次恢复最多等 120 秒，超时重试一次，仍失败就先向 hub 报离线再退出，不会改用新线程（那会丢掉对话历史）。要改这个上限，设 `ANET_CODEX_RESUME_TIMEOUT_MS`（整数毫秒，规则同上）。
 
+`opencode` 节点每个任务默认最多等 30 分钟。共存模式（`opencodeMode: "copresence"`）下这是整个任务的总时长；到点后 bridge 只是停止等待，不会中止共享会话里的这一轮。任务会在节点的 TUI 里继续跑完，发送方收到的回复会写明这一点，但最终结果不会再自动回传。headless 模式下这是「连续没有任何进展输出」的时长，到点会结束 opencode 子进程，这一轮就中止了。要改这个上限，设环境变量 `OPENCODE_TIMEOUT_MS`，或在节点 `config.json` 里设 `flags.timeout` / `flags.opencodeTimeoutMs`（整数毫秒；`0` = 不设上限）。优先级依次是环境变量、`flags.timeout`、`flags.opencodeTimeoutMs`。节点启动时会打印一行 `[opencode] task timeout=… source=…`，写明实际取到的值和来源。
+
 附件、图片和 channel 支持随 runtime 不同；不要假设所有 runtime 都能处理媒体。按 [Runtime 对比](/guide/runtimes)和 [Channel 指南](/guide/channels)确认。
 
 ## 工具与权限

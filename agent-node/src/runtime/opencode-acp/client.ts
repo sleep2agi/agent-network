@@ -189,7 +189,8 @@ export class OpencodeAcpClient extends EventEmitter {
           timer = setTimeout(check, Math.max(500, idleTimeoutMs - idleFor));
         }
       };
-      timer = setTimeout(check, idleTimeoutMs);
+      // `idleTimeoutMs <= 0` = no idle deadline (OPENCODE_TIMEOUT_MS=0).
+      if (idleTimeoutMs > 0) timer = setTimeout(check, idleTimeoutMs);
       this.pending.set(id, {
         resolve: (v) => { if (timer) clearTimeout(timer); resolve(v as R); },
         reject:  (e) => { if (timer) clearTimeout(timer); reject(e); },

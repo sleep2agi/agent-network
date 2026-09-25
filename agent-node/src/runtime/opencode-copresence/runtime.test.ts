@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, test } from "bun:test";
+import { runtimeErrorReplyText } from "../unverified-reply-text";
 import {
   linuxProcessGroupIsGone,
   readLinuxProcessGroupIdentity,
@@ -11,6 +12,7 @@ import {
 } from "./process-group";
 import {
   OPENCODE_COMMHUB_TOKEN_ENV,
+  OpenCodeCopresenceTimeoutError,
   openVettedOpenCodeCopresence,
   parseMessageReply,
   requireOpenCodeCopresenceModel,
@@ -33,7 +35,9 @@ if (command === "serve") {
   const statuses = {};
   const messages = {};
   let lastResponse = null;
+  const trace = (line) => { if (env.FAKE_LOG) require("fs").appendFileSync(env.FAKE_LOG, line + "\\n"); };
   const server = http.createServer(async (req, res) => {
+    trace(req.method + " " + req.url);
     if (req.headers.authorization !== expectedAuth) { res.writeHead(401); return res.end("unauthorized"); }
     const body = await new Promise((resolve) => { let s=""; req.on("data", c => s+=c); req.on("end", () => resolve(s)); });
     const json = body ? JSON.parse(body) : {};
@@ -85,11 +89,16 @@ if (command === "serve") {
         return send(res, lastResponse);
       }
       statuses[id] = { type:"busy" };
+      // Real OpenCode records the user message before the runner starts; the
+      // legacy fake records it at the end. FAKE_USER_FIRST opts into the real
+      // order (the timeout path reads history to see whether it landed).
+      if (env.FAKE_USER_FIRST === "1") messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
+      // Like OpenCode 1.18.1, a client disconnect does not stop the turn.
       await new Promise(r => setTimeout(r, Number(env.FAKE_TURN_MS || 25)));
       const prompt = json.parts?.[0]?.text || "";
       const reply = "FAKE_REPLY:" + prompt;
       let parentID = json.messageID;
-      messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
+      if (env.FAKE_USER_FIRST !== "1") messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
       if (env.FAKE_RACE_HUMAN === "1") {
         // A human TUI turn won the idle-check -> POST race: it is in history
         // as a real text user message and the runner answered it.
@@ -105,6 +114,7 @@ if (command === "serve") {
       lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] };
       messages[id].push(lastResponse);
       delete statuses[id];
+      trace("TURN_DONE " + prompt);
       return send(res, lastResponse);
     }
     res.writeHead(404); res.end("not found");
@@ -555,6 +565,102 @@ describe("OpenCode native serve+attach copresence", () => {
 // StepStart, StepFinish, Snapshot, Agent, Retry, Compaction, Subtask,
 // FilePartSource[Text]). A completed turn with zero TextPart is a
 // canonical shape, not a bug.
+describe("OpenCode copresence task deadline", () => {
+  async function open(extraEnv: NodeJS.ProcessEnv) {
+    const f = fixture(extraEnv);
+    const runtime = await openVettedOpenCodeCopresence({
+      binary: f.binary,
+      env: f.env,
+      cwd: f.root,
+      workDir: f.root,
+      model: "opencode/fake",
+      startupTimeoutMs: 5_000,
+    });
+    return { f, runtime };
+  }
+
+  test("honours the configured deadline, says the turn is still running, and never aborts the session", async () => {
+    const log = join(tmpdir(), `opencode-deadline-${process.pid}-${Date.now()}.log`);
+    const { f, runtime } = await open({ FAKE_TURN_MS: "2500", FAKE_USER_FIRST: "1", FAKE_LOG: log });
+    try {
+      const started = Date.now();
+      let thrown: any;
+      try { await runtime.submit("long build", 400); } catch (error) { thrown = error; }
+      const elapsed = Date.now() - started;
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("reply");
+      expect(thrown.timeoutMs).toBe(400);
+      // One budget for the task, not per phase, and not the old 300s.
+      expect(elapsed).toBeGreaterThanOrEqual(380);
+      expect(elapsed).toBeLessThan(2_000);
+      // The CommHub reply is the truthful wording, not "opencode 错误: ...aborted".
+      const reply = runtimeErrorReplyText("opencode", thrown);
+      expect(reply).toBe(thrown.userReplyText);
+      expect(reply).toContain("仍在节点的 TUI 会话里运行");
+      expect(reply).toContain("没有被中止");
+      expect(reply).toContain("OPENCODE_TIMEOUT_MS");
+      expect(reply).not.toContain("错误");
+      expect(reply).not.toContain("aborted");
+      // The bridge only stopped waiting: no abort call, and the turn finishes
+      // in the shared session afterwards.
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && !readFileSync(log, "utf8").includes("TURN_DONE")) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      const trace = readFileSync(log, "utf8");
+      expect(trace).toContain("TURN_DONE long build");
+      expect(trace).not.toMatch(/\/abort/);
+    } finally {
+      await runtime.close();
+      f.close();
+      rmSync(log, { force: true });
+    }
+  }, 20_000);
+
+  test("a POST that timed out without landing in history is reported as not submitted", async () => {
+    // Legacy fake order: the user message only appears when the turn ends,
+    // so at the deadline the submission is not in history.
+    const { f, runtime } = await open({ FAKE_TURN_MS: "2000" });
+    try {
+      let thrown: any;
+      try { await runtime.submit("never landed", 300); } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      expect(runtimeErrorReplyText("opencode", thrown)).toContain("opencode 任务未提交");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 20_000);
+
+  test("admission timeout on a busy human session says the task was not submitted", async () => {
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000" });
+    try {
+      let thrown: any;
+      try { await runtime.submit("queued", 300); } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      expect(thrown.message).toContain("remained busy");
+      expect(thrown.userReplyText).toContain("本任务没有发出");
+      expect(thrown.userReplyText).not.toContain("仍在节点的 TUI 会话里运行");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 20_000);
+
+  test("0 disables the deadline: a turn longer than any fetch budget still returns its reply", async () => {
+    const { f, runtime } = await open({ FAKE_TURN_MS: "1200", FAKE_INITIAL_BUSY_MS: "300" });
+    try {
+      const result = await runtime.submit("no deadline", 0);
+      expect(result.replyText).toBe("FAKE_REPLY:no deadline");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 20_000);
+});
+
 describe("parseMessageReply (#1451)", () => {
   test("joins and trims text when TextPart present (existing behavior preserved)", () => {
     const msg = { parts: [

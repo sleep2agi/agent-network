@@ -35,6 +35,7 @@ import {
   type OpencodeAcpExitInfo,
 } from "./client";
 import { resolve } from "path";
+import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
 import {
   buildOpencodeChildEnv,
   cleanupOpencodeChildEnv,
@@ -73,8 +74,10 @@ export interface OpencodeThinkOptions {
    *  returns a fresh id so anet's config.session can be written back
    *  for a subsequent crash-restart to reuse. */
   onSession?: (sessionId: string) => void | Promise<void>;
-  /** Idle timeout for `session/prompt` (default 5 min). Streaming
-   *  frames reset the timer, so long running turns aren't killed. */
+  /** Idle timeout for `session/prompt` (default 30 min, from
+   *  OPENCODE_TIMEOUT_MS / flags.timeout / flags.opencodeTimeoutMs; `0`
+   *  disables it). Streaming frames reset the timer, so long running turns
+   *  aren't killed. */
   idleTimeoutMs?: number;
   /** Logger. Falls back to `console.log` / `console.warn`. */
   log?: (msg: string) => void;
@@ -329,7 +332,7 @@ export async function opencodeThink(
 ): Promise<OpencodeThinkResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const warn = opts.warn ?? ((m: string) => console.warn(m));
-  const idleTimeoutMs = opts.idleTimeoutMs ?? 5 * 60_000;
+  const idleTimeoutMs = opts.idleTimeoutMs ?? OPENCODE_DEFAULT_TASK_TIMEOUT_MS;
   const state = newOpencodeTurnState(runtime.sessionId);
 
   // A timed-out/erroring prompt has no JSON-RPC cancellation primitive. If
@@ -361,8 +364,17 @@ export async function opencodeThink(
     opts.onSubmitted?.();
     response = await request;
     opts.onConsumed?.();
-  } catch (error) {
+  } catch (error: any) {
     await killFailedTurnChild("session/prompt failure");
+    // Headless has no human TUI: the child that ran the turn is killed
+    // above, so the turn IS aborted. Say so instead of the client's
+    // generic "background work may still be running".
+    if (idleTimeoutMs > 0 && /idle for \d+ms \(threshold/.test(String(error?.message ?? ""))) {
+      throw Object.assign(new Error(
+        `opencode 本轮在 ${Math.round(idleTimeoutMs / 1000)} 秒内没有任何进展输出，已终止该轮（opencode 子进程已结束，下个任务会重开会话）。` +
+        `可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调大（单位 ms，0 = 不设上限）。`,
+      ), { cause: error });
+    }
     throw error;
   } finally {
     runtime.client.off("notification", onNotification);

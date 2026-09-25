@@ -22,6 +22,7 @@ import {
 import { accessSync, constants as fsConstants } from "node:fs";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
+import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
 import { createStderrTurnAggregator } from "./runtime/stderr-turn-aggregator";
 import { resolveLogLevel } from "./log-level";
@@ -2162,6 +2163,18 @@ if (RUNTIME === "opencode" && opencodeMode !== "headless" && opencodeMode !== "c
   console.error(`[${ALIAS}] invalid opencodeMode=${JSON.stringify(opencodeMode)}; expected headless or copresence`);
   process.exit(1);
 }
+// Opencode task deadline (copresence: wall-clock per network task; headless
+// ACP: idle budget between frames). Read per turn so a restart-required
+// Dashboard apply of flags.timeout takes effect after re-spawn, like claude.
+function currentOpencodeTimeout() {
+  return resolveOpencodeTimeout({
+    env: process.env.OPENCODE_TIMEOUT_MS,
+    flags: fileConfig.flags as { timeout?: unknown; opencodeTimeoutMs?: unknown } | undefined,
+  });
+}
+if (RUNTIME === "opencode") {
+  console.log(`[${ALIAS}] [opencode] task timeout=${describeOpencodeTimeout(currentOpencodeTimeout())} mode=${opencodeMode}`);
+}
 let opencodeCopresenceSession:
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
 const opencodeCopresenceOpening = createSingleFlight<
@@ -3475,7 +3488,7 @@ async function processWithOpencode(
   debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
   if (opencodeMode === "copresence") {
     const runtime = await ensureOpencodeCopresenceRuntime();
-    const outcome = await runtime.submit(task, undefined, _from, {
+    const outcome = await runtime.submit(task, currentOpencodeTimeout().valueMs, _from, {
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
     });
@@ -3533,6 +3546,7 @@ async function processWithOpencode(
     cwd: process.cwd(),
     workDir: NODE_DIR,
     sessionId: opencodeRuntimeSession.sessionId,
+    idleTimeoutMs: currentOpencodeTimeout().valueMs,
     log,
     warn,
     onSubmitted: evidence?.submitted,
