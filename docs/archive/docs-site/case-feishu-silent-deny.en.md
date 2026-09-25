@@ -1,3 +1,5 @@
+> Archived: moved out of the anet.sh user docs on 2026-09-25 (docs slimming). Content kept as-is for maintainers; see https://anet.sh for current user docs.
+
 # Case Study: Feishu Bot "Connected Fine, Messages Vanish"
 
 > A real debugging post-mortem. The bot showed online, logs looked healthy, yet the user's messages never got a reply. The root cause turned out to be neither the network nor the event subscription — it was **a stale identity ID left in the channel's access allowlist after switching Feishu apps**.

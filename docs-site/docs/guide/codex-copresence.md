@@ -138,7 +138,7 @@ tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 
 ## 生命周期命令：`anet node codex …`
 
-重启 / 恢复共存节点以前靠人肉 runbook(见「Codex TUI 节点安全重启」);现在把每一步「核什么」做成确定性的 CLI,正常流程不调用任何 LLM,只出机器可读 receipt。第一批两个只读命令:
+重启 / 恢复共存节点以前靠人肉 runbook(见下文[手工安全重启](#safe-restart));现在把每一步「核什么」做成确定性的 CLI,正常流程不调用任何 LLM,只出机器可读 receipt。第一批两个只读命令:
 
 ```bash
 anet node codex preflight <alias>          # 只读核对,exit 0 = PASS / exit 2 = FAIL
@@ -280,6 +280,46 @@ app-server **支持多客户端**，所以 bridge 连着的时候 TUI 照样能 
 TUI 启动时可能出现 `Update available`，且默认高亮立即升级。共享宿主上请选“跳过/稍后”，把 Codex CLI 升级安排到维护窗口；全局升级二进制可能同时影响这台机器上的所有共存节点。
 :::
 
+## 手工安全重启（不用 `anet node codex restart` 时） {#safe-restart}
+
+优先用上面的 `anet node codex restart`，它把下面每一项都做成了自动核对。只有在用不了它时（旧版本、手工拓扑），才按这份清单手工做。目标不是「进程重新出现」，而是**同一个节点身份、同一个 thread、同一个工作目录、同一份主 rollout** 都被恢复。任一项不一致立即停下，修好后从头重新验收。
+
+### 1. 重启前逐节点记录现状
+
+| 记录项 | 为什么要它 |
+|---|---|
+| alias、node_id、节点专属 `CODEX_HOME` | 验收时核对身份 |
+| 预期工作目录（绝对路径） | TUI `-C`、bridge cwd、CommHub `project_dir` 三处要对齐到它 |
+| 完整 36 位 thread ID | 恢复必须 exact，不接受前缀 |
+| 主 rollout 绝对路径 + 字节数 | 重启后不得缩小、不得被换成新文件 |
+| goal 状态（active / paused） | 重启后保持原状态 |
+| app-server / TUI / bridge 的真实子进程命令行 | 照原样拉起；看子进程，不看外层启动器或 tmux 名 |
+
+先备份节点的 `auth.json` 并 `chmod 0600`。凭据、`ntok_`、`atok_` 不进命令行参数、日志、回执或截图。
+
+### 2. 按顺序停，反序起
+
+- 停：**bridge → TUI → app-server**（优先在共存进程树外执行 `anet node stop <alias>`）。停完核对没有孤儿进程、孤儿监听端口，旧 bridge 不再连着 Hub。
+- 起：**app-server → TUI → bridge**。app-server 与 TUI 都显式用该节点的 `CODEX_HOME`；TUI 用完整 thread ID 和显式工作目录恢复：
+
+```bash
+codex resume --remote <app-server-url> <full-thread-id> -C <node-cwd> -m <model>
+```
+
+bridge 启动前先 `cd` 到节点工作目录。禁止用短前缀、「最近一个 session」或交互 picker。
+
+### 3. 验收：全部通过才算恢复
+
+- [ ] **身份**：Hub 上 `from_name` / `from_node_id` 与目标节点一致（用无副作用的固定短语探针验证，别拿真任务当探针）
+- [ ] **会话**：完整 thread ID 与记录一致
+- [ ] **rollout**：同一绝对路径，字节数 ≥ 重启前，内容未被新 thread 替换
+- [ ] **工作目录**：TUI `-C` == bridge cwd == CommHub `project_dir` == 节点配置
+- [ ] **goal**：active 的继续，paused 的保持 paused，没有意外续跑
+- [ ] **进程**：三段都在线，Hub 显示 online / idle，没有旧实例重复连接
+- [ ] **凭据**：`auth.json` 为 `0600`，secret 没出现在 argv、日志或回执里
+
+「三个进程都起来了」只是其中一项，不是结论。批量重启时先对一个节点做 canary，通过后再逐个进行。
+
 ## 长任务与 600 秒提示
 
 一条 thread 同一时刻只能有一个 active turn；后续网络任务会 FIFO 排队。当前网络任务等待最终回复的窗口**默认**是 600 秒（runtime 选项可覆盖，并非不可变的硬上限）：
@@ -300,4 +340,4 @@ TUI 启动时可能出现 `Update available`，且默认高亮立即升级。共
 - [RFC-030 Codex TUI Bridge](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)
 - [节点 Runtime](/guide/runtimes)
 - [CLI：`anet node start`](/guide/cli#anet-node-start)
-- [Grok 人机共存 TUI](/guide/grok-copresence)
+- [Grok 节点](/guide/grok)

@@ -139,7 +139,7 @@ They can be used independently or composed:
 - **Just need the comm hub**: `bunx @sleep2agi/commhub-server`
 - **Just need the Web UI**: `anet hub dashboard`
 
-Full version scheme (independent semver per npm package vs the `v0.10.x` bundle-release anchor) is documented in [Versioning](/en/guide/versioning).
+Full version scheme (independent semver per npm package vs the `v0.10.x` bundle-release anchor) is documented in [Versioning](/en/guide/upgrade#channels).
 
 ## CommHub Server
 

@@ -21,4 +21,4 @@
 2. **热修版本只带单一修复**，绝不夹带功能。
 3. 发布时整体版本 tag ↔ 各包版本的映射**必须回填到上表**，且与 CLI 内 PINNED 链一致（`anet -v` 可验）。
 4. 各包日常可发 preview 小版本，但**对外口径一律用整体版本**说话。
-5. 版本号**怎么读**见 [versioning](../../docs-site/docs/guide/versioning.md)；通道状态见 [release-plan](../plans/release-plan.md)。
+5. 版本号**怎么读**见 [升级指南 · 发布通道与版本号](../../docs-site/docs/guide/upgrade.md)；通道状态见 [release-plan](../plans/release-plan.md)。

@@ -3,6 +3,23 @@
 本页适用于已经安装 `anet` 的用户。不要从文档复制固定版本号；稳定版与预览版
 分别以 npm 的 `latest`、`preview` dist-tag 为准。
 
+## 发布通道与版本号 {#channels}
+
+Agent Network 有两个 npm 发布通道：
+
+| 通道 | 装法 | 适合 |
+|---|---|---|
+| `latest`（稳定） | `anet upgrade` 或 `npm install -g @sleep2agi/agent-network` | 大多数用户 |
+| `preview` | `anet upgrade --channel preview` 或 `npm install -g @sleep2agi/agent-network@preview` | 想提前试新功能 |
+
+切回稳定通道：`anet upgrade --channel latest`。查通道此刻指向哪个版本：`npm view @sleep2agi/agent-network dist-tags`（`agent-node`、`commhub-server` 同理）。
+
+版本号怎么读：
+
+- `anet -v` 顶行是 `@sleep2agi/agent-network` 的版本（形如 `anet v2.3.0-preview.N`），下面的 Components 列出 `agent-node`、`commhub-server`、dashboard 各自的版本。各包按需独立发版，hotfix 可以只升一个包。
+- 主仓 [GitHub releases](https://github.com/sleep2agi/agent-network/releases) 的 `v0.10.x` 等 tag 是 2026-06 之前的「bundle release」，最后一条是 2026-06-17 的 `v2.2.15`，不代表当前版本。变更请看[更新日志](/changelog)；桌面端安装包在 [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)。
+- 包版本与整体版本的对应矩阵见 [docs/version/](https://github.com/sleep2agi/agent-network/blob/main/docs/version/README.md)。
+
 ## 1. 先看计划
 
 ```bash
@@ -98,7 +115,14 @@ v0.7 使用旧的全局 token 模型。当前版本保留旧 `atok_` 的读取�
 详细背景见[账号体系](/guide/account-system)与[更新日志](/changelog)。本页不再复制
 旧版本的逐包安装命令，因为固定版本和历史默认密码会误导当前安装。
 
-## 忘了管理员密码
+## 初始管理员密码的版本差异 {#initial-password}
+
+- **`≥ 2.2.22-preview.4`**（现在的 `latest` 与 `preview` 都在此范围）：首次 `anet hub start` 打印**一次性随机密码**，只显示这一次，请当场保存；首次登录提示改密。
+- **`≤ 2.2.22-preview.3`（含 `2.2.21` 及更早）**：固定默认 `admin` / `anethub`，登录后必须立即 `anet passwd` 改密。
+
+任何公网部署，无论哪个版本，都必须登录后立即 `anet passwd`。
+
+## 忘了管理员密码 {#forgot-password}
 
 在 Hub 主机上运行：
 

@@ -4,6 +4,23 @@ This page is for users who already have `anet` installed. Do not copy a fixed
 version from documentation: npm's `latest` and `preview` dist-tags define the
 stable and preview channels.
 
+## Release channels and version numbers {#channels}
+
+Agent Network ships on two npm channels:
+
+| Channel | Install | For |
+|---|---|---|
+| `latest` (stable) | `anet upgrade` or `npm install -g @sleep2agi/agent-network` | most users |
+| `preview` | `anet upgrade --channel preview` or `npm install -g @sleep2agi/agent-network@preview` | trying new features early |
+
+Switch back to stable with `anet upgrade --channel latest`. To see which version a channel points to right now: `npm view @sleep2agi/agent-network dist-tags` (same for `agent-node` and `commhub-server`).
+
+Reading version numbers:
+
+- The top line of `anet -v` is the `@sleep2agi/agent-network` version (like `anet v2.3.0-preview.N`); the Components below list `agent-node`, `commhub-server` and the dashboard. Packages ship independently, so a hotfix can bump just one of them.
+- Tags such as `v0.10.x` in the main repo's [GitHub releases](https://github.com/sleep2agi/agent-network/releases) are pre-2026-06 "bundle releases"; the last one is `v2.2.15` from 2026-06-17 and does not reflect current versions. See the [Changelog](/en/changelog) for changes; desktop installers are at [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases).
+- The package-to-bundle version matrix is in [docs/version/](https://github.com/sleep2agi/agent-network/blob/main/docs/version/README.md).
+
 ## 1. Inspect the plan
 
 ```bash
@@ -110,7 +127,14 @@ See the [account system](/en/guide/account-system) and
 per-package commands or historical default passwords, because they mislead current
 installations.
 
-## Forgotten administrator password
+## Initial admin password by version {#initial-password}
+
+- **`>= 2.2.22-preview.4`** (today's `latest` and `preview` are both in this range): the first `anet hub start` prints a **one-time random password**, shown only once; save it right then. The first login prompts you to change it.
+- **`<= 2.2.22-preview.3` (including `2.2.21` and earlier)**: fixed default `admin` / `anethub`; run `anet passwd` immediately after login.
+
+Any internet-facing deployment must run `anet passwd` right after login, regardless of version.
+
+## Forgotten administrator password {#forgot-password}
 
 Run this on the Hub host:
 

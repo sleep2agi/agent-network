@@ -68,8 +68,6 @@ const activeDocs = [
   "docs-site/docs/en/deploy/npm.md",
   "docs-site/docs/community.md",
   "docs-site/docs/en/community.md",
-  "docs-site/docs/ecosystem.md",
-  "docs-site/docs/en/ecosystem.md",
 ];
 
 const validateActiveDocs = (documents) => {

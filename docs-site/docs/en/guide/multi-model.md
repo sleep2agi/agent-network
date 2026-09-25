@@ -309,7 +309,7 @@ done
 **Configure and tune**:
 - Where does the cost go? See the "Cost" column in the model tables earlier on this page
 - Persist multiple API keys? See [Agent Node -- config.json env field](/en/guide/agent-node)
-- Rate-limit errors? Most providers have concurrency caps -- see [FAQ](/en/faq)
+- Rate-limit errors? Most providers have concurrency caps -- see [FAQ](/en/troubleshooting#faq)
 
 **Dig deeper**:
 - Why does `ANTHROPIC_BASE_URL` work across all domestic models? See [How ANTHROPIC_BASE_URL works](#how-anthropic-base-url-works) above

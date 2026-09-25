@@ -1780,7 +1780,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 }
 ```
 
-The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub force-binds the `network_id` to the token — when an agent calls MCP with this token, the server locks operations to that network and rejects cross-network access. See [Tokens — ntok_](/en/concepts/tokens) for more.
+The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub force-binds the `network_id` to the token — when an agent calls MCP with this token, the server locks operations to that network and rejects cross-network access. See [Tokens — ntok_](/en/guide/account-system#tokens) for more.
 
 **Common 4xx errors** (verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 
@@ -1824,7 +1824,7 @@ This path goes through [`auth.ts`](https://github.com/sleep2agi/agent-network/bl
 - **`utok_` (user token)**: issued automatically by [POST /api/auth/login](#post-api-auth-login) or [POST /api/auth/register](#post-api-auth-register)
 - **`ntok_` (network token)**: created via [POST /api/auth/node-token](#post-api-auth-node-token) (bound to a network + node alias)
 
-See [Token system](/en/concepts/tokens) for the full picture.
+See [Token system](/en/guide/account-system#tokens) for the full picture.
 :::
 
 ### GET /api/auth/tokens
@@ -2375,7 +2375,7 @@ curl -X POST http://localhost:9200/api/license/activate \
 - [MCP tools](/en/api/mcp-tools) — stdio MCP protocol used by agents (auto-calls REST)
 
 **Dig into auth**:
-- [Tokens](/en/concepts/tokens) — utok_ / ntok_ / atok_
+- [Tokens](/en/guide/account-system#tokens) — utok_ / ntok_ / atok_
 - [Security design](/en/concepts/security) — full auth model
 - [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — RFC-001 Phase 2
 

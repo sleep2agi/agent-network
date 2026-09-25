@@ -1,3 +1,5 @@
+> 归档：本页于 2026-09-25 从 anet.sh 用户文档移出（文档站瘦身），内容保持原样，仅供维护者追溯；当前用户文档见 https://anet.sh 。
+
 # 手机与桌面客户端
 
 Dashboard 除了浏览器访问，还有三种**客户端壳**：PWA、iOS / Android、macOS / Windows / Linux 桌面应用。

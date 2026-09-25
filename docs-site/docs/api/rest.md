@@ -1885,7 +1885,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 }
 ```
 
-`token` 是该 `(node_name, network_id)` 组合的 `ntok_`，hub 端强制 binding——agent 用这个 token 调 MCP 时，server 自动锁定到 `network_id`，跨网络访问拒绝。详见 [Token 概念 — ntok_](/concepts/tokens#_2-ntok-agent-的-token-每个-agent-一个)。
+`token` 是该 `(node_name, network_id)` 组合的 `ntok_`，hub 端强制 binding——agent 用这个 token 调 MCP 时，server 自动锁定到 `network_id`，跨网络访问拒绝。详见 [Token 概念 — ntok_](/guide/account-system#tokens)。
 
 **常见 4xx**（verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)）：
 
@@ -1929,7 +1929,7 @@ curl -X POST http://localhost:9200/api/auth/tokens \
 - **`utok_`（用户 Token）**：通过 [POST /api/auth/login](#post-api-auth-login) 或 [POST /api/auth/register](#post-api-auth-register) 自动颁发
 - **`ntok_`（节点 Token）**：通过 [POST /api/auth/node-token](#post-api-auth-node-token) 创建（绑定到指定 network + 节点 alias）
 
-详见 [Token 体系](/concepts/tokens)。
+详见 [Token 体系](/guide/account-system#tokens)。
 :::
 
 ### GET /api/auth/tokens
@@ -2479,7 +2479,7 @@ curl -X POST http://localhost:9200/api/license/activate \
 - [MCP 工具](/api/mcp-tools) — Agent 端用的 stdio MCP 协议（自动调 REST）
 
 **深入鉴权**：
-- [Token 体系](/concepts/tokens) — utok_ / ntok_ / atok_
+- [Token 体系](/guide/account-system#tokens) — utok_ / ntok_ / atok_
 - [安全设计](/concepts/security) — 完整鉴权模型
 - [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — RFC-001 Phase 2
 

@@ -51,15 +51,15 @@
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/versioning) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
-- **当前 preview**：以 npm `preview` dist-tag 为准。2026-08-18 实测 `agent-node@2.5.0-preview.31` 的 `--help` 已列出 `grok-build-cli` + `ANET_CAPABILITY_GROK_COPRESENCE_V2`，`anet@2.3.0-preview.39 grok` 打印 `Usage: anet grok attach <node>`。现在 `latest` 与 `preview` 都包含 `grok-build-cli` 与 `anet grok attach`（实验能力；默认推荐仍是 `grok-build-acp`），状态见 [Grok TUI 状态页](/guide/grok-copresence)。
+- **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/upgrade#channels) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
+- **当前 preview**：以 npm `preview` dist-tag 为准。2026-08-18 实测 `agent-node@2.5.0-preview.31` 的 `--help` 已列出 `grok-build-cli` + `ANET_CAPABILITY_GROK_COPRESENCE_V2`，`anet@2.3.0-preview.39 grok` 打印 `Usage: anet grok attach <node>`。现在 `latest` 与 `preview` 都包含 `grok-build-cli` 与 `anet grok attach`（实验能力；默认推荐仍是 `grok-build-acp`），状态见 [Grok TUI 状态页](/guide/grok)。
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
 ## Grok 人机共存 TUI（`grok-build-cli`）—— preview（2026-07-15）🟡 preview
 
 ::: danger 2026-07-31 更正
-下文记录的是当时的候选里程碑。其中的安装与运行命令是当时的写法，请勿照抄；`grok-build-cli` / `anet grok attach` 后来已进入 npm 发布包（实验能力），现状与用法见 [Grok TUI 状态页](/guide/grok-copresence)。
+下文记录的是当时的候选里程碑。其中的安装与运行命令是当时的写法，请勿照抄；`grok-build-cli` / `anet grok attach` 后来已进入 npm 发布包（实验能力），现状与用法见 [Grok TUI 状态页](/guide/grok)。
 :::
 
 **版本同步**（npm `@preview` tag）：
@@ -80,7 +80,7 @@ anet node start grok-shared        # 等日志：attach with anet grok attach gr
 anet grok attach grok-shared       # Terminal 2，真实 TTY、同机同用户同项目目录
 ```
 
-限制：仅 Linux、需精确 `grok 0.2.93 (f00f96316d)`、固定 text-only `[todo_write]` profile（无 fs/shell/network/MCP 工具）、只连可信 Hub、**preview 非 latest/生产**。完整用法与 caveats 见 [Grok 人机共存 TUI](/guide/grok-copresence)。
+限制：仅 Linux、需精确 `grok 0.2.93 (f00f96316d)`、固定 text-only `[todo_write]` profile（无 fs/shell/network/MCP 工具）、只连可信 Hub、**preview 非 latest/生产**。完整用法与 caveats 见 [Grok 人机共存 TUI](/guide/grok)。
 
 ---
 

@@ -31,7 +31,7 @@ A runtime controls how `agent-node` drives an AI. A provider controls the model 
 | `codex-sdk` | You use Codex for coding tasks |
 | `grok-build-acp` | You use the Grok Build ACP interface |
 
-Stable behavior follows npm `latest`; preview features require an explicit channel install described in [Version channels](/en/guide/versioning). See [Runtimes](/en/guide/runtimes) for details.
+Stable behavior follows npm `latest`; preview features require an explicit channel install described in [Version channels](/en/guide/upgrade#channels). See [Runtimes](/en/guide/runtimes) for details.
 
 ## Shortest setup path
 

@@ -54,7 +54,7 @@ anet upgrade --dry-run
 npm install -g @sleep2agi/agent-node
 ```
 
-Upgrade on the selected release channel. Do not copy a fixed preview or package version from an old document. See [Versioning](/en/guide/versioning) and [Upgrading](/en/guide/upgrade).
+Upgrade on the selected release channel. Do not copy a fixed preview or package version from an old document. See [Versioning](/en/guide/upgrade#channels) and [Upgrading](/en/guide/upgrade).
 
 ### Port conflict or immediate Hub exit
 
@@ -138,7 +138,7 @@ This generates a new password and user token and revokes old user tokens. Do not
 - `access_denied` / `permission_denied`: identity resolution succeeded, but the role cannot perform the operation. Ask the network owner to change membership; a global admin is not automatically every network's owner.
 - Agent Nodes use an `ntok_` bound to one network. Do not reuse a node token across networks.
 
-See [Tokens and permissions](/en/concepts/tokens), [Roles](/en/concepts/roles), and [Networks](/en/concepts/networks).
+See [Tokens and permissions](/en/guide/account-system#tokens), [Roles](/en/guide/account-system#roles), and [Networks](/en/concepts/networks).
 
 ### Other authentication/network errors
 
@@ -194,6 +194,17 @@ Stop old instances and keep one process. Do not reclaim identity by editing `nod
 ### Wrong working directory
 
 File tools use the node's launch directory. Stop it, enter the intended project, and start again. In Codex TUI co-presence, the thread directory is inherited from the app-server process. Follow [Codex TUI co-presence](/en/guide/codex-copresence) and inspect the full session group, not only the bridge.
+
+### A `claude-code-cli` node created on a remote daemon does not start {#remote-cli-login}
+
+When you create a node on a remote machine (a daemon) from the Dashboard, whether it runs depends on how the node authenticates:
+
+| Auth method | Stored in | Works across machines |
+|---|---|---|
+| API key (DeepSeek / MiniMax / Anthropic, …) | node config + Hub secret vault | yes, it travels with the node |
+| Claude Code CLI subscription login (`claude auth login`) | that machine's `~/.claude` | no, bound to the machine |
+
+For multi-machine setups prefer an API key: configure vendor, model and key in the Dashboard's provider library and pick that preset when creating the node. If you must use a subscription login, SSH to that machine and run `claude auth login` once; only then can `claude-code-cli` nodes run there. anet never copies `~/.claude` to another machine for you.
 
 <a id="vendor-api-auth-failure-401-invalid-api-key-expired-token-intern-a02xx-user-token-expired"></a>
 <a id="vendor-api-timeout-high-concurrency-fan-out-132-retry-with-backoff"></a>
@@ -307,10 +318,34 @@ When the layer-by-layer pass above does not settle it, each of these targets one
   prefixes mean, why the version lines report instead of judging, and which questions it
   **cannot** answer.
 - [Connectivity: channels and MCP](/en/troubleshooting/connectivity-channels-mcp)
-- [CLI login on a remote node](/en/troubleshooting/remote-node-cli-login)
-- [Case: Feishu silently denies](/en/troubleshooting/case-feishu-silent-deny)
-- [Restart a Codex TUI node safely](/en/troubleshooting/codex-tui-node-restart) — keep the session and never regress the rollout when restarting a co-presence node.
-- [Node stuck in stopping / starting](/en/troubleshooting/node-stuck-lifecycle) — when an action on a daemon-managed node does nothing, or the node sits in an intermediate state, wait for one reconnect first.
+- [Node stuck in stopping / starting](/en/troubleshooting/is-this-node-alive#stuck-lifecycle)
+- [Restart a Codex TUI node safely](/en/guide/codex-copresence#safe-restart)
+- [Feishu bot receives or answers nothing](/en/guide/feishu#no-reply)
+
+## FAQ {#faq}
+
+### What is Agent Network? Is it free?
+
+A self-hosted communication layer for multiple agents: CommHub handles identity, tasks and messages; agents discover teammates over MCP and receive tasks over SSE; it does not dictate how an agent reasons. The code is Apache 2.0 and there is no official hosted Hub. For personal use run the Hub on your own machine; across machines or for a team, put it on a machine every node can reach. Choose runtimes and models with the [runtime comparison](/en/guide/runtimes) and [multi-model configuration](/en/guide/multi-model).
+
+### Where are configuration and data stored?
+
+| Path | Contents |
+|---|---|
+| `~/.anet/config.json` | current Hub, user token, network |
+| `<project>/.anet/nodes/<alias>/config.json` | node runtime, identity and flags |
+| `<project>/.anet/nodes/<alias>/.env` | optional node secrets, plain text, should be mode `0600` |
+| `~/.commhub/commhub.db` | the Hub's SQLite database |
+
+Never commit `.anet`, tokens or `.env`. See [Security Design](/en/concepts/security).
+
+### Can I expose 9200 / 3000 directly to the internet?
+
+Not recommended. Change the initial password first, then put TLS and access control in front with Caddy / Nginx, and go through the [production deployment](/en/deploy/production) checklist.
+
+### Is PostgreSQL supported?
+
+The maintained and verified backend is SQLite. The PostgreSQL compatibility entry points in the code do not mean production support.
 
 ## Still unresolved
 

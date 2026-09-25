@@ -1,5 +1,167 @@
 {
   "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/ecosystem",
+      "destination": "/community#ecosystem",
+      "permanent": true
+    },
+    {
+      "source": "/en/ecosystem",
+      "destination": "/en/community#ecosystem",
+      "permanent": true
+    },
+    {
+      "source": "/skillhub/contribute",
+      "destination": "/skillhub/#contribute",
+      "permanent": true
+    },
+    {
+      "source": "/en/skillhub/contribute",
+      "destination": "/en/skillhub/#contribute",
+      "permanent": true
+    },
+    {
+      "source": "/guide/grok-copresence",
+      "destination": "/guide/grok",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/grok-copresence",
+      "destination": "/en/guide/grok",
+      "permanent": true
+    },
+    {
+      "source": "/guide/grok-tui",
+      "destination": "/guide/grok#copresence",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/grok-tui",
+      "destination": "/en/guide/grok#copresence",
+      "permanent": true
+    },
+    {
+      "source": "/guide/codex-tui-safe-restart",
+      "destination": "/guide/codex-copresence#safe-restart",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/codex-tui-safe-restart",
+      "destination": "/en/guide/codex-copresence#safe-restart",
+      "permanent": true
+    },
+    {
+      "source": "/troubleshooting/codex-tui-node-restart",
+      "destination": "/guide/codex-copresence#safe-restart",
+      "permanent": true
+    },
+    {
+      "source": "/en/troubleshooting/codex-tui-node-restart",
+      "destination": "/en/guide/codex-copresence#safe-restart",
+      "permanent": true
+    },
+    {
+      "source": "/guide/app-shells",
+      "destination": "/guide/desktop-app#dashboard-shells",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/app-shells",
+      "destination": "/en/guide/desktop-app#dashboard-shells",
+      "permanent": true
+    },
+    {
+      "source": "/troubleshooting/node-stuck-lifecycle",
+      "destination": "/troubleshooting/is-this-node-alive#stuck-lifecycle",
+      "permanent": true
+    },
+    {
+      "source": "/en/troubleshooting/node-stuck-lifecycle",
+      "destination": "/en/troubleshooting/is-this-node-alive#stuck-lifecycle",
+      "permanent": true
+    },
+    {
+      "source": "/troubleshooting/case-feishu-silent-deny",
+      "destination": "/guide/feishu#no-reply",
+      "permanent": true
+    },
+    {
+      "source": "/en/troubleshooting/case-feishu-silent-deny",
+      "destination": "/en/guide/feishu#no-reply",
+      "permanent": true
+    },
+    {
+      "source": "/troubleshooting/remote-node-cli-login",
+      "destination": "/troubleshooting#remote-cli-login",
+      "permanent": true
+    },
+    {
+      "source": "/en/troubleshooting/remote-node-cli-login",
+      "destination": "/en/troubleshooting#remote-cli-login",
+      "permanent": true
+    },
+    {
+      "source": "/guide/versioning",
+      "destination": "/guide/upgrade#channels",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/versioning",
+      "destination": "/en/guide/upgrade#channels",
+      "permanent": true
+    },
+    {
+      "source": "/preview",
+      "destination": "/guide/upgrade#channels",
+      "permanent": true
+    },
+    {
+      "source": "/en/preview",
+      "destination": "/en/guide/upgrade#channels",
+      "permanent": true
+    },
+    {
+      "source": "/faq",
+      "destination": "/troubleshooting#faq",
+      "permanent": true
+    },
+    {
+      "source": "/en/faq",
+      "destination": "/en/troubleshooting#faq",
+      "permanent": true
+    },
+    {
+      "source": "/concepts/tokens",
+      "destination": "/guide/account-system#tokens",
+      "permanent": true
+    },
+    {
+      "source": "/en/concepts/tokens",
+      "destination": "/en/guide/account-system#tokens",
+      "permanent": true
+    },
+    {
+      "source": "/concepts/roles",
+      "destination": "/guide/account-system#roles",
+      "permanent": true
+    },
+    {
+      "source": "/en/concepts/roles",
+      "destination": "/en/guide/account-system#roles",
+      "permanent": true
+    },
+    {
+      "source": "/preview/",
+      "destination": "/guide/upgrade#channels",
+      "permanent": true
+    },
+    {
+      "source": "/en/preview/",
+      "destination": "/en/guide/upgrade#channels",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/desktop/update/latest.json",

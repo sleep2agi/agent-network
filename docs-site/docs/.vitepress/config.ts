@@ -43,21 +43,13 @@ export default withMermaid(defineConfig({
           { text: '指南', link: '/guide/getting-started' },
           { text: 'SkillHub', link: '/skillhub/' },
           { text: 'API', link: '/api/mcp-tools' },
-          { text: '生态', link: '/ecosystem' },
-          { text: '社群', link: '/community' },
+          { text: '社区与生态', link: '/community' },
           {
             text: '更新日志',
             items: [
               { text: 'Changelog（全部版本）', link: '/changelog' },
               { text: 'npm 版本（anet CLI）', link: 'https://www.npmjs.com/package/@sleep2agi/agent-network?activeTab=versions' },
               { text: '桌面端 releases（GitHub）', link: 'https://github.com/sleep2agi/agent-network-app/releases' },
-            ]
-          },
-          {
-            text: 'latest ▾',
-            items: [
-              { text: 'latest（稳定版 · npm latest）', link: '/' },
-              { text: 'preview（2026-06-28 存档）', link: '/preview/' },
             ]
           },
         ],
@@ -75,8 +67,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: '账号体系', link: '/guide/account-system' },
               { text: 'Dashboard', link: '/guide/dashboard' },
-              { text: '桌面应用', link: '/guide/desktop-app' },
-              { text: '手机与桌面客户端', link: '/guide/app-shells' },
+              { text: '桌面与手机客户端', link: '/guide/desktop-app' },
               { text: 'CLI 命令', link: '/guide/cli' },
               { text: 'Agent Node', link: '/guide/agent-node' },
               { text: 'Goal 与 Loop', link: '/guide/goals-and-loops' },
@@ -91,8 +82,6 @@ export default withMermaid(defineConfig({
             items: [
               { text: '基本概念', link: '/guide/basics' },
               { text: '架构概览', link: '/guide/architecture' },
-              { text: 'Token 体系', link: '/concepts/tokens' },
-              { text: '角色与权限', link: '/concepts/roles' },
               { text: '网络隔离', link: '/concepts/networks' },
               { text: '任务生命周期', link: '/concepts/task-lifecycle' },
               { text: '安全设计', link: '/concepts/security' },
@@ -106,13 +95,10 @@ export default withMermaid(defineConfig({
             ]
           },
           {
-            text: 'Preview 功能',
+            text: '更多节点类型',
             items: [
-              { text: 'Preview 说明', link: '/preview/' },
-              { text: 'Grok 人机共存 TUI', link: '/guide/grok-copresence' },
-              { text: 'Grok 共存 TUI（grok-build-cli）', link: '/guide/grok-tui' },
+              { text: 'Grok 节点', link: '/guide/grok' },
               { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
-              { text: 'Codex TUI 安全重启', link: '/guide/codex-tui-safe-restart' },
               { text: 'DSH 节点', link: '/guide/dsh' },
             ]
           },
@@ -135,7 +121,6 @@ export default withMermaid(defineConfig({
             text: '帮助',
             items: [
               { text: '故障排查', link: '/troubleshooting' },
-              { text: 'FAQ', link: '/faq' },
               { text: '更新日志', link: '/changelog' },
             ]
           },
@@ -152,7 +137,6 @@ export default withMermaid(defineConfig({
           { text: 'Guide', link: '/en/guide/getting-started' },
           { text: 'SkillHub', link: '/en/skillhub/' },
           { text: 'API', link: '/en/api/mcp-tools' },
-          { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
             text: 'Changelog',
@@ -160,13 +144,6 @@ export default withMermaid(defineConfig({
               { text: 'Changelog (all versions)', link: '/en/changelog' },
               { text: 'npm versions (anet CLI)', link: 'https://www.npmjs.com/package/@sleep2agi/agent-network?activeTab=versions' },
               { text: 'Desktop releases (GitHub)', link: 'https://github.com/sleep2agi/agent-network-app/releases' },
-            ]
-          },
-          {
-            text: 'latest ▾',
-            items: [
-              { text: 'latest (stable · npm latest)', link: '/en/' },
-              { text: 'preview (2026-06-28 archive)', link: '/en/preview/' },
             ]
           },
         ],
@@ -184,8 +161,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Account System', link: '/en/guide/account-system' },
               { text: 'Dashboard', link: '/en/guide/dashboard' },
-              { text: 'Desktop App', link: '/en/guide/desktop-app' },
-              { text: 'Mobile & desktop clients', link: '/en/guide/app-shells' },
+              { text: 'Desktop & Mobile Clients', link: '/en/guide/desktop-app' },
               { text: 'CLI Commands', link: '/en/guide/cli' },
               { text: 'Agent Node', link: '/en/guide/agent-node' },
               { text: 'Goals and Loops', link: '/en/guide/goals-and-loops' },
@@ -200,8 +176,6 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Basic Concepts', link: '/en/guide/basics' },
               { text: 'Architecture', link: '/en/guide/architecture' },
-              { text: 'Token System', link: '/en/concepts/tokens' },
-              { text: 'Roles & Permissions', link: '/en/concepts/roles' },
               { text: 'Network Isolation', link: '/en/concepts/networks' },
               { text: 'Task Lifecycle', link: '/en/concepts/task-lifecycle' },
               { text: 'Security Design', link: '/en/concepts/security' },
@@ -215,13 +189,10 @@ export default withMermaid(defineConfig({
             ]
           },
           {
-            text: 'Preview Features',
+            text: 'More Node Types',
             items: [
-              { text: 'Preview overview', link: '/en/preview/' },
-              { text: 'Grok Co-presence TUI', link: '/en/guide/grok-copresence' },
-              { text: 'Grok Co-presence TUI (grok-build-cli)', link: '/en/guide/grok-tui' },
+              { text: 'Grok Nodes', link: '/en/guide/grok' },
               { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
-              { text: 'Codex TUI Safe Restart', link: '/en/guide/codex-tui-safe-restart' },
               { text: 'DSH node', link: '/en/guide/dsh' },
             ]
           },
@@ -244,7 +215,6 @@ export default withMermaid(defineConfig({
             text: 'Help',
             items: [
               { text: 'Troubleshooting', link: '/en/troubleshooting' },
-              { text: 'FAQ', link: '/en/faq' },
               { text: 'Changelog', link: '/en/changelog' },
             ]
           },

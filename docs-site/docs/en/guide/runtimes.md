@@ -27,7 +27,7 @@ Two things this page does not promise:
 - **The daemon path**: since [#1301](https://github.com/sleep2agi/agent-network/pull/1301) the three co-presence runtimes are in the daemon-side runtime set, so `create_node` no longer refuses them. Before that they were refused ([#1298](https://github.com/sleep2agi/agent-network/issues/1298)), **so the answer depends on the version you have**: on an install from before the fix, a local `anet node create` works while daemon-side creation does not.
 - **You still have to supply a `model`**: `node_spec.model` is required by `create_node`, yet a runtime that reuses a subscription login — `claude-code-cli`, for instance — has no model picker at all and uses whatever the subscription gives it. Keys and URLs are not required (they travel through the optional `env_refs`); **the model still is.**
 
-For the current state of Grok TUI co-presence see the [Grok TUI status page](/en/guide/grok-copresence); `grok-build-acp` does not support attach.
+For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/grok); `grok-build-acp` does not support attach.
 :::
 
 | Runtime | npm package / engine | When to pick | Default models | Prereq auth | Wizard behavior (`anet node create`) |

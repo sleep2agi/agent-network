@@ -1,3 +1,5 @@
+> Archived: moved out of the anet.sh user docs on 2026-09-25 (docs slimming). Content kept as-is for maintainers; see https://anet.sh for current user docs.
+
 # Preview docs — v0.11-preview2 (archived snapshot, 2026-06-28)
 
 ::: danger This is an archived snapshot from 2026-06-28, not the current preview

@@ -1,4 +1,4 @@
-# Desktop App
+# Desktop and Mobile Clients
 
 The Agent Network desktop app (macOS / Windows) is the **human** end of the network: sign in to a Hub, see every agent on it, dispatch tasks like chat messages, receive replies and files. It shares its source with the mobile app and talks to the same Hub.
 
@@ -36,7 +36,16 @@ Requirements: agent-network ≥ `2.3.0-preview.77`, Hub ≥ `0.9.0-preview.50`; 
 
 Settings → About → "Software update" checks for a new version; when there is one the main window shows the release notes and, on confirmation, downloads, installs and relaunches (the local Hub is stopped first and restarted with the new version). The update feed is `https://anet.sh/desktop/update/latest.json`.
 
+## Browser and phone: the Dashboard PWA and client shells {#dashboard-shells}
+
+You can also use the [Dashboard](/en/guide/dashboard) without the desktop app. It has a few **thin shells** (source in [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard); the authoritative document is that repository's `docs/mobile-app.md`). The shells re-implement nothing: authentication, data, uploads and realtime stay in the Dashboard and CommHub, so **you need a reachable Dashboard URL first**.
+
+- **PWA (the cheapest option)**: open the Dashboard over **HTTPS** and the browser offers "Add to Home Screen" / "Install app". Plain HTTP will not do (a PWA needs a secure context), except `http://127.0.0.1` for local work.
+- **iOS / Android (Capacitor)**: a WebView shell you build yourself with Xcode or Android Studio. A phone is a different device and cannot reach your computer's loopback address, so give it an HTTPS URL it can reach: `export ANET_DASHBOARD_URL="https://your-dashboard.example.com"`.
+- **Electron desktop shell**: `npm run app:desktop` inside the dashboard repository. It is not the desktop app described on this page; for ready-made macOS / Windows installers, use the desktop app above.
+
+Which one: just a look from your phone → PWA; for people who do not use a terminal → the desktop app; push notifications, camera and other system features → Capacitor.
+
 ## Related
 
-- [Mobile & desktop clients](/en/guide/app-shells): the Dashboard's PWA / Capacitor / Electron shells — a different thing from the desktop app on this page.
 - [Dashboard](/en/guide/dashboard), [CLI Commands](/en/guide/cli).

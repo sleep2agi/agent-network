@@ -196,7 +196,7 @@ anet channel ls
 
 换 App 时**三处**都要同步改：① 节点环境 / 部署里的 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` ② channel 的 `.env` ③ **`access.json` 的 `allowFrom` / `allowChats`**（最容易漏）。
 
-漏第三处的典型症状：**`client ready` 正常、能看到事件、但用户消息「毫无反应」**。完整复盘见 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
+漏第三处的典型症状：**`client ready` 正常、能看到事件、但用户消息「毫无反应」**。
 :::
 
 ## 6. 群 @ 机制
@@ -344,9 +344,19 @@ export ANET_FEISHU_BRIDGE_MODE=commhub   # 显式打开
 | 私聊不响应 | `open_id` 是否在 `allowFrom` 内（`anet channel ls` 看一下） |
 | **连上了、有事件、但消息「没反应」** | bridge stderr **grep `deny` / `allowFrom`**：消息收到了但发件人不在白名单。**换 App 后最常见**（`open_id` 按 App 变了，见 §5 危险提示） |
 | 收到图片 bot 答非所问 / 报错 | 后端不是 vision-capable（见 §4）—— 切到支持 vision 的 model |
-| **发图片 bot 回「收到事件但没有可处理的文本/图片内容」** | 图片**没被抠出来**，两种根因依次排：① 节点没开图片能力（`flags.modelImageCapable` 默认不设，见 §4）② **下载失败**——日志看 `[feishu:image] … download FAILED`，最常见是**旧版本的 `downloadImage` SDK 误用 bug**（[#324](https://github.com/sleep2agi/agent-network/pull/324)，`2.2.22-preview.2` 等旧版带），升级到含修复的 preview 即根治。详见 [经典案例 · 同源篇](/troubleshooting/case-feishu-silent-deny#同源案例-图片识别不了) |
+| **发图片 bot 回「收到事件但没有可处理的文本/图片内容」** | 图片**没被抠出来**，两种根因依次排：① 节点没开图片能力（`flags.modelImageCapable` 默认不设，见 §4）② **下载失败**——日志看 `[feishu:image] … download FAILED`，最常见是**旧版本的 `downloadImage` SDK 误用 bug**（[#324](https://github.com/sleep2agi/agent-network/pull/324)，`2.2.22-preview.2` 等旧版带），升级到含修复的 preview 即根治。见下方[图片识别 checklist](#no-reply)。 |
 
-诊断口诀（按层收窄）：① 先找 `failed to obtain token` / `[ws] ws connect failed`，`bridge online` 或 `client ready` 单独出现不等于连接成功；② 飞书后台已识别测试连接、但零事件 = 检查是否漏 `im.message.receive_v1` / 未使用长连接 / 未发布版本；③ 已有事件、但不回 = 应用层拒了，grep `deny` / `allowFrom`；④ 发图无反应 = 查 `modelImageCapable` flag + 下载是否失败（旧版本 bug，升级）。完整复盘 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
+诊断口诀（按层收窄）：① 先找 `failed to obtain token` / `[ws] ws connect failed`，`bridge online` 或 `client ready` 单独出现不等于连接成功；② 飞书后台已识别测试连接、但零事件 = 检查是否漏 `im.message.receive_v1` / 未使用长连接 / 未发布版本；③ 已有事件、但不回 = 应用层拒了，grep `deny` / `allowFrom`；④ 发图无反应 = 查 `modelImageCapable` flag + 下载是否失败（旧版本 bug，升级）。
+
+### 已有事件但 Bot 不回：grep 这几行 {#no-reply}
+
+- `[feishu:audit] deny ... not in allowFrom`：发件人不在白名单，换 App 后最常见（见 §5）。
+- `empty vendor result`：模型生成了但抽不出文本，多为模型与网关响应格式不兼容，换一个兼容的模型。
+- `No conversation found`：会话状态失效，清掉节点配置里的 session 字段后重启。
+
+「没反应」既可能是没收到，也可能是收到了被拒，两者排查方向完全不同。拿不准时，用一段只连飞书 SDK 长连接、订阅 `im.message.receive_v1` 的最小脚本确认事件能否到达，再回到产品栈里找。
+
+**图片识别 checklist**：① 模型支持 vision；② 节点 `flags.modelImageCapable=true`；③ agent-network 版本含 [#324](https://github.com/sleep2agi/agent-network/pull/324) 下载修复。
 
 ## 10. 已知限制（preview scope）
 

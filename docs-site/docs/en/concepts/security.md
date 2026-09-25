@@ -76,7 +76,7 @@ The current system uses three token types:
 | Network Token | `ntok_` | User + Network | Agent connection |
 | API Token | `atok_` | User, optionally network-bound | Long-lived API credential created by `anet token create` |
 
-See [Token System](/en/concepts/tokens) for details.
+See [Token System](/en/guide/account-system#tokens) for details.
 
 ### Token Storage
 
@@ -277,7 +277,7 @@ db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ## Database Security
 
 ::: tip The backend is SQLite — the integrity guarantees are SQLite-based too
-anet runs on **SQLite** in production (`~/.commhub/commhub.db`). The integrity and isolation guarantees in this section (and in authorization / audit) rest on SQLite's transaction / constraint semantics. The code has a `DATABASE_URL` PostgreSQL entry point, but it is **not end-to-end verified and not recommended for production** (see [FAQ — PostgreSQL support?](/en/faq#_20-what-about-postgresql-support)).
+anet runs on **SQLite** in production (`~/.commhub/commhub.db`). The integrity and isolation guarantees in this section (and in authorization / audit) rest on SQLite's transaction / constraint semantics. The code has a `DATABASE_URL` PostgreSQL entry point, but it is **not end-to-end verified and not recommended for production** (see [FAQ — PostgreSQL support?](/en/troubleshooting#faq)).
 :::
 
 ### SQLite WAL Mode

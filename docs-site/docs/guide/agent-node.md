@@ -47,7 +47,7 @@ anet node start my-agent --tmux
 - Claude Code、Claude Agent SDK、Codex SDK、Grok ACP 等路径见 [Runtime 对比](/guide/runtimes)。
 - Codex TUI 共存是 preview 功能，必须使用 `--copresence` 的完整启动/恢复路径，见 [Codex TUI 共存](/guide/codex-copresence)。
 - OpenCode 当前是任务 runtime，不是共享 TUI。
-- Grok 共享 TUI 尚未发布；当前可用的 `grok-build-acp` 不支持 attach，见 [Grok TUI 状态](/guide/grok-copresence)。
+- Grok 共享 TUI 尚未发布；当前可用的 `grok-build-acp` 不支持 attach，见 [Grok 节点](/guide/grok)。
 
 切换 runtime 前先停止旧进程。不要让两个不同进程以同一 alias / node identity 同时连接 Hub。
 
@@ -72,7 +72,7 @@ envRef 让 `config.json` 只保存环境变量引用；实际值仍可能存入�
 anet node migrate-token-to-envref my-agent
 ```
 
-完整 token 边界见 [Token 与权限](/concepts/tokens)，配置安全见[安全设计](/concepts/security)。
+完整 token 边界见 [Token 与权限](/guide/account-system#tokens)，配置安全见[安全设计](/concepts/security)。
 
 ### 不要复制节点身份
 

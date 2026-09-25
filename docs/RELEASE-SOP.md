@@ -102,16 +102,15 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/guide/desktop-app.md` | 见门输出 | 下界断言:未读权威数需 Hub ≥ `0.9.0-preview.51`;本机 daemon 安装需 anet ≥ `2.3.0-preview.77`、Hub ≥ `0.9.0-preview.50` —— 是「≥」,发新版不会变假,promote latest 时只核 latest 是否已过这些下界 |
 > | `docs-site/docs/en/guide/desktop-app.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/en/troubleshooting/is-this-node-alive.md` | 见门输出 | 同上(英文) |
-> | `docs-site/docs/troubleshooting/node-stuck-lifecycle.md` | 4–5 | **下界断言**(agent-node ≥ `2.5.0-preview.49` / commhub-server ≥ `0.9.0-preview.40`)——发版**不会**让它变假;要核的是另一件事:**当这两个修复进入 `latest` 时,把页面的指引从「需要 preview」改成「latest 已含」**,否则 latest 用户会以为必须切 preview |
-> | `docs-site/docs/en/troubleshooting/node-stuck-lifecycle.md` | 4–5 | 同上(英文) |
-> | `docs-site/docs/guide/grok-tui.md` | 见门输出 | 共存已在 preview 通道(钉 2.3.0-preview.59 / 2.5.0-preview.43 实测)——发版时核对仍真 |
-> | `docs-site/docs/en/guide/grok-tui.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/grok.md` | 见门输出 | Grok 节点页(原 grok-tui + grok-copresence 合并)：共存随 npm 发布包提供(latest 与 preview)、agent-node 版本下界断言——发版时核对仍真 |
+> | `docs-site/docs/en/guide/grok.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/upgrade.md` | 见门输出 | 初始管理员密码一节写「现在的 `latest` 与 `preview` 都在 `≥ 2.2.22-preview.4` 范围」（原 versioning 页并入）——是下界断言，发新版不会变假 |
+> | `docs-site/docs/en/guide/upgrade.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/troubleshooting/is-this-node-alive.md` 的「节点卡在 stopping / starting」一节 | — | 原 node-stuck-lifecycle 页并入；下界断言(agent-node ≥ `2.5.0-preview.49` / commhub-server ≥ `0.9.0-preview.40`)，这两个修复进 `latest` 时把指引改成「latest 已含」 |
 > | `docs-site/docs/deploy/clean-server.md` | 21–22 | 同上 |
 > | `docs-site/docs/en/deploy/clean-server.md` | 21–22 | 同上(英文) |
 > | `docs-site/docs/troubleshooting.md` | 29、37 | preview 有 preflight / latest 没有 |
 > | `docs-site/docs/en/troubleshooting.md` | 29、37 | 同上(英文) |
-> | `docs-site/docs/guide/versioning.md` | 11 | `anet -v` 顶行示例 `anet v2.2.21` |
-> | `docs-site/docs/en/guide/versioning.md` | 11 | 同上(英文) |
 > | `docs-site/docs/guide/windows.md` | 102 | 跨盘 `anet --version` 崩溃是哪个通道的现状 |
 > | `docs-site/docs/guide/support-matrix.md` | 49 | 脚注 ^1^ 钉了「已在已发布产物 `@sleep2agi/agent-node@2.5.0-preview.34` 里 grep 复核」——**这是一次取证的时间戳，不是「当前通道版本」**；换版本时不要顺手改它，改了就等于把当时的证据改成另一个版本的 |
 > | `docs-site/docs/en/guide/support-matrix.md` | 49 | 同上(英文) |
@@ -130,16 +129,10 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/guide/channels.md` | 见门输出 | 信道断言 —— send_desktop_message 一节钉了 `commhub-server@0.9.0-preview.36`(工具引入版本) |
 > | `docs-site/docs/en/guide/channels.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/en/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
-> | `docs-site/docs/en/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/en/guide/runtimes.md` | 见门输出 | 信道断言 —— 通道表钉了 npm `latest` 的**具体版本号**(#1298)，换 dist-tag 即失真 |
-> | `docs-site/docs/en/preview/index.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
-> | `docs-site/docs/en/troubleshooting/case-feishu-silent-deny.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/guide/runtimes.md` | 见门输出 | 信道断言 —— 同上(中文) |
 > | `docs-site/docs/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
-> | `docs-site/docs/guide/grok-copresence.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
-> | `docs-site/docs/preview/index.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
-> | `docs-site/docs/troubleshooting/case-feishu-silent-deny.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 >
 > 🔴 **这张表第四次被修正:7 → 8 → 12 → 31。**
 > 前三次都是有人踩到之后手工补的,而 SOP 里那句「加新断言时同时加进这张表」靠人记 —— 记不住。
