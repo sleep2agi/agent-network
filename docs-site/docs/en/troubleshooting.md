@@ -26,7 +26,7 @@ Before sharing logs, remove tokens, API keys, passwords, cookies, complete envir
 
 ### `requires the Bun runtime` / `spawn bunx ENOENT` / Bun not found
 
-The **preview** channel (`2.3.0-preview.x`) refuses before launch with a clear message:
+**Builds `2.3.0-preview.47` and later** (both the `latest` and `preview` channels are in that range now) refuse before launch with a clear message:
 
 ```
 ❌ anet hub start requires the Bun runtime (commhub-server is bun-only …)
@@ -34,9 +34,7 @@ The **preview** channel (`2.3.0-preview.x`) refuses before launch with a clear m
 
 and exit with code 1.
 
-🔴 **The `latest` channel (currently `2.2.21`) does not have that preflight yet** — there you still get a bare `Error: spawn bunx ENOENT` plus a Node stack trace. `npm i -g @sleep2agi/agent-network` installs `latest`, so for most readers the string below is **present tense, not history**.
-
-`spawn bunx ENOENT` is what [#235](https://github.com/sleep2agi/agent-network/issues/235) removed **on preview**; the string is kept in this heading so people arriving from older versions — and everyone still on `latest` — find this section.
+Older builds without that preflight (such as `2.2.x`) crash with a bare `Error: spawn bunx ENOENT` plus a Node stack trace. If you see that string you are on an old build: install Bun, then run `anet upgrade`. Check your installed version with `anet -v`; check where the channels point with `npm view @sleep2agi/agent-network dist-tags`.
 
 Agent Network CLI requires Node.js ≥ 22.13, and the Hub requires Bun ≥ 1.2:
 

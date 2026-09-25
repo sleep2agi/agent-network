@@ -255,8 +255,8 @@ The following commands exist in the current preview and must not be presented as
 
 | Command | Purpose |
 |---|---|
-| `anet daemon up [name]` | Create and start a `host_supervisor` — **preview channel only** |
-| `anet daemon init <name>` / `start <name>` / `restart <name>` / `list` | Manage local daemons — **preview channel only** |
+| `anet daemon up [name]` | Create and start a `host_supervisor` (version requirements: [which versions have `anet daemon`](/en/deploy/daemon#which-versions)) |
+| `anet daemon init <name>` / `start <name>` / `restart <name>` / `list` | Manage local daemons (same version requirements; for `restart` see the [daemon page](/en/deploy/daemon)) |
 | `anet node start <name> --copresence` | Start Codex app-server, bridge, and shared TUI |
 | `anet opencode ...` | Manage the preview OpenCode integration |
 

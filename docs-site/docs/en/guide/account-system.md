@@ -33,7 +33,7 @@ Two ways to register — both create the same type of account:
 ```bash
 # Method 1: Start the Hub (creates the default admin account)
 anet hub start
-# → Creates admin / anethub on first run
+# → Creates admin with a random password, printed only this once
 # → Prints the next anet login command
 
 # Method 2: Join someone else's server

@@ -1,11 +1,11 @@
-# Grok 人机共存 TUI（预览）
+# Grok 人机共存 TUI（实验）
 
-::: danger 预览 / Preview —— 要稳定的 Grok 节点请用 `grok-build-acp`
-`grok-build-cli` 共存是预览能力：人在 TUI 输入框里有字时网络任务只会排队、超时后失败；grok 自更新到验证清单外的版本后，下一次重启起不来（报错里给出 `GROK_BINARY=<已验证的旧版本> anet node start <节点>` 恢复命令）。无人值守、要稳定接活，用 `--runtime grok-build-acp`。
+::: danger 默认且推荐用 ACP 模式 `grok-build-acp`；共存模式 `grok-build-cli` 是实验能力
+Grok 节点默认、推荐用 `--runtime grok-build-acp`（ACP 模式）。`grok-build-cli` 共存是实验能力：人在 TUI 输入框里有字时网络任务只会排队、超时后失败；grok 自更新到验证清单外的版本后，下一次重启起不来（报错里给出 `GROK_BINARY=<已验证的旧版本> anet node start <节点>` 恢复命令）。无人值守、要稳定接活，用 `--runtime grok-build-acp`。
 :::
 
-::: tip 状态更新（2026-08-29 生产实测）
-下面的 danger 块记录的是 2026-08-18 的验收状态，**已过时**：`grok-build-cli` 共存路径现已端到端跑通 —— macmini 上用 npm 安装的 `anet 2.3.0-preview.43` + 全局 `agent-node`（grok `1.0.5 (5115b46bc909)`，验证清单内）创建节点、`anet grok attach` 进入共享 TUI、网络任务注入并 19 秒收到回答。当前用法见 [Grok 共存 TUI（grok-build-cli）](/guide/grok-tui)。历史告诫保留如下供追溯。
+::: tip 当前状态
+`grok-build-cli` 和 `anet grok attach` 已经在 npm 发布包里（`latest` 与 `preview` 两条通道都有；`anet --help` 的「Grok co-presence」一节会列出它们），状态是**实验**：能端到端跑通（建节点 → `anet grok attach` 进入共享 TUI → 网络任务注入并回复），但不作为默认推荐。只接受验证清单里的 grok build（`0.2.93 (f00f96316d)` 与 `1.0.5 (5115b46bc909)`）。用法见 [Grok 共存 TUI（grok-build-cli）](/guide/grok-tui)。页面下方的 danger 块是 2026-08-18 的旧状态，保留供追溯。
 :::
 
 ::: warning `blocked` 分辨不出真假 —— **从 agent-node `2.5.0-preview.57` 起已修**（[#1606](https://github.com/sleep2agi/agent-network/issues/1606)）
@@ -78,11 +78,10 @@ Hub 不得把死掉/未就绪的 TUI 报成 `idle`（#1005：liveness 快照，�
 本页其余的告诫仍然成立:它仍在重新验收,不要当已发布功能用。
 :::
 
-项目中已有让人和网络任务共享同一个 Grok TUI 的候选实现，但它仍在重新验收，不能视为已发布功能。进度与实测证据见 [Issue #537](https://github.com/sleep2agi/agent-network/issues/537) 和 [Draft PR #538](https://github.com/sleep2agi/agent-network/pull/538)。
-
 ## 现在可以用什么
 
-- `grok-build-acp`：当前正式 Grok runtime，通过 `grok agent stdio` 执行网络任务；**不能 attach 到同一个 TUI**。
+- `grok-build-acp`（**默认、推荐**）：正式的 Grok runtime，通过 `grok agent stdio` 执行网络任务；**不能 attach 到同一个 TUI**。
+- `grok-build-cli`（**实验**）：人和网络任务共享同一个 Grok TUI，见 [Grok 共存 TUI](/guide/grok-tui)。
 - `grok`：可直接在终端使用 Grok CLI，但这不会把该 TUI 变成 Agent Network 共存节点。
 
 ```bash
@@ -91,4 +90,4 @@ anet node create grok-agent --runtime grok-build-acp
 anet node start grok-agent
 ```
 
-功能正式进入发布包后，本页才会恢复安装与 attach 步骤。发布频道说明见[版本说明](./versioning.md)。
+共存模式的建节点与 attach 步骤见 [Grok 共存 TUI](/guide/grok-tui)。发布频道说明见[版本说明](./versioning.md)。

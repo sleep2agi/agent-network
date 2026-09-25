@@ -324,7 +324,7 @@ Agent Node is the working unit in the network, responsible for receiving tasks, 
 ### Runtimes
 
 ::: tip 4 on stable / 6 on preview
-The diagram and table below list all runtimes; rows tagged *(preview)* are preview-only and not selectable via `anet node create` on stable (channel availability: [runtimes canonical table](/en/guide/runtimes#runtimes-—-canonical-table)).
+The diagram and table below list all runtimes; rows tagged *(preview)* are preview maturity and are still selectable in the `anet node create` menu (channel availability: [runtimes canonical table](/en/guide/runtimes#runtimes-—-canonical-table)).
 :::
 
 ```mermaid

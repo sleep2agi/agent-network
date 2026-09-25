@@ -1221,7 +1221,7 @@ curl "http://localhost:9200/api/messages?scope=user&unacked=1&limit=50" \
   ],
   "unread": 3,
   "pending_count": 3,
-  "unread_by_agent": { "代码1号": 2, "通信龙": 3 },
+  "unread_by_agent": { "代码1号": 2, "代码2号": 3 },
   "unread_total": 5
 }
 ```

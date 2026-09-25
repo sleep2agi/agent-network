@@ -324,7 +324,7 @@ Agent Node 是网络中的工作单元，负责接收任务、调用 AI 模型�
 ### Runtime 一览
 
 ::: tip 正式版 4 种 / 预览版 6 种
-下图与表含全部 runtime；标 *(preview)* 的仅预览版可用，正式版 `anet node create` 选不到（渠道可用性见 [runtimes canonical 表](/guide/runtimes#runtime-对比-canonical-表)）。
+下图与表含全部 runtime；标 *(preview)* 的是预览成熟度，`anet node create` 的选单里同样能选到（渠道可用性见 [runtimes canonical 表](/guide/runtimes#runtime-对比-canonical-表)）。
 :::
 
 ```mermaid

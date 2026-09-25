@@ -40,8 +40,13 @@ echo
 echo "A. Canonical pages and channel boundary"
 check_file "$ZH" "Chinese guide exists"
 check_file "$EN" "English guide exists"
-check_grep 'preview-only.*latest.*完全不含|preview-only.*完全不在.*latest' "$ZH" "Chinese guide says feature is absent from latest"
-check_grep 'preview-only.*latest.*contains none|completely absent from npm `latest`' "$EN" "English guide says feature is absent from latest"
+# Corrected 2026-09-25: npm latest (2.3.0-preview.76 + agent-node 2.5.0-preview.58)
+# lists "Co-presence" / --copresence in `anet --help` and accepts
+# `--runtime codex-app-server`; the old "absent from latest" sentence was false.
+check_grep '`latest` 与 `preview` 两条通道.*都有' "$ZH" "Chinese guide says the feature ships on both channels"
+check_grep 'both the npm `latest` and `preview` channels' "$EN" "English guide says the feature ships on both channels"
+check_absent 'latest.*完全不含|完全不在.*latest' "$ZH" "Chinese guide no longer claims latest lacks the feature"
+check_absent 'latest.*contains none|completely absent from npm `latest`' "$EN" "English guide no longer claims latest lacks the feature"
 check_grep 'anet upgrade --channel preview' "$ZH" "Chinese guide gives preview-channel upgrade"
 check_grep 'anet upgrade --channel preview' "$EN" "English guide gives preview-channel upgrade"
 
@@ -57,8 +62,8 @@ check_absent 'tmux (attach|capture-pane|send-keys) -t codex-human' "$ZH" "Chines
 check_absent 'tmux (attach|capture-pane|send-keys) -t codex-human' "$EN" "English guide has no fuzzy co-presence target"
 check_grep '前缀匹配' "$ZH" "Chinese guide warns about tmux prefix matching"
 check_grep 'Prefix matching' "$EN" "English guide warns about tmux prefix matching"
-check_grep '外部团队节点.*2 天.*A站副责人.*9 天' "$ZH" "Chinese guide names both production duplicate cases"
-check_grep '外部团队节点.*two days.*A站副责人.*nine days' "$EN" "English guide names both production duplicate cases"
+check_grep '外部团队节点.*2 天.*另一团队节点.*9 天' "$ZH" "Chinese guide names both production duplicate cases"
+check_grep '外部团队节点.*two days.*另一团队节点.*nine days' "$EN" "English guide names both production duplicate cases"
 check_grep '普通.*start.*争抢同一 alias|普通 `start`.*争抢同一 alias' "$ZH" "Chinese recovery warns against plain start"
 check_grep 'plain `start`.*competes.*same alias|plain `anet node start`.*competes.*same alias' "$EN" "English recovery warns against plain start"
 check_grep 'for v in .*COMMHUB_.*do unset' "$ZH" "Chinese guide clears the complete COMMHUB variable family"

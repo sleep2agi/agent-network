@@ -3,7 +3,7 @@
 > 🔴 **This page covers install and auth. For "does feature F work on runtime R / OS O", see the [Support Matrix](/en/guide/support-matrix)** — that table is tri-state (✅ verified / ❌ verified broken / ❓ not verified) and every cell carries an evidence link.
 
 
-Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships several Runtimes (4 in stable, plus 2 more in preview) — **and you can mix them on a single Hub**: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
+Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships 7 Runtimes (4 stable: `claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`; 3 marked preview: `codex-app-server`, `grok-build-cli`, `opencode-cli`), and `anet node create` lists all 7 — **and you can mix them on a single Hub**: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
 
 ## Runtimes — canonical table {#runtimes-—-canonical-table}
 
@@ -39,7 +39,7 @@ For the current state of Grok TUI co-presence see the [Grok TUI status page](/en
 | `codex-cli` (stored internally as `codex-app-server`, preview) | OWNED codex app-server bridge ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) | Codex TUI co-presence (human and agent share one thread) | OpenAI Codex (default gpt-5.6-sol) | `codex login` done | Selecting it in the wizard enables co-presence; there is no second mode question |
 | `opencode-cli` (preview) | spawn local `opencode` CLI (public sst/opencode, fixed `opencode-ai` version pin) | Use the public opencode CLI as a multi-vendor front-end (unified session / auth abstraction, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | Multi-vendor: Anthropic native / OpenAI preset | Install `opencode` CLI (`npm i -g opencode-ai@<pin>`) + pick a vendor preset (Anthropic reads `ANTHROPIC_API_KEY` / OpenAI reads `OPENAI_API_KEY` env) | Wizard prompts to install opencode CLI → pick vendor preset (anthropic / openai); API key read from env, **not prompted** |
 
-> ⚠️ **`opencode-cli` is preview-channel only** (RFC-029, still iterating): npm **latest does not include it yet** — after installing latest, `anet node create` shows only the production runtimes (`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`). It lands in latest once stable.
+> ⚠️ **`opencode-cli` is still preview** (RFC-029, still iterating): it is in the `anet node create` menu on both the `latest` and `preview` channels, but treat its maturity as preview.
 
 > 🖥️ **Platforms and model (measured 2026-09-07):** `opencode-cli` co-presence runs on **Linux and macOS** — macOS needs
 > agent-network ≥ `2.3.0-preview.87` and agent-node ≥ `2.5.0-preview.67` (#1845: package identity check, `$TMPDIR`

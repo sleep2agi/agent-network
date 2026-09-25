@@ -1,5 +1,20 @@
 # Changelog
 
+::: warning This page is being brought up to date
+The newest entry below stops at 2026-08-28; later releases are still being written up. Until then:
+
+- See where the channels point: `npm view @sleep2agi/agent-network dist-tags` (same for `agent-node` and `commhub-server`)
+- Release notes for every npm version live in the repo's [`docs/tests/`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests) directory as `release-v<version>.md` (for example `release-v2.3.0-preview.76.md`)
+- Desktop app release notes are at [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)
+:::
+
+## Channel changes after 2026-08-28 (npm publish dates)
+
+- **2026-09-02**: `agent-network@2.3.0-preview.76` and `agent-node@2.5.0-preview.58` were published; as of 2026-09-25 they are `latest`. `commhub-server`'s `latest` is still `0.9.0-preview.30` (published 2026-08-26).
+- **As of 2026-09-25**: the `preview` channel is `agent-network@2.3.0-preview.115`, `agent-node@2.5.0-preview.88`, `commhub-server@0.9.0-preview.60`.
+
+---
+
 ## Reliability sprint: stop/delete convergence + node logs + timeout guard — preview (2026-08-28 evening)
 
 Coordinated release: `commhub-server@0.9.0-preview.36–.38`, `agent-node@2.5.0-preview.40–.43`, `agent-network@2.3.0-preview.54–.59`.
@@ -31,14 +46,14 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
 - **Current stable**: whatever npm's `latest` tag points to (see [Versioning](/en/guide/versioning) — npm `latest` is authoritative); v0.8.1 was the first Apache 2.0 OSS release.
-- **Current preview**: follow npm's `preview` dist-tag. Current published packages do not include `grok-build-cli` / `anet grok attach`; see [Issue #537](https://github.com/sleep2agi/agent-network/issues/537) for Grok TUI status.
+- **Current preview**: follow npm's `preview` dist-tag. Both `latest` and `preview` now include `grok-build-cli` and `anet grok attach` (experimental; `grok-build-acp` remains the default recommendation); see the [Grok TUI status page](/en/guide/grok-copresence).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
 ## Grok Co-presence TUI (`grok-build-cli`) — preview (2026-07-15) 🟡 preview
 
 ::: danger Correction — 2026-07-31
-The section below records a candidate milestone, not a currently installable feature. Rechecking the published npm packages showed that neither current `latest` nor `preview` contains `grok-build-cli` / `anet grok attach`; do not run the installation or usage commands in this historical entry. See the [Grok TUI status page](/en/guide/grok-copresence).
+The section below records a candidate milestone. Its installation and usage commands are as written at the time; do not copy them. `grok-build-cli` / `anet grok attach` later shipped in the npm packages (experimental); for the current status and usage see the [Grok TUI status page](/en/guide/grok-copresence).
 :::
 
 **Version sync** (npm `@preview` tag):
@@ -233,7 +248,7 @@ agent-node --version    # agent-node v2.4.10 ⬆
 
 #### Root cause + fix for `grok-build-acp` nodes hanging at `session/prompt timed out after 300000ms`
 
-**Symptom**: A `grok-build-acp` runtime node accepts a second task, hangs for ≈5 min, then agent-node reports `grok ACP request 'session/prompt' timed out after 300000ms`. ai-insight's `A站Grok` node (grok 0.2.29 alpha) captured the exact 2026-06-07 19:53:09 log:
+**Symptom**: A `grok-build-acp` runtime node accepts a second task, hangs for ≈5 min, then agent-node reports `grok ACP request 'session/prompt' timed out after 300000ms`. an ai-insight user's Grok node (grok 0.2.29 alpha) captured the exact 2026-06-07 19:53:09 log:
 
 ```text
 ERROR failed to parse incoming message: invalid type: string 'ENOENT',
@@ -252,7 +267,7 @@ Raw: {'jsonrpc':'2.0','id':5,
 **Live verification** (in-house, 2026-06-07 19:50–19:55):
 - Same-shape `read_file` failure retried: returns structured `code: -32000` + `data.originalCode: "ENOENT"` immediately
 - The grok turn continues without hanging; the task completes normally (47 s, well under the 300 s timeout)
-- ai-insight's `A站Grok` node passed UAT after installing `2.4.9-preview.0` globally
+- ai-insight's Grok node passed UAT after installing `2.4.9-preview.0` globally
 
 ### 🐛 Bugs Fixed
 
@@ -292,7 +307,7 @@ For the full troubleshooting entry see [troubleshooting → grok-build-acp node 
 
 ### 🙏 Credits
 
-Bug repro + root cause + UAT: live 19:53:09 capture + Vincent's `A站Grok` 47 s pilot; fix implementation: commit `4818776` + 2 regression tests; release ops: Method B two-phase + dual Install/Upgrade release notes sections.
+Bug repro + root cause + UAT: live 19:53:09 capture + a 47 s pilot on a user's Grok node; fix implementation: commit `4818776` + 2 regression tests; release ops: Method B two-phase + dual Install/Upgrade release notes sections.
 
 **Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.12...v0.10.13>
 

@@ -6,19 +6,19 @@
 
 `grok-build-cli` gives one Agent Network node ownership of the only real Grok TUI. You enter that same interface from another terminal with `anet grok attach`, while CommHub tasks queue into the same session. Human input has priority and network tasks run FIFO.
 
-::: warning Experimental (available on the preview channel)
-Co-presence now ships on the npm preview channel (verified with `@sleep2agi/agent-network@2.3.0-preview.59` + `@sleep2agi/agent-node@2.5.0-preview.43`). It does not replace `grok-build-acp`. Co-presence only accepts **verified grok builds**: `0.2.93 (f00f96316d)` and `1.0.5 (5115b46bc909)`; anything else is rejected.
+::: warning Experimental (included in the published npm packages)
+Co-presence ships in the published npm packages on both the `latest` and `preview` channels (see the "Grok co-presence" section of `anet --help`). It is experimental and does not replace `grok-build-acp`, which remains the default recommendation. Co-presence only accepts **verified grok builds**: `0.2.93 (f00f96316d)` and `1.0.5 (5115b46bc909)`; anything else is rejected.
 :::
 
 ## Prerequisites
 
 - Linux, macOS, or WSL with Node.js, Bun, and the native `node-pty` dependency
 - Grok Build CLI installed and logged in
-- A clone of the Agent Network repository
+- A clone of the Agent Network repository only if you want to run unreleased source changes; with npm-installed `anet` / `agent-node` you can skip the "Build from source" section below
 
 ```bash
 grok --version
-# Must be: grok 0.2.93 (f00f96316d)
+# Must be a build on the verified list: grok 0.2.93 (f00f96316d) or grok 1.0.5 (5115b46bc909)
 
 grok
 # Complete login in the UI on first use, then exit
@@ -38,7 +38,7 @@ npm run build
 cd ..
 ```
 
-The remaining commands on this page must use the CLI you just built, not npm stable's global `anet`. In bash/zsh, define a function scoped to the current shell and point it at the matching agent-node:
+If you build from source, the remaining commands on this page must use the CLI you just built, not the globally installed `anet`. In bash/zsh, define a function scoped to the current shell and point it at the matching agent-node:
 
 ```bash
 export ANET_SOURCE=/absolute/path/to/agent-orchestra

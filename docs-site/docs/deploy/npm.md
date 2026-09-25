@@ -166,8 +166,8 @@ npm install -g @sleep2agi/agent-network
 # 启动 Server（后台运行；公网部署请配反代 TLS）
 nohup anet hub start --host 0.0.0.0 --port 9200 &
 
-# 首次启动后立即改掉快速上手默认密码
-anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+# 首次启动打印一次随机密码;登录后立即改成自己的强密码
+anet login --hub http://127.0.0.1:9200 --username admin --password '<启动时打印的密码>'
 anet passwd
 
 # --- 成员端 ---

@@ -26,7 +26,7 @@ anet logs <alias> --follow
 
 ### `requires the Bun runtime` / `spawn bunx ENOENT` / 找不到 Bun
 
-**preview 线**(`2.3.0-preview.x`)会在启动前拦下并给出明确提示：
+**`2.3.0-preview.47` 及以后的构建**(现在 `latest` 与 `preview` 两条通道都在这个范围内)会在启动前拦下并给出明确提示：
 
 ```
 ❌ anet hub start requires the Bun runtime (commhub-server is bun-only …)
@@ -34,9 +34,7 @@ anet logs <alias> --follow
 
 退出码 1。
 
-🔴 **latest 线(当前 `2.2.21`)还没有这道 preflight** —— 那里仍是裸崩 `Error: spawn bunx ENOENT` + Node 堆栈。所以下面这个字样对 latest 用户是**现在时**,不是历史。
-
-`spawn bunx ENOENT` 是 [#235](https://github.com/sleep2agi/agent-network/issues/235) **之后在 preview 上**才消失的表现，这里保留这个字样是方便从旧版本搜过来的人找到本节。
+更早、不含这道 preflight 的构建(如 `2.2.x`)会裸崩 `Error: spawn bunx ENOENT` + Node 堆栈。看到这个字样说明你装的是旧版本:先装 Bun,再 `anet upgrade`。查自己装的版本用 `anet -v`;查通道当前指向用 `npm view @sleep2agi/agent-network dist-tags`。
 
 Agent Network CLI 需要 Node.js ≥ 22.13，Hub 需要 Bun ≥ 1.2：
 

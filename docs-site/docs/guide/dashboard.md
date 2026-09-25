@@ -309,7 +309,7 @@ Dashboard 通过三类数据面保持更新：
 ```bash
 # 升级 CLI 到 preview
 npm i -g @sleep2agi/agent-network@preview
-anet -v                                    # 应显示 2.3.0-preview.N（当前 preview 通道；latest 稳定版是 2.2.x）
+anet -v                                    # 应显示 2.3.0-preview.N（latest 与 preview 两条通道现在都是这个格式）
 anet hub dashboard                          # 自动 npx 拉当前 preview 版本
 ```
 

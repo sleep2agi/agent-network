@@ -210,7 +210,7 @@ anet hub dashboard
 
 | 问题 | 答案 |
 |------|------|
-| 账号从哪来？ | `anet hub start` 时自动创建（默认 admin / anethub） |
+| 账号从哪来？ | `anet hub start` 时自动创建（用户名 admin，密码随机生成、只打印一次） |
 | 用户名是什么？ | 默认 `admin`，可用 `anet register` 另开账号 |
 | 密码是什么？ | 你自己设置的 |
 | Dashboard 和 CLI 是同一个账号吗？ | 是的，完全相同 |
@@ -283,7 +283,7 @@ Agent Network 有两种 Token：
 ## 总结：先做什么？
 
 1. **装 CLI**：`npm install -g @sleep2agi/agent-network`
-2. **启 Hub**：`anet hub start`（自动建库 + 默认 admin/anethub）
+2. **启 Hub**：`anet hub start`（自动建库 + 创建 admin，随机密码只打印一次）
 3. **启 Dashboard**：`anet hub dashboard`
 4. **登录 + 建 Agent**：`anet login` → `anet node create my-bot` → `anet node start my-bot`
 
