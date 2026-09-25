@@ -30,6 +30,7 @@ import {
   stopRecordedAttach,
 } from "./attach-tui";
 import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
+import { Agent, type Dispatcher } from "undici";
 
 export { OPENCODE_DEFAULT_TASK_TIMEOUT_MS };
 
@@ -332,29 +333,72 @@ async function reserveLoopbackPort(): Promise<number> {
   });
 }
 
-async function fetchJson(
+// #2008 raised the task deadline to 30 min, yet turns still died at exactly
+// 5:00 with a bare "fetch failed". `POST /session/:id/message` in OpenCode
+// 1.18.1 sends no response headers until the turn ends, and Node's built-in
+// fetch (undici) has its own `headersTimeout`/`bodyTimeout` of 300_000 ms that
+// fire regardless of the AbortSignal: `TypeError: fetch failed`, cause
+// `UND_ERR_HEADERS_TIMEOUT`. The turn call therefore gets its own dispatcher
+// whose transport timers follow the task deadline (0 = unlimited when the
+// deadline is disabled). The grace keeps the bridge's AbortSignal the one that
+// fires first, so a deadline still takes the truthful "still running" path.
+// Bun (dev runs from source) ignores `dispatcher` but has its own 300 s fetch
+// timeout (`TimeoutError: The operation timed out`), disabled per request with
+// `timeout: false`; the AbortSignal still bounds the turn there too.
+const TURN_TRANSPORT_GRACE_MS = 60_000;
+
+export function openCodeTurnDispatcher(timeoutMs: number): Agent {
+  const transportMs = timeoutMs > 0 ? timeoutMs + TURN_TRANSPORT_GRACE_MS : 0;
+  return new Agent({ headersTimeout: transportMs, bodyTimeout: transportMs });
+}
+
+// "fetch failed" alone hides the reason; the undici cause code names it
+// (UND_ERR_HEADERS_TIMEOUT, ECONNREFUSED, UND_ERR_SOCKET, ...). The bridge's
+// own deadline (TimeoutError/AbortError) is passed through untouched.
+function explainFetchFailure(error: any, method: string, path: string): unknown {
+  if (error?.name === "TimeoutError" || error?.name === "AbortError") return error;
+  const cause = error?.cause;
+  const code = cause?.code;
+  if (!code) return error;
+  const detail = cause?.message && cause.message !== code ? `: ${cause.message}` : "";
+  return new Error(`OpenCode ${method} ${path} ${error?.message ?? "fetch failed"} (${code}${detail})`, { cause: error });
+}
+
+export async function fetchOpenCodeJson(
   url: string,
   password: string,
   path: string,
   init: RequestInit = {},
   timeoutMs = 5_000,
+  dispatcher?: Dispatcher,
 ): Promise<any> {
-  const response = await fetch(`${url}${path}`, {
-    ...init,
-    headers: {
-      authorization: basicAuthorization(password),
-      "content-type": "application/json",
-      ...(init.headers ?? {}),
-    },
-    // `timeoutMs <= 0` = no deadline (the operator disabled it).
-    ...(timeoutMs > 0 ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-  });
-  const text = await response.text();
+  const method = init.method ?? "GET";
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetch(`${url}${path}`, {
+      ...init,
+      headers: {
+        authorization: basicAuthorization(password),
+        "content-type": "application/json",
+        ...(init.headers ?? {}),
+      },
+      // `timeoutMs <= 0` = no deadline (the operator disabled it).
+      ...(timeoutMs > 0 ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      // Neither key is in the DOM RequestInit type. Node's fetch honours
+      // `dispatcher` and ignores `timeout`; Bun is the other way round.
+      ...(dispatcher ? { dispatcher, timeout: false } : {}),
+    } as RequestInit);
+    text = await response.text();
+  } catch (error) {
+    throw explainFetchFailure(error, method, path);
+  }
   if (!response.ok) {
-    throw new Error(`OpenCode ${init.method ?? "GET"} ${path} returned HTTP ${response.status}`);
+    throw new Error(`OpenCode ${method} ${path} returned HTTP ${response.status}`);
   }
   return text ? JSON.parse(text) : null;
 }
+const fetchJson = fetchOpenCodeJson;
 
 async function waitForHealth(
   child: ChildProcessWithoutNullStreams,
@@ -680,6 +724,8 @@ export async function openVettedOpenCodeCopresence(
             throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
           }
           let message: any;
+          const turnTimeoutMs = deadline > 0 ? Math.max(1, deadline - Date.now()) : 0;
+          const turnDispatcher = openCodeTurnDispatcher(turnTimeoutMs);
           try {
             message = await fetchJson(url, password, `/session/${created.id}/message`, {
               method: "POST",
@@ -688,7 +734,7 @@ export async function openVettedOpenCodeCopresence(
                 model,
                 parts: [{ type: "text", text: visiblePrompt }],
               }),
-            }, deadline > 0 ? Math.max(1, deadline - Date.now()) : 0);
+            }, turnTimeoutMs, turnDispatcher);
           } catch (error: any) {
             // Only the bridge's own deadline becomes the "still running"
             // reply; any other POST failure keeps its real message.
@@ -705,6 +751,11 @@ export async function openVettedOpenCodeCopresence(
               throw new OpenCodeCopresenceTimeoutError(landed ? "reply" : "admission", budgetMs);
             }
             throw error;
+          } finally {
+            // The body is fully read (or the request failed) by now; free the
+            // per-turn connection pool. Bun's built-in `undici` shim has no
+            // destroy(), hence the optional call.
+            (turnDispatcher as { destroy?: () => Promise<void> }).destroy?.()?.catch(() => {});
           }
           if (message?.info?.role !== "assistant") {
             throw unverifiedOwnerError(parseMessageReply(message), message?.info?.parentID, messageId, "response is not an assistant message");
