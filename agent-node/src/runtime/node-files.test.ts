@@ -113,8 +113,8 @@ describe("secretReasonFor (pure deny rules)", () => {
   for (const p of fine) test(`not secret: ${p}`, () => expect(secretReasonFor(p)).toBeNull());
 
   test("the work dir's own ancestors count as directories, never as a file name", () => {
-    expect(secretReasonFor("notes.md", "/home/demo/.claude/projects/p")).toBe("secret");
-    expect(secretReasonFor("", "/home/demo/.codex")).toBe("secret");
+    expect(secretReasonFor("notes.md", "/home/user/.claude/projects/p")).toBe("secret");
+    expect(secretReasonFor("", "/home/user/.codex")).toBe("secret");
     expect(secretReasonFor("config.json", "/srv/demo/.anet/nodes/demo-node")).toBe("secret");
     expect(secretReasonFor("run.log", "/srv/demo/.anet/nodes/demo-node")).toBeNull();
     // A work dir that happens to be named like a secret file is still browsable.
