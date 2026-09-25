@@ -20,6 +20,7 @@
 //   COMMHUB_DB=/tmp/test-retention.db bun test src/retention.test.ts
 
 import { db } from "./db.js";
+import { sweepNodeRequestContent, type NodeRequestSweepResult } from "./node-request-retention.js";
 
 export type RetentionConfig = {
   // High-frequency telemetry; default = 7 days.
@@ -52,6 +53,9 @@ export type SweepResult = {
     tasks: number;
     audit_log: number;
   };
+  // node_rules_requests: file bytes purged by age / after read, rows deleted
+  // after 30 days. Fixed policy (privacy, not disk) — no env opt-out.
+  nodeRequests: NodeRequestSweepResult;
   vacuum: {
     walCheckpointPagesMoved: number | null;
     incrementalFreedPages: number | null;
@@ -178,6 +182,8 @@ export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Sw
     cfg.auditLogDays,
   );
 
+  const nodeRequests = sweepNodeRequestContent();
+
   // VACUUM:
   //   - wal_checkpoint(TRUNCATE): trims the WAL file. Works on every
   //     SQLite DB regardless of auto_vacuum setting. Useful after
@@ -230,6 +236,7 @@ export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Sw
       tasks,
       audit_log: auditLog,
     },
+    nodeRequests,
     vacuum: { walCheckpointPagesMoved, incrementalFreedPages, errored },
   };
 }
@@ -249,11 +256,13 @@ export function startRetentionSweeper(
         r.deletes.inbox +
         r.deletes.tasks +
         r.deletes.audit_log;
-      if (totalDeletes > 0 || r.vacuum.errored) {
+      const nr = r.nodeRequests;
+      if (totalDeletes > 0 || nr.purged > 0 || nr.deleted > 0 || nr.timedOut > 0 || r.vacuum.errored) {
         console.log(
           `[commhub retention] swept in ${r.durationMs}ms — ` +
             `telemetry=${r.deletes.agent_telemetry} events=${r.deletes.task_events} ` +
             `inbox=${r.deletes.inbox} tasks=${r.deletes.tasks} audit=${r.deletes.audit_log} ` +
+            `nodeReqPurged=${nr.purged} nodeReqDeleted=${nr.deleted} nodeReqTimedOut=${nr.timedOut} ` +
             `walPages=${r.vacuum.walCheckpointPagesMoved} freedPages=${r.vacuum.incrementalFreedPages}`,
         );
       }

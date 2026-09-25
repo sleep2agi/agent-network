@@ -62,6 +62,7 @@ import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { parseHubTimestamp } from "./hub-timestamp";
+import { noteTerminalResultRead, sweepNodeRequestContent } from "./node-request-retention.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -3286,6 +3287,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       );
     }
 
+    // Opportunistic content retention (bounded, indexed) — node-request-retention.ts.
+    sweepNodeRequestContent();
     const requestId = `rf_${uuidv4()}`;
     const networkId = node.network_id || "default";
     db.run(
@@ -3490,6 +3493,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         );
         row.error = `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`;
       }
+      // Privacy: node file bytes are handed out for a short grace window after the
+      // first terminal read, then purged (node-request-retention.ts). Only reached
+      // after the SEC-1 scope check above — a foreign caller can't stamp/purge.
+      const terminal = status === "done" || status === "failed" || status === "timeout";
+      const purged = terminal ? noteTerminalResultRead(requestId).purged : false;
       return {
         content: [{
           type: "text" as const,
@@ -3501,7 +3509,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             status,
             file_name: row.file_name ?? null,
             exists: row.file_exists === null || row.file_exists === undefined ? null : row.file_exists === 1,
-            ...(status === "done" && row.op !== "write" ? { content: row.result_content ?? "" } : {}),
+            ...(status === "done" && row.op !== "write" && !purged ? { content: row.result_content ?? "" } : {}),
+            ...(purged ? { content_purged: true } : {}),
             error: row.error ?? null,
             age_ms: ageMs,
           }),
