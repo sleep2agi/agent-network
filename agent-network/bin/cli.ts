@@ -163,6 +163,11 @@ import {
   GROK_COPRESENCE_CHILD_ENV,
 } from "../src/grok-copresence-orchestration";
 import {
+  GROK_COPRESENCE_EXPERIMENTAL_NOTE_EN,
+  GROK_COPRESENCE_EXPERIMENTAL_NOTE_ZH,
+  resolveGrokCreateRuntime,
+} from "../src/grok-create-mode";
+import {
   grokCopresenceDisclosure,
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
@@ -3041,11 +3046,11 @@ async function setupCommand() {
         value: "codex-sdk",
       },
       {
-        name: `grok-build-acp — Grok Build ACP${isInstalled(versions.agentNode) ? "（需要 agent-node + grok CLI）" : "（需要安装 agent-node + grok CLI）"}`,
+        name: `grok-build-acp — Grok（推荐 / default：headless ACP）${isInstalled(versions.agentNode) ? "（需要 agent-node + grok CLI）" : "（需要安装 agent-node + grok CLI）"}`,
         value: "grok-build-acp",
       },
       {
-        name: `grok-build-cli — Grok 共存 TUI（预览 / Preview：人在输入框打字时网络任务会排队，grok 自更新后需重新钉版；要稳定选 grok-build-acp）`,
+        name: `grok-build-cli — Grok 共存 TUI（实验性 / experimental）— ${GROK_COPRESENCE_EXPERIMENTAL_NOTE_ZH}`,
         value: "grok-build-cli",
       },
       {
@@ -3715,7 +3720,8 @@ function printGrokCopresenceWarning(
   session: GrokCopresenceSessionDisclosure = "configured",
 ) {
   const disclosure = grokCopresenceDisclosure(tools, session);
-  console.warn(`[anet] ⚠ EXPERIMENTAL/DANGEROUS Grok co-presence preview.`);
+  console.warn(`[anet] ⚠ EXPERIMENTAL/DANGEROUS Grok co-presence (not the default — plain \`--runtime grok\` creates a headless ACP node).`);
+  console.warn(`[anet]   ${GROK_COPRESENCE_EXPERIMENTAL_NOTE_EN}`);
   console.warn(`[anet]   Network tasks drive the same Grok TUI; its fixed tools are automatically approved.`);
   for (const line of disclosure.lines) console.warn(`[anet]   ${line}`);
   console.warn(`[anet]   MCP is the single runtime-owned CommHub server.`);
@@ -4010,12 +4016,17 @@ Co-presence (human TUI + network agent share one thread):
       prevents \`printf 'yes\\n' |\` from bypassing the prompt.
       Optional: --codex-bin <path> --codex-home <dir> --model <id> --port <p>
 
-Grok co-presence (Preview — for a stable Grok node use --runtime grok-build-acp):
+Grok (default = headless ACP, recommended):
+  anet node create <name> --runtime grok
+                                Same as --runtime grok-build-acp. Reuses the \`grok\` CLI login.
+
+Grok co-presence (EXPERIMENTAL — shared human + network TUI; opt in explicitly):
   anet node create <name> --runtime grok-build-cli
-                                Create a preview shared Grok TUI node. Known limits: network
-                                tasks queue while a human is typing in the TUI, and a grok
-                                self-update outside the verified list blocks the next restart
-                                (the error prints a GROK_BINARY recovery command).
+  anet node create <name> --runtime grok --copresence
+                                Create an experimental shared Grok TUI node.
+                                ${GROK_COPRESENCE_EXPERIMENTAL_NOTE_EN}
+                                (A grok self-update outside the verified list blocks the next
+                                restart; the error prints a GROK_BINARY recovery command.)
   anet node create <name> --runtime grok-build-cli --tools WebSearch
                                 Opt into general web search (supports basic X URL search)
   anet grok attach <name>                  Attach this terminal (Ctrl-] detaches)
@@ -5200,9 +5211,11 @@ function createRuntimeChoices() {
     { value: "claude-code-cli", name: "claude-code-cli — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
     { value: "codex-sdk", name: "codex-sdk — OpenAI Codex, 复用 `codex login` 登录态" },
     { value: "codex-app-server", name: "codex-cli — Codex 共存 TUI（人和 Agent 共用一个 thread）" },
-    { value: "grok-build-acp", name: "grok-build-acp — Grok Build ACP, 复用 `grok` CLI 登录态" },
-    { value: "grok-build-cli", name: "grok-build-cli — Grok 共存 TUI（预览 / Preview；仅可信任务；要稳定选 grok-build-acp）" },
+    { value: "grok-build-acp", name: "grok-build-acp — Grok（推荐 / default：headless ACP）, 复用 `grok` CLI 登录态" },
     { value: "opencode-cli", name: "opencode-cli — 公版 OpenCode CLI, Anthropic/OpenAI preset (RFC-029)" },
+    // Owner decision 2026-09-25: Grok co-presence is experimental — listed last,
+    // behind the default ACP choice, with its limitations on the same line.
+    { value: "grok-build-cli", name: `grok-build-cli — Grok 共存 TUI（实验性 / experimental）— ${GROK_COPRESENCE_EXPERIMENTAL_NOTE_ZH}` },
   ];
 }
 
@@ -5477,6 +5490,19 @@ async function createCommand(idOverride?: string) {
   // normalization replaces it with the internal `codex-app-server` name.
   if (opts.runtime === "codex-cli" && opts.copresence === undefined) {
     opts.copresence = "true";
+  }
+
+  // Owner decision 2026-09-25: a plain `grok` node is headless ACP. The shared
+  // TUI (grok-build-cli) is experimental and needs an explicit ask —
+  // `--runtime grok-build-cli` or `--runtime grok --copresence`. New nodes only;
+  // existing profiles never pass through here (src/grok-create-mode.ts).
+  {
+    const grokMode = resolveGrokCreateRuntime(opts.runtime, opts.copresence);
+    if (!grokMode.ok) {
+      console.error(`[anet] ❌ ${grokMode.error}`);
+      process.exit(1);
+    }
+    if (grokMode.runtime !== undefined) opts.runtime = grokMode.runtime;
   }
 
   // ── Check hub connection BEFORE asking for model/key ──

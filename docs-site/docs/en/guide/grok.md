@@ -69,6 +69,8 @@ anet node create grok-demo --runtime grok-build-cli
 anet node start grok-demo
 ```
 
+(From anet 2.3.0-preview.116 you can also write `--runtime grok --copresence`; it creates the same node.)
+
 This line means the TUI is ready:
 
 ```text
