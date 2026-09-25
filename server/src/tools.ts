@@ -2982,6 +2982,51 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
 
+  // One alias can own several `nodes` rows in a network: re-creating a node
+  // under the same alias leaves the old row behind, and `db.get` on
+  // `WHERE alias = ? AND network_id = ?` then returns whichever row SQLite
+  // happens to yield first. A field report showed the result: the client
+  // queued a rules-file read for the live node, the node pulled with its own
+  // token, the hub resolved its alias to the stale row, found nothing pending
+  // and returned `request: null` until the read timed out.
+  //
+  // resolveNodeByAlias: prefer the row the alias's session points at (sessions
+  // are UNIQUE per network+alias and carry the node_id that last reported),
+  // then the newest row. Used where only an alias is known (a client targeting
+  // by alias; unbound legacy node tokens).
+  const resolveNodeByAlias = (alias: string, networkId: string) =>
+    db.get<{ node_id: string; alias: string; network_id: string | null }>(
+      `SELECT n.node_id, n.alias, n.network_id FROM nodes n
+         LEFT JOIN sessions s ON s.alias = n.alias AND s.network_id = n.network_id AND s.node_id = n.node_id
+        WHERE n.alias = ?1 AND n.network_id = ?2
+        ORDER BY (s.node_id IS NOT NULL) DESC, n.created_at DESC, n.rowid DESC
+        LIMIT 1`,
+      alias,
+      networkId,
+    ) ?? null;
+  // resolveCallerNode: the node a network token pulls/acks for. A token bound
+  // to a node resolves to exactly that node (and never to another row that
+  // shares its alias); only unbound legacy tokens fall back to the alias.
+  // Callers have already required callerTokenIsNetwork + enforceNetworkId +
+  // callerAlias.
+  const resolveCallerNode = (): { node_id: string; network_id: string | null } | null => {
+    const bound = callerTokenId
+      ? db.get<{ bound_node_id: string | null }>(
+          "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2",
+          callerTokenId,
+          enforceNetworkId,
+        )?.bound_node_id ?? null
+      : null;
+    if (bound) {
+      return db.get<{ node_id: string; network_id: string | null }>(
+        "SELECT node_id, network_id FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+        bound,
+        enforceNetworkId,
+      ) ?? null;
+    }
+    return resolveNodeByAlias(callerAlias!, enforceNetworkId!);
+  };
+
   server.tool(
     "get_config_update",
     "Node pulls its pending config update (called from agent-node when SSE config_update doorbell arrives). RFC-024.",
@@ -3005,11 +3050,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Unconditional network_id filter (was previously conditional on
       // enforceNetworkId being set; the new ntok guard above guarantees
       // it's non-null so the filter is always applied).
-      const node = db.get<any>(
-        "SELECT node_id, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
-        callerAlias,
-        enforceNetworkId,
-      );
+      const node = resolveCallerNode();
       if (!node) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, update: null }) }] };
       }
@@ -3062,11 +3103,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Cross-tenant guard: the ack-er must own the update being acked.
       // Resolve node by caller's alias under the enforced network.
       // Network filter is unconditional (guard above guarantees non-null).
-      const node = db.get<any>(
-        "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
-        callerAlias,
-        enforceNetworkId,
-      );
+      const node = resolveCallerNode();
       if (!node) {
         // Silently ignore stale ack — return ok so the node doesn't retry forever.
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "alias_unknown" }) }] };
@@ -3155,11 +3192,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       node = resolved.row as any;
     } else {
       const scopeNet = effectiveNetId || "default";
-      const byAlias = db.get<{ node_id: string; alias: string; network_id: string | null }>(
-        "SELECT node_id, alias, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
-        a.alias,
-        scopeNet,
-      );
+      const byAlias = resolveNodeByAlias(a.alias, scopeNet);
       if (byAlias) {
         node = byAlias;
       } else {
@@ -3278,11 +3311,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!callerAlias) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
       }
-      const node = db.get<any>(
-        "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
-        callerAlias,
-        enforceNetworkId,
-      );
+      const node = resolveCallerNode();
       // app#225 follow-up — no `nodes` row: this is a session-only target
       // (claude-code). Its queue key is `session:<alias>`, always paired with the
       // caller's network so a same-named alias in another network never matches.
@@ -3333,11 +3362,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!callerAlias) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
       }
-      const node = db.get<any>(
-        "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
-        callerAlias,
-        enforceNetworkId,
-      );
+      const node = resolveCallerNode();
       const queueKey: string = node ? node.node_id : `session:${callerAlias}`;
       const req = db.get<any>(
         "SELECT request_id, node_id, network_id, status FROM node_rules_requests WHERE request_id = ?1",
