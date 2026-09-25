@@ -738,6 +738,16 @@ export function patrolExpiredTasks(): void {
         // in this count. The WHERE clause still targets one exact guarded
         // task, so any positive count proves the task transition happened.
         if (result.changes < 1) continue;
+        // #2022 — retire the inbox rows in the same transaction. Nothing
+        // else acks them: an expired task can never be acked by its target,
+        // and retention only sweeps acked=1 rows, so leaving them unacked
+        // kept them in every "unacked inbox" consumer (the stop/delete gate,
+        // the unread badge) forever. COALESCE(task_id, id) mirrors
+        // cancel_task — legacy rows carry the logical task id in `id`.
+        db.run(
+          `UPDATE inbox SET acked = 1 WHERE COALESCE(task_id, id) = ?1 AND acked = 0`,
+          [task.task_id],
+        );
         syncScheduledRunForTask(task.task_id, task.network_id);
         changed.push(task);
       }

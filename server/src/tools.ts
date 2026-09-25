@@ -4528,10 +4528,45 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // Use COALESCE so a NULL inbox row is counted against the same
     // network as the target node (which is the only safe default
     // — pre-multi-network rows existed in single-network mode).
+    //
+    // #2022 — "unacked" alone is not "in flight". Nothing acks a row
+    // whose task already reached a terminal state (report_completion,
+    // send_reply, send_ack, the TTL patrol all leave inbox alone) and
+    // retention sweeps only acked=1 rows, so those rows were counted
+    // forever: one dead row pinned this gate to node_busy_in_flight
+    // and force=true was the only way past it. Counting rule — a row is
+    // in flight only while it can still be work; both filters fail
+    // open toward "count it" until then:
+    //   1. type='task' rows — LEFT JOIN tasks on the logical task id
+    //      (COALESCE(task_id, id), the same key cancel_task and
+    //      ack_inbox use: the first deliveries set id == task_id and
+    //      retry/reassign write a fresh transport id) and drop the row
+    //      once its task is terminal: replied / failed / cancelled /
+    //      expired. A task row with no tasks row (reaped, or a legacy
+    //      row carrying no resolvable id) falls through to filter 2.
+    //   2. an age ceiling of IN_FLIGHT_MAX_AGE_MINUTES on
+    //      inbox.created_at, applied to every row type. It equals the
+    //      default task TTL (send_task ttl_seconds = 3600): work that
+    //      was never pulled within a TTL is not work this node is
+    //      processing — acked work has already left this count (it left
+    //      as acked=1). This is also the only exit for task rows the
+    //      TTL patrol never expires (acked/running are outside its
+    //      scope) and for non-task rows (reply / broadcast / message),
+    //      which are judged by age alone.
+    // The count stays a per-alias inbox count: one PK join per row, no
+    // per-row task lookup beyond it.
+    const IN_FLIGHT_MAX_AGE_MINUTES = 60;
     const inFlightRow = db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM inbox WHERE session_name = ?1 AND acked = 0
-         AND COALESCE(network_id, ?2) = ?2`,
-      node.alias, node.network_id,
+      `SELECT COUNT(*) AS n FROM inbox i
+         LEFT JOIN tasks t
+           ON i.type = 'task'
+          AND t.task_id = COALESCE(i.task_id, i.id)
+        WHERE i.session_name = ?1 AND i.acked = 0
+          AND COALESCE(i.network_id, ?2) = ?2
+          AND i.created_at >= datetime('now', ?3)
+          AND (i.type <> 'task' OR t.task_id IS NULL
+               OR t.status NOT IN ('replied', 'failed', 'cancelled', 'expired'))`,
+      node.alias, node.network_id, `-${IN_FLIGHT_MAX_AGE_MINUTES} minutes`,
     );
     const inFlight = inFlightRow?.n ?? 0;
     if (inFlight > 0 && !args.force) {

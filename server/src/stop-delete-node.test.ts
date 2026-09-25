@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { db } from "./db.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
+import { patrolExpiredTasks } from "./server.js";
 
 // RFC-027 PR1 — handler-driven tests for stop_node, delete_node,
 // get_stop_request, ack_stop_request. Drives the MCP handlers via
@@ -42,6 +43,9 @@ function cleanup() {
     // PR1.2a restart_node tests leave node_config_updates rows; clear
     // so the next test's restart_node doesn't see them as in_flight.
     try { db.run("DELETE FROM node_config_updates WHERE network_id = ?1", [n]); } catch {}
+    // #2022 seeds tasks rows whose status drives the in-flight join; clear
+    // them by network or a later test inherits a stale terminal row.
+    try { db.run("DELETE FROM tasks WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM nodes WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM sessions WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM api_tokens WHERE network_id = ?1", [n]); } catch {}
@@ -948,5 +952,181 @@ describe("delete_node — stale-deleting redispatch exit (#1286)", () => {
     seedDeletingChild(); seedStopRequest("dispatched", 10 * 60_000);
     const r = await call(buildHandlers(USER_A_ID).delete_node, { ...base, force: true });
     expect(r.ok).toBe(true);
+  });
+});
+
+// ── #2022 — in-flight gate: terminal / aged rows must not pin busy ──
+//
+// The old gate was COUNT(*) FROM inbox WHERE session_name=? AND acked=0:
+// no join to tasks, no age limit, and nothing acks an inbox row whose
+// task already died (retention sweeps only acked=1 rows), so a single
+// dead row pinned the node to node_busy_in_flight forever.
+//
+// Rule under test:
+//   1. type='task' rows are dropped once their task is terminal
+//      (replied / failed / cancelled / expired) — join key is
+//      COALESCE(task_id, id), the same logical id cancel_task uses.
+//   2. every row type has a 60-minute age ceiling (= the default task
+//      TTL): unacked longer than that means nobody pulled it, so it is
+//      not work this node is processing.
+//   3. patrolExpiredTasks acks the matching inbox rows in the same
+//      transaction that expires the task.
+
+function seedTaskWithInbox(
+  net: string,
+  alias: string,
+  opts: {
+    task_id: string;
+    status: string;
+    /** signed datetime offset for the tasks row, e.g. '-3 days' */
+    task_age?: string;
+    /** signed datetime offset for the inbox row, e.g. '-3 days' */
+    inbox_age?: string;
+    /** signed datetime offset for tasks.expires_at, e.g. '+1 hour' */
+    expires_in?: string;
+  },
+) {
+  db.run(
+    `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response,
+                        created_at, delivered_at, expires_at, network_id)
+     VALUES (?1, 'caller', ?2, 'normal', ?3, 'do the thing', 'reply',
+             datetime('now', ?4), datetime('now', ?4), datetime('now', ?5), ?6)`,
+    [opts.task_id, alias, opts.status, opts.task_age ?? "0 seconds", opts.expires_in ?? "+1 hour", net],
+  );
+  db.run(
+    `INSERT INTO inbox (id, task_id, session_name, type, priority, content, from_session, network_id, acked, created_at)
+     VALUES (?1, ?1, ?2, 'task', 'normal', 'do the thing', 'caller', ?3, 0, datetime('now', ?4))`,
+    [opts.task_id, alias, net, opts.inbox_age ?? "0 seconds"],
+  );
+}
+
+function stopArgs() {
+  return { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A };
+}
+
+describe("#2022 stop gate — terminal task rows are not in flight", () => {
+  test("28-day-old expired + 3-day-old replied rows → stop dispatches, in_flight=0", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
+      task_id: "task_2022_expired", status: "expired",
+      task_age: "-28 days", inbox_age: "-28 days", expires_in: "-27 days",
+    });
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
+      task_id: "task_2022_replied", status: "replied",
+      task_age: "-3 days", inbox_age: "-3 days", expires_in: "-2 days",
+    });
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.ok).toBe(true);
+    expect(r.in_flight_at_dispatch).toBe(0);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("stopping");
+  });
+
+  test("FRESH terminal row (replied, 0s old) also not counted — terminal filter alone is enough", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_2022_fresh_replied", status: "replied" });
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.ok).toBe(true);
+    expect(r.in_flight_at_dispatch).toBe(0);
+  });
+});
+
+describe("#2022 stop gate — genuinely in-flight rows still block", () => {
+  test("fresh non-terminal task row → node_busy_in_flight, count surfaced, state untouched", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_2022_live", status: "delivered" });
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(1);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+    expect(readAudit("stop_node_dispatched", NET_A).length).toBe(0);
+  });
+
+  test("fresh non-task inbox row (type='reply') still counts — judged by age only", async () => {
+    setupAlphaNetwork();
+    db.run(
+      `INSERT INTO inbox (id, session_name, type, content, from_session, network_id, acked, created_at)
+       VALUES (?1, ?2, 'reply', 'fresh reply', 'caller', ?3, 0, datetime('now'))`,
+      [`inbox_2022_fresh_reply`, CHILD_A_ALIAS, NET_A],
+    );
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(1);
+  });
+});
+
+describe("#2022 stop gate — age ceiling (60 min = default task TTL)", () => {
+  test("non-terminal task row unacked for 2 hours → not counted (nobody pulled it)", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
+      task_id: "task_2022_stale_running", status: "acked",
+      inbox_age: "-120 minutes", expires_in: "+12 hours",
+    });
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.ok).toBe(true);
+    expect(r.in_flight_at_dispatch).toBe(0);
+  });
+
+  test("non-task row older than the ceiling → not counted (the production backlog shape)", async () => {
+    setupAlphaNetwork();
+    db.run(
+      `INSERT INTO inbox (id, session_name, type, content, from_session, network_id, acked, created_at)
+       VALUES (?1, ?2, 'broadcast', 'week-old broadcast', 'caller', ?3, 0, datetime('now', '-7 days'))`,
+      [`inbox_2022_old_broadcast`, CHILD_A_ALIAS, NET_A],
+    );
+    const r = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(r.ok).toBe(true);
+    expect(r.in_flight_at_dispatch).toBe(0);
+  });
+});
+
+describe("#2022 patrolExpiredTasks — expires the task AND acks its inbox rows", () => {
+  test("same transaction: tasks.status='expired' + inbox.acked=1 → gate unblocks", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
+      task_id: "task_2022_due", status: "delivered",
+      inbox_age: "-10 minutes", expires_in: "-1 minute",
+    });
+
+    // Before the patrol: fresh, non-terminal → the node is correctly busy.
+    const before = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(before.error).toBe("node_busy_in_flight");
+    expect(before.in_flight_count).toBe(1);
+
+    patrolExpiredTasks();
+
+    expect(db.get<{ status: string }>("SELECT status FROM tasks WHERE task_id = ?1", "task_2022_due")?.status).toBe("expired");
+    const inboxRow = db.get<{ acked: number }>(
+      "SELECT acked FROM inbox WHERE task_id = ?1 AND session_name = ?2", "task_2022_due", CHILD_A_ALIAS,
+    );
+    expect(inboxRow?.acked).toBe(1);
+
+    // And the gate that was blocked a moment ago now dispatches.
+    const after = await call(buildHandlers(USER_A_ID).stop_node, stopArgs());
+    expect(after.ok).toBe(true);
+    expect(after.in_flight_at_dispatch).toBe(0);
+  });
+
+  test("legacy inbox row keyed by id (task_id IS NULL) is acked too", async () => {
+    setupAlphaNetwork();
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response,
+                          created_at, expires_at, network_id)
+       VALUES ('task_2022_legacy', 'caller', ?1, 'normal', 'delivered', 'do the thing', 'reply',
+               datetime('now', '-10 minutes'), datetime('now', '-1 minute'), ?2)`,
+      [CHILD_A_ALIAS, NET_A],
+    );
+    // Pre-task_id shape: the transport row IS the logical id.
+    db.run(
+      `INSERT INTO inbox (id, session_name, type, content, from_session, network_id, acked, created_at)
+       VALUES ('task_2022_legacy', ?1, 'task', 'do the thing', 'caller', ?2, 0, datetime('now', '-10 minutes'))`,
+      [CHILD_A_ALIAS, NET_A],
+    );
+
+    patrolExpiredTasks();
+
+    expect(db.get<{ status: string }>("SELECT status FROM tasks WHERE task_id = 'task_2022_legacy'")?.status).toBe("expired");
+    expect(db.get<{ acked: number }>("SELECT acked FROM inbox WHERE id = 'task_2022_legacy'")?.acked).toBe(1);
   });
 });
