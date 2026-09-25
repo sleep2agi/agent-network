@@ -1,95 +1,109 @@
-# Keeping the Hub alive
+# `anet daemon`: create nodes on a remote machine
 
-A production Hub needs a process supervisor. A bare `nohup ... &` will not recover
-after a crash, reboot, or accidental kill.
+`anet daemon` starts a `host_supervisor` node on a machine. Once it is connected to the Hub, you can
+create, start, and stop nodes on that machine from the Dashboard or the desktop app, without SSHing in
+to run `anet node create`.
 
-::: tip Which daemon are you after? This page covers two things
-"daemon" means two **different** things in this project — the names collide.
-Pick yours first:
-
-| What you want | Where |
-|---|---|
-| **Try `anet daemon`** — start a `host_supervisor` node (RFC-026) that the Dashboard can drive remotely and that can create/manage other nodes for you | ⬇️ next section, [Try `anet daemon` in 5 minutes](#try-anet-daemon) |
-| **Make the Hub survive a crash** — supervise the `anet hub start` process with PM2 / systemd | ⬇️ everything from [Prerequisites](#hub-prereqs) down |
-
-They are independent — doing one does not require the other.
+::: tip Looking for "restart the Hub automatically when it crashes"?
+That is a different job: supervising the `anet hub start` process with PM2 / systemd. See
+[Keeping the Hub running (pm2 / systemd)](/en/deploy/keep-alive). The two are independent; you can do
+either one on its own.
 :::
+
+## What a daemon is {#what-it-is}
+
+A daemon is an agent-node with `role=host_supervisor`. It only performs deterministic node lifecycle
+operations: create, stop, restart, delete, and probe other nodes, all driven by structured requests from
+the Hub.
+
+- It is not a chat agent and does not use a model to interpret free text. A natural-language task sent
+  to it gets a short reply saying it is a program node and to use structured commands. To get AI work
+  done, send the task to an ordinary agent node.
+- By default it runs with `dangerouslySkipPermissions` + `teammateMode` and can fork child nodes through
+  the Hub. **Only run a daemon on a machine you trust to act on your behalf.** To tighten it, edit
+  `.anet/nodes/<daemon-name>/config.json`.
+- Only Linux and macOS are supported (on Windows, run it inside WSL). Since `2.3.0-preview.52`,
+  `anet daemon init` / `start` / `up` / `restart` exit with an error on native Windows.
+
+## Prerequisites {#hub-prereqs}
+
+Check these in order. Each one blocks you if it is missing, and each fails with an actionable message:
+
+| # | What you see if it is missing | Fix |
+|---|---|---|
+| 1. Bun ≥ 1.2 | `❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)` | `npm i -g bun`, then restart your shell so PATH picks it up |
+| 2. Hub running | `未找到 CommHub Server。请先运行: anet hub start` ("CommHub Server not found") | `anet hub start`, or `anet init --hub <hub-url>` to point at an existing Hub |
+| 3. Logged in with a network_id | `未登录或缺少 network_id。请运行: anet login` ("not logged in") | `anet register` to create an account, or `anet login` |
+
+### Which versions have `anet daemon` {#which-versions}
+
+`anet daemon` is available in `@sleep2agi/agent-network` `2.3.0-preview.39` and later; `2.2.21` and
+earlier do not have it. Do not reason from the channel name; check the build you have:
+
+```bash
+anet -v                 # which build you have
+anet daemon             # present: prints  Usage: anet daemon <subcommand> …
+                        # absent:  Unknown command "daemon" (exit 1)
+```
+
+Other features on this page have their own lower bounds:
+
+| Feature | Requires |
+|---|---|
+| The `anet daemon` command | agent-network ≥ `2.3.0-preview.39` |
+| "Create capability" line in `anet daemon list` | agent-network ≥ `2.3.0-preview.70` |
+| `anet daemon restart` | agent-network ≥ `2.3.0-preview.73` |
+| `ANET_BIN` auto-pin also when a daemon is started by `anet node start` / `node restart` / `project up` | agent-network ≥ `2.3.0-preview.110` |
+| Daemon re-measures create capability and reports when it measured | agent-node ≥ `2.5.0-preview.55` |
 
 ## Try `anet daemon` in 5 minutes {#try-anet-daemon}
 
-> 🔴 **Every command below was actually run in a clean `node:22-bookworm-slim`
-> container** (2026-08-27); the output shown is real, not illustrative.
-> Measured with `anet v2.3.0-preview.47` + `agent-node v2.5.0-preview.34` +
-> `commhub-server v0.9.0-preview.30`.
-
-### 0. Install (`bun` is not optional)
+### 1. Install
 
 ```bash
 npm i -g bun @sleep2agi/agent-network @sleep2agi/agent-node
 ```
 
-🔴 **`bun` is a hard prerequisite.** Without it the very first command stops at:
+`bun` is required; the Hub only runs on Bun. A plain install is enough, with no version number to copy.
+Afterwards check `anet -v` against [the version requirements above](#which-versions).
 
-```
-❌ anet hub start requires the Bun runtime
-   (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)
-```
-
-🔴 **Versions: a plain install is enough — do not hand-copy a version number.**
-`anet daemon` has existed since `2.3.0-preview.39`, and today's `latest` is past that floor. Check yours with
-`anet -v`; if `anet daemon` prints `Unknown command`, your build predates the
-command — see [which versions have it](#which-versions).
-
-### 1. Start the Hub
+### 2. Start the Hub and log in
 
 ```bash
 anet hub start
 ```
 
-It prints a banner containing a **randomly generated admin password, shown only once**:
+The banner contains a randomly generated admin password that is **shown only once**. Copy it now:
 
-```
-  ✅ Server running on http://127.0.0.1:9200 (commhub-server v0.9.0-preview.30)
+```text
+  ✅ Server running on http://127.0.0.1:9200 (commhub-server v<version>)
   ✅ Admin account created
      username: admin
-     password: anet-90ddcdbe2b3f4f81a66ff5      ← yours will differ; copy it now
+     password: anet-<random>
      Store this password now; it will not be shown again.
 ```
 
-🔴 That password is **different on every machine** (random bootstrap password, since
-`2.2.22-preview.4`). Use the one from your own run, not the one above.
-
-### 2. Log in
-
-The banner hands you the assembled command — copy it:
+The banner also prints the assembled login command:
 
 ```bash
-anet login --hub http://127.0.0.1:9200 --username admin --password <from your banner>
+anet login --hub http://127.0.0.1:9200 --username admin --password <password from your banner>
 ```
 
-```
-✅ Logged in as admin
-⚠ Your password is the BOOTSTRAP DEFAULT and must be changed.
-   Change it now:  anet passwd
-   network: admin
-   token saved to ~/.anet/config.json
-```
+The first login asks you to change this bootstrap password with `anet passwd`. Log in before starting
+the daemon; otherwise `anet daemon up` stops at `未登录或缺少 network_id` ("not logged in").
 
-🔴 **Order matters.** Running `anet daemon up` before logging in stops at
-`未登录或缺少 network_id。请运行: anet login` (exit code 1).
-
-### 3. Start the daemon — one command
+### 3. Start the daemon
 
 ```bash
 anet daemon up
 ```
 
-Real output:
+The output looks like this:
 
-```
+```text
 [anet daemon] ✓ created host_supervisor daemon "daemon"
               config:     .anet/nodes/daemon/config.json
-              node_id:    node_daemon_8d94ac332abb
+              node_id:    node_daemon_<id>
 
 [anet daemon] ⚠ Permission posture:
               flags.dangerouslySkipPermissions = true  (no per-call confirmation)
@@ -97,94 +111,128 @@ Real output:
               role = host_supervisor                   (can fork child agent-nodes via hub)
               → Run daemons only on machines you trust to act on your behalf.
 
-[anet] Starting new session for "daemon" [claude-agent-sdk]...
 [daemon] 已注册到 CommHub
 [daemon] SSE connected
 ```
 
-🔴 **`anet daemon up` holds the terminal** — a daemon is a long-running process.
-To background it, see [Keeping a daemon alive](#keep-daemon-alive) below.
+`anet daemon up` is `init` + `start`; with no name, the daemon is called `daemon`. It is a long-running
+process and holds the terminal. To run it in the background, see
+[Keeping a daemon running](#keep-daemon-alive).
 
-⚠️ Note the **Permission posture** block: a daemon runs with
-`dangerouslySkipPermissions` + `teammateMode` and can fork child nodes through the hub.
-**Only run one on a machine you trust to act on your behalf.** To tighten it, edit
-`.anet/nodes/daemon/config.json`.
+Startup also prints `workdir:`. That is the daemon's workspace, and it decides which nodes the daemon can
+reach; see [Which nodes a daemon can reach](#workspace).
 
-::: info A daemon is a **pure-program** supervisor, not a chat agent
-A `host_supervisor` daemon's job is **deterministic node lifecycle** — create / stop /
-restart / delete / probe other nodes — all driven by structured doorbells the hub sends
-(RFC-026/027/028). It is a plain program executor and **does not use a model to interpret
-free-text tasks** you send it. The `[claude-agent-sdk]` in the startup banner is only its
-default runtime label; the daemon does not load a model to handle lifecycle commands.
+### 4. Confirm the daemon is online {#confirm-running}
 
-So: **to get AI work done, send the task to a real agent node**, not the daemon. Sending a
-natural-language task (`commhub_send_task`) to a daemon just gets you a short reply saying
-it is a program node — use structured commands instead.
-:::
-
-### 3.5 Keeping a daemon alive {#keep-daemon-alive}
-
-`anet daemon start` runs in the foreground. **If you started it over SSH, it dies with the
-session.** The three recipes below were each walked through on a real machine on 2026-08-27
-and verified the same way: **disconnect, then check that the hub-side heartbeat is still
-advancing** — never by trusting the startup banner.
-
-**Linux / macOS — `nohup`, then verify the heartbeat**
+`anet daemon list` lists the daemons configured in the current directory and asks the Hub whether each
+one can create nodes right now:
 
 ```bash
-cd ~                       # daemon config is cwd-relative: start it where you ran init
-nohup anet daemon start <name> > ~/daemon-<name>.log 2>&1 &
-sleep 25 && tail -5 ~/daemon-<name>.log   # expect "registered to CommHub" + "SSE connected"
-```
-After disconnecting, wait 3+ minutes and re-read `last_seen_at` on the hub:
-**only a still-advancing heartbeat proves it survived.** For crash-restart, use the PM2
-setup in the rest of this page with `anet daemon start <name>` as the supervised command.
-
-**Windows — a PowerShell Job will not survive**
-
-```powershell
-# ✗ Start-Job: reclaimed together with the SSH session; the daemon vanishes silently
-# ✓ WMI process creation: detaches from the session tree
-Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
-  -Arguments @{ CommandLine = "C:\Users\<you>\start-daemon.bat" }
-```
-`start-daemon.bat` (**wrap it in a .bat** — passing a long command line with quotes and
-redirection straight to WMI returns `ReturnValue=21`, "invalid parameter"):
-```bat
-@echo off
-cd /d C:\Users\<you>
-anet daemon start <name> >> C:\Users\<you>\daemon-<name>.log 2>&1
+anet daemon list
 ```
 
-🔴 **Two traps hit for real:**
+```text
+Local host_supervisor daemons (1):
+  scanned: <workdir>/.anet/nodes
+  daemon                   node_id=node_daemon_<id>  runtimes=[…]
+    创建能力:可用(5s 前测)
+```
 
-1. **cwd decides whether the daemon can find itself.** `anet daemon init` writes the config
-   under the **working directory at that moment** (`.anet/nodes/<name>/`). Start it in the
-   background from somewhere else and you get
-   `Daemon "<name>" not found. Create it first:` — the config exists, it just isn't there.
-   So the background command must `cd` back to the init directory.
-   (Easy to hit on Windows: the SSH login cwd may not be `C:\Users\<username>` — the
-   account name and the profile directory name need not match.)
-2. **Startup output is not a readiness check.** `anet daemon list` only reads local config;
-   being listed does not mean the hub knows about it. The criterion is hub-side:
-   `last_seen_at` still advancing.
+Being listed only means the config exists on this machine. To see whether the daemon is really connected
+to the Hub, check that `anet node ls` shows it as `idle` / `working` with `●` in the SSE column, or look
+at the Dashboard node list.
 
-### 3.6 Let the daemon actually create nodes: auto-pin `ANET_BIN` {#anet-bin-pin}
+The "create capability" line (currently printed in Chinese as `创建能力`) has several outcomes. They
+mean different things and need different actions:
 
-When a daemon receives `create_node`, it must fork the currently installed `anet`. To avoid
-`PATH` hijacking, the runtime still accepts only a verified absolute path; but
-`anet daemon init` / `start` / `up` now prepares that path automatically. Users no longer need
-to manually run `readlink -f`, `chmod`, or export daemon-specific environment variables.
+| The line starts with | Meaning | What to do |
+|---|---|---|
+| `创建能力:可用(…前测)` (available, measured … ago) | It could create nodes when last measured | Nothing |
+| `创建能力:**不可用**(<reason code>,…前测)` (unavailable) | The daemon reports it cannot create nodes | The following lines give the cause and a one-line fix you can paste; the common one is `chmod go-w` |
+| `创建能力:可用` plus a line saying it does not know when it was measured | An older agent-node measures only once at boot | Restart the daemon, or upgrade agent-node to ≥ `2.5.0-preview.55` |
+| `创建能力:未知` (unknown) | This daemon never reported the field; its agent-node is too old | Upgrade agent-node, then restart the daemon. This is not "unavailable"; do not repair a healthy machine |
+| `创建能力:查不到` (not found) | This machine could not read the field from the Hub | Read the rest of the line: no Hub address configured, the Hub rejected this machine's credentials (run `anet login`), the Hub has no such node_id, or the Hub is unreachable |
 
-Daemon startup now automatically:
+The measurement age matters: an "unavailable" measured weeks ago may have been fixed long since, and the
+daemon simply never re-measured. If the Hub is unreachable the command still succeeds and shows the local
+list.
 
-1. Resolves the current `anet` launcher to its real file and injects `ANET_BIN_ABS`.
-2. Diagnoses missing, non-absolute, symlink, group/other-writable, and non-executable paths separately.
-3. Refuses to start for the common npm `775` / group-writable install produced under `umask 0002`, and prints the exact `chmod go-w` command to run.
-4. Allows non-root nvm/homebrew/npm installs by default, because the binary is the user's own file.
-5. Rejects daemon mode on Windows up front, instead of waiting for POSIX-only path and mode checks to fail during node creation.
+If startup prints an "installed but not on PATH" warning, fix it first. Child nodes created by the daemon
+inherit the daemon's PATH; otherwise they fail with "xxx CLI not found" for a program that is in fact
+installed.
 
-The expected path is simply:
+### 5. Create your first node from the Dashboard {#first-node}
+
+Open the Dashboard:
+
+```bash
+anet hub dashboard        # port 3000 by default
+```
+
+The bind address is taken from `--ip`, then `--host`, then the `HOSTNAME` environment variable, falling
+back to `127.0.0.1`. Inside containers `HOSTNAME` is usually set, so pass `--ip` explicitly if needed.
+
+`daemon` appears in the node list with `role=host_supervisor`, and you can pick it under "choose a
+server" when creating a node.
+
+::: warning For your first node, trust the daemon log
+`create_node` returning `ok:true` with a `request_id` only means the request was accepted, not that the
+node was created. Some failures are written only to the log on the daemon's machine, and the Dashboard
+does not turn red. Check the log for your first creation:
+
+```bash
+# on the machine running the daemon
+tail -f ~/daemon-<daemon-name>.log     # or whatever file you redirected to at startup
+```
+
+| What you see | Meaning |
+|---|---|
+| `[create-node] spawned child '<name>' pid=…` and `+5000ms capability check OK` | Created; the new node registers itself with the Hub |
+| `[create-node] anet_bin_unsafe_path: …` | The `anet` path check failed; see [`ANET_BIN` auto-pin](#anet-bin-pin). It does not retry |
+| nothing at all | The request never reached the daemon; go back to [step 4](#confirm-running) and confirm it is connected |
+:::
+
+## Keeping a daemon running {#keep-daemon-alive}
+
+`anet daemon start` runs in the foreground. If you started it over SSH, it exits when the session ends.
+
+Run it in the background with `nohup`:
+
+```bash
+cd <directory where you ran init>     # daemon config is stored per directory
+nohup anet daemon start <daemon-name> > ~/daemon-<daemon-name>.log 2>&1 &
+sleep 25 && tail -5 ~/daemon-<daemon-name>.log   # expect "已注册到 CommHub" and "SSE connected"
+```
+
+Disconnect, wait a few minutes, and confirm from another session that it is still online (`anet node ls`
+or the Dashboard). The startup banner does not prove it survives the session; only being online after you
+disconnect does.
+
+For automatic restart after a crash, supervise the `anet daemon start <daemon-name>` command with PM2 or
+systemd, the same way as the Hub (see [Keeping the Hub running](/en/deploy/keep-alive#pm2)). Two things
+to get right:
+
+- The working directory (PM2 `cwd`, systemd `WorkingDirectory=`) must be the directory where you ran
+  `anet daemon init`. Otherwise you get `Daemon "<daemon-name>" not found. Create it first:` even though
+  the config exists; it is just not where the command looks.
+- Supervise `anet daemon start`, not `agent-node` directly. A daemon started without going through `anet`
+  never receives the `ANET_BIN` pin: it registers and heartbeats, but cannot create nodes (see the next
+  section).
+
+## `ANET_BIN` auto-pin {#anet-bin-pin}
+
+When a daemon receives `create_node`, it forks the locally installed `anet` to create the child node. To
+prevent `PATH` hijacking it accepts only a verified absolute path. `anet daemon init` / `start` / `up` /
+`restart` prepare that path automatically:
+
+1. Resolve the current `anet` launcher to its real file, inject `ANET_BIN_ABS`, and declare
+   `ANET_DAEMON_ALLOW_ENV_BIN=1`.
+2. Diagnose unresolved, non-absolute, symlink, group/other-writable, and non-executable paths separately.
+3. Refuse to start on the group-writable (`775`) install npm produces under `umask 0002`, and print the
+   exact `chmod go-w` command to run.
+4. Accept non-root nvm / Homebrew / npm installs by default.
+
+So normally all you need is:
 
 ```bash
 npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
@@ -192,18 +240,38 @@ anet login
 anet daemon up
 ```
 
-The `anet` path has two sources with different trust levels:
+The pin is not stored on disk; every start re-resolves it from the running `anet`. After upgrading
+`anet`, `anet daemon restart <daemon-name>` re-pins it.
+
+On agent-network ≥ `2.3.0-preview.110`, `anet node start <daemon-name>`, `anet node restart <daemon-name>`,
+and `anet project up` apply the same rules when the node they start is a daemon. If verification fails,
+the daemon still starts and prints the fix, and it reports "cannot create nodes" to the Hub, which greys
+it out in the Dashboard.
+
+### A running daemon that cannot create nodes {#anet-bin-fix}
+
+Try the no-root fix first: restart it through `anet`:
+
+```bash
+anet daemon restart <daemon-name>
+# older builds without restart:
+anet node stop <daemon-name> && anet daemon start <daemon-name>
+```
+
+If the binary is writable by group/other, not executable, or not an anet package bin,
+`anet daemon start` refuses and tells you why; follow its instructions. Do not work around the check by
+editing startup files on the server.
+
+### The two sources of the pinned `anet` path {#anet-bin-sources}
 
 | Source | Used for |
 |---|---|
-| `/etc/anet-daemon/path.conf` | Production trust root; when present, it wins over the environment |
-| `ANET_BIN_ABS` environment variable | Docker, development machines, or manual operations convenience |
+| A `path.conf` file | Trust root; wins over the environment when present |
+| `ANET_BIN_ABS` environment variable | Convenience for Docker, development machines, or manual operations; accepted only when `ANET_DAEMON_ALLOW_ENV_BIN=1` |
 
-🔴 **Source ① does not have to live in `/etc`, so it does not have to need root.**
-Its location comes from `ANET_DAEMON_PATH_CONF`; only when that is unset does it
-fall back to `/etc/anet-daemon/path.conf` (`%ProgramData%\anet-daemon\path.conf` on
-Windows). Point it at a file you own and you get a **root-free pin that survives a
-restart** — unlike `ANET_BIN_ABS`, which lives only in that one process:
+The location of `path.conf` comes from `ANET_DAEMON_PATH_CONF`, defaulting to
+`/etc/anet-daemon/path.conf`. Point it at a file you own to get a pin that needs no root and survives a
+restart:
 
 ```bash
 ANET_BIN_REAL="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' "$(command -v anet)")" \
@@ -212,429 +280,59 @@ ANET_BIN_REAL="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]
   && export ANET_DAEMON_PATH_CONF="$HOME/.anet/path.conf"
 ```
 
-Put `ANET_DAEMON_PATH_CONF` in the daemon's own environment (systemd `Environment=`,
-pm2 `env`, or the profile of the shell that starts it) — otherwise a restart falls
-back to `/etc` again.
+Put `ANET_DAEMON_PATH_CONF` in the daemon's own environment (systemd `Environment=`, PM2 `env`, or the
+profile of the shell that starts it); otherwise a restart falls back to `/etc`. You only need to set these
+variables by hand when you bypass `anet daemon` and assemble the startup command yourself.
 
-The runtime accepts `ANET_BIN_ABS` only when `ANET_DAEMON_ALLOW_ENV_BIN=1` is also set.
-`anet daemon init` / `start` / `up` sets that declaration itself, so the quickstart above
-does not need a manual environment variable. You only need to set it yourself when bypassing
-`anet daemon` and assembling the daemon startup command directly.
+## Which nodes a daemon can reach {#workspace}
 
-If a safety check fails, the CLI prints a one-line repair command that can be copied and run
-directly; do not work around it by editing untracked server startup files.
+A daemon's workspace is the directory it was started from. Every node it creates or starts lives under
+`<workdir>/.anet/nodes/`. Nodes you created by hand in another directory are out of reach; this is not a
+permission problem, they are simply not where the daemon looks.
 
-**Criterion**: issue one `create_node` from the hub; the daemon log must show
-`[create-node] spawned child '<name>' pid=…` plus `+5000ms capability check OK`, and the new
-node must register itself back to the hub. **Without those two lines it is not wired up** —
-it will not retry.
-
-**An already-running daemon that is not wired up — try the no-root path first.**
-`anet daemon init` / `start` / `up` / `restart` auto-declare the pin. Since **#1353**,
-`anet node start <daemon>` / `anet node restart <daemon>` / `anet project up` (which is how
-the boot sweep starts nodes) also self-resolve and verify the pin **with the same rules**
-when the node is a daemon (`role=host_supervisor`); the start log shows
-`[anet daemon] #1353 "<name>" is a daemon started via node start — pinned anet binary: …`.
-If verification fails it **still starts**, prints the fix, and the daemon reports
-"cannot create nodes" to the hub (the Dashboard greys it out).
-
-The pin is **not persisted**: every start re-resolves it from the running anet package, so
-after upgrading anet, `anet daemon restart <name>` is the re-pin. There is no separate pin
-file to maintain, and the trust root is unchanged.
-
-Only launches that bypass `anet` still **never receive** the pin: pm2 / systemd / a
-hand-assembled command that runs `agent-node` directly. Such a daemon still registers, stays
-online, and heartbeats, and shows "cannot create nodes" on the hub.
+To find a daemon's workspace (`<pid>` from `anet node ls` or `ps`):
 
 ```bash
-anet node stop <name> && anet daemon start <name>    # no root required
-```
-
-This is not guaranteed to work (`anet daemon start` refuses, and tells you why, if the
-binary is group/other-writable, not executable, or not an anet package bin), but it costs
-far less — **try it before reaching for sudo**. If it still fails, write
-`/etc/anet-daemon/path.conf` (the production trust root, see the table above).
-
-
-### 4. Confirm the **process** came up
-
-```bash
-anet daemon list
-```
-
-```
-Local host_supervisor daemons (1):
-  daemon   node_id=node_daemon_8d94ac332abb  runtimes=[claude-agent-sdk,codex-sdk,grok-build-acp]
-```
-
-On the Hub side you get a heartbeat every 3 minutes:
-
-```
-[08:36:00] SSE ← net_b84e736f347c:daemon connected (1 clients)
-[08:39:01] daemon (sdk-node) → report_status: idle [net]
-[08:42:01] daemon (sdk-node) → report_status: idle [net]
-```
-
-**`anet daemon list` now asks the hub whether each daemon can actually create nodes**,
-printing one extra line per daemon. Five situations get five different sentences — do not
-collapse them:
-
-```
-create capability: available (measured 5s ago)
-create capability: **unavailable** (anet_bin_permission, measured 5s ago)
-  cause: the binary is group/other-writable. One line fixes it
-  fix (paste as-is): chmod go-w "$(command -v anet)"
-create capability: available, but **we do not know when it was measured** — this daemon
-  version computes it once at boot and never re-checks. Restart it, or upgrade.
-create capability: unknown — this daemon never reported it (agent-node older than
-  preview.55). Upgrading is not enough — restart the daemon.
-create capability: not found — the hub has no such node_id (never registered, or
-  registered into a different network)
-create capability: not found — the hub rejected this machine's identity (HTTP 401).
-  The hub is reachable; this is a *credentials* problem, not a network one: run anet login
-```
-
-🔴 **"never reported" is not "unavailable."** The former says *this machine's agent-node is
-too old to tell us*; the latter says *it told us, and the answer is no*. Treating the first
-as the second sends you to repair a machine that is fine.
-
-🔴 **If startup prints an "installed but not on PATH" warning, fix that first.**
-`anet daemon start` checks whether the binaries required by the runtimes this daemon
-claims to support actually resolve on its PATH. It warns **only** when a binary is
-installed but not on PATH — because **child nodes the daemon creates inherit the
-daemon's PATH**, so those children fail with "xxx CLI not found" for something that
-is in fact installed, and reinstalling it changes nothing. (When the binary is genuinely
-absent it stays quiet: the node's own startup error is more specific.)
-
-🔴 **Upgrading alone changes nothing — restart it.** The daemon is a **long-lived process**
-and computes this field in-process, so swapping the package on disk has no effect on a daemon
-that is **already running**: `anet daemon list` keeps printing "unknown".
-
-```bash
-anet daemon restart <name>
-```
-
-::: tip Does your version have it?
-`restart` landed in **2.3.0-preview.73** (#1601); earlier builds print
-`Unknown daemon subcommand "restart"`. The `latest` tag that `npm i -g` installs by default
-now includes it (check where the channels point with
-`npm view @sleep2agi/agent-network dist-tags`).
-
-If unsure, run `anet daemon` with no subcommand and check the list for `restart`.
-**If it is absent, use the two-step form** — `daemon start` delegates to `node start`,
-so stopping goes through `node` too:
-
-```bash
-anet node stop <name>
-anet daemon start <name>
-```
-:::
-
-🔴 **The age is not decoration.** An `unavailable` measured 5s ago and one measured three
-weeks ago are different things — the latter was quite possibly fixed long since, and the
-daemon simply never re-measured. The line reports *when it was measured*, not *what is true
-right now*.
-
-(If the hub is unreachable the command still succeeds — the local listing never needed the
-network, and "cannot see the capability" is not "there is no daemon".)
-
-**Do you still need the next section's acceptance check?** Yes, but for a narrower purpose:
-`create capability: available` means *the pin resolved*. The next section — actually issuing
-one `create_node` — exercises the whole chain (doorbell arrives, child spawns, the new node
-registers back).
-
-### 5. Drive it remotely from the Dashboard
-
-Once the daemon is up and connected, open the Dashboard:
-
-```bash
-anet hub dashboard        # http://localhost:3000 by default
-```
-
-`daemon` appears in the node list with `role=host_supervisor`. What separates it from an
-ordinary node: **it can create and start other nodes on that machine for you** — which is
-the point of remote node creation. You no longer need to ssh in and run `anet node create`
-by hand.
-
-::: danger 🔴 Your first node creation: `ok:true` is **not** the success criterion
-At this step every signal you can see says it worked: the daemon is online, the heartbeat
-is healthy, the Dashboard lists it under "choose a server", and clicking through makes
-`create_node` return **`ok:true` plus a request_id**.
-
-**And the node may not have been created at all.** The failure is written only to the
-**local log on the daemon's own machine** — the hub never learns about it and the
-Dashboard never turns red. **Anyone who does not know to open that log gets stuck here.**
-
-**So verify your first creation from the log, not from the UI:**
-
-```bash
-# on the machine running the daemon
-tail -f ~/daemon-<name>.log        # or whatever file you redirected to at startup
-```
-
-| What you see | Meaning |
-|---|---|
-| `[create-node] spawned child '<name>' pid=…`<br>`+5000ms capability check OK` | ✅ really created; the new node registers itself with the hub |
-| `[create-node] anet_bin_unsafe_path: …` | ❌ `ANET_BIN` is not pinned correctly → [§3.6](#anet-bin-pin). **It does not retry** |
-| nothing at all | ❌ the doorbell never arrived — check the daemon is really connected (§4) |
-
-⚠️ **On Windows this step currently always fails**, with the same deceptive symptoms
-(registration, heartbeat and `ok:true` all look fine) — see [the end of §3.6](#anet-bin-pin)
-and [#1290](https://github.com/sleep2agi/agent-network/issues/1290). Until #1290 is fixed a
-Windows machine can run a daemon, but **do not expect it to fork child nodes**.
-:::
-
-::: warning ⚠️ Which nodes a daemon can reach: **only the ones in its own workspace**
-
-This is the easiest thing to misread here, and when you hit it, it does not look like a
-failure — it looks like the feature was never built.
-
-A daemon's workspace (`workDir`) is **whatever directory it happened to be started from**
-(`process.cwd()`). Every child node it creates or starts lives under
-`<workDir>/.anet/nodes/` — see `nodesRoot = join(deps.workDir, ".anet", "nodes")` in
-`agent-node/src/runtime/start-daemon.ts`.
-
-⇒ **Pre-existing nodes you created by hand somewhere else are out of reach.** It is not a
-permission problem; they are simply not in the directory the daemon searches. No amount of
-Dashboard buttons will start them. For a real-world shape see
-[#1648](https://github.com/sleep2agi/agent-network/issues/1648): daemon online with its CWD
-at the user's home directory, while three offline nodes had `project_dir` on two other
-drives and a WSL path.
-
-**How to tell which workspace a given daemon has** (`<pid>` from `anet node list` or `ps`):
-
-```bash
-ls -l /proc/<pid>/cwd            # Linux: read its cwd directly
+ls -l /proc/<pid>/cwd            # Linux
 lsof -a -p <pid> -d cwd          # macOS
-ls <workDir>/.anet/nodes/        # the nodes it can reach are exactly these
+ls <workdir>/.anet/nodes/        # the nodes it can reach are exactly these
 ```
 
-⇒ **Starting two daemons from two different directories on the same machine gives you two
-node sets that cannot see each other.** To have a daemon manage a given set of nodes,
-start it from that workspace.
+Two daemons started from two directories on the same machine manage two node sets that cannot see each
+other. To have a daemon manage a set of nodes, start it from the directory those nodes live in.
+`anet daemon list` likewise lists only the daemons in the current directory.
 
-(RFC-026 specifies `workDir` as a fixed `~/.anet/daemon/workspaces/<network_id>/`; the
-current implementation uses `process.cwd()`. The gap and three possible fixes are tracked
-in [#1722](https://github.com/sleep2agi/agent-network/issues/1722).)
-:::
+Whether the workspace should become a fixed directory is tracked in
+[#1722](https://github.com/sleep2agi/agent-network/issues/1722).
 
+## Upgrading and restarting {#restart}
 
----
-
-
-::: warning Use exactly one supervisor
-Do not let PM2, systemd, and a cron watchdog manage the same Hub. Competing
-supervisors can start two processes against one port and one SQLite database.
-:::
-
-## Prerequisites (in order — each one will stop you) {#hub-prereqs}
-
-Measured on a clean machine. All three fail closed with an actionable
-message, but the docs never showed them as one chain, so you hit them one at
-a time:
-
-| # | What you see if it is missing | Fix |
-|---|---|---|
-| 1. **Bun ≥ 1.2** | `❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback)` | `npm i -g bun`, then **restart your shell** so PATH picks it up |
-| 2. **Hub running** | `未找到 CommHub Server。请先运行: anet hub start` | `anet hub start` (up in ~3s) |
-| 3. **Logged in with a network_id** | `未登录或缺少 network_id。请运行: anet login` | `anet register`, or `anet login` |
-
-::: warning `anet daemon` is not what the rest of this page daemonizes
-The **rest of this page** is about keeping the Hub alive with PM2 (`anet hub start`).
-
-`anet daemon init` / `up` is a different thing: it creates and starts a
-`host_supervisor` node (RFC-026). Similar names, different jobs — for the walkthrough
-see [Try `anet daemon` in 5 minutes](#try-anet-daemon) above.
-:::
-
-### Which versions have `anet daemon` {#which-versions}
-
-🔴 **This box used to say the opposite**, because it was pinned to a number that drifts.
-It read: "`anet daemon` only exists on `preview`; `latest` prints `Unknown command`."
-That was measured on 2026-08-18 against the then-`latest` (`2.2.21`). **Both halves of
-that premise are false today.**
-
-So this section does not say *which channel* has it — only how to check for yourself:
+A daemon is a long-running process; upgrading the npm packages has no effect on a process that is already
+running. Restart it after upgrading:
 
 ```bash
-anet -v                 # which build you have
-anet daemon             # present: prints  Usage: anet daemon <subcommand> …
-                        # absent:  Unknown command "daemon". Did you mean: anet demo? (exit 1)
+anet daemon restart <daemon-name>
 ```
 
-| Version | `anet daemon` | Evidence |
-|---|---|---|
-| `2.2.21` | ❌ `Unknown command "daemon"` | measured 2026-08-18 (`latest` at the time) |
-| `2.3.0-preview.39` | ✅ `Usage: anet daemon <subcommand> …` | measured 2026-08-18 (`preview` at the time) |
-| `2.3.0-preview.47` | ✅ `Usage: anet daemon <subcommand> …` | measured 2026-08-27 — **and it was that day's `latest`** |
-
-⇒ **State a lower bound, not a channel**: `2.3.0-preview.39` and later have it; `2.2.21`
-does not. The table lists **measured points, not the exact boundary** — the individual
-release between `2.2.21` and `.39` was not bisected.
-**Do not write "whether `latest` has it" into docs**: what `latest` points at changes (on
-2026-08-27 it was already `2.3.0-preview.47`), so a conclusion pinned to a channel needs
-rewriting again within days.
-
-## Recommended entry point
-
-Supervise `anet hub start`; do not pin an old `commhub-server` preview in the
-configuration. `anet` selects the Server version paired with the installed CLI.
-
-Resolve the real executable paths first:
+`restart` requires agent-network ≥ `2.3.0-preview.73`. Earlier builds print
+`Unknown daemon subcommand "restart"`; use two steps instead:
 
 ```bash
-command -v anet
-command -v bun
+anet node stop <daemon-name>
+anet daemon start <daemon-name>
 ```
 
-::: warning Do not use `bunx` / `npx` as the daemon entrypoint
-`bunx` / `npx` unpack the package into a cache directory under `/tmp` and **execute it from there**.
-After a reboot `/tmp` is cleared and the daemon can no longer start — PM2 will only show repeated
-restarts, with no hint of the cause. Always use the **absolute path** from `command -v`.
-:::
+There are no daemon-specific stop / delete / status subcommands; use the node commands directly:
+`anet node stop`, `anet node delete`, `anet node ls`.
 
-This PM2 example uses the absolute path returned by `command -v anet`:
+If `anet daemon list` says the daemon is missing some runtimes, run
+`anet daemon init <daemon-name> --force` to backfill them. It keeps the `node_id` but issues a new token,
+so restart the daemon afterwards.
 
-```js
-// hub.ecosystem.config.js
-module.exports = {
-  apps: [{
-    name: 'commhub-hub',
-    script: '/absolute/path/to/anet',
-    args: 'hub start',
-    interpreter: 'none',
-    env: { HOST: '127.0.0.1', PORT: '9200' },
-    autorestart: true,
-    // min_uptime must exceed how long a failing start takes to exit. If it is
-    // smaller, PM2 counts the start as successful, never trips backoff, and a
-    // crash loop looks like ordinary restarts.
-    min_uptime: 45000,
-    // backoff without max_restarts = a failing process retries forever. That is
-    // deliberate here: the Hub should keep self-healing. The cost is that a truly
-    // broken process retries indefinitely and floods the logs. Add max_restarts
-    // if you want it to give up after N attempts.
-    exp_backoff_restart_delay: 200,
-    kill_timeout: 10000,
-    max_memory_restart: '2G',
-  }],
-};
-```
+## Related {#related}
 
-The filename has to let PM2 recognise the file as a **config** rather than a
-**script**: `*.config.js`, `*.config.cjs`, `*.json`, and `*.yaml` all work (the
-files under `deploy/` in this repo are named `ecosystem.config.cjs`). A name that
-matches none of those shapes is executed as a plain script — PM2 may show it as
-`online` and never start the Hub.
-
-Start and verify it:
-
-```bash
-pm2 start hub.ecosystem.config.js --only commhub-hub
-pm2 status commhub-hub
-curl -fsS http://127.0.0.1:9200/health
-```
-
-Do not treat PM2's green status as proof; `/health` proves that the service responds.
-
-## This repo's authoritative config lives in `deploy/`
-
-The example above is a generic starting point. The configuration this project
-actually runs in production is already committed — there is no need to retype it:
-
-- [`deploy/hub/ecosystem.config.cjs`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/ecosystem.config.cjs) — the Hub's PM2 process definition (no secrets)
-- [`deploy/hub/hub-daemon.sh`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/hub-daemon.sh) — the guarded launcher, with four fail-closed prechecks (bun / pinned install / vault key / port already listening)
-- [`deploy/fleet/`](https://github.com/sleep2agi/agent-network/blob/main/deploy/fleet) — the systemd **user** units and the fleet boot chain
-- [`deploy/hub/README.md`](https://github.com/sleep2agi/agent-network/blob/main/deploy/hub/README.md) — the Hub version-switch procedure (rehearsed)
-
-What sits in `~/.local/bin/` on the production host is a **deployed copy**; the Git
-authority is `deploy/`. Change both together, and check for drift with
-[`deploy/check-deployed-copies.sh`](https://github.com/sleep2agi/agent-network/blob/main/deploy/check-deployed-copies.sh).
-
-## Derive `min_uptime` from how long a failing start takes to exit
-
-The rule: `min_uptime` must be **greater** than the time a failing start needs to
-reach its exit. Set it lower and PM2 records the failure as a successful start —
-`max_restarts` never accumulates, `exp_backoff_restart_delay` never engages, and a
-crash loop looks like ordinary restarts.
-
-**How to obtain that number**: read the fixed delays on the guarded script's failure
-path. `hub-daemon.sh` routes every failed precheck through `fail_slow()`, which
-sleeps 30 seconds and then exits 1 — so a failing start takes about 30 seconds, and
-anything guarding it needs `min_uptime` above `30000`. A bare `anet hub start`
-usually fails much faster, so the `45000` used in the example above clears both
-entry points.
-
-Measured (PM2 inside a `node:22-bookworm-slim` container, the same "exit 1 after 30
-seconds" script, observed for 100 seconds — roughly three cycles):
-
-| `min_uptime` | `restarts` | `unstable restarts` |
-|---|---|---|
-| `20000` | 3 | **0** — backoff never engages |
-| `45000` | 3 | 3 |
-
-An `unstable restarts` stuck at 0 is the reading that says this protection is
-already inert: PM2 believes every start succeeded. Check that field when reviewing a
-supervisor config — `restarts` alone will not tell you. (The review of this repo's
-current value is tracked in [#1223](https://github.com/sleep2agi/agent-network/issues/1223).)
-
-## Security boundaries
-
-- Keep `HOST=127.0.0.1` by default. Complete the [production security setup](/en/deploy/production) before allowing remote access.
-- Never use `--dev-open` in production.
-- Do not put tokens or vault keys in the ecosystem file; PM2 persists environment variables.
-- Never clean up with `pkill -f` or `killall`. Resolve and stop the exact PID.
-- Keep restart backoff enabled so missing dependencies or registry failures do not create a tight restart loop.
-
-If a secret environment variable is unavoidable, keep it in a separate mode-`600`
-file and load it from a minimal wrapper. Verify that the value is absent from logs,
-the PM2 dump, and configuration. Avoid `export $(grep ...)`: an empty match can
-degrade into a command that prints the whole environment.
-
-## Verify automatic recovery
-
-Test once during a maintenance window:
-
-1. Record the exact PID from `pm2 pid commhub-hub`.
-2. Send `SIGTERM` to that PID; do not use a process-name pattern.
-3. Confirm that `/health` returns 200 again.
-4. Confirm that the PID changed.
-
-All four checks matter. An unchanged PID only shows that the process never stopped;
-a new PID with a failing health check only shows that PM2 restarted a broken process.
-
-## Start on boot
-
-```bash
-pm2 startup
-```
-
-This prints, but does not execute, the systemd command that must run as root. Run
-the printed command, verify the Hub, and only then save the process list:
-
-```bash
-pm2 save
-ls /etc/systemd/system/pm2-*.service
-```
-
-`loginctl enable-linger` alone does not create PM2's systemd unit.
-
-## Change configuration safely
-
-Validate the replacement before removing anything. Do not `pm2 delete` the old
-entry and then gamble on untested flags.
-
-```bash
-pm2 startOrReload hub.ecosystem.config.js --only commhub-hub
-curl -fsS http://127.0.0.1:9200/health
-```
-
-Disable an existing cron watchdog before handing ownership to PM2. If ownership is
-unclear, stop and identify which supervisor controls the Hub first.
-
-## Related
-
+- [Keeping the Hub running (pm2 / systemd)](/en/deploy/keep-alive)
 - [Production and public-internet security](/en/deploy/production)
-- [Upgrade guide](/en/guide/upgrade)
+- [CLI reference](/en/guide/cli)
 - [Troubleshooting](/en/troubleshooting)
-- [`deploy/` — the Git authority for this repo's deployment assets](https://github.com/sleep2agi/agent-network/blob/main/deploy)
-- [Lifecycle-request reliability model (daemon ↔ hub)](https://github.com/sleep2agi/agent-network/blob/main/docs/daemon-lifecycle-reliability.md) — developer-facing: why a doorbell can be dropped, how reconnect compensation replays it, and how each of the three stuck states converges
+- [Lifecycle-request reliability model (daemon ↔ hub)](https://github.com/sleep2agi/agent-network/blob/main/docs/daemon-lifecycle-reliability.md) (developer-facing)

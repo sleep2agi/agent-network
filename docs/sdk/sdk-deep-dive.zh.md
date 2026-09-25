@@ -1,5 +1,7 @@
 # SDK Deep-dive：claude-agent-sdk vs codex-sdk
 
+> 这份贡献者文档于 2026-09-25 从 anet.sh 用户文档（原 `/guide/sdk-deep-dive`）移到仓库。文中以 `/` 开头的链接指 anet.sh 上的页面。
+
 > 给"想自己接新 SDK"或者"想看懂 anet 怎么 wrap SDK"的 contributor。
 > 只是想用？看 [节点 Runtime](/guide/runtimes)。
 

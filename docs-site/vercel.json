@@ -200,6 +200,26 @@
       "source": "/en/guide/one-shot-install",
       "destination": "/en/guide/install#setup-anet",
       "permanent": true
+    },
+    {
+      "source": "/concepts/vendor-adapters",
+      "destination": "/guide/multi-model#vendor-adapters",
+      "permanent": true
+    },
+    {
+      "source": "/en/concepts/vendor-adapters",
+      "destination": "/en/guide/multi-model#vendor-adapters",
+      "permanent": true
+    },
+    {
+      "source": "/guide/sdk-deep-dive",
+      "destination": "https://github.com/sleep2agi/agent-network/blob/main/docs/sdk/sdk-deep-dive.zh.md",
+      "permanent": true
+    },
+    {
+      "source": "/en/guide/sdk-deep-dive",
+      "destination": "https://github.com/sleep2agi/agent-network/blob/main/docs/sdk/sdk-deep-dive.en.md",
+      "permanent": true
     }
   ],
   "rewrites": [

@@ -1,130 +1,123 @@
 # 节点 Runtime
 
-> 🔴 **这一页讲的是「怎么装、怎么认证」。想知道「哪个功能在哪个 runtime / 操作系统上能不能用」，看 [支持矩阵](/guide/support-matrix)** —— 那张表用三态（✅ 验过 / ❌ 验过不行 / ❓ 没验过），每一格都带证据链接。
+> 这一页讲「怎么装、怎么认证」。想知道某个功能在哪个 runtime / 操作系统上能不能用，看 [支持矩阵](/guide/support-matrix)：那张表用三态（✅ 验过 / ❌ 验过不行 / ❓ 没验过），没验过的格子不会被写成可用。
 
-
-每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置 7 种 Runtime（4 种正式：`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`；3 种标为预览：`codex-app-server`、`grok-build-cli`、`opencode-cli`），`anet node create` 的选单 7 个全部列出，**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
+每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型、跑工具。Agent Network 内置 7 种 Runtime：4 种正式（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`），3 种预览（`codex-app-server`、`grok-build-cli`、`opencode-cli`）。`anet node create` 的选单 7 个全部列出。同一个 Hub 上可以混搭，比如一个 Claude Code CLI agent 把翻译任务派给 MiniMax agent，再让 Codex agent 写代码，最后把结果汇总回来。
 
 ## Runtime 对比（canonical 表） {#runtime-对比-canonical-表}
 
-> 本表是全站 runtime 信息的**单一权威来源**, 其他页面 (`cli` / `agent-node` / `getting-started` / `clean-server`) 都引用这里, 别在那些页面里重复整表.
+> 本表是全站 runtime 信息的**单一权威来源**。其他页面（`cli` / `agent-node` / `getting-started` / `clean-server`）都引用这里，不在那些页面重复整表。
 
-::: tip 哪些 runtime 在哪个通道可用（容器内真机实测，2026-08-27）
-实测对象是当天的 npm `latest` = **2.3.0-preview.47**（`preview` = 2.3.0-preview.51）。
-装好后跑 `anet node create` 的 runtime 选单，**7 个全部列出**：
+::: tip 哪些 runtime 在哪个通道可用
+agent-network `≥ 2.3.0-preview.47` 在 `latest` 与 `preview` 两个通道上，`anet node create` 的 runtime 选单**都列出全部 7 个**：
 
 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `codex-app-server` / `grok-build-acp` / `grok-build-cli` / `opencode-cli`
 
-同一版本里 `anet daemon` 与 `anet grok attach` 也都存在。
+这些版本同时带 `anet daemon` 与 `anet grok attach`。
 
-🔴 **本页此前写的「codex-app-server / opencode-cli 仅预览版」「grok-build-cli 不在任何包中」对这个版本都不再成立** —— `latest` 曾长期停在 2.2.21，那时的说法是对的。**行为类说法请连版本号一起读**：换一个 dist-tag 结论就可能反过来。
+更早的 `2.2.x` 选单里没有 `codex-app-server`、`opencode-cli`、`grok-build-cli`。用 `anet -v` 查你装的版本；行为类说法要连版本号一起读。
 :::
 
 ::: warning 「选单里能选到」不等于「已生产就绪」，也不等于「daemon 能创建」
-两件事本页不替你打包票：
-
-- **成熟度**：`grok-build-cli` 在选单里仍自称「实验性 preview，仅可接收可信任务」。列出 ≠ 稳定。
-- **daemon 路径**：[#1301](https://github.com/sleep2agi/agent-network/pull/1301) 起，三个共存 runtime 已经进入 daemon 侧的 runtime 集合，`create_node` 不再拒它们。此前它们会被拒（[#1298](https://github.com/sleep2agi/agent-network/issues/1298)），**所以结论取决于你手上那个版本**：修复尚未进入你安装的版本时，本机 `anet node create` 可用而 daemon 代创不可用。
-- **仍然要自己给 `model`**：`create_node` 的 `node_spec.model` 是必填，而 `claude-code-cli` 这类复用订阅登录态的 runtime 并没有模型选择器（用订阅自带的模型）。key 和 url 不必给（走可选的 `env_refs`），**model 目前还得给一个**。
+- **成熟度**：`grok-build-cli` 在选单里仍自称「实验性 preview，仅可接收可信任务」。列出不等于稳定。
+- **daemon 路径**：较新的版本里，三个共存 runtime 已进入 daemon 侧的 runtime 集合，`create_node` 不再拒绝它们；较旧的版本会拒绝。如果你的 daemon 拒绝创建这类节点，先升级，或在节点所在机器上直接用 `anet node create`。
+- **仍然要自己给 `model`**：`create_node` 的 `node_spec.model` 是必填，而 `claude-code-cli` 这类复用订阅登录态的 runtime 没有模型选择器（用订阅自带的模型）。key 和 url 不必给（走可选的 `env_refs`），但 model 目前还得给一个。
 
 Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 不支持 attach。
 :::
 
 | Runtime | npm 包 / 内核 | 适用场景 | 主推模型 | 前置 auth | wizard 行为 (`anet node create`) |
 |---|---|---|---|---|---|
-| `claude-code-cli` **⭐推荐入门** | spawn 本机 `claude` 命令 | 想"像在终端用 Claude"那样干活, **复用 Claude 订阅 0 配置**（有 Claude 订阅的**首选**，最稳） | Claude Sonnet / Opus (订阅) | 已 `claude auth login` | 选完直接结束, **跳过 vendor / model / API key** |
-| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (随 agent-node 装) | 编程式调用任意 Anthropic 兼容 API | Anthropic 直连 / MiniMax / 书生 Intern / 小米 MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 ... ([完整表](/guide/multi-model)) | API Key | **唯一会弹 vendor 子菜单 → 选 vendor → 选 model → 填 API Key** |
-| `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完 print `codex login` hint, **跳过 vendor** |
-| `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok login` + `GROK_CODE_XAI_API_KEY` env (该 runtime **另需**该 env, 非 wizard 输出) | 选完 print `grok login` hint, **跳过 vendor** |
-| `codex-cli`（内部存为 `codex-app-server`，preview） | OWNED codex app-server 桥 ([RFC-030](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)) | Codex TUI 人机共存（人和 agent 共用一个 thread） | OpenAI Codex（默认 gpt-5.6-sol） | 已 `codex login` | 向导选中即启用共存，无第二次模式选择 |
-| `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI, 固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端 (统一 session / auth 抽象, [RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)) | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai), API key 从 env 读、**不 prompt** |
+| `claude-code-cli` **⭐推荐入门** | spawn 本机 `claude` 命令 | 想"像在终端用 Claude"那样干活，复用 Claude 订阅、0 配置（有 Claude 订阅时首选，最稳） | Claude Sonnet / Opus (订阅) | 已 `claude auth login` | 选完直接结束，跳过 vendor / model / API key |
+| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (随 agent-node 装) | 编程式调用任意 Anthropic 兼容 API | Anthropic 直连 / MiniMax / 书生 Intern / 小米 MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 ... ([完整表](/guide/multi-model)) | API Key | **唯一会弹 vendor 子菜单**：选 vendor → 选 model → 填 API Key |
+| `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完打印 `codex login` 提示，跳过 vendor |
+| `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok login` + `GROK_CODE_XAI_API_KEY` env（该 runtime 另需该 env，非 wizard 输出） | 选完打印 `grok login` 提示，跳过 vendor |
+| `codex-cli`（内部存为 `codex-app-server`，preview） | 节点自有的 codex app-server + 桥 | Codex TUI 人机共存（人和 agent 共用一个 thread） | OpenAI Codex（默认 gpt-5.6-sol） | 已 `codex login` | 向导选中即启用共存，无第二次模式选择 |
+| `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI，固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端（统一 session / auth 抽象） | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai)，API key 从 env 读，不 prompt |
 
-> ⚠️ **`opencode-cli` 仍是预览**（RFC-029 迭代中）：它已在 `latest` 与 `preview` 两条通道的 `anet node create` 选单里，但成熟度按预览看待。
+> ⚠️ **`opencode-cli` 仍是预览**：它已在 `latest` 与 `preview` 两条通道的 `anet node create` 选单里，但成熟度按预览看待。
 
-> 🖥️ **平台与模型(2026-09-07 实测):** `opencode-cli` 共存在 **Linux 与 macOS** 上可用 —— macOS 需要
-> agent-network ≥ `2.3.0-preview.87` 且 agent-node ≥ `2.5.0-preview.67`(#1845:包身份校验、`$TMPDIR` 启动隔离、
-> `ps`/`lsof` 进程归属三层等价物;Mac mini 端到端:注册 → 收任务 → 回复 → 停机),Windows 不支持。
-> 它**必须带显式模型**(`--model <provider/model>`,如 OpenCode 自带的免费模型 `opencode/mimo-v2.6-flash-free`,不需要 key);
-> 不带模型会在启动时报 `OpenCode copresence requires an explicit provider/model`。桌面向导自 0.2.61 起默认给它。
+> 🖥️ **平台与模型**：`opencode-cli` 共存在 Linux 与 macOS 上可用，Windows 不支持。macOS 需要
+> agent-network ≥ `2.3.0-preview.87` 且 agent-node ≥ `2.5.0-preview.67`。
+> 它必须带显式模型（`--model <provider/model>`，如 OpenCode 自带的免费模型 `opencode/mimo-v2.6-flash-free`，不需要 key）；
+> 不带模型会在启动时报 `OpenCode copresence requires an explicit provider/model`。桌面端 ≥ 0.2.61 的向导会默认填一个。
 
-> 🔴 **默认它跑不了 `bash`,这不是坏了,是设计。** `opencode-cli` 的安全默认把**全部本机工具**
-> 关掉 —— `bash` / `read` / `glob` / `grep` / `edit` / `write` / `list` / `task` / `skill`,外加
-> `question`(无人值守下它会永远等一个交互回答)。所以派给它「跑一条命令」这类任务时,
-> 它**没有能力执行**。
+> **默认它跑不了 `bash`，这是设计，不是故障。** `opencode-cli` 的安全默认把全部本机工具
+> 关掉：`bash` / `read` / `glob` / `grep` / `edit` / `write` / `list` / `task` / `skill`，外加
+> `question`（无人值守下它会永远等一个交互回答）。所以派给它「跑一条命令」这类任务时，
+> 它没有能力执行。
 >
 > 判据在 [`child-env.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/runtime/opencode-acp/child-env.ts) —— 搜 `buildOpencodePermissionPolicy`;
-> ACP 与 copresence 两条路径读的是同一个开关(`agent-node/src/cli.ts`)。
+> ACP 与 copresence 两条路径读的是同一个开关（`agent-node/src/cli.ts`）。
 >
-> ```
+> ```text
 > flags.opencodeUnsafeTools = true    ← 打开本机工具；仅用于可信任务
 > ```
 >
-> `anet node create` 当场会把这条政策打印出来(逐字):
+> `anet node create` 当场会把这条政策打印出来（逐字）：
 >
-> ```
+> ```text
 > [anet]    Built-in disabled: bash / read / glob / grep / edit / write / list / task / skill / question
 > [anet]    Cwd:      external disposable workspace (removed after child exit)
 > [anet]    Intended for communication and text-only tasks.
 > ```
 >
-> ⚠️ **开了之后不是沙箱** —— 产品自己的措辞是 `This is not a security sandbox; use Docker/VM
+> ⚠️ **开了之后不是沙箱**。产品自己的措辞是 `This is not a security sandbox; use Docker/VM
 > for process and filesystem isolation.`
 >
-> **为什么值得单独写一段**:能力缺失在结果里长得不像「做不到」。见
-> [#943](https://github.com/sleep2agi/agent-network/issues/943) —— 一个需要 `bash` 的任务回来的是
-> 一段**没被执行的工具调用原文**,而 hub 侧记的是 `failed=false`(正常完成)。
-> **派工的人只有读了内容才知道它其实没干活。**
+> 注意，能力缺失在结果里长得不像「做不到」：一个需要 `bash` 的任务可能回来一段没被执行的
+> 工具调用原文，而 hub 侧记的是正常完成（`failed=false`）。**派工的人只有读了内容才知道它其实没干活。**
 
-> 🌐 **接第三方 OpenAI 兼容网关(2026-09-17 实测):** 默认安全模式下,agent-node 每次启动都会把节点的 `opencode.json` 重新渲染:
-> `provider` 只保留 `anthropic` / `openai` 两个 id 且 `options` 清空,base URL、自定义 provider 包、headers 一律丢弃;
-> 子进程环境变量也是白名单(`PATH` / `LANG` / `TZ` / 代理 / CA 证书),`OPENAI_BASE_URL` 之类不透传。
-> 所以「手改节点目录里的 opencode.json 加 baseURL」在安全模式下**无效**,模型会回落到官方端点。
+> 🌐 **接第三方 OpenAI 兼容网关**：默认安全模式下，agent-node 每次启动都会把节点的 `opencode.json` 重新渲染：
+> `provider` 只保留 `anthropic` / `openai` 两个 id 且 `options` 清空，base URL、自定义 provider 包、headers 一律丢弃；
+> 子进程环境变量也是白名单（`PATH` / `LANG` / `TZ` / 代理 / CA 证书），`OPENAI_BASE_URL` 之类不透传。
+> 所以在安全模式下手改节点目录里的 opencode.json 加 baseURL 无效，模型会回落到官方端点。
 >
-> 要指向自建网关,入口是 `flags.opencodeUnsafeTools = true`:它同时不再设 `OPENCODE_DISABLE_PROJECT_CONFIG`,
-> 于是**工作区根目录**的 `opencode.json` 会被加载(opencode 日志里能看到 `loading path=<工作区>/opencode.json`)。在那里写:
+> 要指向自建网关，入口是 `flags.opencodeUnsafeTools = true`：它同时不再设 `OPENCODE_DISABLE_PROJECT_CONFIG`，
+> 于是**工作区根目录**的 `opencode.json` 会被加载（opencode 日志里能看到 `loading path=<工作区>/opencode.json`）。在那里写：
 >
 > ```json
 > { "provider": { "anthropic": { "options": { "baseURL": "http://127.0.0.1:<port>/v1" }, "models": { "<model>": {} } } } }
 > ```
 >
-> 并用 `--model anthropic/<model>`。**用 `anthropic` 而不是 `openai` preset**:OpenCode 的 `openai` preset 走 Responses API
-> (`/v1/responses`),多数兼容网关只实现了 `/v1/chat/completions` 与 `/v1/messages`,会直接 500;自定义 provider id 会被凭据白名单
-> 剥掉,内置 id 的 `npm` 包也不可覆盖。凭据仍按 `anthropic` preset 走(create 时读 `ANTHROPIC_API_KEY`,
-> 或 `anet opencode auth-login <node> --provider anthropic`)。
+> 并用 `--model anthropic/<model>`。**用 `anthropic` 而不是 `openai` preset**：OpenCode 的 `openai` preset 走 Responses API
+> (`/v1/responses`)，多数兼容网关只实现了 `/v1/chat/completions` 与 `/v1/messages`，会直接 500；自定义 provider id 会被凭据白名单
+> 剥掉，内置 id 的 `npm` 包也不可覆盖。凭据仍按 `anthropic` preset 走（create 时读 `ANTHROPIC_API_KEY`，
+> 或 `anet opencode auth-login <node> --provider anthropic`）。
 >
-> 同日实测的三条部署前置:① `opencode-ai@1.18.1` 要在 **umask 0022** 的独立 npm 前缀里装(前缀目录带组写位会被包身份校验拒,
-> 报 `unsafe directory ownership or mode`);② 机器上没有 `/run/user/<uid>` 时默认安全根不可用,用 `ANET_OPENCODE_SAFE_BASE`
-> 指定一个 0700、不在 `$HOME`(含 `.claude`)且父目录不带组写位的目录;③ agent-node 必须是**你那份 anet 的配对版本**
-> (不同 preview 各自精确配对;不配对报 `Refusing to start: an unsupported agent-node could silently select another runtime`)。
+> 三条部署前置：① `opencode-ai@<pin>` 要在 umask 0022 的独立 npm 前缀里装（前缀目录带组写位会被包身份校验拒，
+> 报 `unsafe directory ownership or mode`）；② 机器上没有 `/run/user/<uid>` 时默认安全根不可用，用 `ANET_OPENCODE_SAFE_BASE`
+> 指定一个 0700、不在 `$HOME`（含 `.claude`）且父目录不带组写位的目录；③ agent-node 必须是**你那份 anet 的配对版本**
+> （每个版本各自精确配对；不配对报 `Refusing to start: an unsupported agent-node could silently select another runtime`）。
 
 > OpenCode 内置 Anthropic client 发送 `x-api-key`。只接受 Bearer 的 Anthropic 兼容网关（例如 Kimi coding）会返回 401；这类网关要使用支持对应鉴权的 OpenCode plugin 或自定义路径，不能直接套内置 Anthropic preset。
 
 > Agent Node 不读取名为 `TOOLS` 或 `SYSTEM_PROMPT` 的环境变量。工具列表请用 `--tools` 或配置项 `tools`；系统提示词请用 `--prompt` 或配置项 `systemPrompt`。
 
 ::: tip 不知道怎么选?
-- **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
-- **写文案 / 翻译 / 分析 (编程式) / 接国产模型** → `claude-agent-sdk` + 在 wizard 里选对应 vendor
+- **想用 Claude 订阅 / 新手最省事** → `claude-code-cli`（`claude auth login` 后 0 配置）
+- **写文案 / 翻译 / 分析（编程式）/ 接国产模型** → `claude-agent-sdk` + 在 wizard 里选对应 vendor
 - **写代码 / 跑命令** → `codex-sdk`
-- **人和 Agent 共用一个 Codex TUI/thread** → 向导选择 preview `codex-cli`；之后 `anet node start <alias>` 即可启动或恢复（[完整指南](/guide/codex-copresence)）
-- **用 xAI Grok Build** → `grok-build-acp` ([详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
-- **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key，[RFC-029](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)）
-- **接国产 / 非内置 vendor** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
-- **混搭 (推荐)** → 在同一 Hub 按角色组合当前可用 runtime
+- **人和 Agent 共用一个 Codex TUI/thread** → 向导选择 preview `codex-cli`；之后用 `anet node start <alias> --copresence` 启动或恢复（[完整指南](/guide/codex-copresence)）
+- **用 xAI Grok Build** → `grok-build-acp`（[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
+- **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key）
+- **接国产 / 非内置 vendor**（GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等）→ `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
+- **混搭（推荐）** → 在同一 Hub 按角色组合可用的 runtime
 :::
 
 ::: tip wizard 顺序速览
-向导真实顺序: `节点名 → runtime → (仅 claude-agent-sdk) vendor → model → API Key / 鉴权`. runtime 菜单（正式版 4-way / 预览版 6-way）**默认高亮第一项 `claude-agent-sdk`** (要配 vendor + key, 复杂度最高); 新手强烈建议手动选 `claude-code-cli`. 完整步骤见 [上手指南 §5](/guide/getting-started#create-node).
+向导顺序：`节点名 → runtime → (仅 claude-agent-sdk) vendor → model → API Key / 鉴权`。runtime 菜单**默认高亮第一项 `claude-agent-sdk`**（要配 vendor + key，复杂度最高）；新手建议手动选 `claude-code-cli`。完整步骤见 [上手指南 §5](/guide/getting-started#create-node)。
 :::
 
 ---
 
 ## claude-code-cli
 
-复用你**本地已经登录的 Claude CLI 订阅**——不用 API Key、不用 token，跑起来就能干活。
+复用你**本地已经登录的 Claude CLI 订阅**：不用 API Key、不用 token，跑起来就能干活。
 
 ### 前置
 
-`@sleep2agi/agent-network` 自己**不会**帮你装 Claude CLI——它是 spawn 你本机已有的 `claude` 二进制。所以你得先把 CLI 装好、登录好。
+`@sleep2agi/agent-network` 自己**不会**帮你装 Claude CLI，它 spawn 的是你本机已有的 `claude` 二进制。所以你得先把 CLI 装好、登录好。
 
 **1. 安装 Claude Code CLI**（npm 全局包）：
 
@@ -162,7 +155,7 @@ npm config get prefix
 
 ### 工作原理
 
-```
+```text
 anet node start  →  spawn 本机 `claude` 二进制子进程
                  ↓
          .mcp.json 注册 commhub: { type: "stdio", command: "bun",
@@ -176,7 +169,7 @@ anet node start  →  spawn 本机 `claude` 二进制子进程
 - 节点启动时 anet CLI 在 cwd 写 `.mcp.json`（[`agent-network/bin/cli.ts ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)）+ spawn `claude` 二进制
 - claude 按 `.mcp.json` 起一个本地 bun MCP server（`.anet/node-server.js`，[源码](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) 用 `StdioServerTransport`）
 - 本地 MCP server 内部把 commhub 工具调用 HTTP 转发到 CommHub `/mcp`
-- 完整 4 runtime MCP 路径对比 + tool name 命名空间差异见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
+- 各 runtime 的 MCP 路径对比 + tool name 命名空间差异见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
 
 ### 适用场景
 
@@ -205,7 +198,7 @@ anet node start my-bot
 
 ### 注意
 
-- 需要本机已 `claude --version` 能跑（即 Claude Code CLI 已安装并登录）
+- 需要本机 `claude --version` 能跑（即 Claude Code CLI 已安装并登录）
 - `session` 字段由 `anet node create` 预生成。首次 `anet node start` 会用 `claude --session-id <uuid>` 绑定这个 UUID；之后只要 `~/.claude/projects/<cwd>/<uuid>.jsonl` 已存在，就自动用 `claude --resume <uuid>` 续同一个 Claude Code 对话。
 - 与 SDK runtime 的关键差别：CLI runtime 拥有 Claude Code 的全套能力（文件操作 / Bash 执行 / MCP 工具）
 
@@ -213,17 +206,17 @@ anet node start my-bot
 
 ## claude-agent-sdk
 
-编程式调用 **任意 Anthropic 兼容 API** —— 默认接 Anthropic，也能指 MiniMax / DeepSeek / GLM / Kimi 等国产模型的 Anthropic 兼容 endpoint。
+编程式调用**任意 Anthropic 兼容 API**：默认接 Anthropic，也能通过 `ANTHROPIC_BASE_URL` 指向 MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo 等的 Anthropic 兼容 endpoint（完整 provider 表见 [多模型配置](/guide/multi-model)）。
 
 ### 前置
 
-这个 runtime **不需要你额外装任何二进制**——`@anthropic-ai/claude-agent-sdk` 在 [`@sleep2agi/agent-node` 的 `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里，`npm install -g @sleep2agi/agent-node` 时自动一起装（不是打进 dist 里 bundle，build flag 是 `--external`，但 sub-dep 解析时会拉下来）。你只要装 anet 本体 + 准备好一个 API Key。
+这个 runtime **不需要你额外装任何二进制**：`@anthropic-ai/claude-agent-sdk` 在 [`@sleep2agi/agent-node` 的 `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里，`npm install -g @sleep2agi/agent-node` 时自动一起装（不是打进 dist 里 bundle，build flag 是 `--external`，但安装时会作为子依赖拉下来）。你只要装 anet 本体 + 准备好一个 API Key。
 
 **1. 安装 anet**（如果还没装）：
 
 ```bash
 npm install -g @sleep2agi/agent-network
-# 当前 latest 见 https://www.npmjs.com/package/@sleep2agi/agent-network
+# 各通道当前版本见 https://www.npmjs.com/package/@sleep2agi/agent-network
 ```
 
 **2. 准备 API Key**（任选一家）：
@@ -240,26 +233,26 @@ npm install -g @sleep2agi/agent-network
 
 ```bash
 anet --version
-# 期望输出：当前 anet 版本号（npm latest tag）
+# 期望输出：你安装的 anet 版本号
 
 # 启起来一个节点后看进程
 anet node start planner
 # 期望：日志里能看到 "spawned @anthropic-ai/claude-agent-sdk"，不会因为找不到 SDK 包而崩
 ```
 
-**常见坑**：节点起来后立刻报 `401 Unauthorized` 或 `invalid x-api-key`。原因是 `ANTHROPIC_AUTH_TOKEN`（国产 endpoint）和 `ANTHROPIC_API_KEY`（Anthropic 直连）这两个变量没分清。修复：
+**常见坑**：节点起来后立刻报 `401 Unauthorized` 或 `invalid x-api-key`。原因是 `ANTHROPIC_AUTH_TOKEN`（第三方 endpoint）和 `ANTHROPIC_API_KEY`（Anthropic 直连）这两个变量没分清。修复：
 
 - 接 **api.anthropic.com** → 用 `ANTHROPIC_API_KEY`
 - 接 **任何第三方 Anthropic 兼容 endpoint** → 用 `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`
 
 ### 工作原理
 
-```
+```text
 anet node start  →  spawn agent-node 子进程
                  ↓
          @anthropic-ai/claude-agent-sdk → POST ANTHROPIC_BASE_URL
                  ↓
-         commhub 工具走 in-process SDK MCP (#102 Option A):
+         commhub 工具走 in-process SDK MCP:
            createSdkMcpServer({ name: "commhub" }) 注册 7 个工具
            handler 转发到 CommHub POST /mcp (JSON-RPC initialize + tools/call)
 ```
@@ -267,8 +260,8 @@ anet node start  →  spawn agent-node 子进程
 - agent-node 进程通过 SDK 调 Anthropic 兼容 API
 - 默认 `api.anthropic.com`，可通过 `ANTHROPIC_BASE_URL` 重定向到任何兼容服务
 - `settingSources: []` 完全隔离宿主机配置，不会读你本地的 `~/.claude/`
-- LLM 看到的 commhub 工具名是 SDK namespace 化的 **`mcp__commhub__send_task`** 等（单 `commhub` 前缀；非二进制 HTTP MCP 路径）—— 完整 4 runtime MCP 路径对比见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
-- vendor adapter（针对书生 intern 等的 system-prompt bias）也在这层注入 —— 详见 [Vendor 适配层](/concepts/vendor-adapters)
+- LLM 看到的 commhub 工具名是 SDK namespace 化的 **`mcp__commhub__send_task`** 等（单 `commhub` 前缀；非二进制 HTTP MCP 路径），各 runtime 的 MCP 路径对比见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
+- vendor adapter（针对书生 intern 等的 system-prompt bias）也在这层注入，详见 [Vendor adapter](/guide/multi-model#vendor-adapters)
 
 ### 适用场景
 
@@ -309,34 +302,34 @@ anet node create translator \
 
 ### 已验证模型
 
-下表是 `anet node create` 供应商选单（cli.ts `VENDORS` 列表）里 `claude-agent-sdk` runtime 的内置 provider —— **vendor 选单只在选 `claude-agent-sdk` runtime 后才出现**（v0.9.2 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) runtime-first wizard：先选 runtime，`claude-code-cli` / `codex-sdk` 各自 print `auth login` hint 跳过 vendor）。每项的 `baseUrl` + model id 都跑通过真 API 验证：
+下表是 `anet node create` 供应商选单（cli.ts `VENDORS` 列表）里 `claude-agent-sdk` runtime 的内置 provider。**vendor 选单只在选了 `claude-agent-sdk` runtime 后才出现**：向导先选 runtime，`claude-code-cli` / `codex-sdk` 各自打印 `auth login` 提示并跳过 vendor。每项的 `baseUrl` + model id 都用真实 API 调用验证过：
 
 | Provider | 模型 | `ANTHROPIC_BASE_URL` |
 |---|---|---|
 | Anthropic | 当前主线 Sonnet / Opus / Haiku（具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)） | （Anthropic 原生，不需设 base URL） |
 | MiniMax | 当前主线 M 系列（查 [MiniMax 开放平台](https://platform.minimaxi.com)） | `https://api.minimaxi.com/anthropic` |
-| 书生 InternLM | Intern-S2-Preview（默认）/ Intern-S1-Pro（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同） |
+| 书生 InternLM | Intern-S2-Preview（默认）/ Intern-S1-Pro（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀**，跟 MiniMax 等不同） |
 | 小米 MiMo | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni（查 [小米开放平台](https://platform.xiaomimimo.com)） | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 
-> 来源：[`cli.ts VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)。**GLM / Kimi 等没跑通验证的 provider 故意不进 VENDORS 列表** —— 用「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能填 base URL + model）。
+> 来源：[`cli.ts VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)。**GLM / Kimi 等没跑通验证的 provider 故意不进 VENDORS 列表**，用「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能填 base URL + model）。
 
 ::: tip 模型版本号会变
 各家 LLM 厂商每隔几周升级模型，硬编码具体版本号容易过时。**到对应平台拿最新 model id**，填到 `--model` 参数即可。
 :::
 
 ::: details 国产模型 endpoint 完整列表
-查看 [多模型配置](/guide/multi-model) — 每家厂商的 Anthropic 兼容 URL + 示例 key。
+查看 [多模型配置](/guide/multi-model)：每家厂商的 Anthropic 兼容 URL + 示例 key。
 :::
 
 ---
 
 ## codex-sdk
 
-接 **OpenAI Codex CLI** —— 适合写代码、跑命令，工具调用最灵活。
+接 **OpenAI Codex CLI**，适合写代码、跑命令，工具调用最灵活。
 
 ### 前置
 
-`@openai/codex-sdk` 在 [`@sleep2agi/agent-node` 的 `optionalDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是常规 deps）—— npm 7+ 默认会跟着 agent-node 一起拉下来，**但 SDK 本身要 spawn 一个 `codex` 二进制**，所以你还得把 codex CLI 全局装一遍。如果 `anet node start` 抛 `Cannot find module '@openai/codex-sdk'`，手动补一下：`npm install -g @openai/codex-sdk`。
+`@openai/codex-sdk` 在 [`@sleep2agi/agent-node` 的 `optionalDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是常规 deps）。npm 7+ 默认会跟着 agent-node 一起拉下来，**但 SDK 本身要 spawn 一个 `codex` 二进制**，所以你还得把 codex CLI 全局装一遍。如果 `anet node start` 抛 `Cannot find module '@openai/codex-sdk'`，手动补一下：`npm install -g @openai/codex-sdk`。
 
 **1. 安装 codex CLI**（npm 全局包）：
 
@@ -364,7 +357,7 @@ codex login status
 # 期望：显示当前登录的 OpenAI 账号 / API key 状态
 ```
 
-**常见坑**：节点启动时报 `Error: spawn codex ENOENT`。原因是 `codex` 不在 PATH 上——`@openai/codex-sdk` 只是 Node 封装层，实际调用还是要找全局 `codex` 二进制。修复：
+**常见坑**：节点启动时报 `Error: spawn codex ENOENT`。原因是 `codex` 不在 PATH 上：`@openai/codex-sdk` 只是 Node 封装层，实际调用还是要找全局 `codex` 二进制。修复：
 
 ```bash
 which codex
@@ -375,7 +368,7 @@ npm install -g @openai/codex
 
 ### 工作原理
 
-```
+```text
 anet node start  →  spawn agent-node 子进程
                  ↓
          agent-node 内调 @openai/codex-sdk 起 codex thread
@@ -388,7 +381,7 @@ anet node start  →  spawn agent-node 子进程
 - 通过官方 `@openai/codex-sdk` 包驱动 codex thread
 - 支持 Read / Write / Edit / Bash / Glob / Grep / WebSearch（codex CLI baked in）
 - 鉴权走 `codex login`（OAuth 流程）或 `OPENAI_API_KEY`
-- **codex thread 不直接调 commhub MCP 工具**（`codexOpts` 不传 `mcpServers`，[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）—— 多 Agent 派活由 agent-node 父进程外部完成，详见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
+- **codex thread 不直接调 commhub MCP 工具**（`codexOpts` 不传 `mcpServers`，[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）；多 Agent 派活由 agent-node 父进程外部完成，详见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
 
 ### 适用场景
 
@@ -415,32 +408,32 @@ anet node create coder \
 ```
 
 ::: warning codex-sdk 不吃 `tools`
-`codex-sdk` runtime **静默忽略** `--tools` flag 和 `config.json` 的 `tools` 字段（verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `codexOpts` 无 `tools` 字段）。工具集由 `codex` CLI 二进制 baked in，不由 anet 配置。`--tools` 只对 `claude-agent-sdk` runtime 生效。
+`codex-sdk` runtime **静默忽略** `--tools` flag 和 `config.json` 的 `tools` 字段（见 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 的 `codexOpts`，里面没有 `tools` 字段）。工具集由 `codex` CLI 二进制 baked in，不由 anet 配置。`--tools` 只对 `claude-agent-sdk` runtime 生效。
 :::
 
 ::: warning 验证状态
-codex-sdk runtime 单元测试通过，但**端到端验证不全**（缺真实 codex 鉴权回归）。如果你正在跑生产任务，建议先 `anet node start` 后用一个简单任务（"列出当前目录文件"）验证。
+codex-sdk runtime 单元测试通过，但**端到端验证不全**（缺真实 codex 鉴权回归）。如果你要跑生产任务，建议先 `anet node start` 后用一个简单任务（"列出当前目录文件"）验证。
 :::
 
-::: tip v0.10.0 新增 — `codex-direct-stdio` opt-in 路径（[#141](https://github.com/sleep2agi/agent-network/issues/141)）
-v0.10.0 起 agent-node 内嵌一条 **bypass `@openai/codex-sdk` wrapper** 的直 stdio JSON-RPC 客户端路径（~155 LOC，verify [`agent-node@2.4.0`](https://www.npmjs.com/package/@sleep2agi/agent-node)）。开启方式：
+::: tip 可选：`codex-direct-stdio` 路径
+agent-node 内嵌一条绕开 `@openai/codex-sdk` wrapper 的直连 stdio JSON-RPC 客户端路径（需 agent-network ≥ v0.10.0）。开启方式：
 
 ```bash
 ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 ```
 
-启用后 agent-node 走 `spawn('codex', ['app-server'])` + 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** `@openai/codex-sdk` `--mcp-config` HTTP transport 那条 bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family），不再受 codex-sdk breaking change 牵制。
+启用后 agent-node 走 `spawn('codex', ['app-server'])` + 完整 v2 协议面（thread / turn / item / realtime），**绕开** wrapper `--mcp-config` HTTP 传输那一类问题（例如任务挂起），也不再受 codex-sdk breaking change 牵制。
 
-**v0.10.x（含当前 stable）默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0)。
+不设这个变量时默认仍走 `@openai/codex-sdk` wrapper。背景见 [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0)。
 :::
 
 ---
 
-## codex-app-server（Codex TUI 桥, RFC-030）
+## codex-app-server（Codex TUI 桥） {#codex-app-server-codex-tui-桥-rfc-030}
 
 > 想让**人和 agent 共用同一个 Codex 会话**（人机共存）？完整分步指南见 [Codex TUI 人机共存 (preview)](/guide/codex-copresence)。
 
-把一个 **codex CLI 的 TUI 会话**接进网络当节点 —— 节点自己起一个独立的 `codex app-server`，桥（bridge）作为客户端订阅同一条 codex thread。跟 `codex-sdk` 的关键区别：`codex-sdk` 是 agent-node 内嵌 SDK 独占管理 codex thread；**`codex-app-server` 用的是标准 `codex app-server` 协议，一条 thread 可以被多个客户端订阅**——于是**你在 codex TUI 里手打的那个会话，可以同时变成网络节点**。
+把一个 codex CLI 的 TUI 会话接进网络当节点：节点自己起一个独立的 `codex app-server`，桥（bridge）作为客户端订阅同一条 codex thread。跟 `codex-sdk` 的关键区别：`codex-sdk` 是 agent-node 内嵌 SDK 独占管理 codex thread；而 `codex-app-server` 用的是标准 `codex app-server` 协议，一条 thread 可以被多个客户端订阅。于是**你在 codex TUI 里手打的那个会话，可以同时变成网络节点**。
 
 ### 前置
 
@@ -454,7 +447,7 @@ codex --version        # 期望 codex 0.144.0 及以上（app-server 协议以�
 
 ### 工作原理
 
-```
+```text
 anet node start  →  spawn agent-node 子进程（runtime=codex-app-server）
                  ↓
       收到派工时: spawn `codex app-server --listen ws://127.0.0.1:<临时端口>`
@@ -466,26 +459,26 @@ anet node start  →  spawn agent-node 子进程（runtime=codex-app-server）
       结果用 send_task 回派单方（见下方「回复用 send_task」）
 ```
 
-- **收**（入站）：网络 `send_task` → 节点 inbox → **走桥** → codex 执行一轮
-- **发**（出站）：codex 出答案 → **普通 CommHub `send_task`** 回发起方（桥只包住「让 codex 跑一轮」）
+- **收**（入站）：网络 `send_task` → 节点 inbox → 走桥 → codex 执行一轮
+- **发**（出站）：codex 出答案 → 普通 CommHub `send_task` 回发起方（桥只包住「让 codex 跑一轮」）
 - 单条 thread 同一时刻只有一个 active turn；第二个任务在桥里 **FIFO 排队**，等当前 turn（自己的或人类 TUI 的）结束再跑
 - **审批只归人类**：桥永不代答 approval，需要审批的 turn 会挂起等人类在 TUI 里处理
 
 ### 两种拓扑
 
-**推荐的人机共存入口**不是手改 config，而是 preview CLI 的一等命令：
+推荐的人机共存入口不是手改 config，而是 CLI 的一等命令：
 
 ```bash
 cd /path/to/project
 for v in $(env | sed -n 's/^\(COMMHUB_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 anet node create codexbridge --runtime codex-app-server --copresence
-anet node start codexbridge
+anet node start codexbridge --copresence
 tmux attach -t =codexbridge
 ```
 
-创建时的 `--copresence` 会被记住；之后普通 `start`（含中断后的恢复）统一编排独立 app-server、bridge 与 TUI，默认只读。完整权限、恢复、停止与原生 Windows 手工 WS 步骤见 [Codex TUI 人机共存](/guide/codex-copresence)。
+`anet node start <alias> --copresence` 统一编排独立 app-server、bridge 与 TUI（含中断后的恢复），默认只读。完整权限、恢复、停止与原生 Windows 手工 WS 步骤见 [Codex TUI 人机共存](/guide/codex-copresence)。
 
-**① 独占（默认）** —— 节点自己起 app-server + 新建 thread。多个 codex-app-server 节点互不干扰：
+**① 独占（默认）**：节点自己起 app-server + 新建 thread。多个 codex-app-server 节点互不干扰：
 
 ```bash
 codex login
@@ -498,7 +491,7 @@ anet node start codexbridge
 { "runtime": "codex-app-server", "model": "gpt-5.6-sol" }
 ```
 
-**② 接管已有 codex 会话** —— 让一个正在运行的 codex 会话同时变成节点。`--copresence` 会自动生成并保存 URL/thread 绑定；高级或原生 Windows 手工路径也可在创建节点时传：
+**② 接管已有 codex 会话**：让一个正在运行的 codex 会话同时变成节点。`--copresence` 会自动生成并保存 URL/thread 绑定；高级或原生 Windows 手工路径也可在创建节点时传：
 
 ```bash
 anet node create codexbridge --runtime codex-app-server \
@@ -506,11 +499,11 @@ anet node create codexbridge --runtime codex-app-server \
   --codex-thread-id <thread-id>
 ```
 
-桥作为**第二个客户端** `thread/resume` 复用该线程。TUI 接入时必须运行 `codex resume --remote <ws-url> <thread-id>`，不能省略 thread id。每个节点必须使用独立 app-server，不能跨节点共用进程级 CommHub token。
+桥作为第二个客户端 `thread/resume` 复用该线程。TUI 接入时必须运行 `codex resume --remote <ws-url> <thread-id>`，不能省略 thread id。每个节点必须使用独立 app-server，不能跨节点共用进程级 CommHub token。
 
 ### 回复用 send_task（不是 send_reply）
 
-实测：hub 的 `send_reply` 会把回复塞进发起方收件箱，但**不会 SSE 唤醒直接发起方**——对端 agent 只能等下次轮询才看到。`send_task` 会立刻 `new_task` 唤醒。所以 **`codex-app-server` 节点回复派工统一走 `send_task`**（只对该 runtime 生效，不改其他 runtime 的行为）。收发两个方向都是 `send_task`。
+hub 的 `send_reply` 会把回复塞进发起方收件箱，但**不会 SSE 唤醒直接发起方**，对端 agent 只能等下次轮询才看到。`send_task` 会立刻 `new_task` 唤醒。所以 `codex-app-server` 节点回复派工统一走 `send_task`（只对该 runtime 生效，不改其他 runtime 的行为）。收发两个方向都是 `send_task`。
 
 ### 适用场景
 
@@ -518,21 +511,21 @@ anet node create codexbridge --runtime codex-app-server \
 - 想开**多个独立 codex 节点**各干各的
 - 想要标准 `codex app-server` 协议而非 SDK 封装
 
-::: warning 验证状态（Phase 0A / preview 形态）
-当前是**方案 A 直接双客户端**——已真机自验（桥 17 + client 12 单测、741 全量零回归、隔离 hub **真节点 e2e** `send_task`→codex→`send_task` 闭环 PASS），适用于**单机可信 preview**。**尚未**做生产加固：人类 TUI 与桥直连 codex 会在 active turn 争抢、审批「只归人类」目前是代码纪律非权限边界、桥持有 app-server 原始控制面。生产形态是**方案 B 单 upstream Policy Gateway**（排队仲裁 + 审批只递人类 + 最小权限投递口），见 [RFC-030 §18 实现现状 + §8 硬门](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)。
+::: warning 成熟度（preview）
+当前形态是人类 TUI 与桥直接作为两个客户端连同一个 app-server，适用于**单机、可信环境的 preview**。它还没有做生产加固：人类 TUI 与桥在 active turn 上可能争抢；「审批只归人类」是实现约定而非权限边界；桥持有 app-server 的完整控制面。只连接可信 Hub、只接收可信任务。
 :::
 
 ---
 
 ## grok-build-acp
 
-用 [xAI Grok Build](https://x.ai/grok) 本地 CLI 跑 agent —— 节点 spawn 本地 `grok agent stdio` 进程 + Agent Client Protocol (ACP) 协议交互，复用本机 Grok 登录态。**v0.10.8 起正式接入**；v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) 加 per-node isolated cwd 解决多节点身份污染（已在 npm `latest`）。
+用 [xAI Grok Build](https://x.ai/grok) 本地 CLI 跑 agent：节点 spawn 本地 `grok agent stdio` 进程，用 Agent Client Protocol (ACP) 协议交互，复用本机 Grok 登录态。每个节点使用独立的工作目录，多个 grok 节点之间不会互相污染身份。
 
 ### 前置
 
 - 本机已装 `grok` CLI 并 `grok login` 完成
 - 环境变量 `GROK_CODE_XAI_API_KEY` 已设
-- npm `latest` 的 `agent-network` + `agent-node`（包含 grok `session/prompt` 超时修复；详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
+- 较新的 `agent-network` + `agent-node`（包含 grok `session/prompt` 超时修复，用 `anet upgrade` 升级；详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
 
 ### 起节点
 
@@ -543,7 +536,7 @@ anet node start my-grok
 
 ### 长任务超时调整（`flags.grokAcpTimeoutMs`）
 
-当前行为：agent-node 给每个 `session/prompt` 调用设一个**整体硬超时**，默认 **300000 ms（5 分钟）**。视频生成 / 大型 X 搜索 / 多轮 batch 工具调用这种长任务跑超 5min 时，agent-node 会主动 reject 整个请求并把 task 标 `failed`。
+agent-node 给每个 `session/prompt` 调用设一个整体硬超时，默认 **300000 ms（5 分钟）**。视频生成 / 大型 X 搜索 / 多轮 batch 工具调用这种长任务跑超 5 分钟时，agent-node 会主动 reject 整个请求并把 task 标 `failed`。
 
 调大上限有两条路（任选其一，env 变量优先）：
 
@@ -564,16 +557,15 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 > 取舍：调大可以让真长任务跑完，但 hang 类问题（agent 真的卡住、不是慢）会更晚被发现；遇到误超时再调，别盲目设很大值。
 
-::: warning startup log 以当前 latest 为准
-旧版本 agent-node 启动时**不打 `timeoutMs=...` log 行**——值会从 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 读取，但 `anet node start` 输出不一定反映。如果跑了一个**确定 > 5 min** 的任务仍在 300 s 卡住，多半是 `flags.grokAcpTimeoutMs` 没被读到 (config 写错位置 / env 字段名 typo)；请先升级到 npm `latest`，再开 [issue](https://github.com/sleep2agi/agent-network/issues/new) 上报。
+::: warning 启动日志里不一定有 timeoutMs
+较旧的 agent-node 启动时**不打 `timeoutMs=...` 日志行**：值会从 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 读取，但 `anet node start` 输出不一定反映。如果跑了一个确定超过 5 分钟的任务仍在 300 s 处超时，多半是 `flags.grokAcpTimeoutMs` 没被读到（config 写错位置 / env 名字拼错）；请先 `anet upgrade`，再开 [issue](https://github.com/sleep2agi/agent-network/issues/new) 上报。
 :::
 
 ### 详见
 
-- [`grok-build-runtime.md` 完整 runtime 指南](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md) — Known Limits + debug + preview chain
-- [grok-build-acp](#grok-build-acp) — 每个节点使用独立工作目录；不要从其他 runtime 的章节推断 Grok 行为
-- [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603) — `session/prompt` 超时排错入口
-- [architecture § Debug tip](/guide/architecture) — runtime debug 入口
+- [`grok-build-runtime.md` 完整 runtime 指南](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)：Known Limits + debug
+- [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)：`session/prompt` 超时排错入口
+- [architecture § Debug tip](/guide/architecture)：runtime debug 入口
 
 ---
 
@@ -606,13 +598,13 @@ anet node start coder
 > 把这段英文翻译成中文，再让 coder 写一个 Python 脚本把翻译结果写入文件。
 
 `planner` 会通过 commhub MCP 的工具：
-1. `get_all_status` — 发现 translator + coder 在线
-2. `send_task(alias="translator", task="翻译...")` — 派出翻译任务
-3. `get_task` — 轮询拿翻译结果
-4. `send_task(alias="coder", task="写一个脚本把这段文字写入 output.txt")` — 派出写代码任务
+1. `get_all_status`：发现 translator + coder 在线
+2. `send_task(alias="translator", task="翻译...")`：派出翻译任务
+3. `get_task`：轮询拿翻译结果
+4. `send_task(alias="coder", task="写一个脚本把这段文字写入 output.txt")`：派出写代码任务
 5. 整合两边结果，回复给你
 
-整个交互在 Dashboard 的 Tasks / Messages 页面**实时可见**。
+整个交互在 Dashboard 的 Tasks / Messages 页面实时可见。
 
 ---
 
@@ -632,26 +624,27 @@ anet node start coder
 
 ## 已验证 vs 未验证
 
-::: info 已验证（当前 stable 继承 v2 E2E 覆盖）
-- `claude-agent-sdk` runtime 本身 —— E2E 通过
-- vendor 维度：`anet node create` 的 [`VENDORS` 列表（cli.ts）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) 里每个 provider（**Anthropic / MiniMax / 书生 Intern / 小米 MiMo**）的 `baseUrl` + model id 都是 verified-with-real-call 才进列表的
+::: info 已验证
+- `claude-agent-sdk` runtime 本身：E2E 通过
+- vendor 维度：`anet node create` 的 [`VENDORS` 列表（cli.ts）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) 里每个 provider（**Anthropic / MiniMax / 书生 Intern / 小米 MiMo**）的 `baseUrl` + model id 都经过真实调用验证才进列表
 - 多 Runtime 混搭（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
 :::
 
 ::: warning 未验证（请自行评估）
-- `claude-code-cli` —— 本机能跑（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](/changelog)），未做 E2E 回归
-- `codex-sdk` —— 单元测试通过，缺真实 codex 鉴权回归
-- **GLM / Kimi 等没跑通验证的 provider** —— 故意**不进 `VENDORS` 列表**（#104-B 设计：列表里的都是 verified，没验证的不混进去）；要用就走「自定义」`custom` 供应商接入，能用但请自己先验证 endpoint + model id
+- `claude-code-cli`：本机能跑，未做 E2E 回归
+- `codex-sdk`：单元测试通过，缺真实 codex 鉴权回归
+- **GLM / Kimi 等没跑通验证的 provider**：故意不进 `VENDORS` 列表（列表里只放验证过的）；要用就走「自定义」`custom` 供应商接入，能用但请自己先验证 endpoint + model id
 :::
 
 ---
 
 ## 下一步
 
-- [Agent Node 配置](/guide/agent-node) — 节点的完整配置文件 / 命令行参数 / 工具控制
-- [多模型配置](/guide/multi-model) — 每家国产模型的具体 endpoint / Key / 示例
-- [CLI 命令](/guide/cli) — `anet node create` 等命令的全部参数
+- [Agent Node 配置](/guide/agent-node)：节点的完整配置文件 / 命令行参数 / 工具控制
+- [多模型配置](/guide/multi-model)：每家国产模型的具体 endpoint / Key / 示例
+- [CLI 命令](/guide/cli)：`anet node create` 等命令的全部参数
+- 设计文档：[RFC-029 opencode runtime](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-029-opencode-runtime-integration.md)、[RFC-030 Codex TUI 桥](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)
 
 ::: tip 想深入 SDK 层？
-本页面是 user how-to。如果你想搞清两个 SDK adapter（`claude-agent-sdk` / `codex-sdk`）在 session / tool / streaming / 计费 / 错误处理上的具体差异，以及 anet wrapper 怎么收敛它们 —— 看 [SDK Deep-dive](/guide/sdk-deep-dive)。
+本页面是 user how-to。如果你想搞清两个 SDK adapter（`claude-agent-sdk` / `codex-sdk`）在 session / tool / streaming / 计费 / 错误处理上的具体差异，以及 anet wrapper 怎么收敛它们，看 仓库里的 [SDK Deep-dive](https://github.com/sleep2agi/agent-network/blob/main/docs/sdk/sdk-deep-dive.zh.md)（贡献者文档）。
 :::

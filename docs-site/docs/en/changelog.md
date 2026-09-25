@@ -919,11 +919,11 @@ Pairs with #133's runtime-first wizard to keep the interactive wizard stable on 
 
 ### Fixes
 
-- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling now works** ([commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) + two-phase publish promote) — in v0.9.0 the intern-s2-preview endpoint, on the Anthropic protocol with `tool_choice: "auto"`, defaulted to verbose Thinking Process text and did not emit `tool_use` content blocks. Forcing `tool_choice` was rejected with `-20077`. Hotfix: when `ANTHROPIC_BASE_URL` matches `intern-ai.org.cn` / `chat.intern-ai`, a short system-prompt bias is prepended that nudges the model to emit `tool_use` directly. Direct-curl A/B verified: `stop_reason: max_tokens → tool_use`, `output_tokens: 1024 → 122`. See [Vendor Adapters](/en/concepts/vendor-adapters) for the full mechanism, the 5 side effects, and the opt-out path.
+- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling now works** ([commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) + two-phase publish promote) — in v0.9.0 the intern-s2-preview endpoint, on the Anthropic protocol with `tool_choice: "auto"`, defaulted to verbose Thinking Process text and did not emit `tool_use` content blocks. Forcing `tool_choice` was rejected with `-20077`. Hotfix: when `ANTHROPIC_BASE_URL` matches `intern-ai.org.cn` / `chat.intern-ai`, a short system-prompt bias is prepended that nudges the model to emit `tool_use` directly. Direct-curl A/B verified: `stop_reason: max_tokens → tool_use`, `output_tokens: 1024 → 122`. See [Vendor Adapters](/en/guide/multi-model#vendor-adapters) for the full mechanism, the 5 side effects, and the opt-out path.
 
 ### Known gaps (non-blocking)
 
-- The vendor adapter relies on a URL regex to detect the vendor — self-hosted lmdeploy / proxied intern endpoints / aggregator routes will not trigger the bias and need a manual `--prompt`. See [Vendor Adapters — Side effects](/en/concepts/vendor-adapters#⚠-side-effects-must-read).
+- The vendor adapter relies on a URL regex to detect the vendor — self-hosted lmdeploy / proxied intern endpoints / aggregator routes will not trigger the bias and need a manual `--prompt`. See [Vendor Adapters — Side effects](/en/guide/multi-model#vendor-adapter-side-effects).
 - The `--no-vendor-bias` flag is not yet implemented (P1 polish gap, planned alongside a `bias_active` info-display follow-up).
 
 ### Release process

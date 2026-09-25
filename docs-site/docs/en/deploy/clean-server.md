@@ -3,9 +3,9 @@
 ::: tip Who is this page for?
 You just got hold of a **brand-new Ubuntu / Debian server** (cloud VM, local VM, internal box — all fine) and want to bring up anet hub + a node or two + Telegram from zero, end-to-end.
 
-This page follows a maintainer-verified fresh-machine setup path: every step has a verify command + a common-error lookup ([troubleshooting table](#troubleshooting-table-8-坑-mapping)).
+Every step has a verify command, and the end of the page has a common-error lookup ([troubleshooting table](#troubleshooting-table)).
 
-It is **not** for users who already have anet installed — that's [Getting Started](/en/guide/getting-started) or [Upgrade Guide](/en/guide/upgrade).
+It is not for users who already have anet installed; that's [Getting Started](/en/guide/getting-started) or [Upgrade Guide](/en/guide/upgrade).
 :::
 
 ## 0. Prerequisites
@@ -23,7 +23,7 @@ anet -v
 
 ## 2. Start the Hub (recommended: under tmux)
 
-CommHub is a long-running process — **closing the terminal stops it**. For production you'd configure systemd ([§7 Persistence](#_7-persistence-systemd-tmux)); for a quick verify, use tmux:
+CommHub is a long-running process: **closing the terminal stops it**. For production you'd configure systemd ([§8 Persistence](#_8-persistence-systemd-tmux)); for a quick verify, use tmux:
 
 ```bash
 # Install tmux (if not present)
@@ -34,7 +34,7 @@ tmux new -s anet-hub
 anet hub start --host 0.0.0.0 --port 9200
 
 # Look for output like this — that's success:
-# CommHub MCP Server <current latest>
+# CommHub MCP Server <version>
 # REST:   http://0.0.0.0:9200/api
 # ✅ Admin account created
 # username: admin
@@ -47,7 +47,7 @@ Verify the hub is up (from another terminal):
 
 ```bash
 curl -s http://127.0.0.1:9200/health | head -5
-# Expect something like {"ok":true,"version":"<current>",...}
+# Expect something like {"ok":true,"version":"<version>",...}
 ```
 
 ::: danger Public-internet deploy: change the password immediately
@@ -81,9 +81,7 @@ kill "$HUB_PID"
 tmux a -t anet-hub             # Then Ctrl+C to stop, Ctrl+B D to keep the tmux session
 ```
 
-::: tip `anet hub --help` doesn't list stop/status yet?
-`anet hub --help` now lists the `stop` / `status` subcommands (2.2.12 had a display bug that omitted them, fixed in [#240](https://github.com/sleep2agi/agent-network/issues/240) / [PR #241](https://github.com/sleep2agi/agent-network/pull/241), shipped in current latest); the commands themselves have always worked — running `anet hub status` returns `hub running / vX.Y.Z / pid N`.
-:::
+On older versions (such as 2.2.12) `anet hub --help` does not list `stop` / `status`, but the commands work: `anet hub status` returns `hub running / vX.Y.Z / pid N`.
 :::
 
 ## 3. CLI Login
@@ -112,7 +110,7 @@ The wizard asks the following, in order:
 node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth
 ```
 
-**Runtime is the first fork — a 4-way pick on stable (6-way on preview) that decides whether you'll be asked for a vendor and what dependencies you'll need** (npm package / default models / detailed wizard behavior: see [runtimes — canonical table](/en/guide/runtimes#runtimes-—-canonical-table)):
+**Runtime is the first fork: it decides whether you'll be asked for a vendor and what dependencies you'll need.** The picker lists all 7 runtimes; the table below covers the common ones. For npm packages, default models and the full wizard behavior, see [runtimes — canonical table](/en/guide/runtimes#runtimes-—-canonical-table):
 
 | Runtime | Complexity | Best for | Wizard follow-up | Extra dependencies |
 |---|---|---|---|---|
@@ -123,13 +121,13 @@ node-name → runtime → (only if claude-agent-sdk) vendor → model → API ke
 | `opencode-cli` **(preview)** | ⭐⭐⭐ | Use the public sst/opencode CLI as a multi-vendor front-end (preview; in the menu on both `latest` and `preview`) | Pick a vendor preset (anthropic / openai), key read from env | `opencode` CLI + Anthropic/OpenAI env key |
 
 ::: warning Watch out for the default runtime
-The wizard **defaults the first option** (currently `claude-agent-sdk`); a new user pressing Enter all the way lands on the vendor + API-key path. **Manually pick `claude-code-cli`** for the smoothest first-time experience ([#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237), known UX pain — the wizard default will change later).
+The wizard defaults to the first option (currently `claude-agent-sdk`); a new user pressing Enter all the way lands on the vendor + API-key path. **Manually pick `claude-code-cli`** for the smoothest first-time experience.
 :::
 
 ::: warning The wizard does **not** ask about Telegram
-Once the steps above finish, the wizard **ends** — it **never asks for a Telegram bot token / allow-list UID**. Telegram is attached after node creation via a separate command, `anet channel add telegram` (see [§6](#_6-configure-the-telegram-channel-optional)).
+Once the steps above finish, the wizard ends; it never asks for a Telegram bot token / allow-list UID. **Telegram is attached after node creation with a separate command, `anet channel add telegram`** (see [§6](#_6-configure-the-telegram-channel-optional)).
 
-If you see the line "optional Telegram channel" at the top of `anet create`'s output, don't be misled into thinking the wizard will configure it for you — it won't ([#237 坑 4](https://github.com/sleep2agi/agent-network/issues/237), known docs/CLI inconsistency).
+If you see the line "optional Telegram channel" at the top of `anet create`'s output, don't assume the wizard will configure it for you; it won't.
 :::
 
 After completion, the node config is written under cwd:
@@ -146,7 +144,7 @@ anet node ls         # should list my-bot
 
 ## 5. (codex-sdk only) Install agent-node + codex CLI
 
-If you picked **`codex-sdk`** or **`claude-agent-sdk`** above, the node needs the `@sleep2agi/agent-node` package to run. The design is "lazy fetch via npx on first use", but in practice the lazy fetch can be skipped and not actually pull → the node fails on start with `agent-node is not installed or cannot report a version. Run: anet upgrade` ([#237 坑 5](https://github.com/sleep2agi/agent-network/issues/237)).
+If you picked **`codex-sdk`** or `claude-agent-sdk` above, the node needs the `@sleep2agi/agent-node` package to run. It is lazily fetched via npx on first use; if that fetch doesn't happen, the node fails on start with `agent-node is not installed or cannot report a version. Run: anet upgrade`.
 
 The reliable fallback: **install it once manually**:
 
@@ -154,7 +152,7 @@ The reliable fallback: **install it once manually**:
 npm i -g @sleep2agi/agent-node
 
 # Verify
-agent-node --version    # expect current latest or newer
+agent-node --version    # should print a version
 ```
 
 The `codex-sdk` runtime additionally needs the codex CLI installed + logged in:
@@ -168,7 +166,7 @@ codex login        # Browser OAuth
 codex --version
 ```
 
-The `claude-agent-sdk` runtime does NOT need either codex / claude CLI — as long as your node config carries the right vendor's API key (or the matching env vars `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`), you're good.
+The `claude-agent-sdk` runtime does not need either codex / claude CLI: as long as your node config carries the right vendor's API key (or the matching env vars `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`), you're good.
 
 ## 6. Configure the Telegram channel (optional)
 
@@ -199,7 +197,7 @@ anet channel ls
 ```
 
 ::: tip Want to add more allowed users?
-`anet channel add telegram <node> --allow <new-uid-list>` **overwrites** the allowlist, it doesn't append. To keep existing entries, repeat the full list (`--allow 11111,22222,33333`). Known gap ([guide/channels.md](/en/guide/channels#known-gaps-and-pitfalls)), append behavior will land later.
+`anet channel add telegram <node> --allow <new-uid-list>` **overwrites** the allowlist, it doesn't append. To keep existing entries, repeat the full list (`--allow 11111,22222,33333`). More known limits: [guide/channels.md](/en/guide/channels#known-gaps-and-pitfalls).
 :::
 
 ## 7. Start the Node
@@ -218,30 +216,34 @@ On its first launch, a `claude-code-cli` node will pop Claude Code's `--dangerou
   2. Exit
 ```
 
-**Press 1 + Enter**. In scripted / detached launches **nobody's there to answer**, so the node hangs and stays offline ([#237 坑 6](https://github.com/sleep2agi/agent-network/issues/237), known).
+**Press 1 + Enter**. In scripted / detached launches nobody's there to answer, so the node hangs and stays offline.
 
 Workaround: run it once in a foreground tmux and answer the prompt manually; subsequent launches don't pop it (the answer is session-scoped). You can then layer systemd on top.
 :::
 
-When you see `SSE connected`, the node is online — back on the hub side, `anet status` should list `my-bot` as online.
+When you see `SSE connected`, the node is online; back on the hub side, `anet status` should list `my-bot` as online.
 
 `Ctrl+B D` to detach the tmux session.
 
-## 7. Persistence (systemd / tmux)
+## 8. Persistence (systemd / tmux)
 
-anet does not ship an official `--daemon` flag today. Two options below: tmux for quick / dev use, systemd units for production / autostart.
+Two options below: tmux for quick / dev use, systemd units for production / autostart.
 
-### 7.1 tmux (dev / quick verify)
+### 8.1 tmux (dev / quick verify)
 
-A machine reboot drops everything — you re-attach by hand:
+A machine reboot drops everything; **you restart by hand**:
 
 - hub: `tmux new -s anet-hub` + `anet hub start --host 0.0.0.0`
 - each node: `tmux new -s anet-<alias>` + `anet node start <alias>`
-- An `@reboot` crontab line can replace the manual step, but you'll need to solve the non-interactive-shell PATH / nvm problem first (see [§0 nvm caveat](#_0-prerequisites))
+- An `@reboot` crontab line can replace the manual step, but you'll need to solve the non-interactive-shell PATH / nvm problem first (see [§0](#_0-prerequisites))
 
-### 7.2 systemd units (production / autostart)
+::: tip Confirm the node really came up; don't trust the stdout ✅
+After starting each node, run `tmux has-session -t "=<alias>"; echo $?` and expect `0`. **The `=` is required**: a bare name is a prefix match and can go green on another session. Versions before `2.3.0-preview.40` can print `✅ started detached (tmux session live)` and `exit 0` on the detached path while nothing runs in tmux. For bulk launches use `anet project up`; its exit code is trustworthy on `≥ 2.3.0-preview.40`.
+:::
 
-The unit files below are **not officially tested** — swap in your real `node` binary path (from `which anet`) and the user you run anet under, then `systemctl daemon-reload` + `enable --now`.
+### 8.2 systemd units (production / autostart)
+
+The unit files below are **not officially tested**. Swap in your real `anet` path (from `which anet`) and the user you run anet under, then `systemctl daemon-reload` + `enable --now`.
 
 **Hub** `/etc/systemd/system/anet-hub.service`:
 
@@ -296,8 +298,8 @@ sudo systemctl status anet-hub anet-node@my-bot
 **Gotchas**:
 
 - `ExecStart` must be the **absolute path** to `anet` (`which anet`); systemd does not read nvm's `~/.bashrc`
-- `User=` should be the everyday user that owns the anet install; **don't use root**
-- The `claude-code-cli` runtime pops a dev-channels confirmation on first run ([see the dev-channels prompt in §7 Start the Node](#_7-start-the-node)); answer it once under a foreground tmux before handing off to systemd
+- `User=` should be the everyday user that owns the anet install; don't use `root`
+- The `claude-code-cli` runtime pops a dev-channels confirmation on first run ([see §7 Start the Node](#_7-start-the-node)); answer it once under a foreground tmux before handing off to systemd
 - Want an official unit / improvements to the template above? PRs welcome, or open a thread on [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)
 
 ## Running in containers {#docker}
@@ -310,29 +312,30 @@ There is no maintained production compose bundle yet; the Dockerfiles and compos
 - **Persistence**: node state lives in `.anet/nodes/<alias>/` under the working directory and Hub data in `~/.commhub/`; mount both as volumes.
 - **Do not run the node process as PID 1**: wrap it in an init such as `tini`, otherwise SIGTERM skips the node's offline notification.
 
-## Troubleshooting table (8 坑 mapping)
+## Troubleshooting table
 
-In the order they hit you on a real fresh machine — **symptom → cause → fix**:
+In the order of the setup steps — **symptom → cause → fix**:
 
 | # | Symptom | Cause | Fix |
 |---|---|---|---|
-| 1 | `anet hub start` → `spawn bunx ENOENT` + node-stack crash | Bun not installed; commhub-server is Bun-shebang TS | `npm i -g bun` or `curl -fsSL https://bun.sh/install \| bash`; afterwards `bun --version` should produce output. **[#235](https://github.com/sleep2agi/agent-network/issues/235)** tracks adding a preflight + friendly message |
-| 2 | `anet node create` → after picking runtime → `FATAL: TypeError: fetch failed` | Node creation needs to register with the local hub, but hub isn't up (usually because of bug #1) | Open another terminal, `anet hub start`, then retry. **[#237](https://github.com/sleep2agi/agent-network/issues/237)** main thread tracks classified fetch errors |
+| 1 | `anet hub start` → `spawn bunx ENOENT` + node-stack crash | Bun not installed; commhub-server is Bun-shebang TS | `npm i -g bun` or `curl -fsSL https://bun.sh/install \| bash`; afterwards `bun --version` should produce output |
+| 2 | `anet node create` → after picking runtime → `FATAL: TypeError: fetch failed` | Node creation needs to register with the local hub, but the hub isn't up (usually because of row 1) | Open another terminal, `anet hub start`, then retry |
 | 3 | Pressing Enter through the wizard lands you on the vendor + API-key path | Runtime menu defaults to `claude-agent-sdk`, not the simpler `claude-code-cli` | **Manually pick `claude-code-cli`** when creating the node (with `claude auth login` already done, it reuses the subscription directly). If a Ctrl-C during vendor selection left a half-baked node behind, clean up with `anet node delete <alias>` and retry |
-| 4 | Telegram doesn't work after node creation, even though the wizard mentioned "optional Telegram channel" | The wizard never actually asks about Telegram — that line is misleading copy | Use `anet channel add telegram <node> --bot-token <tok> --allow <uid>` separately to attach it (see [§6](#_6-configure-the-telegram-channel-optional)) |
-| 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx lazy-load didn't actually pull `@sleep2agi/agent-node` | `npm i -g @sleep2agi/agent-node`; then `agent-node --version` should produce output |
+| 4 | Telegram doesn't work after node creation, even though the wizard mentioned "optional Telegram channel" | The wizard never asks about Telegram; that line is misleading copy | Use `anet channel add telegram <node> --bot-token <tok> --allow <uid>` separately to attach it (see [§6](#_6-configure-the-telegram-channel-optional)) |
+| 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx lazy-load didn't actually pull `@sleep2agi/agent-node`; builds `≤ 2.3.0-preview.37` (including `2.2.x`) have this problem | Short-term: `npm i -g @sleep2agi/agent-node` to put the binary in place; long-term: `anet upgrade` to `≥ 2.3.0-preview.38` (check what each channel points to with `npm view @sleep2agi/agent-network dist-tags`) |
+| 5.5 | `anet node start` prints `✅ started detached (tmux session live)` and `exit 0`, but `tmux ls` has no such session and the process is gone | False success on the detached path; versions before `2.3.0-preview.40` have this problem | Real check: `tmux has-session -t "=<alias>"; echo $?` should print `0` (the `=` is required). For bulk launches use `anet project up` (its exit code is trustworthy on `≥ 2.3.0-preview.40`). Until you upgrade, confirm every start with has-session |
 | 6 | `claude-code-cli` node starts but stays offline / pane is stuck on the confirmation prompt | Claude Code's `--dangerously-load-development-channels` prompt is waiting for an Enter | Run it once in foreground tmux and press `1` + Enter; subsequent launches don't pop it |
 | 7 | systemd / cron / a different user launch produces a string of `command not found` errors | nvm + Bun each install per user; non-interactive shells don't load them | Symlink node/npm/bun into `/usr/local/bin/`, or have the launch script explicitly `source ~/.nvm/nvm.sh` |
-| 8 | Machine reboot drops everything | Hub + nodes all rely on manual tmux sessions | Configure autostart via systemd — see the template in [§7.2 systemd units](#_7-2-systemd-units-production-autostart) |
+| 8 | Machine reboot drops everything | Hub + nodes all rely on manual tmux sessions | Configure autostart via systemd; see the template in [§8.2 systemd units](#_8-2-systemd-units-production-autostart) |
 
 ---
 
 ## Next
 
-- [Getting Started](/en/guide/getting-started) — end-to-end walkthrough for an already-installed laptop setup
-- [One-shot installer retirement](/en/guide/install#setup-anet) — the old script is disabled; use this page's step-by-step flow
-- [Production / public-internet deployment](/en/deploy/production) — TLS / firewall / backup / public-internet risk surface
-- [Channel integration](/en/guide/channels) — current channel status and Telegram / Feishu setup; WeChat has not shipped
-- [Node runtime](/en/guide/runtimes) — detailed comparison of the runtimes
+- [Getting Started](/en/guide/getting-started): end-to-end walkthrough for an already-installed laptop setup
+- [One-shot installer retirement](/en/guide/install#setup-anet): the old script is disabled; use this page's step-by-step flow
+- [Production / public-internet deployment](/en/deploy/production): TLS / firewall / backup / public-internet risk surface
+- [Channel integration](/en/guide/channels): current channel status and Telegram / Feishu setup; WeChat has not shipped
+- [Node runtime](/en/guide/runtimes): detailed comparison of the runtimes
 
-If you hit a bug not covered here, please open a [GitHub issue](https://github.com/sleep2agi/agent-network/issues) — include which step failed, the exact error, and the `anet -v` output.
+If you hit a problem not covered here, please open a [GitHub issue](https://github.com/sleep2agi/agent-network/issues) with the step that failed, the exact error, and the `anet -v` output.

@@ -38,7 +38,7 @@ Agent 的文件工具以启动目录为工作区。请在目标项目目录创�
 anet node start my-agent --tmux
 ```
 
-从终端启动会 attach 到 tmux；用 `Ctrl-B D` detach。无 TTY 的环境会以 detached 模式启动。长期守护和开机恢复见[后台运行指南](/deploy/daemon)。
+从终端启动会 attach 到 tmux；用 `Ctrl-B D` detach。无 TTY 的环境会以 detached 模式启动。长期守护和开机恢复见[干净服务器部署 · 持久化](/deploy/clean-server#_8-持久化-systemd-tmux)。
 
 ## 选择 Runtime
 

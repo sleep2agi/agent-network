@@ -175,5 +175,5 @@ If compatibility is uncertain, preserve the evidence and open a
 ## Related
 
 - [CLI commands](/en/guide/cli)
-- [Process supervision](/en/deploy/daemon)
+- [Keeping the Hub running](/en/deploy/keep-alive)
 - [Troubleshooting](/en/troubleshooting)
