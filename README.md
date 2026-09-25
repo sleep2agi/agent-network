@@ -7,15 +7,13 @@
 **把分布在多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团 —— 在一个桌面应用里指挥它们。**
 
 [![npm](https://img.shields.io/npm/v/@sleep2agi/agent-network?label=npm&color=009e7e)](https://www.npmjs.com/package/@sleep2agi/agent-network)
-[![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?filter=desktop-v*&label=desktop&color=2f6feb)](https://github.com/sleep2agi/agent-network-app/releases/latest)
+[![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?filter=desktop-v*&label=download&color=2f6feb)](https://github.com/sleep2agi/agent-network-app/releases/latest)
 [![QA](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main)](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml)
 [![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e)](https://anet.sh)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
 [![Stars](https://img.shields.io/github/stars/sleep2agi/agent-network?style=flat&color=yellow)](https://github.com/sleep2agi/agent-network/stargazers)
 
 [文档](https://anet.sh) · [下载桌面版](https://github.com/sleep2agi/agent-network-app/releases/latest) · [快速上手](https://anet.sh/guide/getting-started) · **中文** · [English](./README.en.md)
-
-<br>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
@@ -43,10 +41,12 @@
 **方式二：`anet` CLI**（需要 Node.js ≥ 22.13）
 
 ```bash
-curl -fsSL https://anet.sh/install.sh | sh && npm i -g bun   # 装 anet；Hub 运行在 Bun 上
-anet hub start                                   # 终端 1：保持运行，记下只打印一次的 admin 密码
-anet login --hub http://127.0.0.1:9200 --username admin      # 终端 2
-anet node create my-bot && anet node start my-bot            # 向导里选 runtime（已 `claude auth login` 就选 claude-code-cli）
+curl -fsSL https://anet.sh/install.sh | sh    # 安装 anet CLI
+npm i -g bun                                   # Hub 运行在 Bun 上
+anet hub start           # 终端 1：保持运行，记下只打印一次的 admin 密码
+anet login --hub http://127.0.0.1:9200 --username admin     # 终端 2
+anet node create my-bot  # 向导里选 runtime；已 claude auth login 就选 claude-code-cli
+anet node start my-bot
 ```
 
 看到 `SSE connected` 就说明节点上线了。之后用桌面端连 `http://127.0.0.1:9200` 和它对话，或运行 `anet hub dashboard` 打开 Web 版（`http://localhost:3000`）。公网部署请立刻 `anet passwd` 改密 —— 完整步骤见 [上手指南](https://anet.sh/guide/getting-started)。
@@ -90,7 +90,7 @@ flowchart LR
 
 欢迎贡献！开始之前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [行为准则](./CODE_OF_CONDUCT.md)；安全问题请按 [SECURITY.md](./SECURITY.md) 私下报告。提问和反馈：[Issues](https://github.com/sleep2agi/agent-network/issues) · [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [社群](https://anet.sh/community)。
 
-[![Star History Chart](https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date)](https://star-history.com/#sleep2agi/agent-network&Date)
+<a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
 
 ## 许可证
 
