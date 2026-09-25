@@ -110,8 +110,8 @@ test "$(find docs-site/docs/public/skillhub/skills -type l | wc -l)" -eq 0
 pass "public registry contains no symlinks"
 
 grep -q "never as raw HTML" docs/rfcs/RFC-033-public-skillhub.md
-grep -q "不会自动公开" docs-site/docs/skillhub/contribute.md
-grep -q "never sends it to anet.sh automatically" docs-site/docs/en/skillhub/contribute.md
+grep -q "不会自动公开" docs-site/docs/skillhub/index.md
+grep -q "never sends it to anet.sh automatically" docs-site/docs/en/skillhub/index.md
 pass "private/public trust boundary is documented in both locales"
 
 grep -q "PublicSkillHub" docs-site/docs/.vitepress/theme/index.ts

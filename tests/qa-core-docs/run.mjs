@@ -10,14 +10,13 @@ const check = (condition, message) => {
 const pages = {
   zhIntro: read("docs-site/docs/guide/introduction.md"),
   enIntro: read("docs-site/docs/en/guide/introduction.md"),
-  zhEcosystem: read("docs-site/docs/ecosystem.md"),
-  enEcosystem: read("docs-site/docs/en/ecosystem.md"),
   zhCommunity: read("docs-site/docs/community.md"),
   enCommunity: read("docs-site/docs/en/community.md"),
 };
 
 for (const [name, text] of Object.entries(pages)) {
-  const limit = name.includes("Intro") ? 70 : name.includes("Ecosystem") ? 35 : 30;
+  // community.md absorbed ecosystem.md (docs slimming, 2026-09-25): 30 + the ecosystem table.
+  const limit = name.includes("Intro") ? 70 : 40;
   check(text.split("\n").length <= limit, `${name} exceeds ${limit} lines`);
 }
 
@@ -90,7 +89,7 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("PASS: six bilingual core pages stay concise");
+console.log("PASS: four bilingual core pages stay concise");
 console.log("PASS: unsupported marketing claims are absent and witnessed-red works");
 console.log("PASS: concise intro retains install, version, and loopback facts");
 console.log("PASS: sidebars stay below 30 links per language");

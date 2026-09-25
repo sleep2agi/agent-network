@@ -54,7 +54,7 @@ anet upgrade --dry-run
 npm install -g @sleep2agi/agent-node
 ```
 
-按当前发布频道升级，不要从旧文档复制固定 preview 或 package 版本。升级策略见[版本说明](/guide/versioning)和[升级指南](/guide/upgrade)。
+按当前发布频道升级，不要从旧文档复制固定 preview 或 package 版本。升级策略见[版本说明](/guide/upgrade#channels)和[升级指南](/guide/upgrade)。
 
 ### 端口被占用或 Hub 立即退出
 
@@ -138,7 +138,7 @@ anet hub admin reset-user --username <username>
 - `access_denied` / `permission_denied`：身份已解析，但角色无权执行该操作。由 network owner 调整成员角色；全局 admin 不自动成为每个 network 的 owner。
 - Agent Node 使用绑定到单一 network 的 `ntok_`；不要跨 network 复用节点 token。
 
-完整权限边界见 [Token 与权限](/concepts/tokens)、[角色](/concepts/roles)和 [Network](/concepts/networks)。
+完整权限边界见 [Token 与权限](/guide/account-system#tokens)、[角色](/guide/account-system#roles)和 [Network](/concepts/networks)。
 
 ### 其它认证/network 报错
 
@@ -194,6 +194,17 @@ tmux ls
 ### 工作目录不对
 
 文件工具使用节点的启动目录。停止节点，切到正确项目目录再启动。Codex TUI 共存时，线程目录继承自 app-server 进程；请按 [Codex TUI 共存指南](/guide/codex-copresence)检查整组会话，不要只看桥进程。
+
+### 远程 daemon 上建的 `claude-code-cli` 节点起不来 {#remote-cli-login}
+
+从 Dashboard 选一台远程机器（daemon）建节点时，能不能跑取决于节点用哪种认证：
+
+| 认证方式 | 存在哪 | 能否跨机 |
+|---|---|---|
+| API key（DeepSeek / MiniMax / Anthropic 等） | 节点配置 + Hub secret vault | 能，跟着节点走 |
+| Claude Code CLI 订阅登录（`claude auth login`） | 那台机器的 `~/.claude` | 不能，绑定机器 |
+
+多机场景优先用 API key：在 Dashboard 的供应商库里配好 vendor、model 和 key，建节点时选这个预设。一定要用订阅登录时，先 SSH 到那台机器执行一次 `claude auth login`，之后那台机器上的 `claude-code-cli` 节点才能跑。anet 不会替你把 `~/.claude` 传到别的机器。
 
 <a id="vendor-api-auth-失败-401-invalid-api-key-expired-token-intern-a02xx-user-token-expired"></a>
 <a id="vendor-api-超时-fan-out-高并发-132-retry-with-backoff"></a>
@@ -305,10 +316,34 @@ docker compose logs --tail=200 <service>
 - [**`anet doctor` 的输出怎么读**](/troubleshooting/reading-anet-doctor) —— 四种前缀分别代表什么、
   为什么版本那几行只报不判、以及它**回答不了**哪些问题。
 - [连通性：Channel 与 MCP](/troubleshooting/connectivity-channels-mcp)
-- [远端节点的 CLI 登录](/troubleshooting/remote-node-cli-login)
-- [案例：飞书静默拒绝](/troubleshooting/case-feishu-silent-deny)
-- [安全重启 Codex TUI 节点](/troubleshooting/codex-tui-node-restart) —— 重启共存节点不丢会话、不回退 rollout。
-- [节点卡在 stopping / starting](/troubleshooting/node-stuck-lifecycle) —— daemon 托管的节点操作没反应、或停在中间态时，先等一次重连。
+- [节点卡在 stopping / starting](/troubleshooting/is-this-node-alive#stuck-lifecycle)
+- [安全重启 Codex TUI 节点](/guide/codex-copresence#safe-restart)
+- [飞书 Bot 收不到或不回消息](/guide/feishu#no-reply)
+
+## 常见问题 {#faq}
+
+### Agent Network 是什么？免费吗？
+
+自部署的多 Agent 通信层：CommHub 负责身份、任务和消息，Agent 通过 MCP 发现队友、通过 SSE 接收任务，它不规定 Agent 内部怎样推理。代码是 Apache 2.0 许可，项目不提供官方托管 Hub；个人使用把 Hub 跑在本机，跨机器或团队使用时部署在所有节点都能访问的机器上。选 runtime 和模型以 [Runtime 对比](/guide/runtimes)和[多模型配置](/guide/multi-model)为准。
+
+### 配置和数据在哪里？
+
+| 路径 | 内容 |
+|---|---|
+| `~/.anet/config.json` | 当前 Hub、用户 token、network |
+| `<项目>/.anet/nodes/<alias>/config.json` | 节点 runtime、身份和 flags |
+| `<项目>/.anet/nodes/<alias>/.env` | 可选的节点 secret，明文文件，权限应为 `0600` |
+| `~/.commhub/commhub.db` | Hub 的 SQLite 数据库 |
+
+不要提交 `.anet`、token 或 `.env`。详见[安全设计](/concepts/security)。
+
+### 可以直接把 9200 / 3000 暴露到公网吗？
+
+不建议。先改初始密码，再通过 Caddy / Nginx 配 TLS 和访问控制，按[生产部署](/deploy/production)逐项检查。
+
+### 支持 PostgreSQL 吗？
+
+当前维护和验证的后端是 SQLite。代码里的 PostgreSQL 兼容入口不代表生产支持。
 
 ## 仍未解决
 

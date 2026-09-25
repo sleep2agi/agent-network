@@ -96,7 +96,7 @@ anet node start my-agent
 | `anet token create <name>` | 创建 API token；明文只显示一次 |
 | `anet token revoke <token-id>` | 撤销 token |
 
-Token 类型、作用域与兼容规则见 [Token 体系](/concepts/tokens)。
+Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#tokens)。
 
 <a id="agent-node-管理"></a>
 <a id="anet-node-create"></a>
@@ -321,4 +321,4 @@ Secret 建议使用 envRef，不要把 token 或模型密钥直接提交到配�
 - [Agent Node 配置](/guide/agent-node)
 - [Runtime 对比](/guide/runtimes)
 - [Channel 接入](/guide/channels)
-- [Token 体系](/concepts/tokens)
+- [Token 体系](/guide/account-system#tokens)

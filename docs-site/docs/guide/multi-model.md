@@ -254,7 +254,7 @@ done
 **配置和调优**：
 - 钱花在哪儿？看本页上方模型对照表的「成本」列
 - 想把多个 API Key 持久化？看 [Agent Node 配置](/guide/agent-node) 的 env 字段
-- API 限流报错？多数厂商有并发上限，[FAQ](/faq) 里有应对策略
+- API 限流报错？多数厂商有并发上限，[FAQ](/troubleshooting#faq) 里有应对策略
 
 **深入原理**：
 - 为什么 `ANTHROPIC_BASE_URL` 能切所有国产模型？看上方 [ANTHROPIC_BASE_URL 原理](#anthropic-base-url-原理) 一节

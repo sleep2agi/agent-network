@@ -139,7 +139,7 @@ Agent Network 由四个 npm 包组成，职责清晰：
 - **只需通信服务**：`bunx @sleep2agi/commhub-server`
 - **只需 Web 界面**：`anet hub dashboard`
 
-完整版本号体系（npm 包独立 semver vs `v0.10.x` bundle release 锚点）见 [版本号体系](/guide/versioning)。
+完整版本号体系（npm 包独立 semver vs `v0.10.x` bundle release 锚点）见 [版本号体系](/guide/upgrade#channels)。
 
 ## CommHub Server
 

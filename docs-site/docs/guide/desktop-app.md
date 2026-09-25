@@ -1,4 +1,4 @@
-# 桌面应用
+# 桌面与手机客户端
 
 Agent Network 桌面应用(macOS / Windows)是给**人**用的那一端:登录一个 Hub,看到网络里所有 Agent,像聊天一样派任务、收回复、传文件。它和手机端是同一份源码,连的是同一个 Hub。
 
@@ -36,7 +36,16 @@ Agent Network 桌面应用(macOS / Windows)是给**人**用的那一端:登录�
 
 设置 → 关于 → 「软件更新」检查新版;有新版时主窗口会弹更新说明,确认后自动下载安装并重启(本地 Hub 会先停再随新版本启动)。更新源是 `https://anet.sh/desktop/update/latest.json`。
 
+## 浏览器与手机：Dashboard 的 PWA 与客户端壳 {#dashboard-shells}
+
+不装桌面应用也可以用 [Dashboard](/guide/dashboard)。它还有几种**薄壳**（源码在 [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)，权威文档是那个仓的 `docs/mobile-app.md`）。壳不重新实现任何功能，认证、数据、上传和实时推送仍由 Dashboard 与 CommHub 承担，所以**必须先有一个能访问的 Dashboard 地址**。
+
+- **PWA（最省事）**：用 **HTTPS** 打开 Dashboard，浏览器会提供「安装到主屏 / 安装为应用」。HTTP 不行（PWA 需要安全上下文），`http://127.0.0.1` 本机调试除外。
+- **iOS / Android（Capacitor）**：WebView 壳，需要 Xcode 或 Android Studio 自行构建。手机是另一台设备，回环地址到不了你的电脑，要显式给一个它够得到的 HTTPS 地址：`export ANET_DASHBOARD_URL="https://your-dashboard.example.com"`。
+- **Electron 桌面壳**：在 dashboard 仓里 `npm run app:desktop`。它和本页的桌面应用不是一回事；要现成的 macOS / Windows 安装包，用上面的桌面应用。
+
+怎么选：只想在手机上看看 → PWA；给不用命令行的人 → 桌面应用；要接推送、相机等系统能力 → Capacitor。
+
 ## 相关
 
-- [手机与桌面客户端](/guide/app-shells):Dashboard 的 PWA / Capacitor / Electron 壳,和本页的桌面应用不是一回事。
 - [Dashboard](/guide/dashboard)、[CLI 命令](/guide/cli)。

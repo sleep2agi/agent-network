@@ -2,7 +2,7 @@
 
 > **各版本的迭代范围（冻结的功能清单）** 见 [docs/version/](../version/)：[版本矩阵](../version/README.md) · [v0.11.0](../version/0.11.0/) · [v0.10.16](../version/0.10.16/)。本文只保留通道状态与政策。
 
-> 最后更新：2026-08-14（`npm view` 实测）。Owner：release ops。版本号**怎么读**（npm 版号 vs bundle tag 两套体系）见 [versioning](../../docs-site/docs/guide/versioning.md)。
+> 最后更新：2026-08-14（`npm view` 实测）。Owner：release ops。版本号**怎么读**（npm 版号 vs bundle tag 两套体系）见 [升级指南 · 发布通道与版本号](../../docs-site/docs/guide/upgrade.md)。
 
 ## 当前已发布状态
 

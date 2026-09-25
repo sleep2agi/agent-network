@@ -123,8 +123,8 @@ check_grep 'node start codexbridge --copresence' docs-site/docs/guide/runtimes.m
 check_grep 'tmux attach -t =codexbridge' docs-site/docs/guide/runtimes.md "Chinese runtime guide uses exact tmux target"
 check_grep 'node start codexbridge --copresence' docs-site/docs/en/guide/runtimes.md "English runtime guide uses co-presence"
 check_grep 'tmux attach -t =codexbridge' docs-site/docs/en/guide/runtimes.md "English runtime guide uses exact tmux target"
-check_grep 'upgrade --channel preview' docs-site/docs/guide/versioning.md "Chinese versioning guide documents preview switch"
-check_grep 'upgrade --channel preview' docs-site/docs/en/guide/versioning.md "English versioning guide documents preview switch"
+check_grep 'upgrade --channel preview' docs-site/docs/guide/upgrade.md "Chinese upgrade guide documents preview switch"
+check_grep 'upgrade --channel preview' docs-site/docs/en/guide/upgrade.md "English upgrade guide documents preview switch"
 
 echo
 echo "F. VitePress render"

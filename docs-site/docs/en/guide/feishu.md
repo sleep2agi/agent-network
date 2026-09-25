@@ -196,7 +196,7 @@ Feishu's `open_id` (user identity) and `chat_id` (conversation) are **scoped per
 
 When switching apps, update **all three** places: ① `FEISHU_APP_ID` / `FEISHU_APP_SECRET` in the node env / deployment ② the channel `.env` ③ **`allowFrom` / `allowChats` in `access.json`** (most often missed).
 
-Classic symptom of missing the third: **`client ready` is fine, events arrive, yet the user's messages get "no reaction."** Full post-mortem → [Case Study: Feishu Silent Deny](/en/troubleshooting/case-feishu-silent-deny).
+Classic symptom of missing the third: **`client ready` is fine, events arrive, yet the user's messages get "no reaction."**
 :::
 
 ## 6. Group `@bot` mechanics
@@ -347,9 +347,19 @@ export ANET_FEISHU_BRIDGE_MODE=commhub   # opt in explicitly
 | Bot doesn't reply in a DM | Verify the sender's `open_id` is in `allowFrom` (run `anet channel ls`) |
 | **Connected, events arrive, but messages get "no reaction"** | **grep the bridge stderr for `deny` / `allowFrom`**: message received but sender not in allowlist. **Most common after switching apps** (`open_id` changed per app — see the §5 danger note) |
 | Bot replies seem wrong / errors out on an image | The backend isn't vision-capable (§4) — switch to a vision-capable model |
-| **Sending an image gets "received the event but no processable text/image content"** | The image wasn't extracted. Check in order: ① the node has image capability off (`flags.modelImageCapable` is unset by default — see §4) ② **download failed** — look for `[feishu:image] … download FAILED` in the log; most often the **old `downloadImage` SDK-misuse bug** ([#324](https://github.com/sleep2agi/agent-network/pull/324), present in old builds like `2.2.22-preview.2`) — upgrade to a preview that includes the fix. See [Case Study · companion](/en/troubleshooting/case-feishu-silent-deny#companion-case-the-bot-can-t-see-images) |
+| **Sending an image gets "received the event but no processable text/image content"** | The image wasn't extracted. Check in order: ① the node has image capability off (`flags.modelImageCapable` is unset by default — see §4) ② **download failed** — look for `[feishu:image] … download FAILED` in the log; most often the **old `downloadImage` SDK-misuse bug** ([#324](https://github.com/sleep2agi/agent-network/pull/324), present in old builds like `2.2.22-preview.2`) — upgrade to a preview that includes the fix. See the [image checklist](#no-reply) below. |
 
-Diagnostic mnemonic (narrow by layer): ① look first for `failed to obtain token` / `[ws] ws connect failed`; `bridge online` or `client ready` alone does not mean the connection succeeded; ② the Feishu console recognizes the test connection but no events arrive = check for missing `im.message.receive_v1`, the wrong delivery mode, or an unpublished version; ③ events arrive but there is no reply = denied at the application layer, grep `deny` / `allowFrom`; ④ an image gets no reaction = check the `modelImageCapable` flag and whether the download failed (old-version bug, upgrade). Full post-mortem → [Case Study: Feishu Silent Deny](/en/troubleshooting/case-feishu-silent-deny).
+Diagnostic mnemonic (narrow by layer): ① look first for `failed to obtain token` / `[ws] ws connect failed`; `bridge online` or `client ready` alone does not mean the connection succeeded; ② the Feishu console recognizes the test connection but no events arrive = check for missing `im.message.receive_v1`, the wrong delivery mode, or an unpublished version; ③ events arrive but there is no reply = denied at the application layer, grep `deny` / `allowFrom`; ④ an image gets no reaction = check the `modelImageCapable` flag and whether the download failed (old-version bug, upgrade).
+
+### Events arrive but the bot does not reply: grep for these {#no-reply}
+
+- `[feishu:audit] deny ... not in allowFrom`: the sender is not on the allowlist; most common after switching apps (see §5).
+- `empty vendor result`: the model produced output but no text could be extracted, usually a model × gateway response-format mismatch; switch to a compatible model.
+- `No conversation found`: the session state is stale; clear the session field in the node config and restart.
+
+"No reaction" can mean "never received" or "received and denied", and the two lead in completely different directions. When unsure, confirm with a minimal script that only opens a Feishu SDK long connection and subscribes to `im.message.receive_v1`, then go back into the product stack.
+
+**Image checklist**: ① the model supports vision; ② the node has `flags.modelImageCapable=true`; ③ your agent-network version includes the [#324](https://github.com/sleep2agi/agent-network/pull/324) download fix.
 
 ## 10. Known limitations (preview scope)
 

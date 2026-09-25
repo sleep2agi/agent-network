@@ -139,7 +139,7 @@ Measured 2026-07-31: reproduced on a freshly created TUI; pre-existing co-presen
 
 ## Lifecycle commands: `anet node codex …` (read-only checks land first)
 
-Restarting or resuming a co-presence node used to be a manual runbook ("Codex TUI safe restart"). Every check in it is becoming a deterministic CLI step: no LLM on the happy path, machine-readable receipts only. The first two commands are read-only:
+Restarting or resuming a co-presence node used to be a manual runbook (see [Manual safe restart](#safe-restart) below). Every check in it is becoming a deterministic CLI step: no LLM on the happy path, machine-readable receipts only. The first two commands are read-only:
 
 ```bash
 anet node codex preflight <alias>          # read-only checks, exit 0 = PASS / exit 2 = FAIL
@@ -282,6 +282,46 @@ A manually started app-server does not automatically get the CommHub MCP injecti
 The TUI may show `Update available` with upgrade-now selected by default. On a shared host, choose skip/later and schedule Codex CLI upgrades for a maintenance window; replacing the global binary may affect every co-presence node on that machine.
 :::
 
+## Manual safe restart (without `anet node codex restart`) {#safe-restart}
+
+Prefer `anet node codex restart` above: it checks every item below automatically. Use this checklist only when you cannot (older versions, hand-built topologies). The goal is not "the processes came back" but that **the same node identity, the same thread, the same working directory and the same main rollout** are restored. If any item disagrees, stop, fix it, and redo the whole acceptance check.
+
+### 1. Record the current state per node
+
+| Item | Why |
+|---|---|
+| alias, node_id, the node's own `CODEX_HOME` | to verify identity afterwards |
+| expected working directory (absolute path) | TUI `-C`, bridge cwd and CommHub `project_dir` must all match it |
+| full 36-character thread ID | recovery must be exact; no prefixes |
+| main rollout absolute path + byte size | must not shrink or be replaced after the restart |
+| goal state (active / paused) | must be kept as it was |
+| real child-process command lines of app-server / TUI / bridge | restart them as they were; look at the children, not the launcher or tmux name |
+
+Back up the node's `auth.json` first and `chmod 0600` it. Credentials, `ntok_` and `atok_` never go into argv, logs, receipts or screenshots.
+
+### 2. Stop in order, start in reverse
+
+- Stop: **bridge → TUI → app-server** (preferably `anet node stop <alias>` run from outside the co-presence process tree). Then check there are no orphan processes or listening ports and the old bridge is no longer connected to the Hub.
+- Start: **app-server → TUI → bridge**. Both app-server and TUI use the node's own `CODEX_HOME`; the TUI resumes with the full thread ID and an explicit working directory:
+
+```bash
+codex resume --remote <app-server-url> <full-thread-id> -C <node-cwd> -m <model>
+```
+
+`cd` into the node's working directory before starting the bridge. Never use a short prefix, "the most recent session" or the interactive picker.
+
+### 3. Acceptance: everything must pass
+
+- [ ] **Identity**: `from_name` / `from_node_id` on the Hub match the target node (verify with a side-effect-free fixed-phrase probe, not a real task)
+- [ ] **Session**: the full thread ID matches the record
+- [ ] **Rollout**: same absolute path, byte size ≥ before, content not replaced by a new thread
+- [ ] **Working directory**: TUI `-C` == bridge cwd == CommHub `project_dir` == node config
+- [ ] **Goal**: active goals continue, paused goals stay paused, nothing resumed by accident
+- [ ] **Processes**: all three are up, the Hub shows online / idle, no duplicate old instance
+- [ ] **Credentials**: `auth.json` is `0600`; no secret in argv, logs or receipts
+
+"All three processes are up" is one item, not the verdict. For a batch, canary one node first, then continue one by one.
+
 ## Long tasks and the 600-second message
 
 Only one turn can be active in a thread; later network tasks queue FIFO. The current network-task wait for a final answer **defaults** to 600 seconds (runtime options can override it; it is not an immutable hard cap):
@@ -302,4 +342,4 @@ Only one turn can be active in a thread; later network tasks queue FIFO. The cur
 - [RFC-030 Codex TUI Bridge](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)
 - [Node runtimes](/en/guide/runtimes)
 - [CLI: `anet node start`](/en/guide/cli#anet-node-start)
-- [Grok Co-presence TUI](/en/guide/grok-copresence)
+- [Grok nodes](/en/guide/grok)

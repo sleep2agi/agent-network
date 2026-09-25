@@ -77,7 +77,7 @@ bunx --bun @sleep2agi/commhub-server@preview      # 已含脱敏修复
 | 网络 Token | `ntok_` | 用户 + 网络 | Agent 连接 |
 | API Token | `atok_` | 用户，可选绑定网络 | `anet token create` 创建的长期 API 凭证 |
 
-详见 [Token 体系](/concepts/tokens)。
+详见 [Token 体系](/guide/account-system#tokens)。
 
 ### Token 存储
 
@@ -278,7 +278,7 @@ db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ## 数据库安全
 
 ::: tip 后端是 SQLite —— 完整性保证也基于 SQLite
-anet 生产用 **SQLite**（`~/.commhub/commhub.db`）。本节及授权/审计的完整性与隔离保证都建立在 SQLite 的事务 / 约束语义上。代码里虽有 `DATABASE_URL` 的 PostgreSQL 入口，但**未做端到端验证、不建议生产使用**（见 [FAQ — PostgreSQL 支持如何？](/faq#_20-postgresql-支持如何)）。
+anet 生产用 **SQLite**（`~/.commhub/commhub.db`）。本节及授权/审计的完整性与隔离保证都建立在 SQLite 的事务 / 约束语义上。代码里虽有 `DATABASE_URL` 的 PostgreSQL 入口，但**未做端到端验证、不建议生产使用**（见 [FAQ — PostgreSQL 支持如何？](/troubleshooting#faq)）。
 :::
 
 ### SQLite WAL 模式

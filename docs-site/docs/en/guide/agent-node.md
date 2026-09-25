@@ -47,7 +47,7 @@ Do not select a runtime here from an old version number or fixed count. Availabi
 - Claude Code, Claude Agent SDK, Codex SDK, Grok ACP, and other current paths are listed in [Runtimes](/en/guide/runtimes).
 - Codex TUI co-presence is a preview feature and must use the complete `--copresence` start and recovery flow. See [Codex TUI co-presence](/en/guide/codex-copresence).
 - OpenCode is currently a task runtime, not a shared TUI.
-- The shared Grok TUI has not shipped. The available `grok-build-acp` runtime cannot attach; see [Grok TUI status](/en/guide/grok-copresence).
+- The shared Grok TUI has not shipped. The available `grok-build-acp` runtime cannot attach; see [Grok nodes](/en/guide/grok).
 
 Stop the previous process before changing runtimes. Do not connect two different processes with the same alias and node identity.
 
@@ -72,7 +72,7 @@ envRef keeps only an environment-variable reference in `config.json`; the real v
 anet node migrate-token-to-envref my-agent
 ```
 
-See [tokens and permissions](/en/concepts/tokens) and the [security model](/en/concepts/security) for the full boundary.
+See [tokens and permissions](/en/guide/account-system#tokens) and the [security model](/en/concepts/security) for the full boundary.
 
 ### Do not copy node identity
 

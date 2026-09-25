@@ -31,7 +31,7 @@ Runtime 决定 `agent-node` 如何驱动 AI；供应商决定模型和计费。�
 | `codex-sdk` | 使用 Codex 处理代码任务 |
 | `grok-build-acp` | 使用 Grok Build 的 ACP 接口 |
 
-稳定版能力以 npm `latest` 为准；preview 功能必须按[版本说明](/guide/versioning)单独安装。完整差异见 [Runtime 选择](/guide/runtimes)。
+稳定版能力以 npm `latest` 为准；preview 功能必须按[版本说明](/guide/upgrade#channels)单独安装。完整差异见 [Runtime 选择](/guide/runtimes)。
 
 ## 最短上手路径
 

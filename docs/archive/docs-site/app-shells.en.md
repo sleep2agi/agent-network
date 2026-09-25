@@ -1,3 +1,5 @@
+> Archived: moved out of the anet.sh user docs on 2026-09-25 (docs slimming). Content kept as-is for maintainers; see https://anet.sh for current user docs.
+
 # Mobile and desktop clients
 
 Besides the browser, the Dashboard ships three **client shells**: a PWA, iOS / Android,

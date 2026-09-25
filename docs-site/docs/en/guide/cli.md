@@ -96,7 +96,7 @@ Invite options include `--role admin|member|viewer`, `--uses <n>`, and `--expire
 | `anet token create <name>` | Create an API token; plaintext is shown once |
 | `anet token revoke <token-id>` | Revoke a token |
 
-See [Token model](/en/concepts/tokens) for token types, scopes, and compatibility behavior.
+See [Token model](/en/guide/account-system#tokens) for token types, scopes, and compatibility behavior.
 
 <a id="agent-node-management"></a>
 <a id="anet-node-create"></a>
@@ -327,4 +327,4 @@ Use envRef for secrets; do not commit tokens or model keys in configuration. See
 - [Agent Node configuration](/en/guide/agent-node)
 - [Runtime comparison](/en/guide/runtimes)
 - [Channel integration](/en/guide/channels)
-- [Token model](/en/concepts/tokens)
+- [Token model](/en/guide/account-system#tokens)

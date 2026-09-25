@@ -226,7 +226,12 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   git ls-files 把它们算进 docs-site 文件集;pin 计数不变。
 # 2026-09-23:files 137 → 139。新增 DSH 节点预览页 docs-site/docs/guide/dsh.md 与 en/guide/dsh.md(#1970);
 #   两页不含源码行号 pin,uniq/occ 不变。CI 先红(「预期扫 137 …,实际 139」)才来抬。
-[[ "$files" -eq 139 ]] || fail "预期扫 139 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-25:files 139 → 111。文档站瘦身第 3 步合并了 14 组重复/过短页面(中英各 14 页,共 28 个 .md):
+#   ecosystem、skillhub/contribute、grok-copresence、grok-tui(→ 新 guide/grok,+1)、codex-tui-safe-restart、
+#   troubleshooting/codex-tui-node-restart、app-shells、troubleshooting/node-stuck-lifecycle、
+#   troubleshooting/case-feishu-silent-deny、troubleshooting/remote-node-cli-login、guide/versioning、preview/index、
+#   faq、concepts/tokens、concepts/roles(15 删 + 1 增 = 净 −14/语言)。这些页都不含源码行号 pin,uniq/occ 不变。
+[[ "$files" -eq 111 ]] || fail "预期扫 111 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 9  ]] || fail "预期 9 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 24 ]] || fail "预期 24 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
