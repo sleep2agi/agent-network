@@ -580,6 +580,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_nrr_node_status ON node_rules_requests(node_id, status);
   CREATE INDEX IF NOT EXISTS idx_nrr_network ON node_rules_requests(network_id);
 `);
+// Content retention (node-request-retention.ts): file bytes in content /
+// result_content are purged after the first terminal read (+grace) or a TTL;
+// these two columns record when, so the row itself survives as audit metadata.
+for (const col of ["first_read_at INTEGER", "content_purged_at INTEGER"]) {
+  try { db.exec(`ALTER TABLE node_rules_requests ADD COLUMN ${col}`); } catch {}
+}
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_nrr_created ON node_rules_requests(created_at);
+  CREATE INDEX IF NOT EXISTS idx_nrr_first_read ON node_rules_requests(first_read_at);
+`);
 
 // ── V3: networks table ──
 db.exec(`
