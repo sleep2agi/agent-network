@@ -1,17 +1,151 @@
 # 更新日志
 
-::: warning 本页正在补齐
-下面最新的条目停在 2026-08-28，之后的版本正在补写。在补齐之前：
+按时间倒序列出面向用户的变化。查通道此刻指向哪个版本：`npm view @sleep2agi/agent-network dist-tags`（`agent-node`、`commhub-server` 同理）；每一版 npm 包的完整发布说明在仓库的 [`docs/tests/release-v<版本号>.md`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests)，桌面端见 [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)。
 
-- 查通道当前指向：`npm view @sleep2agi/agent-network dist-tags`（`agent-node`、`commhub-server` 同理）
-- 每一版 npm 包的发布说明在仓库的 [`docs/tests/`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests) 目录，文件名为 `release-v<版本号>.md`（例如 `release-v2.3.0-preview.76.md`）
-- 桌面端的版本说明在 [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)
-:::
+## 节点可见性：规则文件、技能、项目文件夹——preview（2026-09-23 至 09-25）
 
-## 2026-08-28 之后的通道变化（npm 发布时间）
+三包配套发布：`commhub-server@0.9.0-preview.56–.60`、`agent-node@2.5.0-preview.85–.88`、`agent-network@2.3.0-preview.110–.115`（`agent-node@.84` 未在 npm 上可见，由 `.85` 取代）。
 
-- **2026-09-02**：`agent-network@2.3.0-preview.76` 与 `agent-node@2.5.0-preview.58` 发布；截至 2026-09-25 它们就是 `latest`。`commhub-server` 的 `latest` 仍是 `0.9.0-preview.30`（2026-08-26 发布）。
-- **截至 2026-09-25**：`preview` 通道为 `agent-network@2.3.0-preview.115`、`agent-node@2.5.0-preview.88`、`commhub-server@0.9.0-preview.60`。
+- **项目文件夹只读浏览**（#1999）：新 hub 工具 `list_node_files` / `read_node_file`，可逐层浏览节点工作目录、查看文本文件（≤256 KiB）。`.env*`、私钥、`auth.json` 等凭据类文件只列名、不给内容；路径与软链接不得逃出工作目录；节点 token 不能发起浏览。需要 hub `.59` + agent-node `.88`（或 anet `.115`）+ 桌面端 0.2.94
+- **节点技能只读查看**（#1984）：`list_node_skills` / `read_node_skill`，按各运行时（codex / grok / opencode / Claude Code）真实加载位置列出技能并读取 SKILL.md
+- **Claude Code 会话也能远程读写 CLAUDE.md**（#1977）：`read_node_rules_file` / `write_node_rules_file` 新增 `alias` 参数，可定位没有节点行的会话；已在跑的会话需重启到 anet `.111` 才会上报能力
+- **暂存内容自动清理**（#2001，hub `.60`）：规则文件、SKILL.md、文件读取结果在请求方取到后 60 秒清空，未被取走的 24 小时后清空，30 天后删行；首次部署会一次性清掉 24 小时以上的旧内容
+- **取件按 token 绑定的节点解析**（#1994，hub `.58`）：同一别名在库里有多行时，规则文件 / 配置更新请求不再被派到旧行、空等 60 秒
+- **codex-app-server 启动更稳**（#1988 / #1989 / #1991）：新增 `ANET_QUEUE_TIMEOUT_MS`（排队截止）与 `ANET_CODEX_RESUME_TIMEOUT_MS`（启动恢复会话，默认 120 秒，超时重试一次）；恢复失败先向 hub 报离线再退出，hub 不再把死节点显示成 idle；未绑定的旧 token 只停出站对账、不再连收件箱补偿一起停
+- **daemon 开机后仍能建节点**（#1976，anet `.110`）：经 `anet node start/restart` 或开机扫起的 daemon 同样钉死 anet 二进制，不再「在线但建不了节点」
+
+---
+
+## 桌面端 0.2.85–0.2.97（2026-09-24 至 09-25）
+
+macOS（Apple Silicon）与 Windows（x64）签名更新。
+
+- **界面**：更简洁的配色与层次（背景色区分层级、正文对比度 ≥4.5:1），细滚动条悬停才出现；长代码、哈希、URL 在气泡内换行
+- **节点页重做**（0.2.87–0.2.88）：头部卡片 + 分区导航（概览 / 模型与运行时 / 规则文件 / 技能 / 任务 / 危险操作）；任务按进行中、排队、可能卡住、最近完成分组；宽窗口居中铺开
+- **规则文件编辑器**（0.2.85–0.2.93）：Codex / OpenCode / Claude 节点均显示；默认「阅读」模式按排版渲染，支持全屏带目录、双击段落跳到对应源码编辑；修复定时刷新冲掉未保存内容；agent-node 过旧时直接提示需要的版本，不再空等 60 秒
+- **技能与项目文件夹**：只读技能区（0.2.87）与项目文件夹浏览（0.2.94），版本不够时提示要升级什么
+- **未读与通知**：修复 macOS 菜单栏未读数不消失、面板只列 20 个会话（0.2.92）；节点列表顶部新增「新消息」组（0.2.95）
+- **规则文件查找与替换**（0.2.97）：`Ctrl+F` / `⌘F` 在阅读、编辑、全屏里都能查找并在结果间跳转，编辑模式可替换，只改草稿、保存后才写回节点；读取最多 90 秒内一定出结果或原因，内容过期时不再显示成可编辑的空文件
+- **新建 Grok 节点默认 ACP 模式**（0.2.97）：共存模式移到「高级」并标为实验性
+- **其他**：设置 → 关于的检查更新总有明确结果（0.2.88）；全屏阅读时 macOS 红绿灯与 Windows 窗口按钮不再被遮挡（0.2.96）；Grok TUI 共存运行时在向导中标为「预览」
+
+---
+
+## 队列正确性与运行时修复——preview（2026-09-22 至 09-23）
+
+`agent-node@2.5.0-preview.76–.83`、`agent-network@2.3.0-preview.100–.109`（`.102` 在 npm 上作废，由 `.103` 取代）。
+
+- **codex 队列不再白跑或偷跑**（#1939 / #1945）：所有终态路径都会摘掉本地排队行；排队行出队前先问 hub，已被确认或已终态的任务不再起一轮 turn
+- **grok-build-acp 真正使用配置的模型**（#1961）：启动时传模型并调用 `session/set_model` 回读核对，不一致则在任何 prompt 之前报错；hub 上报的是实际生效的模型
+- **codex 二进制可显式选择**（#1971）：按 `codexBin` 配置 → `ANET_CODEX_BIN` → PATH 上不低于内置版本的 `codex` → 内置 的顺序选择，启动日志打印路径与版本；解决干净安装内置 codex 过旧、新模型报「requires a newer version of Codex」的问题。配套 #1974 不再对新 codex 误报推理档位告警
+- **opencode 共存远程改模型后能恢复**（#1950 / #1964 / #1966）：重启不再因自己上一代留下的 `ANET-COMMHUB.md` 拒启；旧的 attach TUI 被精确停掉，并在原 tmux pane 里重新接上新会话
+- **`anet node codex fork` 补齐五处**（#1954，anet `.104`）：自动创建 `--workdir`、改写项目表头、`--model` 覆盖与不一致警告、预探空闲端口、`AGENTS.md` 随 fork 走
+- **grok 共存标为预览**（#1968）：`anet setup` / `anet node create` 与文档中 `grok-build-cli` 标「预览」，推荐稳定的 `grok-build-acp`；未验证 grok 的拒起报错附可复制的 `GROK_BINARY=… anet node start` 恢复命令
+
+---
+
+## codex 共享登录检测 + 长回合可观测——preview（2026-09-19 至 09-20）
+
+`agent-node@2.5.0-preview.73–.75`、`agent-network@2.3.0-preview.97–.99`。
+
+- **多节点共用同一份 codex 登录会被点名**（#1920 / #1928 / #1931）：启动时按 refresh token 指纹检测，命中即告警并列出共用的节点（只告警、不拒启）。检测在 agent-node 内执行，直接启动的节点同样覆盖；比较范围为整台主机（`~/.anet/codex-auth-fingerprints/`）。要完整功能请用 anet `.99` + agent-node `.75`
+- **刷新失败给出命名原因**：`rotation-conflict`（token 已被别的节点用过，需重登一次）与 `token-endpoint-unreachable`（出网到不了 token 端点）分开说明；文案明确不要去拷别的节点的 `auth.json`
+- **长回合心跳**（#1919）：grok 节点在回合进行中每 30–60 秒写一行 `in-flight: … elapsed=… last=…`，「看着不动」与「真的卡住」可以区分
+- **stderr 降噪**：已知无害的 grok stderr 每回合折成一行 INFO，不再刷满 WARN
+- **`ANET_LOG_LEVEL`**：新增 `ANET_` 前缀的日志级别变量，非法值会告警一次（此前 `LOG_LEVEL` 写错会静默回落到 info）
+
+---
+
+## 附件、跨 WAN 起节点、未读清零——preview（2026-09-14 至 09-17）
+
+`commhub-server@0.9.0-preview.54–.55`、`agent-node@2.5.0-preview.69–.72`、`agent-network@2.3.0-preview.90–.96`（`.94` 未在 npm 上可见，由 `.95` 取代）。
+
+- **回复里的本机文件链接自动变附件**（#1869 / #1876）：任何运行时在回复中写 `[名字](/绝对路径)`，桌面端即显示可下载的附件卡片；上传不了会注明原因（不在工作目录/家目录内、超 12 MB 等）；claude-code-cli 节点的 `attachments` 写成字符串也不再丢
+- **跨 WAN 连 hub 不再被误判**（#1882）：`anet node start` 的 hub 健康探测对非回环地址默认 10 秒，可用 `ANET_HUB_HEALTH_TIMEOUT_MS`（1000–60000）覆盖
+- **hub 响应 gzip**（#1897，hub `.54`）：≥1 KB 的 JSON/文本响应按需压缩，`/api/status?light=1` 截短任务文本，慢链路上节点列表与聊天记录明显变小
+- **按 agent 一键标已读**（#1909，hub `.55`）：`POST /api/messages/ack` 支持 `{ "agent": "<alias>" }`，一次清空该 agent 的全部未读（桌面端 0.2.73+ 使用）
+- **已终态任务不再重跑**（#1902）：串行队列出队前查一次任务状态，已回复/已关闭的任务只 ack 不起 turn
+- **claude-code 节点收件箱一次取空**（#1901）：每个新任务事件把积压取完，第 6 条起不再拖到下一个事件
+- **opencode 共存回件归属**（#1912）：经上下文压缩的长回合不再被误判为「非本任务回复」而丢掉答案；仍被拒时原文附在错误件里
+- **共存身份回收器只认本节点进程树**（#1872）：继承了节点标记的无关进程不再被当作上一代杀掉；grok 共存两类常见启动失败附恢复命令（#1882 / #1888）；`anet grok --help` 列出 `model` 子命令（#1886）
+
+---
+
+## 桌面端联动与 Codex 生命周期控制器——preview（2026-09-06 至 09-10）
+
+`commhub-server@0.9.0-preview.50–.53`、`agent-node@2.5.0-preview.67–.68`、`agent-network@2.3.0-preview.86–.89`。
+
+- **`anet node codex` 生命周期命令**（#1856，anet `.89`）：`preflight` / `verify` 只读体检；`start` / `restart` / `resume` 确定性启停并失败回滚；`fork` 继承历史建新节点；`account register|list|install` 与 `rollback` 管理登录；`canary` 顺序验证。另有 `anet node edit --workdir`
+- **回复附件显示在正确的气泡**（#1824，hub `.50`）：agent 回复的附件不再画进提问者的气泡，也不再覆盖提问者自带的附件
+- **按 agent 的权威未读数**（#1838，hub `.51`）：`GET /api/messages?scope=user` 返回 `unread_by_agent` / `unread_total`，ack 同步到所有设备
+- **向导能看到建节点失败原因**（#1843，hub `.52`）：新增 `GET /api/node-create-requests?request_id=`，直接显示 daemon 回报的错误
+- **OpenCode 共存支持 macOS**（#1847 / #1848 / #1849）：包身份校验、启动隔离、进程身份三层补齐 darwin（Windows 仍不支持）
+- **模型名允许 `provider/model`**（#1853）：hub 与 daemon 同步放行一个斜杠，向导可建带 `opencode/…` 模型的节点
+
+---
+
+## 共存节点与 CLI 可靠性——preview（2026-09-03 至 09-04）
+
+`commhub-server@0.9.0-preview.46–.49`、`agent-node@2.5.0-preview.59–.66`、`agent-network@2.3.0-preview.77–.85`。
+
+- **标准 MCP 客户端恢复工具清单**（#1763，hub `.46`）：修复 `tools/list` 抛 `schema._zod`，Claude Code 的 MCP 配置、Inspector 等能正常列出工具
+- **`blocked` 有出口**（#1793，hub `.47`）：节点发出终态回复或派任务后自动回到 `idle`；hub 内部异常时 MCP 调用返回真正的错误信息（#1801）
+- **grok 共存不再一条条超时**（#1774 / #1775 / #1776）：通过校验的 grok 可执行文件被钉住；`turn_ended` 缺失时有界等待后放弃该轮；人在 TUI 输入到一半离开 10 分钟后自动让路。停止后不再残留 5 个占位文件（#1784 / #1817）
+- **共存节点不再重复回复**（#1770）：模型自己发给任务发起方的重复消息被改写成不推送的进度上报（需 anet `.77` + agent-node `.62`，并重启节点）
+- **CLI**：`anet node start` 拒绝对已在跑的节点起第二个会话（#1804）；优先使用与 anet 同装的 agent-node（#1813）；`anet node edit` 支持 `--runtime` / `--model`；`--force` / `--yes` 不再吃掉下一个参数；agent 可直接用 `attachments` 发文件（#1186）；Mac / Windows 可起 grok 共存节点（带隔离弱化提示）
+- **名册信息更完整**：claude-code 节点上报遥测与 model（#1787 / #1799）；换手上报不再清空 version 与遥测（#1810）；codex 共存就绪探测按端口判定，秒级就绪（#1798）
+- **派单误判修复**（#1805）：「让/请 X …」只在句首/行首才算派单，散文中提及他人不再生成幽灵任务
+
+---
+
+## agent-network 2.3.0-preview.76 升为 latest（2026-09-02）
+
+`npm i -g @sleep2agi/agent-network` 默认获得 `2.3.0-preview.76`。包含截至 2026-09-02 的全部 CLI 改进，重点是本页下方 08-29 至 09-02 各条目中的报错、帮助与排版修复。
+
+---
+
+## agent-node 2.5.0-preview.58 升为 latest（2026-09-02）
+
+`@sleep2agi/agent-node` 的 `latest` 指向 `2.5.0-preview.58`，带节点规则文件远程读写支持。`commhub-server` 的 `latest` 在本期未变动（仍为 `0.9.0-preview.30`），需要新 hub 能力请安装 `preview`。
+
+---
+
+## 节点规则文件远程读写 + CLI 文案大修——preview（2026-09-02）
+
+三包配套发布：`commhub-server@0.9.0-preview.45`、`agent-node@2.5.0-preview.58`、`agent-network@2.3.0-preview.76`。
+
+- **节点规则文件**（#1755）：桌面端可远程读写节点的 `CLAUDE.md` / `AGENTS.md`；hub 新增 `read_node_rules_file` / `write_node_rules_file` 等工具，节点只在自己的工作目录内读写，整条链路没有路径参数
+- **did-you-mean 与子命令帮助**：敲错 `daemon` 等命令给出正确建议；`anet goal/token/batch/opencode/network/channel/session --help` 打印各自的帮助
+- **节点找不到时给出相近名称**，按「没有节点 / 有相近的 / 没有相近的」分别说明
+- **表格排版**：中文别名、长运行时名、多行任务文本不再把 `node ls` / `status` / `tasks` 打歪；`anet demo` 不再输出字面量颜色码
+- **时间与诊断**：hub 时间戳显式标 UTC 并附相对时长；`anet doctor` 说清各项量的是什么，列出运行时 CLI 实际版本，0 个节点不再报错
+
+---
+
+## 建节点能力可见 + grok 共存体验——preview（2026-08-30）
+
+`commhub-server@0.9.0-preview.43–.44`、`agent-node@2.5.0-preview.53–.57`、`agent-network@2.3.0-preview.68–.75`。
+
+- **daemon 能否建节点一目了然**（#1545）：`anet daemon list` 以五种明确说法报告创建能力及其测量时间；hub 在派发 `create_node` 前按 daemon 自报能力拦截并给出原因（#1510 / #1511 / #1588）
+- **`anet daemon restart <name>`**（#1601，anet `.74`）：一条命令重启 daemon；起不来时明确提示「它现在是停着的」及重试命令（#1616）
+- **grok 共存**：`anet grok attach` 使用备用屏幕，断开后原样还原终端（#1514）；recovery TUI 退出时显示 grok 真实输出（#1518）；grok 1.0.5 等 leaderless 版本不再被恒报 `blocked`（#1609）
+- **报错指向正确方向**：401 不再说成「连不上 hub」（#1581）；daemon 启动时提示「装了 grok 但不在 PATH」（#1586）；grok 找不到时区分未在 PATH / 不可执行 / 启动失败（#1582）；`anet_bin_source` 的修复命令可直接执行（#1521）
+- **`anet status` 不再把卡住/出错显示成在干活**（#1577）；非 claude-agent-sdk 节点拒绝配置飞书通道（#1575）
+- **`anet node stop`** 不再因残留的无监听 socket 路径误报失败（#1526）
+
+---
+
+## grok 共存修复、Windows 可用、桌面消息持久化——preview（2026-08-29）
+
+`commhub-server@0.9.0-preview.39–.42`、`agent-node@2.5.0-preview.44–.52`、`agent-network@2.3.0-preview.60–.67`。
+
+- **grok 共存 TUI**：斜杠命令被拦时即时提示（#1404）；干净的 `/model <id>` 由运行时代为执行（#1408）；attach 后不再黑屏（#1412）；换模型不再使节点崩溃（#1416）
+- **Windows 可用**（#1137 / #1489 / #1494 / #1504）：`anet` 能调起 npm/npx 等外部启动器，daemon 能在 Windows 上 fork 出节点且子节点不再因缺少 `HOME` 崩溃。需同时升级 anet `.66` 与 agent-node `.51` 以上
+- **桌面消息不再丢**（#1481 / #1485 / #1488）：`send_desktop_message` 先持久化再推送，新增 `GET /api/messages?scope=user` 与 `POST /api/messages/ack`，带未读数并在回读时遮蔽 token 形状的字符串
+- **无非回环 IPv4 的机器能起节点**（#1498 / #1506）：hub 接受 `host.ip = null`，节点对可选遥测字段的分歧改为降级重试
+- **daemon 回归纯程序**（#1418）：自由文本任务不再调用大模型，只执行结构化生命周期命令；stop/start/delete 门铃支持 SSE 重连补偿（#1450）
+- **安全**：删除节点时按真实工作目录清理，不再残留节点凭据（#1478；升级前在 cwd ≠ home 的机器上删过的节点请手工检查 `.anet/nodes/`）
+- **CLI**：`anet node create --resume` 推断 `claude-code-cli`（#1420）；交互向导与带名路径共用环境检查（#1473）；`--copresence` 启动失败会指出失败步骤并给出日志路径（#1500）
 
 ---
 
@@ -52,14 +186,14 @@
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
 - **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/upgrade#channels) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
-- **当前 preview**：以 npm `preview` dist-tag 为准。2026-08-18 实测 `agent-node@2.5.0-preview.31` 的 `--help` 已列出 `grok-build-cli` + `ANET_CAPABILITY_GROK_COPRESENCE_V2`，`anet@2.3.0-preview.39 grok` 打印 `Usage: anet grok attach <node>`。现在 `latest` 与 `preview` 都包含 `grok-build-cli` 与 `anet grok attach`（实验能力；默认推荐仍是 `grok-build-acp`），状态见 [Grok TUI 状态页](/guide/grok)。
-- 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
+- **当前 preview**：以 npm `preview` dist-tag 为准。2026-08-18 实测 `agent-node@2.5.0-preview.31` 的 `--help` 已列出 `grok-build-cli` + `ANET_CAPABILITY_GROK_COPRESENCE_V2`，`anet@2.3.0-preview.39 grok` 打印 `Usage: anet grok attach <node>`。现在 `latest` 与 `preview` 都包含 `grok-build-cli` 与 `anet grok attach`（实验能力；默认推荐仍是 `grok-build-acp`），状态见 [Grok 节点](/guide/grok#copresence)。
+- v0.9.2 及更早的条目（含 v1.0.0-preview / v2.1 / v0.x）见本页末尾的[更早的版本](#older)
 :::
 
 ## Grok 人机共存 TUI（`grok-build-cli`）—— preview（2026-07-15）🟡 preview
 
 ::: danger 2026-07-31 更正
-下文记录的是当时的候选里程碑。其中的安装与运行命令是当时的写法，请勿照抄；`grok-build-cli` / `anet grok attach` 后来已进入 npm 发布包（实验能力），现状与用法见 [Grok TUI 状态页](/guide/grok)。
+下文记录的是当时的候选里程碑。其中的安装与运行命令是当时的写法，请勿照抄；`grok-build-cli` / `anet grok attach` 后来已进入 npm 发布包（实验能力），现状与用法见 [Grok 节点](/guide/grok#copresence)。
 :::
 
 **版本同步**（npm `@preview` tag）：
@@ -853,531 +987,13 @@ agent-node 每次 `commhub_report_status` 心跳带上 `process_telemetry`：`rs
 
 ---
 
-## v0.9.2 — **Patch: Auth fast-fail + Fan-out retry + Wizard 重做 + #122 default-tmux 回退**（2026-05-16）✅ stable
+## 更早的版本 {#older}
 
-**版本同步**（npm `latest` tag）：
-- `@sleep2agi/agent-network@2.1.15`
-- `@sleep2agi/agent-node@2.3.10`
-- `@sleep2agi/commhub-server@0.8.1` *(无变化)*
-- `@sleep2agi/agent-network-dashboard@0.4.6` *(无变化)*
-
-> 发布流程沿用 [v0.9.0 split-brain lessons (#126)](https://github.com/sleep2agi/agent-network/issues/126) 的两 phase publish SOP（先 `--tag preview` 上传 tarball + curl verify HTTP 200，再 `npm dist-tag add @<v> latest`）避免 `npm publish --tag latest` 直推路径在 CDN 异步窗口内的 split-brain；版本号本身用 clean semver（无 `-preview.N` 后缀，便于 `anet upgrade` 比较 + npm range 选择）。
-
-### 5 P0 fix chain
-
-**1. [#129](https://github.com/sleep2agi/agent-network/issues/129) Vendor API auth 快速失败 + vendor-specific URL hint**（[`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3)）
-起因：intern key 过期时 agent-node 之前默默等 120s 才报「claude-agent-sdk 调用超时」通用错误。现在 `isAuthError(msg)` 启发式正则覆盖 Anthropic 标准（401/403、`invalid_api_key`、`authentication_error`）+ intern A02xx 系列（user_token_expired）+ 通用 OpenAI-compat 401 envelope（`unauthorized` / `expired_token`），命中后**短路 retry loop**（用同一个坏 key 重试只是浪费 backoff window）并按 `ANTHROPIC_BASE_URL` 域名 print **vendor-specific URL hint**（intern → `chat.intern-ai.org.cn`、minimax → `platform.minimaxi.com`、anthropic → `console.anthropic.com`、其他 → generic）。从 v0.9.1 之前的 15min 缩到 **<5s** 拿到具体修复 URL。详见 [troubleshooting → Vendor API auth 失败](/troubleshooting#vendor-api-auth-失败-401-invalid-api-key-expired-token-intern-a02xx-user-token-expired)。
-
-**2. [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) Fan-out timeout + retry-with-backoff**（同 commit [`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3)）
-[SDK concurrency investigation Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md)：30-agent papercope fan-out demo 下 intern API per-request latency 拉到 17-37s（10-20× 单 agent 1.57s 基线），老 120s timeout 中途 abort 让 25/30 子 agent 静默 fail。两件事：
-- `CLAUDE_TIMEOUT_MS` default 120000 → **300000**（300s，给 intern queue drain 留 buffer）
-- 新 `CLAUDE_MAX_RETRIES` env var，default `2`（共 3 attempts）；transient error / timeout backoff `4s, 8s + 0-1s jitter`（jitter 散开 herd retries 防一窝蜂打 vendor queue）；auth-class 错误**不** retry（接 #129 fast-fail）
-
-设 `CLAUDE_MAX_RETRIES=0` 退回 v0.9.1 no-retry 行为。
-
-**3. [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet node create` runtime-first wizard**（[`29fd290`](https://github.com/sleep2agi/agent-network/commit/29fd290)）
-Vincent catch：老 vendor-first selector 只 enum claude-agent-sdk vendors（intern / MiniMax / Claude / GLM / ...），用 `claude-code-cli` (Anthropic Max plan + 本地 `claude` CLI 登录态) 或 `codex-sdk` (OpenAI `codex auth login`) 的用户**implicitly stuck** —— 必须知道传 `--runtime codex-sdk` 才能 skip vendor picker。新 flow：
-1. `selectRuntime()` 3-way picker: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`
-2. `claude-agent-sdk` → 继续走 `selectVendorAndModel()` (existing flow)
-3. `claude-code-cli` → print `claude auth login` hint, skip vendor
-4. `codex-sdk` → print `codex auth login` hint, skip vendor
-
-backward-compat：显式 `--runtime <X>` 仍 skip picker；demo / batch / 已 `--env` 注入 credential 的 scripted 调用路径不变。
-
-**4. [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 v0.9.0 #122 默认 detached tmux**（[`a3a3fd4`](https://github.com/sleep2agi/agent-network/commit/a3a3fd4)）
-起因：detached tmux + bun claude-code-cli 调 `setRawMode` 在 macOS 触发 `errno 5 (EIO)` —— detached child 的 stdio 不是 real PTY。回退 v0.9.0 短暂引入的 4 条件 wrap 矩阵：
-- `anet node start <alias>` → **默认前台**（修 macOS bug）
-- `anet node start <alias> --tmux` → `tmux new -As <alias>` **attached** 模式（PTY chain 保持完整不再触发 setRawMode bug）
-
-移除 `--foreground` / `--no-tmux` / `--attach` flag（默认就是 foreground，`--tmux` 自带 attach）。`anet project up` 内部 `startNodeTmuxSession` 路径**仍是 detached**（在 macOS bun 下可能 re-trigger setRawMode，跟进 follow-up 待）。
-
-**5. Wizard 静默退出修复链 [#135](https://github.com/sleep2agi/agent-network/issues/135) / [#138](https://github.com/sleep2agi/agent-network/issues/138) / [#139](https://github.com/sleep2agi/agent-network/issues/139)**
-- **#135** Node v24 top-level await warning ([`fa08eb4`](https://github.com/sleep2agi/agent-network/commit/fa08eb4) v3)：dispatch 包进 `async main()` 解决 root cause
-- **#138** `@inquirer/prompts + readline ask()` stdin mismatch ([`b8c5885`](https://github.com/sleep2agi/agent-network/commit/b8c5885) preview.5 + [`596cfe9`](https://github.com/sleep2agi/agent-network/commit/596cfe9) preview.6)：wizard `select()` 之后 silent exit 修复 + `launchAgent` await child before parent exit
-- **#139** dispatch add await to 5 async commands ([`15cf6de`](https://github.com/sleep2agi/agent-network/commit/15cf6de) preview.7)
-
-跟 #133 runtime-first wizard 配合：让交互式 wizard 在 Node v24 环境跑得稳。
-
-### 6 SOP 升级
-
-- **两 phase publish SOP** 沿用（v0.9.0 split-brain lessons #126）—— 避免 npm `--tag latest` 直推
-- **macOS PTY 边界 case** 进入 release smoke checklist（detached tmux + setRawMode）
-- **fan-out / 高并发 timeout 调参文档化**：[troubleshooting Vendor API 超时段](/troubleshooting#vendor-api-超时-fan-out-高并发-132-retry-with-backoff) + [agent-node.md env table](/guide/agent-node#环境变量)
-- **runtime-first wizard 区分 anet create vs --batch**：batch wizard 仍 vendor-first（用 `selectVendorAndModel()` 但不走 `selectRuntime()`），doc 显式消歧
-- **CLAUDE_MAX_RETRIES=0 opt-out**：保留退回 v0.9.1 行为路径供调试 / 跑老脚本
-- **vendor-specific remediation hint 路由**进入设计原则：每加一个 verified vendor 都附 URL hint
-
-### Breaking changes / Migration
-
-- ⚠ **`anet node start` 默认行为再变**（v0.9.0 → v0.9.1 短暂 detached → v0.9.2 回退前台）：脚本/CI 上 v0.9.1 加的 `--foreground` / `--no-tmux` flag **v0.9.2 已移除**（默认前台无需 flag）；想 tmux 用 `--tmux` opt-in attached 模式
-- ⚠ **`anet node create` interactive 行为变**（vendor-first → runtime-first）：scripted `--runtime <X>` 仍 skip picker，**没有 backward-compat 问题**；交互用户体验改善（3 runtime 平等可选）
-- ⚠ **`CLAUDE_TIMEOUT_MS` 默认从 120 → 300**：之前显式覆盖到更短超时的脚本不受影响；fan-out 场景默认更宽容
-- ✅ **新 `CLAUDE_MAX_RETRIES` env var**：默认 `2`（共 3 attempts）。设 `0` 退回 v0.9.1 no-retry 行为
-
----
-
-## v0.9.1 — **Patch: #130 intern tool-calling hotfix promote**（2026-05-15）✅ stable
-
-**版本同步**（npm `latest` tag）：
-- `@sleep2agi/agent-network@2.1.14` （只升 version 字段，无源码变更；让 `anet upgrade` 看到 v0.9.1 line 跟 agent-node 2.3.9 + dashboard 配套）
-- `@sleep2agi/agent-node@2.3.9` （promote [#130](https://github.com/sleep2agi/agent-network/issues/130) hotfix to latest）
-- `@sleep2agi/commhub-server@0.8.1` *(无变化)*
-- `@sleep2agi/agent-network-dashboard@0.4.6` *(无变化)*
-
-### 修复
-
-- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling 真打通**（[commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) ＋ 双 phase publish promote）—— v0.9.0 时 intern-s2-preview 在 Anthropic 协议 `tool_choice: "auto"` 下默认走 verbose Thinking Process 不发 `tool_use` content blocks，强制 `tool_choice` 又被 `-20077` 拒。Hotfix：检测到 `ANTHROPIC_BASE_URL` 命中 `intern-ai.org.cn` / `chat.intern-ai` 时，prepend 一段短 system-prompt bias 让 model 直接发 `tool_use`。curl A/B verified：`stop_reason: max_tokens → tool_use`，`output_tokens: 1024 → 122`。详见 [Vendor 适配层](/guide/multi-model#vendor-adapters)（含 5 副作用 + opt-out 路径）。
-
-### 已知 gap 提醒（不阻 promote）
-
-- vendor adapter detection 用 URL regex 检测 vendor —— 自部署 lmdeploy / 走 proxy / 走 aggregator 的 intern endpoint 不命中 bias，需要手动 `--prompt` 复制 bias。详见 [Vendor 适配层 ⚠ 5 副作用](/guide/multi-model#vendor-adapter-side-effects)。
-- `--no-vendor-bias` flag 未实现（P1 polish gap，跟 `bias_active` info display follow-up 一起规划）。
-
-### 发布流程
-
-per v0.9.0 split-brain 教训（[issue #126](https://github.com/sleep2agi/agent-network/issues/126)）：两 phase publish 路径
-
-```
-1. version bump → preview.N+1
-2. npm publish --tag preview     → tarball uploaded
-3. curl tarball URL               → HTTP 200 确认
-4. npm dist-tag add @<pkg>@<v> latest
-5. npm view dist-tags.latest      → "<v>" verified
-```
-
-避开 `npm publish --tag latest` 直推路径的 split-brain（CDN 异步同步窗口里 `latest` tag 指向但 tarball 还没分发）。
-
----
-
-## v0.9.0 — **Recovery & Observability**（2026-05-15）✅ stable
-
-- `@sleep2agi/agent-network@2.1.13`
-- `@sleep2agi/agent-node@2.3.8`
-- `@sleep2agi/commhub-server@0.8.1`
-- `@sleep2agi/agent-network-dashboard@0.4.6`
-
-### 🎯 主题：Recovery & Observability
-
-22 节点 reboot 后的**零键盘恢复闭环** + 默认 toolset 行为透明化 + 服务器级聚合观测。
-
-### 新功能 — Recovery 链
-
-- **`anet project up / restart / down`**（issue [#117](https://github.com/sleep2agi/agent-network/issues/117)）— cwd-wide 节点编排，扫 `.anet/nodes/` 全起 / 全重启 / 全停。共享选项 `--stagger <秒>`（默认 3 错峰）/ `--only a,b,c` / `--exclude x,y`。`down` 给 hub-offline 通知设 2s race timeout 防 hub 自挂场景拖死命令。
-- **`anet node create --resume <id>` / `--resume-latest`**（issue [#115](https://github.com/sleep2agi/agent-network/issues/115)）— 创建节点时直接绑定已有 Claude session；TTY 模式下交互式 picker 列 `~/.claude/projects/<cwd>/*.jsonl`（age / size / 60-char 首行预览）。`anet session ls` 用同一份 `listClaudeSessions()` helper。
-- **零键盘恢复机制**（[#115](https://github.com/sleep2agi/agent-network/issues/115)）— `anet node start` spawn `claude` 时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`，跳过 Claude Code 默认 70min session-age 阈值的「Resume from summary / full / Don't ask again」交互弹窗；per-spawn 注入、不污染 `~/.claude/settings.json`、用户显式 export 覆盖；resume 还原完整 session（restart-recovery 不带意外 compaction）。
-- **`anet node start` 默认 detached tmux**（issue [#122](https://github.com/sleep2agi/agent-network/issues/122)，⚠ **v0.9.2 已回退**见 [#136](https://github.com/sleep2agi/agent-network/issues/136)）— v0.9.0 短暂引入 4 条件 wrap 矩阵（TTY + `$TMUX` 未设 + 装了 tmux + 同名 session 不存在）+ `--foreground` / `--no-tmux` / `--attach` flag + 两层递归保护。**v0.9.2 回退**：macOS bun 在 detached tmux 下触发 `setRawMode errno 5`（detached child stdio 不是 real PTY），新机制改成默认前台 + `--tmux` opt-in attached 模式（保留 PTY chain）。`anet node stop` 联动 `tmux kill-session` 先于 SIGTERM 仍然保留。
-- **`anet upgrade` 4-包 + 双通道 + dry-run + self**（issue [#88](https://github.com/sleep2agi/agent-network/issues/88)）— 覆盖 `anet self` / `agent-node` / `commhub-server` / `dashboard`。Channel auto-detect（prerelease tag → preview，否则 latest）+ `--channel` 覆盖。`--dry-run` 只 print plan。`--self` opt-in detached spawn（默认 print 手动命令避免升级时替换运行进程）。Plan 行带 action badge：`upgrade` / `up-to-date` / `lazy via npx skip` / `self skip` / `lookup failed`。`commhub-server` 行恒显 `PINNED_SERVER_VERSION = 0.8.0` 提醒 `anet hub start` 跑 pinned 不跟全局走。
-- **`anet.sh` install / upgrade scripts 同步**（issue [#123](https://github.com/sleep2agi/agent-network/issues/123)）— anet.sh 一键脚本与 npm 双通道对齐 + Node 22.13 engine 校验。
-
-### 新功能 — Runtime 默认行为透明化
-
-- **`claude-agent-sdk` 默认 Claude Code preset 全集**（issue [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B）— 修了 root cause：`config.json` 无 `tools` 字段时 agent-node 设 SDK `options.tools = undefined` → agent 零内建工具 → 幻觉「网络受限」。改成 fallback 到 SDK `{ type: 'preset', preset: 'claude_code' }` sentinel，agent 默认获得 WebFetch / WebSearch / Bash / Read / Write / Edit / Glob / Grep / Task / NotebookEdit 等。`--tools "all"` 路由到同一 preset（去硬编码 8-tool 列表）。
-- **行为披露 banner**（[#101](https://github.com/sleep2agi/agent-network/issues/101) Vincent push）— `anet node create` 成功后 print built-in tools + MCP tools + `dangerouslySkipPermissions=true` 警示 + restrict-tools / disable-auto-skip / inspect-current-set hint。`anet info <alias>` 显示 `tools:` + `flags:` 行供随时审计。
-- **`anet ls -v` / `--verbose`**（同 [#101](https://github.com/sleep2agi/agent-network/issues/101) 配套）— 每节点多打一行 `tools=...  permGate=on/off`。
-
-### 新功能 — Security hardening
-
-- **Vendor token envRef 模式**（issue [#125](https://github.com/sleep2agi/agent-network/issues/125)，v0.9.0 P0 gate #2）— `config.json` env map 接受 tagged union：`string`（legacy，仍兼容，print 一次性 deprecation banner）或 `{ "_envRef": "VAR_NAME" }`（推荐，secret 留 process.env 永不落盘）。agent-node unset envRef 时**启动直接 FATAL exit** + remediation hint，refuse silent broken。
-- **`anet node create` 自动 envRef rewrite** — `saveCreatedNode` 前跑 `rewritePlainSecretsToEnvRef()`：secret 识别启发式（key 后缀 `/_TOKEN|_KEY|_SECRET|AUTH$/` 或 value 前缀 `/sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer/`）任一命中就翻 envRef，原值塞当前 `process.env`（spawn 立即可用）+ print `export NAME='value'` 让用户抄进 `~/.bashrc`。
-- **`anet node migrate-token-to-envref <alias>`** — 新命令，已有节点一键迁。备份原文件到 `config.json.bak-<ts>`，rewrite + print export 行；idempotent（非 secret + 已 envRef 不动）。
-- **`anet doctor` enumerate plain-secret 节点** — passive 扫描 + 提示走 migrate 命令（不自动 `--fix`，per-node opt-in）。
-
-### 新功能 — Observability
-
-- **`GET /api/servers` REST endpoint**（issue [#119](https://github.com/sleep2agi/agent-network/issues/119)，server 11a3018）— 按 `hostname` + `ip` 聚合 agent + host 实时遥测，dashboard「服务器侧栏」用。返回**裸 JSON array**（非 `{ok, ...}` wrapper）。先 10min stale 标 offline 再聚合；`addNetworkScope` 网络作用域。字段：`hostname` / `ip` / `agent_count` / `cpu_load_1min` / `cpu_cores` / `mem_avail_gb` / `mem_used_gb` / `last_seen`。
-- **agent-node host telemetry**（[#119](https://github.com/sleep2agi/agent-network/issues/119) step 1，5364931）— 每次 `report_status` 附带 host 字段。Linux `/proc/loadavg` + `/proc/meminfo` MemAvailable 优先；macOS/Win 兜底 `os.loadavg()` / `os.totalmem()` / `os.freemem()`；Windows `[0,0,0]` 主动 coerce `null`；10s cache 阻断 burst。
-- **Dashboard ServersDrawer**（[#119](https://github.com/sleep2agi/agent-network/issues/119) step 3）— Web UI 侧栏展示按物理机聚合的 agent count + CPU / RAM 实时条。
-- **Dashboard 拓扑图重做 + 38 轮持续 polish**（issue [#112](https://github.com/sleep2agi/agent-network/issues/112) + [#116](https://github.com/sleep2agi/agent-network/issues/116)）— grid / ring 双视图 + mount fade-in + hover ring focus + click ripple + label scale + arrow tier + offline dim + group-box hover + minimap + cwd tooltip 等 9+ 轮交互细化。
-
-### 文档
-
-- **GitHub README 门面级优化**（issue [#118](https://github.com/sleep2agi/agent-network/issues/118)，commit `2dd646d`）— Hero / Quick start / Demo / CTA 提前；anet vs LangGraph/AutoGen/CrewAI 5×4 对比表；信任信号 4-badge + Star History chart；mermaid 架构图 + 节点接入流程；ZH + EN 双语同步。
-- **docs-site catch-up sweep**（issue [#124](https://github.com/sleep2agi/agent-network/issues/124)）— 把今日 ship 的所有新功能批量同步到 anet.sh：`cli.md` / `upgrade.md` / `security.md` / `rest.md` / `CHANGELOG.md` 全部 ZH + EN。
-
-### Breaking changes / Migration
-
-- ⚠ **`anet node start` 默认行为变化（v0.9.0 only，v0.9.2 已回退）** — 从 v0.9.0 起短暂默认 wrap 进 detached tmux（v0.8 是前台跑），但 v0.9.2 via [#136](https://github.com/sleep2agi/agent-network/issues/136) **回退到前台默认**（macOS bun setRawMode bug）。脚本/CI 用 v0.9.1 时仍需 `--foreground` / `--no-tmux`，v0.9.2+ 已默认前台无需 flag；想 tmux 走 `--tmux` opt-in attached 模式。
-- ⚠ **`claude-agent-sdk` 节点默认 toolset 变化** — 从空集变成 Claude Code preset 全集（含 Bash / WebFetch / Write 等）。已有节点显式 `tools` 列表保留原行为。新节点请确认是否需要 `--tools Read,Glob,Grep` 显式收窄。
-- ⚠ **vendor secret 不再落 `config.json` 明文** — 新建节点自动走 envRef；已有明文节点跑 `anet node migrate-token-to-envref <alias>` 一键迁，过渡期 plain string 仍兼容（deprecation banner 提醒）。
-- ✅ **Preview 版本号规则**（[Vincent push](https://github.com/sleep2agi/agent-network/issues/126)）— preview chain 内升 `-preview.N+1` 后缀，**不升 patch 重置 preview.0**，避免版本号「倒退看起来像 downgrade」。
-
-### Smoke validation 必跑（promote 前）
-
-```
-1. plain fallback           — 旧 config 含 "sk-..." 仍能启动 + 显示 deprecation banner
-2. envRef happy path        — { _envRef: "TEST_TOKEN" } + export TEST_TOKEN=fake → 节点拿到正确 token
-3. envRef missing var FATAL — #2 不 export → 启动 FATAL + remediation hint
-4. anet doctor 扫描         — 混合 plain + envRef 节点 → 只 plain 入 warning
-5. migrate 幂等            — plain → migrate → 再跑无 op + `.bak-<ts>` 存在 + export 行打印
-6. anet node create 自动    — `--env ANTHROPIC_AUTH_TOKEN=sk-fake` → config.json 是 envRef，不是字面 sk-fake
-```
-
-详见 [issue #125](https://github.com/sleep2agi/agent-network/issues/125#issuecomment-4457630036) 完整可复现步骤。
-
----
-
-## 2026-05-14 — **v0.8.3 正式版** batch primitive + 多 demo + P0/UX 修复 ✅ stable
-
-**版本同步**（npm `latest` tag）：
-- `@sleep2agi/agent-network@2.1.9`
-- `@sleep2agi/agent-node@2.3.1`
-- `@sleep2agi/commhub-server@0.8.0` *(无变化)*
-- `@sleep2agi/agent-network-dashboard@0.4.5`
-
-> 注：agent-network 2.1.8 因早先 stale build 占位跳过，正式版为 2.1.9。
-
-### 新功能
-
-- **`anet create --batch` 批量 agent 原语**（issue [#55](https://github.com/sleep2agi/agent-network/issues/55)）— 一行起 N 个带身份的 agent，`--prefix` 自动编号，每节点独立工作目录 + config + tmux session；配套 `anet batch <verb>` 统一管 lifecycle（list/stop/cleanup/start/restart）。
-- **`anet demo sci-team`**（issue [#51](https://github.com/sleep2agi/agent-network/issues/51)）— 科研军团 demo：1 leader + N-1 worker 主动 fan-out 协作。
-- **`anet demo pr-review`**（issue [#41](https://github.com/sleep2agi/agent-network/issues/41)）— 4-agent PR review room demo。
-- **`anet login` 首次登录引导**（issue [#58](https://github.com/sleep2agi/agent-network/issues/58)）— 认证失败时给出 register / 默认账号 / hub admin reset-user 指引。
-- **claude-agent-sdk 模型 dropdown 增加 verified vendor presets**（issue [#48](https://github.com/sleep2agi/agent-network/issues/48)）— MiniMax + 书生 Intern。
-- **SDK 升级** — codex-sdk / claude-agent-sdk / inquirer 依赖升级。
-
-### 修复
-
-- **batch 节点身份注入**（issue [#93](https://github.com/sleep2agi/agent-network/issues/93)，P0）— batch 创建的节点之前不知道自己的 alias；现在 per-node 注入身份前缀。
-- **`anet hub dashboard` npx 缓存自愈**（issue [#89](https://github.com/sleep2agi/agent-network/issues/89)，P0）— spawn 前自动清理 stale staging dir。
-- **`anet hub dashboard` release channel 匹配**（issue [#61](https://github.com/sleep2agi/agent-network/issues/61)）— dashboard 版本号改为按 anet channel 动态匹配。
-- **`anet init` token prompt UX + session 计数**（issue [#56](https://github.com/sleep2agi/agent-network/issues/56)）。
-- **进程 spawn 移除 shell**（issue [#36](https://github.com/sleep2agi/agent-network/issues/36)）— 消除 command injection 面。
-- **claude-agent-sdk env 注入 + timeout guard**（issue [#98](https://github.com/sleep2agi/agent-network/issues/98)，部分修复）— config.json env 块在 `--config` 启动路径正确注入；claude 调用加 wall-clock timeout guard，hang 变可见超时错误。
-- **PINNED commhub-server → 0.8.0 stable**。
-
-### 包变更明细
-
-- **agent-network** 2.1.7 → 2.1.9（13 个 preview 迭代累积）
-- **agent-node** 2.3.0 → 2.3.1 — claude-agent-sdk / codex-sdk 依赖升级 + #98 修复
-- **commhub-server** 0.8.0 *(无变化)*
-- **agent-network-dashboard** 0.4.2 → 0.4.5 — 三环 layout / alias 头像 / 全屏 zoom / 前缀分组 / 书生头像 / 标签遮挡修复 / trial badge 删除
-
----
-
-## 2026-05-12 — **v0.8.2 正式版** telegram channel + claude-code-cli session resume ✅ stable
-
-**版本同步**（npm `latest` tag）：
-- `@sleep2agi/agent-network@2.1.7`
-- `@sleep2agi/commhub-server@0.8.0` *(无变化)*
-- `@sleep2agi/agent-node@2.3.0` *(无变化)*
-
-**关联**：issue [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed) · issue [#14](https://github.com/sleep2agi/agent-network/issues/14) · commit [143b2a1](https://github.com/sleep2agi/agent-network/commit/143b2a1) (`release: 2.1.7 stable`) · commit [f1e3d9c](https://github.com/sleep2agi/agent-network/commit/f1e3d9c) (`fix(cli): bind claude code sessions on first start`)
-
-### 新功能
-
-- **`anet channel add telegram` 一键接入** — 给已有 node 绑定 Telegram bot token + allow user，自动生成 channels/telegram 配置（细节见 cases/telegram-squad）。
-
-### 修复
-
-- `claude-code-cli` runtime 创建节点时预生成 Claude session UUID。
-- 首次启动使用 `claude --session-id <uuid>` 绑定固定 session；检测到本机已有 `~/.claude/projects/<cwd>/<uuid>.jsonl` 后改用 `claude --resume <uuid>` 续会话，避免 `anet node start` 误开新对话。
-- `anet node start --new-session` 会生成并保存新的 session UUID。
-
----
-
-## 2026-05-11 — **v0.8.1 补丁** Dashboard SSE-online 全局修补 ✅ stable
-
-**版本同步**（npm `latest` tag，git tag `v0.8.1`）：
-- `@sleep2agi/commhub-server@0.8.0` *(无变化)*
-- `@sleep2agi/agent-network@2.1.5`
-- `@sleep2agi/agent-network-dashboard@0.4.2`
-- `@sleep2agi/agent-node@2.3.0` *(无变化)*
-
-### 修复
-
-- Dashboard `/nodes`、`/admin`、`/api/hub/session` 三处都因为 SSE key 在 v0.7+ 改成 `network_id:alias` 而显示所有 agent 为 offline。0.4.1 的 fix 漏了这 3 处，0.4.2 补齐全局 sse 查询的 alias-fallback 模式。
-- CLI 同步 bump `PINNED_DASHBOARD_VERSION` 到 0.4.2，否则 `anet hub dashboard` 仍拉老版。
-
----
-
-## 2026-05-11 — **v0.8.0 正式版** 🎉 RFC-001 阶段 2 落地 ✅ stable
-
-**版本同步**（git tag `v0.8.0`）：
-- `@sleep2agi/commhub-server@0.8.0`
-- `@sleep2agi/agent-network@2.1.4`
-- `@sleep2agi/agent-network-dashboard@0.4.1`
-- `@sleep2agi/agent-node@2.3.0` *(无变化)*
-
-### 鉴权变化
-
-- `COMMHUB_AUTH_TOKEN` 进入软废弃：v0.8 只保留 `/api/*` 读类兼容并打印 warning，v1.0 移除。
-- `anet hub start` 首次启动 bootstrap 默认 admin 账户（`admin / anethub` 快速上手默认），把本机恢复用 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（`chmod 600`）。**公网部署立刻 `anet passwd` 改强密码**。
-- 第二次起 `anet hub start` 是 idempotent：admin-utok.json 已存在直接跳过 bootstrap，不再 prompt。
-- Dashboard 改为浏览器 cookie 透传（thin proxy 起步，完整 0-token 模型留 v0.8.x 后续）。
-- tmux / admin 端点强制 admin `utok_`。
-
-### 密码管理
-
-- `anet passwd` 默认交互输入旧密码、新密码、确认密码；保留 `--old` / `--new`。
-- 改密成功后当前设备换新 `utok_`，其他设备 `utok_` 自动失效；Agent `ntok_` 不受影响。
-- 新增 `anet hub admin reset-user --username <u>`，仅 hub 主机本机恢复普通用户密码，写入 `password_reset_by_admin` 审计事件。
-- 用户自选密码最小长度 8 + top-1000 弱密码字典；首次 bootstrap admin 的默认密码不受此限制（≥ 4 即可）。
-
-### Doctor 大幅增强
-
-- `anet doctor --fix` 现在会**主动 probe 每个 node 的 ntok_** 是否被 hub 接受。401/403 自动从当前 utok_ 重新颁发 ntok_，**in-place patch 文件**，session_id / channels / runtime / role 全部保留。这覆盖了"hub DB 被 wipe / token 被撤销" 场景。
-
-### CLI / UX
-
-- `anet hub start` 默认 silent auto-generate，不再 prompt 中断启动。
-- `anet login` 输出加 ✅ + 下一步提示；prompt 文案去掉重复冒号 bug。
-- 命令行错误信息从 `[anet]` 平淡前缀改为 ✅ / ❌ 视觉标识。
-
-### Dashboard 0.4.1
-
-- 修 Command Mesh 的 `sse:undefined`：SSE key 在 server v0.7+ 改为 `network_id:alias`，dashboard 同步按双层 key 查询，带 alias-only fallback 兼容老 hub。
-- light/mint 主题 solid button 修补（从 0.3.4 起）。
-
----
-
-## 2026-05-10 — **v2.1 正式版** 🎉
-
-**版本同步**（npm `latest` tag）：
-- `@sleep2agi/agent-network@2.1.0`
-- `@sleep2agi/commhub-server@0.6.0`
-- `@sleep2agi/agent-node@2.3.0`
-- `@sleep2agi/agent-network-dashboard@0.3.0`
-
-::: tip 安装
-```bash
-npm install -g @sleep2agi/agent-network
-```
-不需要再加 `@preview`，默认就是新正式版。
-:::
-
-### 这一波带来什么
-
-**🩺 `anet doctor --fix` 自动迁移老 V2 节点**
-来自一线踩坑：claude-code-cli runtime 路径上很多 V2 时代的 node config（带 `alias`/`resume`/没 token / hub URL 是 dev IP）跑 V3 hub 直接报 `utok_ but SSE needs ntok_`。doctor 现在能：
-- 检测 6 类老 config 问题（字段重命名、runtime 改名、stale hub、缺 token、无前缀 token、缺 node_id）
-- 一键 `--fix` 升级，**保留 session 字段不丢对话历史**，重新申请 ntok_
-
-**🪄 `anet demo` 子命令族**
-- `anet demo ls` — 列出 demo
-- `anet demo debate` — 6 agent 9 步辩论赛
-- `anet demo socialmedia` — 4 agent 社交媒体内容工厂（小红书/Twitter/微信/LinkedIn）
-- 默认建独立 `demo-<suffix>` network 跑完自动清场，**不污染 default**
-
-**🔧 hub telemetry 修复**
-- `POST /api/task` 现在双写 inbox + tasks 表（之前只写 inbox 导致 dashboard Tasks 页空 + send_reply 找不到 task）
-- 派任务时立即 UPDATE sessions.task + updated_at（dashboard Overview 实时反映"任务在飞"）
-
-**🎨 dashboard 多主题**
-- 4 个主题：Cyber（默认深色）/ Light / Mint / Sunset
-- 右下角切换，localStorage 持久化
-- 修复 `useSSE` 死循环（之前 hub 收 1500+ admin SSE 把 mcp 拖死）
-- 默认 `COMMHUB_URL` fallback 改回 `127.0.0.1:9200`（之前是 leftover dev IP）
-
-**🛠️ CLI**
-- `--runtime http-api` 不再错走 claude CLI 分支
-- agent-node HTTP runtime 同时识别 `ANTHROPIC_AUTH_TOKEN`（之前只读 `ANTHROPIC_API_KEY`）
-- demo 子命令调 createCommand 时不再触发 6 次 "选择 provider" 交互弹窗
-
-**📦 一键部署脚本**
-- `hub-only.sh` 重写：4G swap + sudoers NOPASSWD + enable-linger + systemd autostart + AUTOSTART=1
-- `agent-only.sh` 同步更新
-
-### 升级路径
-
-```bash
-# 1. 升级 CLI
-npm install -g @sleep2agi/agent-network    # 或 npm update -g
-
-# 2. 重启 hub（让新 commhub-server 生效）
-# tmux 起的: tmux kill-session -t hub; tmux new -d -s hub 'anet hub start'
-# systemd-user 起的: systemctl --user restart anet-hub
-
-# 3. 每个老项目目录跑 doctor --fix
-cd <project-dir>
-anet doctor --fix
-
-# 4. 重启 agent
-kill <claude-pid> && anet resume <node-name>
-```
-
-详细见 [升级指南](/guide/upgrade)。
-
----
-
-## 2026-05-03 — `anet demo` 子命令族 + 多个 bug 修复
-
-**版本同步**：anet@2.0.3-preview.4 / agent-node@2.2.0-preview.1 / dashboard@0.2.1-preview.1 / commhub-server@0.5.3-preview.0
-
-### 新功能
-
-- **`anet demo ls`** — 列出可用 demo
-- **`anet demo debate`** — 一键 6-agent 辩论赛（主持人/正反 4 辩/评委）
-  - `--topic "议题"` 议题（默认交互输入）
-  - `--key sk-cp-xxx` MiniMax API key（默认 `$MINIMAX_KEY`）
-  - `--quick` 4 步简化版（默认 9 步完整版）
-  - `--keep` 跑完保留 6 个临时 agent（默认清掉）
-  - `--out path.md` 实录路径
-  - 角色个性独立 systemPrompt，跑完输出 markdown 实录
-- **`anet demo monitor`**（旧 `anet demo --live` 别名保留）
-
-### Bug 修复
-
-- **anet CLI**：`--runtime http-api` 在 `node start` 时错走 claude CLI 分支 → 改为 spawn agent-node 并显式传 `--runtime`
-- **agent-node**：HTTP runtime 加读 `ANTHROPIC_AUTH_TOKEN` env（之前只读 `ANTHROPIC_API_KEY`，导致 MiniMax 配置无法工作）
-- **dashboard**：`useSSE` 钩子的 `connect` callback 依赖 `onEvent`，调用方传内联函数导致每次 render 都 reconnect → 用 ref 包装 `onEvent`（修复了"hub 收 1500+ admin SSE"的死循环）
-- **hub-only.sh** 一键脚本重写：自动加 4G swap、配 sudoers NOPASSWD、enable-linger、systemd --user 自启（`AUTOSTART=1` 启用）
-
----
-
-## 2026-04-30 — Parent Task Lineage + Auto-Chain Reply
-
-**commhub-server@0.5.3-preview.0**
-
-修复多 agent 链式调用断链问题：admin → 指挥室 → 主编 时，指挥室 reply 后会话结束，主编返回结果时找不到 admin。
-
-- `tasks` 表加 `parent_task_id` 列 + `chainReplyToParent()` helper
-- `send_task` 接受 `parent_task_id`（缺失时根据 caller 最近一个 open task 推断）
-- `send_reply` / `report_completion` 自动沿 parent 链向上转发结果
-- agent-node 自动注入 `CURRENT_TASK_ID` env，prompt 提示 LLM 必须传 `parent_task_id`
-
----
-
-## 2026-04-26 — Hub Server Logs Page + V2 Lineage Foundation
-
-**commhub-server@0.5.2-preview.0 / dashboard@0.2.1-preview.0 / anet@2.0.3-preview.1**
-
-- Dashboard 新页面 `/server-logs`：实时查看 hub stdout（最近 N 行 ring buffer）
-- REST `GET /api/server-logs`（admin 鉴权）
-- Hub banner & `/health` 显示真实 published 版本号
-
----
-
-## 2026-04-15 — V3 Stable: Multi-Network + User System + Trial License
-
-**Agent Network V3 — Multi-Network + Commercial Ready**（commhub-server 0.5.x、anet 2.0.x）
-
-主要交付：
-- **多网络支持**：每个网络隔离 nodes/tasks/sessions
-- **用户系统**：用户名+密码注册/登录、JWT、双 Token 体系（utok_ + ntok_）
-- **试用授权**：14 天免费试用，授权码激活 Pro
-- **39 CLI 命令**：quickstart、login、register、passwd、token、network (CRUD)、status、tasks、doctor、info、logs、demo、config、license、activate、hub start...
-- **17 MCP 工具**：send_task/send_reply/retry_task/cancel_task/reassign_task/list_tasks/get_task/...
-- **17 REST 端点**：/api/auth/* + /api/networks/* + /api/tasks + /api/nodes + /api/stats + /api/audit-log + /api/license + ...
-- **3 种 Runtime**：claude-agent-sdk、codex-sdk、http-api（OpenAI/MiniMax 兼容）
-- **审计日志** + **速率限制** + **PostgreSQL 支持**（DbAdapter 接口）
-
-测试：200+ Docker E2E 回归测试覆盖（认证、网络、隔离、token CRUD、SSE 并发、审计）。
-
----
-
-## v1.0.0-preview.25 (2026-04-11)
-
-### PostgreSQL + Adapter Architecture
-
-**新功能**：
-- **PostgreSQL 支持**：`DATABASE_URL=postgres://...` 启用 PostgreSQL（SQLite 仍为默认）
-- **DbAdapter 接口**：统一数据库抽象层（SQLiteAdapter + PgAdapter）
-- **SQL 自动翻译器**：`sqliteToPostgres()` 处理 datetime->NOW、?N->$N、AUTOINCREMENT->SERIAL
-- **34 个 CLI 命令**：新增 passwd、token (create/ls/revoke)、network (info/rename/delete)、demo、config、license、activate、hub start
-- **17 个 REST 端点**：新增 PUT /api/networks/:id、DELETE /api/networks/:id、POST /api/auth/password、token CRUD
-- **一键 Demo**：`bash examples/demo-one-click.sh` -- 60 秒自动化演示
-- **createAdapter() 工厂**：环境驱动的数据库选择
-
-**架构改进**：
-- 全部 85+ 个 `db.query()` 调用迁移到 adapter 方法（`db.get()`、`db.all()`、`db.run()`）
-- 全部 7 个手动 `BEGIN/COMMIT/ROLLBACK` 事务转换为 `db.transaction()`
-- 零原始数据库访问 -- 所有代码通过 `DbAdapter` 接口
-- SQL 翻译器处理 4 个源文件中的 161 个 SQL 片段
-
-**测试**：
-- 200 个 Docker E2E 测试（137 基础 + 25 认证 + 22 网络 + 16 配置）
-- 19 个 adapter 专项 E2E 测试
-- 10 个 SQL 翻译器单元测试
-
----
-
-## v1.0.0-preview (2026-04-10)
-
-### Agent Network V3 -- Multi-Network + Commercial Ready
-
-**新功能**：
-- **多网络支持**：创建隔离的网络，每个有独立的 nodes/tasks/sessions
-- **用户系统**：用户名+密码注册/登录、API Token 认证
-- **试用授权**：14 天免费试用，授权码激活 Pro
-- **39 个 CLI 命令**：quickstart、login、register、passwd、token、network (create/ls/use/info/rename/delete)、status、tasks、doctor、info、logs、demo、config、license、activate、hub start...
-- **17 个 MCP 工具**：send_task、send_reply、retry_task、cancel_task、reassign_task、list_tasks、get_task...
-- **17 个 REST 端点**：/api/auth/*、/api/networks/*、/api/tasks、/api/nodes、/api/stats、/api/audit-log、/api/license...
-- **2 种 AI Runtime**：codex-sdk (OpenAI Codex / GPT-5)、claude-agent-sdk (Claude / MiniMax / OpenAI 兼容)
-- **审计日志**：所有用户操作 + 任务状态变更记录
-- **速率限制**：注册 30/min、登录 10/min per IP
-
-**安全**：
-- MCP/SSE/WebSocket 认证
-- Server 端强制 network_id（token 绑定，客户端不可覆盖）
-- SQL 注入修复（全部参数化查询）
-- 网络所有权检查（跨用户访问 403）
-- 密码哈希（SHA-256）
-- localhost 免速率限制（开发/测试）
-
-**数据库（13 张表）**：
-sessions、inbox、tasks、nodes、completions、task_events、users、networks、api_tokens、audit_log、licenses、network_members、network_invites
-
-**测试（200 个回归测试）**：
-- 基础 E2E：137 个测试（节点生命周期、消息生命周期、认证、授权、SSE、并发）
-- 认证套件：25 个测试（注册、登录、token、profile、密码、审计、速率限制）
-- 网络套件：22 个测试（CRUD、隔离、所有权、重命名、删除、跨用户）
-- 配置优先级：16 个测试（CLI > env > project > global）
-- 真实 AI：Codex (GPT-5) + MiniMax (Anthropic API) 验证
-- 10-agent 成语接龙（混合 codex + minimax）
-
-**npm 包**：
-- @sleep2agi/agent-network (anet CLI)
-- @sleep2agi/agent-node (Agent 运行时)
-- @sleep2agi/commhub-server (通信中枢)
-
----
-
-## v0.x (2026-03 ~ 2026-04-09) -- Pre-V3
-
-### 核心功能建设
-
-- **CommHub Server**：基于 MCP + SSE 的通信中枢
-- **agent-node**：双引擎 Runtime（Claude + Codex）
-- **anet CLI**：create / start / resume / channel 等基础命令
-- **Dashboard**：基础版本
-- **消息类型**：task / reply / message / ack 四种类型区分
-- **Channel 插件**：Claude Code 接入 CommHub
-
-### 早期里程碑
-
-| 版本 | 日期 | 内容 |
-|------|------|------|
-| v0.1 | 2026-03 初 | 基础 CommHub + SSE |
-| v0.3 | 2026-03 中 | agent-node 双引擎 |
-| v0.5 | 2026-03 末 | anet CLI + Channel |
-| v0.7 | 2026-04 初 | Dashboard + 消息类型 |
-| v0.9 | 2026-04-09 | 多模型支持（MiniMax、书生） |
-
----
-
-## 未来规划
-
-### v0.9 -- 安全硬化
-- 密码哈希升级到 Argon2id（当前 SHA-256）
-- `utok_` / `ntok_` TTL + revoke-all
-- 安装脚本 checksum 校验
-- Dashboard 完整 0-token 模型收尾
-
-### v1.0 -- 清理 + 公开网络
-- 完全移除 `COMMHUB_AUTH_TOKEN` 兼容路径
-- Token scope (full/agent/readonly) 完整实现
-- 公开 / 邀请混合网络（member 申请 + owner 审批流）
-- Dashboard 按角色精细化按钮可见性
-
-### 后续探索
-- ~~可选 PostgreSQL 后端~~ — adapter 接口保留作扩展点，**v0.8+ 产品方向已转为 SQLite only**（见 [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)）
-- SSO 集成
-- Webhook 回调
-- 任务调度（cron）
+v0.9.2（2026-05-16）及更早的条目和当时的路线图已移到仓库的 [changelog 存档](https://github.com/sleep2agi/agent-network/blob/main/docs/archive/changelog-pre-v0.10.zh.md)。
 
 ## 下一步
 
 - [升级指南](/guide/upgrade) — v0.7 → v0.8 行为变化 + 标准步骤
 - [架构概览](/guide/architecture) — 各版本是怎么累积成现在这套系统的
-- [GitHub Releases](https://github.com/sleep2agi/agent-network/releases) — 每个 git tag 的 release notes
+- [npm 版本列表](https://www.npmjs.com/package/@sleep2agi/agent-network?activeTab=versions) 与 [桌面端 releases](https://github.com/sleep2agi/agent-network-app/releases)
 - [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — v0.8 ~ v1.0 master token 废弃路线图

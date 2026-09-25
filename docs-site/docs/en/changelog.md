@@ -1,17 +1,151 @@
 # Changelog
 
-::: warning This page is being brought up to date
-The newest entry below stops at 2026-08-28; later releases are still being written up. Until then:
+User-facing changes, newest first. To see which version a channel points to right now: `npm view @sleep2agi/agent-network dist-tags` (same for `agent-node` and `commhub-server`). Full release notes for every npm version are in the repository's [`docs/tests/release-v<version>.md`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests); desktop notes are at [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases).
 
-- See where the channels point: `npm view @sleep2agi/agent-network dist-tags` (same for `agent-node` and `commhub-server`)
-- Release notes for every npm version live in the repo's [`docs/tests/`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests) directory as `release-v<version>.md` (for example `release-v2.3.0-preview.76.md`)
-- Desktop app release notes are at [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)
-:::
+## Node visibility: rules files, skills, project folder — preview (2026-09-23 to 09-25)
 
-## Channel changes after 2026-08-28 (npm publish dates)
+Coordinated release: `commhub-server@0.9.0-preview.56–.60`, `agent-node@2.5.0-preview.85–.88`, `agent-network@2.3.0-preview.110–.115` (`agent-node@.84` never became visible on npm and is superseded by `.85`).
 
-- **2026-09-02**: `agent-network@2.3.0-preview.76` and `agent-node@2.5.0-preview.58` were published; as of 2026-09-25 they are `latest`. `commhub-server`'s `latest` is still `0.9.0-preview.30` (published 2026-08-26).
-- **As of 2026-09-25**: the `preview` channel is `agent-network@2.3.0-preview.115`, `agent-node@2.5.0-preview.88`, `commhub-server@0.9.0-preview.60`.
+- **Read-only project folder browsing** (#1999): new hub tools `list_node_files` / `read_node_file` let you walk a node's working directory level by level and view text files (≤256 KiB). Credential-like files (`.env*`, private keys, `auth.json`, …) are listed by name only; paths and symlinks cannot escape the working directory; node tokens cannot start a browse. Requires hub `.59` + agent-node `.88` (or anet `.115`) + desktop 0.2.94
+- **Read-only node skills** (#1984): `list_node_skills` / `read_node_skill` list skills from where each runtime (codex / grok / opencode / Claude Code) actually loads them, and read SKILL.md
+- **Claude Code sessions can have CLAUDE.md read/written remotely** (#1977): `read_node_rules_file` / `write_node_rules_file` gain an `alias` parameter that can target a session without a node row; running sessions must be restarted on anet `.111` to report the capability
+- **Staged content is cleaned up** (#2001, hub `.60`): rules files, SKILL.md and file-read results are cleared 60 s after the requester fetches them, unfetched content after 24 h, and rows are deleted after 30 days; the first run after deploy clears all content older than 24 h in one pass
+- **Pickups resolve by the token's bound node** (#1994, hub `.58`): when an alias has several rows, rules-file / config-update requests no longer go to a stale row and wait 60 s for nothing
+- **Steadier codex-app-server startup** (#1988 / #1989 / #1991): new `ANET_QUEUE_TIMEOUT_MS` (queue deadline) and `ANET_CODEX_RESUME_TIMEOUT_MS` (startup session resume, default 120 s, one retry on timeout); a failed resume reports offline to the hub before exiting, so the hub no longer shows a dead node as idle; an unbound legacy token now only disables outbound reconciliation instead of stopping inbox compensation too
+- **Daemons can still create nodes after a reboot** (#1976, anet `.110`): daemons started through `anet node start/restart` or the boot sweep also pin the anet binary, ending the "online but cannot create nodes" state
+
+---
+
+## Desktop 0.2.85–0.2.97 (2026-09-24 to 09-25)
+
+Signed updates for macOS (Apple Silicon) and Windows (x64).
+
+- **Look**: a quieter palette and hierarchy (surfaces separated by tone, text contrast ≥4.5:1); thin scrollbars that appear on hover; long code, hashes and URLs wrap inside chat bubbles
+- **Redesigned node page** (0.2.87–0.2.88): header card plus section bar (Overview / Model & runtime / Rules file / Skills / Tasks / Danger zone); tasks grouped into In progress, Queued, Possibly stuck and Recently finished; centered layout on wide windows
+- **Rules-file editor** (0.2.85–0.2.93): shown for Codex / OpenCode / Claude nodes; a rendered Read mode by default, full-screen view with a heading outline, double-click a passage to jump to its source in the editor; periodic refresh no longer wipes unsaved edits; an agent-node that is too old is reported with the required version instead of a 60 s wait
+- **Skills and project folder**: read-only Skills section (0.2.87) and project-folder browsing (0.2.94), with a clear upgrade hint when versions are too old
+- **Unread and notifications**: the macOS menu-bar unread count now clears and the panel is no longer capped at 20 conversations (0.2.92); a "New messages" group at the top of the node list (0.2.95)
+- **Find and replace in rules files** (0.2.97): `Ctrl+F` / `⌘F` works in Read, Edit and full screen with jumps between matches; Edit mode can replace, changing only the draft until you save; a read now always shows content or a reason within 90 s, and stale content is no longer shown as an editable empty file
+- **New Grok nodes default to ACP mode** (0.2.97): co-presence moves under Advanced and is marked experimental
+- **Other**: Settings → About update checks always end in a visible result (0.2.88); in full-screen reading, macOS traffic lights and Windows caption buttons are no longer covered (0.2.96); the Grok TUI co-presence runtime is labelled Preview in the wizard
+
+---
+
+## Queue correctness and runtime fixes — preview (2026-09-22 to 09-23)
+
+`agent-node@2.5.0-preview.76–.83`, `agent-network@2.3.0-preview.100–.109` (`.102` is void on npm and superseded by `.103`).
+
+- **The codex queue no longer runs work twice or late** (#1939 / #1945): every terminal path removes the local queue row; queued rows ask the hub before dequeue, so tasks already acknowledged or finished no longer start a turn
+- **grok-build-acp really uses the configured model** (#1961): the model is passed at launch and read back via `session/set_model`; a mismatch fails before any prompt, and the hub shows the model actually in effect
+- **Explicit codex binary selection** (#1971): order is `codexBin` config → `ANET_CODEX_BIN` → a PATH `codex` no older than the bundled one → bundled; the startup log prints path and version. Fixes clean installs whose bundled codex was too old for newer models ("requires a newer version of Codex"). #1974 stops the false reasoning-tier warning on newer codex
+- **opencode co-presence survives a remote model change** (#1950 / #1964 / #1966): restart no longer refuses on its own previous generation's `ANET-COMMHUB.md`; the old attach TUI is stopped precisely and the new session is re-attached in the same tmux pane
+- **`anet node codex fork` gains five fixes** (#1954, anet `.104`): creates a missing `--workdir`, rewrites the project table header, `--model` override with a mismatch warning, pre-probes a free port, carries `AGENTS.md` along
+- **grok co-presence marked Preview** (#1968): `anet setup`, `anet node create` and the docs label `grok-build-cli` as Preview and point to the stable `grok-build-acp`; the refusal for an unverified grok binary now includes a copy-paste `GROK_BINARY=… anet node start` recovery command
+
+---
+
+## Shared codex login detection + long-turn observability — preview (2026-09-19 to 09-20)
+
+`agent-node@2.5.0-preview.73–.75`, `agent-network@2.3.0-preview.97–.99`.
+
+- **Nodes sharing one codex login are named** (#1920 / #1928 / #1931): at startup a refresh-token fingerprint check warns and lists the other nodes sharing the login (warn only, never refuses to start). The check runs inside agent-node, so directly launched nodes are covered, and comparison is host-wide (`~/.anet/codex-auth-fingerprints/`). Use anet `.99` + agent-node `.75` for the complete behavior
+- **Named refresh-failure causes**: `rotation-conflict` (the token was already used by another node; log in once again) and `token-endpoint-unreachable` (egress cannot reach the token endpoint) are reported separately; the message explicitly says not to copy another node's `auth.json`
+- **Long-turn heartbeat** (#1919): grok nodes write an `in-flight: … elapsed=… last=…` line every 30–60 s during a turn, so "quiet" and "stuck" are distinguishable
+- **Less stderr noise**: known-benign grok stderr is folded into one INFO line per turn instead of flooding WARN
+- **`ANET_LOG_LEVEL`**: a new `ANET_`-prefixed log-level variable; invalid values warn once (a mistyped `LOG_LEVEL` used to fall back to info silently)
+
+---
+
+## Attachments, cross-WAN node start, clearing unread — preview (2026-09-14 to 09-17)
+
+`commhub-server@0.9.0-preview.54–.55`, `agent-node@2.5.0-preview.69–.72`, `agent-network@2.3.0-preview.90–.96` (`.94` never became visible on npm and is superseded by `.95`).
+
+- **Local file links in replies become attachments** (#1869 / #1876): any runtime can write `[name](/absolute/path)` in a reply and the desktop shows a downloadable attachment card; files that cannot be uploaded are annotated with the reason (outside the workdir/home, over 12 MB, …); `attachments` passed as a string on claude-code-cli nodes is no longer dropped
+- **Cross-WAN hubs are no longer misjudged** (#1882): the hub health probe in `anet node start` defaults to 10 s for non-loopback hubs, overridable with `ANET_HUB_HEALTH_TIMEOUT_MS` (1000–60000)
+- **Gzip hub responses** (#1897, hub `.54`): JSON/text responses ≥1 KB are compressed on request and `/api/status?light=1` truncates task text, making node lists and chat history much smaller on slow links
+- **Mark an agent read in one call** (#1909, hub `.55`): `POST /api/messages/ack` accepts `{ "agent": "<alias>" }` to clear all unread from that agent (used by desktop 0.2.73+)
+- **Finished tasks are not re-run** (#1902): serial queues check task state before dequeue; replied/closed tasks are only acked, never started
+- **claude-code nodes drain the inbox** (#1901): each new-task event fetches the whole backlog, so the 6th message onward no longer waits for the next event
+- **opencode co-presence reply ownership** (#1912): long turns that went through context compaction are no longer rejected as "not owned" with the answer dropped; when still rejected, the answer is attached to the error
+- **The co-presence identity reaper only targets its own process tree** (#1872): unrelated processes that inherited a node marker are no longer killed as a previous generation; two common grok co-presence startup failures now include recovery commands (#1882 / #1888); `anet grok --help` lists the `model` subcommand (#1886)
+
+---
+
+## Desktop integration and the Codex lifecycle controller — preview (2026-09-06 to 09-10)
+
+`commhub-server@0.9.0-preview.50–.53`, `agent-node@2.5.0-preview.67–.68`, `agent-network@2.3.0-preview.86–.89`.
+
+- **`anet node codex` lifecycle commands** (#1856, anet `.89`): read-only `preflight` / `verify`; deterministic `start` / `restart` / `resume` with rollback on failure; `fork` a new node that inherits history; `account register|list|install` and `rollback` for logins; sequential `canary`. Plus `anet node edit --workdir`
+- **Reply attachments land in the right bubble** (#1824, hub `.50`): an agent's reply attachments no longer render under the asker's bubble or overwrite the asker's own attachments
+- **Authoritative per-agent unread counts** (#1838, hub `.51`): `GET /api/messages?scope=user` returns `unread_by_agent` / `unread_total`, and acks sync across devices
+- **The wizard shows why node creation failed** (#1843, hub `.52`): new `GET /api/node-create-requests?request_id=` surfaces the daemon's error directly
+- **OpenCode co-presence on macOS** (#1847 / #1848 / #1849): package identity check, launch isolation and process identity now support darwin (Windows still unsupported)
+- **`provider/model` model names allowed** (#1853): hub and daemon both accept a single slash, so the wizard can create nodes with `opencode/…` models
+
+---
+
+## Co-presence and CLI reliability — preview (2026-09-03 to 09-04)
+
+`commhub-server@0.9.0-preview.46–.49`, `agent-node@2.5.0-preview.59–.66`, `agent-network@2.3.0-preview.77–.85`.
+
+- **Standard MCP clients get the tool list again** (#1763, hub `.46`): `tools/list` no longer throws `schema._zod`, so Claude Code MCP configs, Inspector and similar clients can list tools
+- **`blocked` has a way out** (#1793, hub `.47`): a node returns to `idle` after sending a terminal reply or dispatching a task; internal hub errors now return the real error message to MCP callers (#1801)
+- **grok co-presence stops timing out task after task** (#1774 / #1775 / #1776): the verified grok binary is pinned; a missing `turn_ended` is abandoned after a bounded wait; a half-typed TUI input left idle for 10 minutes yields to queued work. Stopping no longer leaves 5 placeholder files behind (#1784 / #1817)
+- **No more duplicate replies from co-presence nodes** (#1770): the model's own extra messages to the task sender are rewritten into non-push progress reports (requires anet `.77` + agent-node `.62`, and a node restart)
+- **CLI**: `anet node start` refuses a second session for a running node (#1804); prefers the agent-node installed beside anet (#1813); `anet node edit` supports `--runtime` / `--model`; `--force` / `--yes` no longer swallow the next argument; agents can send files via `attachments` (#1186); grok co-presence can start on Mac / Windows (with a reduced-isolation notice)
+- **Richer roster data**: claude-code nodes report telemetry and model (#1787 / #1799); handover reports no longer wipe version and telemetry (#1810); codex co-presence readiness is probed by port and becomes ready in seconds (#1798)
+- **Delegation false positives fixed** (#1805): "let/ask X …" patterns only count as delegation at the start of a sentence or line, so mentioning another node in prose no longer creates phantom tasks
+
+---
+
+## agent-network 2.3.0-preview.76 promoted to latest (2026-09-02)
+
+`npm i -g @sleep2agi/agent-network` now installs `2.3.0-preview.76` by default. It includes all CLI improvements through 2026-09-02, notably the error-message, help and layout fixes in the 08-29 to 09-02 entries below.
+
+---
+
+## agent-node 2.5.0-preview.58 promoted to latest (2026-09-02)
+
+The `latest` tag of `@sleep2agi/agent-node` points to `2.5.0-preview.58`, which supports remote node rules-file read/write. `commhub-server`'s `latest` did not move in this period (still `0.9.0-preview.30`); install `preview` for the newer hub capabilities.
+
+---
+
+## Remote node rules files + CLI wording overhaul — preview (2026-09-02)
+
+Coordinated release: `commhub-server@0.9.0-preview.45`, `agent-node@2.5.0-preview.58`, `agent-network@2.3.0-preview.76`.
+
+- **Node rules files** (#1755): the desktop can read and write a node's `CLAUDE.md` / `AGENTS.md` remotely; the hub adds `read_node_rules_file` / `write_node_rules_file` and related tools; nodes only read/write inside their own working directory and the chain has no path parameter
+- **Did-you-mean and subcommand help**: mistyped commands such as `daemon` get the right suggestion; `anet goal/token/batch/opencode/network/channel/session --help` print their own help
+- **Unknown node names get close matches**, with separate messages for "no nodes", "similar names exist" and "no similar names"
+- **Table layout**: CJK aliases, long runtime names and multi-line task text no longer skew `node ls` / `status` / `tasks`; `anet demo` no longer prints literal color codes
+- **Time and diagnostics**: hub timestamps are labelled UTC with a relative age; `anet doctor` says what each check measures, lists actual runtime CLI versions, and no longer reports zero nodes as an error
+
+---
+
+## Node-creation capability made visible + grok co-presence UX — preview (2026-08-30)
+
+`commhub-server@0.9.0-preview.43–.44`, `agent-node@2.5.0-preview.53–.57`, `agent-network@2.3.0-preview.68–.75`.
+
+- **Whether a daemon can create nodes is now obvious** (#1545): `anet daemon list` reports create capability in five distinct messages with when it was measured; the hub checks the daemon's reported capability before dispatching `create_node` and explains refusals (#1510 / #1511 / #1588)
+- **`anet daemon restart <name>`** (#1601, anet `.74`): restart a daemon in one command; if it fails to come back, it says clearly that the daemon is now stopped and how to retry (#1616)
+- **grok co-presence**: `anet grok attach` uses the alternate screen and restores your terminal on detach (#1514); the recovery TUI shows grok's real output when it exits (#1518); leaderless builds such as grok 1.0.5 are no longer permanently reported `blocked` (#1609)
+- **Errors point the right way**: a 401 is no longer called "cannot reach hub" (#1581); `anet daemon start` warns when grok is installed but not on the daemon's PATH (#1586); grok not found distinguishes not-on-PATH / not executable / failed to start (#1582); the `anet_bin_source` fix command now actually runs (#1521)
+- **`anet status` no longer shows stuck/errored nodes as working** (#1577); Feishu channels are refused on non-claude-agent-sdk nodes (#1575)
+- **`anet node stop`** no longer reports failure because of a leftover socket path with no listener (#1526)
+
+---
+
+## grok co-presence fixes, Windows support, persistent desktop messages — preview (2026-08-29)
+
+`commhub-server@0.9.0-preview.39–.42`, `agent-node@2.5.0-preview.44–.52`, `agent-network@2.3.0-preview.60–.67`.
+
+- **grok co-presence TUI**: immediate notice when a slash command is blocked (#1404); a clean `/model <id>` is executed on your behalf (#1408); no more black screen after attach (#1412); switching models no longer crashes the node (#1416)
+- **Windows works** (#1137 / #1489 / #1494 / #1504): `anet` can launch npm/npx and other external launchers, and the daemon can fork nodes on Windows without children crashing on a missing `HOME`. Upgrade both anet `.66` and agent-node `.51` or later
+- **Desktop messages are no longer lost** (#1481 / #1485 / #1488): `send_desktop_message` persists before pushing; new `GET /api/messages?scope=user` and `POST /api/messages/ack` with unread counts and token-shaped strings masked on read
+- **Nodes start on machines without a non-loopback IPv4** (#1498 / #1506): the hub accepts `host.ip = null`, and nodes retry without optional telemetry on a schema mismatch
+- **The daemon is a pure program again** (#1418): free-text tasks no longer invoke an LLM; only structured lifecycle commands run. stop/start/delete doorbells are replayed after SSE reconnect (#1450)
+- **Security**: node deletion cleans the real working directory and no longer leaves node credentials behind (#1478; on machines where cwd ≠ home, check `.anet/nodes/` manually for nodes deleted before upgrading)
+- **CLI**: `anet node create --resume` infers `claude-code-cli` (#1420); the interactive wizard shares the named path's environment checks (#1473); `--copresence` startup failures name the failing step and log paths (#1500)
 
 ---
 
@@ -46,14 +180,14 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
 - **Current stable**: whatever npm's `latest` tag points to (see [Versioning](/en/guide/upgrade#channels) — npm `latest` is authoritative); v0.8.1 was the first Apache 2.0 OSS release.
-- **Current preview**: follow npm's `preview` dist-tag. Both `latest` and `preview` now include `grok-build-cli` and `anet grok attach` (experimental; `grok-build-acp` remains the default recommendation); see the [Grok TUI status page](/en/guide/grok).
-- Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
+- **Current preview**: follow npm's `preview` dist-tag. Both `latest` and `preview` now include `grok-build-cli` and `anet grok attach` (experimental; `grok-build-acp` remains the default recommendation); see the [Grok nodes](/en/guide/grok#copresence).
+- Entries for v0.9.2 and earlier (including v1.0.0-preview / v2.1 / v0.x) are linked under [Older releases](#older) at the end of this page.
 :::
 
 ## Grok Co-presence TUI (`grok-build-cli`) — preview (2026-07-15) 🟡 preview
 
 ::: danger Correction — 2026-07-31
-The section below records a candidate milestone. Its installation and usage commands are as written at the time; do not copy them. `grok-build-cli` / `anet grok attach` later shipped in the npm packages (experimental); for the current status and usage see the [Grok TUI status page](/en/guide/grok).
+The section below records a candidate milestone. Its installation and usage commands are as written at the time; do not copy them. `grok-build-cli` / `anet grok attach` later shipped in the npm packages (experimental); for the current status and usage see the [Grok nodes](/en/guide/grok#copresence).
 :::
 
 **Version sync** (npm `@preview` tag):
@@ -846,522 +980,13 @@ Release flow follows the [v0.9.0 split-brain lessons #126](https://github.com/sl
 
 ---
 
-## v0.9.2 — **Patch: Auth fast-fail + fan-out retry + wizard redo + #122 default-tmux reverted** (2026-05-16) ✅ stable
+## Older releases {#older}
 
-**Version sync** (npm `latest` tag):
-- `@sleep2agi/agent-network@2.1.15`
-- `@sleep2agi/agent-node@2.3.10`
-- `@sleep2agi/commhub-server@0.8.1` *(unchanged)*
-- `@sleep2agi/agent-network-dashboard@0.4.6` *(unchanged)*
-
-> The release flow follows the [v0.9.0 split-brain lessons (#126)](https://github.com/sleep2agi/agent-network/issues/126) two-phase publish SOP (first `--tag preview` to upload + curl-verify the tarball returns HTTP 200, then `npm dist-tag add @<v> latest`), which avoids the `npm publish --tag latest` direct path's split-brain in the CDN async window. The version numbers themselves are clean semver (no `-preview.N` suffix — easier for `anet upgrade` comparison + npm range resolution).
-
-### 5 P0 fix chain
-
-**1. [#129](https://github.com/sleep2agi/agent-network/issues/129) Vendor API auth fast-fail + vendor-specific URL hint** ([`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3))
-Background: when an intern key expired, agent-node previously silently waited 120s then printed a generic "claude-agent-sdk 调用超时" error. Now the `isAuthError(msg)` heuristic covers the Anthropic standard (401/403, `invalid_api_key`, `authentication_error`) plus intern's A02xx family (`user_token_expired`) plus generic OpenAI-compat 401 envelopes (`unauthorized` / `expired_token`); on hit it **short-circuits the retry loop** (retrying with the same bad key just wastes the backoff window) and prints a **vendor-specific URL hint** based on `ANTHROPIC_BASE_URL` host (intern → `chat.intern-ai.org.cn`, minimax → `platform.minimaxi.com`, anthropic → `console.anthropic.com`, otherwise generic). The clear error returns in **under 5 seconds** instead of the 15 minutes pre-v0.9.1 took. Full write-up: [troubleshooting → Vendor API auth failure](/en/troubleshooting#vendor-api-auth-failure-401-invalid-api-key-expired-token-intern-a02xx-user-token-expired).
-
-**2. [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) Fan-out timeout + retry-with-backoff** (same commit [`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3))
-The [SDK concurrency investigation Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md): in a 30-agent papercope fan-out demo, intern API per-request latency stretched to 17-37s (10-20× the 1.57s single-agent baseline), so the old 120s timeout fired mid-stream and 25 / 30 sub-agents silently failed. Two changes:
-- `CLAUDE_TIMEOUT_MS` default 120000 → **300000** (300s, leaves room for the intern queue to drain)
-- New `CLAUDE_MAX_RETRIES` env var, default `2` (3 attempts total); on transient errors / timeouts, backoff `4s, 8s + 0-1s jitter` (jitter spreads herd retries across the recovering vendor queue); auth-class errors **do not** retry (handled by #129 fast-fail above)
-
-Set `CLAUDE_MAX_RETRIES=0` to revert to the v0.9.1 no-retry behavior.
-
-**3. [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet node create` runtime-first wizard** ([`29fd290`](https://github.com/sleep2agi/agent-network/commit/29fd290))
-Vincent catch: the old vendor-first selector enumerated only claude-agent-sdk vendors (intern / MiniMax / Claude / GLM / ...), leaving users who want `claude-code-cli` (Anthropic Max plan + local `claude` CLI login) or `codex-sdk` (OpenAI `codex auth login`) **implicitly stuck** — they had to know to pass `--runtime codex-sdk` to skip the vendor picker. New flow:
-1. `selectRuntime()` 3-way picker: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`
-2. `claude-agent-sdk` → continues into `selectVendorAndModel()` (existing flow)
-3. `claude-code-cli` → prints `claude auth login` hint, skips vendor
-4. `codex-sdk` → prints `codex auth login` hint, skips vendor
-
-Backward-compatible: explicit `--runtime <X>` still skips the picker; demo / batch / scripted callers that already inject credentials via `--env` are unaffected.
-
-**4. [#136](https://github.com/sleep2agi/agent-network/issues/136) Revert v0.9.0 #122 default-detached-tmux** ([`a3a3fd4`](https://github.com/sleep2agi/agent-network/commit/a3a3fd4))
-Background: detached tmux + bun claude-code-cli calling `setRawMode` triggers `errno 5 (EIO)` on macOS — the detached child's stdio is not a real PTY. Reverts the brief v0.9.0 four-condition wrap matrix:
-- `anet node start <alias>` → **foreground by default** (fixes the macOS bug)
-- `anet node start <alias> --tmux` → `tmux new -As <alias>` in **attached** mode (keeps the PTY chain intact, no setRawMode bug)
-
-Removes the `--foreground` / `--no-tmux` / `--attach` flags (foreground is the default; `--tmux` already attaches). `anet project up`'s internal `startNodeTmuxSession` path **still uses detached** (which can re-trigger setRawMode on macOS bun — follow-up tracking).
-
-**5. Wizard silent-exit fix chain [#135](https://github.com/sleep2agi/agent-network/issues/135) / [#138](https://github.com/sleep2agi/agent-network/issues/138) / [#139](https://github.com/sleep2agi/agent-network/issues/139)**
-- **#135** Node v24 top-level-await warning ([`fa08eb4`](https://github.com/sleep2agi/agent-network/commit/fa08eb4) v3): wrap dispatch in an `async main()` to fix the root cause
-- **#138** `@inquirer/prompts` + `readline` ask() stdin mismatch ([`b8c5885`](https://github.com/sleep2agi/agent-network/commit/b8c5885) preview.5 + [`596cfe9`](https://github.com/sleep2agi/agent-network/commit/596cfe9) preview.6): the wizard silently exiting after `select()` is fixed + `launchAgent` now `await`s its child before the parent exits
-- **#139** dispatch — add `await` to 5 async commands ([`15cf6de`](https://github.com/sleep2agi/agent-network/commit/15cf6de) preview.7)
-
-Pairs with #133's runtime-first wizard to keep the interactive wizard stable on Node v24.
-
-### 6 SOP updates
-
-- **Two-phase publish SOP** continues (v0.9.0 split-brain lessons #126) — avoid the `npm --tag latest` direct path
-- **macOS PTY edge case** enters the release smoke checklist (detached tmux + setRawMode)
-- **Fan-out / high-concurrency timeout tuning is documented**: [troubleshooting Vendor API timeout section](/en/troubleshooting#vendor-api-timeout-high-concurrency-fan-out-132-retry-with-backoff) + [agent-node.md env table](/en/guide/agent-node#environment-variables)
-- **Runtime-first wizard split: `anet create` vs `--batch`** — the batch wizard is still vendor-first (it uses `selectVendorAndModel()` but does not go through `selectRuntime()`), and the docs now disambiguate explicitly
-- **`CLAUDE_MAX_RETRIES=0` opt-out** — keeps a path back to v0.9.1 no-retry behavior for debugging / legacy scripts
-- **Vendor-specific remediation-hint routing** is now a design principle — every newly verified vendor must ship a remediation URL hint
-
-### Breaking changes / Migration
-
-- ⚠ **`anet node start` default behavior swung again** (v0.9.0 → v0.9.1 brief detached → v0.9.2 reverted to foreground): the `--foreground` / `--no-tmux` flags scripts/CI added in v0.9.1 are **removed in v0.9.2** (foreground is the default, no flag needed); for tmux, opt in with `--tmux` (attached mode)
-- ⚠ **`anet node create` interactive flow changed** (vendor-first → runtime-first): scripted `--runtime <X>` still skips the picker, so **no backward-compat issue**; the interactive UX improves (all 3 runtimes are first-class)
-- ⚠ **`CLAUDE_TIMEOUT_MS` default 120 → 300**: scripts that already explicitly override to a shorter timeout are unaffected; the default is more tolerant of fan-out scenarios
-- ✅ **New `CLAUDE_MAX_RETRIES` env var**: default `2` (3 attempts total). Set `0` to revert to v0.9.1's no-retry behavior
-
----
-
-## v0.9.1 — **Patch: #130 intern tool-calling hotfix promoted** (2026-05-15) ✅ stable
-
-**Version sync** (npm `latest` tag):
-- `@sleep2agi/agent-network@2.1.14` (version-only bump, no source changes; lets `anet upgrade` show a v0.9.1 line that aligns with agent-node 2.3.9 + dashboard)
-- `@sleep2agi/agent-node@2.3.9` (promotes the [#130](https://github.com/sleep2agi/agent-network/issues/130) hotfix to latest)
-- `@sleep2agi/commhub-server@0.8.1` *(unchanged)*
-- `@sleep2agi/agent-network-dashboard@0.4.6` *(unchanged)*
-
-### Fixes
-
-- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling now works** ([commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) + two-phase publish promote) — in v0.9.0 the intern-s2-preview endpoint, on the Anthropic protocol with `tool_choice: "auto"`, defaulted to verbose Thinking Process text and did not emit `tool_use` content blocks. Forcing `tool_choice` was rejected with `-20077`. Hotfix: when `ANTHROPIC_BASE_URL` matches `intern-ai.org.cn` / `chat.intern-ai`, a short system-prompt bias is prepended that nudges the model to emit `tool_use` directly. Direct-curl A/B verified: `stop_reason: max_tokens → tool_use`, `output_tokens: 1024 → 122`. See [Vendor Adapters](/en/guide/multi-model#vendor-adapters) for the full mechanism, the 5 side effects, and the opt-out path.
-
-### Known gaps (non-blocking)
-
-- The vendor adapter relies on a URL regex to detect the vendor — self-hosted lmdeploy / proxied intern endpoints / aggregator routes will not trigger the bias and need a manual `--prompt`. See [Vendor Adapters — Side effects](/en/guide/multi-model#vendor-adapter-side-effects).
-- The `--no-vendor-bias` flag is not yet implemented (P1 polish gap, planned alongside a `bias_active` info-display follow-up).
-
-### Release process
-
-Per the v0.9.0 split-brain lessons ([issue #126](https://github.com/sleep2agi/agent-network/issues/126)), uses the two-phase publish path:
-
-```
-1. version bump → preview.N+1
-2. npm publish --tag preview      → tarball uploaded
-3. curl tarball URL                → HTTP 200 confirmed
-4. npm dist-tag add @<pkg>@<v> latest
-5. npm view dist-tags.latest       → verifies "<v>"
-```
-
-This avoids the direct `npm publish --tag latest` path that splits during the CDN async window, where the `latest` tag points at a version whose tarball is not yet served everywhere.
-
----
-
-## v0.9.0 — **Recovery & Observability** (2026-05-15) ✅ stable
-
-- `@sleep2agi/agent-network@2.1.13`
-- `@sleep2agi/agent-node@2.3.8`
-- `@sleep2agi/commhub-server@0.8.1`
-- `@sleep2agi/agent-network-dashboard@0.4.6`
-
-### 🎯 Theme: Recovery & Observability
-
-The full **zero-keystroke recovery loop** for 22-node reboots + transparent default toolset behavior + server-level aggregate observability.
-
-### New features — Recovery chain
-
-- **`anet project up / restart / down`** (issue [#117](https://github.com/sleep2agi/agent-network/issues/117)) — cwd-wide node orchestration; scans `.anet/nodes/` and starts / restarts / stops every node. Shared options: `--stagger <seconds>` (default 3) / `--only a,b,c` / `--exclude x,y`. `down` caps the hub-offline notify at a 2-second race so a crashed-hub teardown for 22 nodes doesn't deadlock.
-- **`anet node create --resume <id>` / `--resume-latest`** (issue [#115](https://github.com/sleep2agi/agent-network/issues/115)) — bind an existing Claude session at node-create time; TTY mode launches an interactive picker listing `~/.claude/projects/<cwd>/*.jsonl` (age / size / 60-char first-line preview). `anet session ls` and the picker share the same `listClaudeSessions()` helper.
-- **Zero-keystroke recovery** ([#115](https://github.com/sleep2agi/agent-network/issues/115)) — `anet node start` injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` into the `claude` spawn env, skipping Claude Code's default 70-minute session-age threshold for the "Resume from summary / full / Don't ask again" interactive prompt. Per-spawn, does not pollute `~/.claude/settings.json`, respects an explicit user override. Resume restores the full session as-is (no per-invocation flag forces a compact summary; restart-recovery is safer without surprise compaction).
-- **`anet node start` auto-wraps into detached tmux** (issue [#122](https://github.com/sleep2agi/agent-network/issues/122), ⚠ **reverted in v0.9.2**, see [#136](https://github.com/sleep2agi/agent-network/issues/136)) — v0.9.0 briefly introduced a 4-condition wrap matrix (TTY + `$TMUX` not set + tmux installed + no same-name session) with `--foreground` / `--no-tmux` / `--attach` flags and a two-layer recursion guard. **v0.9.2 reverts**: macOS bun triggered `setRawMode errno 5` under detached tmux (the detached child's stdio isn't a real PTY), so the new design is foreground-by-default + `--tmux` opt-in **attached** mode (keeps the PTY chain intact). `anet node stop` still kills the tmux session before SIGTERM.
-- **`anet upgrade` overhaul — 4 packages, dual-channel, dry-run, self** (issue [#88](https://github.com/sleep2agi/agent-network/issues/88)) — covers `anet self` / `agent-node` / `commhub-server` / `dashboard`. Channel auto-detected (prerelease tag → preview, else latest); `--channel` overrides. `--dry-run` prints the plan only. `--self` is an opt-in detached spawn (default prints the manual command to avoid replacing the running CLI mid-upgrade). Plan rows carry action badges: `upgrade` / `up-to-date` / `lazy via npx skip` / `self skip` / `lookup failed`. The `commhub-server` row always shows `PINNED_SERVER_VERSION = 0.8.0` as a reminder that `anet hub start` runs the pinned version regardless of what's globally installed.
-- **`anet.sh` install / upgrade scripts sync** (issue [#123](https://github.com/sleep2agi/agent-network/issues/123)) — the anet.sh one-shot scripts now match npm's dual-channel layout, with the Node 22.13 engine check baked in.
-
-### New features — Runtime default-behavior transparency
-
-- **`claude-agent-sdk` default = Claude Code preset** (issue [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B) — root-cause fix: with no `tools` field in `config.json`, agent-node was passing the SDK `options.tools = undefined`, giving the agent zero built-in tools and producing hallucinated "network restricted" responses. Now agent-node falls back to the SDK `{ type: 'preset', preset: 'claude_code' }` sentinel — every agent gets WebFetch / WebSearch / Bash / Read / Write / Edit / Glob / Grep / Task / NotebookEdit by default. `--tools "all"` routes to the same preset (replaces the old hardcoded 8-tool list as the single source of truth).
-- **Behavior-disclosure banner** ([#101](https://github.com/sleep2agi/agent-network/issues/101), per Vincent) — `anet node create` prints a banner with the built-in tools + MCP tools + `dangerouslySkipPermissions=true` warning + restrict-tools / disable-auto-skip / inspect-current-set hints. `anet info <alias>` displays `tools:` + `flags:` lines for ad-hoc audits.
-- **`anet ls -v` / `--verbose`** (companion to [#101](https://github.com/sleep2agi/agent-network/issues/101)) — prints a second line per node with `tools=...  permGate=on/off`.
-
-### New features — Security hardening
-
-- **Vendor token envRef mode** (issue [#125](https://github.com/sleep2agi/agent-network/issues/125), v0.9.0 P0 gate #2) — the `config.json` env map now accepts a tagged union: `string` (legacy, still works, with a one-shot deprecation banner) or `{ "_envRef": "VAR_NAME" }` (recommended — the secret stays in process.env and never touches disk). agent-node refuses to start (FATAL with remediation hint) if a referenced env var is unset — no more silent broken startup.
-- **`anet node create` auto-rewrites secrets** — `saveCreatedNode` runs `rewritePlainSecretsToEnvRef()` before the first write. The detection heuristic — key suffix `/_TOKEN|_KEY|_SECRET|AUTH$/` or value prefix `/sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer/` — flips matching values to envRef, drops the original into the current `process.env` (so the immediate spawn works), and prints `export NAME='value'` lines for the user to persist in `~/.bashrc`.
-- **`anet node migrate-token-to-envref <alias>`** — new command for migrating existing nodes in place. Writes `config.json.bak-<ts>`, rewrites + prints export lines; idempotent (non-secret and already-migrated values are left alone).
-- **`anet doctor` enumerates plain-secret nodes** — passive scan + migrate suggestion (no `--fix`; per-node opt-in).
-
-### New features — Observability
-
-- **`GET /api/servers` REST endpoint** (issue [#119](https://github.com/sleep2agi/agent-network/issues/119), server commit 11a3018) — aggregates agents by `hostname` + `ip` and returns live host telemetry, used by the dashboard's "Servers" sidebar. Returns a **bare JSON array** (not the `{ok, ...}` wrapper). Marks 10-min-stale sessions offline before aggregating; network-scoped via `addNetworkScope`. Fields: `hostname` / `ip` / `agent_count` / `cpu_load_1min` / `cpu_cores` / `mem_avail_gb` / `mem_used_gb` / `last_seen`.
-- **agent-node host telemetry** ([#119](https://github.com/sleep2agi/agent-network/issues/119) step 1, commit 5364931) — each `report_status` call now carries `host` fields. On Linux: `/proc/loadavg` + `/proc/meminfo` `MemAvailable` first. On macOS/Windows: falls back to `os.loadavg()` / `os.totalmem()` / `os.freemem()`. Windows `[0,0,0]` is actively coerced to `null`. A 10-second cache prevents burst reports.
-- **Dashboard ServersDrawer** ([#119](https://github.com/sleep2agi/agent-network/issues/119) step 3) — UI sidebar shows aggregated agent counts per physical machine alongside live CPU / RAM bars.
-- **Dashboard topology redo + 38 rounds of polish** (issues [#112](https://github.com/sleep2agi/agent-network/issues/112) + [#116](https://github.com/sleep2agi/agent-network/issues/116)) — grid + ring dual views; mount fade-in; hover ring focus; click ripple; label scaling; arrow tiers; offline dim; group-box hover; minimap; cwd tooltip; and 9+ further rounds of interaction polish.
-
-### Documentation
-
-- **GitHub README front-page overhaul** (issue [#118](https://github.com/sleep2agi/agent-network/issues/118), commit `2dd646d`) — Hero / Quick start / Demo / CTA promoted to the top; anet vs LangGraph/AutoGen/CrewAI 5×4 comparison table; trust signals (4 new badges + Star History chart); mermaid architecture diagram + node onboarding flow; ZH + EN parity.
-- **docs-site catch-up sweep** (issue [#124](https://github.com/sleep2agi/agent-network/issues/124)) — bulk-syncs every new feature shipped today to anet.sh: `cli.md` / `upgrade.md` / `security.md` / `rest.md` / `CHANGELOG.md`, all ZH + EN.
-
-### Breaking changes / Migration
-
-- ⚠ **`anet node start` default changed (v0.9.0 only, reverted in v0.9.2)** — v0.9.0 briefly auto-wrapped into a detached tmux session (v0.8 ran foreground), but v0.9.2 via [#136](https://github.com/sleep2agi/agent-network/issues/136) **reverts to foreground default** (macOS bun setRawMode bug). Scripts/CI on v0.9.1 still need `--foreground` / `--no-tmux`; v0.9.2+ is foreground by default with no flag needed. For tmux, opt in with `--tmux` (attached mode).
-- ⚠ **`claude-agent-sdk` node default toolset changed** — from empty to the full Claude Code preset (Bash / WebFetch / Write / …). Existing nodes with an explicit `tools` allowlist keep their old behavior; for new nodes, decide whether you need to narrow with `--tools Read,Glob,Grep`.
-- ⚠ **Vendor secrets no longer persist plain in `config.json`** — newly created nodes go through envRef automatically; for existing plain-secret nodes run `anet node migrate-token-to-envref <alias>` for a one-shot migration. The plain-string path stays compatible for now (with a deprecation banner).
-- ✅ **Preview version-number rule** ([per Vincent](https://github.com/sleep2agi/agent-network/issues/126)) — bump the `-preview.N+1` suffix within a preview chain; **do not bump the patch and reset preview.0** (avoids "backwards-looking" version numbers).
-
-### Smoke validation (before promote)
-
-```
-1. plain fallback           — old config with "sk-..." still starts + shows the deprecation banner
-2. envRef happy path        — { _envRef: "TEST_TOKEN" } + export TEST_TOKEN=fake → node receives the correct token
-3. envRef missing var FATAL — case #2 without the export → startup FATAL + remediation hint
-4. anet doctor scan         — mix of plain + envRef nodes → only plain ones surface under the warning
-5. migrate idempotent       — plain → migrate → second run is a no-op + `.bak-<ts>` exists + export lines printed
-6. anet node create auto    — `--env ANTHROPIC_AUTH_TOKEN=sk-fake` → config.json contains envRef, not literal sk-fake
-```
-
-See [issue #125](https://github.com/sleep2agi/agent-network/issues/125#issuecomment-4457630036) for full repro steps.
-
----
-
-## 2026-05-14 — **v0.8.3 stable release** batch primitive + multi-demo + P0/UX fixes ✅ stable
-
-**Version sync** (npm `latest` tag):
-- `@sleep2agi/agent-network@2.1.9`
-- `@sleep2agi/agent-node@2.3.1`
-- `@sleep2agi/commhub-server@0.8.0` *(unchanged)*
-- `@sleep2agi/agent-network-dashboard@0.4.5`
-
-> Note: agent-network 2.1.8 was skipped (an earlier stale build occupied the version); the stable release is 2.1.9.
-
-### New features
-
-- **`anet create --batch` batch agent primitive** (issue [#55](https://github.com/sleep2agi/agent-network/issues/55)) — spin up N identity-bearing agents in one line, `--prefix` auto-numbering, per-node working dir + config + tmux session; `anet batch <verb>` for lifecycle management (list/stop/cleanup/start/restart).
-- **`anet demo sci-team`** (issue [#51](https://github.com/sleep2agi/agent-network/issues/51)) — research-squad demo: 1 leader + N-1 workers with active fan-out collaboration.
-- **`anet demo pr-review`** (issue [#41](https://github.com/sleep2agi/agent-network/issues/41)) — 4-agent PR review room demo.
-- **`anet login` first-time login guidance** (issue [#58](https://github.com/sleep2agi/agent-network/issues/58)) — on auth failure, points to register / default account / hub admin reset-user.
-- **claude-agent-sdk model dropdown verified vendor presets** (issue [#48](https://github.com/sleep2agi/agent-network/issues/48)) — MiniMax + Intern (书生).
-- **SDK upgrades** — codex-sdk / claude-agent-sdk / inquirer dependency bumps.
-
-### Fixes
-
-- **batch node identity injection** (issue [#93](https://github.com/sleep2agi/agent-network/issues/93), P0) — batch-created nodes previously didn't know their own alias; now per-node identity prefix is injected.
-- **`anet hub dashboard` npx cache self-heal** (issue [#89](https://github.com/sleep2agi/agent-network/issues/89), P0) — auto-cleans stale staging dirs before spawn.
-- **`anet hub dashboard` release channel matching** (issue [#61](https://github.com/sleep2agi/agent-network/issues/61)) — dashboard version now dynamically matches the anet channel.
-- **`anet init` token prompt UX + session count** (issue [#56](https://github.com/sleep2agi/agent-network/issues/56)).
-- **shell removed from process spawn** (issue [#36](https://github.com/sleep2agi/agent-network/issues/36)) — eliminates command injection surface.
-- **claude-agent-sdk env injection + timeout guard** (issue [#98](https://github.com/sleep2agi/agent-network/issues/98), partial fix) — config.json env block now injected on the `--config` startup path; claude calls get a wall-clock timeout guard so hangs surface as visible timeout errors.
-- **PINNED commhub-server → 0.8.0 stable**.
-
-### Package change details
-
-- **agent-network** 2.1.7 → 2.1.9 (13 preview iterations accumulated)
-- **agent-node** 2.3.0 → 2.3.1 — claude-agent-sdk / codex-sdk dependency bumps + #98 fixes
-- **commhub-server** 0.8.0 *(unchanged)*
-- **agent-network-dashboard** 0.4.2 → 0.4.5 — tri-ring layout / alias avatars / fullscreen zoom / prefix grouping / Intern avatars / label-overlap fix / trial badge removal
-
----
-
-## 2026-05-12 — **v0.8.2 stable release** telegram channel + claude-code-cli session resume ✅ stable
-
-**Version sync** (npm `latest` tag):
-- `@sleep2agi/agent-network@2.1.7`
-- `@sleep2agi/commhub-server@0.8.0` *(unchanged)*
-- `@sleep2agi/agent-node@2.3.0` *(unchanged)*
-
-**Related**: issue [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed) · issue [#14](https://github.com/sleep2agi/agent-network/issues/14) · commit [143b2a1](https://github.com/sleep2agi/agent-network/commit/143b2a1) (`release: 2.1.7 stable`) · commit [f1e3d9c](https://github.com/sleep2agi/agent-network/commit/f1e3d9c) (`fix(cli): bind claude code sessions on first start`)
-
-### New features
-
-- **`anet channel add telegram` one-shot bind** — attaches a Telegram bot token + allow-user to an existing node, auto-generates the `channels/telegram` config (see cases/telegram-squad for details).
-
-### Fixes
-
-- `claude-code-cli` runtime now pre-generates a Claude session UUID when creating a node.
-- First start binds a fixed session with `claude --session-id <uuid>`; once `~/.claude/projects/<cwd>/<uuid>.jsonl` exists on the local machine, subsequent starts switch to `claude --resume <uuid>` to continue the same conversation — `anet node start` no longer accidentally opens a new chat.
-- `anet node start --new-session` generates and saves a fresh session UUID.
-
----
-
-## 2026-05-11 — **v0.8.1 patch** Dashboard SSE-online global fix ✅ stable
-
-**Version sync** (npm `latest` tag, git tag `v0.8.1`):
-- `@sleep2agi/commhub-server@0.8.0` *(unchanged)*
-- `@sleep2agi/agent-network@2.1.5`
-- `@sleep2agi/agent-network-dashboard@0.4.2`
-- `@sleep2agi/agent-node@2.3.0` *(unchanged)*
-
-### Fixes
-
-- Dashboard `/nodes`, `/admin`, and `/api/hub/session` all showed every agent as offline because the SSE key in server v0.7+ became `network_id:alias`. The 0.4.1 fix missed these three; 0.4.2 adds alias-fallback to all global SSE lookups.
-- CLI bumps `PINNED_DASHBOARD_VERSION` to 0.4.2 so `anet hub dashboard` pulls the patched version.
-
----
-
-## 2026-05-11 — **v0.8.0 stable release** 🎉 RFC-001 phase 2 landed ✅ stable
-
-**Version sync** (git tag `v0.8.0`):
-- `@sleep2agi/commhub-server@0.8.0`
-- `@sleep2agi/agent-network@2.1.4`
-- `@sleep2agi/agent-network-dashboard@0.4.1`
-- `@sleep2agi/agent-node@2.3.0` *(unchanged)*
-
-### Auth changes
-
-- `COMMHUB_AUTH_TOKEN` is now soft-deprecated: v0.8 keeps only `/api/*` read-side compat and logs a warning; v1.0 removes it entirely.
-- First `anet hub start` bootstraps a default admin account (**`admin / anethub`** quick-start default) and writes a local recovery admin `utok_` to `~/.anet/server/admin-utok.json` (`chmod 600`). **Public deployments must immediately `anet passwd` to a strong password.**
-- Subsequent `anet hub start` is idempotent: if `admin-utok.json` exists it skips bootstrap and no longer prompts.
-- Dashboard moved to browser-cookie passthrough (thin proxy mode — the full 0-token model lands later in v0.8.x).
-- tmux and admin endpoints now require an admin `utok_`.
-
-### Password management
-
-- `anet passwd` prompts for old / new / confirm by default; `--old` / `--new` still supported.
-- Successful change rotates the current device's `utok_`; other devices lose their `utok_` automatically. Agent `ntok_` are unaffected.
-- New: `anet hub admin reset-user --username <u>` — hub-host-only recovery for non-admin users, emits a `password_reset_by_admin` audit event.
-- User-chosen passwords require ≥ 8 chars + are checked against the top-1000 weak-password dictionary. The first-run bootstrap admin password is exempt (≥ 4 is accepted) since it must be rotated immediately anyway.
-
-### Doctor enhancements
-
-- `anet doctor --fix` now **actively probes every node's `ntok_`** against the hub. On 401/403 it auto-reissues a fresh `ntok_` from the current `utok_` and **patches the file in place** — `session_id` / `channels` / `runtime` / `role` are all preserved. This covers the "hub DB wiped / token revoked" failure mode.
-
-### CLI / UX
-
-- `anet hub start` is silent auto-generate by default and no longer interrupts startup with prompts.
-- `anet login` prints ✅ and a next-step hint; double-colon prompt bug fixed.
-- CLI error output switched from the flat `[anet]` prefix to ✅ / ❌ visual markers.
-
-### Dashboard 0.4.1
-
-- Fixed Command Mesh's `sse:undefined`: SSE key in server v0.7+ became `network_id:alias`; dashboard now queries with the double-layer key, with alias-only fallback for older hubs.
-- Light / Mint theme solid-button polish (regressions since 0.3.4).
-
----
-
-## 2026-05-10 — **v2.1 stable release**
-
-**Version sync** (git tag `v2.1.0`):
-- `@sleep2agi/agent-network@2.1.0`
-- `@sleep2agi/commhub-server@0.6.0`
-- `@sleep2agi/agent-node@2.3.0`
-- `@sleep2agi/agent-network-dashboard@0.3.0`
-
-::: tip Install
-```bash
-npm install -g @sleep2agi/agent-network
-```
-No more `@preview` tag needed — `latest` is now the stable line.
-:::
-
-### What's new
-
-**`anet doctor --fix` auto-migrates legacy V2 nodes**
-Frontline pain point: `claude-code-cli` runtime hit many V2-era node configs (with `alias`/`resume`/no token / dev IP for hub) that throw `utok_ but SSE needs ntok_` against the V3 hub. `doctor` now:
-- Detects 6 classes of legacy config issues (renamed fields, runtime rename, stale hub, missing token, unprefixed token, missing node_id)
-- One-shot `--fix` migration; **preserves the session field so chat history is not lost**, re-issues `ntok_`
-
-**`anet demo` subcommand family**
-- `anet demo ls` — list demos
-- `anet demo debate` — 6-agent, 9-step debate
-- `anet demo socialmedia` — 4-agent social media content factory (Xiaohongshu / Twitter / WeChat / LinkedIn)
-- Defaults to a standalone `demo-<suffix>` network, auto-cleaned afterwards — **never pollutes `default`**
-
-**Hub telemetry fixes**
-- `POST /api/task` now double-writes the inbox + tasks tables (previously only the inbox, which left the Dashboard Tasks page empty and `send_reply` unable to find tasks)
-- Dispatching a task immediately UPDATEs `sessions.task` + `updated_at` so the Dashboard Overview reflects "task in flight" in real time
-
-**Dashboard theming**
-- 4 themes: Cyber (default dark) / Light / Mint / Sunset, switcher bottom-right, persisted in localStorage
-- Fixed the `useSSE` reconnect loop (the hub used to receive 1500+ admin SSE reconnects that DoSed mcp)
-- `COMMHUB_URL` fallback restored to `127.0.0.1:9200` (was a leftover dev IP)
-
-**CLI**
-- `--runtime http-api` no longer falls into the Claude CLI branch
-- `agent-node` HTTP runtime now also reads `ANTHROPIC_AUTH_TOKEN` (previously only `ANTHROPIC_API_KEY`)
-- Demo subcommands no longer trigger 6 "select provider" interactive prompts when calling `createCommand`
-
-**One-shot deploy scripts**
-- `hub-only.sh` rewritten: 4G swap + sudoers NOPASSWD + enable-linger + systemd autostart + `AUTOSTART=1`
-- `agent-only.sh` updated to match
-
-### Upgrade path
-
-```bash
-# 1. Upgrade the CLI
-npm install -g @sleep2agi/agent-network    # or: npm update -g
-
-# 2. Restart the hub (so the new commhub-server takes effect)
-# tmux: tmux kill-session -t hub; tmux new -d -s hub 'anet hub start'
-# systemd-user: systemctl --user restart anet-hub
-
-# 3. In every legacy project directory, run doctor --fix
-cd <project-dir>
-anet doctor --fix
-
-# 4. Restart agents
-kill <claude-pid> && anet resume <node-name>
-```
-
-See the [Upgrade Guide](/en/guide/upgrade) for details.
-
----
-
-## 2026-05-03 - `anet demo` subcommands and bug fixes
-
-**Version sync**: anet@2.0.3-preview.4 / agent-node@2.2.0-preview.1 / dashboard@0.2.1-preview.1 / commhub-server@0.5.3-preview.0
-
-### New Features
-
-- **`anet demo ls`** - list available demos
-- **`anet demo debate`** - one-command 6-agent debate demo
-  - `--topic "..."` debate topic
-  - `--key sk-cp-xxx` MiniMax API key, defaulting to `$MINIMAX_KEY`
-  - `--quick` shortened 4-step run
-  - `--keep` keep temporary agents and network after the run
-  - `--out path.md` transcript output path
-- **`anet demo monitor`** - kept as the old `anet demo --live` alias
-
-### Fixes
-
-- **anet CLI**: `--runtime http-api` now starts through `agent-node` instead of falling into the Claude CLI branch.
-- **agent-node**: HTTP runtime reads `ANTHROPIC_AUTH_TOKEN` for MiniMax-compatible configs.
-- **dashboard**: fixed repeated SSE reconnects caused by inline `onEvent` callbacks.
-- **hub-only.sh**: rewritten with swap setup, sudoers NOPASSWD, linger, and optional systemd user autostart.
-
----
-
-## 2026-04-30 - Parent Task Lineage + Auto-Chain Reply
-
-**commhub-server@0.5.3-preview.0**
-
-- Added `parent_task_id` to tasks and `chainReplyToParent()` to keep multi-agent chains connected.
-- `send_task` accepts `parent_task_id` and can infer it from the caller's recent open task.
-- `send_reply` / `report_completion` forward results up the parent chain automatically.
-- `agent-node` injects `CURRENT_TASK_ID` and prompts the LLM to pass `parent_task_id`.
-
----
-
-## 2026-04-26 - Hub Server Logs Page + V2 Lineage Foundation
-
-**commhub-server@0.5.2-preview.0 / dashboard@0.2.1-preview.0 / anet@2.0.3-preview.1**
-
-- Dashboard `/server-logs` page for live hub stdout.
-- REST `GET /api/server-logs` for admin users.
-- Hub banner and `/health` show the published version.
-
----
-
-## 2026-04-15 - V3 Stable: Multi-Network + User System + Trial License
-
-**Agent Network V3 - Multi-Network + Commercial Ready** (`commhub-server` 0.5.x, `anet` 2.0.x)
-
-- Multi-network isolation for nodes, tasks, and sessions.
-- Username/password accounts, JWT, and the `utok_` + `ntok_` token system.
-- 14-day trial licensing and Pro activation.
-- 39 CLI commands, 17 MCP tools, and 17 REST endpoint families.
-- 3 runtimes: `claude-agent-sdk`, `codex-sdk`, and `http-api`.
-- Audit logs, rate limiting, and PostgreSQL support through the `DbAdapter`.
-
----
-
-## v1.0.0-preview.25 (2026-04-11)
-
-### PostgreSQL + Adapter Architecture
-
-**New features**:
-- **PostgreSQL support**: Enable via `DATABASE_URL=postgres://...` (SQLite remains the default)
-- **DbAdapter interface**: Unified database abstraction layer (SQLiteAdapter + PgAdapter)
-- **SQL auto-translator**: `sqliteToPostgres()` handles datetime->NOW, ?N->$N, AUTOINCREMENT->SERIAL
-- **34 CLI commands**: Added passwd, token (create/ls/revoke), network (info/rename/delete), demo, config, license, activate, hub start
-- **17 REST endpoints**: Added PUT /api/networks/:id, DELETE /api/networks/:id, POST /api/auth/password, token CRUD
-- **One-click demo**: `bash examples/demo-one-click.sh` -- 60-second automated demo
-- **createAdapter() factory**: Environment-driven database selection
-
-**Architecture improvements**:
-- All 85+ `db.query()` calls migrated to adapter methods (`db.get()`, `db.all()`, `db.run()`)
-- All 7 manual `BEGIN/COMMIT/ROLLBACK` transactions converted to `db.transaction()`
-- Zero raw database access -- all code goes through the `DbAdapter` interface
-- SQL translator handles 161 SQL fragments across 4 source files
-
-**Testing**:
-- 200 Docker E2E tests (137 core + 25 auth + 22 network + 16 config)
-- 19 adapter-specific E2E tests
-- 10 SQL translator unit tests
-
----
-
-## v1.0.0-preview (2026-04-10)
-
-### Agent Network V3 -- Multi-Network + Commercial Ready
-
-**New features**:
-- **Multi-network support**: Create isolated networks, each with independent nodes/tasks/sessions
-- **User system**: Username + password registration/login, API token authentication
-- **Trial licensing**: 14-day free trial, license key activation for Pro
-- **39 CLI commands**: quickstart, login, register, passwd, token, network (create/ls/use/info/rename/delete), status, tasks, doctor, info, logs, demo, config, license, activate, hub start...
-- **17 MCP tools**: send_task, send_reply, retry_task, cancel_task, reassign_task, list_tasks, get_task...
-- **17 REST endpoints**: /api/auth/*, /api/networks/*, /api/tasks, /api/nodes, /api/stats, /api/audit-log, /api/license...
-- **2 AI runtimes**: codex-sdk (OpenAI Codex / GPT-5), claude-agent-sdk (Claude / MiniMax / OpenAI-compatible)
-- **Audit logging**: All user operations + task state changes recorded
-- **Rate limiting**: Registration 30/min, login 10/min per IP
-
-**Security**:
-- MCP/SSE/WebSocket authentication
-- Server-side enforced network_id (token-bound, client cannot override)
-- SQL injection fix (all parameterized queries)
-- Network ownership checks (cross-user access returns 403)
-- Password hashing (SHA-256)
-- Localhost rate limit exemption (dev/testing)
-
-**Database (13 tables)**:
-sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_tokens, audit_log, licenses, network_members, network_invites
-
-**Testing (200 regression tests)**:
-- Core E2E: 137 tests (node lifecycle, message lifecycle, auth, authorization, SSE, concurrency)
-- Auth suite: 25 tests (registration, login, token, profile, password, audit, rate limiting)
-- Network suite: 22 tests (CRUD, isolation, ownership, rename, delete, cross-user)
-- Config priority: 16 tests (CLI > env > project > global)
-- Real AI: Codex (GPT-5) + MiniMax (Anthropic API) verified
-- 10-agent idiom chain (mixed codex + minimax)
-
-**npm packages**:
-- @sleep2agi/agent-network (anet CLI)
-- @sleep2agi/agent-node (Agent runtime)
-- @sleep2agi/commhub-server (Communication hub)
-
----
-
-## v0.x (2026-03 ~ 2026-04-09) -- Pre-V3
-
-### Core Feature Development
-
-- **CommHub Server**: MCP + SSE-based communication hub
-- **agent-node**: Dual-engine runtime (Claude + Codex)
-- **anet CLI**: create / start / resume / channel and other basic commands
-- **Dashboard**: Initial version
-- **Message types**: task / reply / message / ack type differentiation
-- **Channel plugins**: Claude Code CommHub integration
-
-### Early Milestones
-
-| Version | Date | Content |
-|------|------|------|
-| v0.1 | Early 2026-03 | Basic CommHub + SSE |
-| v0.3 | Mid 2026-03 | agent-node dual engine |
-| v0.5 | Late 2026-03 | anet CLI + Channel |
-| v0.7 | Early 2026-04 | Dashboard + message types |
-| v0.9 | 2026-04-09 | Multi-model support (MiniMax, InternLM) |
-
----
-
-## Roadmap
-
-### v0.9 — Security hardening
-- Argon2id password hashing (currently SHA-256)
-- `utok_` / `ntok_` TTL + revoke-all
-- Install-script checksum verification
-- Dashboard full 0-token model finishing touches
-
-### v1.0 — Cleanup + public networks
-- Remove `COMMHUB_AUTH_TOKEN` compat path entirely
-- Token scope (full / agent / readonly) full implementation
-- Public / invite-hybrid networks (member application + owner approval flow)
-- Per-role button visibility in Dashboard
-
-### Later
-- ~~Continued PostgreSQL adapter improvements~~ — adapter interface kept as extension point, but **v0.8+ product direction is SQLite only** (see [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md))
-- SSO integration
-- Webhook callbacks
-- Cron-style task scheduling
+Entries for v0.9.2 (2026-05-16) and earlier, and the roadmap of that time, moved to the repository's [changelog archive](https://github.com/sleep2agi/agent-network/blob/main/docs/archive/changelog-pre-v0.10.en.md).
 
 ## Next steps
 
 - [Upgrade guide](/en/guide/upgrade) — v0.7 → v0.8 behavior changes + standard steps
 - [Architecture](/en/guide/architecture) — how each release accumulated into the current system
-- [GitHub Releases](https://github.com/sleep2agi/agent-network/releases) — per-tag release notes
+- [npm version list](https://www.npmjs.com/package/@sleep2agi/agent-network?activeTab=versions) and [desktop releases](https://github.com/sleep2agi/agent-network-app/releases)
 - [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — v0.8 ~ v1.0 master-token deprecation roadmap
