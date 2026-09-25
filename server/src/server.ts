@@ -1,3 +1,4 @@
+import { classifyRequestTransport, type TransportKind } from "./node-env.js";
 import { buildServeErrorResponse } from "./serve-error.js";
 import { maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { redactMessageRow } from "./redact-tokens.js";
@@ -156,12 +157,12 @@ function sweepStaleRateLimits(): void {
 }
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, requestTransport: TransportKind = "plain"): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId);
+  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId, requestTransport);
   return server;
 }
 
@@ -830,7 +831,17 @@ return Bun.serve({
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null);
+      // Node environment variables: how THIS request reached the hub (loopback /
+      // https / plain), from the socket peer — never from X-Forwarded-For — plus
+      // the Host it dialed and, on a loopback hop only, X-Forwarded-Proto.
+      // set_node_env refuses to accept or forward a secret over "plain" (node-env.ts).
+      const requestTransport = classifyRequestTransport({
+        peerIp: server?.requestIP?.(req)?.address ?? null,
+        url: req.url,
+        host: req.headers.get("host"),
+        forwardedProto: req.headers.get("x-forwarded-proto"),
+      });
+      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, requestTransport);
       await mcpServer.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak
@@ -1684,6 +1695,7 @@ return Bun.serve({
           rules_file_capable: s.rules_file_capable === 1,
           skills_capable: s.skills_capable === 1,
           files_capable: s.files_capable === 1,
+          env_capable: s.env_capable === 1,
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {

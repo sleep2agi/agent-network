@@ -1,0 +1,57 @@
+test2002 node-env e2e — Docker (tests/test2002-node-env-e2e), 2026-09-25T07:56Z
+
+PASS throwaway hub booted on 127.0.0.1:9762 (HOME=/tmp/test2002/home)
+PASS admin + two network-scoped node tokens
+PASS anet node start → agent-node registered with env_capable (pid 151)
+PASS list: keys + metadata only, restart=remote (under the exit-75 supervisor), PRE_EXISTING in effect
+PASS set: written to the node config.json (0600, .prev kept, other fields intact); hub DB holds no value after the ack
+PASS before restart: E2E_TOKEN listed with in_effect=false (needs restart)
+PASS after restart_node: node reports E2E_TOKEN in_effect=true length=43; /proc/304/environ has it (sha matches)
+PASS a key that existed at launch takes its NEW value after restart (launcher re-reads the config on exit 75)
+PASS unset + restart: key gone from config and from the new process environment
+PASS client leg: relayed (non-loopback Host) → insecure_transport leg=client; list says write_allowed=false; X-Forwarded-Proto: https on the loopback hop → allowed
+PASS node leg: a node that reaches the hub through a relay (peer 127.0.0.1, Host = relay) → insecure_transport leg=node; env_list still works there (restart=manual: no supervisor)
+PASS value absent from 6 log file(s) and the hub DB; the node did log the key-only line
+PASS witnessed-red: without the exit-75 env refresh, a changed key is NOT in effect after restart (step 3 would fail)
+source_commit=9971a2fc8b73b247460869d35808f76c0cef3227
+RESULT: PASS (13 checks)
+
+Guard mutation check (each guard mutated, its unit suite run, file restored):
+H1 node token refused: RED rc=1
+H2 key validated before row: RED rc=1
+H3 value validated before row: RED rc=1
+H4 deny list: COMMHUB_ prefix: RED rc=1
+H5 deny list: exact PATH/HOME: RED rc=1
+H6 client-leg gate: RED rc=1
+H7 node-leg gate: RED rc=1
+H8 pull-time gate: RED rc=1
+H9 loopback needs a loopback peer: RED rc=1
+H10 loopback needs a loopback Host: RED rc=1
+H11 X-Forwarded-Proto only on a loopback hop: RED rc=1
+H12 value purged on ack: RED rc=1
+H13 ack rebuilt from a whitelist: RED rc=1
+H14 error quoting the value withheld: RED rc=1
+H15 env result only for the login that asked: RED rc=1
+H16 stale set never handed out: RED rc=1
+H17 backstop purge of terminal rows: RED rc=1
+H18 backstop timeout of stale rows: RED rc=1
+H19 capability/transport set only by the own token: RED rc=1
+H20 audit carries no value: RED rc=1
+H21 reply never echoes the value: RED rc=1
+H22 env_capable required on the target: RED rc=1
+N1 node re-checks the key: RED rc=1
+N2 node re-checks the value: RED rc=1
+N3 refuse symlink / hardlink config: RED rc=1
+N4 mode 0600 (stricter kept): RED rc=1
+N5 .prev backup: RED rc=1
+N6 temp file cleaned on failure: RED rc=1
+N7 foreign error messages not passed through: RED rc=1
+N8 config parse error does not quote the file: RED rc=1
+N9 list returns no value: RED rc=1
+N10 log line has no value: RED rc=1
+N11 env error text is the safe one: RED rc=1
+N12 claude-code session restart is manual: RED rc=1
+N13 launcher refresh never touches reserved keys: RED rc=1
+N14 launcher refresh drops removed keys: RED rc=1
+N15 parity: hub deny list drifts from the node's: RED rc=1
+MUTATIONS: 37/37 red

@@ -45,7 +45,7 @@ const GOLDEN_RESPONSE_KEYS = {
     "process_rss_mb", "process_cpu_pct", "process_uptime_seconds",
     "process_in_flight_count", "network_id", "registered_at", "updated_at",
     "node_id", "session_id", "config_path", "channels", "last_seen_at", "model",
-    "external_schedules", "rules_file_capable", "skills_capable", "files_capable", "runtime", "host", "process_telemetry",
+    "external_schedules", "rules_file_capable", "skills_capable", "files_capable", "env_capable", "runtime", "host", "process_telemetry",
   ],
   task: [
     "task_id", "from_node_id", "from_name", "to_node_id", "to_name", "priority",

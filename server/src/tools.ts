@@ -3,7 +3,7 @@ import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
-import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
+import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask, logAudit } from "./db.js";
 import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
@@ -63,6 +63,11 @@ import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type 
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, sweepNodeRequestContent } from "./node-request-retention.js";
+import {
+  envKeyOnlyContent, envKeyProblem, envRequestParts, envValueProblem, envWriteBlock,
+  isEnvOp, isSecureTransport, purgeEnvRequestValues, sanitizeEnvAckContent, startEnvPurgeTimer, withholdIfContainsValue, ENV_VALUE_MAX_BYTES,
+  type EnvOp, type TransportKind,
+} from "./node-env.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -126,7 +131,7 @@ export function resolveNodeIdArg(a: { node_id?: string; child_node_id?: string }
   return { ok: true, node_id: id };
 }
 
-export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
+export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, requestTransport: TransportKind = "plain") {
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
   // an agent's send_task call always claimed from='hub' and peer agents
@@ -724,8 +729,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       skills_capable: z.literal(true).optional(),
       // Project folder view — same doorbell, ops files_list / file_read.
       files_capable: z.literal(true).optional(),
+      // Node environment variables — same doorbell, ops env_list / env_set / env_unset.
+      env_capable: z.literal(true).optional(),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, env_capable: envCapable }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -936,6 +943,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
         if (filesCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
           db.run("UPDATE sessions SET files_capable = 1 WHERE resume_id = ?1", [resume_id]);
+        }
+        // Node environment variables: sticky capability like the three above, plus
+        // how THIS report reached the hub (loopback / https / plain). Not sticky —
+        // it is re-measured on every report, and set_node_env refuses to forward a
+        // secret to a node whose last report came over plain HTTP (node-env.ts).
+        if (callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
+          if (envCapable === true) db.run("UPDATE sessions SET env_capable = 1 WHERE resume_id = ?1", [resume_id]);
+          db.run("UPDATE sessions SET env_transport = ?1 WHERE resume_id = ?2", [requestTransport, resume_id]);
         }
         if (host || proc) {
           db.run(
@@ -3189,10 +3204,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   };
 
   const enqueueRulesFileRequest = (
-    op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read",
-    a: { node_id?: string; child_node_id?: string; alias?: string; network_id?: string; content?: string },
+    op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | EnvOp,
+    a: { node_id?: string; child_node_id?: string; alias?: string; network_id?: string; content?: string; envKey?: string; envValue?: string },
   ) => {
     const effectiveNetId = getNetworkId(a.network_id);
+    // Node environment variables — user logins only (a node token must not read
+    // or write another node's secrets), key / value rules before any row exists.
+    // 🔴 The value is never echoed: not in a reply, an error, an audit row or a log.
+    if (isEnvOp(op)) {
+      if (callerTokenIsNetwork) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_cannot_manage_env", message: "a node token cannot read or change another node's environment variables; use a user login" }) }] };
+      }
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, `${op} node env`);
+      if (op !== "env_list") {
+        const kp = envKeyProblem(a.envKey);
+        if (kp) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, ...kp }) }] };
+      }
+      if (op === "env_set") {
+        const vp = envValueProblem(a.envValue);
+        if (vp) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, ...vp }) }] };
+      }
+      a = { ...a, content: op === "env_list" ? undefined : JSON.stringify(op === "env_set" ? { key: a.envKey, value: a.envValue } : { key: a.envKey }) };
+    }
     if (isFilesOp(op)) {
       if (callerTokenIsNetwork) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_cannot_browse_files", message: "a node token cannot browse another node's project folder; use a user login" }) }] };
@@ -3234,7 +3267,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         node = byAlias;
       } else {
         const session = db.get<{ alias: string; network_id: string | null }>(
-          isFilesOp(op)
+          isEnvOp(op)
+            ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND env_capable = 1 ORDER BY updated_at DESC LIMIT 1"
+            : isFilesOp(op)
             ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND files_capable = 1 ORDER BY updated_at DESC LIMIT 1"
             : isSkillsOp(op)
             ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND skills_capable = 1 ORDER BY updated_at DESC LIMIT 1"
@@ -3243,6 +3278,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           scopeNet,
         );
         if (!session) {
+          if (isEnvOp(op)) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "env_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can manage environment variables (its agent-node / channel server may be too old)" }) }] };
+          }
           if (isFilesOp(op)) {
             return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "files_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve its project folder (its channel server may be too old)" }) }] };
           }
@@ -3254,6 +3292,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
     }
     const nodeId = node.node_id;
+    // Env ops: the target must have reported env_capable (a nodes-row target is
+    // checked through its latest session), and a secret is forwarded only when
+    // both legs are encrypted or local — this call's, and the node's.
+    let envWriteBlocked: ReturnType<typeof envWriteBlock> = null;
+    const target = node as { node_id: string; alias: string; network_id: string | null };
+    if (isEnvOp(op)) {
+      const envSession = db.get<{ env_capable: number; env_transport: string | null }>(
+        "SELECT env_capable, env_transport FROM sessions WHERE alias = ?1 AND network_id = ?2 ORDER BY updated_at DESC LIMIT 1",
+        target.alias,
+        target.network_id || "default",
+      );
+      if (!envSession || envSession.env_capable !== 1) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "env_not_supported", alias: target.alias, message: "this node has not reported env_capable: its agent-node / channel server is too old, it was started without a config file, or it is offline" }) }] };
+      }
+      envWriteBlocked = envWriteBlock(requestTransport, envSession.env_transport);
+      if (op === "env_set" && envWriteBlocked) {
+        return { content: [{ type: "text" as const, text: JSON.stringify(envWriteBlocked) }] };
+      }
+    }
     if (op === "write") {
       if (typeof a.content !== "string") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_content", reason: "content must be a string" }) }] };
@@ -3268,8 +3325,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // 非终态，不回收就把这个节点锁死。
     // Separate single-flight lanes: the client opens the rules file and the
     // skills list together; one must not block the other.
+    if (isEnvOp(op)) purgeEnvRequestValues(db);
     const inFlight = db.get<{ request_id: string; created_at: number; pulled_at: number | null }>(
-      isFilesOp(op)
+      isEnvOp(op)
+        ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('env_list', 'env_set', 'env_unset') ORDER BY created_at DESC LIMIT 1"
+        : isFilesOp(op)
         ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('files_list', 'file_read') ORDER BY created_at DESC LIMIT 1"
         : isSkillsOp(op)
         ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('skills_list', 'skill_read') ORDER BY created_at DESC LIMIT 1"
@@ -3285,6 +3345,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         "UPDATE node_rules_requests SET status = 'timeout', acked_at = ?1, error = ?2 WHERE request_id = ?3",
         [Date.now(), `superseded after ${age}ms (> ${RULES_REQUEST_STALE_MS}ms) — node did not answer`, inFlight.request_id],
       );
+      if (isEnvOp(op)) purgeEnvRequestValues(db);
     }
 
     // Opportunistic content retention (bounded, indexed) — node-request-retention.ts.
@@ -3293,9 +3354,27 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const networkId = node.network_id || "default";
     db.run(
       `INSERT INTO node_rules_requests (request_id, node_id, network_id, op, content, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
-      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" || isFilesOp(op) ? a.content! : null, Date.now(), callerTokenId || "unknown"],
+      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" || isFilesOp(op) || op === "env_set" || op === "env_unset" ? a.content! : null, Date.now(), callerTokenId || "unknown"],
     );
     pushEvent(node.alias, { type: "rules_file", request_id: requestId }, networkId);
+    if (isEnvOp(op)) {
+      if (op !== "env_list") {
+        // Audit: who changed which key on which node — never the value.
+        logAudit(enforceUserId ?? null, callerAlias ?? null, op === "env_set" ? "node_env_set" : "node_env_unset", "node", nodeId,
+          JSON.stringify({ key: a.envKey, ...(op === "env_set" ? { length: [...(a.envValue ?? "")].length } : {}), request_id: requestId }), clientIP, networkId);
+      }
+      // One-shot backstop: if nobody acks or polls, the value still leaves the row.
+      if (op === "env_set") {
+        const t = setTimeout(() => { try { purgeEnvRequestValues(db); } catch {} }, RULES_REQUEST_STALE_MS + 1_000);
+        (t as any).unref?.();
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true, request_id: requestId, op,
+        ...(op !== "env_list" ? { key: a.envKey } : {}),
+        ...(op === "env_set" ? { length: [...(a.envValue ?? "")].length } : {}),
+        ...(op === "env_list" ? { write_allowed: !envWriteBlocked, ...(envWriteBlocked ? { write_blocked: { error: envWriteBlocked.error, leg: envWriteBlocked.leg, message: envWriteBlocked.message } } : {}) } : {}),
+      }) }] };
+    }
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, op }) }] };
   };
 
@@ -3369,6 +3448,49 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ node_id, child_node_id, alias, path: relPath, network_id }) => enqueueRulesFileRequest("file_read", { node_id, child_node_id, alias, content: relPath, network_id }),
   );
 
+  // ── Node environment variables (desktop 节点设置 → 环境变量) ──
+  // Keys + metadata only ever come back; values are write-only. Same queue +
+  // doorbell + bound-node pull/ack as rules files; user logins only. See
+  // node-env.ts for the key rules and the transport gate.
+  const ENV_KEY_ARG = z.string().min(1).max(200).describe("Variable name: ^[A-Z_][A-Z0-9_]{0,127}$, not a reserved runtime variable.");
+  server.tool(
+    "list_node_env",
+    "List a node's environment variables (the env block of its config.json): keys and metadata only — {key, set, length, in_effect, kind} — never values. Poll get_rules_file_result for content JSON {keys:[…], restart:\"remote\"|\"manual\"}. The immediate reply also says whether a secret may be written to this node (write_allowed / write_blocked). User logins only.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported env_capable."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("env_list", { node_id, child_node_id, alias, network_id }),
+  );
+
+  server.tool(
+    "set_node_env",
+    "Set one environment variable on a node (written atomically to the env block of its config.json, mode 0600; takes effect after the node restarts). The value is write-only: it is never returned, logged or audited, and it is removed from the hub the moment the node acks. Refused with insecure_transport unless both this call and the node's hub connection are HTTPS or loopback. User logins only.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id."),
+      key: ENV_KEY_ARG,
+      // Loose on purpose: the 8 KiB / NUL / empty checks run in the handler with
+      // messages that never quote the value (a schema error might).
+      value: z.string().max(ENV_VALUE_MAX_BYTES * 4).describe("The value (UTF-8, at most 8 KiB, no NUL). Write-only."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, key, value, network_id }) => enqueueRulesFileRequest("env_set", { node_id, child_node_id, alias, network_id, envKey: key, envValue: value }),
+  );
+
+  server.tool(
+    "unset_node_env",
+    "Remove one environment variable from a node's config.json env block (takes effect after the node restarts). User logins only.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id."),
+      key: ENV_KEY_ARG,
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, key, network_id }) => enqueueRulesFileRequest("env_unset", { node_id, child_node_id, alias, network_id, envKey: key }),
+  );
+
   server.tool(
     "get_rules_file_request",
     "Node pulls its oldest pending rules-file request (called from agent-node when the SSE rules_file doorbell arrives). app#225.",
@@ -3386,11 +3508,31 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // (claude-code). Its queue key is `session:<alias>`, always paired with the
       // caller's network so a same-named alias in another network never matches.
       const queueKey: string = node ? node.node_id : `session:${callerAlias}`;
-      const req = db.get<any>(
-        "SELECT request_id, op, content FROM node_rules_requests WHERE node_id = ?1 AND network_id = ?2 AND status = 'pending' ORDER BY created_at ASC LIMIT 1",
-        queueKey,
-        enforceNetworkId,
-      );
+      let req: any = null;
+      // Env rows are checked before they are handed out: a stale one (> 60 s) is
+      // timed out, and a secret is never sent back over a plain-HTTP pull — the
+      // row fails with insecure_transport and its value is purged on the spot.
+      for (let i = 0; i < 16; i++) {
+        req = db.get<any>(
+          "SELECT request_id, op, content, created_at FROM node_rules_requests WHERE node_id = ?1 AND network_id = ?2 AND status = 'pending' ORDER BY created_at ASC LIMIT 1",
+          queueKey,
+          enforceNetworkId,
+        );
+        if (!req || !isEnvOp(req.op)) break;
+        if (Date.now() - req.created_at > RULES_REQUEST_STALE_MS) {
+          db.run("UPDATE node_rules_requests SET status = 'timeout', acked_at = ?1, error = ?2, content = ?3 WHERE request_id = ?4",
+            [Date.now(), `expired before the node pulled it (> ${RULES_REQUEST_STALE_MS}ms)`, req.op === "env_set" ? envKeyOnlyContent(envRequestParts(req.content).key) : req.content, req.request_id]);
+          req = null;
+          continue;
+        }
+        if (req.op === "env_set" && !isSecureTransport(requestTransport)) {
+          db.run("UPDATE node_rules_requests SET status = 'failed', acked_at = ?1, error = ?2, content = ?3 WHERE request_id = ?4",
+            [Date.now(), "insecure_transport: the node pulled this secret over an unencrypted connection; refused (the value was not sent and has been removed from the hub)", envKeyOnlyContent(envRequestParts(req.content).key), req.request_id]);
+          req = null;
+          continue;
+        }
+        break;
+      }
       if (!req) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request: null }) }] };
       }
@@ -3406,7 +3548,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             request: {
               request_id: req.request_id,
               op: req.op,
-              ...(req.op === "write" || req.op === "skill_read" || isFilesOp(req.op) ? { content: req.content ?? "" } : {}),
+              ...(req.op === "write" || req.op === "skill_read" || isFilesOp(req.op) || req.op === "env_set" || req.op === "env_unset" ? { content: req.content ?? "" } : {}),
             },
           }),
         }],
@@ -3437,7 +3579,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const node = resolveCallerNode();
       const queueKey: string = node ? node.node_id : `session:${callerAlias}`;
       const req = db.get<any>(
-        "SELECT request_id, node_id, network_id, status, op FROM node_rules_requests WHERE request_id = ?1",
+        "SELECT request_id, node_id, network_id, status, op, content FROM node_rules_requests WHERE request_id = ?1",
         requestId,
       );
       // 跨租户闸：只能 ack 自己的请求；别人的当不存在处理。session 键另外核网络。
@@ -3449,6 +3591,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       if (typeof content === "string" && !isFilesOp(req.op) && content.length > RULES_FILE_MAX_BYTES) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "content_too_large", max: RULES_FILE_MAX_BYTES }) }] };
+      }
+      if (isEnvOp(req.op)) {
+        // Rebuild the node's answer from a whitelist (a buggy node cannot smuggle
+        // a value through), withhold an error that quotes the value, and drop the
+        // value from the row in the same statement — nothing ever reads it back.
+        const parts = envRequestParts(req.content);
+        const clean = status === "done" ? sanitizeEnvAckContent(req.op, content, parts.key) : null;
+        const finalStatus = status === "done" && clean === null ? "failed" : status;
+        const finalError = finalStatus === "failed"
+          ? (status === "done" ? "node returned a malformed environment-variable result" : withholdIfContainsValue(ackError || "node reported failure without a reason", parts.value))
+          : null;
+        db.run(
+          `UPDATE node_rules_requests SET status = ?1, acked_at = ?2, file_name = 'env', file_exists = ?3, result_content = ?4, error = ?5, content = ?6 WHERE request_id = ?7`,
+          [finalStatus, Date.now(), typeof exists === "boolean" ? (exists ? 1 : 0) : null, finalStatus === "done" ? clean : null, finalError,
+            req.op === "env_set" ? envKeyOnlyContent(parts.key) : req.content, requestId],
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, status: finalStatus }) }] };
       }
       db.run(
         `UPDATE node_rules_requests SET status = ?1, acked_at = ?2, file_name = ?3, file_exists = ?4, result_content = ?5, error = ?6 WHERE request_id = ?7`,
@@ -3479,7 +3638,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       );
       // SEC-1：结果行的网络必须等于调用方作用域，否则当不存在。
       // Project folder results: only the (user) token that asked may read them.
-      const foreignFilesRow = !!row && isFilesOp(row.op) && (callerTokenIsNetwork || row.created_by_token !== (callerTokenId || "unknown"));
+      // Env results too: keys are not secret, but they are only for the login that asked.
+      const foreignFilesRow = !!row && (isFilesOp(row.op) || isEnvOp(row.op)) && (callerTokenIsNetwork || row.created_by_token !== (callerTokenId || "unknown"));
       if (!row || row.network_id !== (effectiveNetId || "default") || foreignFilesRow) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found", request_id: requestId }) }] };
       }
@@ -3492,6 +3652,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           [Date.now(), `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`, requestId],
         );
         row.error = `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`;
+        if (isEnvOp(row.op)) purgeEnvRequestValues(db);
       }
       // Privacy: node file bytes are handed out for a short grace window after the
       // first terminal read, then purged (node-request-retention.ts). Only reached
@@ -3593,6 +3754,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // per request). They unref themselves so don't hold the event loop.
   startPendingEnvGcTimer();
   startSweeperTimer();
+  startEnvPurgeTimer(db);
 
   // §4.1.4 C2 — caller daemon resolved via token-bound identity (NOT
   // alias). Thin closure over the module-level helper so callers in

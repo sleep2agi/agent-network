@@ -40,6 +40,7 @@ import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
 import { processRulesFileRequests } from "./runtime/rules-file";
+import { fileEnvStore, type NodeEnvStore } from "./runtime/node-env";
 import { chooseGrokBinary, grokBinaryPinToRecord, findVerifiedGrokCandidates, grokRecoveryHint } from "./runtime/grok-binary-pin";
 
 // 🔴 这三处原先都喂 `__dirname`,而打包器把它内联成构建期常量 —— 见 #1433。
@@ -1517,6 +1518,8 @@ const register = async () => {
     skills_capable: true,
     // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
     files_capable: true,
+    // 同一门铃也答 env_list / env_set / env_unset(node-env.ts);只有有配置文件的节点才答。
+    ...(configFilePath ? { env_capable: true } : {}),
   };
   // 🔴 启动注册是 `await register()`（本文件底部、顶层、**无 catch**），所以这里
   //    抛出什么都会让整个进程退出。#1225 实测到的那次就是这样：hub 的
@@ -6394,6 +6397,40 @@ async function processConfigUpdate(): Promise<void> {
   }
 }
 
+// 节点环境变量(runtime/node-env.ts)—— 存在本节点自己的 config.json 的 env 块里,
+// 启动时注入 process.env(见上方「Inject config.json `env` block」)。没有 --config /
+// profile 路径的节点不答 env_*(那种节点重启后也读不到这里)。
+function nodeEnvStore(): NodeEnvStore | null {
+  if (!configFilePath) return null;
+  const base = fileEnvStore(configFilePath);
+  if (RUNTIME !== "opencode") return base;
+  // opencode 的 config.json 走它自己的私有写入器(启动闸校验同一套形状)。
+  return {
+    read: () => base.read(),
+    backup: () => { backupOpencodeConfig(configFilePath); },
+    write: (body: string) => writeOpencodeConfig(configFilePath, JSON.parse(body)),
+  };
+}
+
+function rulesFileDeps() {
+  const store = nodeEnvStore();
+  return {
+    callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn,
+    ...(store ? {
+      env: {
+        store,
+        // ANET_CONFIG_UPDATE_CAPABLE=1 ⇔ 在 `anet node start` 的 exit-75 监督进程下,restart_node 能拉起来。
+        restart: (process.env.ANET_CONFIG_UPDATE_CAPABLE === "1" ? "remote" : "manual") as "remote" | "manual",
+        processEnv: process.env,
+        home,
+        // 同步内存里的配置:之后的 update_node_config(mergePatch(fileConfig, …))不会把新写的 env 覆盖回去。
+        // 只改 fileConfig.env,不改 process.env —— 新值在重启后生效。
+        onWritten: (env: Record<string, unknown>) => { fileConfig = { ...fileConfig, env }; },
+      },
+    } : {}),
+  };
+}
+
 // RFC-024 — restart_node-triggered SSE doorbell. Restart_node creates
 // an apply_mode=restart_only update; processConfigUpdate's restart_only
 // branch handles it. So we just delegate.
@@ -6497,7 +6534,7 @@ async function connectSSE() {
               commhubCompensation?.trigger("sse-reconnect");
               // app#225 —— 断线/未连上期间桌面端可能已发起规则文件请求(hub 侧 60s 内
               // 仍 pending,门铃却没人听);连上后补拉一次,没有就是一次空拉。
-              processRulesFileRequests({ callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn })
+              processRulesFileRequests(rulesFileDeps())
                 .catch((e: any) => warn(`[rules-file] connect catch-up failed: ${e?.message || e}`));
               if (fileConfig.role === "host_supervisor") {
                 import("./runtime/create-node-daemon.js").then(({ handleCreateNodeDoorbell, reconcilePendingCreateRequestsOnConnect, serializeEnvLocalDaemon }) => {
@@ -6591,7 +6628,7 @@ async function connectSSE() {
       // 本节点按 RUNTIME 决定、目录固定 cwd，见 runtime/rules-file.ts 顶部。
       if (ev.type === "rules_file") {
         log(`[rules-file] doorbell received`);
-        processRulesFileRequests({ callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn })
+        processRulesFileRequests(rulesFileDeps())
           .catch((e: any) => warn(`[rules-file] doorbell handler failed: ${e?.message || e}`));
       }
       if (ev.type === "restart") {

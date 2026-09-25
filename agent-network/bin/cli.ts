@@ -86,6 +86,7 @@ import {
 } from "../src/opencode-agent-node-pair";
 import { siblingAgentNodeEntrypoint } from "../src/sibling-agent-node";
 import { hardenOpencodeAgentNodeEnv } from "../src/opencode-launch-env";
+import { refreshProfileEnvOverlay, resolveProfileEnvLenient } from "../src/profile-env-refresh";
 import {
   clearOpencodeAuthJson,
   findOpencodePreset,
@@ -122,6 +123,8 @@ import {
   agentNodeHelpSupportsGrokCopresence,
   buildGrokAgentNodeEnv,
   buildGrokPreviewResolverEnv,
+  GROK_AGENT_NODE_INHERITED_ENV_KEYS,
+  GROK_AGENT_NODE_OPTIONAL_ENV_KEYS,
   grokBuildCliCreationFields,
   prepareGrokPreviewResolverConfigs,
   resolveGrokAttachTarget,
@@ -6516,7 +6519,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     if (Object.keys(_dotenvSDK).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
-    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
+    // Kept for the exit-75 respawn below: which keys this launch took from the profile.
+    const launchProfileEnv = resolveProfileEnv(profile.env as any, home, _dotenvSDK);
+    const launcherEnvSnapshot: Record<string, string | undefined> = { ...process.env };
+    Object.assign(env, launchProfileEnv);
 
     if (runtime === "opencode-cli") {
       if (!opencodeLaunchIdentity) {
@@ -6608,6 +6614,32 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     }
     const pidFile = join(nodesDir(), nodeId, ".pid");
 
+    // Node environment variables (desktop 节点设置 → 环境变量): a respawn after exit 75
+    // re-reads the profile's env block, so a key changed or removed since launch
+    // takes effect on restart (profile-env-refresh.ts). Values are never logged.
+    let appliedProfileEnv: Record<string, string> = launchProfileEnv;
+    let spawnEnv: NodeJS.ProcessEnv = childEnv;
+    let spawnCount = 0;
+    const refreshSpawnEnv = () => {
+      try {
+        const fresh = loadProfile(nodeId);
+        if (!fresh) { console.warn(`[anet] respawn: could not re-read the node config; keeping the previous environment`); return; }
+        const dotenv = runtime === "opencode-cli" ? loadOpencodeNodeDotenv(nodeId) : loadNodeDotenv(nodeId);
+        const { env: next, missing } = resolveProfileEnvLenient((fresh as any).env, home, dotenv, launcherEnvSnapshot);
+        if (missing.length) console.warn(`[anet] respawn: env ${missing.join(", ")} reference(s) not set; keeping their previous values`);
+        for (const k of missing) if (appliedProfileEnv[k] !== undefined) next[k] = appliedProfileEnv[k];
+        const onlyKeys = runtime === "grok-build-cli"
+          ? new Set<string>([...GROK_AGENT_NODE_INHERITED_ENV_KEYS, ...GROK_AGENT_NODE_OPTIONAL_ENV_KEYS])
+          : undefined;
+        spawnEnv = refreshProfileEnvOverlay(spawnEnv, appliedProfileEnv, next, launcherEnvSnapshot, onlyKeys) as NodeJS.ProcessEnv;
+        const changed = [...new Set([...Object.keys(appliedProfileEnv), ...Object.keys(next)])].filter((k) => appliedProfileEnv[k] !== next[k]);
+        if (changed.length) console.log(`[anet] respawn: node env re-read from config (${changed.length} key(s) changed: ${changed.join(", ")})`);
+        appliedProfileEnv = next;
+      } catch (e: any) {
+        console.warn(`[anet] respawn: env refresh failed (${e?.code || e?.name || "error"}); keeping the previous environment`);
+      }
+    };
+
     // Sentinel code agent-node uses to request re-spawn. Must stay in
     // lockstep with RESTART_SENTINEL in agent-node/src/runtime/config-apply.ts.
     const RESTART_SENTINEL = 75;
@@ -6667,8 +6699,9 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         // Stable timer — child survives 30s → reset backoff to base.
         // Mirrors the connectFeishu supervisor pattern from PR #263.
         const stableTimer = setTimeout(() => ctrl.markStable(), 30_000);
+        if (spawnCount++ > 0) refreshSpawnEnv();
         const child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn(runCommand, runCommandArgs, {
-          env: childEnv,
+          env: spawnEnv,
           stdio: "inherit",
           shell: runtime === "opencode-cli" ? false : process.platform === "win32",
         }));

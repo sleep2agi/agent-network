@@ -14,6 +14,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listSkills, readSkill } from "./node-skills";
 import { listNodeFiles, readNodeFile } from "./node-files";
+import { listNodeEnv, parseEnvRequestContent, safeEnvErrorMessage, setNodeEnv, unsetNodeEnv, EnvOpError, type EnvRestartMode, type NodeEnvStore } from "./node-env";
 
 export const RULES_FILE_MAX_BYTES = 256 * 1024;
 
@@ -92,8 +93,9 @@ export async function writeRulesFile(
 export interface RulesFileRequest {
   request_id: string;
   /** read/write = 规则文件;skills_list/skill_read = 只读技能(node-skills.ts),content 是技能名;
-   *  files_list/file_read = 只读项目文件夹(node-files.ts),content 是相对工作目录的路径。 */
-  op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read";
+   *  files_list/file_read = 只读项目文件夹(node-files.ts),content 是相对工作目录的路径;
+   *  env_list/env_set/env_unset = 节点环境变量(node-env.ts),content 是 JSON {key, value?}。 */
+  op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | "env_list" | "env_set" | "env_unset";
   content?: string;
 }
 
@@ -106,7 +108,19 @@ export interface ProcessRulesFileDeps {
   /** 技能根目录用;缺省取 os.homedir() / process.env.CODEX_HOME。 */
   home?: string;
   codexHome?: string;
+  /** 环境变量:节点自己的 config.json(node-env.ts)。缺省 = 这个节点没有配置文件,env_* 一律 failed。 */
+  env?: {
+    store: NodeEnvStore;
+    /** remote = 在 exit-75 监督进程下(restart_node 能拉起);manual = 要人去机器上重启。 */
+    restart: EnvRestartMode;
+    processEnv: Record<string, string | undefined>;
+    home?: string;
+    /** 写成功后把新的 env 块交给调用方(agent-node 同步内存里的 fileConfig,免得之后的 config-apply 用旧块覆盖)。 */
+    onWritten?: (env: Record<string, unknown>) => void;
+  };
 }
+
+const isEnvOp = (op: unknown) => op === "env_list" || op === "env_set" || op === "env_unset";
 
 /** 一次门铃最多处理这么多条，防止 hub 侧异常堆积把节点拖进死循环。 */
 export const RULES_FILE_MAX_PER_DOORBELL = 8;
@@ -183,17 +197,47 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
           content: JSON.stringify(r),
         });
         deps.log(`[files] read ${r.path} kind=${r.kind} (${req.request_id})`);
+      } else if (isEnvOp(req.op)) {
+        // 🔴 值只写不读:ack 与日志里只有键和长度(node-env.ts)。
+        if (!deps.env) throw new EnvOpError("this node has no config.json for environment variables (started without --config?)");
+        const env = deps.env;
+        let payload: Record<string, unknown>;
+        if (req.op === "env_list") {
+          const r = listNodeEnv(env.store, { processEnv: env.processEnv, home: env.home, restart: env.restart });
+          payload = r as unknown as Record<string, unknown>;
+          deps.log(`[env] listed ${r.keys.length} key(s) (${req.request_id})`);
+        } else if (req.op === "env_set") {
+          const body = parseEnvRequestContent(req.content);
+          const r = setNodeEnv(env.store, body.key, body.value, env.restart);
+          env.onWritten?.(r.env);
+          payload = r.result as unknown as Record<string, unknown>;
+          deps.log(`[env] set ${r.result.key} length=${r.result.length} — takes effect after restart (${req.request_id})`);
+        } else {
+          const body = parseEnvRequestContent(req.content);
+          const r = unsetNodeEnv(env.store, body.key, env.restart);
+          if (r.env) env.onWritten?.(r.env);
+          payload = r.result as unknown as Record<string, unknown>;
+          deps.log(`[env] unset ${r.result.key} existed=${r.result.existed} (${req.request_id})`);
+        }
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: "env",
+          exists: true,
+          content: JSON.stringify(payload),
+        });
       } else {
         throw new Error(`unknown op ${String((req as any).op)}`);
       }
     } catch (err: any) {
-      const msg = String(err?.message || err).slice(0, 500);
+      // env_*:只回固定文案 / 错误码 —— 系统错误与解析错误的原文可能带着值。
+      const msg = isEnvOp(req.op) ? safeEnvErrorMessage(err) : String(err?.message || err).slice(0, 500);
       deps.warn(`[rules-file] ${req.op} failed (${req.request_id}): ${msg}`);
       try {
         await deps.callCommHub("ack_rules_file_request", {
           request_id: req.request_id,
           status: "failed",
-          file_name: req.op === "skills_list" || req.op === "skill_read" ? "skills" : req.op === "files_list" || req.op === "file_read" ? "files" : rulesFileNameForRuntime(deps.runtime),
+          file_name: req.op === "skills_list" || req.op === "skill_read" ? "skills" : req.op === "files_list" || req.op === "file_read" ? "files" : isEnvOp(req.op) ? "env" : rulesFileNameForRuntime(deps.runtime),
           error: msg,
         });
       } catch (ackErr: any) {
