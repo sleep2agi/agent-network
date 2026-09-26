@@ -28,46 +28,46 @@ features:
 
 <section class="desktop-download" aria-labelledby="desktop-download-title">
   <div class="desktop-download-copy">
-    <span class="eyebrow">DESKTOP APP · v0.2.121</span>
+    <span class="eyebrow">DESKTOP APP · v0.2.123</span>
     <h2 id="desktop-download-title">Download and start collaborating</h2>
     <p>A signed native desktop experience. Mac and Windows connect to the same Hubs, accounts, and conversations.</p>
     <div class="download-note">The current Mac build supports Apple Silicon. The Windows build supports 64-bit Windows 10/11.</div>
   </div>
   <div class="download-grid">
     <div class="download-card download-card-routes download-card-primary">
-      <span class="download-platform"><strong>macOS</strong> · v0.2.121</span><small>Apple Silicon · 36.9 MB</small>
-      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_aarch64.dmg">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_aarch64.dmg">Mirror 2 (GitHub)</a></div>
+      <span class="download-platform"><strong>macOS</strong> · v0.2.123</span><small>Apple Silicon · 36.9 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.123/Agent.Network_0.2.123_aarch64.dmg">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.123/Agent.Network_0.2.123_aarch64.dmg">Mirror 2 (GitHub)</a></div>
     </div>
     <div class="download-card download-card-routes">
-      <span class="download-platform"><strong>Windows</strong> · v0.2.121</span><small>Windows x64 · 35.3 MB</small>
-      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_x64-setup.exe">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_x64-setup.exe">Mirror 2 (GitHub)</a></div>
+      <span class="download-platform"><strong>Windows</strong> · v0.2.123</span><small>Windows x64 · 35.3 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.123/Agent.Network_0.2.123_x64-setup.exe">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.123/Agent.Network_0.2.123_x64-setup.exe">Mirror 2 (GitHub)</a></div>
     </div>
   </div>
-  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">Release notes and checksums</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases">All releases</a></p>
+  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.123">Release notes and checksums</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases">All releases</a></p>
 </section>
 
 <section class="mobile-download" aria-labelledby="mobile-download-title">
   <div class="desktop-download-copy">
-    <span class="eyebrow">MOBILE · v0.2.121</span>
+    <span class="eyebrow">MOBILE · v0.2.123</span>
     <h2 id="mobile-download-title">Keep an eye on your agents from a phone</h2>
     <p>Built from the same application source as the desktop app, talking to the same Hub.</p>
     <div class="download-note">Android is a test-signed package requiring Android 7.0 or newer; iOS ships through TestFlight.</div>
   </div>
   <div class="download-grid">
     <div class="download-card download-card-routes download-card-primary">
-      <span class="download-platform"><strong>Android</strong> · v0.2.121</span><small>Android 7.0+ · 79.5 MB</small>
-      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_android-universal.apk">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_android-universal.apk">Mirror 2 (GitHub)</a></div>
+      <span class="download-platform"><strong>Android</strong> · v0.2.123</span><small>Android 7.0+ · 79.5 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.123/Agent.Network_0.2.123_android-universal.apk">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.123/Agent.Network_0.2.123_android-universal.apk">Mirror 2 (GitHub)</a></div>
     </div>
     <div class="download-card download-card-pending" aria-disabled="true"><span class="download-platform">iOS</span><strong>TestFlight in review</strong><small>Public testing link coming soon</small></div>
   </div>
-  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">Release notes and checksum</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">Advanced: 0.2.32 audit .ipa and SHA256SUMS</a></p>
+  <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.123">Release notes and checksum</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">Advanced: 0.2.32 audit .ipa and SHA256SUMS</a></p>
   <p class="release-links">The iOS <code>.ipa</code> is App Store distribution-signed, published for auditing only — it <strong>cannot be sideloaded</strong>. Wait for TestFlight.</p>
 </section>
 
 <section class="product-path">
   <div class="product-path-heading"><span class="eyebrow">TWO WAYS TO START</span><h2>Desktop simplicity, full CLI power</h2></div>
   <div class="product-path-grid">
-    <article class="product-path-card"><span class="path-number">01</span><h3>Desktop app</h3><p>For everyday work: manage agents, conversations, files, schedules, and servers visually.</p><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">Get the latest release →</a></article>
+    <article class="product-path-card"><span class="path-number">01</span><h3>Desktop app</h3><p>For everyday work: manage agents, conversations, files, schedules, and servers visually.</p><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.123">Get the latest release →</a></article>
     <article class="product-path-card"><span class="path-number">02</span><h3>anet CLI</h3><p>For developers and servers: control Hubs, nodes, runtimes, and automation precisely.</p><div class="cli-command"><code>curl -fsSL https://anet.sh/install.sh | sh</code></div><a href="/en/guide/getting-started">Read the install guide →</a></article>
   </div>
 </section>
@@ -75,5 +75,5 @@ features:
 <section class="final-cta">
   <h2 class="final-cta-title">Turn your agents into a real team</h2>
   <p class="final-cta-sub">Start with the desktop app or build your own network with anet CLI.</p>
-  <div class="final-cta-actions"><a class="cta-primary" href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">Download desktop</a><a class="cta-ghost" href="/en/guide/getting-started">Developer docs</a><a class="cta-ghost" href="https://github.com/sleep2agi/agent-network" target="_blank" rel="noopener">GitHub</a></div>
+  <div class="final-cta-actions"><a class="cta-primary" href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.123">Download desktop</a><a class="cta-ghost" href="/en/guide/getting-started">Developer docs</a><a class="cta-ghost" href="https://github.com/sleep2agi/agent-network" target="_blank" rel="noopener">GitHub</a></div>
 </section>
