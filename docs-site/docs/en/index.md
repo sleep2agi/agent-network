@@ -8,11 +8,8 @@ hero:
   tagline: Connect Claude, Codex, and Grok in one desktop app. See nodes, start conversations, and delegate work while keeping control of your data.
   actions:
     - theme: brand
-      text: Download for macOS
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_aarch64.dmg
-    - theme: alt
-      text: Download for Windows
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_x64-setup.exe
+      text: Download the desktop app
+      link: /en/#desktop-download-title
     - theme: alt
       text: Read the docs
       link: /en/guide/getting-started
@@ -37,10 +34,15 @@ features:
     <div class="download-note">The current Mac build supports Apple Silicon. The Windows build supports 64-bit Windows 10/11.</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_aarch64.dmg"><span class="download-platform">macOS</span><strong>Download .dmg</strong><small>Apple Silicon · 36.9 MB</small><span class="download-arrow">↓</span></a>
-    <a class="download-card" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_x64-setup.exe"><span class="download-platform">Windows</span><strong>Download installer</strong><small>Windows x64 · 35.3 MB</small><span class="download-arrow">↓</span></a>
+    <div class="download-card download-card-routes download-card-primary">
+      <span class="download-platform"><strong>macOS</strong> · v0.2.121</span><small>Apple Silicon · 36.9 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_aarch64.dmg">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_aarch64.dmg">Mirror 2 (GitHub)</a></div>
+    </div>
+    <div class="download-card download-card-routes">
+      <span class="download-platform"><strong>Windows</strong> · v0.2.121</span><small>Windows x64 · 35.3 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_x64-setup.exe">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_x64-setup.exe">Mirror 2 (GitHub)</a></div>
+    </div>
   </div>
-  <p class="release-links">Mirror in China (ModelScope): <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_aarch64.dmg">macOS .dmg</a> · <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_x64-setup.exe">Windows installer</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">Release notes and checksums</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases">All releases</a></p>
 </section>
 
@@ -52,10 +54,12 @@ features:
     <div class="download-note">Android is a test-signed package requiring Android 7.0 or newer; iOS ships through TestFlight.</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_android-universal.apk"><span class="download-platform">Android</span><strong>Download .apk</strong><small>Android 7.0+ · 79.5 MB</small><span class="download-arrow">↓</span></a>
+    <div class="download-card download-card-routes download-card-primary">
+      <span class="download-platform"><strong>Android</strong> · v0.2.121</span><small>Android 7.0+ · 79.5 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_android-universal.apk">Mirror 1 (China · ModelScope)<span class="download-route-tag">Recommended</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_android-universal.apk">Mirror 2 (GitHub)</a></div>
+    </div>
     <div class="download-card download-card-pending" aria-disabled="true"><span class="download-platform">iOS</span><strong>TestFlight in review</strong><small>Public testing link coming soon</small></div>
   </div>
-  <p class="release-links">Mirror in China (ModelScope): <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_android-universal.apk">Android .apk</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">Release notes and checksum</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">Advanced: 0.2.32 audit .ipa and SHA256SUMS</a></p>
   <p class="release-links">The iOS <code>.ipa</code> is App Store distribution-signed, published for auditing only — it <strong>cannot be sideloaded</strong>. Wait for TestFlight.</p>
 </section>

@@ -157,13 +157,30 @@ for (const [language, html] of renderedHomepages) {
   check(/releases\/tag\/desktop-v\d+\.\d+\.\d+/.test(html), `${language} rendered homepage lost the stable desktop release`);
   check(/Agent\.Network_\d+\.\d+\.\d+_aarch64\.dmg/.test(html), `${language} rendered homepage lost the macOS download`);
   check(/Agent\.Network_\d+\.\d+\.\d+_x64-setup\.exe/.test(html), `${language} rendered homepage lost the Windows download`);
+  // 每个平台两条线路:线路一 ModelScope(按版本目录)、线路二 GitHub。三个平台 × 两条 = 6。
+  for (const file of ["aarch64.dmg", "x64-setup.exe", "android-universal.apk"]) {
+    const ms = new RegExp(`agent-network-releases/resolve/master/desktop/\\d+\\.\\d+\\.\\d+/Agent\\.Network_\\d+\\.\\d+\\.\\d+_${file.replace(/\./g, "\\.")}`);
+    const gh = new RegExp(`releases/download/desktop-v\\d+\\.\\d+\\.\\d+/Agent\\.Network_\\d+\\.\\d+\\.\\d+_${file.replace(/\./g, "\\.")}`);
+    check(ms.test(html), `${language} rendered homepage lost the ModelScope route for ${file}`);
+    check(gh.test(html), `${language} rendered homepage lost the GitHub route for ${file}`);
+  }
 }
+check(renderedHomepages[0][1].includes("线路一") && renderedHomepages[0][1].includes("线路二"), "Chinese homepage lost the 线路一/线路二 labels");
+check(renderedHomepages[1][1].includes("Mirror 1") && renderedHomepages[1][1].includes("Mirror 2"), "English homepage lost the Mirror 1/Mirror 2 labels");
 
 // 收全集再判,不取首个匹配:只看第一个 desktop-v 的话,页面上同时留着新旧两个版本
 // (改了上面忘了下面、或旧卡片没删干净)会被判成正常 —— 而那正是最像"已经更新完"
 // 的失败形态。`desktop-v` 前缀让 mobile-v 的版本号不参与,不会互相误伤。
+// 下载卡片有两条线路:ModelScope 的 `desktop/<ver>/Agent.Network_<ver>_…` 与 GitHub 的
+// `desktop-v<ver>/…`,卡片标题还印着 `v<ver>`。三种形状一起收,任何一处漏改都会让集合 >1。
 const desktopVersions = (html) => [
-  ...new Set([...html.matchAll(/desktop-v(\d+\.\d+\.\d+)/g)].map((m) => m[1])),
+  ...new Set(
+    [
+      ...html.matchAll(/desktop-v(\d+\.\d+\.\d+)/g),
+      ...html.matchAll(/\/desktop\/(\d+\.\d+\.\d+)\//g),
+      ...html.matchAll(/Agent\.Network_(\d+\.\d+\.\d+)_/g),
+    ].map((m) => m[1]),
+  ),
 ];
 for (const [language, html] of renderedHomepages) {
   const versions = desktopVersions(html);
