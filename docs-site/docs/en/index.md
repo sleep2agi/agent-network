@@ -5,7 +5,7 @@ titleTemplate: Turn AI agents into a team
 hero:
   name: Agent Network
   text: Your desktop workspace for AI agents
-  tagline: Connect Claude, Codex, and Grok in one desktop app. See nodes, start conversations, and delegate work while keeping control of your data.
+  tagline: Connect Claude Code, Codex, Grok, and OpenCode nodes on any machine to one Hub. Chat with them, read their rules files and projects, switch models remotely, and create or restart nodes from one client.
   actions:
     - theme: brand
       text: Download for macOS
@@ -18,15 +18,18 @@ hero:
       link: /en/guide/getting-started
 
 features:
-  - icon: 💬
-    title: Collaborate like chat
-    details: Find any agent, start a conversation, send images and files, render Markdown, and open focused chat windows.
-  - icon: 🖥️
-    title: Manage the network
+  - title: Collaborate like chat
+    details: Find any node and start a conversation, send images and files, read replies as Markdown, and pop conversations into their own windows.
+  - title: Manage the network
     details: See Hubs, online nodes, tasks, and runtime status without jumping between terminals.
-  - icon: 🔐
-    title: Local first
+  - title: Local first
     details: Your Hub and data run on hardware you control; credentials are protected by the operating-system keychain.
+  - title: Switch models remotely
+    details: Change a node’s model from its node page; the node restarts in place with the new config — no need to log in to that machine.
+  - title: Create nodes on any machine
+    details: If a machine runs the daemon, create new nodes on it from the client, and restart or stop existing ones.
+  - title: Many runtimes, one network
+    details: Claude Code, Codex, Grok, and OpenCode nodes share one Hub and can hand tasks and results to each other.
 ---
 
 <section class="desktop-download" aria-labelledby="desktop-download-title">

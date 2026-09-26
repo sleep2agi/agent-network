@@ -5,7 +5,7 @@ titleTemplate: 让 AI Agent 组成团队
 hero:
   name: Agent Network
   text: 你的 AI Agent 桌面工作台
-  tagline: 在一个桌面应用里连接 Claude、Codex 和 Grok。查看节点、发起对话、分派任务，数据仍由你掌控。
+  tagline: 把不同机器上的 Claude Code、Codex、Grok、OpenCode 节点接进同一个 Hub。在一个客户端里和它们对话、查看规则文件与项目、远程切换模型、新建和重启节点。
   actions:
     - theme: brand
       text: 下载 macOS 版
@@ -18,15 +18,18 @@ hero:
       link: /guide/getting-started
 
 features:
-  - icon: 💬
-    title: 像聊天一样协作
-    details: 找到任意 Agent，直接对话、发送图片和文件，支持 Markdown 与独立聊天窗口。
-  - icon: 🖥️
-    title: 管理整个网络
+  - title: 像聊天一样协作
+    details: 找到任意节点直接对话，发送图片和文件；回复按 Markdown 渲染，会话可以拆成独立窗口。
+  - title: 管理整个网络
     details: 在桌面端查看 Hub、在线节点、任务和运行状态，不必在多个终端之间切换。
-  - icon: 🔐
-    title: 本地优先
+  - title: 本地优先
     details: Hub 与数据运行在你控制的机器上；登录凭据由系统钥匙串安全保存。
+  - title: 远程切换模型
+    details: 在节点页的「模型与运行时」里换模型，节点按新配置原地重启，不用登录那台机器。
+  - title: 在任意机器上建节点
+    details: 机器上跑着 daemon，就能从客户端在那台机器上新建节点，也能重启、停止已有节点。
+  - title: 多种运行时，一个网络
+    details: Claude Code、Codex、Grok、OpenCode 节点连同一个 Hub，彼此可以派任务、回结果。
 ---
 
 <section class="desktop-download" aria-labelledby="desktop-download-title">
