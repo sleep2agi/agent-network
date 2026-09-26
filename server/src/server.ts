@@ -19,6 +19,7 @@ import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-va
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
+import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
 import { getLoginClientIp, sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
 import {
   FILE_ID_REGEX,
@@ -2401,7 +2402,6 @@ return Bun.serve({
           ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
         }, { status: 404 }));
       }
-      const id = crypto.randomUUID();
       // Identity binding, mirroring the MCP transport (tools.ts defaultFrom /
       // fromIdentityMismatchReply). Both transports resolve the same
       // api_tokens row through resolveToken, and auth.ts already documents the
@@ -2460,12 +2460,61 @@ return Bun.serve({
           : "legacy";
       const metaJson = normalizeMetaJson(stampTaskAuthOrigin(mergedMeta, authOrigin));
 
+      // Client-request-id idempotency, mirroring the MCP `send_task` tool
+      // (tools.ts). The app/Dashboard mint one `meta.client_request_id` per
+      // message bubble and reuse it only to retry that bubble, so:
+      //   - the task id is derived from (network, from, request id): a retry
+      //     after a lost response finds the row it already wrote and gets the
+      //     same task id back (200, idempotent_replay) — across restarts too;
+      //   - the same id with a different payload fails closed (409);
+      //   - a NEW id is a new message even when the text is identical, so it
+      //     must not hit the #212 content-hash window below (that silently
+      //     dropped a user's second 「好」 while the app showed it delivered).
+      const clientRequestId = clientRequestIdFromMeta(mergedMeta);
+      const id = clientRequestId
+        ? idempotentTaskId(taskNetId ?? null, fromSession, clientRequestId)
+        : crypto.randomUUID();
+      if (clientRequestId) {
+        const existing = db.get<StoredIdempotentTask & { to_node_id: string | null }>(
+          "SELECT task_id, from_name, to_node_id, to_name, priority, content, network_id, meta_json, status FROM tasks WHERE task_id = ?1",
+          [id],
+        );
+        if (existing) {
+          if (!idempotentTaskMatches(existing, {
+            fromName: fromSession, toName: targetAlias, priority: body.priority, content: body.task,
+            networkId: taskNetId ?? null, metaJson,
+          })) {
+            console.log(`[/api/task] ${fromSession} → ${targetAlias}: REJECTED idempotency_conflict (key=request_id, task=${existing.task_id.slice(0, 13)})`);
+            return withCors(req, Response.json({
+              ok: false,
+              error: "idempotency_conflict",
+              message: "client_request_id was already used with a different task payload",
+            }, { status: 409 }));
+          }
+          console.log(`[/api/task] ${fromSession} → ${targetAlias}: REPLAY (key=request_id, task=${existing.task_id.slice(0, 13)})`);
+          return withCors(req, Response.json({
+            ok: true,
+            task_id: existing.task_id,
+            message_id: existing.task_id,
+            task_status: existing.status,
+            idempotent_replay: true,
+            actual_to: {
+              alias: existing.to_name,
+              to_node_id: existing.to_node_id ?? null,
+              network_id: existing.network_id ?? null,
+            },
+          }));
+        }
+      }
+
       // #212 dedup guardrail. Mirrors the MCP `send_task` tool: same
       // (from_session, target_alias, task) within COMMHUB_SEND_DEDUP_WINDOW_MS
       // is rejected with a structured `duplicate_send` error so dashboard
       // dispatch buttons and scripted REST callers get the same guarantee
-      // as agent-driven MCP traffic.
-      const dedup = sharedSendDedup.check(fromSession, targetAlias, body.task);
+      // as agent-driven MCP traffic. Sends carrying a client_request_id are
+      // keyed on that id instead of the content (send_dedup.ts header).
+      const dedupScope = { requestId: clientRequestId, networkId: taskNetId ?? null };
+      const dedup = sharedSendDedup.check(fromSession, targetAlias, body.task, undefined, dedupScope);
       if (dedup.duplicate) {
         const payload = buildDuplicateSendPayload({
           from: fromSession,
@@ -2473,7 +2522,7 @@ return Bun.serve({
           ageMs: dedup.ageMs,
           windowMs: sharedSendDedup.windowMs,
         });
-        console.log(`[/api/task] ${fromSession} → ${targetAlias}: DROPPED duplicate (age=${dedup.ageMs}ms, window=${sharedSendDedup.windowMs}ms)`);
+        console.log(`[/api/task] ${fromSession} → ${targetAlias}: DROPPED duplicate (key=${dedup.kind}, age=${dedup.ageMs}ms, window=${sharedSendDedup.windowMs}ms)`);
         return withCors(req, Response.json(payload, { status: 429 }));
       }
 
@@ -2528,7 +2577,7 @@ return Bun.serve({
       // #212 — stamp the dedup index only after the inbox/tasks insert
       // succeeds. Mirrors the MCP `send_task` path so a failed write
       // never shadows a legitimate retry.
-      sharedSendDedup.record(fromSession, targetAlias, body.task);
+      sharedSendDedup.record(fromSession, targetAlias, body.task, undefined, dedupScope);
       if (target.state === "offline") {
         return withCors(req, Response.json({
           ok: false,
