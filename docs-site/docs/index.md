@@ -8,11 +8,8 @@ hero:
   tagline: 在一个桌面应用里连接 Claude、Codex 和 Grok。查看节点、发起对话、分派任务，数据仍由你掌控。
   actions:
     - theme: brand
-      text: 下载 macOS 版
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_aarch64.dmg
-    - theme: alt
-      text: 下载 Windows 版
-      link: https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_x64-setup.exe
+      text: 下载桌面版
+      link: /#desktop-download-title
     - theme: alt
       text: 查看文档
       link: /guide/getting-started
@@ -37,14 +34,15 @@ features:
     <div class="download-note">当前 Mac 版本适用于 Apple 芯片；Windows 版本适用于 64 位 Windows 10/11。</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_aarch64.dmg">
-      <span class="download-platform">macOS</span><strong>下载 .dmg</strong><small>Apple Silicon · 36.9 MB</small><span class="download-arrow">↓</span>
-    </a>
-    <a class="download-card" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_x64-setup.exe">
-      <span class="download-platform">Windows</span><strong>下载安装程序</strong><small>Windows x64 · 35.3 MB</small><span class="download-arrow">↓</span>
-    </a>
+    <div class="download-card download-card-routes download-card-primary">
+      <span class="download-platform"><strong>macOS</strong> · v0.2.121</span><small>Apple Silicon · 36.9 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_aarch64.dmg">线路一（国内 · ModelScope）<span class="download-route-tag">推荐</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_aarch64.dmg">线路二（GitHub）</a></div>
+    </div>
+    <div class="download-card download-card-routes">
+      <span class="download-platform"><strong>Windows</strong> · v0.2.121</span><small>Windows x64 · 35.3 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_x64-setup.exe">线路一（国内 · ModelScope）<span class="download-route-tag">推荐</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_x64-setup.exe">线路二（GitHub）</a></div>
+    </div>
   </div>
-  <p class="release-links">国内下载（ModelScope）：<a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_aarch64.dmg">macOS .dmg</a> · <a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_x64-setup.exe">Windows 安装程序</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">查看版本说明与校验信息</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases">全部历史版本</a></p>
 </section>
 
@@ -56,14 +54,14 @@ features:
     <div class="download-note">Android 为测试签名安装包，需 Android 7.0 及以上；iOS 通过 TestFlight 分发。</div>
   </div>
   <div class="download-grid">
-    <a class="download-card download-card-primary" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_android-universal.apk">
-      <span class="download-platform">Android</span><strong>下载 .apk</strong><small>Android 7.0+ · 79.5 MB</small><span class="download-arrow">↓</span>
-    </a>
+    <div class="download-card download-card-routes download-card-primary">
+      <span class="download-platform"><strong>Android</strong> · v0.2.121</span><small>Android 7.0+ · 79.5 MB</small>
+      <div class="download-routes"><a class="download-route download-route-primary" href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/0.2.121/Agent.Network_0.2.121_android-universal.apk">线路一（国内 · ModelScope）<span class="download-route-tag">推荐</span></a><a class="download-route" href="https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.121/Agent.Network_0.2.121_android-universal.apk">线路二（GitHub）</a></div>
+    </div>
     <div class="download-card download-card-pending" aria-disabled="true">
       <span class="download-platform">iOS</span><strong>TestFlight 处理中</strong><small>公开测试链接即将开放</small>
     </div>
   </div>
-  <p class="release-links">国内下载（ModelScope）：<a href="https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop/latest/Agent.Network_android-universal.apk">Android .apk</a></p>
   <p class="release-links"><a href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.121">查看版本说明与校验信息</a> · <a href="https://github.com/sleep2agi/agent-network-app/releases/tag/mobile-v0.2.32">高级：0.2.32 审计用 .ipa 与 SHA256SUMS</a></p>
   <p class="release-links">iOS 的 <code>.ipa</code> 是 App Store distribution 签名，供审计比对，<strong>不能直接侧载安装</strong>；请等 TestFlight 开放。</p>
 </section>
