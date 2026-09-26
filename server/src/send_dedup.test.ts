@@ -146,6 +146,60 @@ describe("SendDedup", () => {
   });
 });
 
+describe("SendDedup key selection (client_request_id vs content)", () => {
+  const t0 = 1_700_000_000_000;
+  const A = "dreq_00000000000000000000000000000001";
+  const B = "dreq_00000000000000000000000000000002";
+
+  it("keyFor picks the request id when present, content hash otherwise", () => {
+    const withId = SendDedup.keyFor("alice", "bob", "好", { requestId: A, networkId: "net1" });
+    expect(withId.kind).toBe("request_id");
+    expect(withId.key).toBe(`rid|net1|alice|bob|${A}`);
+    const noId = SendDedup.keyFor("alice", "bob", "好", {});
+    expect(noId.kind).toBe("content");
+    expect(noId.key).toBe(SendDedup.key("alice", "bob", "好"));
+    // Empty / null ids fall back to the content key.
+    expect(SendDedup.keyFor("alice", "bob", "好", { requestId: "" }).kind).toBe("content");
+    expect(SendDedup.keyFor("alice", "bob", "好", { requestId: null }).kind).toBe("content");
+  });
+
+  it("same text with different request ids is never a duplicate", () => {
+    const d = new SendDedup({ windowMs: 300_000, maxKeys: 64 });
+    d.record("alice", "bob", "好", t0, { requestId: A });
+    expect(d.check("alice", "bob", "好", t0 + 1000, { requestId: B })).toEqual({ duplicate: false });
+  });
+
+  it("same request id is a duplicate even with different content (one id = one message)", () => {
+    const d = new SendDedup({ windowMs: 300_000, maxKeys: 64 });
+    d.record("alice", "bob", "first", t0, { requestId: A });
+    const again = d.check("alice", "bob", "second", t0 + 1000, { requestId: A });
+    expect(again.duplicate).toBe(true);
+    if (again.duplicate) expect(again.kind).toBe("request_id");
+  });
+
+  it("request-id keys are scoped by network, sender and target", () => {
+    const d = new SendDedup({ windowMs: 300_000, maxKeys: 64 });
+    d.record("alice", "bob", "x", t0, { requestId: A, networkId: "net1" });
+    expect(d.check("alice", "bob", "x", t0 + 1, { requestId: A, networkId: "net2" })).toEqual({ duplicate: false });
+    expect(d.check("carol", "bob", "x", t0 + 1, { requestId: A, networkId: "net1" })).toEqual({ duplicate: false });
+    expect(d.check("alice", "dave", "x", t0 + 1, { requestId: A, networkId: "net1" })).toEqual({ duplicate: false });
+  });
+
+  it("#212 regression guard: without an id, same content is still a duplicate and reports kind=content", () => {
+    const d = new SendDedup({ windowMs: 300_000, maxKeys: 64 });
+    d.record("agent", "peer", "same task", t0);
+    const again = d.check("agent", "peer", "same task", t0 + 1000);
+    expect(again.duplicate).toBe(true);
+    if (again.duplicate) expect(again.kind).toBe("content");
+  });
+
+  it("an id-bearing send does not shadow a later id-less send of the same text", () => {
+    const d = new SendDedup({ windowMs: 300_000, maxKeys: 64 });
+    d.record("alice", "bob", "好", t0, { requestId: A });
+    expect(d.check("alice", "bob", "好", t0 + 1000)).toEqual({ duplicate: false });
+  });
+});
+
 describe("buildDuplicateSendPayload", () => {
   it("contains the Chinese LLM-facing hint with target alias and window minutes", () => {
     const payload = buildDuplicateSendPayload({

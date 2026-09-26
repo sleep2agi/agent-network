@@ -1621,6 +1621,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               message: "client_request_id was already used with a different task payload",
             }) }] };
           }
+          console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: REPLAY (key=request_id, task=${existing.task_id.slice(0, 13)})`);
           return { content: [{ type: "text" as const, text: JSON.stringify({
             ok: true, message_id: existing.task_id, task_id: existing.task_id,
             task_status: existing.status, idempotent_replay: true,
@@ -1644,7 +1645,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // incident: 50+ identical dispatches across 5 LLM turns ignored
       // three STOP replies — the LLM cannot be trusted to debounce
       // itself, so the runtime layer must.
-      const dedup = sharedSendDedup.check(from_session, targetAlias, task);
+      //
+      // A send carrying a validated client_request_id is keyed on that id
+      // instead of the content hash (send_dedup.ts header): a human typing
+      // the same short text twice sent two messages. Same-id retries were
+      // already answered from the durable row above.
+      const dedupScope = { requestId: clientRequestId, networkId: effectiveNetId ?? null };
+      const dedup = sharedSendDedup.check(from_session, targetAlias, task, undefined, dedupScope);
       if (dedup.duplicate) {
         const payload = buildDuplicateSendPayload({
           from: from_session,
@@ -1652,7 +1659,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           ageMs: dedup.ageMs,
           windowMs: sharedSendDedup.windowMs,
         });
-        console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: DROPPED duplicate (age=${dedup.ageMs}ms, window=${sharedSendDedup.windowMs}ms)`);
+        console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: DROPPED duplicate (key=${dedup.kind}, age=${dedup.ageMs}ms, window=${sharedSendDedup.windowMs}ms)`);
         return { content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
       }
 
@@ -1692,7 +1699,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Only stamp the dedup index after the inbox/tasks transaction
       // succeeds, so a failed insert never silently shadows a legitimate
       // retry.
-      sharedSendDedup.record(from_session, targetAlias, task);
+      sharedSendDedup.record(from_session, targetAlias, task, undefined, dedupScope);
 
       // SSE push by alias.
       // The SSE channel is keyed by alias (subscribers connected to /events/<alias>),

@@ -33,6 +33,26 @@
 //   - The structured response shape is identical between MCP and REST
 //     callers so the LLM gets the same parseable hint regardless of
 //     transport.
+//
+// Key selection (#2043, follow-up to #212): the content-hash key above is
+// only right for callers that have no other notion of "one message".
+// Human chat clients (the desktop/mobile app, the web Dashboard) mint a
+// fresh `meta.client_request_id` per message bubble and reuse it only
+// when retrying that same bubble. For those sends the content hash is the
+// WRONG identity: a user who types 「好」 twice within five minutes sent
+// two messages, and dropping the second one (while the app maps the 429
+// to "delivered") silently loses it. So:
+//   - a send WITH a valid client_request_id is keyed on
+//     (network, from, to, client_request_id) — a new id always proceeds,
+//     identical text or not; a same-id retry is answered from the durable
+//     tasks row by the handler (task-idempotency.ts) before this index is
+//     even consulted, so this key is defence in depth, not the primary
+//     replay mechanism;
+//   - a send WITHOUT one (agent / MCP / scripted traffic) keeps the #212
+//     content-hash window unchanged.
+// One id is one message: re-using an id with different content is a
+// client bug and the handlers fail it closed (`idempotency_conflict`)
+// rather than storing a second row or silently replaying the first.
 
 import { createHash } from "crypto";
 
@@ -61,9 +81,23 @@ export function readDedupConfig(env: NodeJS.ProcessEnv = process.env): DedupConf
   };
 }
 
+/** Which identity a dedup key was built from. Logged on every drop. */
+export type DedupKeyKind = "request_id" | "content";
+
+/**
+ * Optional per-send scope. When `requestId` is a non-empty string the key
+ * is the request id (scoped by network/from/to) instead of the content hash.
+ * Callers must pass the already-validated id (clientRequestIdFromMeta), not
+ * raw client input.
+ */
+export type DedupScope = {
+  requestId?: string | null;
+  networkId?: string | null;
+};
+
 export type DedupCheck =
   | { duplicate: false }
-  | { duplicate: true; lastSentMs: number; ageMs: number };
+  | { duplicate: true; lastSentMs: number; ageMs: number; kind: DedupKeyKind };
 
 export class SendDedup {
   private last = new Map<string, number>();
@@ -94,6 +128,18 @@ export class SendDedup {
   }
 
   /**
+   * Pick the dedup identity for one send. A validated client request id
+   * wins over the content hash; see the header comment for why.
+   */
+  static keyFor(from: string, to: string, content: string, scope: DedupScope = {}): { key: string; kind: DedupKeyKind } {
+    const requestId = typeof scope.requestId === "string" && scope.requestId.length > 0 ? scope.requestId : null;
+    if (requestId) {
+      return { key: `rid|${scope.networkId ?? ""}|${from}|${to}|${requestId}`, kind: "request_id" };
+    }
+    return { key: SendDedup.key(from, to, content), kind: "content" };
+  }
+
+  /**
    * Check whether (from, to, content) was sent recently. Returns
    * `{ duplicate: false }` when the call should proceed, or
    * `{ duplicate: true, lastSentMs, ageMs }` when the caller should be
@@ -103,10 +149,10 @@ export class SendDedup {
    * AFTER the underlying side effect (inbox insert + pushEvent) succeeds,
    * so failed sends don't accidentally block legitimate retries.
    */
-  check(from: string, to: string, content: string, nowMs: number = Date.now()): DedupCheck {
+  check(from: string, to: string, content: string, nowMs: number = Date.now(), scope: DedupScope = {}): DedupCheck {
     if (!this.enabled) return { duplicate: false };
     this.evictExpired(nowMs);
-    const k = SendDedup.key(from, to, content);
+    const { key: k, kind } = SendDedup.keyFor(from, to, content, scope);
     const lastSentMs = this.last.get(k);
     if (lastSentMs === undefined) return { duplicate: false };
     const ageMs = nowMs - lastSentMs;
@@ -114,13 +160,13 @@ export class SendDedup {
       this.last.delete(k);
       return { duplicate: false };
     }
-    return { duplicate: true, lastSentMs, ageMs };
+    return { duplicate: true, lastSentMs, ageMs, kind };
   }
 
   /** Record a successful send for future dedup checks. */
-  record(from: string, to: string, content: string, nowMs: number = Date.now()): void {
+  record(from: string, to: string, content: string, nowMs: number = Date.now(), scope: DedupScope = {}): void {
     if (!this.enabled) return;
-    const k = SendDedup.key(from, to, content);
+    const k = SendDedup.keyFor(from, to, content, scope).key;
     this.last.set(k, nowMs);
     if (this.last.size > this.cfg.maxKeys) this.evictOldest();
   }
