@@ -23,6 +23,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { childWorkDirFor, forgetChildWorkdir } from "./child-workdir.js";
 
 const execFileP = promisify(execFile);
 
@@ -187,8 +188,7 @@ export async function handleStopDoorbell(
   const renameDir = deps.renameDir ?? ((src, dst) => renameSync(src, dst));
   const ensureDir = deps.ensureDir ?? ((p, mode) => { mkdirSync(p, { recursive: true, mode }); });
   const chmod = deps.chmod ?? ((p, mode) => chmodSync(p, mode));
-  const workdirRoot = deps.workdirRoot ?? join(deps.workDir ?? process.cwd(), ".anet", "nodes");
-  const deletedRoot = deps.deletedRoot ?? join(deps.workDir ?? process.cwd(), ".anet", "deleted");
+  const daemonWorkDir = deps.workDir ?? process.cwd();
 
   let req: GetStopRequestResult;
   try {
@@ -202,6 +202,16 @@ export async function handleStopDoorbell(
     return;
   }
   const { child_node_id, child_alias, action, delete_config = true, grace_seconds = 10 } = req;
+  // 建的时候带了工作目录的子节点,config 在 <workdir>/.anet/nodes 下;回收站也放在同一棵树里
+  // (同一文件系统,rename 不会 EXDEV)。没登记 = 老布局 = daemon cwd,与改动前逐字相同。
+  const childWorkDir = child_alias ? childWorkDirFor(daemonWorkDir, child_alias) : daemonWorkDir;
+  const workdirRoot = deps.workdirRoot ?? join(childWorkDir, ".anet", "nodes");
+  const deletedRoot = deps.deletedRoot ?? join(childWorkDir, ".anet", "deleted");
+  const forgetIfDeleted = (backup: string | null) => {
+    if (!backup || !child_alias) return;
+    try { forgetChildWorkdir(daemonWorkDir, child_alias); }
+    catch (e: any) { deps.warn(`[stop-daemon] child workdir registry cleanup failed: ${e?.message || e}`); }
+  };
 
   const entry = childrenMap.get(child_node_id);
   if (!entry) {
@@ -227,6 +237,7 @@ export async function handleStopDoorbell(
     const backup = (action === "delete" && delete_config && child_alias)
       ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
       : null;
+    forgetIfDeleted(backup);
     // Ack `stopped` either way: the child is not running (swept) and — for
     // delete — its config is not in place, which IS each action's end state,
     // so the hub must converge (stop→stopped / delete→row gone + ntok revoked).
@@ -336,6 +347,7 @@ export async function handleStopDoorbell(
   const backup_path: string | null = (action === "delete" && delete_config && child_alias)
     ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
     : null;
+  forgetIfDeleted(backup_path);
 
   // PR1.2 e2e defense-in-depth: even after pgid signaling, sweep any
   // residual agent-node process matching this alias. Catches the case

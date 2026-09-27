@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { join, resolve, sep } from "node:path";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { getChildrenSnapshot, recordSpawnedChild } from "./stop-daemon.js";
+import { childWorkDirFor } from "./child-workdir.js";
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
@@ -92,7 +93,9 @@ export async function handleStartDoorbell(
   // #1474 finding-1 — 根从 create 用的 cwd 基准(deps.workDir=daemon process.cwd())派生,
   // 不硬编码 homedir():create 写 $CWD/.anet/nodes(create-node-daemon:525),daemon 从非
   // $HOME 目录跑时 homedir() 会指向错目录 → 找不到 config → 假 start_failed。
-  const nodesRoot = deps.nodesRoot ?? join(deps.workDir, ".anet", "nodes");
+  // 建的时候带了工作目录的子节点不在 daemon cwd 里,按登记找回它的 .anet 根(child-workdir.ts)。
+  const childWorkDir = childWorkDirFor(deps.workDir, req.child_alias);
+  const nodesRoot = deps.nodesRoot ?? join(childWorkDir, ".anet", "nodes");
   try {
     verifyStoppedChildConfig(nodesRoot, req.child_node_id, req.child_alias);
   } catch (e: any) {
@@ -156,7 +159,7 @@ export async function handleStartDoorbell(
   try {
     const spawnChild = deps.spawnChild ?? spawn;
     const child = spawnChild(anetBin, ["node", "start", req.child_alias], {
-      cwd: deps.workDir,
+      cwd: childWorkDir,
       env: minimalEnv(),
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,
