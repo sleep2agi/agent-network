@@ -733,6 +733,15 @@ function migrateNodeCreateRequestsModelNullable() {
 }
 migrateNodeCreateRequestsModelNullable();
 
+// app「新建节点」工作目录 —— 请求带的 node_spec.workdir(可空;空 = 落 daemon cwd 的老行为)。
+// 🔴 必须排在上面那个重建表迁移**之后**:它按显式列清单拷贝,排在前面的话,老库(model NOT NULL)
+//    第一次启动时这一列会被重建吞掉。
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN workdir TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,
 // 叠在 send_desktop_message 的代码级三闸之上:canWrite / `!effectiveNetId` return /
 // getUserNetworkRole,tools.ts)。「不产生 network_id=NULL 孤儿」现是代码级保证 + #1492

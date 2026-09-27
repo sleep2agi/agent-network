@@ -9441,7 +9441,7 @@ async function daemonStartCommand() {
   //   固定下来的时刻 —— 与上面那段 PATH 警告同一个道理:在这里说一句，
   //   胜过用户在 Dashboard 上点半天再回头猜 daemon 是从哪个目录起的。
   console.error(`  workdir: ${process.cwd()}`);
-  console.error(`  (它只管得到 ${nodesDir()} 里的节点;别处的存量节点够不着 —— 见 #1722)`);
+  console.error(`  (它只管得到 ${nodesDir()} 里的节点,以及它自己带工作目录建出、登记在 .anet/child-workdirs.json 里的节点;别处的存量节点够不着 —— 见 #1722)`);
 
   // Delegate to existing startCommand — it reads args[1] for the node name,
   // which is what we have after the `daemon start` splice in daemonCommand.

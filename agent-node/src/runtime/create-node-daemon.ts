@@ -18,6 +18,7 @@ import {
   atomicWritePrivateText,
   repairPrivateConfigPermissions,
 } from "./config-apply.js";
+import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 
 // ── §4.2.6 B2 — ANET_BIN install-time pin + boot 4-check ──────────
 //
@@ -554,6 +555,8 @@ export interface DaemonNodeSpec {
   model?: string | null;
   flags?: Record<string, unknown>;
   channels?: unknown;
+  /** app「新建节点」确认页的工作目录。缺席 = 老行为(落 daemon cwd)。见 child-workdir.ts。 */
+  workdir?: string | null;
 }
 
 function kebab(k: string): string { return k.replace(/([A-Z])/g, "-$1").toLowerCase(); }
@@ -732,6 +735,27 @@ export async function handleCreateNodeDoorbell(
   // Ensure WORK_DIR exists
   try { mkdirSync(deps.workDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
 
+  // 这个子节点的 .anet 根 = spawn cwd。请求带了 workdir 就用它(校验 + 0700 创建 +
+  // 「里面不能住着别的节点」),否则沿用 daemon cwd —— 与改动前逐字相同。
+  let childWorkDir = deps.workDir;
+  const rawWorkdir = req.node_spec.workdir;
+  if (rawWorkdir !== undefined && rawWorkdir !== null) {
+    try {
+      childWorkDir = prepareChildWorkdir(rawWorkdir, req.node_spec.name, {
+        home: resolveChildHome(process.env, process.platform),
+        platform: process.platform,
+      });
+      deps.log(`[create-node] child workdir: ${childWorkDir}`);
+    } catch (e: any) {
+      const msg = e instanceof WorkdirError ? e.message : `workdir_invalid:${e?.message || e}`;
+      deps.warn(`[create-node] workdir rejected: ${msg}`);
+      await deps.callCommHub("ack_create_request", {
+        request_id, status: "rejected", error: `validate: ${msg}`.slice(0, 800),
+      }).catch(() => {});
+      return;
+    }
+  }
+
   // P1: ensure global ~/.anet/config.json has hub so `anet node start`
   // can resolve the hub even when called from minimalEnv. Idempotent.
   // #1490 — was `process.env.HOME!` which passed undefined on Windows and
@@ -752,7 +776,7 @@ export async function handleCreateNodeDoorbell(
   // of truth for runtime/model/flags — we map it back to config keys.
   // F2 security: args were already structurally validated; this map
   // is a JSON write, no shell.
-  const childDir = join(deps.workDir, ".anet", "nodes", req.node_spec.name);
+  const childDir = join(childWorkDir, ".anet", "nodes", req.node_spec.name);
   try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
   const childCfgPath = join(childDir, "config.json");
   const flagsObj: Record<string, unknown> = req.node_spec.flags || {};
@@ -780,8 +804,19 @@ export async function handleCreateNodeDoorbell(
     return;
   }
   void args;     // args validated; we'll use them on Phase 2 follow-up if anet node create lands an --unattended flag
+  // start / delete doorbell 要按 alias 找回这个目录(见 child-workdir.ts 登记一节)。
+  // 写不进去就不 spawn:否则会建出一个之后「停了就再也启动不了、删了 token 原地残留」的节点。
+  try {
+    recordChildWorkdir(deps.workDir, req.node_spec.name, childWorkDir);
+  } catch (e: any) {
+    deps.warn(`[create-node] child workdir registry write failed: ${e?.message || e}`);
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "failed", error: `workdir_registry: ${e?.message || e}`.slice(0, 800),
+    }).catch(() => {});
+    return;
+  }
   if (req.env_blob && Object.keys(req.env_blob).length > 0) {
-    const envFile = join(deps.workDir, ".anet", "nodes", req.node_spec.name, ".env.local");
+    const envFile = join(childWorkDir, ".anet", "nodes", req.node_spec.name, ".env.local");
     try {
       atomicWritePrivateText(envFile, deps.serializeEnvLocal(req.env_blob));
     } catch (e: any) {
@@ -813,7 +848,7 @@ export async function handleCreateNodeDoorbell(
   let childPid = -1;
   try {
     const child = spawn(anetBin, ["node", "start", req.node_spec.name], {
-      cwd: deps.workDir,
+      cwd: childWorkDir,
       env: minimalEnv(),
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,

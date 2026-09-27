@@ -302,6 +302,34 @@ Two daemons started from two directories on the same machine manage two node set
 other. To have a daemon manage a set of nodes, start it from the directory those nodes live in.
 `anet daemon list` likewise lists only the daemons in the current directory.
 
+### Giving a new node its own working directory {#child-workdir}
+
+Newer daemons (with a matching Hub) accept a per-node directory at create time. The desktop app's
+"New node" confirm page shows a "Working directory" row, defaulting to `<default root>/<node name>`;
+"Change" lets you enter another absolute path or `~/…`. The node's `.anet` and its process working
+directory are there, so file tools do not see other projects or secrets in your home directory.
+
+- The default root is the daemon user's `$HOME`, so the default is `$HOME/<node name>`. Override it with
+  `default_workdir_root` in the daemon's `config.json` (`~/…` is allowed).
+- A missing directory is created with mode `0700`; an existing directory keeps its mode.
+- Rejected: `$HOME` itself or any parent of it, `/`, system directories (`/etc`, `/usr`, `/var`, …), and a
+  directory that already hosts another node (it has `.anet/nodes/<other name>/config.json`).
+- A request without a working directory still lands in the daemon's workspace, exactly as before.
+- Older daemons do not understand the field. The desktop app hides the row for them, and the Hub
+  rejects a request with a working directory aimed at one (`workdir_not_supported_by_daemon`) instead of
+  letting it be silently ignored.
+
+Nodes created this way are not under the daemon's `<workdir>/.anet/nodes/`; the daemon records where they
+are in `<workdir>/.anet/child-workdirs.json`, so stop, start and delete keep working. Delete moves the
+config into that node directory's `.anet/deleted/` and leaves the directory itself in place.
+
+::: warning Before changing the default root
+If nodes are brought back at boot by scanning `$HOME/*/.anet` (for example this repo's
+`deploy/fleet/anet-nodes-boot.sh`), the default `$HOME/<node name>` is inside that scan and a deeper
+directory such as `$HOME/work/<node name>` is not. Before moving `default_workdir_root`, make sure your
+boot mechanism covers the new location.
+:::
+
 Whether the workspace should become a fixed directory is tracked in
 [#1722](https://github.com/sleep2agi/agent-network/issues/1722).
 

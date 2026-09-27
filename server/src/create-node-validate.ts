@@ -205,6 +205,40 @@ export function serializeEnvLocal(env: Record<string, string>): string {
   }).join("\n") + "\n";
 }
 
+// app「新建节点」工作目录 —— hub 只判**形状**(daemon 才知道那台机器的 $HOME、系统目录、
+// 目录里住没住别的节点,那几条在 agent-node/src/runtime/child-workdir.ts)。
+// 这里挡的是「根本不像一条路径」的输入,让它在派发前就失败,而不是占一个请求行再被 daemon 拒。
+export const MAX_WORKDIR_LEN = 1024;
+export function validateWorkdir(s: unknown): asserts s is string | undefined | null {
+  if (s === undefined || s === null) return;
+  if (typeof s !== "string") throw new ValidationError("workdir_invalid", { reason: "must be string" });
+  const v = s.trim();
+  if (v.length === 0 || v.length > MAX_WORKDIR_LEN) {
+    throw new ValidationError("workdir_invalid", { reason: `length 1..${MAX_WORKDIR_LEN}` });
+  }
+  if (/[\u0000-\u001f\u007f]/.test(v)) throw new ValidationError("workdir_invalid", { reason: "control character" });
+  const shapeOk = v.startsWith("/") || v === "~" || v.startsWith("~/") || /^[A-Za-z]:[\\/]/.test(v);
+  if (!shapeOk) {
+    throw new ValidationError("workdir_invalid", { reason: "must be absolute (/…, ~/…, or C:\\…)", value: v.slice(0, 80) });
+  }
+}
+
+/** daemon 自报的默认工作目录根(`daemon_capabilities.default_workdir_root`),消毒后返回;
+ *  没报 / 形状不对 = null。**非 null 即表示该 daemon 认 `node_spec.workdir`** ——
+ *  create_node 的「老 daemon 不收 workdir」门和 /api/host-supervisors 的透出共用这一个判据。 */
+export function daemonDefaultWorkdirRoot(configSnapshot: unknown): string | null {
+  try {
+    const snap = typeof configSnapshot === "string" ? JSON.parse(configSnapshot) : configSnapshot;
+    const v = (snap as any)?.daemon_capabilities?.default_workdir_root;
+    if (typeof v !== "string" || v.length === 0 || v.length > MAX_WORKDIR_LEN) return null;
+    if (/[\u0000-\u001f\u007f]/.test(v)) return null;
+    if (!(v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v))) return null;
+    return v;
+  } catch {
+    return null;
+  }
+}
+
 // §4.2.5 — channels fail-closed in P1.
 export function validateChannelsP1(channels: unknown): void {
   if (channels === undefined || channels === null) return;

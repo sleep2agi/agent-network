@@ -169,6 +169,7 @@ import {
   type CreateCapabilityLogState,
   type DaemonCreateCapability,
 } from "./runtime/daemon-create-capability";
+import { daemonHome, resolveDefaultWorkdirRoot } from "./runtime/child-workdir";
 import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 import {
@@ -248,8 +249,8 @@ import {
 /** 只用于**日志去重**的状态(见 daemon-create-capability.ts 里的注释)。
  *  🔴 它不参与任何判断 —— 上报的能力值每次都是现算的。 */
 const _createCapLogState: CreateCapabilityLogState = {};
-function daemonCreateCapability(): DaemonCreateCapability | undefined {
-  return evaluateCreateCapability({
+function daemonCreateCapability(): (DaemonCreateCapability & { defaultWorkdirRoot?: string | null }) | undefined {
+  const cap = evaluateCreateCapability({
     role: fileConfig?.role,
     // 同步 require 而不是顶层 import:cli.ts 对 create-node-daemon 一直是按需加载的,
     // 保持一致,也避免非 daemon 节点为这一个函数拉进整个模块。
@@ -258,6 +259,10 @@ function daemonCreateCapability(): DaemonCreateCapability | undefined {
     log,
     logState: _createCapLogState,
   });
+  // 只对 daemon 报(cap 为 undefined 即非 daemon)。每次心跳现算:改了 config 的
+  // default_workdir_root 不必等重启。
+  if (!cap) return cap;
+  return { ...cap, defaultWorkdirRoot: resolveDefaultWorkdirRoot(fileConfig, { home: daemonHome() }) };
 }
 
 const home = homedir();

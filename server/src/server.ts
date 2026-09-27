@@ -16,6 +16,7 @@ import { pendingInboxCount } from "./inbox-count.js";
 import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
+import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
@@ -3418,6 +3419,13 @@ return Bun.serve({
             if (typeof observedMsAgo === "number") {
               out.create_capability_observed_ms_ago = observedMsAgo;
             }
+          }
+          // app「新建节点」确认页的默认工作目录根。出现即表示该 daemon 认 node_spec.workdir;
+          // 缺席(老 daemon / 老 hub 的 zod 剥掉了它)时 app 藏起那一行、不发 workdir。
+          // 🔴 它是那台机器的家目录路径 —— 与 ip_internal 同级,只给 admin/owner。
+          if (isPrivileged) {
+            const workdirRoot = daemonDefaultWorkdirRoot(r.config_snapshot);
+            if (workdirRoot) out.default_workdir_root = workdirRoot;
           }
           return out;
         });

@@ -281,6 +281,31 @@ ls <workdir>/.anet/nodes/        # 它管得到的就是这里面的节点
 
 工作区将来是否改为固定目录，在 [#1722](https://github.com/sleep2agi/agent-network/issues/1722) 跟踪。
 
+### 给新节点指定工作目录 {#child-workdir}
+
+新版 daemon（与之配套的 Hub）支持在创建时给节点单独一个目录。桌面端「新建节点」的确认页会多一行
+「工作目录」，默认是 `<默认根>/<节点名>`，点「改」可以换成别的绝对路径或 `~/…`。节点的 `.anet`
+和进程的工作目录都在那里，文件工具看不到家目录里别的项目和密钥。
+
+- 默认根是 daemon 用户的 `$HOME`，所以默认目录是 `$HOME/<节点名>`。可以在 daemon 的
+  `config.json` 里用 `default_workdir_root` 改（可写 `~/…`）。
+- 目录不存在时会创建，权限 `0700`；已存在的目录不改权限。
+- 会被拒绝：`$HOME` 本身或它的上级目录、`/`、系统目录（`/etc`、`/usr`、`/var` 等）、
+  已经住着另一个节点（有 `.anet/nodes/<别的名字>/config.json`）的目录。
+- 请求里不带工作目录时，节点仍落在 daemon 的工作区，和以前一样。
+- 旧版 daemon 不认这个字段，桌面端在旧 daemon 上不显示这一行；Hub 也会拒绝发往旧 daemon 的、
+  带工作目录的请求（`workdir_not_supported_by_daemon`），不会让它被悄悄忽略。
+
+这样建出来的节点不在 daemon 的 `<workdir>/.anet/nodes/` 下，daemon 用
+`<workdir>/.anet/child-workdirs.json` 记住它们在哪，停止、启动、删除照常可用。删除时配置移到
+该节点目录下的 `.anet/deleted/`，目录本身保留。
+
+::: warning 改默认根之前
+如果开机时靠扫描 `$HOME/*/.anet` 把节点拉起来（例如项目里的 `deploy/fleet/anet-nodes-boot.sh`），
+默认的 `$HOME/<节点名>` 正好在扫描范围内，而 `$HOME/work/<节点名>` 这类更深的目录不在。
+把 `default_workdir_root` 改到别处之前，先确认开机拉起的方式覆盖得到新位置。
+:::
+
 ## 升级与重启 {#restart}
 
 daemon 是常驻进程，升级 npm 包不会影响已经在运行的进程。升级后必须重启：

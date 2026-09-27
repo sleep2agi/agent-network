@@ -15,6 +15,8 @@ import {
   validateRuntime,
   validateModel,
   validateChannelsP1,
+  validateWorkdir,
+  daemonDefaultWorkdirRoot,
   validateEnvRefs,
   FLAG_KEYS,
   validateFlagValue,
@@ -712,6 +714,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // 不上报这一格 ≠ 0。旧 daemon 压根不发,读的人必须能把
           // 「刚测的」「很久以前测的」「不知道」分成三件事说。
           create_capability_observed_ms_ago: z.number().nullable().catch(null).optional(),
+          // app「新建节点」工作目录:daemon 的默认根。出现即表示该 daemon 认 node_spec.workdir。
+          // `.catch(undefined)`:同上一格的立场 —— 一个诊断/展示字段不许拒掉整份 report。
+          // 读取侧再按形状消毒(create-node-validate.ts daemonDefaultWorkdirRoot)。
+          default_workdir_root: z.string().max(1024).optional().catch(undefined),
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
       // app#225 follow-up — the reporting process answers the `rules_file`
@@ -3740,6 +3746,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             telemetry.mem_gb = r.session_mem_total_gb ?? null;
             telemetry.ip_internal = r.session_ip ?? null;
           }
+          // 工作目录默认根会暴露那台机器的家目录路径 —— 与 IP 同级,只给 admin/owner
+          // (也只有他们能 create_node)。见 create-node-validate.ts daemonDefaultWorkdirRoot。
+          const workdirRoot = isPrivileged ? daemonDefaultWorkdirRoot(r.config_snapshot) : null;
           return {
             daemon_node_id: r.node_id,
             alias: r.alias,
@@ -3749,6 +3758,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             runtimes_supported: runtimes,
             allowed_secret_keys: secrets,
             host_telemetry: telemetry,
+            ...(workdirRoot ? { default_workdir_root: workdirRoot } : {}),
           };
         });
 
@@ -3771,6 +3781,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         flags: z.record(z.string(), z.unknown()).optional(),
         env_refs: z.array(z.string().max(64)).optional(),
         channels: z.array(z.unknown()).optional(),
+        // app「新建节点」确认页的工作目录(绝对路径或 ~/…,daemon 侧展开并校验)。
+        // 缺席 = 老行为:落 daemon 的 cwd。
+        workdir: z.string().max(1024).optional().nullable(),
       }),
       network_id: z.string().max(200).optional(),
     },
@@ -3915,12 +3928,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         validateRuntime(node_spec.runtime);
         validateModel(node_spec.model);
         validateChannelsP1((node_spec as any).channels);
+        validateWorkdir(node_spec.workdir);
         for (const [k, v] of Object.entries(node_spec.flags || {})) {
           if (!(FLAG_KEYS as readonly string[]).includes(k)) throw new ValidationError("flag_key_unknown", { field: k });
           validateFlagValue(k, v);
         }
       } catch (e) {
         return validationFailReply(e);
+      }
+      // 🔴 老 daemon 会**静默忽略** node_spec.workdir,把节点建在它自己的 cwd 里 ——
+      //    用户以为指定了目录,实际落到了别处(常常就是 $HOME)。所以没自报支持的 daemon
+      //    直接拒,而不是派一个会被悄悄改写的请求。app 在这种 daemon 上本就不显示那一行。
+      const requestedWorkdir = typeof node_spec.workdir === "string" ? node_spec.workdir.trim() : null;
+      if (requestedWorkdir && !daemonDefaultWorkdirRoot(daemon.config_snapshot)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false,
+          error: "workdir_not_supported_by_daemon",
+          hint: "this daemon's agent-node predates create-node workdir support; upgrade it, or omit workdir to use its current directory",
+          daemon_node_id,
+        }) }] };
       }
 
       // P1 daemon-side allowlist: if daemon publishes allowed_runtimes,
@@ -4007,12 +4033,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const envKeys = Object.keys(envBlob);
       db.run(
         `INSERT INTO node_create_requests
-           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11)`,
+           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, workdir)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11, ?12)`,
         [
           requestId, daemon_node_id, node_spec.name, networkIdForChild,
           node_spec.runtime, node_spec.model ?? null, JSON.stringify(node_spec.flags || {}),
           JSON.stringify(envKeys), childTokenId, Date.now(), callerTokenId || "unknown",
+          requestedWorkdir,
         ],
       );
 
@@ -4035,6 +4062,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           model: node_spec.model ?? null,
           flag_keys: Object.keys(node_spec.flags || {}),
           env_keys: envKeys,
+          workdir: requestedWorkdir,
         },
       });
 
@@ -4168,8 +4196,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "env_blob_unavailable" }) }] };
       }
       // Hydrate spec from row.
-      const specRow = db.get<{ child_name: string; runtime: string; model: string | null; flags_json: string }>(
-        `SELECT child_name, runtime, model, flags_json FROM node_create_requests WHERE request_id = ?1`,
+      const specRow = db.get<{ child_name: string; runtime: string; model: string | null; flags_json: string; workdir: string | null }>(
+        `SELECT child_name, runtime, model, flags_json, workdir FROM node_create_requests WHERE request_id = ?1`,
         request_id,
       );
       if (!specRow) {
@@ -4192,6 +4220,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             model: specRow.model,
             flags: JSON.parse(specRow.flags_json),
             channels: [],
+            // 只在请求真带了时出现:老 daemon 看不到多余的键,新 daemon 缺席即走老布局。
+            ...(specRow.workdir ? { workdir: specRow.workdir } : {}),
           },
           child_token: blob.child_token,
           env_blob: blob.env_blob,

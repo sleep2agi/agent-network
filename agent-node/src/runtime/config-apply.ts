@@ -430,6 +430,11 @@ export interface DaemonCapabilities {
    * 为什么是时长不是时间戳:见 buildConfigSnapshot 里的赋值处注释(时钟偏移)。 */
   create_capability_observed_ms_ago?: number;
   create_nodes_blocked_reason?: CreateNodesBlockedReason;
+  /** app「新建节点」确认页的默认工作目录根(绝对路径);默认路径 = `<root>/<name>`。
+   *  **出现即表示本 daemon 认 create_node 的 `node_spec.workdir`** —— 老 daemon 不报,
+   *  app 据此藏起那一行、hub 据此拒掉带 workdir 的请求(否则老 daemon 会静默忽略它)。
+   *  见 child-workdir.ts。 */
+  default_workdir_root?: string;
 }
 
 /** #1353 —— `can_create_nodes === false` 时的原因代码。
@@ -511,6 +516,8 @@ export function buildConfigSnapshot(
      *  给了就换算成 `create_capability_observed_ms_ago` 一起上报;
      *  没给就**不上报那一格**(读的人据此说「年龄未知」)。 */
     probedAtMs?: number;
+    /** 见 DaemonCapabilities.default_workdir_root。null/缺席 = 不报。 */
+    defaultWorkdirRoot?: string | null;
   },
   /** #1545 测试注入点:默认取 `Date.now()`。**只为可测,不改语义。** */
   nowMs: number = Date.now(),
@@ -578,6 +585,9 @@ export function buildConfigSnapshot(
     }
     if (!createCapability.ok && createCapability.reason) {
       caps.create_nodes_blocked_reason = createCapability.reason;
+    }
+    if (typeof createCapability.defaultWorkdirRoot === "string" && createCapability.defaultWorkdirRoot.length > 0) {
+      caps.default_workdir_root = createCapability.defaultWorkdirRoot;
     }
   }
   if (Object.keys(caps).length > 0) {
