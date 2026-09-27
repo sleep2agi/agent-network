@@ -1,0 +1,18 @@
+# test2060 local secrets e2e — 2026-09-27T06:08Z
+# docker build -f tests/test2060-local-secrets-e2e/Dockerfile . && docker run --rm <image>
+
+PASS throwaway hub on 127.0.0.1:9766 (HOME=<throwaway>)
+PASS admin + node token
+PASS anet secret set / anet node secret set → both files 0600 under umask 0002
+PASS value on argv refused; reserved COMMHUB_TOKEN refused; nothing written
+PASS anet secret list --node: keys, source, length, override + config-shadow notes
+PASS anet node start → agent-node pid 341: GLOBAL_ONLY=global, SHARED=node (shell and global lose), FROM_CONFIG=config.json, REF_KEY via _envRef from secrets.env (sha256 compared)
+PASS anet node start (claude-code-cli) → the claude it spawns has the same layering: global, node over global and shell, config.json env on top, _envRef from secrets.env
+PASS restart → new pid 687 still has every secret; the updated node value is in effect
+PASS direct 'agent-node --config' (no anet, no exports) → pid 799 has every secret; a 0644 global file was tightened to 0600 and loaded
+PASS node secrets.env owned by another user → NOT loaded; the _envRef that needed it fails the start closed
+PASS anet doctor: both files, mode and key count
+PASS no secret value in 8 log/output file(s); the key-count line is there
+PASS witnessed-red: without the loader line the secrets never reach the node — its _envRef to a secrets-file key fails the start (step 4 would fail)
+source_commit=b6a03c48c33f091f8c2d90eb0e53f689fa0652a7
+RESULT: PASS (13 checks)

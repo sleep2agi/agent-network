@@ -35,6 +35,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { checkCodexCredentialSharing } from "./codex-auth-fingerprint.js";
+import { describeSecretsRead, globalSecretsPath, nodeDirForConfig, nodeSecretsPath, planSecretEnv, readSecretsFile } from "./node-secrets.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
@@ -493,6 +494,25 @@ if (!opts.config && !Object.keys(fileConfig).length) {
   if (legacy) { fileConfig = legacy; console.log(`[agent-node] 配置: .agent-node.json`); }
 }
 
+// Local secrets (node-secrets.ts): ~/.anet/secrets.env for every node on this
+// machine, <node dir>/secrets.env for this one. Loaded HERE, not in the anet
+// launcher, because most nodes start agent-node directly. Order: process env <
+// global < node < config.json `env` (keys named there are left to the block
+// below, so `_envRef` can now point at a secrets-file key instead of an export).
+{
+  const nodeDir = nodeDirForConfig(configFilePath);
+  const globalRead = readSecretsFile(globalSecretsPath(home));
+  const nodeRead = nodeDir ? readSecretsFile(nodeSecretsPath(nodeDir)) : null;
+  for (const line of describeSecretsRead("global", globalRead)) console.warn(`[agent-node] ⚠ ${line}`);
+  if (nodeRead) for (const line of describeSecretsRead("node", nodeRead)) console.warn(`[agent-node] ⚠ ${line}`);
+  const envBlock = fileConfig.env && typeof fileConfig.env === "object" ? fileConfig.env : {};
+  const plan = planSecretEnv({ global: globalRead.values, node: nodeRead?.values, configEnvKeys: Object.keys(envBlock) });
+  Object.assign(process.env, plan.set);
+  const counts = Object.values(plan.sources).reduce((a, s) => { a[s]++; return a; }, { global: 0, node: 0 });
+  if (counts.global || counts.node) console.log(`[agent-node] secrets: ${counts.global} global + ${counts.node} node key(s) loaded`);
+  if (plan.reserved.length) console.warn(`[agent-node] ⚠ secrets: skipped reserved key(s): ${plan.reserved.join(", ")}`);
+}
+
 // Inject config.json `env` block into process.env, regardless of which load
 // path resolved fileConfig. Previously this only ran for the `--alias` path;
 // `anet node start` spawns agent-node with BOTH `--config` and `--alias`, so
@@ -526,8 +546,9 @@ if (fileConfig.env && typeof fileConfig.env === "object") {
         // Don't silently fall through — that would let agent-node start with a
         // missing secret and fail mysteriously on the first LLM call. Fail
         // loud so the user sees the cause.
-        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell.`);
-        console.error(`[anet]        Fix: export ${refName}=<your-value>  then re-run anet node start`);
+        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell or in a secrets file.`);
+        console.error(`[anet]        Fix (persists across restarts): anet node secret set ${ALIAS || "<alias>"} ${refName}`);
+        console.error(`[anet]        Or: export ${refName}=<your-value>  then re-run anet node start`);
         console.error(`[anet]        (set the value matching the previous plain secret you migrated away from)`);
         process.exit(1);
       }
@@ -538,7 +559,9 @@ if (fileConfig.env && typeof fileConfig.env === "object") {
   }
   if (plainSecretSeen) {
     console.warn(`[anet] ⚠ DEPRECATED: config.json env contains plain secret values that are persisted on disk.`);
-    console.warn(`[anet]    Migrate to envRef form to keep secrets out of the JSON file:`);
+    console.warn(`[anet]    Move each one into the node's secrets file (0600, survives restarts) and delete it from config.json env:`);
+    console.warn(`[anet]      anet node secret set ${ALIAS || "<alias>"} <KEY>`);
+    console.warn(`[anet]    Or keep an env-var name in config.json instead:`);
     console.warn(`[anet]      anet node migrate-token-to-envref ${ALIAS || "<alias>"}`);
     console.warn(`[anet]    Or inspect candidates across all nodes:`);
     console.warn(`[anet]      anet doctor`);

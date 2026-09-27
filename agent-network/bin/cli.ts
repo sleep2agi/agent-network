@@ -239,6 +239,8 @@ import {
   defaultCodexModelForRuntime,
 } from "../src/codex-model-default";
 import { resolvePrimaryNetwork } from "../src/primary-network";
+import { nodeSecretCommand, readSecretFromProcess, secretCommand, SECRET_USAGE, type SecretContext } from "../src/secret-command";
+import { globalSecretsPath, nodeSecretsPath, planSecretEnv, readSecretsFile, describeSecretsRead } from "../src/node-secrets";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -3963,6 +3965,11 @@ Quick start:
   anet demo                  List demos
   (连别人已有的 hub: anet init --hub <url>)
 
+Secrets:
+  anet secret set <KEY>         Store a secret for every node on this machine (0600 file)
+  anet secret unset <KEY>       Remove it
+  anet secret list [--node <n>] Key names, source and length — never values
+
 Node Management:
   anet node create <name>       Create a new agent node
   anet node start <name>        Start a node
@@ -3975,6 +3982,7 @@ Node Management:
   anet node restart <name>      Stop then start a node
   anet node loop <name> ...     Schedule a recurring goal on a node
   anet node ls                  List all nodes
+  anet node secret <sub> <name> One node's secrets: set <KEY> | unset <KEY> | list
   anet node codex <verb> <ref>  Codex TUI co-presence lifecycle: preflight|verify|canary|start|restart|resume|fork|account|rollback
   anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
@@ -4479,7 +4487,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
 // process.env and FATAL-fails the parent CLI when the referenced var is
 // missing — same UX as agent-node's own resolver, just earlier in the chain
 // so we don't fork into a crashing child.
-function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string, dotenvMap?: Record<string, string>): Record<string, string> {
+function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string, dotenvMap?: Record<string, string>, secretsMap?: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   if (!profileEnv || typeof profileEnv !== "object") return out;
   for (const [k, v] of Object.entries(profileEnv)) {
@@ -4493,10 +4501,11 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
       // .anet/nodes/<id>/.env file. Closes the wizard-create-then-start
       // deadlock without forcing the user to manually `export` before start;
       // existing shell env still wins, so prior-working setups don't change.
-      const refVal = process.env[refName] ?? dotenvMap?.[refName];
+      // Secrets files (anet secret set) rank above the shell, like everywhere else.
+      const refVal = secretsMap?.[refName] ?? process.env[refName] ?? dotenvMap?.[refName];
       if (refVal === undefined || refVal === "") {
-        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell or in .anet/nodes/<id>/.env.`);
-        console.error(`[anet]        Fix: export ${refName}=<your-value>  then re-run anet node start`);
+        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell, a secrets file or .anet/nodes/<id>/.env.`);
+        console.error(`[anet]        Fix (persists): anet node secret set <node> ${refName}   — or: export ${refName}=<your-value>  then re-run anet node start`);
         console.error(`[anet]        (or restore .anet/nodes/<id>/.env from your secrets manager)`);
         process.exit(1);
       }
@@ -4506,6 +4515,40 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
     // Any other shape is ignored — env values must be string or envRef object.
   }
   return out;
+}
+
+// `anet secret` / `anet node secret` — a node ref resolves exactly like
+// `anet node start` does (cwd-relative .anet/nodes/<id>), so the file written
+// here is the one agent-node reads next to that node's config.json.
+function secretContext(): SecretContext {
+  return {
+    home,
+    resolveNode: (ref: string) => {
+      const r = resolveNodeRef(ref);
+      if (!r) return { error: nodeNotFound(ref) };
+      const env = r.profile.env && typeof r.profile.env === "object" ? r.profile.env : {};
+      return { dir: join(nodesDir(), r.id), id: r.id, configEnvKeys: Object.keys(env) };
+    },
+    io: {
+      stdinIsTTY: !!process.stdin.isTTY,
+      readValue: readSecretFromProcess,
+      out: (l) => console.log(l),
+      err: (l) => console.error(l),
+    },
+  };
+}
+
+// Global + node secrets files for a node the launcher is about to spawn
+// (node-secrets.ts). Warnings name files and keys only.
+function loadLaunchSecrets(nodeId: string, profileEnv: Record<string, any> | undefined) {
+  const g = readSecretsFile(globalSecretsPath(home));
+  const n = readSecretsFile(nodeSecretsPath(join(nodesDir(), nodeId)));
+  for (const line of [...describeSecretsRead("global", g), ...describeSecretsRead("node", n)]) console.warn(`[anet] ⚠ ${line}`);
+  const plan = planSecretEnv({ global: g.values, node: n.values, configEnvKeys: Object.keys(profileEnv || {}) });
+  // `_envRef` lookup: node > global secrets (config keys included — a ref's
+  // target is a different name from the key that holds the ref).
+  const refLookup: Record<string, string> = { ...g.values, ...n.values };
+  return { plan, refLookup };
 }
 
 // #193 envRef Option A — read a node's per-node secret store from
@@ -6542,7 +6585,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     if (Object.keys(_dotenvSDK).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
-    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
+    // Secrets files: agent-node loads them itself at boot (so a remote restart
+    // sees edits); here they only resolve `_envRef` targets.
+    const _secretsSDK = loadLaunchSecrets(nodeId, profile.env as any);
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK, _secretsSDK.refLookup));
 
     if (runtime === "opencode-cli") {
       if (!opencodeLaunchIdentity) {
@@ -6781,7 +6827,13 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     if (Object.keys(_dotenvCC).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvCC).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
-    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC));
+    // claude-code-cli is spawned directly (no agent-node in between), so the
+    // launcher applies the secrets files: shell < global < node < config env.
+    const _secretsCC = loadLaunchSecrets(nodeId, profile.env as any);
+    Object.assign(env, _secretsCC.plan.set);
+    const _secretKeysCC = Object.keys(_secretsCC.plan.set).length;
+    if (_secretKeysCC) console.log(`[anet] secrets: ${_secretKeysCC} key(s) from ~/.anet/secrets.env + node secrets.env`);
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC, _secretsCC.refLookup));
     // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
     // stable per-node value (node-server.ts:75 otherwise falls through to
     // randomUUID() at every start, orphaning the old session row on any
@@ -17085,9 +17137,34 @@ async function doctorCommand() {
       const name = nodeDisplayName(id, loadProfile(id));
       info(`    ↳ ${name}`, `env keys: ${fields.join(", ")}`);
     }
-    info("→ migrate", `anet node migrate-token-to-envref <alias>   (one node at a time, prints export commands)`);
+    info("→ move", `anet node secret set <alias> <KEY>   (or machine-wide: anet secret set <KEY>), then delete the key from config.json env`);
+    info("→ or", `anet node migrate-token-to-envref <alias>   (keeps an env-var name in config.json)`);
   } else {
     check("No plain-secret config", true, "all env values are either non-secret or envRef objects");
+  }
+
+  // Secrets files (anet secret / anet node secret): presence, mode, key count.
+  // Reading applies the load policy (a group/other-readable file we own is
+  // tightened to 0600), so doctor reports what the next node start will see.
+  {
+    const describe = (label: string, r: ReturnType<typeof readSecretsFile>) => {
+      if (r.status === "refused") { warning(label, `${r.path} will NOT be loaded — ${r.reason}`); return; }
+      const mode = (r.mode ?? 0).toString(8).padStart(4, "0");
+      const fixed = r.repairedFromMode !== undefined ? `, was ${r.repairedFromMode.toString(8).padStart(4, "0")} → tightened` : "";
+      check(label, true, `${r.path} mode ${mode}${fixed}, ${Object.keys(r.values).length} key(s)`);
+      for (const p of r.problems) warning(`${label} line ${p.line}`, `skipped — ${p.reason}`);
+    };
+    const g = readSecretsFile(globalSecretsPath(home));
+    if (g.status === "missing") info("Global secrets", `none (${globalSecretsPath(home)}) — add with: anet secret set <KEY>`);
+    else describe("Global secrets", g);
+    let withNodeFile = 0;
+    for (const id of ids) {
+      const r = readSecretsFile(nodeSecretsPath(join(nodesDir(), id)));
+      if (r.status === "missing") continue;
+      withNodeFile++;
+      describe(`Node secrets ${nodeDisplayName(id, loadProfile(id))}`, r);
+    }
+    info("Node secrets", `${withNodeFile} of ${ids.length} node(s) under ${nodesDir()} have a secrets.env`);
   }
 
   // Probe each ntok_ against hub; auto-reissue any that hub rejects with 401.
@@ -17276,6 +17353,7 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       // parseOpts()、session 的 !sub 直接跑 ls —— 那三个没有前置 help 守卫,
       // 路由过去会有副作用,正是 #215 那条 default 要防的东西,留着不动。
     case "opencode": await opencodeCommand(); break;
+    case "secret":   console.log(SECRET_USAGE.join("\n")); break;
     case "goal":     await goalCommand();     break;
     case "token":    await tokenCommand();    break;
     case "batch":    await batchCommand();    break;
@@ -17312,6 +17390,8 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       // get the generic node usage.
       if (args[1] === "start") {
         printNodeStartHelp();
+      } else if (args[1] === "secret") {
+        console.log(SECRET_USAGE.join("\n"));
       } else if (args[1] === "loop") {
         args.splice(0, 1); // drop "node" so nodeLoopCommand sees args[1] as alias slot (no alias → prints loop help)
         // strip --help so it's not treated as an alias literal
@@ -17322,7 +17402,7 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
         await nodeLoopCommand();
         process.exit(0);
       } else {
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|secret|migrate-token-to-envref> [name]`);
       }
       break;
     default:
@@ -17362,6 +17442,7 @@ switch (command) {
       }
       case "migrate-token-to-envref": args.splice(0, 1); await migrateTokenToEnvRefCommand(); break;
       case "codex": args.splice(0, 1); await codexLifecycleCommand(); break; // #1856 —— Codex TUI 共存节点生命周期控制器
+      case "secret": { const code = await nodeSecretCommand(args.slice(2), secretContext()); if (code) process.exit(code); break; }
       default: {
         const sub = args[1];
         if (sub) {
@@ -17369,11 +17450,11 @@ switch (command) {
           const redirect = nodeSubcommandRedirect(sub, args[2]);
           if (redirect) { for (const line of redirect) console.log(line); }
           else {
-            const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex"]);
+            const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex", "secret"]);
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|secret|migrate-token-to-envref> [name]`);
         break;
       }
     }
@@ -17397,6 +17478,7 @@ switch (command) {
   case "tasks": await tasksCommand(); break;
   case "goal": await goalCommand(); break;
   case "doctor": await doctorCommand(); break;
+  case "secret": { const code = await secretCommand(args.slice(1), secretContext()); if (code) process.exit(code); break; }
   case "license": await licenseCommand(); break;
   case "activate": await activateCommand(); break;
   case "passwd": await passwdCommand(); break;
@@ -17445,7 +17527,7 @@ switch (command) {
         "activate", "passwd", "token", "demo", "batch", "logs", "info", "config",
         "login", "register", "logout", "whoami", "network", "run", "version", "help",
         // 这四个是后加的顶层命令,曾长期漏在本名单外 —— 见 top-commands-coverage.test.ts。
-        "daemon", "grok", "opencode", "quickstart",
+        "daemon", "grok", "opencode", "quickstart", "secret",
       ];
       const suggestion = suggestSimilar(command, TOP_COMMANDS);
       if (suggestion) console.error(`Unknown command "${command}". Did you mean: anet ${suggestion}?`);
