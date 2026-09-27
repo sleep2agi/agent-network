@@ -28,6 +28,7 @@ on:
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test1755-rules-file-e2e/**'
+      - 'tests/test2060-local-secrets-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
@@ -205,6 +206,7 @@ on:
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test1755-rules-file-e2e/**'
+      - 'tests/test2060-local-secrets-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
@@ -486,6 +488,28 @@ jobs:
 
       - name: Run rules-file e2e
         run: docker run --rm anet-test1755-rules-file-e2e
+
+  test2060-local-secrets-e2e:
+    # 本地密钥(anet secret / anet node secret)端到端:一次性 hub + 真 agent-node。
+    # 验 0600(umask 0002 下)、argv 传值被拒、list/doctor 不打印值、节点子进程里
+    # 全局 < 节点 < config.json env 的层级与 _envRef(经假 claude 记录 sha256,不看值)、
+    # 重启后仍在、直起 agent-node 也生效、他人属主的文件不加载、witnessed-red。
+    # 冷构建含三次 bun install,不进 L1 的 5 分钟预算,独立 job(同 test1755)。
+    name: local secrets e2e (Docker, real hub + anet + agent-node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact local-secrets e2e image
+        run: |
+          docker build \
+            --build-arg TEST2060_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test2060-local-secrets-e2e \
+            -f tests/test2060-local-secrets-e2e/Dockerfile .
+
+      - name: Run local-secrets e2e
+        run: docker run --rm anet-test2060-local-secrets-e2e
 
   test-lib-meta:
     # tests/lib/ 下的共享 helper 各自带一份元测试。它们此前**一个都没被 CI 跑过** ——

@@ -98,6 +98,7 @@ export default withMermaid(defineConfig({
             text: '账号与安全',
             items: [
               { text: '账号、Token 与角色', link: '/guide/account-system' },
+              { text: '密钥（Secrets）', link: '/guide/secrets' },
               { text: '网络隔离', link: '/concepts/networks' },
               { text: '安全设计', link: '/concepts/security' },
               { text: '升级与发布通道', link: '/guide/upgrade' },
@@ -187,6 +188,7 @@ export default withMermaid(defineConfig({
             text: 'Accounts & Security',
             items: [
               { text: 'Accounts, Tokens & Roles', link: '/en/guide/account-system' },
+              { text: 'Secrets', link: '/en/guide/secrets' },
               { text: 'Network Isolation', link: '/en/concepts/networks' },
               { text: 'Security Design', link: '/en/concepts/security' },
               { text: 'Upgrades & Release Channels', link: '/en/guide/upgrade' },
