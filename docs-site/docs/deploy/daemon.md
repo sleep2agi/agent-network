@@ -289,6 +289,9 @@ ls <workdir>/.anet/nodes/        # 它管得到的就是这里面的节点
 
 - 默认根是 daemon 用户的 `$HOME`，所以默认目录是 `$HOME/<节点名>`。可以在 daemon 的
   `config.json` 里用 `default_workdir_root` 改（可写 `~/…`）。
+- 默认目录名一律是 ASCII：桌面端把节点名转成 `[a-z0-9-]`（中文取拼音，如「吉他大师」→ `jitadashi`；
+  转不出来时用 `node-<6 位十六进制>`），并把算好的完整路径显式发给 daemon。
+- `$HOME` 以下那一段含非 ASCII 字符的目录会被拒绝（`workdir_not_ascii`）。家目录本身是什么不算在内。
 - 目录不存在时会创建，权限 `0700`；已存在的目录不改权限。
 - 会被拒绝：`$HOME` 本身或它的上级目录、`/`、系统目录（`/etc`、`/usr`、`/var` 等）、
   已经住着另一个节点（有 `.anet/nodes/<别的名字>/config.json`）的目录。

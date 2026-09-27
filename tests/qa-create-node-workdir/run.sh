@@ -226,12 +226,18 @@ S=$(wait_req_terminal "$D3"); E=$(req_error "$D3")
 [[ "$S" == rejected && "$E" == *workdir_is_system_dir* ]] && ok "/etc/... rejected: $E" || bad "etc: status=$S error=$E"
 [[ ! -e /etc/d-etc ]] && ok "/etc/d-etc not created" || bad "/etc/d-etc exists"
 
+R=$(mcp_call "$UTOK" "$(create_body d-cjk "~/吉他大师")")
+D4=$(printf '%s' "$R" | jq -r '.request_id // empty' 2>/dev/null)
+S=$(wait_req_terminal "$D4"); E=$(req_error "$D4")
+[[ "$S" == rejected && "$E" == *workdir_not_ascii* ]] && ok "non-ASCII dir name rejected: $E" || bad "cjk: status=$S error=$E"
+[[ ! -e "$HOME/吉他大师" ]] && ok "~/吉他大师 not created" || bad "~/吉他大师 was created"
+
 R=$(mcp_call "$UTOK" "$(create_body d-rel relative/dir)")
 [[ "$(printf '%s' "$R" | jq -r '.error // empty' 2>/dev/null)" == workdir_invalid ]] && ok "relative path rejected at hub (workdir_invalid)" || bad "relative: $R"
 N=$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM node_create_requests WHERE child_name='d-rel';")
 [[ "$N" == 0 ]] && ok "no request row for the hub-rejected one" || bad "rows=$N"
 LEAKED=""
-for n in d-home d-squat d-etc d-rel; do registered "$n" && LEAKED="$LEAKED $n"; done
+for n in d-home d-squat d-etc d-cjk d-rel; do registered "$n" && LEAKED="$LEAKED $n"; done
 [[ -z "$LEAKED" ]] && ok "none of the rejected names registered" || bad "registered despite rejection:$LEAKED"
 
 # ── E. stop → start → delete a child that lives in its own dir ──────────

@@ -311,6 +311,11 @@ directory are there, so file tools do not see other projects or secrets in your 
 
 - The default root is the daemon user's `$HOME`, so the default is `$HOME/<node name>`. Override it with
   `default_workdir_root` in the daemon's `config.json` (`~/…` is allowed).
+- Default directory names are always ASCII: the desktop app turns the node name into `[a-z0-9-]` (pinyin
+  for Chinese, e.g. "吉他大师" → `jitadashi`; `node-<6 hex>` when nothing usable is left) and sends the full
+  computed path to the daemon explicitly.
+- A directory whose path below `$HOME` contains non-ASCII characters is rejected (`workdir_not_ascii`).
+  The home directory itself is not counted.
 - A missing directory is created with mode `0700`; an existing directory keeps its mode.
 - Rejected: `$HOME` itself or any parent of it, `/`, system directories (`/etc`, `/usr`, `/var`, …), and a
   directory that already hosts another node (it has `.anet/nodes/<other name>/config.json`).

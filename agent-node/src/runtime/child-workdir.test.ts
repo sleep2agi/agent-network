@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   assertWorkdirAllowed,
+  assertWorkdirAscii,
   childWorkDirFor,
   expandWorkdir,
   forgetChildWorkdir,
@@ -85,6 +86,26 @@ describe("assertWorkdirAllowed", () => {
   });
 });
 
+describe("assertWorkdirAscii — node workdirs are ASCII below $HOME", () => {
+  test("🔴 a CJK directory name under $HOME is rejected", () => {
+    expect(code(() => assertWorkdirAscii(`${H}/吉他大师`, env))).toBe("workdir_not_ascii");
+    expect(code(() => assertWorkdirAscii(`${H}/work/café`, env))).toBe("workdir_not_ascii");
+    expect(code(() => assertWorkdirAscii("/srv/节点", env))).toBe("workdir_not_ascii");
+  });
+  test("ASCII paths (incl. spaces, dots, dashes) pass", () => {
+    for (const p of [`${H}/jitadashi`, `${H}/my proj`, `${H}/a.b_c-d`, "/srv/node-1a2b3c"]) {
+      expect(code(() => assertWorkdirAscii(p, env))).toBe("no_throw");
+    }
+  });
+  test("a non-ASCII $HOME itself is not held against the user (only the part below it counts)", () => {
+    const w = { home: "C:\\Users\\张三", platform: "win32" as const };
+    expect(code(() => assertWorkdirAscii("C:\\Users\\张三\\proj", w))).toBe("no_throw");
+    expect(code(() => assertWorkdirAscii("C:\\Users\\张三\\项目", w))).toBe("workdir_not_ascii");
+    const u = { home: "/home/张三", platform: "linux" as const };
+    expect(code(() => assertWorkdirAscii("/home/张三/proj", u))).toBe("no_throw");
+  });
+});
+
 let scratch = "";
 let home = "";
 beforeEach(() => {
@@ -144,6 +165,10 @@ describe("prepareChildWorkdir — on disk", () => {
     const link = join(home, "etc-link");
     symlinkSync("/etc", link);
     expect(code(() => prepareChildWorkdir(link, "c1", { home }))).toStartWith("workdir_is_system_dir");
+  });
+  test("🔴 non-ASCII workdir refused BEFORE any directory is created", () => {
+    expect(code(() => prepareChildWorkdir("~/吉他大师", "c1", { home }))).toBe("workdir_not_ascii");
+    expect(existsSync(join(home, "吉他大师"))).toBe(false);
   });
   test("$HOME itself is refused before anything is created", () => {
     expect(code(() => prepareChildWorkdir("~", "c1", { home }))).toBe("workdir_is_home");
