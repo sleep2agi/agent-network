@@ -43,7 +43,7 @@ beforeEach(() => {
 afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
 describe("anet secret set / node secret set", () => {
-  test("piped value (trailing newline dropped) → global file 0600; node file next to config.json", async () => {
+  test("piped value (trailing newline dropped) → daemon file 0600; node file next to config.json", async () => {
     piped = `${SENTINEL}\n`;
     expect(await secretCommand(["set", "OPENAI_API_KEY"], ctx())).toBe(0);
     const g = join(home, ".anet", "secrets.env");
@@ -53,6 +53,7 @@ describe("anet secret set / node secret set", () => {
     piped = "node-value";
     expect(await nodeSecretCommand(["set", "n1", "OPENAI_API_KEY"], ctx())).toBe(0);
     expect(readFileSync(join(nodeDir, "secrets.env"), "utf8")).toBe("OPENAI_API_KEY=node-value\n");
+    expect(all()).toContain("running nodes are not touched; it takes effect on their next start");
     expect(all()).not.toContain(SENTINEL);
   });
 
@@ -111,7 +112,7 @@ describe("anet secret list never prints values", () => {
     expect(await nodeSecretCommand(["list", "n1"], ctx())).toBe(0);
     const text = all();
     // Positive control: the listing really did run over those keys.
-    for (const k of ["SHARED", "GLOBAL_ONLY", "ONLY_ON_NODE", "overrides global", "ignored: config.json env", String(SENTINEL.length)]) {
+    for (const k of ["SHARED", "GLOBAL_ONLY", "ONLY_ON_NODE", "overrides daemon", "ignored: config.json env", String(SENTINEL.length)]) {
       expect(text).toContain(k);
     }
     expect(text).not.toContain(SENTINEL);
@@ -132,6 +133,7 @@ describe("unset", () => {
     expect(await secretCommand(["unset", "K"], ctx())).toBe(0);
     expect(readFileSync(join(home, ".anet", "secrets.env"), "utf8")).toBe("L=v\n");
     expect(await secretCommand(["unset", "K"], ctx())).toBe(0);
+    expect(all()).toContain("running nodes keep it until their next start");
     expect(all()).toContain("was not set");
     expect(await nodeSecretCommand(["unset", "n1", "K"], ctx())).toBe(0);
   });

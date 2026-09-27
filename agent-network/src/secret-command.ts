@@ -7,7 +7,7 @@
 
 import { existsSync } from "node:fs";
 import {
-  globalSecretsPath,
+  daemonSecretsPath,
   listSecretEntries,
   nodeSecretsPath,
   readSecretsFile,
@@ -34,16 +34,20 @@ export interface SecretContext {
 
 export const SECRET_USAGE = [
   "Usage:",
-  "  anet secret set <KEY>                     machine-wide, every node (~/.anet/secrets.env)",
+  "  anet secret set <KEY>                     sets a daemon (this machine) env var shared by all nodes on this machine",
+  "                                            (~/.anet/secrets.env)",
   "  anet secret unset <KEY>",
-  "  anet secret list [--node <node>]          key names, source, length — never values",
-  "  anet node secret set <node> <KEY>         one node (<node dir>/secrets.env), overrides global",
+  "  anet secret list [--node <node>]          key names, layer, length — never values",
+  "  anet node secret set <node> <KEY>         sets a node env var (<node dir>/secrets.env), overrides the daemon one",
   "  anet node secret unset <node> <KEY>",
   "  anet node secret list <node>",
   "",
   "The value is read from the terminal (not echoed) or from stdin:",
   "  printf '%s' \"$VALUE\" | anet secret set OPENAI_API_KEY",
-  "Load order at node start: shell env < global < node < config.json env.",
+  "At node start: daemon < node < config.json env < the start command's own environment.",
+  "The files only fill variables the start command does not already have; a value set by",
+  "hand (export / VAR=x anet node start) wins for that launch only and is never saved.",
+  "set/unset only change the file: running nodes see it on their next start.",
 ];
 
 function tilde(home: string, path: string): string {
@@ -81,7 +85,8 @@ async function doSet(ctx: SecretContext, path: string, key: string, where: strin
     const r = setSecret(path, key, value);
     let n = 0; for (const _ of value) n++;
     io.out(`✓ ${r.replaced ? "updated" : "set"} ${key} (${where}, ${n} chars) in ${tilde(ctx.home, path)} (0600)`);
-    io.out("  Takes effect when a node next starts — restart running nodes: anet node restart <node>");
+    io.out("  File only — running nodes are not touched; it takes effect on their next start (anet node restart <node>).");
+    io.out("  A value exported in the start command's environment still wins over the file.");
     return 0;
   } catch (e: any) {
     io.err(`anet secret: ${e?.message || e}`);
@@ -92,7 +97,9 @@ async function doSet(ctx: SecretContext, path: string, key: string, where: strin
 function doUnset(ctx: SecretContext, path: string, key: string, where: string): number {
   try {
     const r = unsetSecret(path, key);
-    ctx.io.out(r.existed ? `✓ removed ${key} (${where}) from ${tilde(ctx.home, path)}` : `${key} was not set (${where}); nothing changed`);
+    ctx.io.out(r.existed
+      ? `✓ removed ${key} (${where}) from ${tilde(ctx.home, path)} — file only; running nodes keep it until their next start`
+      : `${key} was not set (${where}); nothing changed`);
     return 0;
   } catch (e: any) {
     ctx.io.err(`anet secret: ${e?.message || e}`);
@@ -102,18 +109,18 @@ function doUnset(ctx: SecretContext, path: string, key: string, where: string): 
 
 function doList(ctx: SecretContext, node?: { dir: string; id: string; configEnvKeys: string[] }): number {
   const { io, home } = ctx;
-  const g = readSecretsFile(globalSecretsPath(home));
+  const g = readSecretsFile(daemonSecretsPath(home));
   const n = node ? readSecretsFile(nodeSecretsPath(node.dir)) : undefined;
-  io.out(fileLine(home, "global", g));
+  io.out(fileLine(home, "daemon (this machine)", g));
   if (node && n) io.out(fileLine(home, `node ${node.id}`, n));
   const entries = listSecretEntries(g.values, n?.values);
   if (!entries.length) { io.out("(no secrets)"); return 0; }
   const shadowed = new Set(node?.configEnvKeys ?? []);
   const w = Math.max(3, ...entries.map((e) => e.key.length));
-  io.out(`${"KEY".padEnd(w)}  SOURCE  LENGTH`);
+  io.out(`${"KEY".padEnd(w)}  LAYER   LENGTH`);
   for (const e of entries) {
     const notes: string[] = [];
-    if (e.overridesGlobal) notes.push("overrides global");
+    if (e.overridesDaemon) notes.push("overrides daemon");
     if (shadowed.has(e.key)) notes.push("ignored: config.json env sets this key");
     io.out(`${e.key.padEnd(w)}  ${e.source.padEnd(6)}  ${String(e.length).padStart(6)}${notes.length ? `  (${notes.join("; ")})` : ""}`);
   }
@@ -133,19 +140,19 @@ function argvValueRefusal(rest: string[], keyArg: string | undefined): string | 
 export async function secretCommand(argv: string[], ctx: SecretContext): Promise<number> {
   const [sub, ...rest] = argv;
   const { io, home } = ctx;
-  const gpath = globalSecretsPath(home);
+  const gpath = daemonSecretsPath(home);
   switch (sub) {
     case "set": {
       const [key, ...extra] = rest;
       const refusal = argvValueRefusal(extra, key);
       if (refusal) { io.err(refusal); return 2; }
       if (!key) { io.err(SECRET_USAGE.join("\n")); return 2; }
-      return doSet(ctx, gpath, key, "global");
+      return doSet(ctx, gpath, key, "daemon");
     }
     case "unset": {
       const [key] = rest;
       if (!key || rest.length !== 1) { io.err(SECRET_USAGE.join("\n")); return 2; }
-      return doUnset(ctx, gpath, key, "global");
+      return doUnset(ctx, gpath, key, "daemon");
     }
     case "list": case "ls": {
       const i = rest.indexOf("--node");

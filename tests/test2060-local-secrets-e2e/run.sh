@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# test2060 — local secrets end-to-end: throwaway hub + `anet secret` / `anet node secret`
-# + a real agent-node, started once through `anet node start` and once directly.
-# Proves what the unit tests cannot:
+# test2060 — node env files end-to-end: throwaway hub + `anet secret` (daemon env, this
+# machine) / `anet node secret` (node env) + a real agent-node, started through
+# `anet node start` and directly. Proves what the unit tests cannot:
 #   - the CLI writes ~/.anet/secrets.env and <node dir>/secrets.env as 0600, under umask 0002
 #   - a value on argv is refused; `list` / `doctor` never print a value
-#   - the node PROCESS has both layers, node overriding global, both overriding the shell,
-#     config.json `env` overriding both; `_envRef` resolves from a secrets file (no export)
-#     — checked in /proc/<pid>/environ by key and sha256 only
-#   - after a restart the secrets are still there, including a direct `agent-node --config` start
+#   - what the node's child sees: daemon only; node over daemon; config.json `env` above
+#     the files; the start command's own env above everything (an EMPTY exported value is
+#     kept); `_envRef` resolved from a file — compared by sha256, never by value
+#   - the startup line lists key names in the right groups
+#   - a restart from a clean env picks up the file values and drops the by-hand ones,
+#     including a direct `agent-node --config` start
 #   - a loose-mode file is tightened and loaded; a file owned by another user is not loaded
 #   - no value in any log
 #   - witnessed-red: without the loader line in agent-node, the direct start cannot resolve its secrets
@@ -23,12 +25,17 @@ ADMIN="secrets_admin"
 PASSWORD="Secrets-Strong-1!"
 rand() { head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 # Values that cannot appear anywhere by accident.
-G_ONLY="sk-T2060G-$(rand)-GLOBAL"
-G_SHARED="sk-T2060GS-$(rand)-GSHARED"
+D_ONLY="sk-T2060D-$(rand)-DAEMON"
+D_SHARED="sk-T2060DS-$(rand)-DSHARED"
+D_CFG="sk-T2060DC-$(rand)-DCFG"
+D_HAND="sk-T2060DH-$(rand)-DHAND"
 N_SHARED="sk-T2060N-$(rand)-NODE"
 N_SHARED2="sk-T2060N2-$(rand)-NODE2"
+N_HAND="sk-T2060NH-$(rand)-NHAND"
+N_EMPTY="sk-T2060NE-$(rand)-NEMPTY"
 REF_VAL="sk-T2060R-$(rand)-REF"
-ALL_VALUES=("$G_ONLY" "$G_SHARED" "$N_SHARED" "$N_SHARED2" "$REF_VAL")
+BY_HAND="by-hand-$(rand)"
+ALL_VALUES=("$D_ONLY" "$D_SHARED" "$D_CFG" "$D_HAND" "$N_SHARED" "$N_SHARED2" "$N_HAND" "$N_EMPTY" "$REF_VAL")
 sha() { printf '%s' "$1" | sha256sum | cut -c1-64; }
 PASS=0
 ok() { PASS=$((PASS + 1)); printf 'PASS %s\n' "$*"; }
@@ -102,9 +109,10 @@ cat >"$WORK/bin/claude" <<SH
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then echo "2.0.0 (Claude Code)"; exit 0; fi
 out="$WORK/envdump/dump.\$(date +%s%N).\$\$"
-for k in GLOBAL_ONLY SHARED FROM_CONFIG REF_KEY; do
-  v="\${!k:-}"
-  if [[ -n "\$v" ]]; then printf '%s=%s\n' "\$k" "\$(printf '%s' "\$v" | sha256sum | cut -c1-64)"; else printf '%s=absent\n' "\$k"; fi
+for k in DAEMON_ONLY SHARED HAND EMPTY_KEPT FROM_CONFIG REF_KEY; do
+  if [[ -z "\${!k+x}" ]]; then printf '%s=absent\n' "\$k"
+  elif [[ -z "\${!k}" ]]; then printf '%s=empty\n' "\$k"
+  else printf '%s=%s\n' "\$k" "\$(printf '%s' "\${!k}" | sha256sum | cut -c1-64)"; fi
 done >"\$out.tmp" && mv "\$out.tmp" "\$out"
 exit 1
 SH
@@ -114,17 +122,22 @@ anet() { (cd "$WORK/proj" && bun "$REPO/agent-network/bin/cli.ts" "$@"); }
 CLI_LOG="$WORK/cli.log"
 
 # ── 1. CLI: set (piped), argv refusal, reserved key, modes ──
-printf '%s\n' "$G_ONLY"   | anet secret set GLOBAL_ONLY >>"$CLI_LOG" 2>&1 || fail 'secret set GLOBAL_ONLY'
-printf '%s\n' "$G_SHARED" | anet secret set SHARED      >>"$CLI_LOG" 2>&1 || fail 'secret set SHARED'
-printf '%s'   "$G_SHARED" | anet secret set FROM_CONFIG >>"$CLI_LOG" 2>&1 || fail 'secret set FROM_CONFIG'
+printf '%s\n' "$D_ONLY"   | anet secret set DAEMON_ONLY >>"$CLI_LOG" 2>&1 || fail 'secret set DAEMON_ONLY'
+printf '%s\n' "$D_SHARED" | anet secret set SHARED      >>"$CLI_LOG" 2>&1 || fail 'secret set SHARED'
+printf '%s'   "$D_CFG"    | anet secret set FROM_CONFIG >>"$CLI_LOG" 2>&1 || fail 'secret set FROM_CONFIG'
+printf '%s\n' "$D_HAND"   | anet secret set HAND        >>"$CLI_LOG" 2>&1 || fail 'secret set HAND'
 printf '%s\n' "$N_SHARED" | anet node secret set "$ALIAS" SHARED     >>"$CLI_LOG" 2>&1 || fail 'node secret set SHARED'
 printf '%s\n' "$REF_VAL"  | anet node secret set "$ALIAS" REF_TARGET >>"$CLI_LOG" 2>&1 || fail 'node secret set REF_TARGET'
+printf '%s\n' "$N_HAND"   | anet node secret set "$ALIAS" HAND       >>"$CLI_LOG" 2>&1 || fail 'node secret set HAND'
+printf '%s\n' "$N_EMPTY"  | anet node secret set "$ALIAS" EMPTY_KEPT >>"$CLI_LOG" 2>&1 || fail 'node secret set EMPTY_KEPT'
 GFILE="$HOME/.anet/secrets.env"; NFILE="$NODE_DIR/secrets.env"
-[[ "$(stat -c %a "$GFILE")" == 600 && "$(stat -c %a "$NFILE")" == 600 ]] || fail "modes: global $(stat -c %a "$GFILE") node $(stat -c %a "$NFILE") (umask $(umask))"
-ok 'anet secret set / anet node secret set → both files 0600 under umask 0002'
+[[ "$(stat -c %a "$GFILE")" == 600 && "$(stat -c %a "$NFILE")" == 600 ]] || fail "modes: daemon $(stat -c %a "$GFILE") node $(stat -c %a "$NFILE") (umask $(umask))"
+grep -Fq "running nodes are not touched; it takes effect on their next start" "$CLI_LOG" || fail 'set did not say it only changes the file'
+ok 'anet secret set (daemon) / anet node secret set → both files 0600 under umask 0002; output says file-only, next start'
+
 
 set +e
-OUT=$(anet secret set ARGV_KEY "$G_ONLY" 2>&1); RC=$?
+OUT=$(anet secret set ARGV_KEY "$D_ONLY" 2>&1); RC=$?
 OUT2=$(printf 'x' | anet node secret set "$ALIAS" COMMHUB_TOKEN 2>&1); RC2=$?
 set -e
 [[ $RC -ne 0 && "$OUT" == *"never taken from the command line"* ]] || fail "argv value not refused (rc=$RC)"
@@ -135,17 +148,16 @@ ok 'value on argv refused; reserved COMMHUB_TOKEN refused; nothing written'
 
 LIST=$(anet secret list --node "$ALIAS" 2>&1)
 printf '%s\n' "$LIST" >>"$CLI_LOG"
-for k in GLOBAL_ONLY SHARED REF_TARGET FROM_CONFIG "overrides global" "ignored: config.json env"; do
+for k in DAEMON_ONLY SHARED REF_TARGET FROM_CONFIG HAND EMPTY_KEPT "overrides daemon" "ignored: config.json env"; do
   grep -Fq "$k" <<<"$LIST" || fail "list is missing '$k'"
 done
-grep -Eq "^SHARED +node +${#N_SHARED}  \(overrides global\)" <<<"$LIST" || fail "SHARED row: $(grep SHARED <<<"$LIST")"
-ok 'anet secret list --node: keys, source, length, override + config-shadow notes'
+grep -Eq "^SHARED +node +${#N_SHARED}  \(overrides daemon\)" <<<"$LIST" || fail "SHARED row: $(grep SHARED <<<"$LIST")"
+ok 'anet secret list --node: keys, layer, length, override + config-shadow notes'
 
-# ── 2. start through `anet node start`; the shell exports a competing SHARED ──
-start_launcher() {
+# ── 2. `anet node start` with values set by hand: HAND=<by hand>, EMPTY_KEPT="" ──
+start_launcher() {  # extra args: VAR=value set by hand for this launch only
   (cd "$WORK/proj" && exec setsid env HOME="$HOME" PATH="$WORK/bin:$PATH" ANTHROPIC_API_KEY=test2060-not-used \
-    SHARED=from-the-shell GLOBAL_ONLY=from-the-shell \
-    bun "$REPO/agent-network/bin/cli.ts" node start "$ALIAS" >>"$WORK/launcher.log" 2>&1 </dev/null) &
+    "$@" bun "$REPO/agent-network/bin/cli.ts" node start "$ALIAS" >>"$WORK/launcher.log" 2>&1 </dev/null) &
   LAUNCHER_PID=$!
 }
 status_row() {
@@ -189,19 +201,33 @@ probe_env() {  # send a task; the fake claude it spawns records the env it got
 }
 env_sha() { sed -n "s/^$1=//p" "$DUMP"; }
 dump_diag() { echo "---- processes ----" >&2; for d in /proc/[0-9]*; do printf '%s %s\n' "${d#/proc/}" "$(tr '\0' ' ' <"$d/cmdline" 2>/dev/null | cut -c1-160)"; done >&2; echo "---- status row ----" >&2; status_row >&2 || true; echo "---- launcher.log ----" >&2; tail -60 "$WORK/launcher.log" >&2 || true; echo "---- direct.log ----" >&2; tail -60 "$WORK/direct.log" >&2 || true; find "$WORK/proj/.anet" -path '*logs*' -type f -exec tail -40 {} + >&2 2>/dev/null || true; }
-check_env() {
-  local label="$1" node_shared="$2"
+expect() {  # expect <label> <KEY> <absent|empty|value>
+  local want="$3"
+  [[ "$want" == absent || "$want" == empty ]] || want=$(sha "$want")
+  [[ "$(env_sha "$2")" == "$want" ]] || fail "$1: $2 is $(env_sha "$2" | cut -c1-12), expected ${4:-$3 (sha)}"
+}
+check_env() {  # check_env <label> <node SHARED value> hand|clean
+  local label="$1"
   probe_env "$label"
-  [[ "$(env_sha GLOBAL_ONLY)" == "$(sha "$G_ONLY")" ]] || fail "$label: GLOBAL_ONLY is not the global secret (shell value must lose)"
-  [[ "$(env_sha SHARED)" == "$(sha "$node_shared")" ]] || fail "$label: SHARED is not the node secret (node must override global and shell)"
-  [[ "$(env_sha FROM_CONFIG)" == "$(sha cfg-wins)" ]] || fail "$label: FROM_CONFIG is not the config.json env value (config must win over secrets)"
-  [[ "$(env_sha REF_KEY)" == "$(sha "$REF_VAL")" ]] || fail "$label: REF_KEY did not resolve its _envRef from the node secrets file"
+  expect "$label" DAEMON_ONLY "$D_ONLY" "the daemon value (daemon only)"
+  expect "$label" SHARED "$2" "the node value (node overrides daemon)"
+  expect "$label" FROM_CONFIG cfg-wins "config.json env (above both files)"
+  expect "$label" REF_KEY "$REF_VAL" "_envRef resolved from the node file"
+  if [[ "$3" == hand ]]; then
+    expect "$label" HAND "$BY_HAND" "the by-hand value (process env overrides both files)"
+    expect "$label" EMPTY_KEPT empty "the empty by-hand value (empty counts as present)"
+  else
+    expect "$label" HAND "$N_HAND" "the node file value (by-hand value gone after a clean restart)"
+    expect "$label" EMPTY_KEPT "$N_EMPTY" "the node file value (by-hand empty gone after a clean restart)"
+  fi
 }
 
-start_launcher
+start_launcher HAND="$BY_HAND" EMPTY_KEPT=
 PID=$(wait_node) || { dump_diag; fail 'node never came up via anet node start'; }
-check_env "anet node start" "$N_SHARED"
-ok "anet node start → agent-node pid $PID: GLOBAL_ONLY=global, SHARED=node (shell and global lose), FROM_CONFIG=config.json, REF_KEY via _envRef from secrets.env (sha256 compared)"
+check_env "anet node start (by hand)" "$N_SHARED" hand
+grep -Fq "[agent-node] env: daemon=[DAEMON_ONLY] node=[REF_TARGET,SHARED] kept-from-process=[EMPTY_KEPT,HAND] config-json=[FROM_CONFIG]" "$WORK/launcher.log" \
+  || fail "startup line: $(grep -F '] env:' "$WORK/launcher.log" || echo none)"
+ok "anet node start + by-hand HAND / empty EMPTY_KEPT → pid $PID child: DAEMON_ONLY=daemon, SHARED=node, FROM_CONFIG=config.json, REF_KEY via _envRef, HAND=by hand, EMPTY_KEPT kept empty; startup line groups the names (sha256 compared)"
 
 # ── 2b. claude-code-cli: `anet node start` spawns `claude` itself (no agent-node) ──
 CC_ALIAS="secrets-cc"
@@ -219,17 +245,17 @@ printf '%s\n' "$N_SHARED" | anet node secret set "$CC_ALIAS" SHARED     >>"$CLI_
 printf '%s\n' "$REF_VAL"  | anet node secret set "$CC_ALIAS" REF_TARGET >>"$CLI_LOG" 2>&1 || fail 'cc node secret set REF_TARGET'
 rm -f "$WORK/envdump"/dump.*
 # claude-code-cli refuses to start without a TTY (#486): give it one.
-(cd "$WORK/proj" && env HOME="$HOME" PATH="$WORK/bin:$PATH" SHARED=from-the-shell GLOBAL_ONLY=from-the-shell \
+(cd "$WORK/proj" && env HOME="$HOME" PATH="$WORK/bin:$PATH" HAND="$BY_HAND" EMPTY_KEPT= \
   timeout 60 script -qec "bun $REPO/agent-network/bin/cli.ts node start $CC_ALIAS" /dev/null >"$WORK/cc.log" 2>&1 </dev/null) || true
 DUMP=$(find "$WORK/envdump" -name 'dump.*' ! -name '*.tmp' -type f | sort | tail -n1)
 [[ -n "$DUMP" ]] || { tail -40 "$WORK/cc.log" >&2; fail 'claude-code-cli: anet never spawned claude'; }
-[[ "$(env_sha GLOBAL_ONLY)" == "$(sha "$G_ONLY")" ]] || fail "claude-code-cli: GLOBAL_ONLY is not the global secret"
-[[ "$(env_sha SHARED)" == "$(sha "$N_SHARED")" ]] || fail "claude-code-cli: SHARED is not the node secret"
-[[ "$(env_sha FROM_CONFIG)" == "$(sha cfg-wins)" ]] || fail "claude-code-cli: FROM_CONFIG is not the config.json env value"
-[[ "$(env_sha REF_KEY)" == "$(sha "$REF_VAL")" ]] || fail "claude-code-cli: REF_KEY did not resolve from the node secrets file"
-ok 'anet node start (claude-code-cli) → the claude it spawns has the same layering: global, node over global and shell, config.json env on top, _envRef from secrets.env'
+expect cc DAEMON_ONLY "$D_ONLY"; expect cc SHARED "$N_SHARED"; expect cc FROM_CONFIG cfg-wins
+expect cc REF_KEY "$REF_VAL"; expect cc HAND "$BY_HAND"; expect cc EMPTY_KEPT empty
+grep -Fq "[anet] env: daemon=[DAEMON_ONLY] node=[REF_TARGET,SHARED] kept-from-process=[HAND] config-json=[FROM_CONFIG]" "$WORK/cc.log" \
+  || fail "cc startup line: $(grep -F '] env:' "$WORK/cc.log" || echo none)"
+ok 'anet node start (claude-code-cli) → the claude it spawns: same layering (daemon, node over daemon, config.json, _envRef, by-hand wins, empty kept)'
 
-# ── 3. restart (fresh launcher, no exports) after changing the node secret ──
+# ── 3. restart from a clean env (no by-hand values) after changing the node file ──
 printf '%s\n' "$N_SHARED2" | anet node secret set "$ALIAS" SHARED >>"$CLI_LOG" 2>&1 || fail 'node secret update'
 stop_group "$LAUNCHER_PID"; LAUNCHER_PID=""
 for _ in $(seq 1 40); do node_pid >/dev/null || break; sleep 0.25; done
@@ -237,13 +263,15 @@ mv "$WORK/launcher.log" "$WORK/launcher.log.1"
 start_launcher
 PID2=$(wait_node) || { dump_diag; fail 'node never came back after restart'; }
 [[ "$PID2" != "$PID" ]] || fail 'restart reused the old pid'
-check_env "after restart" "$N_SHARED2"
-ok "restart → new pid $PID2 still has every secret; the updated node value is in effect"
+check_env "after clean restart" "$N_SHARED2" clean
+grep -Fq "[agent-node] env: daemon=[DAEMON_ONLY] node=[EMPTY_KEPT,HAND,REF_TARGET,SHARED] kept-from-process=[] config-json=[FROM_CONFIG]" "$WORK/launcher.log" \
+  || fail "startup line after restart: $(grep -F '] env:' "$WORK/launcher.log" || echo none)"
+ok "clean restart → new pid $PID2: file values in effect (updated SHARED), the by-hand HAND and empty EMPTY_KEPT are gone — the files filled them"
 stop_group "$LAUNCHER_PID"; LAUNCHER_PID=""
 for _ in $(seq 1 40); do node_pid >/dev/null || break; sleep 0.25; done
 
 # ── 4. direct start (no anet): the loader lives in agent-node ──
-# Global file loosened to 0644 first: it must be tightened and still loaded.
+# Daemon file loosened to 0644 first: it must be tightened and still loaded.
 chmod 0644 "$GFILE"
 start_direct() {
   (cd "$WORK/proj" && exec setsid env HOME="$HOME" PATH="$WORK/bin:$PATH" ANTHROPIC_API_KEY=test2060-not-used \
@@ -252,10 +280,10 @@ start_direct() {
 }
 start_direct
 PID3=$(wait_node) || { dump_diag; fail 'direct agent-node never came up'; }
-check_env "direct agent-node" "$N_SHARED2"
-[[ "$(stat -c %a "$GFILE")" == 600 ]] || fail "loose global file not tightened ($(stat -c %a "$GFILE"))"
+check_env "direct agent-node" "$N_SHARED2" clean
+[[ "$(stat -c %a "$GFILE")" == 600 ]] || fail "loose daemon file not tightened ($(stat -c %a "$GFILE"))"
 grep -Fq "was mode 0644; tightened to 0600" "$WORK/direct.log" || fail 'no tightened notice in the node log'
-ok "direct 'agent-node --config' (no anet, no exports) → pid $PID3 has every secret; a 0644 global file was tightened to 0600 and loaded"
+ok "direct 'agent-node --config' (no anet, no exports) → pid $PID3 child has every file value; a 0644 daemon file was tightened to 0600 and loaded"
 stop_group "$DIRECT_PID"; DIRECT_PID=""
 for _ in $(seq 1 40); do node_pid >/dev/null || break; sleep 0.25; done
 
@@ -275,8 +303,8 @@ chown "$(id -u)" "$NFILE"
 # ── 6. doctor reports files without values ──
 DOC=$(cd "$WORK/proj" && timeout 120 bun "$REPO/agent-network/bin/cli.ts" doctor 2>&1 || true)
 printf '%s\n' "$DOC" >"$WORK/doctor.log"
-grep -Eq "Global secrets .*mode 0600, 3 key\(s\)" <<<"$DOC" || fail "doctor global line: $(grep -F secrets <<<"$DOC" || true)"
-grep -Eq "Node secrets $ALIAS .*mode 0600, 2 key\(s\)" <<<"$DOC" || fail "doctor node line: $(grep -F secrets <<<"$DOC" || true)"
+grep -Eq "Daemon env \(this machine\) .*mode 0600, 4 key\(s\)" <<<"$DOC" || fail "doctor daemon line: $(grep -F env <<<"$DOC" || true)"
+grep -Eq "Node env $ALIAS .*mode 0600, 4 key\(s\)" <<<"$DOC" || fail "doctor node line: $(grep -F env <<<"$DOC" || true)"
 ok 'anet doctor: both files, mode and key count'
 
 # ── 7. no value in any output or log ──
@@ -286,9 +314,8 @@ for f in "${LOGS[@]}"; do
   [[ -f "$f" ]] || continue
   for v in "${ALL_VALUES[@]}"; do ! grep -Fq "$v" "$f" || fail "a secret value is in $f"; done
 done
-# GLOBAL_ONLY from global; SHARED + REF_TARGET from the node file (FROM_CONFIG is config.json's).
-grep -rFq "secrets: 1 global + 2 node key(s) loaded" "${LOGS[@]}" || fail 'positive control: the node never logged its key-count line'
-ok "no secret value in ${#LOGS[@]} log/output file(s); the key-count line is there"
+grep -sFq "] env: daemon=[DAEMON_ONLY]" "${LOGS[@]}" || fail 'positive control: no startup env line in the logs we scanned'
+ok "no secret value in ${#LOGS[@]} log/output file(s) (the startup env lines are there, names only)"
 
 # ── 8. witnessed-red: drop the loader's apply line → the direct start must not get its secrets ──
 cp "$NODE_SRC" "$WORK/cli.ts.orig"

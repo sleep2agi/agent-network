@@ -240,7 +240,7 @@ import {
 } from "../src/codex-model-default";
 import { resolvePrimaryNetwork } from "../src/primary-network";
 import { nodeSecretCommand, readSecretFromProcess, secretCommand, SECRET_USAGE, type SecretContext } from "../src/secret-command";
-import { globalSecretsPath, nodeSecretsPath, planSecretEnv, readSecretsFile, describeSecretsRead } from "../src/node-secrets";
+import { daemonSecretsPath, describeSecretEnvPlan, nodeSecretsPath, planSecretEnv, readSecretsFile, describeSecretsRead } from "../src/node-secrets";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -3966,7 +3966,7 @@ Quick start:
   (连别人已有的 hub: anet init --hub <url>)
 
 Secrets:
-  anet secret set <KEY>         Store a secret for every node on this machine (0600 file)
+  anet secret set <KEY>         Set a daemon (this machine) env var shared by all nodes
   anet secret unset <KEY>       Remove it
   anet secret list [--node <n>] Key names, source and length — never values
 
@@ -4501,8 +4501,8 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
       // .anet/nodes/<id>/.env file. Closes the wizard-create-then-start
       // deadlock without forcing the user to manually `export` before start;
       // existing shell env still wins, so prior-working setups don't change.
-      // Secrets files (anet secret set) rank above the shell, like everywhere else.
-      const refVal = secretsMap?.[refName] ?? process.env[refName] ?? dotenvMap?.[refName];
+      // Env files (anet secret set) only fill what the shell does not have.
+      const refVal = process.env[refName] ?? secretsMap?.[refName] ?? dotenvMap?.[refName];
       if (refVal === undefined || refVal === "") {
         console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell, a secrets file or .anet/nodes/<id>/.env.`);
         console.error(`[anet]        Fix (persists): anet node secret set <node> ${refName}   — or: export ${refName}=<your-value>  then re-run anet node start`);
@@ -4538,16 +4538,16 @@ function secretContext(): SecretContext {
   };
 }
 
-// Global + node secrets files for a node the launcher is about to spawn
+// Daemon + node env files for a node the launcher is about to spawn
 // (node-secrets.ts). Warnings name files and keys only.
-function loadLaunchSecrets(nodeId: string, profileEnv: Record<string, any> | undefined) {
-  const g = readSecretsFile(globalSecretsPath(home));
+function loadLaunchSecrets(nodeId: string, profileEnv: Record<string, any> | undefined, processEnv: Record<string, string | undefined>) {
+  const d = readSecretsFile(daemonSecretsPath(home));
   const n = readSecretsFile(nodeSecretsPath(join(nodesDir(), nodeId)));
-  for (const line of [...describeSecretsRead("global", g), ...describeSecretsRead("node", n)]) console.warn(`[anet] ⚠ ${line}`);
-  const plan = planSecretEnv({ global: g.values, node: n.values, configEnvKeys: Object.keys(profileEnv || {}) });
-  // `_envRef` lookup: node > global secrets (config keys included — a ref's
-  // target is a different name from the key that holds the ref).
-  const refLookup: Record<string, string> = { ...g.values, ...n.values };
+  for (const line of [...describeSecretsRead("daemon", d), ...describeSecretsRead("node", n)]) console.warn(`[anet] ⚠ ${line}`);
+  const plan = planSecretEnv({ processEnv, daemon: d.values, node: n.values, configEnvKeys: Object.keys(profileEnv || {}) });
+  // `_envRef` lookup below the shell: node > daemon (config keys included — a
+  // ref's target is a different name from the key that holds the ref).
+  const refLookup: Record<string, string> = { ...d.values, ...n.values };
   return { plan, refLookup };
 }
 
@@ -6587,7 +6587,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     }
     // Secrets files: agent-node loads them itself at boot (so a remote restart
     // sees edits); here they only resolve `_envRef` targets.
-    const _secretsSDK = loadLaunchSecrets(nodeId, profile.env as any);
+    const _secretsSDK = loadLaunchSecrets(nodeId, profile.env as any, env);
     Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK, _secretsSDK.refLookup));
 
     if (runtime === "opencode-cli") {
@@ -6828,11 +6828,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       console.log(`[anet] loaded ${Object.keys(_dotenvCC).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
     // claude-code-cli is spawned directly (no agent-node in between), so the
-    // launcher applies the secrets files: shell < global < node < config env.
-    const _secretsCC = loadLaunchSecrets(nodeId, profile.env as any);
+    // launcher applies the env files the same way agent-node does: they only
+    // fill keys this launch's environment does not already have.
+    const _secretsCC = loadLaunchSecrets(nodeId, profile.env as any, env);
     Object.assign(env, _secretsCC.plan.set);
-    const _secretKeysCC = Object.keys(_secretsCC.plan.set).length;
-    if (_secretKeysCC) console.log(`[anet] secrets: ${_secretKeysCC} key(s) from ~/.anet/secrets.env + node secrets.env`);
+    console.log(`[anet] ${describeSecretEnvPlan(_secretsCC.plan)}`);
     Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC, _secretsCC.refLookup));
     // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
     // stable per-node value (node-server.ts:75 otherwise falls through to
@@ -17137,13 +17137,13 @@ async function doctorCommand() {
       const name = nodeDisplayName(id, loadProfile(id));
       info(`    ↳ ${name}`, `env keys: ${fields.join(", ")}`);
     }
-    info("→ move", `anet node secret set <alias> <KEY>   (or machine-wide: anet secret set <KEY>), then delete the key from config.json env`);
+    info("→ move", `anet node secret set <alias> <KEY>   (or daemon env for every node on this machine: anet secret set <KEY>), then delete the key from config.json env`);
     info("→ or", `anet node migrate-token-to-envref <alias>   (keeps an env-var name in config.json)`);
   } else {
     check("No plain-secret config", true, "all env values are either non-secret or envRef objects");
   }
 
-  // Secrets files (anet secret / anet node secret): presence, mode, key count.
+  // Env files (anet secret / anet node secret): presence, mode, key count.
   // Reading applies the load policy (a group/other-readable file we own is
   // tightened to 0600), so doctor reports what the next node start will see.
   {
@@ -17154,17 +17154,17 @@ async function doctorCommand() {
       check(label, true, `${r.path} mode ${mode}${fixed}, ${Object.keys(r.values).length} key(s)`);
       for (const p of r.problems) warning(`${label} line ${p.line}`, `skipped — ${p.reason}`);
     };
-    const g = readSecretsFile(globalSecretsPath(home));
-    if (g.status === "missing") info("Global secrets", `none (${globalSecretsPath(home)}) — add with: anet secret set <KEY>`);
-    else describe("Global secrets", g);
+    const g = readSecretsFile(daemonSecretsPath(home));
+    if (g.status === "missing") info("Daemon env (this machine)", `none (${daemonSecretsPath(home)}) — add with: anet secret set <KEY>`);
+    else describe("Daemon env (this machine)", g);
     let withNodeFile = 0;
     for (const id of ids) {
       const r = readSecretsFile(nodeSecretsPath(join(nodesDir(), id)));
       if (r.status === "missing") continue;
       withNodeFile++;
-      describe(`Node secrets ${nodeDisplayName(id, loadProfile(id))}`, r);
+      describe(`Node env ${nodeDisplayName(id, loadProfile(id))}`, r);
     }
-    info("Node secrets", `${withNodeFile} of ${ids.length} node(s) under ${nodesDir()} have a secrets.env`);
+    info("Node env", `${withNodeFile} of ${ids.length} node(s) under ${nodesDir()} have a secrets.env`);
   }
 
   // Probe each ntok_ against hub; auto-reissue any that hub rejects with 401.

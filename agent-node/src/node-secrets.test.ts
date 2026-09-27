@@ -6,7 +6,8 @@ import { join } from "node:path";
 import {
   describeSecretsRead,
   formatSecretValue,
-  globalSecretsPath,
+  daemonSecretsPath,
+  describeSecretEnvPlan,
   listSecretEntries,
   nodeDirForConfig,
   parseSecretsEnv,
@@ -89,30 +90,68 @@ describe("secretKeyProblem", () => {
   });
 });
 
-describe("planSecretEnv — process env < global < node < config.json env", () => {
-  test("node overrides global; config.json env keys are left alone; reserved skipped", () => {
+describe("planSecretEnv — daemon < node < config.json env < process env", () => {
+  const SENTINEL = "sk-SENTINEL-plan-4be2";
+  test("daemon only", () => {
+    const plan = planSecretEnv({ processEnv: {}, daemon: { A: "d" } });
+    expect({ ...plan.set }).toEqual({ A: "d" });
+    expect({ ...plan.sources }).toEqual({ A: "daemon" });
+  });
+
+  test("node overrides daemon", () => {
+    const plan = planSecretEnv({ processEnv: {}, daemon: { A: "d", B: "d2" }, node: { A: "n" } });
+    expect({ ...plan.set }).toEqual({ A: "n", B: "d2" });
+    expect({ ...plan.sources }).toEqual({ A: "node", B: "daemon" });
+  });
+
+  test("process env overrides both — files only fill absent keys", () => {
+    const processEnv: Record<string, string | undefined> = { A: "by-hand", OTHER: "x" };
+    const plan = planSecretEnv({ processEnv, daemon: { A: "d", B: "d2" }, node: { A: "n" } });
+    expect({ ...plan.set }).toEqual({ B: "d2" });
+    expect(plan.keptFromProcess).toEqual(["A"]);
+    Object.assign(processEnv, plan.set);
+    expect(processEnv).toEqual({ A: "by-hand", OTHER: "x", B: "d2" });
+  });
+
+  test("an empty string in the process env counts as present and is kept", () => {
+    const processEnv: Record<string, string | undefined> = { A: "" };
+    const plan = planSecretEnv({ processEnv, daemon: { A: "d" }, node: { A: "n" } });
+    expect({ ...plan.set }).toEqual({});
+    expect(plan.keptFromProcess).toEqual(["A"]);
+    Object.assign(processEnv, plan.set);
+    expect(processEnv.A).toBe("");
+  });
+
+  test("config.json env keys are left to the config injector (above the node file); reserved keys skipped", () => {
     const plan = planSecretEnv({
-      global: { SHARED: "g", ONLY_GLOBAL: "g1", IN_CONFIG: "g2", PATH: "/evil" },
-      node: { SHARED: "n", ONLY_NODE: "n1", IN_CONFIG: "n2", COMMHUB_TOKEN: "x" },
+      processEnv: {},
+      daemon: { IN_CONFIG: "d", PATH: "/evil" },
+      node: { IN_CONFIG: "n", COMMHUB_TOKEN: "x", OK: "1" },
       configEnvKeys: ["IN_CONFIG"],
     });
-    expect({ ...plan.set }).toEqual({ SHARED: "n", ONLY_GLOBAL: "g1", ONLY_NODE: "n1" });
-    expect({ ...plan.sources }).toEqual({ SHARED: "node", ONLY_GLOBAL: "global", ONLY_NODE: "node" });
-    expect(plan.reserved).toEqual(["COMMHUB_TOKEN", "PATH"]);
+    expect({ ...plan.set }).toEqual({ OK: "1" });
     expect(plan.shadowedByConfig).toEqual(["IN_CONFIG"]);
+    expect(plan.reserved).toEqual(["COMMHUB_TOKEN", "PATH"]);
   });
 
-  test("applied over a process env, secrets win over the shell", () => {
-    const env: Record<string, string> = { SHARED: "shell", SHELL_ONLY: "s" };
-    Object.assign(env, planSecretEnv({ global: { SHARED: "g" } }).set);
-    expect(env).toEqual({ SHARED: "g", SHELL_ONLY: "s" });
+  test("the startup line: key names in the right groups, never a value", () => {
+    const plan = planSecretEnv({
+      processEnv: { KEPT: "" , ALSO_KEPT: SENTINEL },
+      daemon: { D1: SENTINEL, D2: SENTINEL, KEPT: SENTINEL, SHARED: SENTINEL },
+      node: { SHARED: SENTINEL, N1: SENTINEL, ALSO_KEPT: SENTINEL },
+    });
+    const line = describeSecretEnvPlan(plan);
+    expect(line).toBe("env: daemon=[D1,D2] node=[N1,SHARED] kept-from-process=[ALSO_KEPT,KEPT]");
+    expect(line).not.toContain("SENTINEL");
+    const withExtras = describeSecretEnvPlan(planSecretEnv({ processEnv: {}, daemon: { PATH: SENTINEL }, node: { C: SENTINEL }, configEnvKeys: ["C"] }));
+    expect(withExtras).toBe("env: daemon=[] node=[] kept-from-process=[] config-json=[C] skipped-reserved=[PATH]");
   });
 
-  test("listSecretEntries: lengths only, node marks the global it overrides", () => {
+  test("listSecretEntries: lengths only, node marks the daemon key it overrides", () => {
     const e = listSecretEntries({ A: "12345", B: "xx" }, { A: "中文", C: "c" });
     expect(e).toEqual([
-      { key: "A", source: "node", length: 2, overridesGlobal: true },
-      { key: "B", source: "global", length: 2 },
+      { key: "A", source: "node", length: 2, overridesDaemon: true },
+      { key: "B", source: "daemon", length: 2 },
       { key: "C", source: "node", length: 1 },
     ]);
   });
@@ -126,7 +165,7 @@ describe("files: permissions and atomic writes", () => {
   test("set creates 0600 even under umask 0002; parent created 0700", () => {
     const old = process.umask(0o002);
     try {
-      const p = globalSecretsPath(join(dir, "home"));
+      const p = daemonSecretsPath(join(dir, "home"));
       setSecret(p, "API_KEY", "v1");
       expect(mode(p)).toBe(0o600);
       expect(mode(join(dir, "home", ".anet"))).toBe(0o700);
@@ -167,7 +206,7 @@ describe("files: permissions and atomic writes", () => {
     expect(r.repairedFromMode).toBe(0o644);
     expect(r.values.A).toBe("1");
     expect(mode(p)).toBe(0o600);
-    expect(describeSecretsRead("global", r).join("\n")).toContain("0644; tightened to 0600");
+    expect(describeSecretsRead("daemon", r).join("\n")).toContain("0644; tightened to 0600");
   });
 
   test("a file owned by another user is refused, nothing loaded, mode untouched", () => {

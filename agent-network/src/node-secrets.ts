@@ -1,6 +1,9 @@
 /**
- * Local secrets store: `~/.anet/secrets.env` (every node on this machine) and
- * `<node dir>/secrets.env` (one node; the directory that holds its config.json).
+ * A node's environment variables, kept in two files:
+ *   daemon env — `~/.anet/secrets.env`: this machine, shared by every node on it;
+ *   node env   — `<node dir>/secrets.env`: one node (the directory holding its config.json).
+ * (The hub's own env — ports, DB, the hub's secrets — is a third place and is
+ * never injected into nodes or distributed through the hub.)
  *
  * Why this exists. Before it, a node's secrets lived either in plain text in
  * config.json `env` (deprecated, printed a warning) or behind `{"_envRef":"X"}`,
@@ -8,15 +11,23 @@
  * so the value was gone after the next restart. The owner's verdict was "现在等于
  * 没有管理". These two files are set once and read at every start.
  *
- * Precedence, lowest → highest:
+ * Precedence at startup, lowest → highest:
  *
- *   process env  <  global secrets.env  <  node secrets.env  <  config.json `env`
+ *   daemon secrets.env  <  node secrets.env  <  config.json `env`  <  process env
  *
- * config.json `env` keys (plain or `_envRef`) are left entirely to the existing
- * injector in agent-node/src/cli.ts: a key named there is skipped here, so the
- * explicit per-node config keeps the last word and `_envRef` still resolves the
- * way it always did — except that the referenced variable can now come from a
- * secrets file instead of an `export`.
+ * The files persist; a value set by hand (`export`, `VAR=x anet node start`)
+ * applies to that one launch only and is never written back. So the files only
+ * FILL keys the process does not already have — a key present with an empty
+ * string counts as present. A clean shell / new tmux / boot sweep sees only the
+ * files: that is the fix for "a restart loses the env I set by hand" — to make a
+ * value persist, `set` it into a file.
+ *
+ * config.json `env` keys (plain or `_envRef`) sit above the node file: they are
+ * the node's explicit, existing configuration (and what #2004 writes today), so
+ * a new file must not silently change a running fleet's values. A key named
+ * there is skipped here and left to the existing injector in agent-node/src/cli.ts;
+ * `_envRef` still resolves from the process env — which now includes what the
+ * files filled — so its target can live in a secrets file instead of an `export`.
  *
  * 🔴 WHERE THIS RUNS, and why the file exists twice. The loader has to run in
  *    agent-node itself: most fleet nodes start `agent-node --config …` straight
@@ -66,7 +77,7 @@ export const SECRET_KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
 export const SECRET_KEY_MAX_LENGTH = 128;
 export const SECRET_VALUE_MAX_BYTES = 8 * 1024;
 
-export function globalSecretsPath(home: string): string {
+export function daemonSecretsPath(home: string): string {
   return join(home, ".anet", SECRETS_FILE_NAME);
 }
 
@@ -78,7 +89,7 @@ export function nodeSecretsPath(nodeDir: string): string {
  * The node directory for a resolved config file, or null. Node secrets sit next
  * to the node's own config.json (`<root>/.anet/nodes/<id>/config.json`, whatever
  * the root is). A legacy `.anet/profiles/<alias>.json` or `.agent-node.json`
- * has no per-node directory, so such a node only gets the global file.
+ * has no per-node directory, so such a node only gets the daemon file.
  */
 export function nodeDirForConfig(configFilePath: string | undefined | null): string | null {
   if (!configFilePath) return null;
@@ -370,13 +381,15 @@ export function unsetSecret(path: string, key: string): { existed: boolean } {
 
 // ─── merge ───
 
-export type SecretSource = "global" | "node";
+export type SecretSource = "daemon" | "node";
 
 export interface SecretEnvPlan {
-  /** Keys to put into the environment, and their values. */
+  /** Keys to put into the environment (all absent from it before), and their values. */
   set: Record<string, string>;
   /** Where each key in `set` came from. */
   sources: Record<string, SecretSource>;
+  /** File keys skipped because the process already had them (even as ""). */
+  keptFromProcess: string[];
   /** Keys a file tried to set that the key rules forbid (skipped). */
   reserved: string[];
   /** Keys config.json `env` names explicitly (left to that injector). */
@@ -384,31 +397,46 @@ export interface SecretEnvPlan {
 }
 
 /**
- * process env < global < node < config.json `env`. Pure: the caller applies
- * `set` on top of its environment. `configEnvKeys` are the keys the node's
- * config.json `env` block names; those are skipped so the config injector
- * decides them exactly as before.
+ * daemon < node < config.json `env` < process env. Pure: the caller applies
+ * `set` on top of `processEnv`, which it never overwrites.
  */
 export function planSecretEnv(opts: {
-  global?: Record<string, string>;
+  processEnv: Record<string, string | undefined>;
+  daemon?: Record<string, string>;
   node?: Record<string, string>;
   configEnvKeys?: Iterable<string>;
 }): SecretEnvPlan {
   const config = new Set(opts.configEnvKeys ?? []);
   const set: Record<string, string> = Object.create(null);
   const sources: Record<string, SecretSource> = Object.create(null);
+  const kept = new Set<string>();
   const reserved = new Set<string>();
   const shadowed = new Set<string>();
-  const layers: [SecretSource, Record<string, string> | undefined][] = [["global", opts.global], ["node", opts.node]];
+  const layers: [SecretSource, Record<string, string> | undefined][] = [["daemon", opts.daemon], ["node", opts.node]];
   for (const [source, values] of layers) {
     for (const [k, v] of Object.entries(values ?? {})) {
       if (secretKeyProblem(k)) { reserved.add(k); continue; }
       if (config.has(k)) { shadowed.add(k); continue; }
+      if (opts.processEnv[k] !== undefined) { kept.add(k); continue; }
       set[k] = v;
       sources[k] = source;
     }
   }
-  return { set, sources, reserved: [...reserved].sort(), shadowedByConfig: [...shadowed].sort() };
+  return {
+    set, sources,
+    keptFromProcess: [...kept].sort(),
+    reserved: [...reserved].sort(),
+    shadowedByConfig: [...shadowed].sort(),
+  };
+}
+
+/** The one startup line: key names only, never values. */
+export function describeSecretEnvPlan(plan: SecretEnvPlan): string {
+  const names = (src: SecretSource) => Object.keys(plan.sources).filter((k) => plan.sources[k] === src).sort();
+  let line = `env: daemon=[${names("daemon").join(",")}] node=[${names("node").join(",")}] kept-from-process=[${plan.keptFromProcess.join(",")}]`;
+  if (plan.shadowedByConfig.length) line += ` config-json=[${plan.shadowedByConfig.join(",")}]`;
+  if (plan.reserved.length) line += ` skipped-reserved=[${plan.reserved.join(",")}]`;
+  return line;
 }
 
 // ─── display (no values) ───
@@ -418,20 +446,20 @@ export interface SecretListEntry {
   source: SecretSource;
   /** Characters (code points) of the value in effect — never the value. */
   length: number;
-  /** A node entry that overrides a global one with the same key. */
-  overridesGlobal?: true;
+  /** A node entry that overrides a daemon one with the same key. */
+  overridesDaemon?: true;
 }
 
 function codePoints(s: string): number { let n = 0; for (const _ of s) n++; return n; }
 
-export function listSecretEntries(global: Record<string, string>, node?: Record<string, string>): SecretListEntry[] {
+export function listSecretEntries(daemon: Record<string, string>, node?: Record<string, string>): SecretListEntry[] {
   const out: SecretListEntry[] = [];
-  for (const [key, v] of Object.entries(global)) {
+  for (const [key, v] of Object.entries(daemon)) {
     if (node && Object.prototype.hasOwnProperty.call(node, key)) continue;
-    out.push({ key, source: "global", length: codePoints(v) });
+    out.push({ key, source: "daemon", length: codePoints(v) });
   }
   for (const [key, v] of Object.entries(node ?? {})) {
-    out.push({ key, source: "node", length: codePoints(v), ...(Object.prototype.hasOwnProperty.call(global, key) ? { overridesGlobal: true as const } : {}) });
+    out.push({ key, source: "node", length: codePoints(v), ...(Object.prototype.hasOwnProperty.call(daemon, key) ? { overridesDaemon: true as const } : {}) });
   }
   return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
