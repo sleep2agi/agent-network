@@ -34,3 +34,8 @@ Review follow-up: replaced SQLite-only PRAGMA with the existing additive ALTER
 and duplicate-column handling pattern, and preferred node display_name in people
 results. Reran this HTTP suite in Docker Bun 1.3.14: 9 pass / 43 assertions.
 This rerun uses SQLite; it does not claim a PostgreSQL end-to-end run.
+
+Rebased onto requirements-hub 2c7fcdc9 (GitHub issue bindings). Conflict resolution
+preserves issues_json in SELECT/INSERT/PATCH together with assignments. Repeated
+the affected Docker HTTP suite: 10 pass, 0 fail, 47 assertions, including the new
+base branch's GitHub issue binding case. Refreshed audit helper links to L1751.
