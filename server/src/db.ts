@@ -972,6 +972,9 @@ db.exec(`
 try { db.exec("ALTER TABLE requirements ADD COLUMN client_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE requirements ADD COLUMN issues_json TEXT"); } catch {}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_client ON requirements(network_id, client_id) WHERE client_id IS NOT NULL AND client_id != ''");
+const requirementColumns = new Set(db.all<{ name: string }>("PRAGMA table_info(requirements)").map(row => row.name));
+if (!requirementColumns.has("owner_json")) db.exec("ALTER TABLE requirements ADD COLUMN owner_json TEXT");
+if (!requirementColumns.has("participants_json")) db.exec("ALTER TABLE requirements ADD COLUMN participants_json TEXT NOT NULL DEFAULT '[]'");
 
 // ── V3: licenses table ──
 db.exec(`

@@ -55,6 +55,43 @@ afterAll(() => {
 describe("requirements stay on the hub", () => {
   let id = "";
 
+  test("typed assignments validate network membership, preserve kinds and clear explicitly", async () => {
+    const { db } = await import('./db.js');
+    const ownerId = db.get<{ owner_id: string }>('SELECT owner_id FROM networks WHERE network_id=?1', ownerNetwork)!.owner_id;
+    db.run('INSERT INTO nodes(node_id,node_name,alias,network_id) VALUES (?1,?2,?2,?3)', [ownerId, 'same-name', ownerNetwork]);
+    db.run('INSERT INTO nodes(node_id,node_name,network_id) VALUES (?1,?2,?3)', ['foreign-person-node', 'foreign-node', 'other-network']);
+    const people = await api(ownerToken, `/api/requirements/people?network_id=${ownerNetwork}`);
+    expect(people.status).toBe(200);
+    expect(people.body.people.some((p: any) => p.id === ownerId && p.kind === 'user')).toBe(true);
+    expect(people.body.people.some((p: any) => p.id === ownerId && p.kind === 'node')).toBe(true);
+    expect(people.body.people.every((p: any) => p.networkId === ownerNetwork)).toBe(true);
+    const user = { kind: 'user', id: ownerId };
+    const node = { kind: 'node', id: ownerId };
+    const created = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: 'typed people', owner: user, participants: [user, node, user] }) });
+    expect(created.status).toBe(201);
+    expect(created.body.requirement.owner).toEqual(user);
+    expect(created.body.requirement.participants).toEqual([user, node]);
+    const path = `/api/requirements/${created.body.requirement.id}`;
+    const changed = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node }) });
+    expect(changed.status).toBe(200);
+    expect(changed.body.requirement.owner).toEqual(node);
+    expect(changed.body.requirement.participants).toEqual([user, node]);
+    expect(changed.body.requirement.column).toBe('pool');
+    for (const token of [viewerToken, nodeToken]) {
+      expect((await api(token, path, { method: 'PATCH', body: JSON.stringify({ owner: null, participants: [] }) })).status).toBe(403);
+    }
+    expect((await api(otherToken, path, { method: 'PATCH', body: JSON.stringify({ owner: null }) })).status).toBe(404);
+    for (const invalid of [{ kind: 'node', id: 'foreign-person-node' }, { kind: 'user', id: 'unknown' }, { kind: 'admin', id: ownerId }]) {
+      expect((await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ participants: [invalid] }) })).status).toBe(400);
+    }
+    const listed = await api(ownerToken, '/api/requirements');
+    expect(listed.body.requirements.find((row: any) => row.id === created.body.requirement.id).owner).toEqual(node);
+    const cleared = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: null, participants: [] }) });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.requirement.owner).toBeNull();
+    expect(cleared.body.requirement.participants).toEqual([]);
+  });
+
   test("owner creates a card in the pool", async () => {
     const created = await api(ownerToken, "/api/requirements", {
       method: "POST",
