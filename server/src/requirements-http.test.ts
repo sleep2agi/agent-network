@@ -187,6 +187,51 @@ describe("requirements stay on the hub", () => {
     expect(bad.status).toBe(400);
   });
 
+  test("an existing card can change its text without dropping omitted fields", async () => {
+    const { db } = await import("./db.js");
+    const ownerId = db.get<{ owner_id: string }>("SELECT owner_id FROM networks WHERE network_id=?1", ownerNetwork)!.owner_id;
+    const created = await api(ownerToken, "/api/requirements", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "旧标题",
+        priority: "low",
+        assignee: "node-a",
+        due: "2026-10-01",
+        column: "doing",
+        owner: { kind: "user", id: ownerId },
+      }),
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.requirement.id;
+    const renamed = await api(ownerToken, `/api/requirements/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: "新标题" }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.requirement.name).toBe("新标题");
+    expect(renamed.body.requirement.priority).toBe("low");
+    expect(renamed.body.requirement.assignee).toBe("node-a");
+    expect(renamed.body.requirement.due).toBe("2026-10-01");
+    expect(renamed.body.requirement.column).toBe("doing");
+    expect(renamed.body.requirement.owner).toEqual({ kind: "user", id: ownerId });
+    const cleared = await api(ownerToken, `/api/requirements/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ due: "", assignee: "", priority: "high" }),
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.requirement.name).toBe("新标题");
+    expect(cleared.body.requirement.due).toBe("");
+    expect(cleared.body.requirement.assignee).toBe("");
+    expect(cleared.body.requirement.priority).toBe("high");
+    expect(cleared.body.requirement.owner).toEqual({ kind: "user", id: ownerId });
+    expect((await api(ownerToken, `/api/requirements/${id}`, { method: "PATCH", body: JSON.stringify({ name: "  " }) })).status).toBe(400);
+    expect((await api(ownerToken, `/api/requirements/${id}`, { method: "PATCH", body: JSON.stringify({ due: "2026-13-01" }) })).status).toBe(400);
+    expect((await api(viewerToken, `/api/requirements/${id}`, { method: "PATCH", body: JSON.stringify({ name: "越权" }) })).status).toBe(403);
+    expect((await api(otherToken, `/api/requirements/${id}`, { method: "PATCH", body: JSON.stringify({ name: "别人的" }) })).status).toBe(404);
+    const listed = await api(ownerToken, "/api/requirements");
+    expect(listed.body.requirements.find((row: { id: string }) => row.id === id).name).toBe("新标题");
+  });
+
   test("empty name and a bad date are rejected", async () => {
     const empty = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "  " }) });
     expect(empty.status).toBe(400);
