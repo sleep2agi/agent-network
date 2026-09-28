@@ -39,7 +39,7 @@ const GOLDEN_RESPONSE_KEYS = {
   ],
   statusSession: [
     "resume_id", "alias", "tmux_name", "server", "ip", "hostname", "agent",
-    "project_dir", "version", "status", "task", "output", "progress", "score",
+    "project_dir", "codex_home", "version", "status", "task", "output", "progress", "score",
     "cpu_load_1min", "cpu_cores", "mem_total_gb", "mem_used_gb", "mem_avail_gb",
     "disk_total_gb", "disk_used_gb", "disk_avail_gb", "process_rss_bytes",
     "process_rss_mb", "process_cpu_pct", "process_uptime_seconds",

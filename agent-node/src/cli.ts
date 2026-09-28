@@ -35,6 +35,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { checkCodexCredentialSharing } from "./codex-auth-fingerprint.js";
+import { reportedCodexHomeField } from "./codex-home-report.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
@@ -1496,6 +1497,7 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
+    ...reportedCodexHomeField(RUNTIME, process.env.CODEX_HOME),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
@@ -1561,6 +1563,7 @@ const reportStatus = async (status: string, task?: string) => {
     // resume_id 时会整行 DELETE+INSERT,没带的列被清成 NULL;.49 之前的 hub 没有接手逻辑,
     // 这里带上至少让 agent-node 自己的每次上报都把 version 写回去。
     version: AGENT_NODE_VERSION,
+    ...reportedCodexHomeField(RUNTIME, process.env.CODEX_HOME),
     node_id: NODE_ID || undefined,
     session_id: activeSessionId,
     config_path: configFilePath || undefined,

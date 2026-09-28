@@ -133,6 +133,9 @@ for (const col of [
   // Project folder view — the same session answers files_list / file_read on the
   // rules-file doorbell (node-files.ts). Sticky, bound-token only, like above.
   { name: "files_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // Codex CODEX_HOME，和 project_dir 分开。没上报就留着上一次的值（换 resume_id
+  // 时由 report_status 的接手语句写回）。不是配置项，不进 config_snapshot。
+  { name: "codex_home", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }

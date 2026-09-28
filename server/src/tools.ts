@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
+import { sanitizeCodexHome } from "./codex-home-field.js";
 import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
@@ -524,6 +525,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       hostname: z.string().max(200).optional().describe("Agent hostname"),
       agent: z.string().max(100).optional().describe("Agent type (claude-code / codex / opencode)"),
       project_dir: z.string().max(1000).optional().describe("Agent working directory"),
+      // Codex 的 CODEX_HOME。放在顶层而不是 host 里：和 project_dir 一样是路径。
+      // 旧 hub 的参数对象不是 strict，不认识的键会被丢掉，节点不会掉线。
+      // `.catch(undefined)`：超长、类型不对都不能拒掉整份 report_status。
+      // 真正入库前再走 sanitizeCodexHome（相对路径和令牌形状不存）。
+      codex_home: z.string().max(1024).optional().catch(undefined),
       version: z.string().max(100).optional().describe("Agent version"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
@@ -731,7 +737,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Project folder view — same doorbell, ops files_list / file_read.
       files_capable: z.literal(true).optional(),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, codex_home: codexHomeRaw, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -860,7 +866,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           `SELECT tmux_name, server, ip, hostname, agent, project_dir, version, node_id, session_id, config_path,
                   channels, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
                   disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct,
-                  process_uptime_seconds, process_in_flight_count, external_schedules, registered_at
+                  process_uptime_seconds, process_in_flight_count, external_schedules, registered_at, codex_home
              FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3
              ORDER BY updated_at DESC LIMIT 1`,
           effectiveAlias, resume_id, sessionNetId,
@@ -942,6 +948,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
         if (filesCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
           db.run("UPDATE sessions SET files_capable = 1 WHERE resume_id = ?1", [resume_id]);
+        }
+        // 单独一条 UPDATE：上面的 INSERT 被 test698 按字节钉住，不能改。
+        // 这次带了合法路径就覆盖；没带就从被换掉的那行接手。两条都没有就不动，
+        // 同 resume_id 的心跳不会把已经记下的路径清掉。
+        const reportedCodexHome = sanitizeCodexHome(codexHomeRaw);
+        const carriedCodexHome = sanitizeCodexHome(handover?.codex_home);
+        const nextCodexHome = reportedCodexHome ?? carriedCodexHome;
+        if (nextCodexHome) {
+          db.run("UPDATE sessions SET codex_home = ?1 WHERE resume_id = ?2", [nextCodexHome, resume_id]);
         }
         if (host || proc) {
           db.run(
