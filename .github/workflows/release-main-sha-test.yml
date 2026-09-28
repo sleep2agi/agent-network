@@ -1,0 +1,25 @@
+name: Release main SHA guard test
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/release-main-sha-test.yml'
+      - '.github/scripts/verify-release-main.sh'
+      - 'tests/release-main-sha/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/release-main-sha-test.yml'
+      - '.github/scripts/verify-release-main.sh'
+      - 'tests/release-main-sha/**'
+permissions:
+  contents: read
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f tests/release-main-sha/Dockerfile -t release-main-sha-test .
+      - run: docker run --rm release-main-sha-test

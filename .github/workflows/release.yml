@@ -94,6 +94,10 @@ on:
       - 'commhub-server@v*'
   workflow_dispatch:
     inputs:
+      commit:
+        description: 'Full 40-character main commit SHA (required when publish=true)'
+        required: false
+        type: string
       package:
         description: 'Package to gate (agent-network / agent-node / commhub-server)'
         required: true
@@ -131,8 +135,21 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       dir: ${{ steps.resolve.outputs.dir }}
       tarball: ${{ steps.pack.outputs.tarball }}
+      commit: ${{ steps.source.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify and bind release source
+        id: source
+        env:
+          PUBLISH: ${{ inputs.publish || false }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          if [[ "$PUBLISH" == true ]]; then bash .github/scripts/verify-release-main.sh; fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -212,6 +229,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-tarball.outputs.commit }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -433,6 +452,8 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-tarball.outputs.commit }}
 
       - name: Grep PINNED_* + assert npm has those versions
         env:
@@ -517,6 +538,8 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-tarball.outputs.commit }}
 
       - name: Assert release notes have both Install and Upgrade sections
         env:
@@ -587,6 +610,8 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-tarball.outputs.commit }}
 
       # getting-started.md 里有一整套**带版本号的行为断言**(某个版本上第一条命令
       # 会怎样)。它们今天是真的(#952 逐条实跑过),但在发版那一刻同时变假,而且
@@ -659,6 +684,17 @@ jobs:
       contents: read
       id-token: write          # npm trusted publishing(OIDC)—— 无长期 token
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-tarball.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Recheck main ancestry before publishing
+        env:
+          PUBLISH: 'true'
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: bash .github/scripts/verify-release-main.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
