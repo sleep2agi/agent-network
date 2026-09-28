@@ -960,6 +960,7 @@ db.exec(`
     priority       TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('high', 'normal', 'low')),
     due_on         TEXT,
     assignee       TEXT,
+    client_id      TEXT,
     created_by     TEXT,
     created_at     TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
@@ -967,6 +968,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_requirements_network
     ON requirements(network_id, created_at DESC);
 `);
+try { db.exec("ALTER TABLE requirements ADD COLUMN client_id TEXT"); } catch {}
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_client ON requirements(network_id, client_id) WHERE client_id IS NOT NULL AND client_id != ''");
 
 // ── V3: licenses table ──
 db.exec(`

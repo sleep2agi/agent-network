@@ -97,14 +97,34 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const due = typeof body.due === "string" ? body.due.trim() : "";
     if (due && !dueOk(due)) return jsonError("invalid_due", 400);
     const assignee = typeof body.assignee === "string" ? body.assignee.trim().slice(0, 80) : "";
+    const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
+    if (clientId && !/^[A-Za-z0-9._-]{1,80}$/.test(clientId)) return jsonError("invalid_client_id", 400);
+    const column = typeof body.column === "string" && COLUMNS.has(body.column) ? body.column : "pool";
+    if (clientId) {
+      const existing = db.get<Row>(
+        `SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`,
+        networkId, clientId,
+      );
+      if (existing) return Response.json({ ok: true, requirement: toPublic(existing) });
+    }
     const id = `req_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
-    db.run(
-      `INSERT INTO requirements
-       (requirement_id, network_id, title, column_name, priority, due_on, assignee, created_by, created_at, updated_at)
-       VALUES (?1, ?2, ?3, 'pool', ?4, ?5, ?6, ?7, ?8, ?8)`,
-      [id, networkId, name, priority, due || null, assignee, ctx.auth?.userId ?? null, createdAt],
-    );
+    try {
+      db.run(
+        `INSERT INTO requirements
+         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, created_by, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)`,
+        [id, networkId, name, column, priority, due || null, assignee, clientId || null, ctx.auth?.userId ?? null, createdAt],
+      );
+    } catch {
+      if (!clientId) return jsonError("insert_failed", 500);
+      const existing = db.get<Row>(
+        `SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`,
+        networkId, clientId,
+      );
+      if (!existing) return jsonError("insert_failed", 500);
+      return Response.json({ ok: true, requirement: toPublic(existing) });
+    }
     const created = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, id)!;
     return Response.json({ ok: true, requirement: toPublic(created) }, { status: 201 });
   }

@@ -107,6 +107,25 @@ describe("requirements stay on the hub", () => {
     expect(denied.status).toBe(403);
   });
 
+  test("the same client_id does not create a second card", async () => {
+    const first = await api(ownerToken, "/api/requirements", {
+      method: "POST",
+      body: JSON.stringify({ name: "迁移甲", client_id: "local_card_1", column: "doing" }),
+    });
+    expect(first.status).toBe(201);
+    expect(first.body.requirement.column).toBe("doing");
+    const again = await api(ownerToken, "/api/requirements", {
+      method: "POST",
+      body: JSON.stringify({ name: "迁移甲", client_id: "local_card_1", column: "done" }),
+    });
+    expect(again.status).toBe(200);
+    expect(again.body.requirement.id).toBe(first.body.requirement.id);
+    expect(again.body.requirement.column).toBe("doing");
+    const listed = await api(ownerToken, "/api/requirements");
+    const matches = listed.body.requirements.filter((row: { id: string }) => row.id === first.body.requirement.id);
+    expect(matches.length).toBe(1);
+  });
+
   test("empty name and a bad date are rejected", async () => {
     const empty = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "  " }) });
     expect(empty.status).toBe(400);
