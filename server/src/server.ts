@@ -55,6 +55,7 @@ import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
+import { handleRequirementsRequest } from "./requirements.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
@@ -1625,6 +1626,16 @@ return Bun.serve({
       scope: restScope,
     });
     if (scheduledResponse) return withCors(req, scheduledResponse);
+
+    const requirementsResponse = await handleRequirementsRequest({
+      req,
+      url,
+      auth: restAuth,
+      isAdmin,
+      isNodeToken: requestToken(req).startsWith("ntok_"),
+      scope: restScope,
+    });
+    if (requirementsResponse) return withCors(req, requirementsResponse);
 
     // ── #473 REST: SSE connection detail (ops-only) ──
     // The per-key breakdown /health used to expose anonymously: keys are

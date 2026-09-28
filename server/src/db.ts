@@ -950,6 +950,24 @@ db.exec(`
     ON skillhub_skills(network_id, slug, version);
 `);
 
+// 需求池。长期卡片，按 network 隔离。不是 tasks。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS requirements (
+    requirement_id TEXT PRIMARY KEY,
+    network_id     TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    column_name    TEXT NOT NULL DEFAULT 'pool' CHECK(column_name IN ('pool', 'doing', 'done')),
+    priority       TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('high', 'normal', 'low')),
+    due_on         TEXT,
+    assignee       TEXT,
+    created_by     TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_requirements_network
+    ON requirements(network_id, created_at DESC);
+`);
+
 // ── V3: licenses table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS licenses (
