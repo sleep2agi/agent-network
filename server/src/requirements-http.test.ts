@@ -126,6 +126,30 @@ describe("requirements stay on the hub", () => {
     expect(matches.length).toBe(1);
   });
 
+  test("a card can bind a github issue and a bad link is rejected", async () => {
+    const created = await api(ownerToken, "/api/requirements", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "绑 issue",
+        issues: [{ url: "https://github.com/sleep2agi/agent-network-app/issues/472", title: "picker" }],
+      }),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.requirement.issues).toEqual([
+      { repo: "sleep2agi/agent-network-app", number: 472, title: "picker" },
+    ]);
+    const moved = await api(ownerToken, `/api/requirements/${created.body.requirement.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ column: "doing" }),
+    });
+    expect(moved.body.requirement.issues[0].number).toBe(472);
+    const bad = await api(ownerToken, `/api/requirements/${created.body.requirement.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ issues: ["javascript:alert(1)"] }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
   test("empty name and a bad date are rejected", async () => {
     const empty = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "  " }) });
     expect(empty.status).toBe(400);

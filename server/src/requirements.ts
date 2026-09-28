@@ -26,6 +26,7 @@ type Row = {
   priority: string;
   due_on: string | null;
   assignee: string | null;
+  issues_json: string | null;
   created_at: string;
 };
 
@@ -40,6 +41,59 @@ function dueOk(due: string): boolean {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
+const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const ISSUE_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/issues\/(\d+)\/?$/;
+
+function clipTitle(value: unknown): string {
+  return typeof value === "string" ? value.replace(/[\r\n\t]/g, " ").trim().slice(0, 120) : "";
+}
+
+function issueFromParts(repo: string, number: number, title: string) {
+  if (!REPO.test(repo) || !Number.isInteger(number) || number < 1 || number > 10_000_000) return null;
+  return { repo, number, title: clipTitle(title) };
+}
+
+function oneIssue(item: unknown) {
+  if (typeof item === "string") {
+    const m = ISSUE_URL.exec(item.trim());
+    return m ? issueFromParts(`${m[1]}/${m[2]}`, Number(m[3]), "") : null;
+  }
+  if (!item || typeof item !== "object") return null;
+  const row = item as Record<string, unknown>;
+  if (typeof row.url === "string") {
+    const m = ISSUE_URL.exec(row.url.trim());
+    if (m) return issueFromParts(`${m[1]}/${m[2]}`, Number(m[3]), clipTitle(row.title));
+  }
+  const repo = typeof row.repo === "string" ? row.repo.trim() : "";
+  const number = typeof row.number === "number" ? row.number : Number(row.number);
+  return issueFromParts(repo, number, clipTitle(row.title));
+}
+
+function normalizeIssues(raw: unknown) {
+  if (!Array.isArray(raw) || raw.length > 8) return null;
+  const out: { repo: string; number: number; title: string }[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const issue = oneIssue(item);
+    if (!issue) return null;
+    const key = `${issue.repo}#${issue.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(issue);
+  }
+  return out;
+}
+
+function storedIssues(raw: string | null) {
+  if (!raw) return [];
+  try {
+    const parsed = normalizeIssues(JSON.parse(raw));
+    return parsed ?? [];
+  } catch {
+    return [];
+  }
+}
+
 function toPublic(row: Row) {
   return {
     id: row.requirement_id,
@@ -49,6 +103,7 @@ function toPublic(row: Row) {
     due: row.due_on || "",
     column: row.column_name,
     createdAt: row.created_at,
+    issues: storedIssues(row.issues_json),
   };
 }
 
@@ -68,7 +123,7 @@ function canWrite(ctx: RequirementsRequestContext, networkId: string | null): bo
   return !ctx.isNodeToken && canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, created_at";
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at";
 
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
   const { req, url } = ctx;
@@ -100,6 +155,8 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
     if (clientId && !/^[A-Za-z0-9._-]{1,80}$/.test(clientId)) return jsonError("invalid_client_id", 400);
     const column = typeof body.column === "string" && COLUMNS.has(body.column) ? body.column : "pool";
+    const issues = body.issues === undefined ? [] : normalizeIssues(body.issues);
+    if (issues === null) return jsonError("invalid_issues", 400);
     if (clientId) {
       const existing = db.get<Row>(
         `SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`,
@@ -112,9 +169,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     try {
       db.run(
         `INSERT INTO requirements
-         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, created_by, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)`,
-        [id, networkId, name, column, priority, due || null, assignee, clientId || null, ctx.auth?.userId ?? null, createdAt],
+         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)`,
+        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt],
       );
     } catch {
       if (!clientId) return jsonError("insert_failed", 500);
@@ -134,8 +191,12 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const id = decodeURIComponent(match[1]);
   let body: Record<string, unknown>;
   try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
-  const column = typeof body.column === "string" ? body.column : "";
-  if (!COLUMNS.has(column)) return jsonError("invalid_column", 400);
+  const hasColumn = typeof body.column === "string";
+  const hasIssues = Object.prototype.hasOwnProperty.call(body, "issues");
+  if (!hasColumn && !hasIssues) return jsonError("invalid_column", 400);
+  if (hasColumn && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
+  const issues = hasIssues ? normalizeIssues(body.issues) : null;
+  if (hasIssues && issues === null) return jsonError("invalid_issues", 400);
   const params: unknown[] = [id];
   let sql = `SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`;
   sql = addNetworkScope(sql, params, ctx.scope);
@@ -143,10 +204,22 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   if (!row) return jsonError("requirement_not_found", 404);
   if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
   const updatedAt = new Date().toISOString();
-  db.run(
-    "UPDATE requirements SET column_name = ?1, updated_at = ?2 WHERE requirement_id = ?3",
-    [column, updatedAt, row.requirement_id],
-  );
+  if (hasColumn && hasIssues) {
+    db.run(
+      "UPDATE requirements SET column_name = ?1, issues_json = ?2, updated_at = ?3 WHERE requirement_id = ?4",
+      [body.column, JSON.stringify(issues), updatedAt, row.requirement_id],
+    );
+  } else if (hasColumn) {
+    db.run(
+      "UPDATE requirements SET column_name = ?1, updated_at = ?2 WHERE requirement_id = ?3",
+      [body.column, updatedAt, row.requirement_id],
+    );
+  } else {
+    db.run(
+      "UPDATE requirements SET issues_json = ?1, updated_at = ?2 WHERE requirement_id = ?3",
+      [JSON.stringify(issues), updatedAt, row.requirement_id],
+    );
+  }
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json({ ok: true, requirement: toPublic(updated) });
 }

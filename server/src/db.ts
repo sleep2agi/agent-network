@@ -961,6 +961,7 @@ db.exec(`
     due_on         TEXT,
     assignee       TEXT,
     client_id      TEXT,
+    issues_json    TEXT,
     created_by     TEXT,
     created_at     TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
@@ -969,6 +970,7 @@ db.exec(`
     ON requirements(network_id, created_at DESC);
 `);
 try { db.exec("ALTER TABLE requirements ADD COLUMN client_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE requirements ADD COLUMN issues_json TEXT"); } catch {}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_client ON requirements(network_id, client_id) WHERE client_id IS NOT NULL AND client_id != ''");
 
 // ── V3: licenses table ──
