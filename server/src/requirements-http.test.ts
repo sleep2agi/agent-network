@@ -120,6 +120,18 @@ describe("requirements stay on the hub", () => {
     expect(moved.body.requirement.column).toBe("doing");
   });
 
+  test("editing an existing card stores name priority due", async () => {
+    const edited = await api(ownerToken, `/api/requirements/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: "多端同步-改", priority: "low", due: "2026-12-01" }),
+    });
+    expect(edited.status).toBe(200);
+    expect(edited.body.requirement.name).toBe("多端同步-改");
+    expect(edited.body.requirement.priority).toBe("low");
+    expect(edited.body.requirement.due).toBe("2026-12-01");
+    expect(edited.body.requirement.column).toBe("doing");
+  });
+
   test("another network cannot see it", async () => {
     const listed = await api(otherToken, "/api/requirements");
     expect(listed.status).toBe(200);

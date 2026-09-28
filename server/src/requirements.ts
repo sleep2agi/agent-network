@@ -234,7 +234,11 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
   const hasColumn = 'column' in body;
   const hasIssues = Object.prototype.hasOwnProperty.call(body, "issues");
-  if (!hasColumn && !hasIssues && !('owner' in body) && !('participants' in body)) return jsonError('empty_patch', 400);
+  const hasName = 'name' in body;
+  const hasPriority = 'priority' in body;
+  const hasDue = 'due' in body;
+  const hasAssignee = 'assignee' in body;
+  if (!hasColumn && !hasIssues && !('owner' in body) && !('participants' in body) && !hasName && !hasPriority && !hasDue && !hasAssignee) return jsonError('empty_patch', 400);
   if (hasColumn && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
   const issues = hasIssues ? normalizeIssues(body.issues) : null;
   if (hasIssues && issues === null) return jsonError("invalid_issues", 400);
@@ -244,12 +248,33 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const row = db.get<Row>(sql, ...params);
   if (!row) return jsonError("requirement_not_found", 404);
   if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+  let name = row.title;
+  if (hasName) {
+    const n = typeof body.name === "string" ? body.name.trim() : "";
+    if (!n || n.length > 80) return jsonError("invalid_name", 400);
+    name = n;
+  }
+  let priority = row.priority;
+  if (hasPriority) {
+    if (typeof body.priority !== "string" || !PRIORITIES.has(body.priority)) return jsonError("invalid_priority", 400);
+    priority = body.priority;
+  }
+  let dueOn = row.due_on;
+  if (hasDue) {
+    const due = typeof body.due === "string" ? body.due.trim() : "";
+    if (due && !dueOk(due)) return jsonError("invalid_due", 400);
+    dueOn = due || null;
+  }
+  let assignee = row.assignee;
+  if (hasAssignee) {
+    assignee = typeof body.assignee === "string" ? body.assignee.trim().slice(0, 80) : "";
+  }
   let people;
   try { people = assignments(body, row.network_id, row); } catch (e) { return jsonError((e as Error).message, 400); }
   const updatedAt = new Date().toISOString();
   db.run(
-    "UPDATE requirements SET column_name = ?1, updated_at = ?2, owner_json = ?4, participants_json = ?5, issues_json = ?6 WHERE requirement_id = ?3",
-    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json],
+    "UPDATE requirements SET column_name = ?1, updated_at = ?2, owner_json = ?4, participants_json = ?5, issues_json = ?6, title = ?7, priority = ?8, due_on = ?9, assignee = ?10 WHERE requirement_id = ?3",
+    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json, name, priority, dueOn, assignee],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json({ ok: true, requirement: toPublic(updated) });
