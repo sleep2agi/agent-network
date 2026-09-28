@@ -58,12 +58,12 @@ describe("requirements stay on the hub", () => {
   test("typed assignments validate network membership, preserve kinds and clear explicitly", async () => {
     const { db } = await import('./db.js');
     const ownerId = db.get<{ owner_id: string }>('SELECT owner_id FROM networks WHERE network_id=?1', ownerNetwork)!.owner_id;
-    db.run('INSERT INTO nodes(node_id,node_name,alias,network_id) VALUES (?1,?2,?2,?3)', [ownerId, 'same-name', ownerNetwork]);
+    db.run('INSERT INTO nodes(node_id,node_name,alias,display_name,network_id) VALUES (?1,?2,?2,?3,?4)', [ownerId, 'same-name', '自定义 Agent 名', ownerNetwork]);
     db.run('INSERT INTO nodes(node_id,node_name,network_id) VALUES (?1,?2,?3)', ['foreign-person-node', 'foreign-node', 'other-network']);
     const people = await api(ownerToken, `/api/requirements/people?network_id=${ownerNetwork}`);
     expect(people.status).toBe(200);
     expect(people.body.people.some((p: any) => p.id === ownerId && p.kind === 'user')).toBe(true);
-    expect(people.body.people.some((p: any) => p.id === ownerId && p.kind === 'node')).toBe(true);
+    expect(people.body.people.some((p: any) => p.id === ownerId && p.kind === 'node' && p.name === '自定义 Agent 名')).toBe(true);
     expect(people.body.people.every((p: any) => p.networkId === ownerNetwork)).toBe(true);
     const user = { kind: 'user', id: ownerId };
     const node = { kind: 'node', id: ownerId };
