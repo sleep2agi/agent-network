@@ -1,0 +1,41 @@
+Requirements assignment increment — 2026-09-28
+Base: ca3c41ff7dedd222cba2568f3440f0b23428af24 (PR #2064)
+
+Docker oven/bun:1.3.14, read-only source, tmpfs database/dependency directory:
+bun install --frozen-lockfile && bun test src/requirements-http.test.ts
+Result: 9 pass, 0 fail, 43 assertions.
+Includes typed identities (same ID user/node), candidate network scope,
+participant dedup, partial assignment update, clearing, viewer/node-token
+rejection, foreign-card rejection, invalid/foreign member rejection, and all
+existing requirements create/move/migration regressions.
+
+Actual App transport -> this isolated Hub:
+PASS create through App transport and independent client read
+PASS move persists and second client observes it
+PASS real candidate query, assignment save/read, deduplication and clearing
+PASS migration into nonempty Hub and retry idempotency
+PASS viewer write denied without state change and foreign network cannot read
+REAL HUB INTEGRATION PASS
+Client script: App #475 tests/requirement-details/hub-integration.ts.
+Reproducible client source: sleep2agi/agent-network-app commit
+017d2035ac67e6a8032167fd8a368c361430cd3d (not an untracked local script).
+With that checkout mounted as /app and this repo server/ copied to /tmp/qa/server
+in oven/bun:1.3.14, run from /tmp/qa/server:
+bun install --frozen-lockfile && bun /app/tests/requirement-details/hub-integration.ts
+The source-owned Dockerfile is in the App repo at
+tests/requirement-details/Dockerfile.hub; the reported run used Bun 1.3.14,
+not that Dockerfile's older 1.3.1 base. No claim of running that Dockerfile.
+No production Hub/database/node changed. No release performed.
+
+An initial attempt with old Bun 1.3.1 failed to parse the existing beforeAll
+timeout overload. Reran using the repo CI version 1.3.14; did not weaken tests.
+
+Review follow-up: replaced SQLite-only PRAGMA with the existing additive ALTER
+and duplicate-column handling pattern, and preferred node display_name in people
+results. Reran this HTTP suite in Docker Bun 1.3.14: 9 pass / 43 assertions.
+This rerun uses SQLite; it does not claim a PostgreSQL end-to-end run.
+
+Rebased onto requirements-hub 2c7fcdc9 (GitHub issue bindings). Conflict resolution
+preserves issues_json in SELECT/INSERT/PATCH together with assignments. Repeated
+the affected Docker HTTP suite: 10 pass, 0 fail, 47 assertions, including the new
+base branch's GitHub issue binding case. Refreshed audit helper links to L1751.

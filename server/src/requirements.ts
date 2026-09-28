@@ -19,6 +19,8 @@ const PRIORITIES = new Set(["high", "normal", "low"]);
 const DUE = /^\d{4}-\d{2}-\d{2}$/;
 
 type Row = {
+  owner_json: string | null;
+  participants_json: string;
   requirement_id: string;
   network_id: string;
   title: string;
@@ -96,6 +98,8 @@ function storedIssues(raw: string | null) {
 
 function toPublic(row: Row) {
   return {
+    owner: row.owner_json ? JSON.parse(row.owner_json) : null,
+    participants: JSON.parse(row.participants_json || '[]'),
     id: row.requirement_id,
     name: row.title,
     priority: row.priority,
@@ -123,12 +127,47 @@ function canWrite(ctx: RequirementsRequestContext, networkId: string | null): bo
   return !ctx.isNodeToken && canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at";
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json";
+
+type PersonRef = { kind: 'user' | 'node'; id: string };
+function personRef(value: unknown, networkId: string): PersonRef {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_person');
+  const row = value as Record<string, unknown>;
+  if ((row.kind !== 'user' && row.kind !== 'node') || typeof row.id !== 'string' || !row.id.trim()) throw new Error('invalid_person');
+  const exists = row.kind === 'user'
+    ? db.get("SELECT 1 FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 AND m.user_id=?2", networkId, row.id)
+    : db.get("SELECT 1 FROM nodes WHERE network_id=?1 AND node_id=?2", networkId, row.id);
+  if (!exists) throw new Error('person_not_in_network');
+  return { kind: row.kind, id: row.id };
+}
+
+function assignments(body: Record<string, unknown>, networkId: string, current?: Row) {
+  const owner = 'owner' in body ? body.owner === null ? null : personRef(body.owner, networkId) : current?.owner_json ? JSON.parse(current.owner_json) : null;
+  let participants = current ? JSON.parse(current.participants_json || '[]') : [];
+  if ('participants' in body) {
+    if (!Array.isArray(body.participants) || body.participants.length > 100) throw new Error('invalid_participants');
+    const refs = body.participants.map(value => personRef(value, networkId));
+    participants = [...new Map(refs.map(ref => [`${ref.kind}:${ref.id}`, ref])).values()];
+  }
+  return { ownerJson: owner === null ? null : JSON.stringify(owner), participantsJson: JSON.stringify(participants) };
+}
 
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
   const { req, url } = ctx;
   if (url.pathname !== "/api/requirements" && !url.pathname.startsWith("/api/requirements/")) return null;
   if (ctx.isNodeToken) return jsonError("user_token_required", 403);
+
+  if (url.pathname === '/api/requirements/people' && req.method === 'GET') {
+    const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+    if (!networkId) return jsonError('network_id_required', 400);
+    const users = db.all<{ id: string; name: string }>(
+      "SELECT u.user_id AS id, COALESCE(NULLIF(u.display_name,''), u.username) AS name FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 ORDER BY name, id", networkId,
+    );
+    const nodes = db.all<{ id: string; name: string }>(
+      "SELECT node_id AS id, COALESCE(NULLIF(display_name,''), NULLIF(alias,''), node_name) AS name FROM nodes WHERE network_id=?1 ORDER BY name, id", networkId,
+    );
+    return Response.json({ ok: true, people: [...users.map(row => ({ ...row, kind: 'user', networkId })), ...nodes.map(row => ({ ...row, kind: 'node', networkId }))] });
+  }
 
   if (url.pathname === "/api/requirements" && req.method === "GET") {
     const params: unknown[] = [];
@@ -166,12 +205,14 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     }
     const id = `req_${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
+    let people;
+    try { people = assignments(body, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
     try {
       db.run(
         `INSERT INTO requirements
-         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)`,
-        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt],
+         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13)`,
+        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson],
       );
     } catch {
       if (!clientId) return jsonError("insert_failed", 500);
@@ -191,9 +232,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const id = decodeURIComponent(match[1]);
   let body: Record<string, unknown>;
   try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
-  const hasColumn = typeof body.column === "string";
+  const hasColumn = 'column' in body;
   const hasIssues = Object.prototype.hasOwnProperty.call(body, "issues");
-  if (!hasColumn && !hasIssues) return jsonError("invalid_column", 400);
+  if (!hasColumn && !hasIssues && !('owner' in body) && !('participants' in body)) return jsonError('empty_patch', 400);
   if (hasColumn && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
   const issues = hasIssues ? normalizeIssues(body.issues) : null;
   if (hasIssues && issues === null) return jsonError("invalid_issues", 400);
@@ -203,23 +244,13 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const row = db.get<Row>(sql, ...params);
   if (!row) return jsonError("requirement_not_found", 404);
   if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+  let people;
+  try { people = assignments(body, row.network_id, row); } catch (e) { return jsonError((e as Error).message, 400); }
   const updatedAt = new Date().toISOString();
-  if (hasColumn && hasIssues) {
-    db.run(
-      "UPDATE requirements SET column_name = ?1, issues_json = ?2, updated_at = ?3 WHERE requirement_id = ?4",
-      [body.column, JSON.stringify(issues), updatedAt, row.requirement_id],
-    );
-  } else if (hasColumn) {
-    db.run(
-      "UPDATE requirements SET column_name = ?1, updated_at = ?2 WHERE requirement_id = ?3",
-      [body.column, updatedAt, row.requirement_id],
-    );
-  } else {
-    db.run(
-      "UPDATE requirements SET issues_json = ?1, updated_at = ?2 WHERE requirement_id = ?3",
-      [JSON.stringify(issues), updatedAt, row.requirement_id],
-    );
-  }
+  db.run(
+    "UPDATE requirements SET column_name = ?1, updated_at = ?2, owner_json = ?4, participants_json = ?5, issues_json = ?6 WHERE requirement_id = ?3",
+    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json],
+  );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json({ ok: true, requirement: toPublic(updated) });
 }
