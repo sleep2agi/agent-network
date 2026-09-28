@@ -1,0 +1,10 @@
+2026-09-28 — release main SHA guard
+Docker node:22.23.0-bookworm (digest pinned in suite Dockerfile).
+Read-only guard and suite mounts, isolated /tmp tmpfs, local bare git origin.
+Executed bash /run.sh using the same guard called by release.yml.
+PASS: exact main SHA; older SHA still an ancestor of advanced main.
+PASS: reject missing SHA, short SHA, branch name, mismatched HEAD, unmerged SHA.
+PASS: nonpublishing feature test remains allowed.
+Exit 0. No npm publication, credentials, production services or real remote writes.
+Separately parsed workflow YAML in Docker Bun 1.3.14; commit input and publish
+recheck present. This does not claim a live GitHub Actions release has run.
