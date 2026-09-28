@@ -1,10 +1,12 @@
-# CommHub v0.9.0-preview.63
+# CommHub v0.9.0-preview.64
 
 本次小版本准备交付：按网络隔离的需求池、卡片状态和 GitHub issue 关联，
 以及人类/Agent 负责人和参与人的稳定身份绑定。卡片不是正在执行的节点 tasks，
 绑定 Agent 不会自动派单；节点令牌本版仍不能使用需求池接口。
 
-发布前置：身份绑定 PR #2065 必须已经合入 main。本说明不是已发布证明。
+身份绑定 PR #2065 已合入 main（524b30f4e5b4c0e5816550fc7e6c8738bd3fbbdd）。本说明不是已发布证明。
+main 的 server/package.json 实际版本为 preview.64；此前误用 preview.63 参数的
+Actions run 36408927591 被安装版本检查拒绝，publish 跳过，没有发布该错误版本。
 只从包含该实现的 main 完整 SHA 运行 release.yml，并保持 preview 通道。
 
 ## Install
@@ -12,7 +14,7 @@
 在获准安装的独立环境中安装精确版本（Hub 运行需要 Bun）：
 
 ```sh
-npm install -g @sleep2agi/commhub-server@0.9.0-preview.63
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.64
 ```
 
 启动、密钥和数据目录沿用仓库部署说明；不要把此命令当作生产变更授权。
@@ -20,7 +22,7 @@ npm install -g @sleep2agi/commhub-server@0.9.0-preview.63
 ## Upgrade
 
 ```sh
-npm install -g @sleep2agi/commhub-server@0.9.0-preview.63
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.64
 ```
 
 已有实例由运维在授权窗口备份数据库后按原服务管理方式重启。新增表和列为
