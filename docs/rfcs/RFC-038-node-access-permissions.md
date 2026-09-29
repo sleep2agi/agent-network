@@ -207,3 +207,109 @@ app 侧的流程如下:
 
 1. 要不要做「管理」这一档(第 4 步)?建议**先不做**,等真有成员需要改别人节点的规则时再上。前三步不依赖它。
 2. 老成员要不要统一收窄?建议**不收**。保持 `all`,由管理员逐个切换(§4.3)。
+
+## 8. 附:真正的 Agent 分组(需求 ②,2026-09-30 追加)
+
+Vincent 原话:「可以访问的 agent 的时候…可以设置为全部或者是分组…而不是一个一个去选，支持多种选择方式」。
+
+- **已做的(①,纯 app,agent-network-app#548)**:授权选择器里加了「按机器 / 按类型 / 全选搜索结果 / 清空」。这些都是**一次性**的批量勾选,最后仍然存成逐个节点的授权,**以后新建的 Agent 不会自动加入**;界面上写明了这一点。
+- **本节设计的(②,hub + app)**:真正的分组。授权可以直接给到一个组;组里加进新 Agent,被授权的成员**立刻**就能访问,不用再去勾一遍。
+
+### 8.1 模型
+
+组是管理员自由定义的:组名随便起,成员随便放。**不做**按机器、按类型的规则组,理由见 §8.6。
+
+```sql
+CREATE TABLE agent_groups (
+  group_id    TEXT PRIMARY KEY,           -- agrp_<uuid>
+  network_id  TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  description TEXT,
+  created_by  TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT,
+  UNIQUE (network_id, name)
+);
+CREATE TABLE agent_group_members (          -- 按 node_id(稳定,改名不丢)
+  group_id  TEXT NOT NULL, node_id TEXT NOT NULL,
+  added_by  TEXT, added_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (group_id, node_id)
+);
+CREATE TABLE network_member_group_grants (  -- 成员 × 组
+  network_id TEXT NOT NULL, user_id TEXT NOT NULL, group_id TEXT NOT NULL,
+  can_message INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (network_id, user_id, group_id)
+);
+```
+
+**为什么组授权要单独一张表,而不是往 `network_member_agent_grants` 上加一列 `group_id`**:
+
+1. 那张表带着 `CHECK ((node_id IS NULL) <> (alias IS NULL))`,SQLite 改不了 CHECK,组授权的行写不进去。
+2. 更要紧的是**旧 app 的 PUT 是整体替换**。旧 app 保存授权时只会带回它认得的 node_id 和 alias 两类授权;组授权如果放在同一张表里,就会被这次整体替换**悄悄删掉**。放在单独的表里,旧的 PUT 根本碰不到它。
+
+### 8.2 生效规则
+
+生效规则只改一处:`agent-access.ts` 里的 `visibleAgents()`。它现在按逐个节点的授权展开;改成在此基础上再并入「该成员被授权的组 → 这些组里的成员节点」。只算同一网络、而且 `nodes` 表里还存在的节点;已删除或已迁出的节点自然就不算了。
+
+- **动态**:往组里加一个节点,下一次请求这个节点就可见了。hub 现在就是每次请求现算、不做缓存,所以这一点天然成立。
+- **并集**:可见 = 直接授权 ∪ 组授权。可对话 = 任一来源给了 `can_message` 就算。
+- **执行点不变**:§2 里列的所有路径都经过 `canSeeAgent`、`canMessageAgent`、`addAgentNetworkScope` 和 `addOwnTrafficScope`,改了 `visibleAgents()` 就全部覆盖了。
+- **打开着的实时流**:组成员增删、组授权变化、删除组的时候,对受影响的成员调用 `closeUserStreamsInNetwork()`,让他们按新权限重连。已有的授权变更走的就是这条路。
+- **受限判据不变**:`isAgentRestricted()` 照旧;`agent_access='all'` 的成员不看组。
+
+### 8.3 API
+
+全部要求用户令牌,节点令牌一律 403。调用者限于网络 owner/admin 和 Hub 管理员。
+
+| 路由 | 说明 |
+|---|---|
+| `GET /api/networks/:id/agent-groups` | 组列表,每个组带 `member_count`、`granted_user_count` |
+| `POST /api/networks/:id/agent-groups {name, description?, node_ids?}` | 建组;同一网络内重名返回 409 |
+| `PATCH /api/networks/:id/agent-groups/:gid {name?, description?}` | 改名 |
+| `PUT /api/networks/:id/agent-groups/:gid/members {node_ids}` | 整体替换组成员;不属于本网络的节点返回 400,整批都不写 |
+| `DELETE /api/networks/:id/agent-groups/:gid` | 删组,同时删掉这个组上的所有授权;响应里带 `affected_user_ids` |
+| `GET/PUT …/members/:uid/agent-grants` | **向后兼容地加字段**:GET 多返回一个 `group_grants:[{group_id, name, can_message}]`,`grants` 的形状不变;PUT 新增可选的 `group_grants`。**不传 `group_grants` 就保持原样**,所以旧 app 的 PUT 不会动到组授权 |
+| `GET /api/networks/:id/members` | 每个成员多返回一个 `agent_group_count` |
+
+受限成员**看不到**组列表(403)。他只会通过名册看到最终能访问的那些 Agent。
+
+### 8.4 审计
+
+新增审计事件:`agent_group_created`、`agent_group_renamed`、`agent_group_deleted`(附带受影响成员的数量)、`agent_group_members_changed`(记 `added` 和 `removed` 两份 diff,不记全量)。原有的 `member_agent_grants_changed` 事件里,新增 `group_grants` 字段。这些事件都带 `network_id`,§4.4 的「网络负责人读本网络审计」能直接读到。
+
+### 8.5 兼容
+
+| 组合 | 行为 |
+|---|---|
+| 旧 app × 新 hub | 选择器只显示直接授权,组授权被保留(见 §8.1)。成员行的「N 个 Agent」只统计直接授权,可能偏少,但不会误删任何东西 |
+| 新 app × 旧 hub | 分组接口返回 404,app 就不显示「Agent 分组」入口和授权里的「组」一栏,其余功能照旧 |
+| 旧节点(`agent-node`) | 不涉及,组完全是 hub 侧的概念 |
+
+升级不改变任何人现有的可见范围:新表是空的,组授权为零。
+
+### 8.6 app
+
+- 设置 → 用户管理 → 新增「Agent 分组」:可以建组、改名、删除,删除时要二次确认并写明「会影响 N 个成员」。编辑组成员复用 ① 做的那套批量选择器(按机器、按类型、搜索、全选);这里存下来的是**组成员**,之后授权给组的成员会随之动态生效。
+- 成员授权对话框和成员页:在「仅指定」下面加一栏「分组」,每个组一行,可勾选,并带可对话开关;组下方用小字写明「组里新加的 Agent 会自动可见」。**桌面端**是对话框里的一个区块,**手机端**是一张单独的卡片,都用 settings-kit 的行。
+- **为什么不做规则组(比如「这台机器上的所有 Agent」)**:机器名来自节点自报的 `hostname`,节点换机器、重名都会让授权悄悄漂移,边界不够硬。先上自由定义的组,真有需要再加一个 `rule` 列。
+
+### 8.7 测试计划(正反两个方向)
+
+hub 侧写在 `agent-acl-groups-http.test.ts`,用临时库和真实的 `Bun.serve`。
+
+- **正向**:组授权后能看见、能派活;往组里加节点后立刻可见;移出组但仍有直接授权的节点照样能访问;直接授权与组授权的可对话取并集。
+- **反向**:从组里移出节点后,对它派活返回 403,且与「节点不存在」的返回逐字节相同;删组后访问消失;别的网络的 group_id 和 node_id 返回 400;节点令牌 403;受限成员 GET 组列表 403。
+- **兼容**:
+  - 用旧形状的 PUT(只带 `grants`)保存后,组授权仍在;
+  - `agent_access='all'` 的成员不受组影响。
+- **变异见证**:删掉 `visibleAgents()` 里的组展开,正向用例必须变红;删掉 PUT 的「不传就保持」,兼容用例必须变红。
+- **app 侧**:ck 单测,加上一次性 hub 上的端到端;桌面端和手机端各一套 boundingBox 测量。
+
+### 8.8 发布
+
+分三步,每一步都能单独发:
+
+1. **hub preview**:建表、`visibleAgents()` 并组、上 API、审计和测试。旧 app 照常使用。
+2. **app**:加上「Agent 分组」管理页和授权里的「分组」一栏。
+3. **可选**:加规则组(`rule` 列),等 Vincent 需要时再做。
+
+需要 Vincent 定的只有一件事:**组列表要不要对普通成员可见**。建议不可见,成员只需要看到最终能访问的 Agent。
