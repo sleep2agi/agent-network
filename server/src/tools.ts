@@ -5697,6 +5697,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const reqPerson = z.object({ kind: z.enum(["user", "node"]), id: z.string().min(1).max(200) });
   const reqChecklistItem = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(), text: z.string().min(1).max(500), done: z.boolean().optional() });
   const reqFields = {
+    tags: z.array(z.string()).max(10).optional().describe("Task labels; each 1–20 Unicode characters. Omit to preserve, [] to clear."),
     name: z.string().min(1).max(80).optional(),
     priority: z.enum(["high", "normal", "low"]).optional(),
     column: z.enum(["pool", "doing", "done"]).optional(),

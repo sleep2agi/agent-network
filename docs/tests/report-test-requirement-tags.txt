@@ -1,0 +1,16 @@
+Requirement tags / req_f77afb7f
+2026-09-29, base bcb0239f, isolated Docker only.
+
+Dockerfile: server/tests/tags/Dockerfile
+HTTP suite: 19 pass, 0 fail, 309 assertions.
+Startup migration: 1 pass (existing suite).
+MCP suite after adding tags to schema: 4 pass, 0 fail, 48 assertions.
+
+New assertions: trim/deduplicate; old PATCH name/status preserves tags;
+bad type/empty/too long/too many rejected; network-local aggregate; another
+network sees none; bound node can read; viewer write rejected; explicit [] clears.
+MCP update adds a tag, subsequent legacy-shaped upsert preserves it.
+Existing HTTP capability assertion updated to include tags after initial red.
+
+Temporary SQLite files under container /tmp; bootServer port 0, no published
+ports, no production database or 9200 access. No release, no version changes.
