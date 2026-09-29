@@ -2990,7 +2990,9 @@ return Bun.serve({
         for (const r of agentRows) byAgent[r.agent || "hub"] = (byAgent[r.agent || "hub"] ?? 0) + Number(r.n ?? 0);
       };
       const uiAgentParams: any[] = [callerUserId];
-      let uiAgentSql = "SELECT from_session AS agent, COUNT(*) AS n FROM user_inbox WHERE user_id = ?1 AND acked = 0";
+      // 人与人私信(kind=human_dm)的 from_session 是发信人的用户名,不是 Agent —— 不进按 Agent 的未读,
+      // 否则客户端会把发私信的人画成一个幽灵 Agent。私信未读走 /api/dm/threads。
+      let uiAgentSql = "SELECT from_session AS agent, COUNT(*) AS n FROM user_inbox WHERE user_id = ?1 AND acked = 0 AND kind != 'human_dm'";
       uiAgentSql = addHumanNetworkScope(uiAgentSql, uiAgentParams, restScope);
       addByAgent(db.all<{ agent: string | null; n: number }>(uiAgentSql + " GROUP BY from_session", ...uiAgentParams));
       const callerUsername = restAuth?.username ?? "";

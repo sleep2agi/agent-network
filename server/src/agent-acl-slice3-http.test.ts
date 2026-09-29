@@ -221,6 +221,9 @@ describe("human ↔ human DM (/api/dm): restricted members can talk to people", 
     expect((await send(daveToken, "POST", "/api/dm", { network_id: NET, to_username: "acl3_carol", message: "hi carol" })).status).toBe(200);
     const thread = await get(carolToken, `/api/dm?network_id=${NET}&with=${daveId}`);
     expect(thread.body.messages.map((m: any) => [m.direction, m.content])).toEqual([["in", "hi carol"], ["out", "hi dave"]]);
+    // 私信不进按 Agent 的未读(发信人不是 Agent)。
+    const inbox = await get(daveToken, `/api/messages?scope=user&network_id=${NET}`);
+    expect(inbox.body.unread_by_agent["acl3_carol"]).toBeUndefined();
     const daveThread = await get(daveToken, `/api/dm?network_id=${NET}&with=${carolId}`);
     expect(daveThread.body.messages.map((m: any) => m.direction)).toEqual(["out", "in"]);
   });
