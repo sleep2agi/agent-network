@@ -62,4 +62,4 @@ Which one: day to day → the desktop or Android package on the home page; Dashb
 
 ## Related
 
-- [Tasks](/en/guide/tasks), [Node run logs](/en/guide/node-run-logs), [Dashboard](/en/guide/dashboard), [CLI Commands](/en/guide/cli).
+- [Tasks](/en/guide/tasks), [Schedules](/en/guide/schedules), [Node run logs](/en/guide/node-run-logs), [Dashboard](/en/guide/dashboard), [CLI Commands](/en/guide/cli).
