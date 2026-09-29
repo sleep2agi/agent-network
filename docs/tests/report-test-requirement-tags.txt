@@ -45,3 +45,16 @@ CI-exact test831 build args TEST831_SOURCE_COMMIT / TEST831_RUNSH_BLOB,
 docker run --rm --network none: L0-L8 RESULT PASS.
 symbol-pins . and . --doc-root docs-site: drift0, unavailable-ref0;
 judged/skipped9/8 and18/2 respectively. This append is report-only.
+
+Rebase after docs #2098/#2099/#2100 onto main
+dc3a40f7d7b1ff80a90b15410ae4136d8a05e66a:
+Tested head c9366db01da126964dab092bc9a10109da912e6b.
+Resolved only test831 count/comment block: retained main files=113,
+applied our unique pins 8->7 and occurrences 22->20. No whole-file selection.
+requirements.ts, requirement-tags.ts, tools.ts and db.ts unchanged from
+previous head 91fa21c1. Reviewed full diff against origin/main; diff --check clean.
+CI-exact test831 Docker build SHA/blob args, --network none run:
+L0-L8 RESULT PASS; files113 / unique7 / occurrences20 / broken0.
+Docker symbol-pins . and . --doc-root docs-site both PASS:
+judged/skipped9/8 and18/2, drift0, unavailable-ref0. Skips are not verified.
+No server test rerun for this docs-only rebase delta. Report-only commit follows.
