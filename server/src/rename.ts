@@ -15,6 +15,7 @@
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { getUserNetworkRole, getNetworkMembers } from "./auth";
+import { canSeeAgent, isAgentRestricted } from "./agent-access";
 import { pushEvent } from "./push";
 import { eventBus } from "./event_bus";
 
@@ -35,7 +36,8 @@ export interface CanonicalAlias {
 
 function hasWriteAccess(userId: string, networkId: string): boolean {
   const role = getUserNetworkRole(userId, networkId);
-  return !!role && role !== "viewer";
+  // 改名是对 Agent 的写操作;受限成员(只看授权 Agent 的成员)不能改。
+  return !!role && role !== "viewer" && !isAgentRestricted(userId, networkId);
 }
 
 // Resolve committed alias renames (old -> new), following short chains such
@@ -214,8 +216,11 @@ export function commitRename(userId: string, txnId: string): RenameResult {
   // without this it would never receive node.renamed (#84 SSE channel fix:
   // N站马 confirmed the dashboard listens on the user channel). All members get
   // it, not just the owner, since any member's dashboard should reflect the rename.
+  // 多用户 Agent 权限:受限成员只收到他被授权的那个 Agent 的改名(否则等于把 alias 广播给他)。
   for (const member of getNetworkMembers(txn.network_id)) {
-    if (member.username) pushEvent(member.username, renamedEvent, txn.network_id);
+    if (!member.username) continue;
+    if (!canSeeAgent(member.user_id, txn.network_id, { alias: txn.new_alias, nodeId: renamedNode?.node_id ?? null })) continue;
+    pushEvent(member.username, renamedEvent, txn.network_id);
   }
 
   return { ok: true, txn_id: txnId };

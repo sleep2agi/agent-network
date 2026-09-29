@@ -112,7 +112,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-每行 6 字段对照 [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L347) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
+每行 6 字段对照 [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L364) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
 
 ### DELETE /api/auth/tokens/:id
 
@@ -135,7 +135,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L395) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
+| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L413) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
 
 写 audit log `action='token_revoked'`。撤销后该 token 的下一次请求拿 401 `invalid token`。
 
@@ -199,6 +199,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/members \
 |------|------|:----:|------|
 | `user_id` | string | &check; | 目标用户 ID |
 | `role` | enum | | `admin` / `member` / `viewer`（默认 `member`） |
+| `agent_access` | enum | | `granted`(默认,只看授权的 Agent)/ `all`(完全信任的成员);见[用户与 Agent 权限端点](#用户与-agent-权限端点) |
 
 **响应**（成功）：
 
@@ -356,6 +357,85 @@ curl -X POST http://localhost:9200/api/networks/join \
 `anet network join` CLI 拿到该响应后会自动切换到加入的 network（即 `~/.anet/config.json` 的 `network_id` 字段更新为 `res.network_id`），并打印 `Joined network as <role>`。同时 server 自动颁发一个 `network_id` 绑定的 token 给加入者（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `"auto-join", "full"` `name='auto-join' scope='full'`），写 audit `network_joined`。
 
 ---
+
+## 用户与 Agent 权限端点
+
+多用户账号:Hub 管理员(或网络 owner / admin)建号,新成员**默认看不到任何 Agent**,在「可访问的 Agent」里逐个授权。人与人之间的私信不受影响。
+
+**判定规则**(`server/src/agent-access.ts`):网络里 `role` 为 `member` / `viewer`、`agent_access` 不是 `all`、且不是 Hub 管理员的用户是**受限成员**。受限成员:
+
+- 只看得到授权给他的 Agent(`/api/status`、`/api/nodes`、MCP `get_all_status` / `get_session_status`、需求看板的人员选择器);
+- 只能给 `can_message=true` 的授权 Agent 发任务 / 消息,发件人固定为自己的用户名;
+- 任务、inbox、task_events 只看得到**自己与授权 Agent 之间**的往来,看不到别人(包括 owner)和同一个 Agent 的对话;
+- 不能订阅 Agent 的 SSE 频道(即使已授权——那个频道推的是所有人发给它的任务原文),网络观察流只收到自己是一端的路由事件;
+- 不能持有网络令牌(`ntok_` / 邀请码令牌):签发被拒,升级前已签发的在他变成受限后解析失败;
+- 文件只能下载自己上传的、或对方(授权 Agent / 私信发件人)发给他的附件;也不能把看不见的 `file_id` 当附件转给 Agent;
+- 其余面向 Agent 的端点(节点配置 / 日志 / 文件 / 规则 / 改名 / 排程 / 创建节点 / 广播 / 统计)对受限网络 **fail-closed**:整网不返回、写入 403;没列在白名单里的 MCP 工具返回 `agent_access_restricted`。
+
+owner / admin 角色与 Hub 管理员不受影响。**升级前已存在的成员行** `agent_access` 默认为 `all`,可见范围不因升级而变;此后新加入的 member / viewer(管理员建号、`POST /members`、邀请码)默认 `granted`。
+
+⚠️ 授权一个 Agent,等于信任这个人使用该 Agent 能做到的事(Agent 自己的网络令牌能读网络里的文件、调用工具)。
+
+### POST /api/admin/users
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)(`adminCreateUser`)
+
+建一个用户。规则与 `/api/auth/register` 相同(用户名 2–50 位、密码 ≥ 8 且不是常见密码、自动建个人网络),但**不返回令牌**——用户自己登录才拿令牌。
+
+- Hub 管理员:可以不带 `network_id`;
+- 某网络的 owner / admin:必须带自己管理的 `network_id`(新用户进这个网络);网络 admin 不能建 `role=admin` 的成员。
+
+```bash
+curl -X POST http://localhost:9200/api/admin/users \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"<至少 8 位>","display_name":"Alice","network_id":"net_xxx","role":"member"}'
+```
+
+**响应**:
+
+```json
+{ "ok": true, "user": { "user_id": "u_abc", "username": "alice", "role": "user" }, "personal_network_id": "net_own", "membership": { "network_id": "net_xxx", "role": "member", "agent_access": "granted" } }
+```
+
+| 状态 | `error` | 触发 |
+|------|---------|------|
+| 400 | `username already taken` / `password must be at least 8 characters` / `password is too common` | register() 的规则 |
+| 403 | `admin required` / `owner/admin required` | 调用者无权 |
+| 404 | `network_not_found` | `network_id` 不存在 |
+| 409 | `username_collides_with_agent_alias` | 用户名与该网络某个 Agent 的 alias 相同(用户频道按用户名寻址,撞名会串流量);账号不会落库 |
+
+写 audit log `admin_user_created`(被拒时 `admin_user_create_denied`)。
+
+### GET /api/admin/users
+
+Hub 管理员专用。返回全部用户,每人带 `networks: [{network_id, network_name, role, agent_access}]`,不含密码哈希。
+
+### GET / PUT /api/networks/:id/members/:user_id/agent-grants
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/agent-access.ts)(`replaceAgentGrants`)
+
+读 / 整体替换某成员可访问的 Agent。owner / admin / Hub 管理员可调;网络 admin 不能改 owner / 其他 admin。只接受用户令牌。
+
+```bash
+curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grants \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"grants":[{"node_id":"node_x"},{"node_id":"node_y","can_message":false}]}'
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `grants` | array | 每项 `{node_id}` 或 `{alias}`(只给没有 node_id 的旧会话)+ 可选 `can_message`(默认 `true`)。也接受 `node_id` 字符串数组。整体替换 |
+| `agent_access` | `all` \| `granted` | 可选。`all` = 解除限制(旧语义),`granted` = 只看授权的 |
+
+任何一项不是本网络的 Agent → 400 `agent_not_in_network`,整批不写。成功后写 audit log `member_agent_grants_changed`,并断开该成员已连着的观察流 / 用户流让它按新权限重连。
+
+**响应**:`{ ok, network_id, user_id, agent_access, restricted, grants: [{node_id, alias, can_message}] }`(GET 另带 `role`)。
+
+### GET /api/networks/:id/humans
+
+任何成员(含受限成员)都能调:网络里的人类成员通讯录,只有 `user_id` / `username` / `display_name`。给受限成员选私信对象用(私信走 MCP `send_desktop_message`)。
+
+`GET /api/networks/:id/members` 的每一项另带 `agent_access`(生效值)与 `agent_grant_count`;`POST /api/networks/:id/members` 接受可选 `agent_access`(缺省 `granted`);`GET /api/auth/me` 的 `networks[]` 另带 `agent_access`,客户端据此显示「还没有被分配任何 Agent,请联系管理员」。
 
 ## 文件端点
 

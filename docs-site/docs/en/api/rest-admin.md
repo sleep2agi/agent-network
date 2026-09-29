@@ -112,7 +112,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L347) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
+The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L364) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
 
@@ -135,7 +135,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L395) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L413) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
 
 Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 
@@ -199,6 +199,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/members \
 |------|------|:----:|------|
 | `user_id` | string | &check; | Target user ID |
 | `role` | enum | | `admin` / `member` / `viewer` (default `member`) |
+| `agent_access` | enum | | `granted` (default, only granted agents) / `all` (fully trusted member); see [Users & Agent Access Endpoints](#users-agent-access-endpoints) |
 
 **Response** (success):
 
@@ -356,6 +357,85 @@ curl -X POST http://localhost:9200/api/networks/join \
 After receiving this response, the `anet network join` CLI auto-switches to the joined network (updating the `network_id` field in `~/.anet/config.json` to `res.network_id`) and prints `Joined network as <role>`. The server also auto-issues a network-bound token for the joiner ([`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `"auto-join", "full"`, `name='auto-join' scope='full'`) and writes a `network_joined` audit row.
 
 ---
+
+## Users & Agent Access Endpoints
+
+Multi-user accounts: a hub admin (or a network owner / admin) creates accounts, and a new member **sees no agents by default** until agents are granted one by one. Human-to-human direct messages are not affected.
+
+**Rule** (`server/src/agent-access.ts`): a user whose network `role` is `member` / `viewer`, whose `agent_access` is not `all`, and who is not a hub admin is a **restricted member**. A restricted member:
+
+- sees only the agents granted to them (`/api/status`, `/api/nodes`, MCP `get_all_status` / `get_session_status`, the requirements people picker);
+- can send tasks / messages only to granted agents with `can_message=true`, always as their own username;
+- sees only tasks, inbox rows and task events **between themselves and a granted agent** — never other people's (including the owner's) conversations with the same agent;
+- cannot subscribe to an agent's SSE channel (even a granted one — that channel carries everyone's tasks to it); the network observer stream only carries routing events they are part of;
+- cannot hold network tokens (`ntok_` / invite tokens): minting is refused, and tokens issued before the restriction stop resolving;
+- can download only files they uploaded or that the other side (a granted agent, a DM sender) attached for them, and cannot forward a `file_id` they cannot see to an agent;
+- gets **fail-closed** behaviour on every other agent-facing endpoint (node config / logs / files / rules / rename / schedules / node creation / broadcast / stats): nothing is returned for the restricted network and writes are 403; MCP tools outside the allow-list return `agent_access_restricted`.
+
+Owners / admins and hub admins are unaffected. **Membership rows that existed before the upgrade** default to `agent_access='all'`, so nobody's visibility changes on upgrade; members / viewers added afterwards (admin-created, `POST /members`, invite codes) default to `granted`.
+
+⚠️ Granting an agent means trusting that person with whatever the agent can do (the agent's own network token can read files in the network and call tools).
+
+### POST /api/admin/users
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) (`adminCreateUser`)
+
+Creates a user with the same rules as `/api/auth/register` (username 2–50 chars, password ≥ 8 and not a common one, a personal network is created) but **returns no tokens** — the user gets tokens by logging in.
+
+- Hub admin: `network_id` optional;
+- Network owner / admin: must pass a `network_id` they manage (the new user joins it); a network admin cannot create `role=admin` members.
+
+```bash
+curl -X POST http://localhost:9200/api/admin/users \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"<at least 8 chars>","display_name":"Alice","network_id":"net_xxx","role":"member"}'
+```
+
+**Response**:
+
+```json
+{ "ok": true, "user": { "user_id": "u_abc", "username": "alice", "role": "user" }, "personal_network_id": "net_own", "membership": { "network_id": "net_xxx", "role": "member", "agent_access": "granted" } }
+```
+
+| Status | `error` | When |
+|------|---------|------|
+| 400 | `username already taken` / `password must be at least 8 characters` / `password is too common` | register() rules |
+| 403 | `admin required` / `owner/admin required` | caller not allowed |
+| 404 | `network_not_found` | unknown `network_id` |
+| 409 | `username_collides_with_agent_alias` | the username equals an agent alias in that network (user channels are addressed by username); the account is not created |
+
+Writes audit log `admin_user_created` (`admin_user_create_denied` when refused).
+
+### GET /api/admin/users
+
+Hub admin only. Returns every user with `networks: [{network_id, network_name, role, agent_access}]`; no password hashes.
+
+### GET / PUT /api/networks/:id/members/:user_id/agent-grants
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/agent-access.ts) (`replaceAgentGrants`)
+
+Read / replace the agents a member can access. Owner / admin / hub admin; a network admin cannot change an owner or another admin. User tokens only.
+
+```bash
+curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grants \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"grants":[{"node_id":"node_x"},{"node_id":"node_y","can_message":false}]}'
+```
+
+| Field | Type | Notes |
+|------|------|------|
+| `grants` | array | Each item `{node_id}` or `{alias}` (only for legacy sessions without a node_id) + optional `can_message` (default `true`). A plain array of `node_id` strings is also accepted. Replaces the whole set |
+| `agent_access` | `all` \| `granted` | Optional. `all` lifts the restriction (legacy semantics), `granted` restricts to grants |
+
+Any item that is not an agent of this network → 400 `agent_not_in_network`, nothing is written. On success writes audit log `member_agent_grants_changed` and drops the member's open observer / user streams so they reconnect under the new access.
+
+**Response**: `{ ok, network_id, user_id, agent_access, restricted, grants: [{node_id, alias, can_message}] }` (GET also returns `role`).
+
+### GET /api/networks/:id/humans
+
+Any member (restricted ones included): the network's human directory, with only `user_id` / `username` / `display_name`, for picking a DM recipient (DMs go through MCP `send_desktop_message`).
+
+Each `GET /api/networks/:id/members` item also carries `agent_access` (effective value) and `agent_grant_count`; `POST /api/networks/:id/members` accepts an optional `agent_access` (default `granted`); `GET /api/auth/me` `networks[]` carries `agent_access`, which clients use to show "no agents assigned yet, ask an admin".
 
 ## File Endpoints
 

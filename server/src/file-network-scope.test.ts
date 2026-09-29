@@ -108,13 +108,14 @@ const N2 = nonAdminUserB.networkId;
 const N3 = seedUser.networkId;
 const N_FAKE = `net_503fake${STAMP}`;
 
-if (!addNetworkMember(N1, nonAdminUserB.userId, "member", nonAdminUserA.userId).ok) {
+// 多用户 Agent 权限:新成员默认只看授权 Agent;本测试测的是「完全信任的成员」旧语义,显式 agent_access=all。
+if (!addNetworkMember(N1, nonAdminUserB.userId, "member", nonAdminUserA.userId, { agentAccess: "all" }).ok) {
   throw new Error("fixture: userB → N1 member failed");
 }
 // The admin needs write access to N1 to be issued a node ntok_ there
 // (createNetworkTokenForNode refuses non-members and viewers). That
 // token is the D15 probe: a ntok_ ISSUED BY an admin.
-if (!addNetworkMember(N1, adminUser.userId, "member", nonAdminUserA.userId).ok) {
+if (!addNetworkMember(N1, adminUser.userId, "member", nonAdminUserA.userId, { agentAccess: "all" }).ok) {
   throw new Error("fixture: admin → N1 member failed");
 }
 // viewerOnlyUser must hold exactly one network, with role viewer, so the
@@ -122,15 +123,15 @@ if (!addNetworkMember(N1, adminUser.userId, "member", nonAdminUserA.userId).ok) 
 // reachable. register() makes everyone owner of a default network, so
 // that membership is dropped here.
 db.run("DELETE FROM network_members WHERE user_id = ?1", [viewerOnlyUser.userId]);
-if (!addNetworkMember(N1, viewerOnlyUser.userId, "viewer", nonAdminUserA.userId).ok) {
+if (!addNetworkMember(N1, viewerOnlyUser.userId, "viewer", nonAdminUserA.userId, { agentAccess: "all" }).ok) {
   throw new Error("fixture: viewerOnly → N1 viewer failed");
 }
 // mixedUser can write in N1 but only read in N2 — U14 asserts that an
 // explicit param pointing at the viewer network is refused.
-if (!addNetworkMember(N1, mixedUser.userId, "member", nonAdminUserA.userId).ok) {
+if (!addNetworkMember(N1, mixedUser.userId, "member", nonAdminUserA.userId, { agentAccess: "all" }).ok) {
   throw new Error("fixture: mixed → N1 member failed");
 }
-if (!addNetworkMember(N2, mixedUser.userId, "viewer", nonAdminUserB.userId).ok) {
+if (!addNetworkMember(N2, mixedUser.userId, "viewer", nonAdminUserB.userId, { agentAccess: "all" }).ok) {
   throw new Error("fixture: mixed → N2 viewer failed");
 }
 

@@ -206,7 +206,8 @@ describe("/api/host-supervisors — default_workdir_root visibility", () => {
     if (!m.ok || !m.token) throw new Error("member register failed");
     memberTok = m.token;
     const memberId = login(`wd_member_${sfx}`, pw).user!.user_id;
-    const add = addNetworkMember(restNet, memberId, "member");
+    // 多用户 Agent 权限:新成员默认只看授权 Agent;本测试测的是「完全信任的成员」旧语义,显式 agent_access=all。
+    const add = addNetworkMember(restNet, memberId, "member", undefined, { agentAccess: "all" });
     if (!add.ok) throw new Error("add member failed: " + add.error);
     const { bootServer } = await import("./server.js");
     server = bootServer({ port: 0, hostname: "127.0.0.1" });

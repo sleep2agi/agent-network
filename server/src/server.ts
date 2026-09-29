@@ -10,14 +10,16 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
-import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX } from "./push.js";
+import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
-import { addNetworkScope, canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
+import { canMessageAgent, isAgentRestricted, listAgentGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds } from "./agent-access.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
-import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
@@ -353,6 +355,7 @@ export function normalizeEntry(
 export function authorizeFileDownload(
   principal: Principal,
   entry: { ownerId: string | null; networkId: string | null },
+  fileId?: string,
 ): boolean {
   if (principal.kind === "legacy-master") return true;
   if (principal.kind === "admin-utok") return true;
@@ -360,7 +363,11 @@ export function authorizeFileDownload(
   if (entry.networkId !== null) {
     if (principal.kind === "anonymous" || principal.kind === "dev-open-anon") return false;
     if (principal.kind === "ntok") return principal.boundNetworkId === entry.networkId;
-    return !!getUserNetworkRole(principal.userId, entry.networkId);
+    if (!getUserNetworkRole(principal.userId, entry.networkId)) return false;
+    // 多用户 Agent 权限:受限成员只能下载自己传的,或者出现在自己与授权 Agent 往来 / 自己收件箱里的文件。
+    if (!isAgentRestricted(principal.userId, entry.networkId)) return true;
+    if (entry.ownerId !== null && entry.ownerId === principal.userId) return true;
+    return !!fileId && restrictedMemberSeesFile(principal.userId, principal.username, entry.networkId, fileId);
   }
 
   if (principal.kind === "ntok" || principal.kind === "utok") {
@@ -892,7 +899,16 @@ return Bun.serve({
       if (!observerRole) {
         return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       }
-      return createNetworkObserverStream(observedNetId);
+      // 多用户 Agent 权限:受限成员只收到自己是一端的路由事件(自己发的 / 发给自己的),
+      // 看不到网络里别人和各个 Agent 之间的流量。
+      if (isAgentRestricted(authCtx.userId, observedNetId)) {
+        const me = authCtx.username;
+        return createNetworkObserverStream(observedNetId, {
+          subscriberUserId: authCtx.userId,
+          eventFilter: (event) => event.from === me || event.to === me,
+        });
+      }
+      return createNetworkObserverStream(observedNetId, { subscriberUserId: authCtx.userId });
     }
 
     // GET /events/users/me?network_id=... → Desktop/user-client stream.
@@ -1001,6 +1017,15 @@ return Bun.serve({
       }
       if (sessionName === authCtx.username) {
         return createSSEStream(sessionName, scopedNetId);
+      }
+      // 多用户 Agent 权限:Agent 频道推的是**所有人**发给这个 Agent 的任务原文,
+      // 受限成员即使被授权了这个 Agent 也不能订阅(他只该看到自己与它的往来,走自己的用户名频道)。
+      // 与「频道不存在」同一个 403 文案,不给 alias 探测留差异。
+      if (isAgentRestricted(authCtx.userId, scopedNetId)) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "channel not allowed: must be your username or an existing agent in your network"
+        }, { status: 403 }));
       }
       const utokSession = db.get<any>(
         "SELECT 1 FROM sessions WHERE alias = ?1 AND network_id = ?2",
@@ -1317,6 +1342,78 @@ return Bun.serve({
       }
     }
 
+    // ── 多用户 Agent 权限:成员可访问的 Agent(owner/admin 管理) ──
+    // GET  → { agent_access: 'all'|'granted', grants: [{node_id, alias, can_message}] }
+    // PUT  { grants?: [{node_id | alias, can_message?}] | string[], agent_access?: 'all'|'granted' } → 整体替换
+    const grantsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/agent-grants$/);
+    if (grantsMatch && (req.method === "GET" || req.method === "PUT")) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      // 授权是用户层面的管理动作,网络令牌(节点身份)不能改人的权限。
+      if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      const netId = decodeURIComponent(grantsMatch[1]);
+      const targetUid = decodeURIComponent(grantsMatch[2]);
+      const hubAdmin = resolved.user.role === "admin";
+      const callerRole = getUserNetworkRole(resolved.user.user_id, netId);
+      if (!hubAdmin && callerRole !== "owner" && callerRole !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+      }
+      const targetRole = getUserNetworkRole(targetUid, netId);
+      if (!targetRole) return withCors(req, Response.json({ ok: false, error: "member_not_found" }, { status: 404 }));
+      if (req.method === "GET") {
+        return withCors(req, Response.json({
+          ok: true,
+          network_id: netId,
+          user_id: targetUid,
+          role: targetRole,
+          agent_access: getAgentAccessMode(netId, targetUid),
+          restricted: isAgentRestricted(targetUid, netId),
+          grants: listAgentGrants(netId, targetUid),
+        }));
+      }
+      // 网络 admin 不能改 owner / 其他 admin 的授权(对他们本来也不生效,但别让 admin 去碰平级)。
+      if (!hubAdmin && callerRole !== "owner" && (targetRole === "owner" || targetRole === "admin")) {
+        return withCors(req, Response.json({ ok: false, error: "owner required" }, { status: 403 }));
+      }
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined) {
+        return withCors(req, Response.json({ ok: false, error: "grants or agent_access required" }, { status: 400 }));
+      }
+      const result = replaceAgentGrants({
+        networkId: netId,
+        userId: targetUid,
+        grants: body.grants ?? body.node_ids,
+        agentAccess: body.agent_access,
+        actorUserId: resolved.user.user_id,
+      });
+      if (!result.ok) {
+        return withCors(req, Response.json({ ok: false, error: result.error, ...(result.detail ? { detail: result.detail } : {}) }, { status: result.status }));
+      }
+      logAudit(resolved.user.user_id, resolved.user.username, "member_agent_grants_changed", "network", netId,
+        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })) }).slice(0, 4000),
+        undefined, netId);
+      // 已连着的观察流 / 用户流按旧权限鉴权过,断开让它按新权限重连。
+      closeUserStreamsInNetwork(netId, targetUid);
+      return withCors(req, Response.json({ ok: true, network_id: netId, user_id: targetUid, agent_access: result.agent_access, restricted: isAgentRestricted(targetUid, netId), grants: result.grants }));
+    }
+
+    // ── 多用户:网络里的人类成员通讯录 —— 任何成员(含受限成员)都能看,只有身份字段 ──
+    const humansMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/humans$/);
+    if (humansMatch && req.method === "GET") {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const netId = decodeURIComponent(humansMatch[1]);
+      if (resolved.networkId && resolved.networkId !== netId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      if (resolved.user.role !== "admin" && !getUserNetworkRole(resolved.user.user_id, netId)) {
+        return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      }
+      return withCors(req, Response.json({ ok: true, network_id: netId, humans: getNetworkHumans(netId) }));
+    }
+
     // ── V3.13: Network members + invites ──
     const membersMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members(?:\/([^/]+))?$/);
     if (membersMatch) {
@@ -1337,21 +1434,31 @@ return Bun.serve({
       if (req.method === "POST") {
         if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
         const body = await req.json() as any;
-        const result = addNetworkMember(netId, body.user_id, body.role || "member", resolved.user.user_id);
-        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"}`);
+        // agent_access 缺省 'granted'(新成员看不到任何 Agent);owner/admin 可显式传 'all' 加一个完全信任的成员。
+        if (body.agent_access !== undefined && body.agent_access !== "all" && body.agent_access !== "granted") {
+          return withCors(req, Response.json({ ok: false, error: "invalid_agent_access" }, { status: 400 }));
+        }
+        const result = addNetworkMember(netId, body.user_id, body.role || "member", resolved.user.user_id, { agentAccess: body.agent_access });
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"} agent_access=${body.agent_access === "all" ? "all" : "granted"}`);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       }
       if (req.method === "PUT" && targetUid) {
         if (callerRole !== "owner") return withCors(req, Response.json({ ok: false, error: "owner required" }, { status: 403 }));
         const body = await req.json() as any;
         const result = updateMemberRole(netId, targetUid, body.role);
-        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_role_changed", "network", netId, `${targetUid} → ${body.role}`);
+        if (result.ok) {
+          logAudit(resolved.user.user_id, resolved.user.username, "member_role_changed", "network", netId, `${targetUid} → ${body.role}`);
+          closeUserStreamsInNetwork(netId, targetUid);
+        }
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       }
       if (req.method === "DELETE" && targetUid) {
         if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
         const result = removeNetworkMember(netId, targetUid);
-        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_removed", "network", netId, targetUid);
+        if (result.ok) {
+          logAudit(resolved.user.user_id, resolved.user.username, "member_removed", "network", netId, targetUid);
+          closeUserStreamsInNetwork(netId, targetUid);
+        }
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       }
     }
@@ -1383,6 +1490,39 @@ return Bun.serve({
       return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
     }
 
+    // ── 多用户账号:管理员建号 / 列用户 ──
+    // POST {username, password, display_name?, email?, network_id?, role?}
+    //   Hub 管理员:任意;某网络 owner/admin:只能带上自己管的 network_id(新用户进这个网络)。
+    //   新成员默认 agent_access='granted' —— 看不到任何 Agent,等管理员在 agent-grants 里授权。
+    // GET  → Hub 管理员:全部用户 + 每人所在网络 / 角色 / agent_access。
+    if (url.pathname === "/api/admin/users" && (req.method === "GET" || req.method === "POST")) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      const hubAdmin = resolved.user.role === "admin";
+      if (req.method === "GET") {
+        if (!hubAdmin) return withCors(req, Response.json({ ok: false, error: "admin required" }, { status: 403 }));
+        return withCors(req, Response.json({ ok: true, users: listUsersWithMemberships() }));
+      }
+      const clientIP = getClientIP(req, server);
+      if (!checkRateLimit(`admin-users:${clientIP}`, 30)) {
+        return withCors(req, Response.json({ ok: false, error: "too many requests, try again later" }, { status: 429 }));
+      }
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+      const result = adminCreateUser(body, { userId: resolved.user.user_id, isHubAdmin: hubAdmin });
+      if (!result.ok) {
+        logAudit(resolved.user.user_id, resolved.user.username, "admin_user_create_denied", "user", undefined,
+          JSON.stringify({ username: String(body.username ?? "").slice(0, 50), network_id: body.network_id ?? null, error: result.error }), clientIP);
+        return withCors(req, Response.json({ ok: false, error: result.error }, { status: result.status }));
+      }
+      logAudit(resolved.user.user_id, resolved.user.username, "admin_user_created", "user", result.user.user_id,
+        JSON.stringify({ username: result.user.username, membership: result.membership }), clientIP, result.membership?.network_id);
+      return withCors(req, Response.json({ ok: true, user: result.user, personal_network_id: result.network_id, membership: result.membership }));
+    }
+
     // ── V3: Admin APIs (require auth) ──
     if (url.pathname === "/api/users" && req.method === "GET") {
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
@@ -1409,10 +1549,16 @@ return Bun.serve({
       if (!viewerRole && resolved.user.role !== "admin") {
         return withCors(req, Response.json({ ok: false, error: "access denied" }, { status: 403 }));
       }
-      // Get network stats
-      const nodeCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1", networkId);
-      const sessionCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1", networkId);
-      const taskStats = db.all<any>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status", networkId);
+      // Get network stats —— 受限成员只数得到授权给他的 Agent 与自己的往来。
+      const detailScope: RestNetworkScope = resolved.user.role === "admin" || resolved.networkId
+        ? { networkId, networkIds: null }
+        : resolveRestNetworkScope(networkId, { userId: resolved.user.user_id, networkId: null, username: resolved.user.username }, false);
+      const nodeParams: unknown[] = [];
+      const nodeCount = db.get<{ cnt: number }>(addAgentNetworkScope("SELECT COUNT(*) as cnt FROM nodes WHERE 1=1", nodeParams, detailScope, { alias: "alias", nodeId: "node_id" }), ...nodeParams);
+      const sessionParams: unknown[] = [];
+      const sessionCount = db.get<{ cnt: number }>(addAgentNetworkScope("SELECT COUNT(*) as cnt FROM sessions WHERE 1=1", sessionParams, detailScope, { alias: "alias", nodeId: "node_id" }), ...sessionParams);
+      const taskParams: unknown[] = [];
+      const taskStats = db.all<any>(addOwnTrafficScope("SELECT status, COUNT(*) as count FROM tasks WHERE 1=1", taskParams, detailScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" }) + " GROUP BY status", ...taskParams);
       return withCors(req, Response.json({
         ok: true, network,
         stats: { nodes: nodeCount?.cnt || 0, sessions: sessionCount?.cnt || 0, tasks: taskStats },
@@ -1514,6 +1660,10 @@ return Bun.serve({
                 healthAuth.userId,
               ).map((r) => r.network_id),
         );
+        // 多用户 Agent 权限:键里带着 alias,受限网络整网不出现在这里(与 addNetworkScope 同一 fail-closed 口径)。
+        if (!healthAuth.networkId) {
+          for (const restricted of restrictedNetworkIds(healthAuth.userId)) memberNets.delete(restricted);
+        }
         // If member has no networks at all, keep field present but empty
         // so the dashboard can distinguish "authenticated + none active"
         // from "not authenticated at all".
@@ -1575,6 +1725,9 @@ return Bun.serve({
     const restAuth = resolveRequestAuth(req);
     const isAdmin = !!(restAuth?.username && db.get<any>("SELECT role FROM users WHERE username = ?1", restAuth.username)?.role === "admin");
     const restScope = resolveRestNetworkScope(url.searchParams.get("network_id"), restAuth, isAdmin);
+    // 多用户 Agent 权限:下面凡是读 Agent 数据的查询,受限成员在受限网络里默认拿不到任何行
+    // (addNetworkScope fail-closed);逐条审过的路径改用 addAgentNetworkScope / addOwnTrafficScope
+    // 按授权放行,人类数据用 addHumanNetworkScope。
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
@@ -1676,7 +1829,7 @@ return Bun.serve({
       let sql = isLight
         ? "SELECT alias, status, agent, task, server, updated_at, network_id FROM sessions WHERE 1=1"
         : `SELECT ${SESSION_REST_SELECT} FROM sessions WHERE 1=1`;
-      sql = addNetworkScope(sql, params, restScope);
+      sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
       sql += " ORDER BY updated_at DESC";
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
@@ -2107,7 +2260,8 @@ return Bun.serve({
         }
       }
 
-      if (!canRestWriteNetwork(authCtx, uploadNetId, principal.kind === "admin-utok")) {
+      // 上传是人类侧写入(给私信 / 给授权 Agent 的任务挂附件),受限成员也可以;下载另有授权判定。
+      if (!canRestWriteNetworkAsHuman(authCtx, uploadNetId, principal.kind === "admin-utok")) {
         return earlyReject(Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
 
@@ -2273,7 +2427,7 @@ return Bun.serve({
       // "no such file". Both branches return the same 404 shape
       // for BOTH GET and HEAD (HEAD honours body-omission but the
       // status code and headers are the authoritative signal).
-      if (!authorizeFileDownload(resolvePrincipal(req, { allowQueryToken: false }), normalizeEntry(entry))) {
+      if (!authorizeFileDownload(resolvePrincipal(req, { allowQueryToken: false }), normalizeEntry(entry), fileId)) {
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
@@ -2399,7 +2553,27 @@ return Bun.serve({
           message: "network_id is required when the user token has zero or multiple network memberships",
         }, { status: 400 }));
       }
-      if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
+      // 多用户 Agent 权限:受限成员只能给授权且 can_message 的 Agent 发;
+      // 目标不存在 / 没授权 / 只读授权 → 同一个 403,不留 alias 探测差异。发件人固定为自己的用户名。
+      const restrictedSender = !!restAuth && !isAdmin && !restAuth.networkId && isAgentRestricted(restAuth.userId, taskNetId!);
+      if (restrictedSender) {
+        if (!canRestWriteNetworkAsHuman(restAuth, taskNetId, isAdmin)) {
+          return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+        }
+        const restrictedTarget = resolveCanonicalAlias(taskNetId, body.alias).alias;
+        const restrictedSession = db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", restrictedTarget, taskNetId);
+        if (!restrictedSession || !canMessageAgent(restAuth!.userId, taskNetId, { alias: restrictedTarget, nodeId: restrictedSession.node_id })) {
+          return withCors(req, Response.json({ ok: false, error: "agent_not_granted", message: "this agent has not been granted to you; ask a network admin" }, { status: 403 }));
+        }
+        if (typeof body.from === "string" && body.from.trim() && body.from.trim() !== restAuth!.username) {
+          return withCors(req, Response.json({ ok: false, error: "from_session_identity_mismatch", message: "restricted members always send as their own username" }, { status: 403 }));
+        }
+        for (const raw of [(body as any).attachments, (body as any).meta?.attachments]) {
+          if (restrictedMemberAttachmentsDenied(restAuth!.userId, restAuth!.username, taskNetId!, raw)) {
+            return withCors(req, Response.json({ ok: false, error: "attachment_not_accessible" }, { status: 403 }));
+          }
+        }
+      } else if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
       const canonical = resolveCanonicalAlias(taskNetId, body.alias);
@@ -2722,7 +2896,8 @@ return Bun.serve({
     const userInboxAliasCollides = (username: string, scope: RestNetworkScope): boolean => {
       const p: any[] = [username];
       let q = "SELECT 1 AS hit FROM nodes WHERE alias = ?1";
-      q = addNetworkScope(q, p, scope);
+      // 撞名检测要看见网络里**所有**节点(受限成员看不见的也算),否则撞名的节点待办会被当成用户未读。
+      q = addHumanNetworkScope(q, p, scope);
       return !!db.get<{ hit: number }>(q + " LIMIT 1", ...p);
     };
 
@@ -2745,7 +2920,7 @@ return Bun.serve({
                  FROM user_inbox WHERE user_id = ?1`;
       if (unackedOnly) sql += " AND acked = 0";
       // 复用 alias 分支同一个 scope 助手：新读路径漏 scope 是已被审计证实的真风险。
-      sql = addNetworkScope(sql, params, restScope);
+      sql = addHumanNetworkScope(sql, params, restScope);
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const rows = db.all<any>(sql, ...params);
@@ -2753,7 +2928,7 @@ return Bun.serve({
       // 未读数与列表用同一个 user_id + 同一个 scope 助手算，避免两处口径漂开。
       const countParams: any[] = [callerUserId];
       let countSql = "SELECT COUNT(*) AS cnt FROM user_inbox WHERE user_id = ?1 AND acked = 0";
-      countSql = addNetworkScope(countSql, countParams, restScope);
+      countSql = addHumanNetworkScope(countSql, countParams, restScope);
       const unread = db.get<{ cnt: number }>(countSql, ...countParams)?.cnt ?? 0;
 
       // #1828 —— 按 agent 分的未读:user_inbox(agent 主动发给用户)+ inbox 里发给**这个用户名**的
@@ -2766,13 +2941,13 @@ return Bun.serve({
       };
       const uiAgentParams: any[] = [callerUserId];
       let uiAgentSql = "SELECT from_session AS agent, COUNT(*) AS n FROM user_inbox WHERE user_id = ?1 AND acked = 0";
-      uiAgentSql = addNetworkScope(uiAgentSql, uiAgentParams, restScope);
+      uiAgentSql = addHumanNetworkScope(uiAgentSql, uiAgentParams, restScope);
       addByAgent(db.all<{ agent: string | null; n: number }>(uiAgentSql + " GROUP BY from_session", ...uiAgentParams));
       const callerUsername = restAuth?.username ?? "";
       if (callerUsername && !userInboxAliasCollides(callerUsername, restScope)) {
         const ibParams: any[] = [callerUsername];
         let ibSql = "SELECT from_session AS agent, COUNT(*) AS n FROM inbox WHERE session_name = ?1 AND acked = 0 AND type IN ('reply', 'task', 'message')";
-        ibSql = addNetworkScope(ibSql, ibParams, restScope);
+        ibSql = addHumanNetworkScope(ibSql, ibParams, restScope);
         addByAgent(db.all<{ agent: string | null; n: number }>(ibSql + " GROUP BY from_session", ...ibParams));
       }
       const unreadTotal = Object.values(byAgent).reduce((a, b) => a + b, 0);
@@ -2804,7 +2979,7 @@ return Bun.serve({
         params.push(alias);
         sql += ` AND session_name = ?${params.length}`;
       }
-      sql = addNetworkScope(sql, params, restScope);
+      sql = addOwnTrafficScope(sql, params, restScope, { from: "from_session", to: "session_name" });
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const rows = db.all(sql, ...params);
@@ -2813,7 +2988,7 @@ return Bun.serve({
       if (alias) {
         const countParams: any[] = [alias];
         let countSql = "SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
-        countSql = addNetworkScope(countSql, countParams, restScope);
+        countSql = addOwnTrafficScope(countSql, countParams, restScope, { from: "from_session", to: "session_name" });
         pendingCount = db.get<{ cnt: number }>(countSql, ...countParams)?.cnt ?? 0;
       }
 
@@ -2843,7 +3018,7 @@ return Bun.serve({
         const uiParams: any[] = [callerUserId, agentRaw];
         let uiSql = `UPDATE user_inbox SET acked = 1, acked_at = datetime('now')
                      WHERE user_id = ?1 AND from_session = ?2 AND acked = 0`;
-        uiSql = addNetworkScope(uiSql, uiParams, restScope);
+        uiSql = addHumanNetworkScope(uiSql, uiParams, restScope);
         const uiAcked = db.run(uiSql, uiParams).changes ?? 0;
         let agentInboxAcked = 0;
         const agentCallerUsername = restAuth?.username ?? "";
@@ -2851,7 +3026,7 @@ return Bun.serve({
           const ibAgentParams: any[] = [agentCallerUsername, agentRaw];
           let ibAgentSql = `UPDATE inbox SET acked = 1
                             WHERE session_name = ?1 AND from_session = ?2 AND acked = 0 AND type IN ('reply', 'task', 'message')`;
-          ibAgentSql = addNetworkScope(ibAgentSql, ibAgentParams, restScope);
+          ibAgentSql = addHumanNetworkScope(ibAgentSql, ibAgentParams, restScope);
           agentInboxAcked = db.run(ibAgentSql, ibAgentParams).changes ?? 0;
         }
         return withCors(req, Response.json({
@@ -2871,7 +3046,7 @@ return Bun.serve({
       const placeholders = ids.map((_, i) => `?${i + 2}`).join(", ");
       let sql = `UPDATE user_inbox SET acked = 1, acked_at = datetime('now')
                  WHERE user_id = ?1 AND message_id IN (${placeholders}) AND acked = 0`;
-      sql = addNetworkScope(sql, params, restScope);
+      sql = addHumanNetworkScope(sql, params, restScope);
       const res = db.run(sql, params);
       // #1828 —— 同一批 id 也可能是 inbox 里发给这个用户名的 reply/task/message 行(agent 回复);
       //    用户看过就 ack 掉。只动 session_name = 调用者用户名 的行,别人的 id 匹配不到;
@@ -2882,7 +3057,7 @@ return Bun.serve({
         const ibParams: any[] = [callerUsername, ...ids];
         let ibSql = `UPDATE inbox SET acked = 1
                      WHERE session_name = ?1 AND id IN (${placeholders}) AND acked = 0 AND type IN ('reply', 'task', 'message')`;
-        ibSql = addNetworkScope(ibSql, ibParams, restScope);
+        ibSql = addHumanNetworkScope(ibSql, ibParams, restScope);
         inboxAcked = db.run(ibSql, ibParams).changes ?? 0;
       }
       return withCors(req, Response.json({ ok: true, scope: "ids", acked: (res.changes ?? 0) + inboxAcked, acked_user_inbox: res.changes ?? 0, acked_inbox: inboxAcked }));
@@ -2971,7 +3146,13 @@ return Bun.serve({
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 500);
       let sql = `SELECT ${TASK_EVENT_REST_SELECT} FROM task_events WHERE 1=1`;
       const params: any[] = [];
-      sql = addNetworkScope(sql, params, restScope);
+      if (restScope.agentRestriction) {
+        // 受限成员:只看得到自己与授权 Agent 往来的那些任务的事件。
+        sql += " AND task_id IN (SELECT task_id FROM tasks WHERE 1=1";
+        sql = addOwnTrafficScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" }) + ")";
+      } else {
+        sql = addNetworkScope(sql, params, restScope);
+      }
       if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
@@ -3277,6 +3458,10 @@ return Bun.serve({
           : "missing_network_id";
         return withCors(req, Response.json({ ok: false, error, memberships }, { status: 400 }));
       }
+      // 多用户 Agent 权限:daemon 也是 Agent,受限成员看不到。
+      if (restAuth && !isAdmin && isAgentRestricted(restAuth.userId, effectiveNetId)) {
+        return withCors(req, Response.json({ ok: true, daemons: [], count: 0 }));
+      }
       // Role for member-脱敏 (admin/owner = full host_telemetry, others = masked)
       let isPrivileged = false;
       if (restAuth?.userId) {
@@ -3467,7 +3652,7 @@ return Bun.serve({
                         display_name, team, tags, attrs_revision
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
-      sql = addNetworkScope(sql, params, restScope);
+      sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
       if (nodeId) { sql += ` AND node_id = ?${params.length + 1}`; params.push(nodeId); }
       if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
       sql += " ORDER BY updated_at DESC";
@@ -3539,7 +3724,7 @@ return Bun.serve({
       const taskId = decodeURIComponent(taskPathMatch[1] ?? "");
       const params: any[] = [taskId];
       let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE task_id = ?1`;
-      sql = addNetworkScope(sql, params, restScope);
+      sql = addOwnTrafficScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       sql += " LIMIT 1";
       const task = db.get(sql, ...params);
       if (!task) {
@@ -3628,7 +3813,7 @@ return Bun.serve({
 
       let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE 1=1`;
       const params: any[] = [];
-      sql = addNetworkScope(sql, params, restScope);
+      sql = addOwnTrafficScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (toName) { sql += ` AND to_name = ?${params.length + 1}`; params.push(toName); }
@@ -3651,7 +3836,7 @@ return Bun.serve({
       }
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
-      statsSql = addNetworkScope(statsSql, statsParams, restScope);
+      statsSql = addOwnTrafficScope(statsSql, statsParams, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       statsSql += " GROUP BY status";
       const stats = db.all<any>(statsSql, ...statsParams);
       return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));

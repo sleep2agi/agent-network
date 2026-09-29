@@ -41,7 +41,8 @@ beforeAll(async () => {
   expect(viewer.ok).toBe(true);
   viewerToken = viewer.token!;
   const viewerId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", viewer.user!.username)!.user_id;
-  addNetworkMember(networkId, viewerId, "viewer", ownerId);
+  // 多用户 Agent 权限:新成员默认只看授权 Agent;本测试测的是「完全信任的成员」旧语义,显式 agent_access=all。
+  addNetworkMember(networkId, viewerId, "viewer", ownerId, { agentAccess: "all" });
   const ntok = createNetworkTokenForNode(ownerId, networkId, "scheduler-node");
   expect(ntok.ok).toBe(true);
   nodeToken = ntok.token!;

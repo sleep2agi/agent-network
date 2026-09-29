@@ -104,7 +104,8 @@ if (!userBNetworkId) throw new Error("userB default network not found");
 // Add userA as a member of userB's default network. This is what makes
 // the "same-network non-owner" test cell meaningful — without it, that
 // test would only prove cross-network denial, which is a weaker claim.
-const addMember = addNetworkMember(userBNetworkId, userAUserId, "member", userBUserId);
+// 多用户 Agent 权限:新成员默认只看授权 Agent;本测试测的是「完全信任的成员」旧语义,显式 agent_access=all。
+const addMember = addNetworkMember(userBNetworkId, userAUserId, "member", userBUserId, { agentAccess: "all" });
 if (!addMember.ok) throw new Error(`add userA to userB network failed: ${addMember.error}`);
 
 const { bootServer } = await import("./server.js");
