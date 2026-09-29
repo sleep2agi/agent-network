@@ -14,3 +14,19 @@ Existing HTTP capability assertion updated to include tags after initial red.
 
 Temporary SQLite files under container /tmp; bootServer port 0, no published
 ports, no production database or 9200 access. No release, no version changes.
+
+CI doc-pin follow-up (2026-09-29):
+Job 109361720080 reported new trivial-line server/src/db.ts#L1758.
+After equivalent rebase, logAudit is at 1759. Both dashboard documents now
+link to the file with `export function logAudit` lookup rather than a moving
+line number. Exact test831 counts: files 109 unchanged; unique pins 8->7;
+occurrences 22->20; baseline stays empty (not relaxed).
+Tested tree db4f7fb73dc8daa818f9fda14d7888cbe25ebbda:
+Docker build uses TEST831_SOURCE_COMMIT and TEST831_RUNSH_BLOB from git,
+Docker run --rm --network none: L0-L8 RESULT PASS including witnessed-reds.
+Container symbol checks, same CI arguments:
+python3 scripts/check-doc-symbol-pins.py .
+  scanned17 / judged9 / skipped8 / unavailable-ref0 / drift0
+python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site
+  scanned20 / judged18 / skipped2 / unavailable-ref0 / drift0
+Skipped references are not claimed verified. Report-only commit follows.
