@@ -347,7 +347,7 @@ Not recommended. Change the initial password first, then put TLS and access cont
 
 ### Is PostgreSQL supported?
 
-The maintained and verified backend is SQLite. The PostgreSQL compatibility entry points in the code do not mean production support.
+**PostgreSQL support is still in development and does not work yet.** The maintained and verified backend is SQLite. The code has a `DATABASE_URL=postgres://…` entry point, but a Hub configured that way exits while creating its schema. Progress: [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md).
 
 ## Still unresolved
 

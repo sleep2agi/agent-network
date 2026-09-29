@@ -150,9 +150,11 @@ delivered/acked/running → reassign → delivered (new agent)
 
 ## PostgreSQL (community extension point — not on the maintained roadmap)
 
+> **PostgreSQL support is still in development and does not work yet** (PostgreSQL 支持尚在开发中，目前不可用). With `DATABASE_URL=postgres://…` the hub exits while creating its schema. Progress: [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md).
+
 > v0.8+ product direction is **SQLite only** (see [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)). The PostgreSQL adapter interface is preserved as a community extension point — no E2E coverage on the current stable line; **not recommended for mainline production**.
 
-Set `DATABASE_URL` to switch to PostgreSQL — the SQL layer auto-translates SQLite-isms (datetime, parameter placeholders) so application code is unchanged. Requires `bun add pg`.
+Design intent (not working today): setting `DATABASE_URL` switches to PostgreSQL, and the SQL layer translates SQLite-isms (datetime, parameter placeholders). Requires `bun add pg`.
 
 ```bash
 DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-server
@@ -166,7 +168,7 @@ DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-serv
 | `HOST` | `0.0.0.0` in the server package, `127.0.0.1` when launched by `anet hub start` | listen address |
 | `COMMHUB_AUTH_TOKEN` | (none) | Bearer token gate (legacy) |
 | `COMMHUB_DB` | `~/.commhub/commhub.db` | SQLite path |
-| `DATABASE_URL` | (none) | switches to PostgreSQL when set (unverified) |
+| `DATABASE_URL` | (none) | switches to PostgreSQL when set — **does not work yet**, see above |
 
 ## Running the unit tests
 
@@ -274,7 +276,7 @@ main 上 66 处写的是 `SOURCE_COMMIT`,另有若干写成 `TEST<编号>_SOURCE
 ## Not verified
 
 - `/api/license*` — experimental legacy trial/pro-license endpoints.
-- PostgreSQL backend — translation layer exists, no E2E run.
+- PostgreSQL backend — in development, does not work yet (hub exits while creating its schema; RFC-039).
 - Telegram / WeChat / Feishu channel endpoints — channel code exists, but only Telegram-oriented agent-node paths are actively exercised.
 
 ## License

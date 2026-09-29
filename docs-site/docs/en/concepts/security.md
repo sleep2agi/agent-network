@@ -277,7 +277,7 @@ db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ## Database Security
 
 ::: tip The backend is SQLite — the integrity guarantees are SQLite-based too
-anet runs on **SQLite** in production (`~/.commhub/commhub.db`). The integrity and isolation guarantees in this section (and in authorization / audit) rest on SQLite's transaction / constraint semantics. The code has a `DATABASE_URL` PostgreSQL entry point, but it is **not end-to-end verified and not recommended for production** (see [FAQ — PostgreSQL support?](/en/troubleshooting#faq)).
+anet runs on **SQLite** in production (`~/.commhub/commhub.db`). The integrity and isolation guarantees in this section (and in authorization / audit) rest on SQLite's transaction / constraint semantics. The code has a `DATABASE_URL` PostgreSQL entry point, but **PostgreSQL support is still in development and does not work yet** (see [FAQ — PostgreSQL support?](/en/troubleshooting#faq)).
 :::
 
 ### SQLite WAL Mode

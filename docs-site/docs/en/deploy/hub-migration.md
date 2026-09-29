@@ -4,7 +4,7 @@
 
 **No.** If the address clients already use stays the same, nodes and apps change nothing. If the address must change, change only that address; do not reissue tokens. Changing the address without moving the database and the vault key connects everyone to an empty Hub.
 
-This page is the SQLite Hub as it works today. If `DATABASE_URL` starts with `postgres://` or `postgresql://`, the Hub is not using the file below, and these steps do not apply.
+This page is the SQLite Hub as it works today. If `DATABASE_URL` starts with `postgres://` or `postgresql://`, the Hub is not using the file below, and these steps do not apply. **PostgreSQL support is still in development and does not work yet**: a Hub configured this way exits while creating its schema (see [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md)).
 
 ## What moves
 
