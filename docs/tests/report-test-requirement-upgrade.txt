@@ -41,7 +41,7 @@ server/src/requirements-upgrade-e2e.test.ts         1 pass / 34 expects (+ date-
   start (upgrade) → HTTP read shows owner null / agent_owner node, other card
   untouched → role rules over HTTP → third start changes nothing.
   Witnessed red with the migration call commented out (fail=1).
-Full server suite (scripts/test-aggregate.ts): 117 files, 1412 pass, 0 fail.
+Full server suite (scripts/test-aggregate.ts): 118 files, 1422 pass, 0 fail (rebased onto main 1ade6d42).
 CI: all three are server/src/*.test.ts, run by tests/test798-server-unit-ci.
 Migration is triggered from requirements.ts (not db.ts) so db.ts keeps its line
 numbers: docs pin db.ts:437 (doc-claims) and db.ts#L1751 (symbol pins); the first
