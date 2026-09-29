@@ -150,6 +150,7 @@ on:
       - 'tests/test607-health-upload-limits/**'
       - 'tests/test609-dashboard-chat-doc-path/**'
       - 'tests/test637-database-url-guard/**'
+      - 'tests/test2123-hub-postgres-ladder/**'
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
@@ -318,6 +319,7 @@ on:
       - 'tests/test607-health-upload-limits/**'
       - 'tests/test609-dashboard-chat-doc-path/**'
       - 'tests/test637-database-url-guard/**'
+      - 'tests/test2123-hub-postgres-ladder/**'
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
@@ -1254,6 +1256,7 @@ jobs:
           - test607-health-upload-limits
           - test609-dashboard-chat-doc-path
           - test637-database-url-guard
+          - test2123-hub-postgres-ladder
           - test649-token-cli
           - test651-init-no-token-prompt
           - test5-auth
