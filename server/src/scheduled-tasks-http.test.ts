@@ -431,6 +431,96 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(["Concurrent editor A", "Concurrent editor B"]).toContain(latest.name);
   });
 
+  // Owner report 2026-09-29: editing a 2-minute schedule failed with
+  // revision_conflict whenever a run landed while the dialog was open, and the
+  // client dropped the draft. Runs are bookkeeping, not edits.
+  test("a scheduler run between GET and PATCH does not conflict with the edit", async () => {
+    const created = await api(ownerToken, "/api/scheduled-tasks", {
+      method: "POST",
+      body: JSON.stringify({ network_id: networkId, name: "Run-during-edit", target_node_id: nodeId, task: "before edit", timezone: "Asia/Shanghai", schedule: { type: "interval", every_seconds: 120 } }),
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.schedule.schedule_id;
+    const path = `/api/scheduled-tasks/${id}?network_id=${encodeURIComponent(networkId)}`;
+    const opened = (await api(ownerToken, path)).body.schedule;
+
+    const firedAt = new Date(Date.now() - 1_000).toISOString();
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [firedAt, id]);
+    runDueScheduledTasks();
+    const afterRun = (await api(ownerToken, path)).body.schedule;
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM scheduled_task_runs WHERE schedule_id = ?1", id)!.n).toBe(1);
+    expect(afterRun.last_run_at).toBe(firedAt);
+    expect(new Date(afterRun.next_run_at).getTime()).toBeGreaterThan(Date.now());
+    expect(afterRun.revision).toBe(opened.revision);
+
+    const saved = await api(ownerToken, path, {
+      method: "PATCH",
+      body: JSON.stringify({ revision: opened.revision, task: "edited while it ran", name: opened.name, schedule: opened.schedule, timezone: opened.timezone }),
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.schedule.task_content).toBe("edited while it ran");
+    expect(saved.body.schedule.revision).toBe(opened.revision + 1);
+    // Cadence edit-preservation must keep the scheduler's advanced slot, not
+    // resurrect the occurrence that already fired.
+    expect(saved.body.schedule.next_run_at).toBe(afterRun.next_run_at);
+
+    // A second device still holding the pre-edit revision is a true conflict.
+    const stale = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ revision: opened.revision, task: "other device" }) });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe("revision_conflict");
+    await api(ownerToken, `/api/scheduled-tasks/${id}/cancel?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
+  });
+
+  test("a run that lands while the PATCH body is in flight keeps the advanced next_run_at", async () => {
+    const created = await api(ownerToken, "/api/scheduled-tasks", {
+      method: "POST",
+      body: JSON.stringify({ network_id: networkId, name: "Run-during-body", target_node_id: nodeId, task: "before", timezone: "Asia/Shanghai", schedule: { type: "interval", every_seconds: 120 } }),
+    });
+    const id = created.body.schedule.schedule_id;
+    const path = `/api/scheduled-tasks/${id}?network_id=${encodeURIComponent(networkId)}`;
+    const firedAt = new Date(Date.now() - 1_000).toISOString();
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [firedAt, id]);
+    const opened = (await api(ownerToken, path)).body.schedule;
+
+    // The handler reads the row before awaiting the body. Hold the body open,
+    // run the scheduler, then release it — the PATCH now carries a stale
+    // row.next_run_at (the slot that just fired).
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const payload = new TextEncoder().encode(JSON.stringify({ revision: opened.revision, task: "edited mid-run" }));
+    const body = new ReadableStream({ async pull(c) { await gate; c.enqueue(payload); c.close(); } });
+    const pending = fetch(`${base}${path}`, { method: "PATCH", body, duplex: "half", headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" } } as any);
+    await new Promise((r) => setTimeout(r, 100));
+    runDueScheduledTasks();
+    const advanced = db.get<{ next_run_at: string }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", id)!.next_run_at;
+    expect(advanced).not.toBe(firedAt);
+    release();
+    const res = await pending;
+    const saved = await res.json() as any;
+    expect(res.status).toBe(200);
+    expect(saved.schedule.task_content).toBe("edited mid-run");
+    expect(saved.schedule.next_run_at).toBe(advanced);
+    await api(ownerToken, `/api/scheduled-tasks/${id}/cancel?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
+  });
+
+  test("one-shot auto-complete is a user-visible status change and still bumps revision", async () => {
+    const created = await api(ownerToken, "/api/scheduled-tasks", {
+      method: "POST",
+      body: JSON.stringify({ network_id: networkId, name: "One-shot", target_node_id: nodeId, task: "once", timezone: "Asia/Shanghai", schedule: { type: "once", run_at: new Date(Date.now() + 3_600_000).toISOString() } }),
+    });
+    const id = created.body.schedule.schedule_id;
+    const path = `/api/scheduled-tasks/${id}?network_id=${encodeURIComponent(networkId)}`;
+    const opened = (await api(ownerToken, path)).body.schedule;
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [new Date(Date.now() - 1_000).toISOString(), id]);
+    runDueScheduledTasks();
+    const done = (await api(ownerToken, path)).body.schedule;
+    expect(done.status).toBe("completed");
+    expect(done.revision).toBe(opened.revision + 1);
+    const edit = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ revision: opened.revision, task: "too late" }) });
+    expect(edit.status).toBe(409);
+    expect(edit.body.error).toBe("schedule_completed");
+  });
+
   test("optimistic revision, pause/resume, run-now and cancel preserve history", async () => {
     const latest = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`);
     revision = latest.body.schedule.revision;
