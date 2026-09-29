@@ -62,4 +62,4 @@ Which one: day to day → the desktop or Android package on the home page; Dashb
 
 ## Related
 
-- [Tasks](/en/guide/tasks), [Dashboard](/en/guide/dashboard), [CLI Commands](/en/guide/cli).
+- [Tasks](/en/guide/tasks), [Schedules](/en/guide/schedules), [Dashboard](/en/guide/dashboard), [CLI Commands](/en/guide/cli).

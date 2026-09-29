@@ -247,7 +247,12 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   两页都没有 #L 源码行号 pin(grep -c '#L[0-9]' → 0 / 0)。uniq 仍 8、occ 仍 22。
 #   本地 checker:scanned_doc_files=109,unique_pins=8,pin_occurrences=22。
 #   CI 先红(doc source-pin floor,预期 107)才来抬,顺序是对的。
-[[ "$files" -eq 109 ]] || fail "预期扫 109 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-29:files 109 → 111。新增定时任务页(中英各一份):
+#     docs-site/docs/guide/schedules.md
+#     docs-site/docs/en/guide/schedules.md
+#   两页都没有 #L 源码行号 pin。uniq 仍 8、occ 仍 22。
+#   本地 checker(git ls-files):scanned_doc_files=111,unique_pins=8,pin_occurrences=22。
+[[ "$files" -eq 111 ]] || fail "预期扫 111 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 8  ]] || fail "预期 8 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 22 ]] || fail "预期 22 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
