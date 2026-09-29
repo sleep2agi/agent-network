@@ -1,7 +1,7 @@
 import { db, logTaskEvent } from "./db.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
-import { pushEvent, pushNetworkObserverEvent } from "./push.js";
+import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 
 export type ScheduleSpec =
@@ -262,11 +262,19 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     }
 
     const taskId = crypto.randomUUID();
+    // claude-code 裸节点的 node-server 上报 report_status 不带 node_id,它的 sessions 行
+    // node_id 永远是 NULL —— 只按 node_id 找会话,这类节点每一次都判成 queued、门铃不响,
+    // 任务在 inbox 里等到别的消息顺带捎进去(生产上 20–36 分钟)。按 node_id 找不到时退回
+    // 同网同别名、node_id 为空的会话;SSE 订阅者注册表是「有没有人在听」的实测,也算数。
     const session = db.get<{ status: string | null }>(
       "SELECT status FROM sessions WHERE node_id = ?1 AND network_id = ?2 ORDER BY updated_at DESC LIMIT 1",
       row.target_node_id, row.network_id,
+    ) ?? db.get<{ status: string | null }>(
+      "SELECT status FROM sessions WHERE alias = ?1 AND network_id = ?2 AND node_id IS NULL ORDER BY updated_at DESC LIMIT 1",
+      node.alias, row.network_id,
     );
-    const deliveryState: "delivered" | "queued" = session && session.status !== "offline" ? "delivered" : "queued";
+    const deliveryState: "delivered" | "queued" =
+      (session && session.status !== "offline") || hasSubscribers(node.alias, row.network_id) ? "delivered" : "queued";
     const metaJson = JSON.stringify({
       scheduled_task_id: row.schedule_id,
       scheduled_run_id: runId,
