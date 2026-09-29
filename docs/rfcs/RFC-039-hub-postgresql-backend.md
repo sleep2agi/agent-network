@@ -90,7 +90,7 @@ Docker 里 `postgres:16-alpine` + `oven/bun:1.3.14` + `pg@8.16.3`,一次性容�
 | B2 | `exec()` 按 `;` 切句:不认注释、不认 `$$` | `db.exec` 136 处,任何一处注释带 `;` 就断 | 第 0、2 轮 |
 | B3 | 时间列类型分裂:`DEFAULT (datetime('now'))` 被译成 `TIMESTAMP`,其余仍是 `TEXT` | 33 个列被改成 `TIMESTAMP`,24 个 `*_at TEXT` 列没改;`datetime(` 137 处 | 第 3 轮、`send_reply` 第一次 |
 | B4 | 整数宽度:毫秒时间戳存在 `INTEGER` 列(PG 是 32 位) | 53 个 `*_at INTEGER` 列 | sweeper 报错 |
-| B5 | `COUNT(*)` 等 `int8` 结果以字符串返回;`=== 0` 恒假 | `COUNT(` 46 处;已知 `auth.ts:77`、`auth.ts:756` 两处严格比较 | 首个用户不是 admin |
+| B5 | `COUNT(*)` 等 `int8` 结果以字符串返回;`=== 0` 恒假 | `COUNT(` 46 处;已知 `auth.ts:77`、`auth.ts:756` 两处严格比较 | 首个用户不是 admin;探针里把 int8 解析成数字后变回 admin(见 `docs/tests/report-test2123.txt`,#2125) |
 | B6 | `startHub()` 在 PG 上拒绝启动;另两处功能拒绝 | 3 处 | `server.ts:4177`、`tools.ts:1310`、`side-thread-command-transport.ts:53` |
 | B7 | 驱动不在依赖里 | `server/package.json` 无 `pg` | §1.1 |
 
@@ -217,7 +217,7 @@ Docker 里 `postgres:16-alpine` + `oven/bun:1.3.14` + `pg@8.16.3`,一次性容�
 
 | 步 | 内容 | 对 SQLite 用户的影响 | 验收 |
 |---|---|---|---|
-| **S1** | 新 Docker 套件 `test-hub-postgres-probe`:起 `postgres:16` + Hub,**断言当前已知状态**(记录 Hub 在 PG 上停在哪一步),注册进 L1;不改生产代码 | 无 | 套件在 CI 跑;输出一行「PG 状态」。以后每修一处,就把这里的期望往前推一格 |
+| **S1** | Docker 套件 `test2123-hub-postgres-ladder`(#2125):容器内起 PostgreSQL + Hub,逐级爬 L0 连上 → L1 建表并监听 → L2 首个用户是 admin → L3 登录/节点令牌/派活 → L4 回复并终态;**棘轮**,低于 `FLOOR` 才红。注册进 `qa.yml` 的 Hub Docker 矩阵(不进 L1:L1 串行构建,本套件要装 postgresql)。不改生产代码 | 无 | 今天 `level=0`;以后每一步把 `FLOOR` 往上推 |
 | **S2** | 换桥:Worker + `Bun.SQL` 保留连接;`exec()` 整段发送;结果类型归一;契约测试 | 无(只动 `PgAdapter`) | 回滚测试、1000 条耗时、`COUNT` 类型 |
 | **S3** | 翻译器:文本时间、`BIGINT`/`BIGSERIAL`/`BYTEA`、`strftime`;F1/F3/F4 逐处修 | 无(翻译只在 PG 路径执行;F3 改 `ORDER BY` 需在 SQLite 上回归) | Hub 在 PG 上建表完成;S1 套件推进到冒烟全绿(定时任务除外) |
 | **S4** | 去掉三处「拒绝」分支(事务已真);PG 上跑定时任务、运行证据、side-thread 的现有测试 | 无 | 冒烟套件不再需要任何绕过;`qa-hub-*` 选 3–5 个按 PG 参数化 |
