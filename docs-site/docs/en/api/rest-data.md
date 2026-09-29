@@ -22,6 +22,7 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 |------|------|
 | `network_id` | Filter by network (when an `ntok_` is bound, this parameter is overridden by the token's network) |
 | `status` | Filter by status (idle / working / offline) |
+| `alias` | Only this agent's rows (applied inside the network scope, never widens it). Use it when you need one agent's full row instead of the whole network; older hubs ignore it and return every row |
 
 **Response**:
 
