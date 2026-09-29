@@ -17,6 +17,19 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 - 读取总带 `agent_owner` 字段（没有时为 `null`）；客户端用「行里有没有这个字段」判断 Hub 是否支持两个角色，旧 Hub 退回单一负责人。
 - 启动迁移（`server/src/requirements-migrate.ts`，`requirements.ts` 载入时调用一次）：`owner` 是节点且 `agent_owner` 为空的行，把节点挪到 `agent_owner`、`owner` 置空；幂等，不删行、不动其他列，解析不了的旧值原样保留。旧库里未迁移的节点负责人照常读出，只在请求显式写 owner 时校验种类。
 
+### 描述与子任务（description / checklist）
+
+- `description`：markdown 原文，最多 20000 字符，`\r\n` 统一成 `\n`。PATCH 整段替换，`""` 清空；省略则保留。超长返回 400 `invalid_description`。
+- `checklist`：有序数组 `[{id,text,done}]`，最多 100 项；`text` 1–500 字（换行折成空格），`id` 为 `[A-Za-z0-9_-]{1,40}`，缺省时 Hub 生成 `ck_…`，`done` 缺省为 false。PATCH 整个替换（排序、增删都走这里）；重复 id、空文字、坏类型整体拒绝（400 `invalid_checklist`），原值不变。
+- 单项勾选：`PATCH /api/requirements/{id}/checklist/{itemId}`，body `{"done": true|false}`。只改那一项，`done` 是显式值（不是取反），重复请求结果一样；找不到返回 404 `checklist_item_not_found`。读-改-写在同一同步段完成，同一进程里的两次勾选不会交错。
+- 读取总带 `description`（没有为 `""`）和 `checklist`（没有为 `[]`）；客户端据此判断 Hub 是否支持。
+- 权限：与卡片其他字段相同，viewer 不可写。**节点令牌（Agent）本版仍返回 `user_token_required`**。以后放开时，把操作名（`read` / `patch` / `checklist_item`）加进 `requirements.ts` 的 `NODE_TOKEN_OPERATIONS`，并给写入补上节点所属网络的判断；路由和请求体不需要改。
+
+## 升级
+
+- 加列只加不改：`agent_owner_json`、`description`、`checklist_json` 都在 `db.ts` 既有的加列循环里；旧行三列为 NULL，读出为 `null` / `""` / `[]`。
+- 一次 Hub 升级同时带上负责 Agent、描述、子任务三项。
+
 本版为最后写入覆盖语义，尚无版本冲突提示。客户端应避免一次编辑提交未改动的绑定字段；多人同时修改同一字段的冲突解决属于后续交付项。
 
 ## 恢复与部署边界

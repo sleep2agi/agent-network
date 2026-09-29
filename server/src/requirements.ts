@@ -26,6 +26,8 @@ const DUE = /^\d{4}-\d{2}-\d{2}$/;
 type Row = {
   owner_json: string | null;
   agent_owner_json: string | null;
+  description: string | null;
+  checklist_json: string | null;
   participants_json: string;
   requirement_id: string;
   network_id: string;
@@ -102,11 +104,54 @@ function storedIssues(raw: string | null) {
   }
 }
 
+// ── 描述 / 子任务 ──
+// 描述是 markdown 原文,整段替换。子任务是有序数组 [{id,text,done}]:PATCH 整个替换(排序、增删都走这里),
+// 单项勾选走 PATCH /api/requirements/{id}/checklist/{itemId} {done} —— 只改那一项,app 和 Agent 同时操作
+// 不会互相盖掉对方的整张清单。done 是显式值(不是「取反」),重复请求结果一样。
+export const DESCRIPTION_MAX = 20_000;
+export const CHECKLIST_MAX_ITEMS = 100;
+export const CHECKLIST_TEXT_MAX = 500;
+const CHECKLIST_ID = /^[A-Za-z0-9_-]{1,40}$/;
+type ChecklistItem = { id: string; text: string; done: boolean };
+
+function normalizeDescription(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const text = raw.replace(/\r\n?/g, "\n");
+  return text.length > DESCRIPTION_MAX ? null : text;
+}
+
+/** 输入的 id 保留(客户端要靠它对上勾选);缺 id 的由 Hub 生成。重复 id、空文字、超长 → null(整体拒绝)。 */
+function normalizeChecklist(raw: unknown): ChecklistItem[] | null {
+  if (!Array.isArray(raw) || raw.length > CHECKLIST_MAX_ITEMS) return null;
+  const seen = new Set<string>();
+  const out: ChecklistItem[] = [];
+  for (const value of raw) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const item = value as Record<string, unknown>;
+    const id = item.id === undefined ? `ck_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}` : item.id;
+    if (typeof id !== "string" || !CHECKLIST_ID.test(id) || seen.has(id)) return null;
+    const text = typeof item.text === "string" ? item.text.replace(/[\r\n]+/g, " ").trim() : "";
+    if (!text || text.length > CHECKLIST_TEXT_MAX) return null;
+    if (item.done !== undefined && typeof item.done !== "boolean") return null;
+    seen.add(id);
+    out.push({ id, text, done: item.done === true });
+  }
+  return out;
+}
+
+function storedChecklist(raw: string | null): ChecklistItem[] {
+  if (!raw) return [];
+  try { return normalizeChecklist(JSON.parse(raw)) ?? []; } catch { return []; }
+}
+
 function toPublic(row: Row) {
   return {
     owner: row.owner_json ? JSON.parse(row.owner_json) : null,
     // 负责 Agent(执行者)。字段总在:客户端靠它判断这个 Hub 分不分「负责人 / 负责 Agent」。
     agent_owner: row.agent_owner_json ? JSON.parse(row.agent_owner_json) : null,
+    // 描述(markdown)与子任务。字段总在:客户端靠它判断这个 Hub 支不支持。
+    description: row.description || "",
+    checklist: storedChecklist(row.checklist_json),
     participants: JSON.parse(row.participants_json || '[]'),
     id: row.requirement_id,
     name: row.title,
@@ -135,7 +180,7 @@ function canWrite(ctx: RequirementsRequestContext, networkId: string | null): bo
   return !ctx.isNodeToken && canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json, agent_owner_json";
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
 function personRef(value: unknown, networkId: string): PersonRef {
@@ -175,10 +220,21 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
   };
 }
 
+/** 节点令牌可用的操作。空 = 与之前一样全部拒绝(本 PR 不放宽)。候选:'read' | 'patch' | 'checklist_item'。 */
+const NODE_TOKEN_OPERATIONS: ReadonlySet<string> = new Set<string>();
+function operationOf(req: Request, url: URL): string {
+  if (req.method === "GET") return "read";
+  if (/^\/api\/requirements\/[^/]+\/checklist\/[^/]+$/.test(url.pathname)) return "checklist_item";
+  if (req.method === "PATCH") return "patch";
+  return "create";
+}
+
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
   const { req, url } = ctx;
   if (url.pathname !== "/api/requirements" && !url.pathname.startsWith("/api/requirements/")) return null;
-  if (ctx.isNodeToken) return jsonError("user_token_required", 403);
+  // 节点令牌(Agent)现在一律拒绝。以后要让 Agent 读写描述、勾子任务,把对应操作加进
+  // NODE_TOKEN_OPERATIONS(并给 canWrite 加上节点所属网络的判断)即可 —— 路由和请求体不用改。
+  if (ctx.isNodeToken && !NODE_TOKEN_OPERATIONS.has(operationOf(req, url))) return jsonError("user_token_required", 403);
 
   if (url.pathname === '/api/requirements/people' && req.method === 'GET') {
     const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
@@ -219,6 +275,10 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const column = typeof body.column === "string" && COLUMNS.has(body.column) ? body.column : "pool";
     const issues = body.issues === undefined ? [] : normalizeIssues(body.issues);
     if (issues === null) return jsonError("invalid_issues", 400);
+    const description = body.description === undefined ? "" : normalizeDescription(body.description);
+    if (description === null) return jsonError("invalid_description", 400);
+    const checklist = body.checklist === undefined ? [] : normalizeChecklist(body.checklist);
+    if (checklist === null) return jsonError("invalid_checklist", 400);
     if (clientId) {
       const existing = db.get<Row>(
         `SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`,
@@ -233,9 +293,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     try {
       db.run(
         `INSERT INTO requirements
-         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14)`,
-        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson],
+         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16)`,
+        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist)],
       );
     } catch {
       if (!clientId) return jsonError("insert_failed", 500);
@@ -250,6 +310,29 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     return Response.json({ ok: true, requirement: toPublic(created) }, { status: 201 });
   }
 
+  const itemMatch = url.pathname.match(/^\/api\/requirements\/([^/]+)\/checklist\/([^/]+)$/);
+  if (itemMatch) {
+    if (req.method !== "PATCH") return jsonError("not_found", 404);
+    let body: Record<string, unknown>;
+    try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
+    if (typeof body.done !== "boolean") return jsonError("invalid_done", 400);
+    const params: unknown[] = [decodeURIComponent(itemMatch[1])];
+    let sql = `SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`;
+    sql = addNetworkScope(sql, params, ctx.scope);
+    const row = db.get<Row>(sql, ...params);
+    if (!row) return jsonError("requirement_not_found", 404);
+    if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
+    const items = storedChecklist(row.checklist_json);
+    const itemId = decodeURIComponent(itemMatch[2]);
+    const item = items.find(entry => entry.id === itemId);
+    if (!item) return jsonError("checklist_item_not_found", 404);
+    item.done = body.done;
+    db.run("UPDATE requirements SET checklist_json = ?1, updated_at = ?2 WHERE requirement_id = ?3", [JSON.stringify(items), new Date().toISOString(), row.requirement_id]);
+    const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
+    return Response.json({ ok: true, requirement: toPublic(updated) });
+  }
+
   const match = url.pathname.match(/^\/api\/requirements\/([^/]+)$/);
   if (!match || req.method !== "PATCH") return jsonError("not_found", 404);
   const id = decodeURIComponent(match[1]);
@@ -261,7 +344,13 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const hasPriority = 'priority' in body;
   const hasDue = 'due' in body;
   const hasAssignee = 'assignee' in body;
-  if (!hasColumn && !hasIssues && !hasName && !hasPriority && !hasDue && !hasAssignee && !('owner' in body) && !('agent_owner' in body) && !('participants' in body)) return jsonError('empty_patch', 400);
+  const hasDescription = 'description' in body;
+  const hasChecklist = 'checklist' in body;
+  if (!hasColumn && !hasIssues && !hasName && !hasPriority && !hasDue && !hasAssignee && !('owner' in body) && !('agent_owner' in body) && !('participants' in body) && !hasDescription && !hasChecklist) return jsonError('empty_patch', 400);
+  const description = hasDescription ? normalizeDescription(body.description) : null;
+  if (hasDescription && description === null) return jsonError("invalid_description", 400);
+  const checklist = hasChecklist ? normalizeChecklist(body.checklist) : null;
+  if (hasChecklist && checklist === null) return jsonError("invalid_checklist", 400);
   if (hasColumn && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
   const issues = hasIssues ? normalizeIssues(body.issues) : null;
   if (hasIssues && issues === null) return jsonError("invalid_issues", 400);
@@ -296,8 +385,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   try { people = assignments(body, row.network_id, row); } catch (e) { return jsonError((e as Error).message, 400); }
   const updatedAt = new Date().toISOString();
   db.run(
-    "UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6, agent_owner_json = ?11 WHERE requirement_id = ?3",
-    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson],
+    "UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6, agent_owner_json = ?11, description = ?12, checklist_json = ?13 WHERE requirement_id = ?3",
+    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
+      hasDescription ? (description || null) : row.description, hasChecklist ? JSON.stringify(checklist) : row.checklist_json],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json({ ok: true, requirement: toPublic(updated) });

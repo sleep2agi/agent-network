@@ -1,19 +1,27 @@
-Requirements agent_owner (负责人 / 负责 Agent) — 2026-09-29
+Requirements agent_owner + description + checklist — 2026-09-29 (one hub upgrade)
 Base: origin/main e6a69598 (commhub-server 0.9.0-preview.65)
 
-server/src/requirements-http.test.ts            12 pass / 87 expects
+server/src/requirements-http.test.ts            13 pass / 125 expects
+  description/checklist: create, CRLF→LF, generated ck_ ids, per-item PATCH
+  {done} (explicit, idempotent, only that item), 404 unknown item, 400 bad done,
+  viewer 403, node token user_token_required, foreign 404; replace-all reorder,
+  description-only PATCH keeps checklist; caps 20000 chars / 100 items accepted,
+  20001 / 101 rejected; duplicate id, blank text, bad id, non-boolean done rejected.
   owner must be kind user (owner_must_be_human), agent_owner must be kind node
   (agent_owner_must_be_agent) on POST and PATCH; agent_owner-only PATCH is not
   empty_patch and keeps omitted fields; foreign-network node rejected; viewer 403;
   clearing both roles; existing create/move/issue/edit regressions unchanged.
-server/src/requirements-agent-owner-migration.test.ts   1 pass / 36 expects
+server/src/requirements-upgrade-migration.test.ts   1 pass / 38 expects (also: the
+  three new columns exist and legacy rows read NULL)
   #2065-era schema (no agent_owner_json) seeded with 6 rows (2 node owners, user
   owner, null, malformed JSON, node without id) → import db.ts + requirements.ts
   (the startup path server.ts takes): row count 6 → 6,
   node owners moved to agent_owner with owner NULL, others unchanged, all other
   columns unchanged; second run moves 0 and the snapshot is identical.
   Witnessed red with the startup call commented out (fail=1).
-server/src/requirements-agent-owner-e2e.test.ts         1 pass / 20 expects
+server/src/requirements-upgrade-e2e.test.ts         1 pass / 26 expects (also: after
+  the upgrade restart, description + checklist written, one item ticked, and both
+  survive the third start)
   Throwaway hub process `bun run src/index.ts`, HOME=mkdtemp, random port
   20000–39999 (asserted != 9200), own COMMHUB_DB. Start → register, node, cards →
   stop → rewrite one card to a node owner and DROP the agent_owner_json column →

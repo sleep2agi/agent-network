@@ -91,6 +91,14 @@ test("an upgraded hub moves node owners to agent_owner and then enforces human o
   expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ owner: agent }) })).body.error).toBe("owner_must_be_human");
   expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ agent_owner: human }) })).body.error).toBe("agent_owner_must_be_agent");
 
+  // 描述 / 子任务:升级后的旧卡可写,单项勾选只动那一项
+  expect(upgraded.description).toBe("");
+  expect(upgraded.checklist).toEqual([]);
+  const withList = await api(token, path, { method: "PATCH", body: JSON.stringify({ description: "# 验收\n- 能用", checklist: [{ id: "one", text: "第一步" }, { id: "two", text: "第二步" }] }) });
+  expect(withList.status).toBe(200);
+  const ticked = await api(token, `/api/requirements/${upgraded.id}/checklist/two?network_id=${net}`, { method: "PATCH", body: JSON.stringify({ done: true }) });
+  expect(ticked.body.requirement.checklist).toEqual([{ id: "one", text: "第一步", done: false }, { id: "two", text: "第二步", done: true }]);
+
   // 第三次启动(同一个库):迁移不再改任何东西
   await stopHub();
   await startHub();
@@ -99,4 +107,6 @@ test("an upgraded hub moves node owners to agent_owner and then enforces human o
   const same = again.find((r: any) => r.id === upgraded.id);
   expect(same.owner).toEqual(human);
   expect(same.agent_owner).toEqual(agent);
+  expect(same.description).toBe("# 验收\n- 能用");
+  expect(same.checklist.map((i: any) => i.done)).toEqual([false, true]);
 }, 60_000);

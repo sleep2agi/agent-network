@@ -57,6 +57,11 @@ test("startup migration moves node owners to agent_owner, keeps every row, and i
     expect(r.due_on).toBe("2026-10-01");
     expect(r.assignee).toBe("legacy");
   }
+  // 加列只加不改:旧行的描述 / 子任务是空
+  const cols = (db.all("PRAGMA table_info(requirements)") as { name: string }[]).map(c => c.name);
+  expect(cols.includes("description") && cols.includes("checklist_json") && cols.includes("agent_owner_json")).toBe(true);
+  const extra = db.all("SELECT description, checklist_json FROM requirements") as any[];
+  expect(extra.every(r => r.description === null && r.checklist_json === null)).toBe(true);
   // 再跑一次(= 下次启动):什么都不动
   expect(migrateRequirementAgentOwners(db).moved).toBe(0);
   expect(snapshot(db)).toEqual(after);

@@ -134,6 +134,68 @@ describe("requirements stay on the hub", () => {
     expect(viewerWrite.status).toBe(403);
   });
 
+  test("description (markdown) and checklist: create, replace-all PATCH, per-item done, limits", async () => {
+    const created = await api(ownerToken, "/api/requirements", {
+      method: "POST",
+      body: JSON.stringify({ name: "带描述和子任务", description: "## 目标\r\n- 一\n- 二", checklist: [{ id: "a", text: "写接口" }, { text: "写测试", done: true }] }),
+    });
+    expect(created.status).toBe(201);
+    const card = created.body.requirement;
+    expect(card.description).toBe("## 目标\n- 一\n- 二");
+    expect(card.checklist.length).toBe(2);
+    expect(card.checklist[0]).toEqual({ id: "a", text: "写接口", done: false });
+    expect(card.checklist[1].done).toBe(true);
+    expect(card.checklist[1].id).toMatch(/^ck_[0-9a-f]{16}$/);
+    const plain = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "什么都没有" }) });
+    expect(plain.body.requirement.description).toBe("");
+    expect(plain.body.requirement.checklist).toEqual([]);
+
+    const path = `/api/requirements/${card.id}`;
+    const b = card.checklist[1].id;
+    // 单项勾选:只动那一项,显式 done,重复请求结果一样
+    const done = await api(ownerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: true }) });
+    expect(done.status).toBe(200);
+    expect(done.body.requirement.checklist.map((i: any) => i.done)).toEqual([true, true]);
+    const again = await api(ownerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: true }) });
+    expect(again.body.requirement.checklist.map((i: any) => i.done)).toEqual([true, true]);
+    expect(again.body.requirement.name).toBe("带描述和子任务");
+    expect((await api(ownerToken, `${path}/checklist/${b}`, { method: "PATCH", body: JSON.stringify({ done: false }) })).body.requirement.checklist[1].done).toBe(false);
+    expect((await api(ownerToken, `${path}/checklist/missing`, { method: "PATCH", body: JSON.stringify({ done: true }) })).body.error).toBe("checklist_item_not_found");
+    expect((await api(ownerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: "yes" }) })).status).toBe(400);
+    expect((await api(ownerToken, `${path}/checklist/a`, { method: "POST", body: JSON.stringify({ done: true }) })).status).toBe(404);
+    expect((await api(viewerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: false }) })).status).toBe(403);
+    expect((await api(nodeToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: false }) })).body.error).toBe("user_token_required");
+    expect((await api(otherToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: false }) })).status).toBe(404);
+
+    // 整个替换:排序 / 增删;只改描述时清单不动;只改清单是有效 PATCH
+    const reordered = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: [{ id: b, text: "写测试", done: false }, { id: "a", text: "写接口", done: true }, { id: "c", text: "发版" }] }) });
+    expect(reordered.status).toBe(200);
+    expect(reordered.body.requirement.checklist.map((i: any) => i.id)).toEqual([b, "a", "c"]);
+    const described = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "改过的描述" }) });
+    expect(described.body.requirement.description).toBe("改过的描述");
+    expect(described.body.requirement.checklist.length).toBe(3);
+    const cleared = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "", checklist: [] }) });
+    expect(cleared.body.requirement.description).toBe("");
+    expect(cleared.body.requirement.checklist).toEqual([]);
+
+    // 上限与坏输入整体拒绝,原值不变
+    const tooLong = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "x".repeat(20_001) }) });
+    expect(tooLong.body.error).toBe("invalid_description");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "x".repeat(20_000) }) })).status).toBe(200);
+    const many = Array.from({ length: 101 }, (_, i) => ({ id: `i${i}`, text: `第 ${i} 项` }));
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: many }) })).body.error).toBe("invalid_checklist");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: many.slice(0, 100) }) })).status).toBe(200);
+    for (const bad of [[{ id: "a", text: "x" }, { id: "a", text: "y" }], [{ text: "  " }], [{ id: "有空格 的id", text: "x" }], [{ text: "x", done: 1 }], ["字符串"]]) {
+      expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: bad }) })).body.error).toBe("invalid_checklist");
+    }
+    const listed = await api(ownerToken, "/api/requirements");
+    const row = listed.body.requirements.find((r: any) => r.id === card.id);
+    expect(row.checklist.length).toBe(100);
+    expect(row.description.length).toBe(20_000);
+    expect((await api(viewerToken, path, { method: "PATCH", body: JSON.stringify({ description: "越权" }) })).status).toBe(403);
+    expect((await api(nodeToken, path, { method: "PATCH", body: JSON.stringify({ description: "Agent 暂不能写" }) })).body.error).toBe("user_token_required");
+  });
+
   test("owner creates a card in the pool", async () => {
     const created = await api(ownerToken, "/api/requirements", {
       method: "POST",
