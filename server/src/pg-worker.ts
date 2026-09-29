@@ -26,7 +26,11 @@ const { port, flag, url, statementTimeoutMs } = workerData as {
 
 // bigint:true makes int8 arrive as BigInt, so it can be told apart from a
 // TEXT column that happens to hold digits; normalise() turns it into a number.
-const sql = new SQL(url, { max: 1, bigint: true });
+// libpq's `connect_timeout` (seconds) in the URL is honoured, default 10 s,
+// so an endpoint that accepts TCP but never speaks PostgreSQL fails the
+// startup check instead of hanging the Hub.
+const connectTimeout = Number(new URL(url).searchParams.get("connect_timeout") || 10);
+const sql = new SQL(url, { max: 1, bigint: true, connectionTimeout: connectTimeout > 0 ? connectTimeout : 10 });
 let conn: any = null;
 
 async function connection() {
