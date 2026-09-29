@@ -241,7 +241,13 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   这几页都不含源码行号 pin,uniq/occ 不变。
 # 2026-09-25:files 103 → 107。文档站瘦身第 6 步:api/rest.md 拆成 rest / rest-data / rest-admin 三页
 #   (中英各 +2)。rest 页里的源码行号 pin 随段落原样搬进新文件,uniq/occ 仍是 8/22 —— 判定数没有减少。
-[[ "$files" -eq 107 ]] || fail "预期扫 107 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-29:files 107 → 109。新增任务页(中英各一份):
+#     docs-site/docs/guide/tasks.md
+#     docs-site/docs/en/guide/tasks.md
+#   两页都没有 #L 源码行号 pin(grep -c '#L[0-9]' → 0 / 0)。uniq 仍 8、occ 仍 22。
+#   本地 checker:scanned_doc_files=109,unique_pins=8,pin_occurrences=22。
+#   CI 先红(doc source-pin floor,预期 107)才来抬,顺序是对的。
+[[ "$files" -eq 109 ]] || fail "预期扫 109 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 8  ]] || fail "预期 8 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 22 ]] || fail "预期 22 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
