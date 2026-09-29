@@ -30,3 +30,18 @@ python3 scripts/check-doc-symbol-pins.py .
 python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site
   scanned20 / judged18 / skipped2 / unavailable-ref0 / drift0
 Skipped references are not claimed verified. Report-only commit follows.
+
+Rebase onto .67 main 4923e15073dc779f13ecc0a900154d48dd9f0c49:
+Tested code head 5c18aaa3b6893910be7f33715116e33a5ac84e8c.
+All three commits range-diff =; no conflicts, no whole-file side selection.
+Against origin/main, db.ts adds only tags_json. scheduled-tasks.ts, server
+package.json and lockfile are unchanged; version stays 0.9.0-preview.67.
+CI-exact test798 build args SOURCE_COMMIT and RUNSH_BLOB from git; original
+Dockerfile/run.sh, bun1.3.14, node22.23.3, uid1000, container /tmp databases:
+executed_files=121 discovered_files=121 failed_files=0
+MUTATION_RED registration-password-floor-weakened rc=1
+RESULT: PASS
+CI-exact test831 build args TEST831_SOURCE_COMMIT / TEST831_RUNSH_BLOB,
+docker run --rm --network none: L0-L8 RESULT PASS.
+symbol-pins . and . --doc-root docs-site: drift0, unavailable-ref0;
+judged/skipped9/8 and18/2 respectively. This append is report-only.
