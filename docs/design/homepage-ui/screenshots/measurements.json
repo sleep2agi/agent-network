@@ -1,0 +1,88 @@
+{
+  "passed": 14,
+  "total": 14,
+  "checks": [
+    {
+      "name": "desktop no horizontal overflow",
+      "ok": true
+    },
+    {
+      "name": "desktop one primary headline",
+      "ok": true
+    },
+    {
+      "name": "desktop hero action fits",
+      "ok": true,
+      "data": {
+        "x": 787.90625,
+        "y": 260.578125,
+        "width": 156,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop screenshot tabs work",
+      "ok": true
+    },
+    {
+      "name": "desktop tabs support keyboard",
+      "ok": true
+    },
+    {
+      "name": "desktop download anchor works",
+      "ok": true,
+      "data": {
+        "x": 120,
+        "y": 86.375,
+        "width": 1200,
+        "height": 565.5625
+      }
+    },
+    {
+      "name": "desktop no runtime errors",
+      "ok": true,
+      "data": []
+    },
+    {
+      "name": "phone no horizontal overflow",
+      "ok": true
+    },
+    {
+      "name": "phone one primary headline",
+      "ok": true
+    },
+    {
+      "name": "phone hero action fits",
+      "ok": true,
+      "data": {
+        "x": 22,
+        "y": 314.125,
+        "width": 142.03125,
+        "height": 48
+      }
+    },
+    {
+      "name": "phone screenshot tabs work",
+      "ok": true
+    },
+    {
+      "name": "phone tabs support keyboard",
+      "ok": true
+    },
+    {
+      "name": "phone download anchor works",
+      "ok": true,
+      "data": {
+        "x": 22,
+        "y": 86.453125,
+        "width": 346,
+        "height": 1098.8125
+      }
+    },
+    {
+      "name": "phone no runtime errors",
+      "ok": true,
+      "data": []
+    }
+  ]
+}

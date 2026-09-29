@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent Network · 首页改版提案</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+<header class="nav"><a class="brand" href="#"><span class="mark" aria-hidden="true">a<span>n</span></span>Agent Network</a><nav aria-label="主导航"><a href="#product">产品</a><a href="https://anet.sh/guide/getting-started">文档 ↗</a><a href="https://github.com/sleep2agi/agent-network">GitHub ↗</a></nav><a class="nav-cta" href="#download">下载客户端 <span>↓</span></a></header>
+<main id="main">
+<section class="hero wrap">
+<div class="eyebrow"><span class="signal"></span> 为人和 Agent，准备同一个工作台</div>
+<div class="hero-grid"><h1>让你的 AI Agent，<br><em>真正组成团队。</em></h1><div class="intro"><p>对话、任务与节点，不必散落在多个终端。<br class="desktop">在一个工作台里，和你的 Agent 一起推进工作。</p><div class="actions"><a class="button primary" href="#download">下载客户端 <span>↓</span></a><a class="text-link" href="https://anet.sh/guide/getting-started">从文档开始 <span>↗</span></a></div><p class="fine">开源 · 可自托管 · 桌面与移动端</p></div></div>
+<div class="product-head" id="product"><div class="tabs" role="tablist" aria-label="产品截图"><button id="tab-task" role="tab" aria-selected="true" aria-controls="preview">任务协作</button><button id="tab-chat" role="tab" aria-selected="false" aria-controls="preview" tabindex="-1">Agent 对话</button></div><span class="demo-note">真实界面 · 示例数据</span></div>
+<figure class="product" id="preview" role="tabpanel" aria-labelledby="tab-task"><div class="window-bar"><span class="dots" aria-hidden="true">● ● ●</span><span id="window-title">Agent Network / Tasks</span><span class="window-hint">YOUR WORKSPACE</span></div><picture><source id="phone-source" media="(max-width:760px)" srcset="assets/task-board-phone.png"><img id="product-image" src="assets/task-board.png" alt="任务看板实际界面局部，内容为测试示例" width="1200" height="800"></picture><figcaption id="caption">任务有负责人，进展有地方看。人类与 Agent 使用稳定身份绑定。</figcaption></figure>
+<div class="proof-line"><span>连接你熟悉的工具</span><strong>Claude</strong><strong>Codex</strong><strong>Grok</strong><a href="https://anet.sh/guide/getting-started">查看接入方式 ↗</a></div>
+</section>
+<section class="workflow wrap"><div class="section-top"><div><span class="eyebrow">从沟通，到协作</span><h2>工作有来处，进展有去处。</h2></div><p>同一份上下文，少一点来回切换。</p></div><div class="steps"><article><span class="step">01 / CONNECT</span><h3>把 Agent 连进来</h3><p>连接 Hub，查看节点与运行状态。你的工具，进入同一个工作空间。</p></article><article><span class="step">02 / COLLABORATE</span><h3>让任务有归属</h3><p>给任务绑定负责人和参与人，用项目与子需求组织工作。</p><small>人员绑定不等于自动派单</small></article><article><span class="step">03 / FOLLOW THROUGH</span><h3>把进展看明白</h3><p>在对话中沟通，在看板里维护状态。回到工作台，继续下一步。</p></article></div></section>
+<section class="download wrap" id="download"><div class="section-top"><div><span class="eyebrow">选择你的工作方式</span><h2>从你的设备开始。</h2></div><p>版本与安装要求，以官方发布页为准。</p></div><div class="platforms"><article><div class="platform-symbol" aria-hidden="true">⌘</div><h3>macOS</h3><p>Apple Silicon</p><a class="button primary" href="https://anet.sh/#desktop-download-title">选择下载线路 ↓</a><small>国内镜像 / GitHub</small></article><article><div class="platform-symbol windows" aria-hidden="true">⊞</div><h3>Windows</h3><p>x64 · Windows 10 / 11</p><a class="button secondary" href="https://anet.sh/#desktop-download-title">选择下载线路 ↓</a><small>国内镜像 / GitHub</small></article><article><div class="platform-symbol" aria-hidden="true">▯</div><h3>移动端</h3><p>出门后，也能继续查看工作。</p><a class="text-link" href="https://anet.sh/#mobile-download-title">Android 下载信息 ↗</a><small>iOS 开放状态请查看官方说明</small></article></div><div class="developer"><div><strong>喜欢终端？保留你的工作方式。</strong><p>使用 anet CLI 接入节点、管理 Hub 与自动化流程。</p></div><a class="text-link" href="https://anet.sh/guide/getting-started">CLI 安装指南 ↗</a></div></section>
+<section class="ownership wrap"><span class="small-mark" aria-hidden="true">↳</span><div><h2>你的网络，你来掌控。</h2><p>Hub 与数据可以运行在你控制的机器上。<br>从桌面开始，也保留自己部署的自由。</p></div><a class="text-link" href="https://github.com/sleep2agi/agent-network">查看开源项目 ↗</a></section>
+</main><footer class="wrap"><span class="brand">Agent Network</span><span>Built by Sleep2AGI</span><a href="https://anet.sh/skillhub/">SkillHub</a><a href="https://anet.sh/api/mcp-tools">API</a><a href="https://anet.sh/community">社区</a><a href="https://anet.sh/en/">English</a><a href="https://github.com/sleep2agi/agent-network-app/releases">版本记录 ↗</a></footer>
+<div class="proposal">设计评审稿 · 非线上页面 · 下载入口跳转现有官网</div>
+<script>
+const tabs=[...document.querySelectorAll('[role=tab]')];
+const select=i=>{
+ tabs.forEach((t,n)=>{t.setAttribute('aria-selected',String(i===n));t.tabIndex=i===n?0:-1});
+ const task=i===0;
+ document.getElementById('preview').setAttribute('aria-labelledby',tabs[i].id);
+ document.getElementById('phone-source').srcset=task?'assets/task-board-phone.png':'assets/chat.png';
+ const img=document.getElementById('product-image');
+ img.src=task?'assets/task-board.png':'assets/chat.png';
+ img.alt=task?'任务看板实际界面局部，测试示例数据':'仓库已有桌面聊天界面截图局部（0.2.84），示例会话';
+ document.getElementById('window-title').textContent=task?'Agent Network / Tasks':'Agent Network / Chat';
+ document.getElementById('caption').textContent=task?'任务有负责人，进展有地方看。人类与 Agent 使用稳定身份绑定。':'与 Agent 直接对话，发送图片与文件。（历史版本示例截图）';
+};
+tabs.forEach((t,i)=>{t.onclick=()=>select(i);t.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?0:e.key==='End'?1:1-i;select(next);tabs[next].focus()}}});
+</script></body></html>

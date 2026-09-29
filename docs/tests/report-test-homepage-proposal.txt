@@ -1,0 +1,25 @@
+Homepage UI/UX design proposal — 2026-09-29
+Base main: 6a20bde2 (agent-network).
+Scope: independent docs/design/homepage-ui HTML proposal, no docs-site code change.
+
+Docker environment: pinned Playwright1.58.2 noble image, Chromium, Noto Sans CJK.
+Commands: tests/test-homepage-proposal/Dockerfile; README has reproduction.
+Final run mounted current proposal read-only at /qa/site.
+PASS 14/14 across desktop1440x1000 and phone390x844:
+- no page horizontal overflow; one h1
+- primary action within viewport, height48px
+- screenshot tabs switch and support keyboard navigation
+- download anchor reaches visible section
+- no browser runtime errors
+Desktop action x787.906 width156; phone action x22 width142.031.
+Screenshots: docs/design/homepage-ui/screenshots (6PNG + measurements.json).
+Visually inspected desktop hero/full and phone hero/download.
+
+First review found the desktop screenshot unreadable when scaled to phone width;
+changed phone source to a real narrow-screen task screenshot, cropped with CSS.
+No generated product claims/counters; screenshot data is marked as example.
+Historic chat screenshot remains explicitly identified as an old version.
+
+Limits: static Chinese/light proposal only; not VitePress integration, not a
+native client test, not an audit of actual download assets. No production calls
+from the test server, no credentials, no Hub/TM writes, no merge or release.
