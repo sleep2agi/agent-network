@@ -76,6 +76,7 @@ export default withMermaid(defineConfig({
             text: '节点与 Runtime',
             items: [
               { text: 'Agent Node', link: '/guide/agent-node' },
+              { text: '节点运行日志', link: '/guide/node-run-logs' },
               { text: '选择 Runtime', link: '/guide/runtimes' },
               { text: '支持矩阵', link: '/guide/support-matrix' },
               { text: '模型与供应商', link: '/guide/multi-model' },
@@ -167,6 +168,7 @@ export default withMermaid(defineConfig({
             text: 'Nodes & Runtimes',
             items: [
               { text: 'Agent Node', link: '/en/guide/agent-node' },
+              { text: 'Node run logs', link: '/en/guide/node-run-logs' },
               { text: 'Choosing a Runtime', link: '/en/guide/runtimes' },
               { text: 'Support Matrix', link: '/en/guide/support-matrix' },
               { text: 'Models & Providers', link: '/en/guide/multi-model' },
