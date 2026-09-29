@@ -52,6 +52,7 @@ type Row = {
   column_name: string;
   priority: string;
   due_on: string | null;
+  start_on: string | null;
   assignee: string | null;
   issues_json: string | null;
   tags_json: string | null;
@@ -285,6 +286,8 @@ function toPublic(row: Row) {
     priority: row.priority,
     assignee: row.assignee || "",
     due: row.due_on || "",
+    // 开始(可空,甘特图用)。形状同 due;没设 = ""。旧 App 不认识这个字段,忽略即可。
+    start: row.start_on || "",
     column: row.column_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at || row.created_at,
@@ -353,7 +356,7 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
   };
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, " +
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0) AS children_total, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
@@ -427,7 +430,7 @@ function operationOf(req: Request, url: URL): string {
   return "create";
 }
 
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -534,6 +537,8 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   if (!PRIORITIES.has(priority)) return jsonError("invalid_priority", 400);
   const due = typeof body.due === "string" ? normalizeDue(body.due) : "";
   if (due === null) return jsonError("invalid_due", 400);
+  const start = typeof body.start === "string" ? normalizeDue(body.start) : "";
+  if (start === null) return jsonError("invalid_start", 400);
   const assignee = typeof body.assignee === "string" ? body.assignee.trim().slice(0, 80) : "";
   const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
   if (clientId && !/^[A-Za-z0-9._-]{1,80}$/.test(clientId)) return jsonError("invalid_client_id", 400);
@@ -577,9 +582,9 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   try {
     db.run(
       `INSERT INTO requirements
-       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22)`,
-      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags)],
+       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json, start_on)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22, ?23)`,
+      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags), start || null],
     );
   } catch {
     // 并发的同一个 external_ref / client_id:唯一索引挡住了第二个,回已有的那条。
@@ -597,7 +602,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
 }
 
 // ── 修改(省略的字段保留原值) ──
-const PATCH_FIELDS = ["column", "issues", "tags", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "description", "checklist", "project_id", "external_ref", "external_url", "archived", "parent_id"];
+const PATCH_FIELDS = ["column", "issues", "tags", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "description", "checklist", "project_id", "external_ref", "external_url", "archived", "parent_id", "start"];
 function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Record<string, unknown>): Response {
   if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
@@ -627,6 +632,13 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     const next = normalizeDue(body.due);
     if (next === null) return jsonError("invalid_due", 400);
     due = next;
+  }
+  let start = row.start_on || "";
+  if (has("start")) {
+    if (typeof body.start !== "string") return jsonError("invalid_start", 400);
+    const next = normalizeDue(body.start);
+    if (next === null) return jsonError("invalid_start", 400);
+    start = next;
   }
   let assignee = row.assignee || "";
   if (has("assignee")) {
@@ -673,10 +685,10 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   const updatedAt = new Date().toISOString();
   db.run(
     `UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6,
-       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18, parent_id = ?19, tags_json = ?20
+       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18, parent_id = ?19, tags_json = ?20, start_on = ?21
      WHERE requirement_id = ?3`,
     [has("column") ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, has("issues") ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
-      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx)), parentId, has("tags") ? JSON.stringify(tags) : row.tags_json],
+      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx)), parentId, has("tags") ? JSON.stringify(tags) : row.tags_json, start || null],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json(withLegacyOwner(toPublicFor(ctx, updated), people.coerced));
