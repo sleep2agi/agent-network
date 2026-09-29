@@ -68,6 +68,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: '桌面与手机客户端', link: '/guide/desktop-app' },
               { text: '任务', link: '/guide/tasks' },
+              { text: '定时任务', link: '/guide/schedules' },
               { text: 'Web Dashboard', link: '/guide/dashboard' },
             ]
           },
@@ -159,6 +160,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Desktop & Mobile Clients', link: '/en/guide/desktop-app' },
               { text: 'Tasks', link: '/en/guide/tasks' },
+              { text: 'Schedules', link: '/en/guide/schedules' },
               { text: 'Web Dashboard', link: '/en/guide/dashboard' },
             ]
           },

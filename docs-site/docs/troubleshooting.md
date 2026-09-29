@@ -278,6 +278,8 @@ anet status
 
 ### 定时任务没有运行
 
+应用里的「定时任务」页（Hub 计划）见[定时任务](/guide/schedules)。下面这几条命令查的是另一件事：命令行的 Goal / Loop。
+
 ```bash
 anet goal list <alias>
 anet info <alias>

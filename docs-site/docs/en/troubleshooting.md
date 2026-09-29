@@ -278,6 +278,8 @@ The current token/network may not own the object, or a message may belong to ano
 
 ### Scheduled task did not run
 
+The app's Schedules page (Hub schedules) is documented in [Schedules](/en/guide/schedules). The commands below are a different feature: Goals and Loops.
+
 ```bash
 anet goal list <alias>
 anet info <alias>

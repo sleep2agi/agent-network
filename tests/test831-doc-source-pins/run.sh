@@ -251,7 +251,11 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/guide/node-run-logs.md
 #     docs-site/docs/en/guide/node-run-logs.md
 #   两页都没有 #L 源码行号 pin。uniq 仍 8、occ 仍 22。
-[[ "$files" -eq 111 ]] || fail "预期扫 111 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-29:files 111 → 113。新增定时任务页(中英各一份):
+#     docs-site/docs/guide/schedules.md
+#     docs-site/docs/en/guide/schedules.md
+#   两页都没有 #L 源码行号 pin。uniq 仍 8、occ 仍 22。
+[[ "$files" -eq 113 ]] || fail "预期扫 113 个文档文件(= git ls-files 的结果),实际 $files"
 [[ "$uniq"  -eq 8  ]] || fail "预期 8 个唯一 pin,实际 $uniq"
 [[ "$occ"   -eq 22 ]] || fail "预期 22 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
