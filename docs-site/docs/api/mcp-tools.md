@@ -867,7 +867,7 @@ send_task({
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/requirements` | 列表；过滤参数 `status`、`project_id`（`none` = 无项目）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`（ISO）、`external_ref`、`parent_id`（`none` = 顶层）/ `top_level=1`、`include_archived=1`；响应带 `capabilities` |
+| GET | `/api/requirements` | 列表；过滤参数 `status`、`project_id`（`none` = 无项目）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`（ISO）、`external_ref`、`parent_id`（`none` = 顶层）/ `top_level=1`；默认不含归档，`include_archived=1` 含全部，`archived=true` 仅归档（优先于 `include_archived`）；响应带 `capabilities` |
 | GET | `/api/requirements/{id}` | 一条 |
 | POST | `/api/requirements` | 新建；重复 `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
 | POST | `/api/requirements/upsert` | 按 `external_ref` 建或改（省略的字段、包括状态，保留）；响应 `{requirement, created}` |

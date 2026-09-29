@@ -862,7 +862,7 @@ Tasks (requirement cards) live on the Hub; the app's 任务 page and agents read
 
 | Method | Path | Notes |
 |------|------|------|
-| GET | `/api/requirements` | List; filters `status`, `project_id` (`none` = no project), `owner` / `agent_owner` (`user:<id>` / `node:<id>` / `none`), `updated_since` (ISO), `external_ref`, `parent_id` (`none` = top level) / `top_level=1`, `include_archived=1`; the response carries `capabilities` |
+| GET | `/api/requirements` | List; filters `status`, `project_id` (`none` = no project), `owner` / `agent_owner` (`user:<id>` / `node:<id>` / `none`), `updated_since` (ISO), `external_ref`, `parent_id` (`none` = top level) / `top_level=1`; excludes archived by default, `include_archived=1` includes all, `archived=true` returns only archived (takes precedence over `include_archived`); the response carries `capabilities` |
 | GET | `/api/requirements/{id}` | One task |
 | POST | `/api/requirements` | Create; duplicate `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
 | POST | `/api/requirements/upsert` | Create or patch by `external_ref` (omitted fields, including status, are kept); returns `{requirement, created}` |
