@@ -4,7 +4,7 @@
 
 **不是。** 对外地址不变时，节点和客户端都不用改。必须换地址时，改的也只是地址，令牌不用重签。只改地址、不把库和密钥一起搬走，等于连上一台空 Hub。
 
-本页只讲现在的 SQLite Hub。`DATABASE_URL` 以 `postgres://` 或 `postgresql://` 开头时，Hub 不使用下面这份库，这些步骤不适用。
+本页只讲现在的 SQLite Hub。`DATABASE_URL` 以 `postgres://` 或 `postgresql://` 开头时，Hub 不使用下面这份库，这些步骤不适用。**PostgreSQL 支持尚在开发中，目前不可用**：这样配置的 Hub 在建表阶段就会退出（见 [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md)）。
 
 ## 要搬什么
 
