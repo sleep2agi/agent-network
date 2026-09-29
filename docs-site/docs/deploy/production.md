@@ -114,7 +114,7 @@ sqlite3 ~/.commhub/commhub.db \
 - Dashboard 的 Audit Log
 - Hub 进程是否由可靠的进程管理器守护
 
-长期运行和开机恢复见 [让 Hub 常驻](/deploy/keep-alive)。
+长期运行和开机恢复见 [让 Hub 常驻](/deploy/keep-alive)。把整台 Hub 换到另一台机器，见 [迁移 Hub](/deploy/hub-migration)。
 
 ## 部署方式
 

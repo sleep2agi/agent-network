@@ -261,7 +261,11 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/guide/multi-user.md
 #     docs-site/docs/en/guide/multi-user.md
 #   四页都没有 #L 源码行号 pin。uniq 仍 7、occ 仍 20(#2097 已把 uniq/occ 收到 7/20)。
-[[ "$files" -eq 117 ]] || fail "预期扫 117 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-30:files 117 → 119。新增 Hub 迁移页(中英各一份):
+#     docs-site/docs/deploy/hub-migration.md
+#     docs-site/docs/en/deploy/hub-migration.md
+#   两页都没有 #L 源码行号 pin。uniq 仍 6、occ 仍 18。
+[[ "$files" -eq 119 ]] || fail "预期扫 119 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
 # 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——
