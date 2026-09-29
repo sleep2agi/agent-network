@@ -1707,6 +1707,7 @@ return Bun.serve({
           rules_file_capable: s.rules_file_capable === 1,
           skills_capable: s.skills_capable === 1,
           files_capable: s.files_capable === 1,
+          logs_capable: s.logs_capable === 1,
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {

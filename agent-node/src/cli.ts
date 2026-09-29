@@ -41,6 +41,7 @@ import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
 import { processRulesFileRequests } from "./runtime/rules-file";
+import { createLogRedactor, parseLogsTailParams, tailNodeLogs } from "./runtime/node-logs";
 import { chooseGrokBinary, grokBinaryPinToRecord, findVerifiedGrokCandidates, grokRecoveryHint } from "./runtime/grok-binary-pin";
 
 // 🔴 这三处原先都喂 `__dirname`,而打包器把它内联成构建期常量 —— 见 #1433。
@@ -1242,6 +1243,19 @@ const taskTraceLog = (line: string) => {
   } catch {}
 };
 
+// 规则文件门铃(rules_file / skills / files / logs_tail)的依赖。logs_tail 读本进程自己的
+// 日志目录;脱敏器每次现建,节点 token 轮换后(reloadNodeToken)立刻按新值遮。
+function rulesFileDeps() {
+  return {
+    callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn,
+    logsTail: (raw: string | undefined) => tailNodeLogs(
+      PRIVATE_LOG_DIR,
+      parseLogsTailParams(raw),
+      createLogRedactor({ knownValues: [AUTH_TOKEN, fileConfig.token, globalConfig.token], env: process.env }),
+    ),
+  };
+}
+
 // ── CommHub MCP 调用 (with retry) ──
 //
 // #168 RC-B1 + RC-B2 fix. Error classification + payload parsing lives
@@ -1523,6 +1537,8 @@ const register = async () => {
     skills_capable: true,
     // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
     files_capable: true,
+    // 同一门铃也答 logs_tail(node-logs.ts,本节点运行日志只读查看,返回前脱敏)。
+    logs_capable: true,
   };
   // 🔴 启动注册是 `await register()`（本文件底部、顶层、**无 catch**），所以这里
   //    抛出什么都会让整个进程退出。#1225 实测到的那次就是这样：hub 的
@@ -6516,7 +6532,7 @@ async function connectSSE() {
               commhubCompensation?.trigger("sse-reconnect");
               // app#225 —— 断线/未连上期间桌面端可能已发起规则文件请求(hub 侧 60s 内
               // 仍 pending,门铃却没人听);连上后补拉一次,没有就是一次空拉。
-              processRulesFileRequests({ callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn })
+              processRulesFileRequests(rulesFileDeps())
                 .catch((e: any) => warn(`[rules-file] connect catch-up failed: ${e?.message || e}`));
               if (fileConfig.role === "host_supervisor") {
                 import("./runtime/create-node-daemon.js").then(({ handleCreateNodeDoorbell, reconcilePendingCreateRequestsOnConnect, serializeEnvLocalDaemon }) => {
@@ -6610,7 +6626,7 @@ async function connectSSE() {
       // 本节点按 RUNTIME 决定、目录固定 cwd，见 runtime/rules-file.ts 顶部。
       if (ev.type === "rules_file") {
         log(`[rules-file] doorbell received`);
-        processRulesFileRequests({ callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn })
+        processRulesFileRequests(rulesFileDeps())
           .catch((e: any) => warn(`[rules-file] doorbell handler failed: ${e?.message || e}`));
       }
       if (ev.type === "restart") {

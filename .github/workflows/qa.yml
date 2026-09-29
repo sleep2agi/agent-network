@@ -489,6 +489,27 @@ jobs:
       - name: Run rules-file e2e
         run: docker run --rm anet-test1755-rules-file-e2e
 
+  qa-node-logs-e2e:
+    # 节点运行日志(tail_node_logs)端到端:真 hub + 真 agent-node 同镜像。验单测验不了的那几条:
+    # 种进节点日志的 token / Bearer / KEY= / 只在节点 env 里的凭据值经真实链路回来时一个不剩、
+    # grep 探不出被遮的字符、hub 读后即删、节点 token 与别的网络被拒、witnessed-red(关掉节点脱敏器
+    # 后断言必红)。冷构建含两次 bun install,不进 L1 的 5 分钟预算,独立 job(同 test1755 的形状)。
+    name: node run-log e2e (Docker, real hub + agent-node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact node run-log e2e image
+        run: |
+          docker build \
+            --build-arg QA_NODE_LOGS_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-qa-node-logs-e2e \
+            -f tests/qa-node-logs-e2e/Dockerfile .
+
+      - name: Run node run-log e2e
+        run: docker run --rm anet-qa-node-logs-e2e
+
   qa-create-node-workdir:
     # app「新建节点」工作目录端到端:真 hub + 真 `anet daemon up` + create_node(默认 <root>/<name>、
     # 自定义 ~/…、不带 workdir 的老布局、三种拒绝)+ 自己目录里的节点 stop/start/delete。

@@ -29,6 +29,13 @@
 //      was just nulled (it would otherwise receive `content: ""` and write an
 //      empty rules file).
 //   3. Rows older than ROW_TTL_MS are deleted outright.
+//   4. Run logs (op = logs_tail) are stricter: read-once with NO grace — the
+//      first authorized terminal read purges them in the same call
+//      (purgeLogsResultNow), because the app never follows another request's
+//      logs result (it simply asks again) and a process log is the most
+//      sensitive thing on this queue. Unread terminal results are purged after
+//      LOGS_CONTENT_TTL_MS (the requester closed the page). The filter JSON in
+//      `content` (it can hold a user-typed grep) goes with it.
 //
 // Every statement is bounded (LIMIT via `request_id IN (SELECT … LIMIT n)` —
 // SQLite's UPDATE/DELETE … LIMIT needs a compile flag we don't control) and
@@ -44,13 +51,15 @@ export const CONTENT_GRACE_MS = 60_000;
 export const CONTENT_TTL_MS = 24 * 60 * 60 * 1000;
 export const ROW_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const SWEEP_BATCH = 500;
+export const LOGS_CONTENT_TTL_MS = 5 * 60 * 1000;
 
 export type NodeRequestSweepResult = { timedOut: number; purged: number; deleted: number };
 
 // `content` is only a file body for op=write. For skill_read / file_read it is
 // the skill name / relative path the requester asked for — audit metadata, kept.
+// For logs_tail it is the filter JSON, which may carry a user-typed grep — purged.
 const PURGE_SET =
-  "result_content = NULL, content = CASE WHEN op = 'write' THEN NULL ELSE content END, content_purged_at = ?1";
+  "result_content = NULL, content = CASE WHEN op IN ('write', 'logs_tail') THEN NULL ELSE content END, content_purged_at = ?1";
 
 function purgeWhere(where: string, params: (string | number)[], now: number): number {
   const r = db.run(
@@ -77,6 +86,7 @@ export function sweepNodeRequestContent(now: number = Date.now()): NodeRequestSw
     // ?1 = now (PURGE_SET), ?2… = where params.
     out.purged += purgeWhere("first_read_at IS NOT NULL AND first_read_at <= ?2 AND status IN ('done', 'failed', 'timeout')", [now - CONTENT_GRACE_MS], now);
     out.purged += purgeWhere("created_at < ?2 AND status IN ('done', 'failed', 'timeout')", [ttlCutoff], now);
+    out.purged += purgeWhere("op = 'logs_tail' AND created_at < ?2 AND status IN ('done', 'failed', 'timeout')", [now - LOGS_CONTENT_TTL_MS], now);
   } catch (e: any) {
     console.log(`[commhub retention] node_rules_requests sweep failed: ${e?.message ?? e}`);
   }
@@ -101,4 +111,10 @@ export function noteTerminalResultRead(requestId: string, now: number = Date.now
     requestId,
   );
   return { purged: row?.content_purged_at != null };
+}
+
+/** Run-log results are read-once: called by get_rules_file_result right after it
+ *  handed a terminal logs_tail result to its (authorized) requester. */
+export function purgeLogsResultNow(requestId: string, now: number = Date.now()): void {
+  db.run(`UPDATE node_rules_requests SET ${PURGE_SET} WHERE request_id = ?2 AND op = 'logs_tail' AND content_purged_at IS NULL`, [now, requestId]);
 }
