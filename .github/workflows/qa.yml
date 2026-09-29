@@ -557,6 +557,27 @@ jobs:
       - name: Run node run-log e2e
         run: docker run --rm anet-qa-node-logs-e2e
 
+  qa-claude-code-node-id:
+    # claude-code-cli 节点的 MCP 通道(.anet/node-server.js)report_status 要带配置里的
+    # node_id —— 不带,hub 的 nodes 表就没有这个节点,定时任务 / 桌面端选择器选不到它。
+    # 真 hub + 与 dist 同一条 bun build 的 node-server 产物,含「修复前产物」正控。
+    # 冷构建含两次 bun install,不进 L1 的 5 分钟预算,独立 job(同 test1755 的形状)。
+    name: claude-code node_id e2e (Docker, real hub + node-server bundle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact claude-code node_id e2e image
+        run: |
+          docker build \
+            --build-arg QA_CC_NODE_ID_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-qa-claude-code-node-id \
+            -f tests/qa-claude-code-node-id/Dockerfile .
+
+      - name: Run claude-code node_id e2e
+        run: docker run --rm anet-qa-claude-code-node-id
+
   qa-create-node-workdir:
     # app「新建节点」工作目录端到端:真 hub + 真 `anet daemon up` + create_node(默认 <root>/<name>、
     # 自定义 ~/…、不带 workdir 的老布局、三种拒绝)+ 自己目录里的节点 stop/start/delete。

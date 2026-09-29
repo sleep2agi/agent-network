@@ -66,6 +66,17 @@ describe("node-server 的身份载荷(三处)", () => {
     expect(missing.length).toBe(0);
   });
 
+  it("🔴 三处都带 node_id / node_name —— 不带,hub 的 nodes 表就没有这个节点,定时任务选不到", () => {
+    const missing = blocks.filter(b => !b.includes("node_id: NODE_ID") || !b.includes("node_name: NODE_NAME"));
+    expect(missing.length).toBe(0);
+  });
+
+  it("node_id 只来自节点配置(不读 COMMHUB_NODE_ID:继承来的旧值会认领别人的 nodes 行)", () => {
+    expect(CODE).toContain("const NODE_ID = NODE_IDENTITY.node_id;");
+    expect(CODE).toContain("nodeIdentityFromConfig(CONFIG_PATH)");
+    expect(CODE).not.toContain("COMMHUB_NODE_ID");
+  });
+
   it("config_path 不存在时不发这个字段(发一个不存在的路径比不发更糟)", () => {
     expect(CODE).toContain("existsSync(p) ? p : undefined");
   });
