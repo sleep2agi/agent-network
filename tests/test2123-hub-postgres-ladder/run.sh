@@ -14,6 +14,10 @@
 #   L4  login → node token → report_status → POST /api/task
 #   L5  send_reply ok and the task row is replied
 #
+# Before the ladder, contract.ts checks PgAdapter itself on the same server
+# (rollback, savepoints, caught errors inside a transaction, int8/BLOB/bool
+# types). That part is pass/fail, not a ratchet.
+#
 # It is a ratchet, not a pass/fail smoke: the suite is red only when the level
 # drops below FLOOR. Each RFC-039 step that moves the Hub up a rung raises
 # FLOOR in the same PR. Reaching above FLOOR prints a note, never red.
@@ -31,9 +35,10 @@ if [ -n "${EXPECTED_SOURCE_COMMIT:-}" ] && [ "$EXPECTED_SOURCE_COMMIT" != "${SOU
   exit 1
 fi
 
-# Current floor: RFC-039 S2a builds the whole schema on PG; startHub() then
-# refuses (scheduled tasks need the real transactions S2b brings).
-FLOOR="${PG_LADDER_FLOOR:-1}"
+# Current floor: RFC-039 S2b gives PgAdapter real transactions, so startHub()
+# no longer refuses; the Hub listens, bootstraps its admin and accepts tasks.
+# L5 (send_reply) still fails on an untyped `?2 IS NULL` parameter (S3).
+FLOOR="${PG_LADDER_FLOOR:-4}"
 SUITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PG_PORT=25433
 HUB_PORT=29213
@@ -69,6 +74,12 @@ runuser -u postgres -- "$PG_BIN/createdb" -h 127.0.0.1 -p "$PG_PORT" -U postgres
 # can't reach L0" — a harness failure dressed up as a product finding.
 runuser -u postgres -- "$PG_BIN/psql" -h 127.0.0.1 -p "$PG_PORT" -U postgres -d commhub -Atc 'select 1' | grep -qx 1
 echo "[pg] ready on 127.0.0.1:$PG_PORT"
+
+# PgAdapter contract (RFC-039 S2b): real transactions, savepoints, types.
+# Not a ratchet — any failure here is red regardless of FLOOR.
+contract_rc=0
+(cd /work/server && env -u NODE_ENV -u COMMHUB_DB \
+  bun "$SUITE_DIR/contract.ts" "postgres://postgres@127.0.0.1:$PG_PORT/commhub" /work/server/src/db-adapter.ts) || contract_rc=$?
 
 cd /work/server
 env -u NODE_ENV -u COMMHUB_DB \
@@ -118,6 +129,10 @@ echo "----------------------"
 
 echo "PG_LADDER level=$LEVEL floor=$FLOOR first_fail=${FIRST_FAIL:-none}"
 
+if [ "$contract_rc" -ne 0 ]; then
+  echo "RESULT: FAIL — PgAdapter contract failed (rc=$contract_rc)."
+  exit 1
+fi
 if [ "$LEVEL" -lt 0 ]; then
   echo "RESULT: FAIL — the Hub never reported a PostgreSQL connection (L0). Harness or adapter selection is broken."
   exit 1

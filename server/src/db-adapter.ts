@@ -2,7 +2,8 @@
  * Database Adapter — supports SQLite and PostgreSQL
  *
  * SQLite adapter: wraps bun:sqlite (sync)
- * PostgreSQL adapter: wraps pg Pool (async, bridged to sync interface via blocking)
+ * PostgreSQL adapter: one Bun.SQL connection in a worker thread, bridged to the
+ *   sync interface with Atomics.wait (pg-worker.ts)
  *
  * Key design: callers write SQLite-style SQL. PgAdapter auto-translates:
  *   - ?1, ?2  →  $1, $2
@@ -40,6 +41,9 @@ export interface DbAdapter {
 
   /** Dialect identifier */
   readonly dialect: "sqlite" | "postgres";
+
+  /** True when transaction() is all-or-nothing on one connection. */
+  readonly atomicTransactions: boolean;
 }
 
 // ════════════════════════════════════════════
@@ -48,6 +52,7 @@ export interface DbAdapter {
 
 export class SQLiteAdapter implements DbAdapter {
   readonly dialect = "sqlite" as const;
+  readonly atomicTransactions = true;
   constructor(private readonly rawDb: Database) {}
 
   run(sql: string, params?: any[]): QueryResult {
@@ -183,64 +188,74 @@ export function splitSqlStatements(sql: string): string[] {
 }
 
 /**
- * PostgreSQL adapter using a synchronous subprocess bridge.
+ * PostgreSQL adapter: synchronous facade over one long-lived worker thread
+ * (RFC-039 S2b).
  *
- * TODO(P0-4): this is not transaction-safe. querySync currently starts a
- * fresh `node -e` process for every statement, so BEGIN/COMMIT/ROLLBACK do
- * not share one backend connection. PostgreSQL support is demoted behind
- * SQLite for now; before advertising it as production-ready, replace this
- * bridge with a long-lived worker or make DbAdapter async and use pg directly.
+ * The worker (pg-worker.ts) holds a single reserved Bun.SQL connection. Each
+ * call posts one request and blocks on Atomics.wait until the worker answers,
+ * so the DbAdapter interface stays synchronous — the same contract bun:sqlite
+ * gives the rest of the Hub, including "nothing else runs while a transaction
+ * is open". Because every statement uses the same backend connection,
+ * BEGIN/COMMIT/ROLLBACK are real transactions.
+ *
+ * SQLite semantics kept on purpose:
+ *   - a failed statement inside a transaction does not poison the transaction
+ *     (each statement inside one runs under a savepoint);
+ *   - nested transaction() calls become savepoints;
+ *   - booleans bind as 1/0 and undefined as NULL.
  */
 export class PgAdapter implements DbAdapter {
   readonly dialect = "postgres" as const;
-  private connString: string;
+  readonly atomicTransactions = true;
+  private readonly port: MessagePort;
+  private readonly flag: Int32Array;
+  private readonly worker: import("node:worker_threads").Worker;
+  private readonly waitMs: number;
+  private txDepth = 0;
 
   constructor(connectionString: string) {
-    this.connString = connectionString;
-    // Validate pg is available
-    try { require("pg"); } catch (e) {
-      throw new Error(
-        "PostgreSQL support requires 'pg' package. Install with: bun add pg\n" +
-        `  Original error: ${(e as Error).message}`
-      );
-    }
+    const { Worker, MessageChannel } = require("node:worker_threads") as typeof import("node:worker_threads");
+    const statementTimeoutMs = Number(process.env.COMMHUB_PG_STATEMENT_TIMEOUT_MS || 30_000);
+    // The main thread waits a little longer than PG itself will run a statement.
+    this.waitMs = statementTimeoutMs > 0 ? statementTimeoutMs + 5_000 : 300_000;
+    const { port1, port2 } = new MessageChannel();
+    this.port = port1 as unknown as MessagePort;
+    this.flag = new Int32Array(new SharedArrayBuffer(4));
+    this.worker = new Worker(new URL("./pg-worker.ts", import.meta.url), {
+      workerData: { port: port2, flag: this.flag, url: connectionString, statementTimeoutMs },
+      transferList: [port2 as any],
+    });
+    this.worker.unref();
+    (port1 as any).unref?.();
     // Test connection on startup
-    const test = this.querySync("SELECT 1 as ok");
+    const test = this.request("SELECT 1 as ok");
     if (!test.rows?.[0]?.ok) throw new Error("PostgreSQL connection test failed");
     console.log("[commhub] PostgreSQL connection verified");
   }
 
-  private querySync(sql: string, params?: any[]): { rows: any[]; rowCount: number } {
-    const pgSql = sqliteToPostgres(sql);
-    // Single-query subprocess with pg Pool (connection string from env)
-    const script = `
-      const{Pool,types}=require('pg');
-      types.setTypeParser(20,v=>{const n=Number(v);return Number.isSafeInteger(n)?n:v;});
-      const p=new Pool({connectionString:${JSON.stringify(this.connString)},max:1});
-      const q=${JSON.stringify(pgSql)};
-      const v=${JSON.stringify(params || [])};
-      p.query(q,v).then(r=>{
-        process.stdout.write(JSON.stringify({rows:r.rows,rowCount:r.rowCount||0}));
-        p.end();
-      }).catch(e=>{
-        process.stderr.write(e.message);
-        p.end();
-        process.exit(1);
-      });
-    `;
-    const proc = Bun.spawnSync(["node", "--no-warnings", "-e", script], {
-      stdout: "pipe", stderr: "pipe",
-    });
-    if (proc.exitCode !== 0) {
-      throw new Error(`PG: ${proc.stderr.toString().trim() || "query failed"}`);
+  /** Send one already-translated statement to the worker and block for the answer. */
+  private request(pgSql: string, params?: any[]): { rows: any[]; count: number } {
+    const { receiveMessageOnPort } = require("node:worker_threads") as typeof import("node:worker_threads");
+    const bound = (params ?? []).map(v => v === undefined ? null : typeof v === "boolean" ? (v ? 1 : 0) : v);
+    Atomics.store(this.flag, 0, 0);
+    (this.port as any).postMessage({ sql: pgSql, params: bound, guard: this.txDepth > 0 });
+    if (Atomics.wait(this.flag, 0, 0, this.waitMs) === "timed-out") {
+      throw new Error(`PG: no answer from the database worker within ${this.waitMs}ms`);
     }
-    return JSON.parse(proc.stdout.toString().trim());
+    const reply = receiveMessageOnPort(this.port as any)?.message as any;
+    if (!reply) throw new Error("PG: database worker signalled without a reply");
+    if (!reply.ok) throw new Error(`PG: ${reply.error}`);
+    return reply;
+  }
+
+  private querySync(sql: string, params?: any[]): { rows: any[]; count: number } {
+    return this.request(sqliteToPostgres(sql), params);
   }
 
   run(sql: string, params?: any[]): QueryResult {
     if (sql.trim().toUpperCase().startsWith("PRAGMA")) return { changes: 0 };
     const result = this.querySync(sql, params);
-    return { changes: result.rowCount };
+    return { changes: result.count };
   }
 
   get<T = any>(sql: string, ...params: any[]): T | null {
@@ -259,7 +274,7 @@ export class PgAdapter implements DbAdapter {
     // Split multi-statement DDL (CREATE TABLE; CREATE INDEX; ...)
     const stmts = splitSqlStatements(pgSql);
     for (const stmt of stmts) {
-      try { this.querySync(stmt); } catch (e: any) {
+      try { this.request(stmt); } catch (e: any) {
         // Ignore "already exists" errors for CREATE TABLE/INDEX IF NOT EXISTS
         if (!/already exists/.test(e.message)) throw e;
       }
@@ -267,19 +282,32 @@ export class PgAdapter implements DbAdapter {
   }
 
   transaction<T>(fn: () => T): T {
-    // Not atomic for PostgreSQL until P0-4 is implemented; see class TODO.
-    this.querySync("BEGIN");
+    const depth = this.txDepth;
+    const savepoint = `anet_tx_${depth}`;
+    // Control statements run unguarded: they are what the guard is made of.
+    this.txDepth = 0;
+    try { this.request(depth === 0 ? "BEGIN" : `SAVEPOINT ${savepoint}`); } finally { this.txDepth = depth; }
+    this.txDepth = depth + 1;
+    let result: T;
     try {
-      const result = fn();
-      this.querySync("COMMIT");
-      return result;
+      result = fn();
     } catch (e) {
-      try { this.querySync("ROLLBACK"); } catch {}
+      this.txDepth = 0;
+      try {
+        if (depth === 0) this.request("ROLLBACK");
+        else { this.request(`ROLLBACK TO SAVEPOINT ${savepoint}`); this.request(`RELEASE SAVEPOINT ${savepoint}`); }
+      } catch {}
+      this.txDepth = depth;
       throw e;
     }
+    this.txDepth = 0;
+    try { this.request(depth === 0 ? "COMMIT" : `RELEASE SAVEPOINT ${savepoint}`); } finally { this.txDepth = depth; }
+    return result;
   }
 
-  close(): void {}
+  close(): void {
+    this.worker.terminate();
+  }
 }
 
 // ════════════════════════════════════════════

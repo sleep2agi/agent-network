@@ -1304,10 +1304,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_required" }) }],
       };
     }
-    // PgAdapter.transaction currently opens a fresh subprocess/connection
-    // per statement. The all-or-nothing batch promise cannot be made there;
-    // refuse evidence rather than publish a partially stamped batch.
-    if (db.dialect !== "sqlite") {
+    // The all-or-nothing batch promise needs a transaction() that really is
+    // one transaction; refuse evidence on any adapter that cannot give that
+    // rather than publish a partially stamped batch.
+    if (!db.atomicTransactions) {
       return {
         content: [{ type: "text" as const, text: JSON.stringify({
           ok: false,

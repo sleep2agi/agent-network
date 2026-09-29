@@ -178,8 +178,8 @@ describe("Hub durable SideThread command outbox", () => {
     a.close(); b.close();
   });
 
-  test("fails closed on the currently non-atomic PostgreSQL adapter", () => {
-    expect(() => new SideThreadCommandStore({ dialect: "postgres" } as any)).toThrow(/atomic SQLite/);
+  test("fails closed on an adapter without atomic transactions", () => {
+    expect(() => new SideThreadCommandStore({ dialect: "postgres", atomicTransactions: false } as any)).toThrow(/atomic SQLite/);
   });
   test("allows exactly one durable terminal applier", () => {
     const f = fixture(); const close = f.port.subscribe(async () => {});
