@@ -40,6 +40,7 @@
 10. `inbox`/`tasks` 持久化成功只代表派发：run 的 `completed_at` 必须保持 `NULL`。仅当精确绑定的 task 进入 `replied/failed/cancelled/expired` 时，才在同一 transaction 写入 run 的终态和 `completed_at`。
 11. `retry_task` 复用原 logical `task_id`，因此会把同一 run 重新打开为 `delivered, completed_at=NULL`；重试后的新终态再关闭该 run。`reassign_task` 只允许非终态 task，保持 run 开放且不换绑定。
 12. agent 子任务的结果通过 parent chain 回终 scheduler task 时，parent task 与 run 的终态必须同事务提交；不能把“子任务已回复、父 run 仍 delivered”当作完成。
+13. `overlap_policy=skip` 因上一次 task 仍开放而跳过时,run 写 `error_code=previous_run_active`,并带 `blocked_by_task_id`(挡住它的那条 task)和 `blocked_by_state`:节点从未取走过它(inbox 未 ack、task 未进 acked/running)为 `not_received`,否则为 `in_progress`。前者是投递故障,后者才是上一次真的还没做完;客户端据此分别显示「节点还没收到」与「节点在处理」。
 
 SQLite transaction 是当前生产原子边界。仓库现有 PostgreSQL adapter 已明确不提供真实跨语句 transaction；`startHub()` 会在监听前 fail closed，直到该 adapter 修复，不得把 PostgreSQL 宣称为 scheduler 的 production-safe 后端。
 
