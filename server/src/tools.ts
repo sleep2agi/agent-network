@@ -5768,6 +5768,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     priority: z.enum(["high", "normal", "low", "lowest"]).optional().describe("high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低"),
     column: z.enum(["pool", "doing", "done"]).optional(),
     due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears"),
+    start: z.string().max(40).optional().describe("start date (Gantt): same shapes as due; \"\" clears"),
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
     project_id: z.string().max(200).nullable().optional(),
