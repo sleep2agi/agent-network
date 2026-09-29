@@ -1,10 +1,10 @@
-Task-name validation and archived-only listing
+Archived-only listing and existing task-name regression guard
 Base: d52406e90f02d9ec2ea9a09590b54379a22a051f (#2097 merged)
-Tested implementation: 976baaa50f899d0ac9f5042356e090cec2d67dd7
+Historical tested implementation: 976baaa50f899d0ac9f5042356e090cec2d67dd7
 
 Scope: requirements.ts only; no DB/schema, version, deployment or auth changes.
-create/PATCH share trimmed string.length <=80 validation; upsert delegates to
-those paths. This preserves existing UTF-16 length semantics, not byte counts.
+Final scope: title implementation restored exactly to main on reviewer request;
+only its new regression tests remain. No shared-helper refactor.
 archived=true selects archived rows only and wins over include_archived=1;
 default remains active-only; legacy include_archived=1 still returns both.
 Chinese/English API docs updated in the same change.
@@ -20,9 +20,9 @@ docker run --rm -v /dev/shm/anet-name-archive-base/server/src:/app/server/src:ro
 1 pass / 1 fail / 49 expects; exit1.
 RED: archived=true returned active task instead of archived task.
 Title regression already PASS on main: PATCH already had the 80 limit.
-Do not claim a title bug reproduced on this main. Shared helper is consolidation.
+Do not claim a title bug reproduced on this main. Shared helper was removed.
 
-Fixed image: docker build -t anet-name-archive -f server/tests/name-archive/Dockerfile .
+Historical fixed image (976baaa5): docker build -t anet-name-archive -f server/tests/name-archive/Dockerfile .
 docker run --rm anet-name-archive
 HTTP 21 pass / 0 fail / 370 expects; MCP 4 pass / 0 fail / 48 expects; exit0.
 Names: create/PATCH/upsert insert/update reject150 ASCII,81 Chinese,blank,null,number;
@@ -51,3 +51,12 @@ bun1.3.14 node22.23.3 uid1000; one container /tmp DB per file.
 executed_files=121 discovered_files=121 failed_files=0
 MUTATION_RED registration-password-floor-weakened rc=1
 RESULT: PASS; exit0. This append changes only the report.
+
+Scope reduction requested by reviewer:
+Removed requirementName helper and restored both title-validation blocks to main.
+Product diff now contains ONLY the archived=true SQL filter branch.
+Title regression tests retained unchanged as guards, not a claimed bug fix.
+Rebuilt server/tests/name-archive/Dockerfile after removal and reran:
+HTTP21/21 (370 expects), MCP4/4 (48 expects), exit0.
+Previous full-suite results above are historical, not a rerun of this new head;
+the pushed head must pass its own remote CI and assert-pr-mergeable.

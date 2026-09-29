@@ -26,12 +26,6 @@ const COLUMNS = new Set(["pool", "doing", "done"]);
 const PRIORITIES = new Set(["high", "normal", "low"]);
 const DUE = /^\d{4}-\d{2}-\d{2}$/;
 
-// Keep the existing trimmed string.length limit for every task-name write.
-function requirementName(raw: unknown): string | null {
-  const name = typeof raw === "string" ? raw.trim() : "";
-  return name && name.length <= 80 ? name : null;
-}
-
 type Row = {
   owner_json: string | null;
   agent_owner_json: string | null;
@@ -492,8 +486,8 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   const networkId = writeNetwork(body, ctx);
   if (!networkId) return jsonError("network_id_required", 400);
   if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
-  const name = requirementName(body.name);
-  if (name === null) return jsonError("invalid_name", 400);
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name || name.length > 80) return jsonError("invalid_name", 400);
   const priority = typeof body.priority === "string" ? body.priority : "normal";
   if (!PRIORITIES.has(priority)) return jsonError("invalid_priority", 400);
   const due = typeof body.due === "string" ? normalizeDue(body.due) : "";
@@ -577,9 +571,8 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   if (has("checklist") && checklist === null) return jsonError("invalid_checklist", 400);
   let name = row.title;
   if (has("name")) {
-    const next = requirementName(body.name);
-    if (next === null) return jsonError("invalid_name", 400);
-    name = next;
+    name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 80) return jsonError("invalid_name", 400);
   }
   let priority = row.priority;
   if (has("priority")) {
