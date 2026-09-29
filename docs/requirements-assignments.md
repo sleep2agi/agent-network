@@ -11,7 +11,8 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 
 ### 负责人 / 负责 Agent 分开（agent_owner）
 
-- `owner`：**负责人**，只能是人类（`{kind:"user",id}`），对结果负责。写入节点返回 400 `owner_must_be_human`。
+- `owner`：**负责人**，只能是人类（`{kind:"user",id}`），对结果负责。新客户端（请求里带了 `agent_owner`）写入节点返回 400 `owner_must_be_human`。
+- **旧客户端兼容**（App ≤ 0.2.142 只有一个「负责人」）：请求里 `owner` 是节点且**没带** `agent_owner` → 当成设置负责 Agent，`owner` 清空，照常 200，响应带 `owner_coerced_to_agent_owner: true`，响应里的 `owner` 回显那个节点（旧客户端拿它核对保存生效）；存储与之后的 GET 都是 `owner: null` + `agent_owner: 节点`。GET 不做旧字段回显：新 App 同时读两个字段，回显会把 Agent 当成负责人；旧 App 列表上这类卡显示「未分配」，0.2.143 起正常。
 - `agent_owner`：**负责 Agent**，只能是节点（`{kind:"node",id}`），负责执行。写入人类返回 400 `agent_owner_must_be_agent`。与 owner 同样按网络校验成员，`null` 清空，PATCH 省略则保留。
 - `participants` 不变：人类和 Agent 都可以。
 - 读取总带 `agent_owner` 字段（没有时为 `null`）；客户端用「行里有没有这个字段」判断 Hub 是否支持两个角色，旧 Hub 退回单一负责人。

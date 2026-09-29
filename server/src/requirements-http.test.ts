@@ -76,7 +76,8 @@ describe("requirements stay on the hub", () => {
     const humanAsAgent = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: user }) });
     expect(humanAsAgent.status).toBe(400);
     expect(humanAsAgent.body.error).toBe('agent_owner_must_be_agent');
-    const agentAsOwner = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node }) });
+    // 新客户端(带了 agent_owner):节点当负责人严格拒绝
+    const agentAsOwner = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node, agent_owner: null }) });
     expect(agentAsOwner.status).toBe(400);
     expect(agentAsOwner.body.error).toBe('owner_must_be_human');
     const changed = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: node }) });
@@ -113,7 +114,7 @@ describe("requirements stay on the hub", () => {
     expect(both.body.requirement.agent_owner).toEqual(agent);
     const plain = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '都不填' }) });
     expect(plain.body.requirement.agent_owner).toBeNull();
-    const wrongOwner = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '节点当负责人', owner: agent }) });
+    const wrongOwner = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '节点当负责人', owner: agent, agent_owner: null }) });
     expect(wrongOwner.status).toBe(400);
     expect(wrongOwner.body.error).toBe('owner_must_be_human');
     const wrongAgent = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '人当负责 Agent', agent_owner: human }) });
@@ -339,6 +340,44 @@ describe("requirements stay on the hub", () => {
     expect(after.find((r: any) => r.id === a.id).parent_id).toBeNull();
     expect(after.find((r: any) => r.id === levels[1].id).parent_id).toBeNull();
     expect(after.find((r: any) => r.id === levels[2].id).parent_id).toBe(levels[1].id);
+  });
+
+  test("old-app compat: owner {kind:'node'} without agent_owner becomes agent_owner (200 + flag); new clients stay strict", async () => {
+    const { db } = await import('./db.js');
+    const ownerId = db.get<{ owner_id: string }>('SELECT owner_id FROM networks WHERE network_id=?1', ownerNetwork)!.owner_id;
+    db.run('INSERT OR IGNORE INTO nodes(node_id,node_name,alias,network_id) VALUES (?1,?2,?2,?3)', ['compat-node', 'compat-node', ownerNetwork]);
+    const node = { kind: 'node', id: 'compat-node' };
+    const human = { kind: 'user', id: ownerId };
+    const card = (await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '旧 App 的卡', owner: human }) })).body.requirement;
+    const path = `/api/requirements/${card.id}`;
+    // 0.2.142 的详情保存:{name?, owner:{node}} —— 不带 agent_owner
+    const old = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node }) });
+    expect(old.status).toBe(200);
+    expect(old.body.owner_coerced_to_agent_owner).toBe(true);
+    // 回显给旧客户端的 owner 是它设的那个节点(它按这个核对「保存生效」);agent_owner 也在
+    expect(old.body.requirement.owner).toEqual(node);
+    expect(old.body.requirement.agent_owner).toEqual(node);
+    // 实际存储:负责人清空,负责 Agent = 节点;GET 看到的是真实值
+    const stored = (await api(ownerToken, path)).body.requirement;
+    expect(stored.owner).toBeNull();
+    expect(stored.agent_owner).toEqual(node);
+    const row = db.get<{ owner_json: string | null; agent_owner_json: string | null }>('SELECT owner_json, agent_owner_json FROM requirements WHERE requirement_id=?1', card.id)!;
+    expect(row.owner_json).toBeNull();
+    expect(JSON.parse(row.agent_owner_json!)).toEqual(node);
+    // 旧 App 新建时选了节点当负责人:同样改写
+    const created = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '旧 App 新建', owner: node, assignee: '' }) });
+    expect(created.status).toBe(201);
+    expect(created.body.owner_coerced_to_agent_owner).toBe(true);
+    expect((await api(ownerToken, `/api/requirements/${created.body.requirement.id}`)).body.requirement.agent_owner).toEqual(node);
+    // 旧 App 设人类负责人:照常,不带标志
+    const normal = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: human }) });
+    expect(normal.body.owner_coerced_to_agent_owner).toBeUndefined();
+    expect(normal.body.requirement.owner).toEqual(human);
+    expect(normal.body.requirement.agent_owner).toEqual(node);
+    // 新客户端带 agent_owner:严格
+    expect((await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node, agent_owner: node }) })).body.error).toBe('owner_must_be_human');
+    // 节点不在网络里:仍然 400(不因为兼容放宽成员校验)
+    expect((await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: { kind: 'node', id: 'foreign-person-node' } }) })).status).toBe(400);
   });
 
   test("owner creates a card in the pool", async () => {

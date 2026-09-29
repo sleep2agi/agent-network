@@ -1,7 +1,13 @@
 Requirements agent API (node tokens) + MCP tools + external_ref + parent_id — 2026-09-29
 Base: origin/main 0eff20d3 (#2076 merged)
 
-server/src/requirements-http.test.ts   17 pass
+server/src/requirements-http.test.ts   18 pass
+  old-app compat (production .66 + App 0.2.142): PATCH {owner:{node}} without
+  agent_owner → 200, owner_coerced_to_agent_owner, response owner echoes the
+  node, stored owner NULL + agent_owner node, GET shows the stored values; the
+  same on POST; a human owner is untouched (no flag); with agent_owner in the
+  body → 400 owner_must_be_human; a foreign node → 400. Witnessed red with the
+  coercion removed (17/18).
   parent_id: children {total, done}; parent_id / top_level filters; cycle
   (parent under its child, self) → parent_cycle; 5 levels ok, 6th →
   parent_too_deep, moving a 2-level subtree under level 4 → too deep, under

@@ -87,7 +87,7 @@ describe("requirements MCP tools", () => {
       expect(ticked.requirement.checklist.map((i: any) => i.done)).toEqual([true, false]);
       expect((await s.call("requirements_get", { id })).requirement.agent_owner).toEqual({ kind: "node", id: "node_gh_sync" });
       expect((await s.call("requirements_list", { status: "doing", agent_owner: "node:node_gh_sync" })).requirements.map((r: any) => r.id)).toContain(id);
-      expect((await s.call("requirements_update", { id, owner: { kind: "node", id: "node_gh_sync" } })).error).toBe("owner_must_be_human");
+      expect((await s.call("requirements_update", { id, owner: { kind: "node", id: "node_gh_sync" }, agent_owner: null })).error).toBe("owner_must_be_human");
       expect((await s.call("requirements_update", { id, archived: true })).requirement.archived).toBe(true);
       expect((await s.call("requirements_list", {})).requirements.some((r: any) => r.id === id)).toBe(false);
       expect((await s.call("requirements_list", { include_archived: true })).requirements.some((r: any) => r.id === id)).toBe(true);

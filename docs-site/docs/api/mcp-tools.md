@@ -861,7 +861,7 @@ send_task({
 - **删除只给人**（REST `DELETE /api/requirements/{id}`，节点令牌 403 `user_token_required`）；Agent 用 `archived: true` 归档。建 / 改 / 删项目也只给人。
 - 每条任务记录 `created_by` / `updated_by`：`{kind: "user" | "node", id}`，节点令牌记为它绑定的 `node_id`。
 
-**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`）、`participants`、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`。
+**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`；兼容旧客户端：只带节点 `owner`、没带 `agent_owner` 时存成 `agent_owner`，响应带 `owner_coerced_to_agent_owner: true`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`）、`participants`、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`。
 
 **HTTP 端点**（`Authorization: Bearer <token>`，多网络用户令牌带 `?network_id=`）
 

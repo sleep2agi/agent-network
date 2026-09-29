@@ -333,13 +333,22 @@ function personRef(value: unknown, networkId: string): PersonRef {
 
 // 负责人只能是人类,负责 Agent 只能是节点;参与人两种都行。库里旧的节点负责人照样读出来(启动迁移会挪走),
 // 只有这次请求显式写了 owner / agent_owner 才校验种类。
+// 旧客户端兼容(App ≤ 0.2.142 只有一个「负责人」,可以选节点):请求里 owner 是节点、又**没带** agent_owner
+// → 当成设置负责 Agent,负责人清空,照常 200,并回 owner_coerced_to_agent_owner: true。
+// 带了 agent_owner 的就是新客户端,保持严格:owner 是节点 → 400 owner_must_be_human。
 function assignments(body: Record<string, unknown>, networkId: string, current?: Row) {
   let owner = current?.owner_json ? JSON.parse(current.owner_json) : null;
+  let agentOwner = current?.agent_owner_json ? JSON.parse(current.agent_owner_json) : null;
+  let coerced: PersonRef | null = null;
   if ('owner' in body) {
     owner = body.owner === null ? null : personRef(body.owner, networkId);
-    if (owner && owner.kind !== 'user') throw new Error('owner_must_be_human');
+    if (owner && owner.kind !== 'user') {
+      if ('agent_owner' in body) throw new Error('owner_must_be_human');
+      coerced = owner;
+      agentOwner = owner;
+      owner = null;
+    }
   }
-  let agentOwner = current?.agent_owner_json ? JSON.parse(current.agent_owner_json) : null;
   if ('agent_owner' in body) {
     agentOwner = body.agent_owner === null ? null : personRef(body.agent_owner, networkId);
     if (agentOwner && agentOwner.kind !== 'node') throw new Error('agent_owner_must_be_agent');
@@ -351,6 +360,7 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
     participants = [...new Map(refs.map(ref => [`${ref.kind}:${ref.id}`, ref])).values()];
   }
   return {
+    coerced,
     ownerJson: owner === null ? null : JSON.stringify(owner),
     agentOwnerJson: agentOwner === null ? null : JSON.stringify(agentOwner),
     participantsJson: JSON.stringify(participants),
@@ -536,7 +546,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
     return Response.json({ ok: true, requirement: toPublic(existing) });
   }
   const created = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, id)!;
-  return Response.json({ ok: true, requirement: toPublic(created) }, { status: 201 });
+  return Response.json(withLegacyOwner(toPublic(created), people.coerced), { status: 201 });
 }
 
 // ── 修改(省略的字段保留原值) ──
@@ -620,7 +630,17 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
       has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx)), parentId],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
-  return Response.json({ ok: true, requirement: toPublic(updated) });
+  return Response.json(withLegacyOwner(toPublic(updated), people.coerced));
+}
+
+/**
+ * 被兼容改写的请求(旧客户端):响应里的 owner 按旧客户端的理解回显那个节点(它会拿响应核对「保存生效没有」,
+ * 0.2.142 的核对不通过就报「这个 Hub 还不能修改」),真实存储是 owner 空、agent_owner = 节点;agent_owner 也一并返回。
+ * GET 不这么做:新 App 读 owner / agent_owner 两个字段,GET 回显会让新 App 把 Agent 当成负责人。
+ */
+function withLegacyOwner(requirement: ReturnType<typeof toPublic>, coerced: PersonRef | null) {
+  if (!coerced) return { ok: true, requirement };
+  return { ok: true, requirement: { ...requirement, owner: coerced }, owner_coerced_to_agent_owner: true };
 }
 
 function scopedRow(ctx: RequirementsRequestContext, id: string): Row | undefined {
