@@ -509,7 +509,7 @@ If you still know the old password, run `anet passwd` (it prompts for the old on
 ## Next Steps
 
 **Dig into concepts**:
-- [Multi-user and permissions](/en/guide/multi-user) — which Agents a member can access, and the human-to-human message API; user management, registration, and direct messages are not in the app yet
+- [Multi-user and permissions](/en/guide/multi-user) — which Agents a member can access, and the human-to-human message API; user management, registration, and direct messages are in the app starting with 0.2.153
 - [Network isolation](/en/concepts/networks) — RBAC permission matrix, invite codes, data isolation
 
 **Hands-on**:
