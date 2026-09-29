@@ -72,7 +72,7 @@ const PLANTED = [
 
 const redactor = createLogRedactor({
   knownValues: [S.knownValue],
-  env: { SOME_SERVICE_TOKEN_VALUE: S.processEnv, HOME: "/home/placeholder", PATH: "/usr/bin" },
+  env: { SOME_SERVICE_TOKEN_VALUE: S.processEnv, HOME: "/home/user", PATH: "/usr/bin" },
 });
 
 describe("redactor", () => {
