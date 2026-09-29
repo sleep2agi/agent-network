@@ -439,6 +439,16 @@ Any item that is not an agent of this network → 400 `agent_not_in_network`, no
 
 Any member (restricted ones included): the network's human directory, with only `user_id` / `username` / `display_name`, for picking a DM recipient (DMs go through MCP `send_desktop_message`).
 
+### POST /api/dm · GET /api/dm · GET /api/dm/threads
+
+Human-to-human direct messages between two users of the same network (restricted members included). User tokens only.
+
+- `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` — written to the recipient's user_inbox (`kind=human_dm`) and pushed over `/events/users/me`; the hub records `sender_user_id` from the token and ignores any `from` in the body. Retrying with the same `client_request_id` does not create a second message. Unknown users and users outside the network both get 404 `dm_target_not_in_network`. A restricted member attaching a file they cannot see gets 403 `attachment_not_accessible`.
+- `GET /api/dm?network_id=&with=<user_id>[&limit&before]` — both directions with that person, newest first, each row with `direction: in | out`.
+- `GET /api/dm/threads?network_id=` — one row per counterpart: `{other_user_id, last_at, unread}`.
+
+Mark read with `POST /api/messages/ack` (a DM is a row in the recipient's user_inbox).
+
 Each `GET /api/networks/:id/members` item also carries `agent_access` (effective value) and `agent_grant_count`; `POST /api/networks/:id/members` accepts an optional `agent_access` (default `granted`); `GET /api/auth/me` `networks[]` carries `agent_access`, which clients use to show "no agents assigned yet, ask an admin".
 
 ## File Endpoints

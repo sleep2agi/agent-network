@@ -15,6 +15,7 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
+import { listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { canMessageAgent, isAgentRestricted, listAgentGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias } from "./agent-access.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -1787,6 +1788,47 @@ return Bun.serve({
       scope: restScope,
     });
     if (scheduledResponse) return withCors(req, scheduledResponse);
+
+    // ── 多用户:人与人私信(同网络两个用户之间;受限成员也可以) ──
+    // POST /api/dm {network_id?, to_user_id | to_username, message, attachments?, client_request_id?}
+    // GET  /api/dm?network_id=&with=<user_id>[&limit&before]  → 双向会话记录(新的在前)
+    // GET  /api/dm/threads?network_id=                       → 每个对方一行 + 未读数
+    // 已读沿用 POST /api/messages/ack(私信就是收件人 user_inbox 里的行)。
+    if (url.pathname === "/api/dm" || url.pathname === "/api/dm/threads") {
+      if (!restAuth || !requestToken(req).startsWith("utok_")) {
+        return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      }
+      if (req.method === "POST" && url.pathname === "/api/dm") {
+        let body: any;
+        try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+        if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+        const dmNet = typeof body.network_id === "string" && body.network_id ? body.network_id : singleNetworkId(restScope);
+        if (!dmNet) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+        const sent = sendHumanDm({
+          networkId: dmNet,
+          sender: { userId: restAuth.userId, username: restAuth.username },
+          toUserId: body.to_user_id, toUsername: body.to_username,
+          message: body.message, attachments: body.attachments, clientRequestId: body.client_request_id,
+        });
+        if (!sent.ok) return withCors(req, Response.json({ ok: false, error: sent.error }, { status: sent.status }));
+        return withCors(req, Response.json({ ok: true, message: sent.message, delivered: sent.delivered }));
+      }
+      if (req.method === "GET") {
+        const dmNet = url.searchParams.get("network_id") || singleNetworkId(restScope);
+        if (!dmNet) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+        if (!getUserNetworkRole(restAuth.userId, dmNet)) {
+          return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+        }
+        if (url.pathname === "/api/dm/threads") {
+          return withCors(req, Response.json({ ok: true, network_id: dmNet, threads: listDmThreads(dmNet, restAuth.userId) }));
+        }
+        const other = url.searchParams.get("with") ?? "";
+        if (!other) return withCors(req, Response.json({ ok: false, error: "with_required" }, { status: 400 }));
+        const limit = Number(url.searchParams.get("limit")) || 50;
+        return withCors(req, Response.json({ ok: true, network_id: dmNet, with: other, messages: listDmThread(dmNet, restAuth.userId, other, limit, url.searchParams.get("before")) }));
+      }
+      return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+    }
 
     const requirementsResponse = await handleRequirementsRequest({
       req,

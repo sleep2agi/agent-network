@@ -203,3 +203,62 @@ describe("username collides with an agent alias registered later", () => {
     expect((await get(carolToken, `/api/tasks?network_id=${NET}`)).body.tasks.length).toBeGreaterThan(0);
   });
 });
+
+describe("human ↔ human DM (/api/dm): restricted members can talk to people", () => {
+  let daveToken = "", daveId = "";
+  test("carol (restricted) DMs dave; dave sees it in thread + threads + user inbox and replies", async () => {
+    const dave = register("acl3_dave", PW);
+    daveToken = dave.token!; daveId = dave.user!.user_id;
+    expect(addNetworkMember(NET, daveId, "member", adminId).ok).toBe(true);
+    const sent = await send(carolToken, "POST", "/api/dm", { network_id: NET, to_user_id: daveId, message: "hi dave", client_request_id: "c1" });
+    expect(sent.status).toBe(200);
+    expect(sent.body.message.sender_user_id).toBe(carolId);
+    // 重试同一个气泡不产生第二条。
+    expect((await send(carolToken, "POST", "/api/dm", { network_id: NET, to_user_id: daveId, message: "hi dave", client_request_id: "c1" })).body.message.message_id).toBe(sent.body.message.message_id);
+    const threads = await get(daveToken, `/api/dm/threads?network_id=${NET}`);
+    expect(threads.body.threads).toEqual([expect.objectContaining({ other_user_id: carolId, unread: 1 })]);
+    expect((await get(daveToken, `/api/messages?scope=user&network_id=${NET}`)).body.messages.map((m: any) => m.content)).toContain("hi dave");
+    expect((await send(daveToken, "POST", "/api/dm", { network_id: NET, to_username: "acl3_carol", message: "hi carol" })).status).toBe(200);
+    const thread = await get(carolToken, `/api/dm?network_id=${NET}&with=${daveId}`);
+    expect(thread.body.messages.map((m: any) => [m.direction, m.content])).toEqual([["in", "hi carol"], ["out", "hi dave"]]);
+    const daveThread = await get(daveToken, `/api/dm?network_id=${NET}&with=${carolId}`);
+    expect(daveThread.body.messages.map((m: any) => m.direction)).toEqual(["out", "in"]);
+  });
+  test("sender identity comes from the token, not from the body", async () => {
+    await send(carolToken, "POST", "/api/dm", { network_id: NET, to_user_id: daveId, message: "who am i", from: adminName, sender_user_id: adminId });
+    const row = db.get<{ sender_user_id: string; from_session: string }>("SELECT sender_user_id, from_session FROM user_inbox WHERE content = 'who am i'");
+    expect(row).toEqual({ sender_user_id: carolId, from_session: "acl3_carol" });
+  });
+  test("a third party cannot read someone else's thread", async () => {
+    const eve = register("acl3_eve", PW);
+    expect(addNetworkMember(NET, eve.user!.user_id, "member", adminId).ok).toBe(true);
+    // eve 查「她和 dave」的会话:空(carol↔dave 的不会出现)。
+    expect((await get(eve.token!, `/api/dm?network_id=${NET}&with=${daveId}`)).body.messages).toEqual([]);
+    expect((await get(eve.token!, `/api/dm/threads?network_id=${NET}`)).body.threads).toEqual([]);
+  });
+  test("non-members and outsiders are refused; unknown and outside users look the same", async () => {
+    const out = register("acl3_out", PW);
+    expect((await send(out.token!, "POST", "/api/dm", { network_id: NET, to_user_id: daveId, message: "x" })).status).toBe(403);
+    expect((await get(out.token!, `/api/dm/threads?network_id=${NET}`)).status).toBe(403);
+    const a = await send(carolToken, "POST", "/api/dm", { network_id: NET, to_user_id: out.user!.user_id, message: "x" });
+    const b = await send(carolToken, "POST", "/api/dm", { network_id: NET, to_user_id: "u_nobody", message: "x" });
+    expect(a).toEqual(b);
+    expect(a.status).toBe(404);
+  });
+  test("a restricted member cannot smuggle a file they cannot see into a DM", async () => {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array([1, 2, 3])]), "a.bin");
+    const up = await fetch(`${BASE}/api/upload?network_id=${NET}`, { method: "POST", body: form, headers: auth(adminToken) });
+    const fid = (await up.json()).file_id;
+    const r = await send(carolToken, "POST", "/api/dm", { network_id: NET, to_user_id: daveId, message: "f", attachments: [{ type: "file", file_id: fid }] });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe("attachment_not_accessible");
+    // 管理员(不受限)可以附带本网络文件发给 carol;carol 因此能下载它。
+    expect((await send(adminToken, "POST", "/api/dm", { network_id: NET, to_user_id: carolId, message: "file for you", attachments: [{ type: "file", file_id: fid }] })).status).toBe(200);
+    expect((await fetch(`${BASE}/api/files/${fid}`, { headers: auth(carolToken) })).status).toBe(200);
+  });
+  test("node tokens cannot use the DM API", async () => {
+    const r = await fetch(`${BASE}/api/dm/threads?network_id=${NET}`, { headers: { Authorization: "Bearer ntok_x" } });
+    expect(r.status).toBeGreaterThanOrEqual(401);
+  });
+});

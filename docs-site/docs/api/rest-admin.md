@@ -439,6 +439,16 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 
 任何成员(含受限成员)都能调:网络里的人类成员通讯录,只有 `user_id` / `username` / `display_name`。给受限成员选私信对象用(私信走 MCP `send_desktop_message`)。
 
+### POST /api/dm · GET /api/dm · GET /api/dm/threads
+
+人与人私信(同一网络里的两个用户;受限成员也可以),只接受用户令牌。
+
+- `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` —— 写进对方的 user_inbox(`kind=human_dm`),经 `/events/users/me` 推送;发信人 `sender_user_id` 由 Hub 按令牌写入,请求体里的 `from` 一律忽略。同一个 `client_request_id` 重试不产生第二条。对方不存在与不在本网络同为 404 `dm_target_not_in_network`。受限成员附带看不见的文件 → 403 `attachment_not_accessible`。
+- `GET /api/dm?network_id=&with=<user_id>[&limit&before]` —— 我和这个人的双向记录,新的在前,每条带 `direction: in | out`。
+- `GET /api/dm/threads?network_id=` —— 每个对方一行:`{other_user_id, last_at, unread}`。
+
+已读沿用 `POST /api/messages/ack`(私信就是收件人 user_inbox 里的行)。
+
 `GET /api/networks/:id/members` 的每一项另带 `agent_access`(生效值)与 `agent_grant_count`;`POST /api/networks/:id/members` 接受可选 `agent_access`(缺省 `granted`);`GET /api/auth/me` 的 `networks[]` 另带 `agent_access`,客户端据此显示「还没有被分配任何 Agent,请联系管理员」。
 
 ## 文件端点
