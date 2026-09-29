@@ -26,7 +26,7 @@
 
 - 🤖 **一支跨机器的 Agent 军团** —— Claude Code、Claude Agent SDK、Codex、Grok Build、OpenCode 都能作为节点接入同一个网络，节点之间通过 MCP 互相发现、互相派活。
 - 🛰️ **一个 Hub 串起所有机器** —— CommHub 通过 MCP 暴露工具、通过 SSE 实时投递任务；每台机器跑一个 `anet daemon`，就能从客户端远程创建、启动和停止那台机器上的节点。
-- 💬 **一个客户端管全部** —— 桌面端（macOS / Windows）和 Android 端：像聊天一样派活、收发文件；查看和编辑节点的规则文件（`CLAUDE.md` / `AGENTS.md`）、技能和项目文件夹；远程切换模型、重启节点。
+- 💬 **一个客户端管全部** —— 桌面（macOS / Windows）和 Android：聊天派活、收发文件；任务页管理项目、子任务、GitHub Issue 和到秒的时间；界面可切换中英文；可看节点与 Hub 日志；规则文件、技能、项目目录、远程切模型和重启仍在。iOS 只走 TestFlight，公开链接还没开。
 - 🔐 **自托管、本地优先、开源** —— Hub 和 SQLite 数据跑在你自己的机器上（桌面端还自带一个本地 Hub），不做 SaaS 托管；Apache 2.0。
 
 <table><tr>
@@ -36,7 +36,7 @@
 
 ## 30 秒上手
 
-**方式一：桌面应用（推荐）** —— 从 [GitHub Releases](https://github.com/sleep2agi/agent-network-app/releases/latest) 或 [anet.sh](https://anet.sh) 下载 macOS `.dmg` / Windows 安装程序 / Android `.apk`。选「本地工作区」即可使用内置 Hub，在「服务器」页一键安装并启动本机 daemon，然后直接创建节点。
+**方式一：桌面应用（推荐）** —— 从 [anet.sh](https://anet.sh) 下载 macOS、Windows、Android（线路一是国内 ModelScope，线路二是 GitHub）。选「本地工作区」即可使用内置 Hub，在「服务器」页一键安装并启动本机 daemon，然后直接创建节点。
 
 **方式二：`anet` CLI**（需要 Node.js ≥ 22.13）
 
@@ -84,7 +84,7 @@ flowchart LR
 
 ## 文档
 
-[上手指南](https://anet.sh/guide/getting-started) · [桌面应用](https://anet.sh/guide/desktop-app) · [Runtime 选择](https://anet.sh/guide/runtimes) · [多模型接入](https://anet.sh/guide/multi-model) · [架构](https://anet.sh/guide/architecture) · [CLI](https://anet.sh/guide/cli) · [生产部署](https://anet.sh/deploy/production) · [版本通道](https://anet.sh/guide/versioning) · [更新日志](https://anet.sh/changelog)
+[上手指南](https://anet.sh/guide/getting-started) · [桌面应用](https://anet.sh/guide/desktop-app) · [任务 API](https://anet.sh/api/mcp-tools) · [架构](https://anet.sh/guide/architecture) · [CLI](https://anet.sh/guide/cli) · [生产部署](https://anet.sh/deploy/production) · [升级通道](https://anet.sh/guide/upgrade) · [更新日志](https://anet.sh/changelog)
 
 ## 参与与社区
 

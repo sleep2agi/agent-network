@@ -26,7 +26,7 @@
 
 - 🤖 **A legion of agents across machines** — Claude Code, the Claude Agent SDK, Codex, Grok Build and OpenCode all join one network as nodes; nodes discover each other and hand off work through MCP.
 - 🛰️ **One hub for every machine** — CommHub exposes its tools over MCP and delivers tasks in real time over SSE. Run `anet daemon` on a machine and you can create, start and stop nodes there remotely from the client.
-- 💬 **One client for all of it** — the desktop app (macOS / Windows) and the Android app: dispatch work like chat and exchange files; read and edit a node's rules file (`CLAUDE.md` / `AGENTS.md`), skills and project folder; switch models and restart nodes remotely.
+- 💬 **One client for all of it** — desktop (macOS / Windows) and Android: dispatch work like chat and exchange files; the Tasks page covers projects, subtasks, GitHub Issues and times to the second; the UI switches between Chinese and English; node and Hub logs are available; rules files, skills, project folders, remote model switches and restarts remain. iOS is TestFlight only, and the public link is not open yet.
 - 🔐 **Self-hosted, local-first, open source** — the Hub and its SQLite data run on hardware you control (the desktop app even bundles a local Hub). No hosted SaaS. Apache 2.0.
 
 <table><tr>
@@ -36,7 +36,7 @@
 
 ## Quick start in 30 seconds
 
-**Option 1: the desktop app (recommended)** — download the macOS `.dmg`, the Windows installer or the Android `.apk` from [GitHub Releases](https://github.com/sleep2agi/agent-network-app/releases/latest) or [anet.sh](https://anet.sh/en/). Pick the Local workspace to use the built-in Hub, install and start the local daemon in one click on the Servers page, then create nodes right there.
+**Option 1: the desktop app (recommended)** — download macOS, Windows or Android from [anet.sh](https://anet.sh/en/) (route one is the China ModelScope mirror, route two is GitHub). Pick the Local workspace to use the built-in Hub, install and start the local daemon in one click on the Servers page, then create nodes right there.
 
 **Option 2: the `anet` CLI** (requires Node.js ≥ 22.13)
 
@@ -84,7 +84,7 @@ Per-runtime capabilities and platforms: [Runtimes](https://anet.sh/en/guide/runt
 
 ## Documentation
 
-[Getting started](https://anet.sh/en/guide/getting-started) · [Desktop app](https://anet.sh/en/guide/desktop-app) · [Choose a runtime](https://anet.sh/en/guide/runtimes) · [Model providers](https://anet.sh/en/guide/multi-model) · [Architecture](https://anet.sh/en/guide/architecture) · [CLI](https://anet.sh/en/guide/cli) · [Production](https://anet.sh/en/deploy/production) · [Version channels](https://anet.sh/en/guide/versioning) · [Changelog](https://anet.sh/en/changelog)
+[Getting started](https://anet.sh/en/guide/getting-started) · [Desktop app](https://anet.sh/en/guide/desktop-app) · [Task API](https://anet.sh/en/api/mcp-tools) · [Architecture](https://anet.sh/en/guide/architecture) · [CLI](https://anet.sh/en/guide/cli) · [Production](https://anet.sh/en/deploy/production) · [Upgrade channel](https://anet.sh/en/guide/upgrade) · [Changelog](https://anet.sh/en/changelog)
 
 ## Contributing and community
 
