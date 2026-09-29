@@ -241,6 +241,25 @@ function isNodeCredential(resolved: { networkId: string | null } | null | undefi
 function isHubAdminCredential(resolved: { networkId: string | null; user: { role: string } } | null | undefined): boolean {
   return !!resolved && !resolved.networkId && resolved.user.role === "admin";
 }
+// 节点改名(`anet node rename` 用节点自己的 ntok 驱动 2PC):节点令牌只能改**它自己**——
+// 绑定网络内、old_alias 就是令牌所代表的那个节点。改别的节点、别的网络仍然要用户令牌。
+function nodeTokenAlias(resolved: { tokenName: string | null }): string | null {
+  return resolved.tokenName?.startsWith("node:") ? resolved.tokenName.slice("node:".length) : null;
+}
+function nodeMayRename(resolved: { networkId: string | null; tokenName: string | null }, networkId: unknown, oldAlias: unknown): boolean {
+  if (!resolved.networkId) return true;
+  return networkId === resolved.networkId && typeof oldAlias === "string" && oldAlias === nodeTokenAlias(resolved);
+}
+function nodeMayRenameTxn(resolved: { networkId: string | null; tokenName: string | null }, txnId: unknown): boolean {
+  if (!resolved.networkId) return true;
+  if (typeof txnId !== "string") return false;
+  const txn = db.get<{ network_id: string; old_alias: string; new_alias: string }>("SELECT network_id, old_alias, new_alias FROM rename_txn WHERE txn_id = ?1", txnId);
+  if (!txn || txn.network_id !== resolved.networkId) return false;
+  // commit 前后令牌名可能已被改成新 alias(api_tokens.name 跟随改名),两个都算它自己。
+  const self = nodeTokenAlias(resolved);
+  return self === txn.old_alias || self === txn.new_alias;
+}
+
 function userTokenRequired(req: Request): Response {
   return withCors(req, Response.json({ ok: false, error: "user_token_required", message: "this endpoint acts on a user account; node tokens cannot use it" }, { status: 403 }));
 }
@@ -1248,12 +1267,12 @@ return Bun.serve({
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
-      if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
         if (!body.network_id || !body.old_alias || !body.new_alias) {
           return withCors(req, Response.json({ ok: false, error: "network_id, old_alias, new_alias required" }, { status: 400 }));
         }
+        if (!nodeMayRename(resolved, body.network_id, body.old_alias)) return userTokenRequired(req);
         const result = prepareRename(resolved.user.user_id, body.network_id, body.old_alias, body.new_alias);
         if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "node_rename_prepared", "node", body.old_alias, body.new_alias);
         return withCors(req, Response.json(result, { status: result.ok || result.code === "node_local_only" ? 200 : 400 }));
@@ -1267,10 +1286,10 @@ return Bun.serve({
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
-      if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
         if (!body.txn_id) return withCors(req, Response.json({ ok: false, error: "txn_id required" }, { status: 400 }));
+        if (!nodeMayRenameTxn(resolved, body.txn_id)) return userTokenRequired(req);
         const result = commitRename(resolved.user.user_id, body.txn_id);
         if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "node_rename_committed", "node", body.txn_id);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
@@ -1284,10 +1303,10 @@ return Bun.serve({
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
-      if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
         if (!body.txn_id) return withCors(req, Response.json({ ok: false, error: "txn_id required" }, { status: 400 }));
+        if (!nodeMayRenameTxn(resolved, body.txn_id)) return userTokenRequired(req);
         const result = abortRename(resolved.user.user_id, body.txn_id);
         if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "node_rename_aborted", "node", body.txn_id);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
@@ -1352,7 +1371,7 @@ return Bun.serve({
       // made otherwise-authorized networks impossible to select (#94). Keep
       // ordinary utok_ callers membership-scoped; ntok_ returned above stays
       // bound to exactly one network.
-      const networks = isHubAdminCredential(resolved)
+      const networks = resolved.user.role === "admin"
         ? db.all<any>(
             `SELECT ${NETWORK_REST_SELECT},
                     COALESCE((SELECT nm.role FROM network_members nm

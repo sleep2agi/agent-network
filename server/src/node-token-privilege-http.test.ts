@@ -113,8 +113,21 @@ describe("account and network management need a user token", () => {
     expect((await call(ntok, "POST", "/api/networks/join", { invite_code: "inv_x" })).status).toBe(403);
     expect((await call(adminToken, "GET", `/api/networks/${NET}/members`)).status).toBe(200);
   });
-  test("cannot drive node renames", async () => {
-    expect((await call(ntok, "POST", "/api/node-rename/prepare", { network_id: OTHER_NET, old_alias: "a", new_alias: "b" })).status).toBe(403);
+  test("renames: a node token may only rename ITSELF in its bound network", async () => {
+    // 别的网络 / 别的节点 → user_token_required
+    expect((await call(ntok, "POST", "/api/node-rename/prepare", { network_id: OTHER_NET, old_alias: "ntok-node", new_alias: "b" })).status).toBe(403);
+    db.run(`INSERT INTO sessions (resume_id, alias, status, network_id) VALUES ('r_other_node', 'other-node', 'idle', ?1)`, [NET]);
+    expect((await call(ntok, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "other-node", new_alias: "b" })).status).toBe(403);
+    // 另一个节点(管理员用户令牌)开的事务,本节点不能提交
+    const foreign = await call(adminToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "other-node", new_alias: "other-node-2" });
+    expect(foreign.body.ok).toBe(true);
+    expect((await call(ntok, "POST", "/api/node-rename/commit", { txn_id: foreign.body.txn_id })).status).toBe(403);
+    expect((await call(adminToken, "POST", "/api/node-rename/abort", { txn_id: foreign.body.txn_id })).body.ok).toBe(true);
+    // 自己:照常(anet node rename 就是这么用的)
+    db.run(`INSERT INTO sessions (resume_id, alias, status, network_id) VALUES ('r_self_node', 'ntok-node', 'idle', ?1)`, [NET]);
+    const mine = await call(ntok, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "ntok-node", new_alias: "ntok-node-2" });
+    expect(mine.body.ok).toBe(true);
+    expect((await call(ntok, "POST", "/api/node-rename/abort", { txn_id: mine.body.txn_id })).body.ok).toBe(true);
   });
 });
 
