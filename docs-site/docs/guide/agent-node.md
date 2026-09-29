@@ -61,7 +61,7 @@ anet node start my-agent --tmux
 |---|---|
 | `config.json` | Hub、runtime、node identity、token、model、flags |
 | `.env` | 可选 secret；明文文件，权限应为 `0600` |
-| `logs/` | 运行日志 |
+| `logs/` | 运行日志。本机看用上面的 `anet logs`；从客户端看见 [节点运行日志](/guide/node-run-logs) |
 | `goals.json` | 本节点的循环任务状态 |
 
 全局的用户登录与当前 network 位于 `~/.anet/config.json`。不要提交项目 `.anet`、token 或 `.env`。

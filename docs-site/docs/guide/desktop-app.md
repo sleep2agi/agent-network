@@ -62,4 +62,4 @@ Dashboard 仓库里还有几种**薄壳**(源码在 [sleep2agi/agent-network-das
 
 ## 相关
 
-- [任务](/guide/tasks)、[Dashboard](/guide/dashboard)、[CLI 命令](/guide/cli)。
+- [任务](/guide/tasks)、[节点运行日志](/guide/node-run-logs)、[Dashboard](/guide/dashboard)、[CLI 命令](/guide/cli)。
