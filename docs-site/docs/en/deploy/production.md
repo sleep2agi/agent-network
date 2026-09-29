@@ -115,7 +115,7 @@ At minimum, monitor:
 - the Dashboard Audit Log
 - whether a reliable process manager supervises the Hub
 
-For long-running service and reboot recovery, see [Keeping the Hub running](/en/deploy/keep-alive).
+For long-running service and reboot recovery, see [Keeping the Hub running](/en/deploy/keep-alive). To move the whole Hub to another machine, see [Moving the Hub](/en/deploy/hub-migration).
 
 ## Deployment modes
 

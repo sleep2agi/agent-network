@@ -96,6 +96,7 @@ export default withMermaid(defineConfig({
               { text: '远程机器：anet daemon', link: '/deploy/daemon' },
               { text: '让 Hub 常驻', link: '/deploy/keep-alive' },
               { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
+              { text: '迁移 Hub', link: '/deploy/hub-migration' },
             ]
           },
           {
@@ -190,6 +191,7 @@ export default withMermaid(defineConfig({
               { text: 'Remote Machines: anet daemon', link: '/en/deploy/daemon' },
               { text: 'Keeping the Hub Running', link: '/en/deploy/keep-alive' },
               { text: 'Production / Public Internet', link: '/en/deploy/production' },
+              { text: 'Moving the Hub', link: '/en/deploy/hub-migration' },
             ]
           },
           {
