@@ -60,7 +60,7 @@ If the node is offline, this occurrence is recorded as queued (排队中 · 节�
 
 ## Known issue
 
-Until the Hub fix is publicly released, a Claude Code node may not receive the scheduled-task push. The history can show the run as queued, the same way it does when a node is offline, while the node never received it. Later occurrences are then skipped because the previous run has not finished. The released version number will be added here after publication. This is not a version you can install yet.
+Fixed in Hub .67 (not released yet). Until that version is published and the Hub is upgraded, a Claude Code node may not receive the scheduled-task push. The history can show the run as queued, the same way it does when a node is offline, while the node never received it. Later occurrences are then skipped because the previous run has not finished. This is not a version you can install yet.
 
 ## See also
 
