@@ -43,6 +43,7 @@ export interface AuthResult {
   error?: string;
   user?: AuthUser;
   token?: string;           // user token (utok_)
+  token_id?: string;        // api_tokens.token_id of `token` — lets a client tell which row in GET /api/auth/sessions is itself
   network_token?: string;   // network token (ntok_) for default network
   network_id?: string;
   // #261 P0-2 (2026-06-28): true when the logged-in user still has the
@@ -61,7 +62,7 @@ function validatePasswordStrength(password: string, label = "password"): string 
   return null;
 }
 
-export function register(username: string, password: string, email?: string, displayName?: string, opts: { issueTokens?: boolean } = {}): AuthResult {
+export function register(username: string, password: string, email?: string, displayName?: string, opts: { issueTokens?: boolean; client?: SessionClientInfo } = {}): AuthResult {
   if (!username || username.length < 2) return { ok: false, error: "username must be at least 2 characters" };
   if (username.length > 50) return { ok: false, error: "username too long (max 50)" };
   if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(username)) return { ok: false, error: "username contains invalid characters" };
@@ -135,8 +136,8 @@ export function register(username: string, password: string, email?: string, dis
   const userToken = generateUserToken();
   const userTokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    [userTokenId, hashToken(userToken), userId, null, "user-login", "user"]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    [userTokenId, hashToken(userToken), userId, null, "user-login", "user", cleanClientField(opts.client?.label, 64), cleanClientField(opts.client?.userAgent, 256)]
   );
 
   // Network token (ntok_) — bound to default network, for agent-node
@@ -151,12 +152,13 @@ export function register(username: string, password: string, email?: string, dis
     ok: true,
     user: { user_id: userId, username, display_name: displayName || username, email: email || null, role: isFirstUser ? "admin" : "user" },
     token: userToken,
+    token_id: userTokenId,
     network_token: networkToken,
     network_id: networkId,
   };
 }
 
-export function login(username: string, password: string): AuthResult {
+export function login(username: string, password: string, client: SessionClientInfo = {}): AuthResult {
   const user = db.get<any>(
     "SELECT user_id, username, password_hash, display_name, email, role, must_change_password FROM users WHERE username = ?1",
     username);
@@ -200,8 +202,8 @@ export function login(username: string, password: string): AuthResult {
   const userToken = generateUserToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user"]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user", cleanClientField(client.label, 64), cleanClientField(client.userAgent, 256)]
   );
 
   // Find default network
@@ -217,6 +219,7 @@ export function login(username: string, password: string): AuthResult {
     ok: true,
     user: { user_id: user.user_id, username: user.username, display_name: user.display_name, email: user.email, role: user.role },
     token,
+    token_id: tokenId,
     network_id: networkId,
     // #261 P0-2 — only include field when truthy (back-compat; old clients
     // don't see this field at all unless their account is flagged).
@@ -288,16 +291,64 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
   return { ok: true, token, token_id: tokenId, ...(nodeId ? { node_id: nodeId } : {}) };
 }
 
+// ── 登录会话(login session)令牌 ──
+// 「会话令牌」= scope='user' 且不绑网络的 utok_:登录 / 注册签发的 user-login、改密码后换发的
+// password-change、管理员重置签发的 admin-reset。它们代表「某台设备上的一次登录」,
+// 由 GET /api/auth/sessions 列出、可被「退出其他设备」撤销,并且**闲置 N 天自动过期**(滑动窗口,
+// 以 last_used_at 计,从没用过的以 created_at 计)。
+// 不受影响:POST /api/auth/tokens 显式创建的 API 令牌(scope='full')、节点 / 网络令牌(network_id 非空)。
+// 它们是给脚本和节点长期用的凭据,由各自的管理入口撤销,不该因为一段时间没被用就失效。
+const SESSION_TOKEN_SQL = "scope = 'user' AND network_id IS NULL";
+// last_used_at 最多每小时写一次:每个请求都会解析令牌,原来每次都 UPDATE。
+// 以小时为粒度对一个以天计的闲置窗口没有影响。
+const LAST_USED_WRITE_INTERVAL_SECONDS = 3600;
+
+export type SessionClientInfo = { label?: unknown; userAgent?: unknown };
+
+function cleanClientField(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
+  return cleaned || null;
+}
+
+/** 会话令牌闲置多少天后过期;COMMHUB_SESSION_IDLE_DAYS,默认 30,0 = 关闭闲置过期。每次读,测试可以改。 */
+export function sessionIdleDays(): number {
+  const raw = process.env.COMMHUB_SESSION_IDLE_DAYS;
+  if (raw === undefined || raw.trim() === "") return 30;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 30;
+}
+
+// datetime('now', ?N) 的偏移参数;PgAdapter 把它译成 NOW() + $N::INTERVAL。
+function idleCutoffOffset(): string | null {
+  const days = sessionIdleDays();
+  return days > 0 ? `-${Math.round(days * 86400)} seconds` : null;
+}
+
+// 已按闲置过期的会话令牌:只有 resolveToken 拒绝之后才查,用来把 401 说清楚是「过期」而不是「无效」。
+export function isExpiredSessionToken(token: string): boolean {
+  const cutoff = idleCutoffOffset();
+  if (!token || !cutoff) return false;
+  const row = db.get<any>(
+    `SELECT token_id FROM api_tokens
+     WHERE token_hash = ?1 AND ${SESSION_TOKEN_SQL} AND revoked_at IS NULL
+       AND COALESCE(last_used_at, created_at) < datetime('now', ?2)`,
+    hashToken(token), cutoff);
+  return !!row;
+}
+
 export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null; tokenId: string | null } | null {
   const tHash = hashToken(token);
+  const cutoff = idleCutoffOffset();
   const row = db.get<any>(
     `SELECT t.token_id, t.user_id, t.network_id, t.scope, t.name AS token_name,
             u.username, u.display_name, u.email, u.role
      FROM api_tokens t JOIN users u ON t.user_id = u.user_id
      WHERE t.token_hash = ?1
        AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))
-       AND t.revoked_at IS NULL`,
-    tHash);
+       AND t.revoked_at IS NULL${cutoff ? `
+       AND NOT (t.scope = 'user' AND t.network_id IS NULL AND COALESCE(t.last_used_at, t.created_at) < datetime('now', ?2))` : ""}`,
+    ...(cutoff ? [tHash, cutoff] : [tHash]));
 
   if (!row) return null;
 
@@ -306,8 +357,11 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
   // 在这里拒绝,所有 REST / MCP / SSE 路径一起生效(含升级前就签发、后来才被设为受限的令牌)。
   if (row.network_id && isAgentRestricted(row.user_id, row.network_id)) return null;
 
-  // Update last_used
-  db.run("UPDATE api_tokens SET last_used_at = datetime('now') WHERE token_hash = ?1", [tHash]);
+  // Update last_used(节流:见 LAST_USED_WRITE_INTERVAL_SECONDS)
+  db.run(
+    "UPDATE api_tokens SET last_used_at = datetime('now') WHERE token_id = ?1 AND (last_used_at IS NULL OR last_used_at < datetime('now', ?2))",
+    [row.token_id, `-${LAST_USED_WRITE_INTERVAL_SECONDS} seconds`]
+  );
 
   return {
     user: { user_id: row.user_id, username: row.username, display_name: row.display_name, email: row.email, role: row.role },
@@ -430,6 +484,47 @@ export function revokeOtherUserTokens(userId: string, exceptTokenId?: string | n
     ? db.run("DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL AND token_id != ?2", [userId, exceptTokenId])
     : db.run("DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL", [userId]);
   return result.changes;
+}
+
+export type LoginSession = {
+  token_id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  client_label: string | null;
+  user_agent: string | null;
+  is_current: boolean;
+};
+
+/** 我的登录会话(未过期、未撤销),最近使用的在前。 */
+export function listSessions(userId: string, currentTokenId: string | null): LoginSession[] {
+  const cutoff = idleCutoffOffset();
+  const rows = db.all<any>(
+    `SELECT token_id, name, created_at, last_used_at, client_label, user_agent FROM api_tokens
+     WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND revoked_at IS NULL${cutoff ? `
+       AND COALESCE(last_used_at, created_at) >= datetime('now', ?2)` : ""}
+     ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC`,
+    ...(cutoff ? [userId, cutoff] : [userId]));
+  return rows.map((r) => ({
+    token_id: r.token_id,
+    name: r.name,
+    created_at: r.created_at,
+    last_used_at: r.last_used_at ?? null,
+    client_label: r.client_label ?? null,
+    user_agent: r.user_agent ?? null,
+    is_current: !!currentTokenId && r.token_id === currentTokenId,
+  }));
+}
+
+/** 撤销我的一个登录会话;可以是当前这个(= 退出登录)。不是会话令牌(API 令牌 / 节点令牌)时当作不存在。 */
+export function revokeSession(userId: string, tokenId: string): { ok: boolean; error?: string } {
+  const result = db.run(`DELETE FROM api_tokens WHERE token_id = ?1 AND user_id = ?2 AND ${SESSION_TOKEN_SQL}`, [tokenId, userId]);
+  return result.changes > 0 ? { ok: true } : { ok: false, error: "session_not_found" };
+}
+
+/** 退出其他所有设备:撤销我除当前之外的全部登录会话(含已闲置过期的)。API 令牌、节点令牌不动。 */
+export function revokeOtherSessions(userId: string, currentTokenId: string): number {
+  return db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND token_id != ?2`, [userId, currentTokenId]).changes;
 }
 
 export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null): { ok: boolean; error?: string; revoked?: number } {

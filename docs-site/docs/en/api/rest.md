@@ -163,6 +163,7 @@ curl -X POST http://localhost:9200/api/auth/register \
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_xxxxxxxxxxxx",
   "network_token": "ntok_xxxxxxxxxxxxxxxx",
   "network_id": "net_xxxxxxxx"
 }
@@ -217,11 +218,12 @@ curl -X POST http://localhost:9200/api/auth/login \
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_xxxxxxxxxxxx",
   "network_id": "net_xxxxxxxx"
 }
 ```
 
-The `user` object's 5 fields match the register response (note `email` may be `null`); `network_id` is the default network the user owns ([`auth.ts:209-199`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) does `ORDER BY role = 'owner' DESC LIMIT 1`). Each login issues a **brand-new** `utok_` (existing tokens are not rotated, so multiple devices can log in independently — see [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `// User token (utok_) — not bound to network, for CLI/Dashboard login`).
+The `user` object's 5 fields match the register response (note `email` may be `null`); `network_id` is the default network the user owns ([`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) does `ORDER BY role = 'owner' DESC LIMIT 1`). Each login issues a **brand-new** `utok_` (existing tokens are not rotated, so multiple devices can log in independently — see [`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `// User token (utok_) — not bound to network, for CLI/Dashboard login`). `token_id` is this token's id in [`GET /api/auth/sessions`](#sessions), so a client can recognize "this device"; the body may carry an optional `client_label` (e.g. `"macOS · 0.2.150"`) to name the device. Login tokens expire after 30 idle days — see [Signed-in devices](#sessions).
 
 **Common 4xx errors** (verify [`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)):
 
@@ -362,7 +364,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 `revoked` is the number of utok\_/atok\_ tokens on **other devices** that were just revoked (it does **not** include the caller's own token — that one is revoked separately by `revokeToken(resolved.user.user_id, resolved.tokenId)` in the password-change handler in `server.ts`).
 
-**Key side effects** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L435) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**Key side effects** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L530) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` explicit delete)
 2. **All other devices' `utok_` / `atok_`** are also revoked in one shot ([`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) — grep `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId`) — the count is returned in the `revoked` field
 3. **`ntok_` tokens are unaffected** (`revokeOtherUserTokens` filters on `network_id IS NULL`, so agent nodes using `ntok_` keep running through a password change; matches the [account-system / Change Password](/en/guide/account-system#change-password) narrative)
@@ -384,6 +386,47 @@ Matches the `anet passwd` CLI behavior (the CLI writes the new token back into `
 ::: tip Same strength rules as register
 Password-strength validation reuses `validatePasswordStrength()` from register (see [POST /api/auth/register 4xx](#post-api-auth-register)). The bootstrap-admin exemption applies only to the first signup — **no exemption for password change**.
 :::
+
+---
+
+### Signed-in devices: list / sign out login sessions {#sessions}
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) — grep `/api/auth/sessions`
+
+A **login session token** is a network-unbound `utok_` with `scope='user'`: `user-login` (issued by login / register), `password-change` (reissued after a password change), and `admin-reset` (issued by an admin reset). One row per login — "one sign-in on one device".
+
+**Idle expiry (sliding window)**: a login session token that has been idle for more than `COMMHUB_SESSION_IDLE_DAYS` days (default `30`; `0` disables) stops working. Idle time counts from `last_used_at`, or `created_at` if it was never used; every use pushes the window forward (`last_used_at` is written at most once per hour per token). An expired token gets, on any endpoint:
+
+```json
+{ "ok": false, "error": "token_expired", "message": "login session expired after inactivity; sign in again" }
+```
+
+with HTTP 401. Clients should prompt for a fresh login on `error == "token_expired"` (as distinct from `invalid token` and other 401s).
+
+**Not subject to idle expiry**: API tokens created explicitly via `POST /api/auth/tokens` (`scope='full'`) and node / network tokens (`ntok_`). Those are long-lived credentials for scripts and nodes and are revoked through their own endpoints.
+
+The three endpoints below **accept user tokens only**; node tokens get `403 user_token_required`.
+
+**GET /api/auth/sessions** — my live login sessions, most recently used first:
+
+```json
+{
+  "ok": true,
+  "current_token_id": "tok_aaa",
+  "idle_timeout_days": 30,
+  "sessions": [
+    { "token_id": "tok_aaa", "name": "user-login", "created_at": "2026-09-30 08:00:00",
+      "last_used_at": "2026-09-30 09:12:00", "client_label": "macOS · 0.2.150",
+      "user_agent": "Mozilla/5.0 (Macintosh) …", "is_current": true }
+  ]
+}
+```
+
+`client_label` is the optional `client_label` the client sent in the login body (≤ 64 chars); `user_agent` is the login request's `User-Agent` header (≤ 256 chars). Tokens issued before the upgrade have `null` for both.
+
+**POST /api/auth/sessions/revoke-others** — sign out every other device: revokes all of my login sessions except the current one (expired ones included); API tokens and node tokens are untouched. Response `{ "ok": true, "revoked": 3, "kept_token_id": "tok_aaa" }`. The calling token must itself be a login session, otherwise `403 session_token_required`. Audited as `sessions_revoked_others` (`detail = revoked=N`).
+
+**DELETE /api/auth/sessions/:token_id** — revoke one of my login sessions; revoking the current one is a logout. Response `{ "ok": true, "was_current": false }`; `404 session_not_found` when the target is not one of my login sessions (someone else's, an API token, a node token, or nonexistent). Audited as `session_revoked`.
 
 ---
 
@@ -423,7 +466,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS networks`, including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L324) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
+Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS networks`, including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L378) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
 
 ---
 
