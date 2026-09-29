@@ -1999,6 +1999,16 @@ return Bun.serve({
         ? "SELECT alias, status, agent, task, server, updated_at, network_id FROM sessions WHERE 1=1"
         : `SELECT ${SESSION_REST_SELECT} FROM sessions WHERE 1=1`;
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
+      // `?alias=<name>` narrows to that one agent's rows (same projection, same scope). The app's
+      // chat info / node detail read the full projection for ONE agent; unfiltered that is every
+      // session in the network (533 KB, 94 KB gzip on the production network) per open and per
+      // 10 s poll. Older hubs ignore the parameter and return every row — the app still picks its
+      // row by alias, so old app × new hub and new app × old hub both keep working.
+      const aliasFilter = url.searchParams.get("alias")?.trim();
+      if (aliasFilter) {
+        params.push(aliasFilter);
+        sql += ` AND alias = ?${params.length}`;
+      }
       sql += " ORDER BY updated_at DESC";
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes

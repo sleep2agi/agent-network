@@ -22,6 +22,7 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 |------|------|
 | `network_id` | 按网络过滤（绑了 `ntok_` 时此参数被强制覆盖为 token 自带的 network）|
 | `status` | 按状态过滤（idle / working / offline） |
+| `alias` | 只返回这个 agent 的行（在网络作用域之内再筛，不会放宽作用域）。只要一个 agent 的完整行时用它，不用把整个网络拉下来；旧 hub 忽略此参数、照旧返回全部 |
 
 **响应**：
 
