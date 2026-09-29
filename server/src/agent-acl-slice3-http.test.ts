@@ -63,7 +63,7 @@ async function openStream(path: string, token: string) {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
+  let pending: ReturnType<typeof reader.read> | null = null;
   const readFor = async (ms: number) => {
     const until = Date.now() + ms;
     while (Date.now() < until) {
