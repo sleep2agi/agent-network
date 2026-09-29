@@ -117,7 +117,7 @@ key3=$(summary_key "$OUT3")
 for output in "$OUT1" "$OUT2" "$OUT3"; do
   grep -F $'TEST_FILE_RESULT\tserver/src/api-host-supervisors-fallback.test.ts\tpass=8\tfail=0' "$output" >/dev/null
   grep -F $'TEST_FILE_RESULT\tserver/src/uploads-http.test.ts\tpass=15\tfail=0' "$output" >/dev/null
-  grep -F $'TEST_FILE_RESULT\tserver/src/scheduled-tasks-http.test.ts\tpass=12\tfail=0' "$output" >/dev/null
+  grep -F $'TEST_FILE_RESULT\tserver/src/scheduled-tasks-http.test.ts\tpass=15\tfail=0' "$output" >/dev/null
   ! grep -Eqi 'connection refused|ECONNREFUSED|database safety guard|FAIL_SUITE|timeout=true' "$output"
   maps=$(grep -c '^TEST_DB_MAP' "$output")
   unique_maps=$(grep '^TEST_DB_MAP' "$output" | cut -f3 | sort -u | wc -l)
