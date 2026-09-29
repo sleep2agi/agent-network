@@ -1,0 +1,47 @@
+# Tasks
+
+The Tasks page in the desktop app and on Android is where people arrange their own work. It is not the inbox on the [Web Dashboard](/en/guide/dashboard): the inbox is messages dispatched inside a session; this page is task cards. Agents read and write the same records through the [requirements API](/en/api/mcp-tools#requirements-task-board). Fields, permissions and sync live in that section; they are not repeated here.
+
+It is also not the [session-task lifecycle](/en/concepts/task-lifecycle). That page is the state machine for messages sent to an agent, not these cards.
+
+iOS is still TestFlight only, and the public link is not open. This page describes what you can click on desktop and Android.
+
+## List and board
+
+Open Tasks in the nav. On a phone it is in the bottom bar; on a wide unfolded screen it is in the left rail.
+
+The top bar switches between List and Board, and also filters and creates tasks. The board has three columns: Backlog, In progress and Done (需求池 / 进行中 / 完成 in the Chinese UI). On desktop, drag a card to another column; on a phone, long-press the card for the menu. Open a card and edit it in the detail drawer.
+
+The left side filters by All, Assigned to me, Unassigned, By Agent, By node or project, and also opens the Dispatch log.
+
+On an older Hub, when the description, checklist, subtasks or issue links are not available yet, the client asks you to upgrade. The desktop app's built-in local Hub already supports the operations on this page.
+
+## Projects
+
+Create them in Manage projects in the left rail. A project has a color, and task cards show that tag. You can filter by project.
+
+A name is at most 40 characters and cannot duplicate an existing one. An archived project cannot be selected again; tasks already in it keep the project.
+
+## Checklist and subtasks
+
+These are two different things, and the UI names them differently:
+
+- **Checklist** (子任务 in the Chinese UI): tick-boxes on one card. Add or remove them; on desktop, drag to reorder. The card shows how many are done.
+- **Subtasks** (子需求 in the Chinese UI): separate task cards nested under the current one. In the detail drawer, use + New subtask. At most 5 levels. The card shows subtask progress and can jump back to the parent. The filter can show Top level only. Deleting a parent keeps its subtasks and makes them top level.
+
+## Due date
+
+A due date can be all day, or a time to the second. The screen shows the time in your local timezone; the Hub stores UTC. An all-day task is not overdue until that local day has ended. The detail view shows the local time to the second; with a pointer, hovering does too.
+
+## GitHub Issues
+
+In the detail drawer, use + Link issue. Paste an issue URL, or type `owner/repo#123` (number 1–10000000). You can link several, up to 8 by hand. Linking and unlinking save immediately. Cards and the list show how many are linked, and a click opens the issue in the browser.
+
+The one that arrived by sync is marked Sync source and cannot be unlinked here. The same issue cannot be linked twice.
+
+Agents sync idempotently with `external_ref` (such as `github:owner/repo#123`). See [Requirements / task board](/en/api/mcp-tools#requirements-task-board).
+
+## See also
+
+- [Desktop and Mobile Clients](/en/guide/desktop-app)
+- [Requirements / task board](/en/api/mcp-tools#requirements-task-board)
