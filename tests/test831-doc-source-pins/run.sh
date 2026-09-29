@@ -264,8 +264,11 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 [[ "$files" -eq 117 ]] || fail "预期扫 117 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
-[[ "$uniq"  -eq 7  ]] || fail "预期 7 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 20 ]] || fail "预期 20 处原始出现,实际 $occ"
+# 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——
+# 那一行被本 PR 在 register() 里加的一行挤漂(check-doc-source-pins 报 trivial-line)。
+# 同一个 auth.ts pin 减 1,两处引用减 2;没有减少扫描文件或放宽基线。
+[[ "$uniq"  -eq 6  ]] || fail "预期 6 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 18 ]] || fail "预期 18 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------
