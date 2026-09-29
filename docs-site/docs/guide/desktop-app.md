@@ -7,7 +7,7 @@ Agent Network 桌面应用(macOS / Windows)是给**人**用的那一端:登录�
 ## 账号与 Hub
 
 - **多个账号并存**:设置 → 账号与 Hub 里可以同时保存多个 Hub 账号(比如公司 Hub 的 `admin` 和本机的 Local workspace),点一行就切换;`· 当前` 标记的是主窗口正在用的账号。
-- **每个账号一个窗口**(0.2.56+):账号行右侧的「新窗口」会开一个**完整**的工作区窗口(Agent 列表 + 聊天 + 设置),只登这个账号,标题栏显示「账号 · Hub 主机 · Agent Network」。主窗口的当前账号不受影响,两个窗口可以同时在线、同时聊;同一账号再点是聚焦已开的窗口。
+- **每个账号一个窗口**(0.2.56+):账号行右侧的「新窗口」会开一个**完整**的工作区窗口(Agent 列表 + 聊天),只登这个账号,标题栏显示「账号 · Hub 主机 · Agent Network」。主窗口的当前账号不受影响,两个窗口可以同时在线、同时聊;同一账号再点是聚焦已开的窗口。设置不在这个窗口里铺开,见下面的「设置窗口」。
   ::: tip 为什么不是"再开一个 App"
   两个进程会抢同一份本地数据目录和本地 Hub 的端口,所以多开做成了**多窗口**。
   :::
@@ -32,20 +32,34 @@ Agent Network 桌面应用(macOS / Windows)是给**人**用的那一端:登录�
 
 要求:agent-network ≥ `2.3.0-preview.77`、Hub ≥ `0.9.0-preview.50`;这些安装器会替你满足。
 
+## 设置窗口
+
+macOS / Windows 上,点「设置」,或按 macOS 的 ⌘, / Windows 的 Ctrl+,,会另开一个窗口,主窗口的列表和聊天留在原地。窗口标题是「设置 · Agent Network」。已经开着时再点,是把这个窗口带到前面,不会再开一个。
+
+手机和浏览器里没有桌面壳,设置仍留在当前窗口。在设置窗口里换了当前账号之后,主窗口会跟着换。
+
+## 语言
+
+设置 → 外观 → 语言。三个选项是「跟随系统」「中文」「English」;后两个名字不随当前界面语言改变。切换立刻生效,不用重启。导航、设置、聊天和[任务](/guide/tasks)页一起换。
+
 ## 软件更新
 
 设置 → 关于 → 「软件更新」检查新版;有新版时主窗口会弹更新说明,确认后自动下载安装并重启(本地 Hub 会先停再随新版本启动)。更新源是 `https://anet.sh/desktop/update/latest.json`。
 
-## 浏览器与手机：Dashboard 的 PWA 与客户端壳 {#dashboard-shells}
+## 手机应用，以及浏览器里的 Dashboard {#dashboard-shells}
 
-不装桌面应用也可以用 [Dashboard](/guide/dashboard)。它还有几种**薄壳**（源码在 [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)，权威文档是那个仓的 `docs/mobile-app.md`）。壳不重新实现任何功能，认证、数据、上传和实时推送仍由 Dashboard 与 CommHub 承担，所以**必须先有一个能访问的 Dashboard 地址**。
+桌面和 Android 是同一份 Agent Network 应用,连的是同一个 Hub。Android 安装包从[首页](/)下载(线路一是国内 ModelScope,线路二是 GitHub)。iOS 只走 TestFlight,公开链接还没开;审计用的 `.ipa` 不能直接侧载。
 
-- **PWA（最省事）**：用 **HTTPS** 打开 Dashboard，浏览器会提供「安装到主屏 / 安装为应用」。HTTP 不行（PWA 需要安全上下文），`http://127.0.0.1` 本机调试除外。
-- **iOS / Android（Capacitor）**：WebView 壳，需要 Xcode 或 Android Studio 自行构建。手机是另一台设备，回环地址到不了你的电脑，要显式给一个它够得到的 HTTPS 地址：`export ANET_DASHBOARD_URL="https://your-dashboard.example.com"`。
-- **Electron 桌面壳**：在 dashboard 仓里 `npm run app:desktop`。它和本页的桌面应用不是一回事；要现成的 macOS / Windows 安装包，用上面的桌面应用。
+不装这个应用,也可以用浏览器打开 [Dashboard](/guide/dashboard)。
 
-怎么选：只想在手机上看看 → PWA；给不用命令行的人 → 桌面应用；要接推送、相机等系统能力 → Capacitor。
+Dashboard 仓库里还有几种**薄壳**(源码在 [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard),权威文档是那个仓的 `docs/mobile-app.md`)。它们包的是 Dashboard 网页,不是首页提供的桌面或 Android 安装包,也不重新实现认证、数据和实时推送,所以要先有一个手机够得到的 Dashboard 地址。
+
+- **PWA**:用 **HTTPS** 打开 Dashboard,浏览器会提供「安装到主屏 / 安装为应用」。HTTP 不行(PWA 需要安全上下文),`http://127.0.0.1` 本机调试除外。
+- **自己编译的 Capacitor 壳**:WebView,需要 Xcode 或 Android Studio。手机到不了电脑的回环地址,要显式给一个它够得到的 HTTPS 地址:`export ANET_DASHBOARD_URL="https://your-dashboard.example.com"`。
+- **Electron 桌面壳**:在 dashboard 仓里 `npm run app:desktop`。它和本页的桌面应用不是一回事。
+
+怎么选:日常使用 → 首页的桌面或 Android 安装包;只在浏览器里看 Dashboard → PWA;要自己包一层网页壳 → dashboard 仓的 Capacitor 或 Electron。
 
 ## 相关
 
-- [Dashboard](/guide/dashboard)、[CLI 命令](/guide/cli)。
+- [任务](/guide/tasks)、[Dashboard](/guide/dashboard)、[CLI 命令](/guide/cli)。
