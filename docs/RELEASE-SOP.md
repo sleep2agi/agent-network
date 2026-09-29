@@ -87,9 +87,9 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(**42 个路径**,下表 42 行 = 42 个文件 ——
+> 逐次发版必须重新核对的位置(**39 行**,其中 38 个首格是纯路径,门只认这 38 个 ——
 > 不要把 zh/en 合成一行数,分母数错会漏核。
-> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42。**加新的信道断言时,同时把它加进这张表**,
+> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42 → 39。**加新的信道断言时,同时把它加进这张表**,
 > 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
 >
 > | 文件 | 行 | 断言 |
@@ -131,6 +131,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/guide/architecture.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
 > | `docs-site/docs/guide/runtimes.md` | 见门输出 | 信道断言 —— 同上(中文) |
 > | `docs-site/docs/guide/feishu.md` | 见门输出 | 信道断言(由 check-release-channel-assertions.py 扫出) |
+> | `docs-site/docs/guide/schedules.md` | 见门输出 | 下界：Hub `0.9.0-preview.67` 起修复定时任务推送；`agent-network` `2.3.0-preview.118` 起 Claude Code 收到回复会唤醒，需更新节点并重启。发新版不会变假 |
+> | `docs-site/docs/en/guide/schedules.md` | 见门输出 | 同上(英文) |
 >
 > 🔴 **这张表第四次被修正:7 → 8 → 12 → 31。**
 > 前三次都是有人踩到之后手工补的,而 SOP 里那句「加新断言时同时加进这张表」靠人记 —— 记不住。
