@@ -2,6 +2,11 @@
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { db } from "./db.js";
 import { addNetworkScope, canRestWriteNetwork, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { migrateRequirementAgentOwners } from "./requirements-migrate.js";
+
+// 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
+// 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
+migrateRequirementAgentOwners(db);
 
 type RequestAuth = { userId: string; networkId: string | null; username: string } | null;
 

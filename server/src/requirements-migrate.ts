@@ -1,4 +1,4 @@
-// 需求卡的启动迁移。db.ts 启动时调用;单独成文件,db.ts 只多一行 import 一行调用。
+// 需求卡的启动迁移。requirements.ts 载入时调用一次(列由 db.ts 的加列循环加上)。
 import type { DbAdapter } from "./db-adapter";
 
 /**

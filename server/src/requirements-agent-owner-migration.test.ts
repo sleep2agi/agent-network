@@ -1,5 +1,5 @@
 // 负责人 / 负责 Agent 拆分的启动迁移:旧库里 owner 是节点的卡,节点挪到 agent_owner、owner 置空。
-// 用 #2065 时代的表结构(没有 agent_owner_json 列)先建库、塞行,再 import db.ts 触发真实启动路径。
+// 用 #2065 时代的表结构(没有 agent_owner_json 列)先建库、塞行,再 import db.ts + requirements.ts(真实启动路径)。
 import { afterAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -36,6 +36,7 @@ const snapshot = (db: any) => db.all("SELECT requirement_id, network_id, title, 
 
 test("startup migration moves node owners to agent_owner, keeps every row, and is idempotent", async () => {
   const { db } = await import("./db.js");
+  await import("./requirements.js"); // 真实启动路径:server.ts 载入 requirements.ts 时迁移
   const { migrateRequirementAgentOwners } = await import("./requirements-migrate.js");
   const after = snapshot(db);
   expect(after.length).toBe(rows.length);
