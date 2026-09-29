@@ -9,6 +9,14 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 
 成员必须属于卡片的网络；用户来自 network_members，Agent 来自 nodes。读取继承网络作用域，写入继承现有网络角色权限，viewer 不可写。节点令牌依旧拒绝；Agent 自主操作留到后续授权小版。
 
+### 负责人 / 负责 Agent 分开（agent_owner）
+
+- `owner`：**负责人**，只能是人类（`{kind:"user",id}`），对结果负责。写入节点返回 400 `owner_must_be_human`。
+- `agent_owner`：**负责 Agent**，只能是节点（`{kind:"node",id}`），负责执行。写入人类返回 400 `agent_owner_must_be_agent`。与 owner 同样按网络校验成员，`null` 清空，PATCH 省略则保留。
+- `participants` 不变：人类和 Agent 都可以。
+- 读取总带 `agent_owner` 字段（没有时为 `null`）；客户端用「行里有没有这个字段」判断 Hub 是否支持两个角色，旧 Hub 退回单一负责人。
+- 启动迁移（`server/src/requirements-migrate.ts`）：`owner` 是节点且 `agent_owner` 为空的行，把节点挪到 `agent_owner`、`owner` 置空；幂等，不删行、不动其他列，解析不了的旧值原样保留。旧库里未迁移的节点负责人照常读出，只在请求显式写 owner 时校验种类。
+
 本版为最后写入覆盖语义，尚无版本冲突提示。客户端应避免一次编辑提交未改动的绑定字段；多人同时修改同一字段的冲突解决属于后续交付项。
 
 ## 恢复与部署边界

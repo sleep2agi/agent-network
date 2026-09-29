@@ -1,4 +1,5 @@
 import { createAdapter, type DbAdapter } from "./db-adapter";
+import { migrateRequirementAgentOwners } from "./requirements-migrate";
 
 export const db: DbAdapter = createAdapter();
 
@@ -975,9 +976,10 @@ db.exec(`
 try { db.exec("ALTER TABLE requirements ADD COLUMN client_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE requirements ADD COLUMN issues_json TEXT"); } catch {}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_client ON requirements(network_id, client_id) WHERE client_id IS NOT NULL AND client_id != ''");
-for (const column of ["owner_json TEXT", "participants_json TEXT NOT NULL DEFAULT '[]'"]) {
+for (const column of ["owner_json TEXT", "participants_json TEXT NOT NULL DEFAULT '[]'", "agent_owner_json TEXT"]) {
   try { db.exec(`ALTER TABLE requirements ADD COLUMN ${column}`); } catch (e: any) { if (!/duplicate column|already exists/i.test(e?.message || "")) throw e; }
 }
+migrateRequirementAgentOwners(db);
 
 // ── V3: licenses table ──
 db.exec(`

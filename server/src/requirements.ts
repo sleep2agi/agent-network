@@ -20,6 +20,7 @@ const DUE = /^\d{4}-\d{2}-\d{2}$/;
 
 type Row = {
   owner_json: string | null;
+  agent_owner_json: string | null;
   participants_json: string;
   requirement_id: string;
   network_id: string;
@@ -99,6 +100,8 @@ function storedIssues(raw: string | null) {
 function toPublic(row: Row) {
   return {
     owner: row.owner_json ? JSON.parse(row.owner_json) : null,
+    // 负责 Agent(执行者)。字段总在:客户端靠它判断这个 Hub 分不分「负责人 / 负责 Agent」。
+    agent_owner: row.agent_owner_json ? JSON.parse(row.agent_owner_json) : null,
     participants: JSON.parse(row.participants_json || '[]'),
     id: row.requirement_id,
     name: row.title,
@@ -127,7 +130,7 @@ function canWrite(ctx: RequirementsRequestContext, networkId: string | null): bo
   return !ctx.isNodeToken && canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json";
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json, agent_owner_json";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
 function personRef(value: unknown, networkId: string): PersonRef {
@@ -141,15 +144,30 @@ function personRef(value: unknown, networkId: string): PersonRef {
   return { kind: row.kind, id: row.id };
 }
 
+// 负责人只能是人类,负责 Agent 只能是节点;参与人两种都行。库里旧的节点负责人照样读出来(启动迁移会挪走),
+// 只有这次请求显式写了 owner / agent_owner 才校验种类。
 function assignments(body: Record<string, unknown>, networkId: string, current?: Row) {
-  const owner = 'owner' in body ? body.owner === null ? null : personRef(body.owner, networkId) : current?.owner_json ? JSON.parse(current.owner_json) : null;
+  let owner = current?.owner_json ? JSON.parse(current.owner_json) : null;
+  if ('owner' in body) {
+    owner = body.owner === null ? null : personRef(body.owner, networkId);
+    if (owner && owner.kind !== 'user') throw new Error('owner_must_be_human');
+  }
+  let agentOwner = current?.agent_owner_json ? JSON.parse(current.agent_owner_json) : null;
+  if ('agent_owner' in body) {
+    agentOwner = body.agent_owner === null ? null : personRef(body.agent_owner, networkId);
+    if (agentOwner && agentOwner.kind !== 'node') throw new Error('agent_owner_must_be_agent');
+  }
   let participants = current ? JSON.parse(current.participants_json || '[]') : [];
   if ('participants' in body) {
     if (!Array.isArray(body.participants) || body.participants.length > 100) throw new Error('invalid_participants');
     const refs = body.participants.map(value => personRef(value, networkId));
     participants = [...new Map(refs.map(ref => [`${ref.kind}:${ref.id}`, ref])).values()];
   }
-  return { ownerJson: owner === null ? null : JSON.stringify(owner), participantsJson: JSON.stringify(participants) };
+  return {
+    ownerJson: owner === null ? null : JSON.stringify(owner),
+    agentOwnerJson: agentOwner === null ? null : JSON.stringify(agentOwner),
+    participantsJson: JSON.stringify(participants),
+  };
 }
 
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
@@ -210,9 +228,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     try {
       db.run(
         `INSERT INTO requirements
-         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13)`,
-        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson],
+         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14)`,
+        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson],
       );
     } catch {
       if (!clientId) return jsonError("insert_failed", 500);
@@ -238,7 +256,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const hasPriority = 'priority' in body;
   const hasDue = 'due' in body;
   const hasAssignee = 'assignee' in body;
-  if (!hasColumn && !hasIssues && !hasName && !hasPriority && !hasDue && !hasAssignee && !('owner' in body) && !('participants' in body)) return jsonError('empty_patch', 400);
+  if (!hasColumn && !hasIssues && !hasName && !hasPriority && !hasDue && !hasAssignee && !('owner' in body) && !('agent_owner' in body) && !('participants' in body)) return jsonError('empty_patch', 400);
   if (hasColumn && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
   const issues = hasIssues ? normalizeIssues(body.issues) : null;
   if (hasIssues && issues === null) return jsonError("invalid_issues", 400);
@@ -273,8 +291,8 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   try { people = assignments(body, row.network_id, row); } catch (e) { return jsonError((e as Error).message, 400); }
   const updatedAt = new Date().toISOString();
   db.run(
-    "UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6 WHERE requirement_id = ?3",
-    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee],
+    "UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6, agent_owner_json = ?11 WHERE requirement_id = ?3",
+    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json({ ok: true, requirement: toPublic(updated) });

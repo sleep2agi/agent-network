@@ -72,9 +72,17 @@ describe("requirements stay on the hub", () => {
     expect(created.body.requirement.owner).toEqual(user);
     expect(created.body.requirement.participants).toEqual([user, node]);
     const path = `/api/requirements/${created.body.requirement.id}`;
-    const changed = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node }) });
+    // 负责人只能是人类,负责 Agent 只能是节点(参与人两种都行)。
+    const humanAsAgent = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: user }) });
+    expect(humanAsAgent.status).toBe(400);
+    expect(humanAsAgent.body.error).toBe('agent_owner_must_be_agent');
+    const agentAsOwner = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node }) });
+    expect(agentAsOwner.status).toBe(400);
+    expect(agentAsOwner.body.error).toBe('owner_must_be_human');
+    const changed = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: node }) });
     expect(changed.status).toBe(200);
-    expect(changed.body.requirement.owner).toEqual(node);
+    expect(changed.body.requirement.owner).toEqual(user);
+    expect(changed.body.requirement.agent_owner).toEqual(node);
     expect(changed.body.requirement.participants).toEqual([user, node]);
     expect(changed.body.requirement.column).toBe('pool');
     for (const token of [viewerToken, nodeToken]) {
@@ -85,11 +93,45 @@ describe("requirements stay on the hub", () => {
       expect((await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ participants: [invalid] }) })).status).toBe(400);
     }
     const listed = await api(ownerToken, '/api/requirements');
-    expect(listed.body.requirements.find((row: any) => row.id === created.body.requirement.id).owner).toEqual(node);
-    const cleared = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: null, participants: [] }) });
+    const row = listed.body.requirements.find((row: any) => row.id === created.body.requirement.id);
+    expect(row.owner).toEqual(user);
+    expect(row.agent_owner).toEqual(node);
+    const cleared = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: null, agent_owner: null, participants: [] }) });
     expect(cleared.status).toBe(200);
     expect(cleared.body.requirement.owner).toBeNull();
+    expect(cleared.body.requirement.agent_owner).toBeNull();
     expect(cleared.body.requirement.participants).toEqual([]);
+  });
+
+  test("a card is created with a human owner and an agent owner; each role rejects the other kind", async () => {
+    const { db } = await import('./db.js');
+    const ownerId = db.get<{ owner_id: string }>('SELECT owner_id FROM networks WHERE network_id=?1', ownerNetwork)!.owner_id;
+    db.run('INSERT OR IGNORE INTO nodes(node_id,node_name,alias,network_id) VALUES (?1,?2,?2,?3)', ['req-exec-node', 'req-exec-node', ownerNetwork]);
+    const human = { kind: 'user', id: ownerId };
+    const agent = { kind: 'node', id: 'req-exec-node' };
+    const both = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '两个角色', owner: human, agent_owner: agent }) });
+    expect(both.status).toBe(201);
+    expect(both.body.requirement.owner).toEqual(human);
+    expect(both.body.requirement.agent_owner).toEqual(agent);
+    const plain = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '都不填' }) });
+    expect(plain.body.requirement.agent_owner).toBeNull();
+    const wrongOwner = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '节点当负责人', owner: agent }) });
+    expect(wrongOwner.status).toBe(400);
+    expect(wrongOwner.body.error).toBe('owner_must_be_human');
+    const wrongAgent = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '人当负责 Agent', agent_owner: human }) });
+    expect(wrongAgent.status).toBe(400);
+    expect(wrongAgent.body.error).toBe('agent_owner_must_be_agent');
+    const foreign = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '外网节点', agent_owner: { kind: 'node', id: 'foreign-person-node' } }) });
+    expect(foreign.status).toBe(400);
+    // 只改 agent_owner 是一次有效 PATCH(不是 empty_patch),其余字段不动
+    const path = `/api/requirements/${both.body.requirement.id}`;
+    const onlyAgent = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: null }) });
+    expect(onlyAgent.status).toBe(200);
+    expect(onlyAgent.body.requirement.agent_owner).toBeNull();
+    expect(onlyAgent.body.requirement.owner).toEqual(human);
+    expect(onlyAgent.body.requirement.name).toBe('两个角色');
+    const viewerWrite = await api(viewerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: agent }) });
+    expect(viewerWrite.status).toBe(403);
   });
 
   test("owner creates a card in the pool", async () => {
