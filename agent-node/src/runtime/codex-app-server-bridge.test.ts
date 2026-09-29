@@ -43,6 +43,10 @@ async function startFakeApp(config?: {
     respond: (r: { result?: unknown; error?: { code: number; message: string } }) => void,
     broadcast: (obj: object) => void,
   ) => void;
+  /** onRequest answers thread/turns/list itself instead of via the thread/read shim. */
+  handlesTurnsList?: boolean;
+  /** Reject excludeTurns / thread/turns/list like a pre-0.151 codex. */
+  legacyHistoryApi?: boolean;
 }): Promise<FakeApp> {
   const received: object[] = [];
   const connections = new Set<{ send: (s: string) => void }>();
@@ -73,7 +77,24 @@ async function startFakeApp(config?: {
             const line = JSON.stringify(obj);
             for (const c of connections) c.send(line);
           };
-          if (config?.onRequest) {
+          if (config?.legacyHistoryApi && isHistoryPagingRequest(parsed)) {
+            // codex ≤0.150 without the experimentalApi capability (real-wire text).
+            const name = parsed.method === "thread/resume" ? "thread/resume.excludeTurns" : parsed.method;
+            respond({ error: { code: -32600, message: `${name} requires experimentalApi capability` } });
+          } else if (config?.onRequest && parsed.method === "thread/turns/list" && !config.handlesTurnsList) {
+            // Tests describe history as a full thread/read snapshot; serve the
+            // newest page of it the way codex does (desc, `limit` turns).
+            config.onRequest(
+              { ...parsed, method: "thread/read", params: { threadId: parsed.params?.threadId, includeTurns: true } },
+              (r) => {
+                if (r.error) return respond(r);
+                const turns = (r.result as { thread?: { turns?: unknown[] } })?.thread?.turns ?? [];
+                const data = [...turns].reverse().slice(0, parsed.params?.limit ?? turns.length);
+                respond({ result: { data, nextCursor: null, backwardsCursor: null } });
+              },
+              broadcast,
+            );
+          } else if (config?.onRequest) {
             config.onRequest(parsed, respond, broadcast);
           } else {
             // Default: auto-ok initialize / thread/resume; assign turnId to turn/start.
@@ -114,6 +135,12 @@ async function startFakeApp(config?: {
 }
 
 const THREAD = "thread_abc";
+
+function isHistoryPagingRequest(msg: { method: string; params?: any }): boolean {
+  return msg.method === "thread/turns/list" ||
+    msg.method === "thread/items/list" ||
+    (msg.method === "thread/resume" && msg.params?.excludeTurns !== undefined);
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Bootstrap + happy path
@@ -1546,7 +1573,9 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
       status: "completed",
     });
     expect(replies).toEqual([{ taskId: "t-double-loss", text: "fallback-answer" }]);
-    expect(app.received.filter((entry) => (entry as { method?: string }).method === "thread/read")).toHaveLength(2);
+    // One metadata read, then one bounded page — never a full-history read.
+    expect(app.received.filter((entry) => (entry as { method?: string }).method === "thread/read")).toHaveLength(1);
+    expect(app.received.filter((entry) => (entry as { method?: string }).method === "thread/turns/list")).toHaveLength(1);
     await client.close();
     await app.stop();
   });
@@ -1809,5 +1838,153 @@ describe("CodexAppServerBridge — #1930 queued rows are re-checked before their
     expect(admission.started).toBe(true);
     expect(asked).toEqual([]);
     expect(turnStarts()).toHaveLength(1);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Full-history hydration. On a long-lived thread a plain `thread/resume` or
+// `thread/read {includeTurns:true}` answers with every turn and item in one
+// frame; the connection died (1006) mid-resume and every later task failed.
+// A small fixture thread behaves the same either way, so these assert the
+// OUTGOING frames rather than the outcome.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CodexAppServerBridge — never hydrates full thread history", () => {
+  const frames = (app: FakeApp, method: string) =>
+    app.received.filter((entry) => (entry as { method?: string }).method === method) as Array<{ params?: any }>;
+  const fullReads = (app: FakeApp) =>
+    frames(app, "thread/read").filter((frame) => frame.params?.includeTurns === true);
+
+  test("startup resume sends excludeTurns:true", async () => {
+    const app = await startFakeApp();
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    expect(frames(app, "thread/resume").map((frame) => frame.params)).toEqual([{ threadId: THREAD, excludeTurns: true }]);
+    await client.close();
+    await app.stop();
+  });
+
+  test("deferred TUI-thread resume sends excludeTurns:true", async () => {
+    const app = await startFakeApp();
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, deferThreadUntilTui: true, initialDeferredThreadId: "tui-thread" });
+    await bridge.bootstrap();
+    expect(bridge.getThreadId()).toBe("tui-thread");
+    expect(frames(app, "thread/resume").map((frame) => frame.params)).toEqual([{ threadId: "tui-thread", excludeTurns: true }]);
+    await client.close();
+    await app.stop();
+  });
+
+  test("recovery and reconciliation read one bounded page, never includeTurns:true", async () => {
+    // 500 persisted turns; the fake pages them like codex does.
+    const history = Array.from({ length: 500 }, (_, i) => ({ id: `old-${i}`, status: "completed", items: [] as unknown[] }));
+    history.push({ id: "human-live", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "human prompt" }] }] });
+    let status: string = "active";
+    const app = await startFakeApp({
+      handlesTurnsList: true,
+      onRequest: (msg, respond) => {
+        const params = msg.params as any;
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "thread/read") {
+          return respond({ result: { thread: { status: { type: status }, ...(params?.includeTurns ? { turns: history } : {}) } } });
+        }
+        if (msg.method === "thread/turns/list") {
+          const newest = [...history].reverse().slice(0, params.limit ?? history.length);
+          return respond({ result: { data: newest, nextCursor: "more", backwardsCursor: null } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD, fullHistoryReconciliationIntervalMs: 0 });
+    await bridge.bootstrap();
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "human-live", steerable: true });
+
+    history[history.length - 1] = { id: "human-live", status: "completed", items: [{ type: "agentMessage", phase: "final_answer", text: "done" }] };
+    status = "idle";
+    expect(await bridge.reconcileActiveTurn(true)).toEqual({ recovered: true, turnId: "human-live", status: "completed" });
+
+    expect(fullReads(app)).toHaveLength(0);
+    const pages = frames(app, "thread/turns/list").map((frame) => frame.params);
+    expect(pages).toHaveLength(2);
+    for (const page of pages) {
+      expect(page).toMatchObject({ threadId: THREAD, sortDirection: "desc", itemsView: "full" });
+      expect(page.limit).toBeGreaterThan(0);
+      expect(page.limit).toBeLessThanOrEqual(10);
+      expect(page.cursor).toBeUndefined();
+    }
+    await client.close();
+    await app.stop();
+  });
+
+  test("pre-0.151 codex: capability rejection falls back to the legacy calls once", async () => {
+    const app = await startFakeApp({
+      legacyHistoryApi: true,
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "thread/read") return respond({ result: { thread: {
+          status: { type: "active" },
+          turns: [{ id: "legacy-live", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "human" }] }] }],
+        } } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    const unsupported: unknown[] = [];
+    bridge.on("history_paging_unsupported", (event) => unsupported.push(event));
+    await bridge.bootstrap();
+    expect(bridge.currentStatus()).toBe("idle");
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "legacy-live", steerable: true });
+    expect(await bridge.recoverSharedActiveTurn()).toEqual({ turnId: "legacy-live", steerable: true });
+
+    expect(frames(app, "thread/resume").map((frame) => frame.params)).toEqual([
+      { threadId: THREAD, excludeTurns: true },
+      { threadId: THREAD },
+    ]);
+    // The rejection is remembered: the second recovery goes straight to the legacy read.
+    expect(frames(app, "thread/turns/list")).toHaveLength(1);
+    expect(fullReads(app)).toHaveLength(2);
+    expect(unsupported).toEqual([{ method: "thread/resume" }, { method: "thread/turns/list" }]);
+    await client.close();
+    await app.stop();
+  });
+
+  test("a resume timeout is retried with excludeTurns, never downgraded to full hydration", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        // thread/resume: never answered (the huge-thread shape).
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD, resumeTimeoutMs: 30, resumeAttempts: 2 });
+    await expect(bridge.bootstrap()).rejects.toThrow(/timed out 2x/);
+    expect(frames(app, "thread/resume").map((frame) => frame.params)).toEqual([
+      { threadId: THREAD, excludeTurns: true },
+      { threadId: THREAD, excludeTurns: true },
+    ]);
+    await client.close();
+    await app.stop();
+  });
+
+  test("an unrelated resume error is not treated as missing excludeTurns support", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        if (msg.method === "thread/resume") return respond({ error: { code: -32600, message: "thread is archived" } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await expect(bridge.bootstrap()).rejects.toThrow(/thread is archived/);
+    expect(frames(app, "thread/resume")).toHaveLength(1);
+    await client.close();
+    await app.stop();
   });
 });
