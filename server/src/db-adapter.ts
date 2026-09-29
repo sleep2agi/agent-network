@@ -44,7 +44,18 @@ export interface DbAdapter {
 
   /** True when transaction() is all-or-nothing on one connection. */
   readonly atomicTransactions: boolean;
+
+  /**
+   * Why features that need atomic transactions (scheduler, runtime evidence,
+   * side-thread command outbox) must stay off on this adapter, or null when
+   * they may run. Gates refuse on anything but null, so an adapter that does
+   * not implement this also refuses.
+   */
+  readonly transactionalFeaturesRefusal: string | null;
 }
+
+/** RFC-039: opt-in for PostgreSQL features whose PG tests do not exist yet (S4). */
+export const PG_EXPERIMENTAL_ENV = "COMMHUB_PG_EXPERIMENTAL";
 
 // ════════════════════════════════════════════
 //  SQLite Adapter (bun:sqlite, sync)
@@ -53,6 +64,9 @@ export interface DbAdapter {
 export class SQLiteAdapter implements DbAdapter {
   readonly dialect = "sqlite" as const;
   readonly atomicTransactions = true;
+  get transactionalFeaturesRefusal(): string | null {
+    return this.atomicTransactions ? null : "transactions on this adapter are not atomic";
+  }
   constructor(private readonly rawDb: Database) {}
 
   run(sql: string, params?: any[]): QueryResult {
@@ -207,6 +221,12 @@ export function splitSqlStatements(sql: string): string[] {
 export class PgAdapter implements DbAdapter {
   readonly dialect = "postgres" as const;
   readonly atomicTransactions = true;
+  /** Closed by default on PG even with real transactions: explicit opt-in only. */
+  get transactionalFeaturesRefusal(): string | null {
+    if (!this.atomicTransactions) return "transactions on this adapter are not atomic";
+    if (process.env[PG_EXPERIMENTAL_ENV] === "1") return null;
+    return `PostgreSQL support is experimental; set ${PG_EXPERIMENTAL_ENV}=1 to enable this feature on it (RFC-039)`;
+  }
   private readonly port: MessagePort;
   private readonly flag: Int32Array;
   private readonly worker: import("node:worker_threads").Worker;

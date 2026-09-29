@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { splitSqlStatements, sqliteToPostgres } from "./db-adapter";
+import { Database } from "bun:sqlite";
+import { PG_EXPERIMENTAL_ENV, PgAdapter, SQLiteAdapter, splitSqlStatements, sqliteToPostgres } from "./db-adapter";
 
 const UTC_NOW = "to_char((NOW()) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')";
 
@@ -70,5 +71,42 @@ describe("RFC-039 S2a splitSqlStatements", () => {
 
   test("empty statements are dropped", () => {
     expect(splitSqlStatements(" ; ;\n SELECT 1 ;; ")).toEqual(["SELECT 1"]);
+  });
+});
+
+describe("RFC-039 transactional feature gates", () => {
+  // A PgAdapter without its constructor: no worker, no connection.
+  function pgWith(atomic: boolean) {
+    const pg = Object.create(PgAdapter.prototype);
+    Object.defineProperty(pg, "atomicTransactions", { value: atomic });
+    return pg as PgAdapter;
+  }
+  function withFlag<T>(value: string | undefined, fn: () => T): T {
+    const saved = process.env[PG_EXPERIMENTAL_ENV];
+    if (value === undefined) delete process.env[PG_EXPERIMENTAL_ENV];
+    else process.env[PG_EXPERIMENTAL_ENV] = value;
+    try { return fn(); } finally {
+      if (saved === undefined) delete process.env[PG_EXPERIMENTAL_ENV];
+      else process.env[PG_EXPERIMENTAL_ENV] = saved;
+    }
+  }
+
+  test("SQLite: open, flag irrelevant", () => {
+    const sqlite = new SQLiteAdapter(new Database(":memory:"));
+    expect(withFlag(undefined, () => sqlite.transactionalFeaturesRefusal)).toBeNull();
+    expect(withFlag("1", () => sqlite.transactionalFeaturesRefusal)).toBeNull();
+    sqlite.close();
+  });
+
+  test("PostgreSQL with real transactions: closed by default, message names the variable", () => {
+    const refusal = withFlag(undefined, () => pgWith(true).transactionalFeaturesRefusal);
+    expect(refusal).toContain(`${PG_EXPERIMENTAL_ENV}=1`);
+    expect(refusal).toContain("experimental");
+    expect(withFlag("true", () => pgWith(true).transactionalFeaturesRefusal)).not.toBeNull();
+  });
+
+  test("PostgreSQL: opens only with atomic transactions AND the opt-in", () => {
+    expect(withFlag("1", () => pgWith(true).transactionalFeaturesRefusal)).toBeNull();
+    expect(withFlag("1", () => pgWith(false).transactionalFeaturesRefusal)).toContain("not atomic");
   });
 });

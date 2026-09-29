@@ -1307,11 +1307,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // The all-or-nothing batch promise needs a transaction() that really is
     // one transaction; refuse evidence on any adapter that cannot give that
     // rather than publish a partially stamped batch.
-    if (!db.atomicTransactions) {
+    if (db.transactionalFeaturesRefusal !== null) {
       return {
         content: [{ type: "text" as const, text: JSON.stringify({
           ok: false,
-          error: "task_runtime_evidence_backend_unsupported",
+          error: "task_runtime_evidence_backend_unsupported", message: db.transactionalFeaturesRefusal || undefined,
         }) }],
       };
     }

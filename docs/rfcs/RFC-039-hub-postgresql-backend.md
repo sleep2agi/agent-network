@@ -218,10 +218,12 @@ Docker 里 `postgres:16-alpine` + `oven/bun:1.3.14` + `pg@8.16.3`,一次性容�
 | 步 | 内容 | 对 SQLite 用户的影响 | 验收 |
 |---|---|---|---|
 | **S1** | Docker 套件 `test2123-hub-postgres-ladder`(#2125):容器内起 PostgreSQL + Hub,逐级爬 L0 连上 → L1 建表并监听 → L2 首个用户是 admin → L3 登录/节点令牌/派活 → L4 回复并终态;**棘轮**,低于 `FLOOR` 才红。注册进 `qa.yml` 的 Hub Docker 矩阵(不进 L1:L1 串行构建,本套件要装 postgresql)。不改生产代码 | 无 | 今天 `level=0`;以后每一步把 `FLOOR` 往上推 |
-| **S2** | 换桥:Worker + `Bun.SQL` 保留连接;`exec()` 整段发送;结果类型归一;契约测试 | 无(只动 `PgAdapter`) | 回滚测试、1000 条耗时、`COUNT` 类型 |
+| **S2** | S2a(#2127):建表修复(切句、`BYTEA`、文本时间、int8)。S2b(#2129):换桥 —— Worker + `Bun.SQL` 保留连接,真事务、嵌套 savepoint;三处「拒绝」改为**默认仍关闭**,只有 `atomicTransactions` 为真**且** `COMMHUB_PG_EXPERIMENTAL=1` 时打开(见下) | 无(只动 PG 路径) | 契约测试 14 项、回滚见红;梯子在 opt-in 下到 L4 |
 | **S3** | 翻译器:文本时间、`BIGINT`/`BIGSERIAL`/`BYTEA`、`strftime`;F1/F3/F4 逐处修 | 无(翻译只在 PG 路径执行;F3 改 `ORDER BY` 需在 SQLite 上回归) | Hub 在 PG 上建表完成;S1 套件推进到冒烟全绿(定时任务除外) |
-| **S4** | 去掉三处「拒绝」分支(事务已真);PG 上跑定时任务、运行证据、side-thread 的现有测试 | 无 | 冒烟套件不再需要任何绕过;`qa-hub-*` 选 3–5 个按 PG 参数化 |
+| **S4** | 在 PG 上跑定时任务、运行证据、side-thread 的现有测试;都过了再**删掉 `COMMHUB_PG_EXPERIMENTAL`**,三处功能在 PG 上默认打开 | 无 | 冒烟套件不再需要 opt-in;`qa-hub-*` 选 3–5 个按 PG 参数化 |
 | **S5** | `anet hub db migrate` + 文档(中英)+ 静态门 | 无 | 用一份造出来的 SQLite 库迁移,行数与哈希一致;文档页上线 |
+
+**`COMMHUB_PG_EXPERIMENTAL`(S2b 引入,S4 删除)。** PG 适配器有了真事务之后,定时任务、任务运行证据、side-thread 命令外发这三项在 PG 上**仍默认拒绝**,因为它们在 PG 上还没有各自的测试。设 `COMMHUB_PG_EXPERIMENTAL=1` 才打开;不设时拒绝信息里写明这个变量和「experimental」。SQLite 不受影响。test2123 在这个 opt-in 下跑梯子并在结果行里打印它,同时单独验证「不设就拒绝」。这个变量只写在本 RFC 和 `server/README.md`,不进用户指南。
 
 S1 完成后,troubleshooting 的「支持 PostgreSQL 吗?」一节可以加一句「当前状态见 CI 套件 X」;S4 之前**不改**「不建议生产使用」的口径。
 

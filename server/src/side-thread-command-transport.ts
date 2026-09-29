@@ -49,8 +49,8 @@ export class SideThreadCommandStore {
   constructor(readonly db: DbAdapter, private readonly now = Date.now) {
     // A durable command outbox needs atomic transactions. Advertising one on
     // an adapter without them would be false, so fail closed there
-    // (dialect alone does not decide it; see DbAdapter.atomicTransactions).
-    if (!db.atomicTransactions) throw new Error("SideThread command transport requires atomic SQLite transactions");
+    // (dialect alone does not decide it; see DbAdapter.transactionalFeaturesRefusal).
+    if (db.transactionalFeaturesRefusal !== null) throw new Error(`SideThread command transport requires atomic SQLite transactions${db.transactionalFeaturesRefusal ? `: ${db.transactionalFeaturesRefusal}` : ""}`);
     installSideThreadCommandSchema(db);
   }
 

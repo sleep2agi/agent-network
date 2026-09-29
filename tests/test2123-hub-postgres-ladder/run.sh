@@ -35,8 +35,9 @@ if [ -n "${EXPECTED_SOURCE_COMMIT:-}" ] && [ "$EXPECTED_SOURCE_COMMIT" != "${SOU
   exit 1
 fi
 
-# Current floor: RFC-039 S2b gives PgAdapter real transactions, so startHub()
-# no longer refuses; the Hub listens, bootstraps its admin and accepts tasks.
+# Current floor: RFC-039 S2b gives PgAdapter real transactions, so with
+# COMMHUB_PG_EXPERIMENTAL=1 startHub() no longer refuses; the Hub listens,
+# bootstraps its admin and accepts tasks.
 # L5 (send_reply) still fails on an untyped `?2 IS NULL` parameter (S3).
 FLOOR="${PG_LADDER_FLOOR:-4}"
 SUITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,6 +57,7 @@ cleanup() {
   if [ -n "${ARTIFACT_DIR:-}" ]; then
     mkdir -p "$ARTIFACT_DIR"
     cp "$WORK/hub.log" "$ARTIFACT_DIR/test2123-hub.log" 2>/dev/null || true
+    cp "$WORK/hub-noflag.log" "$ARTIFACT_DIR/test2123-hub-noflag.log" 2>/dev/null || true
     cp "$PGSOCK/pg.log" "$ARTIFACT_DIR/test2123-pg.log" 2>/dev/null || true
   fi
   runuser -u postgres -- "$PG_BIN/pg_ctl" -D "$PGDATA" -m immediate stop >/dev/null 2>&1 || true
@@ -81,8 +83,34 @@ contract_rc=0
 (cd /work/server && env -u NODE_ENV -u COMMHUB_DB \
   bun "$SUITE_DIR/contract.ts" "postgres://postgres@127.0.0.1:$PG_PORT/commhub" /work/server/src/db-adapter.ts) || contract_rc=$?
 
+# Default-closed gate (RFC-039): without COMMHUB_PG_EXPERIMENTAL=1 a PG Hub
+# must refuse to start its scheduler, and say which variable opens it. Own
+# database so the ladder below starts from an empty one. Pass/fail, not ratcheted.
+runuser -u postgres -- "$PG_BIN/createdb" -h 127.0.0.1 -p "$PG_PORT" -U postgres commhub_noflag
+gate_rc=0
 cd /work/server
+set +e
+env -u NODE_ENV -u COMMHUB_DB -u COMMHUB_PG_EXPERIMENTAL \
+  DATABASE_URL="postgres://postgres@127.0.0.1:$PG_PORT/commhub_noflag" \
+  PORT="$HUB_PORT" HOST=127.0.0.1 \
+  timeout 120 bun src/index.ts >"$WORK/hub-noflag.log" 2>&1
+noflag_rc=$?
+set -e
+if [ "$noflag_rc" -eq 124 ]; then
+  echo "FAIL gate: without the opt-in the PG Hub kept running (gate open by default)"; gate_rc=1
+elif grep -q 'scheduled_tasks_require_transactional_sqlite_backend.*COMMHUB_PG_EXPERIMENTAL=1' "$WORK/hub-noflag.log"; then
+  echo "PASS gate: without the opt-in the PG Hub refuses and names COMMHUB_PG_EXPERIMENTAL=1"
+elif ! grep -q 'scheduled_tasks_require_transactional_sqlite_backend' "$WORK/hub-noflag.log"; then
+  # Never reached startHub() (schema broke first): the ladder reports that.
+  echo "SKIP gate: the Hub did not reach startHub() without the opt-in (exit=$noflag_rc)"
+else
+  echo "FAIL gate: refusal does not name COMMHUB_PG_EXPERIMENTAL=1"; grep -m1 scheduled_tasks "$WORK/hub-noflag.log" || true; gate_rc=1
+fi
+
+# The ladder runs under the experimental opt-in; the result line says so.
+PG_EXPERIMENTAL=1
 env -u NODE_ENV -u COMMHUB_DB \
+  COMMHUB_PG_EXPERIMENTAL="$PG_EXPERIMENTAL" \
   DATABASE_URL="postgres://postgres@127.0.0.1:$PG_PORT/commhub" \
   PORT="$HUB_PORT" HOST=127.0.0.1 \
   bun src/index.ts >"$WORK/hub.log" 2>&1 &
@@ -127,8 +155,13 @@ echo "--- hub.log (tail) ---"
 tail -n 25 "$WORK/hub.log" || true
 echo "----------------------"
 
-echo "PG_LADDER level=$LEVEL floor=$FLOOR first_fail=${FIRST_FAIL:-none}"
+echo "PG_LADDER level=$LEVEL floor=$FLOOR COMMHUB_PG_EXPERIMENTAL=$PG_EXPERIMENTAL first_fail=${FIRST_FAIL:-none}"
+echo "NOTE: rungs L2+ were reached with COMMHUB_PG_EXPERIMENTAL=$PG_EXPERIMENTAL (experimental PG features on)."
 
+if [ "$gate_rc" -ne 0 ]; then
+  echo "RESULT: FAIL — PostgreSQL feature gate is not closed by default."
+  exit 1
+fi
 if [ "$contract_rc" -ne 0 ]; then
   echo "RESULT: FAIL — PgAdapter contract failed (rc=$contract_rc)."
   exit 1

@@ -73,3 +73,9 @@ a worker thread; image no longer installs nodejs or pg.
 12. neighbouring suites on S2b: test637 PASS (its mutation now also copies
     pg-worker.ts), test601 PASS (L11 mutation repointed to the
     atomicTransactions gate, still MUTATION_RED), test660 PASS, test1195 PASS
+
+13. S2b rework: PG feature gates closed by default (COMMHUB_PG_EXPERIMENTAL)
+    PASS gate: without the opt-in the PG Hub refuses and names COMMHUB_PG_EXPERIMENTAL=1
+    PG_LADDER level=4 floor=4 COMMHUB_PG_EXPERIMENTAL=1 …            rc=0
+    witnessed red — PgAdapter refusal hard-wired to null (gate open by default):
+    FAIL gate: without the opt-in the PG Hub kept running (gate open by default)   rc=1
