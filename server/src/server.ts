@@ -15,7 +15,7 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
-import { canMessageAgent, isAgentRestricted, listAgentGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds } from "./agent-access.js";
+import { canMessageAgent, isAgentRestricted, listAgentGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias } from "./agent-access.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
@@ -1016,6 +1016,14 @@ return Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       }
       if (sessionName === authCtx.username) {
+        // 多用户 Agent 权限:受限成员的用户名撞上本网络某个 Agent 的 alias 时,这个频道其实是那个
+        // Agent 的任务流 —— 不给订阅(入网时已拦撞名,这里兜住 Agent 之后才注册同名 alias 的情况)。
+        if (isAgentRestricted(authCtx.userId, scopedNetId) && usernameIsAgentAlias(scopedNetId, authCtx.username)) {
+          return withCors(req, Response.json({
+            ok: false,
+            error: "channel not allowed: must be your username or an existing agent in your network"
+          }, { status: 403 }));
+        }
         return createSSEStream(sessionName, scopedNetId);
       }
       // 多用户 Agent 权限:Agent 频道推的是**所有人**发给这个 Agent 的任务原文,

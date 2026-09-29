@@ -11,7 +11,7 @@
 
 import { db } from "./db.js";
 import { getUserNetworkRole } from "./auth.js";
-import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
+import { isAgentRestricted, restrictedNetworkIds, usernameIsAgentAlias, visibleAgents } from "./agent-access.js";
 
 export type RestNetworkScope = {
   networkId: string | null;
@@ -155,6 +155,9 @@ export function addOwnTrafficScope(sql: string, params: any[], scope: RestNetwor
   if (allowed.length) parts.push(`${net} IN (${placeholders(params, allowed)})`);
   if (restriction.username) {
     for (const networkId of restriction.networkIds) {
+      // 用户名与本网络某个 Agent 的 alias 撞名时(入网时拦过,但 Agent 之后注册的 alias 拦不住),
+      // 「发给我的」无法和「发给那个 Agent 的」区分开 —— 这个网络的往来一律不放行。
+      if (usernameIsAgentAlias(networkId, restriction.username)) continue;
       const visible = visibleAgents(restriction.userId, networkId);
       // 先判空再生成占位符:side() 会往 params 里推值,推了又丢弃会让参数个数对不上。
       const useNodeIds = !!(cols.fromNodeId && cols.toNodeId) && visible.nodeIds.length > 0;

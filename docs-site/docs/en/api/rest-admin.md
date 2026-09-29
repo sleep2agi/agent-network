@@ -372,6 +372,10 @@ Multi-user accounts: a hub admin (or a network owner / admin) creates accounts, 
 - can download only files they uploaded or that the other side (a granted agent, a DM sender) attached for them, and cannot forward a `file_id` they cannot see to an agent;
 - gets **fail-closed** behaviour on every other agent-facing endpoint (node config / logs / files / rules / rename / schedules / node creation / broadcast / stats): nothing is returned for the restricted network and writes are 403; MCP tools outside the allow-list return `agent_access_restricted`.
 
+- **Granted ≠ administer**: even for a granted agent, a restricted member cannot read or write its rules file / skills / project files / run log, change its config, rename, start or stop it — a grant means "can see it and talk to it";
+- a schedule acts on behalf of its creator: once the creator is restricted and not allowed to message the target agent, the schedule stops dispatching (run `error_code=creator_access_revoked`);
+- if a member's username collides with an agent alias registered after they joined, their username channel and "own traffic" in that network are closed, because "sent to them" and "sent to that agent" can no longer be told apart.
+
 Owners / admins and hub admins are unaffected. **Membership rows that existed before the upgrade** default to `agent_access='all'`, so nobody's visibility changes on upgrade; members / viewers added afterwards (admin-created, `POST /members`, invite codes) default to `granted`.
 
 ⚠️ Granting an agent means trusting that person with whatever the agent can do (the agent's own network token can read files in the network and call tools).

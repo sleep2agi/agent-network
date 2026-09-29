@@ -372,6 +372,10 @@ curl -X POST http://localhost:9200/api/networks/join \
 - 文件只能下载自己上传的、或对方(授权 Agent / 私信发件人)发给他的附件;也不能把看不见的 `file_id` 当附件转给 Agent;
 - 其余面向 Agent 的端点(节点配置 / 日志 / 文件 / 规则 / 改名 / 排程 / 创建节点 / 广播 / 统计)对受限网络 **fail-closed**:整网不返回、写入 403;没列在白名单里的 MCP 工具返回 `agent_access_restricted`。
 
+- **授权 ≠ 管理**:即使授权了某个 Agent,受限成员也不能读写它的规则文件 / 技能 / 项目文件 / 运行日志,不能改配置、改名、启停 —— 授权的含义是「能看见、能对话」;
+- 排程是建它的人的委托:建的人后来变成受限成员且没被授权给目标 Agent 发任务时,排程不再派发(运行记录 `error_code=creator_access_revoked`);
+- 用户名与某个 Agent 的 alias 撞名(Agent 在他入网之后才注册这个 alias)时,他在这个网络里的用户名频道与「自己的往来」一律关闭,因为「发给他」和「发给那个 Agent」无法区分。
+
 owner / admin 角色与 Hub 管理员不受影响。**升级前已存在的成员行** `agent_access` 默认为 `all`,可见范围不因升级而变;此后新加入的 member / viewer(管理员建号、`POST /members`、邀请码)默认 `granted`。
 
 ⚠️ 授权一个 Agent,等于信任这个人使用该 Agent 能做到的事(Agent 自己的网络令牌能读网络里的文件、调用工具)。

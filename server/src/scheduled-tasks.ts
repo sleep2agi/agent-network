@@ -1,6 +1,7 @@
 import { db, logTaskEvent } from "./db.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { canMessageAgent } from "./agent-access.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 
@@ -261,6 +262,17 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       finalStatus = "failed";
       db.run(
         "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'target_node_not_found', error_message = 'The bound node no longer exists in this network', completed_at = datetime('now') WHERE run_id = ?1",
+        [runId],
+      );
+      if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+      return;
+    }
+    // 多用户 Agent 权限:排程是「建它的人」的委托。建的人后来被设成受限成员、而且没被授权
+    // 给目标 Agent 发任务时,不再代他派发(否则受限前建的排程会永远绕过授权)。
+    if (row.created_by && !canMessageAgent(row.created_by, row.network_id, { alias: node.alias, nodeId: node.node_id })) {
+      finalStatus = "failed";
+      db.run(
+        "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'creator_access_revoked', error_message = 'The schedule creator is no longer allowed to message this agent', completed_at = datetime('now') WHERE run_id = ?1",
         [runId],
       );
       if (advanceSchedule) advance(row, scheduledFor, advanceAfter);

@@ -121,6 +121,16 @@ export function visibleAgents(userId: string, networkId: string): VisibleAgents 
   };
 }
 
+/** 这个用户名在该网络里是否同时是某个 Agent 的 alias(sessions 或 nodes)。 */
+export function usernameIsAgentAlias(networkId: string, username: string): boolean {
+  if (!username) return false;
+  return !!db.get(
+    `SELECT 1 WHERE EXISTS (SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2)
+        OR EXISTS (SELECT 1 FROM nodes WHERE network_id = ?1 AND alias = ?2)`,
+    networkId, username,
+  );
+}
+
 export type AgentRef = { alias?: string | null; nodeId?: string | null };
 
 function refMatches(ref: AgentRef, aliases: string[], nodeIds: string[]): boolean {
