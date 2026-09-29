@@ -1100,6 +1100,9 @@ db.exec(`
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (network_id, user_id, group_id)
   );
+  -- 改组成员 / 删组时按组找被授权成员(usersGrantedGroup、granted_user_count):主键以 network_id 开头用不上。
+  -- 展开查询本身走各表主键,见 agent-groups-perf.test.ts 的 EXPLAIN QUERY PLAN。
+  CREATE INDEX IF NOT EXISTS idx_group_grants_group ON network_member_group_grants(group_id);
 `);
 
 // ── #84: node rename — rename_txn table (RFC-010 §4) ──
