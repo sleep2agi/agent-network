@@ -91,6 +91,9 @@ test("an upgraded hub moves node owners to agent_owner and then enforces human o
   expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ owner: agent }) })).body.error).toBe("owner_must_be_human");
   expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ agent_owner: human }) })).body.error).toBe("agent_owner_must_be_agent");
 
+  // 预计完成:旧卡的全天值(升级前写的)原样读回;改成带时刻的,存 UTC
+  const dated = await api(token, path, { method: "PATCH", body: JSON.stringify({ due: "2026-10-01" }) });
+  expect(dated.body.requirement.due).toBe("2026-10-01");
   // 描述 / 子任务:升级后的旧卡可写,单项勾选只动那一项
   expect(upgraded.description).toBe("");
   expect(upgraded.checklist).toEqual([]);
@@ -116,5 +119,8 @@ test("an upgraded hub moves node owners to agent_owner and then enforces human o
   expect(same.description).toBe("# 验收\n- 能用");
   expect(same.checklist.map((i: any) => i.done)).toEqual([false, true]);
   expect(same.project_id).toBe(proj.body.project.id);
+  expect(same.due).toBe("2026-10-01");
+  const timed = await api(token, `/api/requirements/${upgraded.id}?network_id=${net}`, { method: "PATCH", body: JSON.stringify({ due: "2026-10-01T18:30:45+08:00" }) });
+  expect(timed.body.requirement.due).toBe("2026-10-01T10:30:45Z");
   expect((await api(token, `/api/requirements/projects?network_id=${net}`)).body.projects.map((p: any) => p.name)).toEqual(["军团项目"]);
 }, 60_000);

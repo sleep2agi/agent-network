@@ -53,6 +53,26 @@ function dueOk(due: string): boolean {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
+// 预计完成:两种形状都收。
+//   YYYY-MM-DD                      全天(旧值原样保存、原样返回;客户端按查看者本地时区的那一天理解)
+//   YYYY-MM-DDTHH:MM[:SS][.fff](Z|±HH:MM)  精确到秒的时刻 → 统一存成 UTC「YYYY-MM-DDTHH:MM:SSZ」
+// 不带时区的时刻拒收(无法知道是谁的本地时间)。返回 null = 不合法。
+const DUE_DATETIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,9})?(Z|[+-](\d{2}):(\d{2}))$/;
+export function normalizeDue(raw: string): string | null {
+  const due = raw.trim();
+  if (!due) return "";
+  if (dueOk(due)) return due;
+  const m = DUE_DATETIME.exec(due);
+  if (!m) return null;
+  if (!dueOk(`${m[1]}-${m[2]}-${m[3]}`)) return null;
+  const [hh, mm, ss] = [Number(m[4]), Number(m[5]), Number(m[6] ?? 0)];
+  if (hh > 23 || mm > 59 || ss > 59) return null;
+  if (m[7] !== "Z" && (Number(m[8]) > 14 || Number(m[9]) > 59)) return null;
+  const ms = Date.parse(due);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/issues\/(\d+)\/?$/;
 
@@ -321,6 +341,8 @@ function operationOf(req: Request, url: URL): string {
   return "create";
 }
 
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime"] as const;
+
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
   const { req, url } = ctx;
   if (url.pathname !== "/api/requirements" && !url.pathname.startsWith("/api/requirements/")) return null;
@@ -348,7 +370,8 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     sql = addNetworkScope(sql, params, ctx.scope);
     sql += " ORDER BY created_at DESC LIMIT 500";
     const rows = db.all<Row>(sql, ...params).map(toPublic);
-    return Response.json({ ok: true, requirements: rows });
+    // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
+    return Response.json({ ok: true, requirements: rows, capabilities: REQUIREMENT_CAPABILITIES });
   }
 
   if (url.pathname === "/api/requirements" && req.method === "POST") {
@@ -361,8 +384,8 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     if (!name || name.length > 80) return jsonError("invalid_name", 400);
     const priority = typeof body.priority === "string" ? body.priority : "normal";
     if (!PRIORITIES.has(priority)) return jsonError("invalid_priority", 400);
-    const due = typeof body.due === "string" ? body.due.trim() : "";
-    if (due && !dueOk(due)) return jsonError("invalid_due", 400);
+    const due = typeof body.due === "string" ? normalizeDue(body.due) : "";
+    if (due === null) return jsonError("invalid_due", 400);
     const assignee = typeof body.assignee === "string" ? body.assignee.trim().slice(0, 80) : "";
     const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
     if (clientId && !/^[A-Za-z0-9._-]{1,80}$/.test(clientId)) return jsonError("invalid_client_id", 400);
@@ -472,8 +495,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   let due = row.due_on || "";
   if (hasDue) {
     if (typeof body.due !== "string") return jsonError("invalid_due", 400);
-    due = body.due.trim();
-    if (due && !dueOk(due)) return jsonError("invalid_due", 400);
+    const next = normalizeDue(body.due);
+    if (next === null) return jsonError("invalid_due", 400);
+    due = next;
   }
   let assignee = row.assignee || "";
   if (hasAssignee) {

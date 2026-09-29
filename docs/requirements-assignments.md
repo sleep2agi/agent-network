@@ -34,6 +34,14 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 - 卡片 `project_id`：`null` 或同一网络、未归档的项目（400 `project_not_in_network` / `project_archived`）。归档项目上已有的引用保留。读取总带 `project_id`。
 - 写入权限与卡片相同（viewer 不可写）；节点令牌同样 `user_token_required`（操作名 `projects`，未放进 `NODE_TOKEN_OPERATIONS`）。
 
+### 预计完成精确到秒（due）
+
+- `due` 收两种形状：`YYYY-MM-DD`（全天）或带时区的 ISO 8601 时刻 `YYYY-MM-DDTHH:MM[:SS][.fff](Z|±HH:MM)`。
+- 时刻统一存成 UTC、精确到秒：`2026-10-01T18:30:45+08:00` → `2026-10-01T10:30:45Z`（毫秒截掉）。不带时区的时刻、日期不存在、时分秒越界、偏移超过 ±14:00 都返回 400 `invalid_due`。
+- **全天值原样保存、原样返回**（旧数据不改）。约定：全天 = 查看者本地时区那一天结束前都不算逾期；客户端显示为日期、不显示时刻。
+- 排序与逾期由客户端按「全天 = 当天 23:59:59（本地）、时刻 = 精确时刻」统一换算后比较。
+- `GET /api/requirements` 带 `capabilities`（`agent_owner` / `description` / `checklist` / `projects` / `due_datetime`），客户端据此决定显示哪些功能；旧 Hub 没有这个字段。
+
 ## 升级
 
 - 加列只加不改：`agent_owner_json`、`description`、`checklist_json`、`project_id` 都在 `db.ts` 既有的加列循环里；旧行为 NULL，读出为 `null` / `""` / `[]` / `null`。`requirement_projects` 表由 `requirements-migrate.ts` 的 `CREATE TABLE IF NOT EXISTS` 建。

@@ -264,6 +264,35 @@ describe("requirements stay on the hub", () => {
     expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ project_id: null }) })).body.requirement.project_id).toBeNull();
   });
 
+  test("due accepts date-only (all day) and an ISO datetime with offset, stored as UTC to the second", async () => {
+    const make = (due: unknown) => api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "期限", due }) });
+    const shanghai = await make("2026-10-01T18:30:45+08:00");
+    expect(shanghai.status).toBe(201);
+    expect(shanghai.body.requirement.due).toBe("2026-10-01T10:30:45Z");
+    expect((await make("2026-10-01T10:30:45Z")).body.requirement.due).toBe("2026-10-01T10:30:45Z");
+    expect((await make("2026-10-01T10:30Z")).body.requirement.due).toBe("2026-10-01T10:30:00Z");
+    expect((await make("2026-10-01T10:30:45.987-04:00")).body.requirement.due).toBe("2026-10-01T14:30:45Z");
+    // 跨日:东八区的 00:30 是 UTC 前一天
+    expect((await make("2026-10-01T00:30:00+08:00")).body.requirement.due).toBe("2026-09-30T16:30:00Z");
+    // 旧的全天值原样
+    const legacy = await make("2026-10-01");
+    expect(legacy.body.requirement.due).toBe("2026-10-01");
+    for (const bad of ["2026-10-01T18:30:45", "2026-10-01 18:30:45+08:00", "2026-02-30T10:00:00Z", "2026-10-01T24:00:00Z", "2026-10-01T10:60:00Z", "2026-10-01T10:00:61Z", "2026-10-01T10:00:00+15:00", "明天", "2026-10-1"]) {
+      const r = await make(bad);
+      expect(r.status).toBe(400);
+      expect(r.body.error).toBe("invalid_due");
+    }
+    const path = `/api/requirements/${legacy.body.requirement.id}`;
+    const patched = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "2026-12-31T23:59:59-08:00" }) });
+    expect(patched.body.requirement.due).toBe("2027-01-01T07:59:59Z");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "2026-12-31" }) })).body.requirement.due).toBe("2026-12-31");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "T" }) })).status).toBe(400);
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "" }) })).body.requirement.due).toBe("");
+    const listed = await api(ownerToken, "/api/requirements");
+    expect(listed.body.capabilities).toContain("due_datetime");
+    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime"]);
+  });
+
   test("owner creates a card in the pool", async () => {
     const created = await api(ownerToken, "/api/requirements", {
       method: "POST",
