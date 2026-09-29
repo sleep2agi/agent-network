@@ -12,7 +12,36 @@
 - hub:#2084(slice 1)与 #2086(slice 3)已合入 main,实现「每个成员 × 每个节点」的授权表 + 全路由 fail-closed 执行。
 - app:agent-network-app#514(slice 2:设置 → 用户管理、新建用户、「可访问的 Agent」勾选、受限空态、人员私信)已合入,随桌面端 0.2.153 发出。
 
+两个 hub PR 的合并提交(`8cbb138e`、`82417286`)都是 `commhub-server 0.9.0-preview.68` 的祖先:`git merge-base --is-ancestor` 对准备提交 `24efda45` 和实际发版的 run 所在提交 `753f5ed4` 都返回 0。npm 上的 `.68` 包里也确实有 `src/agent-access.ts` 和 `network_member_agent_grants`。生产 hub 跑的是不是 `.68`,以部署机为准,本 RFC 没有去验证。
+
 所以本 RFC 做三件事:(1) 把**今天**非管理员到底能做什么按代码钉死;(2) 指出读代码发现的缺口 —— 其中两条会让管理员以为已经限制了、其实没限制;(3) 把剩下的工作拆成 4 个可以单独发版的小步。
+
+## 0.1 管理员今天就能这样做
+
+前提:你是 Hub 管理员(`users.role=admin`),或者是当前网络的 owner/admin。其他人看不到「用户管理」这个入口(规则见 app 的 `canManageUsers()`)。
+
+**桌面端(0.2.153 起)**
+1. 设置 → 左栏「用户管理」→「新建用户」。填用户名、密码(至少 8 位)、网络、角色(成员 / 只读成员 / 管理员),然后点「创建」。新用户默认看不到任何 Agent。
+2. 在成员列表里点这个人 →「可访问的 Agent」。勾选节点;每个勾选的节点都有一个「可对话」开关,关掉就是只读。点「保存」。
+3. 成员行右侧会显示「N 个 Agent」。对方登录后,名册里只有这 N 个节点;给别的节点派活会得到 403。
+
+**手机端(同一版本的 APK)**
+设置 →「通用」组第一行「用户管理」→ 进入子页面,后面三步与桌面端相同。两个对话框在手机上是居中的 358 宽卡片。
+
+**等价 API**(都要用户令牌 utok;网络令牌 ntok 会被拒):
+
+```bash
+# 1. 建账号并加入网络(默认 agent_access=granted,即零节点)
+curl -X POST "$HUB/api/admin/users" -H "Authorization: Bearer $ADMIN_UTOK" \
+  -d '{"username":"<user>","password":"<pw>","network_id":"<net>","role":"member"}'
+# 2. 授权两个节点:一个可对话,一个只读(整体替换)
+curl -X PUT "$HUB/api/networks/<net>/members/<user_id>/agent-grants" -H "Authorization: Bearer $ADMIN_UTOK" \
+  -d '{"agent_access":"granted","grants":[{"node_id":"<node-a>","can_message":true},{"node_id":"<node-b>","can_message":false}]}'
+# 3. 核对
+curl "$HUB/api/networks/<net>/members/<user_id>/agent-grants" -H "Authorization: Bearer $ADMIN_UTOK"
+```
+
+⚠️ 上面的做法只对**新建**的成员有效。升级前就在网络里的成员,在 app 里勾选节点并保存后**不会被限制**(见 G1)。在第 1 步发版之前,要限制这类成员只能用 API,并且在请求里显式带上 `"agent_access":"granted"`。
 
 ## 1. 今天的模型(以 origin/main 代码为准)
 
@@ -69,7 +98,7 @@ app 侧的流程如下:
 - 授权 UI 在 `src/UserManagementPanel.tsx` 和 `src/user-admin.ts`。
 - 调用的接口集中在 `src/user-admin-api.ts`。
 
-## 3. 缺口(读代码发现的,按严重程度排)
+## 3. 缺口(按对用户的价值排序;G1 正对应 Vincent 原话「限制它能与哪些节点对话」)
 
 **G1 —— 在 app 里限制「老成员」是静默无效的(最严重)。**
 
@@ -86,18 +115,18 @@ app 侧的流程如下:
 
 **G3 —— 在 app 里改不了角色,也移不出成员。** hub 早有 `PUT/DELETE /api/networks/:id/members/:uid`,并且都写了审计(`member_role_changed` / `member_removed`),但 app 没有入口。
 
-**G4 —— 网络负责人看不到权限变更记录。**
+**G4 —— app 里不能切换网络。**
+- 这是 app#514 自己列出的已知限制:给别的网络的用户分配 Agent,得先切到那个网络才行。
+- 如果一个账号属于两个以上网络,名册里显示的是 hub 算出来的并集。
+
+**G5 —— 网络负责人看不到权限变更记录。**
 - hub 已经写审计:`member_agent_grants_changed`(带 `network_id`)、`member_added`、`admin_user_created`。
 - 但 `GET /api/audit-log` 对非 Hub 管理员只返回**本人**做过的操作,所以网络 owner/admin 看不到本网络里别的管理员改了谁的权限。
 - 另外,被拒的派活(`agent_not_granted`)不写审计。
 
-**G5 —— 没有「管理」级别。**
+**G6 —— 没有「管理」级别。**
 - 今天就算给了授权,受限成员也管不了节点(见 §1.2)。
 - 如果要做「让某个成员能改某个节点的规则或配置」,需要新增一个授权位。#2086 已经预留了 `can_manage` 这个名字。
-
-**G6 —— app 里不能切换网络。**
-- 这是 app#514 自己列出的已知限制:给别的网络的用户分配 Agent,得先切到那个网络才行。
-- 如果一个账号属于两个以上网络,名册里显示的是 hub 算出来的并集。
 
 不在本 RFC 范围内:开放注册(RFC-037 待定第 1 条)。注册只会得到一个自己的个人网络,拿不到别人网络里的任何节点,所以它不影响本 RFC 的隔离性。
 
@@ -140,7 +169,7 @@ app 侧的流程如下:
 | 访问范围切换(G1) | 在「可访问的 Agent」对话框顶部放一个分段控件:「全部 Agent / 仅指定 Agent」。选「全部」时下面的清单置灰 | 放在子页面第一组,单选两行,选中的一行打勾;选「仅指定」后才展开节点清单 |
 | 可对话开关(G2) | 成员是 viewer 时不渲染开关,行尾显示「只读」 | 同左 |
 | 改角色 / 移出(G3) | 在成员行上 hover 时出现「⋯」,菜单里是「改为成员 / 只读成员 / 管理员」和「移出网络」(红色,需二次确认) | 成员子页面底部放两行:「角色」(push 选择页)和「移出网络」(红字,底部弹出确认) |
-| 权限记录(G4) | 右栏在成员列表下面加一个「最近权限变更」折叠区,展示 20 条 | 「用户管理」页最下面加一行「权限变更记录」,push 进列表页 |
+| 权限记录(G5) | 右栏在成员列表下面加一个「最近权限变更」折叠区,展示 20 条 | 「用户管理」页最下面加一行「权限变更记录」,push 进列表页 |
 
 交付时,两种尺寸各截图一张并附测量表(居中、边距、行高),沿用 app#514 的做法。
 
@@ -151,28 +180,28 @@ app 侧的流程如下:
 | 步 | 允许方向(必须能用) | 拒绝方向(必须 403,或者在列表里不出现) |
 |---|---|---|
 | 1 | 老成员 `all` 切到 granted 并预填 N 个节点:名册里恰好是这 N 个,对它们派活 200 | 切换之后,对名单外的节点派活返回 403 `agent_not_granted`,和不存在的 alias 返回逐字节相同;在切换之前,只写授权不改模式的请求,应保持 `restricted:false`(守住「不会误收窄」) |
-| 1 | viewer 带授权:名册里看得见 | viewer 派活返回 403;PUT 授权时,`can_message:true` 被规整成 false |
+| 1 | viewer 带授权:名册里看得见;授权对话框对 viewer 不显示「可对话」 | viewer 派活返回 403(hub 现状,app 不再给出误导的开关) |
 | 1 | owner 改角色 / 移出成员,返回 200,审计里有记录 | 网络 admin 改 owner 返回 403;被移出的成员马上看不到任何节点,观察流也被断开 |
-| 2 | owner 用 `?network_id=` 能读到本网络的审计 | 普通 member 带 `?network_id=` 只能拿到自己那几行;别的网络的 owner 拿到 0 行 |
-| 2 | 被拒绝的派活写 1 条 `agent_access_denied` | 一小时内同一对 (用户, 节点) 重复被拒,不会多写 |
+| 2 | 属于两个网络的账号切到网络 B:名册 / 用户管理只剩 B 的节点与成员 | 切到 B 后,A 的节点不出现、也无法从 B 的会话里派给 A 的节点 |
+| 3 | owner 用 `?network_id=` 能读到本网络的审计 | 普通 member 带 `?network_id=` 只能拿到自己那几行;别的网络的 owner 拿到 0 行 |
+| 3 | viewer PUT 授权时 `can_message:true` 被规整成 false | — |
+| 3 | 被拒绝的派活写 1 条 `agent_access_denied` | 一小时内同一对 (用户, 节点) 重复被拒,不会多写 |
 | 4 | `can_manage=1`:该节点的规则、日志、配置返回 200 | `can_manage=0` 返回 403;有 manage 但请求别的节点也返回 403;`/events/<alias>` 始终 403 |
 
 每一步都要做一次变异见证:把新加的判定删掉,至少一条拒绝方向的测试必须变红。app 侧用 ck 单测覆盖 payload 形状,比如切到 granted 时 body 里要带 `agent_access`;再用 Playwright 连真实的临时 hub 跑一遍 E2E。
 
-## 6. 分步发布(每一步都能单独发版)
+## 6. 分步发布(每一步都能单独发版,按用户价值排)
 
-1. **app:修 G1 / G2 / G3,hub 不动。**
-   - 分段控件保存时带上 `agent_access`,切到「仅指定」时预填当前可见的节点。
-   - viewer 不显示「可对话」开关。
-   - 加上改角色、移出成员。
-   - 对现在生产上的 hub(.68,依据是 09-30 的升级记录)就能直接用。发一个桌面端小版本加 APK。
-2. **hub:审计可读 + 被拒访问的审计 + viewer 规整;app:「权限变更记录」。**
-   - 发 commhub-server 的一个 preview。
-   - 生产环境升级前,先拿当前 app 对新 hub 跑一遍(新 hub 只加字段,不改任何现有响应的形状)。
-3. **app:网络切换器(修 G6)。**
-   - 账号属于 2 个及以上网络时,顶栏才出现切换器。
-   - 用户管理页、名册、聊天都跟着当前网络走。
-4. **hub + app:`can_manage`(G5),要 Vincent 先定。** 加一列、`canManageAgent()`、放开 §4.2 列的那几个点,再在授权对话框里加第三档「可管理」。
+1. **app:修 G1 / G2 / G3,hub 不动,一天内可发。** 直接对应 Vincent 原话。
+   - 「可访问的 Agent」加「全部 Agent / 仅指定 Agent」切换,保存时带上 `agent_access`;从「全部」切到「仅指定」时预填当前可见的节点。
+   - viewer 不显示「可对话」开关,授权一律按只读保存。
+   - 加上改角色、移出成员(hub 已有接口)。
+   - `.68` 包已含所需接口(§0 的祖先校验)。发一个桌面端小版本加 APK。
+2. **app:网络切换器(修 G4)。** 账号属于 2 个及以上网络时,顶栏才出现切换器;用户管理页、名册、聊天都跟着当前网络走。
+3. **hub + app:审计(修 G5)+ viewer 规整。**
+   - 网络 owner/admin 可读本网络审计、`member_*` 写入 `network_id`、限频的 `agent_access_denied`;hub 侧把 viewer 的 `can_message` 规整为 0;app 加「权限变更记录」。
+   - 发 commhub-server 的一个 preview;生产升级前,先拿当前 app 对新 hub 跑一遍(只加字段,不改现有响应形状)。
+4. **hub + app:`can_manage`(G6),要 Vincent 先定。** 加一列、`canManageAgent()`、放开 §4.2 列的那几个点,再在授权对话框里加第三档「可管理」。
 
 ## 7. 需要 Vincent 定的
 
