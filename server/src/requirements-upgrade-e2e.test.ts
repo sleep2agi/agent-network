@@ -88,7 +88,7 @@ test("an upgraded hub moves node owners to agent_owner and then enforces human o
   expect(both.status).toBe(200);
   expect(both.body.requirement.owner).toEqual(human);
   expect(both.body.requirement.agent_owner).toEqual(agent);
-  expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ owner: agent }) })).body.error).toBe("owner_must_be_human");
+  expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ owner: agent, agent_owner: agent }) })).body.error).toBe("owner_must_be_human");
   expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ agent_owner: human }) })).body.error).toBe("agent_owner_must_be_agent");
 
   // 预计完成:旧卡的全天值(升级前写的)原样读回;改成带时刻的,存 UTC

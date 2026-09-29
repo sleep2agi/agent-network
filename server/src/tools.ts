@@ -8,7 +8,8 @@ import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetwork
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
-import { canRestWriteNetwork, getUserNetworkIds, singleNetworkId } from "./network-scope.js";
+import { canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId } from "./network-scope.js";
+import { handleRequirementsRequest } from "./requirements.js";
 import {
   buildAnetArgs as _unused_buildAnetArgs,           // ensure module is loaded
   validateName as validateChildName,
@@ -5673,6 +5674,109 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return probeFailReply(e);
       }
     },
+  );
+
+  // ── 需求池 / 任务看板(Agent 读写任务,例如把 GitHub issue 同步成任务) ──
+  // 全部走 REST 同一个处理函数(requirements.ts handleRequirementsRequest):权限、校验、谁做的记录只有一份。
+  // 节点令牌只在它绑定的网络里读 / 建 / 改 / 勾子任务 / upsert / 读项目;删除和管理项目只给人。
+  const requirementsCall = async (method: string, path: string, clientNetId?: string | null, body?: Record<string, unknown>) => {
+    const scope = resolveRestNetworkScope(enforceNetworkId ? null : (clientNetId ?? null), mcpAuthCtx, false);
+    if (scope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "access_denied", message: scope.denied }) }] };
+    const url = new URL(`http://mcp.internal${path}`);
+    const req = new Request(url, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const res = await handleRequirementsRequest({
+      req, url,
+      auth: mcpAuthCtx ? { ...mcpAuthCtx, username: "", tokenId: callerTokenId ?? null, tokenName: callerTokenIsNetwork && callerAlias ? `node:${callerAlias}` : null } : null,
+      isAdmin: false,
+      isNodeToken: callerTokenIsNetwork,
+      scope,
+    });
+    const data = res ? await res.json() : { ok: false, error: "not_found" };
+    return { content: [{ type: "text" as const, text: JSON.stringify(res && !res.ok && data && typeof data === "object" ? { ...data, status: res.status } : data) }] };
+  };
+  const reqPerson = z.object({ kind: z.enum(["user", "node"]), id: z.string().min(1).max(200) });
+  const reqChecklistItem = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(), text: z.string().min(1).max(500), done: z.boolean().optional() });
+  const reqFields = {
+    name: z.string().min(1).max(80).optional(),
+    priority: z.enum(["high", "normal", "low"]).optional(),
+    column: z.enum(["pool", "doing", "done"]).optional(),
+    due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears"),
+    description: z.string().max(20_000).optional().describe("markdown"),
+    checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
+    project_id: z.string().max(200).nullable().optional(),
+    owner: reqPerson.nullable().optional().describe("负责人: must be {kind:'user'}"),
+    agent_owner: reqPerson.nullable().optional().describe("负责 Agent: must be {kind:'node'}"),
+    participants: z.array(reqPerson).max(100).optional(),
+    external_url: z.string().max(500).nullable().optional(),
+    parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
+  };
+  const pick = (args: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => args[k] !== undefined).map(k => [k, args[k]]));
+  const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
+
+  server.tool(
+    "requirements_list",
+    "List requirement tasks in your network. Filters: status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived. Newest first, max 500. Each task carries children {total, done}.",
+    {
+      network_id: z.string().max(200).optional(),
+      status: z.enum(["pool", "doing", "done"]).optional(),
+      project_id: z.string().max(200).optional(),
+      owner: z.string().max(210).optional(),
+      agent_owner: z.string().max(210).optional(),
+      updated_since: z.string().max(40).optional(),
+      external_ref: z.string().max(200).optional(),
+      include_archived: z.boolean().optional(),
+      parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
+      top_level: z.boolean().optional(),
+    },
+    async (args) => {
+      const q = new URLSearchParams();
+      for (const k of ["status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      if (args.include_archived) q.set("include_archived", "1");
+      if (args.top_level) q.set("top_level", "1");
+      return requirementsCall("GET", `/api/requirements${q.size ? `?${q}` : ""}`, args.network_id);
+    },
+  );
+
+  server.tool(
+    "requirements_get",
+    "Get one requirement task by id (with description, checklist, owners, project, external_ref).",
+    { id: z.string().min(1).max(200), network_id: z.string().max(200).optional() },
+    async ({ id, network_id }) => requirementsCall("GET", `/api/requirements/${encodeURIComponent(id)}`, network_id),
+  );
+
+  server.tool(
+    "requirements_create",
+    "Create a requirement task. name is required. A duplicate external_ref in the network returns 409 external_ref_exists with existing_id — use requirements_upsert_by_external_ref for syncing.",
+    { network_id: z.string().max(200).optional(), ...reqFields, name: z.string().min(1).max(80), external_ref: z.string().max(200).optional() },
+    async (args) => requirementsCall("POST", "/api/requirements", args.network_id, pick(args, REQ_WRITE_KEYS)),
+  );
+
+  server.tool(
+    "requirements_update",
+    "Patch a requirement task; omitted fields keep their value. archived=true hides it from the default list (agents cannot delete).",
+    { id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), ...reqFields, external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
+    async (args) => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(args, REQ_WRITE_KEYS)),
+  );
+
+  server.tool(
+    "requirements_checklist_toggle",
+    "Set one checklist item done / not done (only that item is written, so concurrent edits of other items are kept).",
+    { id: z.string().min(1).max(200), item_id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/), done: z.boolean(), network_id: z.string().max(200).optional() },
+    async ({ id, item_id, done, network_id }) => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(id)}/checklist/${encodeURIComponent(item_id)}`, network_id, { done }),
+  );
+
+  server.tool(
+    "requirements_upsert_by_external_ref",
+    "Idempotent sync: create the task for external_ref (e.g. github:owner/repo#123) or, if it already exists in the network, patch it (omitted fields — including status — are kept). Returns { requirement, created }.",
+    { network_id: z.string().max(200).optional(), external_ref: z.string().min(1).max(200), ...reqFields, archived: z.boolean().optional() },
+    async (args) => requirementsCall("POST", "/api/requirements/upsert", args.network_id, pick(args, REQ_WRITE_KEYS)),
+  );
+
+  server.tool(
+    "projects_list",
+    "List requirement projects in your network (id, name, color, sort, archived).",
+    { network_id: z.string().max(200).optional() },
+    async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
   );
 }
 

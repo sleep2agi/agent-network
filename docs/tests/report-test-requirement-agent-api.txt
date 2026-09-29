@@ -1,0 +1,43 @@
+Requirements agent API (node tokens) + MCP tools + external_ref + parent_id — 2026-09-29
+Base: origin/main 0eff20d3 (#2076 merged)
+
+server/src/requirements-http.test.ts   18 pass
+  old-app compat (production .66 + App 0.2.142): PATCH {owner:{node}} without
+  agent_owner → 200, owner_coerced_to_agent_owner, response owner echoes the
+  node, stored owner NULL + agent_owner node, GET shows the stored values; the
+  same on POST; a human owner is untouched (no flag); with agent_owner in the
+  body → 400 owner_must_be_human; a foreign node → 400. Witnessed red with the
+  coercion removed (17/18).
+  parent_id: children {total, done}; parent_id / top_level filters; cycle
+  (parent under its child, self) → parent_cycle; 5 levels ok, 6th →
+  parent_too_deep, moving a 2-level subtree under level 4 → too deep, under
+  level 3 ok; other network's card as parent → parent_not_found (both ways);
+  bad id → 400; detach with null; deleting the parent keeps every child
+  (count -1 only) and detaches only its direct children.
+  Witnessed red with the cycle check disabled (http 16/17).
+  node token (bound to node_sync_bot): list / create (created_by + updated_by =
+  {node,node_sync_bot}) / get / patch / checklist tick / archive; DELETE → 403
+  user_token_required; archived hidden unless include_archived=1; a human edit
+  sets updated_by to the user and keeps created_by; a node token of another
+  network: list excludes, get / patch / tick → 404, a create with this
+  network's network_id lands in its OWN network; the human deletes (200 → 404).
+  external_ref: upsert creates (created:true) then patches the same row
+  (created:false, status kept); plain POST duplicate → 409 + existing_id;
+  PATCH onto a taken ref → 409; same ref allowed in another network; bad ref /
+  empty ref / javascript: url → 400; upsert without ref → 400. Filters:
+  status (+400 on bad), updated_since (past / future / 400), owner (+400),
+  external_ref. Earlier node-token assertions updated to the new rules.
+server/src/requirements-mcp.test.ts    4 pass (+ child create, children count,
+  parent_id / top_level filters, cycle via MCP) (real MCP in-memory
+  transport): 7 tools registered, no delete tool; bad status / person kind /
+  item id / empty name rejected at the protocol boundary; idempotent GitHub
+  issue sync; 409 + existing_id + status; update / tick / get / filters;
+  owner_must_be_human; archive; cross-network node token sees / touches
+  nothing and cannot write into this network; user token unchanged.
+server/src/requirements-upgrade-migration.test.ts  + new columns, legacy rows
+  archived 0, unique external_ref index, parent_id column + index, ensure twice is a no-op.
+Witnessed red: with NODE_TOKEN_OPERATIONS emptied, mcp 2/4 and http 4/16 fail.
+tests/test629-mcp-schema-policy: inventory 69 tools in source order (PASS).
+Full server suite (scripts/test-aggregate.ts): 119 files, 1428 pass, 0 fail.
+Docs: docs-site/docs{,/en}/api/mcp-tools.md index + section; coverage and
+anchor-section gates green. No production Hub/database touched.

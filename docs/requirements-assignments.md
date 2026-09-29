@@ -11,7 +11,8 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 
 ### 负责人 / 负责 Agent 分开（agent_owner）
 
-- `owner`：**负责人**，只能是人类（`{kind:"user",id}`），对结果负责。写入节点返回 400 `owner_must_be_human`。
+- `owner`：**负责人**，只能是人类（`{kind:"user",id}`），对结果负责。新客户端（请求里带了 `agent_owner`）写入节点返回 400 `owner_must_be_human`。
+- **旧客户端兼容**（App ≤ 0.2.142 只有一个「负责人」）：请求里 `owner` 是节点且**没带** `agent_owner` → 当成设置负责 Agent，`owner` 清空，照常 200，响应带 `owner_coerced_to_agent_owner: true`，响应里的 `owner` 回显那个节点（旧客户端拿它核对保存生效）；存储与之后的 GET 都是 `owner: null` + `agent_owner: 节点`。GET 不做旧字段回显：新 App 同时读两个字段，回显会把 Agent 当成负责人；旧 App 列表上这类卡显示「未分配」，0.2.143 起正常。
 - `agent_owner`：**负责 Agent**，只能是节点（`{kind:"node",id}`），负责执行。写入人类返回 400 `agent_owner_must_be_agent`。与 owner 同样按网络校验成员，`null` 清空，PATCH 省略则保留。
 - `participants` 不变：人类和 Agent 都可以。
 - 读取总带 `agent_owner` 字段（没有时为 `null`）；客户端用「行里有没有这个字段」判断 Hub 是否支持两个角色，旧 Hub 退回单一负责人。
@@ -41,6 +42,22 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 - **全天值原样保存、原样返回**（旧数据不改）。约定：全天 = 查看者本地时区那一天结束前都不算逾期；客户端显示为日期、不显示时刻。
 - 排序与逾期由客户端按「全天 = 当天 23:59:59（本地）、时刻 = 精确时刻」统一换算后比较。
 - `GET /api/requirements` 带 `capabilities`（`agent_owner` / `description` / `checklist` / `projects` / `due_datetime`），客户端据此决定显示哪些功能；旧 Hub 没有这个字段。
+
+### Agent 读写（节点令牌）、外部引用、归档
+
+- 节点令牌只在它绑定的网络里读 / 建 / 改 / 勾子任务 / upsert / 读项目（`requirements.ts` 的 `NODE_TOKEN_OPERATIONS`）；删除卡片、建改删项目仍然只给人。写入再由 `canWrite` 核对令牌绑定的网络。
+- `created_by` / `updated_by`：`{kind, id}`，节点令牌记为 `api_tokens.bound_node_id`（老令牌按令牌名里的 alias 找本网络节点，都找不到记 `token:<id>`，不冒充节点）。旧卡的 `created_by` 由原来的用户 id 列推出。**不写 audit_log**：那张表是安全事件（登录、令牌、成员），文档逐项列了动作名。
+- `external_ref`（如 `github:owner/repo#123`，`[A-Za-z0-9][A-Za-z0-9_.:/#@+-]{0,199}`）同一网络唯一（部分唯一索引）；重复新建 409 `external_ref_exists` + `existing_id`。`external_url` 只收 http(s)。
+- `POST /api/requirements/upsert`：按 `external_ref` 建或改，省略的字段（包括状态）保留；返回 `{requirement, created}`。
+- `archived`：归档的卡默认不在列表里（`include_archived=1` 才有）。Agent 用它代替删除。
+- `GET /api/requirements` 过滤：`status`、`project_id`（`none`）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`、`external_ref`、`include_archived`。`GET /api/requirements/{id}` 取一条；`DELETE` 只给人。
+- MCP：`requirements_list` / `requirements_get` / `requirements_create` / `requirements_update` / `requirements_checklist_toggle` / `requirements_upsert_by_external_ref` / `projects_list`，全部转给同一个 REST 处理函数（权限只有一份）。参考 `docs-site/docs/api/mcp-tools.md`。
+
+### 子需求（parent_id）
+
+- `parent_id`：同一网络里的另一张卡；写入时校验：父卡存在且同网络（否则 `parent_not_found`）、不成环（`parent_cycle`）、挂上后不超过 5 层（顶层是第 1 层，连同被移动卡的子树一起算，`parent_too_deep`）。`null` 解挂。
+- 父卡返回 `children: {total, done}`（未归档的子需求数 / 其中完成的）。列表过滤 `parent_id=<id>`（`none` = 顶层）、`top_level=1`。
+- 删父卡：子需求保留，`parent_id` 置空（变成顶层），不级联删除。MCP 的 create / update / upsert / list 都带 `parent_id`。
 
 ## 升级
 
