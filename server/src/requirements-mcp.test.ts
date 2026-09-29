@@ -60,6 +60,13 @@ describe("requirements MCP tools", () => {
       expect((await s.call("requirements_create", { name: "x", owner: { kind: "robot", id: "a" } })).mcpError).toBe(true);
       expect((await s.call("requirements_checklist_toggle", { id: "r", item_id: "has space", done: true })).mcpError).toBe(true);
       expect((await s.call("requirements_create", { name: "" })).mcpError).toBe(true);
+      // P0–P3:lowest(P3 极低)在建 / 改 / upsert 都能写;不认识的值在协议边界被拒
+      expect((await s.call("requirements_create", { name: "x", priority: "urgent" })).mcpError).toBe(true);
+      const low = await s.call("requirements_create", { name: "极低", priority: "lowest" });
+      expect(low.requirement.priority).toBe("lowest");
+      expect((await s.call("requirements_update", { id: low.requirement.id, priority: "high" })).requirement.priority).toBe("high");
+      expect((await s.call("requirements_update", { id: low.requirement.id, priority: "lowest" })).requirement.priority).toBe("lowest");
+      expect((await s.call("requirements_upsert_by_external_ref", { external_ref: "github:acme/p3#1", name: "同步", priority: "lowest" })).requirement.priority).toBe("lowest");
     } finally { await s.close(); }
   });
 
