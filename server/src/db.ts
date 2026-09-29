@@ -1516,6 +1516,10 @@ db.exec(`
     ON scheduled_task_runs(network_id, created_at DESC);
 `);
 try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN misfire_policy TEXT NOT NULL DEFAULT 'catch_up_once'"); } catch {}
+// Skipped runs (overlap_policy=skip) name the open task that blocked them and
+// whether the node had ever picked it up: not_received | in_progress.
+try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN blocked_by_task_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN blocked_by_state TEXT"); } catch {}
 
 // RFC-036 / B4 — owner-authorized edits of node-host managed schedules.
 // This is intentionally separate from Hub scheduled_tasks: these rows are

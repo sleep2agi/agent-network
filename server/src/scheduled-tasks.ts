@@ -219,8 +219,15 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
 
     if (row.overlap_policy === "skip") {
       const placeholders = OPEN_TASK_STATUSES.map((_, i) => `?${i + 2}`).join(", ");
-      const open = db.get<{ task_id: string }>(
-        `SELECT r.task_id FROM scheduled_task_runs r
+      // received:节点那边有没有把这条任务取走过(inbox 行被 ack,或任务已进 acked/running)。
+      // 跳过记录带上它,客户端才分得清「节点还没收到」和「节点在处理」—— 前者是投递故障,
+      // 后者才是真的上一次还没做完。
+      const open = db.get<{ task_id: string; received: number }>(
+        `SELECT r.task_id,
+                CASE WHEN t.status IN ('acked', 'running')
+                       OR EXISTS (SELECT 1 FROM inbox i WHERE (i.task_id = r.task_id OR i.id = r.task_id) AND i.acked = 1)
+                     THEN 1 ELSE 0 END AS received
+         FROM scheduled_task_runs r
          JOIN tasks t ON t.task_id = r.task_id
          WHERE r.schedule_id = ?1 AND t.status IN (${placeholders})
          ORDER BY r.created_at DESC LIMIT 1`,
@@ -228,9 +235,18 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       );
       if (open) {
         finalStatus = "skipped";
+        const blockedState = open.received ? "in_progress" : "not_received";
         db.run(
-          "UPDATE scheduled_task_runs SET status = 'skipped', error_code = 'previous_run_active', completed_at = datetime('now') WHERE run_id = ?1",
-          [runId],
+          `UPDATE scheduled_task_runs SET status = 'skipped', error_code = 'previous_run_active', error_message = ?2,
+             blocked_by_task_id = ?3, blocked_by_state = ?4, completed_at = datetime('now') WHERE run_id = ?1`,
+          [
+            runId,
+            blockedState === "not_received"
+              ? `previous run task ${open.task_id} has not been received by the node yet`
+              : `previous run task ${open.task_id} is still in progress on the node`,
+            open.task_id,
+            blockedState,
+          ],
         );
         if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
         return;
@@ -467,7 +483,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   if (sub === "runs" && req.method === "GET") {
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
     const runs = db.all(
-      "SELECT run_id, schedule_id, scheduled_for, task_id, status, error_code, error_message, created_at, completed_at FROM scheduled_task_runs WHERE schedule_id = ?1 AND network_id = ?2 ORDER BY created_at DESC LIMIT ?3",
+      "SELECT run_id, schedule_id, scheduled_for, task_id, status, error_code, error_message, blocked_by_task_id, blocked_by_state, created_at, completed_at FROM scheduled_task_runs WHERE schedule_id = ?1 AND network_id = ?2 ORDER BY created_at DESC LIMIT ?3",
       row.schedule_id, row.network_id, limit,
     );
     return Response.json({ ok: true, runs });
