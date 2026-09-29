@@ -41,7 +41,7 @@ import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
 import { processRulesFileRequests } from "./runtime/rules-file";
-import { createLogRedactor } from "./runtime/node-logs";
+import { createLogRedactor, parseLogsTailParams, tailNodeLogs } from "./runtime/node-logs";
 import { chooseGrokBinary, grokBinaryPinToRecord, findVerifiedGrokCandidates, grokRecoveryHint } from "./runtime/grok-binary-pin";
 
 // 🔴 这三处原先都喂 `__dirname`,而打包器把它内联成构建期常量 —— 见 #1433。
@@ -1248,8 +1248,11 @@ const taskTraceLog = (line: string) => {
 function rulesFileDeps() {
   return {
     callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn,
-    logDir: PRIVATE_LOG_DIR,
-    logRedactor: createLogRedactor({ knownValues: [AUTH_TOKEN, fileConfig.token, globalConfig.token], env: process.env }),
+    logsTail: (raw: string | undefined) => tailNodeLogs(
+      PRIVATE_LOG_DIR,
+      parseLogsTailParams(raw),
+      createLogRedactor({ knownValues: [AUTH_TOKEN, fileConfig.token, globalConfig.token], env: process.env }),
+    ),
   };
 }
 

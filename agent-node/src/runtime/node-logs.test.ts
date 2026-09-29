@@ -240,7 +240,7 @@ describe("doorbell", () => {
       return { ok: true };
     };
     const logs: string[] = [];
-    await processRulesFileRequests({ callCommHub, runtime: "codex", workDir: d, log: (m) => logs.push(m), warn: (m) => logs.push(m), logDir: d, logRedactor: redactor });
+    await processRulesFileRequests({ callCommHub, runtime: "codex", workDir: d, log: (m) => logs.push(m), warn: (m) => logs.push(m), logsTail: (raw) => tailNodeLogs(d, parseLogsTailParams(raw), redactor) });
     expect(acks[0].status).toBe("done");
     expect(acks[0].file_name).toBe("logs");
     const body = JSON.parse(acks[0].content);
