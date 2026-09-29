@@ -1,6 +1,6 @@
 # Dashboard
 
-Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务管理功能。
+Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控，以及会话任务的收件箱。桌面和 Android 上的任务卡片见[任务](/guide/tasks)，不是本页的 Tasks。
 
 ## 当前 Dashboard
 
@@ -67,6 +67,10 @@ block-beta
 ```
 
 ### Tasks（任务管理）
+
+这里的 Tasks 是 **Web Dashboard 的收件箱**：按 From / To 看派给 Agent 的会话任务，状态机见 [Task 生命周期](/concepts/task-lifecycle)。
+
+它不是桌面和 Android 应用里的[任务](/guide/tasks)页。那一页是项目、子任务清单、子需求和 GitHub Issue 的任务卡片，和这里的收件箱不是同一批界面。
 
 任务管理页展示所有任务的生命周期：
 

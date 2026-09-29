@@ -1,6 +1,6 @@
 # Dashboard
 
-Dashboard is Agent Network's web management interface, providing real-time monitoring and task management capabilities.
+Dashboard is Agent Network's web management interface: real-time monitoring, plus the inbox for session tasks. Task cards on desktop and Android are the [Tasks](/en/guide/tasks) page, not Tasks on this page.
 
 ## Current Dashboard
 
@@ -67,6 +67,10 @@ block-beta
 ```
 
 ### Tasks
+
+Tasks here is the **Web Dashboard inbox**: session tasks dispatched to agents, with From / To columns. The state machine is the [task lifecycle](/en/concepts/task-lifecycle).
+
+It is not the [Tasks](/en/guide/tasks) page in the desktop and Android app. That page is task cards for projects, checklists, subtasks and GitHub Issues, not this inbox.
 
 The task management page displays the full lifecycle of all tasks:
 
