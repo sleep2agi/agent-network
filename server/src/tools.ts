@@ -64,7 +64,7 @@ import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { parseHubTimestamp } from "./hub-timestamp";
-import { noteTerminalResultRead, sweepNodeRequestContent } from "./node-request-retention.js";
+import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -730,8 +730,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       skills_capable: z.literal(true).optional(),
       // Project folder view — same doorbell, ops files_list / file_read.
       files_capable: z.literal(true).optional(),
+      // Node run-log view — same doorbell, op logs_tail.
+      logs_capable: z.literal(true).optional(),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -942,6 +944,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
         if (filesCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
           db.run("UPDATE sessions SET files_capable = 1 WHERE resume_id = ?1", [resume_id]);
+        }
+        if (logsCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
+          db.run("UPDATE sessions SET logs_capable = 1 WHERE resume_id = ?1", [resume_id]);
         }
         if (host || proc) {
           db.run(
@@ -3201,11 +3206,43 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     return segs.join("/");
   };
 
+  // Node run-log view — logs_tail rides the same queue + doorbell. `content`
+  // carries the filter parameters as JSON (lines / level / grep / since_ts) and
+  // never a path: the node reads only its own log directory and redacts before
+  // it answers (agent-node/src/runtime/node-logs.ts). Stricter than the project
+  // folder on the caller: user login only, and only the node's owner or a
+  // network owner/admin — a member who may chat with a node does not get to read
+  // its process log. Log bytes are purged on the first terminal read (see
+  // get_rules_file_result) and by the retention sweep after LOGS_CONTENT_TTL_MS.
+  const isLogsOp = (op: string) => op === "logs_tail";
+  const LOGS_MAX_LINES = 2000;
+  const LOGS_GREP_MAX = 200;
+  const logsParamsJson = (p: { lines?: number; level?: string; grep?: string; since_ts?: number }): string =>
+    JSON.stringify({
+      lines: Math.min(Math.max(Math.floor(p.lines ?? 500), 1), LOGS_MAX_LINES),
+      ...(p.level ? { level: p.level } : {}),
+      ...(p.grep ? { grep: p.grep.slice(0, LOGS_GREP_MAX) } : {}),
+      ...(typeof p.since_ts === "number" && p.since_ts > 0 ? { since_ts: p.since_ts } : {}),
+    });
+  // Owner of the node row, or owner/admin of the network. Legacy open mode (no
+  // user identity on the connection) keeps canWrite's allow-all semantics.
+  const canReadNodeLogs = (nodeId: string, networkId: string): boolean => {
+    if (!enforceUserId) return true;
+    const role = getUserNetworkRole(enforceUserId, networkId);
+    if (role === "owner" || role === "admin") return true;
+    if (nodeId.startsWith("session:")) return false;
+    const row = db.get<{ owner_user_id: string | null }>("SELECT owner_user_id FROM nodes WHERE node_id = ?1", nodeId);
+    return !!row?.owner_user_id && row.owner_user_id === enforceUserId;
+  };
+
   const enqueueRulesFileRequest = (
-    op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read",
+    op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | "logs_tail",
     a: { node_id?: string; child_node_id?: string; alias?: string; network_id?: string; content?: string },
   ) => {
     const effectiveNetId = getNetworkId(a.network_id);
+    if (isLogsOp(op) && callerTokenIsNetwork) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_cannot_read_logs", message: "a node token cannot read another node's run log; use a user login" }) }] };
+    }
     if (isFilesOp(op)) {
       if (callerTokenIsNetwork) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_token_cannot_browse_files", message: "a node token cannot browse another node's project folder; use a user login" }) }] };
@@ -3217,7 +3254,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       a = { ...a, content: rel };
     }
-    if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, isSkillsOp(op) ? `${op} node skills` : `${op} rules file`);
+    if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, isLogsOp(op) ? "read node logs" : isSkillsOp(op) ? `${op} node skills` : `${op} rules file`);
     if (op === "skill_read" && (typeof a.content !== "string" || !SKILL_NAME_RE.test(a.content) || a.content === "." || a.content === "..")) {
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_skill_name", reason: "name must match [A-Za-z0-9._-]{1,64} and not be . or .." }) }] };
     }
@@ -3247,7 +3284,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         node = byAlias;
       } else {
         const session = db.get<{ alias: string; network_id: string | null }>(
-          isFilesOp(op)
+          isLogsOp(op)
+            ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND logs_capable = 1 ORDER BY updated_at DESC LIMIT 1"
+            : isFilesOp(op)
             ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND files_capable = 1 ORDER BY updated_at DESC LIMIT 1"
             : isSkillsOp(op)
             ? "SELECT alias, network_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND skills_capable = 1 ORDER BY updated_at DESC LIMIT 1"
@@ -3256,6 +3295,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           scopeNet,
         );
         if (!session) {
+          if (isLogsOp(op)) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "logs_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve its run log (its agent-node may be too old)" }) }] };
+          }
           if (isFilesOp(op)) {
             return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "files_target_not_found", alias: a.alias, message: "no node with this alias in the network, and no session with this alias that can serve its project folder (its channel server may be too old)" }) }] };
           }
@@ -3267,6 +3309,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
     }
     const nodeId = node.node_id;
+    if (isLogsOp(op) && !canReadNodeLogs(nodeId, node.network_id || "default")) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "logs_permission_denied", message: "only the node's owner or a network owner/admin can read its run log" }) }] };
+    }
     if (op === "write") {
       if (typeof a.content !== "string") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_content", reason: "content must be a string" }) }] };
@@ -3282,7 +3327,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // Separate single-flight lanes: the client opens the rules file and the
     // skills list together; one must not block the other.
     const inFlight = db.get<{ request_id: string; created_at: number; pulled_at: number | null }>(
-      isFilesOp(op)
+      isLogsOp(op)
+        ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op = 'logs_tail' ORDER BY created_at DESC LIMIT 1"
+        : isFilesOp(op)
         ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('files_list', 'file_read') ORDER BY created_at DESC LIMIT 1"
         : isSkillsOp(op)
         ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('skills_list', 'skill_read') ORDER BY created_at DESC LIMIT 1"
@@ -3306,7 +3353,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const networkId = node.network_id || "default";
     db.run(
       `INSERT INTO node_rules_requests (request_id, node_id, network_id, op, content, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
-      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" || isFilesOp(op) ? a.content! : null, Date.now(), callerTokenId || "unknown"],
+      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" || isFilesOp(op) || isLogsOp(op) ? a.content! : null, Date.now(), callerTokenId || "unknown"],
     );
     pushEvent(node.alias, { type: "rules_file", request_id: requestId }, networkId);
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, op }) }] };
@@ -3383,6 +3430,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   );
 
   server.tool(
+    "tail_node_logs",
+    "Ask a node for the tail of its own agent-node run log (read-only, redacted on the node before it leaves). No path argument: the node reads only its own log directory. User logins only; the node's owner or a network owner/admin. Poll get_rules_file_result — content is JSON {files, lines:[{ts, level, text, key}], truncated, matched, now_ts}; it is handed out once and then purged.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported logs_capable."),
+      lines: z.number().int().min(1).max(LOGS_MAX_LINES).optional().describe("How many of the newest matching lines (default 500, max 2000)."),
+      level: z.enum(["info", "warn", "error"]).optional().describe("Only lines of exactly this level."),
+      grep: z.string().min(1).max(LOGS_GREP_MAX).optional().describe("Case-insensitive substring, matched after redaction."),
+      since_ts: z.number().int().min(0).optional().describe("Only lines at or after this epoch-ms timestamp (follow mode; the client de-duplicates by line key)."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, lines, level, grep, since_ts, network_id }) =>
+      enqueueRulesFileRequest("logs_tail", { node_id, child_node_id, alias, content: logsParamsJson({ lines, level, grep, since_ts }), network_id }),
+  );
+
+  server.tool(
     "get_rules_file_request",
     "Node pulls its oldest pending rules-file request (called from agent-node when the SSE rules_file doorbell arrives). app#225.",
     {},
@@ -3419,7 +3482,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             request: {
               request_id: req.request_id,
               op: req.op,
-              ...(req.op === "write" || req.op === "skill_read" || isFilesOp(req.op) ? { content: req.content ?? "" } : {}),
+              ...(req.op === "write" || req.op === "skill_read" || isFilesOp(req.op) || isLogsOp(req.op) ? { content: req.content ?? "" } : {}),
             },
           }),
         }],
@@ -3460,7 +3523,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (req.status === "done" || req.status === "failed" || req.status === "timeout") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "already_terminal", current_status: req.status }) }] };
       }
-      if (typeof content === "string" && !isFilesOp(req.op) && content.length > RULES_FILE_MAX_BYTES) {
+      if (typeof content === "string" && !isFilesOp(req.op) && !isLogsOp(req.op) && content.length > RULES_FILE_MAX_BYTES) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "content_too_large", max: RULES_FILE_MAX_BYTES }) }] };
       }
       db.run(
@@ -3492,7 +3555,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       );
       // SEC-1：结果行的网络必须等于调用方作用域，否则当不存在。
       // Project folder results: only the (user) token that asked may read them.
-      const foreignFilesRow = !!row && isFilesOp(row.op) && (callerTokenIsNetwork || row.created_by_token !== (callerTokenId || "unknown"));
+      // Run-log results: same rule — only the token that asked.
+      const foreignFilesRow = !!row && (isFilesOp(row.op) || isLogsOp(row.op)) && (callerTokenIsNetwork || row.created_by_token !== (callerTokenId || "unknown"));
       if (!row || row.network_id !== (effectiveNetId || "default") || foreignFilesRow) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found", request_id: requestId }) }] };
       }
@@ -3511,6 +3575,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // after the SEC-1 scope check above — a foreign caller can't stamp/purge.
       const terminal = status === "done" || status === "failed" || status === "timeout";
       const purged = terminal ? noteTerminalResultRead(requestId).purged : false;
+      // Run-log bytes are read-once: purge them in the same call that hands them
+      // out (no grace window — the app never follows someone else's logs request,
+      // it re-asks; see node-request-retention.ts).
+      if (terminal && isLogsOp(row.op) && !purged) purgeLogsResultNow(requestId);
       return {
         content: [{
           type: "text" as const,

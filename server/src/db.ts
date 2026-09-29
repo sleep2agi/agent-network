@@ -133,6 +133,9 @@ for (const col of [
   // Project folder view — the same session answers files_list / file_read on the
   // rules-file doorbell (node-files.ts). Sticky, bound-token only, like above.
   { name: "files_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // Node run-log view — the same session answers logs_tail on the rules-file
+  // doorbell (node-logs.ts). Sticky, bound-token only, like above.
+  { name: "logs_capable", def: "INTEGER NOT NULL DEFAULT 0" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }

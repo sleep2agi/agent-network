@@ -14,6 +14,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listSkills, readSkill } from "./node-skills";
 import { listNodeFiles, readNodeFile } from "./node-files";
+import { parseLogsTailParams, tailNodeLogs, type LogRedactor } from "./node-logs";
 
 export const RULES_FILE_MAX_BYTES = 256 * 1024;
 
@@ -92,8 +93,9 @@ export async function writeRulesFile(
 export interface RulesFileRequest {
   request_id: string;
   /** read/write = 规则文件;skills_list/skill_read = 只读技能(node-skills.ts),content 是技能名;
-   *  files_list/file_read = 只读项目文件夹(node-files.ts),content 是相对工作目录的路径。 */
-  op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read";
+   *  files_list/file_read = 只读项目文件夹(node-files.ts),content 是相对工作目录的路径;
+   *  logs_tail = 只读本节点运行日志(node-logs.ts),content 是过滤参数 JSON(没有路径)。 */
+  op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | "logs_tail";
   content?: string;
 }
 
@@ -106,6 +108,9 @@ export interface ProcessRulesFileDeps {
   /** 技能根目录用;缺省取 os.homedir() / process.env.CODEX_HOME。 */
   home?: string;
   codexHome?: string;
+  /** logs_tail 用:本进程的日志目录(cli.ts LOG_DIR)与脱敏器。缺省时 logs_tail 回 failed。 */
+  logDir?: string;
+  logRedactor?: LogRedactor;
 }
 
 /** 一次门铃最多处理这么多条，防止 hub 侧异常堆积把节点拖进死循环。 */
@@ -183,6 +188,19 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
           content: JSON.stringify(r),
         });
         deps.log(`[files] read ${r.path} kind=${r.kind} (${req.request_id})`);
+      } else if (req.op === "logs_tail") {
+        if (!deps.logDir || !deps.logRedactor) throw new Error("this process does not serve its run log");
+        const params = parseLogsTailParams(req.content);
+        const r = await tailNodeLogs(deps.logDir, params, deps.logRedactor);
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: "logs",
+          exists: r.files.length > 0,
+          content: JSON.stringify(r),
+        });
+        // 不记过滤词本身:grep 可能是用户粘进来的一段敏感文本。
+        deps.log(`[logs] tail lines=${r.lines.length}/${r.matched} files=${r.files.length} (${req.request_id})`);
       } else {
         throw new Error(`unknown op ${String((req as any).op)}`);
       }
@@ -193,7 +211,7 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
         await deps.callCommHub("ack_rules_file_request", {
           request_id: req.request_id,
           status: "failed",
-          file_name: req.op === "skills_list" || req.op === "skill_read" ? "skills" : req.op === "files_list" || req.op === "file_read" ? "files" : rulesFileNameForRuntime(deps.runtime),
+          file_name: req.op === "logs_tail" ? "logs" : req.op === "skills_list" || req.op === "skill_read" ? "skills" : req.op === "files_list" || req.op === "file_read" ? "files" : rulesFileNameForRuntime(deps.runtime),
           error: msg,
         });
       } catch (ackErr: any) {
