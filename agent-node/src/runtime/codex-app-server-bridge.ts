@@ -23,6 +23,9 @@ import { EventEmitter } from "events";
 import { CodexAppServerClient } from "./codex-app-server-client";
 import { DEFAULT_RESUME_ATTEMPTS, DEFAULT_RESUME_TIMEOUT_MS } from "./codex-app-server/resume-timeout";
 
+/** Newest turns read when recovering or reconciling a turn from history. */
+const RECENT_TURNS_PAGE_SIZE = 10;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Public shapes
 // ────────────────────────────────────────────────────────────────────────────
@@ -223,6 +226,8 @@ export class CodexAppServerBridge extends EventEmitter {
   private reconciliationInFlight: Promise<ActiveTurnReconciliation> | null = null;
   private readonly fullHistoryReconciliationIntervalMs: number;
   private lastFullHistoryReconciliationAt = Date.now();
+  /** History-paging requests this app-server build rejected (see resumeThread). */
+  private historyPagingUnsupported = new Set<"thread/resume" | "thread/turns/list">();
 
   constructor(opts: CodexAppServerBridgeOptions) {
     super();
@@ -329,7 +334,7 @@ export class CodexAppServerBridge extends EventEmitter {
     for (let attempt = 1; ; attempt++) {
       const attemptStartedAt = Date.now();
       try {
-        await this.client.request("thread/resume", { threadId }, this.resumeTimeoutMs);
+        await this.resumeThread(threadId, this.resumeTimeoutMs);
         return Date.now() - attemptStartedAt;
       } catch (e) {
         if (!isRequestTimeout(e)) throw e;
@@ -342,6 +347,60 @@ export class CodexAppServerBridge extends EventEmitter {
         }
       }
     }
+  }
+
+  /**
+   * `thread/resume` without history. By default codex hydrates every turn and
+   * item of the thread into one response frame; on a long-lived thread the
+   * connection died (1006) before the resume completed, and every later task
+   * failed. Nothing here reads the resume response; readRecentTurns covers
+   * the history the bridge needs.
+   *
+   * codex ≤0.150 gates `excludeTurns` behind the experimentalApi capability
+   * (which this bridge does not negotiate) and rejects the request outright;
+   * only that rejection falls back to the legacy form — a timeout never does.
+   */
+  private async resumeThread(threadId: string, timeoutMs?: number): Promise<void> {
+    if (!this.historyPagingUnsupported.has("thread/resume")) {
+      try {
+        await this.client.request("thread/resume", { threadId, excludeTurns: true }, timeoutMs);
+        return;
+      } catch (e) {
+        if (!isUnsupportedHistoryPaging(e, "excludeTurns")) throw e;
+        this.historyPagingUnsupported.add("thread/resume");
+        this.emit("history_paging_unsupported", { method: "thread/resume" });
+      }
+    }
+    await this.client.request("thread/resume", { threadId }, timeoutMs);
+  }
+
+  /**
+   * The newest turns of the bound thread (items included), oldest first.
+   * `thread/read {includeTurns:true}` has the same full-history problem as a
+   * plain resume, so read one bounded page of `thread/turns/list` instead.
+   * Every caller looks for the active or just-finished turn, which is always
+   * among the newest. Builds without the paged API get the legacy full read.
+   */
+  private async readRecentTurns<T>(): Promise<T[]> {
+    if (!this.historyPagingUnsupported.has("thread/turns/list")) {
+      try {
+        const page = await this.client.request<{ data?: T[] }>("thread/turns/list", {
+          threadId: this.threadId,
+          limit: RECENT_TURNS_PAGE_SIZE,
+          sortDirection: "desc",
+          itemsView: "full",
+        });
+        return [...(page?.data ?? [])].reverse();
+      } catch (e) {
+        if (!isUnsupportedHistoryPaging(e, "thread/turns/list")) throw e;
+        this.historyPagingUnsupported.add("thread/turns/list");
+        this.emit("history_paging_unsupported", { method: "thread/turns/list" });
+      }
+    }
+    const result = await this.client.request<{ thread?: { turns?: T[] } }>(
+      "thread/read", { threadId: this.threadId, includeTurns: true },
+    );
+    return result?.thread?.turns ?? [];
   }
 
   private async startNewThread(): Promise<string> {
@@ -667,23 +726,21 @@ export class CodexAppServerBridge extends EventEmitter {
    */
   async recoverSharedActiveTurn(): Promise<{ turnId: string | null; steerable: boolean }> {
     const result = await this.client.request<{
-      thread?: {
-        status?: string | { type?: string };
-        turns?: Array<{
-          id?: string;
-          status?: string;
-          items?: Array<{
-            type?: string;
-            content?: Array<{ type?: string; text?: string }>;
-          }>;
-        }>;
-      };
-    }>("thread/read", { threadId: this.threadId, includeTurns: true });
+      thread?: { status?: string | { type?: string } };
+    }>("thread/read", { threadId: this.threadId, includeTurns: false });
     this.lastFullHistoryReconciliationAt = Date.now();
     if (extractThreadStatus(result?.thread?.status) !== "active") {
       return { turnId: null, steerable: false };
     }
-    const active = [...(result?.thread?.turns ?? [])]
+    const turns = await this.readRecentTurns<{
+      id?: string;
+      status?: string;
+      items?: Array<{
+        type?: string;
+        content?: Array<{ type?: string; text?: string }>;
+      }>;
+    }>();
+    const active = [...turns]
       .reverse()
       .find((turn) => turn.status === "inProgress" && typeof turn.id === "string");
     if (!active?.id) return { turnId: null, steerable: false };
@@ -769,7 +826,7 @@ export class CodexAppServerBridge extends EventEmitter {
     }
     for (let attempt = 0; attempt < this.deferredResumeAttempts; attempt++) {
       try {
-        await this.client.request("thread/resume", { threadId: id });
+        await this.resumeThread(id);
         const resolve = this.deferredResolve;
         this.deferredResolve = null;
         resolve?.(id);
@@ -1049,11 +1106,11 @@ export class CodexAppServerBridge extends EventEmitter {
       : this.externalActiveTurnId !== activeAtStart;
 
     this.reconciliationInFlight = (async () => {
-      // Most watchdog ticks stay cheap. Full history on a real long-lived TUI
-      // can be several megabytes, so hydrate it only when the thread is idle,
-      // a successor event explicitly forces an exact check, or the slow
-      // fallback interval expires (covering loss of both terminal and
-      // successor notifications).
+      // Most watchdog ticks stay cheap: a status-only read. The recent-turns
+      // page (or, on builds without paging, the full history) is read only
+      // when the thread is idle, a successor event explicitly forces an exact
+      // check, or the slow fallback interval expires (covering loss of both
+      // terminal and successor notifications).
       const statusResult = await this.client.request<{
         thread?: { status?: string | { type?: string } };
       }>("thread/read", { threadId: this.threadId, includeTurns: false });
@@ -1073,17 +1130,12 @@ export class CodexAppServerBridge extends EventEmitter {
         return { recovered: false, turnId: activeAtStart, status: threadStatus };
       }
 
-      const result = await this.client.request<{
-        thread?: {
-          status?: string | { type?: string };
-          turns?: Array<{
-            id?: string;
-            status?: string;
-            error?: { message?: string } | null;
-            items?: Array<{ type?: string; text?: string; phase?: string; clientId?: string }>;
-          }>;
-        };
-      }>("thread/read", { threadId: this.threadId, includeTurns: true });
+      const turns = await this.readRecentTurns<{
+        id?: string;
+        status?: string;
+        error?: { message?: string } | null;
+        items?: Array<{ type?: string; text?: string; phase?: string; clientId?: string }>;
+      }>();
       this.lastFullHistoryReconciliationAt = Date.now();
 
       // A notification may have completed the turn while thread/read was in
@@ -1092,7 +1144,6 @@ export class CodexAppServerBridge extends EventEmitter {
         return { recovered: false, turnId: activeAtStart };
       }
 
-      const turns = result?.thread?.turns ?? [];
       const activePending = ownedAtStart
         ? this.pendingTurns.get(activeAtStart)
         : undefined;
@@ -1114,7 +1165,7 @@ export class CodexAppServerBridge extends EventEmitter {
         return {
           recovered: false,
           turnId: resolvedTurnId,
-          status: turn?.status ?? extractThreadStatus(result?.thread?.status),
+          status: turn?.status ?? threadStatus,
         };
       }
 
@@ -1291,6 +1342,20 @@ function isAlreadyInitialized(e: unknown): boolean {
 function isRequestTimeout(e: unknown): boolean {
   const msg = (e as { message?: unknown })?.message;
   return typeof msg === "string" && /^codex request '[^']+' \(id=\d+\) timed out after \d+ms$/.test(msg);
+}
+
+/**
+ * The app-server refused a history-paging param/method as unavailable in this
+ * build: codex ≤0.150 answers "requires experimentalApi capability"; older or
+ * stripped builds may answer unknown field / unknown variant / method not
+ * found. Anything else (timeouts, transport loss, thread errors) is not this.
+ */
+function isUnsupportedHistoryPaging(e: unknown, name: string): boolean {
+  const code = (e as { code?: unknown })?.code;
+  const msg = (e as { message?: unknown })?.message;
+  if (code !== -32600 && code !== -32601 && code !== -32602) return false;
+  if (typeof msg !== "string" || !msg.includes(name)) return false;
+  return /requires experimentalApi|unknown field|unknown variant|method not found/i.test(msg);
 }
 
 /** thread/resume against an id the app-server has no persisted rollout for. */
