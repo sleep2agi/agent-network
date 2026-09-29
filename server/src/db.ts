@@ -964,7 +964,7 @@ db.exec(`
     network_id     TEXT NOT NULL,
     title          TEXT NOT NULL,
     column_name    TEXT NOT NULL DEFAULT 'pool' CHECK(column_name IN ('pool', 'doing', 'done')),
-    priority       TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('high', 'normal', 'low')),
+    priority       TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('high', 'normal', 'low', 'lowest')),
     due_on         TEXT,
     assignee       TEXT,
     client_id      TEXT,

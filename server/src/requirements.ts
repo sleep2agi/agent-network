@@ -4,10 +4,11 @@ import { db } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, visibleAgents } from "./agent-access.js";
-import { ensureRequirementIndexes, ensureRequirementProjects, migrateRequirementAgentOwners } from "./requirements-migrate.js";
+import { ensureRequirementIndexes, ensureRequirementProjects, migrateRequirementAgentOwners, migrateRequirementPriorityCheck } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
+migrateRequirementPriorityCheck(db);
 migrateRequirementAgentOwners(db);
 ensureRequirementProjects(db);
 ensureRequirementIndexes(db);
@@ -24,7 +25,8 @@ export type RequirementsRequestContext = {
 };
 
 const COLUMNS = new Set(["pool", "doing", "done"]);
-const PRIORITIES = new Set(["high", "normal", "low"]);
+// 界面上 P0–P3:high=P0 最高、normal=P1 普通、low=P2 低、lowest=P3 极低。存的值不变,旧客户端照常读写前三个。
+const PRIORITIES = new Set(["high", "normal", "low", "lowest"]);
 const DUE = /^\d{4}-\d{2}-\d{2}$/;
 
 type Row = {
@@ -425,7 +427,7 @@ function operationOf(req: Request, url: URL): string {
   return "create";
 }
 
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。

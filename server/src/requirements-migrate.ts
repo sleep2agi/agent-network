@@ -49,3 +49,35 @@ export function ensureRequirementIndexes(database: DbAdapter): void {
   database.exec("CREATE INDEX IF NOT EXISTS idx_requirements_network_updated ON requirements(network_id, updated_at)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_requirements_parent ON requirements(parent_id) WHERE parent_id IS NOT NULL");
 }
+
+/**
+ * 优先级加 lowest(P3 极低)。旧库建表时带 CHECK(priority IN ('high', 'normal', 'low')),SQLite 不能就地改
+ * CHECK,只能重建一次:拿 sqlite_master 里的原建表语句(含历次加的列)只换掉那个 CHECK,整表拷过去,
+ * 再按原样重建这张表的索引。已经放开的库什么都不做。存量值不改。
+ */
+const OLD_PRIORITY_CHECK = /CHECK\s*\(\s*priority\s+IN\s*\(\s*'high'\s*,\s*'normal'\s*,\s*'low'\s*\)\s*\)/i;
+export const PRIORITY_CHECK = "CHECK(priority IN ('high', 'normal', 'low', 'lowest'))";
+export function migrateRequirementPriorityCheck(database: DbAdapter): { rebuilt: boolean } {
+  if (database.dialect === "postgres") {
+    try {
+      database.exec("ALTER TABLE requirements DROP CONSTRAINT IF EXISTS requirements_priority_check");
+      database.exec(`ALTER TABLE requirements ADD CONSTRAINT requirements_priority_check ${PRIORITY_CHECK}`);
+    } catch {}
+    return { rebuilt: false };
+  }
+  const table = database.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'requirements'");
+  if (!table?.sql || !OLD_PRIORITY_CHECK.test(table.sql)) return { rebuilt: false };
+  const indexes = database.all<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'requirements' AND sql IS NOT NULL");
+  const createSql = table.sql
+    .replace(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?requirements["`]?/i, "CREATE TABLE requirements_migrated")
+    .replace(OLD_PRIORITY_CHECK, PRIORITY_CHECK);
+  database.transaction(() => {
+    database.exec("DROP TABLE IF EXISTS requirements_migrated");
+    database.exec(createSql);
+    database.exec("INSERT INTO requirements_migrated SELECT * FROM requirements");
+    database.exec("DROP TABLE requirements");
+    database.exec("ALTER TABLE requirements_migrated RENAME TO requirements");
+    for (const index of indexes) database.exec(index.sql);
+  });
+  return { rebuilt: true };
+}
