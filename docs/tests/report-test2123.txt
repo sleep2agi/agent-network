@@ -47,3 +47,29 @@ built" (startHub() reached); old L1–L4 are L2–L5.
    only difference: + server/src/db-adapter-translate.test.ts pass=12 (new)
 
 8. test637-database-url-guard on S2a: RESULT: PASS (guard + mutation red intact)
+
+---
+RFC-039 S2b (branch fix/pg-s2b-worker) — PgAdapter = one Bun.SQL connection in
+a worker thread; image no longer installs nodejs or pg.
+
+9. S2b source, unmodified (what CI will run)
+   14/14 PASS contract (rollback, commit, caught error inside a transaction,
+   nested savepoint, COUNT number, BLOB bytes, bool→1, text datetime,
+   changes, 3 MB value, 0.91 ms/statement over 500 inserts)
+   PASS L3 first registered user is admin
+   PASS L4 login, node token, report_status, POST /api/task
+   INFO task row after the failed reply: status=delivered result=null
+        (on the subprocess bridge the same failure left it status=replied)
+   FAIL L5 send_reply: PG: could not determine data type of parameter $2  (S3, F1)
+   PG_LADDER level=4 floor=4                                        rc=0
+
+10. witnessed red on the contract (adapter bind-mounted with one mutation)
+    ROLLBACK → COMMIT in transaction():  FAIL contract: ROLLBACK discards …   rc=1
+    per-statement savepoint guard off:   "current transaction is aborted"    rc=1
+
+11. SQLite server suite, per-file diff vs S2a: none
+    S2b (28a21808): files=127 pass=1551 fail=0 skip=0
+
+12. neighbouring suites on S2b: test637 PASS (its mutation now also copies
+    pg-worker.ts), test601 PASS (L11 mutation repointed to the
+    atomicTransactions gate, still MUTATION_RED), test660 PASS, test1195 PASS
