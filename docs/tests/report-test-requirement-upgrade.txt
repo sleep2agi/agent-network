@@ -1,7 +1,13 @@
-Requirements agent_owner + description + checklist — 2026-09-29 (one hub upgrade)
+Requirements agent_owner + description + checklist + projects — 2026-09-29 (one hub upgrade)
 Base: origin/main e6a69598 (commhub-server 0.9.0-preview.65)
 
-server/src/requirements-http.test.ts            13 pass / 125 expects
+server/src/requirements-http.test.ts            14 pass / 164 expects
+  projects: empty at start (no seed), create (palette colour / explicit), 409
+  duplicate name, bad name/colour/sort 400, viewer read-only, node token
+  user_token_required, other network invisible / 404 / its project rejected on
+  cards (project_not_in_network), project_id on POST / PATCH / clear, rename /
+  recolour / sort, archive keeps references but rejects new ones
+  (project_archived), delete nulls references and keeps every card.
   description/checklist: create, CRLF→LF, generated ck_ ids, per-item PATCH
   {done} (explicit, idempotent, only that item), 404 unknown item, 400 bad done,
   viewer 403, node token user_token_required, foreign 404; replace-all reorder,
@@ -11,7 +17,9 @@ server/src/requirements-http.test.ts            13 pass / 125 expects
   (agent_owner_must_be_agent) on POST and PATCH; agent_owner-only PATCH is not
   empty_patch and keeps omitted fields; foreign-network node rejected; viewer 403;
   clearing both roles; existing create/move/issue/edit regressions unchanged.
-server/src/requirements-upgrade-migration.test.ts   1 pass / 38 expects (also: the
+server/src/requirements-upgrade-migration.test.ts   1 pass / 42 expects (project table
+  created empty, project_id column added, ensure twice is a no-op; witnessed red
+  with the table creation removed) (also: the
   three new columns exist and legacy rows read NULL)
   #2065-era schema (no agent_owner_json) seeded with 6 rows (2 node owners, user
   owner, null, malformed JSON, node without id) → import db.ts + requirements.ts
@@ -19,7 +27,8 @@ server/src/requirements-upgrade-migration.test.ts   1 pass / 38 expects (also: t
   node owners moved to agent_owner with owner NULL, others unchanged, all other
   columns unchanged; second run moves 0 and the snapshot is identical.
   Witnessed red with the startup call commented out (fail=1).
-server/src/requirements-upgrade-e2e.test.ts         1 pass / 26 expects (also: after
+server/src/requirements-upgrade-e2e.test.ts         1 pass / 31 expects (+ project
+  created after the upgrade, attached to the upgraded card, survives restart) (also: after
   the upgrade restart, description + checklist written, one item ticked, and both
   survive the third start)
   Throwaway hub process `bun run src/index.ts`, HOME=mkdtemp, random port
@@ -28,7 +37,7 @@ server/src/requirements-upgrade-e2e.test.ts         1 pass / 26 expects (also: a
   start (upgrade) → HTTP read shows owner null / agent_owner node, other card
   untouched → role rules over HTTP → third start changes nothing.
   Witnessed red with the migration call commented out (fail=1).
-Full server suite (scripts/test-aggregate.ts): 117 files, 1409 pass, 0 fail.
+Full server suite (scripts/test-aggregate.ts): 117 files, 1411 pass, 0 fail.
 CI: all three are server/src/*.test.ts, run by tests/test798-server-unit-ci.
 Migration is triggered from requirements.ts (not db.ts) so db.ts keeps its line
 numbers: docs pin db.ts:437 (doc-claims) and db.ts#L1751 (symbol pins); the first

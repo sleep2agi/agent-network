@@ -32,7 +32,7 @@ legacy.close();
 
 afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch {} });
 
-const snapshot = (db: any) => db.all("SELECT requirement_id, network_id, title, due_on, assignee, participants_json, owner_json, agent_owner_json FROM requirements ORDER BY requirement_id") as any[];
+const snapshot = (db: any) => db.all("SELECT requirement_id, network_id, title, due_on, assignee, participants_json, owner_json, agent_owner_json, project_id FROM requirements ORDER BY requirement_id") as any[];
 
 test("startup migration moves node owners to agent_owner, keeps every row, and is idempotent", async () => {
   const { db } = await import("./db.js");
@@ -62,6 +62,14 @@ test("startup migration moves node owners to agent_owner, keeps every row, and i
   expect(cols.includes("description") && cols.includes("checklist_json") && cols.includes("agent_owner_json")).toBe(true);
   const extra = db.all("SELECT description, checklist_json FROM requirements") as any[];
   expect(extra.every(r => r.description === null && r.checklist_json === null)).toBe(true);
+  // 项目表:建了、是空的(不预置),重复执行不报错;卡片的 project_id 列只加不改
+  expect(cols.includes("project_id")).toBe(true);
+  expect((db.all("SELECT project_id FROM requirements WHERE project_id IS NOT NULL") as any[]).length).toBe(0);
+  expect((db.get("SELECT COUNT(*) AS n FROM requirement_projects") as any).n).toBe(0);
+  const { ensureRequirementProjects } = await import("./requirements-migrate.js");
+  ensureRequirementProjects(db);
+  ensureRequirementProjects(db);
+  expect((db.get("SELECT COUNT(*) AS n FROM requirement_projects") as any).n).toBe(0);
   // 再跑一次(= 下次启动):什么都不动
   expect(migrateRequirementAgentOwners(db).moved).toBe(0);
   expect(snapshot(db)).toEqual(after);

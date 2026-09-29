@@ -25,10 +25,19 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 - 读取总带 `description`（没有为 `""`）和 `checklist`（没有为 `[]`）；客户端据此判断 Hub 是否支持。
 - 权限：与卡片其他字段相同，viewer 不可写。**节点令牌（Agent）本版仍返回 `user_token_required`**。以后放开时，把操作名（`read` / `patch` / `checklist_item`）加进 `requirements.ts` 的 `NODE_TOKEN_OPERATIONS`，并给写入补上节点所属网络的判断；路由和请求体不需要改。
 
+### 项目（requirement_projects / project_id）
+
+- 表 `requirement_projects`：`project_id, network_id, name, color, sort, archived, created_at`。按网络隔离；**不预置任何项目**（军团项目、TMAI 由 owner 在界面里建）。
+- `GET /api/requirements/projects?network_id=…` → `{projects:[{id,name,color,sort,archived,createdAt}]}`，按 sort、创建时间排序，含已归档（客户端自行隐藏）。viewer 可读。
+- `POST /api/requirements/projects` `{name, color?, sort?}`：名字 1–40 字，同网络未归档项目不重名（409 `project_name_taken`）；颜色 `#RRGGBB`，缺省按调色板轮换；每网络最多 200 个。
+- `PATCH /api/requirements/projects/{id}` `{name?, color?, sort?, archived?}`；`DELETE /api/requirements/projects/{id}`：先把引用它的卡片 `project_id` 置空，再删项目，卡片一张不少。
+- 卡片 `project_id`：`null` 或同一网络、未归档的项目（400 `project_not_in_network` / `project_archived`）。归档项目上已有的引用保留。读取总带 `project_id`。
+- 写入权限与卡片相同（viewer 不可写）；节点令牌同样 `user_token_required`（操作名 `projects`，未放进 `NODE_TOKEN_OPERATIONS`）。
+
 ## 升级
 
-- 加列只加不改：`agent_owner_json`、`description`、`checklist_json` 都在 `db.ts` 既有的加列循环里；旧行三列为 NULL，读出为 `null` / `""` / `[]`。
-- 一次 Hub 升级同时带上负责 Agent、描述、子任务三项。
+- 加列只加不改：`agent_owner_json`、`description`、`checklist_json`、`project_id` 都在 `db.ts` 既有的加列循环里；旧行为 NULL，读出为 `null` / `""` / `[]` / `null`。`requirement_projects` 表由 `requirements-migrate.ts` 的 `CREATE TABLE IF NOT EXISTS` 建。
+- 一次 Hub 升级同时带上负责 Agent、描述、子任务、项目四项。
 
 本版为最后写入覆盖语义，尚无版本冲突提示。客户端应避免一次编辑提交未改动的绑定字段；多人同时修改同一字段的冲突解决属于后续交付项。
 

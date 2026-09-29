@@ -196,6 +196,74 @@ describe("requirements stay on the hub", () => {
     expect((await api(nodeToken, path, { method: "PATCH", body: JSON.stringify({ description: "Agent 暂不能写" }) })).body.error).toBe("user_token_required");
   });
 
+  test("projects: CRUD per network, project_id on cards, delete nulls references, archive keeps them", async () => {
+    const q = `?network_id=${ownerNetwork}`;
+    const empty = await api(ownerToken, `/api/requirements/projects${q}`);
+    expect(empty.status).toBe(200);
+    expect(empty.body.projects).toEqual([]); // 不预置任何项目
+    const legion = await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "军团项目" }) });
+    expect(legion.status).toBe(201);
+    expect(legion.body.project.name).toBe("军团项目");
+    expect(legion.body.project.color).toMatch(/^#[0-9a-fA-F]{6}$/);
+    expect(legion.body.project.archived).toBe(false);
+    const tmai = await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "TMAI", color: "#7c3aed" }) });
+    expect(tmai.body.project.color).toBe("#7c3aed");
+    expect((await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "TMAI" }) })).status).toBe(409);
+    for (const bad of [{ name: "  " }, { name: "x".repeat(41) }, { name: "色", color: "red" }, { name: "序", sort: 1.5 }]) {
+      expect((await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify(bad) })).status).toBe(400);
+    }
+    const listed = await api(ownerToken, `/api/requirements/projects${q}`);
+    expect(listed.body.projects.map((p: any) => p.name)).toEqual(["军团项目", "TMAI"]);
+    // 权限:viewer 能读不能写;节点令牌一律拒绝;别的网络看不见、改不了
+    expect((await api(viewerToken, `/api/requirements/projects${q}`)).body.projects.length).toBe(2);
+    expect((await api(viewerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "越权" }) })).status).toBe(403);
+    expect((await api(nodeToken, `/api/requirements/projects${q}`)).body.error).toBe("user_token_required");
+    expect((await api(otherToken, "/api/requirements/projects")).body.projects).toEqual([]);
+    expect((await api(otherToken, `/api/requirements/projects/${tmai.body.project.id}`, { method: "PATCH", body: JSON.stringify({ name: "抢" }) })).status).toBe(404);
+    const foreign = await api(otherToken, "/api/requirements/projects", { method: "POST", body: JSON.stringify({ name: "别人的项目" }) });
+    expect(foreign.status).toBe(201);
+
+    // 卡片上的 project_id:POST / PATCH / GET;别的网络的项目被拒
+    const card = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "有项目的卡", project_id: legion.body.project.id }) });
+    expect(card.status).toBe(201);
+    expect(card.body.requirement.project_id).toBe(legion.body.project.id);
+    const bare = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "没项目的卡" }) });
+    expect(bare.body.requirement.project_id).toBeNull();
+    expect((await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "外网项目", project_id: foreign.body.project.id }) })).body.error).toBe("project_not_in_network");
+    const path = `/api/requirements/${card.body.requirement.id}`;
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ project_id: foreign.body.project.id }) })).body.error).toBe("project_not_in_network");
+    const moved = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ project_id: tmai.body.project.id }) });
+    expect(moved.status).toBe(200);
+    expect(moved.body.requirement.project_id).toBe(tmai.body.project.id);
+    expect(moved.body.requirement.name).toBe("有项目的卡");
+
+    // 改名 / 改色 / 排序
+    const renamed = await api(ownerToken, `/api/requirements/projects/${tmai.body.project.id}${q}`, { method: "PATCH", body: JSON.stringify({ name: "TMAI 平台", color: "#0891b2", sort: -1 }) });
+    expect(renamed.body.project).toMatchObject({ name: "TMAI 平台", color: "#0891b2", sort: -1 });
+    expect((await api(ownerToken, `/api/requirements/projects/${tmai.body.project.id}${q}`, { method: "PATCH", body: JSON.stringify({ name: "军团项目" }) })).status).toBe(409);
+    expect((await api(ownerToken, `/api/requirements/projects${q}`)).body.projects[0].name).toBe("TMAI 平台");
+
+    // 归档:引用保留,但不能再被选
+    const archived = await api(ownerToken, `/api/requirements/projects/${tmai.body.project.id}${q}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    expect(archived.body.project.archived).toBe(true);
+    const kept = (await api(ownerToken, "/api/requirements")).body.requirements.find((r: any) => r.id === card.body.requirement.id);
+    expect(kept.project_id).toBe(tmai.body.project.id);
+    expect((await api(ownerToken, `/api/requirements/${bare.body.requirement.id}`, { method: "PATCH", body: JSON.stringify({ project_id: tmai.body.project.id }) })).body.error).toBe("project_archived");
+
+    // 删除:卡片一张不少,引用置空
+    await api(ownerToken, `/api/requirements/${bare.body.requirement.id}`, { method: "PATCH", body: JSON.stringify({ project_id: legion.body.project.id }) });
+    const before = (await api(ownerToken, "/api/requirements")).body.requirements.length;
+    expect((await api(viewerToken, `/api/requirements/projects/${legion.body.project.id}${q}`, { method: "DELETE" })).status).toBe(403);
+    const del = await api(ownerToken, `/api/requirements/projects/${legion.body.project.id}${q}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    const after = (await api(ownerToken, "/api/requirements")).body.requirements;
+    expect(after.length).toBe(before);
+    expect(after.find((r: any) => r.id === bare.body.requirement.id).project_id).toBeNull();
+    expect((await api(ownerToken, `/api/requirements/projects${q}`)).body.projects.map((p: any) => p.name)).toEqual(["TMAI 平台"]);
+    // 清空卡片项目
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ project_id: null }) })).body.requirement.project_id).toBeNull();
+  });
+
   test("owner creates a card in the pool", async () => {
     const created = await api(ownerToken, "/api/requirements", {
       method: "POST",

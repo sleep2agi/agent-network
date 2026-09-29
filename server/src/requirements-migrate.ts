@@ -23,3 +23,22 @@ export function migrateRequirementAgentOwners(database: DbAdapter): { moved: num
   }
   return { moved };
 }
+
+/**
+ * 项目表(需求卡的「项目」)。只建表、建索引,不塞任何项目 —— 军团项目 / TMAI 由 owner 在界面里建。
+ * CREATE ... IF NOT EXISTS:重复执行无副作用。放在这里而不是 db.ts,db.ts 的行号被文档钉着。
+ */
+export function ensureRequirementProjects(database: DbAdapter): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS requirement_projects (
+      project_id  TEXT PRIMARY KEY,
+      network_id  TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      color       TEXT NOT NULL,
+      sort        INTEGER NOT NULL DEFAULT 0,
+      archived    INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_requirement_projects_network ON requirement_projects(network_id, sort);
+  `);
+}

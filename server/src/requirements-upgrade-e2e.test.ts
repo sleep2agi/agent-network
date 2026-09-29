@@ -99,6 +99,12 @@ test("an upgraded hub moves node owners to agent_owner and then enforces human o
   const ticked = await api(token, `/api/requirements/${upgraded.id}/checklist/two?network_id=${net}`, { method: "PATCH", body: JSON.stringify({ done: true }) });
   expect(ticked.body.requirement.checklist).toEqual([{ id: "one", text: "第一步", done: false }, { id: "two", text: "第二步", done: true }]);
 
+  // 项目:升级后没有任何项目(不预置),建一个、给旧卡挂上
+  expect((await api(token, `/api/requirements/projects?network_id=${net}`)).body.projects).toEqual([]);
+  const proj = await api(token, `/api/requirements/projects?network_id=${net}`, { method: "POST", body: JSON.stringify({ name: "军团项目" }) });
+  expect(proj.status).toBe(201);
+  expect((await api(token, path, { method: "PATCH", body: JSON.stringify({ project_id: proj.body.project.id }) })).body.requirement.project_id).toBe(proj.body.project.id);
+
   // 第三次启动(同一个库):迁移不再改任何东西
   await stopHub();
   await startHub();
@@ -109,4 +115,6 @@ test("an upgraded hub moves node owners to agent_owner and then enforces human o
   expect(same.agent_owner).toEqual(agent);
   expect(same.description).toBe("# 验收\n- 能用");
   expect(same.checklist.map((i: any) => i.done)).toEqual([false, true]);
+  expect(same.project_id).toBe(proj.body.project.id);
+  expect((await api(token, `/api/requirements/projects?network_id=${net}`)).body.projects.map((p: any) => p.name)).toEqual(["军团项目"]);
 }, 60_000);
