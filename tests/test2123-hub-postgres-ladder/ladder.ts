@@ -1,11 +1,11 @@
-// L2–L4 of the PostgreSQL ladder (L0/L1 are checked by run.sh).
+// L3–L5 of the PostgreSQL ladder (L0–L2 are checked by run.sh).
 // Prints one PASS/FAIL line per level and exits with the highest level reached
 // as `LADDER_LEVEL=<n>` on stdout. Never throws past main(): a thrown error is
 // a FAIL at the level being attempted, not a crash of the harness.
 const base = process.argv[2];
 if (!base) { console.error("usage: ladder.ts <hub base url>"); process.exit(2); }
 
-let level = 1;
+let level = 2;
 function pass(n: number, what: string) { level = n; console.log(`PASS L${n} ${what}`); }
 function fail(n: number, what: string): never {
   console.log(`FAIL L${n} ${what}`);
@@ -40,47 +40,47 @@ async function mcp(token: string, name: string, args: Record<string, unknown>) {
 }
 
 async function main() {
-  // L2 — first registered user is the hub admin.
+  // L3 — first registered user is the hub admin.
   const reg = await json("/api/auth/register", {
     method: "POST", body: JSON.stringify({ username: "admin", password: "StrongPassw0rd" }),
   });
-  if (reg.status !== 200 || reg.body?.ok !== true) fail(2, `register: ${reg.status} ${JSON.stringify(reg.body).slice(0, 300)}`);
-  if (reg.body.user?.role !== "admin") fail(2, `first user role is ${JSON.stringify(reg.body.user?.role)}, expected "admin"`);
-  pass(2, "first registered user is admin");
+  if (reg.status !== 200 || reg.body?.ok !== true) fail(3, `register: ${reg.status} ${JSON.stringify(reg.body).slice(0, 300)}`);
+  if (reg.body.user?.role !== "admin") fail(3, `first user role is ${JSON.stringify(reg.body.user?.role)}, expected "admin"`);
+  pass(3, "first registered user is admin");
 
-  // L3 — login → network → node token → report_status → POST /api/task.
+  // L4 — login → network → node token → report_status → POST /api/task.
   const login = await json("/api/auth/login", {
     method: "POST", body: JSON.stringify({ username: "admin", password: "StrongPassw0rd" }),
   });
   const utok: string = login.body?.token ?? "";
-  if (!utok.startsWith("utok_")) fail(3, `login: ${login.status} ${JSON.stringify(login.body).slice(0, 300)}`);
+  if (!utok.startsWith("utok_")) fail(4, `login: ${login.status} ${JSON.stringify(login.body).slice(0, 300)}`);
   const net = await json("/api/networks", { method: "POST", token: utok, body: JSON.stringify({ name: "pg-ladder" }) });
   const networkId: string = net.body?.network_id ?? net.body?.network?.network_id ?? "";
-  if (!networkId) fail(3, `create network: ${net.status} ${JSON.stringify(net.body).slice(0, 300)}`);
+  if (!networkId) fail(4, `create network: ${net.status} ${JSON.stringify(net.body).slice(0, 300)}`);
   const nt = await json("/api/auth/node-token", {
     method: "POST", token: utok, body: JSON.stringify({ network_id: networkId, node_name: "pg-agent" }),
   });
   const ntok: string = nt.body?.token ?? "";
-  if (!ntok.startsWith("ntok_")) fail(3, `node token: ${nt.status} ${JSON.stringify(nt.body).slice(0, 300)}`);
+  if (!ntok.startsWith("ntok_")) fail(4, `node token: ${nt.status} ${JSON.stringify(nt.body).slice(0, 300)}`);
   const rs = await mcp(ntok, "report_status", {
     resume_id: "00000000-0000-4000-8000-000000002123", alias: "pg-agent", status: "idle", network_id: networkId,
   });
-  if (rs.ok !== true) fail(3, `report_status: ${JSON.stringify(rs).slice(0, 300)}`);
+  if (rs.ok !== true) fail(4, `report_status: ${JSON.stringify(rs).slice(0, 300)}`);
   const task = await json("/api/task", {
     method: "POST", token: utok,
     body: JSON.stringify({ alias: "pg-agent", task: "ladder-ping", priority: "normal", network_id: networkId }),
   });
   const taskId: string = task.body?.task_id ?? "";
-  if (task.body?.ok !== true || !taskId) fail(3, `send task: ${task.status} ${JSON.stringify(task.body).slice(0, 300)}`);
-  pass(3, "login, node token, report_status, POST /api/task");
+  if (task.body?.ok !== true || !taskId) fail(4, `send task: ${task.status} ${JSON.stringify(task.body).slice(0, 300)}`);
+  pass(4, "login, node token, report_status, POST /api/task");
 
-  // L4 — the node replies; the tool says ok AND the task row is terminal.
+  // L5 — the node replies; the tool says ok AND the task row is terminal.
   const rep = await mcp(ntok, "send_reply", { in_reply_to: taskId, text: "ladder-pong", status: "replied" });
-  if (rep.ok !== true) fail(4, `send_reply: ${JSON.stringify(rep).slice(0, 300)}`);
+  if (rep.ok !== true) fail(5, `send_reply: ${JSON.stringify(rep).slice(0, 300)}`);
   const list = await json(`/api/tasks?to_name=pg-agent&network_id=${encodeURIComponent(networkId)}`, { token: utok });
   const row = (list.body?.tasks ?? []).find((t: any) => t.task_id === taskId);
-  if (row?.status !== "replied" || row?.result !== "ladder-pong") fail(4, `task row after reply: ${JSON.stringify(row).slice(0, 300)}`);
-  pass(4, "send_reply ok and task row replied");
+  if (row?.status !== "replied" || row?.result !== "ladder-pong") fail(5, `task row after reply: ${JSON.stringify(row).slice(0, 300)}`);
+  pass(5, "send_reply ok and task row replied");
 
   console.log(`LADDER_LEVEL=${level}`);
 }
