@@ -92,6 +92,13 @@ describe("requirements MCP tools", () => {
       expect((await s.call("requirements_list", {})).requirements.some((r: any) => r.id === id)).toBe(false);
       expect((await s.call("requirements_list", { include_archived: true })).requirements.some((r: any) => r.id === id)).toBe(true);
       expect(Array.isArray((await s.call("projects_list", {})).projects)).toBe(true);
+      // 子需求:建子卡、父卡上的进度、按父卡 / 顶层过滤
+      const child = await s.call("requirements_create", { name: "子需求", parent_id: id });
+      expect(child.requirement.parent_id).toBe(id);
+      expect((await s.call("requirements_get", { id })).requirement.children.total).toBe(1);
+      expect((await s.call("requirements_list", { parent_id: id })).requirements.map((r: any) => r.id)).toEqual([child.requirement.id]);
+      expect((await s.call("requirements_list", { top_level: true, include_archived: true })).requirements.some((r: any) => r.id === child.requirement.id)).toBe(false);
+      expect((await s.call("requirements_update", { id, parent_id: child.requirement.id })).error).toBe("parent_cycle");
     } finally { await s.close(); }
   });
 

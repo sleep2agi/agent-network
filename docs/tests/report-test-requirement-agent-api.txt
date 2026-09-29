@@ -1,7 +1,14 @@
-Requirements agent API (node tokens) + MCP tools + external_ref — 2026-09-29
+Requirements agent API (node tokens) + MCP tools + external_ref + parent_id — 2026-09-29
 Base: origin/main 0eff20d3 (#2076 merged)
 
-server/src/requirements-http.test.ts   16 pass / 250 expects
+server/src/requirements-http.test.ts   17 pass
+  parent_id: children {total, done}; parent_id / top_level filters; cycle
+  (parent under its child, self) → parent_cycle; 5 levels ok, 6th →
+  parent_too_deep, moving a 2-level subtree under level 4 → too deep, under
+  level 3 ok; other network's card as parent → parent_not_found (both ways);
+  bad id → 400; detach with null; deleting the parent keeps every child
+  (count -1 only) and detaches only its direct children.
+  Witnessed red with the cycle check disabled (http 16/17).
   node token (bound to node_sync_bot): list / create (created_by + updated_by =
   {node,node_sync_bot}) / get / patch / checklist tick / archive; DELETE → 403
   user_token_required; archived hidden unless include_archived=1; a human edit
@@ -14,16 +21,17 @@ server/src/requirements-http.test.ts   16 pass / 250 expects
   empty ref / javascript: url → 400; upsert without ref → 400. Filters:
   status (+400 on bad), updated_since (past / future / 400), owner (+400),
   external_ref. Earlier node-token assertions updated to the new rules.
-server/src/requirements-mcp.test.ts    4 pass / 41 expects (real MCP in-memory
+server/src/requirements-mcp.test.ts    4 pass (+ child create, children count,
+  parent_id / top_level filters, cycle via MCP) (real MCP in-memory
   transport): 7 tools registered, no delete tool; bad status / person kind /
   item id / empty name rejected at the protocol boundary; idempotent GitHub
   issue sync; 409 + existing_id + status; update / tick / get / filters;
   owner_must_be_human; archive; cross-network node token sees / touches
   nothing and cannot write into this network; user token unchanged.
 server/src/requirements-upgrade-migration.test.ts  + new columns, legacy rows
-  archived 0, unique external_ref index, ensure twice is a no-op.
+  archived 0, unique external_ref index, parent_id column + index, ensure twice is a no-op.
 Witnessed red: with NODE_TOKEN_OPERATIONS emptied, mcp 2/4 and http 4/16 fail.
 tests/test629-mcp-schema-policy: inventory 69 tools in source order (PASS).
-Full server suite (scripts/test-aggregate.ts): 119 files, 1427 pass, 0 fail.
+Full server suite (scripts/test-aggregate.ts): 119 files, 1428 pass, 0 fail.
 Docs: docs-site/docs{,/en}/api/mcp-tools.md index + section; coverage and
 anchor-section gates green. No production Hub/database touched.

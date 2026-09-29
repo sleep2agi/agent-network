@@ -38,6 +38,9 @@ type Row = {
   created_by_json: string | null;
   updated_by_json: string | null;
   updated_at: string | null;
+  parent_id: string | null;
+  children_total: number | null;
+  children_done: number | null;
   participants_json: string;
   requirement_id: string;
   network_id: string;
@@ -288,6 +291,9 @@ function toPublic(row: Row) {
     // 谁建的 / 谁最后改的:{kind:"user"|"node", id}。旧卡只有 created_by(用户 id)。
     created_by: row.created_by_json ? JSON.parse(row.created_by_json) : row.created_by ? { kind: "user", id: row.created_by } : null,
     updated_by: row.updated_by_json ? JSON.parse(row.updated_by_json) : null,
+    // 子需求:parent_id(可空)和父卡上的子需求进度(未归档的子需求数 / 其中完成的)。
+    parent_id: row.parent_id || null,
+    children: { total: Number(row.children_total ?? 0), done: Number(row.children_done ?? 0) },
   };
 }
 
@@ -309,7 +315,9 @@ function canWrite(ctx: RequirementsRequestContext, networkId: string | null): bo
   return canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at";
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, " +
+  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0) AS children_total, " +
+  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
 function personRef(value: unknown, networkId: string): PersonRef {
@@ -364,7 +372,63 @@ function operationOf(req: Request, url: URL): string {
   return "create";
 }
 
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements"] as const;
+
+// ── 子需求 ──
+// parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
+export const MAX_REQUIREMENT_DEPTH = 5;
+function levelOf(id: string): number {
+  let level = 1;
+  let cur: string | null = id;
+  const seen = new Set<string>();
+  while (cur) {
+    if (seen.has(cur)) return Number.POSITIVE_INFINITY; // 已存在的环(不该有):当作超深,拒绝挂上去
+    seen.add(cur);
+    const up = db.get<{ parent_id: string | null }>("SELECT parent_id FROM requirements WHERE requirement_id = ?1", cur);
+    cur = up?.parent_id ?? null;
+    if (cur) level++;
+  }
+  return level;
+}
+/** 以 id 为根的子树还有几层(叶子 = 0)。 */
+function heightBelow(id: string): number {
+  let height = 0;
+  let frontier = [id];
+  const seen = new Set<string>([id]);
+  while (frontier.length && height <= MAX_REQUIREMENT_DEPTH) {
+    const next: string[] = [];
+    for (const f of frontier) {
+      for (const c of db.all<{ requirement_id: string }>("SELECT requirement_id FROM requirements WHERE parent_id = ?1", f)) {
+        if (!seen.has(c.requirement_id)) { seen.add(c.requirement_id); next.push(c.requirement_id); }
+      }
+    }
+    if (!next.length) break;
+    height++;
+    frontier = next;
+  }
+  return height;
+}
+/** 校验要挂的父卡:同网络、存在、不是自己或自己的后代(不成环)、挂上后不超过 5 层。返回错误码或 null。 */
+function parentError(networkId: string, parentId: string, selfId: string | null): string | null {
+  const parent = db.get<{ network_id: string; requirement_id: string }>("SELECT network_id, requirement_id FROM requirements WHERE requirement_id = ?1", parentId);
+  if (!parent || parent.network_id !== networkId) return "parent_not_found";
+  if (selfId) {
+    // 从父卡往上走,碰到自己 = 成环
+    let cur: string | null = parentId;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (cur === selfId) return "parent_cycle";
+      seen.add(cur);
+      cur = db.get<{ parent_id: string | null }>("SELECT parent_id FROM requirements WHERE requirement_id = ?1", cur)?.parent_id ?? null;
+    }
+  }
+  const depth = levelOf(parentId) + 1 + (selfId ? heightBelow(selfId) : 0);
+  return depth > MAX_REQUIREMENT_DEPTH ? "parent_too_deep" : null;
+}
+function parentIdOf(value: unknown): string | null | undefined {
+  if (value === null || value === "") return null;
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value) ? value : undefined;
+}
 
 // ── 谁做的 ──
 // 用户令牌 = {kind:"user", id:user_id};节点令牌 = {kind:"node", id:令牌绑定的 node_id}(老令牌没绑 node_id 时按
@@ -433,6 +497,12 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   if (ref === undefined) return jsonError("invalid_external_ref", 400);
   const extUrl = body.external_url === undefined ? null : externalUrl(body.external_url);
   if (extUrl === undefined) return jsonError("invalid_external_url", 400);
+  const parentId = body.parent_id === undefined ? null : parentIdOf(body.parent_id);
+  if (parentId === undefined) return jsonError("invalid_parent_id", 400);
+  if (parentId) {
+    const err = parentError(networkId, parentId, null);
+    if (err) return jsonError(err, 400);
+  }
   if (ref) {
     const existing = rowByExternalRef(networkId, ref);
     // 同一个外部条目再建一次 = 冲突,回已有的 id(同步方改用 upsert,或按这个 id PATCH)。
@@ -450,9 +520,9 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   try {
     db.run(
       `INSERT INTO requirements
-       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0)`,
-      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor],
+       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21)`,
+      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId],
     );
   } catch {
     // 并发的同一个 external_ref / client_id:唯一索引挡住了第二个,回已有的那条。
@@ -470,7 +540,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
 }
 
 // ── 修改(省略的字段保留原值) ──
-const PATCH_FIELDS = ["column", "issues", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "description", "checklist", "project_id", "external_ref", "external_url", "archived"];
+const PATCH_FIELDS = ["column", "issues", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "description", "checklist", "project_id", "external_ref", "external_url", "archived", "parent_id"];
 function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Record<string, unknown>): Response {
   if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
@@ -526,6 +596,16 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     if (next === undefined) return jsonError("invalid_external_url", 400);
     extUrl = next;
   }
+  let parentId = row.parent_id;
+  if (has("parent_id")) {
+    const next = parentIdOf(body.parent_id);
+    if (next === undefined) return jsonError("invalid_parent_id", 400);
+    if (next) {
+      const err = parentError(row.network_id, next, row.requirement_id);
+      if (err) return jsonError(err, 400);
+    }
+    parentId = next;
+  }
   let archived = row.archived ? 1 : 0;
   if (has("archived")) {
     if (typeof body.archived !== "boolean") return jsonError("invalid_archived", 400);
@@ -534,10 +614,10 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   const updatedAt = new Date().toISOString();
   db.run(
     `UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6,
-       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18
+       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18, parent_id = ?19
      WHERE requirement_id = ?3`,
     [has("column") ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, has("issues") ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
-      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx))],
+      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx)), parentId],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json({ ok: true, requirement: toPublic(updated) });
@@ -550,7 +630,7 @@ function scopedRow(ctx: RequirementsRequestContext, id: string): Row | undefined
   return db.get<Row>(sql, ...params) ?? undefined;
 }
 
-/** GET 的筛选(同步方 / MCP 用):status、project_id、owner / agent_owner(kind:id)、updated_since、external_ref、include_archived。 */
+/** GET 的筛选(同步方 / MCP 用):status、project_id、owner / agent_owner(kind:id)、updated_since、external_ref、parent_id / top_level、include_archived。 */
 function listFilters(url: URL, sql: string, params: unknown[]): string | Response {
   const q = url.searchParams;
   const status = q.get("status");
@@ -576,6 +656,9 @@ function listFilters(url: URL, sql: string, params: unknown[]): string | Respons
   }
   const ref = q.get("external_ref");
   if (ref !== null) sql += ` AND external_ref = ?${params.push(ref)}`;
+  const parent = q.get("parent_id");
+  if (parent !== null) sql += parent === "none" ? " AND parent_id IS NULL" : ` AND parent_id = ?${params.push(parent)}`;
+  if (q.get("top_level") === "1") sql += " AND parent_id IS NULL";
   if (q.get("include_archived") !== "1") sql += " AND COALESCE(archived, 0) = 0";
   return sql;
 }
@@ -675,6 +758,8 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const row = scopedRow(ctx, id);
     if (!row) return jsonError("requirement_not_found", 404);
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    // 子需求不跟着删:先解挂(变成顶层),再删父卡。
+    db.run("UPDATE requirements SET parent_id = NULL WHERE parent_id = ?1", [row.requirement_id]);
     db.run("DELETE FROM requirements WHERE requirement_id = ?1", [row.requirement_id]);
     return Response.json({ ok: true, deleted: row.requirement_id });
   }

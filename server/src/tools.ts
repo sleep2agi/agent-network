@@ -5708,13 +5708,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     agent_owner: reqPerson.nullable().optional().describe("负责 Agent: must be {kind:'node'}"),
     participants: z.array(reqPerson).max(100).optional(),
     external_url: z.string().max(500).nullable().optional(),
+    parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
   };
   const pick = (args: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => args[k] !== undefined).map(k => [k, args[k]]));
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
 
   server.tool(
     "requirements_list",
-    "List requirement tasks in your network. Filters: status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, include_archived. Newest first, max 500.",
+    "List requirement tasks in your network. Filters: status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived. Newest first, max 500. Each task carries children {total, done}.",
     {
       network_id: z.string().max(200).optional(),
       status: z.enum(["pool", "doing", "done"]).optional(),
@@ -5724,11 +5725,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       updated_since: z.string().max(40).optional(),
       external_ref: z.string().max(200).optional(),
       include_archived: z.boolean().optional(),
+      parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
+      top_level: z.boolean().optional(),
     },
     async (args) => {
       const q = new URLSearchParams();
-      for (const k of ["status", "project_id", "owner", "agent_owner", "updated_since", "external_ref"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      for (const k of ["status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
       if (args.include_archived) q.set("include_archived", "1");
+      if (args.top_level) q.set("top_level", "1");
       return requirementsCall("GET", `/api/requirements${q.size ? `?${q}` : ""}`, args.network_id);
     },
   );

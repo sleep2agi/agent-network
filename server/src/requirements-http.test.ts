@@ -293,7 +293,52 @@ describe("requirements stay on the hub", () => {
     expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "" }) })).body.requirement.due).toBe("");
     const listed = await api(ownerToken, "/api/requirements");
     expect(listed.body.capabilities).toContain("due_datetime");
-    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api"]);
+    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements"]);
+  });
+
+  test("sub-requirements: parent_id in the same network, no cycles, ≤ 5 levels, child counts, filters, delete detaches children", async () => {
+    const mk = async (name: string, extra: Record<string, unknown> = {}) => (await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name, network_id: ownerNetwork, ...extra }) })).body.requirement;
+    const root = await mk("父需求");
+    const a = await mk("子 A", { parent_id: root.id });
+    const b = await mk("子 B", { parent_id: root.id, column: "done" });
+    expect(a.parent_id).toBe(root.id);
+    const parent = (await api(ownerToken, `/api/requirements/${root.id}`)).body.requirement;
+    expect(parent.children).toEqual({ total: 2, done: 1 });
+    expect(parent.parent_id).toBeNull();
+    // 过滤
+    const kids = await api(ownerToken, `/api/requirements?network_id=${ownerNetwork}&parent_id=${root.id}`);
+    expect(kids.body.requirements.map((r: any) => r.id).sort()).toEqual([a.id, b.id].sort());
+    const top = await api(ownerToken, `/api/requirements?network_id=${ownerNetwork}&top_level=1`);
+    expect(top.body.requirements.some((r: any) => r.id === root.id)).toBe(true);
+    expect(top.body.requirements.some((r: any) => r.id === a.id)).toBe(false);
+    // 成环:把父卡挂到自己的子卡下 / 挂到自己
+    expect((await api(ownerToken, `/api/requirements/${root.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: a.id }) })).body.error).toBe("parent_cycle");
+    expect((await api(ownerToken, `/api/requirements/${a.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: a.id }) })).body.error).toBe("parent_cycle");
+    // 深度:第 5 层可以,第 6 层不行;把一棵 2 层的子树挂到第 4 层下面也不行
+    let chain = root;
+    const levels = [root];
+    for (let i = 2; i <= 5; i++) { chain = await mk(`第 ${i} 层`, { parent_id: chain.id }); levels.push(chain); }
+    expect(chain.parent_id).toBe(levels[3].id);
+    expect((await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "第 6 层", network_id: ownerNetwork, parent_id: chain.id }) })).body.error).toBe("parent_too_deep");
+    const subtree = await mk("子树根");
+    await mk("子树叶", { parent_id: subtree.id });
+    expect((await api(ownerToken, `/api/requirements/${subtree.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: levels[3].id }) })).body.error).toBe("parent_too_deep");
+    expect((await api(ownerToken, `/api/requirements/${subtree.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: levels[2].id }) })).status).toBe(200);
+    // 别的网络的卡当父卡:拒绝;坏 id:拒绝
+    const foreign = (await api(otherToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "别的网络的" }) })).body.requirement;
+    expect((await api(ownerToken, `/api/requirements/${a.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: foreign.id }) })).body.error).toBe("parent_not_found");
+    expect((await api(otherToken, `/api/requirements/${foreign.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: root.id }) })).body.error).toBe("parent_not_found");
+    expect((await api(ownerToken, `/api/requirements/${a.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: "bad id!" }) })).body.error).toBe("invalid_parent_id");
+    // 解挂
+    expect((await api(ownerToken, `/api/requirements/${b.id}`, { method: "PATCH", body: JSON.stringify({ parent_id: null }) })).body.requirement.parent_id).toBeNull();
+    // 删父卡:子卡保留、变顶层
+    const before = (await api(ownerToken, `/api/requirements?network_id=${ownerNetwork}`)).body.requirements.length;
+    expect((await api(ownerToken, `/api/requirements/${root.id}`, { method: "DELETE" })).status).toBe(200);
+    const after = (await api(ownerToken, `/api/requirements?network_id=${ownerNetwork}`)).body.requirements;
+    expect(after.length).toBe(before - 1);
+    expect(after.find((r: any) => r.id === a.id).parent_id).toBeNull();
+    expect(after.find((r: any) => r.id === levels[1].id).parent_id).toBeNull();
+    expect(after.find((r: any) => r.id === levels[2].id).parent_id).toBe(levels[1].id);
   });
 
   test("owner creates a card in the pool", async () => {

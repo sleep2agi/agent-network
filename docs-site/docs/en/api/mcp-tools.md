@@ -132,7 +132,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 
 | Tool | What it does |
 |------|------|
-| `requirements_list` | List tasks in your network; filter by status / project_id / owner / agent_owner / updated_since / external_ref; archived ones hidden by default |
+| `requirements_list` | List tasks in your network; filter by status / project_id / owner / agent_owner / updated_since / external_ref / parent_id / top_level; archived ones hidden by default |
 | `requirements_get` | Get one task by id (description, checklist, owners, project, external_ref) |
 | `requirements_create` | Create a task; a duplicate `external_ref` in the network returns 409 `external_ref_exists` + `existing_id` |
 | `requirements_update` | Patch a task, omitted fields kept; `archived: true` archives it (agents cannot delete) |
@@ -856,19 +856,19 @@ Tasks (requirement cards) live on the Hub; the app's 任务 page and agents read
 - **Delete is human-only** (REST `DELETE /api/requirements/{id}`; node tokens get 403 `user_token_required`); agents archive with `archived: true`. Creating / editing / deleting projects is human-only too.
 - Every task records `created_by` / `updated_by`: `{kind: "user" | "node", id}`; a node token is recorded as its bound `node_id`.
 
-**Fields**: `name`, `column` (pool / doing / done), `priority` (high / normal / low), `due` (`YYYY-MM-DD` all day, or an ISO instant with `Z` / `±HH:MM`, stored as UTC seconds), `description` (markdown, ≤ 20000 chars), `checklist` (`[{id, text, done}]`, ≤ 100 items; replaced as a whole), `owner` (负责人, `{kind:"user"}` only), `agent_owner` (负责 Agent, `{kind:"node"}` only), `participants`, `project_id`, `external_ref` (unique per network, e.g. `github:owner/repo#123`), `external_url` (http(s) link), `archived`.
+**Fields**: `name`, `column` (pool / doing / done), `priority` (high / normal / low), `due` (`YYYY-MM-DD` all day, or an ISO instant with `Z` / `±HH:MM`, stored as UTC seconds), `description` (markdown, ≤ 20000 chars), `checklist` (`[{id, text, done}]`, ≤ 100 items; replaced as a whole), `owner` (负责人, `{kind:"user"}` only), `agent_owner` (负责 Agent, `{kind:"node"}` only), `participants`, `project_id`, `parent_id` (sub-requirements: same network, no cycles, at most 5 levels; a parent returns `children: {total, done}`; deleting a parent keeps its children and makes them top level), `external_ref` (unique per network, e.g. `github:owner/repo#123`), `external_url` (http(s) link), `archived`.
 
 **HTTP endpoints** (`Authorization: Bearer <token>`; multi-network user tokens add `?network_id=`)
 
 | Method | Path | Notes |
 |------|------|------|
-| GET | `/api/requirements` | List; filters `status`, `project_id` (`none` = no project), `owner` / `agent_owner` (`user:<id>` / `node:<id>` / `none`), `updated_since` (ISO), `external_ref`, `include_archived=1`; the response carries `capabilities` |
+| GET | `/api/requirements` | List; filters `status`, `project_id` (`none` = no project), `owner` / `agent_owner` (`user:<id>` / `node:<id>` / `none`), `updated_since` (ISO), `external_ref`, `parent_id` (`none` = top level) / `top_level=1`, `include_archived=1`; the response carries `capabilities` |
 | GET | `/api/requirements/{id}` | One task |
 | POST | `/api/requirements` | Create; duplicate `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
 | POST | `/api/requirements/upsert` | Create or patch by `external_ref` (omitted fields, including status, are kept); returns `{requirement, created}` |
 | PATCH | `/api/requirements/{id}` | Patch (omitted fields kept) |
 | PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`; only that item |
-| DELETE | `/api/requirements/{id}` | Delete (humans only) |
+| DELETE | `/api/requirements/{id}` | Delete (humans only); children are kept and detached |
 | GET | `/api/requirements/projects` | Projects (creating / editing / deleting projects is human-only) |
 
 **Sync example (GitHub issues → tasks)**: call `requirements_upsert_by_external_ref` once per issue with `external_ref` = `github:<owner>/<repo>#<number>` and `external_url` = the issue link; re-syncing updates the same task instead of creating a duplicate. Use `updated_since` on `requirements_list` for incremental sync.

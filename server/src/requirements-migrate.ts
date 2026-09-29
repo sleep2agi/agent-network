@@ -47,4 +47,5 @@ export function ensureRequirementProjects(database: DbAdapter): void {
 export function ensureRequirementIndexes(database: DbAdapter): void {
   database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_external_ref ON requirements(network_id, external_ref) WHERE external_ref IS NOT NULL");
   database.exec("CREATE INDEX IF NOT EXISTS idx_requirements_network_updated ON requirements(network_id, updated_at)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_requirements_parent ON requirements(parent_id) WHERE parent_id IS NOT NULL");
 }
