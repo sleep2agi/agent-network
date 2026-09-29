@@ -509,7 +509,7 @@ Key 在 `anet node create` 时输入，保存在当前项目的 `.anet/nodes/<�
 ## 下一步
 
 **深入概念**：
-- [多用户与权限](/guide/multi-user) — 成员能访问哪些 Agent、人与人私聊接口；客户端的用户管理 / 注册 / 私聊还没发
+- [多用户与权限](/guide/multi-user) — 成员能访问哪些 Agent、人与人私聊接口；用户管理、注册、私聊从 app 0.2.153 起
 - [网络隔离](/concepts/networks) — RBAC 权限矩阵、邀请码、数据隔离原理
 
 **实操**：

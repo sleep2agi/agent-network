@@ -2,7 +2,7 @@
 
 Starting with Hub 0.9.0-preview.68, the server has two behaviors that are already live: which Agents a member can access, and a human-to-human direct-message API inside one network.
 
-User management, registration, and direct messages in the desktop and mobile apps are not released. They are coming in an app release. Do not treat those three as screens you can already open. Existing accounts, tokens, and the four network roles stay as described in [Accounts, Tokens & Roles](/en/guide/account-system). CLI registration and invite codes are unchanged.
+User management, registration, and direct messages are in the app starting with 0.2.153. A user who just registered, or one an admin created, sees no Agents by default; an admin has to grant them in User management. Existing accounts, tokens, and the four network roles stay as described in [Accounts, Tokens & Roles](/en/guide/account-system). CLI registration and invite codes are unchanged.
 
 ## Which Agents a member can access
 
@@ -18,7 +18,7 @@ Two users in the same network can message each other with these endpoints. User 
 - `GET /api/dm`
 - `GET /api/dm/threads`
 
-The app does not have this screen yet. Fields and errors are in [the same section](/en/api/rest-admin#human-dm).
+Starting with app 0.2.153, people in the same network can message each other from People. Fields and errors are in [the same section](/en/api/rest-admin#human-dm).
 
 ## A node token cannot administer accounts
 
