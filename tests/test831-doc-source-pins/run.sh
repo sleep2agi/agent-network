@@ -256,8 +256,10 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/en/guide/schedules.md
 #   两页都没有 #L 源码行号 pin。uniq 仍 8、occ 仍 22。
 [[ "$files" -eq 113 ]] || fail "预期扫 113 个文档文件(= git ls-files 的结果),实际 $files"
-[[ "$uniq"  -eq 8  ]] || fail "预期 8 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 22 ]] || fail "预期 22 处原始出现,实际 $occ"
+# #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
+# 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
+[[ "$uniq"  -eq 7  ]] || fail "预期 7 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 20 ]] || fail "预期 20 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------
