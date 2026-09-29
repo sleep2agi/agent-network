@@ -686,7 +686,9 @@ function listFilters(url: URL, sql: string, params: unknown[]): string | Respons
   const parent = q.get("parent_id");
   if (parent !== null) sql += parent === "none" ? " AND parent_id IS NULL" : ` AND parent_id = ?${params.push(parent)}`;
   if (q.get("top_level") === "1") sql += " AND parent_id IS NULL";
-  if (q.get("include_archived") !== "1") sql += " AND COALESCE(archived, 0) = 0";
+  // Explicit archived-only wins over the legacy include-all switch.
+  if (q.get("archived") === "true") sql += " AND COALESCE(archived, 0) = 1";
+  else if (q.get("include_archived") !== "1") sql += " AND COALESCE(archived, 0) = 0";
   return sql;
 }
 

@@ -55,6 +55,61 @@ afterAll(() => {
 describe("requirements stay on the hub", () => {
   let id = "";
 
+  test("name limit is consistent across create, PATCH and both upsert paths", async () => {
+    const send = (path: string, method: string, body: unknown) => api(ownerToken, path, { method, body: JSON.stringify(body) });
+    const ref = 'github:test/name-limit#1';
+    const created = await send('/api/requirements/upsert', 'POST', { name: '字'.repeat(80), external_ref: ref });
+    expect(created.status).toBe(201);
+    const path = `/api/requirements/${created.body.requirement.id}`;
+    for (const name of ['a'.repeat(150), '字'.repeat(81), '   ', null, 12]) {
+      for (const [url, method, extra] of [
+        ['/api/requirements', 'POST', {}],
+        [path, 'PATCH', {}],
+        ['/api/requirements/upsert', 'POST', { external_ref: ref }],
+        ['/api/requirements/upsert', 'POST', { external_ref: 'github:test/name-limit#2' }],
+      ] as const) {
+        const result = await send(url, method, { ...extra, name });
+        expect(result.status).toBe(400);
+        expect(result.body.error).toBe('invalid_name');
+      }
+    }
+    expect((await api(ownerToken, path)).body.requirement.name).toBe('字'.repeat(80));
+    const boundary = await send(path, 'PATCH', { name: `  ${'界'.repeat(80)}  ` });
+    expect(boundary.status).toBe(200);
+    expect(boundary.body.requirement.name).toBe('界'.repeat(80));
+    expect((await send(path, 'PATCH', { priority: 'high' })).body.requirement.name).toBe('界'.repeat(80));
+    await api(ownerToken, path, { method: 'DELETE' });
+  });
+
+  test("archived=true returns only archived tasks and default excludes them", async () => {
+    const create = async (token: string, name: string) => api(token, '/api/requirements', { method: 'POST', body: JSON.stringify({ name }) });
+    const active = (await create(ownerToken, 'archive-filter-active')).body.requirement.id;
+    const archived = (await create(ownerToken, 'archive-filter-archived')).body.requirement.id;
+    const foreign = (await create(otherToken, 'archive-filter-foreign')).body.requirement.id;
+    for (const [token, taskId] of [[ownerToken, archived], [otherToken, foreign]]) {
+      expect((await api(token, `/api/requirements/${taskId}`, { method: 'PATCH', body: JSON.stringify({ archived: true }) })).status).toBe(200);
+    }
+    const ids = async (query: string) => {
+      const result = await api(ownerToken, `/api/requirements${query}${query ? '&' : '?'}network_id=${ownerNetwork}`);
+      expect(result.status).toBe(200);
+      return result.body.requirements.map((task: any) => task.id);
+    };
+    expect(await ids('?archived=true')).toEqual([archived]);
+    expect(await ids('?archived=true&include_archived=1')).toEqual([archived]);
+    const defaults = await ids('');
+    expect(defaults).toContain(active);
+    expect(defaults).not.toContain(archived);
+    expect(defaults).not.toContain(foreign);
+    expect(await ids('?archived=false')).toEqual(defaults);
+    const all = await ids('?include_archived=1');
+    expect(all).toContain(active);
+    expect(all).toContain(archived);
+    expect(all).not.toContain(foreign);
+    for (const [token, taskId] of [[ownerToken, active], [ownerToken, archived], [otherToken, foreign]]) {
+      await api(token, `/api/requirements/${taskId}`, { method: 'DELETE' });
+    }
+  });
+
   test("tags validate, aggregate within network, and survive old PATCH shapes", async () => {
     const created = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: 'tagged task', tags: [' UI ', 'UI', '交付'] }) });
     expect(created.status).toBe(201);

@@ -1,0 +1,70 @@
+Archived-only listing and existing task-name regression guard
+Base: d52406e90f02d9ec2ea9a09590b54379a22a051f (#2097 merged)
+Historical tested implementation: 976baaa50f899d0ac9f5042356e090cec2d67dd7
+
+Scope: requirements.ts only; no DB/schema, version, deployment or auth changes.
+Final scope: title implementation restored exactly to main on reviewer request;
+only its new regression tests remain. No shared-helper refactor.
+archived=true selects archived rows only and wins over include_archived=1;
+default remains active-only; legacy include_archived=1 still returns both.
+Chinese/English API docs updated in the same change.
+
+All tests in Docker via sg docker; Bun1.3.14 pinned image digest.
+server/tests/name-archive/Dockerfile runs HTTP then MCP, stops on failure.
+HTTP fixture boots on port0 and container /tmp DB; no production9200 access.
+
+Witnessed baseline (same final test mounted over main server/src read-only):
+docker run --rm -v /dev/shm/anet-name-archive-base/server/src:/app/server/src:ro
+ -v /dev/shm/anet-requirement-tags/server/src/requirements-http.test.ts:/app/server/src/requirements-http.test.ts:ro
+ anet-name-archive bun test src/requirements-http.test.ts --test-name-pattern 'name limit|archived=true'
+1 pass / 1 fail / 49 expects; exit1.
+RED: archived=true returned active task instead of archived task.
+Title regression already PASS on main: PATCH already had the 80 limit.
+Do not claim a title bug reproduced on this main. Shared helper was removed.
+
+Historical fixed image (976baaa5): docker build -t anet-name-archive -f server/tests/name-archive/Dockerfile .
+docker run --rm anet-name-archive
+HTTP 21 pass / 0 fail / 370 expects; MCP 4 pass / 0 fail / 48 expects; exit0.
+Names: create/PATCH/upsert insert/update reject150 ASCII,81 Chinese,blank,null,number;
+80 Chinese accepted, trim retained, invalid/omitted names preserve stored title.
+Archive: active/archived/foreign fixtures; explicit network scope; default,false,
+true,true+include-all,legacy include-all checked. Other network not returned.
+First full run exposed test-fixture admin multi-network scope, corrected by
+explicit network_id and reran identical final test against both main and fix.
+
+CI-exact test831 build args TEST831_SOURCE_COMMIT/TEST831_RUNSH_BLOB from git;
+docker run --rm --network none: L0-L8 PASS; files113/unique7/occurrences20/broken0.
+Docker python3 scripts/check-doc-symbol-pins.py .
+Docker python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site
+Both PASS: drift0/unavailable0; judged/skipped9/8 and18/2. Skips not verified.
+
+Recovery: no new service/port/env/secret/state, existing launch/upgrade/rollback
+and backup procedures unchanged. This change does not claim a recovery drill.
+No merge, release, production DB or installed package mutation.
+
+CI-exact full server suite on implementation 976baaa5:
+docker build --build-arg SOURCE_COMMIT=<full HEAD>
+ --build-arg RUNSH_BLOB=<HEAD:tests/test798-server-unit-ci/run.sh blob>
+ -t anet-name-archive-server-ci -f tests/test798-server-unit-ci/Dockerfile .
+docker run --rm anet-name-archive-server-ci
+bun1.3.14 node22.23.3 uid1000; one container /tmp DB per file.
+executed_files=121 discovered_files=121 failed_files=0
+MUTATION_RED registration-password-floor-weakened rc=1
+RESULT: PASS; exit0. This append changes only the report.
+
+Scope reduction requested by reviewer:
+Removed requirementName helper and restored both title-validation blocks to main.
+Product diff now contains ONLY the archived=true SQL filter branch.
+Title regression tests retained unchanged as guards, not a claimed bug fix.
+Rebuilt server/tests/name-archive/Dockerfile after removal and reran:
+HTTP21/21 (370 expects), MCP4/4 (48 expects), exit0.
+Previous full-suite results above are historical, not a rerun of this new head;
+the pushed head must pass its own remote CI and assert-pr-mergeable.
+
+Full-suite rerun after scope reduction, tested ad6122d59fcbf1f4e74bd536820d957fdb0a794c:
+Same CI-exact test798 Dockerfile and SHA/blob build args as above.
+source_commit=ad6122d59fcbf1f4e74bd536820d957fdb0a794c
+bun1.3.14 node22.23.3 uid1000
+executed_files=121 discovered_files=121 failed_files=0
+MUTATION_RED registration-password-floor-weakened rc=1
+RESULT: PASS; exit0. Following commit only records this result, no code changes.
