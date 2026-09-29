@@ -29,7 +29,7 @@ const toolsSource = readFileSync("src/tools.ts", "utf8");
 const sdkVersion = JSON.parse(
   readFileSync("node_modules/@modelcontextprotocol/sdk/package.json", "utf8"),
 ).version as string;
-assert(/^1\.(?:29|30)\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
+assert(/^1\.(?:29|30|31)\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
 const registeredTools = [...toolsSource.matchAll(/server\.(?:tool|registerTool)\(\s*\n\s*"([^"]+)"/g)]
   .map(match => match[1]);
 assert(
