@@ -18,12 +18,12 @@ npm i -g @sleep2agi/agent-node@2.5.0-preview.91
 ## Upgrade
 
 ```bash
-npm i -g @sleep2agi/agent-node@2.5.0-preview.91
+npm i -g @sleep2agi/agent-network@2.3.0-preview.118 @sleep2agi/agent-node@2.5.0-preview.91
 ```
 
 - 运行日志要 hub `commhub-server@0.9.0-preview.66` 起才有（`sessions.logs_capable` 列和 `tail_node_logs` 工具）。旧 hub 会丢掉未知键，客户端显示服务器版本过旧。
 - 指定工作目录要 hub 已含 #2058（`0.9.0-preview.64` 起）。
-- 这一版只发 agent-node；`@sleep2agi/agent-network` 里配对的 agent-node 仍是 `.90`，是否跟着重钉另行决定。
+- 🔴 **两个包要一起升**（`agent-network@2.3.0-preview.118 ↔ agent-node@2.5.0-preview.91`）。
 
 ## 证据
 
