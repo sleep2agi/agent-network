@@ -37,15 +37,18 @@ if (args[0] === "app-server") {
         if (msg.method === "turn/start") {
           result = { turn: { id: "turn_bootstrap" } };
         }
+        const turns = humanTurnActive
+          ? [{ id: "turn_windows_human", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "human long turn" }] }] }]
+          : [{ id: "turn_bootstrap", status: "completed", items: [] }];
         if (msg.method === "thread/read") result = {
           thread: {
             id: msg.params.threadId,
             status: humanTurnActive ? { type: "active", activeFlags: [] } : { type: "idle" },
-            turns: humanTurnActive
-              ? [{ id: "turn_windows_human", status: "inProgress", items: [{ type: "userMessage", content: [{ type: "text", text: "human long turn" }] }] }]
-              : [{ id: "turn_bootstrap", status: "completed", items: [] }],
+            ...(msg.params.includeTurns ? { turns } : {}),
           },
         };
+        // codex >=0.151 pages history; the bridge reads the newest turns here.
+        if (msg.method === "thread/turns/list") result = { data: [...turns].reverse(), nextCursor: null, backwardsCursor: null };
         if (msg.method === "test/human-turn/start") {
           humanTurnActive = true;
           result = { turnId: "turn_windows_human" };
