@@ -397,7 +397,7 @@ describe("cannot be abused", () => {
     const decoder = new TextDecoder();
     let buf = "";
     // 一次只挂一个 read():超时放弃的那个 read 仍在排队,下一轮必须接着等它,否则它拿走的块就丢了。
-    let pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
+    let pending: ReturnType<typeof reader.read> | null = null;
     const readFor = async (ms: number) => {
       const until = Date.now() + ms;
       while (Date.now() < until) {
