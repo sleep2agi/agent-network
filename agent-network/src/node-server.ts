@@ -14,6 +14,7 @@
 
 import { inboundChannelMeta } from "./channel-meta.js";
 import { drainInbox } from "./inbox-drain";
+import { createSingleFlight, inboxPollIntervalMs, isInboxWakeEvent, startInboxSafetyNet } from "./channel-inbox-wake";
 import { readFileSync, existsSync } from "fs";
 import { OUTBOUND_TOOL_NAMES } from "./outbound-tool-names";
 import { parseCommhubToolResult } from "./commhub-response";
@@ -722,55 +723,66 @@ async function handleSSEEvent(event: any) {
     return;
   }
 
-  if (event.type === "new_task" || event.type === "broadcast") {
+  // new_reply 也要拉:对端 send_reply 回给本节点时 hub 只推 new_reply(2026-09-29 实测晚到 7–24 分钟)。
+  if (isInboxWakeEvent(event.type)) {
     log(`← ${event.type}: inbox_count=${event.inbox_count} priority=${event.priority || "normal"}`);
-
-    // #1900 —— 之前每个事件只取一页(limit 5)就停,节点忙时攒下的第 6 条起要等下一个事件才投。
-    //    现在取到短页/空页为止;hub 一直回同一批(ack 没生效)时停下不空转。
-    const drained = await drainInbox<any>({
-      pageSize: 5,
-      fetchPage: (limit) => callCommHub("get_inbox", { alias: ALIAS, limit }),
-      handle: async (msg) => {
-      let channelContent = String(msg.content || "");
-      try {
-        const attachments = await downloadChannelAttachments(msg, {
-          hubUrl: COMMHUB_URL,
-          authToken: AUTH_TOKEN,
-          cacheDir: channelAttachmentCacheDir(HOME, ALIAS),
-        });
-        channelContent = appendChannelAttachmentPaths(channelContent, attachments.paths);
-        for (const failure of attachments.failures) {
-          log(`attachment ${failure.fileId || "(legacy)"} not surfaced (${failure.code}): ${failure.message}`);
-        }
-      } catch (error) {
-        // Attachments are additive. Never drop or fail the text task when a
-        // cache/fetch implementation hits an unexpected host error.
-        log(`attachment resolver failed unexpectedly; preserving text-only task: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      const meta = inboundChannelMeta(msg);
-      // V2: remember who sent this task so send_reply knows the target
-      taskOriginators.set(msg.id, msg.from_session || "hub");
-
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: channelContent,
-          meta,
-        },
-      });
-
-      log(`→ injected task ${msg.id.slice(0, 8)} from ${msg.from_session}: ${(msg.content as string).slice(0, 60)}`);
-        await callCommHub("ack_inbox", {
-          alias: ALIAS,
-          message_id: msg.id,
-        });
-      },
-    });
-    if (drained.pages > 1 || drained.stoppedBy === "no-progress" || drained.stoppedBy === "fetch-error") {
-      log(`inbox drain: delivered=${drained.delivered} pages=${drained.pages} stopped=${drained.stoppedBy}`);
-    }
+    await drainChannelInbox();
   }
 }
+
+// 单飞:SSE 门铃和定时兜底可能同时触发,两次并发拉取会把同一条未 ack 的任务注入两遍。
+let drainReason: "sse" | "poll" = "sse";
+const drainChannelInbox = createSingleFlight(async () => {
+  const reason = drainReason;
+  drainReason = "sse";
+  // #1900 —— 之前每个事件只取一页(limit 5)就停,节点忙时攒下的第 6 条起要等下一个事件才投。
+  //    现在取到短页/空页为止;hub 一直回同一批(ack 没生效)时停下不空转。
+  const drained = await drainInbox<any>({
+    pageSize: 5,
+    fetchPage: (limit) => callCommHub("get_inbox", { alias: ALIAS, limit }),
+    handle: async (msg) => {
+    let channelContent = String(msg.content || "");
+    try {
+      const attachments = await downloadChannelAttachments(msg, {
+        hubUrl: COMMHUB_URL,
+        authToken: AUTH_TOKEN,
+        cacheDir: channelAttachmentCacheDir(HOME, ALIAS),
+      });
+      channelContent = appendChannelAttachmentPaths(channelContent, attachments.paths);
+      for (const failure of attachments.failures) {
+        log(`attachment ${failure.fileId || "(legacy)"} not surfaced (${failure.code}): ${failure.message}`);
+      }
+    } catch (error) {
+      // Attachments are additive. Never drop or fail the text task when a
+      // cache/fetch implementation hits an unexpected host error.
+      log(`attachment resolver failed unexpectedly; preserving text-only task: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const meta = inboundChannelMeta(msg);
+    // V2: remember who sent this task so send_reply knows the target
+    taskOriginators.set(msg.id, msg.from_session || "hub");
+
+    await mcp.notification({
+      method: "notifications/claude/channel",
+      params: {
+        content: channelContent,
+        meta,
+      },
+    });
+
+    log(`→ injected task ${msg.id.slice(0, 8)} from ${msg.from_session}: ${(msg.content as string).slice(0, 60)}`);
+      await callCommHub("ack_inbox", {
+        alias: ALIAS,
+        message_id: msg.id,
+      });
+    },
+  });
+  if (drained.pages > 1 || drained.stoppedBy === "no-progress" || drained.stoppedBy === "fetch-error") {
+    log(`inbox drain: delivered=${drained.delivered} pages=${drained.pages} stopped=${drained.stoppedBy}`);
+  }
+  if (reason === "poll" && drained.delivered > 0) {
+    log(`inbox poll: delivered=${drained.delivered} — picked up by the periodic poll, not by a push`);
+  }
+});
 
 // ── Main ────────────────────────────────────────────
 async function main() {
@@ -785,6 +797,18 @@ async function main() {
 
   log("starting SSE listener...");
   connectSSE().catch((err) => log(`SSE fatal: ${err}`));
+
+  // 兜底:任何一次漏推(hub 判错没人在听、事件类型没认)最多晚一个周期。
+  // ANET_CHANNEL_INBOX_POLL_MS=0 关掉。
+  const inboxPollMs = inboxPollIntervalMs(process.env.ANET_CHANNEL_INBOX_POLL_MS);
+  startInboxSafetyNet({
+    intervalMs: inboxPollMs,
+    drain: () => {
+      drainReason = "poll";
+      return drainChannelInbox();
+    },
+    onError: (e) => log(`inbox poll failed: ${e}`),
+  });
 
   callCommHub("report_status", {
     resume_id: RESUME_ID,
