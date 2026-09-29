@@ -72,9 +72,17 @@ describe("requirements stay on the hub", () => {
     expect(created.body.requirement.owner).toEqual(user);
     expect(created.body.requirement.participants).toEqual([user, node]);
     const path = `/api/requirements/${created.body.requirement.id}`;
-    const changed = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node }) });
+    // 负责人只能是人类,负责 Agent 只能是节点(参与人两种都行)。
+    const humanAsAgent = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: user }) });
+    expect(humanAsAgent.status).toBe(400);
+    expect(humanAsAgent.body.error).toBe('agent_owner_must_be_agent');
+    const agentAsOwner = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: node }) });
+    expect(agentAsOwner.status).toBe(400);
+    expect(agentAsOwner.body.error).toBe('owner_must_be_human');
+    const changed = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: node }) });
     expect(changed.status).toBe(200);
-    expect(changed.body.requirement.owner).toEqual(node);
+    expect(changed.body.requirement.owner).toEqual(user);
+    expect(changed.body.requirement.agent_owner).toEqual(node);
     expect(changed.body.requirement.participants).toEqual([user, node]);
     expect(changed.body.requirement.column).toBe('pool');
     for (const token of [viewerToken, nodeToken]) {
@@ -85,11 +93,204 @@ describe("requirements stay on the hub", () => {
       expect((await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ participants: [invalid] }) })).status).toBe(400);
     }
     const listed = await api(ownerToken, '/api/requirements');
-    expect(listed.body.requirements.find((row: any) => row.id === created.body.requirement.id).owner).toEqual(node);
-    const cleared = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: null, participants: [] }) });
+    const row = listed.body.requirements.find((row: any) => row.id === created.body.requirement.id);
+    expect(row.owner).toEqual(user);
+    expect(row.agent_owner).toEqual(node);
+    const cleared = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ owner: null, agent_owner: null, participants: [] }) });
     expect(cleared.status).toBe(200);
     expect(cleared.body.requirement.owner).toBeNull();
+    expect(cleared.body.requirement.agent_owner).toBeNull();
     expect(cleared.body.requirement.participants).toEqual([]);
+  });
+
+  test("a card is created with a human owner and an agent owner; each role rejects the other kind", async () => {
+    const { db } = await import('./db.js');
+    const ownerId = db.get<{ owner_id: string }>('SELECT owner_id FROM networks WHERE network_id=?1', ownerNetwork)!.owner_id;
+    db.run('INSERT OR IGNORE INTO nodes(node_id,node_name,alias,network_id) VALUES (?1,?2,?2,?3)', ['req-exec-node', 'req-exec-node', ownerNetwork]);
+    const human = { kind: 'user', id: ownerId };
+    const agent = { kind: 'node', id: 'req-exec-node' };
+    const both = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '两个角色', owner: human, agent_owner: agent }) });
+    expect(both.status).toBe(201);
+    expect(both.body.requirement.owner).toEqual(human);
+    expect(both.body.requirement.agent_owner).toEqual(agent);
+    const plain = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '都不填' }) });
+    expect(plain.body.requirement.agent_owner).toBeNull();
+    const wrongOwner = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '节点当负责人', owner: agent }) });
+    expect(wrongOwner.status).toBe(400);
+    expect(wrongOwner.body.error).toBe('owner_must_be_human');
+    const wrongAgent = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '人当负责 Agent', agent_owner: human }) });
+    expect(wrongAgent.status).toBe(400);
+    expect(wrongAgent.body.error).toBe('agent_owner_must_be_agent');
+    const foreign = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: '外网节点', agent_owner: { kind: 'node', id: 'foreign-person-node' } }) });
+    expect(foreign.status).toBe(400);
+    // 只改 agent_owner 是一次有效 PATCH(不是 empty_patch),其余字段不动
+    const path = `/api/requirements/${both.body.requirement.id}`;
+    const onlyAgent = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: null }) });
+    expect(onlyAgent.status).toBe(200);
+    expect(onlyAgent.body.requirement.agent_owner).toBeNull();
+    expect(onlyAgent.body.requirement.owner).toEqual(human);
+    expect(onlyAgent.body.requirement.name).toBe('两个角色');
+    const viewerWrite = await api(viewerToken, path, { method: 'PATCH', body: JSON.stringify({ agent_owner: agent }) });
+    expect(viewerWrite.status).toBe(403);
+  });
+
+  test("description (markdown) and checklist: create, replace-all PATCH, per-item done, limits", async () => {
+    const created = await api(ownerToken, "/api/requirements", {
+      method: "POST",
+      body: JSON.stringify({ name: "带描述和子任务", description: "## 目标\r\n- 一\n- 二", checklist: [{ id: "a", text: "写接口" }, { text: "写测试", done: true }] }),
+    });
+    expect(created.status).toBe(201);
+    const card = created.body.requirement;
+    expect(card.description).toBe("## 目标\n- 一\n- 二");
+    expect(card.checklist.length).toBe(2);
+    expect(card.checklist[0]).toEqual({ id: "a", text: "写接口", done: false });
+    expect(card.checklist[1].done).toBe(true);
+    expect(card.checklist[1].id).toMatch(/^ck_[0-9a-f]{16}$/);
+    const plain = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "什么都没有" }) });
+    expect(plain.body.requirement.description).toBe("");
+    expect(plain.body.requirement.checklist).toEqual([]);
+
+    const path = `/api/requirements/${card.id}`;
+    const b = card.checklist[1].id;
+    // 单项勾选:只动那一项,显式 done,重复请求结果一样
+    const done = await api(ownerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: true }) });
+    expect(done.status).toBe(200);
+    expect(done.body.requirement.checklist.map((i: any) => i.done)).toEqual([true, true]);
+    const again = await api(ownerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: true }) });
+    expect(again.body.requirement.checklist.map((i: any) => i.done)).toEqual([true, true]);
+    expect(again.body.requirement.name).toBe("带描述和子任务");
+    expect((await api(ownerToken, `${path}/checklist/${b}`, { method: "PATCH", body: JSON.stringify({ done: false }) })).body.requirement.checklist[1].done).toBe(false);
+    expect((await api(ownerToken, `${path}/checklist/missing`, { method: "PATCH", body: JSON.stringify({ done: true }) })).body.error).toBe("checklist_item_not_found");
+    expect((await api(ownerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: "yes" }) })).status).toBe(400);
+    expect((await api(ownerToken, `${path}/checklist/a`, { method: "POST", body: JSON.stringify({ done: true }) })).status).toBe(404);
+    expect((await api(viewerToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: false }) })).status).toBe(403);
+    expect((await api(nodeToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: false }) })).body.error).toBe("user_token_required");
+    expect((await api(otherToken, `${path}/checklist/a`, { method: "PATCH", body: JSON.stringify({ done: false }) })).status).toBe(404);
+
+    // 整个替换:排序 / 增删;只改描述时清单不动;只改清单是有效 PATCH
+    const reordered = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: [{ id: b, text: "写测试", done: false }, { id: "a", text: "写接口", done: true }, { id: "c", text: "发版" }] }) });
+    expect(reordered.status).toBe(200);
+    expect(reordered.body.requirement.checklist.map((i: any) => i.id)).toEqual([b, "a", "c"]);
+    const described = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "改过的描述" }) });
+    expect(described.body.requirement.description).toBe("改过的描述");
+    expect(described.body.requirement.checklist.length).toBe(3);
+    const cleared = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "", checklist: [] }) });
+    expect(cleared.body.requirement.description).toBe("");
+    expect(cleared.body.requirement.checklist).toEqual([]);
+
+    // 上限与坏输入整体拒绝,原值不变
+    const tooLong = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "x".repeat(20_001) }) });
+    expect(tooLong.body.error).toBe("invalid_description");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ description: "x".repeat(20_000) }) })).status).toBe(200);
+    const many = Array.from({ length: 101 }, (_, i) => ({ id: `i${i}`, text: `第 ${i} 项` }));
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: many }) })).body.error).toBe("invalid_checklist");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: many.slice(0, 100) }) })).status).toBe(200);
+    for (const bad of [[{ id: "a", text: "x" }, { id: "a", text: "y" }], [{ text: "  " }], [{ id: "有空格 的id", text: "x" }], [{ text: "x", done: 1 }], ["字符串"]]) {
+      expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ checklist: bad }) })).body.error).toBe("invalid_checklist");
+    }
+    const listed = await api(ownerToken, "/api/requirements");
+    const row = listed.body.requirements.find((r: any) => r.id === card.id);
+    expect(row.checklist.length).toBe(100);
+    expect(row.description.length).toBe(20_000);
+    expect((await api(viewerToken, path, { method: "PATCH", body: JSON.stringify({ description: "越权" }) })).status).toBe(403);
+    expect((await api(nodeToken, path, { method: "PATCH", body: JSON.stringify({ description: "Agent 暂不能写" }) })).body.error).toBe("user_token_required");
+  });
+
+  test("projects: CRUD per network, project_id on cards, delete nulls references, archive keeps them", async () => {
+    const q = `?network_id=${ownerNetwork}`;
+    const empty = await api(ownerToken, `/api/requirements/projects${q}`);
+    expect(empty.status).toBe(200);
+    expect(empty.body.projects).toEqual([]); // 不预置任何项目
+    const legion = await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "军团项目" }) });
+    expect(legion.status).toBe(201);
+    expect(legion.body.project.name).toBe("军团项目");
+    expect(legion.body.project.color).toMatch(/^#[0-9a-fA-F]{6}$/);
+    expect(legion.body.project.archived).toBe(false);
+    const tmai = await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "TMAI", color: "#7c3aed" }) });
+    expect(tmai.body.project.color).toBe("#7c3aed");
+    expect((await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "TMAI" }) })).status).toBe(409);
+    for (const bad of [{ name: "  " }, { name: "x".repeat(41) }, { name: "色", color: "red" }, { name: "序", sort: 1.5 }]) {
+      expect((await api(ownerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify(bad) })).status).toBe(400);
+    }
+    const listed = await api(ownerToken, `/api/requirements/projects${q}`);
+    expect(listed.body.projects.map((p: any) => p.name)).toEqual(["军团项目", "TMAI"]);
+    // 权限:viewer 能读不能写;节点令牌一律拒绝;别的网络看不见、改不了
+    expect((await api(viewerToken, `/api/requirements/projects${q}`)).body.projects.length).toBe(2);
+    expect((await api(viewerToken, `/api/requirements/projects${q}`, { method: "POST", body: JSON.stringify({ name: "越权" }) })).status).toBe(403);
+    expect((await api(nodeToken, `/api/requirements/projects${q}`)).body.error).toBe("user_token_required");
+    expect((await api(otherToken, "/api/requirements/projects")).body.projects).toEqual([]);
+    expect((await api(otherToken, `/api/requirements/projects/${tmai.body.project.id}`, { method: "PATCH", body: JSON.stringify({ name: "抢" }) })).status).toBe(404);
+    const foreign = await api(otherToken, "/api/requirements/projects", { method: "POST", body: JSON.stringify({ name: "别人的项目" }) });
+    expect(foreign.status).toBe(201);
+
+    // 卡片上的 project_id:POST / PATCH / GET;别的网络的项目被拒
+    const card = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "有项目的卡", project_id: legion.body.project.id }) });
+    expect(card.status).toBe(201);
+    expect(card.body.requirement.project_id).toBe(legion.body.project.id);
+    const bare = await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "没项目的卡" }) });
+    expect(bare.body.requirement.project_id).toBeNull();
+    expect((await api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "外网项目", project_id: foreign.body.project.id }) })).body.error).toBe("project_not_in_network");
+    const path = `/api/requirements/${card.body.requirement.id}`;
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ project_id: foreign.body.project.id }) })).body.error).toBe("project_not_in_network");
+    const moved = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ project_id: tmai.body.project.id }) });
+    expect(moved.status).toBe(200);
+    expect(moved.body.requirement.project_id).toBe(tmai.body.project.id);
+    expect(moved.body.requirement.name).toBe("有项目的卡");
+
+    // 改名 / 改色 / 排序
+    const renamed = await api(ownerToken, `/api/requirements/projects/${tmai.body.project.id}${q}`, { method: "PATCH", body: JSON.stringify({ name: "TMAI 平台", color: "#0891b2", sort: -1 }) });
+    expect(renamed.body.project).toMatchObject({ name: "TMAI 平台", color: "#0891b2", sort: -1 });
+    expect((await api(ownerToken, `/api/requirements/projects/${tmai.body.project.id}${q}`, { method: "PATCH", body: JSON.stringify({ name: "军团项目" }) })).status).toBe(409);
+    expect((await api(ownerToken, `/api/requirements/projects${q}`)).body.projects[0].name).toBe("TMAI 平台");
+
+    // 归档:引用保留,但不能再被选
+    const archived = await api(ownerToken, `/api/requirements/projects/${tmai.body.project.id}${q}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    expect(archived.body.project.archived).toBe(true);
+    const kept = (await api(ownerToken, "/api/requirements")).body.requirements.find((r: any) => r.id === card.body.requirement.id);
+    expect(kept.project_id).toBe(tmai.body.project.id);
+    expect((await api(ownerToken, `/api/requirements/${bare.body.requirement.id}`, { method: "PATCH", body: JSON.stringify({ project_id: tmai.body.project.id }) })).body.error).toBe("project_archived");
+
+    // 删除:卡片一张不少,引用置空
+    await api(ownerToken, `/api/requirements/${bare.body.requirement.id}`, { method: "PATCH", body: JSON.stringify({ project_id: legion.body.project.id }) });
+    const before = (await api(ownerToken, "/api/requirements")).body.requirements.length;
+    expect((await api(viewerToken, `/api/requirements/projects/${legion.body.project.id}${q}`, { method: "DELETE" })).status).toBe(403);
+    const del = await api(ownerToken, `/api/requirements/projects/${legion.body.project.id}${q}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    const after = (await api(ownerToken, "/api/requirements")).body.requirements;
+    expect(after.length).toBe(before);
+    expect(after.find((r: any) => r.id === bare.body.requirement.id).project_id).toBeNull();
+    expect((await api(ownerToken, `/api/requirements/projects${q}`)).body.projects.map((p: any) => p.name)).toEqual(["TMAI 平台"]);
+    // 清空卡片项目
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ project_id: null }) })).body.requirement.project_id).toBeNull();
+  });
+
+  test("due accepts date-only (all day) and an ISO datetime with offset, stored as UTC to the second", async () => {
+    const make = (due: unknown) => api(ownerToken, "/api/requirements", { method: "POST", body: JSON.stringify({ name: "期限", due }) });
+    const shanghai = await make("2026-10-01T18:30:45+08:00");
+    expect(shanghai.status).toBe(201);
+    expect(shanghai.body.requirement.due).toBe("2026-10-01T10:30:45Z");
+    expect((await make("2026-10-01T10:30:45Z")).body.requirement.due).toBe("2026-10-01T10:30:45Z");
+    expect((await make("2026-10-01T10:30Z")).body.requirement.due).toBe("2026-10-01T10:30:00Z");
+    expect((await make("2026-10-01T10:30:45.987-04:00")).body.requirement.due).toBe("2026-10-01T14:30:45Z");
+    // 跨日:东八区的 00:30 是 UTC 前一天
+    expect((await make("2026-10-01T00:30:00+08:00")).body.requirement.due).toBe("2026-09-30T16:30:00Z");
+    // 旧的全天值原样
+    const legacy = await make("2026-10-01");
+    expect(legacy.body.requirement.due).toBe("2026-10-01");
+    for (const bad of ["2026-10-01T18:30:45", "2026-10-01 18:30:45+08:00", "2026-02-30T10:00:00Z", "2026-10-01T24:00:00Z", "2026-10-01T10:60:00Z", "2026-10-01T10:00:61Z", "2026-10-01T10:00:00+15:00", "明天", "2026-10-1"]) {
+      const r = await make(bad);
+      expect(r.status).toBe(400);
+      expect(r.body.error).toBe("invalid_due");
+    }
+    const path = `/api/requirements/${legacy.body.requirement.id}`;
+    const patched = await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "2026-12-31T23:59:59-08:00" }) });
+    expect(patched.body.requirement.due).toBe("2027-01-01T07:59:59Z");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "2026-12-31" }) })).body.requirement.due).toBe("2026-12-31");
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "T" }) })).status).toBe(400);
+    expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "" }) })).body.requirement.due).toBe("");
+    const listed = await api(ownerToken, "/api/requirements");
+    expect(listed.body.capabilities).toContain("due_datetime");
+    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime"]);
   });
 
   test("owner creates a card in the pool", async () => {
