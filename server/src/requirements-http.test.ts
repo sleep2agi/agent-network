@@ -55,6 +55,29 @@ afterAll(() => {
 describe("requirements stay on the hub", () => {
   let id = "";
 
+  test("tags validate, aggregate within network, and survive old PATCH shapes", async () => {
+    const created = await api(ownerToken, '/api/requirements', { method: 'POST', body: JSON.stringify({ name: 'tagged task', tags: [' UI ', 'UI', '交付'] }) });
+    expect(created.status).toBe(201);
+    expect(created.body.requirement.tags).toEqual(['UI', '交付']);
+    const path = `/api/requirements/${created.body.requirement.id}`;
+    const old = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ column: 'doing', name: 'old app edit' }) });
+    expect(old.status).toBe(200);
+    expect(old.body.requirement.tags).toEqual(['UI', '交付']);
+    for (const tags of [null, 'UI', [12], [''], ['a'.repeat(21)], Array.from({ length: 11 }, (_, i) => `t${i}`)]) {
+      const invalid = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ tags }) });
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.error).toBe('invalid_tags');
+    }
+    const own = await api(ownerToken, '/api/requirements/tags');
+    expect(own.body.tags).toEqual(['UI', '交付']);
+    expect((await api(otherToken, '/api/requirements/tags')).body.tags).toEqual([]);
+    expect((await api(nodeToken, '/api/requirements/tags')).body.tags).toEqual(['UI', '交付']);
+    expect((await api(viewerToken, `${path}?network_id=${ownerNetwork}`, { method: 'PATCH', body: JSON.stringify({ tags: [] }) })).status).toBe(403);
+    const cleared = await api(ownerToken, path, { method: 'PATCH', body: JSON.stringify({ tags: [] }) });
+    expect(cleared.body.requirement.tags).toEqual([]);
+    expect((await api(ownerToken, '/api/requirements/tags')).body.tags).toEqual([]);
+  });
+
   test("typed assignments validate network membership, preserve kinds and clear explicitly", async () => {
     const { db } = await import('./db.js');
     const ownerId = db.get<{ owner_id: string }>('SELECT owner_id FROM networks WHERE network_id=?1', ownerNetwork)!.owner_id;
@@ -294,7 +317,7 @@ describe("requirements stay on the hub", () => {
     expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "" }) })).body.requirement.due).toBe("");
     const listed = await api(ownerToken, "/api/requirements");
     expect(listed.body.capabilities).toContain("due_datetime");
-    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements"]);
+    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags"]);
   });
 
   test("sub-requirements: parent_id in the same network, no cycles, ≤ 5 levels, child counts, filters, delete detaches children", async () => {

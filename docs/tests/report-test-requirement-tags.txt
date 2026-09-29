@@ -1,0 +1,60 @@
+Requirement tags / req_f77afb7f
+2026-09-29, base bcb0239f, isolated Docker only.
+
+Dockerfile: server/tests/tags/Dockerfile
+HTTP suite: 19 pass, 0 fail, 309 assertions.
+Startup migration: 1 pass (existing suite).
+MCP suite after adding tags to schema: 4 pass, 0 fail, 48 assertions.
+
+New assertions: trim/deduplicate; old PATCH name/status preserves tags;
+bad type/empty/too long/too many rejected; network-local aggregate; another
+network sees none; bound node can read; viewer write rejected; explicit [] clears.
+MCP update adds a tag, subsequent legacy-shaped upsert preserves it.
+Existing HTTP capability assertion updated to include tags after initial red.
+
+Temporary SQLite files under container /tmp; bootServer port 0, no published
+ports, no production database or 9200 access. No release, no version changes.
+
+CI doc-pin follow-up (2026-09-29):
+Job 109361720080 reported new trivial-line server/src/db.ts#L1758.
+After equivalent rebase, logAudit is at 1759. Both dashboard documents now
+link to the file with `export function logAudit` lookup rather than a moving
+line number. Exact test831 counts: files 109 unchanged; unique pins 8->7;
+occurrences 22->20; baseline stays empty (not relaxed).
+Tested tree db4f7fb73dc8daa818f9fda14d7888cbe25ebbda:
+Docker build uses TEST831_SOURCE_COMMIT and TEST831_RUNSH_BLOB from git,
+Docker run --rm --network none: L0-L8 RESULT PASS including witnessed-reds.
+Container symbol checks, same CI arguments:
+python3 scripts/check-doc-symbol-pins.py .
+  scanned17 / judged9 / skipped8 / unavailable-ref0 / drift0
+python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site
+  scanned20 / judged18 / skipped2 / unavailable-ref0 / drift0
+Skipped references are not claimed verified. Report-only commit follows.
+
+Rebase onto .67 main 4923e15073dc779f13ecc0a900154d48dd9f0c49:
+Tested code head 5c18aaa3b6893910be7f33715116e33a5ac84e8c.
+All three commits range-diff =; no conflicts, no whole-file side selection.
+Against origin/main, db.ts adds only tags_json. scheduled-tasks.ts, server
+package.json and lockfile are unchanged; version stays 0.9.0-preview.67.
+CI-exact test798 build args SOURCE_COMMIT and RUNSH_BLOB from git; original
+Dockerfile/run.sh, bun1.3.14, node22.23.3, uid1000, container /tmp databases:
+executed_files=121 discovered_files=121 failed_files=0
+MUTATION_RED registration-password-floor-weakened rc=1
+RESULT: PASS
+CI-exact test831 build args TEST831_SOURCE_COMMIT / TEST831_RUNSH_BLOB,
+docker run --rm --network none: L0-L8 RESULT PASS.
+symbol-pins . and . --doc-root docs-site: drift0, unavailable-ref0;
+judged/skipped9/8 and18/2 respectively. This append is report-only.
+
+Rebase after docs #2098/#2099/#2100 onto main
+dc3a40f7d7b1ff80a90b15410ae4136d8a05e66a:
+Tested head c9366db01da126964dab092bc9a10109da912e6b.
+Resolved only test831 count/comment block: retained main files=113,
+applied our unique pins 8->7 and occurrences 22->20. No whole-file selection.
+requirements.ts, requirement-tags.ts, tools.ts and db.ts unchanged from
+previous head 91fa21c1. Reviewed full diff against origin/main; diff --check clean.
+CI-exact test831 Docker build SHA/blob args, --network none run:
+L0-L8 RESULT PASS; files113 / unique7 / occurrences20 / broken0.
+Docker symbol-pins . and . --doc-root docs-site both PASS:
+judged/skipped9/8 and18/2, drift0, unavailable-ref0. Skips are not verified.
+No server test rerun for this docs-only rebase delta. Report-only commit follows.

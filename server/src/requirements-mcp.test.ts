@@ -70,9 +70,12 @@ describe("requirements MCP tools", () => {
       const first = await s.call("requirements_upsert_by_external_ref", { external_ref: ref, external_url: "https://github.com/acme/widgets/issues/42", name: "修复登录", description: "issue 正文", checklist: [{ id: "c1", text: "复现" }, { id: "c2", text: "修" }] });
       expect(first.ok).toBe(true);
       expect(first.created).toBe(true);
+      const tagged = await s.call("requirements_update", { id: first.requirement.id, tags: ["release"] });
+      expect(tagged.requirement.tags).toEqual(["release"]);
       expect(first.requirement.created_by).toEqual({ kind: "node", id: "node_gh_sync" });
       const again = await s.call("requirements_upsert_by_external_ref", { external_ref: ref, name: "修复登录(改了标题)" });
       expect(again.created).toBe(false);
+      expect(again.requirement.tags).toEqual(["release"]);
       expect(again.requirement.id).toBe(first.requirement.id);
       const listed = await s.call("requirements_list", { external_ref: ref });
       expect(listed.requirements.length).toBe(1);
