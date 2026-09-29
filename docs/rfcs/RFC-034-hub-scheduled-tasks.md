@@ -62,6 +62,7 @@ SQLite transaction 是当前生产原子边界。仓库现有 PostgreSQL adapter
 - `POST /api/scheduled-tasks/:schedule_id/run-now`
 
 PATCH 必须携带当前 `revision`；陈旧客户端得到 `409 revision_conflict`，不得覆盖另一设备的新状态。
+`revision` 只代表**用户可见的编辑**：编辑、暂停/恢复、取消、一次性计划自动完成会递增；调度器推进 `next_run_at`/`last_run_at` 的例行执行**不递增**，否则高频计划的每次执行都会让正在打开的编辑保存时 409。
 
 创建请求中的 `misfire_policy` 只接受 `catch_up_once` 或 `skip`。省略时按 `catch_up_once` 处理；Dashboard 与 App 必须把该选择显式展示给用户，不得用隐式客户端默认值掩盖 Hub 语义。
 

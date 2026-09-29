@@ -310,6 +310,12 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
   return { runId, taskId: createdTaskId, status: finalStatus, event };
 }
 
+// `revision` is the optimistic-concurrency token for *user edits*. Run
+// bookkeeping (next_run_at/last_run_at) must not bump it: a 2-minute schedule
+// would otherwise turn every edit that spans a run into a 409 and the client
+// would drop the user's draft. Terminal completion still bumps, because it is
+// a status change the user sees and it is what stops an in-flight PATCH (whose
+// UPDATE is guarded by `AND revision = ?`) from reviving a finished one-shot.
 function advance(row: ScheduledRow, scheduledFor: string, after = new Date(), recordLastRun = true): void {
   const spec = JSON.parse(row.schedule_json) as ScheduleSpec;
   const next = nextOccurrence(spec, row.timezone, after);
@@ -321,7 +327,7 @@ function advance(row: ScheduledRow, scheduledFor: string, after = new Date(), re
     );
   } else {
     db.run(
-      "UPDATE scheduled_tasks SET next_run_at = ?1, last_run_at = ?2, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?3",
+      "UPDATE scheduled_tasks SET next_run_at = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3",
       [iso(next), lastRunAt, row.schedule_id],
     );
   }
@@ -532,11 +538,16 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
           ? nextOccurrence(parsed.spec, parsed.timezone, new Date())
           : new Date(row.next_run_at);
       if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
+      // Runs no longer bump revision, so the scheduler may have advanced
+      // next_run_at after `row` was read. When cadence is preserved, keep the
+      // stored value instead of writing back the already-fired occurrence.
+      const keepStoredNext = requestedStatus === "active" && !schedulingChanged && !resumed && !!row.next_run_at ? 1 : 0;
       const updated = db.run(
         `UPDATE scheduled_tasks SET name = ?1, target_node_id = ?2, target_alias = ?3, task_content = ?4,
-         priority = ?5, schedule_type = ?6, schedule_json = ?7, timezone = ?8, status = ?9, next_run_at = ?10,
+         priority = ?5, schedule_type = ?6, schedule_json = ?7, timezone = ?8, status = ?9,
+         next_run_at = CASE WHEN ?14 = 1 AND next_run_at IS NOT NULL THEN next_run_at ELSE ?10 END,
          misfire_policy = ?11, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
-        [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision],
+        [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision, keepStoredNext],
       );
       if (updated.changes !== 1) return jsonError("revision_conflict", 409);
       return Response.json({ ok: true, schedule: decodeRow(db.get<ScheduledRow>(`SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1`, row.schedule_id)!) });

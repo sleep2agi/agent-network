@@ -73,6 +73,24 @@ grep -Fq 'if (false && (!Number.isSafeInteger' server/src/scheduled-tasks.ts
 expect_red optimistic-revision /tmp/test604-mut-revision.db
 cp /tmp/test604-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
-echo "L8 restored green"
+echo "L8 witnessed-red: a recurring run must not bump the edit revision"
+sed -i "s/SET next_run_at = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3/SET next_run_at = ?1, last_run_at = ?2, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?3/" server/src/scheduled-tasks.ts
+grep -Fq "last_run_at = ?2, revision = revision + 1" server/src/scheduled-tasks.ts
+expect_red run-does-not-bump-revision /tmp/test604-mut-runbump.db
+cp /tmp/test604-scheduled-tasks.ts server/src/scheduled-tasks.ts
+
+echo "L9 witnessed-red: an edit in flight across a run keeps the advanced next_run_at"
+sed -i 's/const keepStoredNext = requestedStatus === "active"/const keepStoredNext = 0 \&\& requestedStatus === "active"/' server/src/scheduled-tasks.ts
+grep -Fq 'const keepStoredNext = 0 && requestedStatus' server/src/scheduled-tasks.ts
+expect_red edit-keeps-advanced-next-run /tmp/test604-mut-keepnext.db
+cp /tmp/test604-scheduled-tasks.ts server/src/scheduled-tasks.ts
+
+echo "L10 witnessed-red: one-shot completion still bumps revision"
+sed -i "s/SET status = 'completed', next_run_at = NULL, last_run_at = ?1, revision = revision + 1,/SET status = 'completed', next_run_at = NULL, last_run_at = ?1,/" server/src/scheduled-tasks.ts
+if grep -Fq "last_run_at = ?1, revision = revision + 1" server/src/scheduled-tasks.ts; then echo "MUTATION_NOOP: completion-bump"; exit 1; fi
+expect_red completion-bumps-revision /tmp/test604-mut-completion.db
+cp /tmp/test604-scheduled-tasks.ts server/src/scheduled-tasks.ts
+
+echo "L11 restored green"
 run_real /tmp/test604-restored.db
 echo "RESULT: PASS"
