@@ -582,7 +582,8 @@ export function getNetworkMembers(networkId: string) {
   return db.all<any>(
     `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name,
             CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access,
-            (SELECT COUNT(*) FROM network_member_agent_grants g WHERE g.network_id = nm.network_id AND g.user_id = nm.user_id) AS agent_grant_count
+            (SELECT COUNT(*) FROM network_member_agent_grants g WHERE g.network_id = nm.network_id AND g.user_id = nm.user_id) AS agent_grant_count,
+            (SELECT COUNT(*) FROM network_member_group_grants gg WHERE gg.network_id = nm.network_id AND gg.user_id = nm.user_id) AS agent_group_count
      FROM network_members nm JOIN users u ON nm.user_id = u.user_id
      WHERE nm.network_id = ?1 ORDER BY nm.joined_at`,
     networkId);

@@ -16,7 +16,7 @@ import { pendingInboxCount } from "./inbox-count.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
-import { canMessageAgent, isAgentRestricted, listAgentGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias } from "./agent-access.js";
+import { canMessageAgent, isAgentRestricted, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
@@ -1470,6 +1470,71 @@ return Bun.serve({
       }
     }
 
+    // ── Agent 分组(RFC-038 §8):owner/admin/Hub 管理员管理;组授权动态生效 ──
+    // GET/POST /api/networks/:id/agent-groups · PATCH/DELETE …/:gid · PUT …/:gid/members {node_ids}
+    const groupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/agent-groups(?:\/([^/]+)(\/members)?)?$/);
+    if (groupsMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      // 组是人的管理对象,节点令牌不能碰。
+      if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      const netId = decodeURIComponent(groupsMatch[1]);
+      const groupId = groupsMatch[2] ? decodeURIComponent(groupsMatch[2]) : null;
+      const membersPath = !!groupsMatch[3];
+      const hubAdmin = resolved.user.role === "admin";
+      const callerRole = getUserNetworkRole(resolved.user.user_id, netId);
+      // 受限成员(以及普通成员)看不到组列表:他们只需要看到最终能访问的 Agent。
+      if (!hubAdmin && callerRole !== "owner" && callerRole !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+      }
+      const actor = resolved.user;
+      const readBody = async (): Promise<any | null> => {
+        try { const b = await req.json(); return b && typeof b === "object" && !Array.isArray(b) ? b : null; } catch { return null; }
+      };
+      const kick = (userIds: string[]) => { for (const uid of userIds) closeUserStreamsInNetwork(netId, uid); };
+      if (!groupId && req.method === "GET") {
+        return withCors(req, Response.json({ ok: true, network_id: netId, groups: listAgentGroups(netId) }));
+      }
+      if (!groupId && req.method === "POST") {
+        const body = await readBody();
+        if (!body) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+        const r = createAgentGroup({ networkId: netId, name: body.name, description: body.description, nodeIds: body.node_ids, actorUserId: actor.user_id });
+        if (!r.ok) return withCors(req, Response.json({ ok: false, error: r.error, ...(r.detail ? { detail: r.detail } : {}) }, { status: r.status }));
+        logAudit(actor.user_id, actor.username, "agent_group_created", "agent_group", r.group.group_id,
+          JSON.stringify({ name: r.group.name, node_ids: r.group.node_ids }).slice(0, 4000), undefined, netId);
+        return withCors(req, Response.json({ ok: true, group: r.group }));
+      }
+      if (groupId && !membersPath && req.method === "PATCH") {
+        const body = await readBody();
+        if (!body) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+        const r = updateAgentGroup({ networkId: netId, groupId, name: body.name, description: body.description });
+        if (!r.ok) return withCors(req, Response.json({ ok: false, error: r.error, ...(r.detail ? { detail: r.detail } : {}) }, { status: r.status }));
+        logAudit(actor.user_id, actor.username, "agent_group_renamed", "agent_group", groupId, JSON.stringify({ name: r.group.name }), undefined, netId);
+        return withCors(req, Response.json({ ok: true, group: r.group }));
+      }
+      if (groupId && membersPath && req.method === "PUT") {
+        const body = await readBody();
+        if (!body) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+        const r = replaceAgentGroupMembers({ networkId: netId, groupId, nodeIds: body.node_ids, actorUserId: actor.user_id });
+        if (!r.ok) return withCors(req, Response.json({ ok: false, error: r.error, ...(r.detail ? { detail: r.detail } : {}) }, { status: r.status }));
+        logAudit(actor.user_id, actor.username, "agent_group_members_changed", "agent_group", groupId,
+          JSON.stringify({ added: r.added, removed: r.removed }).slice(0, 4000), undefined, netId);
+        // 组成员变了:这个组上有授权的成员按新权限重连(观察流按连接时的权限过滤)。
+        if (r.added.length || r.removed.length) kick(usersGrantedGroup(groupId));
+        return withCors(req, Response.json({ ok: true, group: r.group, added: r.added, removed: r.removed }));
+      }
+      if (groupId && !membersPath && req.method === "DELETE") {
+        const r = deleteAgentGroup(netId, groupId);
+        if (!r.ok) return withCors(req, Response.json({ ok: false, error: r.error }, { status: r.status }));
+        logAudit(actor.user_id, actor.username, "agent_group_deleted", "agent_group", groupId,
+          JSON.stringify({ affected_user_count: r.affected_user_ids.length }), undefined, netId);
+        kick(r.affected_user_ids);
+        return withCors(req, Response.json({ ok: true, affected_user_ids: r.affected_user_ids }));
+      }
+      return withCors(req, Response.json({ ok: false, error: "method not allowed" }, { status: 405 }));
+    }
+
     // ── 多用户 Agent 权限:成员可访问的 Agent(owner/admin 管理) ──
     // GET  → { agent_access: 'all'|'granted', grants: [{node_id, alias, can_message}] }
     // PUT  { grants?: [{node_id | alias, can_message?}] | string[], agent_access?: 'all'|'granted' } → 整体替换
@@ -1498,6 +1563,7 @@ return Bun.serve({
           agent_access: getAgentAccessMode(netId, targetUid),
           restricted: isAgentRestricted(targetUid, netId),
           grants: listAgentGrants(netId, targetUid),
+          group_grants: listGroupGrants(netId, targetUid),
         }));
       }
       // 网络 admin 不能改 owner / 其他 admin 的授权(对他们本来也不生效,但别让 admin 去碰平级)。
@@ -1507,7 +1573,7 @@ return Bun.serve({
       let body: any;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
       if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
-      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined) {
+      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined && body.group_grants === undefined) {
         return withCors(req, Response.json({ ok: false, error: "grants or agent_access required" }, { status: 400 }));
       }
       const result = replaceAgentGrants({
@@ -1515,17 +1581,18 @@ return Bun.serve({
         userId: targetUid,
         grants: body.grants ?? body.node_ids,
         agentAccess: body.agent_access,
+        groupGrants: body.group_grants,
         actorUserId: resolved.user.user_id,
       });
       if (!result.ok) {
         return withCors(req, Response.json({ ok: false, error: result.error, ...(result.detail ? { detail: result.detail } : {}) }, { status: result.status }));
       }
       logAudit(resolved.user.user_id, resolved.user.username, "member_agent_grants_changed", "network", netId,
-        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })) }).slice(0, 4000),
+        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })), group_grants: result.group_grants.map((g) => ({ group_id: g.group_id, can_message: g.can_message })) }).slice(0, 4000),
         undefined, netId);
       // 已连着的观察流 / 用户流按旧权限鉴权过,断开让它按新权限重连。
       closeUserStreamsInNetwork(netId, targetUid);
-      return withCors(req, Response.json({ ok: true, network_id: netId, user_id: targetUid, agent_access: result.agent_access, restricted: isAgentRestricted(targetUid, netId), grants: result.grants }));
+      return withCors(req, Response.json({ ok: true, network_id: netId, user_id: targetUid, agent_access: result.agent_access, restricted: isAgentRestricted(targetUid, netId), grants: result.grants, group_grants: result.group_grants }));
     }
 
     // ── 多用户:网络里的人类成员通讯录 —— 任何成员(含受限成员)都能看,只有身份字段 ──

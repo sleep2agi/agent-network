@@ -436,10 +436,29 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 |------|------|------|
 | `grants` | array | 每项 `{node_id}` 或 `{alias}`(只给没有 node_id 的旧会话)+ 可选 `can_message`(默认 `true`)。也接受 `node_id` 字符串数组。整体替换 |
 | `agent_access` | `all` \| `granted` | 可选。`all` = 解除限制(旧语义),`granted` = 只看授权的 |
+| `group_grants` | array | 可选。授权给 [Agent 分组](#agent-groups):每项 `{group_id}` + 可选 `can_message`,也接受 `group_id` 字符串数组。**不传 = 保持原样**(旧客户端只发 `grants`,不会清掉组授权);传了就整体替换 |
 
-任何一项不是本网络的 Agent → 400 `agent_not_in_network`,整批不写。成功后写 audit log `member_agent_grants_changed`,并断开该成员已连着的观察流 / 用户流让它按新权限重连。
+任何一项不是本网络的 Agent → 400 `agent_not_in_network`、不是本网络的组 → 400 `group_not_in_network`,整批不写。成功后写 audit log `member_agent_grants_changed`,并断开该成员已连着的观察流 / 用户流让它按新权限重连。
 
-**响应**:`{ ok, network_id, user_id, agent_access, restricted, grants: [{node_id, alias, can_message}] }`(GET 另带 `role`)。
+可见 = 直接授权 ∪ 被授权的组此刻的成员;可对话取并集(任一来源给了就算)。
+
+**响应**:`{ ok, network_id, user_id, agent_access, restricted, grants: [{node_id, alias, can_message}], group_grants: [{group_id, name, can_message}] }`(GET 另带 `role`)。
+
+### Agent 分组 {#agent-groups}
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/agent-access.ts)(`createAgentGroup` / `replaceAgentGroupMembers` / `deleteAgentGroup`)· 设计见 RFC-038 §8
+
+管理员自由定义的一组 Agent。授权给组后,**组里以后新加的 Agent 自动可见**(每次请求现算)。owner / admin / Hub 管理员可调,只接受用户令牌;普通成员与受限成员 403(他们只看得到最终能访问的 Agent)。
+
+| 方法 · 路径 | 说明 |
+|---|---|
+| `GET /api/networks/:id/agent-groups` | `{ groups: [{group_id, name, description, node_ids, member_count, granted_user_count, …}] }` |
+| `POST /api/networks/:id/agent-groups` | `{name, description?, node_ids?}` 建组;同网络重名 409 `group_name_taken` |
+| `PATCH /api/networks/:id/agent-groups/:group_id` | `{name?, description?}` |
+| `PUT /api/networks/:id/agent-groups/:group_id/members` | `{node_ids}` 整体替换组成员;响应带 `added` / `removed` |
+| `DELETE /api/networks/:id/agent-groups/:group_id` | 删组连同组上的授权;响应 `affected_user_ids` |
+
+节点不是本网络的 → 400 `agent_not_in_network`,整批不写。审计:`agent_group_created` / `agent_group_renamed` / `agent_group_members_changed`(只记 diff)/ `agent_group_deleted`,都带 `network_id`。组成员或组本身变化时,断开该组上有授权的成员的实时流,让其按新权限重连。`GET /api/networks/:id/members` 每个成员另带 `agent_group_count`。
 
 ### GET /api/networks/:id/humans
 

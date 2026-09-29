@@ -436,10 +436,29 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 |------|------|------|
 | `grants` | array | Each item `{node_id}` or `{alias}` (only for legacy sessions without a node_id) + optional `can_message` (default `true`). A plain array of `node_id` strings is also accepted. Replaces the whole set |
 | `agent_access` | `all` \| `granted` | Optional. `all` lifts the restriction (legacy semantics), `granted` restricts to grants |
+| `group_grants` | array | Optional. Grants to [agent groups](#agent-groups): each item `{group_id}` + optional `can_message`; a plain array of `group_id` strings is also accepted. **Omitted = unchanged** (older clients send only `grants` and cannot wipe group grants); when present it replaces the whole set |
 
-Any item that is not an agent of this network → 400 `agent_not_in_network`, nothing is written. On success writes audit log `member_agent_grants_changed` and drops the member's open observer / user streams so they reconnect under the new access.
+Any item that is not an agent of this network → 400 `agent_not_in_network`; a group from another network → 400 `group_not_in_network`; nothing is written. On success writes audit log `member_agent_grants_changed` and drops the member's open observer / user streams so they reconnect under the new access.
 
-**Response**: `{ ok, network_id, user_id, agent_access, restricted, grants: [{node_id, alias, can_message}] }` (GET also returns `role`).
+Visible = direct grants ∪ the current members of granted groups; `can_message` is the union (any source granting it counts).
+
+**Response**: `{ ok, network_id, user_id, agent_access, restricted, grants: [{node_id, alias, can_message}], group_grants: [{group_id, name, can_message}] }` (GET also returns `role`).
+
+### Agent groups {#agent-groups}
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/agent-access.ts) (`createAgentGroup` / `replaceAgentGroupMembers` / `deleteAgentGroup`) · design: RFC-038 §8
+
+Admin-defined sets of agents. Once a group is granted, **agents added to it later become visible automatically** (computed per request). Owner / admin / hub admin, user tokens only; ordinary and restricted members get 403 (they only see the agents they can reach).
+
+| Method · path | Notes |
+|---|---|
+| `GET /api/networks/:id/agent-groups` | `{ groups: [{group_id, name, description, node_ids, member_count, granted_user_count, …}] }` |
+| `POST /api/networks/:id/agent-groups` | `{name, description?, node_ids?}`; a duplicate name in the network → 409 `group_name_taken` |
+| `PATCH /api/networks/:id/agent-groups/:group_id` | `{name?, description?}` |
+| `PUT /api/networks/:id/agent-groups/:group_id/members` | `{node_ids}` replaces the members; response has `added` / `removed` |
+| `DELETE /api/networks/:id/agent-groups/:group_id` | Deletes the group and every grant on it; response `affected_user_ids` |
+
+A node outside the network → 400 `agent_not_in_network`, nothing is written. Audit: `agent_group_created` / `agent_group_renamed` / `agent_group_members_changed` (diff only) / `agent_group_deleted`, all with `network_id`. When a group or its members change, members granted that group have their live streams dropped so they reconnect under the new access. `GET /api/networks/:id/members` also returns `agent_group_count` per member.
 
 ### GET /api/networks/:id/humans
 
