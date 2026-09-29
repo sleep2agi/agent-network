@@ -60,7 +60,9 @@ If the node is offline, this occurrence is recorded as queued (排队中 · 节�
 
 ## Known issue
 
-Fixed in Hub .67 (not released yet). Until that version is published and the Hub is upgraded, a Claude Code node may not receive the scheduled-task push. The history can show the run as queued, the same way it does when a node is offline, while the node never received it. Later occurrences are then skipped because the previous run has not finished. This is not a version you can install yet.
+Fixed starting with Hub 0.9.0-preview.67. Before that version was published and the Hub was upgraded, a Claude Code node could miss the scheduled-task push. The history can show the run as queued, the same way it does when a node is offline, while the node never received it. Later occurrences are then skipped because the previous run has not finished.
+
+Starting with agent-network 2.3.0-preview.118, a Claude Code node is also woken when it receives a reply. That takes effect after the node is updated to this version and restarted.
 
 ## See also
 
