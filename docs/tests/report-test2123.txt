@@ -1,0 +1,28 @@
+test2123-hub-postgres-ladder — local Docker runs (2026-09-30)
+image: oven/bun:1.3.14 + Debian postgresql 17.11 + pg@8.16.3, all inside one container
+source_commit: f57e17b38b49ec937916c4e0f74a8ff18d62a0c0 (origin/main at the time)
+
+1. unmodified source (what CI will run)
+   PG_LADDER level=0 floor=0 first_fail=FAIL L1 hub not listening after 3s (hub exit=1): error: PG: syntax error at or near "desktop"
+   RESULT: PASS (level 0, floor 0)                                  rc=0
+
+2. witnessed red: PG_LADDER_FLOOR=1
+   RESULT: FAIL — regressed below the floor (level 0 < floor 1).    rc=1
+
+3. witnessed red: EXPECTED_SOURCE_COMMIT=deadbeef
+   FAIL: source provenance mismatch                                 rc=1
+
+4. positive control for the upper rungs: db-adapter.ts / server.ts replaced
+   (bind-mounted, not committed) with the RFC-039 §1.3 probe patches
+   (comment-aware split, BLOB→BYTEA, $$ sent whole, text timestamps,
+   scheduler gate bypassed)
+   FAIL L2 first user role is "user", expected "admin"
+   PG_LADDER level=1                                                rc=0
+   same + int8 parsed as number:
+   PASS L2 first registered user is admin
+   PASS L3 login, node token, report_status, POST /api/task
+   FAIL L4 send_reply: {"ok":false,"error":"PG: could not determine data type of parameter $2"}
+   PG_LADDER level=3                                                rc=0
+
+   L0–L3 detectors observed passing and failing; L4 observed failing only
+   (no build reaches it yet).
