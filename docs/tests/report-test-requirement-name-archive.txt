@@ -60,3 +60,11 @@ Rebuilt server/tests/name-archive/Dockerfile after removal and reran:
 HTTP21/21 (370 expects), MCP4/4 (48 expects), exit0.
 Previous full-suite results above are historical, not a rerun of this new head;
 the pushed head must pass its own remote CI and assert-pr-mergeable.
+
+Full-suite rerun after scope reduction, tested ad6122d59fcbf1f4e74bd536820d957fdb0a794c:
+Same CI-exact test798 Dockerfile and SHA/blob build args as above.
+source_commit=ad6122d59fcbf1f4e74bd536820d957fdb0a794c
+bun1.3.14 node22.23.3 uid1000
+executed_files=121 discovered_files=121 failed_files=0
+MUTATION_RED registration-password-floor-weakened rc=1
+RESULT: PASS; exit0. Following commit only records this result, no code changes.
