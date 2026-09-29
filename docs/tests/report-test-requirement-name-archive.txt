@@ -41,3 +41,13 @@ Both PASS: drift0/unavailable0; judged/skipped9/8 and18/2. Skips not verified.
 Recovery: no new service/port/env/secret/state, existing launch/upgrade/rollback
 and backup procedures unchanged. This change does not claim a recovery drill.
 No merge, release, production DB or installed package mutation.
+
+CI-exact full server suite on implementation 976baaa5:
+docker build --build-arg SOURCE_COMMIT=<full HEAD>
+ --build-arg RUNSH_BLOB=<HEAD:tests/test798-server-unit-ci/run.sh blob>
+ -t anet-name-archive-server-ci -f tests/test798-server-unit-ci/Dockerfile .
+docker run --rm anet-name-archive-server-ci
+bun1.3.14 node22.23.3 uid1000; one container /tmp DB per file.
+executed_files=121 discovered_files=121 failed_files=0
+MUTATION_RED registration-password-floor-weakened rc=1
+RESULT: PASS; exit0. This append changes only the report.
