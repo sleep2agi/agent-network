@@ -61,7 +61,7 @@ Project-local node state is under `.anet/nodes/<alias>/`:
 |---|---|
 | `config.json` | Hub, runtime, node identity, token, model, and flags |
 | `.env` | Optional secrets; plaintext with expected mode `0600` |
-| `logs/` | Runtime logs |
+| `logs/` | Runtime logs. On this machine use `anet logs` above; from a client see [Node run logs](/en/guide/node-run-logs) |
 | `goals.json` | Scheduled goals owned by this node |
 
 User login and the active network are stored globally in `~/.anet/config.json`. Do not commit project `.anet`, tokens, or `.env`.
