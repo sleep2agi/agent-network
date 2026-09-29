@@ -26,3 +26,24 @@ source_commit: f57e17b38b49ec937916c4e0f74a8ff18d62a0c0 (origin/main at the time
 
    L0–L3 detectors observed passing and failing; L4 observed failing only
    (no build reaches it yet).
+
+---
+RFC-039 S2a (branch fix/pg-s2a-schema) — rungs renumbered: L1 is now "schema
+built" (startHub() reached); old L1–L4 are L2–L5.
+
+5. S2a source, unmodified (what CI will run)
+   FAIL L2 hub not listening after 106s (hub exit=1): error: scheduled_tasks_require_transactional_sqlite_backend
+   PG_LADDER level=1 floor=1                                        rc=0
+
+6. positive control: S2a + scheduler gate bypassed (server.ts bind-mounted)
+   PASS L3 first registered user is admin          ← int8 fix, in the real adapter now
+   PASS L4 login, node token, report_status, POST /api/task
+   FAIL L5 send_reply: {"ok":false,"error":"PG: could not determine data type of parameter $2"}
+   PG_LADDER level=4                                                rc=0
+
+7. SQLite server suite (bun run test, Docker oven/bun:1.3.14), per-file diff vs base
+   base  (5cad7977): files=126 pass=1539 fail=0 skip=0
+   S2a   (dcfb45f3): files=127 pass=1551 fail=0 skip=0
+   only difference: + server/src/db-adapter-translate.test.ts pass=12 (new)
+
+8. test637-database-url-guard on S2a: RESULT: PASS (guard + mutation red intact)
