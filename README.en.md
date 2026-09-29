@@ -20,6 +20,8 @@
   <img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network desktop app: online agents on the left, a conversation with one node on the right">
 </picture>
 
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="Desktop Tasks page: project filters on the left, and columns for Backlog, In progress and Done"></picture>
+
 </div>
 
 ## Why Agent Network
