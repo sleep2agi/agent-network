@@ -818,6 +818,10 @@ function migrateUserInboxNetworkIdNotNull() {
 migrateUserInboxNetworkIdNotNull();
 // 迁移会 drop 掉旧表上的 idx_user_inbox_user_acked → 重建(IF NOT EXISTS;未迁移时 no-op)。
 db.exec(`CREATE INDEX IF NOT EXISTS idx_user_inbox_user_acked ON user_inbox(user_id, acked, created_at);`);
+// 多用户:人与人私信。sender_user_id 由 Hub 按发信人的**用户令牌**写入(不是客户端填的 from_session),
+// 会话记录按它双向取;Agent / 节点令牌发来的桌面消息这一列为 NULL。
+try { db.exec("ALTER TABLE user_inbox ADD COLUMN sender_user_id TEXT"); } catch {}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_user_inbox_dm ON user_inbox(network_id, user_id, sender_user_id, created_at);`);
 
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ncr_daemon_status ON node_create_requests(daemon_node_id, status);

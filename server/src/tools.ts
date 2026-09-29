@@ -2656,8 +2656,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         //   OR REPLACE 会覆盖旧行、把用户已 ack 的状态冲掉。都不取。
         db.run(
           `INSERT INTO user_inbox
-             (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json, sender_user_id)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
            ON CONFLICT(message_id) DO NOTHING`,
           [
             messageId,
@@ -2674,6 +2674,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             // 存储侧走与 inbox 一致的跨主机脱敏；读取侧另有一道 token 形状
             // 脱敏（规格 ③ redact-at-read），两层分别防不同的东西。
             meta && typeof meta === "object" ? normalizeMetaJson(meta) : null,
+            // 多用户私信:只有人(用户令牌)发的才记发信人 user_id;节点令牌发的是 Agent 消息。
+            !callerTokenIsNetwork && enforceUserId ? enforceUserId : null,
           ],
         );
       });

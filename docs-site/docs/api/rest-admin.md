@@ -372,6 +372,10 @@ curl -X POST http://localhost:9200/api/networks/join \
 - 文件只能下载自己上传的、或对方(授权 Agent / 私信发件人)发给他的附件;也不能把看不见的 `file_id` 当附件转给 Agent;
 - 其余面向 Agent 的端点(节点配置 / 日志 / 文件 / 规则 / 改名 / 排程 / 创建节点 / 广播 / 统计)对受限网络 **fail-closed**:整网不返回、写入 403;没列在白名单里的 MCP 工具返回 `agent_access_restricted`。
 
+- **授权 ≠ 管理**:即使授权了某个 Agent,受限成员也不能读写它的规则文件 / 技能 / 项目文件 / 运行日志,不能改配置、改名、启停 —— 授权的含义是「能看见、能对话」;
+- 排程是建它的人的委托:建的人后来变成受限成员且没被授权给目标 Agent 发任务时,排程不再派发(运行记录 `error_code=creator_access_revoked`);
+- 用户名与某个 Agent 的 alias 撞名(Agent 在他入网之后才注册这个 alias)时,他在这个网络里的用户名频道与「自己的往来」一律关闭,因为「发给他」和「发给那个 Agent」无法区分。
+
 owner / admin 角色与 Hub 管理员不受影响。**升级前已存在的成员行** `agent_access` 默认为 `all`,可见范围不因升级而变;此后新加入的 member / viewer(管理员建号、`POST /members`、邀请码)默认 `granted`。
 
 ⚠️ 授权一个 Agent,等于信任这个人使用该 Agent 能做到的事(Agent 自己的网络令牌能读网络里的文件、调用工具)。
@@ -434,6 +438,16 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 ### GET /api/networks/:id/humans
 
 任何成员(含受限成员)都能调:网络里的人类成员通讯录,只有 `user_id` / `username` / `display_name`。给受限成员选私信对象用(私信走 MCP `send_desktop_message`)。
+
+### POST /api/dm · GET /api/dm · GET /api/dm/threads
+
+人与人私信(同一网络里的两个用户;受限成员也可以),只接受用户令牌。
+
+- `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` —— 写进对方的 user_inbox(`kind=human_dm`),经 `/events/users/me` 推送;发信人 `sender_user_id` 由 Hub 按令牌写入,请求体里的 `from` 一律忽略。同一个 `client_request_id` 重试不产生第二条。对方不存在与不在本网络同为 404 `dm_target_not_in_network`。受限成员附带看不见的文件 → 403 `attachment_not_accessible`。
+- `GET /api/dm?network_id=&with=<user_id>[&limit&before]` —— 我和这个人的双向记录,新的在前,每条带 `direction: in | out`。
+- `GET /api/dm/threads?network_id=` —— 每个对方一行:`{other_user_id, last_at, unread}`。
+
+已读沿用 `POST /api/messages/ack`(私信就是收件人 user_inbox 里的行)。
 
 `GET /api/networks/:id/members` 的每一项另带 `agent_access`(生效值)与 `agent_grant_count`;`POST /api/networks/:id/members` 接受可选 `agent_access`(缺省 `granted`);`GET /api/auth/me` 的 `networks[]` 另带 `agent_access`,客户端据此显示「还没有被分配任何 Agent,请联系管理员」。
 
