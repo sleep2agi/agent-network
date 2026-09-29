@@ -255,7 +255,13 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/guide/schedules.md
 #     docs-site/docs/en/guide/schedules.md
 #   两页都没有 #L 源码行号 pin。uniq 仍 8、occ 仍 22。
-[[ "$files" -eq 113 ]] || fail "预期扫 113 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-09-30:files 113 → 117。新增任务标签、多用户与权限(中英各一份):
+#     docs-site/docs/guide/task-tags.md
+#     docs-site/docs/en/guide/task-tags.md
+#     docs-site/docs/guide/multi-user.md
+#     docs-site/docs/en/guide/multi-user.md
+#   四页都没有 #L 源码行号 pin。uniq 仍 7、occ 仍 20(#2097 已把 uniq/occ 收到 7/20)。
+[[ "$files" -eq 117 ]] || fail "预期扫 117 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
 [[ "$uniq"  -eq 7  ]] || fail "预期 7 个唯一 pin,实际 $uniq"

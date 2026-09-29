@@ -41,7 +41,12 @@ The one that arrived by sync is marked Sync source and cannot be unlinked here. 
 
 Agents sync idempotently with `external_ref` (such as `github:owner/repo#123`). See [Requirements / task board](/en/api/mcp-tools#requirements-task-board).
 
+## Tags
+
+See [Task tags](/en/guide/task-tags).
+
 ## See also
 
 - [Desktop and Mobile Clients](/en/guide/desktop-app)
+- [Task tags](/en/guide/task-tags)
 - [Requirements / task board](/en/api/mcp-tools#requirements-task-board)

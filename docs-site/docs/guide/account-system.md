@@ -197,6 +197,7 @@ anet network join inv_xxxxxx
 
 - 节点启动后用它连接 Hub、接收任务并调用 CommHub 工具。
 - Hub 会把请求限制在 token 绑定的 network；token 名称会记录创建它的节点。不要在节点之间复用 `ntok_`。
+- 不能用它管理账号、令牌、网络或成员；那些接口需要用户令牌。它只能给自己改名。见 [多用户与权限](/guide/multi-user)。
 - 本地执行 `anet node delete <alias>` 不会自动撤销 Hub 中的 token；不再使用时还要执行 `anet token revoke <token-id>`。
 
 ### 本机管理员恢复 token
@@ -508,6 +509,7 @@ Key 在 `anet node create` 时输入，保存在当前项目的 `.anet/nodes/<�
 ## 下一步
 
 **深入概念**：
+- [多用户与权限](/guide/multi-user) — 成员能访问哪些 Agent、人与人私聊接口；客户端的用户管理 / 注册 / 私聊还没发
 - [网络隔离](/concepts/networks) — RBAC 权限矩阵、邀请码、数据隔离原理
 
 **实操**：

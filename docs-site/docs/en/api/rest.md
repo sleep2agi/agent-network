@@ -286,7 +286,7 @@ curl http://localhost:9200/api/auth/me \
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-Update personal info.
+Update personal info. **Requires a user token.** A node token gets 403 `user_token_required`.
 
 ```bash
 curl -X PUT http://localhost:9200/api/auth/me \
@@ -337,7 +337,7 @@ If you supply only `display_name` and omit `email` (or omit both), the server do
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-Change password.
+Change password. **Requires a user token.** A node token gets 403 `user_token_required`.
 
 ```bash
 curl -X POST http://localhost:9200/api/auth/password \
@@ -432,7 +432,7 @@ Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-Create a new network.
+Create a new network. **Requires a user token.** A node token gets 403 `user_token_required`.
 
 ```bash
 curl -X POST http://localhost:9200/api/networks \
@@ -511,7 +511,7 @@ The `network` object has 9 fields = `SELECT * FROM networks WHERE network_id = ?
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-Rename a network (owner only).
+Rename a network (owner only). **Requires a user token.** A node token gets 403 `user_token_required`.
 
 ```bash
 curl -X PUT http://localhost:9200/api/networks/net_abc123 \
@@ -549,7 +549,7 @@ Writes audit log `action='network_renamed'`; the `detail` column records the new
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-Delete a network (owner only, must have no active sessions).
+Delete a network (owner only, must have no active sessions). **Requires a user token.** A node token gets 403 `user_token_required`.
 
 ```bash
 curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
