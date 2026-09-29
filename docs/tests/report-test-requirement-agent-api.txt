@@ -1,0 +1,29 @@
+Requirements agent API (node tokens) + MCP tools + external_ref — 2026-09-29
+Base: origin/main 0eff20d3 (#2076 merged)
+
+server/src/requirements-http.test.ts   16 pass / 250 expects
+  node token (bound to node_sync_bot): list / create (created_by + updated_by =
+  {node,node_sync_bot}) / get / patch / checklist tick / archive; DELETE → 403
+  user_token_required; archived hidden unless include_archived=1; a human edit
+  sets updated_by to the user and keeps created_by; a node token of another
+  network: list excludes, get / patch / tick → 404, a create with this
+  network's network_id lands in its OWN network; the human deletes (200 → 404).
+  external_ref: upsert creates (created:true) then patches the same row
+  (created:false, status kept); plain POST duplicate → 409 + existing_id;
+  PATCH onto a taken ref → 409; same ref allowed in another network; bad ref /
+  empty ref / javascript: url → 400; upsert without ref → 400. Filters:
+  status (+400 on bad), updated_since (past / future / 400), owner (+400),
+  external_ref. Earlier node-token assertions updated to the new rules.
+server/src/requirements-mcp.test.ts    4 pass / 41 expects (real MCP in-memory
+  transport): 7 tools registered, no delete tool; bad status / person kind /
+  item id / empty name rejected at the protocol boundary; idempotent GitHub
+  issue sync; 409 + existing_id + status; update / tick / get / filters;
+  owner_must_be_human; archive; cross-network node token sees / touches
+  nothing and cannot write into this network; user token unchanged.
+server/src/requirements-upgrade-migration.test.ts  + new columns, legacy rows
+  archived 0, unique external_ref index, ensure twice is a no-op.
+Witnessed red: with NODE_TOKEN_OPERATIONS emptied, mcp 2/4 and http 4/16 fail.
+tests/test629-mcp-schema-policy: inventory 69 tools in source order (PASS).
+Full server suite (scripts/test-aggregate.ts): 119 files, 1427 pass, 0 fail.
+Docs: docs-site/docs{,/en}/api/mcp-tools.md index + section; coverage and
+anchor-section gates green. No production Hub/database touched.

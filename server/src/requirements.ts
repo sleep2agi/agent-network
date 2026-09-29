@@ -2,14 +2,15 @@
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { db } from "./db.js";
 import { addNetworkScope, canRestWriteNetwork, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
-import { ensureRequirementProjects, migrateRequirementAgentOwners } from "./requirements-migrate.js";
+import { ensureRequirementIndexes, ensureRequirementProjects, migrateRequirementAgentOwners } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
 migrateRequirementAgentOwners(db);
 ensureRequirementProjects(db);
+ensureRequirementIndexes(db);
 
-type RequestAuth = { userId: string; networkId: string | null; username: string } | null;
+type RequestAuth = { userId: string; networkId: string | null; username: string; tokenId?: string | null; tokenName?: string | null } | null;
 
 export type RequirementsRequestContext = {
   req: Request;
@@ -30,6 +31,13 @@ type Row = {
   description: string | null;
   checklist_json: string | null;
   project_id: string | null;
+  external_ref: string | null;
+  external_url: string | null;
+  archived: number | null;
+  created_by: string | null;
+  created_by_json: string | null;
+  updated_by_json: string | null;
+  updated_at: string | null;
   participants_json: string;
   requirement_id: string;
   network_id: string;
@@ -271,7 +279,15 @@ function toPublic(row: Row) {
     due: row.due_on || "",
     column: row.column_name,
     createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
     issues: storedIssues(row.issues_json),
+    // 同步用的外部引用(如 github:owner/repo#123)和链接;归档的卡默认不在列表里(include_archived=1 才有)。
+    external_ref: row.external_ref || null,
+    external_url: row.external_url || null,
+    archived: !!row.archived,
+    // 谁建的 / 谁最后改的:{kind:"user"|"node", id}。旧卡只有 created_by(用户 id)。
+    created_by: row.created_by_json ? JSON.parse(row.created_by_json) : row.created_by ? { kind: "user", id: row.created_by } : null,
+    updated_by: row.updated_by_json ? JSON.parse(row.updated_by_json) : null,
   };
 }
 
@@ -288,10 +304,12 @@ function writeNetwork(body: Record<string, unknown>, ctx: RequirementsRequestCon
 }
 
 function canWrite(ctx: RequirementsRequestContext, networkId: string | null): boolean {
-  return !ctx.isNodeToken && canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
+  // 节点令牌只能写它绑定的那个网络(scope 已强制;这里再核一次,防止别的入口绕过 scope)。
+  if (ctx.isNodeToken && (!ctx.auth?.networkId || ctx.auth.networkId !== networkId)) return false;
+  return canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id";
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
 function personRef(value: unknown, networkId: string): PersonRef {
@@ -331,23 +349,242 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
   };
 }
 
-/** 节点令牌可用的操作。空 = 与之前一样全部拒绝(本 PR 不放宽)。候选:'read' | 'patch' | 'checklist_item'。 */
-const NODE_TOKEN_OPERATIONS: ReadonlySet<string> = new Set<string>();
+/**
+ * 节点令牌(Agent,比如把 GitHub issue 同步进任务的 TM 节点)可用的操作 —— 只在它自己的网络里
+ * (令牌绑定的网络,范围由 resolveRestNetworkScope 强制)。删除卡片、管理项目仍然只给人。
+ */
+const NODE_TOKEN_OPERATIONS: ReadonlySet<string> = new Set<string>(["read", "create", "patch", "checklist_item", "upsert", "projects_read"]);
 function operationOf(req: Request, url: URL): string {
+  if (/^\/api\/requirements\/projects(\/|$)/.test(url.pathname)) return req.method === "GET" ? "projects_read" : "projects_write";
   if (req.method === "GET") return "read";
-  if (/^\/api\/requirements\/projects(\/|$)/.test(url.pathname)) return "projects";
   if (/^\/api\/requirements\/[^/]+\/checklist\/[^/]+$/.test(url.pathname)) return "checklist_item";
+  if (url.pathname === "/api/requirements/upsert") return "upsert";
+  if (req.method === "DELETE") return "delete";
   if (req.method === "PATCH") return "patch";
   return "create";
 }
 
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api"] as const;
+
+// ── 谁做的 ──
+// 用户令牌 = {kind:"user", id:user_id};节点令牌 = {kind:"node", id:令牌绑定的 node_id}(老令牌没绑 node_id 时按
+// 令牌名里的 alias 在本网络找;都找不到记 token 本身,不冒充任何节点)。写进 created_by / updated_by。
+type Actor = { kind: "user" | "node"; id: string };
+function actorOf(ctx: RequirementsRequestContext): Actor | null {
+  if (!ctx.auth) return null;
+  if (!ctx.isNodeToken) return { kind: "user", id: ctx.auth.userId };
+  const tokenId = ctx.auth.tokenId ?? null;
+  const bound = tokenId ? db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", tokenId)?.bound_node_id : null;
+  if (bound) return { kind: "node", id: bound };
+  const alias = ctx.auth.tokenName?.startsWith("node:") ? ctx.auth.tokenName.slice(5) : null;
+  if (alias && ctx.auth.networkId) {
+    const node = db.get<{ node_id: string }>("SELECT node_id FROM nodes WHERE network_id = ?1 AND alias = ?2", ctx.auth.networkId, alias);
+    if (node) return { kind: "node", id: node.node_id };
+  }
+  return { kind: "node", id: `token:${tokenId ?? "unknown"}` };
+}
+
+// ── 外部引用(同步用) ──
+// external_ref:如 github:owner/repo#123,同一网络里唯一(部分唯一索引,见 requirements-migrate.ts)。
+// external_url:http(s) 链接,给界面显示成「在 GitHub 打开」。
+const EXTERNAL_REF = /^[A-Za-z0-9][A-Za-z0-9_.:\/#@+-]{0,199}$/;
+function externalRef(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const v = value.trim();
+  return EXTERNAL_REF.test(v) ? v : undefined;
+}
+function externalUrl(value: unknown): string | null | undefined {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") return undefined;
+  const v = value.trim();
+  return /^https?:\/\/[^\s]{1,500}$/i.test(v) ? v : undefined;
+}
+function rowByExternalRef(networkId: string, ref: string): Row | undefined {
+  return db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND external_ref = ?2`, networkId, ref) ?? undefined;
+}
+
+// ── 新建 ──
+async function createRequirement(ctx: RequirementsRequestContext, body: Record<string, unknown>): Promise<Response> {
+  const networkId = writeNetwork(body, ctx);
+  if (!networkId) return jsonError("network_id_required", 400);
+  if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name || name.length > 80) return jsonError("invalid_name", 400);
+  const priority = typeof body.priority === "string" ? body.priority : "normal";
+  if (!PRIORITIES.has(priority)) return jsonError("invalid_priority", 400);
+  const due = typeof body.due === "string" ? normalizeDue(body.due) : "";
+  if (due === null) return jsonError("invalid_due", 400);
+  const assignee = typeof body.assignee === "string" ? body.assignee.trim().slice(0, 80) : "";
+  const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
+  if (clientId && !/^[A-Za-z0-9._-]{1,80}$/.test(clientId)) return jsonError("invalid_client_id", 400);
+  const column = typeof body.column === "string" && COLUMNS.has(body.column) ? body.column : "pool";
+  const issues = body.issues === undefined ? [] : normalizeIssues(body.issues);
+  if (issues === null) return jsonError("invalid_issues", 400);
+  const description = body.description === undefined ? "" : normalizeDescription(body.description);
+  if (description === null) return jsonError("invalid_description", 400);
+  const checklist = body.checklist === undefined ? [] : normalizeChecklist(body.checklist);
+  if (checklist === null) return jsonError("invalid_checklist", 400);
+  let projectId: string | null = null;
+  if (body.project_id !== undefined) {
+    try { projectId = projectRef(body.project_id, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
+  }
+  const ref = body.external_ref === undefined ? null : externalRef(body.external_ref);
+  if (ref === undefined) return jsonError("invalid_external_ref", 400);
+  const extUrl = body.external_url === undefined ? null : externalUrl(body.external_url);
+  if (extUrl === undefined) return jsonError("invalid_external_url", 400);
+  if (ref) {
+    const existing = rowByExternalRef(networkId, ref);
+    // 同一个外部条目再建一次 = 冲突,回已有的 id(同步方改用 upsert,或按这个 id PATCH)。
+    if (existing) return Response.json({ ok: false, error: "external_ref_exists", existing_id: existing.requirement_id }, { status: 409 });
+  }
+  if (clientId) {
+    const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
+    if (existing) return Response.json({ ok: true, requirement: toPublic(existing) });
+  }
+  const id = `req_${crypto.randomUUID()}`;
+  const createdAt = new Date().toISOString();
+  let people;
+  try { people = assignments(body, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
+  const actor = JSON.stringify(actorOf(ctx));
+  try {
+    db.run(
+      `INSERT INTO requirements
+       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0)`,
+      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor],
+    );
+  } catch {
+    // 并发的同一个 external_ref / client_id:唯一索引挡住了第二个,回已有的那条。
+    if (ref) {
+      const existing = rowByExternalRef(networkId, ref);
+      if (existing) return Response.json({ ok: false, error: "external_ref_exists", existing_id: existing.requirement_id }, { status: 409 });
+    }
+    if (!clientId) return jsonError("insert_failed", 500);
+    const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
+    if (!existing) return jsonError("insert_failed", 500);
+    return Response.json({ ok: true, requirement: toPublic(existing) });
+  }
+  const created = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, id)!;
+  return Response.json({ ok: true, requirement: toPublic(created) }, { status: 201 });
+}
+
+// ── 修改(省略的字段保留原值) ──
+const PATCH_FIELDS = ["column", "issues", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "description", "checklist", "project_id", "external_ref", "external_url", "archived"];
+function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Record<string, unknown>): Response {
+  if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
+  if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+  if (has("column") && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
+  const issues = has("issues") ? normalizeIssues(body.issues) : null;
+  if (has("issues") && issues === null) return jsonError("invalid_issues", 400);
+  const description = has("description") ? normalizeDescription(body.description) : null;
+  if (has("description") && description === null) return jsonError("invalid_description", 400);
+  const checklist = has("checklist") ? normalizeChecklist(body.checklist) : null;
+  if (has("checklist") && checklist === null) return jsonError("invalid_checklist", 400);
+  let name = row.title;
+  if (has("name")) {
+    name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 80) return jsonError("invalid_name", 400);
+  }
+  let priority = row.priority;
+  if (has("priority")) {
+    if (typeof body.priority !== "string" || !PRIORITIES.has(body.priority)) return jsonError("invalid_priority", 400);
+    priority = body.priority;
+  }
+  let due = row.due_on || "";
+  if (has("due")) {
+    if (typeof body.due !== "string") return jsonError("invalid_due", 400);
+    const next = normalizeDue(body.due);
+    if (next === null) return jsonError("invalid_due", 400);
+    due = next;
+  }
+  let assignee = row.assignee || "";
+  if (has("assignee")) {
+    if (typeof body.assignee !== "string") return jsonError("invalid_assignee", 400);
+    assignee = body.assignee.trim().slice(0, 80);
+  }
+  let people;
+  try { people = assignments(body, row.network_id, row); } catch (e) { return jsonError((e as Error).message, 400); }
+  let projectId = row.project_id;
+  if (has("project_id")) {
+    try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return jsonError((e as Error).message, 400); }
+  }
+  let ref = row.external_ref;
+  if (has("external_ref")) {
+    const next = externalRef(body.external_ref);
+    if (next === undefined) return jsonError("invalid_external_ref", 400);
+    if (next && next !== row.external_ref) {
+      const taken = rowByExternalRef(row.network_id, next);
+      if (taken) return Response.json({ ok: false, error: "external_ref_exists", existing_id: taken.requirement_id }, { status: 409 });
+    }
+    ref = next;
+  }
+  let extUrl = row.external_url;
+  if (has("external_url")) {
+    const next = externalUrl(body.external_url);
+    if (next === undefined) return jsonError("invalid_external_url", 400);
+    extUrl = next;
+  }
+  let archived = row.archived ? 1 : 0;
+  if (has("archived")) {
+    if (typeof body.archived !== "boolean") return jsonError("invalid_archived", 400);
+    archived = body.archived ? 1 : 0;
+  }
+  const updatedAt = new Date().toISOString();
+  db.run(
+    `UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6,
+       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18
+     WHERE requirement_id = ?3`,
+    [has("column") ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, has("issues") ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
+      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx))],
+  );
+  const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
+  return Response.json({ ok: true, requirement: toPublic(updated) });
+}
+
+function scopedRow(ctx: RequirementsRequestContext, id: string): Row | undefined {
+  const params: unknown[] = [id];
+  let sql = `SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`;
+  sql = addNetworkScope(sql, params, ctx.scope);
+  return db.get<Row>(sql, ...params) ?? undefined;
+}
+
+/** GET 的筛选(同步方 / MCP 用):status、project_id、owner / agent_owner(kind:id)、updated_since、external_ref、include_archived。 */
+function listFilters(url: URL, sql: string, params: unknown[]): string | Response {
+  const q = url.searchParams;
+  const status = q.get("status");
+  if (status !== null) {
+    if (!COLUMNS.has(status)) return jsonError("invalid_status", 400);
+    sql += ` AND column_name = ?${params.push(status)}`;
+  }
+  const project = q.get("project_id");
+  if (project !== null) sql += project === "none" ? " AND project_id IS NULL" : ` AND project_id = ?${params.push(project)}`;
+  for (const [param, column] of [["owner", "owner_json"], ["agent_owner", "agent_owner_json"]] as const) {
+    const v = q.get(param);
+    if (v === null) continue;
+    if (v === "none") { sql += ` AND ${column} IS NULL`; continue; }
+    const m = /^(user|node):(.+)$/.exec(v);
+    if (!m) return jsonError(`invalid_${param}`, 400);
+    sql += ` AND ${column} = ?${params.push(JSON.stringify({ kind: m[1], id: m[2] }))}`;
+  }
+  const since = q.get("updated_since");
+  if (since !== null) {
+    const ms = Date.parse(since);
+    if (!Number.isFinite(ms)) return jsonError("invalid_updated_since", 400);
+    sql += ` AND updated_at >= ?${params.push(new Date(ms).toISOString())}`;
+  }
+  const ref = q.get("external_ref");
+  if (ref !== null) sql += ` AND external_ref = ?${params.push(ref)}`;
+  if (q.get("include_archived") !== "1") sql += " AND COALESCE(archived, 0) = 0";
+  return sql;
+}
 
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
   const { req, url } = ctx;
   if (url.pathname !== "/api/requirements" && !url.pathname.startsWith("/api/requirements/")) return null;
-  // 节点令牌(Agent)现在一律拒绝。以后要让 Agent 读写描述、勾子任务,把对应操作加进
-  // NODE_TOKEN_OPERATIONS(并给 canWrite 加上节点所属网络的判断)即可 —— 路由和请求体不用改。
+  // 节点令牌只能做 NODE_TOKEN_OPERATIONS 里的事(读 / 建 / 改 / 勾子任务 / upsert / 读项目),
+  // 而且只在它绑定的网络里 —— 范围由 scope 强制,写入再由 canWrite 核一次。
   if (ctx.isNodeToken && !NODE_TOKEN_OPERATIONS.has(operationOf(req, url))) return jsonError("user_token_required", 403);
 
   if (url.pathname === "/api/requirements/projects" || url.pathname.startsWith("/api/requirements/projects/")) return handleProjects(ctx);
@@ -368,8 +605,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const params: unknown[] = [];
     let sql = `SELECT ${SELECT} FROM requirements WHERE 1=1`;
     sql = addNetworkScope(sql, params, ctx.scope);
-    sql += " ORDER BY created_at DESC LIMIT 500";
-    const rows = db.all<Row>(sql, ...params).map(toPublic);
+    const filtered = listFilters(url, sql, params);
+    if (typeof filtered !== "string") return filtered;
+    const rows = db.all<Row>(`${filtered} ORDER BY created_at DESC LIMIT 500`, ...params).map(toPublic);
     // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
     return Response.json({ ok: true, requirements: rows, capabilities: REQUIREMENT_CAPABILITIES });
   }
@@ -377,58 +615,32 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   if (url.pathname === "/api/requirements" && req.method === "POST") {
     let body: Record<string, unknown>;
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
+    return createRequirement(ctx, body);
+  }
+
+  // 按 external_ref 建或改(同步用,幂等):同一网络里已有这个 external_ref → 按 PATCH 语义改它
+  // (省略的字段保留,包括状态);没有 → 新建。重复同步同一个 issue 只会改,不会重复建。
+  if (url.pathname === "/api/requirements/upsert" && req.method === "POST") {
+    let body: Record<string, unknown>;
+    try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
+    const ref = externalRef(body.external_ref);
+    if (!ref) return jsonError("external_ref_required", 400);
     const networkId = writeNetwork(body, ctx);
     if (!networkId) return jsonError("network_id_required", 400);
     if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!name || name.length > 80) return jsonError("invalid_name", 400);
-    const priority = typeof body.priority === "string" ? body.priority : "normal";
-    if (!PRIORITIES.has(priority)) return jsonError("invalid_priority", 400);
-    const due = typeof body.due === "string" ? normalizeDue(body.due) : "";
-    if (due === null) return jsonError("invalid_due", 400);
-    const assignee = typeof body.assignee === "string" ? body.assignee.trim().slice(0, 80) : "";
-    const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
-    if (clientId && !/^[A-Za-z0-9._-]{1,80}$/.test(clientId)) return jsonError("invalid_client_id", 400);
-    const column = typeof body.column === "string" && COLUMNS.has(body.column) ? body.column : "pool";
-    const issues = body.issues === undefined ? [] : normalizeIssues(body.issues);
-    if (issues === null) return jsonError("invalid_issues", 400);
-    const description = body.description === undefined ? "" : normalizeDescription(body.description);
-    if (description === null) return jsonError("invalid_description", 400);
-    const checklist = body.checklist === undefined ? [] : normalizeChecklist(body.checklist);
-    if (checklist === null) return jsonError("invalid_checklist", 400);
-    let projectId: string | null = null;
-    if (body.project_id !== undefined) {
-      try { projectId = projectRef(body.project_id, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
+    const existing = rowByExternalRef(networkId, ref);
+    if (!existing) {
+      const res = await createRequirement(ctx, body);
+      if (res.status !== 201) return res;
+      const data = await res.json() as Record<string, unknown>;
+      return Response.json({ ...data, created: true }, { status: 201 });
     }
-    if (clientId) {
-      const existing = db.get<Row>(
-        `SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`,
-        networkId, clientId,
-      );
-      if (existing) return Response.json({ ok: true, requirement: toPublic(existing) });
-    }
-    const id = `req_${crypto.randomUUID()}`;
-    const createdAt = new Date().toISOString();
-    let people;
-    try { people = assignments(body, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
-    try {
-      db.run(
-        `INSERT INTO requirements
-         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`,
-        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId],
-      );
-    } catch {
-      if (!clientId) return jsonError("insert_failed", 500);
-      const existing = db.get<Row>(
-        `SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`,
-        networkId, clientId,
-      );
-      if (!existing) return jsonError("insert_failed", 500);
-      return Response.json({ ok: true, requirement: toPublic(existing) });
-    }
-    const created = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, id)!;
-    return Response.json({ ok: true, requirement: toPublic(created) }, { status: 201 });
+    const { external_ref: _ref, network_id: _net, client_id: _client, ...patch } = body;
+    if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(patch, k))) return Response.json({ ok: true, requirement: toPublic(existing), created: false });
+    const res = patchRequirement(ctx, existing, patch);
+    if (res.status !== 200) return res;
+    const data = await res.json() as Record<string, unknown>;
+    return Response.json({ ...data, created: false });
   }
 
   const itemMatch = url.pathname.match(/^\/api\/requirements\/([^/]+)\/checklist\/([^/]+)$/);
@@ -437,10 +649,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     let body: Record<string, unknown>;
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
     if (typeof body.done !== "boolean") return jsonError("invalid_done", 400);
-    const params: unknown[] = [decodeURIComponent(itemMatch[1])];
-    let sql = `SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`;
-    sql = addNetworkScope(sql, params, ctx.scope);
-    const row = db.get<Row>(sql, ...params);
+    const row = scopedRow(ctx, decodeURIComponent(itemMatch[1]));
     if (!row) return jsonError("requirement_not_found", 404);
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
@@ -449,73 +658,31 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const item = items.find(entry => entry.id === itemId);
     if (!item) return jsonError("checklist_item_not_found", 404);
     item.done = body.done;
-    db.run("UPDATE requirements SET checklist_json = ?1, updated_at = ?2 WHERE requirement_id = ?3", [JSON.stringify(items), new Date().toISOString(), row.requirement_id]);
+    db.run("UPDATE requirements SET checklist_json = ?1, updated_at = ?2, updated_by_json = ?3 WHERE requirement_id = ?4", [JSON.stringify(items), new Date().toISOString(), JSON.stringify(actorOf(ctx)), row.requirement_id]);
     const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
     return Response.json({ ok: true, requirement: toPublic(updated) });
   }
 
   const match = url.pathname.match(/^\/api\/requirements\/([^/]+)$/);
-  if (!match || req.method !== "PATCH") return jsonError("not_found", 404);
+  if (!match) return jsonError("not_found", 404);
   const id = decodeURIComponent(match[1]);
+  if (req.method === "GET") {
+    const row = scopedRow(ctx, id);
+    return row ? Response.json({ ok: true, requirement: toPublic(row) }) : jsonError("requirement_not_found", 404);
+  }
+  if (req.method === "DELETE") {
+    // 删除只给人(节点令牌在入口已被拒):Agent 用 archived 归档。
+    const row = scopedRow(ctx, id);
+    if (!row) return jsonError("requirement_not_found", 404);
+    if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    db.run("DELETE FROM requirements WHERE requirement_id = ?1", [row.requirement_id]);
+    return Response.json({ ok: true, deleted: row.requirement_id });
+  }
+  if (req.method !== "PATCH") return jsonError("not_found", 404);
   let body: Record<string, unknown>;
   try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
-  const hasColumn = 'column' in body;
-  const hasIssues = Object.prototype.hasOwnProperty.call(body, "issues");
-  const hasName = 'name' in body;
-  const hasPriority = 'priority' in body;
-  const hasDue = 'due' in body;
-  const hasAssignee = 'assignee' in body;
-  const hasDescription = 'description' in body;
-  const hasChecklist = 'checklist' in body;
-  const hasProject = 'project_id' in body;
-  if (!hasColumn && !hasIssues && !hasName && !hasPriority && !hasDue && !hasAssignee && !('owner' in body) && !('agent_owner' in body) && !('participants' in body) && !hasDescription && !hasChecklist && !hasProject) return jsonError('empty_patch', 400);
-  const description = hasDescription ? normalizeDescription(body.description) : null;
-  if (hasDescription && description === null) return jsonError("invalid_description", 400);
-  const checklist = hasChecklist ? normalizeChecklist(body.checklist) : null;
-  if (hasChecklist && checklist === null) return jsonError("invalid_checklist", 400);
-  if (hasColumn && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
-  const issues = hasIssues ? normalizeIssues(body.issues) : null;
-  if (hasIssues && issues === null) return jsonError("invalid_issues", 400);
-  const params: unknown[] = [id];
-  let sql = `SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`;
-  sql = addNetworkScope(sql, params, ctx.scope);
-  const row = db.get<Row>(sql, ...params);
+  if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
+  const row = scopedRow(ctx, id);
   if (!row) return jsonError("requirement_not_found", 404);
-  if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
-  let name = row.title;
-  if (hasName) {
-    name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!name || name.length > 80) return jsonError("invalid_name", 400);
-  }
-  let priority = row.priority;
-  if (hasPriority) {
-    if (typeof body.priority !== "string" || !PRIORITIES.has(body.priority)) return jsonError("invalid_priority", 400);
-    priority = body.priority;
-  }
-  let due = row.due_on || "";
-  if (hasDue) {
-    if (typeof body.due !== "string") return jsonError("invalid_due", 400);
-    const next = normalizeDue(body.due);
-    if (next === null) return jsonError("invalid_due", 400);
-    due = next;
-  }
-  let assignee = row.assignee || "";
-  if (hasAssignee) {
-    if (typeof body.assignee !== "string") return jsonError("invalid_assignee", 400);
-    assignee = body.assignee.trim().slice(0, 80);
-  }
-  let people;
-  try { people = assignments(body, row.network_id, row); } catch (e) { return jsonError((e as Error).message, 400); }
-  let projectId = row.project_id;
-  if (hasProject) {
-    try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return jsonError((e as Error).message, 400); }
-  }
-  const updatedAt = new Date().toISOString();
-  db.run(
-    "UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6, agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14 WHERE requirement_id = ?3",
-    [hasColumn ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, hasIssues ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
-      hasDescription ? (description || null) : row.description, hasChecklist ? JSON.stringify(checklist) : row.checklist_json, projectId],
-  );
-  const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
-  return Response.json({ ok: true, requirement: toPublic(updated) });
+  return patchRequirement(ctx, row, body);
 }

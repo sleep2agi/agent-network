@@ -64,6 +64,13 @@ test("startup migration moves node owners to agent_owner, keeps every row, and i
   expect(extra.every(r => r.description === null && r.checklist_json === null)).toBe(true);
   // 项目表:建了、是空的(不预置),重复执行不报错;卡片的 project_id 列只加不改
   expect(cols.includes("project_id")).toBe(true);
+  // PR B:外部引用 / 归档 / 谁做的 —— 只加不改;旧行 archived = 0、其余 NULL;external_ref 的部分唯一索引建了
+  for (const c of ["external_ref", "external_url", "archived", "created_by_json", "updated_by_json"]) expect(cols.includes(c)).toBe(true);
+  expect((db.all("SELECT archived, external_ref FROM requirements") as any[]).every(r => r.archived === 0 && r.external_ref === null)).toBe(true);
+  const idx = (db.all("PRAGMA index_list(requirements)") as { name: string; unique: number }[]).find(i => i.name === "idx_requirements_external_ref");
+  expect(idx?.unique).toBe(1);
+  const { ensureRequirementIndexes } = await import("./requirements-migrate.js");
+  ensureRequirementIndexes(db);
   expect((db.all("SELECT project_id FROM requirements WHERE project_id IS NOT NULL") as any[]).length).toBe(0);
   expect((db.get("SELECT COUNT(*) AS n FROM requirement_projects") as any).n).toBe(0);
   const { ensureRequirementProjects } = await import("./requirements-migrate.js");

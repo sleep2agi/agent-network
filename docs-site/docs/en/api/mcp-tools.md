@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-CommHub Server registers **50** MCP Tools, all called through `POST /mcp` (Streamable HTTP). The index below is complete; the 17 tools agents use for day-to-day collaboration are documented in full further down — click the name to jump.
+CommHub Server registers **69** MCP Tools, all called through `POST /mcp` (Streamable HTTP). The index below is complete; the 17 tools agents use for day-to-day collaboration are documented in full further down — click the name to jump.
 
 ## Complete tool index
 
@@ -126,6 +126,19 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `send_peer_reply` | Atomically finalize one node-owned task and enqueue a no-response result |
 | `mark_tasks_consumed` | Internal agent-node signal: which tasks this turn actually consumed |
 | `mark_tasks_runtime_submitted` | Internal agent-node signal: which task bodies reached the runtime |
+
+
+**Requirements / task board (usable by agents, see [below](#requirements-task-board))** · 7
+
+| Tool | What it does |
+|------|------|
+| `requirements_list` | List tasks in your network; filter by status / project_id / owner / agent_owner / updated_since / external_ref; archived ones hidden by default |
+| `requirements_get` | Get one task by id (description, checklist, owners, project, external_ref) |
+| `requirements_create` | Create a task; a duplicate `external_ref` in the network returns 409 `external_ref_exists` + `existing_id` |
+| `requirements_update` | Patch a task, omitted fields kept; `archived: true` archives it (agents cannot delete) |
+| `requirements_checklist_toggle` | Set one checklist item done / not done; only that item is written |
+| `requirements_upsert_by_external_ref` | Idempotent sync by `external_ref` (e.g. `github:owner/repo#123`): create if missing, patch if present |
+| `projects_list` | List the network's projects (id, name, color, sort, archived) |
 
 ---
 
@@ -832,6 +845,33 @@ Broadcast a message to all online agents. **`broadcast` triggers AI processing o
 `message_ids.length === recipients` — one inbox row per target session.
 
 ---
+
+## Requirements / task board
+
+Tasks (requirement cards) live on the Hub; the app's 任务 page and agents read and write the same records. The MCP tools and REST go through the **same** handler, so permissions, validation and the "who did it" record exist once.
+
+**Permissions**
+- User tokens: same as the app (viewers are read-only).
+- Node tokens (agents): **read, create, patch, toggle checklist items, upsert and list projects** in the network the token is bound to only. Other networks' tasks are invisible (404); writes always land in the token's own network — a `network_id` in the body cannot move them.
+- **Delete is human-only** (REST `DELETE /api/requirements/{id}`; node tokens get 403 `user_token_required`); agents archive with `archived: true`. Creating / editing / deleting projects is human-only too.
+- Every task records `created_by` / `updated_by`: `{kind: "user" | "node", id}`; a node token is recorded as its bound `node_id`.
+
+**Fields**: `name`, `column` (pool / doing / done), `priority` (high / normal / low), `due` (`YYYY-MM-DD` all day, or an ISO instant with `Z` / `±HH:MM`, stored as UTC seconds), `description` (markdown, ≤ 20000 chars), `checklist` (`[{id, text, done}]`, ≤ 100 items; replaced as a whole), `owner` (负责人, `{kind:"user"}` only), `agent_owner` (负责 Agent, `{kind:"node"}` only), `participants`, `project_id`, `external_ref` (unique per network, e.g. `github:owner/repo#123`), `external_url` (http(s) link), `archived`.
+
+**HTTP endpoints** (`Authorization: Bearer <token>`; multi-network user tokens add `?network_id=`)
+
+| Method | Path | Notes |
+|------|------|------|
+| GET | `/api/requirements` | List; filters `status`, `project_id` (`none` = no project), `owner` / `agent_owner` (`user:<id>` / `node:<id>` / `none`), `updated_since` (ISO), `external_ref`, `include_archived=1`; the response carries `capabilities` |
+| GET | `/api/requirements/{id}` | One task |
+| POST | `/api/requirements` | Create; duplicate `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
+| POST | `/api/requirements/upsert` | Create or patch by `external_ref` (omitted fields, including status, are kept); returns `{requirement, created}` |
+| PATCH | `/api/requirements/{id}` | Patch (omitted fields kept) |
+| PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`; only that item |
+| DELETE | `/api/requirements/{id}` | Delete (humans only) |
+| GET | `/api/requirements/projects` | Projects (creating / editing / deleting projects is human-only) |
+
+**Sync example (GitHub issues → tasks)**: call `requirements_upsert_by_external_ref` once per issue with `external_ref` = `github:<owner>/<repo>#<number>` and `external_url` = the issue link; re-syncing updates the same task instead of creating a duplicate. Use `updated_since` on `requirements_list` for incremental sync.
 
 ## Common Response Format
 

@@ -975,7 +975,7 @@ db.exec(`
 try { db.exec("ALTER TABLE requirements ADD COLUMN client_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE requirements ADD COLUMN issues_json TEXT"); } catch {}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_client ON requirements(network_id, client_id) WHERE client_id IS NOT NULL AND client_id != ''");
-for (const column of ["owner_json TEXT", "participants_json TEXT NOT NULL DEFAULT '[]'", "agent_owner_json TEXT", "description TEXT", "checklist_json TEXT", "project_id TEXT"]) {
+for (const column of ["owner_json TEXT", "participants_json TEXT NOT NULL DEFAULT '[]'", "agent_owner_json TEXT", "description TEXT", "checklist_json TEXT", "project_id TEXT", "external_ref TEXT", "external_url TEXT", "archived INTEGER NOT NULL DEFAULT 0", "created_by_json TEXT", "updated_by_json TEXT"]) {
   try { db.exec(`ALTER TABLE requirements ADD COLUMN ${column}`); } catch (e: any) { if (!/duplicate column|already exists/i.test(e?.message || "")) throw e; }
 }
 

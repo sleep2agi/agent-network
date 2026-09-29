@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-CommHub Server 注册 **50 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
+CommHub Server 注册 **69 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
 
 ## 完整工具索引
 
@@ -123,6 +123,19 @@ CommHub Server 注册 **50 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `send_peer_reply` | 原子地终结一个节点任务并投一条无需回执的结果 |
 | `mark_tasks_consumed` | agent-node 内部信号：标记本轮实际消费的任务 |
 | `mark_tasks_runtime_submitted` | agent-node 内部信号：标记已提交给运行时的任务 |
+
+
+**需求池 / 任务看板（Agent 可用，详见[下文](#需求池-任务看板)）** · 7 个
+
+| 工具 | 说明 |
+|------|------|
+| `requirements_list` | 列本网络的任务；按 status / project_id / owner / agent_owner / updated_since / external_ref 过滤，默认不含已归档 |
+| `requirements_get` | 按 id 取一条任务（含描述、子任务、负责人、项目、external_ref） |
+| `requirements_create` | 新建任务；同网络重复的 `external_ref` 返回 409 `external_ref_exists` + `existing_id` |
+| `requirements_update` | 修改任务，省略的字段保留；`archived: true` 归档（Agent 不能删除） |
+| `requirements_checklist_toggle` | 把一个子任务设为完成 / 未完成，只写这一项 |
+| `requirements_upsert_by_external_ref` | 按 `external_ref`（如 `github:owner/repo#123`）幂等同步：没有就建，有就改 |
+| `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档） |
 
 ---
 
@@ -837,6 +850,33 @@ send_task({
 `message_ids` 长度 = `recipients`，每个 target session 一个 inbox row。
 
 ---
+
+## 需求池 / 任务看板
+
+任务（需求卡）存在 Hub 上，App 的「任务」页和 Agent 读写的是同一份。MCP 工具和 REST 走**同一个**处理函数，权限、校验、「谁做的」记录只有一份。
+
+**权限**
+- 用户令牌：与 App 相同（viewer 只读）。
+- 节点令牌（Agent）：只在它绑定的网络里**读、建、改、勾子任务、upsert、读项目**。跨网络的任务看不到（404）；写入永远落在自己的网络，body 里的 `network_id` 不能把它带到别的网络。
+- **删除只给人**（REST `DELETE /api/requirements/{id}`，节点令牌 403 `user_token_required`）；Agent 用 `archived: true` 归档。建 / 改 / 删项目也只给人。
+- 每条任务记录 `created_by` / `updated_by`：`{kind: "user" | "node", id}`，节点令牌记为它绑定的 `node_id`。
+
+**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`）、`participants`、`project_id`、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`。
+
+**HTTP 端点**（`Authorization: Bearer <token>`，多网络用户令牌带 `?network_id=`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/requirements` | 列表；过滤参数 `status`、`project_id`（`none` = 无项目）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`（ISO）、`external_ref`、`include_archived=1`；响应带 `capabilities` |
+| GET | `/api/requirements/{id}` | 一条 |
+| POST | `/api/requirements` | 新建；重复 `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
+| POST | `/api/requirements/upsert` | 按 `external_ref` 建或改（省略的字段、包括状态，保留）；响应 `{requirement, created}` |
+| PATCH | `/api/requirements/{id}` | 修改（省略的字段保留） |
+| PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`，只改这一项 |
+| DELETE | `/api/requirements/{id}` | 删除（只有人） |
+| GET | `/api/requirements/projects` | 项目列表（建 / 改 / 删项目只有人） |
+
+**同步示例（把 GitHub issue 同步成任务）**：对每个 issue 调一次 `requirements_upsert_by_external_ref`，`external_ref` 用 `github:<owner>/<repo>#<number>`、`external_url` 用 issue 链接；重复同步只会更新同一条，不会重复建。增量同步用 `requirements_list` 的 `updated_since`。
 
 ## 通用返回格式
 

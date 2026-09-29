@@ -42,3 +42,9 @@ export function ensureRequirementProjects(database: DbAdapter): void {
     CREATE INDEX IF NOT EXISTS idx_requirement_projects_network ON requirement_projects(network_id, sort);
   `);
 }
+
+/** external_ref 在同一网络里唯一(只管有值的行)。IF NOT EXISTS:重复执行无副作用。 */
+export function ensureRequirementIndexes(database: DbAdapter): void {
+  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_external_ref ON requirements(network_id, external_ref) WHERE external_ref IS NOT NULL");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_requirements_network_updated ON requirements(network_id, updated_at)");
+}
