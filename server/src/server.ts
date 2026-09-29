@@ -20,7 +20,7 @@ import { canMessageAgent, isAgentRestricted, listAgentGrants, getAgentAccessMode
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
-import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
@@ -258,6 +258,20 @@ function nodeMayRenameTxn(resolved: { networkId: string | null; tokenName: strin
   // commit 前后令牌名可能已被改成新 alias(api_tokens.name 跟随改名),两个都算它自己。
   const self = nodeTokenAlias(resolved);
   return self === txn.old_alias || self === txn.new_alias;
+}
+
+// 登录会话闲置过期(auth.ts sessionIdleDays):resolveToken 把过期令牌当作不存在,各端点于是回各自的
+// 401("invalid token" / "unauthorized" / "auth required" …)。客户端要据此提示「登录已过期」而不是
+// 「令牌无效」,所以在唯一的出口处统一改写:请求带的令牌恰好是一个已闲置过期的会话令牌时,
+// 401 的正文换成 { error: "token_expired" }。状态码不变;只在已经是 401 时才多查一次库。
+function explainExpiredSession(req: Request, res: Response | undefined): Response | undefined {
+  if (!res || res.status !== 401) return res;
+  const token = requestToken(req);
+  if (!token || !isExpiredSessionToken(token)) return res;
+  return withCors(req, Response.json(
+    { ok: false, error: "token_expired", message: "login session expired after inactivity; sign in again" },
+    { status: 401 },
+  ));
 }
 
 function userTokenRequired(req: Request): Response {
@@ -848,7 +862,7 @@ return Bun.serve({
 
   async fetch(req, server) {
     // 2026-09-16 —— 所有 JSON/文本响应在客户端要求时 gzip(见 http-gzip.ts);SSE/流式/二进制原样。
-    return maybeGzipResponse(req, await (async (): Promise<Response | undefined> => {
+    return maybeGzipResponse(req, explainExpiredSession(req, await (async (): Promise<Response | undefined> => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     // ── CORS preflight ──
@@ -1134,7 +1148,7 @@ return Bun.serve({
       }
       try {
         const body = await req.json() as any;
-        const result = register(body.username, body.password, body.email, body.display_name);
+        const result = register(body.username, body.password, body.email, body.display_name, { client: { label: body.client_label, userAgent: req.headers.get("user-agent") } });
         if (result.ok) logAudit(result.user!.user_id, body.username, "register", "user", result.user!.user_id);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       } catch (e: any) {
@@ -1162,7 +1176,7 @@ return Bun.serve({
             { status: 429, headers: { "Retry-After": String(Math.ceil((lock.retryAfterMs ?? 1000) / 1000)) } }
           ));
         }
-        const result = login(body.username, body.password);
+        const result = login(body.username, body.password, { label: body.client_label, userAgent: req.headers.get("user-agent") });
         if (result.ok) {
           sharedLoginFailureLockout.recordSuccess(body.username);
           logAudit(result.user!.user_id, body.username, "login", "user", result.user!.user_id);
@@ -1352,6 +1366,46 @@ return Bun.serve({
       const result = revokeToken(resolved.user.user_id, tokenDeleteMatch[1]);
       if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "token_revoked", "token", tokenDeleteMatch[1]);
       return withCors(req, Response.json(result, { status: result.ok ? 200 : 404 }));
+    }
+
+    // ── 登录设备:列出 / 撤销我的登录会话(见 auth.ts「登录会话令牌」) ──
+    // 只接受用户令牌:节点令牌不是一次登录,也不能替签发它的人管账号(同 #2086)。
+    if (url.pathname === "/api/auth/sessions" && req.method === "GET") {
+      const token = requestToken(req, { allowQueryToken: false });
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      const sessions = listSessions(resolved.user.user_id, resolved.tokenId);
+      return withCors(req, Response.json({ ok: true, sessions, current_token_id: resolved.tokenId, idle_timeout_days: sessionIdleDays() }));
+    }
+
+    if (url.pathname === "/api/auth/sessions/revoke-others" && req.method === "POST") {
+      const token = requestToken(req, { allowQueryToken: false });
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      // 当前令牌必须是一次登录会话,否则「保留当前这个」无从说起(API 令牌调用会把所有会话都撤掉)。
+      const current = resolved.tokenId ? listSessions(resolved.user.user_id, resolved.tokenId).find((x) => x.is_current) : undefined;
+      if (!current) return withCors(req, Response.json({ ok: false, error: "session_token_required", message: "call this with a login session token" }, { status: 403 }));
+      const revoked = revokeOtherSessions(resolved.user.user_id, current.token_id);
+      logAudit(resolved.user.user_id, resolved.user.username, "sessions_revoked_others", "token", current.token_id, `revoked=${revoked}`);
+      return withCors(req, Response.json({ ok: true, revoked, kept_token_id: current.token_id }));
+    }
+
+    const sessionDeleteMatch = url.pathname.match(/^\/api\/auth\/sessions\/([^/]+)$/);
+    if (sessionDeleteMatch && req.method === "DELETE") {
+      const token = requestToken(req, { allowQueryToken: false });
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      const targetId = decodeURIComponent(sessionDeleteMatch[1]);
+      const result = revokeSession(resolved.user.user_id, targetId);
+      const self = targetId === resolved.tokenId;
+      if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "session_revoked", "token", targetId, self ? "self (logout)" : undefined);
+      return withCors(req, Response.json({ ...result, ...(result.ok ? { was_current: self } : {}) }, { status: result.ok ? 200 : 404 }));
     }
 
     // ── V3: Network management ──
@@ -3990,7 +4044,7 @@ Security: ${SECURITY_LABEL}
 `,
       { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } }   // #426
     ));
-    })());
+    })()));
   },
 
   // ── WebSocket handler for tmux terminal streaming ──

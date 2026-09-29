@@ -153,6 +153,7 @@ curl -X POST http://localhost:9200/api/auth/register \
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_xxxxxxxxxxxx",
   "network_token": "ntok_xxxxxxxxxxxxxxxx",
   "network_id": "net_xxxxxxxx"
 }
@@ -207,11 +208,12 @@ curl -X POST http://localhost:9200/api/auth/login \
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_xxxxxxxxxxxx",
   "network_id": "net_xxxxxxxx"
 }
 ```
 
-`user` 对象 5 字段同 register 响应（注 `email` 可为 `null`）；`network_id` 是该用户作为 owner 的 default network（[`auth.ts:209-199`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) 取 `ORDER BY role = 'owner' DESC LIMIT 1`）。每次 login 都签发**新的** `utok_`（不撤销已有，多设备登录互不踢，[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `// User token (utok_) — not bound to network, for CLI/Dashboard login`）。
+`user` 对象 5 字段同 register 响应（注 `email` 可为 `null`）；`network_id` 是该用户作为 owner 的 default network（[`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 取 `ORDER BY role = 'owner' DESC LIMIT 1`）。每次 login 都签发**新的** `utok_`（不撤销已有，多设备登录互不踢，[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `// User token (utok_) — not bound to network, for CLI/Dashboard login`）。`token_id` 是这条令牌在 [`GET /api/auth/sessions`](#sessions) 里的 id，客户端用它认出「本机」；请求体可带可选的 `client_label`（如 `"macOS · 0.2.150"`）标注设备。登录令牌闲置 30 天过期，见 [登录设备](#sessions)。
 
 **常见 4xx**（verify [`auth.ts login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts)）：
 
@@ -352,7 +354,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 `revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销）。
 
-**关键副作用** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L435) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**关键副作用** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L530) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
 2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
 3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
@@ -374,6 +376,47 @@ curl -X POST http://localhost:9200/api/auth/password \
 ::: tip 跟 register 强度规则一致
 密码强度规则跟 register 共用 `validatePasswordStrength()`（参 [POST /api/auth/register 4xx](#post-api-auth-register)）。bootstrap admin 豁免仅适用于首位注册，**改密码无豁免**。
 :::
+
+---
+
+### 登录设备：列出 / 退出登录会话 {#sessions}
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 搜 `/api/auth/sessions`
+
+**登录会话令牌** = 不绑网络、`scope='user'` 的 `utok_`：登录 / 注册签发的 `user-login`、改密码换发的 `password-change`、管理员重置签发的 `admin-reset`。每次登录一条，代表「某台设备上的一次登录」。
+
+**闲置过期（滑动窗口）**：登录会话令牌闲置超过 `COMMHUB_SESSION_IDLE_DAYS` 天（默认 `30`；`0` = 关闭）即失效。闲置时间按 `last_used_at` 计，从没用过的按 `created_at` 计；每次使用都把窗口往后推（`last_used_at` 每个令牌最多每小时写一次）。过期令牌访问任何端点都得到：
+
+```json
+{ "ok": false, "error": "token_expired", "message": "login session expired after inactivity; sign in again" }
+```
+
+HTTP 401。客户端应据 `error == "token_expired"` 提示重新登录（区别于 `invalid token` 等其余 401）。
+
+**不受闲置过期影响**：`POST /api/auth/tokens` 显式创建的 API 令牌（`scope='full'`）、节点 / 网络令牌（`ntok_`）。它们给脚本和节点长期使用，由各自的入口撤销。
+
+以下三个端点**只接受用户令牌**；节点令牌得到 `403 user_token_required`。
+
+**GET /api/auth/sessions** —— 我的未过期登录会话，最近使用的在前：
+
+```json
+{
+  "ok": true,
+  "current_token_id": "tok_aaa",
+  "idle_timeout_days": 30,
+  "sessions": [
+    { "token_id": "tok_aaa", "name": "user-login", "created_at": "2026-09-30 08:00:00",
+      "last_used_at": "2026-09-30 09:12:00", "client_label": "macOS · 0.2.150",
+      "user_agent": "Mozilla/5.0 (Macintosh) …", "is_current": true }
+  ]
+}
+```
+
+`client_label` 是登录时请求体里客户端自报的 `client_label`（可选，≤ 64 字符）；`user_agent` 是登录请求的 `User-Agent` 头（≤ 256 字符）。升级前签发的旧令牌两者都是 `null`。
+
+**POST /api/auth/sessions/revoke-others** —— 退出其他所有设备：撤销我除当前之外的全部登录会话（含已过期的），API 令牌和节点令牌不动。响应 `{ "ok": true, "revoked": 3, "kept_token_id": "tok_aaa" }`。调用令牌本身必须是登录会话，否则 `403 session_token_required`。写 audit `sessions_revoked_others`（`detail = revoked=N`）。
+
+**DELETE /api/auth/sessions/:token_id** —— 撤销我的一个登录会话；撤销当前这个就等于退出登录。响应 `{ "ok": true, "was_current": false }`；目标不是我的登录会话（别人的、API 令牌、节点令牌、不存在）时 `404 session_not_found`。写 audit `session_revoked`。
 
 ---
 
@@ -413,7 +456,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS networks` 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L324) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
+`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS networks` 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L378) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
 
 ---
 

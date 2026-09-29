@@ -640,6 +640,9 @@ for (const ddl of [
   "ALTER TABLE api_tokens ADD COLUMN revoked_at TEXT",
   "ALTER TABLE api_tokens ADD COLUMN role TEXT",
   "ALTER TABLE api_tokens ADD COLUMN bound_node_id TEXT",
+  // 登录会话的设备标识(GET /api/auth/sessions 显示用):客户端自报的 client_label + 登录请求的 User-Agent。
+  "ALTER TABLE api_tokens ADD COLUMN client_label TEXT",
+  "ALTER TABLE api_tokens ADD COLUMN user_agent TEXT",
 ]) {
   try { db.exec(ddl); }
   catch (e: any) {
