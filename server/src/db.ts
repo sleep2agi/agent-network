@@ -1036,6 +1036,31 @@ db.exec(`
   );
 `);
 
+// ── 多用户账号与 Agent 权限:成员可见哪些 Agent ──
+// network_members.agent_access:
+//   'all'     —— 旧语义:能看到并联系网络里所有 Agent。ALTER 的 DEFAULT 让**升级前已有的**成员行
+//                全部落在这里,生产上已有成员的可见范围不因升级而变。
+//   'granted' —— 只看到 network_member_agent_grants 里给了的 Agent。此后**新加入**的
+//                member/viewer(管理员建号、POST members、邀请码)都以它入库,即默认零权限。
+// owner/admin 角色与 Hub 管理员不看这一列(永远全部可见),判定集中在 agent-access.ts。
+try { db.exec("ALTER TABLE network_members ADD COLUMN agent_access TEXT NOT NULL DEFAULT 'all'"); } catch {}
+// node_id 优先(稳定);alias 只给没有 node_id 的旧会话用。两者恰有其一。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_member_agent_grants (
+    network_id   TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    node_id      TEXT,
+    alias        TEXT,
+    can_message  INTEGER NOT NULL DEFAULT 1,
+    created_by   TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK ((node_id IS NULL) <> (alias IS NULL))
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_grants_node ON network_member_agent_grants(network_id, user_id, node_id) WHERE node_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_grants_alias ON network_member_agent_grants(network_id, user_id, alias) WHERE alias IS NOT NULL;
+`);
+
 // ── #84: node rename — rename_txn table (RFC-010 §4) ──
 // Single isolated table holding the rename 2PC transaction state. It doubles
 // as the alias_rename_log (RFC §4 risk #5): the audit log of completed renames

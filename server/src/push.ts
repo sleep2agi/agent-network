@@ -84,6 +84,10 @@ type SSEClient = {
   keepaliveTimer?: ReturnType<typeof setInterval>;
   /** Stable key for log/diagnostic context. */
   key: string;
+  /** 多用户 Agent 权限:订阅者的 user_id(有的话),权限变化时据此断开重连重新鉴权。 */
+  subscriberUserId?: string;
+  /** 只推满足条件的事件(受限成员的网络观察流用)。缺省 = 全推。 */
+  eventFilter?: (event: Record<string, unknown>) => boolean;
 };
 
 // 一个 session 可能有多个 SSE 连接（重连时短暂并存）
@@ -263,10 +267,14 @@ export function createSSEStream(sessionName: string, networkId?: string | null):
 /** #461 — 创建网络级观察者 SSE Response（dashboard 观察第三方流量）。
  *  Shares the exact same registration / backpressure / liveness
  *  machinery as session streams; only the key scheme differs. */
-export function createNetworkObserverStream(networkId: string): Response {
+export function createNetworkObserverStream(
+  networkId: string,
+  opts: { subscriberUserId?: string; eventFilter?: (event: Record<string, unknown>) => boolean } = {},
+): Response {
   return createStreamForKey(
     observerKey(networkId),
     { type: "connected", observer: true, network_id: networkId },
+    opts,
   );
 }
 
@@ -276,10 +284,15 @@ export function createUserEventStream(networkId: string, userId: string): Respon
   return createStreamForKey(
     userKey(networkId, userId),
     { type: "connected", user: true, network_id: networkId, user_id: userId },
+    { subscriberUserId: userId },
   );
 }
 
-function createStreamForKey(key: string, initialEvent: Record<string, unknown>): Response {
+function createStreamForKey(
+  key: string,
+  initialEvent: Record<string, unknown>,
+  opts: { subscriberUserId?: string; eventFilter?: (event: Record<string, unknown>) => boolean } = {},
+): Response {
   const encoder = new TextEncoder();
   let client: SSEClient;
 
@@ -291,6 +304,8 @@ function createStreamForKey(key: string, initialEvent: Record<string, unknown>):
         stuckSince: null,
         closed: false,
         key,
+        ...(opts.subscriberUserId ? { subscriberUserId: opts.subscriberUserId } : {}),
+        ...(opts.eventFilter ? { eventFilter: opts.eventFilter } : {}),
       };
 
       if (!clients.has(key)) clients.set(key, []);
@@ -454,6 +469,11 @@ export function pushNetworkObserverEvent(
       needPrune = true;
       continue;
     }
+    if (c.eventFilter) {
+      let pass = false;
+      try { pass = c.eventFilter(event); } catch { pass = false; }
+      if (!pass) continue;
+    }
     const result = tryEnqueueBytes(c, c.encoder.encode(data));
     if (result === "dead") needPrune = true;
   }
@@ -501,6 +521,27 @@ export function pushUserEvent(
   }
 
   if (needPrune) pruneClosed(key);
+}
+
+/**
+ * 多用户 Agent 权限:某用户在某网络的授权 / 成员资格变了,断开他在这个网络里**订阅时带了身份**
+ * 的流(网络观察流、用户流),客户端重连时按新权限重新鉴权。返回断开的条数。
+ * Agent 频道(/events/<alias>)受限成员本来就订阅不了,不需要这里处理。
+ */
+export function closeUserStreamsInNetwork(networkId: string, userId: string): number {
+  let closed = 0;
+  for (const key of [observerKey(networkId), userKey(networkId, userId)]) {
+    const arr = clients.get(key);
+    if (!arr) continue;
+    for (const c of arr) {
+      if (!c.closed && c.subscriberUserId === userId) {
+        closeClient(c, "access-changed");
+        closed++;
+      }
+    }
+    pruneClosed(key);
+  }
+  return closed;
 }
 
 export function __resetSSEClientsForTest(): void {

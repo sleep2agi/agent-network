@@ -249,7 +249,7 @@ agent-node/src/cli.ts :: Expose CURRENT_TASK_ID
 agent-node/src/cli.ts :: totalCostUsd: m.total_cost_usd
 agent-node/src/feishu-tool-deny.ts :: bubblewrap
 server/src/tools.ts ::     "list_providers",
-server/src/server.ts :: import { addNetworkScope, canRestWriteNetwork
+server/src/server.ts :: import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope
 ```
 
 ### 为什么是显式清单,不是从正文正则抽

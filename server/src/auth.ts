@@ -4,6 +4,7 @@
 import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
 import { WEAK_PASSWORDS } from "./password-dict.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
+import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js";
 
 // Round-6 A1 hardening — dummy hash for username-enumeration timing
 // close. We compute ONE scrypt hash of a throwaway password and reuse
@@ -60,7 +61,7 @@ function validatePasswordStrength(password: string, label = "password"): string 
   return null;
 }
 
-export function register(username: string, password: string, email?: string, displayName?: string): AuthResult {
+export function register(username: string, password: string, email?: string, displayName?: string, opts: { issueTokens?: boolean } = {}): AuthResult {
   if (!username || username.length < 2) return { ok: false, error: "username must be at least 2 characters" };
   if (username.length > 50) return { ok: false, error: "username too long (max 50)" };
   if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(username)) return { ok: false, error: "username contains invalid characters" };
@@ -119,6 +120,16 @@ export function register(username: string, password: string, email?: string, dis
     "INSERT INTO network_members (network_id, user_id, role) VALUES (?1, ?2, 'owner')",
     [networkId, userId]
   );
+
+  // 管理员代建账号(POST /api/admin/users)时不给管理员发这个用户的令牌:
+  // 令牌只该由用户本人登录时拿到。
+  if (opts.issueTokens === false) {
+    return {
+      ok: true,
+      user: { user_id: userId, username, display_name: displayName || username, email: email || null, role: isFirstUser ? "admin" : "user" },
+      network_id: networkId,
+    };
+  }
 
   // User token (utok_) — not bound to network, for CLI/Dashboard login
   const userToken = generateUserToken();
@@ -225,6 +236,7 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
   // Verify user is a member of this network with write access
   const role = getUserNetworkRole(userId, networkId);
   if (!role || role === "viewer") return { ok: false, error: "no write access to this network" };
+  if (isAgentRestricted(userId, networkId)) return { ok: false, error: "restricted members cannot create network tokens" };
   if (!nodeName || nodeName.length > 200) return { ok: false, error: "invalid_node_name" };
   if (nodeId !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(nodeId))) {
     return { ok: false, error: "invalid_node_id" };
@@ -288,6 +300,11 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
     tHash);
 
   if (!row) return null;
+
+  // 多用户 Agent 权限:网络令牌(ntok_ / 邀请码令牌)的权限是「这个网络里的一切」,
+  // 受限成员在受限网络里不能持有它 —— 否则拿它就绕过了授权过滤。这里是唯一的解析入口,
+  // 在这里拒绝,所有 REST / MCP / SSE 路径一起生效(含升级前就签发、后来才被设为受限的令牌)。
+  if (row.network_id && isAgentRestricted(row.user_id, row.network_id)) return null;
 
   // Update last_used
   db.run("UPDATE api_tokens SET last_used_at = datetime('now') WHERE token_hash = ?1", [tHash]);
@@ -382,6 +399,7 @@ export function createToken(userId: string, name: string, networkId?: string): {
     const role = getUserNetworkRole(userId, networkId);
     if (!role) return { ok: false, error: "not a member of this network" };
     if (role === "viewer") return { ok: false, error: "viewer cannot create full-access network tokens" };
+    if (isAgentRestricted(userId, networkId)) return { ok: false, error: "restricted members cannot create network tokens" };
   }
   const token = generateToken();
   const tokenId = generateId("tok");
@@ -467,9 +485,20 @@ export function resetUserPassword(targetUsername: string, callerIsHubAdmin: bool
 
 export function getNetworkMembers(networkId: string) {
   return db.all<any>(
-    `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name
+    `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name,
+            CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access,
+            (SELECT COUNT(*) FROM network_member_agent_grants g WHERE g.network_id = nm.network_id AND g.user_id = nm.user_id) AS agent_grant_count
      FROM network_members nm JOIN users u ON nm.user_id = u.user_id
      WHERE nm.network_id = ?1 ORDER BY nm.joined_at`,
+    networkId);
+}
+
+/** 网络里的人类成员(给受限成员也能看的通讯录):只有身份字段,不含角色与授权。 */
+export function getNetworkHumans(networkId: string) {
+  return db.all<{ user_id: string; username: string; display_name: string | null }>(
+    `SELECT u.user_id, u.username, u.display_name
+       FROM network_members nm JOIN users u ON nm.user_id = u.user_id
+      WHERE nm.network_id = ?1 ORDER BY COALESCE(NULLIF(u.display_name, ''), u.username), u.user_id`,
     networkId);
 }
 
@@ -478,11 +507,33 @@ export function getUserNetworkRole(userId: string, networkId: string): string | 
   return row?.role || null;
 }
 
-export function addNetworkMember(networkId: string, userId: string, role: string, invitedBy?: string): { ok: boolean; error?: string } {
+const MEMBER_ROLES = new Set(["admin", "member", "viewer"]);
+
+/**
+ * 用户名与本网络某个 Agent 的 alias 相同时不能入网:用户的私人 SSE 频道、inbox、
+ * 任务往来都按「用户名」寻址,与 alias 撞名会让受限成员收到那个 Agent 的流量。
+ * 只在入网时查(管理员 / 邀请码持有者才触发),不放在公开的 /api/auth/register 上,
+ * 免得注册接口变成 alias 探测器。
+ */
+export function usernameCollidesWithAgent(networkId: string, userId: string): boolean {
+  return !!db.get(
+    `SELECT 1 FROM users u WHERE u.user_id = ?2 AND (
+       EXISTS (SELECT 1 FROM sessions s WHERE s.network_id = ?1 AND s.alias = u.username)
+       OR EXISTS (SELECT 1 FROM nodes n WHERE n.network_id = ?1 AND n.alias = u.username))`,
+    networkId, userId,
+  );
+}
+
+// 新成员默认 agent_access='granted'(零 Agent 权限),owner/admin 角色不看这一列。
+export function addNetworkMember(networkId: string, userId: string, role: string, invitedBy?: string, opts: { agentAccess?: "all" | "granted" } = {}): { ok: boolean; error?: string } {
+  if (!MEMBER_ROLES.has(role)) return { ok: false, error: "invalid role" };
+  const agentAccess = opts.agentAccess === "all" ? "all" : "granted";
+  if (!db.get("SELECT 1 FROM users WHERE user_id = ?1", userId)) return { ok: false, error: "user not found" };
   const existing = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
   if (existing) return { ok: false, error: "user already a member" };
-  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by) VALUES (?1, ?2, ?3, ?4)",
-    [networkId, userId, role, invitedBy || null]);
+  if (usernameCollidesWithAgent(networkId, userId)) return { ok: false, error: "username_collides_with_agent_alias" };
+  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access) VALUES (?1, ?2, ?3, ?4, ?5)",
+    [networkId, userId, role, invitedBy || null, agentAccess]);
   return { ok: true };
 }
 
@@ -498,6 +549,7 @@ export function removeNetworkMember(networkId: string, userId: string): { ok: bo
   if (!member) return { ok: false, error: "not a member" };
   if (member.role === "owner") return { ok: false, error: "cannot remove owner" };
   db.run("DELETE FROM network_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
+  deleteAgentGrants(networkId, userId);
   return { ok: true };
 }
 
@@ -533,10 +585,13 @@ export function joinByInvite(inviteCode: string, userId: string): { ok: boolean;
   // Check not already member
   const existing = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", invite.network_id, userId);
   if (existing) return { ok: false, error: "already a member of this network" };
+  if (usernameCollidesWithAgent(invite.network_id, userId)) return { ok: false, error: "username_collides_with_agent_alias" };
   // Add member + increment used count
-  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by) VALUES (?1, ?2, ?3, ?4)",
+  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access) VALUES (?1, ?2, ?3, ?4, 'granted')",
     [invite.network_id, userId, invite.role, invite.created_by]);
   db.run("UPDATE network_invites SET used_count = used_count + 1 WHERE invite_code = ?1", [inviteCode]);
+  // 受限成员不能持有网络令牌(resolveToken 会拒),别签一个用不了的。
+  if (isAgentRestricted(userId, invite.network_id)) return { ok: true, network_id: invite.network_id, role: invite.role };
   // Auto-create a token for this network
   const token = generateToken();
   const tokenId = generateId("tok");
@@ -548,8 +603,98 @@ export function joinByInvite(inviteCode: string, userId: string): { ok: boolean;
 /** Get all networks a user is a member of (replaces owner-only query) */
 export function getUserAllNetworks(userId: string) {
   return db.all<any>(
-    `SELECT ${sqlColumns(NETWORK_REST_COLUMNS, "n")}, nm.role as member_role
+    `SELECT ${sqlColumns(NETWORK_REST_COLUMNS, "n")}, nm.role as member_role,
+            -- 多用户 Agent 权限:客户端据此显示「还没有被分配任何 Agent,请联系管理员」。
+            CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access
      FROM networks n JOIN network_members nm ON n.network_id = nm.network_id
+     JOIN users u ON u.user_id = nm.user_id
      WHERE nm.user_id = ?1 ORDER BY nm.role = 'owner' DESC, n.created_at`,
     userId);
+}
+
+// ══════════════════════════════════════
+//  多用户账号:管理员建号
+// ══════════════════════════════════════
+
+export type AdminCreateUserInput = {
+  username?: unknown;
+  password?: unknown;
+  display_name?: unknown;
+  email?: unknown;
+  network_id?: unknown;
+  role?: unknown;
+};
+
+export type AdminCreateUserResult =
+  | { ok: true; user: AuthUser; network_id: string; membership: { network_id: string; role: string; agent_access: "granted" } | null }
+  | { ok: false; error: string; status: number };
+
+/**
+ * 管理员(或某网络的 owner/admin,限于把人建进自己管的网络)代建账号。
+ * 走 register() 的全部规则(用户名、密码 ≥ 8 且不是弱密码、自动建个人网络),
+ * 但不签发令牌 —— 用户自己登录才拿令牌。
+ * 可选一步把新用户加进 network_id,默认 role=member、agent_access='granted'(零 Agent 权限)。
+ * 建号与入网在同一事务里:入网失败(如用户名与 Agent alias 撞名)时账号也不落库。
+ */
+export function adminCreateUser(input: AdminCreateUserInput, actor: { userId: string; isHubAdmin: boolean }): AdminCreateUserResult {
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const username = str(input.username);
+  const password = typeof input.password === "string" ? input.password : "";
+  const displayName = str(input.display_name) || undefined;
+  const email = str(input.email) || undefined;
+  const networkId = str(input.network_id) || null;
+  const role = str(input.role) || "member";
+
+  if (networkId) {
+    if (!db.get("SELECT 1 FROM networks WHERE network_id = ?1", networkId)) return { ok: false, error: "network_not_found", status: 404 };
+    if (!MEMBER_ROLES.has(role)) return { ok: false, error: "invalid role", status: 400 };
+    const actorRole = getUserNetworkRole(actor.userId, networkId);
+    if (!actor.isHubAdmin && actorRole !== "owner" && actorRole !== "admin") return { ok: false, error: "owner/admin required", status: 403 };
+    // 网络 admin 不能建出和自己平级的 admin;只有 owner / Hub 管理员可以。
+    if (role === "admin" && !actor.isHubAdmin && actorRole !== "owner") return { ok: false, error: "owner required to add admins", status: 403 };
+  } else if (!actor.isHubAdmin) {
+    return { ok: false, error: "admin required", status: 403 };
+  }
+  // 首个用户会被 register() 自动设成 Hub 管理员;代建路径上永远不会是首个用户(调用者本身就是用户)。
+  // 但仍显式拒绝,防止空库 + 旧令牌之类的边角把代建变成「造管理员」。
+  const userCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM users");
+  if (!userCount || userCount.cnt === 0) return { ok: false, error: "bootstrap_via_register", status: 400 };
+
+  class Rollback extends Error { constructor(readonly result: AdminCreateUserResult) { super("rollback"); } }
+  try {
+    return db.transaction(() => {
+      const created = register(username, password, email, displayName, { issueTokens: false });
+      if (!created.ok || !created.user) throw new Rollback({ ok: false, error: created.error || "register_failed", status: 400 });
+      if (!networkId) return { ok: true as const, user: created.user, network_id: created.network_id!, membership: null };
+      const added = addNetworkMember(networkId, created.user.user_id, role, actor.userId);
+      if (!added.ok) throw new Rollback({ ok: false, error: added.error || "add_member_failed", status: added.error === "username_collides_with_agent_alias" ? 409 : 400 });
+      return {
+        ok: true as const,
+        user: created.user,
+        network_id: created.network_id!,
+        membership: { network_id: networkId, role, agent_access: "granted" as const },
+      };
+    });
+  } catch (error) {
+    if (error instanceof Rollback) return error.result;
+    throw error;
+  }
+}
+
+/** Hub 管理员的用户列表:每个用户带上他所在的网络与角色、agent_access。不含密码哈希。 */
+export function listUsersWithMemberships() {
+  const users = db.all<{ user_id: string; username: string; display_name: string | null; email: string | null; role: string; created_at: string }>(
+    "SELECT user_id, username, display_name, email, role, created_at FROM users ORDER BY created_at",
+  );
+  const memberships = db.all<{ user_id: string; network_id: string; network_name: string | null; role: string; agent_access: string | null }>(
+    `SELECT nm.user_id, nm.network_id, n.network_name, nm.role, nm.agent_access
+       FROM network_members nm JOIN networks n ON n.network_id = nm.network_id`,
+  );
+  const byUser = new Map<string, Array<{ network_id: string; network_name: string | null; role: string; agent_access: "all" | "granted" }>>();
+  for (const m of memberships) {
+    const list = byUser.get(m.user_id) ?? [];
+    list.push({ network_id: m.network_id, network_name: m.network_name, role: m.role, agent_access: m.agent_access === "all" ? "all" : "granted" });
+    byUser.set(m.user_id, list);
+  }
+  return users.map((u) => ({ ...u, networks: byUser.get(u.user_id) ?? [] }));
 }

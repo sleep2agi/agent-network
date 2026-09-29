@@ -8,7 +8,9 @@ import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetwork
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
-import { canRestWriteNetwork, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId } from "./network-scope.js";
+import { addAgentNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS } from "./agent-access.js";
+import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { handleRequirementsRequest } from "./requirements.js";
 import {
   buildAnetArgs as _unused_buildAnetArgs,           // ensure module is loaded
@@ -129,7 +131,42 @@ export function resolveNodeIdArg(a: { node_id?: string; child_node_id?: string }
   return { ok: true, node_id: id };
 }
 
+function guardRestrictedMemberTools(server: McpServer, restrictedNets: string[], _userId: string): void {
+  const denied = (tool: string) => ({
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        ok: false,
+        error: "agent_access_restricted",
+        message: `${tool} is not available to restricted members in this network; pass network_id of a network where you are not restricted, or ask a network admin for access`,
+      }),
+    }],
+  });
+  const wrap = (name: string, handler: (...callArgs: any[]) => any) => async (...callArgs: any[]) => {
+    if (!RESTRICTED_MEMBER_TOOLS.has(name)) {
+      const args = callArgs[0];
+      const raw = args && typeof args === "object" ? (args as Record<string, unknown>).network_id : undefined;
+      const net = typeof raw === "string" && raw.trim() ? raw.trim() : null;
+      if (!net || restrictedNets.includes(net)) return denied(name);
+    }
+    return handler(...callArgs);
+  };
+  const anyServer = server as any;
+  for (const method of ["tool", "registerTool"] as const) {
+    const original = anyServer[method].bind(server);
+    anyServer[method] = (...regArgs: any[]) => {
+      const last = regArgs.length - 1;
+      if (typeof regArgs[0] === "string" && typeof regArgs[last] === "function") regArgs[last] = wrap(regArgs[0], regArgs[last]);
+      return original(...regArgs);
+    };
+  }
+}
+
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
+  // 多用户 Agent 权限:用户令牌调用者在哪些网络里是受限成员(只看授权 Agent)。
+  // 网络令牌不会走到这里 —— 受限成员的网络令牌在 resolveToken 就被拒了。
+  const restrictedNets = enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : [];
+  if (restrictedNets.length) guardRestrictedMemberTools(server, restrictedNets, enforceUserId!);
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
   // an agent's send_task call always claimed from='hub' and peer agents
@@ -175,6 +212,31 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const canWrite = (effectiveNetworkId?: string | null): boolean => {
     const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
     return canRestWriteNetwork(mcpAuthCtx, netId, false);
+  };
+  // 人类侧写入(私信):不看 Agent 授权,受限成员也可以。
+  const canWriteHuman = (effectiveNetworkId?: string | null): boolean =>
+    canRestWriteNetworkAsHuman(mcpAuthCtx, enforceNetworkId ?? effectiveNetworkId ?? null, false);
+  // 给 Agent 发任务 / 消息的准入。不受限:原判据。受限网络里:目标必须是授权且 can_message 的 Agent,
+  // 发件人固定为自己的用户名;目标不存在与没授权返回同一个错误,不留 alias 探测差异。
+  const agentSendDenied = (effectiveNetworkId: string | null, alias: string, clientFrom: string | undefined, action: "send_task" | "write", meta?: unknown) => {
+    if (!effectiveNetworkId || !restrictedNets.includes(effectiveNetworkId)) {
+      return canWrite(effectiveNetworkId) ? null : writeDeniedReply(effectiveNetworkId, action);
+    }
+    if (!canWriteHuman(effectiveNetworkId)) return writeDeniedReply(effectiveNetworkId, action);
+    const requestedFrom = clientFrom?.trim();
+    if (requestedFrom && requestedFrom !== callerAlias) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "from_session_identity_mismatch", message: "restricted members always send as their own username" }) }] };
+    }
+    const targetAlias = resolveCanonicalAlias(effectiveNetworkId, alias).alias;
+    const session = db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", targetAlias, effectiveNetworkId);
+    if (!session || !canMessageAgent(enforceUserId!, effectiveNetworkId, { alias: targetAlias, nodeId: session.node_id })) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "agent_not_granted", message: "this agent has not been granted to you; ask a network admin" }) }] };
+    }
+    const rawAttachments = meta && typeof meta === "object" ? (meta as { attachments?: unknown }).attachments : undefined;
+    if (restrictedMemberAttachmentsDenied(enforceUserId!, callerAlias ?? "", effectiveNetworkId, rawAttachments)) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "attachment_not_accessible" }) }] };
+    }
+    return null;
   };
 
   // #517: name the REAL cause. The old catch-all blamed permissions for
@@ -379,24 +441,32 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     }
   };
 
-  type ReadScope = { networkId?: string | null; networkIds?: string[] | null; denied?: string };
+  type ReadScope = RestNetworkScope;
 
   // Delegates to the shared membership query (network-scope.ts) — was a
   // byte-for-byte duplicate of getUserNetworkIds before #517.
   const getReadableNetworkIds = (): string[] =>
     enforceUserId ? getUserNetworkIds(enforceUserId) : [];
 
+  // 受限网络挂在 scope.agentRestriction 上:addReadScope(= addNetworkScope)对它们 fail-closed,
+  // 逐条审过的工具改用 addAgentNetworkScope / addOwnTrafficScope 按授权放行。
+  const withRestriction = (scope: ReadScope): ReadScope => {
+    if (!restrictedNets.length || !enforceUserId) return scope;
+    const inScope = scope.networkId ? [scope.networkId] : (scope.networkIds ?? []);
+    const restricted = restrictedNets.filter((id) => inScope.includes(id));
+    return restricted.length ? { ...scope, agentRestriction: { userId: enforceUserId, username: callerAlias ?? "", networkIds: restricted } } : scope;
+  };
   const resolveReadScope = (clientNetId?: string | null): ReadScope => {
     if (!enforceUserId) return { networkId: clientNetId ?? null, networkIds: null };
     if (enforceNetworkId) {
       const role = getUserNetworkRole(enforceUserId, enforceNetworkId);
-      return role ? { networkId: enforceNetworkId, networkIds: null } : { denied: "not a member of token network" };
+      return role ? { networkId: enforceNetworkId, networkIds: null } : { networkId: null, networkIds: [], denied: "not a member of token network" };
     }
     if (clientNetId) {
       const role = getUserNetworkRole(enforceUserId, clientNetId);
-      return role ? { networkId: clientNetId, networkIds: null } : { denied: "access denied to requested network" };
+      return role ? withRestriction({ networkId: clientNetId, networkIds: null }) : { networkId: null, networkIds: [], denied: "access denied to requested network" };
     }
-    return { networkId: null, networkIds: getReadableNetworkIds() };
+    return withRestriction({ networkId: null, networkIds: getReadableNetworkIds() });
   };
 
   // RFC-027 §2.3 race-free invariant — assertNodeActive lives in
@@ -407,20 +477,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // Dispatch (POST /api/task + /api/broadcast). Per
   // per team rule: grep every write site (MCP tools.ts AND REST index.ts) before adding a guard, and extract the helper into a shared module so both transports import it.
 
-  const addReadScope = (sql: string, params: any[], scope: ReadScope, column = "network_id"): string => {
-    if (scope.networkId) {
-      sql += ` AND ${column} = ?${params.length + 1}`;
-      params.push(scope.networkId);
-      return sql;
-    }
-    if (scope.networkIds) {
-      if (scope.networkIds.length === 0) return `${sql} AND 1=0`;
-      const placeholders = scope.networkIds.map((_, i) => `?${params.length + i + 1}`).join(", ");
-      sql += ` AND ${column} IN (${placeholders})`;
-      params.push(...scope.networkIds);
-    }
-    return sql;
-  };
+  // 默认读作用域:对受限网络 fail-closed(见 network-scope.ts addNetworkScope)。
+  const addReadScope = (sql: string, params: any[], scope: ReadScope, column = "network_id"): string =>
+    addNetworkScope(sql, params, scope, column);
 
   type DeliveryTarget =
     | { state: "online"; alias: string; session: any }
@@ -1433,7 +1492,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // (background timer, ~60s cadence). Read path no longer fires UPDATE.
       let sql = "SELECT * FROM sessions WHERE 1=1";
       const params: any[] = [];
-      sql = addReadScope(sql, params, readScope);
+      sql = addAgentNetworkScope(sql, params, readScope, { alias: "alias", nodeId: "node_id" });
       if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
       if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
       const aliasFilter = parseAliasFilter(filter_alias);
@@ -1454,7 +1513,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // under existing callers.
       const summaryParams: any[] = [];
       let summarySql = "SELECT status, COUNT(*) as count FROM sessions WHERE 1=1";
-      summarySql = addReadScope(summarySql, summaryParams, readScope);
+      summarySql = addAgentNetworkScope(summarySql, summaryParams, readScope, { alias: "alias", nodeId: "node_id" });
       summarySql += " GROUP BY status";
       const summary = db.all(summarySql, ...summaryParams);
 
@@ -1488,7 +1547,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       console.log(`[${ts()}] hub → get_session_status: ${alias}`);
       const sessionParams: any[] = [alias];
       let sessionSql = "SELECT * FROM sessions WHERE alias = ?1";
-      sessionSql = addReadScope(sessionSql, sessionParams, readScope);
+      sessionSql = addAgentNetworkScope(sessionSql, sessionParams, readScope, { alias: "alias", nodeId: "node_id" });
       const session = db.get(sessionSql, ...sessionParams);
 
       const pendingParams: any[] = [alias];
@@ -1543,8 +1602,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // existence + ownership of foreign parents via the difference in
       // error codes. Run canWrite first so a viewer ALWAYS gets the
       // same `permission_denied` regardless of parent state.
-      if (!canWrite(effectiveNetId)) {
-        return writeDeniedReply(effectiveNetId, "send_task");
+      {
+        const sendDenied = agentSendDenied(effectiveNetId, alias, _fromIn, "send_task", meta);
+        if (sendDenied) return sendDenied;
       }
 
       // Resolve parent_task_id: explicit > inferred (caller's most recent
@@ -1784,7 +1844,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ alias, message, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
-      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
+      { const sendDenied = agentSendDenied(effectiveNetId, alias, _fromIn, "write"); if (sendDenied) return sendDenied; }
       const canonical = resolveCanonicalAlias(effectiveNetId, alias);
       const targetAlias = canonical.alias;
       const target = resolveDeliveryTarget(targetAlias, effectiveNetId);
@@ -2292,7 +2352,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       const params: any[] = [task_id];
       let sql = "SELECT * FROM tasks WHERE task_id = ?1";
-      sql = addReadScope(sql, params, readScope);
+      sql = addOwnTrafficScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       const task = db.get<any>(sql, ...params);
       return {
         content: [{
@@ -2361,7 +2421,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, thread_id, turn_id, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
-      sql = addReadScope(sql, params, readScope);
+      sql = addOwnTrafficScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
@@ -2377,7 +2437,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Stats
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
-      statsSql = addReadScope(statsSql, statsParams, readScope);
+      statsSql = addOwnTrafficScope(statsSql, statsParams, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       statsSql += " GROUP BY status";
       const stats = db.all(statsSql, ...statsParams);
 
@@ -2511,7 +2571,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (fromMismatch) return fromMismatch;
       const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
-      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      // 人类 ↔ 人类私信:受限成员也能发(canWriteHuman 不看 Agent 授权),但发件人固定为自己的用户名。
+      if (!canWriteHuman(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      if (effectiveNetId && restrictedNets.includes(effectiveNetId) && _fromIn?.trim() && _fromIn.trim() !== callerAlias) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "from_session_identity_mismatch", message: "restricted members always send as their own username" }) }] };
+      }
       if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "write");
 
       if (!to_user_id && !to_username) {

@@ -373,7 +373,8 @@ describe("f28a6c1b CR3 — network-scoped filter matrix (M1-M7)", () => {
     mAliceNet = rAl.network_id;
     db.run("UPDATE users SET role = 'user' WHERE username = ?1", [mAliceName]);
     mAliceId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", [mAliceName])!.user_id;
-    const addAlice = addNetworkMember(mUserANet, mAliceId, "member", mUserAId);
+    // 多用户 Agent 权限:新成员默认只看授权 Agent;本测试测的是「完全信任的成员」旧语义,显式 agent_access=all。
+    const addAlice = addNetworkMember(mUserANet, mAliceId, "member", mUserAId, { agentAccess: "all" });
     if (!addAlice.ok) throw new Error("addNetworkMember(alice→N_A) failed: " + addAlice.error);
 
     // carol — own network + will also be added to N_A, then revoked
@@ -385,7 +386,7 @@ describe("f28a6c1b CR3 — network-scoped filter matrix (M1-M7)", () => {
     mCarolNet = rC.network_id;
     db.run("UPDATE users SET role = 'user' WHERE username = ?1", [mCarolName]);
     mCarolId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", [mCarolName])!.user_id;
-    const addCarol = addNetworkMember(mUserANet, mCarolId, "member", mUserAId);
+    const addCarol = addNetworkMember(mUserANet, mCarolId, "member", mUserAId, { agentAccess: "all" });
     if (!addCarol.ok) throw new Error("addNetworkMember(carol→N_A) failed: " + addCarol.error);
 
     // Live SSE sessions — one per network — so the filter has real

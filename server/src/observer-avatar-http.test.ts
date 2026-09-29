@@ -166,7 +166,8 @@ describe("#461 GET /events/network/:id — auth", () => {
     // not catch this: its authCtx.networkId is null, so only ntok
     // exercises the vulnerable branch — verified by stubbing the OR
     // back in: THIS test goes red, the utok variants stay green).
-    const added = addNetworkMember(memberNetworkId, outsiderUserId, "member");
+    // 多用户 Agent 权限:新成员默认只看授权 Agent;本测试测的是「完全信任的成员」旧语义,显式 agent_access=all。
+    const added = addNetworkMember(memberNetworkId, outsiderUserId, "member", undefined, { agentAccess: "all" });
     expect(added.ok).toBe(true);
     const minted = createNetworkTokenForNode(outsiderUserId, memberNetworkId, "revocation-probe");
     expect(minted.ok).toBe(true);

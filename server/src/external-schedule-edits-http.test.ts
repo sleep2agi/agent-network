@@ -67,8 +67,9 @@ beforeAll(async () => {
   const adminId = admin.user!.user_id;
   ownerId = owner.user!.user_id;
   memberId = member.user!.user_id;
-  expect(addNetworkMember(networkId, ownerId, "member", adminId).ok).toBe(true);
-  expect(addNetworkMember(networkId, memberId, "member", adminId).ok).toBe(true);
+  // 多用户 Agent 权限:新成员默认只看授权 Agent;本测试测的是「完全信任的成员」旧语义,显式 agent_access=all。
+  expect(addNetworkMember(networkId, ownerId, "member", adminId, { agentAccess: "all" }).ok).toBe(true);
+  expect(addNetworkMember(networkId, memberId, "member", adminId, { agentAccess: "all" }).ok).toBe(true);
 
   const minted = createNetworkTokenForNode(ownerId, networkId, alias, nodeId);
   expect(minted.ok).toBe(true);

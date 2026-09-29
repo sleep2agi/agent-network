@@ -2,7 +2,8 @@
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { db } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
-import { addNetworkScope, canRestWriteNetwork, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { isAgentRestricted, visibleAgents } from "./agent-access.js";
 import { ensureRequirementIndexes, ensureRequirementProjects, migrateRequirementAgentOwners } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
@@ -315,7 +316,39 @@ function writeNetwork(body: Record<string, unknown>, ctx: RequirementsRequestCon
 function canWrite(ctx: RequirementsRequestContext, networkId: string | null): boolean {
   // 节点令牌只能写它绑定的那个网络(scope 已强制;这里再核一次,防止别的入口绕过 scope)。
   if (ctx.isNodeToken && (!ctx.auth?.networkId || ctx.auth.networkId !== networkId)) return false;
-  return canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
+  if (ctx.isNodeToken) return canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
+  // 需求看板是人类协作面:受限成员(只看授权 Agent 的成员)照样能读写卡片,
+  // 只是卡片上没授权给他的 Agent 引用会被隐去、也不能被他指派(见 hiddenNodeFilter)。
+  return canRestWriteNetworkAsHuman(ctx.auth, networkId, ctx.isAdmin);
+}
+
+// ── 多用户 Agent 权限 ──
+// 受限成员看需求卡时:agent_owner / 参与人 / created_by / updated_by 里没授权给他的节点一律隐去;
+// 他写卡时也不能引用这些节点。返回 null = 这个调用者在这个网络里不受限。
+type HiddenNode = ((nodeId: string) => boolean) | null;
+function hiddenNodeFilter(ctx: RequirementsRequestContext, networkId: string): HiddenNode {
+  if (!ctx.auth || ctx.isNodeToken || ctx.isAdmin) return null;
+  if (!isAgentRestricted(ctx.auth.userId, networkId)) return null;
+  const visible = new Set(visibleAgents(ctx.auth.userId, networkId).nodeIds);
+  return (nodeId: string) => !visible.has(nodeId);
+}
+function isHiddenRef(ref: unknown, hidden: HiddenNode): boolean {
+  if (!hidden || !ref || typeof ref !== "object") return false;
+  const r = ref as { kind?: unknown; id?: unknown };
+  return r.kind === "node" && typeof r.id === "string" && hidden(r.id);
+}
+function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
+  const pub = toPublic(row);
+  const hidden = hiddenNodeFilter(ctx, row.network_id);
+  if (!hidden) return pub;
+  return {
+    ...pub,
+    owner: isHiddenRef(pub.owner, hidden) ? null : pub.owner,
+    agent_owner: isHiddenRef(pub.agent_owner, hidden) ? null : pub.agent_owner,
+    participants: Array.isArray(pub.participants) ? pub.participants.filter((ref: unknown) => !isHiddenRef(ref, hidden)) : pub.participants,
+    created_by: isHiddenRef(pub.created_by, hidden) ? null : pub.created_by,
+    updated_by: isHiddenRef(pub.updated_by, hidden) ? null : pub.updated_by,
+  };
 }
 
 const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, " +
@@ -323,14 +356,15 @@ const SELECT = "requirement_id, network_id, title, column_name, priority, due_on
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
-function personRef(value: unknown, networkId: string): PersonRef {
+function personRef(value: unknown, networkId: string, hidden: HiddenNode = null): PersonRef {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_person');
   const row = value as Record<string, unknown>;
   if ((row.kind !== 'user' && row.kind !== 'node') || typeof row.id !== 'string' || !row.id.trim()) throw new Error('invalid_person');
   const exists = row.kind === 'user'
     ? db.get("SELECT 1 FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 AND m.user_id=?2", networkId, row.id)
     : db.get("SELECT 1 FROM nodes WHERE network_id=?1 AND node_id=?2", networkId, row.id);
-  if (!exists) throw new Error('person_not_in_network');
+  // 没授权的节点与不存在的节点同一个错误,不给受限成员留 node_id 探测差异。
+  if (!exists || (row.kind === 'node' && hidden?.(row.id as string))) throw new Error('person_not_in_network');
   return { kind: row.kind, id: row.id };
 }
 
@@ -339,12 +373,14 @@ function personRef(value: unknown, networkId: string): PersonRef {
 // 旧客户端兼容(App ≤ 0.2.142 只有一个「负责人」,可以选节点):请求里 owner 是节点、又**没带** agent_owner
 // → 当成设置负责 Agent,负责人清空,照常 200,并回 owner_coerced_to_agent_owner: true。
 // 带了 agent_owner 的就是新客户端,保持严格:owner 是节点 → 400 owner_must_be_human。
-function assignments(body: Record<string, unknown>, networkId: string, current?: Row) {
+function assignments(body: Record<string, unknown>, networkId: string, current?: Row, hidden: HiddenNode = null) {
   let owner = current?.owner_json ? JSON.parse(current.owner_json) : null;
   let agentOwner = current?.agent_owner_json ? JSON.parse(current.agent_owner_json) : null;
   let coerced: PersonRef | null = null;
+  // 受限成员看不见的负责 Agent,他也不能换掉或清空(他读到的是 null,写回 null 不该抹掉别人的指派)。
+  const agentOwnerLocked = isHiddenRef(agentOwner, hidden);
   if ('owner' in body) {
-    owner = body.owner === null ? null : personRef(body.owner, networkId);
+    owner = body.owner === null ? null : personRef(body.owner, networkId, hidden);
     if (owner && owner.kind !== 'user') {
       if ('agent_owner' in body) throw new Error('owner_must_be_human');
       coerced = owner;
@@ -352,15 +388,19 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
       owner = null;
     }
   }
+  if (coerced && agentOwnerLocked) throw new Error('agent_owner_not_granted');
   if ('agent_owner' in body) {
-    agentOwner = body.agent_owner === null ? null : personRef(body.agent_owner, networkId);
+    if (agentOwnerLocked) throw new Error('agent_owner_not_granted');
+    agentOwner = body.agent_owner === null ? null : personRef(body.agent_owner, networkId, hidden);
     if (agentOwner && agentOwner.kind !== 'node') throw new Error('agent_owner_must_be_agent');
   }
   let participants = current ? JSON.parse(current.participants_json || '[]') : [];
   if ('participants' in body) {
     if (!Array.isArray(body.participants) || body.participants.length > 100) throw new Error('invalid_participants');
-    const refs = body.participants.map(value => personRef(value, networkId));
-    participants = [...new Map(refs.map(ref => [`${ref.kind}:${ref.id}`, ref])).values()];
+    const refs = body.participants.map(value => personRef(value, networkId, hidden));
+    // 参与人是整体替换:把受限成员看不见的那些节点原样留下,别让他「保存」时静默删掉。
+    const keptHidden = hidden ? participants.filter((ref: unknown) => isHiddenRef(ref, hidden)) : [];
+    participants = [...new Map([...keptHidden, ...refs].map((ref: PersonRef) => [`${ref.kind}:${ref.id}`, ref])).values()];
   }
   return {
     coerced,
@@ -525,12 +565,12 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   }
   if (clientId) {
     const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
-    if (existing) return Response.json({ ok: true, requirement: toPublic(existing) });
+    if (existing) return Response.json({ ok: true, requirement: toPublicFor(ctx, existing) });
   }
   const id = `req_${crypto.randomUUID()}`;
   const createdAt = new Date().toISOString();
   let people;
-  try { people = assignments(body, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
+  try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId)); } catch (e) { return jsonError((e as Error).message, 400); }
   const actor = JSON.stringify(actorOf(ctx));
   try {
     db.run(
@@ -548,10 +588,10 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
     if (!clientId) return jsonError("insert_failed", 500);
     const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
     if (!existing) return jsonError("insert_failed", 500);
-    return Response.json({ ok: true, requirement: toPublic(existing) });
+    return Response.json({ ok: true, requirement: toPublicFor(ctx, existing) });
   }
   const created = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, id)!;
-  return Response.json(withLegacyOwner(toPublic(created), people.coerced), { status: 201 });
+  return Response.json(withLegacyOwner(toPublicFor(ctx, created), people.coerced), { status: 201 });
 }
 
 // ── 修改(省略的字段保留原值) ──
@@ -592,7 +632,7 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     assignee = body.assignee.trim().slice(0, 80);
   }
   let people;
-  try { people = assignments(body, row.network_id, row); } catch (e) { return jsonError((e as Error).message, 400); }
+  try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id)); } catch (e) { return jsonError((e as Error).message, 400); }
   let projectId = row.project_id;
   if (has("project_id")) {
     try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return jsonError((e as Error).message, 400); }
@@ -637,7 +677,7 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
       has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx)), parentId, has("tags") ? JSON.stringify(tags) : row.tags_json],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
-  return Response.json(withLegacyOwner(toPublic(updated), people.coerced));
+  return Response.json(withLegacyOwner(toPublicFor(ctx, updated), people.coerced));
 }
 
 /**
@@ -653,12 +693,12 @@ function withLegacyOwner(requirement: ReturnType<typeof toPublic>, coerced: Pers
 function scopedRow(ctx: RequirementsRequestContext, id: string): Row | undefined {
   const params: unknown[] = [id];
   let sql = `SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`;
-  sql = addNetworkScope(sql, params, ctx.scope);
+  sql = addHumanNetworkScope(sql, params, ctx.scope);
   return db.get<Row>(sql, ...params) ?? undefined;
 }
 
 /** GET 的筛选(同步方 / MCP 用):status、project_id、owner / agent_owner(kind:id)、updated_since、external_ref、parent_id / top_level、include_archived。 */
-function listFilters(url: URL, sql: string, params: unknown[]): string | Response {
+function listFilters(url: URL, sql: string, params: unknown[], ctx?: RequirementsRequestContext): string | Response {
   const q = url.searchParams;
   const status = q.get("status");
   if (status !== null) {
@@ -673,6 +713,8 @@ function listFilters(url: URL, sql: string, params: unknown[]): string | Respons
     if (v === "none") { sql += ` AND ${column} IS NULL`; continue; }
     const m = /^(user|node):(.+)$/.exec(v);
     if (!m) return jsonError(`invalid_${param}`, 400);
+    // 受限成员按一个没授权给他的节点筛选:与「没有这样的卡」同一结果(否则是「谁负责这张卡」的探测器)。
+    if (m[1] === "node" && ctx && hiddenFilterForScope(ctx, m[2])) { sql += " AND 1=0"; continue; }
     sql += ` AND ${column} = ?${params.push(JSON.stringify({ kind: m[1], id: m[2] }))}`;
   }
   const since = q.get("updated_since");
@@ -690,6 +732,16 @@ function listFilters(url: URL, sql: string, params: unknown[]): string | Respons
   if (q.get("archived") === "true") sql += " AND COALESCE(archived, 0) = 1";
   else if (q.get("include_archived") !== "1") sql += " AND COALESCE(archived, 0) = 0";
   return sql;
+}
+
+/** 这个节点对调用者在他作用域内的某个受限网络里是否隐藏。 */
+function hiddenFilterForScope(ctx: RequirementsRequestContext, nodeId: string): boolean {
+  const restricted = ctx.scope.agentRestriction?.networkIds ?? [];
+  for (const networkId of restricted) {
+    const hidden = hiddenNodeFilter(ctx, networkId);
+    if (hidden?.(nodeId)) return true;
+  }
+  return false;
 }
 
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
@@ -715,19 +767,20 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const users = db.all<{ id: string; name: string }>(
       "SELECT u.user_id AS id, COALESCE(NULLIF(u.display_name,''), u.username) AS name FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 ORDER BY name, id", networkId,
     );
+    const hidden = hiddenNodeFilter(ctx, networkId);
     const nodes = db.all<{ id: string; name: string }>(
       "SELECT node_id AS id, COALESCE(NULLIF(display_name,''), NULLIF(alias,''), node_name) AS name FROM nodes WHERE network_id=?1 ORDER BY name, id", networkId,
-    );
+    ).filter(row => !hidden?.(row.id));
     return Response.json({ ok: true, people: [...users.map(row => ({ ...row, kind: 'user', networkId })), ...nodes.map(row => ({ ...row, kind: 'node', networkId }))] });
   }
 
   if (url.pathname === "/api/requirements" && req.method === "GET") {
     const params: unknown[] = [];
     let sql = `SELECT ${SELECT} FROM requirements WHERE 1=1`;
-    sql = addNetworkScope(sql, params, ctx.scope);
-    const filtered = listFilters(url, sql, params);
+    sql = addHumanNetworkScope(sql, params, ctx.scope);
+    const filtered = listFilters(url, sql, params, ctx);
     if (typeof filtered !== "string") return filtered;
-    const rows = db.all<Row>(`${filtered} ORDER BY created_at DESC LIMIT 500`, ...params).map(toPublic);
+    const rows = db.all<Row>(`${filtered} ORDER BY created_at DESC LIMIT 500`, ...params).map(row => toPublicFor(ctx, row));
     // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
     return Response.json({ ok: true, requirements: rows, capabilities: REQUIREMENT_CAPABILITIES });
   }
@@ -756,7 +809,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
       return Response.json({ ...data, created: true }, { status: 201 });
     }
     const { external_ref: _ref, network_id: _net, client_id: _client, ...patch } = body;
-    if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(patch, k))) return Response.json({ ok: true, requirement: toPublic(existing), created: false });
+    if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(patch, k))) return Response.json({ ok: true, requirement: toPublicFor(ctx, existing), created: false });
     const res = patchRequirement(ctx, existing, patch);
     if (res.status !== 200) return res;
     const data = await res.json() as Record<string, unknown>;
@@ -780,7 +833,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     item.done = body.done;
     db.run("UPDATE requirements SET checklist_json = ?1, updated_at = ?2, updated_by_json = ?3 WHERE requirement_id = ?4", [JSON.stringify(items), new Date().toISOString(), JSON.stringify(actorOf(ctx)), row.requirement_id]);
     const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
-    return Response.json({ ok: true, requirement: toPublic(updated) });
+    return Response.json({ ok: true, requirement: toPublicFor(ctx, updated) });
   }
 
   const match = url.pathname.match(/^\/api\/requirements\/([^/]+)$/);
@@ -788,7 +841,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const id = decodeURIComponent(match[1]);
   if (req.method === "GET") {
     const row = scopedRow(ctx, id);
-    return row ? Response.json({ ok: true, requirement: toPublic(row) }) : jsonError("requirement_not_found", 404);
+    return row ? Response.json({ ok: true, requirement: toPublicFor(ctx, row) }) : jsonError("requirement_not_found", 404);
   }
   if (req.method === "DELETE") {
     // 删除只给人(节点令牌在入口已被拒):Agent 用 archived 归档。
