@@ -29,7 +29,10 @@ const toolsSource = readFileSync("src/tools.ts", "utf8");
 const sdkVersion = JSON.parse(
   readFileSync("node_modules/@modelcontextprotocol/sdk/package.json", "utf8"),
 ).version as string;
-assert(/^1\.(?:29|30)\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
+// 1.31.0 (npm 2026-09-28 18:59Z) — the image resolves `^1.12.0` from server/package.json with no
+// lockfile, so a new minor lands here the day it is published. This tripwire makes that a
+// deliberate review: the unknown-field / inventory checks below were re-run and pass on 1.31.
+assert(/^1\.(?:29|30|31)\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
 const registeredTools = [...toolsSource.matchAll(/server\.(?:tool|registerTool)\(\s*\n\s*"([^"]+)"/g)]
   .map(match => match[1]);
 assert(

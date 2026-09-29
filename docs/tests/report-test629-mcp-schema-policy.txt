@@ -40,3 +40,27 @@ The fixtures contain only synthetic values. No production service, database,
 token, global package, or deployment was touched. The candidate changes only
 documentation and an isolated Docker audit/probe; it does not change MCP tool
 runtime behavior.
+
+## 2026-09-29 — MCP SDK 1.31.0 (tripwire bump)
+
+- npm published @modelcontextprotocol/sdk 1.31.0 at 2026-09-28T18:59Z; the image installs from server/package.json (^1.12.0, no lockfile), so it resolved 1.31.0 and the version tripwire (1.29|1.30) failed on main from the next run on.
+- Allowed 1.31 after re-running the whole probe on it in the suite's own image:
+
+```
+MUTATION_RED: unreviewed-tool-inventory rc=1
+MUTATION_RED: registertool-style-inventory rc=1
+PASS: real MCP SDK version is recorded (1.31.0)
+PASS: all 61 production MCP registrations are explicitly inventoried in source order
+PASS: real SDK accepts a call containing an unknown field
+PASS: real SDK silently strips the unknown field before the handler
+PASS: global strict mode would hard-fail an existing caller with an extra field
+PASS: telemetry wrapper can preserve unknown keys at the validation boundary
+PASS: telemetry records sorted key names
+PASS: telemetry never records unknown values
+PASS: second validation accepts the known payload
+PASS: telemetry wrapper preserves the current stripped handler contract
+inventory_count=61
+sdk_version=1.31.0
+recommended_policy=observe-key-shape-then-strip
+RESULT: PASS
+```
