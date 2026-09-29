@@ -110,7 +110,7 @@ import { decideReplyAlias, replyAliasArgs } from "./reply-originator.js";
 import { clampOutboundPriority, decideOutboundRewrite, parseActiveNetworkTask } from "./active-network-task.js";
 import { getHostTelemetry } from "./host-telemetry.js";
 import { getProcessTelemetry } from "./process-telemetry.js";
-import { nodeIdentityFromConfig } from "./node-server-identity.js";
+import { checkNodeIdClaim, nodeIdentityFromConfig, type NodeIdClaimState } from "./node-server-identity.js";
 
 // ── Load ~/.anet/config.json for token fallback ──────
 function loadAnetConfig(): Record<string, string> {
@@ -224,6 +224,25 @@ const NODE_IDENTITY = nodeIdentityFromConfig(CONFIG_PATH);
 const NODE_MODEL = NODE_IDENTITY.model;
 const NODE_ID = NODE_IDENTITY.node_id;
 const NODE_NAME = NODE_IDENTITY.node_name;
+// node_id 只在确认「hub 上这个 id 没有、或就是我」之后才报(见 node-server-identity.ts 的认领检查)。
+// 三处身份载荷报的都是 reportNodeId,不是配置里的 NODE_ID。
+let reportNodeId: string | undefined;
+let nodeIdClaim: NodeIdClaimState = NODE_ID ? "unknown" : "ok";
+async function refreshNodeIdClaim(): Promise<void> {
+  if (!NODE_ID || nodeIdClaim !== "unknown") return;
+  const r = await checkNodeIdClaim({ hubUrl: COMMHUB_URL, token: AUTH_TOKEN, nodeId: NODE_ID, alias: ALIAS });
+  nodeIdClaim = r.state;
+  if (r.state === "ok") {
+    reportNodeId = NODE_ID;
+  } else if (r.state === "conflict" && r.verdict && !r.verdict.claim) {
+    log(`🚫 NOT reporting node_id=${NODE_ID}: the hub already has it as node "${r.verdict.owner}" ` +
+      `(runtime=${r.verdict.runtime ?? "?"}, config_path=${r.verdict.config_path ?? "?"}). ` +
+      `Reporting it would relabel that node's row as "${ALIAS}". Give this node its own node_id ` +
+      `(mint a bound node token with a fresh node_id and write both into ${CONFIG_PATH ?? "its config.json"}), then restart it.`);
+  } else {
+    log(`node_id claim check deferred (${r.error ?? "unknown"}); not reporting node_id this time`);
+  }
+}
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
   const line = `[${ts}] [commhub] ${msg}`;
@@ -583,6 +602,7 @@ const ABANDON_AFTER_MS = 60 * 60 * 1_000;
 // Re-register on reconnect. Mirrors the payload main() sends at boot.
 async function reregister(): Promise<void> {
   try {
+    await refreshNodeIdClaim();
     await callCommHub("report_status", {
       resume_id: RESUME_ID,
       alias: ALIAS,
@@ -592,7 +612,7 @@ async function reregister(): Promise<void> {
       agent: "claude-code",
       project_dir: process.cwd(),
       config_path: CONFIG_PATH,
-      node_id: NODE_ID,
+      node_id: reportNodeId,
       node_name: NODE_NAME,
       model: NODE_MODEL,
       // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
@@ -809,6 +829,7 @@ async function main() {
     onError: (e) => log(`inbox poll failed: ${e}`),
   });
 
+  await refreshNodeIdClaim();
   callCommHub("report_status", {
     resume_id: RESUME_ID,
     alias: ALIAS,
@@ -818,7 +839,7 @@ async function main() {
     agent: "claude-code",
     project_dir: process.cwd(),
     config_path: CONFIG_PATH,
-    node_id: NODE_ID,
+    node_id: reportNodeId,
     node_name: NODE_NAME,
     model: NODE_MODEL,
     // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
@@ -837,7 +858,8 @@ async function main() {
     .catch((e) => log(`warning: could not register: ${e}`));
 
   // Heartbeat: report_status every 3 minutes to prevent offline timeout
-  setInterval(() => {
+  setInterval(async () => {
+    await refreshNodeIdClaim();
     callCommHub("report_status", {
       resume_id: RESUME_ID,
       alias: ALIAS,
@@ -847,7 +869,7 @@ async function main() {
       agent: "claude-code",
       project_dir: process.cwd(),
       config_path: CONFIG_PATH,
-      node_id: NODE_ID,
+      node_id: reportNodeId,
       node_name: NODE_NAME,
       model: NODE_MODEL,
       // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;

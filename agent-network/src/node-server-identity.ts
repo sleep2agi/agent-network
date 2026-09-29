@@ -46,3 +46,59 @@ export function nodeIdentityFromConfig(path: string | undefined): NodeIdentityFr
   if (model) out.model = model;
   return out;
 }
+
+// ── 认领前先看一眼 hub 上这个 node_id 现在是谁的 ──────────────────────────
+//
+// 🔴 生产实测:一个 claude-code 节点配置里的 node_id,在 hub 上已经是**另一个节点**的行
+//    (别名、config_path、runtime 全是那个节点的 —— 配置被拷过 / 手工回填的 id 撞了)。
+//    hub 的 upsert 对 alias 是 COALESCE(新值优先),一报就把别人的行改成自己的名字。
+//    所以:行存在且别名不是自己 ⇒ 不认领、大声告警(粘住,不每次心跳都刷屏);
+//    查不到结论(网络 / hub 出错)⇒ 这一次不报,下一次上报再查 —— 宁可晚几分钟可选,不能改错别人的行。
+//    正当的改名由 rename.ts 直接改 nodes.alias,所以「别名不同」从来不是同一个节点要报的形状。
+
+export interface NodeRowLike {
+  node_id?: string | null;
+  alias?: string | null;
+  runtime?: string | null;
+  config_path?: string | null;
+}
+
+export type NodeIdClaimVerdict =
+  | { claim: true }
+  | { claim: false; owner: string; runtime: string | null; config_path: string | null };
+
+export function nodeIdClaimVerdict(nodeId: string, rows: readonly NodeRowLike[], alias: string): NodeIdClaimVerdict {
+  // 旧 hub 不认 ?node_id= 会回整张表:按 node_id 自己再筛一遍。
+  const mine = rows.filter(r => r && r.node_id === nodeId);
+  if (mine.length === 0) return { claim: true };
+  const other = mine.find(r => (r.alias ?? "") !== "" && r.alias !== alias);
+  if (!other) return { claim: true };
+  return { claim: false, owner: String(other.alias), runtime: other.runtime ?? null, config_path: other.config_path ?? null };
+}
+
+export type NodeIdClaimState = "ok" | "conflict" | "unknown";
+
+/** 取 hub 上这个 node_id 的行并下结论;任何失败都是 "unknown"(调用方这次不报 node_id)。 */
+export async function checkNodeIdClaim(opts: {
+  hubUrl: string;
+  token: string;
+  nodeId: string;
+  alias: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<{ state: NodeIdClaimState; verdict?: NodeIdClaimVerdict; error?: string }> {
+  const f = opts.fetchImpl ?? fetch;
+  try {
+    const res = await f(`${opts.hubUrl.replace(/\/+$/, "")}/api/nodes?node_id=${encodeURIComponent(opts.nodeId)}`, {
+      headers: opts.token ? { Authorization: `Bearer ${opts.token}` } : {},
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 5_000),
+    });
+    if (!res.ok) return { state: "unknown", error: `HTTP ${res.status}` };
+    const body = await res.json() as { nodes?: unknown };
+    if (!body || !Array.isArray(body.nodes)) return { state: "unknown", error: "no nodes array" };
+    const verdict = nodeIdClaimVerdict(opts.nodeId, body.nodes as NodeRowLike[], opts.alias);
+    return { state: verdict.claim ? "ok" : "conflict", verdict };
+  } catch (e: any) {
+    return { state: "unknown", error: String(e?.message || e) };
+  }
+}

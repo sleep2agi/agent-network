@@ -30,7 +30,7 @@ fail() { printf 'FAIL %s\n' "$*" >&2; dump_diag; exit 1; }
 test "${QA_CC_NODE_ID_SOURCE_COMMIT:-unknown}" != unknown
 echo "source_commit=${QA_CC_NODE_ID_SOURCE_COMMIT}"
 safe_rm_rf "$WORK"
-mkdir -p "$WORK/home" "$WORK/proj/.anet/nodes" "$WORK/old/.anet/nodes"
+mkdir -p "$WORK/home" "$WORK/proj/.anet/nodes" "$WORK/old/.anet/nodes" "$WORK/coll1/.anet" "$WORK/coll2/.anet"
 export HOME="$WORK/home"
 
 HUB_PID=""
@@ -91,6 +91,11 @@ NOID_TOK=$(mint "$NOID_ALIAS")
 OLD_TOK=$(mint "$OLD_ALIAS")
 for t in "$LEGACY_TOK" "$BOUND_TOK" "$NOID_TOK" "$OLD_TOK"; do [[ "$t" == ntok_* ]] || fail 'node token mint'; done
 ok 'four node tokens minted (three unbound legacy-shape, one bound)'
+# 给已有节点换一个新 node_id 的做法:用户 token 铸一个绑定 node_id 的节点 token。
+# hub 在铸造时就插入 nodes 行(owner = 该用户)—— 节点还没报过任何东西,选择器就已经能列出它。
+[[ "$(curl -fsS "$BASE/api/nodes?node_id=$BOUND_ID" -H "Authorization: Bearer $UTOK" | jq -r '.nodes[0].alias // empty')" == "$BOUND_ALIAS" ]] \
+  || fail 'bound node-token mint did not create the nodes row'
+ok 'bound node-token mint creates the nodes row before the node reports anything'
 
 # 节点配置:`anet node create` 写下的形状,路径 = <project>/.anet/nodes/<alias>/config.json。
 write_cfg() {
@@ -119,9 +124,9 @@ CONTROL_SRC="$REPO/agent-network/src/node-server.qa-control.ts"
 python3 - "$REPO/agent-network/src/node-server.ts" "$CONTROL_SRC" <<'PY'
 import pathlib, re, sys
 s = pathlib.Path(sys.argv[1]).read_text()
-n = len(re.findall(r"^\s*node_id: NODE_ID,\n", s, re.M))
+n = len(re.findall(r"^\s*node_id: reportNodeId,\n", s, re.M))
 if n != 3: raise SystemExit(f"expected 3 node_id payload lines, got {n}")
-pathlib.Path(sys.argv[2]).write_text(re.sub(r"^\s*node_id: NODE_ID,\n", "", s, flags=re.M))
+pathlib.Path(sys.argv[2]).write_text(re.sub(r"^\s*node_id: reportNodeId,\n", "", s, flags=re.M))
 PY
 build_rc=0
 (cd "$REPO/agent-network" && bun build "$CONTROL_SRC" --target node --minify --outfile "$WORK/old/.anet/node-server.js" >"$WORK/build-old.log" 2>&1) || build_rc=$?
@@ -184,6 +189,48 @@ ok 'inherited COMMHUB_NODE_ID env is ignored (no row claimed)'
 [[ -z "$(session_node_id "$OLD_ALIAS")" ]] || fail 'pre-fix control unexpectedly reported node_id — the check cannot see the defect'
 [[ -z "$(jq -r --arg id "$OLD_ID" '.nodes[] | select(.node_id==$id) | .node_id' <<<"$NODES")" ]] || fail 'pre-fix control has a nodes row'
 ok 'positive control: pre-fix bundle leaves node_id null and no nodes row (the production symptom)'
+
+# 撞 id:另一个节点先报了同一个 node_id(生产形状:别人的别名 + 别人的 config_path、无 owner)。
+# 后来的节点不能把那一行改成自己的名字 —— node-server 认领前先查,查到是别人就不报。
+COLL_ID="n_coll$(rand)"; FIRST_ALIAS="cc-first-owner"; SECOND_ALIAS="cc-collider"
+FIRST_TOK=$(mint "$FIRST_ALIAS"); SECOND_TOK=$(mint "$SECOND_ALIAS")
+[[ "$FIRST_TOK" == ntok_* && "$SECOND_TOK" == ntok_* ]] || fail 'collision tokens'
+write_cfg "$WORK/coll1" "$FIRST_ALIAS" "$COLL_ID" "$FIRST_TOK"
+write_cfg "$WORK/coll2" "$SECOND_ALIAS" "$COLL_ID" "$SECOND_TOK"
+cp "$WORK/proj/.anet/node-server.js" "$WORK/coll1/.anet/node-server.js"
+cp "$WORK/proj/.anet/node-server.js" "$WORK/coll2/.anet/node-server.js"
+start_cc "$WORK/coll1" "$FIRST_ALIAS" "$FIRST_TOK" -u COMMHUB_NODE_ID
+wait_session "$FIRST_ALIAS" || fail 'first owner never registered'
+for _ in $(seq 1 80); do [[ "$(session_node_id "$FIRST_ALIAS")" == "$COLL_ID" ]] && break; sleep 0.25; done
+row_alias() { curl -fsS "$BASE/api/nodes?node_id=$1" -H "Authorization: Bearer $UTOK" | jq -r '.nodes[0].alias // empty'; }
+[[ "$(row_alias "$COLL_ID")" == "$FIRST_ALIAS" ]] || fail 'first owner did not get the row'
+start_cc "$WORK/coll2" "$SECOND_ALIAS" "$SECOND_TOK" -u COMMHUB_NODE_ID
+wait_session "$SECOND_ALIAS" || fail 'collider never registered'
+for _ in $(seq 1 40); do grep -q "NOT reporting node_id=$COLL_ID" "$WORK/node-$SECOND_ALIAS.log" && break; sleep 0.25; done
+grep -q "NOT reporting node_id=$COLL_ID: the hub already has it as node \"$FIRST_ALIAS\"" "$WORK/node-$SECOND_ALIAS.log" || fail 'collider did not warn about the taken node_id'
+[[ -z "$(session_node_id "$SECOND_ALIAS")" ]] || fail 'collider session claimed the taken node_id'
+[[ "$(row_alias "$COLL_ID")" == "$FIRST_ALIAS" ]] || fail "collider relabelled the row to $(row_alias "$COLL_ID")"
+ok 'node-server refuses a node_id the hub already has under another alias (loud warning, row untouched)'
+
+# hub 侧同一条防线(不经过 node-server 的检查,直接用 collider 的 token 报):别名不同 + config_path 不同 ⇒ 拒绝改行,
+# 会话也不许挂着别人的 node_id。
+mcp_report() {
+  local tok="$1" args="$2" body raw
+  body=$(jq -nc --argjson a "$args" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"report_status",arguments:$a}}')
+  raw=$(curl -sS -X POST "$BASE/mcp" -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2025-03-26' -d "$body")
+  local data; data=$(sed -n 's/^data: //p' <<<"$raw"); data=${data%%$'\n'*}
+  [[ -z "$data" ]] && data="$raw"
+  jq -r '.result.content[0].text // empty' <<<"$data"
+}
+RAW=$(mcp_report "$SECOND_TOK" "$(jq -nc --arg a "$SECOND_ALIAS" --arg id "$COLL_ID" --arg cp "$WORK/coll2/.anet/nodes/$SECOND_ALIAS/config.json" \
+  '{resume_id:"qa-raw-collider",alias:$a,status:"idle",agent:"claude-code",node_id:$id,config_path:$cp}')")
+jq -e '.ok == true' <<<"$RAW" >/dev/null || fail "raw report_status rejected outright: $RAW"
+[[ "$(row_alias "$COLL_ID")" == "$FIRST_ALIAS" ]] || fail "hub relabelled the row on a raw colliding report: $(row_alias "$COLL_ID")"
+RAW_NID=$(curl -fsS "$BASE/api/status?network_id=$NET" -H "Authorization: Bearer $UTOK" | jq -r '[.sessions[] | select(.resume_id=="qa-raw-collider" or (.alias=="'"$SECOND_ALIAS"'"))][] | .node_id // empty')
+[[ -z "$RAW_NID" ]] || fail "hub left the colliding node_id on the session: $RAW_NID"
+grep -q "identity_mismatch" "$WORK/hub.log" || fail 'hub did not log identity_mismatch'
+ok 'hub refuses to relabel a row claimed by a different alias + config_path (identity_mismatch)'
 
 # 用户视角:能对它建定时任务;对修复前的那个不能。
 mk_schedule() {

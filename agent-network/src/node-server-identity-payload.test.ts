@@ -67,8 +67,25 @@ describe("node-server 的身份载荷(三处)", () => {
   });
 
   it("🔴 三处都带 node_id / node_name —— 不带,hub 的 nodes 表就没有这个节点,定时任务选不到", () => {
-    const missing = blocks.filter(b => !b.includes("node_id: NODE_ID") || !b.includes("node_name: NODE_NAME"));
+    const missing = blocks.filter(b => !b.includes("node_id: reportNodeId") || !b.includes("node_name: NODE_NAME"));
     expect(missing.length).toBe(0);
+  });
+
+  it("🔴 报的是认领检查过的 reportNodeId,不是配置里的原值(撞了别人的 id 会改掉别人的行)", () => {
+    for (const b of blocks) expect(b).not.toContain("node_id: NODE_ID");
+    // 只有认领检查结论为 ok 时才赋值
+    expect(CODE.match(/reportNodeId = /g)?.length).toBe(1);
+    expect(CODE).toContain('if (r.state === "ok") {\n    reportNodeId = NODE_ID;');
+  });
+
+  it("三处上报之前都先 await refreshNodeIdClaim()", () => {
+    const lines = CODE.split("\n");
+    const payloadStarts = lines.flatMap((l, i) => /^\s*agent:\s*"claude-code",\s*$/.test(l) ? [i] : []);
+    expect(payloadStarts.length).toBe(3);
+    for (const i of payloadStarts) {
+      const before = lines.slice(Math.max(0, i - 12), i).join("\n");
+      expect(before).toContain("await refreshNodeIdClaim();");
+    }
   });
 
   it("node_id 只来自节点配置(不读 COMMHUB_NODE_ID:继承来的旧值会认领别人的 nodes 行)", () => {
