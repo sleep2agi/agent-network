@@ -856,7 +856,7 @@ Tasks (requirement cards) live on the Hub; the app's 任务 page and agents read
 - **Delete is human-only** (REST `DELETE /api/requirements/{id}`; node tokens get 403 `user_token_required`); agents archive with `archived: true`. Creating / editing / deleting projects is human-only too.
 - Every task records `created_by` / `updated_by`: `{kind: "user" | "node", id}`; a node token is recorded as its bound `node_id`.
 
-**Fields**: `name`, `column` (pool / doing / done), `priority` (high / normal / low), `due` (`YYYY-MM-DD` all day, or an ISO instant with `Z` / `±HH:MM`, stored as UTC seconds), `description` (markdown, ≤ 20000 chars), `checklist` (`[{id, text, done}]`, ≤ 100 items; replaced as a whole), `owner` (负责人, `{kind:"user"}` only; for old clients a node `owner` sent without `agent_owner` is stored as `agent_owner` and the response carries `owner_coerced_to_agent_owner: true`), `agent_owner` (负责 Agent, `{kind:"node"}` only), `participants`, `project_id`, `parent_id` (sub-requirements: same network, no cycles, at most 5 levels; a parent returns `children: {total, done}`; deleting a parent keeps its children and makes them top level), `external_ref` (unique per network, e.g. `github:owner/repo#123`), `external_url` (http(s) link), `archived`.
+**Fields**: `name`, `column` (pool / doing / done), `priority` (high / normal / low), `due` (`YYYY-MM-DD` all day, or an ISO instant with `Z` / `±HH:MM`, stored as UTC seconds), `description` (markdown, ≤ 20000 chars), `checklist` (`[{id, text, done}]`, ≤ 100 items; replaced as a whole), `owner` (负责人, `{kind:"user"}` only; for old clients a node `owner` sent without `agent_owner` is stored as `agent_owner` and the response carries `owner_coerced_to_agent_owner: true`), `agent_owner` (负责 Agent, `{kind:"node"}` only), `participants`, `project_id`, `parent_id` (sub-requirements: same network, no cycles, at most 5 levels; a parent returns `children: {total, done}`; deleting a parent keeps its children and makes them top level), `external_ref` (unique per network, e.g. `github:owner/repo#123`), `external_url` (http(s) link), `archived`, `tags` (string array, at most 10, each at most 20 Unicode characters; omit to keep, `[]` to clear; invalid values are 400 `invalid_tags`).
 
 **HTTP endpoints** (`Authorization: Bearer <token>`; multi-network user tokens add `?network_id=`)
 
@@ -870,6 +870,7 @@ Tasks (requirement cards) live on the Hub; the app's 任务 page and agents read
 | PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`; only that item |
 | DELETE | `/api/requirements/{id}` | Delete (humans only); children are kept and detached |
 | GET | `/api/requirements/projects` | Projects (creating / editing / deleting projects is human-only) |
+| GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them |
 
 **Sync example (GitHub issues → tasks)**: call `requirements_upsert_by_external_ref` once per issue with `external_ref` = `github:<owner>/<repo>#<number>` and `external_url` = the issue link; re-syncing updates the same task instead of creating a duplicate. Use `updated_since` on `requirements_list` for incremental sync.
 

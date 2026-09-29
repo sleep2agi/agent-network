@@ -276,7 +276,7 @@ curl http://localhost:9200/api/auth/me \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-修改个人信息。
+修改个人信息。**需要用户令牌。** 节点令牌返回 403 `user_token_required`。
 
 ```bash
 curl -X PUT http://localhost:9200/api/auth/me \
@@ -327,7 +327,7 @@ curl -X PUT http://localhost:9200/api/auth/me \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-修改密码。
+修改密码。**需要用户令牌。** 节点令牌返回 403 `user_token_required`。
 
 ```bash
 curl -X POST http://localhost:9200/api/auth/password \
@@ -422,7 +422,7 @@ curl http://localhost:9200/api/networks \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-创建新网络。
+创建新网络。**需要用户令牌。** 节点令牌返回 403 `user_token_required`。
 
 ```bash
 curl -X POST http://localhost:9200/api/networks \
@@ -500,7 +500,7 @@ curl http://localhost:9200/api/networks/net_abc123 \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-重命名网络（仅 owner）。
+重命名网络（仅 owner）。**需要用户令牌。** 节点令牌返回 403 `user_token_required`。
 
 ```bash
 curl -X PUT http://localhost:9200/api/networks/net_abc123 \
@@ -538,7 +538,7 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-删除网络（仅 owner，必须无活跃 session）。
+删除网络（仅 owner，必须无活跃 session）。**需要用户令牌。** 节点令牌返回 403 `user_token_required`。
 
 ```bash
 curl -X DELETE http://localhost:9200/api/networks/net_abc123 \

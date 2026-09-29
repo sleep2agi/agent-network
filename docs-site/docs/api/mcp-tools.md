@@ -861,7 +861,7 @@ send_task({
 - **删除只给人**（REST `DELETE /api/requirements/{id}`，节点令牌 403 `user_token_required`）；Agent 用 `archived: true` 归档。建 / 改 / 删项目也只给人。
 - 每条任务记录 `created_by` / `updated_by`：`{kind: "user" | "node", id}`，节点令牌记为它绑定的 `node_id`。
 
-**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`；兼容旧客户端：只带节点 `owner`、没带 `agent_owner` 时存成 `agent_owner`，响应带 `owner_coerced_to_agent_owner: true`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`）、`participants`、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`。
+**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`；兼容旧客户端：只带节点 `owner`、没带 `agent_owner` 时存成 `agent_owner`，响应带 `owner_coerced_to_agent_owner: true`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`）、`participants`、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`、`tags`（字符串数组，最多 10 个、每个最多 20 个 Unicode 字；省略不改，`[]` 清空；不合法为 400 `invalid_tags`）。
 
 **HTTP 端点**（`Authorization: Bearer <token>`，多网络用户令牌带 `?network_id=`）
 
@@ -875,6 +875,7 @@ send_task({
 | PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`，只改这一项 |
 | DELETE | `/api/requirements/{id}` | 删除（只有人）；子需求保留并解挂 |
 | GET | `/api/requirements/projects` | 项目列表（建 / 改 / 删项目只有人） |
+| GET | `/api/requirements/tags` | 当前网络里出现过的标签（去重、排序，含归档任务上的）。节点令牌可以读 |
 
 **同步示例（把 GitHub issue 同步成任务）**：对每个 issue 调一次 `requirements_upsert_by_external_ref`，`external_ref` 用 `github:<owner>/<repo>#<number>`、`external_url` 用 issue 链接；重复同步只会更新同一条，不会重复建。增量同步用 `requirements_list` 的 `updated_since`。
 

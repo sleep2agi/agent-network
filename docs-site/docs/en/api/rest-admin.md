@@ -4,6 +4,8 @@ Part of the [REST API reference](/en/api/rest): tokens, network members, files, 
 
 ## Token Management Endpoints
 
+**Requires a user token.** A node token cannot list, mint, or revoke tokens. The response is 403 `user_token_required`.
+
 ### POST /api/auth/node-token
 
 
@@ -142,6 +144,8 @@ Writes audit log `action='token_revoked'`. After revocation, the next request us
 ---
 
 ## Network Member Endpoints
+
+**Requires a user token.** A node token cannot list, invite, join, change roles, or remove members. The response is 403 `user_token_required`.
 
 ### GET /api/networks/:id/members
 
@@ -360,6 +364,8 @@ After receiving this response, the `anet network join` CLI auto-switches to the 
 
 ## Users & Agent Access Endpoints
 
+**Requires a user token.** A node token calling these endpoints gets 403 `user_token_required`.
+
 Multi-user accounts: a hub admin (or a network owner / admin) creates accounts, and a new member **sees no agents by default** until agents are granted one by one. Human-to-human direct messages are not affected.
 
 **Rule** (`server/src/agent-access.ts`): a user whose network `role` is `member` / `viewer`, whose `agent_access` is not `all`, and who is not a hub admin is a **restricted member**. A restricted member:
@@ -439,7 +445,7 @@ Any item that is not an agent of this network → 400 `agent_not_in_network`, no
 
 Any member (restricted ones included): the network's human directory, with only `user_id` / `username` / `display_name`, for picking a DM recipient (DMs go through MCP `send_desktop_message`).
 
-### POST /api/dm · GET /api/dm · GET /api/dm/threads
+### POST /api/dm · GET /api/dm · GET /api/dm/threads {#human-dm}
 
 Human-to-human direct messages between two users of the same network (restricted members included). User tokens only.
 
@@ -499,7 +505,7 @@ Common errors: `400 bad_file_id` (malformed id) · `404 not_found` (no index ent
 
 ## Node Rename Endpoints (RFC-010)
 
-> Coordination endpoints for the RFC-010 active-rename two-phase transaction, called internally by `anet node rename` (flow: [node-lifecycle §7](https://github.com/sleep2agi/agent-network/blob/main/docs/node-lifecycle.md)). Not normally called by hand — listed here for integrators. All three require `Authorization: Bearer` (missing token 401 / invalid token 401).
+> Coordination endpoints for the RFC-010 active-rename two-phase transaction, called internally by `anet node rename` (flow: [node-lifecycle §7](https://github.com/sleep2agi/agent-network/blob/main/docs/node-lifecycle.md)). Not normally called by hand — listed here for integrators. All three require `Authorization: Bearer` (missing token 401 / invalid token 401). A node token may rename only itself: the network it is bound to, and the old alias must be the node that token represents. Renaming any other node, or a node in another network, **requires a user token**; otherwise the response is 403 `user_token_required`.
 
 ### POST /api/node-rename/prepare
 

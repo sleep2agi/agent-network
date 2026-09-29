@@ -68,6 +68,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: '桌面与手机客户端', link: '/guide/desktop-app' },
               { text: '任务', link: '/guide/tasks' },
+              { text: '任务标签', link: '/guide/task-tags' },
               { text: '定时任务', link: '/guide/schedules' },
               { text: 'Web Dashboard', link: '/guide/dashboard' },
             ]
@@ -101,6 +102,7 @@ export default withMermaid(defineConfig({
             text: '账号与安全',
             items: [
               { text: '账号、Token 与角色', link: '/guide/account-system' },
+              { text: '多用户与权限', link: '/guide/multi-user' },
               { text: '网络隔离', link: '/concepts/networks' },
               { text: '安全设计', link: '/concepts/security' },
               { text: '升级与发布通道', link: '/guide/upgrade' },
@@ -160,6 +162,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Desktop & Mobile Clients', link: '/en/guide/desktop-app' },
               { text: 'Tasks', link: '/en/guide/tasks' },
+              { text: 'Task tags', link: '/en/guide/task-tags' },
               { text: 'Schedules', link: '/en/guide/schedules' },
               { text: 'Web Dashboard', link: '/en/guide/dashboard' },
             ]
@@ -193,6 +196,7 @@ export default withMermaid(defineConfig({
             text: 'Accounts & Security',
             items: [
               { text: 'Accounts, Tokens & Roles', link: '/en/guide/account-system' },
+              { text: 'Multi-user and permissions', link: '/en/guide/multi-user' },
               { text: 'Network Isolation', link: '/en/concepts/networks' },
               { text: 'Security Design', link: '/en/concepts/security' },
               { text: 'Upgrades & Release Channels', link: '/en/guide/upgrade' },

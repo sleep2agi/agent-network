@@ -4,6 +4,8 @@
 
 ## Token 管理端点
 
+**需要用户令牌。** 节点令牌不能列出、签发或撤销令牌，返回 403 `user_token_required`。
+
 ### POST /api/auth/node-token
 
 
@@ -142,6 +144,8 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 ---
 
 ## 网络成员端点
+
+**需要用户令牌。** 节点令牌不能列出、邀请、加入、改角色或移除成员，返回 403 `user_token_required`。
 
 ### GET /api/networks/:id/members
 
@@ -360,6 +364,8 @@ curl -X POST http://localhost:9200/api/networks/join \
 
 ## 用户与 Agent 权限端点
 
+**需要用户令牌。** 节点令牌调用这些接口返回 403 `user_token_required`。
+
 多用户账号:Hub 管理员(或网络 owner / admin)建号,新成员**默认看不到任何 Agent**,在「可访问的 Agent」里逐个授权。人与人之间的私信不受影响。
 
 **判定规则**(`server/src/agent-access.ts`):网络里 `role` 为 `member` / `viewer`、`agent_access` 不是 `all`、且不是 Hub 管理员的用户是**受限成员**。受限成员:
@@ -439,7 +445,7 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 
 任何成员(含受限成员)都能调:网络里的人类成员通讯录,只有 `user_id` / `username` / `display_name`。给受限成员选私信对象用(私信走 MCP `send_desktop_message`)。
 
-### POST /api/dm · GET /api/dm · GET /api/dm/threads
+### POST /api/dm · GET /api/dm · GET /api/dm/threads {#human-dm}
 
 人与人私信(同一网络里的两个用户;受限成员也可以),只接受用户令牌。
 
@@ -498,7 +504,7 @@ curl -OJ http://localhost:9200/api/files/<file_id> -H "Authorization: Bearer uto
 
 ## 节点改名端点（RFC-010）
 
-> RFC-010 active-rename 两阶段事务的协调端点，由 `anet node rename` 内部调用（流程见 [node-lifecycle §7](https://github.com/sleep2agi/agent-network/blob/main/docs/node-lifecycle.md)）。一般不直接手调，列在此处供集成方参考。三个端点都要 `Authorization: Bearer`（缺 token 401 / 无效 token 401）。
+> RFC-010 active-rename 两阶段事务的协调端点，由 `anet node rename` 内部调用（流程见 [node-lifecycle §7](https://github.com/sleep2agi/agent-network/blob/main/docs/node-lifecycle.md)）。一般不直接手调，列在此处供集成方参考。三个端点都要 `Authorization: Bearer`（缺 token 401 / 无效 token 401）。节点令牌只能改自己：绑定的网络里，旧 alias 就是这个令牌代表的节点。改别的节点或别的网络**需要用户令牌**，否则 403 `user_token_required`。
 
 ### POST /api/node-rename/prepare
 

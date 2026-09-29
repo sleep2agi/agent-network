@@ -196,6 +196,7 @@ Username + password (the only thing you remember)
 
 - A running node uses it to connect to the Hub, receive tasks, and call CommHub tools.
 - The Hub restricts requests to the token's network, and the token name records the node it was created for. Do not reuse an `ntok_` across nodes.
+- It cannot administer accounts, tokens, networks, or members. Those endpoints require a user token. A node can rename only itself. See [Multi-user and permissions](/en/guide/multi-user).
 - Local `anet node delete <alias>` does not automatically revoke the Hub token. Revoke the token separately when it is no longer needed.
 
 ### Local admin recovery token
@@ -508,6 +509,7 @@ If you still know the old password, run `anet passwd` (it prompts for the old on
 ## Next Steps
 
 **Dig into concepts**:
+- [Multi-user and permissions](/en/guide/multi-user) — which Agents a member can access, and the human-to-human message API; user management, registration, and direct messages are not in the app yet
 - [Network isolation](/en/concepts/networks) — RBAC permission matrix, invite codes, data isolation
 
 **Hands-on**:

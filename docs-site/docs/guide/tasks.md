@@ -41,7 +41,12 @@ iOS 仍走 TestFlight，公开链接还没开。本页按桌面和 Android 上�
 
 给 Agent 做幂等同步时用 `external_ref`（形如 `github:owner/repo#123`），见 [需求池 / 任务看板](/api/mcp-tools#需求池-任务看板)。
 
+## 标签
+
+见 [任务标签](/guide/task-tags)。
+
 ## 相关
 
 - [桌面与手机客户端](/guide/desktop-app)
+- [任务标签](/guide/task-tags)
 - [需求池 / 任务看板](/api/mcp-tools#需求池-任务看板)
