@@ -20,7 +20,7 @@ import { canMessageAgent, isAgentRestricted, listAgentGrants, getAgentAccessMode
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
-import { register, login, resolveToken, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, adminDeleteEmptyNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
@@ -42,8 +42,8 @@ import {
   validateAttachments,
   validateIndexEntry,
 } from "./uploads.js";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, unlinkSync, renameSync } from "fs";
-import { dirname as pathDirname } from "path";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, unlinkSync, renameSync } from "fs";
+import { dirname as pathDirname, join as pathJoin } from "path";
 import { startRetentionSweeper } from "./retention.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import {
@@ -272,6 +272,22 @@ function explainExpiredSession(req: Request, res: Response | undefined): Respons
     { ok: false, error: "token_expired", message: "login session expired after inactivity; sign in again" },
     { status: 401 },
   ));
+}
+
+// 上传文件的归属网络记在磁盘索引 <uploadsRoot>/.index/<file_id>.json 的 network_id 里,不在库里。
+// 管理员删空网络前要数它:目录不存在就是 0;目录读不了就抛(不能把「数不了」当成「没有」)。
+function countNetworkUploads(networkId: string): number {
+  const dir = pathJoin(getUploadsRoot(), ".index");
+  let names: string[];
+  try { names = readdirSync(dir); } catch (e: any) { if (e?.code === "ENOENT") return 0; throw e; }
+  let count = 0;
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      if (JSON.parse(readFileSync(pathJoin(dir, name), "utf8"))?.network_id === networkId) count++;
+    } catch {}
+  }
+  return count;
 }
 
 function userTokenRequired(req: Request): Response {
@@ -1689,6 +1705,19 @@ return Bun.serve({
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
+      // Hub 管理员删别人的网络:同一个资源、同一个动词,只是换一条判据 —— 只允许空网络
+      // (计数见 auth.ts adminDeleteEmptyNetwork)。owner 自己删仍走下面原来的路径,行为不变。
+      const owner = db.get<{ owner_id: string }>("SELECT owner_id FROM networks WHERE network_id = ?1", netDetailMatch[1]);
+      if (owner && owner.owner_id !== resolved.user.user_id && isHubAdminCredential(resolved)) {
+        const adminResult = adminDeleteEmptyNetwork(netDetailMatch[1], { files: countNetworkUploads(netDetailMatch[1]) });
+        if (!adminResult.ok) {
+          return withCors(req, Response.json({ ok: false, error: adminResult.error, counts: adminResult.counts }, { status: adminResult.status }));
+        }
+        logAudit(resolved.user.user_id, resolved.user.username, "network_deleted", "network", netDetailMatch[1],
+          JSON.stringify({ admin_override: true, owner_id: adminResult.owner_id, network_name: adminResult.network_name, cleaned: adminResult.cleaned }),
+          getClientIP(req, server), netDetailMatch[1]);
+        return withCors(req, Response.json({ ok: true, admin_override: true, cleaned: adminResult.cleaned }));
+      }
       const result = deleteNetwork(resolved.user.user_id, netDetailMatch[1]);
       if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "network_deleted", "network", netDetailMatch[1]);
       return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));

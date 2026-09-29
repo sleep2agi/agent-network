@@ -615,6 +615,23 @@ curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
 
 Writes audit log `action='network_deleted'`.
 
+**Hub admin deleting someone else's network** (for cleaning up personal networks left by old accounts): when the caller is a Hub admin
+(user token, `role=admin`) and not the owner, only an **empty** network can be deleted — any non-zero count in nodes / sessions / tasks /
+inbox / user_inbox / requirements / requirement_projects / scheduled_tasks / providers / network_secrets / skillhub_skills / side_chats,
+in-flight node create/start requests, or uploaded files attributed to the network refuses the request. `network_id='default'` is always
+refused. On success the network's members, grants, invites, network-scoped tokens (its node tokens stop working) and request/telemetry
+history rows are removed in the same transaction; the audit log `detail` carries `"admin_override":true` and the original owner.
+
+```json
+{ "ok": true, "admin_override": true, "cleaned": { "network_members": 1, "api_tokens": 1 } }
+```
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 409 | `network is not empty (nodes=1, sessions=1); …` | Network is not empty; the response also carries a `counts` object |
+| 409 | `the default network cannot be deleted` | Target is `default` |
+| 404 | `network not found` | `network_id` does not exist |
+
 ---
 
 ## Error Response Format

@@ -793,3 +793,77 @@ export function listUsersWithMemberships() {
   }
   return users.map((u) => ({ ...u, networks: byUser.get(u.user_id) ?? [] }));
 }
+
+// Hub 管理员删**别人的**网络(清理旧测试账号留下的个人网络)。只删空网络:
+// 下面每张表里有一行就拒(409),并把计数原样回给调用方。表是按 schema 里所有带
+// network_id 的表逐个分类的,不是凭记忆 —— 新加一张带 network_id 的表要在这里归一类。
+//   阻断:真实内容,或会在删后重新长出节点的在途请求。
+//   清理:只描述「这个网络」本身的元数据/历史,网络没了它们就悬空。
+//   保留:audit_log(删除记录本身要留下)。
+const NETWORK_CONTENT_CHECKS: Array<[label: string, sql: string]> = [
+  ["nodes", "SELECT COUNT(*) AS cnt FROM nodes WHERE network_id = ?1"],
+  ["sessions", "SELECT COUNT(*) AS cnt FROM sessions WHERE network_id = ?1"],
+  ["tasks", "SELECT COUNT(*) AS cnt FROM tasks WHERE network_id = ?1"],
+  ["inbox", "SELECT COUNT(*) AS cnt FROM inbox WHERE network_id = ?1"],
+  ["user_inbox", "SELECT COUNT(*) AS cnt FROM user_inbox WHERE network_id = ?1"],
+  ["requirements", "SELECT COUNT(*) AS cnt FROM requirements WHERE network_id = ?1"],
+  ["requirement_projects", "SELECT COUNT(*) AS cnt FROM requirement_projects WHERE network_id = ?1"],
+  ["scheduled_tasks", "SELECT COUNT(*) AS cnt FROM scheduled_tasks WHERE network_id = ?1"],
+  ["providers", "SELECT COUNT(*) AS cnt FROM providers WHERE network_id = ?1"],
+  ["network_secrets", "SELECT COUNT(*) AS cnt FROM network_secrets WHERE network_id = ?1"],
+  ["skillhub_skills", "SELECT COUNT(*) AS cnt FROM skillhub_skills WHERE network_id = ?1"],
+  ["side_chats", "SELECT COUNT(*) AS cnt FROM side_chats WHERE network_id = ?1"],
+  ["pending_node_create_requests", "SELECT COUNT(*) AS cnt FROM node_create_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
+  ["pending_node_start_requests", "SELECT COUNT(*) AS cnt FROM node_start_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
+];
+const NETWORK_CLEANUP_TABLES = [
+  "network_members", "network_member_agent_grants", "network_invites", "api_tokens",
+  "node_create_requests", "node_start_requests", "node_stop_requests", "node_rules_requests",
+  "node_config_updates", "rename_txn", "probe_results", "agent_telemetry", "completions",
+  "task_events", "task_terminal_events", "scheduled_task_runs", "external_schedule_edits",
+];
+
+function tableExists(name: string): boolean {
+  return db.dialect === "postgres"
+    ? !!db.get("SELECT 1 AS x FROM information_schema.tables WHERE table_name = ?1", name)
+    : !!db.get("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?1", name);
+}
+
+export function countNetworkContents(networkId: string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const [label, sql] of NETWORK_CONTENT_CHECKS) {
+    const table = sql.match(/FROM (\w+)/)![1];
+    // 按需建表的模块(requirements / side-thread)在没用过的库上可能还没有这张表 —— 那就是 0 行。
+    if (!tableExists(table)) continue;
+    const cnt = db.get<{ cnt: number }>(sql, networkId)?.cnt ?? 0;
+    if (cnt > 0) counts[label] = cnt;
+  }
+  return counts;
+}
+
+export type AdminDeleteNetworkResult =
+  | { ok: true; owner_id: string; network_name: string; cleaned: Record<string, number> }
+  | { ok: false; status: number; error: string; counts?: Record<string, number> };
+
+// extraCounts:库外的内容(上传文件的索引在磁盘上),由调用方数好传进来,和库内计数一起判。
+export function adminDeleteEmptyNetwork(networkId: string, extraCounts: Record<string, number> = {}): AdminDeleteNetworkResult {
+  if (networkId === "default") return { ok: false, status: 409, error: "the default network cannot be deleted" };
+  return db.transaction((): AdminDeleteNetworkResult => {
+    const net = db.get<{ owner_id: string; network_name: string }>("SELECT owner_id, network_name FROM networks WHERE network_id = ?1", networkId);
+    if (!net) return { ok: false, status: 404, error: "network not found" };
+    const counts = { ...countNetworkContents(networkId) };
+    for (const [k, v] of Object.entries(extraCounts)) if (v > 0) counts[k] = v;
+    if (Object.keys(counts).length > 0) {
+      const summary = Object.entries(counts).map(([k, v]) => `${k}=${v}`).join(", ");
+      return { ok: false, status: 409, error: `network is not empty (${summary}); only empty networks can be deleted by a hub admin`, counts };
+    }
+    const cleaned: Record<string, number> = {};
+    for (const table of NETWORK_CLEANUP_TABLES) {
+      if (!tableExists(table)) continue;
+      const changes = db.run(`DELETE FROM ${table} WHERE network_id = ?1`, [networkId]).changes;
+      if (changes > 0) cleaned[table] = changes;
+    }
+    db.run("DELETE FROM networks WHERE network_id = ?1", [networkId]);
+    return { ok: true, owner_id: net.owner_id, network_name: net.network_name, cleaned };
+  });
+}

@@ -604,6 +604,23 @@ curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
 
 写 audit log `action='network_deleted'`。
 
+**Hub 管理员删别人的网络**（用于清理旧账号留下的个人网络）：调用者是 Hub 管理员（用户令牌，`role=admin`）且不是 owner 时，
+只允许删**空**网络 —— nodes / sessions / tasks / inbox / user_inbox / requirements / requirement_projects /
+scheduled_tasks / providers / network_secrets / skillhub_skills / side_chats、在途的节点创建/启动请求、
+归属该网络的上传文件，任一非 0 即拒。`network_id='default'` 一律拒。成功时同一事务里删掉该网络的成员、
+授权、邀请、网络作用域令牌（节点令牌随之失效）及请求/遥测等历史行；audit log 的 `detail` 带
+`"admin_override":true` 与原 owner。
+
+```json
+{ "ok": true, "admin_override": true, "cleaned": { "network_members": 1, "api_tokens": 1 } }
+```
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 409 | `network is not empty (nodes=1, sessions=1); …` | 网络非空；响应另带 `counts` 对象逐项给出计数 |
+| 409 | `the default network cannot be deleted` | 目标是 `default` |
+| 404 | `network not found` | `network_id` 不存在 |
+
 ---
 
 ## 错误响应格式
