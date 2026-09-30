@@ -136,6 +136,7 @@ import {
   fetchUnresolvedOutbound,
 } from "./runtime/grok-build-acp/resume-hint";
 import { CurrentAliasResolver } from "./runtime/current-alias";
+import { createStatusAliasFetcher } from "./runtime/status-alias-fetch";
 import { delegationTargetExists } from "./runtime/delegation-precheck";
 import { isDaemonPureProgramNode, daemonProgramReply } from "./runtime/daemon-program-node";
 import { grokCliDenyPaths } from "./runtime/grok-cli-deny-paths";
@@ -1348,31 +1349,13 @@ const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toStri
 // MCP tool factory). Synchronous current() returns the cached value for
 // log lines and file paths; async refresh() hits commhub with a 30 s
 // cache when callers care about staleness. Fetches the canonical alias
-// from the server's GET /api/status endpoint scoped to this node_id.
+// from the server's GET /api/status, filtered to this node_id when the hub supports it.
 const aliasResolver = new CurrentAliasResolver({
   initialAlias: ALIAS,
   nodeId: NODE_ID || null,
   cacheTtlMs: 30_000,
-  fetchCanonicalAlias: async (nodeId: string) => {
-    try {
-      const headers: Record<string, string> = { Accept: "application/json" };
-      if (AUTH_TOKEN) headers["Authorization"] = `Bearer ${AUTH_TOKEN}`;
-      const url = `${COMMHUB_URL}/api/status${NETWORK_ID ? `?network_id=${encodeURIComponent(NETWORK_ID)}` : ""}`;
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 2500);
-      try {
-        const res = await fetch(url, { headers, signal: ctl.signal });
-        if (!res.ok) return null;
-        const body = (await res.json()) as { sessions?: Array<{ node_id?: string; alias?: string }> };
-        const match = body.sessions?.find((s) => s.node_id === nodeId);
-        return match?.alias ?? null;
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch {
-      return null;
-    }
-  },
+  // ?node_id=<id>&light=1 on hubs that advertise it, else the old full-network read (status-alias-fetch.ts).
+  fetchCanonicalAlias: createStatusAliasFetcher({ hubUrl: COMMHUB_URL, token: () => AUTH_TOKEN || undefined, networkId: NETWORK_ID || undefined }),
   onDrift: (oldAlias, newAlias, source) => {
     warn(`[alias-drift] ${oldAlias} → ${newAlias} (source: ${source})`);
   },
