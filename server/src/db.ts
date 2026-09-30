@@ -1475,7 +1475,7 @@ if (db.dialect === "sqlite") {
       IF NEW.status IN ('replied', 'failed', 'cancelled', 'expired')
          AND (TG_OP = 'INSERT' OR OLD.status NOT IN ('replied', 'failed', 'cancelled', 'expired')) THEN
         INSERT INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
-        VALUES (NEW.task_id, NEW.network_id, NEW.from_node_id, COALESCE(NEW.completed_at, NOW()))
+        VALUES (NEW.task_id, NEW.network_id, NEW.from_node_id, COALESCE(NEW.completed_at, datetime('now')))
         ON CONFLICT (task_id) DO NOTHING;
       END IF;
       RETURN NEW;

@@ -6,10 +6,13 @@
 # rung reached:
 #
 #   L0  adapter connects to PG ("PostgreSQL connection verified")   ← always required
-#   L1  schema built and hub listening (/health 200)
-#   L2  first registered user is admin
-#   L3  login → node token → report_status → POST /api/task
-#   L4  send_reply ok and the task row is replied
+#   L1  schema built: every module-level CREATE/ALTER ran and startHub() was
+#       reached — the hub is listening, or startHub() refused with the
+#       scheduled-task backend error (which it raises before binding a port)
+#   L2  hub listening (/health 200)
+#   L3  first registered user is admin
+#   L4  login → node token → report_status → POST /api/task
+#   L5  send_reply ok and the task row is replied
 #
 # It is a ratchet, not a pass/fail smoke: the suite is red only when the level
 # drops below FLOOR. Each RFC-039 step that moves the Hub up a rung raises
@@ -28,9 +31,9 @@ if [ -n "${EXPECTED_SOURCE_COMMIT:-}" ] && [ "$EXPECTED_SOURCE_COMMIT" != "${SOU
   exit 1
 fi
 
-# Current floor: on main the Hub dies while building its schema on PG
-# (RFC-039 §1.3), so L0 is the highest rung it reliably reaches.
-FLOOR="${PG_LADDER_FLOOR:-0}"
+# Current floor: RFC-039 S2a builds the whole schema on PG; startHub() then
+# refuses (scheduled tasks need the real transactions S2b brings).
+FLOOR="${PG_LADDER_FLOOR:-1}"
 SUITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PG_PORT=25433
 HUB_PORT=29213
@@ -89,9 +92,12 @@ for _ in $(seq 1 "$HUB_WAIT_SECS"); do
 done
 
 if grep -q 'PostgreSQL connection verified' "$WORK/hub.log"; then LEVEL=0; fi
+if [ "$LEVEL" = 0 ] && { [ "$up" = 1 ] || grep -q 'scheduled_tasks_require_transactional_sqlite_backend' "$WORK/hub.log"; }; then
+  LEVEL=1
+fi
 
 if [ "$up" = 1 ]; then
-  LEVEL=1
+  LEVEL=2
   ladder_out="$(bun "$SUITE_DIR/ladder.ts" "http://127.0.0.1:$HUB_PORT" 2>&1 || true)"
   printf '%s\n' "$ladder_out"
   reached="$(printf '%s\n' "$ladder_out" | sed -n 's/^LADDER_LEVEL=//p')"
@@ -102,7 +108,7 @@ else
   kill -0 "$HUB_PID" 2>/dev/null || { wait "$HUB_PID" 2>/dev/null && hub_rc=0 || hub_rc=$?; }
   # The first line bun prints for an uncaught error is "error: <message>".
   err="$(grep -m1 -E '^(error|Error)[: ]' "$WORK/hub.log" || true)"
-  FIRST_FAIL="FAIL L1 hub not listening after $((SECONDS - t0))s (hub exit=$hub_rc): ${err:-see hub.log}"
+  FIRST_FAIL="FAIL L$((LEVEL + 1)) hub not listening after $((SECONDS - t0))s (hub exit=$hub_rc): ${err:-see hub.log}"
   echo "$FIRST_FAIL"
 fi
 

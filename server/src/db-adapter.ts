@@ -6,8 +6,9 @@
  *
  * Key design: callers write SQLite-style SQL. PgAdapter auto-translates:
  *   - ?1, ?2  →  $1, $2
- *   - datetime('now')  →  NOW()
- *   - datetime('now', '+N seconds')  →  NOW() + INTERVAL 'N seconds'
+ *   - datetime('now'[, offset])  →  to_char(... AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+ *     (timestamps stay TEXT on both backends, RFC-039 §4.1)
+ *   - BLOB  →  BYTEA
  *   - INTEGER PRIMARY KEY AUTOINCREMENT  →  SERIAL PRIMARY KEY
  *   - ON CONFLICT(col) DO UPDATE SET  →  ON CONFLICT(col) DO UPDATE SET  (same syntax)
  */
@@ -79,24 +80,32 @@ export class SQLiteAdapter implements DbAdapter {
 // ════════════════════════════════════════════
 
 /**
+ * PostgreSQL expression for SQLite's `datetime(...)` text: UTC, `YYYY-MM-DD HH:MM:SS`.
+ * Timestamps stay TEXT on both backends (RFC-039 §4.1), so a column written by
+ * `datetime('now')` compares, sorts and serialises the same way on each.
+ */
+function pgUtcText(expr: string): string {
+  return `to_char((${expr}) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`;
+}
+
+/**
  * Translate SQLite-style SQL to PostgreSQL.
  * Called on every query — must be fast (simple regex, no parsing).
  */
 export function sqliteToPostgres(sql: string): string {
   let s = sql;
   // ── datetime translations (before ?N→$N to handle datetime('now', ?N)) ──
-  // datetime('now', ?N) → NOW() + $N::INTERVAL  (param contains "+3600 seconds")
+  // datetime('now', ?N) → UTC text of NOW() + $N  (param contains "+3600 seconds").
+  // The CAST gives PG a type for a parameter it could not otherwise infer.
   s = s.replace(/datetime\s*\(\s*'now'\s*,\s*\?(\d+)\s*\)/gi, (_, n) => {
-    return `NOW() + $${n}::INTERVAL`;
+    return pgUtcText(`NOW() + CAST($${n} AS TEXT)::INTERVAL`);
   });
-  // datetime('now', '+N seconds') → NOW() + INTERVAL 'N seconds'
+  // datetime('now', '+N seconds') → UTC text of NOW() + INTERVAL 'N seconds'
   s = s.replace(/datetime\s*\(\s*'now'\s*,\s*'([^']+)'\s*\)/gi, (_, offset) => {
-    return `NOW() + INTERVAL '${offset.replace(/^\+/, "")}'`;
+    return pgUtcText(`NOW() + INTERVAL '${offset.replace(/^\+/, "")}'`);
   });
-  // datetime('now') → NOW()
-  s = s.replace(/datetime\s*\(\s*'now'\s*\)/gi, "NOW()");
-  // TEXT NOT NULL DEFAULT (datetime('now')) → TIMESTAMP NOT NULL DEFAULT NOW()
-  s = s.replace(/TEXT\s+NOT\s+NULL\s+DEFAULT\s+\(NOW\(\)\)/gi, "TIMESTAMP NOT NULL DEFAULT NOW()");
+  // datetime('now') → UTC text of NOW()
+  s = s.replace(/datetime\s*\(\s*'now'\s*\)/gi, pgUtcText("NOW()"));
   // ── Parameter placeholders ──
   // ?1, ?2 → $1, $2  (positional params)
   s = s.replace(/\?(\d+)/g, (_, n) => `$${n}`);
@@ -106,7 +115,71 @@ export function sqliteToPostgres(sql: string): string {
   // ── DDL translations ──
   // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
   s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, "SERIAL PRIMARY KEY");
+  // BLOB → BYTEA
+  s = s.replace(/\bBLOB\b/gi, "BYTEA");
   return s;
+}
+
+/**
+ * Split a multi-statement script on top-level `;`.
+ *
+ * A bare `split(";")` cut through SQL comments (db.ts has `;` inside `--`
+ * comments) and through plpgsql `$$ … $$` bodies, so the Hub died on its
+ * first schema block on PostgreSQL. This skips `--` and `/* *\/` comments
+ * (dropping them) and keeps quoted strings, quoted identifiers and
+ * dollar-quoted bodies intact.
+ */
+export function splitSqlStatements(sql: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let i = 0;
+  const n = sql.length;
+  while (i < n) {
+    const c = sql[i];
+    if (c === "-" && sql[i + 1] === "-") {
+      while (i < n && sql[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && sql[i + 1] === "*") {
+      const close = sql.indexOf("*/", i + 2);
+      i = close < 0 ? n : close + 2;
+      cur += " ";
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (sql[j] === c) {
+          if (sql[j + 1] === c) { j += 2; continue; }
+          break;
+        }
+        j++;
+      }
+      cur += sql.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (c === "$") {
+      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+      if (tag) {
+        const close = sql.indexOf(tag[0], i + tag[0].length);
+        const stop = close < 0 ? n : close + tag[0].length;
+        cur += sql.slice(i, stop);
+        i = stop;
+        continue;
+      }
+    }
+    if (c === ";") {
+      if (cur.trim()) out.push(cur.trim());
+      cur = "";
+      i++;
+      continue;
+    }
+    cur += c;
+    i++;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
 }
 
 /**
@@ -141,7 +214,8 @@ export class PgAdapter implements DbAdapter {
     const pgSql = sqliteToPostgres(sql);
     // Single-query subprocess with pg Pool (connection string from env)
     const script = `
-      const{Pool}=require('pg');
+      const{Pool,types}=require('pg');
+      types.setTypeParser(20,v=>{const n=Number(v);return Number.isSafeInteger(n)?n:v;});
       const p=new Pool({connectionString:${JSON.stringify(this.connString)},max:1});
       const q=${JSON.stringify(pgSql)};
       const v=${JSON.stringify(params || [])};
@@ -183,7 +257,7 @@ export class PgAdapter implements DbAdapter {
     if (sql.trim().toUpperCase().startsWith("PRAGMA")) return;
     const pgSql = sqliteToPostgres(sql);
     // Split multi-statement DDL (CREATE TABLE; CREATE INDEX; ...)
-    const stmts = pgSql.split(";").map(s => s.trim()).filter(s => s.length > 0);
+    const stmts = splitSqlStatements(pgSql);
     for (const stmt of stmts) {
       try { this.querySync(stmt); } catch (e: any) {
         // Ignore "already exists" errors for CREATE TABLE/INDEX IF NOT EXISTS
