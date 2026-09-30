@@ -959,7 +959,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     if ("error" in sq) return jsonError(sq.error, 400);
     const statsParams: unknown[] = [networkId];
     const statsSql = addTaskVisibilityScope(
-      "SELECT project_id, column_name, archived, created_at, completed_at, completed_at_approx, completed_by_json FROM requirements WHERE network_id = ?1",
+      "SELECT requirement_id, seq, title, project_id, column_name, archived, created_at, completed_at, completed_at_approx, completed_by_json FROM requirements WHERE network_id = ?1",
       statsParams, taskCaller(ctx),
     );
     const rows = db.all<StatsRow>(statsSql, ...statsParams);

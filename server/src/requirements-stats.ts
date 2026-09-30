@@ -7,8 +7,13 @@ export const STATS_DEFAULT_DAYS = 30;
 export const STATS_MAX_DAYS = 371; // 53 周:够画一整年的贡献热力图
 export const STATS_SPARK_DAYS = 14;
 export const STATS_TOP_COMPLETERS = 20;
+export const STATS_DEFAULT_RECENT = 10;
+export const STATS_MAX_RECENT = 50;
 
 export type StatsRow = {
+  requirement_id: string;
+  seq: number | null;
+  title: string;
   project_id: string | null;
   column_name: string;
   archived: number | null;
@@ -18,7 +23,7 @@ export type StatsRow = {
   completed_by_json: string | null;
 };
 
-export type StatsQuery = { fromMs: number | null; toMs: number; tz: string; days: number };
+export type StatsQuery = { fromMs: number | null; toMs: number; tz: string; days: number; recent: number };
 type Ref = { kind: "user" | "node"; id: string };
 
 /** 解析 from / to / tz / days。不合法 → 错误码(400)。to 缺省 = 现在;from 缺省 = 不设下限(全部)。 */
@@ -40,7 +45,10 @@ export function parseStatsQuery(q: URLSearchParams, nowMs: number): StatsQuery |
   const daysRaw = q.get("days");
   const days = daysRaw === null || daysRaw === "" ? STATS_DEFAULT_DAYS : Number(daysRaw);
   if (!Number.isInteger(days) || days < 1 || days > STATS_MAX_DAYS) return { error: "invalid_days" };
-  return { fromMs: from, toMs, tz, days };
+  const recentRaw = q.get("recent");
+  const recent = recentRaw === null || recentRaw === "" ? STATS_DEFAULT_RECENT : Number(recentRaw);
+  if (!Number.isInteger(recent) || recent < 0 || recent > STATS_MAX_RECENT) return { error: "invalid_recent" };
+  return { fromMs: from, toMs, tz, days, recent };
 }
 
 function validTimeZone(tz: string): boolean {
@@ -88,6 +96,7 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
   let done = 0, approx = 0, created = 0, createdDone = 0, doing = 0, pool = 0, unattributed = 0;
   const byProject = new Map<string | null, number>();
   const byCompleter = new Map<string, { ref: Ref; n: number; spark: Map<string, number> }>();
+  const recent: { row: StatsRow; ms: number; by: Ref | null }[] = [];
 
   for (const row of rows) {
     // 当前还开着的卡(不看时间范围;归档的不算「进行中」)。
@@ -106,6 +115,8 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
       if (day >= firstDay && day <= lastDay) daily.set(day, (daily.get(day) ?? 0) + 1);
     }
     if (!inRange(completedMs)) continue;
+    const who = parseRef(row.completed_by_json);
+    recent.push({ row, ms: completedMs, by: who && !(who.kind === "node" && hidden?.(who.id)) ? who : null });
     done++;
     if (row.completed_at_approx) approx++;
     byProject.set(row.project_id, (byProject.get(row.project_id) ?? 0) + 1);
@@ -140,5 +151,14 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
       .slice(0, STATS_TOP_COMPLETERS)
       .map(c => ({ ...c.ref, n: c.n, spark: spark.map(d => c.spark.get(d) ?? 0) })),
     unattributed,
+    // 最近完成(新 → 旧):仪表盘的「最近完成」时间线和分享图的「今天完成的任务」。只含期内、调用者看得见的卡;
+    // 完成者是隐藏节点 → completed_by = null。
+    recent: recent
+      .sort((a, b) => b.ms - a.ms || (a.row.requirement_id < b.row.requirement_id ? 1 : -1))
+      .slice(0, q.recent)
+      .map(({ row, ms, by }) => ({
+        id: row.requirement_id, seq: row.seq == null ? null : Number(row.seq), name: row.title, project_id: row.project_id,
+        completed_at: new Date(ms).toISOString(), completed_at_approx: !!row.completed_at_approx, completed_by: by, archived: !!row.archived,
+      })),
   };
 }

@@ -184,6 +184,21 @@ describe("GET /api/requirements/stats", () => {
     expect(s.daily.at(-1).date).toBe(localDate(Date.parse(s.range.to), "UTC"));
   });
 
+  test("recent:最近完成的卡(新 → 旧),带短号 / 标题 / 完成者;recent=0 空;非法 400", async () => {
+    const r = await stats(admin.token, "&recent=3");
+    expect(r.status).toBe(200);
+    const rec = r.body.recent as any[];
+    expect(rec.map(x => x.name)).toEqual(["rs-archived", "rs-alice", "rs-bot-card"]);
+    expect(rec[0].archived).toBe(true);
+    expect(rec[1].completed_by).toEqual({ kind: "user", id: alice.id });
+    expect(rec[2].completed_by?.kind).toBe("node");
+    expect(typeof rec[0].seq).toBe("number");
+    for (let i = 1; i < rec.length; i++) expect(rec[i - 1].completed_at >= rec[i].completed_at).toBe(true);
+    expect((await stats(admin.token)).body.recent.length).toBe(5); // 缺省 10,只有 5 张完成
+    expect((await stats(admin.token, "&recent=0")).body.recent).toEqual([]);
+    for (const bad of ["-1", "51", "x"]) expect((await stats(admin.token, `&recent=${bad}`)).body.error).toBe("invalid_recent");
+  });
+
   test("scoped 成员:统计只含他看得见的卡(反向:别人的卡、项目、完成者都不出现)", async () => {
     const r = await stats(alice.token);
     expect(r.status).toBe(200);
@@ -194,6 +209,7 @@ describe("GET /api/requirements/stats", () => {
     expect(r.body.by_project).toEqual([{ project_id: null, n: 1 }]);
     expect(r.body.by_completer).toEqual([expect.objectContaining({ kind: "user", id: alice.id, n: 1 })]);
     expect(r.text).not.toContain(admin.id);
+    expect((r.body.recent as any[]).map(x => x.name)).toEqual(["rs-alice"]);
     expect(r.text).not.toContain(PROJ);
     expect(r.text).not.toContain(bot.nodeId);
   });
@@ -206,6 +222,7 @@ describe("GET /api/requirements/stats", () => {
     expect(r.body.unattributed).toBe(1);
     expect((r.body.by_completer as any[]).some(c => c.kind === "node")).toBe(false);
     expect(r.text).not.toContain(bot.nodeId);
+    expect((r.body.recent as any[]).find(x => x.name === "rs-bot-card").completed_by).toBeNull();
     // 卡片详情也藏掉 completedBy(与 updated_by 同一规则)
     const one = await send(carol.token, "GET", `/api/requirements/${C["rs-bot-card"]}?network_id=${NET}`);
     expect(one.status).toBe(200);
