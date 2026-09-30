@@ -88,7 +88,7 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
   - 失效条件：经过 `handleRequirementsRequest` 的任何非 GET 请求（REST 和 MCP 都走它）都让缓存作废；调用者的成员行或角色变了，也不命中。
   - 条目最多信任 60 s，兜住直接改库的情形。
   - 不缓存的情形：「只看相关任务」的成员、Agent 受限的成员、`q=` 搜索、`changes=1`。
-- `GET /api/stats/routes?minutes=15`（管理员或 master 令牌）：最近 N 分钟（1–1440）每个路由的次数、总耗时、平均值、p95、最大值、字节数和 5xx 数。路由里的 id 段折成 `:id`，保留 `light` / `view` / `scope` / `changes` 这几个会改变载荷形状的参数。数据只在内存里，最多 4096 条样本，重启清空。
+- `GET /api/stats/routes?minutes=15`（管理员或 master 令牌）：最近 N 分钟（1–1440）每个路由的次数、总耗时、平均值、p95、最大值、字节数和 5xx 数。路由里的 id 段折成 `:id`，保留 `light` / `view` / `scope` / `changes` 这几个会改变载荷形状的参数；`POST /mcp` 后面带 JSON-RPC 方法名，`tools/call` 再带工具名（如 `POST /mcp tools/call report_status`；只读这两个字段，不记参数，形状不对的记 `?`，批量记 `batch`）。按分钟分桶累计，保留 24 小时，窗口多长就覆盖多长（粒度一分钟）；p95 取自耗时直方图（近似值，不超过最大值）；每分钟最多 256 个不同路由，多出的记到 `(other)`。数据只在内存里，重启清空。
 
 ### 任务动态（events）
 
