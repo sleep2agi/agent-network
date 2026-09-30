@@ -111,6 +111,9 @@ const SERVER_VERSION = (() => {
   } catch { return "?"; }
 })();
 
+// Feature flags advertised on /health (see the /health handler). Exported for tests.
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id"] as const;
+
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here
 // without source changes. Dashboard tails this buffer for "hub server log
@@ -2007,6 +2010,11 @@ return Bun.serve({
           max_upload_bytes: MAX_UPLOAD_BYTES,
           max_request_content_length: MAX_REQUEST_CONTENT_LENGTH,
         },
+        // Public, stable feature flags for REST reads whose own response can't carry them.
+        // status_node_id: GET /api/status accepts ?node_id=<id> (one node's rows; with light=1 the
+        // row also carries node_id). The /api/status body stays byte-identical without the param, so
+        // the flag lives here — agent-nodes already read /health once at boot.
+        capabilities: HUB_HEALTH_CAPABILITIES,
       };
       if (scopedSessions !== undefined) body.sse_sessions = scopedSessions;
       return withCors(req, Response.json(body));
@@ -2180,9 +2188,10 @@ return Bun.serve({
       // is unchanged so the dashboard / scripts that read full telemetry are
       // unaffected.
       const isLight = url.searchParams.get("light") === "1";
+      const nodeIdFilter = url.searchParams.get("node_id")?.trim();
       const params: any[] = [];
       let sql = isLight
-        ? "SELECT alias, status, agent, task, server, updated_at, network_id FROM sessions WHERE 1=1"
+        ? `SELECT alias, status, agent, task, server, updated_at, network_id${nodeIdFilter ? ", node_id" : ""} FROM sessions WHERE 1=1`
         : `SELECT ${SESSION_REST_SELECT} FROM sessions WHERE 1=1`;
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
       // `?alias=<name>` narrows to that one agent's rows (same projection, same scope). The app's
@@ -2194,6 +2203,15 @@ return Bun.serve({
       if (aliasFilter) {
         params.push(aliasFilter);
         sql += ` AND alias = ?${params.length}`;
+      }
+      // `?node_id=<id>` narrows to one node's rows the same way (same scope, same projection). Every
+      // agent-node resolves its own current alias every 30 s; unfiltered that is the whole network's
+      // full projection (~91 KB gzip per call on production) to read one row. Advertised in /health
+      // `capabilities` ("status_node_id") because old hubs ignore the parameter and — in the light
+      // projection, which has no node_id — the caller could not tell its row from anyone else's.
+      if (nodeIdFilter) {
+        params.push(nodeIdFilter);
+        sql += ` AND node_id = ?${params.length}`;
       }
       sql += " ORDER BY updated_at DESC";
       // `model` comes straight from the explicit sessions projection; `runtime` is
@@ -2211,6 +2229,8 @@ return Bun.serve({
             updated_at: s.updated_at ?? null,
             runtime: normalizeRuntime(s.agent),
             network_id: s.network_id ?? null,
+            // Only when filtering by node_id, so the unfiltered light response keeps its exact bytes.
+            ...(nodeIdFilter ? { node_id: s.node_id ?? null } : {}),
           };
         }
         const externalSchedules = (() => {
