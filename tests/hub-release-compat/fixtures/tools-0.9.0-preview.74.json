@@ -1,0 +1,3450 @@
+[
+ {
+  "name": "submit_skill",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "slug": {
+     "type": "string",
+     "minLength": 2,
+     "maxLength": 80,
+     "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 120
+    },
+    "description": {
+     "type": "string",
+     "maxLength": 1000
+    },
+    "version": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 40,
+     "pattern": "^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$"
+    },
+    "content": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 131072
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "slug",
+    "name",
+    "version",
+    "content"
+   ]
+  }
+ },
+ {
+  "name": "list_skills",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "include_pending": {
+     "type": "boolean"
+    },
+    "query": {
+     "type": "string",
+     "maxLength": 120
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "get_skill",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "skill_id": {
+     "type": "string",
+     "maxLength": 200,
+     "pattern": "^skill_[A-Za-z0-9_-]+$"
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "skill_id"
+   ]
+  }
+ },
+ {
+  "name": "review_skill",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "skill_id": {
+     "type": "string",
+     "maxLength": 200,
+     "pattern": "^skill_[A-Za-z0-9_-]+$"
+    },
+    "decision": {
+     "type": "string",
+     "enum": [
+      "published",
+      "rejected"
+     ]
+    },
+    "note": {
+     "type": "string",
+     "maxLength": 1000
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "skill_id",
+    "decision"
+   ]
+  }
+ },
+ {
+  "name": "report_status",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "resume_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Claude Code session UUID (unique per session)"
+    },
+    "alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Human-readable session name for dispatching (e.g. 指挥室/知识哥)"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "working",
+      "idle",
+      "blocked",
+      "error",
+      "waiting_input",
+      "offline"
+     ]
+    },
+    "task": {
+     "description": "Current task description",
+     "type": "string",
+     "maxLength": 10000
+    },
+    "output": {
+     "description": "Recent output (max 4000 chars stored)",
+     "type": "string",
+     "maxLength": 50000
+    },
+    "score": {
+     "description": "Self-score 1-10",
+     "type": "number",
+     "minimum": 0,
+     "maximum": 10
+    },
+    "progress": {
+     "description": "Progress 0-100",
+     "type": "number",
+     "minimum": 0,
+     "maximum": 100
+    },
+    "server": {
+     "description": "Server identifier",
+     "type": "string",
+     "maxLength": 200
+    },
+    "hostname": {
+     "description": "Agent hostname",
+     "type": "string",
+     "maxLength": 200
+    },
+    "agent": {
+     "description": "Agent type (claude-code / codex / opencode)",
+     "type": "string",
+     "maxLength": 100
+    },
+    "project_dir": {
+     "description": "Agent working directory",
+     "type": "string",
+     "maxLength": 1000
+    },
+    "version": {
+     "description": "Agent version",
+     "type": "string",
+     "maxLength": 100
+    },
+    "tmux_name": {
+     "description": "tmux session name",
+     "type": "string",
+     "maxLength": 200
+    },
+    "node_id": {
+     "description": "Stable node identifier",
+     "type": "string",
+     "maxLength": 200
+    },
+    "session_id": {
+     "description": "Runtime session/thread ID",
+     "type": "string",
+     "maxLength": 200
+    },
+    "config_path": {
+     "description": "Config file path",
+     "type": "string",
+     "maxLength": 1000
+    },
+    "channels": {
+     "description": "JSON array of channels",
+     "type": "string",
+     "maxLength": 2000
+    },
+    "model": {
+     "description": "AI model name",
+     "type": "string",
+     "maxLength": 200
+    },
+    "node_name": {
+     "description": "Stable node display name (may differ from alias)",
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network this agent belongs to",
+     "type": "string",
+     "maxLength": 200
+    },
+    "host": {
+     "description": "Host telemetry reported by agent-node",
+     "type": "object",
+     "properties": {
+      "hostname": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 200
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "ip": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 200
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "cpu_load_1min": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "cpu_cores": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "mem_total_gb": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "mem_used_gb": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "mem_avail_gb": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "disk_total_gb": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "disk_used_gb": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "disk_avail_gb": {
+       "type": [
+        "number",
+        "null"
+       ]
+      }
+     }
+    },
+    "process_telemetry": {
+     "description": "Per-agent process telemetry reported by agent-node",
+     "type": "object",
+     "properties": {
+      "rss_bytes": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "rss_mb": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "rss": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "cpu_pct": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "uptime_seconds": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "in_flight_count": {
+       "type": [
+        "number",
+        "null"
+       ]
+      }
+     }
+    },
+    "external_schedules": {
+     "description": "Bounded node-reported external schedule snapshot; never includes host paths or commands",
+     "type": "object",
+     "properties": {
+      "observed_at": {
+       "type": "string",
+       "maxLength": 64,
+       "format": "date-time",
+       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+      },
+      "schedules": {
+       "maxItems": 64,
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+         },
+         "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+         },
+         "kind": {
+          "type": "string",
+          "enum": [
+           "cron",
+           "systemd",
+           "tmux",
+           "playwright",
+           "custom"
+          ]
+         },
+         "frequency": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+         },
+         "last_run_at": {
+          "anyOf": [
+           {
+            "type": "string",
+            "maxLength": 64,
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "last_status": {
+          "type": "string",
+          "enum": [
+           "success",
+           "failed",
+           "running",
+           "unknown"
+          ]
+         },
+         "last_error": {
+          "anyOf": [
+           {
+            "type": "string",
+            "maxLength": 500
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "next_run_at": {
+          "anyOf": [
+           {
+            "type": "string",
+            "maxLength": 64,
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "log_ref": {
+          "anyOf": [
+           {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "enabled": {
+          "type": "boolean"
+         },
+         "editable": {
+          "type": "boolean"
+         },
+         "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+         }
+        },
+        "required": [
+         "id",
+         "name",
+         "kind",
+         "frequency",
+         "last_run_at",
+         "last_status",
+         "last_error",
+         "next_run_at",
+         "log_ref",
+         "enabled"
+        ],
+        "additionalProperties": false
+       }
+      },
+      "error": {
+       "type": "string",
+       "enum": [
+        "invalid_manifest",
+        "unsafe_manifest",
+        "read_failed"
+       ]
+      }
+     },
+     "required": [
+      "observed_at",
+      "schedules"
+     ],
+     "additionalProperties": false
+    },
+    "config_snapshot": {
+     "description": "RFC-024 — masked node config snapshot",
+     "type": "object",
+     "properties": {
+      "model": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 200
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "flags": {
+       "type": "object",
+       "propertyNames": {
+        "type": "string"
+       },
+       "additionalProperties": {}
+      },
+      "config_revision": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 9007199254740991
+      },
+      "config_update_capable": {
+       "type": "boolean"
+      },
+      "peer_reply_inbox_capable": {
+       "type": "boolean",
+       "const": true
+      },
+      "side_thread_capability": {
+       "type": "object",
+       "properties": {
+        "supported": {
+         "type": "boolean"
+        },
+        "runtime": {
+         "type": "string",
+         "maxLength": 64
+        },
+        "runtimeVersion": {
+         "type": "string",
+         "maxLength": 64
+        },
+        "topology": {
+         "type": "string",
+         "maxLength": 64
+        },
+        "evidenceRevision": {
+         "type": "string",
+         "maxLength": 100
+        },
+        "mode": {
+         "type": "string",
+         "const": "native-exact-fork"
+        },
+        "exactBoundary": {
+         "type": "object",
+         "properties": {
+          "through": {
+           "type": "boolean"
+          },
+          "before": {
+           "type": "boolean"
+          }
+         },
+         "required": [
+          "through",
+          "before"
+         ],
+         "additionalProperties": false
+        },
+        "reason": {
+         "type": "string",
+         "enum": [
+          "runtime",
+          "version",
+          "topology",
+          "experimental-api",
+          "exact-boundary"
+         ]
+        }
+       },
+       "required": [
+        "supported",
+        "runtime",
+        "runtimeVersion",
+        "topology",
+        "evidenceRevision"
+       ],
+       "additionalProperties": false
+      },
+      "role": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 64
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "daemon_capabilities": {
+       "type": "object",
+       "properties": {
+        "runtimes_supported": {
+         "maxItems": 16,
+         "type": "array",
+         "items": {
+          "type": "string",
+          "maxLength": 64
+         }
+        },
+        "allowed_secret_keys": {
+         "maxItems": 64,
+         "type": "array",
+         "items": {
+          "type": "string",
+          "maxLength": 64
+         }
+        },
+        "max_concurrent_children": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 1000
+        },
+        "can_create_nodes": {
+         "type": "boolean"
+        },
+        "create_nodes_blocked_reason": {
+         "type": "string",
+         "enum": [
+          "anet_bin_pin_unresolved",
+          "anet_bin_identity",
+          "anet_bin_source",
+          "anet_bin_shape",
+          "anet_bin_permission",
+          "anet_bin_unknown"
+         ]
+        },
+        "create_capability_observed_ms_ago": {
+         "default": null,
+         "type": [
+          "number",
+          "null"
+         ]
+        },
+        "default_workdir_root": {
+         "type": "string",
+         "maxLength": 1024
+        }
+       }
+      }
+     }
+    },
+    "rules_file_capable": {
+     "type": "boolean",
+     "const": true
+    },
+    "skills_capable": {
+     "type": "boolean",
+     "const": true
+    },
+    "files_capable": {
+     "type": "boolean",
+     "const": true
+    },
+    "logs_capable": {
+     "type": "boolean",
+     "const": true
+    }
+   },
+   "required": [
+    "resume_id",
+    "alias",
+    "status"
+   ]
+  }
+ },
+ {
+  "name": "report_completion",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Session alias"
+    },
+    "task": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 10000,
+     "description": "Completed task description"
+    },
+    "result": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 50000,
+     "description": "Result summary"
+    },
+    "artifacts": {
+     "description": "Output URLs or file paths",
+     "maxItems": 50,
+     "type": "array",
+     "items": {
+      "type": "string",
+      "maxLength": 2000
+     }
+    },
+    "score": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 10
+    },
+    "duration_minutes": {
+     "type": "number",
+     "minimum": 0
+    },
+    "network_id": {
+     "description": "Network scope",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "alias",
+    "task",
+    "result"
+   ]
+  }
+ },
+ {
+  "name": "get_inbox",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Session alias"
+    },
+    "limit": {
+     "default": 10,
+     "type": "number",
+     "minimum": 1,
+     "maximum": 100
+    }
+   },
+   "required": [
+    "alias"
+   ]
+  }
+ },
+ {
+  "name": "ack_inbox",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Session alias"
+    },
+    "message_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "response": {
+     "type": "string",
+     "maxLength": 10000
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "alias",
+    "message_id"
+   ]
+  }
+ },
+ {
+  "name": "mark_tasks_runtime_submitted",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "task_ids": {
+     "minItems": 1,
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+     }
+    },
+    "task_contexts": {
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "task_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+       },
+       "thread_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+       },
+       "turn_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+       }
+      },
+      "required": [
+       "task_id",
+       "thread_id",
+       "turn_id"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "required": [
+    "task_ids"
+   ]
+  }
+ },
+ {
+  "name": "mark_tasks_consumed",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "task_ids": {
+     "minItems": 1,
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+     }
+    },
+    "task_contexts": {
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "task_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+       },
+       "thread_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+       },
+       "turn_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+       }
+      },
+      "required": [
+       "task_id",
+       "thread_id",
+       "turn_id"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "required": [
+    "task_ids"
+   ]
+  }
+ },
+ {
+  "name": "get_all_status",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "filter_status": {
+     "type": "string",
+     "maxLength": 50
+    },
+    "filter_server": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "filter_alias": {
+     "description": "One alias, or several separated by commas. Exact matches only.",
+     "type": "string",
+     "maxLength": 2000
+    },
+    "network_id": {
+     "description": "Filter by network",
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "get_session_status",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Session alias"
+    }
+   },
+   "required": [
+    "alias"
+   ]
+  }
+ },
+ {
+  "name": "send_task",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Target session alias"
+    },
+    "task": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 10000,
+     "description": "Task content"
+    },
+    "priority": {
+     "default": "normal",
+     "type": "string",
+     "enum": [
+      "high",
+      "normal",
+      "low"
+     ]
+    },
+    "context": {
+     "type": "string",
+     "maxLength": 10000
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "ttl_seconds": {
+     "description": "Task TTL in seconds (default: 3600)",
+     "type": "number",
+     "minimum": 1,
+     "maximum": 86400
+    },
+    "network_id": {
+     "description": "Network scope",
+     "type": "string",
+     "maxLength": 200
+    },
+    "parent_task_id": {
+     "description": "Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends.",
+     "type": "string",
+     "maxLength": 200
+    },
+    "meta": {
+     "description": "Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."
+    }
+   },
+   "required": [
+    "alias",
+    "task"
+   ]
+  }
+ },
+ {
+  "name": "send_message",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Target session alias"
+    },
+    "message": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 10000,
+     "description": "Message content"
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "alias",
+    "message"
+   ]
+  }
+ },
+ {
+  "name": "send_reply",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "description": "Target session alias — optional; derived from in_reply_to's task sender when omitted",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "text": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 10000,
+     "description": "Reply content"
+    },
+    "in_reply_to": {
+     "description": "Original task/message ID",
+     "type": "string",
+     "maxLength": 200
+    },
+    "status": {
+     "default": "replied",
+     "description": "Task outcome",
+     "type": "string",
+     "enum": [
+      "replied",
+      "failed",
+      "cancelled"
+     ]
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    },
+    "attachments": {
+     "description": "Optional attachment array; parity with send_task's meta.attachments. Each item: {type:'file', file_id, name?, mime?, size?}. Persisted into tasks.meta_json + inbox.meta_json."
+    },
+    "meta": {
+     "description": "Optional structured reply metadata, e.g. { attachments: [...] }."
+    }
+   },
+   "required": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "send_peer_reply",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "description": "Target session alias — optional; derived from in_reply_to's task sender when omitted",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "text": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 10000,
+     "description": "Reply content"
+    },
+    "in_reply_to": {
+     "description": "Original task/message ID",
+     "type": "string",
+     "maxLength": 200
+    },
+    "status": {
+     "default": "replied",
+     "description": "Task outcome",
+     "type": "string",
+     "enum": [
+      "replied",
+      "failed",
+      "cancelled"
+     ]
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    },
+    "attachments": {
+     "description": "Optional attachment array; parity with send_task's meta.attachments. Each item: {type:'file', file_id, name?, mime?, size?}. Persisted into tasks.meta_json + inbox.meta_json."
+    },
+    "meta": {
+     "description": "Optional structured reply metadata, e.g. { attachments: [...] }."
+    }
+   },
+   "required": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "send_ack",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "task_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Task ID to acknowledge"
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "task_id"
+   ]
+  }
+ },
+ {
+  "name": "retry_task",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "task_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Task ID to retry"
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "task_id"
+   ]
+  }
+ },
+ {
+  "name": "get_task",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "task_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Task ID to query"
+    }
+   },
+   "required": [
+    "task_id"
+   ]
+  }
+ },
+ {
+  "name": "list_tasks",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "alias": {
+     "description": "Filter by to_name (target agent)",
+     "type": "string",
+     "maxLength": 200
+    },
+    "status": {
+     "description": "Filter by status",
+     "type": "string",
+     "maxLength": 50
+    },
+    "from_name": {
+     "description": "Filter by sender",
+     "type": "string",
+     "maxLength": 200
+    },
+    "from_node_id": {
+     "description": "Filter by immutable sender node_id",
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Filter by network",
+     "type": "string",
+     "maxLength": 200
+    },
+    "before_created_at": {
+     "description": "Pagination cursor timestamp",
+     "type": "string",
+     "maxLength": 64
+    },
+    "before_task_id": {
+     "description": "Pagination cursor task id",
+     "type": "string",
+     "maxLength": 200
+    },
+    "durable_cursor": {
+     "description": "Require immutable node-scoped cursor protocol",
+     "type": "boolean"
+    },
+    "durable_terminal_cursor": {
+     "description": "Read terminal outbound journal in monotonic order",
+     "type": "boolean"
+    },
+    "after_terminal_seq": {
+     "description": "Exclusive terminal journal watermark",
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 9007199254740991
+    },
+    "limit": {
+     "default": 20,
+     "type": "number",
+     "minimum": 1,
+     "maximum": 100
+    }
+   }
+  }
+ },
+ {
+  "name": "cancel_task",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "task_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Task ID to cancel"
+    },
+    "reason": {
+     "description": "Cancellation reason",
+     "type": "string",
+     "maxLength": 1000
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "task_id"
+   ]
+  }
+ },
+ {
+  "name": "reassign_task",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "task_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Task ID to reassign"
+    },
+    "new_alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "Target agent alias"
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens)",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "task_id",
+    "new_alias"
+   ]
+  }
+ },
+ {
+  "name": "send_desktop_message",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "to_user_id": {
+     "description": "Target user_id. Mutually checked with to_username when both are supplied.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "to_username": {
+     "description": "Target username. Mutually checked with to_user_id when both are supplied.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 50
+    },
+    "title": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "message": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 10000
+    },
+    "severity": {
+     "default": "info",
+     "type": "string",
+     "enum": [
+      "info",
+      "success",
+      "warning",
+      "error"
+     ]
+    },
+    "kind": {
+     "default": "agent_message",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 80
+    },
+    "meta": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "from_session": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Network scope (auto-resolved for single-network user tokens; ntok stays bound to its network).",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "message"
+   ]
+  }
+ },
+ {
+  "name": "broadcast",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "message": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 10000
+    },
+    "filter_server": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "filter_status": {
+     "type": "string",
+     "maxLength": 50
+    },
+    "network_id": {
+     "description": "Broadcast within a specific network",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "message"
+   ]
+  }
+ },
+ {
+  "name": "get_completions",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "since": {
+     "description": "ISO 8601 datetime, default last 24h",
+     "type": "string"
+    },
+    "alias": {
+     "description": "Filter by session alias",
+     "type": "string",
+     "maxLength": 200
+    },
+    "network_id": {
+     "description": "Filter by network",
+     "type": "string",
+     "maxLength": 200
+    },
+    "limit": {
+     "default": 50,
+     "type": "number",
+     "minimum": 1,
+     "maximum": 500
+    }
+   }
+  }
+ },
+ {
+  "name": "update_node_config",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "base_revision": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 9007199254740991,
+     "description": "Current revision per the dashboard's last GET — 409 if hub's current revision differs."
+    },
+    "patch": {
+     "type": "object",
+     "properties": {
+      "model": {
+       "type": "string",
+       "maxLength": 200
+      },
+      "flags": {
+       "type": "object",
+       "propertyNames": {
+        "type": "string"
+       },
+       "additionalProperties": {}
+      },
+      "channels": {
+       "maxItems": 16,
+       "type": "array",
+       "items": {}
+      }
+     },
+     "description": "Fields to update. Empty patch → no-op (use restart_node for that)."
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "base_revision",
+    "patch"
+   ]
+  }
+ },
+ {
+  "name": "get_config_update",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "ack_config_update",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "update_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "applied",
+      "rejected",
+      "restarting",
+      "timeout"
+     ]
+    },
+    "new_revision": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 9007199254740991
+    },
+    "error": {
+     "type": "string",
+     "maxLength": 2000
+    }
+   },
+   "required": [
+    "update_id",
+    "status"
+   ]
+  }
+ },
+ {
+  "name": "read_node_rules_file",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "alias": {
+     "description": "Target by alias instead of node_id — resolves to the node row, or to a session that reported rules_file_capable (claude-code sessions).",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "write_node_rules_file",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "alias": {
+     "description": "Target by alias instead of node_id — resolves to the node row, or to a session that reported rules_file_capable (claude-code sessions).",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "content": {
+     "type": "string",
+     "maxLength": 262144,
+     "description": "Full new file content (UTF-8). The node writes it atomically."
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "content"
+   ]
+  }
+ },
+ {
+  "name": "list_node_skills",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "alias": {
+     "description": "Target by alias instead of node_id — resolves to the node row, or to a session that reported skills_capable.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "read_node_skill",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "alias": {
+     "description": "Target by alias instead of node_id — resolves to the node row, or to a session that reported skills_capable.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64,
+     "description": "Skill directory name, [A-Za-z0-9._-]."
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "list_node_files",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "alias": {
+     "description": "Target by alias instead of node_id — resolves to the node row, or to a session that reported files_capable.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "path": {
+     "description": "Directory relative to the node's work dir; omit or \"\" for the root.",
+     "type": "string",
+     "maxLength": 1024
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "read_node_file",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "alias": {
+     "description": "Target by alias instead of node_id — resolves to the node row, or to a session that reported files_capable.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "path": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 1024,
+     "description": "File path relative to the node's work dir."
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "path"
+   ]
+  }
+ },
+ {
+  "name": "tail_node_logs",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "alias": {
+     "description": "Target by alias instead of node_id — resolves to the node row, or to a session that reported logs_capable.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "lines": {
+     "description": "How many of the newest matching lines (default 500, max 2000).",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 2000
+    },
+    "level": {
+     "description": "Only lines of exactly this level.",
+     "type": "string",
+     "enum": [
+      "info",
+      "warn",
+      "error"
+     ]
+    },
+    "grep": {
+     "description": "Case-insensitive substring, matched after redaction.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "since_ts": {
+     "description": "Only lines at or after this epoch-ms timestamp (follow mode; the client de-duplicates by line key).",
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 9007199254740991
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "get_rules_file_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "ack_rules_file_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "done",
+      "failed"
+     ]
+    },
+    "file_name": {
+     "type": "string",
+     "maxLength": 64
+    },
+    "exists": {
+     "type": "boolean"
+    },
+    "content": {
+     "type": "string",
+     "maxLength": 1048576
+    },
+    "error": {
+     "type": "string",
+     "maxLength": 2000
+    }
+   },
+   "required": [
+    "request_id",
+    "status"
+   ]
+  }
+ },
+ {
+  "name": "get_rules_file_result",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "request_id"
+   ]
+  }
+ },
+ {
+  "name": "restart_node",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "list_host_supervisors",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "create_node",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "daemon_node_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "node_spec": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64
+      },
+      "runtime": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64
+      },
+      "model": {
+       "anyOf": [
+        {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 100
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "flags": {
+       "type": "object",
+       "propertyNames": {
+        "type": "string"
+       },
+       "additionalProperties": {}
+      },
+      "env_refs": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "maxLength": 64
+       }
+      },
+      "channels": {
+       "type": "array",
+       "items": {}
+      },
+      "workdir": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 1024
+        },
+        {
+         "type": "null"
+        }
+       ]
+      }
+     },
+     "required": [
+      "name",
+      "runtime"
+     ]
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "daemon_node_id",
+    "node_spec"
+   ]
+  }
+ },
+ {
+  "name": "list_my_pending_create_requests",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "list_my_pending_lifecycle_requests",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "get_create_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "request_id"
+   ]
+  }
+ },
+ {
+  "name": "ack_create_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "started",
+      "failed",
+      "rejected",
+      "runtime_capability_check_failed"
+     ]
+    },
+    "error": {
+     "type": "string",
+     "maxLength": 1000
+    },
+    "child_pid": {
+     "type": "integer",
+     "minimum": -9007199254740991,
+     "maximum": 9007199254740991
+    },
+    "runtime": {
+     "type": "string",
+     "maxLength": 64
+    }
+   },
+   "required": [
+    "request_id",
+    "status"
+   ]
+  }
+ },
+ {
+  "name": "stop_node",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "daemon_node_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "pattern": "^node_[a-z0-9_-]+$"
+    },
+    "force": {
+     "default": false,
+     "type": "boolean"
+    },
+    "grace_seconds": {
+     "default": 10,
+     "type": "integer",
+     "minimum": 5,
+     "maximum": 60
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "delete_node",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "daemon_node_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "pattern": "^node_[a-z0-9_-]+$"
+    },
+    "confirm_alias": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "force": {
+     "default": false,
+     "type": "boolean"
+    },
+    "grace_seconds": {
+     "default": 10,
+     "type": "integer",
+     "minimum": 5,
+     "maximum": 60
+    },
+    "delete_config": {
+     "default": true,
+     "type": "boolean"
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "confirm_alias"
+   ]
+  }
+ },
+ {
+  "name": "get_stop_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "request_id"
+   ]
+  }
+ },
+ {
+  "name": "ack_stop_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "stopped",
+      "stop_failed",
+      "noop_not_my_child"
+     ]
+    },
+    "exit_signal": {
+     "type": "string",
+     "maxLength": 16
+    },
+    "backup_path": {
+     "type": "string",
+     "maxLength": 500
+    },
+    "error": {
+     "type": "string",
+     "maxLength": 1000
+    }
+   },
+   "required": [
+    "request_id",
+    "status"
+   ]
+  }
+ },
+ {
+  "name": "start_node",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "node_id": {
+     "description": "Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "child_node_id": {
+     "description": "DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "daemon_node_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "pattern": "^node_[a-z0-9_-]+$"
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "get_start_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "request_id"
+   ]
+  }
+ },
+ {
+  "name": "ack_start_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "started",
+      "start_failed"
+     ]
+    },
+    "child_pid": {
+     "type": "integer",
+     "exclusiveMinimum": 0,
+     "maximum": 9007199254740991
+    },
+    "error": {
+     "type": "string",
+     "maxLength": 1000
+    }
+   },
+   "required": [
+    "request_id",
+    "status"
+   ]
+  }
+ },
+ {
+  "name": "list_my_children",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "upsert_network_secret",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "key": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64,
+     "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "value": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 16384
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "key",
+    "value"
+   ]
+  }
+ },
+ {
+  "name": "list_network_secrets",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "upsert_provider",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 100
+    },
+    "vendor": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64
+    },
+    "base_url": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 500
+    },
+    "secret_key_ref": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64
+    },
+    "models": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "model_name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+       },
+       "display_name": {
+        "type": "string",
+        "maxLength": 100
+       },
+       "context_window": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+       },
+       "supports_vision": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "model_name"
+      ]
+     }
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "name",
+    "vendor",
+    "base_url",
+    "secret_key_ref"
+   ]
+  }
+ },
+ {
+  "name": "update_provider",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "provider_id": {
+     "type": "string",
+     "maxLength": 200,
+     "pattern": "^prov_[a-zA-Z0-9_-]+$"
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "patch": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 100
+      },
+      "base_url": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 500
+      },
+      "models": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "model_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+         },
+         "display_name": {
+          "type": "string",
+          "maxLength": 100
+         },
+         "context_window": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+         },
+         "supports_vision": {
+          "type": "boolean"
+         }
+        },
+        "required": [
+         "model_name"
+        ]
+       }
+      },
+      "enabled": {
+       "type": "boolean"
+      }
+     },
+     "additionalProperties": false
+    }
+   },
+   "required": [
+    "provider_id",
+    "patch"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "list_providers",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "probe_provider_model",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "provider_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "model_name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 100
+    },
+    "daemon_node_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "provider_id",
+    "model_name",
+    "daemon_node_id"
+   ]
+  }
+ },
+ {
+  "name": "get_probe_results",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "provider_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "model_name": {
+     "type": "string",
+     "maxLength": 100
+    },
+    "daemon_node_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 500
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ },
+ {
+  "name": "get_probe_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "probe_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "probe_id"
+   ]
+  }
+ },
+ {
+  "name": "ack_probe_request",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "probe_id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "ok",
+      "auth_fail",
+      "quota",
+      "rate_limit",
+      "network_error",
+      "timeout",
+      "redirect_forbidden",
+      "vendor_5xx",
+      "other_4xx",
+      "tls_error",
+      "probe_resolve_unsafe_ip",
+      "probe_target_forbidden"
+     ]
+    },
+    "raw_status_code": {
+     "type": "integer",
+     "minimum": 100,
+     "maximum": 599
+    },
+    "latency_ms": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 60000
+    }
+   },
+   "required": [
+    "probe_id",
+    "status",
+    "latency_ms"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "requirements_list",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "seq": {
+     "description": "short number (#N) of one task in this network",
+     "type": "integer",
+     "exclusiveMinimum": 0,
+     "maximum": 9007199254740991
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "pool",
+      "doing",
+      "done"
+     ]
+    },
+    "project_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "owner": {
+     "type": "string",
+     "maxLength": 210
+    },
+    "agent_owner": {
+     "type": "string",
+     "maxLength": 210
+    },
+    "updated_since": {
+     "type": "string",
+     "maxLength": 40
+    },
+    "external_ref": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "include_archived": {
+     "type": "boolean"
+    },
+    "parent_id": {
+     "description": "children of this requirement ('none' = top level)",
+     "type": "string",
+     "maxLength": 200
+    },
+    "top_level": {
+     "type": "boolean"
+    },
+    "q": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 1000
+    },
+    "cursor": {
+     "type": "string",
+     "maxLength": 600
+    }
+   }
+  }
+ },
+ {
+  "name": "requirements_get",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)"
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "requirements_create",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "tags": {
+     "description": "Task labels; each 1–20 Unicode characters. Omit to preserve, [] to clear.",
+     "maxItems": 10,
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 80
+    },
+    "priority": {
+     "description": "high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低",
+     "type": "string",
+     "enum": [
+      "high",
+      "normal",
+      "low",
+      "lowest"
+     ]
+    },
+    "column": {
+     "type": "string",
+     "enum": [
+      "pool",
+      "doing",
+      "done"
+     ]
+    },
+    "due": {
+     "description": "YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears",
+     "type": "string",
+     "maxLength": 40
+    },
+    "start": {
+     "description": "start date (Gantt): same shapes as due; \"\" clears",
+     "type": "string",
+     "maxLength": 40
+    },
+    "description": {
+     "description": "markdown",
+     "type": "string",
+     "maxLength": 20000
+    },
+    "checklist": {
+     "description": "replaces the whole list",
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{1,40}$"
+       },
+       "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+       },
+       "done": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "text"
+      ]
+     }
+    },
+    "project_id": {
+     "anyOf": [
+      {
+       "type": "string",
+       "maxLength": 200
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "owner": {
+     "description": "负责人: must be {kind:'user'}",
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "kind": {
+         "type": "string",
+         "enum": [
+          "user",
+          "node"
+         ]
+        },
+        "id": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 200
+        }
+       },
+       "required": [
+        "kind",
+        "id"
+       ]
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "agent_owner": {
+     "description": "负责 Agent: must be {kind:'node'}",
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "kind": {
+         "type": "string",
+         "enum": [
+          "user",
+          "node"
+         ]
+        },
+        "id": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 200
+        }
+       },
+       "required": [
+        "kind",
+        "id"
+       ]
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "participants": {
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "kind": {
+        "type": "string",
+        "enum": [
+         "user",
+         "node"
+        ]
+       },
+       "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+       }
+      },
+      "required": [
+       "kind",
+       "id"
+      ]
+     }
+    },
+    "external_url": {
+     "anyOf": [
+      {
+       "type": "string",
+       "maxLength": 500
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "parent_id": {
+     "description": "parent requirement (same network, no cycles, ≤ 5 levels); null detaches",
+     "anyOf": [
+      {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9_-]{1,200}$"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "external_ref": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "requirements_update",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)"
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "tags": {
+     "description": "Task labels; each 1–20 Unicode characters. Omit to preserve, [] to clear.",
+     "maxItems": 10,
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 80
+    },
+    "priority": {
+     "description": "high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低",
+     "type": "string",
+     "enum": [
+      "high",
+      "normal",
+      "low",
+      "lowest"
+     ]
+    },
+    "column": {
+     "type": "string",
+     "enum": [
+      "pool",
+      "doing",
+      "done"
+     ]
+    },
+    "due": {
+     "description": "YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears",
+     "type": "string",
+     "maxLength": 40
+    },
+    "start": {
+     "description": "start date (Gantt): same shapes as due; \"\" clears",
+     "type": "string",
+     "maxLength": 40
+    },
+    "description": {
+     "description": "markdown",
+     "type": "string",
+     "maxLength": 20000
+    },
+    "checklist": {
+     "description": "replaces the whole list",
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{1,40}$"
+       },
+       "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+       },
+       "done": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "text"
+      ]
+     }
+    },
+    "project_id": {
+     "anyOf": [
+      {
+       "type": "string",
+       "maxLength": 200
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "owner": {
+     "description": "负责人: must be {kind:'user'}",
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "kind": {
+         "type": "string",
+         "enum": [
+          "user",
+          "node"
+         ]
+        },
+        "id": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 200
+        }
+       },
+       "required": [
+        "kind",
+        "id"
+       ]
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "agent_owner": {
+     "description": "负责 Agent: must be {kind:'node'}",
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "kind": {
+         "type": "string",
+         "enum": [
+          "user",
+          "node"
+         ]
+        },
+        "id": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 200
+        }
+       },
+       "required": [
+        "kind",
+        "id"
+       ]
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "participants": {
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "kind": {
+        "type": "string",
+        "enum": [
+         "user",
+         "node"
+        ]
+       },
+       "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+       }
+      },
+      "required": [
+       "kind",
+       "id"
+      ]
+     }
+    },
+    "external_url": {
+     "anyOf": [
+      {
+       "type": "string",
+       "maxLength": 500
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "parent_id": {
+     "description": "parent requirement (same network, no cycles, ≤ 5 levels); null detaches",
+     "anyOf": [
+      {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9_-]{1,200}$"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "external_ref": {
+     "anyOf": [
+      {
+       "type": "string",
+       "maxLength": 200
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "archived": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "requirements_checklist_toggle",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)"
+    },
+    "item_id": {
+     "type": "string",
+     "pattern": "^[A-Za-z0-9_-]{1,40}$"
+    },
+    "done": {
+     "type": "boolean"
+    },
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "required": [
+    "id",
+    "item_id",
+    "done"
+   ]
+  }
+ },
+ {
+  "name": "requirements_upsert_by_external_ref",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    },
+    "external_ref": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "tags": {
+     "description": "Task labels; each 1–20 Unicode characters. Omit to preserve, [] to clear.",
+     "maxItems": 10,
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 80
+    },
+    "priority": {
+     "description": "high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低",
+     "type": "string",
+     "enum": [
+      "high",
+      "normal",
+      "low",
+      "lowest"
+     ]
+    },
+    "column": {
+     "type": "string",
+     "enum": [
+      "pool",
+      "doing",
+      "done"
+     ]
+    },
+    "due": {
+     "description": "YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears",
+     "type": "string",
+     "maxLength": 40
+    },
+    "start": {
+     "description": "start date (Gantt): same shapes as due; \"\" clears",
+     "type": "string",
+     "maxLength": 40
+    },
+    "description": {
+     "description": "markdown",
+     "type": "string",
+     "maxLength": 20000
+    },
+    "checklist": {
+     "description": "replaces the whole list",
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{1,40}$"
+       },
+       "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+       },
+       "done": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "text"
+      ]
+     }
+    },
+    "project_id": {
+     "anyOf": [
+      {
+       "type": "string",
+       "maxLength": 200
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "owner": {
+     "description": "负责人: must be {kind:'user'}",
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "kind": {
+         "type": "string",
+         "enum": [
+          "user",
+          "node"
+         ]
+        },
+        "id": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 200
+        }
+       },
+       "required": [
+        "kind",
+        "id"
+       ]
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "agent_owner": {
+     "description": "负责 Agent: must be {kind:'node'}",
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "kind": {
+         "type": "string",
+         "enum": [
+          "user",
+          "node"
+         ]
+        },
+        "id": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 200
+        }
+       },
+       "required": [
+        "kind",
+        "id"
+       ]
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "participants": {
+     "maxItems": 100,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "kind": {
+        "type": "string",
+        "enum": [
+         "user",
+         "node"
+        ]
+       },
+       "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+       }
+      },
+      "required": [
+       "kind",
+       "id"
+      ]
+     }
+    },
+    "external_url": {
+     "anyOf": [
+      {
+       "type": "string",
+       "maxLength": 500
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "parent_id": {
+     "description": "parent requirement (same network, no cycles, ≤ 5 levels); null detaches",
+     "anyOf": [
+      {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9_-]{1,200}$"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "archived": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "external_ref"
+   ]
+  }
+ },
+ {
+  "name": "projects_list",
+  "inputSchema": {
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "type": "object",
+   "properties": {
+    "network_id": {
+     "type": "string",
+     "maxLength": 200
+    }
+   }
+  }
+ }
+]
