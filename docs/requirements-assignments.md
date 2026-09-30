@@ -59,10 +59,20 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 - 父卡返回 `children: {total, done}`（未归档的子需求数 / 其中完成的）。列表过滤 `parent_id=<id>`（`none` = 顶层）、`top_level=1`。
 - 删父卡：子需求保留，`parent_id` 置空（变成顶层），不级联删除。MCP 的 create / update / upsert / list 都带 `parent_id`。
 
+### 完成时间与仪表盘统计（completed_at / stats）
+
+- 卡片返回 `completedAt`（进「完成」列的时刻，ISO UTC；不在完成列 = `null`）、`completedBy`（`{kind, id}`，谁移进完成的）、`completedAtApprox`（`true` = 升级前就完成的卡，时刻按 `updated_at` 补的近似值，`completedBy` 为 `null`）。
+- 规则：`POST` 直接建在 `done` = 建卡时刻 + 建卡的人；`PATCH` 把列从别处改成 `done` = 此刻 + 这次的操作者；移出 `done` = 三项清空；留在 `done`（改名、勾子任务、`done → done`、归档）不动。受限成员看不见的节点作为 `completedBy` 时同 `updated_by` 一样隐去。
+- `GET /api/requirements/stats?network_id=&from=&to=&tz=&days=`：一个网络里**调用者看得见**的卡（与列表同一个可见范围，含归档的卡 —— 完成的卡常被归档）。
+  - `from` / `to`：ISO 时刻，`to` 缺省 = 现在，`from` 缺省 = 不设下限；`tz`：IANA 时区（缺省 `UTC`），决定「哪一天」；`days`：每日曲线的天数，1–371（缺省 30，371 = 一整年热力图）。非法 → 400 `invalid_from` / `invalid_to` / `invalid_range` / `invalid_tz` / `invalid_days` / `invalid_recent`。
+  - 返回 `totals`（`done` / `done_approx` 期内完成数与其中近似值的张数、`created` / `created_done` / `completion_rate` 期内新建与其中已完成的比例，没有新建为 `null`、`doing` / `pool` 当前未归档的卡数）、`daily`（`[{date, n}]`，以 `to` 在 `tz` 里的那一天结尾，与 `from` 无关）、`by_project`（`[{project_id, n}]`）、`by_completer`（前 20，`[{kind, id, n, spark}]`，`spark` = 最近 14 天每天的数）、`unattributed`（完成者未知或对调用者隐藏的张数）、`recent`（期内最近完成的卡，新 → 旧，`[{id, seq, name, project_id, completed_at, completed_at_approx, completed_by, archived}]`；`recent=` 0–50，缺省 10；完成者是隐藏节点时 `completed_by` 为 `null`）。带 ETag，`If-None-Match` 对上回 304。
+- `capabilities` 加 `completed_at`、`stats`；旧 Hub 没有这两项，客户端退回按 `updatedAt` 近似。
+
 ## 升级
 
 - 加列只加不改：`agent_owner_json`、`description`、`checklist_json`、`project_id` 都在 `db.ts` 既有的加列循环里；旧行为 NULL，读出为 `null` / `""` / `[]` / `null`。`requirement_projects` 表由 `requirements-migrate.ts` 的 `CREATE TABLE IF NOT EXISTS` 建。
 - 一次 Hub 升级同时带上负责 Agent、描述、子任务、项目四项。
+- 完成时间三列（`completed_at` / `completed_by_json` / `completed_at_approx`）与索引 `idx_requirements_network_completed` 由 `requirements-migrate.ts` 的 `ensureRequirementCompletedAt` 每次启动幂等补上：已在完成列、还没有完成时间的卡按 `updated_at`（读不懂退到 `created_at`）补成 ISO、标近似；不在完成列却留着完成时间的卡（回滚到旧 Hub 期间移出的）清空。
 
 本版为最后写入覆盖语义，尚无版本冲突提示。客户端应避免一次编辑提交未改动的绑定字段；多人同时修改同一字段的冲突解决属于后续交付项。
 
