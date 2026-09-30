@@ -372,7 +372,7 @@ describe("requirements stay on the hub", () => {
     expect((await api(ownerToken, path, { method: "PATCH", body: JSON.stringify({ due: "" }) })).body.requirement.due).toBe("");
     const listed = await api(ownerToken, "/api/requirements");
     expect(listed.body.capabilities).toContain("due_datetime");
-    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date"]);
+    expect(listed.body.capabilities).toEqual(["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq"]);
   });
 
   test("sub-requirements: parent_id in the same network, no cycles, ≤ 5 levels, child counts, filters, delete detaches children", async () => {
