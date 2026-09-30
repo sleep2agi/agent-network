@@ -155,6 +155,18 @@ describe("可见性", () => {
   test("alice 只看见:负责 / 参与 / 授权项目的卡;不看见无关的与没授权项目的", async () => {
     expect(await listIds(alice.token)).toEqual(["ta-own", "ta-p1", "ta-p2", "ta-part"]);
   });
+  test("viewer_can:scoped 调用者每张卡带上能不能改 / 删;老成员与 owner 不带", async () => {
+    const r = await get(alice.token, `/api/requirements?network_id=${NET}`);
+    const by = (n: string) => (r.body.requirements as any[]).find(x => x.name === n)?.viewer_can;
+    expect(by("ta-own")).toEqual({ edit: true, delete: true });
+    expect(by("ta-part")).toEqual({ edit: false, delete: false });
+    expect(by("ta-p1")).toEqual({ edit: false, delete: false });
+    expect(by("ta-p2")).toEqual({ edit: true, delete: false });
+    expect((await get(vic.token, `/api/requirements/${C["ta-p3"].id}?network_id=${NET}`)).body.requirement.viewer_can).toEqual({ edit: false, delete: false });
+    const carolList = await get(carol.token, `/api/requirements?network_id=${NET}`);
+    expect((carolList.body.requirements as any[]).every(x => x.viewer_can === undefined)).toBe(true);
+    expect((await get(admin.token, `/api/requirements/${C["ta-own"].id}`)).body.requirement.viewer_can).toBeUndefined();
+  });
   test("viewer vic 只看见授权项目 P3 的卡", async () => {
     expect(await listIds(vic.token)).toEqual(["ta-p3"]);
   });

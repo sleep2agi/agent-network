@@ -8,7 +8,7 @@ import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, 
 import { isAgentRestricted, visibleAgents } from "./agent-access.js";
 import {
   addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
-  isTaskScoped, shouldAuditDenied, type TaskCaller,
+  isTaskScoped, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
 import { ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
@@ -379,8 +379,14 @@ function isHiddenRef(ref: unknown, hidden: HiddenNode): boolean {
   const r = ref as { kind?: unknown; id?: unknown };
   return r.kind === "node" && typeof r.id === "string" && hidden(r.id);
 }
+// 每个请求一个权限解析器(按网络缓存成员行与项目授权)。
+const permsByCtx = new WeakMap<RequirementsRequestContext, ReturnType<typeof taskPermissionsResolver>>();
 function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
-  const pub = toPublic(row);
+  let perms = permsByCtx.get(ctx);
+  if (!perms) permsByCtx.set(ctx, perms = taskPermissionsResolver(taskCaller(ctx)));
+  // viewer_can:只对「只看相关任务」的调用者出现,客户端据此画只读锁、藏删除;不出现 = 与今天一样全能(旧 Hub 也不出现)。
+  const can = perms(row);
+  const pub = can ? { ...toPublic(row), viewer_can: can } : toPublic(row);
   const hidden = hiddenNodeFilter(ctx, row.network_id);
   if (!hidden) return pub;
   return {

@@ -137,6 +137,33 @@ export function canDeleteTask(caller: TaskCaller, row: CardRow): boolean {
   return ownsCard(row, caller.userId) || createdCard(row, caller.userId);
 }
 
+/**
+ * 给客户端画「只读 / 不能删」用的每卡权限。只对 scoped 调用者返回(其余 null = 与今天一样全能)。
+ * 一个请求里按网络缓存成员行与项目授权,列表 500 张卡不会变成 500 × 3 次查询。
+ */
+export type TaskPermissions = { edit: boolean; delete: boolean };
+export function taskPermissionsResolver(caller: TaskCaller): (row: CardRow) => TaskPermissions | null {
+  if (!caller) return () => null;
+  const cache = new Map<string, { scoped: boolean; viewer: boolean; grants: Map<string, boolean> }>();
+  const ctxFor = (networkId: string) => {
+    let c = cache.get(networkId);
+    if (!c) {
+      const m = memberRow(caller.userId, networkId);
+      const scoped = scopedRow(m);
+      const grants = new Map<string, boolean>(scoped ? listProjectGrants(networkId, caller.userId).map((g) => [g.project_id, g.can_edit] as [string, boolean]) : []);
+      cache.set(networkId, c = { scoped, viewer: m?.member_role === "viewer", grants });
+    }
+    return c;
+  };
+  return (row: CardRow) => {
+    const c = ctxFor(row.network_id);
+    if (!c.scoped) return null;
+    if (c.viewer) return { edit: false, delete: false };
+    const mine = ownsCard(row, caller.userId) || createdCard(row, caller.userId);
+    return { edit: mine || (row.project_id ? c.grants.get(row.project_id) === true : false), delete: mine };
+  };
+}
+
 /** 新建 / 挪卡时的目标项目:scoped 成员只能放进自己 can_edit 的项目(null = 不放项目,总是可以)。 */
 export function canUseProject(caller: TaskCaller, networkId: string, projectId: string | null): boolean {
   if (!caller || !projectId) return true;
