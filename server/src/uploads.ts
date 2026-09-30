@@ -200,14 +200,8 @@ export type UploadIndexEntry = {
   // "unattributed" are the same on-disk shape and legacy entries written
   // before #503 are indistinguishable from new unattributed ones.
   network_id?: string;
-  // 私信文件:上传时声明 `?purpose=dm`(App 的私信输入框这么传)。第一次用途就是私信 ——
-  // 只有上传者、收到/发出过带它的私信的人和管理员能下载(server.ts authorizeFileDownload)。
-  // 不是私信的文件不写这个键;以后被转进私信也不会补写,原来谁能看还是谁能看。
-  scope?: typeof DM_FILE_SCOPE;
   uploaded_at: string; // ISO 8601
 };
-
-export const DM_FILE_SCOPE = "dm";
 
 /** Path to the index entry file for a given file_id. Lives in
  * `<uploadsRoot>/.index/<file_id>.json` so /api/files/:file_id can do
@@ -230,8 +224,6 @@ export function validateIndexEntry(entry: unknown): entry is UploadIndexEntry {
   // rather than writing null. owner_id is deliberately NOT constrained
   // here — existing entries legitimately carry owner_id=null.
   if ("network_id" in e && !(typeof e.network_id === "string" && e.network_id.length > 0)) return false;
-  // 未知的 scope 值不当成「没有 scope」放行(那等于把私信文件退回全网可见):整条判坏,下载 404。
-  if ("scope" in e && e.scope !== DM_FILE_SCOPE) return false;
   return (
     typeof e.file_id === "string" && FILE_ID_REGEX.test(e.file_id) &&
     typeof e.date_bucket === "string" && /^\d{4}-\d{2}-\d{2}$/.test(e.date_bucket) &&
