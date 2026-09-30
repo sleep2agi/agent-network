@@ -158,6 +158,10 @@ function closeClient(client: SSEClient, reason: string): void {
     // we're done with it.
   }
   console.log(`[${ts()}] SSE ✕ ${printableKey(client.key)} closed (reason=${reason})`);
+  if (isUserStreamClient(client)) {
+    touchUserSeen(client.subscriberUserId!);
+    if (!isUserOnline(client.subscriberUserId!)) notifyPresence(client.subscriberUserId!, false);
+  }
 }
 
 /** Best-effort enqueue with backpressure guard. Returns:
@@ -308,8 +312,11 @@ function createStreamForKey(
         ...(opts.eventFilter ? { eventFilter: opts.eventFilter } : {}),
       };
 
+      const presenceUser = isUserStreamClient(client) ? client.subscriberUserId! : null;
+      const wasOnline = presenceUser ? isUserOnline(presenceUser) : true;
       if (!clients.has(key)) clients.set(key, []);
       clients.get(key)!.push(client);
+      if (presenceUser) touchUserSeen(presenceUser);
       console.log(`[${ts()}] SSE ← ${printableKey(key)} connected (${clients.get(key)!.length} clients)`);
 
       // Send initial connected frame through the backpressure guard so
@@ -328,6 +335,7 @@ function createStreamForKey(
           return;
         }
         const result = tryEnqueueBytes(client, encoder.encode(`: keepalive\n\n`));
+        if (result === "ok" && isUserStreamClient(client)) touchUserSeen(client.subscriberUserId!);
         if (result === "dead") {
           // closeClient already cleared the timer; just make sure we
           // also prune from the map.
@@ -337,6 +345,8 @@ function createStreamForKey(
       (client.keepaliveTimer as any)?.unref?.();
 
       ensureLivenessSweep();
+      // 在线状态的广播放在 connected 帧之后:订阅方先拿到自己的 connected,再看到别人的变化。
+      if (presenceUser && !wasOnline) notifyPresence(presenceUser, true);
     },
     cancel() {
       // Consumer side hangup — straightforward path, mark closed and
@@ -523,6 +533,75 @@ export function pushUserEvent(
   if (needPrune) pruneClosed(key);
 }
 
+// ── 人类成员在线状态(人员列表的在线点)──────────────────────────────────
+// 判据就是上面这张用户流(/events/users/me)注册表:此刻有活着的用户流 = 在线。按**用户**算,
+// 不按网络 —— 桌面端同一时刻只连当前网络的用户流,按网络算会把正在别的网络里的人画成离线。
+// last_seen 只在内存:连上、每次 keepalive 成功、断开时刷新。Hub 重启后清空(未知 = null,
+// 调用方不要把 null 画成「很久以前」)。
+
+const userLastSeen = new Map<string, number>();
+let presenceListener: ((userId: string, online: boolean, lastSeenAt: string | null) => void) | null = null;
+
+function isUserStreamClient(client: SSEClient): boolean {
+  return !!client.subscriberUserId && client.key.startsWith(USER_KEY_PREFIX);
+}
+
+function touchUserSeen(userId: string): void {
+  userLastSeen.set(userId, Date.now());
+}
+
+function isUserOnline(userId: string): boolean {
+  for (const [key, arr] of clients) {
+    if (!key.startsWith(USER_KEY_PREFIX)) continue;
+    if (arr.some((c) => !c.closed && c.subscriberUserId === userId)) return true;
+  }
+  return false;
+}
+
+function lastSeenIso(userId: string): string | null {
+  const ms = userLastSeen.get(userId);
+  return ms === undefined ? null : new Date(ms).toISOString();
+}
+
+function notifyPresence(userId: string, online: boolean): void {
+  if (!presenceListener) return;
+  try {
+    presenceListener(userId, online, lastSeenIso(userId));
+  } catch (e: any) {
+    console.log(`[${ts()}] presence listener failed: ${e?.message || e}`);
+  }
+}
+
+/** 用户的第一条用户流连上 / 最后一条断开时回调(server.ts 用它向同网络成员推 member_presence)。 */
+export function onUserPresenceChange(cb: ((userId: string, online: boolean, lastSeenAt: string | null) => void) | null): void {
+  presenceListener = cb;
+}
+
+/** 一批用户此刻的在线状态。鉴权由调用方负责。 */
+export function getUserPresence(userIds: readonly string[]): Map<string, { online: boolean; last_seen_at: string | null }> {
+  const online = new Set<string>();
+  for (const [key, arr] of clients) {
+    if (!key.startsWith(USER_KEY_PREFIX)) continue;
+    for (const c of arr) if (!c.closed && c.subscriberUserId) online.add(c.subscriberUserId);
+  }
+  const out = new Map<string, { online: boolean; last_seen_at: string | null }>();
+  for (const uid of userIds) out.set(uid, { online: online.has(uid), last_seen_at: lastSeenIso(uid) });
+  return out;
+}
+
+/** 推给某网络里所有连着用户流的人(可排除一个)。鉴权由调用方负责。 */
+export function pushUserEventToNetwork(networkId: string, event: Record<string, unknown>, exceptUserId?: string): number {
+  const prefix = `${USER_KEY_PREFIX}${networkId}:`;
+  const recipients: string[] = [];
+  for (const key of clients.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    const uid = key.slice(prefix.length);
+    if (uid && uid !== exceptUserId) recipients.push(uid);
+  }
+  for (const uid of recipients) pushUserEvent(networkId, uid, event);
+  return recipients.length;
+}
+
 /**
  * 多用户 Agent 权限:某用户在某网络的授权 / 成员资格变了,断开他在这个网络里**订阅时带了身份**
  * 的流(网络观察流、用户流),客户端重连时按新权限重新鉴权。返回断开的条数。
@@ -549,6 +628,7 @@ export function __resetSSEClientsForTest(): void {
     for (const c of arr) closeClient(c, "reset-for-test");
   }
   clients.clear();
+  userLastSeen.clear();
   if (livenessSweepTimer) {
     clearInterval(livenessSweepTimer);
     livenessSweepTimer = null;

@@ -10,7 +10,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
-import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork } from "./push.js";
+import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
@@ -238,6 +238,16 @@ function isTmuxAllowedIP(ip: string): boolean {
 function isNodeCredential(resolved: { networkId: string | null } | null | undefined): boolean {
   return !!resolved?.networkId;
 }
+// 人员列表的在线点:某人的第一条用户流连上 / 最后一条断开时,推给他所在每个网络里其他连着用户流的成员。
+// 收件人本来就是该网络成员(用户流入口按成员资格鉴权),与 GET /api/networks/:id/humans 同一可见范围。
+// 字段叫 member_user_id:pushUserEvent 会把 user_id 写成**收件人**自己。
+onUserPresenceChange((userId, online, lastSeenAt) => {
+  const nets = db.all<{ network_id: string }>("SELECT network_id FROM network_members WHERE user_id = ?1", userId);
+  for (const { network_id } of nets) {
+    pushUserEventToNetwork(network_id, { type: "member_presence", member_user_id: userId, online, last_seen_at: lastSeenAt }, userId);
+  }
+});
+
 function isHubAdminCredential(resolved: { networkId: string | null; user: { role: string } } | null | undefined): boolean {
   return !!resolved && !resolved.networkId && resolved.user.role === "admin";
 }
@@ -1606,7 +1616,11 @@ return Bun.serve({
       if (resolved.user.role !== "admin" && !getUserNetworkRole(resolved.user.user_id, netId)) {
         return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       }
-      return withCors(req, Response.json({ ok: true, network_id: netId, humans: getNetworkHumans(netId) }));
+      const humans = getNetworkHumans(netId);
+      // 在线状态(online / last_seen_at)只给用户令牌:节点令牌拿到的仍是原来的身份字段,不多得任何东西。
+      if (isNodeCredential(resolved)) return withCors(req, Response.json({ ok: true, network_id: netId, humans }));
+      const presence = getUserPresence(humans.map((h) => h.user_id));
+      return withCors(req, Response.json({ ok: true, network_id: netId, humans: humans.map((h) => ({ ...h, ...presence.get(h.user_id)! })) }));
     }
 
     // ── V3.13: Network members + invites ──
