@@ -472,7 +472,7 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 
 人与人私信(同一网络里的两个用户;受限成员也可以),只接受用户令牌。
 
-- `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` —— 写进对方的 user_inbox(`kind=human_dm`),经 `/events/users/me` 推送;发信人 `sender_user_id` 由 Hub 按令牌写入,请求体里的 `from` 一律忽略。同一个 `client_request_id` 重试不产生第二条。对方不存在与不在本网络同为 404 `dm_target_not_in_network`。受限成员附带看不见的文件 → 403 `attachment_not_accessible`。
+- `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` —— 写进对方的 user_inbox(`kind=human_dm`),经 `/events/users/me` 推送;发信人 `sender_user_id` 由 Hub 按令牌写入,请求体里的 `from` 一律忽略。同一个 `client_request_id` 重试不产生第二条。对方不存在与不在本网络同为 404 `dm_target_not_in_network`。受限成员附带看不见的文件 → 403 `attachment_not_accessible`；附带一个自己看不见的私信文件（`purpose=dm` 上传、自己既不是上传者也不在带着它的私信里）同样 403。私信的附件先用 `POST /api/upload?purpose=dm` 上传。
 - `GET /api/dm?network_id=&with=<user_id>[&limit&before]` —— 我和这个人的双向记录,新的在前,每条带 `direction: in | out`。
 - `GET /api/dm/threads?network_id=` —— 每个对方一行:`{other_user_id, last_at, unread}`。
 
@@ -493,6 +493,7 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 - 请求：`multipart/form-data`，必须带一个 `file` 字段，且必须带 `Content-Length` 头。
 - 大小上限 **12 MiB**（`MAX_UPLOAD_BYTES`），两段校验：先按 `Content-Length` fail-fast，再按解析后的实际大小复核。
 - 限流：**60 次/小时**（按 token id 计，无 token 时按 IP），超限返回 `429 rate_limited`（带 `X-RateLimit-*` 头）。
+- `?purpose=dm`（可选）：这个文件是为一条人与人私信传的，它就成了**私信文件**，只有上传者、带着它的私信的收发双方和 Hub 管理员能下载，同网络的其他成员和节点令牌都拿到 `404 not_found`。不带 `purpose` 时行为不变；文件先在别处用过（例如 agent 会话）再转进私信，也不会变成私信文件。其它值返回 `400 bad_purpose`。见 [人与人私信](#human-dm)。
 
 ```bash
 curl -X POST http://localhost:9200/api/upload \
