@@ -17,7 +17,7 @@ function throws(fn: () => unknown): string | null {
 const db = new PgAdapter(url);
 db.exec(`
   -- a comment; with a semicolon
-  CREATE TABLE contract_t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT, b BLOB, n INTEGER,
+  CREATE TABLE contract_t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT, b BLOB, n INTEGER, r REAL,
     at TEXT NOT NULL DEFAULT (datetime('now')));
 `);
 
@@ -68,6 +68,10 @@ check("datetime('now') default is SQLite-format UTC text",
 check("get()/all() accept one array as the parameter list (bun:sqlite form)",
   db.get<{ v: string }>("SELECT v FROM contract_t WHERE v = ?1 AND n = ?2", ["typed", 1])?.v === "typed"
   && db.all<{ v: string }>("SELECT v FROM contract_t WHERE v = ?1", ["typed"]).length === 1);
+db.run("INSERT INTO contract_t (v, r) VALUES (?1, ?2)", ["real", 15.678901234567]);
+check("REAL keeps SQLite's 8-byte precision",
+  db.get<{ r: number }>("SELECT r FROM contract_t WHERE v = ?1", "real")?.r === 15.678901234567,
+  String(db.get<{ r: number }>("SELECT r FROM contract_t WHERE v = ?1", "real")?.r));
 check("run() reports changes", db.run("UPDATE contract_t SET n = 2 WHERE v = ?1", ["typed"]).changes === 1);
 
 // A large row survives the worker hop.

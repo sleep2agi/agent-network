@@ -140,6 +140,9 @@ export function sqliteToPostgres(sql: string): string {
   // INTEGER → BIGINT: SQLite integers are 64-bit, and the Hub stores epoch
   // milliseconds in INTEGER columns (a 32-bit PG integer overflows).
   s = s.replace(/\bINTEGER\b/gi, "BIGINT");
+  // REAL → DOUBLE PRECISION: SQLite REAL is 8-byte; PostgreSQL REAL is 4-byte
+  // and would silently round telemetry and scores.
+  s = s.replace(/\bREAL\b/gi, "DOUBLE PRECISION");
   // BLOB → BYTEA
   s = s.replace(/\bBLOB\b/gi, "BYTEA");
   return s;
