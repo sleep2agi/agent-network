@@ -3459,7 +3459,7 @@ return Bun.serve({
         db.run("DELETE FROM nodes WHERE node_id = ?1", [node.node_id]);
         if (node.alias) {
           db.run(
-            "DELETE FROM sessions WHERE alias = ?1 AND (network_id = ?2 OR (?2 IS NULL AND network_id IS NULL))",
+            "DELETE FROM sessions WHERE alias = ?1 AND (network_id = ?2 OR (CAST(?2 AS TEXT) IS NULL AND network_id IS NULL))",
             [node.alias, node.network_id ?? null]
           );
         }

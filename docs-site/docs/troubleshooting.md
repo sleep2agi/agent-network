@@ -345,7 +345,7 @@ docker compose logs --tail=200 <service>
 
 ### 支持 PostgreSQL 吗？
 
-**PostgreSQL 支持尚在开发中，目前不可用。**当前维护和验证的后端是 SQLite。代码里虽有 `DATABASE_URL=postgres://…` 入口，但这样配置的 Hub 在建表阶段就会退出。进展见 [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md)。
+**PostgreSQL 支持尚在开发中，目前不可用。**当前维护和验证的后端是 SQLite。代码里虽有 `DATABASE_URL=postgres://…` 入口，但这样配置的 Hub 启动时会拒绝运行。进展见 [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md)。
 
 ## 仍未解决
 

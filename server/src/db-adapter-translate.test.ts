@@ -27,6 +27,11 @@ describe("RFC-039 S2a sqliteToPostgres", () => {
     );
   });
 
+  test("INTEGER → BIGINT (epoch-ms columns), identifiers containing integer untouched", () => {
+    expect(sqliteToPostgres("created_at INTEGER NOT NULL, integer_ref TEXT")).toBe("created_at BIGINT NOT NULL, integer_ref TEXT");
+    expect(sqliteToPostgres("CAST(x AS INTEGER)")).toBe("CAST(x AS BIGINT)");
+  });
+
   test("BLOB → BYTEA, identifiers containing blob untouched", () => {
     expect(sqliteToPostgres("iv BLOB NOT NULL, blob_ref TEXT")).toBe("iv BYTEA NOT NULL, blob_ref TEXT");
   });
@@ -34,7 +39,7 @@ describe("RFC-039 S2a sqliteToPostgres", () => {
   test("placeholders and AUTOINCREMENT unchanged in behaviour", () => {
     expect(sqliteToPostgres("SELECT * FROM t WHERE a = ?1 AND b = ?2")).toBe("SELECT * FROM t WHERE a = $1 AND b = $2");
     expect(sqliteToPostgres("a = ? AND b = ?")).toBe("a = $1 AND b = $2");
-    expect(sqliteToPostgres("id INTEGER PRIMARY KEY AUTOINCREMENT")).toBe("id SERIAL PRIMARY KEY");
+    expect(sqliteToPostgres("id INTEGER PRIMARY KEY AUTOINCREMENT")).toBe("id BIGSERIAL PRIMARY KEY");
   });
 });
 

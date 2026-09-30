@@ -219,7 +219,7 @@ Docker 里 `postgres:16-alpine` + `oven/bun:1.3.14` + `pg@8.16.3`,一次性容�
 |---|---|---|---|
 | **S1** | Docker 套件 `test2123-hub-postgres-ladder`(#2125):容器内起 PostgreSQL + Hub,逐级爬 L0 连上 → L1 建表并监听 → L2 首个用户是 admin → L3 登录/节点令牌/派活 → L4 回复并终态;**棘轮**,低于 `FLOOR` 才红。注册进 `qa.yml` 的 Hub Docker 矩阵(不进 L1:L1 串行构建,本套件要装 postgresql)。不改生产代码 | 无 | 今天 `level=0`;以后每一步把 `FLOOR` 往上推 |
 | **S2** | S2a(#2127):建表修复(切句、`BYTEA`、文本时间、int8)。S2b(#2129):换桥 —— Worker + `Bun.SQL` 保留连接,真事务、嵌套 savepoint;三处「拒绝」改为**默认仍关闭**,只有 `atomicTransactions` 为真**且** `COMMHUB_PG_EXPERIMENTAL=1` 时打开(见下) | 无(只动 PG 路径) | 契约测试 14 项、回滚见红;梯子在 opt-in 下到 L4 |
-| **S3** | 翻译器:文本时间、`BIGINT`/`BIGSERIAL`/`BYTEA`、`strftime`;F1/F3/F4 逐处修 | 无(翻译只在 PG 路径执行;F3 改 `ORDER BY` 需在 SQLite 上回归) | Hub 在 PG 上建表完成;S1 套件推进到冒烟全绿(定时任务除外) |
+| **S3** | F1 两处 `?N IS NULL` 加 `CAST(… AS TEXT)`;`INTEGER→BIGINT`、`AUTOINCREMENT→BIGSERIAL`;retention 的 WAL/vacuum 段只在 SQLite 跑(PG 交给 autovacuum)。F3(`rowid`)、F5(`strftime`)、F6(`LIKE`)留到后续 | 无(两处 CAST 对 SQLite 语义不变,SQLite 全套对比验证) | 梯子在 opt-in 下爬满 L5,`FLOOR` → 5 |
 | **S4** | 在 PG 上跑定时任务、运行证据、side-thread 的现有测试;都过了再**删掉 `COMMHUB_PG_EXPERIMENTAL`**,三处功能在 PG 上默认打开 | 无 | 冒烟套件不再需要 opt-in;`qa-hub-*` 选 3–5 个按 PG 参数化 |
 | **S5** | `anet hub db migrate` + 文档(中英)+ 静态门 | 无 | 用一份造出来的 SQLite 库迁移,行数与哈希一致;文档页上线 |
 

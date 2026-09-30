@@ -35,11 +35,10 @@ if [ -n "${EXPECTED_SOURCE_COMMIT:-}" ] && [ "$EXPECTED_SOURCE_COMMIT" != "${SOU
   exit 1
 fi
 
-# Current floor: RFC-039 S2b gives PgAdapter real transactions, so with
-# COMMHUB_PG_EXPERIMENTAL=1 startHub() no longer refuses; the Hub listens,
-# bootstraps its admin and accepts tasks.
-# L5 (send_reply) still fails on an untyped `?2 IS NULL` parameter (S3).
-FLOOR="${PG_LADDER_FLOOR:-4}"
+# Current floor: with COMMHUB_PG_EXPERIMENTAL=1 the Hub completes the whole
+# ladder on PG — schema, listen, admin bootstrap, task, atomic reply
+# (RFC-039 S2b real transactions + S3 typed NULL-checked parameters).
+FLOOR="${PG_LADDER_FLOOR:-5}"
 SUITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PG_PORT=25433
 HUB_PORT=29213

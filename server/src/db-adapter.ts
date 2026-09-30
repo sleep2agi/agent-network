@@ -10,7 +10,7 @@
  *   - datetime('now'[, offset])  →  to_char(... AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
  *     (timestamps stay TEXT on both backends, RFC-039 §4.1)
  *   - BLOB  →  BYTEA
- *   - INTEGER PRIMARY KEY AUTOINCREMENT  →  SERIAL PRIMARY KEY
+ *   - INTEGER PRIMARY KEY AUTOINCREMENT  →  BIGSERIAL PRIMARY KEY; INTEGER  →  BIGINT
  *   - ON CONFLICT(col) DO UPDATE SET  →  ON CONFLICT(col) DO UPDATE SET  (same syntax)
  */
 
@@ -132,8 +132,11 @@ export function sqliteToPostgres(sql: string): string {
   let idx = 0;
   s = s.replace(/\?(?!\d)/g, () => `$${++idx}`);
   // ── DDL translations ──
-  // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
-  s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, "SERIAL PRIMARY KEY");
+  // INTEGER PRIMARY KEY AUTOINCREMENT → BIGSERIAL PRIMARY KEY
+  s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, "BIGSERIAL PRIMARY KEY");
+  // INTEGER → BIGINT: SQLite integers are 64-bit, and the Hub stores epoch
+  // milliseconds in INTEGER columns (a 32-bit PG integer overflows).
+  s = s.replace(/\bINTEGER\b/gi, "BIGINT");
   // BLOB → BYTEA
   s = s.replace(/\bBLOB\b/gi, "BYTEA");
   return s;
