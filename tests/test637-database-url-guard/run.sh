@@ -71,6 +71,27 @@ test -s "$accepted"
 ! grep -q 'REFUSING to honor inherited DATABASE_URL' "$probe_dir/mutation.stderr"
 echo "MUTATION_RED: deleting the earliest guard produced a real connect"
 
+echo "L3 COMMHUB_TEST_PG_URL host / database-name checks (RFC-039 §9)"
+probe_test_pg() { bun tests/test637-database-url-guard/probe-test-pg-url.ts "$1" "$2"; }
+FOREIGN_HOST='postgres://tester:s3cret@db.example.invalid/anet_x_test'
+PROD_NAME='postgres://tester:s3cret@127.0.0.1/commhub'
+probe_test_pg server/src/db-adapter.ts "$FOREIGN_HOST" | grep -q '^REFUSED .*host must be'
+probe_test_pg server/src/db-adapter.ts "$PROD_NAME" | grep -q '^REFUSED .*database name'
+probe_test_pg server/src/db-adapter.ts 'postgres://tester:s3cret@127.0.0.1/anet_x_test' | grep -q '^ACCEPTED postgres'
+! probe_test_pg server/src/db-adapter.ts "$FOREIGN_HOST" | grep -q 's3cret'
+host_mut="$(mktemp -d /work/test637-hostmut.XXXXXX)"
+cp server/src/db-adapter.ts server/src/pg-worker.ts "$host_mut/"
+sed -i '/if (!TEST_PG_HOSTS.has(u.hostname)) throw refuse/d' "$host_mut/db-adapter.ts"
+! grep -q 'TEST_PG_HOSTS.has(u.hostname)' "$host_mut/db-adapter.ts"
+probe_test_pg "$host_mut/db-adapter.ts" "$FOREIGN_HOST" | grep -q '^ACCEPTED postgres'
+echo "MUTATION_RED: removing the host check accepts a non-loopback host"
+name_mut="$(mktemp -d /work/test637-namemut.XXXXXX)"
+cp server/src/db-adapter.ts server/src/pg-worker.ts "$name_mut/"
+sed -i '/if (!TEST_PG_DB_RE.test(dbName)) throw refuse/d' "$name_mut/db-adapter.ts"
+! grep -q 'TEST_PG_DB_RE.test(dbName)' "$name_mut/db-adapter.ts"
+probe_test_pg "$name_mut/db-adapter.ts" "$PROD_NAME" | grep -q '^ACCEPTED postgres'
+echo "MUTATION_RED: removing the anet_*_test check accepts a production database name"
+
 kill "$listener_pid" 2>/dev/null || true
 wait "$listener_pid" 2>/dev/null || true
 echo "RESULT: PASS"

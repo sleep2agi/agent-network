@@ -8,8 +8,8 @@ import { db } from "./db.js";
 import { assertScheduledTaskBackendSupported, nextOccurrence, runDueScheduledTasks } from "./scheduled-tasks.js";
 
 const dir = mkdtempSync(join(tmpdir(), "anet-scheduler-"));
-const activeDbPath = process.env.COMMHUB_DB;
-if (!activeDbPath) throw new Error("test601 requires COMMHUB_DB before module import");
+const activeDbPath = process.env.COMMHUB_DB ?? (process.env.COMMHUB_TEST_PG_URL ? "postgres" : undefined);
+if (!activeDbPath) throw new Error("test601 requires COMMHUB_DB (or COMMHUB_TEST_PG_URL) before module import");
 let server: any;
 let base = "";
 let ownerToken = "";
@@ -128,8 +128,13 @@ describe("Hub scheduled task API and dispatcher", () => {
       (db as any).atomicTransactions = original;
     }
     expect(() => assertScheduledTaskBackendSupported()).not.toThrow();
-    const misfireColumn = db.all<any>("PRAGMA table_info(scheduled_tasks)").find((column: any) => column.name === "misfire_policy");
-    expect(misfireColumn?.dflt_value).toBe("'catch_up_once'");
+    if (db.dialect === "sqlite") {
+      const misfireColumn = db.all<any>("PRAGMA table_info(scheduled_tasks)").find((column: any) => column.name === "misfire_policy");
+      expect(misfireColumn?.dflt_value).toBe("'catch_up_once'");
+    } else {
+      const misfireColumn = db.get<any>("SELECT column_default FROM information_schema.columns WHERE table_name = 'scheduled_tasks' AND column_name = 'misfire_policy'");
+      expect(misfireColumn?.column_default).toBe("'catch_up_once'::text");
+    }
   });
 
   test("owner creates; viewer and node token cannot mutate", async () => {
@@ -283,10 +288,17 @@ describe("Hub scheduled task API and dispatcher", () => {
     // Test-only fault injection at the second durable write. The inbox row has
     // already been attempted when this aborts, so any missing transaction
     // boundary leaves an observable half-state.
-    db.run(`CREATE TRIGGER test601_abort_scheduled_task_insert
-      BEFORE INSERT ON tasks
-      WHEN NEW.meta_json LIKE '%${atomicScheduleId}%'
-      BEGIN SELECT RAISE(ABORT, 'test601_injected_task_failure'); END`);
+    if (db.dialect === "sqlite") {
+      db.run(`CREATE TRIGGER test601_abort_scheduled_task_insert
+        BEFORE INSERT ON tasks
+        WHEN NEW.meta_json LIKE '%${atomicScheduleId}%'
+        BEGIN SELECT RAISE(ABORT, 'test601_injected_task_failure'); END`);
+    } else {
+      db.exec(`CREATE FUNCTION test601_abort_scheduled_task_insert() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test601_injected_task_failure'; END; $$ LANGUAGE plpgsql;
+        CREATE TRIGGER test601_abort_scheduled_task_insert BEFORE INSERT ON tasks FOR EACH ROW
+        WHEN (NEW.meta_json LIKE '%${atomicScheduleId}%') EXECUTE FUNCTION test601_abort_scheduled_task_insert()`);
+    }
     const failed = runDueScheduledTasks();
     expect(failed.failed).toBe(1);
     expect(db.get("SELECT run_id FROM scheduled_task_runs WHERE schedule_id = ?1", atomicScheduleId)).toBeNull();
@@ -294,7 +306,8 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(db.get("SELECT task_id FROM tasks WHERE meta_json LIKE '%' || ?1 || '%'", atomicScheduleId)).toBeNull();
     expect(db.get<{ next_run_at: string }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", atomicScheduleId)!.next_run_at).toBe(due);
 
-    db.run("DROP TRIGGER test601_abort_scheduled_task_insert");
+    if (db.dialect === "sqlite") db.run("DROP TRIGGER test601_abort_scheduled_task_insert");
+    else db.exec("DROP TRIGGER test601_abort_scheduled_task_insert ON tasks; DROP FUNCTION test601_abort_scheduled_task_insert()");
     expect(runDueScheduledTasks().processed).toBe(1);
     expect(db.get("SELECT task_id FROM scheduled_task_runs WHERE schedule_id = ?1", atomicScheduleId)).toBeTruthy();
   });
