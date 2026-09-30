@@ -1,6 +1,7 @@
 // 需求池。长期卡片，存在 Hub 上，手机和电脑读同一份。
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { createHash } from "node:crypto";
+import { encodeCursor, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
@@ -456,7 +457,8 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
   return header.split(",").some(tag => tag.trim() === "*" || bare(tag) === bare(etag));
 }
 
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq"] as const;
+// search:GET 认 q=(服务端搜索,语义同 App 的任务搜索);paging:认 limit / cursor,响应带 has_more / next_cursor。
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -796,6 +798,54 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
   return sql;
 }
 
+const LIST_ORDER = " ORDER BY created_at DESC, requirement_id DESC";
+type LightRow = { requirement_id: string; network_id: string; created_at: string; title: string; description: string | null; assignee: string | null; tags_json: string | null; project_id: string | null; owner_json: string | null; agent_owner_json: string | null; participants_json: string | null };
+const parseRef = (json: string | null) => { try { return json ? JSON.parse(json) : null; } catch { return null; } };
+
+/**
+ * 列表的一页(from = listFilters 拼好的「FROM requirements WHERE …」)。没有搜索词:SQL 直接 LIMIT。有搜索词:先按同样的筛选 + 顺序读轻量列(不算子需求计数),
+ * 在这里逐行匹配,凑够 limit + 1 张就停,再按 id 读这一页的完整行。
+ */
+function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unknown[], lq: ListQuery): { rows: Row[]; hasMore: boolean; nextCursor: string | null } {
+  const params = [...baseParams];
+  let where = from;
+  if (lq.cursor) {
+    const a = params.push(lq.cursor.createdAt), b = params.push(lq.cursor.id);
+    where += ` AND (created_at < ?${a} OR (created_at = ?${a} AND requirement_id < ?${b}))`;
+  }
+  let rows: Row[];
+  if (!lq.terms.length) {
+    rows = db.all<Row>(`SELECT ${SELECT} ${where}${LIST_ORDER} LIMIT ${lq.limit + 1}`, ...params);
+  } else {
+    const light = db.all<LightRow>(`SELECT requirement_id, network_id, created_at, title, description, assignee, tags_json, project_id, owner_json, agent_owner_json, participants_json ${where}${LIST_ORDER}`, ...params);
+    const maps = new Map<string, NameMaps>();
+    const hits: string[] = [];
+    for (const r of light) {
+      let m = maps.get(r.network_id);
+      if (!m) maps.set(r.network_id, m = searchNameMaps(ctx, r.network_id));
+      const row = { name: r.title, description: r.description || "", assignee: r.assignee || "", tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
+      if (matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
+      if (hits.length > lq.limit) break;
+    }
+    const byId = new Map(hits.length ? db.all<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id IN (${hits.map((_, i) => `?${i + 1}`).join(",")})`, ...hits).map(r => [r.requirement_id, r]) : []);
+    rows = hits.map(id => byId.get(id)).filter((r): r is Row => !!r);
+  }
+  const hasMore = rows.length > lq.limit;
+  if (hasMore) rows = rows.slice(0, lq.limit);
+  const last = rows[rows.length - 1];
+  return { rows, hasMore, nextCursor: hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.requirement_id }) : null };
+}
+
+/** 搜索用的名字表(与 GET /api/requirements/people 同一个显示名规则);调用者看不见的节点不放进来。 */
+function searchNameMaps(ctx: RequirementsRequestContext, networkId: string): NameMaps {
+  const hidden = hiddenNodeFilter(ctx, networkId);
+  const people = new Map<string, string>();
+  for (const u of db.all<{ id: string; name: string }>("SELECT u.user_id AS id, COALESCE(NULLIF(u.display_name,''), u.username) AS name FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1", networkId)) people.set(`user:${u.id}`, u.name);
+  for (const n of db.all<{ id: string; name: string }>("SELECT node_id AS id, COALESCE(NULLIF(display_name,''), NULLIF(alias,''), node_name) AS name FROM nodes WHERE network_id=?1", networkId)) if (!hidden?.(n.id)) people.set(`node:${n.id}`, n.name);
+  const projects = new Map(db.all<{ project_id: string; name: string }>("SELECT project_id, name FROM requirement_projects WHERE network_id=?1", networkId).map(p => [p.project_id, p.name] as const));
+  return { people, projects };
+}
+
 /** 这个节点对调用者在他作用域内的某个受限网络里是否隐藏。 */
 function hiddenFilterForScope(ctx: RequirementsRequestContext, nodeId: string): boolean {
   const restricted = ctx.scope.agentRestriction?.networkIds ?? [];
@@ -838,13 +888,18 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
 
   if (url.pathname === "/api/requirements" && req.method === "GET") {
     const params: unknown[] = [];
-    let sql = `SELECT ${SELECT} FROM requirements WHERE 1=1`;
+    // 只拼 FROM … WHERE:同一组条件既用来读整行,也用来(搜索时)先读轻量列。
+    let sql = "FROM requirements WHERE 1=1";
     sql = addHumanNetworkScope(sql, params, ctx.scope);
     const filtered = listFilters(url, sql, params, ctx);
     if (typeof filtered !== "string") return filtered;
-    const rows = db.all<Row>(`${filtered} ORDER BY created_at DESC LIMIT 500`, ...params).map(row => toPublicFor(ctx, row));
+    // q= / limit / cursor(requirements-search.ts)。都不带 = 旧行为:最新 500 张、同样的顺序。
+    const lq = parseListQuery(url.searchParams);
+    if ("error" in lq) return jsonError(lq.error, 400);
+    const page = listPage(ctx, filtered, params, lq);
     // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
-    return conditionalJson(ctx.req, { ok: true, requirements: rows, capabilities: REQUIREMENT_CAPABILITIES });
+    // has_more / next_cursor:后面还有没有(带 cursor=next_cursor 再读一页)。旧客户端不认识,忽略即可。
+    return conditionalJson(ctx.req, { ok: true, requirements: page.rows.map(row => toPublicFor(ctx, row)), capabilities: REQUIREMENT_CAPABILITIES, has_more: page.hasMore, next_cursor: page.nextCursor });
   }
 
   if (url.pathname === "/api/requirements" && req.method === "POST") {

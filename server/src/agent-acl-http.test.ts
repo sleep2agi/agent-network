@@ -368,6 +368,14 @@ describe("requirements: agent references alice cannot see are hidden and protect
     const r = await get(aliceToken, `/api/requirements?network_id=${NET}&agent_owner=node:${Z.node}`);
     expect(r.body.requirements).toEqual([]);
   });
+  test("q= does not match on a hidden agent's name (no 'who owns this card' probe); admin's q= does", async () => {
+    const zName = db.get<{ name: string }>("SELECT COALESCE(NULLIF(display_name,''), NULLIF(alias,''), node_name) AS name FROM nodes WHERE node_id = ?1", Z.node)!.name;
+    const ids = async (token: string, q: string) => (await get(token, `/api/requirements?network_id=${NET}&q=${encodeURIComponent(q)}`)).body.requirements.map((r: any) => r.id);
+    expect(await ids(aliceToken, zName)).not.toContain(reqId);
+    expect(await ids(adminToken, zName)).toContain(reqId);
+    // 看得见的字段照样能搜到(标题)
+    expect(await ids(aliceToken, "card")).toContain(reqId);
+  });
 });
 
 describe("cannot be abused", () => {

@@ -50,7 +50,7 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 - `external_ref`（如 `github:owner/repo#123`，`[A-Za-z0-9][A-Za-z0-9_.:/#@+-]{0,199}`）同一网络唯一（部分唯一索引）；重复新建 409 `external_ref_exists` + `existing_id`。`external_url` 只收 http(s)。
 - `POST /api/requirements/upsert`：按 `external_ref` 建或改，省略的字段（包括状态）保留；返回 `{requirement, created}`。
 - `archived`：归档的卡默认不在列表里（`include_archived=1` 才有）。Agent 用它代替删除。
-- `GET /api/requirements` 过滤：`status`、`project_id`（`none`）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`、`external_ref`、`include_archived`。`GET /api/requirements/{id}` 取一条；`DELETE` 只给人。
+- `GET /api/requirements` 过滤：`status`、`project_id`（`none`）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`、`external_ref`、`include_archived`;`q` 服务端搜索(同 App 任务搜索的字段与「多词且」);`limit` / `cursor` 分页(响应 `has_more` / `next_cursor`,默认仍是最新 500 张)。`GET /api/requirements/{id}` 取一条；`DELETE` 只给人。
 - MCP：`requirements_list` / `requirements_get` / `requirements_create` / `requirements_update` / `requirements_checklist_toggle` / `requirements_upsert_by_external_ref` / `projects_list`，全部转给同一个 REST 处理函数（权限只有一份）。参考 `docs-site/docs/api/mcp-tools.md`。
 
 ### 子需求（parent_id）
