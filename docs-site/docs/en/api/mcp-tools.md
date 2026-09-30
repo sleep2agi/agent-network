@@ -874,7 +874,8 @@ Everywhere an `{id}` is accepted (REST `GET` / `PATCH` / `DELETE` / checklist to
 | PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`; only that item |
 | DELETE | `/api/requirements/{id}` | Delete (humans only); children are kept and detached |
 | GET | `/api/requirements/projects` | Projects (creating / editing / deleting projects is human-only) |
-| GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them |
+| GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them. A Hub with the `tag_ops` capability also returns `counts` / `colors` / `can_manage` |
+| POST | `/api/requirements/tags/ops` | Rename / merge / delete a tag across the network, or set its color (humans only; scoped members get 403). See [Task tags](/en/guide/task-tags#managing-tags) |
 
 **Sync example (GitHub issues → tasks)**: call `requirements_upsert_by_external_ref` once per issue with `external_ref` = `github:<owner>/<repo>#<number>` and `external_url` = the issue link; re-syncing updates the same task instead of creating a duplicate. Use `updated_since` on `requirements_list` for incremental sync.
 

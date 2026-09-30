@@ -77,7 +77,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -188,6 +188,8 @@ run_pg_tests_rc anet_task_access_test src/task-access-http.test.ts
 # Task dashboard: completed_at set / cleared on POST / PATCH (typed NULL parameters on PostgreSQL) and
 # GET /api/requirements/stats under the same task-visibility clause, on real PostgreSQL rows.
 run_pg_tests_rc anet_req_stats_test src/requirements-stats-http.test.ts
+# 标签管理:改写整网卡片 tags 的事务、network_tags 的 ON CONFLICT upsert、scoped 成员被挡 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_tag_ops_test src/requirement-tag-ops-http.test.ts
 
 # RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
 # refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).

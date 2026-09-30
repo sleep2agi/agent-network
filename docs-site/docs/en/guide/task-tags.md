@@ -26,6 +26,38 @@ A node token can read and write tags on tasks in the network it is bound to. A v
 
 `GET /api/requirements/tags` returns the tags that appear in the current network, deduplicated and sorted, including tags that only remain on archived tasks. The suggestions in the detail view come from this list. Another network does not see them.
 
+## Managing tags
+
+When the list response's `capabilities` includes `tag_ops`, the Hub can rename, merge, or delete a tag across the whole network, and store a color for it. The client puts **Manage tags** at the bottom of the sidebar tag group. On an older Hub the entry is hidden.
+
+`GET /api/requirements/tags` returns more than `tags`:
+
+- `counts`: how many cards use each tag. Only cards the caller can see are counted, and archived cards are included.
+- `colors`: tags that have a color, as `{"tag": "#rrggbb"}`. A tag with no color is left out, and the client uses the default color.
+- `can_manage`: whether this caller may manage tags.
+
+Older clients read `tags` only and ignore the rest.
+
+`POST /api/requirements/tags/ops` takes one of these bodies:
+
+| `op` | Other fields | Effect |
+|------|--------------|--------|
+| `rename` | `from`, `to` | Every card with `from` gets `to` in the same position. If `to` is already on the card, it is kept once, which amounts to a merge |
+| `merge` | `from` (1–50), `to` | On every card with any source, the sources are replaced by a single `to` |
+| `delete` | `tag` | The tag is removed from every card. The cards stay |
+| `color` | `tag`, `color` (`#rrggbb`, or `null` to clear) | Only the color changes. No card is touched |
+
+- All matching cards in the network, archived ones included, are rewritten in one transaction. If anything fails, no card changes.
+- Each rewritten card's `updated_at` moves forward and `updated_by` records the caller, so `updated_since` sync picks up the change.
+- On rename or merge, a target without a color inherits the first source that has one. Source colors are deleted, and so is the color of a deleted tag.
+- The response is `{ok, op, affected}`, where `affected` is the number of cards changed.
+- Tag names follow the rules above. Invalid input returns 400 `invalid_tag`, `invalid_tag_color`, or `invalid_tag_op`. A source equal to the target returns 400 `same_tag`. A tag that is not in the network returns 404 `tag_not_found`.
+- Every successful call writes an audit entry: `requirement_tag_rename`, `_merge`, `_delete`, or `_color`. Its detail includes `affected`.
+
+Who may call it: the same people who can manage projects, meaning the network owner, Hub admins, and members whose task access is **All tasks**. A member limited to related tasks (`task_access = scoped`) gets 403 `permission_denied`, and so does a viewer. A node token gets 403 `user_token_required`.
+
+A scoped member is refused outright rather than allowed to change only the cards they can see, for two reasons. The tag would be split into an old half and a new half. And `affected` would reveal how many cards they cannot see. For a scoped member, `counts` and `colors` also cover only tags on cards they can see.
+
 ## See also
 
 - [Tasks](/en/guide/tasks)
