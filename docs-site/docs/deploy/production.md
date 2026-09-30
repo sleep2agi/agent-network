@@ -95,7 +95,7 @@ anet network invite --role member --uses 1
 
 ### 7. 备份与监控
 
-使用 SQLite 的在线备份命令，不要在 Hub 运行时直接复制数据库文件：
+使用 SQLite 的在线备份命令，不要直接复制数据库文件 —— Hub 停了也一样，最近的写入可能还在 `-wal` 里（[#2151](https://github.com/sleep2agi/agent-network/issues/2151)）：
 
 ```bash
 umask 077

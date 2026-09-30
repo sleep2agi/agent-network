@@ -96,7 +96,7 @@ block that path at the reverse proxy or gateway. Do not share an administrator a
 
 ### 7. Back up and monitor
 
-Use SQLite's online backup command rather than copying a live database file:
+Use SQLite's online backup command rather than copying the database file — even after the Hub stops, its latest writes may still be in the `-wal` ([#2151](https://github.com/sleep2agi/agent-network/issues/2151)):
 
 ```bash
 umask 077

@@ -23,7 +23,7 @@
 
 密钥只从 `hub.env` 或进程环境进入 Hub。`anet hub start` **不会**自己去读 `hub.env`。重新生成一把新密钥解不开库里已有的 `network_secrets` / `providers` 密文。
 
-日常备份仍用 [生产部署](/deploy/production) 里的 `sqlite3 .backup`。搬机器用下面这条，打出一份可以单独拷走的文件。不要 `cp` 正在使用的库，也不要把 `-wal` / `-shm` 当成备份。
+日常备份仍用 [生产部署](/deploy/production) 里的 `sqlite3 .backup`。搬机器用下面这条，打出一份可以单独拷走的文件。不要用 `cp` 单独复制 `.db` 文件 —— Hub 运行时不行，Hub 停了也不行：停掉之后最近的写入仍可能留在旁边的 `-wal` 里（[#2151](https://github.com/sleep2agi/agent-network/issues/2151)），只拷 `.db` 会把它们丢掉。也不要把 `-wal` / `-shm` 当成备份。下面的 `VACUUM INTO` 会连同 `-wal` 里的内容一起写进新文件。
 
 ```bash
 umask 077
