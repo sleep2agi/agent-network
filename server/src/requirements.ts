@@ -1,7 +1,7 @@
 // 需求池。长期卡片，存在 Hub 上，手机和电脑读同一份。
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { createHash } from "node:crypto";
-import { encodeCursor, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
+import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
@@ -799,7 +799,7 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
 }
 
 const LIST_ORDER = " ORDER BY created_at DESC, requirement_id DESC";
-type LightRow = { requirement_id: string; network_id: string; created_at: string; title: string; description: string | null; assignee: string | null; tags_json: string | null; project_id: string | null; owner_json: string | null; agent_owner_json: string | null; participants_json: string | null };
+type LightRow = { requirement_id: string; seq?: number | null; network_id: string; created_at: string; title: string; description: string | null; assignee: string | null; tags_json: string | null; project_id: string | null; owner_json: string | null; agent_owner_json: string | null; participants_json: string | null };
 const parseRef = (json: string | null) => { try { return json ? JSON.parse(json) : null; } catch { return null; } };
 
 /**
@@ -817,14 +817,15 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
   if (!lq.terms.length) {
     rows = db.all<Row>(`SELECT ${SELECT} ${where}${LIST_ORDER} LIMIT ${lq.limit + 1}`, ...params);
   } else {
-    const light = db.all<LightRow>(`SELECT requirement_id, network_id, created_at, title, description, assignee, tags_json, project_id, owner_json, agent_owner_json, participants_json ${where}${LIST_ORDER}`, ...params);
+    // 任务短号 seq(#2139 加的列):没有这列的库照样能搜,只是「#N」对不上短号。
+    const light = db.all<LightRow>(`SELECT requirement_id, ${hasSeqColumn() ? "seq, " : ""}network_id, created_at, title, description, assignee, tags_json, project_id, owner_json, agent_owner_json, participants_json ${where}${LIST_ORDER}`, ...params);
     const maps = new Map<string, NameMaps>();
     const hits: string[] = [];
     for (const r of light) {
       let m = maps.get(r.network_id);
       if (!m) maps.set(r.network_id, m = searchNameMaps(ctx, r.network_id));
       const row = { name: r.title, description: r.description || "", assignee: r.assignee || "", tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
-      if (matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
+      if (matchesTaskId(r, lq.idQuery) || matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
       if (hits.length > lq.limit) break;
     }
     const byId = new Map(hits.length ? db.all<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id IN (${hits.map((_, i) => `?${i + 1}`).join(",")})`, ...hits).map(r => [r.requirement_id, r]) : []);
@@ -834,6 +835,11 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
   if (hasMore) rows = rows.slice(0, lq.limit);
   const last = rows[rows.length - 1];
   return { rows, hasMore, nextCursor: hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.requirement_id }) : null };
+}
+
+/** requirements 表有没有 seq 列(任务短号,#2139)。每次现查:迁移在启动时加列,测试里也可能中途加。 */
+function hasSeqColumn(): boolean {
+  try { db.all("SELECT seq FROM requirements LIMIT 0"); return true; } catch { return false; }
 }
 
 /** 搜索用的名字表(与 GET /api/requirements/people 同一个显示名规则);调用者看不见的节点不放进来。 */

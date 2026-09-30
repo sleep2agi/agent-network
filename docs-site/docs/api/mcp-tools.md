@@ -871,7 +871,7 @@ send_task({
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/requirements` | 列表；过滤参数 `seq`（短号，正整数）、`status`、`project_id`（`none` = 无项目）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`（ISO）、`external_ref`、`parent_id`（`none` = 顶层）/ `top_level=1`；默认不含归档，`include_archived=1` 含全部，`archived=true` 仅归档（优先于 `include_archived`）；`q` 服务端搜索（标题、描述、负责人 / 负责 Agent / 参与人显示名、项目名、标签；空格隔开的词同时满足；调用者看不见的 Agent 名字不参与匹配）；分页 `limit`（默认 500，最多 1000）+ `cursor`，响应带 `has_more` / `next_cursor`，按 `created_at`、`id` 倒序；响应带 `capabilities` |
+| GET | `/api/requirements` | 列表；过滤参数 `seq`（短号，正整数）、`status`、`project_id`（`none` = 无项目）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`（ISO）、`external_ref`、`parent_id`（`none` = 顶层）/ `top_level=1`；默认不含归档，`include_archived=1` 含全部，`archived=true` 仅归档（优先于 `include_archived`）；`q` 服务端搜索（标题、描述、负责人 / 负责 Agent / 参与人显示名、项目名、标签；空格隔开的词同时满足；调用者看不见的 Agent 名字不参与匹配；整句也当任务 ID 匹配：`#N` / `N` 对短号 seq，完整 id 或 8 位以上前缀对 id，全角 `＃` 按半角算）；分页 `limit`（默认 500，最多 1000）+ `cursor`，响应带 `has_more` / `next_cursor`，按 `created_at`、`id` 倒序；响应带 `capabilities` |
 | GET | `/api/requirements/{id}` | 一条；`{id}` 也可以是 `%23N`（短号 `#N`） |
 | POST | `/api/requirements` | 新建；重复 `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
 | POST | `/api/requirements/upsert` | 按 `external_ref` 建或改（省略的字段、包括状态，保留）；响应 `{requirement, created}` |

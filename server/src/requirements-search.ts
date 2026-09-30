@@ -94,7 +94,27 @@ export function decodeCursor(raw: string): Cursor | null {
   }
 }
 
-export type ListQuery = { limit: number; cursor: Cursor | null; terms: string[] };
+export type ListQuery = { limit: number; cursor: Cursor | null; terms: string[]; /** 整句当任务 ID 去对(taskIdQuery);空 = 没有搜索。 */ idQuery: string };
+
+/**
+ * 任务 ID(同 App 的 task-short-id.ts matchesTaskId):「#42」「42」精确对短号 seq;完整 id,或 8 位以上的
+ * id 前缀(带不带 req_ 都行)对主键。整句当一个 ID —— 和文字匹配是「或」,不拆成「ID 且文字」。
+ * 全角「＃４２」先 NFKC 归一(ID 本身都是 ASCII)。
+ */
+export const taskIdQuery = (q: string): string => q.trim().normalize("NFKC").toLowerCase();
+export const seqOfQuery = (idQuery: string): number | null => {
+  const m = /^#?(\d{1,15})$/.exec(idQuery);
+  return m ? Number(m[1]) : null;
+};
+export function matchesTaskId(row: { requirement_id: string; seq?: number | null }, idQuery: string): boolean {
+  if (!idQuery) return false;
+  const n = seqOfQuery(idQuery);
+  if (n !== null) return typeof row.seq === "number" && row.seq === n;
+  const id = row.requirement_id.toLowerCase();
+  if (idQuery === id) return true;
+  const bare = idQuery.replace(/^req_/, "");
+  return bare.length >= 8 && id.replace(/^req_/, "").startsWith(bare);
+}
 
 /** 解析 limit / cursor / q。不合法 → 错误码(400)。都没带 = 旧行为(500 行、第一页、不搜)。 */
 export function parseListQuery(params: URLSearchParams): ListQuery | { error: string } {
@@ -113,5 +133,6 @@ export function parseListQuery(params: URLSearchParams): ListQuery | { error: st
   }
   const q = params.get("q") ?? "";
   if (q.length > MAX_QUERY_LENGTH) return { error: "invalid_q" };
-  return { limit, cursor, terms: searchTerms(q) };
+  const terms = searchTerms(q);
+  return { limit, cursor, terms, idQuery: terms.length ? taskIdQuery(q) : "" };
 }

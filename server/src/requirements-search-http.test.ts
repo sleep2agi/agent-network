@@ -91,6 +91,48 @@ describe("q= server-side search (same semantics as the app's task search)", () =
   });
 });
 
+describe("q= also matches task ids: #N / N on seq (#2139), full id and 8+ char prefix", () => {
+  const idOf = async (name: string) => (await list("limit=1000&include_archived=1")).body.requirements.find((r: any) => r.name === name).id as string;
+  test("full id and id prefix (with or without req_), not shorter prefixes", async () => {
+    const id = await idOf("企业组织树权限设置");
+    const bare = id.replace(/^req_/, "");
+    expect(await ids("q=" + encodeURIComponent(id))).toEqual(["企业组织树权限设置"]);
+    expect(await ids("q=" + encodeURIComponent(id.toUpperCase()))).toEqual(["企业组织树权限设置"]);
+    expect(await ids("q=" + encodeURIComponent(bare.slice(0, 10)))).toEqual(["企业组织树权限设置"]);
+    expect(await ids("q=" + encodeURIComponent(`req_${bare.slice(0, 9)}`))).toEqual(["企业组织树权限设置"]);
+    // 7 位以下的前缀不算 ID(否则输入几个字母就搜出一堆)
+    expect(await ids("q=" + encodeURIComponent(`req_${bare.slice(0, 5)}`))).toEqual([]);
+  });
+  test("#N / N / full-width ＃Ｎ match seq when the column exists; before it exists they are plain text and nothing breaks", async () => {
+    const has = (() => { try { db.all("SELECT seq FROM requirements LIMIT 0"); return true; } catch { return false; } })();
+    const target = await idOf("Space 网络策略 | 历史 receipt 误报");
+    let n: number;
+    if (!has) {
+      // 还没有 #2139 的库:「#1」只是普通文字,不报错
+      const r = await list("q=%231");
+      expect(r.status).toBe(200);
+      expect(r.body.requirements).toEqual([]);
+      // 模拟 #2139 的列(没有它的计数器 / 唯一索引):给目标卡 7,再给另一张 70 验证「#7 不命中 #70」
+      db.run("ALTER TABLE requirements ADD COLUMN seq INTEGER");
+      db.run("UPDATE requirements SET seq = 7 WHERE requirement_id = ?1", [target]);
+      db.run("UPDATE requirements SET seq = 70 WHERE requirement_id = ?1", [await idOf("子项目的卡")]);
+      n = 7;
+    } else {
+      // #2139 已合:用它启动时发的真号,不改(改了会和它的计数器 / 唯一索引打架)
+      n = db.get("SELECT seq FROM requirements WHERE requirement_id = ?1", target).seq;
+      expect(typeof n).toBe("number");
+    }
+    expect(await ids(`q=%23${n}`)).toEqual(["Space 网络策略 | 历史 receipt 误报"]);
+    const fullWidth = `＃${String(n).replace(/\d/g, d => String.fromCharCode(0xff10 + Number(d)))}`;
+    expect(await ids("q=" + encodeURIComponent(fullWidth))).toEqual(["Space 网络策略 | 历史 receipt 误报"]);
+    expect(await ids("q=" + encodeURIComponent(` #${n} `))).toEqual(["Space 网络策略 | 历史 receipt 误报"]);
+    // 「#N receipt」整句不是 ID,只按文字「且」:没有卡同时含「#N」和「receipt」
+    expect(await ids("q=" + encodeURIComponent(`#${n} receipt`))).toEqual([]);
+    // ID 命中也受筛选管
+    expect(await ids(`status=done&q=%23${n}`)).toEqual([]);
+  });
+});
+
 describe("paging: limit / cursor / has_more / next_cursor", () => {
   test("no params: legacy shape plus has_more=false, next_cursor=null, capabilities advertise search + paging", async () => {
     const r = await list("");
