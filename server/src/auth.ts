@@ -438,12 +438,15 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
   // Check if any sessions/tasks still reference this network
   const sessions = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1", networkId);
   if (sessions && sessions.cnt > 0) return { ok: false, error: `network has ${sessions.cnt} active session(s) — stop them first` };
-  db.run("DELETE FROM networks WHERE network_id = ?1 AND owner_id = ?2", [networkId, userId]);
-  // PR #519 codex catch: leaving membership rows behind made deleted
-  // networks count toward getUserNetworkIds — a stale row could flip a
-  // single-network user to "ambiguous" or auto-resolve writes INTO the
-  // deleted network. Remove memberships with the network.
-  db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
+  db.transaction(() => {
+    db.run("DELETE FROM networks WHERE network_id = ?1 AND owner_id = ?2", [networkId, userId]);
+    // PR #519 codex catch: leaving membership rows behind made deleted
+    // networks count toward getUserNetworkIds — a stale row could flip a
+    // single-network user to "ambiguous" or auto-resolve writes INTO the
+    // deleted network. Remove memberships with the network.
+    db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
+    deleteNetworkAgentGroups(networkId); // #2144
+  });
   return { ok: true };
 }
 
@@ -814,6 +817,8 @@ const NETWORK_CONTENT_CHECKS: Array<[label: string, sql: string]> = [
   ["network_secrets", "SELECT COUNT(*) AS cnt FROM network_secrets WHERE network_id = ?1"],
   ["skillhub_skills", "SELECT COUNT(*) AS cnt FROM skillhub_skills WHERE network_id = ?1"],
   ["side_chats", "SELECT COUNT(*) AS cnt FROM side_chats WHERE network_id = ?1"],
+  // #2144 —— 组是管理员手工建的配置,和 requirements 一样算内容:有组就拒,别替人删掉。
+  ["agent_groups", "SELECT COUNT(*) AS cnt FROM agent_groups WHERE network_id = ?1"],
   ["pending_node_create_requests", "SELECT COUNT(*) AS cnt FROM node_create_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
   ["pending_node_start_requests", "SELECT COUNT(*) AS cnt FROM node_start_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
 ];
@@ -864,7 +869,18 @@ export function adminDeleteEmptyNetwork(networkId: string, extraCounts: Record<s
       const changes = db.run(`DELETE FROM ${table} WHERE network_id = ?1`, [networkId]).changes;
       if (changes > 0) cleaned[table] = changes;
     }
+    for (const [table, changes] of Object.entries(deleteNetworkAgentGroups(networkId))) if (changes > 0) cleaned[table] = changes;
     db.run("DELETE FROM networks WHERE network_id = ?1", [networkId]);
     return { ok: true, owner_id: net.owner_id, network_name: net.network_name, cleaned };
   });
+}
+
+// #2144 —— Agent 分组(#2131)的三张表跟着网络一起删。agent_group_members 没有 network_id 列,
+// 只能按该网络的 group_id 删,所以必须在删 agent_groups 之前删它。owner 删网络与管理员删空网络共用。
+export function deleteNetworkAgentGroups(networkId: string): Record<string, number> {
+  return {
+    network_member_group_grants: db.run("DELETE FROM network_member_group_grants WHERE network_id = ?1", [networkId]).changes,
+    agent_group_members: db.run("DELETE FROM agent_group_members WHERE group_id IN (SELECT group_id FROM agent_groups WHERE network_id = ?1)", [networkId]).changes,
+    agent_groups: db.run("DELETE FROM agent_groups WHERE network_id = ?1", [networkId]).changes,
+  };
 }
