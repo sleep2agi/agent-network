@@ -103,10 +103,17 @@ Docker 里 `postgres:16-alpine` + `oven/bun:1.3.14` + `pg@8.16.3`,一次性容�
 | F3 | `rowid` 作为排序兜底 | 3 处(`tools.ts:3093`、`human-dm.ts:130`、`side-thread.ts:591`) | 换成主键或显式自增列 |
 | F4 | `PRAGMA` 走 `get()` 时适配器不拦 | `retention.ts:207/219–221` | retention 的 WAL/vacuum 段按方言分支,PG 上交给 autovacuum |
 | F5 | `strftime('%Y-%m-%d %H:%M:%f','now')` | 1 处(`human-dm.ts:78`) | 翻译器加一条 |
-| F6 | `LIKE` 大小写:SQLite 对 ASCII 不区分,PG 区分 | 18 处 | 逐条看是否依赖不区分;需要的译为 `ILIKE` |
+| F6 | `LIKE` 大小写:SQLite 对 ASCII 不区分,PG 区分 | **5 处 SQL**(原写 18 处是把注释里的英文 like 也数进去了,已更正) | 已逐处定,见下表 |
 | F7 | `INSERT OR IGNORE` / `INSERT OR REPLACE` | 3 + 1 处,**全在已有的 SQLite 分支里** | 无需改;加一道门防新增 |
 | F8 | `sqlite_master` | 6 处,**全在已有的 SQLite 分支里** | 同上 |
 | F9 | `AUTOINCREMENT` | 3 张表 | 已译为 `SERIAL`;改为 `BIGSERIAL`,迁移工具要 `setval` |
+
+**F6 逐处决定(2026-09-30):**
+
+| 位置 | 用途 | 决定 | 理由 |
+|---|---|---|---|
+| `tools.ts` `list_skills` 的 `query`(slug / name / description,3 个 `LIKE`) | 用户搜索 | PG 上用 `ILIKE` | 用户输入 "Incident" 要能搜到 "incident";SQLite 语义保留。`skillhub-http.test.ts` 新增大小写用例,PG 上去掉 `ILIKE` 即红 |
+| `restricted-files.ts` 三处 `meta_json LIKE … ESCAPE '\'`(user_inbox / tasks / inbox) | 受限成员能否看某个文件的**预筛** | 保持 `LIKE`(PG 上区分大小写) | 真正判定在 JS 里按 `file_id ===` 逐字比;预筛更严只会少拿到一定会被判否的行,结果不变,且不会让大小写变体挤占 `LIMIT 50` |
 
 ### 2.3 已经兼容、不用动
 
