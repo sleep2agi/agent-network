@@ -235,7 +235,11 @@ describe("requirement events", () => {
     const t = p1.body.server_time;
     await patch(admin.token, card.id, { priority: "high" });
     const after = await events(admin.token, `${q}&since=${encodeURIComponent(t)}`);
-    expect(after.body.events.map((e: any) => e.new)).toEqual(["high"]);
+    // since is inclusive (>=): an event written in the same millisecond as server_time comes back again,
+    // and clients dedupe by id. Only the events not already seen must be exactly the new one.
+    expect(after.body.events.every((e: any) => Date.parse(e.at) >= Date.parse(t))).toBe(true);
+    const seen = new Set(ids);
+    expect(after.body.events.filter((e: any) => !seen.has(e.id)).map((e: any) => e.new)).toEqual(["high"]);
     for (const bad of ["&limit=0", "&limit=501", "&limit=x", "&since=nope", "&cursor=abc", "&cursor=0"]) {
       expect((await events(admin.token, bad)).status).toBe(400);
     }
