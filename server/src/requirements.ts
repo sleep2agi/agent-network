@@ -1157,8 +1157,10 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (!networkId) return jsonError('network_id_required', 400);
     // name = 显示用的名字(没设 display_name 时回落到用户名 / alias,旧 app 只读它);display_name 单独给出、没设为 ""
     // —— 分享图等对外场景据此判断「只有用户名」,不把 admin 之类的账号名印出去。
+    // 成员的 display_name 等于用户名也算「没设」:register() 在没给显示名时存的就是 username(auth.ts),
+    // 否则没设过显示名的账号(比如 admin)照样把账号名当显示名送出去。
     const users = db.all<{ id: string; name: string; display_name: string }>(
-      "SELECT u.user_id AS id, COALESCE(NULLIF(u.display_name,''), u.username) AS name, COALESCE(u.display_name,'') AS display_name FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 ORDER BY name, id", networkId,
+      "SELECT u.user_id AS id, COALESCE(NULLIF(u.display_name,''), u.username) AS name, CASE WHEN u.display_name IS NULL OR u.display_name = '' OR u.display_name = u.username THEN '' ELSE u.display_name END AS display_name FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 ORDER BY name, id", networkId,
     );
     const hidden = hiddenNodeFilter(ctx, networkId);
     const nodes = db.all<{ id: string; name: string; display_name: string }>(
