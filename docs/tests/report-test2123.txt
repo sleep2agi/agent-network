@@ -128,3 +128,13 @@ RFC-039 F3/F5 (branch fix/pg-f3f5, after S4)
     — bun:sqlite treats a lone array as the parameter list, PgAdapter sent
     it as one array-typed parameter. PgAdapter.get/all now do the same as
     bun:sqlite; contract.ts checks it; removing the fix → RESULT: FAIL.
+
+---
+RFC-039 F6 (branch fix/pg-f6-like, after F3/F5)
+
+19. adds src/skillhub-http.test.ts to the PostgreSQL features stage, with a
+    new case-insensitive list_skills query test.
+    this PR: all 5 feature files rc=0; ladder level=5 floor=5
+    tools.ts without the PG ILIKE (bind-mounted): the new test FAILS on PG
+    restricted-files LIKE kept as-is (prefilter; JS does the exact match) —
+    covered on PG by agent-acl-slice3's "cannot smuggle a file" DM test.

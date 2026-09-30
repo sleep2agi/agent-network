@@ -84,6 +84,14 @@ describe("SkillHub real Hub + SQLite", () => {
     expect(detail.created_by_user).toBeUndefined(); expect(detail.reviewed_by_user).toBeUndefined(); expect(detail.content_hash).toBeUndefined();
   });
 
+  test("query matches regardless of letter case (SQLite LIKE semantics, kept on PostgreSQL)", async () => {
+    for (const query of ["incident", "INCIDENT", "Handoff"]) {
+      const found = await tool(nodeToken, "list_skills", { network_id: networkId, query });
+      expect(found.skills.map((x: any) => x.skill_id)).toContain(skillId);
+    }
+    expect((await tool(nodeToken, "list_skills", { network_id: networkId, query: "no-such-skill" })).skills).toHaveLength(0);
+  });
+
   test("foreign user cannot read or review another network", async () => {
     expect((await tool(foreignToken, "list_skills", { network_id: networkId })).ok).toBe(false);
     const review = await tool(foreignToken, "review_skill", { network_id: networkId, skill_id: skillId, decision: "rejected" });
