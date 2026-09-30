@@ -95,3 +95,22 @@ RFC-039 S3 (branch fix/pg-s3)
 15. witnessed red: db.ts CAST reverted (bind-mounted)
     FAIL L5 send_reply: could not determine data type of parameter $2
     PG_LADDER level=4 floor=5 → RESULT: FAIL                         rc=1
+
+---
+RFC-039 S4 part 1 (branch fix/pg-s4-tests)
+
+16. existing test files run unmodified-in-intent on PostgreSQL via
+    COMMHUB_TEST_PG_URL (role anet_tester, scram password, 127.0.0.1,
+    anet_*_test databases) with COMMHUB_PG_EXPERIMENTAL=1:
+    src/scheduled-tasks-http.test.ts        15 pass 0 fail  (incl. two real
+        processes claiming one occurrence, and dispatch rollback)
+    src/side-thread-command-transport.test.ts  27 pass 0 fail
+    src/task-consumption.test.ts (runtime evidence)  17 pass 0 fail
+    first run found 3 PG-only defects in the fixtures/product:
+      - side_chat_operations ORDER BY rowid → fixed (PG rowid column)
+      - test used PRAGMA table_info / a SQLite trigger for fault injection →
+        dialect-branched in the test (SQLite branch byte-identical)
+    PG_LADDER level=5 floor=5 COMMHUB_PG_EXPERIMENTAL=1                  rc=0
+
+17. test637 L3: host check and anet_*_test check each removed by sed →
+    MUTATION_RED (the mutated copy ACCEPTs the foreign host / prod name)

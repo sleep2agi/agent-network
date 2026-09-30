@@ -201,7 +201,7 @@ Docker 里 `postgres:16-alpine` + `oven/bun:1.3.14` + `pg@8.16.3`,一次性容�
 `assertSafeTestDatabaseEnv()` 规定「`NODE_ENV=test` 下继承的 `DATABASE_URL` 一律拒绝、没有旁路」,这条要保留。PG 套件因此**不走 `bun test` + `DATABASE_URL`**,而是:
 
 - 套件在自己的 Docker compose 网络里起 `postgres` 服务,Hub 作为**普通进程**(非 `NODE_ENV=test`)启动,URL 在 `run.sh` 里构造、指向 compose 服务名;
-- 适配器契约测试需要在 `bun test` 里连库时,另立一个**不同名**的变量(例如 `COMMHUB_TEST_PG_URL`),只接受指向本机或 compose 服务名、库名以 `_test` 结尾的 URL。**这是对守卫的扩展,需要 owner 单独批准**,在批准前只做第一种。
+- 需要在 `bun test` 里连库时,用**不同名**的变量 `COMMHUB_TEST_PG_URL`(已定,见 §9 第 2 条)。
 
 ### 6.3 静态门
 
@@ -230,5 +230,12 @@ S1 完成后,troubleshooting 的「支持 PostgreSQL 吗?」一节可以加一�
 ## 9. 待定
 
 1. 时间列存文本(§4.1)是否接受?(推荐:接受)
-2. §6.2 为 `bun test` 连库新增变量,是否批准?(推荐:S2 时再定,S1 不需要)
+2. **§6.2 测试专用变量 —— 已定:2026-09-30 由通信龙决定;仅测试用;owner 可否决。** 规则:
+   - 名字就是 `COMMHUB_TEST_PG_URL`,只在 `NODE_ENV=test` 下生效(别的环境里忽略);
+   - host 只能字面是 `127.0.0.1`、`localhost` 或 `::1`(不解析 DNS);库名必须匹配 `/^anet_[a-z0-9_]*_test$/`;查询参数只允许 `connect_timeout`/`sslmode`/`application_name`(挡住 `host=`、`options=` 这类改道);
+   - 不假设无密码超级用户:test2123 里 TCP 走 scram 密码认证,测试和 Hub 都用普通角色连;
+   - 报错信息里连接串一律脱敏(去掉用户名和密码);
+   - 继承的 `DATABASE_URL` 照旧拒绝,**即使同时设了 `COMMHUB_TEST_PG_URL`**(有专门的测试);
+   - 每个拒绝分支有单元测试;test637 L3 证明删掉 host 检查或库名检查都会变红。
+   用它,test2123 在 PG 上原样跑定时任务、side-thread 外发、运行证据三个现有测试文件(`COMMHUB_PG_EXPERIMENTAL=1` 下)。
 3. 目标 PG 版本下限:建议 14+(`BIGSERIAL`、`to_char` 都不挑版本;下限只为 CI 固定一个版本)。

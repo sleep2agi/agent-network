@@ -1,12 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { SQLiteAdapter } from "./db-adapter";
+import { PgAdapter, SQLiteAdapter, resolveDatabaseTarget, type DbAdapter } from "./db-adapter";
 import { DurableSideThreadCommandPort, SideThreadCommandStore, handleSideThreadCommandRequest } from "./side-thread-command-transport";
 import { SideThreadCoordinator, SideThreadStore } from "./side-thread";
 
 function actor(tokenId = "tok-node") { return { tokenId, networkId: "net-1", nodeId: "node-1" }; }
+// RFC-039 S4: with COMMHUB_TEST_PG_URL (validated by the adapter guard) the
+// same tests run on PostgreSQL, each fixture on an emptied schema.
+function freshDb(): DbAdapter {
+  if (!process.env.COMMHUB_TEST_PG_URL) return new SQLiteAdapter(new Database(":memory:"));
+  const target = resolveDatabaseTarget();
+  if (target.kind !== "postgres") throw new Error("COMMHUB_TEST_PG_URL did not select PostgreSQL");
+  const pg = new PgAdapter(target.url);
+  pg.exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public");
+  return pg;
+}
 function fixture() {
-  const db = new SQLiteAdapter(new Database(":memory:"));
+  const db = freshDb();
   db.exec("CREATE TABLE inbox(id TEXT PRIMARY KEY, content TEXT)");
   const store = new SideThreadCommandStore(db, () => 123);
   const port = new DurableSideThreadCommandPort({ store, networkForNode: (id) => id === "node-1" ? "net-1" : null,

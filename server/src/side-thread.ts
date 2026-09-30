@@ -450,6 +450,10 @@ export function installSideThreadSchema(database: DbAdapter): void {
     if (!/duplicate column|already exists/i.test(error?.message ?? ""))
       throw error;
   }
+  // RFC-039 F3: operations are listed in insertion order via SQLite's
+  // implicit rowid; PostgreSQL needs a real column for that.
+  if (database.dialect === "postgres")
+    database.exec("ALTER TABLE side_chat_operations ADD COLUMN IF NOT EXISTS rowid BIGSERIAL");
 }
 
 type SideChatRow = {

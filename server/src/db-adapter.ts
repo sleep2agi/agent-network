@@ -376,7 +376,54 @@ export function assertSafeTestDatabaseEnv(env: NodeJS.ProcessEnv = process.env):
  * explicit COMMHUB_DB (or a reviewed PostgreSQL DATABASE_URL), so forgetting
  * one fails before mkdir/open/write instead of touching the live Hub.
  */
+/**
+ * RFC-039 §9 — the one reviewed way a `bun test` process may use PostgreSQL.
+ *
+ * The inherited-DATABASE_URL guard stays absolute. A test that means to run
+ * on PostgreSQL names a *different* variable, COMMHUB_TEST_PG_URL, which is
+ * honoured only under NODE_ENV=test and only for a literal loopback host and
+ * a database called `anet_…_test`, so it cannot reach a real Hub database by
+ * accident. Error messages never carry credentials.
+ */
+export const TEST_PG_URL_ENV = "COMMHUB_TEST_PG_URL";
+const TEST_PG_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const TEST_PG_DB_RE = /^anet_[a-z0-9_]*_test$/;
+const TEST_PG_QUERY_KEYS = new Set(["connect_timeout", "sslmode", "application_name"]);
+
+/** A PostgreSQL URL with user and password replaced, safe to print. */
+export function redactPgUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (u.username || u.password) { u.username = "***"; u.password = ""; }
+    return u.toString();
+  } catch {
+    return "<unparseable URL>";
+  }
+}
+
+export function validateTestPgUrl(raw: string): string {
+  const refuse = (why: string) => new Error(
+    `[commhub] REFUSING ${TEST_PG_URL_ENV}=${redactPgUrl(raw)}: ${why}.\n` +
+    "  It is test-only: postgres(ql)://<user>:<password>@127.0.0.1|localhost|[::1][:port]/anet_<name>_test",
+  );
+  let u: URL;
+  try { u = new URL(raw); } catch { throw refuse("not a URL"); }
+  if (u.protocol !== "postgres:" && u.protocol !== "postgresql:") throw refuse("scheme must be postgres:// or postgresql://");
+  if (!TEST_PG_HOSTS.has(u.hostname)) throw refuse("host must be literally 127.0.0.1, localhost or ::1");
+  const dbName = decodeURIComponent(u.pathname.replace(/^\//, ""));
+  if (!TEST_PG_DB_RE.test(dbName)) throw refuse("database name must match /^anet_[a-z0-9_]*_test$/");
+  for (const key of u.searchParams.keys()) {
+    if (!TEST_PG_QUERY_KEYS.has(key)) throw refuse(`query parameter "${key}" is not allowed`);
+  }
+  return raw;
+}
+
 function resolveDatabaseTargetAfterGuard(env: NodeJS.ProcessEnv): DbTarget {
+  const testPgUrl = env[TEST_PG_URL_ENV];
+  if (env.NODE_ENV === "test" && testPgUrl) {
+    return { kind: "postgres", url: validateTestPgUrl(testPgUrl) };
+  }
+
   const dbUrl = env.DATABASE_URL;
   if (dbUrl && (dbUrl.startsWith("postgres://") || dbUrl.startsWith("postgresql://"))) {
     return { kind: "postgres", url: dbUrl };

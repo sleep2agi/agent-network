@@ -65,32 +65,41 @@ trap cleanup EXIT
 
 PG_BIN="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)"
 echo "[pg] $("$PG_BIN/postgres" --version)"
-runuser -u postgres -- "$PG_BIN/initdb" -D "$PGDATA" -U postgres --auth=trust >/dev/null
+# TCP connections need a password (scram); only the admin socket is trusted.
+# The Hub and the tests connect as ordinary roles over TCP — no password-less
+# superuser anywhere in what the product sees.
+runuser -u postgres -- "$PG_BIN/initdb" -D "$PGDATA" -U postgres --auth-local=trust --auth-host=scram-sha-256 >/dev/null
 runuser -u postgres -- "$PG_BIN/pg_ctl" -D "$PGDATA" -l "$PGSOCK/pg.log" -w \
   -o "-p $PG_PORT -k $PGSOCK -c listen_addresses=127.0.0.1" start >/dev/null
-runuser -u postgres -- "$PG_BIN/createdb" -h 127.0.0.1 -p "$PG_PORT" -U postgres commhub
+psql_admin() { runuser -u postgres -- "$PG_BIN/psql" -h "$PGSOCK" -p "$PG_PORT" -U postgres -v ON_ERROR_STOP=1 -q "$@"; }
+LADDER_PW="ladder-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
+TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
+psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
+  -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
+for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
 # the Hub answers a query. Without this a dead Postgres would read as "Hub
 # can't reach L0" — a harness failure dressed up as a product finding.
-runuser -u postgres -- "$PG_BIN/psql" -h 127.0.0.1 -p "$PG_PORT" -U postgres -d commhub -Atc 'select 1' | grep -qx 1
+PGPASSWORD="$LADDER_PW" runuser -u postgres --preserve-environment -- "$PG_BIN/psql" -h 127.0.0.1 -p "$PG_PORT" -U anet_ladder -d commhub -Atc 'select 1' | grep -qx 1
 echo "[pg] ready on 127.0.0.1:$PG_PORT"
 
 # PgAdapter contract (RFC-039 S2b): real transactions, savepoints, types.
 # Not a ratchet — any failure here is red regardless of FLOOR.
 contract_rc=0
 (cd /work/server && env -u NODE_ENV -u COMMHUB_DB \
-  bun "$SUITE_DIR/contract.ts" "postgres://postgres@127.0.0.1:$PG_PORT/commhub" /work/server/src/db-adapter.ts) || contract_rc=$?
+  bun "$SUITE_DIR/contract.ts" "$LADDER_URL_BASE/commhub" /work/server/src/db-adapter.ts) || contract_rc=$?
 
 # Default-closed gate (RFC-039): without COMMHUB_PG_EXPERIMENTAL=1 a PG Hub
 # must refuse to start its scheduler, and say which variable opens it. Own
 # database so the ladder below starts from an empty one. Pass/fail, not ratcheted.
-runuser -u postgres -- "$PG_BIN/createdb" -h 127.0.0.1 -p "$PG_PORT" -U postgres commhub_noflag
 gate_rc=0
 cd /work/server
 set +e
 env -u NODE_ENV -u COMMHUB_DB -u COMMHUB_PG_EXPERIMENTAL \
-  DATABASE_URL="postgres://postgres@127.0.0.1:$PG_PORT/commhub_noflag" \
+  DATABASE_URL="$LADDER_URL_BASE/commhub_noflag" \
   PORT="$HUB_PORT" HOST=127.0.0.1 \
   timeout 120 bun src/index.ts >"$WORK/hub-noflag.log" 2>&1
 noflag_rc=$?
@@ -110,7 +119,7 @@ fi
 PG_EXPERIMENTAL=1
 env -u NODE_ENV -u COMMHUB_DB \
   COMMHUB_PG_EXPERIMENTAL="$PG_EXPERIMENTAL" \
-  DATABASE_URL="postgres://postgres@127.0.0.1:$PG_PORT/commhub" \
+  DATABASE_URL="$LADDER_URL_BASE/commhub" \
   PORT="$HUB_PORT" HOST=127.0.0.1 \
   bun src/index.ts >"$WORK/hub.log" 2>&1 &
 HUB_PID=$!
@@ -150,6 +159,27 @@ else
   echo "$FIRST_FAIL"
 fi
 
+# RFC-039 S4: the existing scheduler, side-thread outbox and runtime-evidence
+# (task-consumption) test files, run
+# unmodified on PostgreSQL through the test-only COMMHUB_TEST_PG_URL (loopback,
+# anet_*_test database, password role) with the experimental opt-in.
+# Pass/fail, not ratcheted.
+features_rc=0
+# `| tail` would hide bun's exit code; collect it explicitly instead.
+run_pg_tests_rc() {
+  local db=$1 file=$2 out rc=0
+  out="$(cd /work/server && env -u DATABASE_URL -u COMMHUB_DB \
+    COMMHUB_TEST_PG_URL="postgres://anet_tester:$TEST_PW@127.0.0.1:$PG_PORT/$db" \
+    COMMHUB_PG_EXPERIMENTAL=1 \
+    bun test "$file" 2>&1)" || rc=$?
+  printf '%s\n' "$out" | grep -E '^\((pass|fail)\)|^ *[0-9]+ (pass|fail)$|^error:' || true
+  echo "[features] $file rc=$rc"
+  [ "$rc" -eq 0 ] || features_rc=1
+}
+run_pg_tests_rc anet_sched_test src/scheduled-tasks-http.test.ts
+run_pg_tests_rc anet_side_thread_test src/side-thread-command-transport.test.ts
+run_pg_tests_rc anet_evidence_test src/task-consumption.test.ts
+
 echo "--- hub.log (tail) ---"
 tail -n 25 "$WORK/hub.log" || true
 echo "----------------------"
@@ -159,6 +189,10 @@ echo "NOTE: rungs L2+ were reached with COMMHUB_PG_EXPERIMENTAL=$PG_EXPERIMENTAL
 
 if [ "$gate_rc" -ne 0 ]; then
   echo "RESULT: FAIL — PostgreSQL feature gate is not closed by default."
+  exit 1
+fi
+if [ "$features_rc" -ne 0 ]; then
+  echo "RESULT: FAIL — gated-feature tests failed on PostgreSQL."
   exit 1
 fi
 if [ "$contract_rc" -ne 0 ]; then
