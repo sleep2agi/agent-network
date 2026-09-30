@@ -88,6 +88,40 @@ function normalizeMetaJson(meta: unknown): string | null {
   try { return JSON.stringify(stripHostLocalPathsForCrossHostSafe(meta)); } catch { return null; }
 }
 
+/**
+ * 定时任务的回复收件人。scheduler 派的任务 from_name='scheduler',回复按 from_name 落进
+ * inbox(session_name='scheduler')—— 没有任何人读那一行,于是建排程的人在 app 里看得到回复
+ * (会话取自 tasks 表)却永远没有未读红点(unread_by_agent 只数 session_name=用户名 的行)。
+ * 排程是「建它的人」的委托(见 scheduled-tasks.ts canMessageAgent),回复送到他的用户名下。
+ *
+ * 退回 null(= 照旧送 'scheduler')的情形:任务不是 scheduler 派的 / meta 没有排程 id /
+ * 排程没有 created_by(外部或旧排程)/ 用户已不存在 / 用户名与本网络某个节点 alias 撞名
+ * (那一行会变成那个节点的待办,不是用户的未读 —— 与 server.ts userInboxAliasCollides 同一条规则)。
+ * 只改投递地址;任务归属、reply_target_mismatch 等校验仍按原始发送方 'scheduler' 判。
+ */
+function scheduledReplyRecipient(taskId: string, networkId: string | null | undefined): string | null {
+  const params: any[] = [taskId];
+  let sql = "SELECT from_name, meta_json, network_id FROM tasks WHERE task_id = ?1";
+  if (networkId) { params.push(networkId); sql += " AND network_id = ?2"; }
+  const task = db.get<{ from_name: string; meta_json: string | null; network_id: string | null }>(sql, ...params);
+  if (!task || task.from_name !== "scheduler") return null;
+  const meta = parseMetaJson(task.meta_json) as { scheduled_task_id?: unknown } | null;
+  const scheduleId = meta && typeof meta.scheduled_task_id === "string" ? meta.scheduled_task_id : "";
+  if (!scheduleId) return null;
+  const owner = db.get<{ username: string | null }>(
+    `SELECT u.username AS username FROM scheduled_tasks s JOIN users u ON u.user_id = s.created_by
+     WHERE s.schedule_id = ?1 AND s.network_id = ?2`,
+    scheduleId, task.network_id,
+  );
+  const username = owner?.username?.trim();
+  if (!username) return null;
+  const collides = db.get<{ hit: number }>(
+    "SELECT 1 AS hit FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1",
+    username, task.network_id,
+  );
+  return collides ? null : username;
+}
+
 // ── #1281 — 子节点生命周期工具的参数名统一 ────────────────────────────
 //
 // stop_node / start_node / delete_node 历史上用 `child_node_id`（RFC-027），
@@ -1975,12 +2009,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const canonicalReplyTarget = resolveCanonicalAlias(effectiveNetId, effectiveAlias);
       const replyTargetAlias = canonicalReplyTarget.alias;
-      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${replyTargetAlias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}${canonicalReplyTarget.renamed ? ` [renamed from ${effectiveAlias}]` : ""}`);
+      // 回复定时任务:收件人换成建排程的用户(见 scheduledReplyRecipient)。replyTargetAlias 仍是
+      // 'scheduler',下面的归属/目标校验照旧对它判;只有 inbox 行与推送走 replyDeliveryAlias。
+      const scheduledRecipient = in_reply_to && replyTargetAlias === "scheduler"
+        ? scheduledReplyRecipient(in_reply_to, effectiveNetId)
+        : null;
+      const replyDeliveryAlias = scheduledRecipient ?? replyTargetAlias;
+      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${replyDeliveryAlias}: ${text.slice(0, 60)}${attachmentsResult.attachments.length ? ` [+${attachmentsResult.attachments.length} attachments]` : ""}${canonicalReplyTarget.renamed ? ` [renamed from ${effectiveAlias}]` : ""}${scheduledRecipient ? " [scheduled task → creator]" : ""}`);
       const id = uuidv4();
-      const replyTargetNodeId = resolveNodeIdForAlias(replyTargetAlias, effectiveNetId);
+      const replyTargetNodeId = resolveNodeIdForAlias(replyDeliveryAlias, effectiveNetId);
       // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 3/6).
       {
-        const lc = assertNodeActive(replyTargetAlias, effectiveNetId ?? null);
+        const lc = assertNodeActive(replyDeliveryAlias, effectiveNetId ?? null);
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       const replyOutcome = db.transaction(() => {
@@ -2073,7 +2113,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         db.run(
           `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id, meta_json)
            VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7, ?8)`,
-          [id, replyTargetAlias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null, metaJson]
+          [id, replyDeliveryAlias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null, metaJson]
         );
 
         // 更新 tasks 表
@@ -2192,10 +2232,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
       }
 
-      const session = scopedSessionStatus(replyTargetAlias, effectiveNetId);
-      pushEvent(replyTargetAlias, { type: "new_reply", inbox_count: pendingInboxCount(replyTargetAlias, effectiveNetId), from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
+      const session = scopedSessionStatus(replyDeliveryAlias, effectiveNetId);
+      pushEvent(replyDeliveryAlias, { type: "new_reply", inbox_count: pendingInboxCount(replyDeliveryAlias, effectiveNetId), from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
       // #461 network observer summary — ids + routing only, no reply text.
-      pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: replyTargetAlias, status: replyStatus });
+      pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to ?? null, message_id: id, from: from_session, to: replyDeliveryAlias, status: replyStatus });
 
       // #498 compatibility tripwire. Legacy send_reply is intentionally kept
       // for old agents and Dashboard callers during rollout, but it is not the
