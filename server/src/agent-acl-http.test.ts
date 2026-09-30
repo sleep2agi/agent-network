@@ -255,7 +255,7 @@ describe("humans: restricted members can still see and DM other humans", () => {
     const r = await get(aliceToken, `/api/networks/${NET}/humans`);
     expect(r.status).toBe(200);
     expect(r.body.humans.map((h: any) => h.user_id).sort()).toEqual([adminId, aliceId, bobId].sort());
-    expect(Object.keys(r.body.humans[0]).sort()).toEqual(["display_name", "user_id", "username"]);
+    expect(Object.keys(r.body.humans[0]).sort()).toEqual(["display_name", "last_seen_at", "online", "user_id", "username"]);
     // 非成员拿不到。
     const outsider = register(`acl_out_${Date.now()}`, PW);
     expect((await get(outsider.token!, `/api/networks/${NET}/humans`)).status).toBe(403);

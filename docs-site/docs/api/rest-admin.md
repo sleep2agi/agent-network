@@ -464,6 +464,10 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 
 任何成员(含受限成员)都能调:网络里的人类成员通讯录,只有 `user_id` / `username` / `display_name`。给受限成员选私信对象用(私信走 MCP `send_desktop_message`)。
 
+用户令牌另得每人的在线状态:`online`(此刻有没有活着的 `/events/users/me` 用户流,按人算、不分网络)和 `last_seen_at`(ISO,连上 / 心跳 / 断开时刷新;只在 Hub 内存里,Hub 重启后未再连过的人为 `null`,表示未知)。节点令牌拿到的仍只有上面三个身份字段。
+
+某人第一条用户流连上、最后一条断开时,Hub 向他所在每个网络里其他连着用户流的成员推 `{"type":"member_presence","member_user_id","online","last_seen_at"}`(事件里的 `user_id` 是收件人自己)。旧客户端忽略未知事件类型。
+
 ### POST /api/dm · GET /api/dm · GET /api/dm/threads {#human-dm}
 
 人与人私信(同一网络里的两个用户;受限成员也可以),只接受用户令牌。
