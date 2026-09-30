@@ -357,9 +357,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                    FROM skillhub_skills WHERE network_id = ?1`;
       if (!showPending) sql += ` AND status = 'published'`;
       if (query?.trim()) {
-        params.push(`%${query.trim()}%`);
+        params.push(`%${query.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`); // #2141: the query is text, not a pattern
         const like = db.dialect === "postgres" ? "ILIKE" : "LIKE"; // RFC-039 F6: SQLite LIKE ignores ASCII case; keep that on PG
-        sql += ` AND (slug ${like} ?${params.length} OR name ${like} ?${params.length} OR description ${like} ?${params.length})`;
+        sql += ` AND (slug ${like} ?${params.length} ESCAPE '\\' OR name ${like} ?${params.length} ESCAPE '\\' OR description ${like} ?${params.length} ESCAPE '\\')`;
       }
       sql += ` ORDER BY updated_at DESC LIMIT ${limit ?? 100}`;
       return skillHubReply({ ok: true, reviewer, skills: db.all(sql, ...params) });

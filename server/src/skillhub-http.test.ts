@@ -92,6 +92,14 @@ describe("SkillHub real Hub + SQLite", () => {
     expect((await tool(nodeToken, "list_skills", { network_id: networkId, query: "no-such-skill" })).skills).toHaveLength(0);
   });
 
+  test("% and _ in the query are literal characters, not wildcards (#2141)", async () => {
+    const ids = async (query: string) => (await tool(nodeToken, "list_skills", { network_id: networkId, query })).skills.map((x: any) => x.skill_id);
+    expect(await ids("_")).not.toContain(skillId);       // was: matched everything
+    expect(await ids("%")).not.toContain(skillId);
+    expect(await ids("incident_handoff")).not.toContain(skillId); // `_` must not stand for the "-" in the slug
+    expect(await ids("incident-handoff")).toContain(skillId);
+  });
+
   test("foreign user cannot read or review another network", async () => {
     expect((await tool(foreignToken, "list_skills", { network_id: networkId })).ok).toBe(false);
     const review = await tool(foreignToken, "review_skill", { network_id: networkId, skill_id: skillId, decision: "rejected" });
