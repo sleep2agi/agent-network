@@ -2073,3 +2073,9 @@ export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus
     );
   } catch {}
 }
+
+// RFC-039 F3: queries break created_at ties with SQLite's implicit rowid
+// (insertion order). PostgreSQL has none, so give these tables a real one.
+if (db.dialect === "postgres") {
+  for (const table of ["nodes", "user_inbox"]) db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS rowid BIGSERIAL`);
+}

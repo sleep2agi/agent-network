@@ -15,6 +15,12 @@ describe("RFC-039 S2a sqliteToPostgres", () => {
     expect(out).not.toContain("TIMESTAMP");
   });
 
+  test("strftime with milliseconds keeps SQLite's %f shape", () => {
+    expect(sqliteToPostgres("VALUES (strftime('%Y-%m-%d %H:%M:%f', 'now'))")).toBe(
+      "VALUES (to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS'))",
+    );
+  });
+
   test("literal offset", () => {
     expect(sqliteToPostgres("x < datetime('now', '+14 days')")).toBe(
       "x < to_char((NOW() + INTERVAL '14 days') AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')",

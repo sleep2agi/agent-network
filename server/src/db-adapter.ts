@@ -125,6 +125,9 @@ export function sqliteToPostgres(sql: string): string {
   });
   // datetime('now') → UTC text of NOW()
   s = s.replace(/datetime\s*\(\s*'now'\s*\)/gi, pgUtcText("NOW()"));
+  // strftime('%Y-%m-%d %H:%M:%f', 'now') → the same text with milliseconds
+  s = s.replace(/strftime\s*\(\s*'%Y-%m-%d %H:%M:%f'\s*,\s*'now'\s*\)/gi,
+    "to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS')");
   // ── Parameter placeholders ──
   // ?1, ?2 → $1, $2  (positional params)
   s = s.replace(/\?(\d+)/g, (_, n) => `$${n}`);
@@ -281,13 +284,19 @@ export class PgAdapter implements DbAdapter {
     return { changes: result.count };
   }
 
+  /** bun:sqlite also accepts get(sql, [a, b]); a lone array argument is the parameter list. */
+  private static bindArgs(params: any[]): any[] | undefined {
+    if (params.length === 1 && Array.isArray(params[0])) return params[0];
+    return params.length > 0 ? params : undefined;
+  }
+
   get<T = any>(sql: string, ...params: any[]): T | null {
-    const result = this.querySync(sql, params.length > 0 ? params : undefined);
+    const result = this.querySync(sql, PgAdapter.bindArgs(params));
     return (result.rows?.[0] as T) ?? null;
   }
 
   all<T = any>(sql: string, ...params: any[]): T[] {
-    const result = this.querySync(sql, params.length > 0 ? params : undefined);
+    const result = this.querySync(sql, PgAdapter.bindArgs(params));
     return (result.rows as T[]) ?? [];
   }
 

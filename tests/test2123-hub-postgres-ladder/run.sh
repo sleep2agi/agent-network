@@ -77,7 +77,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -160,7 +160,8 @@ else
 fi
 
 # RFC-039 S4: the existing scheduler, side-thread outbox and runtime-evidence
-# (task-consumption) test files, run
+# (task-consumption) test files, plus agent-acl-slice3 (human DMs, node
+# lookups by alias — RFC-039 F3/F5), run
 # unmodified on PostgreSQL through the test-only COMMHUB_TEST_PG_URL (loopback,
 # anet_*_test database, password role) with the experimental opt-in.
 # Pass/fail, not ratcheted.
@@ -179,6 +180,7 @@ run_pg_tests_rc() {
 run_pg_tests_rc anet_sched_test src/scheduled-tasks-http.test.ts
 run_pg_tests_rc anet_side_thread_test src/side-thread-command-transport.test.ts
 run_pg_tests_rc anet_evidence_test src/task-consumption.test.ts
+run_pg_tests_rc anet_acl_dm_test src/agent-acl-slice3-http.test.ts
 
 echo "--- hub.log (tail) ---"
 tail -n 25 "$WORK/hub.log" || true
