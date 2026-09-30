@@ -12,11 +12,56 @@
 
 const args = process.argv.slice(2);
 
+// RFC-039 S5 — offline SQLite → PostgreSQL copy. Handled before any server
+// option parsing: it never starts a Hub and never opens the default database.
+if (args[0] === "migrate-to-pg") {
+  const flag = (name: string) => args.includes(name);
+  const value = (name: string) => { const i = args.indexOf(name); return i > 0 ? args[i + 1] : undefined; };
+  const MIGRATE_VALUE_FLAGS = new Set(["--from", "--to"]);
+  const MIGRATE_FLAGS = new Set(["--dry-run", "--i-know-this-is-a-copy", "--help", "-h"]);
+  for (let i = 1; i < args.length; i++) {
+    if (MIGRATE_VALUE_FLAGS.has(args[i])) { i++; continue; }
+    if (!MIGRATE_FLAGS.has(args[i])) {
+      console.error(`commhub-server migrate-to-pg: unknown argument ${args[i]}\nRun "commhub-server migrate-to-pg --help" for usage.`);
+      process.exit(2);
+    }
+  }
+  if (flag("--help") || flag("-h") || !value("--from") || !value("--to")) {
+    console.log(`
+Usage:
+  commhub-server migrate-to-pg --from <sqlite file> --to <postgres url> [--dry-run] [--i-know-this-is-a-copy]
+
+Copies a stopped Hub's SQLite database into an EMPTY PostgreSQL database, in one
+transaction, verifying per-table row counts and content hashes before COMMIT.
+Experimental (RFC-039); available from commhub-server 0.9.0-preview.73.
+Files under the uploads directory are not copied.
+
+  --dry-run                 do everything, then roll back and leave the target empty
+  --i-know-this-is-a-copy   allow a source under ~/.commhub (refused by default)
+`);
+    process.exit(flag("--help") || flag("-h") ? 0 : 2);
+  }
+  const { migrateSqliteToPg, MigrateRefused } = await import("../src/migrate-sqlite-to-pg.ts");
+  try {
+    await migrateSqliteToPg({
+      from: value("--from")!,
+      to: value("--to")!,
+      dryRun: flag("--dry-run"),
+      allowCommhubCopy: flag("--i-know-this-is-a-copy"),
+    });
+    process.exit(0);
+  } catch (error) {
+    console.error(error instanceof MigrateRefused ? error.message : `[migrate-to-pg] FAILED, rolled back: ${(error as Error)?.message ?? error}`);
+    process.exit(error instanceof MigrateRefused ? 2 : 1);
+  }
+}
+
 const HELP = `
 CommHub MCP Server — AI Agent 通信中枢
 
 Usage:
   commhub-server [options]
+  commhub-server migrate-to-pg --help    Copy a stopped Hub's SQLite database into PostgreSQL (experimental)
 
 Options:
   --port, -p <port>       Port to listen on (default: 9200, env: PORT)

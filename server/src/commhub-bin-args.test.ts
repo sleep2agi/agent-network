@@ -29,7 +29,6 @@ async function listening(port: string): Promise<boolean> {
 describe("commhub-server argument handling", () => {
   for (const [args, message] of [
     [["bogus"], "unknown command bogus"],
-    [["migrate-to-pg", "--from", "/x.db"], "unknown command migrate-to-pg"],
     [["--port=29999"], "unknown option --port=29999"],
     [["--bogus-flag"], "unknown option --bogus-flag"],
     [["--port"], "--port needs a value"],
@@ -44,6 +43,17 @@ describe("commhub-server argument handling", () => {
       expect(await listening(PORT)).toBe(false);
     });
   }
+
+  test("migrate-to-pg with missing or unknown arguments exits 2 and starts nothing", async () => {
+    const missing = run(["migrate-to-pg", "--from", "/x.db"]);
+    expect(missing.code).toBe(2);
+    expect(missing.stdout).toContain("commhub-server migrate-to-pg --from <sqlite file> --to <postgres url>");
+    const unknown = run(["migrate-to-pg", "--from", "/x.db", "--to", "postgres://u@127.0.0.1/anet_x_test", "--bogus"]);
+    expect(unknown.code).toBe(2);
+    expect(unknown.stderr).toContain("unknown argument --bogus");
+    expect(existsSync(join(home, ".commhub"))).toBe(false);
+    expect(await listening(PORT)).toBe(false);
+  });
 
   test("--help and --version exit 0 without starting", async () => {
     const help = run(["--help"]);

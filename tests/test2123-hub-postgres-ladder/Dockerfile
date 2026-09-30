@@ -11,6 +11,7 @@ WORKDIR /work/server
 COPY server/package.json ./package.json
 RUN bun install
 COPY server/src ./src
+COPY server/bin ./bin
 COPY tests/test601-hub-scheduled-tasks/race-worker.ts /work/tests/test601-hub-scheduled-tasks/race-worker.ts
 COPY tests/test2123-hub-postgres-ladder /work/tests/test2123-hub-postgres-ladder
 RUN chmod +x /work/tests/test2123-hub-postgres-ladder/run.sh

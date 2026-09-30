@@ -180,15 +180,23 @@ Docker 里 `postgres:16-alpine` + `oven/bun:1.3.14` + `pg@8.16.3`,一次性容�
 
 ## 5. SQLite → PostgreSQL 数据迁移工具
 
-`anet hub db migrate --from <sqlite 路径> --to <postgres URL>`(离线,Hub 必须停着):
+已实现(S5b):`commhub-server migrate-to-pg --from <sqlite 文件> --to <postgres URL> [--dry-run] [--i-know-this-is-a-copy]`;`anet hub db migrate` 是 S5c 的包装。实验性。
 
-1. **源只读**:以只读方式打开 SQLite;先 `VACUUM INTO` 一份快照再读,不碰原文件。
-2. **目标建表**:用 Hub 自己的适配器对目标库跑一遍 schema(保证和运行时完全一致),不另写一份 DDL。
-3. **目标必须为空**:任何业务表有行就拒绝(不做合并)。
-4. **逐表拷贝**:按两边列名交集、分批 `INSERT`,整个过程一个 PG 事务;失败整体回滚。
-5. **序列**:`BIGSERIAL` 列 `setval` 到 `MAX(id)`。
-6. **校验**:每表行数 + 按主键排序后的内容哈希,两边一致才提交;打印每表对比。
-7. 回滚方案:SQLite 原文件没动过,切回只需去掉 `DATABASE_URL`。
+> **要求 commhub-server ≥ 0.9.0-preview.73。** 更早的版本不认识 `migrate-to-pg`,而且会**忽略**不认识的参数、直接在默认的 `~/.commhub/commhub.db` 和 `:9200` 上起一个 Hub(#2153,.73 修成 exit 2)。旧版上连 `commhub-server --version` 也会起 Hub —— 查版本请看安装目录里的 `package.json`(或 `npm ls @sleep2agi/commhub-server`),不要跑 `--version`。
+
+1. **离线**:源库(及其 `-wal`/`-shm`)被任何运行中的进程打开就拒绝(Linux 上查 `/proc`;查不了的平台打印警告)。
+   ⚠️ 原设计想用「`-wal` 非空 = Hub 还在跑」判断 —— **实测不成立**:Hub 收到 SIGTERM 正常退出后照样留下一个非空 `-wal`(test2123 里 440 KB),最近的写入就在里面。所以改成查进程,并且**必须把 `-wal` 的内容带上**。
+2. **不碰线上库**:源文件真实路径(解析符号链接后)在 `~/.commhub` 下就拒绝,除非显式 `--i-know-this-is-a-copy`。复制时要连 `-wal` 一起复制,只拷 `.db` 会丢掉最近的写入。
+3. **源只读**:只读打开,`VACUUM INTO` 到私有临时目录的快照(快照包含 `-wal` 里的内容),从快照读。
+4. **目标必须为空**:`public` schema 里没有任何表、序列、函数;否则拒绝(不做合并)。
+5. **目标建表**:在迁移进程里把 `DATABASE_URL` 指向目标、导入 Hub 自己的模块图 —— 不另写一份 DDL。建表时 Hub 自己种下的行(如试用许可)在拷贝前被源数据替换。
+6. **一个事务**:逐表按两边列名交集分批 `INSERT`;拷贝期间停用用户触发器(否则终态事件触发器会重复写);SQLite 隐式 `rowid` 拷进 PG 的 `rowid` 列(F3);`BIGSERIAL` 序列 `setval` 到 `MAX+1`。
+7. **校验**:每表行数 + 内容 SHA-256(逐行规范化后哈希、排序、再哈希,与行序和 PG 排序规则无关;整数/浮点/二进制/文本分别编码),在 COMMIT **之前**比对,任何不一致整体回滚。
+8. **`--dry-run`**:以上全做,然后回滚并删掉本次建出来的对象,目标恢复为空。失败时同样清空目标,可直接重跑。
+9. 连接串打印时去掉用户名和密码。上传目录里的文件**不**随库迁移。
+10. 回滚方案:SQLite 源文件没动过,切回只需去掉 `DATABASE_URL`。
+
+test2123 的 migrate 阶段端到端验证:真 Hub 在 SQLite 上爬满 L5 后停掉 → 运行中的库被拒、`~/.commhub` 被拒、非空目标被拒 → dry-run 后目标仍为空 → 改动一个值的变异版本校验失败、回滚、目标为空 → 真迁移提交 → Hub 在迁移后的 PG 上以原管理员身份再爬满 L1–L5。
 
 `docs-site/docs/deploy/hub-migration.md` 里「PG 不适用」那句,在工具发布后改为指向新页面。
 

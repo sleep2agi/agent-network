@@ -138,3 +138,33 @@ RFC-039 F6 (branch fix/pg-f6-like, after F3/F5)
     tools.ts without the PG ILIKE (bind-mounted): the new test FAILS on PG
     restricted-files LIKE kept as-is (prefilter; JS does the exact match) —
     covered on PG by agent-acl-slice3's "cannot smuggle a file" DM test.
+
+---
+RFC-039 S5a/S5b (branches fix/pg-s5a-real, feat/pg-s5b-migrate)
+
+20. S5a: contract "REAL keeps SQLite's 8-byte precision" — PASS; with the
+    old translator: FAIL (15.678901234567 read back as 15.678901672363281).
+
+21. S5b migrate stage (migrate-stage.sh), all PASS, MIGRATE_FAILED=0:
+    seed Hub on SQLite reached L5; stopped seed Hub left a 440872-byte -wal
+    a database open in a running Hub is refused (rc=2)
+    source under ~/.commhub is refused (rc=2)
+    non-empty target is refused (rc=2); refusals left the target untouched
+    dry run with --i-know-this-is-a-copy verified every table; target empty after
+    tampered copy fails verification (MUTATION_RED); target empty after
+    migration committed: 42 tables, 19 rows
+    the seeded, replied task is in PostgreSQL
+    Hub on the migrated PostgreSQL: migrated admin logs in, reached L5
+    first design ("non-empty -wal = Hub running") was wrong: a cleanly
+    stopped Hub leaves one; replaced by a /proc open-file check.
+
+22. S5b review follow-ups:
+    - triggers re-enabled in a `finally`; after a failed (tampered) run the
+      same target takes a clean migration and all user triggers are enabled
+      (tgenabled='O'). Mutation: ENABLE removed → "total=2 disabled=2", FAIL.
+      (The "terminal events keep being recorded" check stays green under that
+      mutation, so it is not trigger-specific; the tgenabled check is.)
+    - every outcome prints one SUMMARY line:
+      SUMMARY result=COMMITTED tables=42 rows=19 verify=OK          rc=0
+      SUMMARY result=DRY-RUN … verify=OK                             rc=0
+      SUMMARY result=FAILED … verify=MISMATCH (tamper)               rc=1
