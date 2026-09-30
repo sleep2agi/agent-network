@@ -1155,12 +1155,14 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
   if (url.pathname === '/api/requirements/people' && req.method === 'GET') {
     const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
     if (!networkId) return jsonError('network_id_required', 400);
-    const users = db.all<{ id: string; name: string }>(
-      "SELECT u.user_id AS id, COALESCE(NULLIF(u.display_name,''), u.username) AS name FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 ORDER BY name, id", networkId,
+    // name = 显示用的名字(没设 display_name 时回落到用户名 / alias,旧 app 只读它);display_name 单独给出、没设为 ""
+    // —— 分享图等对外场景据此判断「只有用户名」,不把 admin 之类的账号名印出去。
+    const users = db.all<{ id: string; name: string; display_name: string }>(
+      "SELECT u.user_id AS id, COALESCE(NULLIF(u.display_name,''), u.username) AS name, COALESCE(u.display_name,'') AS display_name FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 ORDER BY name, id", networkId,
     );
     const hidden = hiddenNodeFilter(ctx, networkId);
-    const nodes = db.all<{ id: string; name: string }>(
-      "SELECT node_id AS id, COALESCE(NULLIF(display_name,''), NULLIF(alias,''), node_name) AS name FROM nodes WHERE network_id=?1 ORDER BY name, id", networkId,
+    const nodes = db.all<{ id: string; name: string; display_name: string }>(
+      "SELECT node_id AS id, COALESCE(NULLIF(display_name,''), NULLIF(alias,''), node_name) AS name, COALESCE(display_name,'') AS display_name FROM nodes WHERE network_id=?1 ORDER BY name, id", networkId,
     ).filter(row => !hidden?.(row.id));
     return Response.json({ ok: true, people: [...users.map(row => ({ ...row, kind: 'user', networkId })), ...nodes.map(row => ({ ...row, kind: 'node', networkId }))] });
   }

@@ -3,7 +3,8 @@
 基于需求池 #2064；本变更尚未发布。运行中的 tasks 状态不变。
 
 GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
-`{people:[{kind:"user"|"node",id,networkId,name}]}`。离线节点仍可分配，显示名不作为身份。
+`{people:[{kind:"user"|"node",id,networkId,name,display_name}]}`。离线节点仍可分配，显示名不作为身份。
+`name` 是界面上用的名字：成员 = display_name，没设回落到用户名；节点 = display_name → alias → node_name。`display_name` 单独给出、没设为 `""`（新增字段：旧 Hub 不返回它，客户端要把缺省当作「不知道」处理），对外展示（如分享图）据此判断「只有用户名」而不把账号名印出去；旧客户端只读 `name`，不受影响。
 
 需求卡新增 `owner:null|{kind,id}` 和 `participants:[{kind,id}]`。POST 可提供初始绑定；PATCH 可以单独替换 owner、participants、name、priority、due、assignee，省略字段保留原值。owner 用 null、participants 用 [] 显式清空；due 和 assignee 用空字符串清空。参与人按 kind + id 去重，上限 100 个输入项。旧 assignee 文本保留，旧列移动客户端仍兼容。
 
