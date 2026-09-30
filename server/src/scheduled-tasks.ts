@@ -57,8 +57,9 @@ const MISFIRE_POLICIES = new Set<MisfirePolicy>(["catch_up_once", "skip"]);
 export const MISFIRE_GRACE_MS = 60_000;
 
 export function assertScheduledTaskBackendSupported(): void {
-  if (db.dialect !== "sqlite") {
-    throw new Error("scheduled_tasks_require_transactional_sqlite_backend");
+  const refusal = db.transactionalFeaturesRefusal;
+  if (refusal !== null) {
+    throw new Error(`scheduled_tasks_require_transactional_sqlite_backend${refusal ? `: ${refusal}` : ""}`);
   }
 }
 

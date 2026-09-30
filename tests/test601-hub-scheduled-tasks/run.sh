@@ -77,8 +77,8 @@ expect_red dst-fallback-single-occurrence /tmp/test601-mut-dst.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 
 echo "L11 witnessed-red: non-transactional backend startup gate is load-bearing"
-sed -i 's/if (db.dialect !== "sqlite") {/if (false \&\& db.dialect !== "sqlite") {/' server/src/scheduled-tasks.ts
-grep -Fq 'if (false && db.dialect !== "sqlite")' server/src/scheduled-tasks.ts
+sed -i 's/if (refusal !== null) {/if (false \&\& refusal !== null) {/' server/src/scheduled-tasks.ts
+grep -Fq 'if (false && refusal !== null)' server/src/scheduled-tasks.ts
 expect_red non-transactional-backend-gate /tmp/test601-mut-backend.db
 cp /tmp/test601-scheduled-tasks.ts server/src/scheduled-tasks.ts
 

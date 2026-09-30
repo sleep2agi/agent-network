@@ -4209,10 +4209,10 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
       `For an additional throwaway instance use bootServer({ port: 0 }).`
     );
   }
-  // The current PostgreSQL adapter opens a fresh process/connection for each
-  // statement, so its transaction() cannot provide the occurrence claim +
-  // task creation atomicity this scheduler requires. Refuse before opening a
-  // listening socket instead of silently running an unsafe scheduler.
+  // The scheduler needs the occurrence claim + task creation to be one
+  // transaction. On an adapter whose transaction() is not atomic, refuse
+  // before opening a listening socket instead of running an unsafe
+  // scheduler.
   assertScheduledTaskBackendSupported();
   const server = bootServer(opts);
 

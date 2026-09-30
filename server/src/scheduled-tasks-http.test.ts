@@ -120,12 +120,12 @@ describe("Hub scheduled task API and dispatcher", () => {
   });
 
   test("scheduler startup rejects a backend without real transactions", () => {
-    const original = db.dialect;
+    const original = db.atomicTransactions;
     try {
-      (db as any).dialect = "postgres";
+      (db as any).atomicTransactions = false;
       expect(() => assertScheduledTaskBackendSupported()).toThrow("scheduled_tasks_require_transactional_sqlite_backend");
     } finally {
-      (db as any).dialect = original;
+      (db as any).atomicTransactions = original;
     }
     expect(() => assertScheduledTaskBackendSupported()).not.toThrow();
     const misfireColumn = db.all<any>("PRAGMA table_info(scheduled_tasks)").find((column: any) => column.name === "misfire_policy");

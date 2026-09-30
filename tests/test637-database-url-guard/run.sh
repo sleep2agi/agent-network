@@ -56,11 +56,13 @@ grep -q 'REFUSING to honor inherited DATABASE_URL' "$probe_dir/green.stderr"
 test ! -e "$accepted"
 
 echo "L2 delete-guard mutation"
-# Keep the copied module below /work so its real `require("pg")` resolves the
-# same installed package as production. A /tmp copy would fail before dial on
-# module resolution and create a false-red mutation.
+# Keep the copied module below /work so its imports resolve the same way as
+# production, and copy its sibling pg-worker.ts (PgAdapter starts it by a
+# relative URL). A missing worker would fail before dial and create a
+# false-red mutation.
 mutation_dir="$(mktemp -d /work/test637-mutation.XXXXXX)"
 cp server/src/db-adapter.ts "$mutation_dir/db-adapter.ts"
+cp server/src/pg-worker.ts "$mutation_dir/pg-worker.ts"
 sed -i '/assertSafeTestDatabaseEnv(process.env);/d' "$mutation_dir/db-adapter.ts"
 run_probe "$mutation_dir/db-adapter.ts" "$probe_dir/mutation"
 grep -q 'database: PostgreSQL' "$probe_dir/mutation.stdout"

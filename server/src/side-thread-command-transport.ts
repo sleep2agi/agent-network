@@ -47,10 +47,10 @@ export function installSideThreadCommandSchema(db: DbAdapter): void {
 
 export class SideThreadCommandStore {
   constructor(readonly db: DbAdapter, private readonly now = Date.now) {
-    // PgAdapter transactions are currently documented non-atomic. Advertising
-    // a durable command outbox on it would be false, so fail closed until a
-    // real PostgreSQL race gate and single-connection transaction land.
-    if (db.dialect !== "sqlite") throw new Error("SideThread command transport requires atomic SQLite transactions");
+    // A durable command outbox needs atomic transactions. Advertising one on
+    // an adapter without them would be false, so fail closed there
+    // (dialect alone does not decide it; see DbAdapter.transactionalFeaturesRefusal).
+    if (db.transactionalFeaturesRefusal !== null) throw new Error(`SideThread command transport requires atomic SQLite transactions${db.transactionalFeaturesRefusal ? `: ${db.transactionalFeaturesRefusal}` : ""}`);
     installSideThreadCommandSchema(db);
   }
 

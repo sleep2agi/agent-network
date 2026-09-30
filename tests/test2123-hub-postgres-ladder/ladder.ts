@@ -76,7 +76,13 @@ async function main() {
 
   // L5 — the node replies; the tool says ok AND the task row is terminal.
   const rep = await mcp(ntok, "send_reply", { in_reply_to: taskId, text: "ladder-pong", status: "replied" });
-  if (rep.ok !== true) fail(5, `send_reply: ${JSON.stringify(rep).slice(0, 300)}`);
+  if (rep.ok !== true) {
+    // With real transactions a failed reply must leave no half-written row.
+    const after = await json(`/api/tasks?to_name=pg-agent&network_id=${encodeURIComponent(networkId)}`, { token: utok });
+    const r = (after.body?.tasks ?? []).find((t: any) => t.task_id === taskId);
+    console.log(`INFO task row after the failed reply: status=${r?.status} result=${JSON.stringify(r?.result ?? null)}`);
+    fail(5, `send_reply: ${JSON.stringify(rep).slice(0, 300)}`);
+  }
   const list = await json(`/api/tasks?to_name=pg-agent&network_id=${encodeURIComponent(networkId)}`, { token: utok });
   const row = (list.body?.tasks ?? []).find((t: any) => t.task_id === taskId);
   if (row?.status !== "replied" || row?.result !== "ladder-pong") fail(5, `task row after reply: ${JSON.stringify(row).slice(0, 300)}`);

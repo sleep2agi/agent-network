@@ -1,16 +1,15 @@
 FROM oven/bun:1.3.14
 
 # Postgres runs inside this same container (one Dockerfile per suite, no
-# compose). nodejs + pg are what the current PgAdapter spawns per statement.
+# compose). The Hub talks to it with Bun's built-in SQL client — no node, no
+# pg package — so a missing driver cannot hide behind the image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql nodejs \
+ && apt-get install -y --no-install-recommends postgresql \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work/server
 COPY server/package.json ./package.json
 RUN bun install
-COPY tests/test2123-hub-postgres-ladder/package.json /work/pgdeps/package.json
-RUN cd /work/pgdeps && bun install --production && cp -r node_modules/. /work/server/node_modules/
 COPY server/src ./src
 COPY tests/test2123-hub-postgres-ladder /work/tests/test2123-hub-postgres-ladder
 RUN chmod +x /work/tests/test2123-hub-postgres-ladder/run.sh
