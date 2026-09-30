@@ -12,6 +12,7 @@ import {
   addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
   isTaskScoped, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
+import { diffRequirement, ensureRequirementEvents, eventPublic, recordRequirementEvents, type EventRow } from "./requirement-events.js";
 import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
@@ -24,6 +25,7 @@ ensureRequirementSeq(db);
 ensureRequirementCompletedAt(db);
 ensureNetworkTags(db);
 ensureRequirementTombstones(db);
+ensureRequirementEvents(db);
 
 type RequestAuth = { userId: string; networkId: string | null; username: string; tokenId?: string | null; tokenName?: string | null } | null;
 
@@ -285,8 +287,15 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
   if (req.method === "DELETE") {
     // 先把卡片上的引用置空,再删项目:卡片一张不少。
     // updated_at 跟着动:按 updated_since 增量同步的客户端要看得见「项目被清空」这一改动。
-    db.run("UPDATE requirements SET project_id = NULL, updated_at = ?2 WHERE project_id = ?1", [current.project_id, new Date().toISOString()]);
-    db.run("DELETE FROM requirement_projects WHERE project_id = ?1", [current.project_id]);
+    // 每张被清空项目的卡记一条「项目 X → 无」(与清空同一个事务)。
+    const at = new Date().toISOString();
+    const actor = JSON.stringify(actorOf(ctx));
+    db.transaction(() => {
+      const cards = db.all<{ requirement_id: string; network_id: string; seq: number | null; title: string }>("SELECT requirement_id, network_id, seq, title FROM requirements WHERE project_id = ?1", current.project_id);
+      db.run("UPDATE requirements SET project_id = NULL, updated_at = ?2 WHERE project_id = ?1", [current.project_id, at]);
+      for (const card of cards) recordRequirementEvents(db, card, actor, [{ kind: "changed", field: "project", old: current.project_id, new: null }], at);
+      db.run("DELETE FROM requirement_projects WHERE project_id = ?1", [current.project_id]);
+    });
     deleteTaskGrantsForProject(current.project_id);
     return Response.json({ ok: true });
   }
@@ -335,8 +344,8 @@ async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
   const actor = JSON.stringify(actorOf(ctx));
   // 读-改-写整个网络的标签在一个事务里:中途失败一张都不改;颜色表跟着一起挪。
   const result = db.transaction(() => {
-    const cards = db.all<{ requirement_id: string; tags_json: string | null }>(
-      "SELECT requirement_id, tags_json FROM requirements WHERE network_id = ?1 AND tags_json IS NOT NULL AND tags_json <> '[]'", networkId,
+    const cards = db.all<{ requirement_id: string; network_id: string; seq: number | null; title: string; tags_json: string | null }>(
+      "SELECT requirement_id, network_id, seq, title, tags_json FROM requirements WHERE network_id = ?1 AND tags_json IS NOT NULL AND tags_json <> '[]'", networkId,
     );
     const colorOf = (name: string) => db.get<{ color: string }>("SELECT color FROM network_tags WHERE network_id = ?1 AND name = ?2", networkId, name)?.color ?? null;
     const sources = op.op === "rename" ? [op.from] : op.op === "merge" ? op.from : [op.tag];
@@ -352,6 +361,7 @@ async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
       const next = applyTagOp(storedTags(card.tags_json), op);
       if (!next) continue;
       db.run("UPDATE requirements SET tags_json = ?1, updated_at = ?2, updated_by_json = ?3 WHERE requirement_id = ?4", [JSON.stringify(next), now, actor, card.requirement_id]);
+      recordRequirementEvents(db, card, actor, [{ kind: "changed", field: "tags", old: storedTags(card.tags_json), new: next }], now);
       affected++;
     }
     moveTagColors(networkId, op, colorOf, now);
@@ -581,7 +591,8 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
 // search:GET 认 q=(服务端搜索,语义同 App 的任务搜索);paging:认 limit / cursor,响应带 has_more / next_cursor。
 // list_summary:GET 认 view=summary(不带描述正文与子任务条目,见 toSummary);changes:GET 认 changes=1 + updated_since
 // (改过的卡含归档的,加上 deleted 墓碑与 server_time,见 listChanges)。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes"] as const;
+// events:GET /api/requirements/events —— 字段级的改动流水(谁、何时、旧值 → 新值,requirement-events.ts)。
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes", "events"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -738,15 +749,19 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId)); } catch (e) { return jsonError((e as Error).message, 400); }
   const actor = JSON.stringify(actorOf(ctx));
   try {
-    // 领号和插入在同一个事务里:插入被唯一索引挡下时,号一起回滚,不留空洞。
-    db.transaction(() => db.run(
-      `INSERT INTO requirements
-       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json, start_on, seq, completed_at, completed_by_json, completed_at_approx)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22, ?23, ?24, ?25, ?26, 0)`,
-      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags), start || null, nextRequirementSeq(db, networkId),
-        // 直接建在「完成」列 = 此刻完成、由建卡的人完成。
-        column === "done" ? createdAt : null, column === "done" ? actor : null],
-    ));
+    // 领号、插入、记「新建」这条动态在同一个事务里:插入被唯一索引挡下时,号和动态一起回滚,不留空洞。
+    db.transaction(() => {
+      const seq = nextRequirementSeq(db, networkId);
+      db.run(
+        `INSERT INTO requirements
+         (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json, start_on, seq, completed_at, completed_by_json, completed_at_approx)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22, ?23, ?24, ?25, ?26, 0)`,
+        [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags), start || null, seq,
+          // 直接建在「完成」列 = 此刻完成、由建卡的人完成。
+          column === "done" ? createdAt : null, column === "done" ? actor : null],
+      );
+      recordRequirementEvents(db, { requirement_id: id, network_id: networkId, seq, title: name }, actor, [{ kind: "created", field: null, old: null, new: { title: name, column } }], createdAt);
+    });
   } catch {
     // 并发的同一个 external_ref / client_id:唯一索引挡住了第二个,回已有的那条。
     if (ref) {
@@ -857,16 +872,21 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   const completed = column !== "done" ? { at: null, by: null, approx: 0 }
     : row.column_name !== "done" ? { at: updatedAt, by: actor, approx: 0 }
     : { at: row.completed_at, by: row.completed_by_json, approx: row.completed_at_approx ? 1 : 0 };
-  db.run(
-    `UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6,
-       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18, parent_id = ?19, tags_json = ?20, start_on = ?21,
-       completed_at = ?22, completed_by_json = ?23, completed_at_approx = ?24
-     WHERE requirement_id = ?3`,
-    [column, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, has("issues") ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
-      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, actor, parentId, has("tags") ? JSON.stringify(tags) : row.tags_json, start || null,
-      completed.at, completed.by, completed.approx],
-  );
-  const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
+  // 改卡和记动态(改前 row → 改后 updated 的字段差异)在同一个事务里:要么都在,要么都不在。
+  const updated = db.transaction(() => {
+    db.run(
+      `UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6,
+         agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18, parent_id = ?19, tags_json = ?20, start_on = ?21,
+         completed_at = ?22, completed_by_json = ?23, completed_at_approx = ?24
+       WHERE requirement_id = ?3`,
+      [column, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, has("issues") ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
+        has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, actor, parentId, has("tags") ? JSON.stringify(tags) : row.tags_json, start || null,
+        completed.at, completed.by, completed.approx],
+    );
+    const after = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
+    recordRequirementEvents(db, after, actor, diffRequirement(row, after), updatedAt);
+    return after;
+  });
   return Response.json(withLegacyOwner(toPublicFor(ctx, updated), people.coerced));
 }
 
@@ -1046,6 +1066,86 @@ function deletedSince(ctx: RequirementsRequestContext, sinceIso: string): string
   return db.all<TombstoneRow>(sql, ...params).filter(row => canSeeTask(caller, row)).map(row => row.requirement_id);
 }
 
+// ── 任务动态(requirement-events.ts)──
+// GET /api/requirements/events?network_id&since&limit&cursor&requirement_id:一个网络的改动流水,按 id 从新到旧。
+// 可见范围与列表相同:卡还在 → 按当前这张卡判断调用者看不看得见;删掉了 → 按墓碑(过了墓碑保留期的删除,
+// 只有不受任务范围限制的调用者看得到)。受限成员看不见的节点:操作者隐去,负责人 / 负责 Agent / 参与人里的隐去,
+// 隐去之后前后一样的那条整条不回(否则是「这张卡的 Agent 换过」的探测器)。
+// 按可见性过滤是在读出来之后做的:一页最多扫 EVENTS_SCAN_MAX 条,扫满还没凑够就带 next_cursor 回去,客户端接着翻。
+const EVENTS_PAGE_DEFAULT = 200;
+const EVENTS_PAGE_MAX = 500;
+const EVENTS_SCAN_MAX = 5000;
+type VisibilityRow = { network_id: string; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null; project_id: string | null };
+
+function listEvents(ctx: RequirementsRequestContext): Response {
+  const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+  if (!networkId) return jsonError("network_id_required", 400);
+  const q = ctx.url.searchParams;
+  const limit = q.get("limit") === null ? EVENTS_PAGE_DEFAULT : Number(q.get("limit"));
+  if (!Number.isInteger(limit) || limit < 1 || limit > EVENTS_PAGE_MAX) return jsonError("invalid_limit", 400);
+  let since: string | null = null;
+  if (q.get("since") !== null) {
+    const ms = Date.parse(q.get("since")!);
+    if (!Number.isFinite(ms)) return jsonError("invalid_since", 400);
+    since = new Date(ms).toISOString();
+  }
+  const cursor = q.get("cursor");
+  if (cursor !== null && !/^[1-9]\d{0,17}$/.test(cursor)) return jsonError("invalid_cursor", 400);
+  const card = q.get("requirement_id");
+  // server_time 取在读表之前:下次拿它当 since,读的期间写进来的不会漏(>= 会重复回,客户端按 id 去重)。
+  const serverTime = new Date().toISOString();
+  const caller = taskCaller(ctx);
+  const hidden = hiddenNodeFilter(ctx, networkId);
+  const seen = new Map<string, boolean>();
+  const canSee = (id: string): boolean => {
+    if (!caller) return true;
+    let ok = seen.get(id);
+    if (ok === undefined) {
+      const cols = "network_id, owner_json, participants_json, created_by, created_by_json, project_id";
+      const row = db.get<VisibilityRow>(`SELECT ${cols} FROM requirements WHERE requirement_id = ?1`, id)
+        ?? db.get<VisibilityRow>(`SELECT ${cols} FROM requirement_tombstones WHERE requirement_id = ?1`, id);
+      seen.set(id, ok = !!row && row.network_id === networkId && canSeeTask(caller, row));
+    }
+    return ok;
+  };
+  const shown = (row: EventRow) => {
+    if (!canSee(row.requirement_id)) return null;
+    const ev = eventPublic(row);
+    if (!hidden) return ev;
+    const mask = (ref: unknown) => (isHiddenRef(ref, hidden) ? null : ref);
+    const masked = { ...ev, actor: mask(ev.actor) };
+    if (ev.field === "owner" || ev.field === "agent_owner") { masked.old = mask(ev.old); masked.new = mask(ev.new); }
+    if (ev.field === "participants") {
+      masked.old = Array.isArray(ev.old) ? ev.old.filter(ref => !isHiddenRef(ref, hidden)) : ev.old;
+      masked.new = Array.isArray(ev.new) ? ev.new.filter(ref => !isHiddenRef(ref, hidden)) : ev.new;
+    }
+    return ev.field && JSON.stringify(masked.old) === JSON.stringify(masked.new) ? null : masked;
+  };
+  const events: ReturnType<typeof eventPublic>[] = [];
+  let before = cursor === null ? null : Number(cursor);
+  let scanned = 0;
+  let nextCursor: string | null = null;
+  scan: for (;;) {
+    const params: unknown[] = [networkId];
+    let sql = "SELECT id, network_id, requirement_id, seq, title, actor_json, kind, field, old_json, new_json, created_at FROM requirement_events WHERE network_id = ?1";
+    if (since) sql += ` AND created_at >= ?${params.push(since)}`;
+    if (card) sql += ` AND requirement_id = ?${params.push(card)}`;
+    if (before !== null) sql += ` AND id < ?${params.push(before)}`;
+    const batch = db.all<EventRow>(`${sql} ORDER BY id DESC LIMIT ${limit + 1}`, ...params);
+    for (const row of batch) {
+      const ev = shown(row);
+      if (ev && events.length === limit) { nextCursor = events[events.length - 1].id; break scan; }
+      scanned++;
+      before = Number(row.id);
+      if (ev) events.push(ev);
+    }
+    if (batch.length < limit + 1) break;
+    // 扫满了(调用者看不见的太多):从扫到的地方接着翻。
+    if (scanned >= EVENTS_SCAN_MAX) { nextCursor = String(before); break; }
+  }
+  return Response.json({ ok: true, network_id: networkId, events, has_more: nextCursor !== null, next_cursor: nextCursor, server_time: serverTime });
+}
+
 /**
  * 需求表的写入代数:每个经过 handleRequirementsRequest 的非 GET 请求处理完就 +1(REST 和 MCP 的写入都走它,
  * tools.ts 调的是同一个处理函数)。列表缓存只在代数没变时复用。进程重启 = 缓存清空。
@@ -1151,6 +1251,8 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const rows = db.all<StatsRow>(statsSql, ...statsParams);
     return conditionalJson(ctx.req, { ok: true, networkId, ...aggregateStats(rows, sq, hiddenNodeFilter(ctx, networkId)) });
   }
+
+  if (url.pathname === "/api/requirements/events" && req.method === "GET") return listEvents(ctx);
 
   if (url.pathname === '/api/requirements/people' && req.method === 'GET') {
     const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
@@ -1261,9 +1363,16 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const itemId = decodeURIComponent(itemMatch[2]);
     const item = items.find(entry => entry.id === itemId);
     if (!item) return jsonError("checklist_item_not_found", 404);
+    const was = item.done;
     item.done = body.done;
-    db.run("UPDATE requirements SET checklist_json = ?1, updated_at = ?2, updated_by_json = ?3 WHERE requirement_id = ?4", [JSON.stringify(items), new Date().toISOString(), JSON.stringify(actorOf(ctx)), row.requirement_id]);
-    const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
+    const at = new Date().toISOString();
+    const actor = JSON.stringify(actorOf(ctx));
+    const updated = db.transaction(() => {
+      db.run("UPDATE requirements SET checklist_json = ?1, updated_at = ?2, updated_by_json = ?3 WHERE requirement_id = ?4", [JSON.stringify(items), at, actor, row.requirement_id]);
+      // 重复勾同一个值(done 是显式值,幂等)不算一次改动,不记。
+      if (was !== item.done) recordRequirementEvents(db, row, actor, [{ kind: "changed", field: "checklist_item", old: { ...item, done: was }, new: { ...item } }], at);
+      return db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
+    });
     return Response.json({ ok: true, requirement: toPublicFor(ctx, updated) });
   }
 
@@ -1282,9 +1391,13 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (!canDeleteTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_delete_denied");
     // 子需求不跟着删:先解挂(变成顶层),再删父卡。
     const deletedAt = new Date().toISOString();
-    db.run("UPDATE requirements SET parent_id = NULL, updated_at = ?2 WHERE parent_id = ?1", [row.requirement_id, deletedAt]);
-    db.run("DELETE FROM requirements WHERE requirement_id = ?1", [row.requirement_id]);
-    recordTombstone(row, deletedAt);
+    db.transaction(() => {
+      db.run("UPDATE requirements SET parent_id = NULL, updated_at = ?2 WHERE parent_id = ?1", [row.requirement_id, deletedAt]);
+      db.run("DELETE FROM requirements WHERE requirement_id = ?1", [row.requirement_id]);
+      recordTombstone(row, deletedAt);
+      // 卡没了,动态里还要画得出「谁删了 #N 标题」:标题 / 短号随行存(seq、title 列)。
+      recordRequirementEvents(db, row, JSON.stringify(actorOf(ctx)), [{ kind: "deleted", field: null, old: null, new: null }], deletedAt);
+    });
     // 硬删除以前不留痕(RFC-038 §9.1):记下是谁删了哪张(标题 + 短号),卡本身已经没了。
     if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_deleted", "requirement", row.requirement_id, JSON.stringify({ title: row.title, seq: row.seq ?? null }).slice(0, 1000), undefined, row.network_id);
     return Response.json({ ok: true, deleted: row.requirement_id });
