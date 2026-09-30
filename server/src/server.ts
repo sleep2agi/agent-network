@@ -1707,7 +1707,7 @@ return Bun.serve({
         const body = await req.json() as any;
         const result = updateMemberRole(netId, targetUid, body.role);
         if (result.ok) {
-          logAudit(resolved.user.user_id, resolved.user.username, "member_role_changed", "network", netId, `${targetUid} → ${body.role}`);
+          logAudit(resolved.user.user_id, resolved.user.username, "member_role_changed", "network", netId, `${targetUid} → ${body.role}`, undefined, netId);
           closeUserStreamsInNetwork(netId, targetUid);
         }
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
@@ -1716,7 +1716,7 @@ return Bun.serve({
         if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
         const result = removeNetworkMember(netId, targetUid);
         if (result.ok) {
-          logAudit(resolved.user.user_id, resolved.user.username, "member_removed", "network", netId, targetUid);
+          logAudit(resolved.user.user_id, resolved.user.username, "member_removed", "network", netId, targetUid, undefined, netId);
           closeUserStreamsInNetwork(netId, targetUid);
         }
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
