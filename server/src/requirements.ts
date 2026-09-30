@@ -3,15 +3,16 @@
 import { createHash } from "node:crypto";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
+import { markGzipReusable } from "./http-gzip.js";
 import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from "./requirement-tags.js";
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
-import { isAgentRestricted, visibleAgents } from "./agent-access.js";
+import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
 import {
   addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
   isTaskScoped, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
-import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
+import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
@@ -22,6 +23,7 @@ ensureRequirementIndexes(db);
 ensureRequirementSeq(db);
 ensureRequirementCompletedAt(db);
 ensureNetworkTags(db);
+ensureRequirementTombstones(db);
 
 type RequestAuth = { userId: string; networkId: string | null; username: string; tokenId?: string | null; tokenName?: string | null } | null;
 
@@ -282,7 +284,8 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
   if (!current || current.network_id !== networkId) return jsonError("project_not_found", 404);
   if (req.method === "DELETE") {
     // 先把卡片上的引用置空,再删项目:卡片一张不少。
-    db.run("UPDATE requirements SET project_id = NULL WHERE project_id = ?1", [current.project_id]);
+    // updated_at 跟着动:按 updated_since 增量同步的客户端要看得见「项目被清空」这一改动。
+    db.run("UPDATE requirements SET project_id = NULL, updated_at = ?2 WHERE project_id = ?1", [current.project_id, new Date().toISOString()]);
     db.run("DELETE FROM requirement_projects WHERE project_id = ?1", [current.project_id]);
     deleteTaskGrantsForProject(current.project_id);
     return Response.json({ ok: true });
@@ -553,11 +556,19 @@ function operationOf(req: Request, url: URL): string {
  */
 export function conditionalJson(req: Request, payload: unknown): Response {
   const body = JSON.stringify(payload);
-  const etag = `W/"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"`;
+  return conditionalBody(req, body, bodyEtag(body));
+}
+
+function bodyEtag(body: string): string {
+  return `W/"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"`;
+}
+
+function conditionalBody(req: Request, body: string, etag: string): Response {
   // private:按用户可见范围生成,不能被共享缓存复用;no-cache:每次都要回来验证,不会拿旧表当新的。
   const headers = { ETag: etag, "Cache-Control": "private, no-cache" };
   if (ifNoneMatchHits(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
-  return new Response(body, { headers: { ...headers, "Content-Type": "application/json;charset=utf-8" } });
+  // ETag 就是正文的哈希:同一份正文的 gzip 结果可以复用(http-gzip.ts)。
+  return markGzipReusable(new Response(body, { headers: { ...headers, "Content-Type": "application/json;charset=utf-8" } }), etag);
 }
 
 function ifNoneMatchHits(header: string | null, etag: string): boolean {
@@ -568,7 +579,9 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
 
 // tag_ops:有 POST /api/requirements/tags/ops(标签改名 / 合并 / 删除 / 颜色),GET /api/requirements/tags 带 counts / colors / can_manage。
 // search:GET 认 q=(服务端搜索,语义同 App 的任务搜索);paging:认 limit / cursor,响应带 has_more / next_cursor。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops"] as const;
+// list_summary:GET 认 view=summary(不带描述正文与子任务条目,见 toSummary);changes:GET 认 changes=1 + updated_since
+// (改过的卡含归档的,加上 deleted 墓碑与 server_time,见 listChanges)。
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -929,8 +942,9 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
   if (parent !== null) sql += parent === "none" ? " AND parent_id IS NULL" : ` AND parent_id = ?${params.push(parent)}`;
   if (q.get("top_level") === "1") sql += " AND parent_id IS NULL";
   // Explicit archived-only wins over the legacy include-all switch.
+  // changes=1 看得见「被归档」这一改动:默认连归档的一起回(行上 archived: true),客户端据此把它移出看板。
   if (q.get("archived") === "true") sql += " AND COALESCE(archived, 0) = 1";
-  else if (q.get("include_archived") !== "1") sql += " AND COALESCE(archived, 0) = 0";
+  else if (q.get("include_archived") !== "1" && q.get("changes") !== "1") sql += " AND COALESCE(archived, 0) = 0";
   return sql;
 }
 
@@ -993,9 +1007,106 @@ function hiddenFilterForScope(ctx: RequirementsRequestContext, nodeId: string): 
   return false;
 }
 
+// ── 列表省流(2026-09-30,App「连接较慢 · 数据可能稍有延迟」)──
+// 生产:425 张卡、1447 条子任务,整张表 1 MB(gzip 240 KB),任务页每 15 s 读一次;中国经 RELAY 的链路上
+// 一次要好几秒。三件事,都是加法,旧 App 不带新参数就与原来逐字相同:
+//   1. view=summary:不带描述正文和子任务条目(打开一张卡再 GET /api/requirements/:id 读全文);
+//   2. changes=1 + updated_since:只回这之后改过的卡(含归档的),加上删掉的卡的 id 和下次用的 server_time;
+//   3. 表没变时不重算:按「调用者 + 查询」缓存上一次的正文和 ETag,需求表一有写入就作废(见 requirementsGeneration)。
+
+/** view=summary 的一行:去掉 description / checklist,换成 has_description 和 checklist_count。 */
+function toSummary<T extends { description: string; checklist: ChecklistItem[] }>(pub: T): Omit<T, "description" | "checklist"> & { has_description: boolean; checklist_count: { total: number; done: number } } {
+  const { description, checklist, ...rest } = pub;
+  return { ...rest, has_description: !!description, checklist_count: { total: checklist.length, done: checklist.filter(item => item.done).length } };
+}
+
+/** 墓碑保留多久。changes 的 updated_since 早于这之前,删除就可能漏报 —— 响应里的 tombstones_since 告诉客户端这个下限。 */
+export const TOMBSTONE_RETENTION_MS = 30 * 86_400_000;
+
+/** 删卡时留一条墓碑(连同判断「谁看得见」要用的列,受限成员只收到他本来看得见的卡的删除)。 */
+function recordTombstone(row: Row, deletedAt: string): void {
+  db.run(
+    `INSERT INTO requirement_tombstones (requirement_id, network_id, deleted_at, project_id, owner_json, participants_json, created_by, created_by_json)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+     ON CONFLICT(requirement_id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+    [row.requirement_id, row.network_id, deletedAt, row.project_id || null, row.owner_json || null, row.participants_json || null, row.created_by || null, row.created_by_json || null],
+  );
+  db.run("DELETE FROM requirement_tombstones WHERE deleted_at < ?1", [new Date(Date.parse(deletedAt) - TOMBSTONE_RETENTION_MS).toISOString()]);
+}
+
+type TombstoneRow = { requirement_id: string; network_id: string; deleted_at: string; project_id: string | null; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null };
+
+/** updated_since 之后删掉的、调用者看得见的卡。同 id 又出现在表里的(不该有)不算删除。 */
+function deletedSince(ctx: RequirementsRequestContext, sinceIso: string): string[] {
+  const params: unknown[] = [sinceIso];
+  let sql = "SELECT requirement_id, network_id, deleted_at, project_id, owner_json, participants_json, created_by, created_by_json FROM requirement_tombstones WHERE deleted_at >= ?1";
+  sql = addHumanNetworkScope(sql, params, ctx.scope);
+  sql += " AND requirement_id NOT IN (SELECT requirement_id FROM requirements) ORDER BY deleted_at, requirement_id";
+  const caller = taskCaller(ctx);
+  return db.all<TombstoneRow>(sql, ...params).filter(row => canSeeTask(caller, row)).map(row => row.requirement_id);
+}
+
+/**
+ * 需求表的写入代数:每个经过 handleRequirementsRequest 的非 GET 请求处理完就 +1(REST 和 MCP 的写入都走它,
+ * tools.ts 调的是同一个处理函数)。列表缓存只在代数没变时复用。进程重启 = 缓存清空。
+ */
+let requirementsGeneration = 0;
+/** 缓存条目最长信任这么久:兜住不经过处理函数的改动(启动迁移、运维脚本直接改库)。 */
+export const LIST_CACHE_MAX_AGE_MS = 60_000;
+/** 只缓存不带搜索词的列表(搜索每打一个字就是一个新键),总共最多这么多字符(条目按最近使用淘汰)。 */
+const LIST_CACHE_MAX_CHARS = 16 * 1024 * 1024;
+type ListCacheEntry = { generation: number; acl: string; at: number; body: string; etag: string };
+const listCache = new Map<string, ListCacheEntry>();
+let listCacheChars = 0;
+function rememberList(key: string, entry: ListCacheEntry): void {
+  const old = listCache.get(key);
+  if (old) { listCache.delete(key); listCacheChars -= old.body.length; }
+  if (entry.body.length > LIST_CACHE_MAX_CHARS / 4) return;
+  listCache.set(key, entry);
+  listCacheChars += entry.body.length;
+  for (const [k, v] of listCache) {
+    if (listCacheChars <= LIST_CACHE_MAX_CHARS) break;
+    listCache.delete(k);
+    listCacheChars -= v.body.length;
+  }
+}
+
+/**
+ * 缓存能不能用、以及调用者权限的指纹。null = 这个调用者不缓存:受限成员(看得见哪些 Agent 取决于节点表)
+ * 和「只看相关任务」的成员(看得见哪些卡取决于项目授权)每次照旧现算。
+ * 其余调用者的输出只取决于需求表本身 + 他的角色 / 成员行:这些都放进指纹,变了就不命中。
+ */
+function listCacheAcl(ctx: RequirementsRequestContext): string | null {
+  const caller = taskCaller(ctx);
+  if (!caller) return `open:${ctx.isAdmin ? 1 : 0}:${ctx.isNodeToken ? 1 : 0}`;
+  if (restrictedNetworkIds(caller.userId).length > 0) return null;
+  const members = db.all<Record<string, unknown>>("SELECT * FROM network_members WHERE user_id = ?1 ORDER BY network_id", caller.userId);
+  const networks = members.map(m => String(m.network_id));
+  if (networks.some(networkId => isTaskScoped(caller.userId, networkId))) return null;
+  const role = db.get<{ role: string | null }>("SELECT role FROM users WHERE user_id = ?1", caller.userId)?.role ?? null;
+  return JSON.stringify({ role, members });
+}
+
+function listCacheKey(ctx: RequirementsRequestContext): string {
+  const sorted = [...ctx.url.searchParams.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify({ u: ctx.auth?.userId ?? null, n: ctx.auth?.networkId ?? null, a: ctx.isAdmin, t: ctx.isNodeToken, s: ctx.scope, q: sorted });
+}
+
+/** Test-only. */
+export function __requirementsListCacheForTest() {
+  return { size: () => listCache.size, clear: () => { listCache.clear(); listCacheChars = 0; }, generation: () => requirementsGeneration };
+}
+
 export async function handleRequirementsRequest(ctx: RequirementsRequestContext): Promise<Response | null> {
-  const { req, url } = ctx;
+  const { url } = ctx;
   if (url.pathname !== "/api/requirements" && !url.pathname.startsWith("/api/requirements/")) return null;
+  if (ctx.req.method === "GET") return handleRequirementsRequestInner(ctx);
+  // 写完(成功与否)才 +1:之后的 GET 一定看得见这次写入。
+  try { return await handleRequirementsRequestInner(ctx); } finally { requirementsGeneration++; }
+}
+
+async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): Promise<Response | null> {
+  const { req, url } = ctx;
   // 节点令牌只能做 NODE_TOKEN_OPERATIONS 里的事(读 / 建 / 改 / 勾子任务 / upsert / 读项目),
   // 而且只在它绑定的网络里 —— 范围由 scope 强制,写入再由 canWrite 核一次。
   if (ctx.isNodeToken && !NODE_TOKEN_OPERATIONS.has(operationOf(req, url))) return jsonError("user_token_required", 403);
@@ -1065,10 +1176,37 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     // q= / limit / cursor(requirements-search.ts)。都不带 = 旧行为:最新 500 张、同样的顺序。
     const lq = parseListQuery(url.searchParams);
     if ("error" in lq) return jsonError(lq.error, 400);
+    const view = url.searchParams.get("view");
+    if (view !== null && view !== "full" && view !== "summary") return jsonError("invalid_view", 400);
+    const changes = url.searchParams.get("changes") === "1";
+    if (changes && url.searchParams.get("updated_since") === null) return jsonError("updated_since_required", 400);
+    // changes 模式:server_time 取在读表之前,下次拿它当 updated_since,读表期间的写入不会漏(>= 会重复回一次,客户端按 id 覆盖)。
+    const serverTime = new Date().toISOString();
+    const cacheKey = changes || url.searchParams.get("q") ? null : listCacheKey(ctx);
+    const acl = cacheKey ? listCacheAcl(ctx) : null;
+    const generation = requirementsGeneration;
+    const cached = cacheKey && acl !== null ? listCache.get(cacheKey) : undefined;
+    if (cached && cached.generation === generation && cached.acl === acl && Date.now() - cached.at < LIST_CACHE_MAX_AGE_MS) {
+      listCache.delete(cacheKey!);
+      listCache.set(cacheKey!, cached);
+      return conditionalBody(ctx.req, cached.body, cached.etag);
+    }
     const page = listPage(ctx, filtered, params, lq);
+    const rows = page.rows.map(row => toPublicFor(ctx, row));
     // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
     // has_more / next_cursor:后面还有没有(带 cursor=next_cursor 再读一页)。旧客户端不认识,忽略即可。
-    return conditionalJson(ctx.req, { ok: true, requirements: page.rows.map(row => toPublicFor(ctx, row)), capabilities: REQUIREMENT_CAPABILITIES, has_more: page.hasMore, next_cursor: page.nextCursor });
+    const payload: Record<string, unknown> = { ok: true, requirements: view === "summary" ? rows.map(toSummary) : rows, capabilities: REQUIREMENT_CAPABILITIES, has_more: page.hasMore, next_cursor: page.nextCursor };
+    if (view === "summary") payload.view = "summary";
+    if (changes) {
+      const since = new Date(Date.parse(url.searchParams.get("updated_since")!)).toISOString();
+      payload.deleted = deletedSince(ctx, since);
+      payload.server_time = serverTime;
+      payload.tombstones_since = new Date(Date.parse(serverTime) - TOMBSTONE_RETENTION_MS).toISOString();
+    }
+    const body = JSON.stringify(payload);
+    const etag = bodyEtag(body);
+    if (cacheKey && acl !== null) rememberList(cacheKey, { generation, acl, at: Date.now(), body, etag });
+    return conditionalBody(ctx.req, body, etag);
   }
 
   if (url.pathname === "/api/requirements" && req.method === "POST") {
@@ -1139,8 +1277,10 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
     if (!canDeleteTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_delete_denied");
     // 子需求不跟着删:先解挂(变成顶层),再删父卡。
-    db.run("UPDATE requirements SET parent_id = NULL WHERE parent_id = ?1", [row.requirement_id]);
+    const deletedAt = new Date().toISOString();
+    db.run("UPDATE requirements SET parent_id = NULL, updated_at = ?2 WHERE parent_id = ?1", [row.requirement_id, deletedAt]);
     db.run("DELETE FROM requirements WHERE requirement_id = ?1", [row.requirement_id]);
+    recordTombstone(row, deletedAt);
     // 硬删除以前不留痕(RFC-038 §9.1):记下是谁删了哪张(标题 + 短号),卡本身已经没了。
     if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_deleted", "requirement", row.requirement_id, JSON.stringify({ title: row.title, seq: row.seq ?? null }).slice(0, 1000), undefined, row.network_id);
     return Response.json({ ok: true, deleted: row.requirement_id });

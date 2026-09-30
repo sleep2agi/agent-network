@@ -71,3 +71,24 @@ test("trimLightTask keeps a one-line preview under the cap", () => {
   expect([...t].length).toBe(LIGHT_TASK_MAX_CHARS + 1);
   expect(trimLightTask("short")).toBe("short");
 });
+
+test("a response marked reusable is gzipped once per key; unmarked ones every time; different keys never share bytes", async () => {
+  const { markGzipReusable, gzipCacheStats, __resetGzipCacheForTest } = await import("./http-gzip");
+  __resetGzipCacheForTest();
+  const first = await maybeGzipResponse(reqWith("gzip"), markGzipReusable(json(big), "W/\"k1\""));
+  const second = await maybeGzipResponse(reqWith("gzip"), markGzipReusable(json(big), "W/\"k1\""));
+  expect(gzipCacheStats).toEqual({ hits: 1, misses: 1 });
+  const a = new Uint8Array(await first!.arrayBuffer());
+  const b = new Uint8Array(await second!.arrayBuffer());
+  expect(new TextDecoder().decode(Bun.gunzipSync(b))).toBe(big);
+  expect(Buffer.from(b).equals(Buffer.from(a))).toBe(true);
+  expect(Number(second!.headers.get("Content-Length"))).toBe(b.byteLength);
+  const other = big.replace("节点0", "节点X");
+  const third = await maybeGzipResponse(reqWith("gzip"), markGzipReusable(json(other), "W/\"k2\""));
+  expect(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await third!.arrayBuffer())))).toBe(other);
+  await maybeGzipResponse(reqWith("gzip"), json(big));
+  expect(gzipCacheStats).toEqual({ hits: 1, misses: 2 });
+  // 没要 gzip 的客户端照旧拿原样正文,不碰缓存
+  const plain = markGzipReusable(json(big), "W/\"k1\"");
+  expect(await maybeGzipResponse(reqWith(), plain)).toBe(plain);
+});

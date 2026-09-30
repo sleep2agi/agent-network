@@ -29,6 +29,56 @@ export function isCompressibleResponse(res: Response): boolean {
   return COMPRESSIBLE.test(ct);
 }
 
+// 2026-09-30(连接较慢横幅):任务页每 15 s 轮询 ~1 MB 的需求表,每次都在事件循环上同步 gzip 一遍,
+// 而两次轮询之间表多半没变。带内容哈希 ETag 的响应(conditionalJson)标一个键,同一份正文只压一次。
+// 键就是正文的哈希,所以不同调用者拿到同一份压缩字节是安全的:字节相同 ⇔ 正文相同。
+export const GZIP_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+const gzipKeys = new WeakMap<Response, string>();
+const gzipCache = new Map<string, Uint8Array>();
+let gzipCacheBytes = 0;
+export const gzipCacheStats = { hits: 0, misses: 0 };
+
+/** 标记这个响应的正文由 `key`(正文的内容哈希)唯一决定:压缩结果可以按键复用。 */
+export function markGzipReusable(res: Response, key: string): Response {
+  gzipKeys.set(res, key);
+  return res;
+}
+
+function gzipCached(key: string | undefined, raw: () => Promise<Uint8Array>): Promise<{ raw: Uint8Array | null; gz: Uint8Array | null }> | { raw: null; gz: Uint8Array } {
+  if (key) {
+    const hit = gzipCache.get(key);
+    if (hit) {
+      gzipCacheStats.hits++;
+      gzipCache.delete(key);
+      gzipCache.set(key, hit); // 最近用过的挪到队尾(LRU)
+      return { raw: null, gz: hit };
+    }
+  }
+  return raw().then(bytes => {
+    if (bytes.byteLength < GZIP_MIN_BYTES) return { raw: bytes, gz: null };
+    const gz = Bun.gzipSync(bytes);
+    if (key) gzipCacheStats.misses++;
+    if (key && gz.byteLength <= GZIP_CACHE_MAX_BYTES / 4) {
+      gzipCache.set(key, gz);
+      gzipCacheBytes += gz.byteLength;
+      for (const [k, v] of gzipCache) {
+        if (gzipCacheBytes <= GZIP_CACHE_MAX_BYTES) break;
+        gzipCache.delete(k);
+        gzipCacheBytes -= v.byteLength;
+      }
+    }
+    return { raw: bytes, gz };
+  });
+}
+
+/** Test-only. */
+export function __resetGzipCacheForTest(): void {
+  gzipCache.clear();
+  gzipCacheBytes = 0;
+  gzipCacheStats.hits = 0;
+  gzipCacheStats.misses = 0;
+}
+
 /**
  * Gzip a finished response when the client asked for it and the body is worth it.
  * Reads the body once; callers must not have consumed it. Anything streamed or
@@ -37,11 +87,11 @@ export function isCompressibleResponse(res: Response): boolean {
 export async function maybeGzipResponse(req: Request, res: Response | undefined | void): Promise<Response | undefined> {
   if (!res) return res as undefined;
   if (req.method === "HEAD" || !wantsGzip(req) || !isCompressibleResponse(res)) return res;
-  const raw = new Uint8Array(await res.arrayBuffer());
-  if (raw.byteLength < GZIP_MIN_BYTES) {
-    return new Response(raw, { status: res.status, statusText: res.statusText, headers: res.headers });
+  const got = await gzipCached(gzipKeys.get(res), async () => new Uint8Array(await res.arrayBuffer()));
+  if (!got.gz) {
+    return new Response(got.raw, { status: res.status, statusText: res.statusText, headers: res.headers });
   }
-  const gz = Bun.gzipSync(raw);
+  const gz = got.gz;
   const headers = new Headers(res.headers);
   headers.set("Content-Encoding", "gzip");
   headers.set("Content-Length", String(gz.byteLength));

@@ -61,6 +61,7 @@ import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js"
 import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { handleRequirementsRequest } from "./requirements.js";
+import { recordRouteTiming, routeStats } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
@@ -903,7 +904,8 @@ return Bun.serve({
 
   async fetch(req, server) {
     // 2026-09-16 —— 所有 JSON/文本响应在客户端要求时 gzip(见 http-gzip.ts);SSE/流式/二进制原样。
-    return maybeGzipResponse(req, explainExpiredSession(req, await (async (): Promise<Response | undefined> => {
+    // 2026-09-30 —— 每个请求的路由形状 + 耗时进内存环(route-timing.ts),GET /api/stats/routes 看谁在吃 CPU。
+    return recordRouteTiming(req, performance.now(), await maybeGzipResponse(req, explainExpiredSession(req, await (async (): Promise<Response | undefined> => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     // ── CORS preflight ──
@@ -2125,6 +2127,16 @@ return Bun.serve({
       scope: restScope,
     });
     if (requirementsResponse) return withCors(req, requirementsResponse);
+
+    // ── REST: per-route timing (ops-only, same gate as /api/stats/sse) ──
+    // ?minutes=N(默认 15,最多 1440):最近 N 分钟里每个路由的次数、总耗时、p95、最大、字节。
+    if (url.pathname === "/api/stats/routes" && req.method === "GET") {
+      if (restAuth && !isAdmin) {
+        return withCors(req, Response.json({ ok: false, error: "admin or master token required" }, { status: 403 }));
+      }
+      const minutes = Math.min(Math.max(Number(url.searchParams.get("minutes")) || 15, 1), 1440);
+      return withCors(req, Response.json({ ok: true, ...routeStats(minutes * 60_000) }));
+    }
 
     // ── #473 REST: SSE connection detail (ops-only) ──
     // The per-key breakdown /health used to expose anonymously: keys are
@@ -4235,7 +4247,7 @@ Security: ${SECURITY_LABEL}
 `,
       { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } }   // #426
     ));
-    })()));
+    })())));
   },
 
   // ── WebSocket handler for tmux terminal streaming ──
