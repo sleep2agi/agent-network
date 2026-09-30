@@ -5784,7 +5784,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_list",
-    "List requirement tasks in your network. Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived. Newest first, max 500. Each task carries children {total, done}.",
+    "List requirement tasks in your network. Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q = search title / description / owner, agent and participant names / project name / tags (space-separated terms are ANDed). Newest first, 500 per page by default (limit ≤ 1000); has_more + next_cursor → pass cursor for the next page. Each task carries children {total, done}.",
     {
       network_id: z.string().max(200).optional(),
       seq: z.number().int().positive().optional().describe("short number (#N) of one task in this network"),
@@ -5796,11 +5796,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       external_ref: z.string().max(200).optional(),
       include_archived: z.boolean().optional(),
       parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
-      top_level: z.boolean().optional(),
+      top_level: z.boolean().optional(), q: z.string().max(200).optional(), limit: z.number().int().min(1).max(1000).optional(), cursor: z.string().max(600).optional(),
     },
     async (args) => {
       const q = new URLSearchParams();
-      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id", "q", "limit", "cursor"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
       if (args.include_archived) q.set("include_archived", "1");
       if (args.top_level) q.set("top_level", "1");
       return requirementsCall("GET", `/api/requirements${q.size ? `?${q}` : ""}`, args.network_id);

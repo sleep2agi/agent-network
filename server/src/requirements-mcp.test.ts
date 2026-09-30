@@ -109,6 +109,12 @@ describe("requirements MCP tools", () => {
       expect((await s.call("requirements_list", { parent_id: id })).requirements.map((r: any) => r.id)).toEqual([child.requirement.id]);
       expect((await s.call("requirements_list", { top_level: true, include_archived: true })).requirements.some((r: any) => r.id === child.requirement.id)).toBe(false);
       expect((await s.call("requirements_update", { id, parent_id: child.requirement.id })).error).toBe("parent_cycle");
+      // q= / limit / cursor 透传到 GET /api/requirements
+      expect((await s.call("requirements_list", { q: "子需求" })).requirements.map((r: any) => r.id)).toEqual([child.requirement.id]);
+      const page = await s.call("requirements_list", { limit: 1, include_archived: true });
+      expect(page.requirements.length).toBe(1);
+      expect(page.has_more).toBe(true);
+      expect((await s.call("requirements_list", { limit: 1, include_archived: true, cursor: page.next_cursor })).requirements[0].id).not.toBe(page.requirements[0].id);
     } finally { await s.close(); }
   });
 
