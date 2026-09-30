@@ -5,7 +5,7 @@ import { db } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, visibleAgents } from "./agent-access.js";
-import { ensureRequirementIndexes, ensureRequirementProjects, migrateRequirementAgentOwners, migrateRequirementPriorityCheck } from "./requirements-migrate.js";
+import { ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
@@ -13,6 +13,7 @@ migrateRequirementPriorityCheck(db);
 migrateRequirementAgentOwners(db);
 ensureRequirementProjects(db);
 ensureRequirementIndexes(db);
+ensureRequirementSeq(db);
 
 type RequestAuth = { userId: string; networkId: string | null; username: string; tokenId?: string | null; tokenName?: string | null } | null;
 
@@ -58,6 +59,7 @@ type Row = {
   issues_json: string | null;
   tags_json: string | null;
   created_at: string;
+  seq: number | null;
 };
 
 function jsonError(error: string, status: number): Response {
@@ -283,6 +285,8 @@ function toPublic(row: Row) {
     project_id: row.project_id || null,
     participants: JSON.parse(row.participants_json || '[]'),
     id: row.requirement_id,
+    // 短号:每个网络自己的 #1、#2…(不回收)。界面显示 #N;GET / PATCH / MCP 的 id 也收「#N」。旧 App 忽略它。
+    seq: row.seq == null ? null : Number(row.seq),
     name: row.title,
     priority: row.priority,
     assignee: row.assignee || "",
@@ -357,7 +361,7 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
   };
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, " +
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, seq, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0) AS children_total, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
@@ -452,7 +456,7 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
   return header.split(",").some(tag => tag.trim() === "*" || bare(tag) === bare(etag));
 }
 
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -602,12 +606,13 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId)); } catch (e) { return jsonError((e as Error).message, 400); }
   const actor = JSON.stringify(actorOf(ctx));
   try {
-    db.run(
+    // 领号和插入在同一个事务里:插入被唯一索引挡下时,号一起回滚,不留空洞。
+    db.transaction(() => db.run(
       `INSERT INTO requirements
-       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json, start_on)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22, ?23)`,
-      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags), start || null],
-    );
+       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json, start_on, seq)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22, ?23, ?24)`,
+      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags), start || null, nextRequirementSeq(db, networkId)],
+    ));
   } catch {
     // 并发的同一个 external_ref / client_id:唯一索引挡住了第二个,回已有的那条。
     if (ref) {
@@ -726,14 +731,30 @@ function withLegacyOwner(requirement: ReturnType<typeof toPublic>, coerced: Pers
   return { ok: true, requirement: { ...requirement, owner: coerced }, owner_coerced_to_agent_owner: true };
 }
 
-function scopedRow(ctx: RequirementsRequestContext, id: string): Row | undefined {
-  const params: unknown[] = [id];
-  let sql = `SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`;
-  sql = addHumanNetworkScope(sql, params, ctx.scope);
-  return db.get<Row>(sql, ...params) ?? undefined;
+/** 「#123」→ 123;别的形状(包括裸数字)→ null,仍按 requirement_id 查。 */
+export function seqFromId(id: string): number | null {
+  const m = /^#([1-9]\d{0,14})$/.exec(id.trim());
+  return m ? Number(m[1]) : null;
 }
 
-/** GET 的筛选(同步方 / MCP 用):status、project_id、owner / agent_owner(kind:id)、updated_since、external_ref、parent_id / top_level、include_archived。 */
+/**
+ * 按 id 或「#N」找调用者作用域里的那张卡。短号只在一个网络里唯一:作用域跨多个网络、又各有一张 #N 时
+ * 不猜,回 409 ambiguous_seq(带 ?network_id= 再查)。
+ */
+function scopedRow(ctx: RequirementsRequestContext, id: string): Row | Response {
+  const seq = seqFromId(id);
+  const params: unknown[] = [seq ?? id];
+  let sql = `SELECT ${SELECT} FROM requirements WHERE ${seq === null ? "requirement_id" : "seq"} = ?1`;
+  sql = addHumanNetworkScope(sql, params, ctx.scope);
+  const rows = db.all<Row>(`${sql} LIMIT 2`, ...params);
+  if (rows.length > 1) {
+    const networks = rows.map(r => r.network_id);
+    return Response.json({ ok: false, error: "ambiguous_seq", networks, message: `#${seq} exists in more than one network you can see (${networks.join(", ")}); pass network_id to pick one` }, { status: 409 });
+  }
+  return rows[0] ?? jsonError("requirement_not_found", 404);
+}
+
+/** GET 的筛选(同步方 / MCP 用):seq(短号)、status、project_id、owner / agent_owner(kind:id)、updated_since、external_ref、parent_id / top_level、include_archived。 */
 function listFilters(url: URL, sql: string, params: unknown[], ctx?: RequirementsRequestContext): string | Response {
   const q = url.searchParams;
   const status = q.get("status");
@@ -758,6 +779,11 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
     const ms = Date.parse(since);
     if (!Number.isFinite(ms)) return jsonError("invalid_updated_since", 400);
     sql += ` AND updated_at >= ?${params.push(new Date(ms).toISOString())}`;
+  }
+  const seq = q.get("seq");
+  if (seq !== null) {
+    if (!/^[1-9]\d{0,14}$/.test(seq)) return jsonError("invalid_seq", 400);
+    sql += ` AND seq = ?${params.push(Number(seq))}`;
   }
   const ref = q.get("external_ref");
   if (ref !== null) sql += ` AND external_ref = ?${params.push(ref)}`;
@@ -859,7 +885,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
     if (typeof body.done !== "boolean") return jsonError("invalid_done", 400);
     const row = scopedRow(ctx, decodeURIComponent(itemMatch[1]));
-    if (!row) return jsonError("requirement_not_found", 404);
+    if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
     const items = storedChecklist(row.checklist_json);
@@ -877,12 +903,12 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   const id = decodeURIComponent(match[1]);
   if (req.method === "GET") {
     const row = scopedRow(ctx, id);
-    return row ? Response.json({ ok: true, requirement: toPublicFor(ctx, row) }) : jsonError("requirement_not_found", 404);
+    return row instanceof Response ? row : Response.json({ ok: true, requirement: toPublicFor(ctx, row) });
   }
   if (req.method === "DELETE") {
     // 删除只给人(节点令牌在入口已被拒):Agent 用 archived 归档。
     const row = scopedRow(ctx, id);
-    if (!row) return jsonError("requirement_not_found", 404);
+    if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
     // 子需求不跟着删:先解挂(变成顶层),再删父卡。
     db.run("UPDATE requirements SET parent_id = NULL WHERE parent_id = ?1", [row.requirement_id]);
@@ -894,6 +920,6 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
   if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
   const row = scopedRow(ctx, id);
-  if (!row) return jsonError("requirement_not_found", 404);
+  if (row instanceof Response) return row;
   return patchRequirement(ctx, row, body);
 }

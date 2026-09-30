@@ -5780,12 +5780,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   };
   const pick = (args: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => args[k] !== undefined).map(k => [k, args[k]]));
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
+  const REQ_ID_DESC = "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)";
 
   server.tool(
     "requirements_list",
-    "List requirement tasks in your network. Filters: status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived. Newest first, max 500. Each task carries children {total, done}.",
+    "List requirement tasks in your network. Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived. Newest first, max 500. Each task carries children {total, done}.",
     {
       network_id: z.string().max(200).optional(),
+      seq: z.number().int().positive().optional().describe("short number (#N) of one task in this network"),
       status: z.enum(["pool", "doing", "done"]).optional(),
       project_id: z.string().max(200).optional(),
       owner: z.string().max(210).optional(),
@@ -5798,7 +5800,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async (args) => {
       const q = new URLSearchParams();
-      for (const k of ["status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
       if (args.include_archived) q.set("include_archived", "1");
       if (args.top_level) q.set("top_level", "1");
       return requirementsCall("GET", `/api/requirements${q.size ? `?${q}` : ""}`, args.network_id);
@@ -5807,8 +5809,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_get",
-    "Get one requirement task by id (with description, checklist, owners, project, external_ref).",
-    { id: z.string().min(1).max(200), network_id: z.string().max(200).optional() },
+    "Get one requirement task by id or by its short number \"#N\" (with description, checklist, owners, project, external_ref, seq).",
+    { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional() },
     async ({ id, network_id }) => requirementsCall("GET", `/api/requirements/${encodeURIComponent(id)}`, network_id),
   );
 
@@ -5821,15 +5823,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_update",
-    "Patch a requirement task; omitted fields keep their value. archived=true hides it from the default list (agents cannot delete).",
-    { id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), ...reqFields, external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
+    "Patch a requirement task (id or \"#N\"); omitted fields keep their value. archived=true hides it from the default list (agents cannot delete).",
+    { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional(), ...reqFields, external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
     async (args) => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(args, REQ_WRITE_KEYS)),
   );
 
   server.tool(
     "requirements_checklist_toggle",
     "Set one checklist item done / not done (only that item is written, so concurrent edits of other items are kept).",
-    { id: z.string().min(1).max(200), item_id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/), done: z.boolean(), network_id: z.string().max(200).optional() },
+    { id: z.string().min(1).max(200).describe(REQ_ID_DESC), item_id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/), done: z.boolean(), network_id: z.string().max(200).optional() },
     async ({ id, item_id, done, network_id }) => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(id)}/checklist/${encodeURIComponent(item_id)}`, network_id, { done }),
   );
 
