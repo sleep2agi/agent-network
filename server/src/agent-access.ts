@@ -88,6 +88,9 @@ export function listAgentGrants(networkId: string, userId: string): AgentGrant[]
  * node_id 授权同时带出:nodes 表里这个节点的 alias、sessions 表里同 node_id 的会话 alias
  * (改名后 sessions 先于 nodes 更新的窗口里两者可能不同,两个都算)。都限定在同一网络。
  */
+/** visibleAgents 一次查询里最多放多少个节点 id(绑定参数上限;1000 个授权节点 = 2 次查询)。 */
+export const VISIBLE_AGENTS_CHUNK = 500;
+
 export function visibleAgents(userId: string, networkId: string): VisibleAgents {
   const aliases = new Set<string>();
   const nodeIds = new Set<string>();
@@ -96,20 +99,34 @@ export function visibleAgents(userId: string, networkId: string): VisibleAgents 
   // RFC-038 §8:组授权展开成「该组此刻的成员节点」—— 每次现算,组里新加的节点下一次请求就可见。
   // 只并同网络、且 nodes 表里还在的节点;可对话取并集(直接授权或任一组给了就算)。
   const grants: AgentGrant[] = [...listAgentGrants(networkId, userId), ...groupGrantNodes(networkId, userId)];
+  // #2133:所有授权节点的 alias 一次查完(原来每个节点单独查一次 nodes ∪ sessions:300 条授权 ≈ 300 次查询,
+  // 而受限成员的每次 /api/status 轮询都走这里)。结果与原实现逐字一致:授权按上面数组的顺序,
+  // 同一节点内的 alias 按 UNION 的去重升序 —— agent-access-batch.test.ts 在随机夹具上逐字比对。
+  // 分块只为绑定参数个数的上限;同一节点的所有 alias 必在同一块里,顺序不受分块影响。
+  const grantedNodeIds = [...new Set(grants.map((grant) => grant.node_id).filter((id): id is string => !!id))];
+  const aliasesByNode = new Map<string, string[]>();
+  for (let start = 0; start < grantedNodeIds.length; start += VISIBLE_AGENTS_CHUNK) {
+    const chunk = grantedNodeIds.slice(start, start + VISIBLE_AGENTS_CHUNK);
+    const inList = chunk.map((_, i) => `?${i + 2}`).join(", ");
+    for (const row of db.all<{ node_id: string; alias: string | null }>(
+      `SELECT node_id, alias FROM nodes WHERE network_id = ?1 AND node_id IN (${inList})
+       UNION SELECT node_id, alias FROM sessions WHERE network_id = ?1 AND node_id IN (${inList})
+       ORDER BY node_id, alias`,
+      networkId, ...chunk,
+    )) {
+      if (!row.alias) continue;
+      const list = aliasesByNode.get(row.node_id);
+      if (list) list.push(row.alias); else aliasesByNode.set(row.node_id, [row.alias]);
+    }
+  }
   for (const grant of grants) {
-    const grantAliases: string[] = [];
+    let grantAliases: readonly string[] = [];
     if (grant.node_id) {
       nodeIds.add(grant.node_id);
       if (grant.can_message) messageNodeIds.add(grant.node_id);
-      for (const row of db.all<{ alias: string | null }>(
-        `SELECT alias FROM nodes WHERE node_id = ?1 AND network_id = ?2
-         UNION SELECT alias FROM sessions WHERE node_id = ?1 AND network_id = ?2`,
-        grant.node_id, networkId,
-      )) {
-        if (row.alias) grantAliases.push(row.alias);
-      }
+      grantAliases = aliasesByNode.get(grant.node_id) ?? [];
     } else if (grant.alias) {
-      grantAliases.push(grant.alias);
+      grantAliases = [grant.alias];
     }
     for (const alias of grantAliases) {
       aliases.add(alias);

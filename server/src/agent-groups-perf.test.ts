@@ -128,6 +128,29 @@ describe("Agent 分组:性能守卫(50 组 × 300 节点)", () => {
     expect(r.delta).toBeLessThanOrEqual(bound(r.a));
   }, PERF_TIMEOUT_MS);
 
+  // #2133:visibleAgents() 以前每个授权节点查一次 alias(300 条 ≈ 28–43 ms)。这两条钉住它不再回到 N+1:
+  // 查询条数(直接授权 1 + 组授权 1 + alias 1)是主判据,不受机器负载影响;绝对上限只兜底 ——
+  // 本机实测 ≈2.6–3.7 ms(负载 ~5),15 ms 给 test638 那种 --cpus=1 双份并发留足余量,仍远低于 N+1 的 28 ms。
+  const ABS_MS = 15;
+  test(`visibleAgents() at 300 grants stays under ${ABS_MS} ms (direct and via groups)`, () => {
+    const t = pairedDelta(() => { visibleAgents(bob.id, NET); }, () => { visibleAgents(alice.id, NET); }, 40);
+    console.log(`[perf] visibleAgents absolute: direct-300=${t.a.toFixed(2)}ms groups-50x6=${t.b.toFixed(2)}ms bound=${ABS_MS}ms`);
+    expect(t.a).toBeLessThan(ABS_MS);
+    expect(t.b).toBeLessThan(ABS_MS);
+  });
+
+  test("visibleAgents() makes a fixed number of queries, not one per granted node (#2133)", () => {
+    for (const who of [bob, alice]) {
+      let queries = 0;
+      const all = db.all.bind(db), get = db.get.bind(db);
+      (db as any).all = (...a: any[]) => { queries++; return (all as any)(...a); };
+      (db as any).get = (...a: any[]) => { queries++; return (get as any)(...a); };
+      try { visibleAgents(who.id, NET); } finally { (db as any).all = all; (db as any).get = get; }
+      console.log(`[perf] visibleAgents queries (${who === bob ? "direct-300" : "groups-50x6"}): ${queries}`);
+      expect(queries).toBeLessThanOrEqual(3);
+    }
+  });
+
   test(`受限成员 GET /api/status:组授权比等量直接授权多出 ≤ max(${BOUND_MS} ms, 基线 15%)`, async () => {
     const hit = async (token: string) => {
       const r = await fetch(`${BASE}/api/status?network_id=${NET}`, { headers: json(token) });
