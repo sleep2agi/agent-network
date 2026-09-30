@@ -4,7 +4,7 @@
 // 场景:NET 里 300 个节点;50 个组,每组 6 个节点(合起来覆盖全部 300 个)。
 //   baseline —— bob 直接授权这 300 个节点(没有组);
 //   groups   —— alice 授权这 50 个组(没有直接授权),可见集合与 bob 完全相同。
-// 两人看到的 Agent 一样多,差值就是「按组展开」本身的代价。团队要求 ≈2 ms 以内(本机实测 −0.5~+1.9 ms);
+// 两人看到的 Agent 一样多,差值就是「按组展开」本身的代价(交替量 15 轮,取每轮差值的中位数)。团队要求 ≈2 ms 以内(本机实测 −0.5~+1.9 ms);
 // 断言放宽到 max(5 ms, 基线的 15%)—— CI 容器比本机慢时两边一起变慢,绝对差也跟着放大。数字打印出来。
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
@@ -29,6 +29,11 @@ const GROUPS = 50;
 const PER_GROUP = NODES / GROUPS;
 const BOUND_MS = 5;
 const bound = (base: number) => Math.max(BOUND_MS, base * 0.15);
+// CI 容器里一次 visibleAgents() 约 65 ms(本机约 28 ms):原来 40 次 × 两边再加预热,顶破了 bun 默认的 5 s 单测超时(#2131 CI 实测)。
+// 15 次取中位数足够稳;性能用例另给显式超时。
+const WARMUP = 3;
+const ITER = 15;
+const PERF_TIMEOUT_MS = 60_000;
 
 const json = (token: string) => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 async function send(token: string, method: string, path: string, payload?: unknown) {
@@ -36,17 +41,30 @@ async function send(token: string, method: string, path: string, payload?: unkno
   return { status: res.status, body: await res.json().catch(() => null) as any };
 }
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
-function time(fn: () => void, n: number): number {
-  for (let i = 0; i < 5; i++) fn(); // warm-up
-  const xs: number[] = [];
-  for (let i = 0; i < n; i++) { const t = performance.now(); fn(); xs.push(performance.now() - t); }
-  return median(xs);
+/**
+ * 交替计时:每一轮先量 A 再量 B,取「B − A」的中位数(再附上两边各自的中位数给人看)。
+ * 不能 A 连量 N 次再 B 连量 N 次:test638 在同一台机器上并发跑两份 aggregate,负载随时间变,
+ * 两段分开量时差值被负载漂移主导(--cpus=1 实测差出 26–33 ms,真实差值 < 1 ms)。
+ */
+function pairedDelta(a: () => void, b: () => void, n: number): { a: number; b: number; delta: number } {
+  for (let i = 0; i < WARMUP; i++) { a(); b(); }
+  const as: number[] = [], bs: number[] = [], ds: number[] = [];
+  for (let i = 0; i < n; i++) {
+    let t = performance.now(); a(); const ta = performance.now() - t;
+    t = performance.now(); b(); const tb = performance.now() - t;
+    as.push(ta); bs.push(tb); ds.push(tb - ta);
+  }
+  return { a: median(as), b: median(bs), delta: median(ds) };
 }
-async function timeAsync(fn: () => Promise<void>, n: number): Promise<number> {
-  for (let i = 0; i < 5; i++) await fn();
-  const xs: number[] = [];
-  for (let i = 0; i < n; i++) { const t = performance.now(); await fn(); xs.push(performance.now() - t); }
-  return median(xs);
+async function pairedDeltaAsync(a: () => Promise<void>, b: () => Promise<void>, n: number): Promise<{ a: number; b: number; delta: number }> {
+  for (let i = 0; i < WARMUP; i++) { await a(); await b(); }
+  const as: number[] = [], bs: number[] = [], ds: number[] = [];
+  for (let i = 0; i < n; i++) {
+    let t = performance.now(); await a(); const ta = performance.now() - t;
+    t = performance.now(); await b(); const tb = performance.now() - t;
+    as.push(ta); bs.push(tb); ds.push(tb - ta);
+  }
+  return { a: median(as), b: median(bs), delta: median(ds) };
 }
 
 beforeAll(async () => {
@@ -105,11 +123,10 @@ describe("Agent 分组:性能守卫(50 组 × 300 节点)", () => {
   });
 
   test(`visibleAgents():组展开的额外开销 ≤ max(${BOUND_MS} ms, 基线 15%)(目标 ≈2 ms)`, () => {
-    const base = time(() => { visibleAgents(bob.id, NET); }, 40);
-    const groups = time(() => { visibleAgents(alice.id, NET); }, 40);
-    console.log(`[perf] visibleAgents median: direct-300=${base.toFixed(2)}ms groups-50x6=${groups.toFixed(2)}ms delta=${(groups - base).toFixed(2)}ms`);
-    expect(groups - base).toBeLessThanOrEqual(bound(base));
-  });
+    const r = pairedDelta(() => { visibleAgents(bob.id, NET); }, () => { visibleAgents(alice.id, NET); }, ITER);
+    console.log(`[perf] visibleAgents median: direct-300=${r.a.toFixed(2)}ms groups-50x6=${r.b.toFixed(2)}ms paired-delta=${r.delta.toFixed(2)}ms bound=${bound(r.a).toFixed(2)}ms`);
+    expect(r.delta).toBeLessThanOrEqual(bound(r.a));
+  }, PERF_TIMEOUT_MS);
 
   test(`受限成员 GET /api/status:组授权比等量直接授权多出 ≤ max(${BOUND_MS} ms, 基线 15%)`, async () => {
     const hit = async (token: string) => {
@@ -117,11 +134,10 @@ describe("Agent 分组:性能守卫(50 组 × 300 节点)", () => {
       const body = await r.json() as any;
       if ((body.sessions ?? []).length !== NODES) throw new Error(`expected ${NODES} sessions, got ${(body.sessions ?? []).length}`);
     };
-    const base = await timeAsync(() => hit(bob.token), 20);
-    const groups = await timeAsync(() => hit(alice.token), 20);
-    console.log(`[perf] GET /api/status median: direct-300=${base.toFixed(2)}ms groups-50x6=${groups.toFixed(2)}ms delta=${(groups - base).toFixed(2)}ms bound=${bound(base).toFixed(2)}ms`);
-    expect(groups - base).toBeLessThanOrEqual(bound(base));
-  });
+    const r = await pairedDeltaAsync(() => hit(bob.token), () => hit(alice.token), ITER);
+    console.log(`[perf] GET /api/status median: direct-300=${r.a.toFixed(2)}ms groups-50x6=${r.b.toFixed(2)}ms paired-delta=${r.delta.toFixed(2)}ms bound=${bound(r.a).toFixed(2)}ms`);
+    expect(r.delta).toBeLessThanOrEqual(bound(r.a));
+  }, PERF_TIMEOUT_MS);
 
   test("EXPLAIN QUERY PLAN:组展开走索引,不全表扫描", () => {
     const plan = db.all<{ detail: string }>(
