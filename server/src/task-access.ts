@@ -29,8 +29,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_project_grants_project ON network_member_project_grants(project_id);
 `);
 
-/** 新成员(管理员建号 / POST members / 邀请码)默认的任务范围。Vincent 若定「新成员也看全部」,改这一行。 */
-export const NEW_MEMBER_TASK_ACCESS: TaskAccessMode = "scoped";
+/**
+ * 新成员(管理员建号 / POST members / 邀请码)默认的任务范围。
+ * 暂时是 'all':app ≤0.2.163 没有任务权限界面,从那些 app 加的成员若默认 scoped 会一张卡都看不到,
+ * 管理员也没法在那些 app 里放宽。等 owner 的设备都 ≥0.2.164 且他确认后,改回 'scoped'(只改这一行)。
+ * 显式 task_access='scoped'(POST members / PUT task-grants)不受这个默认值影响。
+ */
+export const NEW_MEMBER_TASK_ACCESS: TaskAccessMode = "all";
 
 export type TaskAccessMode = "all" | "scoped";
 export type ProjectGrant = { project_id: string; can_edit: boolean };

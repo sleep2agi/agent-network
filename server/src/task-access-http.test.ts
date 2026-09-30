@@ -1,9 +1,10 @@
 // 任务(需求卡)的人员权限(RFC-038 §9)—— HTTP 集成测试(真实 Bun.serve,私有端口,临时库)。
 //
 // 场景:Hub 管理员 admin 的网络 NET。成员:
-//   alice —— 新建成员(默认 scoped),授权 P1(只看)、P2(可改);
+//   alice —— 新建成员,经授权接口显式设成 scoped,授权 P1(只看)、P2(可改);
+//            (新成员默认值 NEW_MEMBER_TASK_ACCESS 暂时是 'all',见「默认值与授权接口」)
 //   carol —— 升级前的老成员(task_access='all'):行为必须与今天逐字相同;
-//   vic   —— scoped 的 viewer,授权 P3(只看)。
+//   vic   —— 经授权接口显式设成 scoped 的 viewer,授权 P3(只看)。
 // admin 建的卡:c_own(负责人 alice)、c_part(参与人 alice)、c_p1 / c_p2 / c_p3(在项目里)、c_other(与 alice 无关)。
 // 正向:相关卡与授权项目看得见;负责 / 自建 / can_edit 能改;老成员与 owner 照旧;MCP 与 REST 一致。
 // 反向:看不见的卡在 GET / PATCH / DELETE / 勾子任务 / #N 上与不存在的卡逐字节相同;只读卡 403;
@@ -104,9 +105,9 @@ beforeAll(async () => {
   await card("ta-p3", { project_id: P["ta-P3"] });
   await card("ta-other", { tags: ["secret-tag"], client_id: "admin-client-1" });
 
-  const g = await send(admin.token, "PUT", `/api/networks/${NET}/members/${alice.id}/task-grants`, { project_grants: [{ project_id: P["ta-P1"] }, { project_id: P["ta-P2"], can_edit: true }] });
+  const g = await send(admin.token, "PUT", `/api/networks/${NET}/members/${alice.id}/task-grants`, { task_access: "scoped", project_grants: [{ project_id: P["ta-P1"] }, { project_id: P["ta-P2"], can_edit: true }] });
   expect(g.status).toBe(200);
-  const gv = await send(admin.token, "PUT", `/api/networks/${NET}/members/${vic.id}/task-grants`, { project_grants: [P["ta-P3"]] });
+  const gv = await send(admin.token, "PUT", `/api/networks/${NET}/members/${vic.id}/task-grants`, { task_access: "scoped", project_grants: [P["ta-P3"]] });
   expect(gv.status).toBe(200);
 }, 30_000);
 
@@ -116,8 +117,40 @@ afterAll(() => {
 });
 
 describe("默认值与授权接口", () => {
-  test("新成员默认 scoped;常量就是 'scoped';升级前的行是 'all'", async () => {
-    expect(NEW_MEMBER_TASK_ACCESS).toBe("scoped");
+  test("新成员默认 all:常量是 'all';管理员建号 / POST members / 邀请码加入都落在 all 且看得见全部卡", async () => {
+    expect(NEW_MEMBER_TASK_ACCESS).toBe("all");
+    const all = ["ta-other", "ta-own", "ta-p1", "ta-p2", "ta-p3", "ta-part"];
+    const stamp = Date.now();
+    // 管理员建号
+    const u1 = { username: `ta_new1_${stamp}`, password: PW, network_id: NET, role: "member" };
+    expect((await send(admin.token, "POST", "/api/admin/users", u1)).status).toBe(200);
+    const l1 = await send("", "POST", "/api/auth/login", { username: u1.username, password: PW });
+    // POST /members 不带 task_access
+    const u2 = register(`ta_new2_${stamp}`, PW);
+    expect((await send(admin.token, "POST", `/api/networks/${NET}/members`, { user_id: u2.user!.user_id, role: "member" })).status).toBe(200);
+    // 邀请码加入
+    const inv = await send(admin.token, "POST", `/api/networks/${NET}/invite`, { role: "member" });
+    const u3 = register(`ta_new3_${stamp}`, PW);
+    expect((await send(u3.token!, "POST", "/api/networks/join", { invite_code: inv.body.invite_code })).status).toBe(200);
+    for (const [id, token] of [[l1.body.user.user_id, l1.body.token], [u2.user!.user_id, u2.token!], [u3.user!.user_id, u3.token!]] as [string, string][]) {
+      const g = await get(admin.token, `/api/networks/${NET}/members/${id}/task-grants`);
+      expect(g.body.task_access).toBe("all");
+      expect(g.body.restricted).toBe(false);
+      expect(await listIds(token)).toEqual(all);
+      const me = await get(token, "/api/auth/me");
+      expect(me.body.networks.find((n: any) => n.network_id === NET).task_access).toBe("all");
+    }
+    // POST /members 显式传 scoped 仍然生效
+    const u4 = register(`ta_new4_${stamp}`, PW);
+    expect((await send(admin.token, "POST", `/api/networks/${NET}/members`, { user_id: u4.user!.user_id, role: "member", task_access: "scoped" })).status).toBe(200);
+    expect((await get(admin.token, `/api/networks/${NET}/members/${u4.user!.user_id}/task-grants`)).body.task_access).toBe("scoped");
+    expect(await listIds(u4.token!)).toEqual([]);
+    for (const id of [l1.body.user.user_id, u2.user!.user_id, u3.user!.user_id, u4.user!.user_id]) {
+      expect((await send(admin.token, "DELETE", `/api/networks/${NET}/members/${id}`)).status).toBe(200);
+    }
+  });
+
+  test("经授权接口显式设成 scoped 的成员:task_access / restricted / 授权与改默认值之前逐字相同;升级前的行是 'all'", async () => {
     const r = await get(admin.token, `/api/networks/${NET}/members/${alice.id}/task-grants`);
     expect(r.body.task_access).toBe("scoped");
     expect(r.body.restricted).toBe(true);
