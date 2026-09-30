@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { addNetworkMember, createNetworkTokenForNode, register } from "./auth.js";
 import { db } from "./db.js";
@@ -24,6 +25,31 @@ async function api(token: string, path: string, init?: RequestInit) {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init?.headers || {}) },
   });
   return { status: res.status, body: await res.json() as any };
+}
+
+// #2135 —— 每条测试自己建它要断言的数据:不读前面测试留下的 schedule / run 行,也不靠执行顺序。
+// 单跑任何一条(-t)、从 server/ 或仓根跑,结果都一样。
+async function createSchedule(name: string, extra: Record<string, unknown> = {}) {
+  const res = await api(ownerToken, "/api/scheduled-tasks", {
+    method: "POST",
+    body: JSON.stringify({
+      network_id: networkId,
+      name,
+      target_node_id: nodeId,
+      task: `${name} task`,
+      timezone: "UTC",
+      schedule: { type: "interval", every_seconds: 60 },
+      ...extra,
+    }),
+  });
+  expect(res.status).toBe(201);
+  return res.body.schedule as { schedule_id: string; revision: number; [key: string]: any };
+}
+
+/** Make exactly this schedule due at `at` (default: a minute ago). */
+function makeDue(scheduleId: string, at = new Date(Date.now() - 60_000).toISOString()): string {
+  db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [at, scheduleId]);
+  return at;
 }
 
 // 30s 而不是 bun 默认的 5s:这个 hook 跑 register()(KDF)+bootServer(),
@@ -66,8 +92,12 @@ afterAll(() => {
 });
 
 describe("Hub scheduled task API and dispatcher", () => {
-  let scheduleId = "";
-  let revision = 0;
+  // runDueScheduledTasks() sweeps every due schedule in the DB. Park whatever an earlier test
+  // left due (e.g. the race schedule when its workers could not start), so each test's
+  // processed counts only ever see the schedules it made due itself.
+  beforeEach(() => {
+    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE next_run_at IS NOT NULL", [new Date(Date.now() + 24 * 3600_000).toISOString()]);
+  });
 
   test("schedule math supports timezone-aware daily and weekly forms", () => {
     const daily = nextOccurrence({ type: "daily", time: "09:30" }, "Asia/Shanghai", new Date("2026-08-09T02:00:00Z"));
@@ -130,11 +160,10 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(created.body.schedule.misfire_policy).toBe("catch_up_once");
     expect(created.body.schedule.created_by).toBeUndefined();
     expect(created.body.schedule.schedule_json).toBeUndefined();
-    scheduleId = created.body.schedule.schedule_id;
-    revision = created.body.schedule.revision;
   });
 
   test("network scope hides schedules from foreign users and viewers may read", async () => {
+    const scheduleId = (await createSchedule("Scope probe")).schedule_id;
     const visible = await api(viewerToken, `/api/scheduled-tasks?network_id=${encodeURIComponent(networkId)}`);
     expect(visible.status).toBe(200);
     expect(visible.body.schedules.map((x: any) => x.schedule_id)).toContain(scheduleId);
@@ -145,9 +174,9 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(hidden.status).toBe(403);
   });
 
-  test("due occurrence creates ordinary inbox/task/run atomically and is idempotent", () => {
-    const due = new Date(Date.now() - 120_000).toISOString();
-    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [due, scheduleId]);
+  test("due occurrence creates ordinary inbox/task/run atomically and is idempotent", async () => {
+    const scheduleId = (await createSchedule("Due occurrence probe")).schedule_id;
+    makeDue(scheduleId, new Date(Date.now() - 120_000).toISOString());
     expect(runDueScheduledTasks().processed).toBe(1);
     const run = db.get<any>("SELECT * FROM scheduled_task_runs WHERE schedule_id = ?1 ORDER BY created_at DESC LIMIT 1", scheduleId)!;
     expect(["delivered", "queued"]).toContain(run.status);
@@ -289,11 +318,14 @@ describe("Hub scheduled task API and dispatcher", () => {
 
     const raceDir = mkdtempSync(join(dir, "race-"));
     const gate = join(raceDir, "go");
-    const workerPath = "tests/test601-hub-scheduled-tasks/race-worker.ts";
+    // Resolved from this file, not from the current directory (#2135): `bun test` from server/
+    // used to look for tests/… under server/ and never start the workers.
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+    const workerPath = join(repoRoot, "tests", "test601-hub-scheduled-tasks", "race-worker.ts");
     const dbPath = activeDbPath;
     const spawnWorker = (id: string) => Bun.spawn(
       ["bun", workerPath, dbPath, raceScheduleId, due, join(raceDir, `ready-${id}`), gate],
-      { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: { ...process.env, COMMHUB_DB: dbPath } },
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe", env: { ...process.env, COMMHUB_DB: dbPath } },
     );
     const waitReady = async (id: string) => {
       const readyPath = join(raceDir, `ready-${id}`);
@@ -326,16 +358,23 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM inbox WHERE meta_json LIKE '%' || ?1 || '%'", raceScheduleId)!.count).toBe(1);
   }, 20_000);
 
-  test("non-overlap skips while prior task is open; rename follows stable node_id", () => {
+  test("non-overlap skips while prior task is open; rename follows stable node_id", async () => {
+    // Its own node: the rename below must not change the node every other test targets.
+    const renameNodeId = `n_sched_rename_${Date.now()}`;
+    db.run("INSERT INTO nodes (node_id, node_name, alias, runtime, network_id) VALUES (?1, 'Rename Probe', 'scheduler-rename-probe', 'codex-sdk', ?2)", [renameNodeId, networkId]);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id) VALUES (?1, 'scheduler-rename-probe', 'idle', ?2, ?3)", [`r_rename_${Date.now()}`, renameNodeId, networkId]);
+    const scheduleId = (await createSchedule("Non-overlap probe", { target_node_id: renameNodeId })).schedule_id;
+    makeDue(scheduleId, new Date(Date.now() - 90_000).toISOString());
+    expect(runDueScheduledTasks().processed).toBe(1);
     const firstTask = db.get<{ task_id: string }>("SELECT task_id FROM scheduled_task_runs WHERE schedule_id = ?1 AND task_id IS NOT NULL LIMIT 1", scheduleId)!.task_id;
-    const due2 = new Date(Date.now() - 60_000).toISOString();
-    db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [due2, scheduleId]);
+
+    const due2 = makeDue(scheduleId);
     expect(runDueScheduledTasks().processed).toBe(1);
     expect(db.get<any>("SELECT status FROM scheduled_task_runs WHERE schedule_id = ?1 AND scheduled_for = ?2", scheduleId, due2)!.status).toBe("skipped");
 
     db.run("UPDATE tasks SET status = 'replied', completed_at = datetime('now') WHERE task_id = ?1", [firstTask]);
-    db.run("UPDATE nodes SET alias = 'scheduler-renamed' WHERE node_id = ?1 AND network_id = ?2", [nodeId, networkId]);
-    db.run("UPDATE sessions SET alias = 'scheduler-renamed' WHERE node_id = ?1 AND network_id = ?2", [nodeId, networkId]);
+    db.run("UPDATE nodes SET alias = 'scheduler-renamed' WHERE node_id = ?1 AND network_id = ?2", [renameNodeId, networkId]);
+    db.run("UPDATE sessions SET alias = 'scheduler-renamed' WHERE node_id = ?1 AND network_id = ?2", [renameNodeId, networkId]);
     const due3 = new Date(Date.now() - 30_000).toISOString();
     db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [due3, scheduleId]);
     expect(runDueScheduledTasks().processed).toBe(1);
@@ -344,6 +383,7 @@ describe("Hub scheduled task API and dispatcher", () => {
   });
 
   test("full edit validates target and policy, preserves cadence, and recomputes through DST-safe schedule math", async () => {
+    const scheduleId = (await createSchedule("Daily briefing to edit", { priority: "high", timezone: "Asia/Shanghai" })).schedule_id;
     // Pin a recognizable future occurrence so a metadata-only edit can prove
     // that it does not silently reset the interval cadence.
     const pinnedNext = new Date(Date.now() + 45 * 60_000).toISOString();
@@ -413,6 +453,7 @@ describe("Hub scheduled task API and dispatcher", () => {
   });
 
   test("two editors with one revision produce one winner and one refreshable conflict", async () => {
+    const scheduleId = (await createSchedule("Two editors probe")).schedule_id;
     const current = (await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`)).body.schedule;
     const [a, b] = await Promise.all([
       api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, {
@@ -523,8 +564,18 @@ describe("Hub scheduled task API and dispatcher", () => {
   });
 
   test("optimistic revision, pause/resume, run-now and cancel preserve history", async () => {
+    const scheduleId = (await createSchedule("History probe")).schedule_id;
+    // Its own history before the lifecycle calls: a run, a skipped overlap, and a second run.
+    makeDue(scheduleId, new Date(Date.now() - 180_000).toISOString());
+    expect(runDueScheduledTasks().processed).toBe(1);
+    makeDue(scheduleId, new Date(Date.now() - 120_000).toISOString());
+    expect(runDueScheduledTasks().processed).toBe(1);
+    db.run("UPDATE tasks SET status='replied' WHERE task_id IN (SELECT task_id FROM scheduled_task_runs WHERE schedule_id=?1)", [scheduleId]);
+    makeDue(scheduleId);
+    expect(runDueScheduledTasks().processed).toBe(1);
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM scheduled_task_runs WHERE schedule_id = ?1", scheduleId)!.n).toBe(3);
     const latest = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`);
-    revision = latest.body.schedule.revision;
+    const revision = latest.body.schedule.revision;
     const stale = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, { method: "PATCH", body: JSON.stringify({ revision: revision - 1, status: "paused" }) });
     expect(stale.status).toBe(409);
     const paused = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}?network_id=${encodeURIComponent(networkId)}`, { method: "PATCH", body: JSON.stringify({ revision, status: "paused" }) });
