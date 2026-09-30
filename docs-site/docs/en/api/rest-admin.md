@@ -472,7 +472,7 @@ When a person's first user stream connects or their last one disconnects, the hu
 
 Human-to-human direct messages between two users of the same network (restricted members included). User tokens only.
 
-- `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` — written to the recipient's user_inbox (`kind=human_dm`) and pushed over `/events/users/me`; the hub records `sender_user_id` from the token and ignores any `from` in the body. Retrying with the same `client_request_id` does not create a second message. Unknown users and users outside the network both get 404 `dm_target_not_in_network`. A restricted member attaching a file they cannot see gets 403 `attachment_not_accessible`.
+- `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` — written to the recipient's user_inbox (`kind=human_dm`) and pushed over `/events/users/me`; the hub records `sender_user_id` from the token and ignores any `from` in the body. Retrying with the same `client_request_id` does not create a second message. Unknown users and users outside the network both get 404 `dm_target_not_in_network`. A restricted member attaching a file they cannot see gets 403 `attachment_not_accessible`, and so does anyone attaching a DM file they cannot see (uploaded with `purpose=dm`, and they are neither the uploader nor in a DM that carries it). Upload DM attachments with `POST /api/upload?purpose=dm`.
 - `GET /api/dm?network_id=&with=<user_id>[&limit&before]` — both directions with that person, newest first, each row with `direction: in | out`.
 - `GET /api/dm/threads?network_id=` — one row per counterpart: `{other_user_id, last_at, unread}`.
 
@@ -493,6 +493,7 @@ Uploads a file and returns a downloadable `url`.
 - Request: `multipart/form-data` with a `file` field; a `Content-Length` header is required.
 - Size cap **12 MiB** (`MAX_UPLOAD_BYTES`), checked in two stages: fail-fast on `Content-Length`, then re-verify the parsed size.
 - Rate limit: **60/hour** (keyed by token id, falling back to IP); over the limit returns `429 rate_limited` (with `X-RateLimit-*` headers).
+- `?purpose=dm` (optional): the file is uploaded for a human DM and becomes a **DM file**. Only the uploader, the two sides of any DM that carries it, and Hub admins can download it; other members of the network and node tokens get `404 not_found`. Without `purpose` nothing changes, and a file first used elsewhere (for example in an agent chat) does not become a DM file when it is later forwarded into a DM. Any other value returns `400 bad_purpose`. See [human DMs](#human-dm).
 
 ```bash
 curl -X POST http://localhost:9200/api/upload \
