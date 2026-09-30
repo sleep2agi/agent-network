@@ -11,6 +11,7 @@
 #   CHECK_75=1 SCHED_BASELINE=counted          (phase A)
 #   CHECK_BYTES=1 EXPECT_BACKFILL=0 OLD_LABEL NEW_LABEL   (phase B)
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 : "${BASE_VERSION:?set BASE_VERSION to the last published @sleep2agi/commhub-server version}"
 APP_TAGS=${APP_TAGS:-desktop-v0.2.162,desktop-v0.2.163,desktop-v0.2.164,desktop-v0.2.165,desktop-v0.2.166}
@@ -20,7 +21,8 @@ IMAGE=anet-hub-release-compat:local
 # Say which tree the candidate is; a dirty tree means the result is not about HEAD.
 echo "candidate: $(git -C "$ROOT" rev-parse HEAD) dirty_files=$(git -C "$ROOT" status --porcelain -- server | wc -l)  baseline: $BASE_VERSION"
 
-CTX=$(mktemp -d); trap 'rm -rf "$CTX"' EXIT
+# Explicit /tmp so safe_rm_rf's allow-list holds whatever TMPDIR is.
+CTX=$(mktemp -d /tmp/hub-release-compat.XXXXXX); trap 'safe_rm_rf "$CTX"' EXIT
 mkdir -p "$CTX/server" "$CTX/compat/apps"
 cp -r "$ROOT/server/package.json" "$ROOT/server/src" "$ROOT/server/bin" "$CTX/server/"
 cp -r "$ROOT/tests/hub-release-compat/." "$CTX/compat/"
