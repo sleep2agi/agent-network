@@ -13,7 +13,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { register } from "./auth.js";
+import { issueUserToken, register } from "./auth.js";
 import { db } from "./db.js";
 import { NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
 
@@ -291,6 +291,32 @@ describe("MCP 与 REST 一致", () => {
     const hidden = await mcp(alice.token, "requirements_get", { id: C["ta-other"].id, network_id: NET });
     expect(hidden.ok).toBe(false);
     expect(hidden.error).toBe("requirement_not_found");
+  });
+});
+
+describe("LIKE 通配符不越权(参与人 / 负责人 id 里有 % 或 _)", () => {
+  // 可见性子句用 LIKE … ESCAPE 匹配 `"kind":"user","id":"<uid>"`;id 里的 % / _ 必须按字面匹配。
+  // 造两个用户:pct 的 id 带 % 与 _,twin 的 id 在「不转义」时恰好能被 pct 的模式匹配上。
+  const PCT = "u_ta%pct_1";
+  const TWIN = "u_taXpctA1";
+  let pctToken = "";
+  beforeAll(async () => {
+    for (const [id, name] of [[PCT, "ta_pct"], [TWIN, "ta_twin"]] as const) {
+      db.run("INSERT INTO users (user_id, username, password_hash, display_name, role) VALUES (?1, ?2, 'x', ?2, 'user')", [id, `${name}_${Date.now()}`]);
+      db.run("INSERT INTO network_members (network_id, user_id, role, agent_access, task_access) VALUES (?1, ?2, 'member', 'granted', 'scoped')", [NET, id]);
+    }
+    pctToken = issueUserToken(PCT).token;
+    for (const [name, ref] of [["ta-twin-owned", TWIN], ["ta-pct-owned", PCT]] as const) {
+      const r = await send(admin.token, "POST", "/api/requirements", { network_id: NET, name, owner: userRef(ref), participants: [userRef(ref)] });
+      expect(r.status).toBe(201);
+      C[name] = { id: r.body.requirement.id, seq: r.body.requirement.seq };
+    }
+  });
+  test("id 带 % / _ 的成员只看见自己的卡,看不见被通配符「撞上」的那张", async () => {
+    const mine = await listIds(pctToken);
+    expect(mine).toContain("ta-pct-owned");
+    expect(mine).not.toContain("ta-twin-owned");
+    expect((await get(pctToken, `/api/requirements/${C["ta-twin-owned"].id}?network_id=${NET}`)).status).toBe(404);
   });
 });
 

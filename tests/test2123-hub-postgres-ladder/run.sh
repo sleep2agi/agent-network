@@ -77,7 +77,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -182,6 +182,9 @@ run_pg_tests_rc anet_side_thread_test src/side-thread-command-transport.test.ts
 run_pg_tests_rc anet_evidence_test src/task-consumption.test.ts
 run_pg_tests_rc anet_acl_dm_test src/agent-acl-slice3-http.test.ts
 run_pg_tests_rc anet_skillhub_test src/skillhub-http.test.ts
+# RFC-038 §9: task visibility is a LIKE … ESCAPE clause on JSON text columns — run it on real PostgreSQL rows,
+# including member ids that contain % and _ (task-access-http.test.ts「LIKE 通配符不越权」).
+run_pg_tests_rc anet_task_access_test src/task-access-http.test.ts
 
 # RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
 # refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).
