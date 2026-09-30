@@ -38,6 +38,11 @@ describe("RFC-039 S2a sqliteToPostgres", () => {
     expect(sqliteToPostgres("CAST(x AS INTEGER)")).toBe("CAST(x AS BIGINT)");
   });
 
+  test("REAL → DOUBLE PRECISION (SQLite REAL is 8-byte), identifiers containing real untouched", () => {
+    expect(sqliteToPostgres("mem_used_gb REAL, realm TEXT")).toBe("mem_used_gb DOUBLE PRECISION, realm TEXT");
+    expect(sqliteToPostgres("CAST(x AS REAL)")).toBe("CAST(x AS DOUBLE PRECISION)");
+  });
+
   test("BLOB → BYTEA, identifiers containing blob untouched", () => {
     expect(sqliteToPostgres("iv BLOB NOT NULL, blob_ref TEXT")).toBe("iv BYTEA NOT NULL, blob_ref TEXT");
   });
