@@ -817,8 +817,8 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
   if (!lq.terms.length) {
     rows = db.all<Row>(`SELECT ${SELECT} ${where}${LIST_ORDER} LIMIT ${lq.limit + 1}`, ...params);
   } else {
-    // 任务短号 seq(#2139 加的列):没有这列的库照样能搜,只是「#N」对不上短号。
-    const light = db.all<LightRow>(`SELECT requirement_id, ${hasSeqColumn() ? "seq, " : ""}network_id, created_at, title, description, assignee, tags_json, project_id, owner_json, agent_owner_json, participants_json ${where}${LIST_ORDER}`, ...params);
+    // seq(任务短号,#2139):启动迁移 ensureRequirementSeq 在 SQLite / PostgreSQL 上都加这一列,SELECT 本来就带它。
+    const light = db.all<LightRow>(`SELECT requirement_id, seq, network_id, created_at, title, description, assignee, tags_json, project_id, owner_json, agent_owner_json, participants_json ${where}${LIST_ORDER}`, ...params);
     const maps = new Map<string, NameMaps>();
     const hits: string[] = [];
     for (const r of light) {
@@ -835,11 +835,6 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
   if (hasMore) rows = rows.slice(0, lq.limit);
   const last = rows[rows.length - 1];
   return { rows, hasMore, nextCursor: hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.requirement_id }) : null };
-}
-
-/** requirements 表有没有 seq 列(任务短号,#2139)。每次现查:迁移在启动时加列,测试里也可能中途加。 */
-function hasSeqColumn(): boolean {
-  try { db.all("SELECT seq FROM requirements LIMIT 0"); return true; } catch { return false; }
 }
 
 /** 搜索用的名字表(与 GET /api/requirements/people 同一个显示名规则);调用者看不见的节点不放进来。 */
