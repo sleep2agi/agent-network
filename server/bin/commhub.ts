@@ -12,15 +12,7 @@
 
 const args = process.argv.slice(2);
 
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--port" || args[i] === "-p") process.env.PORT = args[++i];
-  if (args[i] === "--host") process.env.HOST = args[++i];
-  if (args[i] === "--token" || args[i] === "-t") process.env.COMMHUB_AUTH_TOKEN = args[++i];
-  if (args[i] === "--db") process.env.COMMHUB_DB = args[++i];
-  if (args[i] === "--cors") process.env.COMMHUB_CORS_ORIGINS = args[++i];
-  if (args[i] === "--dev-open") process.env.COMMHUB_DEV_OPEN = "1";
-  if (args[i] === "--help" || args[i] === "-h") {
-    console.log(`
+const HELP = `
 CommHub MCP Server — AI Agent 通信中枢
 
 Usage:
@@ -34,6 +26,7 @@ Options:
   --cors <origins>        CORS origins, comma-separated (env: COMMHUB_CORS_ORIGINS)
   --dev-open              Explicit unauthenticated local development mode
   --help, -h              Show this help
+  --version, -v           Print the version and exit
 
 Environment Variables:
   PORT                    Server port (default: 9200)
@@ -49,8 +42,43 @@ Examples:
   commhub-server --port 9200 --token my-secret-token
   commhub-server --port 9200 --dev-open
   PORT=9200 COMMHUB_AUTH_TOKEN=secret commhub-server
-`);
+`;
+
+// Anything this bin does not recognise is a usage error: exit 2 and never
+// start a Hub. Before this, unknown words and flags were ignored and a Hub
+// started on the defaults — `commhub-server <some-subcommand>` on a version
+// without that subcommand opened ~/.commhub/commhub.db on :9200.
+function usageError(message: string): never {
+  console.error(`commhub-server: ${message}\nRun "commhub-server --help" for usage.`);
+  process.exit(2);
+}
+
+const VALUE_FLAGS: Record<string, string> = {
+  "--port": "PORT", "-p": "PORT",
+  "--host": "HOST",
+  "--token": "COMMHUB_AUTH_TOKEN", "-t": "COMMHUB_AUTH_TOKEN",
+  "--db": "COMMHUB_DB",
+  "--cors": "COMMHUB_CORS_ORIGINS",
+};
+
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  if (Object.hasOwn(VALUE_FLAGS, arg)) {
+    const value = args[i + 1];
+    if (value === undefined || value.startsWith("--")) usageError(`${arg} needs a value`);
+    process.env[VALUE_FLAGS[arg]] = value;
+    i++;
+  } else if (arg === "--dev-open") {
+    process.env.COMMHUB_DEV_OPEN = "1";
+  } else if (arg === "--help" || arg === "-h") {
+    console.log(HELP);
     process.exit(0);
+  } else if (arg === "--version" || arg === "-v") {
+    const pkg = (await import("../package.json", { with: { type: "json" } })).default as { version: string };
+    console.log(pkg.version);
+    process.exit(0);
+  } else {
+    usageError(arg.startsWith("-") ? `unknown option ${arg}` : `unknown command ${arg}`);
   }
 }
 
