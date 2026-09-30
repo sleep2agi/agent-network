@@ -152,16 +152,20 @@ export function addTaskVisibilityScope(sql: string, params: unknown[], caller: T
   if (!caller) return sql;
   const scoped = taskScopedNetworks(caller.userId);
   if (!scoped.length) return sql;
+  // 参数只在真正用到时才压进去:PostgreSQL 的预编译语句里出现「没被引用的 $n」会直接报错
+  // (推不出类型),SQLite 不在乎 —— 只有 viewer 的网络时,「我的卡」那段模式参数就不该出现。
   const uid = params.push(caller.userId);
-  const pat = params.push(userRefPattern(caller.userId));
   const granted = `project_id IN (SELECT g.project_id FROM network_member_project_grants g WHERE g.user_id = ?${uid} AND g.network_id = requirements.network_id)`;
-  const mine = `owner_json LIKE ?${pat} ESCAPE '\\' OR participants_json LIKE ?${pat} ESCAPE '\\' OR created_by_json LIKE ?${pat} ESCAPE '\\' OR (created_by_json IS NULL AND created_by = ?${uid})`;
   const members = scoped.filter((s) => !s.viewer).map((s) => s.networkId);
   const viewers = scoped.filter((s) => s.viewer).map((s) => s.networkId);
   const ph = (ids: string[]) => ids.map((id) => `?${params.push(id)}`).join(", ");
   const all = scoped.map((s) => s.networkId);
   const parts = [`network_id NOT IN (${ph(all)})`];
-  if (members.length) parts.push(`(network_id IN (${ph(members)}) AND (${mine} OR ${granted}))`);
+  if (members.length) {
+    const pat = params.push(userRefPattern(caller.userId));
+    const mine = `owner_json LIKE ?${pat} ESCAPE '\\' OR participants_json LIKE ?${pat} ESCAPE '\\' OR created_by_json LIKE ?${pat} ESCAPE '\\' OR (created_by_json IS NULL AND created_by = ?${uid})`;
+    parts.push(`(network_id IN (${ph(members)}) AND (${mine} OR ${granted}))`);
+  }
   if (viewers.length) parts.push(`(network_id IN (${ph(viewers)}) AND ${granted})`);
   return `${sql} AND (${parts.join(" OR ")})`;
 }
