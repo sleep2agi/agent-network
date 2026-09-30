@@ -23,7 +23,7 @@ If the process you run is the launcher [`deploy/hub/hub-daemon.sh`](https://gith
 
 The key reaches the Hub only through `hub.env` or the process environment. `anet hub start` does **not** read `hub.env` by itself. A newly generated key does not decrypt existing `network_secrets` or `providers` ciphertext.
 
-Routine backups stay on the `sqlite3 .backup` command in [Production](/en/deploy/production). For a move, use the command below. It writes one standalone file. Do not `cp` a database that is in use, and do not treat `-wal` / `-shm` files as the backup.
+Routine backups stay on the `sqlite3 .backup` command in [Production](/en/deploy/production). For a move, use the command below. It writes one standalone file. Do not `cp` the `.db` file on its own — not while the Hub runs, and not after it stops either: a stopped Hub can still hold its latest writes in the `-wal` next to it ([#2151](https://github.com/sleep2agi/agent-network/issues/2151)), and copying only the `.db` drops them. Do not treat `-wal` / `-shm` files as the backup. `VACUUM INTO` below writes the `-wal` contents into the new file too.
 
 ```bash
 umask 077
