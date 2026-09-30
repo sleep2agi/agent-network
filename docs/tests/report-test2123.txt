@@ -168,3 +168,27 @@ RFC-039 S5a/S5b (branches fix/pg-s5a-real, feat/pg-s5b-migrate)
       SUMMARY result=COMMITTED tables=42 rows=19 verify=OK          rc=0
       SUMMARY result=DRY-RUN … verify=OK                             rc=0
       SUMMARY result=FAILED … verify=MISMATCH (tamper)               rc=1
+
+== 2026-09-30 — L6 (task board slim reads), local Docker run of perf/hub-requirements-summary-etag ==
+    PASS L3 first registered user is admin
+    PASS L4 login, node token, report_status, POST /api/task
+    PASS L5 send_reply ok and task row replied
+    PASS L6 requirements view=summary, changes=1 with tombstones, ETag 304
+    [features] src/scheduled-tasks-http.test.ts rc=0
+    [features] src/side-thread-command-transport.test.ts rc=0
+    [features] src/task-consumption.test.ts rc=0
+    [features] src/agent-acl-slice3-http.test.ts rc=0
+    [features] src/skillhub-http.test.ts rc=0
+    [features] src/task-access-http.test.ts rc=0
+    [features] src/requirements-stats-http.test.ts rc=0
+    [features] src/requirement-tag-ops-http.test.ts rc=0
+    [features] src/scheduled-reply-unread-http.test.ts rc=0
+    [features] src/requirements-list-slim-http.test.ts rc=0
+    PASS migrate: seed Hub on SQLite reached L6
+    PASS L3 the migrated admin logs in with its original password and is still admin
+    PASS L4 login, node token, report_status, POST /api/task
+    PASS L5 send_reply ok and task row replied
+    PASS L6 requirements view=summary, changes=1 with tombstones, ETag 304
+    PASS migrate: Hub on the migrated PostgreSQL reached L6
+    PG_LADDER level=6 floor=6 COMMHUB_PG_EXPERIMENTAL=1 first_fail=none
+    RESULT: PASS (level 6, floor 6)

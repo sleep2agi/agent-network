@@ -59,6 +59,27 @@ export function ensureNetworkTags(database: DbAdapter): void {
   `);
 }
 
+/**
+ * 删掉的卡留一条墓碑,给 GET /api/requirements?changes=1 报「这些 id 没了」(按 updated_since 增量同步的客户端
+ * 否则永远不知道一张卡被删了)。连同判断可见性要用的列一起存:受限成员只收到他本来看得见的卡的删除。
+ * 保留 30 天(requirements.ts TOMBSTONE_RETENTION_MS,写入时顺手清)。IF NOT EXISTS:重复执行无副作用。
+ */
+export function ensureRequirementTombstones(database: DbAdapter): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS requirement_tombstones (
+      requirement_id    TEXT PRIMARY KEY,
+      network_id        TEXT NOT NULL,
+      deleted_at        TEXT NOT NULL,
+      project_id        TEXT,
+      owner_json        TEXT,
+      participants_json TEXT,
+      created_by        TEXT,
+      created_by_json   TEXT
+    );
+  `);
+  database.exec("CREATE INDEX IF NOT EXISTS idx_requirement_tombstones_network ON requirement_tombstones(network_id, deleted_at)");
+}
+
 /** external_ref 在同一网络里唯一(只管有值的行)。IF NOT EXISTS:重复执行无副作用。 */
 export function ensureRequirementIndexes(database: DbAdapter): void {
   database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_external_ref ON requirements(network_id, external_ref) WHERE external_ref IS NOT NULL");

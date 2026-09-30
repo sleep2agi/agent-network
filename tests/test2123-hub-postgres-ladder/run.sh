@@ -13,6 +13,7 @@
 #   L3  first registered user is admin
 #   L4  login → node token → report_status → POST /api/task
 #   L5  send_reply ok and the task row is replied
+#   L6  task board slim reads: view=summary, changes=1 + delete tombstone, ETag 304
 #
 # Before the ladder, contract.ts checks PgAdapter itself on the same server
 # (rollback, savepoints, caught errors inside a transaction, int8/BLOB/bool
@@ -38,7 +39,8 @@ fi
 # Current floor: with COMMHUB_PG_EXPERIMENTAL=1 the Hub completes the whole
 # ladder on PG — schema, listen, admin bootstrap, task, atomic reply
 # (RFC-039 S2b real transactions + S3 typed NULL-checked parameters).
-FLOOR="${PG_LADDER_FLOOR:-5}"
+# L6 (2026-09-30): the task board's slim reads — view=summary, changes=1 with delete tombstones, ETag 304.
+FLOOR="${PG_LADDER_FLOOR:-6}"
 SUITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PG_PORT=25433
 HUB_PORT=29213
@@ -77,7 +79,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -193,6 +195,8 @@ run_pg_tests_rc anet_tag_ops_test src/requirement-tag-ops-http.test.ts
 # Scheduled-task replies routed to the schedule creator (scheduled_tasks ⋈ users, tasks.meta_json read in JS),
 # counted by unread_by_agent and cleared by ack-by-agent — on real PostgreSQL rows.
 run_pg_tests_rc anet_sched_reply_test src/scheduled-reply-unread-http.test.ts
+# 任务看板省流:view=summary、changes=1 的墓碑(ON CONFLICT upsert + NOT IN 子查询)、列表缓存作废 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_req_slim_test src/requirements-list-slim-http.test.ts
 
 # RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
 # refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).

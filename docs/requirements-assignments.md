@@ -68,6 +68,27 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
   - 返回 `totals`（`done` / `done_approx` 期内完成数与其中近似值的张数、`created` / `created_done` / `completion_rate` 期内新建与其中已完成的比例，没有新建为 `null`、`doing` / `pool` 当前未归档的卡数）、`daily`（`[{date, n}]`，以 `to` 在 `tz` 里的那一天结尾，与 `from` 无关）、`by_project`（`[{project_id, n}]`）、`by_completer`（前 20，`[{kind, id, n, spark}]`，`spark` = 最近 14 天每天的数）、`unattributed`（完成者未知或对调用者隐藏的张数）、`recent`（期内最近完成的卡，新 → 旧，`[{id, seq, name, project_id, completed_at, completed_at_approx, completed_by, archived}]`；`recent=` 0–50，缺省 10；完成者是隐藏节点时 `completed_by` 为 `null`）。带 ETag，`If-None-Match` 对上回 304。
 - `capabilities` 加 `completed_at`、`stats`；旧 Hub 没有这两项，客户端退回按 `updatedAt` 近似。
 
+### 列表省流（view=summary / changes=1）
+
+2026-09-30 起。生产上 431 张卡的整张列表 1,045 KB（gzip 243 KB），其中描述正文占 626 KB。任务页每 15 s 读一次，从中国经 RELAY 读要好几秒。下面两个参数都是加法：旧客户端不带这两个参数，拿到的列表与原来逐字相同。
+
+- `view=summary`（capability `list_summary`）：每行去掉 `description` 和 `checklist`，换成 `has_description`（布尔）和 `checklist_count: {total, done}`，其余字段、顺序、分页都不变。响应带 `view: "summary"`。打开一张卡时用 `GET /api/requirements/{id}` 读全文。生产数据上的大小是 330 KB，gzip 42 KB（−83%）。`view=full` 等于不带；其他值返回 400 `invalid_view`。
+- `changes=1`（capability `changes`，必须同时带 `updated_since`，否则 400 `updated_since_required`）：
+  - 只回 `updated_since` 之后改过的卡。**含归档的**，行上 `archived: true` 表示「移出看板」。显式带 `archived=true` 时仍然只回归档的卡。
+  - 加三个字段：
+    - `deleted`：此后删掉的、调用者看得见的卡 id（墓碑表 `requirement_tombstones`）；
+    - `server_time`：下次的 `updated_since`，在读表之前取，所以不漏，最多重复回一次；
+    - `tombstones_since`：墓碑只保留 30 天。`updated_since` 早于这个值时删除可能漏报，应整读一次。
+  - 可以和 `view=summary`、`limit` / `cursor` 组合。翻页时每一页都带同一个 `updated_since`，并用第一页的 `server_time`。
+  - 两类改动过去不动 `updated_at`，现在跟着动，增量同步看得见：删父卡时被解挂的子卡；删项目时被清空 `project_id` 的卡。
+  - 父卡的 `children` 计数会因子卡变化而变，但父卡本身的 `updated_at` 不动。增量同步的客户端应按手里的子卡自己算，或定期整读。
+  - 受限成员能看见哪些卡的权限变了（授权、角色），不体现在增量里，同样靠定期整读。
+- 列表缓存：同一个调用者、同一个查询，在需求表没有写入时直接复用上一次的正文和 ETag，不再 SELECT、序列化和哈希。gzip 结果也按 ETag 复用，见 `server/src/http-gzip.ts`。
+  - 失效条件：经过 `handleRequirementsRequest` 的任何非 GET 请求（REST 和 MCP 都走它）都让缓存作废；调用者的成员行或角色变了，也不命中。
+  - 条目最多信任 60 s，兜住直接改库的情形。
+  - 不缓存的情形：「只看相关任务」的成员、Agent 受限的成员、`q=` 搜索、`changes=1`。
+- `GET /api/stats/routes?minutes=15`（管理员或 master 令牌）：最近 N 分钟（1–1440）每个路由的次数、总耗时、平均值、p95、最大值、字节数和 5xx 数。路由里的 id 段折成 `:id`，保留 `light` / `view` / `scope` / `changes` 这几个会改变载荷形状的参数。数据只在内存里，最多 4096 条样本，重启清空。
+
 ## 升级
 
 - 加列只加不改：`agent_owner_json`、`description`、`checklist_json`、`project_id` 都在 `db.ts` 既有的加列循环里；旧行为 NULL，读出为 `null` / `""` / `[]` / `null`。`requirement_projects` 表由 `requirements-migrate.ts` 的 `CREATE TABLE IF NOT EXISTS` 建。

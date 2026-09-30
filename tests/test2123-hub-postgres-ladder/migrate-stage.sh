@@ -47,7 +47,7 @@ env -u DATABASE_URL -u COMMHUB_PG_EXPERIMENTAL COMMHUB_DB="$SEED" PORT=29214 HOS
 seed_pid=$!
 if wait_health 29214 "$seed_pid"; then
   seed_out="$(bun "$SUITE_DIR/ladder.ts" http://127.0.0.1:29214 2>&1 || true)"
-  if printf '%s\n' "$seed_out" | grep -qx 'LADDER_LEVEL=5'; then pass "seed Hub on SQLite reached L5"; else fail "seed ladder: $(printf '%s' "$seed_out" | tail -n 3)"; fi
+  if printf '%s\n' "$seed_out" | grep -qx 'LADDER_LEVEL=6'; then pass "seed Hub on SQLite reached L6"; else fail "seed ladder: $(printf '%s' "$seed_out" | tail -n 3)"; fi
 else
   fail "seed Hub on SQLite never listened"; tail -n 20 "$WORK/seed-hub.log" || true
 fi
@@ -124,7 +124,7 @@ mig_pid=$!
 if wait_health 29215 "$mig_pid"; then
   mig_out="$(LADDER_EXISTING_ADMIN=1 LADDER_NET_NAME=pg-ladder-after-migrate bun "$SUITE_DIR/ladder.ts" http://127.0.0.1:29215 2>&1 || true)"
   printf '%s\n' "$mig_out" | grep -E '^(PASS|FAIL) L' || true
-  if printf '%s\n' "$mig_out" | grep -qx 'LADDER_LEVEL=5'; then pass "Hub on the migrated PostgreSQL reached L5"; else fail "migrated ladder stopped early"; fi
+  if printf '%s\n' "$mig_out" | grep -qx 'LADDER_LEVEL=6'; then pass "Hub on the migrated PostgreSQL reached L6"; else fail "migrated ladder stopped early"; fi
   events_after="$(psql_admin -d mig_target -Atc "SELECT COUNT(*) FROM task_terminal_events")"
   if [ "$events_after" -gt "$events_before" ]; then pass "terminal events keep being recorded on the migrated database ($events_before → $events_after)"; else fail "terminal events did not grow ($events_before → $events_after)"; fi
 else

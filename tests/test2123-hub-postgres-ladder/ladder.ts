@@ -97,6 +97,35 @@ async function main() {
   if (row?.status !== "replied" || row?.result !== "ladder-pong") fail(5, `task row after reply: ${JSON.stringify(row).slice(0, 300)}`);
   pass(5, "send_reply ok and task row replied");
 
+  // L6 — the task board's slim reads on PG: view=summary, changes=1 with a delete tombstone, the list cache.
+  const q = `network_id=${encodeURIComponent(networkId)}`;
+  const mk = (name: string, extra: Record<string, unknown> = {}) => json("/api/requirements", { method: "POST", token: utok, body: JSON.stringify({ name, network_id: networkId, ...extra }) });
+  const a = await mk("ladder-card-a", { description: "描述".repeat(50), checklist: [{ text: "one", done: true }, { text: "two" }] });
+  const b = await mk("ladder-card-b");
+  const aId: string = a.body?.requirement?.id ?? "", bId: string = b.body?.requirement?.id ?? "";
+  if (a.status !== 201 || b.status !== 201 || !aId || !bId) fail(6, `create cards: ${a.status}/${b.status} ${JSON.stringify(a.body).slice(0, 300)}`);
+  const summary = await json(`/api/requirements?${q}&view=summary`, { token: utok });
+  const sa = (summary.body?.requirements ?? []).find((r: any) => r.id === aId);
+  if (summary.status !== 200 || !sa || "description" in sa || sa.checklist_count?.total !== 2 || sa.checklist_count?.done !== 1 || sa.has_description !== true) {
+    fail(6, `view=summary: ${summary.status} ${JSON.stringify(sa ?? summary.body).slice(0, 300)}`);
+  }
+  const first = await json(`/api/requirements?${q}&changes=1&updated_since=${encodeURIComponent(new Date(Date.now() - 3_600_000).toISOString())}`, { token: utok });
+  const t0: string = first.body?.server_time ?? "";
+  if (first.status !== 200 || !t0) fail(6, `changes=1: ${first.status} ${JSON.stringify(first.body).slice(0, 300)}`);
+  await new Promise(r => setTimeout(r, 20));
+  const del = await json(`/api/requirements/${encodeURIComponent(bId)}?${q}`, { method: "DELETE", token: utok });
+  const arch = await json(`/api/requirements/${encodeURIComponent(aId)}?${q}`, { method: "PATCH", token: utok, body: JSON.stringify({ archived: true }) });
+  if (del.status !== 200 || arch.status !== 200) fail(6, `delete/archive: ${del.status}/${arch.status}`);
+  const delta = await json(`/api/requirements?${q}&changes=1&view=summary&updated_since=${encodeURIComponent(t0)}`, { token: utok });
+  const ids = (delta.body?.requirements ?? []).map((r: any) => r.id);
+  if (delta.status !== 200 || JSON.stringify(delta.body?.deleted) !== JSON.stringify([bId]) || ids.length !== 1 || ids[0] !== aId) {
+    fail(6, `changes after delete/archive: ${delta.status} ${JSON.stringify(delta.body).slice(0, 400)}`);
+  }
+  const e1 = await fetch(`${base}/api/requirements?${q}`, { headers: { Authorization: `Bearer ${utok}` } });
+  const e2 = await fetch(`${base}/api/requirements?${q}`, { headers: { Authorization: `Bearer ${utok}`, "If-None-Match": e1.headers.get("etag") ?? "" } });
+  if (e1.status !== 200 || e2.status !== 304) fail(6, `list ETag/304: ${e1.status}/${e2.status}`);
+  pass(6, "requirements view=summary, changes=1 with tombstones, ETag 304");
+
   console.log(`LADDER_LEVEL=${level}`);
 }
 
