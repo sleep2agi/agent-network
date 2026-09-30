@@ -20,6 +20,8 @@ This release carries 7 Hub changes, all already on main. Production is on `0.9.0
 - #2140 (313bfc801d1d1bf7e21e7322e1fe83f30d7e122c), #2145 (78c7769478f7dac46c7a7c98e67a92ddbf35e41e) **PostgreSQL work (RFC-039 S3, S4 part 1).**
   PostgreSQL is still in development and not usable. SQLite paths are unchanged, except that the PostgreSQL-only `side_chat_operations.rowid` column is added only on PostgreSQL.
 - #2136 (a4eedb7b940b9dc993c4fdce8141faa947a242fd) test-only: scheduled-tasks HTTP tests own their data.
+- #2147 (859bb29ca74bbc5f2b0f65bb737b06e789a4fcef) **PostgreSQL work (RFC-039 F3/F5), added to this note afterwards.**
+  It was in the published package but left out of this list. PostgreSQL only: a `rowid` column on `nodes` / `user_inbox` on PostgreSQL, the `strftime` translation, and `get(sql, [params])` handling in the PostgreSQL adapter. SQLite is unchanged.
 
 This note is not proof of publication. Publish only by running release.yml from the full main SHA that contains these changes:
 package `@sleep2agi/commhub-server`, version `0.9.0-preview.72`, channel preview.
