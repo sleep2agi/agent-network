@@ -4,13 +4,14 @@ import { createHash } from "node:crypto";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
+import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, visibleAgents } from "./agent-access.js";
 import {
   addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
   isTaskScoped, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
-import { ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
+import { ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
@@ -19,6 +20,7 @@ migrateRequirementAgentOwners(db);
 ensureRequirementProjects(db);
 ensureRequirementIndexes(db);
 ensureRequirementSeq(db);
+ensureRequirementCompletedAt(db);
 
 type RequestAuth = { userId: string; networkId: string | null; username: string; tokenId?: string | null; tokenName?: string | null } | null;
 
@@ -65,6 +67,9 @@ type Row = {
   tags_json: string | null;
   created_at: string;
   seq: number | null;
+  completed_at: string | null;
+  completed_by_json: string | null;
+  completed_at_approx: number | null;
 };
 
 function jsonError(error: string, status: number): Response {
@@ -340,6 +345,11 @@ function toPublic(row: Row) {
     // 子需求:parent_id(可空)和父卡上的子需求进度(未归档的子需求数 / 其中完成的)。
     parent_id: row.parent_id || null,
     children: { total: Number(row.children_total ?? 0), done: Number(row.children_done ?? 0) },
+    // 完成时间:进「完成」列的时刻,移出清空(不在「完成」列 = null)。completedAtApprox = 升级前就完成的卡,
+    // 时刻是按 updated_at 补的近似值。completedBy = 谁移进「完成」的(近似值的卡为 null)。旧 App 忽略这三个字段。
+    completedAt: row.completed_at || null,
+    completedAtApprox: !!row.completed_at_approx,
+    completedBy: row.completed_by_json ? JSON.parse(row.completed_by_json) : null,
   };
 }
 
@@ -396,10 +406,11 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
     participants: Array.isArray(pub.participants) ? pub.participants.filter((ref: unknown) => !isHiddenRef(ref, hidden)) : pub.participants,
     created_by: isHiddenRef(pub.created_by, hidden) ? null : pub.created_by,
     updated_by: isHiddenRef(pub.updated_by, hidden) ? null : pub.updated_by,
+    completedBy: isHiddenRef(pub.completedBy, hidden) ? null : pub.completedBy,
   };
 }
 
-const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, seq, " +
+const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, seq, completed_at, completed_by_json, completed_at_approx, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0) AS children_total, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
@@ -495,7 +506,7 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
 }
 
 // search:GET 认 q=(服务端搜索,语义同 App 的任务搜索);paging:认 limit / cursor,响应带 has_more / next_cursor。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -655,9 +666,11 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
     // 领号和插入在同一个事务里:插入被唯一索引挡下时,号一起回滚,不留空洞。
     db.transaction(() => db.run(
       `INSERT INTO requirements
-       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json, start_on, seq)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22, ?23, ?24)`,
-      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags), start || null, nextRequirementSeq(db, networkId)],
+       (requirement_id, network_id, title, column_name, priority, due_on, assignee, client_id, issues_json, created_by, created_at, updated_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, created_by_json, updated_by_json, archived, parent_id, tags_json, start_on, seq, completed_at, completed_by_json, completed_at_approx)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?20, 0, ?21, ?22, ?23, ?24, ?25, ?26, 0)`,
+      [id, networkId, name, column, priority, due || null, assignee, clientId || null, JSON.stringify(issues), ctx.auth?.userId ?? null, createdAt, people.ownerJson, people.participantsJson, people.agentOwnerJson, description || null, JSON.stringify(checklist), projectId, ref, extUrl, actor, parentId, JSON.stringify(tags), start || null, nextRequirementSeq(db, networkId),
+        // 直接建在「完成」列 = 此刻完成、由建卡的人完成。
+        column === "done" ? createdAt : null, column === "done" ? actor : null],
     ));
   } catch {
     // 并发的同一个 external_ref / client_id:唯一索引挡住了第二个,回已有的那条。
@@ -763,12 +776,20 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     archived = body.archived ? 1 : 0;
   }
   const updatedAt = new Date().toISOString();
+  const column = has("column") ? String(body.column) : row.column_name;
+  const actor = JSON.stringify(actorOf(ctx));
+  // 完成时间:移进「完成」= 此刻 + 这次的操作者;移出 = 清空;留在「完成」(done → done、改别的字段)= 原样不动。
+  const completed = column !== "done" ? { at: null, by: null, approx: 0 }
+    : row.column_name !== "done" ? { at: updatedAt, by: actor, approx: 0 }
+    : { at: row.completed_at, by: row.completed_by_json, approx: row.completed_at_approx ? 1 : 0 };
   db.run(
     `UPDATE requirements SET column_name = ?1, updated_at = ?2, title = ?7, priority = ?8, due_on = ?9, assignee = ?10, owner_json = ?4, participants_json = ?5, issues_json = ?6,
-       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18, parent_id = ?19, tags_json = ?20, start_on = ?21
+       agent_owner_json = ?11, description = ?12, checklist_json = ?13, project_id = ?14, external_ref = ?15, external_url = ?16, archived = ?17, updated_by_json = ?18, parent_id = ?19, tags_json = ?20, start_on = ?21,
+       completed_at = ?22, completed_by_json = ?23, completed_at_approx = ?24
      WHERE requirement_id = ?3`,
-    [has("column") ? body.column : row.column_name, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, has("issues") ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
-      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, JSON.stringify(actorOf(ctx)), parentId, has("tags") ? JSON.stringify(tags) : row.tags_json, start || null],
+    [column, updatedAt, row.requirement_id, people.ownerJson, people.participantsJson, has("issues") ? JSON.stringify(issues) : row.issues_json, name, priority, due || null, assignee, people.agentOwnerJson,
+      has("description") ? (description || null) : row.description, has("checklist") ? JSON.stringify(checklist) : row.checklist_json, projectId, ref, extUrl, archived, actor, parentId, has("tags") ? JSON.stringify(tags) : row.tags_json, start || null,
+      completed.at, completed.by, completed.approx],
   );
   const updated = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
   return Response.json(withLegacyOwner(toPublicFor(ctx, updated), people.coerced));
@@ -927,6 +948,22 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const rows = db.all<{ tags_json: string | null }>(tagSql, ...tagParams);
     const tags = [...new Set(rows.flatMap(row => storedTags(row.tags_json)))].sort();
     return Response.json({ ok: true, networkId, tags });
+  }
+
+  // 仪表盘聚合(requirements-stats.ts):一个网络、调用者看得见的卡(与列表同一个可见范围),含归档的卡 ——
+  // 完成的卡常被归档,不算它们「今天完成了多少」就会偏少。
+  if (url.pathname === "/api/requirements/stats" && req.method === "GET") {
+    const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+    if (!networkId) return jsonError("network_id_required", 400);
+    const sq = parseStatsQuery(url.searchParams, Date.now());
+    if ("error" in sq) return jsonError(sq.error, 400);
+    const statsParams: unknown[] = [networkId];
+    const statsSql = addTaskVisibilityScope(
+      "SELECT project_id, column_name, archived, created_at, completed_at, completed_at_approx, completed_by_json FROM requirements WHERE network_id = ?1",
+      statsParams, taskCaller(ctx),
+    );
+    const rows = db.all<StatsRow>(statsSql, ...statsParams);
+    return conditionalJson(ctx.req, { ok: true, networkId, ...aggregateStats(rows, sq, hiddenNodeFilter(ctx, networkId)) });
   }
 
   if (url.pathname === '/api/requirements/people' && req.method === 'GET') {

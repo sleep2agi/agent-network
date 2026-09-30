@@ -28,6 +28,8 @@ const rows: [string, string | null, string][] = [
 for (const [id, owner, participants] of rows) {
   legacy.run("INSERT INTO requirements (requirement_id, network_id, title, due_on, assignee, owner_json, participants_json) VALUES (?1, 'net', ?2, '2026-10-01', 'legacy', ?3, ?4)", [id, `卡 ${id}`, owner, participants]);
 }
+// 升级前就在「完成」列的一张(旧库 updated_at 是 datetime('now') 的「YYYY-MM-DD HH:MM:SS」UTC 形状)。
+legacy.run("UPDATE requirements SET column_name = 'done', updated_at = '2026-09-01 10:00:00' WHERE requirement_id = 'r_user_owner'");
 legacy.close();
 
 afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch {} });
@@ -79,7 +81,18 @@ test("startup migration moves node owners to agent_owner, keeps every row, and i
   ensureRequirementProjects(db);
   ensureRequirementProjects(db);
   expect((db.get("SELECT COUNT(*) AS n FROM requirement_projects") as any).n).toBe(0);
+  // 完成时间:三列加上;升级前已完成的卡按 updated_at 补成 ISO、标近似、完成者留空;别的卡不动;索引建了
+  for (const c of ["completed_at", "completed_by_json", "completed_at_approx"]) expect(cols.includes(c)).toBe(true);
+  const completed = db.all("SELECT requirement_id, completed_at, completed_by_json, completed_at_approx FROM requirements ORDER BY requirement_id") as any[];
+  for (const r of completed) {
+    if (r.requirement_id === "r_user_owner") expect(r).toEqual({ requirement_id: "r_user_owner", completed_at: "2026-09-01T10:00:00.000Z", completed_by_json: null, completed_at_approx: 1 });
+    else expect([r.completed_at, r.completed_by_json, r.completed_at_approx]).toEqual([null, null, 0]);
+  }
+  expect((db.all("PRAGMA index_list(requirements)") as { name: string }[]).some(i => i.name === "idx_requirements_network_completed")).toBe(true);
+  const { ensureRequirementCompletedAt } = await import("./requirements-migrate.js");
   // 再跑一次(= 下次启动):什么都不动
+  expect(ensureRequirementCompletedAt(db)).toEqual({ backfilled: 0, cleared: 0 });
+  expect(db.all("SELECT requirement_id, completed_at, completed_by_json, completed_at_approx FROM requirements ORDER BY requirement_id")).toEqual(completed);
   expect(migrateRequirementAgentOwners(db).moved).toBe(0);
   expect(snapshot(db)).toEqual(after);
 });

@@ -129,6 +129,50 @@ export function ensureRequirementSeq(database: DbAdapter): { backfilled: number 
 }
 
 /**
+ * 完成时间(仪表盘「今天 / 本周完成了多少」用)。三列只加不改:
+ * - completed_at:进入「完成」列的时刻(ISO,UTC)。移出「完成」列清空;在「完成」列里改别的字段不动它。
+ * - completed_by_json:谁把它移进「完成」的({kind,id},同 updated_by)。
+ * - completed_at_approx:1 = 这个时刻是补出来的近似值(见下),界面可以标「近似」。
+ * 补值:已经在「完成」列、还没有 completed_at 的卡,按 updated_at(没有就 created_at)补,approx = 1,completed_by 留空
+ * —— updated_at 是「最后一次改」,不是「完成那一刻」,只能当近似。旧库里 datetime('now') 的「YYYY-MM-DD HH:MM:SS」(UTC)
+ * 统一换成 ISO,按时间范围比较时不和 ISO 值错位。
+ * 每次启动都跑,重复执行只处理需要处理的行:回滚到旧 Hub 期间移进「完成」的卡补近似值,移出「完成」的卡清掉残留。
+ */
+export function ensureRequirementCompletedAt(database: DbAdapter): { backfilled: number; cleared: number } {
+  for (const column of ["completed_at TEXT", "completed_by_json TEXT", "completed_at_approx INTEGER NOT NULL DEFAULT 0"]) {
+    try { database.exec(`ALTER TABLE requirements ADD COLUMN ${column}`); } catch (e: any) { if (!/duplicate column|already exists/i.test(e?.message || "")) throw e; }
+  }
+  const pending = database.all<{ requirement_id: string; updated_at: string | null; created_at: string | null }>(
+    "SELECT requirement_id, updated_at, created_at FROM requirements WHERE column_name = 'done' AND completed_at IS NULL",
+  );
+  const stale = database.all<{ requirement_id: string }>(
+    "SELECT requirement_id FROM requirements WHERE column_name <> 'done' AND (completed_at IS NOT NULL OR completed_by_json IS NOT NULL OR completed_at_approx <> 0)",
+  );
+  if (pending.length || stale.length) {
+    database.transaction(() => {
+      for (const row of pending) {
+        database.run(
+          "UPDATE requirements SET completed_at = ?1, completed_by_json = NULL, completed_at_approx = 1 WHERE requirement_id = ?2 AND completed_at IS NULL",
+          [isoInstant(row.updated_at) ?? isoInstant(row.created_at) ?? new Date().toISOString(), row.requirement_id],
+        );
+      }
+      for (const row of stale) {
+        database.run("UPDATE requirements SET completed_at = NULL, completed_by_json = NULL, completed_at_approx = 0 WHERE requirement_id = ?1", [row.requirement_id]);
+      }
+    });
+  }
+  database.exec("CREATE INDEX IF NOT EXISTS idx_requirements_network_completed ON requirements(network_id, completed_at) WHERE completed_at IS NOT NULL");
+  return { backfilled: pending.length, cleared: stale.length };
+}
+
+/** 库里的时间 → ISO(UTC)。认 ISO 和旧默认值「YYYY-MM-DD HH:MM:SS」(SQLite datetime('now'),UTC);读不懂 → null。 */
+export function isoInstant(value: string | null | undefined): string | null {
+  const s = value ?? "";
+  const ms = Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s) ? `${s.replace(" ", "T")}Z` : s);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+/**
  * 给新卡领下一个号。调用方把它和 INSERT 放在同一个事务里:插入失败(client_id / external_ref 撞了)号也一起回滚。
  * 一条语句完成「读 + 加一 + 写回」,两个并发的新建拿不到同一个号;(network_id, seq) 唯一索引兜底。
  */
