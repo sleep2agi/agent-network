@@ -81,3 +81,64 @@ export function migrateRequirementPriorityCheck(database: DbAdapter): { rebuilt:
   });
   return { rebuilt: true };
 }
+
+/**
+ * 任务短号 seq:每个网络自己的 #1、#2…,界面显示和按 #N 查都用它。主键 requirement_id 不变。
+ * - 加可空列 seq;没有号的旧行按 created_at(再按 requirement_id)补号,接在该网络已有的最大号后面。
+ * - requirement_seq_counters 记每个网络发到过的最大号:删掉 / 归档的卡,号也不回收。
+ * - (network_id, seq) 唯一。重复执行只补还没号的行(回滚到旧 Hub 期间新建的卡)。
+ */
+export function ensureRequirementSeq(database: DbAdapter): { backfilled: number } {
+  try { database.exec("ALTER TABLE requirements ADD COLUMN seq INTEGER"); } catch (e: any) { if (!/duplicate column|already exists/i.test(e?.message || "")) throw e; }
+  database.exec("CREATE TABLE IF NOT EXISTS requirement_seq_counters (network_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL DEFAULT 0)");
+  const pending = database.all<{ requirement_id: string; network_id: string; created_at: string | null }>(
+    "SELECT requirement_id, network_id, created_at FROM requirements WHERE seq IS NULL",
+  );
+  if (pending.length) {
+    // datetime('now') 的旧默认值「YYYY-MM-DD HH:MM:SS」是 UTC,和 ISO 混在一起时按字符串排会错位,换成毫秒再排。
+    const at = (v: string | null) => {
+      const s = v ?? "";
+      const ms = Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s) ? `${s.replace(" ", "T")}Z` : s);
+      return Number.isFinite(ms) ? ms : 0;
+    };
+    pending.sort((a, b) => a.network_id.localeCompare(b.network_id) || at(a.created_at) - at(b.created_at) || (a.requirement_id < b.requirement_id ? -1 : a.requirement_id > b.requirement_id ? 1 : 0));
+    database.transaction(() => {
+      const next = new Map<string, number>();
+      for (const row of pending) {
+        if (!next.has(row.network_id)) {
+          const max = database.get<{ m: number | null }>("SELECT MAX(seq) AS m FROM requirements WHERE network_id = ?1", row.network_id)?.m ?? 0;
+          const counter = database.get<{ last_seq: number }>("SELECT last_seq FROM requirement_seq_counters WHERE network_id = ?1", row.network_id)?.last_seq ?? 0;
+          next.set(row.network_id, Math.max(Number(max), Number(counter)));
+        }
+        const seq = next.get(row.network_id)! + 1;
+        next.set(row.network_id, seq);
+        database.run("UPDATE requirements SET seq = ?1 WHERE requirement_id = ?2 AND seq IS NULL", [seq, row.requirement_id]);
+      }
+    });
+  }
+  // 计数器不低于库里的最大号(补号之后、或计数器表是新建的)。
+  for (const row of database.all<{ network_id: string; m: number }>("SELECT network_id, MAX(seq) AS m FROM requirements WHERE seq IS NOT NULL GROUP BY network_id")) {
+    database.run(
+      `INSERT INTO requirement_seq_counters (network_id, last_seq) VALUES (?1, ?2)
+       ON CONFLICT(network_id) DO UPDATE SET last_seq = CASE WHEN excluded.last_seq > requirement_seq_counters.last_seq THEN excluded.last_seq ELSE requirement_seq_counters.last_seq END`,
+      [row.network_id, Number(row.m)],
+    );
+  }
+  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_network_seq ON requirements(network_id, seq) WHERE seq IS NOT NULL");
+  return { backfilled: pending.length };
+}
+
+/**
+ * 给新卡领下一个号。调用方把它和 INSERT 放在同一个事务里:插入失败(client_id / external_ref 撞了)号也一起回滚。
+ * 一条语句完成「读 + 加一 + 写回」,两个并发的新建拿不到同一个号;(network_id, seq) 唯一索引兜底。
+ */
+export function nextRequirementSeq(database: DbAdapter, networkId: string): number {
+  const row = database.get<{ last_seq: number }>(
+    `INSERT INTO requirement_seq_counters (network_id, last_seq)
+     VALUES (?1, COALESCE((SELECT MAX(seq) FROM requirements WHERE network_id = ?1), 0) + 1)
+     ON CONFLICT(network_id) DO UPDATE SET last_seq = requirement_seq_counters.last_seq + 1
+     RETURNING last_seq`,
+    networkId,
+  );
+  return Number(row!.last_seq);
+}
