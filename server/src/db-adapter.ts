@@ -90,6 +90,17 @@ export class SQLiteAdapter implements DbAdapter {
   }
 
   close(): void {
+    // #2151: once more than 20 distinct SQL strings have gone through query(),
+    // bun:sqlite's close() can no longer really close the connection (measured:
+    // close(true) reports "database is locked"), so SQLite never checkpoints and
+    // a cleanly stopped Hub left its latest writes in -wal. Checkpoint first,
+    // so the .db file alone is complete after a clean stop.
+    try {
+      const r = this.rawDb.query<{ busy: number; log: number; checkpointed: number }, []>("PRAGMA wal_checkpoint(TRUNCATE)").get();
+      if (r && r.busy !== 0) console.warn(`[commhub] WAL checkpoint on close was busy: ${JSON.stringify(r)}`);
+    } catch (e) {
+      console.warn(`[commhub] WAL checkpoint on close failed: ${(e as Error)?.message ?? e}`);
+    }
     this.rawDb.close();
   }
 }
