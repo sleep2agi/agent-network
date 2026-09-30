@@ -1,6 +1,6 @@
 # CommHub v0.9.0-preview.72
 
-This release carries 7 Hub changes, all already on main. Production is on `0.9.0-preview.71`.
+This release carries 8 Hub changes, all already on main. Production is on `0.9.0-preview.71`.
 
 - #2139 (a209d83892dadeaf533927a5d5ab01d16788970d) **A short task number per network (`#N`).**
   - Each requirement gets a `seq` that is shown as `#N`. The primary key `requirement_id` is unchanged.
@@ -20,6 +20,8 @@ This release carries 7 Hub changes, all already on main. Production is on `0.9.0
 - #2140 (313bfc801d1d1bf7e21e7322e1fe83f30d7e122c), #2145 (78c7769478f7dac46c7a7c98e67a92ddbf35e41e) **PostgreSQL work (RFC-039 S3, S4 part 1).**
   PostgreSQL is still in development and not usable. SQLite paths are unchanged, except that the PostgreSQL-only `side_chat_operations.rowid` column is added only on PostgreSQL.
 - #2136 (a4eedb7b940b9dc993c4fdce8141faa947a242fd) test-only: scheduled-tasks HTTP tests own their data.
+- #2147 (859bb29ca74bbc5f2b0f65bb737b06e789a4fcef) **PostgreSQL-only fixes (RFC-039 F3/F5).** This merged after the bump PR was cut, and it is in the published package.
+  It adds `rowid` tie-break columns on `nodes` / `user_inbox`, translates `strftime`, and accepts `get(sql, [params])`, all on PostgreSQL only. SQLite is unchanged.
 
 This note is not proof of publication. Publish only by running release.yml from the full main SHA that contains these changes:
 package `@sleep2agi/commhub-server`, version `0.9.0-preview.72`, channel preview.
