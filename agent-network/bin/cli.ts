@@ -38,6 +38,7 @@ import {
 } from "../src/copresence-identity";
 import { buildReceipt, formatReceiptSummary, writeReceipt, type LifecycleVerb, type ReceiptCheck } from "../src/codex-lifecycle-receipt";
 import { hubHealthTimeoutMs, HUB_HEALTH_TIMEOUT_ENV } from "../src/hub-health-timeout";
+import { anetClientLabel } from "../src/login-client-label";
 import { evaluateCodexPreflight, evaluateCodexVerify, checkIdentity, checkHome, checkSession } from "../src/codex-lifecycle-preflight";
 import { FORK_HOME_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, forkRolloutPath, readLastTurnContextModel, rewriteRollout, rewriteTrustedProjects, uuidV7 } from "../src/codex-lifecycle-fork";
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
@@ -2625,6 +2626,11 @@ function packageJsonPath() {
 function getAnetVersion(): string {
   try { return JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version || ""; }
   catch { return ""; }
+}
+
+/** POST /api/auth/login|register 的 client_label:这条登录在 app「登录设备」里叫什么(见 src/login-client-label.ts)。 */
+function loginClientLabel(command: string): string {
+  return anetClientLabel({ version: getAnetVersion(), host: hostname(), command });
 }
 
 // 🅗2 temp fallback per #61 — anet@latest 用户从 dashboard 0.4.5-preview.1 (pin
@@ -8646,7 +8652,7 @@ async function serverCommand() {
         const reg = await fetch(`${hubUrl}/api/auth/register`, {
           method: "POST",
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
-          body: JSON.stringify({ username: defaultUser, password: defaultPass }),
+          body: JSON.stringify({ username: defaultUser, password: defaultPass, client_label: loginClientLabel("hub start") }),
         }).then(r => r.json() as any);
         if (reg.ok) {
           defaultAccountReady = true;
@@ -13735,7 +13741,7 @@ async function registerCommand() {
     const res = await fetch(`${hub}/api/auth/register`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ username, password, email: email || undefined }),
+      body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register") }),
     }).then(r => r.json() as any);
 
     if (!res.ok) { console.error(`Registration failed: ${res.error}`); process.exit(1); }
@@ -13797,7 +13803,7 @@ async function loginCommand() {
     res = await fetch(`${hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, client_label: loginClientLabel("login") }),
     }).then(r => r.json() as any);
   } catch (e: any) {
     // Network / DNS / connection error — show the friendly hint, not the
@@ -15784,7 +15790,7 @@ async function demoSciTeamCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub" }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team") }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);
@@ -16360,7 +16366,7 @@ async function createBatchWizardCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub" }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch") }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);

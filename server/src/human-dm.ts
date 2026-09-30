@@ -11,7 +11,7 @@ import { getUserNetworkRole } from "./auth.js";
 import { isAgentRestricted } from "./agent-access.js";
 import { pushUserEvent, hasUserSubscribers } from "./push.js";
 import { existsSync, readFileSync } from "fs";
-import { DM_FILE_SCOPE, FILE_ID_REGEX, indexEntryPath, validateAttachments, validateIndexEntry, type UploadIndexEntry } from "./uploads.js";
+import { FILE_ID_REGEX, indexEntryPath, validateAttachments, validateIndexEntry } from "./uploads.js";
 import { restrictedMemberCanUseFile } from "./restricted-files.js";
 import { redactMessageRow } from "./redact-tokens.js";
 
@@ -57,16 +57,10 @@ export function sendHumanDm(input: HumanDmSendInput): HumanDmSendResult {
   for (const a of attachments.attachments) {
     const fileId = (a as { file_id?: string }).file_id;
     if (!fileId) continue;
-    const entry = networkFileEntry(networkId, fileId);
     const usable = restricted
       ? restrictedMemberCanUseFile(sender.userId, sender.username, networkId, fileId)
-      : !!entry;
+      : fileInNetwork(networkId, fileId);
     if (!usable) return { ok: false, error: "attachment_not_accessible", status: 403 };
-    // 私信文件只能由看得见它的人转发:否则任何成员把别人私信里的 file_id 塞进一条自己发出的私信,
-    // 就成了「私信参与者」而解锁它。上传者本人、以及已经在某段私信里收到/发出过它的人可以转。
-    if (entry?.scope === DM_FILE_SCOPE && entry.owner_id !== sender.userId && !dmParticipantSeesFile(sender.userId, networkId, fileId)) {
-      return { ok: false, error: "attachment_not_accessible", status: 403 };
-    }
   }
 
   const clientRequestId = typeof input.clientRequestId === "string" && /^[A-Za-z0-9._-]{1,80}$/.test(input.clientRequestId)
@@ -113,36 +107,15 @@ export function sendHumanDm(input: HumanDmSendInput): HumanDmSendResult {
   return { ok: true, message: redactMessageRow(row), delivered };
 }
 
-/** 带附件:文件必须属于这个网络(防把别的网络的 file_id 塞进来)。返回它的索引条目,不属于 → null。 */
-function networkFileEntry(networkId: string, fileId: string): UploadIndexEntry | null {
-  if (!FILE_ID_REGEX.test(fileId)) return null;
+/** 不受限的成员带附件:文件必须属于这个网络(防把别的网络的 file_id 塞进来)。 */
+function fileInNetwork(networkId: string, fileId: string): boolean {
+  if (!FILE_ID_REGEX.test(fileId)) return false;
   const path = indexEntryPath(fileId);
-  if (!path || !existsSync(path)) return null;
+  if (!path || !existsSync(path)) return false;
   try {
     const entry = JSON.parse(readFileSync(path, "utf8"));
-    return validateIndexEntry(entry) && entry.file_id === fileId && entry.network_id === networkId ? entry : null;
-  } catch { return null; }
-}
-
-/**
- * 这个用户是不是某段带着这个文件的私信里的一方(收到的或发出的)。私信文件(scope=dm)的下载只认它
- * 和上传者本人(server.ts authorizeFileDownload)。LIKE 只做预筛,真正的判定按 attachments 键解析。
- */
-export function dmParticipantSeesFile(userId: string, networkId: string, fileId: string): boolean {
-  if (!FILE_ID_REGEX.test(fileId)) return false;
-  const needle = `%"${fileId.replace(/_/g, "\\_")}"%`;
-  const rows = db.all<{ meta_json: string | null }>(
-    `SELECT meta_json FROM user_inbox
-      WHERE network_id = ?1 AND kind = '${HUMAN_DM_KIND}' AND (user_id = ?2 OR sender_user_id = ?2)
-        AND meta_json LIKE ?3 ESCAPE '\\' LIMIT 50`,
-    networkId, userId, needle,
-  );
-  return rows.some((row) => {
-    try {
-      const list = JSON.parse(row.meta_json ?? "null")?.attachments;
-      return Array.isArray(list) && list.some((a: any) => a && typeof a === "object" && a.file_id === fileId);
-    } catch { return false; }
-  });
+    return validateIndexEntry(entry) && entry.file_id === fileId && entry.network_id === networkId;
+  } catch { return false; }
 }
 
 /** 我和某人的私信记录(双向),新的在前。before = 上一页最后一条的 created_at。 */

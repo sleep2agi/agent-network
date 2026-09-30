@@ -15,7 +15,7 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
-import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
+import { listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
 import { canMessageAgent, isAgentRestricted, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
@@ -42,7 +42,6 @@ import {
   stripHostLocalPathsForCrossHostSafe,
   validateAttachments,
   validateIndexEntry,
-  DM_FILE_SCOPE,
 } from "./uploads.js";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, unlinkSync, renameSync } from "fs";
 import { dirname as pathDirname, join as pathJoin } from "path";
@@ -387,16 +386,15 @@ export function resolvePrincipal(req: Request, options: RequestTokenOptions = {}
 // these two fields lives here and nowhere else, so the authz rules can be
 // read as rules rather than as string-checks.
 export function normalizeEntry(
-  entry: { owner_id?: unknown; network_id?: unknown; scope?: unknown },
-): { ownerId: string | null; networkId: string | null; dmScoped?: true } {
+  entry: { owner_id?: unknown; network_id?: unknown },
+): { ownerId: string | null; networkId: string | null } {
   const ownerId = typeof entry.owner_id === "string" && entry.owner_id.length > 0
     ? entry.owner_id
     : null;
   const networkId = typeof entry.network_id === "string" && entry.network_id.length > 0
     ? entry.network_id
     : null;
-  // dmScoped 只在是私信文件时出现:其余条目的形状与之前逐字相同。
-  return { ownerId, networkId, ...(entry.scope === DM_FILE_SCOPE ? { dmScoped: true as const } : {}) };
+  return { ownerId, networkId };
 }
 
 // #495/#503 — shared authorization gate for /api/files/:file_id downloads.
@@ -417,13 +415,6 @@ export function normalizeEntry(
 //     a task but not open its attachment is a broken product).
 //   - entry.network_id absent (legacy / unattributed) → the pre-#503
 //     rules stand unchanged: owner match, or null owner_id + DEV_OPEN.
-//   - entry.dmScoped (uploaded with ?purpose=dm — its first use is a
-//     human DM) → only the uploader and the users on either side of a DM
-//     that carries it (human-dm.ts dmParticipantSeesFile). Other members of
-//     the network and node tokens (agents) are denied. admin-utok and the
-//     legacy master token still pass above, as for every other file.
-//     Files uploaded any other way never become DM-scoped, including when
-//     they are later forwarded into a DM.
 //   - Everything else → deny (404). New uploads in production always
 //     carry a truthy owner_id (requireAuth blocks the null-owner-
 //     producing path when DEV_OPEN=off and no legacy master token is
@@ -438,7 +429,7 @@ export function normalizeEntry(
 // 所有文件在同一 network → 无实际影响, 但语义变更须明写, 不能悄悄发生.
 export function authorizeFileDownload(
   principal: Principal,
-  entry: { ownerId: string | null; networkId: string | null; dmScoped?: boolean },
+  entry: { ownerId: string | null; networkId: string | null },
   fileId?: string,
 ): boolean {
   if (principal.kind === "legacy-master") return true;
@@ -446,13 +437,8 @@ export function authorizeFileDownload(
 
   if (entry.networkId !== null) {
     if (principal.kind === "anonymous" || principal.kind === "dev-open-anon") return false;
-    if (principal.kind === "ntok") return principal.boundNetworkId === entry.networkId && !entry.dmScoped;
+    if (principal.kind === "ntok") return principal.boundNetworkId === entry.networkId;
     if (!getUserNetworkRole(principal.userId, entry.networkId)) return false;
-    // 私信文件:只看是不是这段私信里的人,与受限 / 不受限无关。
-    if (entry.dmScoped) {
-      if (entry.ownerId !== null && entry.ownerId === principal.userId) return true;
-      return !!fileId && dmParticipantSeesFile(principal.userId, entry.networkId, fileId);
-    }
     // 多用户 Agent 权限:受限成员只能下载自己传的,或者出现在自己与授权 Agent 往来 / 自己收件箱里的文件。
     if (!isAgentRestricted(principal.userId, entry.networkId)) return true;
     if (entry.ownerId !== null && entry.ownerId === principal.userId) return true;
@@ -2518,12 +2504,6 @@ return Bun.serve({
       // uploaded and never gets their multipart envelope parsed.
       const principal = resolvePrincipal(req);
       const requestedNetId = url.searchParams.get("network_id");
-      // ?purpose=dm:这个文件是为一条人与人私信传的(见 UploadIndexEntry.scope)。缺省 = 旧行为。
-      // 拼错的值拒掉,不静默当成缺省 —— 否则私信图会不声不响地变成全网可见。
-      const purpose = url.searchParams.get("purpose");
-      if (purpose !== null && purpose !== DM_FILE_SCOPE) {
-        return earlyReject(Response.json({ ok: false, error: "bad_purpose", message: `purpose must be "${DM_FILE_SCOPE}" or absent` }, { status: 400 }));
-      }
       let uploadNetId: string | null = null;
 
       switch (principal.kind) {
@@ -2700,7 +2680,6 @@ return Bun.serve({
             owner_id: authCtx?.userId ?? null,
             // Key omitted (not null) when unattributed — see UploadIndexEntry.
             ...(uploadNetId ? { network_id: uploadNetId } : {}),
-            ...(purpose === DM_FILE_SCOPE ? { scope: DM_FILE_SCOPE } : {}),
             uploaded_at: new Date().toISOString(),
           }, null, 2));
         } else {
