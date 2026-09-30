@@ -4,7 +4,7 @@
 import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
 import { WEAK_PASSWORDS } from "./password-dict.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
-import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js";
+import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, NEW_MEMBER_TASK_ACCESS, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
 
 // Round-6 A1 hardening — dummy hash for username-enumeration timing
 // close. We compute ONE scrypt hash of a throwaway password and reuse
@@ -586,6 +586,8 @@ export function getNetworkMembers(networkId: string) {
     `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name,
             CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access,
             (SELECT COUNT(*) FROM network_member_agent_grants g WHERE g.network_id = nm.network_id AND g.user_id = nm.user_id) AS agent_grant_count,
+            CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.task_access = 'all' THEN 'all' ELSE 'scoped' END AS task_access,
+            (SELECT COUNT(*) FROM network_member_project_grants pg WHERE pg.network_id = nm.network_id AND pg.user_id = nm.user_id) AS task_project_count,
             (SELECT COUNT(*) FROM network_member_group_grants gg WHERE gg.network_id = nm.network_id AND gg.user_id = nm.user_id) AS agent_group_count
      FROM network_members nm JOIN users u ON nm.user_id = u.user_id
      WHERE nm.network_id = ?1 ORDER BY nm.joined_at`,
@@ -624,15 +626,17 @@ export function usernameCollidesWithAgent(networkId: string, userId: string): bo
 }
 
 // 新成员默认 agent_access='granted'(零 Agent 权限),owner/admin 角色不看这一列。
-export function addNetworkMember(networkId: string, userId: string, role: string, invitedBy?: string, opts: { agentAccess?: "all" | "granted" } = {}): { ok: boolean; error?: string } {
+export function addNetworkMember(networkId: string, userId: string, role: string, invitedBy?: string, opts: { agentAccess?: "all" | "granted"; taskAccess?: TaskAccessMode } = {}): { ok: boolean; error?: string } {
   if (!MEMBER_ROLES.has(role)) return { ok: false, error: "invalid role" };
   const agentAccess = opts.agentAccess === "all" ? "all" : "granted";
+  // 任务范围:新成员默认 NEW_MEMBER_TASK_ACCESS(task-access.ts 一处定义)。
+  const taskAccess: TaskAccessMode = opts.taskAccess === "all" || opts.taskAccess === "scoped" ? opts.taskAccess : NEW_MEMBER_TASK_ACCESS;
   if (!db.get("SELECT 1 FROM users WHERE user_id = ?1", userId)) return { ok: false, error: "user not found" };
   const existing = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
   if (existing) return { ok: false, error: "user already a member" };
   if (usernameCollidesWithAgent(networkId, userId)) return { ok: false, error: "username_collides_with_agent_alias" };
-  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access) VALUES (?1, ?2, ?3, ?4, ?5)",
-    [networkId, userId, role, invitedBy || null, agentAccess]);
+  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access, task_access) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    [networkId, userId, role, invitedBy || null, agentAccess, taskAccess]);
   return { ok: true };
 }
 
@@ -649,6 +653,7 @@ export function removeNetworkMember(networkId: string, userId: string): { ok: bo
   if (member.role === "owner") return { ok: false, error: "cannot remove owner" };
   db.run("DELETE FROM network_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
   deleteAgentGrants(networkId, userId);
+  deleteTaskGrantsForMember(networkId, userId);
   return { ok: true };
 }
 
@@ -686,8 +691,8 @@ export function joinByInvite(inviteCode: string, userId: string): { ok: boolean;
   if (existing) return { ok: false, error: "already a member of this network" };
   if (usernameCollidesWithAgent(invite.network_id, userId)) return { ok: false, error: "username_collides_with_agent_alias" };
   // Add member + increment used count
-  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access) VALUES (?1, ?2, ?3, ?4, 'granted')",
-    [invite.network_id, userId, invite.role, invite.created_by]);
+  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access, task_access) VALUES (?1, ?2, ?3, ?4, 'granted', ?5)",
+    [invite.network_id, userId, invite.role, invite.created_by, NEW_MEMBER_TASK_ACCESS]);
   db.run("UPDATE network_invites SET used_count = used_count + 1 WHERE invite_code = ?1", [inviteCode]);
   // 受限成员不能持有网络令牌(resolveToken 会拒),别签一个用不了的。
   if (isAgentRestricted(userId, invite.network_id)) return { ok: true, network_id: invite.network_id, role: invite.role };
@@ -704,7 +709,9 @@ export function getUserAllNetworks(userId: string) {
   return db.all<any>(
     `SELECT ${sqlColumns(NETWORK_REST_COLUMNS, "n")}, nm.role as member_role,
             -- 多用户 Agent 权限:客户端据此显示「还没有被分配任何 Agent,请联系管理员」。
-            CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access
+            CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access,
+            -- 任务权限(RFC-038 §9):客户端据此显示只读提示与「还没有与你相关的任务」。
+            CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.task_access = 'all' THEN 'all' ELSE 'scoped' END AS task_access
      FROM networks n JOIN network_members nm ON n.network_id = nm.network_id
      JOIN users u ON u.user_id = nm.user_id
      WHERE nm.user_id = ?1 ORDER BY nm.role = 'owner' DESC, n.created_at`,

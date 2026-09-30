@@ -35,7 +35,8 @@ beforeAll(async () => {
   expect(viewer.ok).toBe(true);
   viewerToken = viewer.token!;
   const viewerId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", viewer.user!.username)!.user_id;
-  addNetworkMember(networkId, viewerId, "viewer", ownerId);
+  // 这里的 viewer 代表 RFC-038 §9 之前的语义(能读全网、不能写);scoped viewer 在 task-access-http.test.ts 里测。
+  addNetworkMember(networkId, viewerId, "viewer", ownerId, { taskAccess: "all" });
   const ntok = createNetworkTokenForNode(ownerId, networkId, "req-node");
   expect(ntok.ok).toBe(true);
   nodeToken = ntok.token!;

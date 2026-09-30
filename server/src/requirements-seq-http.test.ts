@@ -122,7 +122,8 @@ describe("requirement short numbers (#N)", () => {
   test("a user whose scope spans two networks gets 409 ambiguous_seq for #N, and network_id resolves it", async () => {
     const { db } = await import("./db.js");
     const { addNetworkMember } = await import("./auth.js");
-    addNetworkMember(otherNet, ownerId, "member", otherId);
+    // 看全网的成员(RFC-038 §9 之前的语义):这里测的是跨网络 #N 歧义,不是任务范围。
+    addNetworkMember(otherNet, ownerId, "member", otherId, { taskAccess: "all" });
     const both = await api(ownerToken, "/api/requirements/%231");
     expect(both.status).toBe(409);
     expect(both.body.error).toBe("ambiguous_seq");

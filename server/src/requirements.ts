@@ -2,10 +2,14 @@
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { createHash } from "node:crypto";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
-import { db } from "./db.js";
+import { db, logAudit } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, visibleAgents } from "./agent-access.js";
+import {
+  addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
+  isTaskScoped, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
+} from "./task-access.js";
 import { ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
@@ -65,6 +69,27 @@ type Row = {
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ ok: false, error }, { status });
+}
+
+// ── 任务的人员权限(RFC-038 §9,判定在 task-access.ts) ──
+// 节点令牌(Agent)、Hub 管理员、没有身份的旧全局令牌:不受任务权限约束(null)。
+function taskCaller(ctx: RequirementsRequestContext): TaskCaller {
+  if (!ctx.auth || ctx.isNodeToken || ctx.isAdmin) return null;
+  return { userId: ctx.auth.userId };
+}
+/** 看得见但没权限写:403,并按 (用户, 卡) 每小时最多记一条审计。 */
+function taskDenied(ctx: RequirementsRequestContext, row: Row, error: "task_read_only" | "task_delete_denied"): Response {
+  if (ctx.auth && shouldAuditDenied(ctx.auth.userId, row.requirement_id)) {
+    logAudit(ctx.auth.userId, ctx.auth.username || null, "task_access_denied", "requirement", row.requirement_id, JSON.stringify({ error }), undefined, row.network_id);
+  }
+  return jsonError(error, 403);
+}
+/** 父卡对调用者不可见 = 与不存在同一个错误(不给 scoped 成员留卡片存在性探测)。 */
+function parentHidden(ctx: RequirementsRequestContext, parentId: string): boolean {
+  const caller = taskCaller(ctx);
+  if (!caller) return false;
+  const parent = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, parentId);
+  return !!parent && !canSeeTask(caller, parent);
 }
 
 function dueOk(due: string): boolean {
@@ -219,10 +244,15 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
   if (!networkId) return jsonError("network_id_required", 400);
   const one = url.pathname.match(/^\/api\/requirements\/projects\/([^/]+)$/);
   if (url.pathname === "/api/requirements/projects" && req.method === "GET") {
-    const rows = db.all<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE network_id = ?1 ORDER BY sort, created_at`, networkId);
+    // scoped 成员只列授权给自己的项目(RFC-038 §9.3)。
+    const projectParams: unknown[] = [networkId];
+    const projectSql = addProjectVisibilityScope(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE network_id = ?1`, projectParams, taskCaller(ctx), networkId);
+    const rows = db.all<ProjectRow>(`${projectSql} ORDER BY sort, created_at`, ...projectParams);
     return Response.json({ ok: true, projects: rows.map(projectPublic) });
   }
   if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
+  // 项目管理(建 / 改名 / 归档 / 删)只给不受任务范围限制的人。
+  if (taskCaller(ctx) && isTaskScoped(ctx.auth!.userId, networkId)) return jsonError("permission_denied", 403);
   let body: Record<string, unknown> = {};
   if (req.method === "POST" || req.method === "PATCH") {
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
@@ -248,6 +278,7 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     // 先把卡片上的引用置空,再删项目:卡片一张不少。
     db.run("UPDATE requirements SET project_id = NULL WHERE project_id = ?1", [current.project_id]);
     db.run("DELETE FROM requirement_projects WHERE project_id = ?1", [current.project_id]);
+    deleteTaskGrantsForProject(current.project_id);
     return Response.json({ ok: true });
   }
   if (req.method !== "PATCH") return jsonError("not_found", 404);
@@ -348,8 +379,14 @@ function isHiddenRef(ref: unknown, hidden: HiddenNode): boolean {
   const r = ref as { kind?: unknown; id?: unknown };
   return r.kind === "node" && typeof r.id === "string" && hidden(r.id);
 }
+// 每个请求一个权限解析器(按网络缓存成员行与项目授权)。
+const permsByCtx = new WeakMap<RequirementsRequestContext, ReturnType<typeof taskPermissionsResolver>>();
 function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
-  const pub = toPublic(row);
+  let perms = permsByCtx.get(ctx);
+  if (!perms) permsByCtx.set(ctx, perms = taskPermissionsResolver(taskCaller(ctx)));
+  // viewer_can:只对「只看相关任务」的调用者出现,客户端据此画只读锁、藏删除;不出现 = 与今天一样全能(旧 Hub 也不出现)。
+  const can = perms(row);
+  const pub = can ? { ...toPublic(row), viewer_can: can } : toPublic(row);
   const hidden = hiddenNodeFilter(ctx, row.network_id);
   if (!hidden) return pub;
   return {
@@ -579,18 +616,24 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   if (description === null) return jsonError("invalid_description", 400);
   const checklist = body.checklist === undefined ? [] : normalizeChecklist(body.checklist);
   if (checklist === null) return jsonError("invalid_checklist", 400);
+  const caller = taskCaller(ctx);
+  const scoped = !!caller && isTaskScoped(caller.userId, networkId);
   let projectId: string | null = null;
   if (body.project_id !== undefined) {
     try { projectId = projectRef(body.project_id, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
+    // scoped 成员只能建进自己 can_edit 的项目;没授权的项目与不存在的项目同一个错误。
+    if (!canUseProject(caller, networkId, projectId)) return jsonError("project_not_in_network", 400);
   }
   const ref = body.external_ref === undefined ? null : externalRef(body.external_ref);
   if (ref === undefined) return jsonError("invalid_external_ref", 400);
+  // scoped 成员不能带 external_ref:「external_ref_exists」会把别人的卡号回给他。
+  if (ref && scoped) return jsonError("external_ref_not_allowed", 403);
   const extUrl = body.external_url === undefined ? null : externalUrl(body.external_url);
   if (extUrl === undefined) return jsonError("invalid_external_url", 400);
   const parentId = body.parent_id === undefined ? null : parentIdOf(body.parent_id);
   if (parentId === undefined) return jsonError("invalid_parent_id", 400);
   if (parentId) {
-    const err = parentError(networkId, parentId, null);
+    const err = parentHidden(ctx, parentId) ? "parent_not_found" : parentError(networkId, parentId, null);
     if (err) return jsonError(err, 400);
   }
   if (ref) {
@@ -600,7 +643,8 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   }
   if (clientId) {
     const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
-    if (existing) return Response.json({ ok: true, requirement: toPublicFor(ctx, existing) });
+    // 重放只回调用者看得见的卡;撞上别人的卡(scoped 看不见)= 固定的 409,不把那张卡回给他。
+    if (existing) return canSeeTask(caller, existing) ? Response.json({ ok: true, requirement: toPublicFor(ctx, existing) }) : jsonError("client_id_taken", 409);
   }
   const id = `req_${crypto.randomUUID()}`;
   const createdAt = new Date().toISOString();
@@ -624,6 +668,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
     if (!clientId) return jsonError("insert_failed", 500);
     const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
     if (!existing) return jsonError("insert_failed", 500);
+    if (!canSeeTask(caller, existing)) return jsonError("client_id_taken", 409);
     return Response.json({ ok: true, requirement: toPublicFor(ctx, existing) });
   }
   const created = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, id)!;
@@ -636,6 +681,10 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
   if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+  const caller = taskCaller(ctx);
+  if (!canEditTask(caller, row)) return taskDenied(ctx, row, "task_read_only");
+  // scoped 成员不能写 external_ref:唯一索引冲突会泄露别的卡用了这个 ref。
+  if (has("external_ref") && caller && isTaskScoped(caller.userId, row.network_id)) return jsonError("external_ref_not_allowed", 403);
   if (has("column") && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
   const issues = has("issues") ? normalizeIssues(body.issues) : null;
   if (has("issues") && issues === null) return jsonError("invalid_issues", 400);
@@ -679,6 +728,8 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   let projectId = row.project_id;
   if (has("project_id")) {
     try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return jsonError((e as Error).message, 400); }
+    // scoped 成员只能挪进自己 can_edit 的项目;没授权的项目与不存在的项目同一个错误。
+    if (projectId !== row.project_id && !canUseProject(caller, row.network_id, projectId)) return jsonError("project_not_in_network", 400);
   }
   let ref = row.external_ref;
   if (has("external_ref")) {
@@ -701,7 +752,7 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     const next = parentIdOf(body.parent_id);
     if (next === undefined) return jsonError("invalid_parent_id", 400);
     if (next) {
-      const err = parentError(row.network_id, next, row.requirement_id);
+      const err = parentHidden(ctx, next) ? "parent_not_found" : parentError(row.network_id, next, row.requirement_id);
       if (err) return jsonError(err, 400);
     }
     parentId = next;
@@ -748,6 +799,8 @@ function scopedRow(ctx: RequirementsRequestContext, id: string): Row | Response 
   const params: unknown[] = [seq ?? id];
   let sql = `SELECT ${SELECT} FROM requirements WHERE ${seq === null ? "requirement_id" : "seq"} = ?1`;
   sql = addHumanNetworkScope(sql, params, ctx.scope);
+  // 看不见的卡与不存在的卡同一个 404(逐字节相同);#N 的 ambiguous_seq 也只在看得见的行里判定。
+  sql = addTaskVisibilityScope(sql, params, taskCaller(ctx));
   const rows = db.all<Row>(`${sql} LIMIT 2`, ...params);
   if (rows.length > 1) {
     const networks = rows.map(r => r.network_id);
@@ -869,7 +922,9 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
   if (url.pathname === "/api/requirements/tags" && req.method === "GET") {
     const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
     if (!networkId) return jsonError("network_id_required", 400);
-    const rows = db.all<{ tags_json: string | null }>("SELECT tags_json FROM requirements WHERE network_id=?1", networkId);
+    const tagParams: unknown[] = [networkId];
+    const tagSql = addTaskVisibilityScope("SELECT tags_json FROM requirements WHERE network_id=?1", tagParams, taskCaller(ctx));
+    const rows = db.all<{ tags_json: string | null }>(tagSql, ...tagParams);
     const tags = [...new Set(rows.flatMap(row => storedTags(row.tags_json)))].sort();
     return Response.json({ ok: true, networkId, tags });
   }
@@ -892,6 +947,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     // 只拼 FROM … WHERE:同一组条件既用来读整行,也用来(搜索时)先读轻量列。
     let sql = "FROM requirements WHERE 1=1";
     sql = addHumanNetworkScope(sql, params, ctx.scope);
+    sql = addTaskVisibilityScope(sql, params, taskCaller(ctx));
     const filtered = listFilters(url, sql, params, ctx);
     if (typeof filtered !== "string") return filtered;
     // q= / limit / cursor(requirements-search.ts)。都不带 = 旧行为:最新 500 张、同样的顺序。
@@ -919,6 +975,8 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const networkId = writeNetwork(body, ctx);
     if (!networkId) return jsonError("network_id_required", 400);
     if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
+    // scoped 成员不能用同步接口:external_ref 的唯一索引会把「这个 ref 已经有卡」泄露出去。固定错误,不看 ref。
+    if (taskCaller(ctx) && isTaskScoped(ctx.auth!.userId, networkId)) return jsonError("upsert_not_allowed", 403);
     const existing = rowByExternalRef(networkId, ref);
     if (!existing) {
       const res = await createRequirement(ctx, body);
@@ -943,6 +1001,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const row = scopedRow(ctx, decodeURIComponent(itemMatch[1]));
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    if (!canEditTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_read_only");
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
     const items = storedChecklist(row.checklist_json);
     const itemId = decodeURIComponent(itemMatch[2]);
@@ -966,9 +1025,12 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const row = scopedRow(ctx, id);
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    if (!canDeleteTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_delete_denied");
     // 子需求不跟着删:先解挂(变成顶层),再删父卡。
     db.run("UPDATE requirements SET parent_id = NULL WHERE parent_id = ?1", [row.requirement_id]);
     db.run("DELETE FROM requirements WHERE requirement_id = ?1", [row.requirement_id]);
+    // 硬删除以前不留痕(RFC-038 §9.1):记下是谁删了哪张(标题 + 短号),卡本身已经没了。
+    if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_deleted", "requirement", row.requirement_id, JSON.stringify({ title: row.title, seq: row.seq ?? null }).slice(0, 1000), undefined, row.network_id);
     return Response.json({ ok: true, deleted: row.requirement_id });
   }
   if (req.method !== "PATCH") return jsonError("not_found", 404);
