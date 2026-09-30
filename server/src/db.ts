@@ -1970,7 +1970,7 @@ export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: stri
     `SELECT task_id, network_id, status, completed_at
        FROM tasks
       WHERE task_id = ?1
-        AND (?2 IS NULL OR network_id = ?2)`,
+        AND (CAST(?2 AS TEXT) IS NULL OR network_id = ?2)`,
     taskId,
     expectedNetworkId ?? null,
   );

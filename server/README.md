@@ -150,7 +150,7 @@ delivered/acked/running → reassign → delivered (new agent)
 
 ## PostgreSQL (community extension point — not on the maintained roadmap)
 
-> **PostgreSQL support is still in development and does not work yet** (PostgreSQL 支持尚在开发中，目前不可用). With `DATABASE_URL=postgres://…` the hub exits while creating its schema. Progress: [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md).
+> **PostgreSQL support is still in development and does not work yet** (PostgreSQL 支持尚在开发中，目前不可用). With `DATABASE_URL=postgres://…` the hub builds its schema, but `startHub()` refuses to run on PostgreSQL unless you also set `COMMHUB_PG_EXPERIMENTAL=1` (experimental, for testing only: it switches on the scheduler, task runtime evidence and side-thread commands on PostgreSQL before their PostgreSQL tests exist; RFC-039 S4 removes the flag). Progress: [RFC-039](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-039-hub-postgresql-backend.md).
 
 > v0.8+ product direction is **SQLite only** (see [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)). The PostgreSQL adapter interface is preserved as a community extension point — no E2E coverage on the current stable line; **not recommended for mainline production**.
 
@@ -276,7 +276,7 @@ main 上 66 处写的是 `SOURCE_COMMIT`,另有若干写成 `TEST<编号>_SOURCE
 ## Not verified
 
 - `/api/license*` — experimental legacy trial/pro-license endpoints.
-- PostgreSQL backend — in development, does not work yet (hub exits while creating its schema; RFC-039).
+- PostgreSQL backend — in development, does not work yet (the hub refuses to start on it without the experimental opt-in; RFC-039).
 - Telegram / WeChat / Feishu channel endpoints — channel code exists, but only Telegram-oriented agent-node paths are actively exercised.
 
 ## License

@@ -197,10 +197,13 @@ export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Sw
   //     DBs must run a one-time blocking `VACUUM` themselves (out of
   //     scope for the sweeper, which deliberately stays non-
   //     blocking).
+  //   Both are SQLite PRAGMAs; on PostgreSQL autovacuum does this job and
+  //   the two counters stay null (RFC-039 S3).
   let walCheckpointPagesMoved: number | null = null;
   let incrementalFreedPages: number | null = null;
   let errored = false;
-  try {
+  const sqliteVacuum = db.dialect === "sqlite";
+  if (sqliteVacuum) try {
     // wal_checkpoint(TRUNCATE) returns a row { busy, log, checkpointed }.
     // We expose `log` (page count moved into the main DB) for ops visibility.
     const checkpoint = db.get<{ busy: number; log: number; checkpointed: number }>(
@@ -211,7 +214,7 @@ export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Sw
     console.log(`[commhub retention] wal_checkpoint failed: ${e?.message ?? e}`);
     errored = true;
   }
-  try {
+  if (sqliteVacuum) try {
     // incremental_vacuum is a no-op on databases not created with
     // PRAGMA auto_vacuum = INCREMENTAL. For existing prod DBs that
     // weren't, the operator would have to run a full one-time VACUUM

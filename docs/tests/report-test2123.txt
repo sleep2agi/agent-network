@@ -79,3 +79,19 @@ a worker thread; image no longer installs nodejs or pg.
     PG_LADDER level=4 floor=4 COMMHUB_PG_EXPERIMENTAL=1 …            rc=0
     witnessed red — PgAdapter refusal hard-wired to null (gate open by default):
     FAIL gate: without the opt-in the PG Hub kept running (gate open by default)   rc=1
+
+---
+RFC-039 S3 (branch fix/pg-s3)
+
+14. S3 source (what CI will run)
+    PASS gate (no opt-in → refuses, names COMMHUB_PG_EXPERIMENTAL=1)
+    PASS L3 admin / PASS L4 task / PASS L5 send_reply ok and task row replied
+    PG_LADDER level=5 floor=5 COMMHUB_PG_EXPERIMENTAL=1 first_fail=none   rc=0
+    full hub.log: 0 "PG:"/"failed" lines (retention PRAGMA and integer
+    out-of-range errors gone); pg.log ERRORs are only the idempotent
+    "column … already exists" ALTERs and contract.ts's deliberate
+    no_such_table.
+
+15. witnessed red: db.ts CAST reverted (bind-mounted)
+    FAIL L5 send_reply: could not determine data type of parameter $2
+    PG_LADDER level=4 floor=5 → RESULT: FAIL                         rc=1
