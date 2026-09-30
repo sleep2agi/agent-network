@@ -137,7 +137,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L467) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L470) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
 
 Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 

@@ -137,7 +137,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L467) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
+| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L470) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
 
 写 audit log `action='token_revoked'`。撤销后该 token 的下一次请求拿 401 `invalid token`。
 

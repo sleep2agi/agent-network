@@ -174,4 +174,55 @@ describe("DELETE /api/networks/:id — hub admin override for empty foreign netw
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
   });
+
+  // #2144 —— Agent 分组(#2131)的三张表。
+  function addGroup(netId: string, tag: string): string {
+    const groupId = `grp-${tag}-${stamp}`;
+    db.run("INSERT INTO agent_groups (group_id, network_id, name) VALUES (?1, ?2, ?3)", [groupId, netId, `g-${tag}`]);
+    db.run("INSERT INTO agent_group_members (group_id, node_id) VALUES (?1, ?2)", [groupId, `node-${tag}-${stamp}`]);
+    db.run("INSERT INTO network_member_group_grants (network_id, user_id, group_id) VALUES (?1, ?2, ?3)", [netId, memberUserId, groupId]);
+    return groupId;
+  }
+  function groupRows(netId: string, groupId: string) {
+    return {
+      agent_groups: rowCount("agent_groups", netId),
+      agent_group_members: db.get<{ cnt: number }>("SELECT COUNT(*) AS cnt FROM agent_group_members WHERE group_id = ?1", groupId)!.cnt,
+      network_member_group_grants: rowCount("network_member_group_grants", netId),
+    };
+  }
+
+  test("#2144 admin is refused with 409 counts.agent_groups when the network has an agent group", async () => {
+    const netId = memberNetwork("grouped");
+    const groupId = addGroup(netId, "admin-blocked");
+    const res = await del(netId, adminToken);
+    const body = await res.json() as any;
+    expect(res.status).toBe(409);
+    expect(body.counts).toEqual({ agent_groups: 1 });
+    expect(db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)).toBeTruthy();
+    expect(groupRows(netId, groupId)).toEqual({ agent_groups: 1, agent_group_members: 1, network_member_group_grants: 1 });
+  });
+
+  test("#2144 admin delete of an otherwise-empty network cleans orphan group grants", async () => {
+    const netId = memberNetwork("orphan-grant");
+    db.run("INSERT INTO network_member_group_grants (network_id, user_id, group_id) VALUES (?1, ?2, ?3)", [netId, memberUserId, `grp-gone-${stamp}`]);
+    const res = await del(netId, adminToken);
+    const body = await res.json() as any;
+    expect(res.status).toBe(200);
+    expect(body.cleaned.network_member_group_grants).toBe(1);
+    expect(rowCount("network_member_group_grants", netId)).toBe(0);
+  });
+
+  test("#2144 owner delete removes the network's groups, group members and group grants, and leaves other networks' groups", async () => {
+    const netId = memberNetwork("owner-grouped");
+    const groupId = addGroup(netId, "owner");
+    const otherNet = memberNetwork("owner-grouped-other");
+    const otherGroup = addGroup(otherNet, "other");
+
+    const res = await del(netId, memberToken);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)).toBeFalsy();
+    expect(groupRows(netId, groupId)).toEqual({ agent_groups: 0, agent_group_members: 0, network_member_group_grants: 0 });
+    expect(groupRows(otherNet, otherGroup)).toEqual({ agent_groups: 1, agent_group_members: 1, network_member_group_grants: 1 });
+  });
 });

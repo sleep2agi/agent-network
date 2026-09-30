@@ -354,7 +354,7 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 `revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销）。
 
-**关键副作用** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L530) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**关键副作用** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L533) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
 2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
 3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
@@ -581,7 +581,7 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-删除网络（仅 owner，必须无活跃 session）。**需要用户令牌。** 节点令牌返回 403 `user_token_required`。
+删除网络（仅 owner，必须无活跃 session；该网络的 Agent 分组、组成员与组授权一并删除）。**需要用户令牌。** 节点令牌返回 403 `user_token_required`。
 
 ```bash
 curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
@@ -606,7 +606,7 @@ curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
 
 **Hub 管理员删别人的网络**（用于清理旧账号留下的个人网络）：调用者是 Hub 管理员（用户令牌，`role=admin`）且不是 owner 时，
 只允许删**空**网络 —— nodes / sessions / tasks / inbox / user_inbox / requirements / requirement_projects /
-scheduled_tasks / providers / network_secrets / skillhub_skills / side_chats、在途的节点创建/启动请求、
+scheduled_tasks / providers / network_secrets / skillhub_skills / side_chats / agent_groups、在途的节点创建/启动请求、
 归属该网络的上传文件，任一非 0 即拒。`network_id='default'` 一律拒。成功时同一事务里删掉该网络的成员、
 授权、邀请、网络作用域令牌（节点令牌随之失效）及请求/遥测等历史行；audit log 的 `detail` 带
 `"admin_override":true` 与原 owner。
