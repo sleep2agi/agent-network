@@ -183,6 +183,13 @@ run_pg_tests_rc anet_evidence_test src/task-consumption.test.ts
 run_pg_tests_rc anet_acl_dm_test src/agent-acl-slice3-http.test.ts
 run_pg_tests_rc anet_skillhub_test src/skillhub-http.test.ts
 
+# RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
+# refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).
+# Pass/fail, not ratcheted.
+migrate_rc=0
+PG_BIN="$PG_BIN" PGSOCK="$PGSOCK" PG_PORT="$PG_PORT" WORK="$WORK" SUITE_DIR="$SUITE_DIR" LADDER_PW="$LADDER_PW" \
+  bash "$SUITE_DIR/migrate-stage.sh" || migrate_rc=$?
+
 echo "--- hub.log (tail) ---"
 tail -n 25 "$WORK/hub.log" || true
 echo "----------------------"
@@ -192,6 +199,10 @@ echo "NOTE: rungs L2+ were reached with COMMHUB_PG_EXPERIMENTAL=$PG_EXPERIMENTAL
 
 if [ "$gate_rc" -ne 0 ]; then
   echo "RESULT: FAIL — PostgreSQL feature gate is not closed by default."
+  exit 1
+fi
+if [ "$migrate_rc" -ne 0 ]; then
+  echo "RESULT: FAIL — migrate-to-pg stage failed."
   exit 1
 fi
 if [ "$features_rc" -ne 0 ]; then

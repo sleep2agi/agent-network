@@ -40,13 +40,22 @@ async function mcp(token: string, name: string, args: Record<string, unknown>) {
 }
 
 async function main() {
-  // L3 — first registered user is the hub admin.
-  const reg = await json("/api/auth/register", {
-    method: "POST", body: JSON.stringify({ username: "admin", password: "StrongPassw0rd" }),
-  });
-  if (reg.status !== 200 || reg.body?.ok !== true) fail(3, `register: ${reg.status} ${JSON.stringify(reg.body).slice(0, 300)}`);
-  if (reg.body.user?.role !== "admin") fail(3, `first user role is ${JSON.stringify(reg.body.user?.role)}, expected "admin"`);
-  pass(3, "first registered user is admin");
+  // L3 — first registered user is the hub admin. On a migrated database
+  // (LADDER_EXISTING_ADMIN=1) that admin already exists: log in as it instead.
+  if (process.env.LADDER_EXISTING_ADMIN === "1") {
+    const again = await json("/api/auth/login", {
+      method: "POST", body: JSON.stringify({ username: "admin", password: "StrongPassw0rd" }),
+    });
+    if (again.status !== 200 || again.body?.user?.role !== "admin") fail(3, `existing admin login: ${again.status} ${JSON.stringify(again.body).slice(0, 300)}`);
+    pass(3, "the migrated admin logs in with its original password and is still admin");
+  } else {
+    const reg = await json("/api/auth/register", {
+      method: "POST", body: JSON.stringify({ username: "admin", password: "StrongPassw0rd" }),
+    });
+    if (reg.status !== 200 || reg.body?.ok !== true) fail(3, `register: ${reg.status} ${JSON.stringify(reg.body).slice(0, 300)}`);
+    if (reg.body.user?.role !== "admin") fail(3, `first user role is ${JSON.stringify(reg.body.user?.role)}, expected "admin"`);
+    pass(3, "first registered user is admin");
+  }
 
   // L4 — login → network → node token → report_status → POST /api/task.
   const login = await json("/api/auth/login", {
@@ -54,7 +63,7 @@ async function main() {
   });
   const utok: string = login.body?.token ?? "";
   if (!utok.startsWith("utok_")) fail(4, `login: ${login.status} ${JSON.stringify(login.body).slice(0, 300)}`);
-  const net = await json("/api/networks", { method: "POST", token: utok, body: JSON.stringify({ name: "pg-ladder" }) });
+  const net = await json("/api/networks", { method: "POST", token: utok, body: JSON.stringify({ name: process.env.LADDER_NET_NAME || "pg-ladder" }) });
   const networkId: string = net.body?.network_id ?? net.body?.network?.network_id ?? "";
   if (!networkId) fail(4, `create network: ${net.status} ${JSON.stringify(net.body).slice(0, 300)}`);
   const nt = await json("/api/auth/node-token", {
