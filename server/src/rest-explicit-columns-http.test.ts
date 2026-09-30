@@ -31,7 +31,7 @@ const GOLDEN_RESPONSE_KEYS = {
   //    —— 理由见本文件顶部：从投影推导会让被删掉的列同时从响应和期望里消失，产生假绿。
   authMeNetwork: [
     "network_id", "network_name", "owner_id", "description", "settings",
-    "created_at", "updated_at", "visibility", "max_members", "member_role", "agent_access",
+    "created_at", "updated_at", "visibility", "max_members", "member_role", "agent_access", "task_access",
   ],
   networkDetail: [
     "network_id", "network_name", "owner_id", "description", "settings",

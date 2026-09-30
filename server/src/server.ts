@@ -16,6 +16,7 @@ import { pendingInboxCount } from "./inbox-count.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
+import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
 import { canMessageAgent, isAgentRestricted, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -1548,6 +1549,51 @@ return Bun.serve({
     // ── 多用户 Agent 权限:成员可访问的 Agent(owner/admin 管理) ──
     // GET  → { agent_access: 'all'|'granted', grants: [{node_id, alias, can_message}] }
     // PUT  { grants?: [{node_id | alias, can_message?}] | string[], agent_access?: 'all'|'granted' } → 整体替换
+    // ── 任务(需求卡)的人员权限(RFC-038 §9):成员能看 / 能改哪些卡。owner/admin/Hub 管理员管理 ──
+    // GET  → { task_access: 'all'|'scoped', restricted, project_grants: [{project_id, can_edit}] }
+    // PUT  { task_access?, project_grants?: [{project_id, can_edit?}] | string[] } → 不传的字段保持原样;传了整体替换
+    const taskGrantsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/task-grants$/);
+    if (taskGrantsMatch && (req.method === "GET" || req.method === "PUT")) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      const netId = decodeURIComponent(taskGrantsMatch[1]);
+      const targetUid = decodeURIComponent(taskGrantsMatch[2]);
+      const hubAdmin = resolved.user.role === "admin";
+      const callerRole = getUserNetworkRole(resolved.user.user_id, netId);
+      if (!hubAdmin && callerRole !== "owner" && callerRole !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+      }
+      const targetRole = getUserNetworkRole(targetUid, netId);
+      if (!targetRole) return withCors(req, Response.json({ ok: false, error: "member_not_found" }, { status: 404 }));
+      const view = () => ({
+        ok: true, network_id: netId, user_id: targetUid, role: targetRole,
+        task_access: getTaskAccessMode(netId, targetUid), restricted: isTaskScoped(targetUid, netId),
+        project_grants: listProjectGrants(netId, targetUid),
+      });
+      if (req.method === "GET") return withCors(req, Response.json(view()));
+      // 网络 admin 不能改 owner / 其他 admin(对他们本来也不生效)。
+      if (!hubAdmin && callerRole !== "owner" && (targetRole === "owner" || targetRole === "admin")) {
+        return withCors(req, Response.json({ ok: false, error: "owner required" }, { status: 403 }));
+      }
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+      if (body.task_access === undefined && body.project_grants === undefined) {
+        return withCors(req, Response.json({ ok: false, error: "task_access or project_grants required" }, { status: 400 }));
+      }
+      const before = { task_access: getTaskAccessMode(netId, targetUid), project_grants: listProjectGrants(netId, targetUid) };
+      const result = replaceTaskGrants({ networkId: netId, userId: targetUid, taskAccess: body.task_access, projectGrants: body.project_grants, actorUserId: resolved.user.user_id });
+      if (!result.ok) {
+        return withCors(req, Response.json({ ok: false, error: result.error, ...(result.detail ? { detail: result.detail } : {}) }, { status: result.status }));
+      }
+      logAudit(resolved.user.user_id, resolved.user.username, "member_task_grants_changed", "network", netId,
+        JSON.stringify({ user_id: targetUid, before, after: { task_access: result.task_access, project_grants: result.project_grants } }).slice(0, 4000),
+        undefined, netId);
+      return withCors(req, Response.json(view()));
+    }
+
     const grantsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/agent-grants$/);
     if (grantsMatch && (req.method === "GET" || req.method === "PUT")) {
       const token = requestToken(req, { allowQueryToken: false });
@@ -1648,8 +1694,12 @@ return Bun.serve({
         if (body.agent_access !== undefined && body.agent_access !== "all" && body.agent_access !== "granted") {
           return withCors(req, Response.json({ ok: false, error: "invalid_agent_access" }, { status: 400 }));
         }
-        const result = addNetworkMember(netId, body.user_id, body.role || "member", resolved.user.user_id, { agentAccess: body.agent_access });
-        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"} agent_access=${body.agent_access === "all" ? "all" : "granted"}`);
+        // task_access 缺省 NEW_MEMBER_TASK_ACCESS(RFC-038 §9.4);显式传 'all' / 'scoped' 覆盖。
+        if (body.task_access !== undefined && body.task_access !== "all" && body.task_access !== "scoped") {
+          return withCors(req, Response.json({ ok: false, error: "invalid_task_access" }, { status: 400 }));
+        }
+        const result = addNetworkMember(netId, body.user_id, body.role || "member", resolved.user.user_id, { agentAccess: body.agent_access, taskAccess: body.task_access });
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"} agent_access=${body.agent_access === "all" ? "all" : "granted"} task_access=${body.task_access ?? NEW_MEMBER_TASK_ACCESS}`, undefined, netId);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       }
       if (req.method === "PUT" && targetUid) {

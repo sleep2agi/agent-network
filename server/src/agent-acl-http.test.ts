@@ -344,6 +344,8 @@ describe("granted member sees and messages ONLY what was granted", () => {
 describe("requirements: agent references alice cannot see are hidden and protected", () => {
   let reqId = "";
   test("a card owned by Z shows agent_owner=null to alice, Z to admin", async () => {
+    // 这一组测的是「看不见的 Agent 引用被隐去、不能被改」,不是任务范围:alice 按 RFC-038 §9 之前的语义能改全网的卡。
+    db.run("UPDATE network_members SET task_access = 'all' WHERE network_id = ?1 AND user_id = ?2", [NET, aliceId]);
     const c = await send(adminToken, "POST", "/api/requirements", { name: "card", network_id: NET, agent_owner: { kind: "node", id: Z.node }, participants: [{ kind: "node", id: Z.node }, { kind: "user", id: aliceId }] });
     expect(c.status).toBe(201);
     reqId = c.body.requirement.id;
