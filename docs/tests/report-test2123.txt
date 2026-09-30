@@ -114,3 +114,17 @@ RFC-039 S4 part 1 (branch fix/pg-s4-tests)
 
 17. test637 L3: host check and anet_*_test check each removed by sed →
     MUTATION_RED (the mutated copy ACCEPTs the foreign host / prod name)
+
+---
+RFC-039 F3/F5 (branch fix/pg-f3f5, after S4)
+
+18. adds src/agent-acl-slice3-http.test.ts (human DMs, node lookups,
+    renames) to the PostgreSQL features stage:
+    before this PR (S4 db.ts / db-adapter.ts bind-mounted): 4 DM tests
+      fail (user_inbox ORDER BY rowid; strftime) + rename commit fails with
+      "PG: insufficient data left in message"
+    this PR: 14 pass 0 fail; ladder level=5 floor=5; contract 15/15
+    root cause of the rename failure: 10 call sites pass get(sql, [a, b])
+    — bun:sqlite treats a lone array as the parameter list, PgAdapter sent
+    it as one array-typed parameter. PgAdapter.get/all now do the same as
+    bun:sqlite; contract.ts checks it; removing the fix → RESULT: FAIL.

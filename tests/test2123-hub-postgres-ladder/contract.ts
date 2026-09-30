@@ -65,6 +65,9 @@ check("BLOB round-trips as bytes", !!typed && Array.from(typed.b ?? []).join(","
 check("boolean binds as 1 (SQLite)", typed?.n === 1, String(typed?.n));
 check("datetime('now') default is SQLite-format UTC text",
   typeof typed?.at === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(typed.at), String(typed?.at));
+check("get()/all() accept one array as the parameter list (bun:sqlite form)",
+  db.get<{ v: string }>("SELECT v FROM contract_t WHERE v = ?1 AND n = ?2", ["typed", 1])?.v === "typed"
+  && db.all<{ v: string }>("SELECT v FROM contract_t WHERE v = ?1", ["typed"]).length === 1);
 check("run() reports changes", db.run("UPDATE contract_t SET n = 2 WHERE v = ?1", ["typed"]).changes === 1);
 
 // A large row survives the worker hop.
