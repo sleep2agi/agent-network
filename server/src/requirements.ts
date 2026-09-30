@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
-import { normalizeTags, storedTags } from "./requirement-tags.js";
+import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from "./requirement-tags.js";
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, visibleAgents } from "./agent-access.js";
@@ -11,7 +11,7 @@ import {
   addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
   isTaskScoped, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
-import { ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
+import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
@@ -21,6 +21,7 @@ ensureRequirementProjects(db);
 ensureRequirementIndexes(db);
 ensureRequirementSeq(db);
 ensureRequirementCompletedAt(db);
+ensureNetworkTags(db);
 
 type RequestAuth = { userId: string; networkId: string | null; username: string; tokenId?: string | null; tokenName?: string | null } | null;
 
@@ -310,6 +311,65 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
   return Response.json({ ok: true, project: projectPublic(db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, current.project_id)!) });
 }
 
+// ── 标签管理(RFC-038 §9 的取舍:同项目管理) ──
+// 改名 / 合并 / 删除要改写网络里**每一张**带这个标签的卡,包括调用者看不见的;所以只给不受任务范围限制的人
+// (网络 owner / 管理员 / task_access='all' 的成员),scoped 成员一律 403 —— 不做「只改我看得见的那几张」:
+// 那样同一个标签会被拆成两半,而且改动条数会泄露看不见的卡有几张。节点令牌在入口已被拒(tags_write)。
+function canManageTags(ctx: RequirementsRequestContext, networkId: string): boolean {
+  if (ctx.isNodeToken || !canWrite(ctx, networkId)) return false;
+  return !(taskCaller(ctx) && isTaskScoped(ctx.auth!.userId, networkId));
+}
+
+async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
+  const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+  if (!networkId) return jsonError("network_id_required", 400);
+  if (!canManageTags(ctx, networkId)) return jsonError("permission_denied", 403);
+  let body: Record<string, unknown>;
+  try { body = await bodyObject(ctx.req); } catch { return jsonError("invalid_json", 400); }
+  const op = parseTagOp(body);
+  if ("error" in op) return jsonError(op.error, 400);
+  const now = new Date().toISOString();
+  const actor = JSON.stringify(actorOf(ctx));
+  // 读-改-写整个网络的标签在一个事务里:中途失败一张都不改;颜色表跟着一起挪。
+  const result = db.transaction(() => {
+    const cards = db.all<{ requirement_id: string; tags_json: string | null }>(
+      "SELECT requirement_id, tags_json FROM requirements WHERE network_id = ?1 AND tags_json IS NOT NULL AND tags_json <> '[]'", networkId,
+    );
+    const colorOf = (name: string) => db.get<{ color: string }>("SELECT color FROM network_tags WHERE network_id = ?1 AND name = ?2", networkId, name)?.color ?? null;
+    const sources = op.op === "rename" ? [op.from] : op.op === "merge" ? op.from : [op.tag];
+    const known = cards.some(card => storedTags(card.tags_json).some(tag => sources.includes(tag))) || sources.some(tag => colorOf(tag) !== null);
+    if (!known) return null;
+    if (op.op === "color") {
+      if (op.color === null) db.run("DELETE FROM network_tags WHERE network_id = ?1 AND name = ?2", [networkId, op.tag]);
+      else db.run("INSERT INTO network_tags (network_id, name, color, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (network_id, name) DO UPDATE SET color = excluded.color, updated_at = excluded.updated_at", [networkId, op.tag, op.color, now]);
+      return { affected: 0 };
+    }
+    let affected = 0;
+    for (const card of cards) {
+      const next = applyTagOp(storedTags(card.tags_json), op);
+      if (!next) continue;
+      db.run("UPDATE requirements SET tags_json = ?1, updated_at = ?2, updated_by_json = ?3 WHERE requirement_id = ?4", [JSON.stringify(next), now, actor, card.requirement_id]);
+      affected++;
+    }
+    moveTagColors(networkId, op, colorOf, now);
+    return { affected };
+  });
+  if (!result) return jsonError("tag_not_found", 404);
+  if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, `requirement_tag_${op.op}`, "requirement_tag", op.op === "rename" || op.op === "merge" ? op.to : op.tag, JSON.stringify({ ...op, affected: result.affected }).slice(0, 1000), undefined, networkId);
+  return Response.json({ ok: true, op: op.op, affected: result.affected });
+}
+
+/** 改名 / 合并:目标没有颜色就继承第一个有颜色的来源;来源的颜色行删掉。删除:删颜色行。 */
+function moveTagColors(networkId: string, op: TagOp, colorOf: (name: string) => string | null, now: string): void {
+  if (op.op === "color") return;
+  const sources = op.op === "rename" ? [op.from] : op.op === "merge" ? op.from : [op.tag];
+  if (op.op !== "delete" && colorOf(op.to) === null) {
+    const inherited = sources.map(colorOf).find(color => color !== null);
+    if (inherited) db.run("INSERT INTO network_tags (network_id, name, color, updated_at) VALUES (?1, ?2, ?3, ?4)", [networkId, op.to, inherited, now]);
+  }
+  for (const tag of sources) db.run("DELETE FROM network_tags WHERE network_id = ?1 AND name = ?2", [networkId, tag]);
+}
+
 function toPublic(row: Row) {
   return {
     owner: row.owner_json ? JSON.parse(row.owner_json) : null,
@@ -476,6 +536,7 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
 const NODE_TOKEN_OPERATIONS: ReadonlySet<string> = new Set<string>(["read", "create", "patch", "checklist_item", "upsert", "projects_read"]);
 function operationOf(req: Request, url: URL): string {
   if (/^\/api\/requirements\/projects(\/|$)/.test(url.pathname)) return req.method === "GET" ? "projects_read" : "projects_write";
+  if (url.pathname === "/api/requirements/tags/ops") return "tags_write";
   if (req.method === "GET") return "read";
   if (/^\/api\/requirements\/[^/]+\/checklist\/[^/]+$/.test(url.pathname)) return "checklist_item";
   if (url.pathname === "/api/requirements/upsert") return "upsert";
@@ -505,8 +566,9 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
   return header.split(",").some(tag => tag.trim() === "*" || bare(tag) === bare(etag));
 }
 
+// tag_ops:有 POST /api/requirements/tags/ops(标签改名 / 合并 / 删除 / 颜色),GET /api/requirements/tags 带 counts / colors / can_manage。
 // search:GET 认 q=(服务端搜索,语义同 App 的任务搜索);paging:认 limit / cursor,响应带 has_more / next_cursor。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -946,8 +1008,21 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     const tagParams: unknown[] = [networkId];
     const tagSql = addTaskVisibilityScope("SELECT tags_json FROM requirements WHERE network_id=?1", tagParams, taskCaller(ctx));
     const rows = db.all<{ tags_json: string | null }>(tagSql, ...tagParams);
-    const tags = [...new Set(rows.flatMap(row => storedTags(row.tags_json)))].sort();
-    return Response.json({ ok: true, networkId, tags });
+    // counts:调用者看得见的卡里(含归档)每个标签用了几张;colors:只回这些标签的颜色(看不见的卡上的标签不外泄)。
+    // can_manage:这个调用者能不能用 /tags/ops。旧 App 只读 tags,多出的字段忽略。
+    const counts: Record<string, number> = {};
+    for (const row of rows) for (const tag of storedTags(row.tags_json)) counts[tag] = (counts[tag] ?? 0) + 1;
+    const tags = Object.keys(counts).sort();
+    const colors: Record<string, string> = {};
+    for (const row of db.all<{ name: string; color: string }>("SELECT name, color FROM network_tags WHERE network_id = ?1", networkId)) {
+      if (counts[row.name]) colors[row.name] = row.color;
+    }
+    return Response.json({ ok: true, networkId, tags, counts, colors, can_manage: canManageTags(ctx, networkId) });
+  }
+
+  if (url.pathname === "/api/requirements/tags/ops") {
+    if (req.method !== "POST") return jsonError("not_found", 404);
+    return handleTagOp(ctx);
   }
 
   // 仪表盘聚合(requirements-stats.ts):一个网络、调用者看得见的卡(与列表同一个可见范围),含归档的卡 ——

@@ -26,6 +26,38 @@ iOS 仍走 TestFlight，公开链接还没开。
 
 `GET /api/requirements/tags` 返回当前网络里出现过的标签，去重后排序，归档任务上的也算。详情里的候选列表用的就是它。别的网络看不到。
 
+## 管理标签
+
+Hub 在列表响应的 `capabilities` 里带 `tag_ops` 时，可以整网改名、合并、删除标签，或给标签设颜色。客户端在侧栏标签组底部放「管理标签」，旧 Hub 上不显示这个入口。
+
+`GET /api/requirements/tags` 在 `tags` 之外还返回：
+
+- `counts`：每个标签用在几张卡上（调用者看得见的卡，含归档的）。
+- `colors`：设过颜色的标签，`{"标签": "#rrggbb"}`。没设过的不出现，客户端用默认色。
+- `can_manage`：这个调用者能不能管理标签。
+
+旧客户端只读 `tags`，其余字段忽略。
+
+`POST /api/requirements/tags/ops`，请求体是下面之一：
+
+| `op` | 其余字段 | 做什么 |
+|------|----------|--------|
+| `rename` | `from`、`to` | 每张带 `from` 的卡改成 `to`，位置不变。`to` 已经在卡上就只留一个，等于合并 |
+| `merge` | `from`（1–50 个）、`to` | 每张带任一来源的卡，来源换成一个 `to` |
+| `delete` | `tag` | 从每张卡上拿掉这个标签，卡本身保留 |
+| `color` | `tag`、`color`（`#rrggbb` 或 `null` 清除） | 只改颜色，不动卡 |
+
+- 网络里所有匹配的卡在一个事务里改写，含归档的。中途失败时一张都不改。
+- 改过的卡 `updated_at` 前移，`updated_by` 记调用者，`updated_since` 同步得到。
+- 改名、合并时，目标没有颜色就继承第一个有颜色的来源。来源的颜色和被删标签的颜色一起删掉。
+- 返回 `{ok, op, affected}`，`affected` 是改了几张卡。
+- 标签名规则同上。不合法返回 400 `invalid_tag`、`invalid_tag_color` 或 `invalid_tag_op`。来源和目标相同返回 400 `same_tag`。网络里没有这个标签返回 404 `tag_not_found`。
+- 每次成功都写审计 `requirement_tag_rename` / `_merge` / `_delete` / `_color`，详情里带 `affected`。
+
+谁能用：和管理项目一样，只有网络 owner、Hub 管理员和任务范围为「全部任务」的成员。只看相关任务的成员（`task_access = scoped`）一律 403 `permission_denied`，viewer 也是。节点令牌返回 403 `user_token_required`。
+
+scoped 成员被整个拒绝，而不是只改他看得见的那几张。原因有两个：一个标签会被拆成新旧两半；返回的 `affected` 也会透露他看不见的卡有几张。scoped 成员拿到的 `counts` 和 `colors` 也只包含他看得见的卡上的标签。
+
 ## 相关
 
 - [任务](/guide/tasks)

@@ -43,6 +43,22 @@ export function ensureRequirementProjects(database: DbAdapter): void {
   `);
 }
 
+/**
+ * 标签颜色(可选)。标签本身仍只是卡片 tags 数组里的字符串;这里只存「这个网络里这个名字用什么颜色」。
+ * 没有行 = 默认色。改名 / 合并 / 删除时跟着挪或删(见 requirements.ts 的标签管理)。IF NOT EXISTS:重复执行无副作用。
+ */
+export function ensureNetworkTags(database: DbAdapter): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS network_tags (
+      network_id  TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      color       TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
+      PRIMARY KEY (network_id, name)
+    );
+  `);
+}
+
 /** external_ref 在同一网络里唯一(只管有值的行)。IF NOT EXISTS:重复执行无副作用。 */
 export function ensureRequirementIndexes(database: DbAdapter): void {
   database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_external_ref ON requirements(network_id, external_ref) WHERE external_ref IS NOT NULL");
