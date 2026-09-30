@@ -61,7 +61,7 @@ import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js"
 import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { handleRequirementsRequest } from "./requirements.js";
-import { recordRouteTiming, routeStats } from "./route-timing.js";
+import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
@@ -102,6 +102,9 @@ if (productionSideThreadTransport) installSideThreadExecutionPort(productionSide
 if (AUTH_TOKEN) {
   console.warn("[commhub] COMMHUB_AUTH_TOKEN is deprecated and will be removed in v1.0. See RFC-001.");
 }
+
+// POST /mcp bodies up to this size are parsed once up front to label the route (see the /mcp handler).
+const MCP_LABEL_MAX_BYTES = 1024 * 1024;
 
 // Read version from package.json so banners and /health stay in sync.
 const SERVER_VERSION = (() => {
@@ -941,9 +944,22 @@ return Bun.serve({
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
+      // 2026-10-01 —— /api/stats/routes 里 POST /mcp 是最大的一项(生产 15 req/s),但看不出是哪个工具。
+      // 请求体我们自己读一次、解析一次,只取 method / params.name 做路由标签(mcpRouteLabel),
+      // 解析结果作为 parsedBody 交给 transport,不重复解析。没有 Content-Length 或超过 MCP_LABEL_MAX_BYTES
+      // 的请求体不碰,由 transport 照旧自己读。不是合法 JSON 时不传 parsedBody:transport 读已消费的
+      // body 失败,落进它自己的 catch,回的仍是原来那条 -32700「Parse error: Invalid JSON」(测试钉住)。
+      let mcpParsedBody: unknown;
+      if (req.method === "POST") {
+        const declared = Number(req.headers.get("content-length"));
+        if (req.headers.has("content-length") && Number.isFinite(declared) && declared <= MCP_LABEL_MAX_BYTES) {
+          try { mcpParsedBody = JSON.parse(await req.text()); } catch { mcpParsedBody = undefined; }
+        }
+        labelRoute(req, mcpParsedBody === undefined ? "?" : mcpRouteLabel(mcpParsedBody));
+      }
       const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null);
       await mcpServer.connect(transport);
-      const response = await transport.handleRequest(req);
+      const response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
       // Disconnect after response to prevent McpServer leak
       setImmediate(() => mcpServer.close().catch(() => {}));
       // #426: the MCP SDK's WebStandardStreamableHTTPServerTransport builds
