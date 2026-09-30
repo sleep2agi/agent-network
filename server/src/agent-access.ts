@@ -93,7 +93,10 @@ export function visibleAgents(userId: string, networkId: string): VisibleAgents 
   const nodeIds = new Set<string>();
   const messageAliases = new Set<string>();
   const messageNodeIds = new Set<string>();
-  for (const grant of listAgentGrants(networkId, userId)) {
+  // RFC-038 §8:组授权展开成「该组此刻的成员节点」—— 每次现算,组里新加的节点下一次请求就可见。
+  // 只并同网络、且 nodes 表里还在的节点;可对话取并集(直接授权或任一组给了就算)。
+  const grants: AgentGrant[] = [...listAgentGrants(networkId, userId), ...groupGrantNodes(networkId, userId)];
+  for (const grant of grants) {
     const grantAliases: string[] = [];
     if (grant.node_id) {
       nodeIds.add(grant.node_id);
@@ -119,6 +122,162 @@ export function visibleAgents(userId: string, networkId: string): VisibleAgents 
     messageAliases: [...messageAliases],
     messageNodeIds: [...messageNodeIds],
   };
+}
+
+// ══════════════ Agent 分组(RFC-038 §8) ══════════════
+
+export type AgentGroupGrant = { group_id: string; name: string; can_message: boolean };
+export type AgentGroup = { group_id: string; network_id: string; name: string; description: string | null; node_ids: string[]; member_count: number; granted_user_count: number; created_at: string; updated_at: string | null };
+
+/** 该成员被授权的组,展开成节点级授权(只取同网络、仍存在的节点)。 */
+function groupGrantNodes(networkId: string, userId: string): AgentGrant[] {
+  return db.all<{ node_id: string; can_message: number }>(
+    `SELECT m.node_id, g.can_message
+       FROM network_member_group_grants g
+       JOIN agent_groups ag ON ag.group_id = g.group_id AND ag.network_id = g.network_id
+       JOIN agent_group_members m ON m.group_id = g.group_id
+       JOIN nodes n ON n.node_id = m.node_id AND n.network_id = g.network_id
+      WHERE g.network_id = ?1 AND g.user_id = ?2`,
+    networkId, userId,
+  ).map((row) => ({ node_id: row.node_id, alias: null, can_message: row.can_message === 1 }));
+}
+
+export function listGroupGrants(networkId: string, userId: string): AgentGroupGrant[] {
+  return db.all<{ group_id: string; name: string; can_message: number }>(
+    `SELECT g.group_id, ag.name, g.can_message
+       FROM network_member_group_grants g JOIN agent_groups ag ON ag.group_id = g.group_id
+      WHERE g.network_id = ?1 AND g.user_id = ?2 ORDER BY ag.name`,
+    networkId, userId,
+  ).map((row) => ({ group_id: row.group_id, name: row.name, can_message: row.can_message === 1 }));
+}
+
+export function listAgentGroups(networkId: string): AgentGroup[] {
+  const groups = db.all<{ group_id: string; network_id: string; name: string; description: string | null; created_at: string; updated_at: string | null }>(
+    "SELECT group_id, network_id, name, description, created_at, updated_at FROM agent_groups WHERE network_id = ?1 ORDER BY name",
+    networkId,
+  );
+  return groups.map((g) => {
+    const nodeIds = db.all<{ node_id: string }>(
+      `SELECT m.node_id FROM agent_group_members m JOIN nodes n ON n.node_id = m.node_id AND n.network_id = ?2
+        WHERE m.group_id = ?1 ORDER BY m.node_id`,
+      g.group_id, networkId,
+    ).map((row) => row.node_id);
+    const granted = db.get<{ c: number }>("SELECT COUNT(*) AS c FROM network_member_group_grants WHERE group_id = ?1", g.group_id)?.c ?? 0;
+    return { ...g, node_ids: nodeIds, member_count: nodeIds.length, granted_user_count: granted };
+  });
+}
+
+export function getAgentGroup(networkId: string, groupId: string): AgentGroup | null {
+  return listAgentGroups(networkId).find((g) => g.group_id === groupId) ?? null;
+}
+
+/** 这个组上有授权的成员(组变化时要断开他们的实时流,让其按新权限重连)。 */
+export function usersGrantedGroup(groupId: string): string[] {
+  return db.all<{ user_id: string }>("SELECT user_id FROM network_member_group_grants WHERE group_id = ?1", groupId).map((r) => r.user_id);
+}
+
+const MAX_GROUP_NAME = 64;
+const MAX_GROUP_MEMBERS = 1000;
+
+export type GroupResult = { ok: true; group: AgentGroup } | { ok: false; error: string; status: number; detail?: unknown };
+
+function normalizeName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const name = raw.trim();
+  if (!name || name.length > MAX_GROUP_NAME) return null;
+  return name;
+}
+
+/** node_ids 必须都是本网络里存在的节点;任何一个不合格 ⇒ 整批拒绝。去重。 */
+function validateNodeIds(networkId: string, raw: unknown): { ok: true; ids: string[] } | { ok: false; error: string; status: number; detail?: unknown } {
+  if (!Array.isArray(raw)) return { ok: false, error: "node_ids_must_be_array", status: 400 };
+  if (raw.length > MAX_GROUP_MEMBERS) return { ok: false, error: "too_many_members", status: 400, detail: { limit: MAX_GROUP_MEMBERS } };
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const [index, item] of raw.entries()) {
+    const id = typeof item === "string" ? item.trim() : "";
+    if (!id) return { ok: false, error: "invalid_node_id", status: 400, detail: { index } };
+    if (!db.get("SELECT 1 FROM nodes WHERE node_id = ?1 AND network_id = ?2", id, networkId)) {
+      return { ok: false, error: "agent_not_in_network", status: 400, detail: { index, node_id: id } };
+    }
+    if (!seen.has(id)) { seen.add(id); ids.push(id); }
+  }
+  return { ok: true, ids };
+}
+
+export function createAgentGroup(input: { networkId: string; name: unknown; description?: unknown; nodeIds?: unknown; actorUserId: string }): GroupResult {
+  const name = normalizeName(input.name);
+  if (!name) return { ok: false, error: "invalid_group_name", status: 400, detail: { max_length: MAX_GROUP_NAME } };
+  if (db.get("SELECT 1 FROM agent_groups WHERE network_id = ?1 AND name = ?2", input.networkId, name)) {
+    return { ok: false, error: "group_name_taken", status: 409 };
+  }
+  let ids: string[] = [];
+  if (input.nodeIds !== undefined) {
+    const v = validateNodeIds(input.networkId, input.nodeIds);
+    if (!v.ok) return v;
+    ids = v.ids;
+  }
+  const description = typeof input.description === "string" ? input.description.trim().slice(0, 500) || null : null;
+  const groupId = `agrp_${crypto.randomUUID().replace(/-/g, "")}`;
+  db.transaction(() => {
+    db.run("INSERT INTO agent_groups (group_id, network_id, name, description, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
+      [groupId, input.networkId, name, description, input.actorUserId]);
+    for (const id of ids) db.run("INSERT INTO agent_group_members (group_id, node_id, added_by) VALUES (?1, ?2, ?3)", [groupId, id, input.actorUserId]);
+  });
+  return { ok: true, group: getAgentGroup(input.networkId, groupId)! };
+}
+
+export function updateAgentGroup(input: { networkId: string; groupId: string; name?: unknown; description?: unknown }): GroupResult {
+  if (!db.get("SELECT 1 FROM agent_groups WHERE group_id = ?1 AND network_id = ?2", input.groupId, input.networkId)) {
+    return { ok: false, error: "group_not_found", status: 404 };
+  }
+  if (input.name !== undefined) {
+    const name = normalizeName(input.name);
+    if (!name) return { ok: false, error: "invalid_group_name", status: 400, detail: { max_length: MAX_GROUP_NAME } };
+    if (db.get("SELECT 1 FROM agent_groups WHERE network_id = ?1 AND name = ?2 AND group_id != ?3", input.networkId, name, input.groupId)) {
+      return { ok: false, error: "group_name_taken", status: 409 };
+    }
+    db.run("UPDATE agent_groups SET name = ?1, updated_at = datetime('now') WHERE group_id = ?2", [name, input.groupId]);
+  }
+  if (input.description !== undefined) {
+    const description = typeof input.description === "string" ? input.description.trim().slice(0, 500) || null : null;
+    db.run("UPDATE agent_groups SET description = ?1, updated_at = datetime('now') WHERE group_id = ?2", [description, input.groupId]);
+  }
+  return { ok: true, group: getAgentGroup(input.networkId, input.groupId)! };
+}
+
+/** 整体替换组成员;返回增删 diff(审计只记 diff)。 */
+export function replaceAgentGroupMembers(input: { networkId: string; groupId: string; nodeIds: unknown; actorUserId: string }):
+  { ok: true; group: AgentGroup; added: string[]; removed: string[] } | { ok: false; error: string; status: number; detail?: unknown } {
+  if (!db.get("SELECT 1 FROM agent_groups WHERE group_id = ?1 AND network_id = ?2", input.groupId, input.networkId)) {
+    return { ok: false, error: "group_not_found", status: 404 };
+  }
+  const v = validateNodeIds(input.networkId, input.nodeIds);
+  if (!v.ok) return v;
+  const before = new Set(db.all<{ node_id: string }>("SELECT node_id FROM agent_group_members WHERE group_id = ?1", input.groupId).map((r) => r.node_id));
+  const after = new Set(v.ids);
+  const added = v.ids.filter((id) => !before.has(id));
+  const removed = [...before].filter((id) => !after.has(id));
+  db.transaction(() => {
+    for (const id of removed) db.run("DELETE FROM agent_group_members WHERE group_id = ?1 AND node_id = ?2", [input.groupId, id]);
+    for (const id of added) db.run("INSERT INTO agent_group_members (group_id, node_id, added_by) VALUES (?1, ?2, ?3)", [input.groupId, id, input.actorUserId]);
+    db.run("UPDATE agent_groups SET updated_at = datetime('now') WHERE group_id = ?1", [input.groupId]);
+  });
+  return { ok: true, group: getAgentGroup(input.networkId, input.groupId)!, added, removed };
+}
+
+/** 删组:连同组成员与组上的全部授权。返回受影响的成员(调用方断开其实时流、写审计)。 */
+export function deleteAgentGroup(networkId: string, groupId: string): { ok: true; affected_user_ids: string[] } | { ok: false; error: string; status: number } {
+  if (!db.get("SELECT 1 FROM agent_groups WHERE group_id = ?1 AND network_id = ?2", groupId, networkId)) {
+    return { ok: false, error: "group_not_found", status: 404 };
+  }
+  const affected = usersGrantedGroup(groupId);
+  db.transaction(() => {
+    db.run("DELETE FROM network_member_group_grants WHERE group_id = ?1", [groupId]);
+    db.run("DELETE FROM agent_group_members WHERE group_id = ?1", [groupId]);
+    db.run("DELETE FROM agent_groups WHERE group_id = ?1", [groupId]);
+  });
+  return { ok: true, affected_user_ids: affected };
 }
 
 /** 这个用户名在该网络里是否同时是某个 Agent 的 alias(sessions 或 nodes)。 */
@@ -155,7 +314,7 @@ export function canMessageAgent(userId: string, networkId: string | null | undef
 export type AgentGrantInput = { node_id?: unknown; alias?: unknown; can_message?: unknown };
 
 export type ReplaceGrantsResult =
-  | { ok: true; agent_access: AgentAccessMode; grants: AgentGrant[] }
+  | { ok: true; agent_access: AgentAccessMode; grants: AgentGrant[]; group_grants: AgentGroupGrant[] }
   | { ok: false; error: string; status: number; detail?: unknown };
 
 const MAX_GRANTS = 1000;
@@ -169,6 +328,8 @@ export function replaceAgentGrants(input: {
   userId: string;
   grants: unknown;
   agentAccess?: unknown;
+  /** RFC-038 §8:组授权。undefined = 保持原样(旧 app 的 PUT 不带它,不能把组授权清掉)。 */
+  groupGrants?: unknown;
   actorUserId: string;
 }): ReplaceGrantsResult {
   const member = db.get<{ role: string }>(
@@ -215,7 +376,38 @@ export function replaceAgentGrants(input: {
     }
   }
 
+  let groupRows: Array<{ group_id: string; can_message: number }> | undefined;
+  if (input.groupGrants !== undefined) {
+    if (!Array.isArray(input.groupGrants)) return { ok: false, error: "group_grants_must_be_array", status: 400 };
+    if (input.groupGrants.length > MAX_GRANTS) return { ok: false, error: "too_many_grants", status: 400, detail: { limit: MAX_GRANTS } };
+    const seenGroups = new Set<string>();
+    groupRows = [];
+    for (const [index, raw] of input.groupGrants.entries()) {
+      const item = typeof raw === "string" ? { group_id: raw } : (raw && typeof raw === "object" && !Array.isArray(raw) ? raw as { group_id?: unknown; can_message?: unknown } : {});
+      const groupId = typeof item.group_id === "string" ? item.group_id.trim() : "";
+      if (!groupId) return { ok: false, error: "group_grant_needs_group_id", status: 400, detail: { index } };
+      if (item.can_message !== undefined && typeof item.can_message !== "boolean") {
+        return { ok: false, error: "can_message_must_be_boolean", status: 400, detail: { index } };
+      }
+      if (!db.get("SELECT 1 FROM agent_groups WHERE group_id = ?1 AND network_id = ?2", groupId, input.networkId)) {
+        return { ok: false, error: "group_not_in_network", status: 400, detail: { index, group_id: groupId } };
+      }
+      if (seenGroups.has(groupId)) continue;
+      seenGroups.add(groupId);
+      groupRows.push({ group_id: groupId, can_message: item.can_message === false ? 0 : 1 });
+    }
+  }
+
   db.transaction(() => {
+    if (groupRows) {
+      db.run("DELETE FROM network_member_group_grants WHERE network_id = ?1 AND user_id = ?2", [input.networkId, input.userId]);
+      for (const row of groupRows) {
+        db.run(
+          `INSERT INTO network_member_group_grants (network_id, user_id, group_id, can_message, created_by) VALUES (?1, ?2, ?3, ?4, ?5)`,
+          [input.networkId, input.userId, row.group_id, row.can_message, input.actorUserId],
+        );
+      }
+    }
     if (mode) {
       db.run("UPDATE network_members SET agent_access = ?1 WHERE network_id = ?2 AND user_id = ?3", [mode, input.networkId, input.userId]);
     }
@@ -235,12 +427,14 @@ export function replaceAgentGrants(input: {
     ok: true,
     agent_access: getAgentAccessMode(input.networkId, input.userId) ?? "granted",
     grants: listAgentGrants(input.networkId, input.userId),
+    group_grants: listGroupGrants(input.networkId, input.userId),
   };
 }
 
 /** 成员被移出网络时一并清掉授权,重新加入时从零开始。 */
 export function deleteAgentGrants(networkId: string, userId: string): void {
   db.run("DELETE FROM network_member_agent_grants WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
+  db.run("DELETE FROM network_member_group_grants WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
 }
 
 // 多用户 Agent 权限 —— 受限成员(只看授权 Agent 的成员)能调的 MCP 工具。每一个都逐条审过:

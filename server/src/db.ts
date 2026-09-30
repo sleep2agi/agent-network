@@ -1068,6 +1068,43 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_grants_alias ON network_member_agent_grants(network_id, user_id, alias) WHERE alias IS NOT NULL;
 `);
 
+// ── Agent 分组(RFC-038 §8):管理员自由定义的组,授权可以给到组,组成员动态生效 ──
+// 组授权单独一张表(不给 network_member_agent_grants 加列):那张表的 CHECK 改不了,
+// 而且旧 app 的 PUT 是整体替换 —— 同表的话,旧 app 一保存就把组授权清掉。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_groups (
+    group_id     TEXT PRIMARY KEY,
+    network_id   TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    description  TEXT,
+    created_by   TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_groups_name ON agent_groups(network_id, name);
+
+  CREATE TABLE IF NOT EXISTS agent_group_members (
+    group_id   TEXT NOT NULL,
+    node_id    TEXT NOT NULL,
+    added_by   TEXT,
+    added_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, node_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS network_member_group_grants (
+    network_id   TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    group_id     TEXT NOT NULL,
+    can_message  INTEGER NOT NULL DEFAULT 1,
+    created_by   TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, user_id, group_id)
+  );
+  -- 改组成员 / 删组时按组找被授权成员(usersGrantedGroup、granted_user_count):主键以 network_id 开头用不上。
+  -- 展开查询本身走各表主键,见 agent-groups-perf.test.ts 的 EXPLAIN QUERY PLAN。
+  CREATE INDEX IF NOT EXISTS idx_group_grants_group ON network_member_group_grants(group_id);
+`);
+
 // ── #84: node rename — rename_txn table (RFC-010 §4) ──
 // Single isolated table holding the rename 2PC transaction state. It doubles
 // as the alias_rename_log (RFC §4 risk #5): the audit log of completed renames
