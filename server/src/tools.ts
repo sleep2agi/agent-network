@@ -5780,7 +5780,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   };
   const pick = (args: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => args[k] !== undefined).map(k => [k, args[k]]));
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
-  const REQ_ID_DESC = "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network)";
+  const REQ_ID_DESC = "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)";
 
   server.tool(
     "requirements_list",

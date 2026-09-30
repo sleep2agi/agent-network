@@ -865,7 +865,7 @@ send_task({
 
 **短号 `seq`（任务 ID `#N`）**：每张任务除了主键 `id`（`req_<uuid>`）还有一个只读的 `seq` —— 每个网络各自从 1 起递增，App 显示为 `#N`。建卡时由 Hub 在同一个事务里分配（并发新建不会重号）；之后永不改变，**删除或归档的号也不回收**。升级前的旧卡在 Hub 启动时按 `created_at`（同一时刻按 `id`）逐网络补号。列表响应 `capabilities` 含 `requirement_seq` 的 Hub 起支持；旧 Hub 没有这个字段，旧 App 忽略它。
 
-凡是收 `{id}` 的地方（REST `GET` / `PATCH` / `DELETE` / 勾子任务，MCP `requirements_get` / `requirements_update` / `requirements_checklist_toggle` 的 `id`）都也收 **`#N`**（REST 路径里写成 `%23N`，如 `/api/requirements/%2342`）；只认 `#` 开头的形状，裸数字仍按 `id` 查。旧的 `req_…` id 照常可用。短号只在一个网络里唯一：作用域覆盖多个网络、且不止一个网络有 `#N` 时返回 409 `{error:"ambiguous_seq", networks}`，加 `?network_id=` 再查。列表也可以按号筛：`GET /api/requirements?seq=N`（MCP `requirements_list` 的 `seq`）。
+凡是收 `{id}` 的地方（REST `GET` / `PATCH` / `DELETE` / 勾子任务，MCP `requirements_get` / `requirements_update` / `requirements_checklist_toggle` 的 `id`）都也收 **`#N`**（REST 路径里写成 `%23N`，如 `/api/requirements/%2342`）；只认 `#` 开头的形状，裸数字仍按 `id` 查。旧的 `req_…` id 照常可用。短号只在一个网络里唯一：作用域覆盖多个网络、且不止一个网络有 `#N` 时返回 409 `{error:"ambiguous_seq", networks, message}`，加 `?network_id=`（MCP 传 `network_id`）再查。列表也可以按号筛：`GET /api/requirements?seq=N`（MCP `requirements_list` 的 `seq`）。
 
 **HTTP 端点**（`Authorization: Bearer <token>`，多网络用户令牌带 `?network_id=`）
 

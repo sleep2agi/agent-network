@@ -747,7 +747,10 @@ function scopedRow(ctx: RequirementsRequestContext, id: string): Row | Response 
   let sql = `SELECT ${SELECT} FROM requirements WHERE ${seq === null ? "requirement_id" : "seq"} = ?1`;
   sql = addHumanNetworkScope(sql, params, ctx.scope);
   const rows = db.all<Row>(`${sql} LIMIT 2`, ...params);
-  if (rows.length > 1) return Response.json({ ok: false, error: "ambiguous_seq", networks: rows.map(r => r.network_id) }, { status: 409 });
+  if (rows.length > 1) {
+    const networks = rows.map(r => r.network_id);
+    return Response.json({ ok: false, error: "ambiguous_seq", networks, message: `#${seq} exists in more than one network you can see (${networks.join(", ")}); pass network_id to pick one` }, { status: 409 });
+  }
   return rows[0] ?? jsonError("requirement_not_found", 404);
 }
 

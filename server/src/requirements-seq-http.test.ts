@@ -127,6 +127,30 @@ describe("requirement short numbers (#N)", () => {
     expect(both.status).toBe(409);
     expect(both.body.error).toBe("ambiguous_seq");
     expect(both.body.networks.sort()).toEqual([ownerNet, otherNet].sort());
+    expect(both.body.message).toContain("pass network_id");
+    // MCP 上用户令牌(跨两个网络)同样:清楚的错误 + 带 network_id 就能查到
+    {
+      const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+      const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+      const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+      const { registerTools } = await import("./tools.js");
+      const mcp = new McpServer({ name: "seq-mcp-user", version: "1" });
+      registerTools(mcp, undefined, null, ownerId, "seq-owner", false, "tok_user");
+      const client = new Client({ name: "seq-mcp-user-client", version: "1" });
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await mcp.connect(st); await client.connect(ct);
+      const call = async (name: string, args: Record<string, unknown>) => JSON.parse(((await client.callTool({ name, arguments: args })) as any).content[0].text);
+      try {
+        const amb = await call("requirements_get", { id: "#1" });
+        expect(amb.ok).toBe(false);
+        expect(amb.error).toBe("ambiguous_seq");
+        expect(amb.status).toBe(409);
+        expect(amb.message).toContain("pass network_id");
+        expect((await call("requirements_update", { id: "#1", priority: "low" })).error).toBe("ambiguous_seq");
+        expect((await call("requirements_get", { id: "#1", network_id: otherNet })).requirement.name).toBe("别的网络第一张");
+        expect((await call("requirements_get", { id: "#1", network_id: ownerNet })).requirement.name).toBe("第一张");
+      } finally { await client.close(); await mcp.close(); }
+    }
     // 旧 id 不受影响
     const firstId = (await api(ownerToken, `/api/requirements/%231?network_id=${ownerNet}`)).body.requirement.id;
     expect((await api(ownerToken, `/api/requirements/${firstId}`)).status).toBe(200);
