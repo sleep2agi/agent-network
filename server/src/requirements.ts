@@ -1,5 +1,6 @@
 // 需求池。长期卡片，存在 Hub 上，手机和电脑读同一份。
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
+import { createHash } from "node:crypto";
 import { db } from "./db.js";
 import { normalizeTags, storedTags } from "./requirement-tags.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
@@ -430,6 +431,27 @@ function operationOf(req: Request, url: URL): string {
   return "create";
 }
 
+/**
+ * GET /api/requirements 的条件请求:ETag = 响应体的哈希,`If-None-Match` 对上就回 304 空体。
+ * app 每 15 s 轮询整张表(生产 500 行 708 KB / gzip 163 KB,中国 → 美国约 0.65 s 纯传输),
+ * 绝大多数轮询里表根本没变。按**响应体**算,所以对这个调用方可见的任何字段变了都会变
+ * (同一张表不同成员看到的不同,ETag 也不同)。不带 If-None-Match 的旧客户端照旧拿 200 全量。
+ */
+export function conditionalJson(req: Request, payload: unknown): Response {
+  const body = JSON.stringify(payload);
+  const etag = `W/"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"`;
+  // private:按用户可见范围生成,不能被共享缓存复用;no-cache:每次都要回来验证,不会拿旧表当新的。
+  const headers = { ETag: etag, "Cache-Control": "private, no-cache" };
+  if (ifNoneMatchHits(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
+  return new Response(body, { headers: { ...headers, "Content-Type": "application/json;charset=utf-8" } });
+}
+
+function ifNoneMatchHits(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const bare = (tag: string) => tag.trim().replace(/^W\//, "");
+  return header.split(",").some(tag => tag.trim() === "*" || bare(tag) === bare(etag));
+}
+
 export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date"] as const;
 
 // ── 子需求 ──
@@ -796,7 +818,7 @@ export async function handleRequirementsRequest(ctx: RequirementsRequestContext)
     if (typeof filtered !== "string") return filtered;
     const rows = db.all<Row>(`${filtered} ORDER BY created_at DESC LIMIT 500`, ...params).map(row => toPublicFor(ctx, row));
     // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
-    return Response.json({ ok: true, requirements: rows, capabilities: REQUIREMENT_CAPABILITIES });
+    return conditionalJson(ctx.req, { ok: true, requirements: rows, capabilities: REQUIREMENT_CAPABILITIES });
   }
 
   if (url.pathname === "/api/requirements" && req.method === "POST") {
