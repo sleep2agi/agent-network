@@ -132,7 +132,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 
 | Tool | What it does |
 |------|------|
-| `requirements_list` | List tasks in your network; filter by status / project_id / owner / agent_owner / updated_since / external_ref / parent_id / top_level; archived ones hidden by default |
+| `requirements_list` | List tasks in your network; filter by status / project_id / owner / agent_owner / updated_since / external_ref / parent_id / top_level; archived ones hidden by default; `view: "summary"` drops description and checklist bodies (much smaller — use `requirements_get` for full text); `changes: true` + `updated_since` returns only tasks changed since then (archived included) plus `deleted` and `server_time` (Hub ≥ preview.75) |
 | `requirements_get` | Get one task by id (description, checklist, owners, project, external_ref) |
 | `requirements_create` | Create a task; a duplicate `external_ref` in the network returns 409 `external_ref_exists` + `existing_id` |
 | `requirements_update` | Patch a task, omitted fields kept; `archived: true` archives it (agents cannot delete) |

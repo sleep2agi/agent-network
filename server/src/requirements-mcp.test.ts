@@ -115,6 +115,21 @@ describe("requirements MCP tools", () => {
       expect(page.requirements.length).toBe(1);
       expect(page.has_more).toBe(true);
       expect((await s.call("requirements_list", { limit: 1, include_archived: true, cursor: page.next_cursor })).requirements[0].id).not.toBe(page.requirements[0].id);
+      // view / changes 透传(Hub capability list_summary / changes):精简行没有正文;增量带 deleted 与 server_time
+      const slim = await s.call("requirements_list", { view: "summary", include_archived: true });
+      const slimRow = slim.requirements.find((r: any) => r.id === id);
+      expect(slim.view).toBe("summary");
+      expect("description" in slimRow).toBe(false);
+      expect(typeof slimRow.checklist_count.total).toBe("number");
+      expect(typeof slimRow.has_description).toBe("boolean");
+      expect((await s.call("requirements_list", { view: "tiny" })).mcpError).toBe(true);
+      expect((await s.call("requirements_list", { changes: true })).error).toBe("updated_since_required");
+      const since = new Date(Date.now() - 1000).toISOString();
+      await s.call("requirements_update", { id: child.requirement.id, name: "子需求改名" });
+      const delta = await s.call("requirements_list", { changes: true, updated_since: since, view: "summary" });
+      expect(delta.requirements.map((r: any) => r.id)).toContain(child.requirement.id);
+      expect(Array.isArray(delta.deleted)).toBe(true);
+      expect(typeof delta.server_time).toBe("string");
     } finally { await s.close(); }
   });
 

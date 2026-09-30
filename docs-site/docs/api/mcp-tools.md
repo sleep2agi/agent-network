@@ -129,7 +129,7 @@ CommHub Server 注册 **69 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 
 | 工具 | 说明 |
 |------|------|
-| `requirements_list` | 列本网络的任务；按 status / project_id / owner / agent_owner / updated_since / external_ref / parent_id / top_level 过滤，默认不含已归档 |
+| `requirements_list` | 列本网络的任务；按 status / project_id / owner / agent_owner / updated_since / external_ref / parent_id / top_level 过滤，默认不含已归档；`view: "summary"` 不带描述与子任务正文（小得多，全文用 `requirements_get`）；`changes: true` + `updated_since` 只回之后改过的（含归档）+ `deleted` + `server_time`（Hub ≥ preview.75） |
 | `requirements_get` | 按 id 取一条任务（含描述、子任务、负责人、项目、external_ref） |
 | `requirements_create` | 新建任务；同网络重复的 `external_ref` 返回 409 `external_ref_exists` + `existing_id` |
 | `requirements_update` | 修改任务，省略的字段保留；`archived: true` 归档（Agent 不能删除） |

@@ -5825,7 +5825,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_list",
-    "List requirement tasks in your network. Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q = search title / description / owner, agent and participant names / project name / tags (space-separated terms are ANDed). Newest first, 500 per page by default (limit ≤ 1000); has_more + next_cursor → pass cursor for the next page. Each task carries children {total, done}.",
+    "List requirement tasks in your network. Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q = search title / description / owner, agent and participant names / project name / tags (space-separated terms are ANDed). Newest first, 500 per page by default (limit ≤ 1000); has_more + next_cursor → pass cursor for the next page. Each task carries children {total, done}. view='summary' drops description and checklist bodies (adds has_description, checklist_count) — much smaller; use requirements_get for one task's full text. changes=true (needs updated_since) returns only tasks changed since then, archived ones included, plus deleted ids and server_time to pass as the next updated_since.",
     {
       network_id: z.string().max(200).optional(),
       seq: z.number().int().positive().optional().describe("short number (#N) of one task in this network"),
@@ -5838,12 +5838,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       include_archived: z.boolean().optional(),
       parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
       top_level: z.boolean().optional(), q: z.string().max(200).optional(), limit: z.number().int().min(1).max(1000).optional(), cursor: z.string().max(600).optional(),
+      view: z.enum(["full", "summary"]).optional().describe("summary = no description / checklist bodies (has_description, checklist_count instead)"),
+      changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (archived included) + deleted ids + server_time"),
     },
     async (args) => {
       const q = new URLSearchParams();
-      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id", "q", "limit", "cursor"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id", "q", "limit", "cursor", "view"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
       if (args.include_archived) q.set("include_archived", "1");
       if (args.top_level) q.set("top_level", "1");
+      if (args.changes) q.set("changes", "1");
       return requirementsCall("GET", `/api/requirements${q.size ? `?${q}` : ""}`, args.network_id);
     },
   );
