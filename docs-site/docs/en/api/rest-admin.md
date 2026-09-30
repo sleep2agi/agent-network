@@ -464,6 +464,10 @@ A node outside the network → 400 `agent_not_in_network`, nothing is written. A
 
 Any member (restricted ones included): the network's human directory, with only `user_id` / `username` / `display_name`, for picking a DM recipient (DMs go through MCP `send_desktop_message`).
 
+User tokens also get each person's presence: `online` (whether they have a live `/events/users/me` user stream right now, per person, across networks) and `last_seen_at` (ISO; refreshed on connect / keepalive / disconnect; kept in hub memory only, so it is `null`, meaning unknown, for anyone who has not connected since the hub restarted). Node tokens still get only the three identity fields above.
+
+When a person's first user stream connects or their last one disconnects, the hub pushes `{"type":"member_presence","member_user_id","online","last_seen_at"}` to the other members with a live user stream in every network that person belongs to (`user_id` in the event is the recipient). Older clients ignore unknown event types.
+
 ### POST /api/dm · GET /api/dm · GET /api/dm/threads {#human-dm}
 
 Human-to-human direct messages between two users of the same network (restricted members included). User tokens only.
