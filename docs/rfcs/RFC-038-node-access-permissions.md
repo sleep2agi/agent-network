@@ -313,3 +313,159 @@ hub 侧写在 `agent-acl-groups-http.test.ts`,用临时库和真实的 `Bun.serv
 3. **可选**:加规则组(`rule` 列),等 Vincent 需要时再做。
 
 需要 Vincent 定的只有一件事:**组列表要不要对普通成员可见**。建议不可见,成员只需要看到最终能访问的 Agent。
+
+## 9. 附:任务(需求卡)的人员权限(2026-09-30 追加)
+
+Vincent 原话:「还有 任务的权限也要设计一下,人员的」。本节只管**人**(用户令牌)能看、能改哪些任务;Agent(节点令牌)的规则**原样不动**(§9.2 末尾)。实现分三步,见 §9.8。
+
+### 9.1 今天(按 origin/main 代码)
+
+代码入口是 `server/src/requirements.ts` 的 `handleRequirementsRequest()`。MCP 的 `requirements_*` 工具经 `tools.ts` 的 `requirementsCall` 直接调它,所以 REST 和 MCP 是同一套规则。
+
+| 操作 | 人(成员 / 受限成员) | viewer | 执行点 |
+|---|---|---|---|
+| 列表 `GET /api/requirements`(含 `q=`、分页、`seq`、`project_id` 等筛选) | **网络里全部卡片**(未归档的最新 500 张) | 全部 | `addHumanNetworkScope()`:只按网络过滤 |
+| 单张 `GET /api/requirements/:id`(或 `#N`) | 网络里任一张 | 任一张 | `scopedRow()` |
+| 新建 `POST` | 可以 | 403 | `canWrite()` → `canRestWriteNetworkAsHuman()`(非 viewer 即可) |
+| 修改 `PATCH`(含改负责人、参与人、状态) | **任一张** | 403 | `patchRequirement()` → `canWrite()` |
+| 勾子任务 `PATCH …/checklist/:item` | 任一张 | 403 | 同上 |
+| 删除 `DELETE` | **任一张,而且是硬删除** | 403 | 同上 |
+| 按 external_ref 同步 `POST /upsert` | 可以 | 403 | 同上 |
+| 项目:列表 | 网络里全部 | 全部 | `handleProjects()` |
+| 项目:新建 / 改名 / 归档 / 删除 | 可以 | 403 | `handleProjects()` → `canWrite()` |
+| `GET /tags`、`GET /people` | 全网标签;全体成员 + 自己看得见的 Agent | 同左 | — |
+
+补充几点:
+
+- **受限成员**(`agent_access='granted'`)目前在任务上只有一处与普通成员不同:卡片上**没授权给他的 Agent 引用**会被隐去,他也不能指派这些 Agent(`hiddenNodeFilter()`、`personRef()`)。卡片本身他全都看得见、改得了。
+- **需求卡的写操作没有任何审计**:`requirements.ts` 里没有调用 `logAudit`。硬删除也不留痕。
+- **Agent(节点令牌)**:只能在自己令牌绑定的网络里读、建、改、勾子任务、upsert、读项目;不能删除,也不能管理项目(`NODE_TOKEN_OPERATIONS`)。它能改的是**该网络里任意一张卡**,不限于负责 Agent 是自己的卡。
+- **没有「评论」功能**:代码里既没有评论表,也没有评论接口。所以提议里的「只能看 / 评论」,目前只能先落成「只能看」。
+
+### 9.2 模型
+
+在 `network_members` 上新增一列 `task_access`,取值 `all` 或 `scoped`,判定方式与 `agent_access` 完全平行。另加一张项目授权表:
+
+```sql
+ALTER TABLE network_members ADD COLUMN task_access TEXT NOT NULL DEFAULT 'all';   -- 升级前的行全部是 all
+CREATE TABLE network_member_project_grants (
+  network_id TEXT NOT NULL, user_id TEXT NOT NULL, project_id TEXT NOT NULL,
+  can_edit INTEGER NOT NULL DEFAULT 0,            -- 行存在即可看;can_edit=1 可改
+  created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (network_id, user_id, project_id)
+);
+```
+
+| 谁 | 能看见的卡 | 能改 / 能勾子任务 | 能删 | 项目管理 |
+|---|---|---|---|---|
+| Hub 管理员、网络 owner/admin | 全部 | 全部 | 全部 | 可以 |
+| `task_access='all'` 的 member(升级前的老成员) | 全部(与今天相同) | 全部(与今天相同) | 全部(与今天相同) | 可以(与今天相同) |
+| `scoped` 的 member | ① 负责人是我;② 参与人里有我;③ 我建的;④ 所在项目授权给了我 | 负责人是我,或我建的;所在项目授权给我且 `can_edit`。**其余能看见的卡只能看** | 负责人是我或我建的 | 不可以;只看得到授权给自己的项目 |
+| `scoped` 的 viewer | 只有 ④ | 不能改 | 不能删 | 不可以 |
+| `all` 的 viewer(升级前) | 全部,只读(与今天相同) | 不能改 | 不能删 | 不可以 |
+
+- **新建**:`scoped` 的 member 可以建卡。卡要么不放进任何项目,要么放进自己有 `can_edit` 的项目。建完以后他就是创建者,可以看也可以改。
+- **子任务**:子卡的可见性按它自己的负责人、参与人、创建者、项目单独判定,**不从父卡继承**。父卡上显示的子任务进度,只统计调用者看得见的子卡。
+- **Agent 引用照旧**:§2 的 `hiddenNodeFilter` 规则不变,没授权的 Agent 照样隐去,也照样不能指派。
+- **Agent(节点令牌)本节不改**:仍然在自己的网络里读、建、改任意一张卡。「只能改负责 Agent 是自己的卡」是一个可以另做的收紧,列为 §9.9 的第 2 项。
+
+### 9.3 执行点
+
+新增一个模块 `server/src/task-access.ts`,里面只放判定;`requirements.ts` 里的每条路径都走它。
+
+| 路径 | 规则 |
+|---|---|
+| 列表(含搜索、分页、所有筛选) | SQL 追加可见性子句(见下文示意),`scoped` 调用者才加。`ambiguous_seq` 只在可见行里判定 |
+| 单张 `GET` / `PATCH` / 勾子任务 / `DELETE` | 看不见的卡,一律返回 `404 requirement_not_found`,与不存在的卡**逐字节相同**(和 `agent_not_granted` 同一个思路,不能拿它探测卡是否存在)。看得见但没有改权 → `403 task_read_only`;没有删权 → `403 task_delete_denied` |
+| 新建 | `project_id` 必须是自己有 `can_edit` 的项目,否则返回 `project_not_found`,与项目不存在同一个错误;`parent_id` 必须是看得见的卡,否则返回 `parent_not_found`。用 `client_id` 重放时,只有原卡是**自己建的**才回原卡,否则返回 409 `client_id_taken`,不回别人的卡 |
+| upsert(同步接口) | `scoped` 的成员一律 `403 upsert_not_allowed`,是一个固定错误。否则 `external_ref` 的唯一索引会把「这个 ref 已经存在」泄露出去。同步本来就是 Agent 和管理员在用 |
+| 项目列表 / 管理 | `scoped` 的成员只列出授权给自己的项目;新建、改名、归档、删除都返回 403 |
+| `GET /tags` | 只从自己看得见的卡里汇总 |
+| `GET /people` | 不变:人员通讯录 + 看得见的 Agent |
+| MCP `requirements_*` | 经 `requirementsCall` 走同一个处理函数,**自动**跟着生效;`RESTRICTED_MEMBER_TOOLS` 不用改 |
+
+可见性子句的示意(SQLite 写法,用 `json_each` 拆参与人)。PostgreSQL 后端(RFC-039)要换成 `jsonb_array_elements`,两种写法都要在测试里各跑一遍:
+
+```sql
+AND ( requirements.owner_json = :me_ref
+   OR requirements.created_by = :uid OR requirements.created_by_json = :me_ref
+   OR EXISTS (SELECT 1 FROM json_each(requirements.participants_json) p WHERE p.value = :me_ref)
+   OR requirements.project_id IN (SELECT project_id FROM network_member_project_grants WHERE network_id = :net AND user_id = :uid) )
+```
+
+实现时先用 EXPLAIN 看这条子句的查询计划;比照 §8 做法,补一道性能守卫:300 张卡、20 个项目授权时,列表请求多出的耗时不超过 5 ms。
+
+### 9.4 默认值与迁移(不收窄任何人)
+
+- **老成员不变**:升级前已有的成员行由 `ALTER … DEFAULT 'all'` 落在 `all`,看到的、能做的都与今天一样,一个人都不会被收窄。
+- **新成员默认 `scoped`**(和 `agent_access` 新成员默认 `granted` 同一个思路)。管理员建号、`POST /members`、邀请码加入都一样。新成员默认只看得到与自己相关的卡,没有任何项目授权。
+- **要收窄老成员**:管理员在 UI 上把他切到「仅相关任务」,切换时对话框里预填「当前全部项目 + 可看」,不会一保存就把人清空。与 §4.3 的 G1 同一个做法。
+- **升级前后**:owner/admin 的行为不变;没有数据迁移,只新增一列和一张空表。
+
+### 9.5 API
+
+以下接口都只接受用户令牌,调用者限于 owner/admin 和 Hub 管理员,与 agent-grants 相同。
+
+- `GET/PUT /api/networks/:id/members/:user_id/task-grants`:
+  - 请求体 `{ task_access?: 'all'|'scoped', project_grants?: [{project_id, can_edit}] }`,**整体替换**。
+  - 不传的字段保持原样,旧客户端不会误清。
+  - 任何一个项目不属于本网络,返回 400,整批都不写。
+- `GET /api/networks/:id/members` 每个成员增加 `task_access` 和 `task_project_count` 两个字段。
+- `/api/auth/me` 的 `networks[]` 增加 `task_access`,app 靠它显示只读提示和空态文案。
+
+### 9.6 审计
+
+- 新增事件:
+  - `member_task_grants_changed`:授权变更,记 diff;
+  - `requirement_deleted`:删卡,今天完全不留痕,这次补上;
+  - `task_access_denied`:被拒的写入,同一 (用户, 卡) 每小时最多记一条。
+- 全部事件都带 `network_id`,§4.4 的「网络负责人读本网络审计」能直接读到。
+
+### 9.7 app
+
+**成员弹窗 / 成员页**:在「可访问的 Agent」下面新增一段「任务权限」。
+
+| | 桌面(DialogFrame 里的一个区块) | 手机(设置三级页「成员」里的卡片,微信式) |
+|---|---|---|
+| 范围 | 分段控件「全部任务 / 仅相关任务」,下面一行小字说明「相关 = 我负责、我参与、我建的,加上下面勾选的项目」 | 单选两行,选中的打 ✓;说明放在卡片页脚 |
+| 项目 | 可搜索的项目清单:每行一个复选框 + 项目色点 + 名称 + 「可编辑」开关;viewer 不显示开关,显示「只读」 | 每个项目一行 ✓;另起一张「可编辑的项目」卡片,每个已选项目一行开关 |
+| 成员行摘要 | 「全部任务」/「3 个项目」/「仅相关任务」 | 同左 |
+
+**任务看板**(`scoped` 成员看到的变化):
+
+- 只读的卡显示 🔒「只读」,编辑控件置灰。点了不会让用户先改完再被 403 退回来,而是一开始就不让编辑。
+- 看不到删除按钮;项目管理入口也不显示。
+- 看板为空时显示「还没有与你相关的任务」,而不是「还没有任务」。
+
+**老 hub 兼容**:`task-grants` 返回 404 时,整段「任务权限」不显示,和 §8.5 的分组做法相同。
+
+### 9.8 测试计划与发布
+
+**测试**(hub 侧,`task-access-http.test.ts`,真实 `Bun.serve` + 临时库):
+
+- **正向**:
+  - 负责人、参与人、创建者都能看见自己的卡;
+  - 项目授权 `can_view` 能看、`can_edit` 能改;
+  - `all` 的老成员和 owner 行为与今天逐字相同;
+  - MCP `requirements_list/get/update` 与 REST 结果一致。
+- **反向**:
+  - 看不见的卡:GET、PATCH、DELETE、勾子任务、`#N` 都返回 404,且与不存在的卡逐字节相同;
+  - 只读的卡 PATCH 返回 403 `task_read_only`;
+  - `scoped` 成员 upsert、管理项目都返回 403;
+  - 往没授权的项目里建卡、`parent_id` 指向看不见的卡、`client_id` 撞上别人的卡,都返回与「不存在」相同的错误;
+  - 列表、搜索、标签都不出现看不见的卡。
+- **变异见证**:删掉可见性子句、删掉 404 同形、删掉 upsert 拦截,各自至少一条用例变红。
+- **性能守卫**:见 §9.3。
+- **app 侧**:ck 单测;在一次性 hub 上跑端到端:建 `scoped` 成员 → 只看到相关卡 → 授权项目 → 能看、能改 → 撤销;桌面、手机各测一套 boundingBox。
+
+**分三步发布**,每一步都能单独发:
+
+1. **hub**:`task_access` 列 + 项目授权表 + §9.3 的全部执行点 + 审计(含补上的删卡审计)+ 测试。旧 app 照常能用:`scoped` 成员只是看到的卡变少,改只读卡时拿到 403,旧 app 会把这个错误原样显示出来。
+2. **app**:成员弹窗和成员页里的「任务权限」区块(桌面、手机分别做),加上看板的只读、隐藏删除、空态文案。
+3. **可选**:评论功能(让「只能看 / 评论」补全),以及收紧 Agent 规则:节点令牌只能改负责 Agent 是自己或参与人里有自己的卡。
+
+### 9.9 需要 Vincent 定的
+
+1. 新成员默认 `scoped`(只看与自己相关的卡)?建议**是**,与 Agent 权限新成员默认零授权保持一致。
+2. Agent 的改卡范围要不要收紧到「负责 Agent 是自己的卡」(第 3 步)?建议**先不收**,目前没有实际问题。
+3. 参与人要不要能勾子任务(轻量参与)?建议**先不能**,评论做出来以后再定。
