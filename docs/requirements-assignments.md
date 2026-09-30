@@ -90,6 +90,19 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
   - 不缓存的情形：「只看相关任务」的成员、Agent 受限的成员、`q=` 搜索、`changes=1`。
 - `GET /api/stats/routes?minutes=15`（管理员或 master 令牌）：最近 N 分钟（1–1440）每个路由的次数、总耗时、平均值、p95、最大值、字节数和 5xx 数。路由里的 id 段折成 `:id`，保留 `light` / `view` / `scope` / `changes` 这几个会改变载荷形状的参数。数据只在内存里，最多 4096 条样本，重启清空。
 
+### 任务动态（events）
+
+- 每次写入按字段记一条流水（`requirement_events` 表，`server/src/requirement-events.ts`），与那次写入同一个事务：流水写不进去，改动也不生效。
+  - `kind`：`created` / `changed` / `deleted`。`field`（`changed` 才有）：`column`、`title`、`priority`、`due`、`start`、`assignee`、`owner`、`agent_owner`、`participants`、`tags`、`checklist_item`（勾选或取消一项，`{id,text,done}`）、`checklist`（增删改条目，`{total,done}`）、`description`（只记字数 `{chars}`，不存正文）、`project`、`parent`、`archived`。
+  - `old` / `new`：改前 / 改后的值；`actor`：`{kind:"user"|"node", id}`，与 `updated_by` 同一个来源；`title` / `seq`：写入时卡片的标题和短号（卡删了也画得出来）。
+  - 写路径：新建、PATCH（含 upsert）、勾子任务、标签改名 / 合并 / 删除（每张被改的卡一条 `tags`）、删项目（每张被清空的卡一条 `project`）、删卡。没有实际变化的写入不记。删父卡时被解挂的子卡不记。
+  - 保留 180 天，更早的在写入时顺手清。
+- `GET /api/requirements/events`（capability `events`）：一个网络的流水，按 `id` 从新到旧。参数 `since`（ISO，含）、`limit`（1–500，默认 200）、`cursor`（上一页的 `next_cursor`）、`requirement_id`（只看一张卡）。响应 `events`、`has_more`、`next_cursor`、`server_time`（下次的 `since`，读表之前取，最多重复回一次，按 `id` 去重）。
+  - 可见范围与列表相同：卡还在，就按当前这张卡判断；删了就按墓碑判断（过了 30 天墓碑期的删除，只有不受任务范围限制的调用者看得到）。
+  - Agent 受限的成员：看不见的节点当操作者时 `actor: null`；负责人 / 负责 Agent / 参与人里的隐去；隐去之后前后一样的那条整条不回。
+  - 可见性在读出之后过滤，一页最多扫 5000 条；扫满还没凑够就带 `next_cursor` 返回，接着翻即可。
+- 升级 / 回滚：只新建一张表和三个索引（`CREATE … IF NOT EXISTS`）。旧 Hub 不认识这张表，也不碰它；回滚期间的改动没有流水，再升回来接着记。
+
 ## 升级
 
 - 加列只加不改：`agent_owner_json`、`description`、`checklist_json`、`project_id` 都在 `db.ts` 既有的加列循环里；旧行为 NULL，读出为 `null` / `""` / `[]` / `null`。`requirement_projects` 表由 `requirements-migrate.ts` 的 `CREATE TABLE IF NOT EXISTS` 建。
