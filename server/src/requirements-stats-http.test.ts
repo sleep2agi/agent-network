@@ -2,7 +2,7 @@
 // test2123 在真实 PostgreSQL 上原样再跑一遍(COMMHUB_TEST_PG_URL)。
 //
 // 场景:Hub 管理员 admin 的网络 NET;节点令牌 bot(绑定一个节点);成员:
-//   alice —— 新建成员(任务 scoped、Agent 受限):只看得见自己负责的卡;
+//   alice —— 新建成员(经授权接口显式设成任务 scoped、Agent 受限):只看得见自己负责的卡;
 //   carol —— 任务 'all'、Agent 受限('granted' 且没授权 bot):卡全看得见,但 bot 不该以名字出现在统计里。
 // 正向:移进完成记时刻与操作者、完成列里改别的不动、移出清空、再移进换新时刻;直接建在完成列;归档的卡照样计数;
 //       tz / days / from / to 的语义。
@@ -78,6 +78,8 @@ beforeAll(async () => {
   const stamp = Date.now();
   alice = await mk(`rs_alice_${stamp}`);
   carol = await mk(`rs_carol_${stamp}`);
+  // 新成员默认值 NEW_MEMBER_TASK_ACCESS 暂时是 'all',alice 要显式设成 scoped。
+  expect((await send(admin.token, "PUT", `/api/networks/${NET}/members/${alice.id}/task-grants`, { task_access: "scoped" })).status).toBe(200);
   db.run("UPDATE network_members SET task_access = 'all' WHERE network_id = ?1 AND user_id = ?2", [NET, carol.id]);
 
   const t = createNetworkTokenForNode(admin.id, NET, "rs-bot");
