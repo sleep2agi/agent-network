@@ -1,5 +1,6 @@
 import { buildServeErrorResponse } from "./serve-error.js";
 import { maybeGzipResponse, trimLightTask } from "./http-gzip";
+import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
@@ -2207,11 +2208,19 @@ return Bun.serve({
       // take 12s+ on flaky cellular (Vincent tg, #220 PWA). Default response
       // is unchanged so the dashboard / scripts that read full telemetry are
       // unaffected.
-      const isLight = url.searchParams.get("light") === "1";
       const nodeIdFilter = url.searchParams.get("node_id")?.trim();
+      // agent-node < 2.5.0-preview.93 resolves its own alias every 30 s with the WHOLE network's full projection
+      // (~93 KB gzip on production) and reads only sessions[].node_id / .alias — under a hard 2.5 s abort. Over the
+      // RELAY frp tunnel to a China-side machine (~50 KB/s per connection) the body often isn't done in 2.5 s: the
+      // node aborts, the Hub has already pushed the body into the tunnel and frps drops it (~60% of the tunnel,
+      // 2026-10-01). That caller has an exact signature no other client sends (statusAliasResolverRead): give it
+      // the light projection + node_id (~28 KB gzip), which is all it reads. `?full=1` always gets the full body.
+      const aliasResolverRead = statusAliasResolverRead(url.searchParams, requestToken(req), req.headers.get("accept"));
+      const isLight = url.searchParams.get("light") === "1" || aliasResolverRead;
+      const withNodeId = !!nodeIdFilter || aliasResolverRead;
       const params: any[] = [];
       let sql = isLight
-        ? `SELECT alias, status, agent, task, server, updated_at, network_id${nodeIdFilter ? ", node_id" : ""} FROM sessions WHERE 1=1`
+        ? `SELECT alias, status, agent, task, server, updated_at, network_id${withNodeId ? ", node_id" : ""} FROM sessions WHERE 1=1`
         : `SELECT ${SESSION_REST_SELECT} FROM sessions WHERE 1=1`;
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
       // `?alias=<name>` narrows to that one agent's rows (same projection, same scope). The app's
@@ -2249,8 +2258,9 @@ return Bun.serve({
             updated_at: s.updated_at ?? null,
             runtime: normalizeRuntime(s.agent),
             network_id: s.network_id ?? null,
-            // Only when filtering by node_id, so the unfiltered light response keeps its exact bytes.
-            ...(nodeIdFilter ? { node_id: s.node_id ?? null } : {}),
+            // Only when filtering by node_id (or for the old alias resolver), so the unfiltered light response
+            // keeps its exact bytes.
+            ...(withNodeId ? { node_id: s.node_id ?? null } : {}),
           };
         }
         const externalSchedules = (() => {
@@ -2296,7 +2306,9 @@ return Bun.serve({
         else acc.idle++;
         return acc;
       }, { idle: 0, working: 0, offline: 0, total: sessions.length });
-      return withCors(req, Response.json({ ok: true, sessions, summary }));
+      const res = Response.json({ ok: true, sessions, summary });
+      if (aliasResolverRead) res.headers.set("X-Status-Projection", "alias-resolver");
+      return withCors(req, res);
     }
 
     // ── REST: aggregate agents by physical server ──
