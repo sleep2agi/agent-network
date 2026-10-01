@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
-  __resetRouteTimingForTest, labelRoute, mcpRouteLabel, recordRouteTiming, routeKey, routeStats,
+  __resetRouteTimingForTest, callerTokenKind, labelRoute, mcpRouteLabel, recordRouteTiming, routeKey, routeStats,
+  setRouteCallerMasterToken, userAgentFamily, ROUTE_MAX_CALLERS_PER_ROUTE,
   ROUTE_BUCKET_MS, ROUTE_BUCKET_RETENTION, ROUTE_MAX_KEYS_PER_BUCKET, ROUTE_OVERFLOW_KEY,
 } from "./route-timing";
 
@@ -134,4 +135,71 @@ test("mcpRouteLabel: method, tool name, and nothing else", () => {
   expect(mcpRouteLabel({ method: "tools/call", params: { name: "../../etc/passwd" } })).toBe("tools/call ?");
   expect(mcpRouteLabel({ method: "tools/call", params: { name: "n".repeat(65) } })).toBe("tools/call ?");
   expect(mcpRouteLabel({ method: "tools/call", params: { name: "" } })).toBe("tools/call ?");
+});
+
+// ── caller classes (?by=caller) ──
+const reqAs = (path: string, headers: Record<string, string>) => new Request(`http://hub${path}`, { headers });
+
+test("userAgentFamily keeps only allow-listed product names and a sanitized version", () => {
+  expect(userAgentFamily("agent-node/2.5.0-preview.88")).toBe("agent-node/2.5.0-preview.88");
+  expect(userAgentFamily("node")).toBe("node");
+  expect(userAgentFamily("Bun/1.2.19")).toBe("bun/1.2.19");
+  expect(userAgentFamily("okhttp/4.12.0")).toBe("okhttp/4.12.0");
+  expect(userAgentFamily("curl/8.5.0")).toBe("curl/8.5.0");
+  expect(userAgentFamily("agent-network-desktop/0.2.170")).toBe("agent-network-desktop/0.2.170");
+  expect(userAgentFamily("tauri-plugin-http/2.5.9")).toBe("tauri-plugin-http/2.5.9");
+  expect(userAgentFamily("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15")).toBe("browser");
+  expect(userAgentFamily("SomeApp/42 CFNetwork/1568.100.1 Darwin/24.0.0")).toBe("cfnetwork/1568.100.1");
+  expect(userAgentFamily(null)).toBe("none");
+  expect(userAgentFamily("   ")).toBe("none");
+  // Free text never comes through: unknown product names, and anything after a version.
+  expect(userAgentFamily("my-laptop-hostname/1.0")).toBe("other");
+  expect(userAgentFamily("curl/8.5.0;user=alice@example.com")).toBe("curl/8.5.0");
+  expect(userAgentFamily("node/abc-secret")).toBe("node");
+});
+
+test("callerTokenKind recognises token kinds without keeping the token", () => {
+  setRouteCallerMasterToken("master-secret-xyz");
+  try {
+    const kind = (headers: Record<string, string>, path = "/api/status") => callerTokenKind(reqAs(path, headers), u(path));
+    expect(kind({ Authorization: "Bearer ntok_abc" })).toBe("node");
+    expect(kind({ Authorization: "Bearer utok_abc" })).toBe("user");
+    expect(kind({ Authorization: "Bearer master-secret-xyz" })).toBe("master");
+    expect(kind({ Authorization: "Bearer something-else" })).toBe("token");
+    expect(kind({})).toBe("anon");
+    expect(kind({}, "/events/x?token=ntok_q")).toBe("node");
+  } finally {
+    setRouteCallerMasterToken(undefined);
+  }
+});
+
+test("routeStats({byCaller}) counts per class; without it the rows have no callers field", () => {
+  __resetRouteTimingForTest();
+  const now = 3_000_000_000;
+  const status = (headers: Record<string, string>, len: number) => recordRouteTiming(reqAs("/api/status", headers), at(1), res(200, len), now);
+  for (let i = 0; i < 3; i++) status({ Authorization: "Bearer utok_secret1", "User-Agent": "node" }, 100);
+  status({ Authorization: "Bearer ntok_secret2", "User-Agent": "agent-node/2.5.0-preview.88" }, 10);
+  status({ "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0" }, 1);
+  const plain = routeStats(60_000, now);
+  expect(plain.routes[0]).not.toHaveProperty("callers");
+  const by = routeStats(60_000, now, { byCaller: true });
+  expect(by.routes[0].callers).toEqual([
+    { class: "user node", count: 3, bytes: 300 },
+    { class: "node agent-node/2.5.0-preview.88", count: 1, bytes: 10 },
+    { class: "anon browser", count: 1, bytes: 1 },
+  ]);
+  expect(JSON.stringify(by)).not.toMatch(/secret|Mozilla|Linux|Chrome/);
+});
+
+test("caller classes are capped per route: per bucket and again after merging buckets", () => {
+  __resetRouteTimingForTest();
+  const now = 4_000_000_000 - (4_000_000_000 % ROUTE_BUCKET_MS);
+  // Minute 1: 30 distinct versions → 20 stored, 10 into (other). Minute 2: 25 more distinct ones.
+  for (let i = 0; i < 30; i++) recordRouteTiming(reqAs("/api/status", { "User-Agent": `curl/${i}.0` }), at(1), res(200, 1), now - ROUTE_BUCKET_MS);
+  for (let i = 100; i < 125; i++) recordRouteTiming(reqAs("/api/status", { "User-Agent": `curl/${i}.0` }), at(1), res(200, 1), now);
+  const callers = routeStats(5 * 60_000, now, { byCaller: true }).routes[0].callers!;
+  expect(callers.length).toBe(ROUTE_MAX_CALLERS_PER_ROUTE);
+  expect(callers.at(-1)!.class).toBe(ROUTE_OVERFLOW_KEY);
+  expect(callers.reduce((n, c) => n + c.count, 0)).toBe(55);
+  expect(callers.reduce((n, c) => n + c.bytes, 0)).toBe(55);
 });

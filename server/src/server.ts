@@ -61,7 +61,7 @@ import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js"
 import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { handleRequirementsRequest } from "./requirements.js";
-import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats } from "./route-timing.js";
+import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
@@ -72,6 +72,7 @@ import { parseHubTimestamp } from "./hub-timestamp";
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
+setRouteCallerMasterToken(AUTH_TOKEN);
 const DEV_OPEN = process.argv.includes("--dev-open") || process.env.COMMHUB_DEV_OPEN === "1";
 const TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1";
 const SECURITY_LABEL = DEV_OPEN ? "⚠️ DEV OPEN MODE" : "🔒 secured";
@@ -2154,12 +2155,14 @@ return Bun.serve({
 
     // ── REST: per-route timing (ops-only, same gate as /api/stats/sse) ──
     // ?minutes=N(默认 15,最多 1440):最近 N 分钟里每个路由的次数、总耗时、p95、最大、字节。
+    // &by=caller:每个路由再带 callers —— 令牌种类 + UA 家族的次数 / 字节(route-timing.ts callerClass)。不带时输出逐字节不变。
     if (url.pathname === "/api/stats/routes" && req.method === "GET") {
       if (restAuth && !isAdmin) {
         return withCors(req, Response.json({ ok: false, error: "admin or master token required" }, { status: 403 }));
       }
       const minutes = Math.min(Math.max(Number(url.searchParams.get("minutes")) || 15, 1), 1440);
-      return withCors(req, Response.json({ ok: true, ...routeStats(minutes * 60_000) }));
+      const byCaller = url.searchParams.get("by") === "caller";
+      return withCors(req, Response.json({ ok: true, ...routeStats(minutes * 60_000, Date.now(), { byCaller }) }));
     }
 
     // ── #473 REST: SSE connection detail (ops-only) ──

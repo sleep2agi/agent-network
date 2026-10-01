@@ -89,6 +89,7 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
   - 条目最多信任 60 s，兜住直接改库的情形。
   - 不缓存的情形：「只看相关任务」的成员、Agent 受限的成员、`q=` 搜索、`changes=1`。
 - `GET /api/stats/routes?minutes=15`（管理员或 master 令牌）：最近 N 分钟（1–1440）每个路由的次数、总耗时、平均值、p95、最大值、字节数和 5xx 数。路由里的 id 段折成 `:id`，保留 `light` / `view` / `scope` / `changes` 这几个会改变载荷形状的参数；`POST /mcp` 后面带 JSON-RPC 方法名，`tools/call` 再带工具名（如 `POST /mcp tools/call report_status`；只读这两个字段，不记参数，形状不对的记 `?`，批量记 `batch`）。按分钟分桶累计，保留 24 小时，窗口多长就覆盖多长（粒度一分钟）；p95 取自耗时直方图（近似值，不超过最大值）；每分钟最多 256 个不同路由，多出的记到 `(other)`。数据只在内存里，重启清空。
+  - 加 `&by=caller`：每个路由再带 `callers: [{class, count, bytes}]`，按次数降序。`class` = 令牌种类（`node` / `user` / `master` / `token`（其他令牌）/ `anon`）+ 空格 + User-Agent 家族（白名单里的产品名 + 版本，如 `agent-node/2.5.0-preview.88`、`agent-network-desktop/0.2.170`、`tauri-plugin-http/2.5.9`、`node`、`bun/1.2.19`、`okhttp/4.12.0`、`curl/8.5.0`；浏览器一律 `browser`，iOS 系统网络库记 `cfnetwork/…`，没有 UA 记 `none`，其余一律 `other`）。不记令牌、用户 / 节点 id、IP 或完整 UA。每个路由每分钟最多 20 类，汇总后也只给前 20 类，多出的并进 `(other)`。不带 `by=caller` 时输出与原来逐字节相同。
 
 ### 任务动态（events）
 
