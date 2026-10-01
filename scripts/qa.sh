@@ -342,6 +342,21 @@ case "${1:-}" in
   *)    fail "unknown arg: $1"; exit 2 ;;
 esac
 
+# docs-only PR 的轻量路径:qa.yml 的 changes job(.github/scripts/ci-docs-only.py)
+# 只把「镜像里有 docs-site」的 L1 套件放进 QA_L1_ONLY。空/未设 = 全部 L1。
+# 名字必须逐字在 L1_TESTS 里 —— 拼错一个不是「少跑一个」,是红。
+if [[ -n "${QA_L1_ONLY:-}" ]]; then
+  _l1_keep=()
+  for _t in $QA_L1_ONLY; do
+    _hit=0
+    for _u in "${L1_TESTS[@]}"; do [[ "$_u" == "$_t" ]] && _hit=1; done
+    if (( ! _hit )); then fail "QA_L1_ONLY: $_t 不在 L1_TESTS 里"; exit 2; fi
+    _l1_keep+=("$_t")
+  done
+  note "QA_L1_ONLY: 只跑 ${#_l1_keep[@]}/${#L1_TESTS[@]} 个 L1 套件(docs-only PR)"
+  L1_TESTS=("${_l1_keep[@]}")
+fi
+
 START=$(date +%s)
 FAILED=0
 
