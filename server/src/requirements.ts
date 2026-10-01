@@ -9,9 +9,10 @@ import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-s
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
 import {
-  addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
-  isTaskScoped, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
+  addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canParticipantEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
+  isTaskScoped, PARTICIPANT_EDIT_FIELDS, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
+import { notifyParticipantChange } from "./requirement-notify.js";
 import { diffRequirement, ensureRequirementEvents, eventPublic, recordRequirementEvents, type EventRow } from "./requirement-events.js";
 import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
@@ -87,12 +88,31 @@ function taskCaller(ctx: RequirementsRequestContext): TaskCaller {
   if (!ctx.auth || ctx.isNodeToken || ctx.isAdmin) return null;
   return { userId: ctx.auth.userId };
 }
-/** 看得见但没权限写:403,并按 (用户, 卡) 每小时最多记一条审计。 */
-function taskDenied(ctx: RequirementsRequestContext, row: Row, error: "task_read_only" | "task_delete_denied"): Response {
+/**
+ * 看得见但没权限写:403,并按 (用户, 卡) 每小时最多记一条审计。
+ * field:参与人改了参与人不能改的字段 —— 错误码不变(旧 App 照旧认 task_read_only),多带 field + 一句中文 message。
+ */
+function taskDenied(ctx: RequirementsRequestContext, row: Row, error: "task_read_only" | "task_delete_denied", field?: string): Response {
   if (ctx.auth && shouldAuditDenied(ctx.auth.userId, row.requirement_id)) {
-    logAudit(ctx.auth.userId, ctx.auth.username || null, "task_access_denied", "requirement", row.requirement_id, JSON.stringify({ error }), undefined, row.network_id);
+    logAudit(ctx.auth.userId, ctx.auth.username || null, "task_access_denied", "requirement", row.requirement_id, JSON.stringify(field ? { error, field } : { error }), undefined, row.network_id);
   }
-  return jsonError(error, 403);
+  if (!field) return jsonError(error, 403);
+  return Response.json({ ok: false, error, field, message: `参与人只能修改状态和检查项,不能修改「${FIELD_LABEL[field] ?? field}」` }, { status: 403 });
+}
+const FIELD_LABEL: Record<string, string> = {
+  name: "标题", description: "描述", owner: "负责人", agent_owner: "负责 Agent", participants: "参与人", project_id: "项目",
+  priority: "优先级", due: "预计完成", start: "开始时间", tags: "标签", issues: "关联 issue", assignee: "执行人",
+  external_ref: "外部引用", external_url: "外部链接", archived: "归档", parent_id: "父任务",
+};
+/** 参与人改完(事务提交后)发通知;操作者不是参与人 / 状态和检查项没变 → 不发。只对人(用户令牌)。 */
+function notifyIfParticipant(ctx: RequirementsRequestContext, before: Row, after: Row): void {
+  if (!ctx.auth || ctx.isNodeToken) return;
+  try {
+    notifyParticipantChange({ before, after, actorUserId: ctx.auth.userId });
+  } catch (e) {
+    // 通知失败不影响这次改动(已经提交)。
+    console.error(`[requirements] participant notice failed: ${(e as Error).message}`);
+  }
 }
 /** 父卡对调用者不可见 = 与不存在同一个错误(不给 scoped 成员留卡片存在性探测)。 */
 function parentHidden(ctx: RequirementsRequestContext, parentId: string): boolean {
@@ -785,7 +805,12 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
   if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
   const caller = taskCaller(ctx);
-  if (!canEditTask(caller, row)) return taskDenied(ctx, row, "task_read_only");
+  if (!canEditTask(caller, row)) {
+    // 参与人:只放状态和检查项;别的字段点名拒绝。不是参与人 → 与今天一样。
+    if (!canParticipantEditTask(caller, row)) return taskDenied(ctx, row, "task_read_only");
+    const other = PATCH_FIELDS.find(k => has(k) && !PARTICIPANT_EDIT_FIELDS.includes(k));
+    if (other) return taskDenied(ctx, row, "task_read_only", other);
+  }
   // scoped 成员不能写 external_ref:唯一索引冲突会泄露别的卡用了这个 ref。
   if (has("external_ref") && caller && isTaskScoped(caller.userId, row.network_id)) return jsonError("external_ref_not_allowed", 403);
   if (has("column") && !COLUMNS.has(String(body.column))) return jsonError("invalid_column", 400);
@@ -887,6 +912,7 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     recordRequirementEvents(db, after, actor, diffRequirement(row, after), updatedAt);
     return after;
   });
+  notifyIfParticipant(ctx, row, updated);
   return Response.json(withLegacyOwner(toPublicFor(ctx, updated), people.coerced));
 }
 
@@ -1357,7 +1383,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const row = scopedRow(ctx, decodeURIComponent(itemMatch[1]));
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
-    if (!canEditTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_read_only");
+    if (!canEditTask(taskCaller(ctx), row) && !canParticipantEditTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_read_only");
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
     const items = storedChecklist(row.checklist_json);
     const itemId = decodeURIComponent(itemMatch[2]);
@@ -1373,6 +1399,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
       if (was !== item.done) recordRequirementEvents(db, row, actor, [{ kind: "changed", field: "checklist_item", old: { ...item, done: was }, new: { ...item } }], at);
       return db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, row.requirement_id)!;
     });
+    notifyIfParticipant(ctx, row, updated);
     return Response.json({ ok: true, requirement: toPublicFor(ctx, updated) });
   }
 

@@ -133,6 +133,26 @@ export function canEditTask(caller: TaskCaller, row: CardRow): boolean {
   return projectGrant(row.network_id, caller.userId, row.project_id)?.can_edit === true;
 }
 
+/**
+ * 参与人能改的字段(Vincent 2026-10-01「参与人可以改，但是改了之后需要有个通知」):状态(列)和检查项。
+ * 只对 canEditTask 为 false 的 scoped 参与人生效;标题 / 描述 / 负责人 / 参与人 / 项目 / 优先级 / 日期 / 标签等仍只给
+ * 负责人 / 创建者 / 可改项目授权。
+ */
+export const PARTICIPANT_EDIT_FIELDS: readonly string[] = ["column", "checklist"];
+
+/** 这个调用者是不是「只能以参与人身份改」这张卡(canEditTask 为 false、但他是卡上的参与人)。viewer 不算。 */
+export function canParticipantEditTask(caller: TaskCaller, row: CardRow): boolean {
+  if (!caller) return false;
+  const m = memberRow(caller.userId, row.network_id);
+  if (!scopedRow(m) || m?.member_role === "viewer") return false;
+  return participates(row, caller.userId);
+}
+
+/** 卡上有没有这个用户当参与人(不看权限模式;通知用)。 */
+export function isParticipant(row: Pick<CardRow, "participants_json">, userId: string): boolean {
+  return refIs(row.participants_json, userId);
+}
+
 /** 能删这张卡吗。scoped 成员只能删负责人是自己或自己建的。 */
 export function canDeleteTask(caller: TaskCaller, row: CardRow): boolean {
   if (!caller) return true;
@@ -146,7 +166,8 @@ export function canDeleteTask(caller: TaskCaller, row: CardRow): boolean {
  * 给客户端画「只读 / 不能删」用的每卡权限。只对 scoped 调用者返回(其余 null = 与今天一样全能)。
  * 一个请求里按网络缓存成员行与项目授权,列表 500 张卡不会变成 500 × 3 次查询。
  */
-export type TaskPermissions = { edit: boolean; delete: boolean };
+// edit_fields:只在 edit=false、但调用者是这张卡的参与人时出现 —— 他能改的就是这几个字段(旧 App 不认这个键,照旧画只读)。
+export type TaskPermissions = { edit: boolean; delete: boolean; edit_fields?: readonly string[] };
 export function taskPermissionsResolver(caller: TaskCaller): (row: CardRow) => TaskPermissions | null {
   if (!caller) return () => null;
   const cache = new Map<string, { scoped: boolean; viewer: boolean; grants: Map<string, boolean> }>();
@@ -165,7 +186,9 @@ export function taskPermissionsResolver(caller: TaskCaller): (row: CardRow) => T
     if (!c.scoped) return null;
     if (c.viewer) return { edit: false, delete: false };
     const mine = ownsCard(row, caller.userId) || createdCard(row, caller.userId);
-    return { edit: mine || (row.project_id ? c.grants.get(row.project_id) === true : false), delete: mine };
+    const edit = mine || (row.project_id ? c.grants.get(row.project_id) === true : false);
+    if (!edit && participates(row, caller.userId)) return { edit, delete: mine, edit_fields: PARTICIPANT_EDIT_FIELDS };
+    return { edit, delete: mine };
   };
 }
 

@@ -360,7 +360,7 @@ CREATE TABLE network_member_project_grants (
 |---|---|---|---|---|
 | Hub 管理员、网络 owner/admin | 全部 | 全部 | 全部 | 可以 |
 | `task_access='all'` 的 member(升级前的老成员) | 全部(与今天相同) | 全部(与今天相同) | 全部(与今天相同) | 可以(与今天相同) |
-| `scoped` 的 member | ① 负责人是我;② 参与人里有我;③ 我建的;④ 所在项目授权给了我 | 负责人是我,或我建的;所在项目授权给我且 `can_edit`。**其余能看见的卡只能看** | 负责人是我或我建的 | 不可以;只看得到授权给自己的项目 |
+| `scoped` 的 member | ① 负责人是我;② 参与人里有我;③ 我建的;④ 所在项目授权给了我 | 负责人是我,或我建的;所在项目授权给我且 `can_edit`。参与人里有我的卡:**只能改状态和检查项**(见 §9.9 第 3 项)。**其余能看见的卡只能看** | 负责人是我或我建的 | 不可以;只看得到授权给自己的项目 |
 | `scoped` 的 viewer | 只有 ④ | 不能改 | 不能删 | 不可以 |
 | `all` 的 viewer(升级前) | 全部,只读(与今天相同) | 不能改 | 不能删 | 不可以 |
 
@@ -376,7 +376,7 @@ CREATE TABLE network_member_project_grants (
 | 路径 | 规则 |
 |---|---|
 | 列表(含搜索、分页、所有筛选) | SQL 追加可见性子句(见下文示意),`scoped` 调用者才加。`ambiguous_seq` 只在可见行里判定 |
-| 单张 `GET` / `PATCH` / 勾子任务 / `DELETE` | 看不见的卡,一律返回 `404 requirement_not_found`,与不存在的卡**逐字节相同**(和 `agent_not_granted` 同一个思路,不能拿它探测卡是否存在)。看得见但没有改权 → `403 task_read_only`;没有删权 → `403 task_delete_denied` |
+| 单张 `GET` / `PATCH` / 勾子任务 / `DELETE` | 看不见的卡,一律返回 `404 requirement_not_found`,与不存在的卡**逐字节相同**(和 `agent_not_granted` 同一个思路,不能拿它探测卡是否存在)。看得见但没有改权 → `403 task_read_only`;参与人改了状态 / 检查项以外的字段 → 同一个 `403 task_read_only`,另带 `field` 和中文 `message`;没有删权 → `403 task_delete_denied` |
 | 新建 | `project_id` 必须是自己有 `can_edit` 的项目,否则返回 `project_not_found`,与项目不存在同一个错误;`parent_id` 必须是看得见的卡,否则返回 `parent_not_found`。用 `client_id` 重放时,只有原卡是**自己建的**才回原卡,否则返回 409 `client_id_taken`,不回别人的卡 |
 | upsert(同步接口) | `scoped` 的成员一律 `403 upsert_not_allowed`,是一个固定错误。否则 `external_ref` 的唯一索引会把「这个 ref 已经存在」泄露出去。同步本来就是 Agent 和管理员在用 |
 | 项目列表 / 管理 | `scoped` 的成员只列出授权给自己的项目;新建、改名、归档、删除都返回 403 |
@@ -469,4 +469,8 @@ AND ( requirements.owner_json = :me_ref
 
 1. 新成员默认 `scoped`(只看与自己相关的卡)?建议**是**,与 Agent 权限新成员默认零授权保持一致。
 2. Agent 的改卡范围要不要收紧到「负责 Agent 是自己的卡」(第 3 步)?建议**先不收**,目前没有实际问题。
-3. 参与人要不要能勾子任务(轻量参与)?建议**先不能**,评论做出来以后再定。
+3. 参与人要不要能勾子任务(轻量参与)?~~建议先不能~~ —— **Vincent 2026-10-01 定:「参与人可以改，但是改了之后需要有个通知。」**
+   参与人能改状态(列)和检查项(勾选 / 增 / 删 / 改字),其余字段仍只给负责人 / 创建者 / 可改项目授权。
+   参与人(非负责人)改了,Hub 以他的名义给负责人、创建者、其他参与人各发一条私信(只发给人、去重、不发给自己;
+   同一人对同一张卡 60 s 内的连续改动并成一条未读私信)。实现:`server/src/requirement-notify.ts`;
+   每卡权限 `viewer_can` 对这类卡多带 `edit_fields: ["column", "checklist"]`。

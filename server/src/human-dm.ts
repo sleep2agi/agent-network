@@ -78,13 +78,7 @@ export function sendHumanDm(input: HumanDmSendInput): HumanDmSendResult {
   const metaJson = attachments.attachments.length ? JSON.stringify({ attachments: attachments.attachments }) : null;
 
   db.transaction(() => {
-    db.run(
-      // created_at 带毫秒:同一秒里一来一回的两条私信要能排出先后(秒级的 datetime('now') 排不出)。
-      `INSERT INTO user_inbox (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json, sender_user_id, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, 'info', ?7, ?8, strftime('%Y-%m-%d %H:%M:%f', 'now'))
-       ON CONFLICT(message_id) DO NOTHING`,
-      [messageId, networkId, target.user_id, sender.username, HUMAN_DM_KIND, text, metaJson, sender.userId],
-    );
+    insertDmRow({ messageId, networkId, targetUserId: target.user_id, sender, title: null, text, metaJson });
     db.run(
       `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
        VALUES (?1, ?2, 'human_dm_sent', 'user', ?3, ?4, ?5)`,
@@ -97,20 +91,65 @@ export function sendHumanDm(input: HumanDmSendInput): HumanDmSendResult {
     messageId,
   )!;
   // 推送在提交之后(与 send_desktop_message 同一条规矩:回滚的消息不能先被看见)。
-  const delivered = hasUserSubscribers(networkId, target.user_id);
-  pushUserEvent(networkId, target.user_id, {
+  const delivered = pushDmEvent({ messageId, networkId, targetUserId: target.user_id, sender, title: null, text, metaJson });
+  return { ok: true, message: redactMessageRow(row), delivered };
+}
+
+type DmRow = { messageId: string; networkId: string; targetUserId: string; sender: { userId: string; username: string }; title: string | null; text: string; metaJson: string | null };
+
+function insertDmRow(m: DmRow): void {
+  db.run(
+    // created_at 带毫秒:同一秒里一来一回的两条私信要能排出先后(秒级的 datetime('now') 排不出)。
+    `INSERT INTO user_inbox (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json, sender_user_id, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'info', ?8, ?9, strftime('%Y-%m-%d %H:%M:%f', 'now'))
+     ON CONFLICT(message_id) DO NOTHING`,
+    [m.messageId, m.networkId, m.targetUserId, m.sender.username, HUMAN_DM_KIND, m.title, m.text, m.metaJson, m.sender.userId],
+  );
+}
+
+/** 推 desktop_message 到收件人的 /events/users/me。返回推送时他有没有在线的订阅。 */
+function pushDmEvent(m: DmRow): boolean {
+  const delivered = hasUserSubscribers(m.networkId, m.targetUserId);
+  pushUserEvent(m.networkId, m.targetUserId, {
     type: "desktop_message",
-    message_id: messageId,
+    message_id: m.messageId,
     kind: HUMAN_DM_KIND,
-    from: sender.username,
-    from_user_id: sender.userId,
-    title: null,
-    message: text,
+    from: m.sender.username,
+    from_user_id: m.sender.userId,
+    title: m.title,
+    message: m.text,
     severity: "info",
     created_at: new Date().toISOString(),
-    ...(metaJson ? { meta: JSON.parse(metaJson) } : {}),
+    ...(m.metaJson ? { meta: JSON.parse(m.metaJson) } : {}),
   });
-  return { ok: true, message: redactMessageRow(row), delivered };
+  return delivered;
+}
+
+/**
+ * Hub 代某人发的一条私信(参与人改了任务的通知,见 requirement-notify.ts):与人发的私信同一张表、同一条推送,
+ * 所以 App 按私信展示(顶部提示 + 人员列表未读 + 与他的会话里能看到),不用新渠道。
+ * 不校验正文 / 附件(调用方生成),也不记 human_dm_sent 审计(这不是他亲手发的)。
+ * 收件人或发信人已不在网络里 → 不发。返回 false = 没发。
+ */
+export function sendNoticeDm(m: DmRow): boolean {
+  if (m.targetUserId === m.sender.userId) return false;
+  if (!getUserNetworkRole(m.sender.userId, m.networkId) || !getUserNetworkRole(m.targetUserId, m.networkId)) return false;
+  insertDmRow(m);
+  pushDmEvent(m);
+  return true;
+}
+
+/**
+ * 把一条还没读的通知私信改写成合并后的正文(同一段时间里的连续改动并成一条)。
+ * 收件人已经读过(acked)或那行没了 → false,调用方另发一条新的。
+ * 只改库、再推一次同一个 message_id:App 按 message_id 去重,不会第二次弹;会话列表下次拉到的是新正文。
+ */
+export function rewriteUnreadNoticeDm(m: DmRow): boolean {
+  const row = db.get<{ acked: number | boolean | null }>("SELECT acked FROM user_inbox WHERE message_id = ?1 AND user_id = ?2", m.messageId, m.targetUserId);
+  if (!row || row.acked) return false;
+  db.run("UPDATE user_inbox SET content = ?1, meta_json = ?2 WHERE message_id = ?3 AND user_id = ?4", [m.text, m.metaJson, m.messageId, m.targetUserId]);
+  pushDmEvent(m);
+  return true;
 }
 
 /** 带附件:文件必须属于这个网络(防把别的网络的 file_id 塞进来)。返回它的索引条目,不属于 → null。 */
