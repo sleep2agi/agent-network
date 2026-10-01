@@ -61,7 +61,7 @@ import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js"
 import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { handleRequirementsRequest } from "./requirements.js";
-import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken } from "./route-timing.js";
+import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
@@ -73,6 +73,7 @@ const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 setRouteCallerMasterToken(AUTH_TOKEN);
+setRouteCallerTokenReader(req => requestToken(req)); // 函数声明会提升;与鉴权同一个取令牌优先级
 const DEV_OPEN = process.argv.includes("--dev-open") || process.env.COMMHUB_DEV_OPEN === "1";
 const TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1";
 const SECURITY_LABEL = DEV_OPEN ? "⚠️ DEV OPEN MODE" : "🔒 secured";

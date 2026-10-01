@@ -76,10 +76,19 @@ export function setRouteCallerMasterToken(token: string | undefined): void {
   masterToken = token || "";
 }
 
+// 取令牌走 server.ts 的 requestToken()(启动时交进来),与鉴权同一个优先级:先 Authorization,再 ?token=。
+// 这里不自己读 ?token=(query-token-ratchet 只许减少直接读的地方)。没交进来时只看 Authorization 头。
+let readToken: (req: Request) => string = req => req.headers.get("authorization")?.replace("Bearer ", "") || "";
+/** 返回原来的读取函数(测试用来还原)。 */
+export function setRouteCallerTokenReader(reader: (req: Request) => string): (req: Request) => string {
+  const previous = readToken;
+  readToken = reader;
+  return previous;
+}
+
 /** 令牌种类:ntok_ → node,utok_ → user,等于 master 令牌 → master,别的非空令牌 → token,没有 → anon。 */
-export function callerTokenKind(req: Request, url: URL): string {
-  const header = req.headers.get("authorization");
-  const token = (header ? header.replace(/^Bearer\s+/i, "").trim() : "") || url.searchParams.get("token") || "";
+export function callerTokenKind(req: Request): string {
+  const token = readToken(req);
   if (!token) return "anon";
   if (token.startsWith("ntok_")) return "node";
   if (token.startsWith("utok_")) return "user";
@@ -119,8 +128,8 @@ export function userAgentFamily(ua: string | null): string {
 }
 
 /** 一个请求的调用方类别,如 "node agent-node/2.5.0-preview.88"、"user browser"、"anon none"。 */
-export function callerClass(req: Request, url: URL): string {
-  return `${callerTokenKind(req, url)} ${userAgentFamily(req.headers.get("user-agent"))}`;
+export function callerClass(req: Request): string {
+  return `${callerTokenKind(req)} ${userAgentFamily(req.headers.get("user-agent"))}`;
 }
 
 /** 记一次请求;原样返回 res,方便套在 fetch 处理器的 return 上。WebSocket 升级(res 为空)不记。 */
@@ -132,7 +141,7 @@ export function recordRouteTiming<T extends Response | undefined>(req: Request, 
   const route = label ? `${routeKey(req.method, url)} ${label}` : routeKey(req.method, url);
   const length = Number(res.headers.get("content-length"));
   const bytes = Number.isFinite(length) && res.headers.has("content-length") ? length : 0;
-  addSample(route, performance.now() - started, res.status, bytes, now, callerClass(req, url));
+  addSample(route, performance.now() - started, res.status, bytes, now, callerClass(req));
   return res;
 }
 

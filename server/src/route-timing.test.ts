@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   __resetRouteTimingForTest, callerTokenKind, labelRoute, mcpRouteLabel, recordRouteTiming, routeKey, routeStats,
-  setRouteCallerMasterToken, userAgentFamily, ROUTE_MAX_CALLERS_PER_ROUTE,
+  setRouteCallerMasterToken, setRouteCallerTokenReader, userAgentFamily, ROUTE_MAX_CALLERS_PER_ROUTE,
   ROUTE_BUCKET_MS, ROUTE_BUCKET_RETENTION, ROUTE_MAX_KEYS_PER_BUCKET, ROUTE_OVERFLOW_KEY,
 } from "./route-timing";
 
@@ -160,16 +160,22 @@ test("userAgentFamily keeps only allow-listed product names and a sanitized vers
 
 test("callerTokenKind recognises token kinds without keeping the token", () => {
   setRouteCallerMasterToken("master-secret-xyz");
+  // Header-only reader, as installed by default; another test file in the same process may have booted server.ts.
+  const previous = setRouteCallerTokenReader(r => r.headers.get("authorization")?.replace("Bearer ", "") || "");
   try {
-    const kind = (headers: Record<string, string>, path = "/api/status") => callerTokenKind(reqAs(path, headers), u(path));
+    const kind = (headers: Record<string, string>) => callerTokenKind(reqAs("/api/status", headers));
     expect(kind({ Authorization: "Bearer ntok_abc" })).toBe("node");
     expect(kind({ Authorization: "Bearer utok_abc" })).toBe("user");
     expect(kind({ Authorization: "Bearer master-secret-xyz" })).toBe("master");
     expect(kind({ Authorization: "Bearer something-else" })).toBe("token");
     expect(kind({})).toBe("anon");
-    expect(kind({}, "/events/x?token=ntok_q")).toBe("node");
+    // ?token= is read only through the reader server.ts installs (requestToken); a header-only reader ignores it.
+    expect(callerTokenKind(reqAs("/events/x?token=ntok_q", {}))).toBe("anon");
+    setRouteCallerTokenReader(r => new URL(r.url).searchParams.get("t") || "");
+    expect(callerTokenKind(reqAs("/events/x?t=ntok_q", {}))).toBe("node");
   } finally {
     setRouteCallerMasterToken(undefined);
+    setRouteCallerTokenReader(previous);
   }
 });
 
