@@ -79,3 +79,5 @@ features:
   <p class="final-cta-sub">从桌面应用开始，或使用 anet CLI 构建自己的协作网络。</p>
   <div class="final-cta-actions"><a class="cta-primary" href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.174">下载桌面版</a><a class="cta-ghost" href="/guide/getting-started">开发者文档</a><a class="cta-ghost" href="https://github.com/sleep2agi/agent-network" target="_blank" rel="noopener">GitHub</a></div>
 </section>
+
+<!-- docs-only light-path probe (#2207), not for merge -->

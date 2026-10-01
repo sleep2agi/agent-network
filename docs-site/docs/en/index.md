@@ -77,3 +77,5 @@ features:
   <p class="final-cta-sub">Start with the desktop app or build your own network with anet CLI.</p>
   <div class="final-cta-actions"><a class="cta-primary" href="https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.174">Download desktop</a><a class="cta-ghost" href="/en/guide/getting-started">Developer docs</a><a class="cta-ghost" href="https://github.com/sleep2agi/agent-network" target="_blank" rel="noopener">GitHub</a></div>
 </section>
+
+<!-- docs-only light-path probe (#2207), not for merge -->
