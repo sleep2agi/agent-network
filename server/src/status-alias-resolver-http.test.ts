@@ -35,8 +35,8 @@ function seed(i: number) {
      VALUES (?1, ?2, ?3, 'idle', ?4, ?5, ?6, ?7, ?8, ?9, '10.0.0.' || ?10, ?9, 'agent-node:codex-app-server', '2.5.0-preview.88',
        '1.5', '8', '61.4', '26.9', '34.5', '491.8', '442.2', '29.4', 121868288, 116.2, 0.2, 292866, 0,
        datetime('now', '-' || ?10 || ' seconds'), datetime('now'), datetime('now', '-30 days'))`,
-    [`r_${node}`, alias, node, NET, `示例任务 ${i}:`.repeat(12), `示例输出 ${i} `.repeat(20), `/home/sample/project-${i}`,
-      `/home/sample/project-${i}/.anet/nodes/${alias}/config.json`, `sample-host-${i % 4}`, i],
+    [`r_${node}`, alias, node, NET, `示例任务 ${i}:`.repeat(12), `示例输出 ${i} `.repeat(20), `/home/user/project-${i}`,
+      `/home/user/project-${i}/.anet/nodes/${alias}/config.json`, `sample-host-${i % 4}`, i],
   );
 }
 
