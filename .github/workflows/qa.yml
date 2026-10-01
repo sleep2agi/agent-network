@@ -192,6 +192,7 @@ on:
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
       - 'tests/test626-grok-model-switch-fallback/**'
+      - '.github/scripts/ci-docs-only.py'
   push:
     branches: [main]
     paths:
@@ -376,6 +377,7 @@ on:
       - 'tests/test1181-codex-durable-poll/**'
       - 'tests/test1204-btw-production-wiring/**'
       - 'tests/test1210-actual-target-contract/**'
+      - '.github/scripts/ci-docs-only.py'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
@@ -384,6 +386,33 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # 🔴 docs-only 轻量路径的分类器。只改 docs-site/ 的 PR(下载页 bump 之类)不跑那些
+  #    镜像里**根本没有** docs-site 的重套件;镜像里有 docs-site 的照跑。
+  #    判据、取集、可跳清单的校验全在 .github/scripts/ci-docs-only.py 的文件头。
+  #    失败方向:本 job 红 / 输出为空 ⇒ 下游 `contains(…)` 为假 ⇒ 全量照跑。
+  changes:
+    name: docs-only classifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.plan.outputs.docs_only }}
+      skip: ${{ steps.plan.outputs.skip }}
+      l1_only: ${{ steps.plan.outputs.l1_only }}
+    steps:
+      # depth 2:pull_request 检出的是 refs/pull/N/merge,要拿到它的第一个父提交(base 尖)。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet --require-hashes -r .github/scripts/requirements-workflow-structure.txt
+      - name: Selftest (判据 + 取集)
+        run: python3 .github/scripts/ci-docs-only.py --selftest
+      - name: Plan
+        id: plan
+        run: python3 .github/scripts/ci-docs-only.py plan >> "$GITHUB_OUTPUT"
+
   release-sync-dry-run:
     name: release version sync dry-run (Docker)
     runs-on: ubuntu-latest
@@ -399,6 +428,8 @@ jobs:
 
   doc-claims:
     name: doc claim freshness (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:doc-claims"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -420,6 +451,8 @@ jobs:
 
   agent-network-unit:
     name: agent-network unit (Docker, non-root)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:agent-network-unit"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -437,6 +470,8 @@ jobs:
 
   server-unit:
     name: server unit (Docker, non-root)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:server-unit"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -455,6 +490,8 @@ jobs:
 
   agent-node-unit:
     name: agent-node unit (Docker, non-root)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:agent-node-unit"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -476,6 +513,8 @@ jobs:
     # 节点 cwd 且只多出那一个 / 离线 60s timeout / witnessed-red)。冷构建含两次
     # bun install,不进 L1 的 5 分钟预算,独立 job(同 server unit 的形状)。
     name: rules-file e2e (Docker, real hub + agent-node)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test1755-rules-file-e2e"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -497,6 +536,8 @@ jobs:
     # grep 探不出被遮的字符、hub 读后即删、节点 token 与别的网络被拒、witnessed-red(关掉节点脱敏器
     # 后断言必红)。冷构建含两次 bun install,不进 L1 的 5 分钟预算,独立 job(同 test1755 的形状)。
     name: node run-log e2e (Docker, real hub + agent-node)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-node-logs-e2e"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -518,6 +559,8 @@ jobs:
     # 冷构建含三次 bun install + 两次 npm pack(同 qa-daemon-lifecycle-e2e 的形状,~4 分钟),
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: create-node workdir e2e (Docker, real hub + daemon)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-workdir"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -564,6 +607,8 @@ jobs:
 
   recovered-suites:
     name: recovered suites (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites"') }}
     runs-on: ubuntu-latest
     # 2026-09-16:这个 job 正常 7.3–8.8 min(12 次抽样),但同一天两次在第 12 分钟被 timeout 取消 ——
     # 步骤全绿、只是 Docker 构建慢了几十秒。12 太贴身,放到 16;真挂死仍会在 16 分钟被杀。
@@ -714,6 +759,8 @@ jobs:
 
   qa:
     name: L0 + L1 (report-only)
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # 🔴 2026-08-19：5 → 10。实测（同一个 job，两次 PR）：
     #     L1 = 24 条（含 test657）  3.50 分钟  success
@@ -753,6 +800,9 @@ jobs:
         run: bash scripts/qa.sh --l0
 
       - name: Run L1 (Docker contract tests, ~16s parallel)
+        # docs-only PR 时只跑镜像里有 docs-site 的 L1 套件;其他 PR 这里是空串 = 全部。
+        env:
+          QA_L1_ONLY: ${{ needs.changes.outputs.l1_only }}
         run: bash scripts/qa.sh --l1
 
       - name: Dump test logs on failure
@@ -824,6 +874,8 @@ jobs:
 
   test225-known-failures:
     name: test225 known-failure ratchet (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test225-known-failures"') }}
     runs-on: ubuntu-latest
     # 完整跑一次 ~8 分钟(装依赖 + 起容器内 Hub + 真 tmux attach)。
     timeout-minutes: 25
@@ -902,6 +954,8 @@ jobs:
 
   grok-green-suites:
     name: grok suites (Docker)
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # 🔴 改成矩阵的理由是量出来的，不是「应该更快」。
@@ -923,10 +977,12 @@ jobs:
           - test605-grok-startup-model-label
     steps:
       - uses: actions/checkout@v4
+        if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
 
       # 这些套件都是先跑过基线确认真绿才接进来的，所以是**阻塞门**，不套 known-failure 棘轮。
       # `--network none -e ARTIFACT_DIR=/tmp/art` 是跑基线时用的那条命令原样。
       - name: Build + run ${{ matrix.suite }}
+        if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-${{ matrix.suite }} \
@@ -961,6 +1017,8 @@ jobs:
     # 🔴 单独一个 job，不塞进 grok-green-suites —— 那个名字会对它包含的内容说谎。
     #    （改已有 job 的名字会动分支保护里的 required check，风险更高，所以新开。）
     name: hub daemon fail-closed (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:hub-daemon-gate"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1015,6 +1073,8 @@ jobs:
     # 独立 job：这两个套件守的是**凭据落盘的私有写入边界**，和 grok / hub 都不是一回事，
     # 名字必须说得出它管什么。
     name: private config write boundary (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:private-config-gates"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1076,6 +1136,8 @@ jobs:
   security-orphan-gates:
     # 名字说得出它管什么：这四个套件守的是**鉴权 / 凭据下发 / 泄漏清洗**这一族。
     name: auth + secret hygiene (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:security-orphan-gates"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1168,6 +1230,8 @@ jobs:
   hub-boundary-gates:
     # 名字说得出它管什么：这三条守的是**生产 DB 边界与 hub 生命周期**。
     name: prod-db boundary + hub lifecycle (Docker)
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -1179,6 +1243,7 @@ jobs:
           - test683-hub-lifecycle-watcher
     steps:
       - uses: actions/checkout@v4
+        if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
 
       # 🔴 test660 / test661 守的正是「必须显式 opt-in 才能碰生产 DB」这条边界，
       #    而它们此前的 CI 引用是 **0** —— 守边界的机制本身没有任何持续验证。
@@ -1193,6 +1258,7 @@ jobs:
       #
       #    ⚠️ 不加 `--network none`：基线就是这么跑的，不写没验证过的变体。
       - name: Build + run ${{ matrix.suite }}
+        if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-${{ matrix.suite }} \
@@ -1225,6 +1291,8 @@ jobs:
   hub-orphan-gates:
     # 名字说得出它管什么：改名规范化 / 登录闸 / daemon 私有状态 / 遗留修复 / 任务证据 / owner 门控调度。
     name: hub semantics + guards (Docker)
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -1294,6 +1362,7 @@ jobs:
           - test736-pm2-fleet-rebuild
     steps:
       - uses: actions/checkout@v4
+        if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
 
       # 🔴 **从 Dockerfile 里读 ARG 名，不硬编码**。这六个套件有四种形状：
       #     qa-hub-17 / qa-hub-19        无 ARG
@@ -1308,6 +1377,7 @@ jobs:
       #   ⚠️ 不加 `--network none`：基线就是这么跑的，不写没验证过的变体
       #      （test631 那次 rc=1 就是我自己加这个限制造成的）。
       - name: Build + run ${{ matrix.suite }}
+        if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
         run: |
           set -euo pipefail
           DF="tests/${{ matrix.suite }}/Dockerfile"
