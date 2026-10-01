@@ -192,6 +192,16 @@ export function taskPermissionsResolver(caller: TaskCaller): (row: CardRow) => T
   };
 }
 
+/**
+ * 项目列表的 viewer_can.edit 用:与 canUseProject 同一判据,但一个请求里只读一次授权表(列表最多 200 个项目)。
+ * 不受任务范围限制的调用者(节点 / Hub 管理员 / owner / admin / task_access='all')⇒ 每个项目都 true。
+ */
+export function projectUseResolver(caller: TaskCaller, networkId: string): (projectId: string) => boolean {
+  if (!caller || !isTaskScoped(caller.userId, networkId)) return () => true;
+  const editable = new Set(listProjectGrants(networkId, caller.userId).filter((g) => g.can_edit).map((g) => g.project_id));
+  return (projectId) => editable.has(projectId);
+}
+
 /** 新建 / 挪卡时的目标项目:scoped 成员只能放进自己 can_edit 的项目(null = 不放项目,总是可以)。 */
 export function canUseProject(caller: TaskCaller, networkId: string, projectId: string | null): boolean {
   if (!caller || !projectId) return true;

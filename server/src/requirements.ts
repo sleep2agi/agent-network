@@ -9,7 +9,7 @@ import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-s
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
 import {
-  addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canParticipantEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject,
+  addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canParticipantEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject, projectUseResolver,
   isTaskScoped, PARTICIPANT_EDIT_FIELDS, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
 import { notifyParticipantChange } from "./requirement-notify.js";
@@ -278,7 +278,11 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     const projectParams: unknown[] = [networkId];
     const projectSql = addProjectVisibilityScope(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE network_id = ?1`, projectParams, taskCaller(ctx), networkId);
     const rows = db.all<ProjectRow>(`${projectSql} ORDER BY sort, created_at`, ...projectParams);
-    return Response.json({ ok: true, projects: rows.map(projectPublic) });
+    // viewer_can.edit:调用者能不能把卡建进 / 挪进这个项目 —— 与 POST / PATCH 卡片同一套判据
+    // (canWrite + projectRef 拒归档 + canUseProject)。只加字段;客户端据此只列能编辑的项目(app 任务页审计 L13)。
+    const writable = canWrite(ctx, networkId);
+    const canUse = projectUseResolver(taskCaller(ctx), networkId);
+    return Response.json({ ok: true, projects: rows.map((row) => ({ ...projectPublic(row), viewer_can: { edit: writable && !row.archived && canUse(row.project_id) } })) });
   }
   if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
   // 项目管理(建 / 改名 / 归档 / 删)只给不受任务范围限制的人。
