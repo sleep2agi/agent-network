@@ -192,7 +192,8 @@ describe("可见性", () => {
     const r = await get(alice.token, `/api/requirements?network_id=${NET}`);
     const by = (n: string) => (r.body.requirements as any[]).find(x => x.name === n)?.viewer_can;
     expect(by("ta-own")).toEqual({ edit: true, delete: true });
-    expect(by("ta-part")).toEqual({ edit: false, delete: false });
+    // 参与人:整卡只读,但状态和检查项能改(edit_fields;旧 App 不认这个键,照旧画只读)。
+    expect(by("ta-part")).toEqual({ edit: false, delete: false, edit_fields: ["column", "checklist"] });
     expect(by("ta-p1")).toEqual({ edit: false, delete: false });
     expect(by("ta-p2")).toEqual({ edit: true, delete: false });
     expect((await get(vic.token, `/api/requirements/${C["ta-p3"].id}?network_id=${NET}`)).body.requirement.viewer_can).toEqual({ edit: false, delete: false });
@@ -235,25 +236,28 @@ describe("可见性", () => {
 });
 
 describe("写入", () => {
-  test("能改:负责的、可改项目里的;只读:参与的、只看项目里的(403 task_read_only);看不见的与不存在的同一个 404", async () => {
+  test("能改:负责的、可改项目里的;只读:只看项目里的(403 task_read_only);参与的只能改状态 / 检查项;看不见的与不存在的同一个 404", async () => {
     expect((await send(alice.token, "PATCH", `/api/requirements/${C["ta-own"].id}?network_id=${NET}`, { column: "doing" })).status).toBe(200);
     expect((await send(alice.token, "PATCH", `/api/requirements/${C["ta-p2"].id}?network_id=${NET}`, { column: "doing" })).status).toBe(200);
-    for (const n of ["ta-part", "ta-p1"]) {
-      const r = await send(alice.token, "PATCH", `/api/requirements/${C[n].id}?network_id=${NET}`, { column: "doing" });
-      expect(r.status).toBe(403);
-      expect(r.body.error).toBe("task_read_only");
-    }
+    const p1 = await send(alice.token, "PATCH", `/api/requirements/${C["ta-p1"].id}?network_id=${NET}`, { column: "doing" });
+    expect(p1.status).toBe(403);
+    expect(p1.body).toEqual({ ok: false, error: "task_read_only" });
+    const part = await send(alice.token, "PATCH", `/api/requirements/${C["ta-part"].id}?network_id=${NET}`, { name: "renamed" });
+    expect(part.status).toBe(403);
+    expect(part.body.error).toBe("task_read_only");
+    expect(part.body.field).toBe("name");
     const hidden = await send(alice.token, "PATCH", `/api/requirements/${C["ta-other"].id}?network_id=${NET}`, { column: "doing" });
     const ghost = await send(alice.token, "PATCH", `/api/requirements/req_does_not_exist?network_id=${NET}`, { column: "doing" });
     expect(hidden.status).toBe(404);
     expect(hidden.text).toBe(ghost.text);
   });
 
-  test("勾子任务:负责的能勾,参与的 403,看不见的 404", async () => {
+  test("勾子任务:负责的能勾,参与的能勾,只看项目的 403,看不见的 404", async () => {
     expect((await send(alice.token, "PATCH", `/api/requirements/${C["ta-own"].id}/checklist/i1?network_id=${NET}`, { done: true })).status).toBe(200);
-    const part = await send(alice.token, "PATCH", `/api/requirements/${C["ta-part"].id}/checklist/i1?network_id=${NET}`, { done: true });
-    expect(part.status).toBe(403);
-    expect(part.body.error).toBe("task_read_only");
+    expect((await send(alice.token, "PATCH", `/api/requirements/${C["ta-part"].id}/checklist/i1?network_id=${NET}`, { done: true })).status).toBe(200);
+    const ro = await send(alice.token, "PATCH", `/api/requirements/${C["ta-p1"].id}/checklist/i1?network_id=${NET}`, { done: true });
+    expect(ro.status).toBe(403);
+    expect(ro.body.error).toBe("task_read_only");
     expect((await send(alice.token, "PATCH", `/api/requirements/${C["ta-other"].id}/checklist/i1?network_id=${NET}`, { done: true })).status).toBe(404);
   });
 
