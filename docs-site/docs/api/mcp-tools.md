@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
+CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
 
 ## 完整工具索引
 
@@ -127,11 +127,12 @@ CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `mark_tasks_runtime_submitted` | agent-node 内部信号：标记已提交给运行时的任务 |
 
 
-**需求池 / 任务看板（Agent 可用，详见[下文](#需求池-任务看板)）** · 11 个
+**需求池 / 任务看板（Agent 可用，详见[下文](#需求池-任务看板)）** · 12 个
 
 | 工具 | 说明 |
 |------|------|
 | `requirements_list` | 列本网络的任务，从新到旧；按 status / project_id / owner / agent_owner / `tag`（精确、区分大小写）/ updated_since / external_ref / parent_id / top_level / `q` 过滤，默认不含已归档。**MCP 默认 `view: "summary"` + 每页 50 张**（summary 不带描述与检查项正文，每张约 0.5–0.8 KB，一页通常 30–40 KB）；`has_more` + `next_cursor` 翻页（传 `cursor`），`limit` ≤ 1000。要全文：单张用 `requirements_get`，或传 `view: "full"`（每张几 KB，`limit` 要小）。**参数严格**：不认识的参数（如把 `tag` 写成 `tags`）直接报错 `-32602`，错误里列出全部可用参数，不会再静默回整张表。`changes: true` + `updated_since` 只回之后改过的（含归档）+ `deleted` + `server_time`（Hub ≥ preview.75）。REST `GET /api/requirements` 的默认不变（full、500 张） |
+| `requirements_people` | 查本网络的人和他们名下的 Agent，用来填任务的人员字段：每行 `user_id`、`username`、`display_name`（没设为 `""`）、`role`、`department`（`{id, name}` 或 `null`）、`agents: [{node_id, alias}]`；没有主人的 Agent 在 `agents_without_owner`（只在第一页）。`q` 按用户名 / 显示名 / 部门 / Agent 别名筛（不区分大小写的子串）；每页 50 人（`limit` ≤ 200），`has_more` + `next_offset` 翻页（传 `offset`）。受限成员看不见的 Agent 不出现。参数严格（不认识的参数 → `-32602`） |
 | `requirements_get` | 按 id 取一条任务（含描述、子任务、负责人、项目、external_ref） |
 | `requirements_create` | 新建任务；同网络重复的 `external_ref` 返回 409 `external_ref_exists` + `existing_id` |
 | `requirements_update` | 修改任务，省略的字段保留；`archived: true` 归档（Agent 不能删除） |
@@ -870,7 +871,7 @@ send_task({
 - **删除只给人**（REST `DELETE /api/requirements/{id}`，节点令牌 403 `user_token_required`）；Agent 用 `archived: true` 归档。建 / 改 / 删项目也只给人。
 - 每条任务记录 `created_by` / `updated_by`：`{kind: "user" | "node", id}`，节点令牌记为它绑定的 `node_id`。
 
-**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low / lowest，界面显示为 P0 最高 / P1 普通 / P2 低 / P3 极低；lowest 从列表响应 `capabilities` 含 `priority_lowest` 的 Hub 起支持，旧 Hub 返回 400 `invalid_priority`）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`start`（开始，可空，形状同 `due`，甘特图用；列表响应 `capabilities` 含 `start_date` 的 Hub 起支持，不合法为 400 `invalid_start`；旧 Hub 忽略它）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`；兼容旧客户端：只带节点 `owner`、没带 `agent_owner` 时存成 `agent_owner`，响应带 `owner_coerced_to_agent_owner: true`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`）、`participants`、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`、`tags`（字符串数组，最多 10 个、每个最多 20 个 Unicode 字；省略不改，`[]` 清空；不合法为 400 `invalid_tags`）。
+**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low / lowest，界面显示为 P0 最高 / P1 普通 / P2 低 / P3 极低；lowest 从列表响应 `capabilities` 含 `priority_lowest` 的 Hub 起支持，旧 Hub 返回 400 `invalid_priority`）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`start`（开始，可空，形状同 `due`，甘特图用；列表响应 `capabilities` 含 `start_date` 的 Hub 起支持，不合法为 400 `invalid_start`；旧 Hub 忽略它）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`，写 `{kind:"user", id}` 或 `{kind:"user", username}`；兼容旧客户端：只带节点 `owner`、没带 `agent_owner` 时存成 `agent_owner`，响应带 `owner_coerced_to_agent_owner: true`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`，写 `{kind:"node", id}` 或 `{kind:"node", alias}`）、`participants`（两种都行，同样可以按名字写；按名字写时只在任务所在的网络里找、存下来仍是 `{kind, id}`、给了 `id` 就只看 `id`；找不到为 400 `person_not_in_network`，别名对上多个 Agent 为 400 `person_ambiguous`，都带 `field` 和指向 `requirements_people` 的 `hint`）、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`、`tags`（字符串数组，最多 10 个、每个最多 20 个 Unicode 字；省略不改，`[]` 清空；不合法为 400 `invalid_tags`）。
 
 **短号 `seq`（任务 ID `#N`）**：每张任务除了主键 `id`（`req_<uuid>`）还有一个只读的 `seq` —— 每个网络各自从 1 起递增，App 显示为 `#N`。建卡时由 Hub 在同一个事务里分配（并发新建不会重号）；之后永不改变，**删除或归档的号也不回收**。升级前的旧卡在 Hub 启动时按 `created_at`（同一时刻按 `id`）逐网络补号。列表响应 `capabilities` 含 `requirement_seq` 的 Hub 起支持；旧 Hub 没有这个字段，旧 App 忽略它。
 

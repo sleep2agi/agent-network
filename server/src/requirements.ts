@@ -2,6 +2,7 @@
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { errorBody, errorFrom, RequirementFieldError, type ErrorContext } from "./requirements-errors.js";
 import { createHash } from "node:crypto";
+import { parsePeopleQuery, peopleDirectory, resolvePersonName } from "./requirements-people.js";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
 import { markGzipReusable } from "./http-gzip.js";
@@ -523,7 +524,15 @@ type PersonRef = { kind: 'user' | 'node'; id: string };
 function personRef(value: unknown, networkId: string, hidden: HiddenNode = null, field = 'owner'): PersonRef {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequirementFieldError('invalid_person', field);
   const row = value as Record<string, unknown>;
-  if ((row.kind !== 'user' && row.kind !== 'node') || typeof row.id !== 'string' || !row.id.trim()) throw new RequirementFieldError('invalid_person', field);
+  if (row.kind !== 'user' && row.kind !== 'node') throw new RequirementFieldError('invalid_person', field);
+  // #473 —— 没给 id 时可以按名字:人 {kind:'user', username},Agent {kind:'node', alias}。
+  // 只在 networkId(任务所在的网络)里找,绝不跨网络;存下来的仍是 {kind, id}。给了 id 就只看 id(与以前逐字相同)。
+  if (typeof row.id !== 'string' || !row.id.trim()) {
+    const name = row.kind === 'user' ? row.username : row.alias;
+    if (row.id !== undefined || typeof name !== 'string' || !name.trim()) throw new RequirementFieldError('invalid_person', field);
+    try { return { kind: row.kind, id: resolvePersonName(row.kind, name.trim(), networkId, hidden) }; }
+    catch (e) { throw new RequirementFieldError((e as Error).message, field); }
+  }
   const exists = row.kind === 'user'
     ? db.get("SELECT 1 FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 AND m.user_id=?2", networkId, row.id)
     : db.get("SELECT 1 FROM nodes WHERE network_id=?1 AND node_id=?2", networkId, row.id);
@@ -544,7 +553,7 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
   // 受限成员看不见的负责 Agent,他也不能换掉或清空(他读到的是 null,写回 null 不该抹掉别人的指派)。
   const agentOwnerLocked = isHiddenRef(agentOwner, hidden);
   if ('owner' in body) {
-    owner = body.owner === null ? null : personRef(body.owner, networkId, hidden);
+    owner = body.owner === null ? null : personRef(body.owner, networkId, hidden, 'owner');
     if (owner && owner.kind !== 'user') {
       if (strictOwner || 'agent_owner' in body) throw new Error('owner_must_be_human');
       coerced = owner;
@@ -1297,6 +1306,15 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
   }
 
   if (url.pathname === "/api/requirements/events" && req.method === "GET") return listEvents(ctx);
+
+  // #473 —— MCP requirements_people:紧凑通讯录(用户名、角色、部门、名下 Agent),q / limit / offset。
+  if (url.pathname === '/api/requirements/people/directory' && req.method === 'GET') {
+    const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+    if (!networkId) return jsonError('network_id_required', 400);
+    const pq = parsePeopleQuery(url.searchParams);
+    if ('error' in pq) return jsonError(pq.error, 400);
+    return Response.json(peopleDirectory(networkId, hiddenNodeFilter(ctx, networkId), pq));
+  }
 
   if (url.pathname === '/api/requirements/people' && req.method === 'GET') {
     const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);

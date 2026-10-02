@@ -73,8 +73,9 @@ describe("each hint, over MCP", () => {
     const byAlias = await mcp(nodeToken, "requirements_update", { id: cardId, agent_owner: { kind: "node", id: "示例-甲" } });
     expect(byAlias.error).toBe("person_not_in_network");
     expect(byAlias.field).toBe("agent_owner");
-    expect(byAlias.hint).toContain("get_all_status");
-    expect(byAlias.hint).toContain("Aliases and usernames are not accepted");
+    // #473:人员字段也收名字 —— 提示改为指向 requirements_people,并说明 alias / username 的写法。
+    expect(byAlias.hint).toContain("requirements_people");
+    expect(byAlias.hint).toContain("{kind:'node', alias}");
     expect((await mcp(nodeToken, "requirements_update", { id: cardId, owner: { kind: "user", id: "u_nobody" } })).field).toBe("owner");
     expect((await mcp(nodeToken, "requirements_update", { id: cardId, participants: [{ kind: "node", id: "node_reqerr_a" }, { kind: "user", id: "u_nobody" }] })).field).toBe("participants");
   });

@@ -23,7 +23,8 @@ type Detail = { field?: string; message: string; hint?: string };
 type Entry = Detail | ((ctx: ErrorContext) => Detail);
 
 const DUE_FORMATS = 'YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (e.g. 2026-10-10T18:00:00+08:00); "" clears it';
-const PERSON_IDS = "node ids (kind:'node') come from get_all_status (node_id) or a task's agent_owner / participants; user ids (kind:'user') from a task's owner / created_by / participants. Aliases and usernames are not accepted.";
+// #473 —— 人员字段也收名字({kind:'user', username} / {kind:'node', alias}),只在任务所在的网络里解析;查人用 requirements_people。
+const PERSON_IDS = "Look people up with requirements_people (q= filters by name): it returns each member's user_id and username and the node_id and alias of their Agents. Pass {kind:'user', id} or {kind:'user', username}, {kind:'node', id} or {kind:'node', alias}; names resolve only in the task's own network.";
 
 const ENTRIES: Record<string, Entry> = {
   // ── 定位 / 范围 ──
@@ -40,8 +41,9 @@ const ENTRIES: Record<string, Entry> = {
   upsert_not_allowed: { message: 'Task-scoped members cannot upsert by external_ref.', hint: 'Use requirements_create / requirements_update on tasks you can see.' },
   external_ref_not_allowed: { field: 'external_ref', message: 'Task-scoped members cannot set external_ref.', hint: 'Leave external_ref out.' },
   // ── 人员 ──
-  invalid_person: (ctx) => ({ field: ctx.field ?? 'owner', message: 'A person must be an object {kind:"user"|"node", id}.', hint: PERSON_IDS }),
-  person_not_in_network: (ctx) => ({ field: ctx.field ?? 'owner', message: `${ctx.field ?? 'owner'} names nobody in this network (unknown id, wrong kind, or a node you cannot see).`, hint: PERSON_IDS }),
+  invalid_person: (ctx) => ({ field: ctx.field ?? 'owner', message: 'A person must be an object {kind:"user", id | username} or {kind:"node", id | alias}.', hint: PERSON_IDS }),
+  person_not_in_network: (ctx) => ({ field: ctx.field ?? 'owner', message: `${ctx.field ?? 'owner'} names nobody in this network (unknown id / username / alias, wrong kind, or a node you cannot see).`, hint: PERSON_IDS }),
+  person_ambiguous: (ctx) => ({ field: ctx.field ?? 'agent_owner', message: 'More than one Agent in this network has that alias.', hint: 'Call requirements_people (q=<alias>) and pass the node_id instead.' }),
   owner_must_be_human: { field: 'owner', message: 'owner (负责人) must be a person.', hint: "Use owner: {kind:'user', id}. To assign a node / Agent, use agent_owner: {kind:'node', id}." },
   agent_owner_must_be_agent: { field: 'agent_owner', message: 'agent_owner (负责 Agent) must be a node.', hint: "Use agent_owner: {kind:'node', id}. To assign a person, use owner: {kind:'user', id}." },
   agent_owner_not_granted: { field: 'agent_owner', message: 'The current responsible Agent is one you are not granted, so you cannot replace or clear it.', hint: 'Leave agent_owner out of the patch.' },

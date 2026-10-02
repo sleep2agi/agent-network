@@ -5839,7 +5839,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const data = res ? await res.json() : { ok: false, error: "not_found" };
     return { content: [{ type: "text" as const, text: JSON.stringify(res && !res.ok && data && typeof data === "object" ? { ...data, status: res.status } : data) }] };
   };
-  const reqPerson = z.object({ kind: z.enum(["user", "node"]), id: z.string().min(1).max(200) });
+  // #473 —— 人员字段除了 id,也可以按名字:{kind:'user', username} / {kind:'node', alias},在任务所在的网络里解析
+  // (requirements.ts personRef;找不到 / 别名对上多个 → 400 + hint)。给了 id 就只看 id。
+  const reqPerson = z.object({
+    kind: z.enum(["user", "node"]),
+    id: z.string().min(1).max(200).optional().describe("user_id / node_id (from requirements_people)"),
+    username: z.string().min(1).max(100).optional().describe("kind 'user' only: the member's username, resolved in the task's network"),
+    alias: z.string().min(1).max(200).optional().describe("kind 'node' only: the Agent's alias, resolved in the task's network"),
+  });
   const reqChecklistItem = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(), text: z.string().min(1).max(500), done: z.boolean().optional() });
   const reqFields = {
     tags: z.array(z.string()).max(10).optional().describe("Task labels; each 1–20 Unicode characters. Omit to preserve, [] to clear."),
@@ -5851,8 +5858,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
     project_id: z.string().max(200).nullable().optional(),
-    owner: reqPerson.nullable().optional().describe("负责人 (a person): must be {kind:'user', id}; a node here is rejected with 400 owner_must_be_human — use agent_owner for nodes"),
-    agent_owner: reqPerson.nullable().optional().describe("负责 Agent: must be {kind:'node'}"),
+    owner: reqPerson.nullable().optional().describe("负责人 (a person): {kind:'user', id} or {kind:'user', username}; a node here is rejected with 400 owner_must_be_human — use agent_owner for nodes"),
+    agent_owner: reqPerson.nullable().optional().describe("负责 Agent: {kind:'node', id} or {kind:'node', alias}"),
     participants: z.array(reqPerson).max(100).optional(),
     external_url: z.string().max(500).nullable().optional(),
     parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
@@ -5904,6 +5911,31 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (args.top_level) q.set("top_level", "1");
       if (args.changes) q.set("changes", "1");
       return requirementsCall("GET", `/api/requirements?${q}`, args.network_id);
+    },
+  );
+
+  // #473 —— Agent 查人:紧凑通讯录(requirements-people.ts)。严格参数,同 requirements_list(#471)。
+  const reqPeopleShape = {
+    network_id: z.string().max(200).optional(),
+    q: z.string().min(1).max(100).optional().describe("case-insensitive substring of username, display name, department or Agent alias"),
+    limit: z.number().int().min(1).max(200).optional().describe("people per page, default 50"),
+    offset: z.number().int().min(0).optional().describe("next_offset from the previous page"),
+  };
+  const reqPeopleKeys = Object.keys(reqPeopleShape);
+  server.registerTool(
+    "requirements_people",
+    {
+      description: "Look up the people in your network and the Agents they own, to fill task person fields. Each row: user_id, username, display_name (\"\" if not set), role, department {id, name} or null, agents [{node_id, alias}]; Agents with no owner in this network are listed in agents_without_owner (first page only). q filters by username / display name / department / Agent alias (case-insensitive substring). 50 people per page (limit ≤ 200); has_more + next_offset → pass offset. Agents you are not granted are left out. Person fields on requirements_create / requirements_update / requirements_upsert_by_external_ref accept {kind:'user', id} or {kind:'user', username} (owner, participants) and {kind:'node', id} or {kind:'node', alias} (agent_owner, participants), resolved in the task's own network only.",
+      inputSchema: z.strictObject(reqPeopleShape, {
+        error: (iss: any) => iss.code === "unrecognized_keys"
+          ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqPeopleKeys.join(", ")}`
+          : undefined,
+      }) as any,
+    },
+    async (args: any) => {
+      const q = new URLSearchParams();
+      for (const k of ["q", "limit", "offset"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      return requirementsCall("GET", `/api/requirements/people/directory${q.size ? `?${q}` : ""}`, args.network_id);
     },
   );
 
