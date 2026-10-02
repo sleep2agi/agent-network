@@ -79,7 +79,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test anet_status_cache_test anet_owner_strict_test anet_req_list_mcp_test anet_req_errors_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test anet_status_cache_test anet_owner_strict_test anet_req_list_mcp_test anet_req_errors_test anet_req_comment_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -209,6 +209,8 @@ run_pg_tests_rc anet_status_cache_test src/status-read-cache-http.test.ts
 run_pg_tests_rc anet_owner_strict_test src/requirements-owner-strict-mcp-http.test.ts
 # #472 任务 / 项目错误带 field / message / hint(error 码原样),每条提示一个测试 + 错误码登记取集门。
 run_pg_tests_rc anet_req_errors_test src/requirements-errors-mcp-http.test.ts
+# #474 评论:只追加、进动态 kind=comment、看不见 404 / 只读 403、不改任务本身 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_req_comment_test src/requirements-comment-http.test.ts
 # 参与人改状态 / 检查项 + 通知私信(user_inbox 插入、未读时 UPDATE 改写、可见性子句不变)—— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_part_notify_test src/requirement-participant-notify-http.test.ts
 # MCP projects_create / projects_update / requirements_events(app 任务页审计 M3):走 app 同一套 REST 处理,逐类调用者对照 —— 在真 PostgreSQL 上。

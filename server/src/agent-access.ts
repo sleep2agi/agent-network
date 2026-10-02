@@ -480,4 +480,6 @@ export const RESTRICTED_MEMBER_TOOLS: ReadonlySet<string> = new Set([
   "projects_create",
   "projects_update",
   "requirements_events",
+  // #474:评论走同一个 REST 处理 —— 看不见的任务 404、只读角色 403;受限成员的评论和他的其他任务写一样按可见性准入。
+  "requirements_comment",
 ]);

@@ -5980,7 +5980,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_events",
-    "Read the task activity timeline (the app's 动态): field-level changes — who, when, old → new — newest first. Pass requirement_id (req_… or \"#N\") for one task, or omit it for the whole network. since (ISO) = only changes after it; limit 1–500 (default 200); next_cursor → pass as cursor for the next page; server_time → use as the next since. Same visibility as requirements_list: tasks you can't see (and hidden Agents) are left out.",
+    "Read the task activity timeline (the app's 动态): field-level changes — who, when, old → new — and comments (kind=comment, text in new.text; add one with requirements_comment), newest first. Pass requirement_id (req_… or \"#N\") for one task, or omit it for the whole network. since (ISO) = only changes after it; limit 1–500 (default 200); next_cursor → pass as cursor for the next page; server_time → use as the next since. Same visibility as requirements_list: tasks you can't see (and hidden Agents) are left out.",
     {
       network_id: z.string().max(200).optional(),
       requirement_id: z.string().min(1).max(200).optional(),
@@ -6004,6 +6004,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (args.cursor) q.set("cursor", args.cursor);
       return requirementsCall("GET", `/api/requirements/events${q.size ? `?${q}` : ""}`, args.network_id);
     },
+  );
+
+  // #474(MCP 任务生命周期测试报告问题 5):评论 / 进展。以前只能 requirements_get 读全文、再整段改写 description ——
+  // 两次调用,并发时覆盖别人刚写的描述。这条只追加,进「动态」(requirements_events kind=comment),不改任务本身。
+  server.tool(
+    "requirements_comment",
+    "Add a comment / progress note to a task (append-only; never rewrites the description). It shows in the task's activity timeline (the app's 动态, requirements_events kind=comment, text in new.text) under your name. text: markdown, 1–4000 characters. Anyone who can see the task and can write in the network (not read-only) may comment. Returns { event }.",
+    {
+      id: z.string().min(1).max(200).describe(REQ_ID_DESC),
+      text: z.string().min(1).max(4000).describe("the comment (markdown), 1–4000 characters"),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ id, text, network_id }) => requirementsCall("POST", `/api/requirements/${encodeURIComponent(id)}/comments`, network_id, { text }),
   );
 }
 

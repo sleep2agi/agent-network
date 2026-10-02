@@ -25,7 +25,7 @@ const expectedTools = [
   "get_probe_request", "ack_probe_request",
   "requirements_list", "requirements_get", "requirements_create", "requirements_update",
   "requirements_checklist_toggle", "requirements_upsert_by_external_ref", "projects_list",
-  "projects_create", "projects_update", "requirements_events",
+  "projects_create", "projects_update", "requirements_events", "requirements_comment",
 ];
 
 const toolsSource = readFileSync("src/tools.ts", "utf8");
