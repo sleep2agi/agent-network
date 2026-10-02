@@ -1312,6 +1312,7 @@ jobs:
           - test1280-desktop-user-push
           - qa-anet-daemon-cmd
           - qa-hub-16-rest-task-api
+          - qa-hub-20-model-auth-notify
           - qa-node-04-codex-app-server-reply-routing
           - test599-skillhub
           - test600-public-skillhub

@@ -3,6 +3,7 @@ import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { nodeHealthSchema, recordNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
+import { noteModelAuthHealth } from "./model-auth-notify.js";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
@@ -1062,7 +1063,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const acceptedHealth = nodeHealth && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias
         ? nodeHealth
         : undefined;
-      if (acceptedHealth) recordNodeHealth(sessionNetId, effectiveAlias, acceptedHealth);
+      if (acceptedHealth) {
+        recordNodeHealth(sessionNetId, effectiveAlias, acceptedHealth);
+        // #462 — model login went bad → tell the node's owner once (detect + notify only).
+        if (callerTokenId) noteModelAuthHealth({ networkId: sessionNetId, alias: effectiveAlias, tokenId: callerTokenId, health: acceptedHealth });
+      }
       pushEvent(effectiveAlias, {
         type: "status_update",
         alias: effectiveAlias,
