@@ -7,9 +7,11 @@ import {
   appsrvSessionFor,
   buildRelaunchScript,
   captureAppServerLaunch,
+  hungKillVeto,
   markerStillOurs,
   relaunchAppServer,
   relaunchBlocker,
+  terminateHungAppServer,
   writeAppServerTokenFile,
   type ProcView,
   type RelaunchDeps,
@@ -115,7 +117,8 @@ describe("relaunch (#461)", () => {
   test("process gone → new tmux session with the same name, cwd, marker, CODEX_HOME and argv; new pid", async () => {
     const { d, tmuxCalls } = deps({ procs: {}, panes: "" });
     const next = await relaunchAppServer(snap, d);
-    expect(next).toEqual({ ...snap, pid: 200 });
+    // #465: the relaunched snapshot records the new session id, so a later hung check compares against it.
+    expect(next).toEqual({ ...snap, pid: 200, sessionId: "$7" });
     expect(tmuxCalls).toHaveLength(1);
     const [cmd] = tmuxCalls;
     expect(cmd.slice(0, 8)).toEqual(["new-session", "-d", "-s", "demo-appsrv", "-c", "/work/demo", "-e", `ANET_NODE_MARKER=${MARKER}`]);
@@ -170,5 +173,108 @@ describe("relaunch (#461)", () => {
       tmux: () => { throw new Error("no server"); },
     })).rejects.toThrow(/tmux new-session demo-appsrv failed/);
     expect(existsSync(p)).toBe(false);
+  });
+});
+
+describe("hung app-server: strict identity check + terminate (#465)", () => {
+  const HOME = "/n/codex-home";
+  const ours = (): Proc => ({ cmdline: ARGV, cwd: "/work/demo", env: { ANET_NODE_MARKER: MARKER, CODEX_HOME: HOME }, alive: true });
+  const snap = { session: "demo-appsrv", url: URL_, argv: ARGV, cwd: "/work/demo", pid: 100, sessionId: "$3" };
+  const base = (procs: Record<number, Proc>, over: Partial<Parameters<typeof hungKillVeto>[1]> = {}) => ({
+    marker: MARKER, codexHome: HOME, panes: () => pane("demo-appsrv", 100), proc: fakeProc(procs), sessionId: () => "$3", ...over,
+  });
+
+  test("all four checks pass → may kill", () => {
+    expect(hungKillVeto(snap, base({ 100: ours() }))).toBeNull();
+    expect(hungKillVeto(snap, base({ 100: { ...ours(), env: { ANET_NODE_MARKER: MARKER, CODEX_HOME: `${HOME}/` } } }))).toBeNull();
+  });
+
+  test("each identity mismatch vetoes the kill", () => {
+    const veto = (procs: Record<number, Proc>, over = {}, s: any = snap) => hungKillVeto(s, base(procs, over));
+    // 1. tmux session replaced (same name, new id) / gone
+    expect(veto({ 100: ours() }, { sessionId: () => "$9" })).toContain("is not the one this node started");
+    expect(veto({ 100: ours() }, { sessionId: () => null })).toContain("is not the one this node started");
+    // pid is no longer that session's live pane
+    expect(veto({ 100: ours() }, { panes: () => pane("demo-appsrv", 101) })).toContain("no longer the live pane");
+    expect(veto({ 100: ours() }, { panes: () => pane("demo-appsrv", 100, true) })).toContain("no longer the live pane");
+    // 2. argv: not app-server / another --listen
+    expect(veto({ 100: { ...ours(), cmdline: ["/bin/sleep", "100"] } })).toContain("is not `app-server --listen");
+    expect(veto({ 100: { ...ours(), cmdline: [...ARGV.slice(0, -1), "ws://127.0.0.1:1"] } })).toContain("is not `app-server --listen");
+    // 3. foreign / missing node marker
+    expect(veto({ 100: { ...ours(), env: { ANET_NODE_MARKER: "other", CODEX_HOME: HOME } } })).toContain("another identity marker");
+    expect(veto({ 100: { ...ours(), env: { CODEX_HOME: HOME } } })).toContain("another identity marker");
+    // 4. another CODEX_HOME / none
+    expect(veto({ 100: { ...ours(), env: { ANET_NODE_MARKER: MARKER, CODEX_HOME: "/other/codex-home" } } })).toContain("another CODEX_HOME");
+    expect(veto({ 100: { ...ours(), env: { ANET_NODE_MARKER: MARKER } } })).toContain("another CODEX_HOME");
+    // and the preconditions
+    expect(veto({ 100: ours() }, { marker: undefined })).toContain("no identity marker");
+    expect(veto({ 100: ours() }, {}, { ...snap, sessionId: undefined })).toContain("no tmux session id");
+    expect(veto({ 100: ours() }, {}, null)).toBe("no launch snapshot");
+    expect(veto({ 100: ours() }, { panes: () => null })).toBe("tmux unavailable");
+  });
+
+  test("snapshot records the tmux session id when given", () => {
+    const r = captureAppServerLaunch({ session: "demo-appsrv", url: URL_, marker: MARKER, panes: pane("demo-appsrv", 100), proc: fakeProc({ 100: ours() }), sessionId: "$3" });
+    expect(r.ok && r.snapshot.sessionId).toBe("$3");
+  });
+
+  function killWorld(opts: { ignoresTerm?: boolean; dieAfterKill?: boolean; groupLeader?: boolean; swapMarkerDuringGrace?: boolean } = {}) {
+    const procs: Record<number, Proc> = { 100: ours() };
+    let panes = pane("demo-appsrv", 100);
+    const signals: Array<[number, string | number]> = [];
+    let clock = 0;
+    const deps = {
+      marker: MARKER, codexHome: HOME, panes: () => panes, proc: fakeProc(procs), sessionId: () => "$3",
+      pgid: () => (opts.groupLeader === false ? 1 : 100),
+      signal: (target: number, sig: NodeJS.Signals | 0) => {
+        if (sig === 0) { if (!procs[100]?.alive) throw Object.assign(new Error("ESRCH"), { code: "ESRCH" }); return; }
+        signals.push([target, sig]);
+        if (sig === "SIGTERM" && !opts.ignoresTerm) { procs[100].alive = false; panes = ""; }
+        if (sig === "SIGKILL" && opts.dieAfterKill !== false) { procs[100].alive = false; panes = ""; }
+      },
+      sleep: async (ms: number) => {
+        clock += ms;
+        if (opts.swapMarkerDuringGrace && clock >= 400) procs[100].env = { ANET_NODE_MARKER: "other", CODEX_HOME: HOME };
+      },
+      graceMs: 2_000,
+    };
+    return { deps, signals, clock: () => clock };
+  }
+
+  test("SIGTERM to the process group; exits within the grace → no SIGKILL", async () => {
+    const w = killWorld();
+    expect(await terminateHungAppServer(snap, w.deps)).toBe("SIGTERM");
+    expect(w.signals).toEqual([[-100, "SIGTERM"]]);
+  });
+
+  test("ignores SIGTERM → SIGKILL after the grace (process group)", async () => {
+    const w = killWorld({ ignoresTerm: true });
+    expect(await terminateHungAppServer(snap, w.deps)).toBe("SIGKILL");
+    expect(w.signals).toEqual([[-100, "SIGTERM"], [-100, "SIGKILL"]]);
+    expect(w.clock()).toBeGreaterThanOrEqual(2_000);
+  });
+
+  test("not a group leader → signals only the pid", async () => {
+    const w = killWorld({ groupLeader: false });
+    await terminateHungAppServer(snap, w.deps);
+    expect(w.signals).toEqual([[100, "SIGTERM"]]);
+  });
+
+  test("identity changes during the grace → no SIGKILL, fails", async () => {
+    const w = killWorld({ ignoresTerm: true, swapMarkerDuringGrace: true });
+    await expect(terminateHungAppServer(snap, w.deps)).rejects.toThrow("changed identity during the grace period");
+    expect(w.signals).toEqual([[-100, "SIGTERM"]]);
+  });
+
+  test("survives SIGKILL → fails (counts as a failed restart)", async () => {
+    const w = killWorld({ ignoresTerm: true, dieAfterKill: false });
+    await expect(terminateHungAppServer(snap, w.deps)).rejects.toThrow("survived SIGKILL");
+  });
+
+  test("a foreign process is never signalled", async () => {
+    const w = killWorld();
+    w.deps.proc = fakeProc({ 100: { ...ours(), env: { ANET_NODE_MARKER: "other", CODEX_HOME: HOME } } });
+    await expect(terminateHungAppServer(snap, w.deps)).rejects.toThrow("not killing the hung app-server: pid 100 carries another identity marker");
+    expect(w.signals).toEqual([]);
   });
 });

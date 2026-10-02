@@ -6,7 +6,10 @@ import {
   createAppServerWatchdog,
   DEFAULT_FAILURES_BEFORE_RESTART,
   DEFAULT_MAX_RESTARTS,
+  DEFAULT_HUNG_KILL_GRACE_MS,
+  DEFAULT_HUNG_PROBES_BEFORE_KILL,
   DEFAULT_RESTART_WINDOW_MS,
+  hungKillGraceFromEnv,
   watchdogLimitsFromEnv,
 } from "./codex-appserver-watchdog";
 import { createCodexHealthMonitor, healthSignature, ModelAuthTracker, type AppServerHealth } from "./codex-health";
@@ -127,8 +130,8 @@ describe("app-server watchdog (#461)", () => {
   });
 
   test("env limits: valid integers win, junk falls back", () => {
-    expect(watchdogLimitsFromEnv({ ANET_CODEX_APPSERVER_RESTART_MAX: "2", ANET_CODEX_APPSERVER_RESTART_WINDOW_MS: "5000" } as any)).toEqual({ maxRestarts: 2, windowMs: 5000 });
-    expect(watchdogLimitsFromEnv({ ANET_CODEX_APPSERVER_RESTART_MAX: "0", ANET_CODEX_APPSERVER_RESTART_WINDOW_MS: "abc" } as any)).toEqual({ maxRestarts: 3, windowMs: 600_000 });
+    expect(watchdogLimitsFromEnv({ ANET_CODEX_APPSERVER_RESTART_MAX: "2", ANET_CODEX_APPSERVER_RESTART_WINDOW_MS: "5000" } as any)).toEqual({ maxRestarts: 2, windowMs: 5000, hungProbesBeforeKill: 4 });
+    expect(watchdogLimitsFromEnv({ ANET_CODEX_APPSERVER_RESTART_MAX: "0", ANET_CODEX_APPSERVER_RESTART_WINDOW_MS: "abc" } as any)).toEqual({ maxRestarts: 3, windowMs: 600_000, hungProbesBeforeKill: 4 });
   });
 });
 
@@ -181,5 +184,103 @@ describe("health monitor + watchdog", () => {
     expect(restarts).toBe(1);
     expect(reports).toEqual(["false:restarting app-serve", "true:"]);
     await new Promise<void>((r) => srv!.close(() => r()));
+  });
+});
+
+describe("hung app-server: alive but not answering (#465)", () => {
+  const hung: AppServerHealth = { ok: false, rtt_ms: null, last_error: "no ws handshake within 5000ms" };
+  function hungHarness(opts: { veto?: string | null; alive?: boolean; m?: number } = {}) {
+    const calls: Array<{ cause: string; killHung: boolean }> = [];
+    const wd = createAppServerWatchdog({
+      maxRestarts: 3,
+      hungProbesBeforeKill: opts.m ?? 4,
+      canRestart: () => "app-server process 42 is still alive but not answering; not killing a live process",
+      appServerAlive: () => opts.alive ?? true,
+      canKillHung: () => opts.veto ?? null,
+      restart: async (cause, o) => { calls.push({ cause, killHung: !!o?.killHung }); },
+    });
+    return { wd, calls };
+  }
+
+  test("defaults: 4 failed probes before killing, 10 s SIGTERM grace; env can tune both", () => {
+    expect(DEFAULT_HUNG_PROBES_BEFORE_KILL).toBe(4);
+    expect(DEFAULT_HUNG_KILL_GRACE_MS).toBe(10_000);
+    expect(watchdogLimitsFromEnv({ ANET_CODEX_APPSERVER_HUNG_PROBES: "2" } as any).hungProbesBeforeKill).toBe(2);
+    expect(watchdogLimitsFromEnv({ ANET_CODEX_APPSERVER_HUNG_PROBES: "0" } as any).hungProbesBeforeKill).toBe(4);
+    expect(hungKillGraceFromEnv({ ANET_CODEX_APPSERVER_KILL_GRACE_MS: "1500" } as any)).toBe(1500);
+    expect(hungKillGraceFromEnv({ ANET_CODEX_APPSERVER_KILL_GRACE_MS: "x" } as any)).toBe(10_000);
+    expect(hungKillGraceFromEnv({} as any)).toBe(10_000);
+  });
+
+  test("M-1 failed probes only report (with the count); the Mth kills + relaunches", async () => {
+    const h = hungHarness();
+    expect(h.wd.observe(hung).last_error).toBe(hung.last_error); // 1st: below the dead-process threshold too
+    for (let i = 2; i <= 3; i++) {
+      expect(h.wd.observe(hung).last_error).toContain(`app-server is alive but not answering (${i}/4 failed probes`);
+    }
+    expect(h.calls).toHaveLength(0);
+    const r = h.wd.observe(hung);
+    expect(r.last_error).toMatch(/^restarting app-server \(attempt 1\/3\): hung \(alive, 4 failed probes\)/);
+    await settle(); await settle();
+    expect(h.calls).toEqual([{ cause: expect.stringContaining("hung (alive, 4 failed probes)"), killHung: true }]);
+  });
+
+  test("a ws close (noteExit) does not shortcut the hung count: a live process still needs M probes", async () => {
+    const h = hungHarness();
+    h.wd.noteExit();
+    for (let i = 1; i <= 3; i++) h.wd.observe(hung);
+    expect(h.calls).toHaveLength(0);
+    h.wd.observe(hung);
+    await settle(); await settle();
+    expect(h.calls.map((c) => c.killHung)).toEqual([true]);
+  });
+
+  test("identity veto → reported, never killed, no budget used", async () => {
+    const h = hungHarness({ veto: "pid 42 carries another identity marker" });
+    let last: AppServerHealth = hung;
+    for (let i = 0; i < 10; i++) last = h.wd.observe(hung);
+    await settle();
+    expect(h.calls).toHaveLength(0);
+    expect(last.last_error).toContain("not killing it: pid 42 carries another identity marker");
+    expect(h.wd.state().restarts).toHaveLength(0);
+  });
+
+  test("no hung support wired (macOS/Windows: appServerAlive false) → the old report-only path", async () => {
+    const h = hungHarness({ alive: false });
+    let last: AppServerHealth = hung;
+    for (let i = 0; i < 10; i++) last = h.wd.observe(hung);
+    await settle();
+    expect(h.calls).toHaveLength(0);
+    expect(last.last_error).toContain("not restarting: app-server process 42 is still alive");
+  });
+
+  test("the hung kill shares the restart budget (3 per window) and then gives up", async () => {
+    const h = hungHarness({ m: 2 });
+    for (let i = 0; i < 6; i++) { h.wd.observe(hung); await settle(); await settle(); }
+    expect(h.calls).toHaveLength(3);
+    expect(h.calls.every((c) => c.killHung)).toBe(true);
+    h.wd.observe(hung);
+    expect(h.wd.observe(hung).last_error).toMatch(/auto-restart gave up: 3 restarts/);
+    await settle();
+    expect(h.calls).toHaveLength(3);
+  });
+
+  test("entering the hung state is a signature flip (the Hub hears it at once); the counter ticking is not", () => {
+    const base = { model_auth: "unknown" as const };
+    const plain = healthSignature({ ...base, app_server: hung });
+    const hung2 = healthSignature({ ...base, app_server: { ...hung, last_error: `${hung.last_error}; app-server is alive but not answering (2/4 failed probes before restarting it)` } });
+    const hung3 = healthSignature({ ...base, app_server: { ...hung, last_error: `${hung.last_error}; app-server is alive but not answering (3/4 failed probes before restarting it)` } });
+    const vetoed = healthSignature({ ...base, app_server: { ...hung, last_error: `${hung.last_error}; app-server is alive but not answering; not killing it: x` } });
+    expect(hung2).not.toBe(plain);
+    expect(hung3).toBe(hung2);
+    expect(vetoed).toBe(hung2);
+  });
+
+  test("an answering probe resets the hung count", () => {
+    const h = hungHarness();
+    for (let i = 0; i < 3; i++) h.wd.observe(hung);
+    h.wd.observe(up);
+    for (let i = 0; i < 3; i++) h.wd.observe(hung);
+    expect(h.calls).toHaveLength(0);
   });
 });
