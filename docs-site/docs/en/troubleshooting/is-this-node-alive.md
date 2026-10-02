@@ -16,6 +16,7 @@ failures; it answers that single question, and **only the last row gives a defin
 | `send_task` returns `ok` rather than `alias_offline` | Moderate | Routing works and the message is queued. **It says nothing about anyone processing it.** |
 | `status = offline` | Moderate (not conclusive) | Carries more than `idle`, but it is **not enough to conclude the node is dead**. At least one path marks a live node offline; see below. |
 | `status = blocked` | Useless (weaker than `idle`) | A `blocked` node can answer a dispatched task within seconds. `blocked` means **there is no exit**, not "it stopped"; see below. |
+| A `degraded` field / the app's 「降级 · reason」 badge | Strong (only in the "it can't work" direction) | Comes from the node's own layered health report from the last 10 minutes: the App Server won't handshake, the co-presence TUI is gone, or the model login failed. With it, work dispatched now will almost certainly not run (from Hub `0.9.0-preview.86` it is refused outright with `node_degraded`). **Its absence does not mean healthy**: old nodes, non-`codex-app-server` nodes and stale reports never carry it. See [health and degraded refusal](/en/guide/codex-copresence#health). |
 | It answered you | **Hard evidence** | The only signal that does not depend on the observer's vantage point. |
 
 **So: only the last row counts.** All four rows above can be green on a dead node; all four can
@@ -99,8 +100,11 @@ it, and you can no longer tell answering from working.
 
 ## What this page does not answer
 
-It does not say *why* something broke, and it offers no self-healing. There is currently **no**
-built-in crash recovery at the node level (the Hub has a watchdog; nodes do not); see
+It does not say *why* something broke, and it offers no self-healing. The only node-level
+self-healing today is the App Server watchdog on `codex-app-server` nodes (agent-node
+`2.5.0-preview.95`+: a dead or hung app-server is relaunched on the original session, on Linux only for co-presence nodes; see
+[health and degraded refusal](/en/guide/codex-copresence#health)). There is still **no** built-in
+recovery when the bridge process itself crashes; see
 [issue #534](https://github.com/sleep2agi/agent-network/issues/534). The "still reports idle after
 failing" row is [issue #811](https://github.com/sleep2agi/agent-network/issues/811).
 

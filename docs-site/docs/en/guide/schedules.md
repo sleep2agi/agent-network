@@ -48,11 +48,35 @@ On desktop the form is a centered dialog. On a phone it is a full page. When the
 
 Every Hub schedule created here skips the new occurrence when the previous one has not finished.
 
-At the scheduled time, if the task last dispatched by this schedule is still `created`, `delivered`, `acked` or `running`, this occurrence does not dispatch a new task. The history records it as skipped (已跳过), because the previous run had not finished (上一次还没结束). That skip has no wait limit. It does not turn into a dispatch after a while. The schedule's own next time still moves forward.
+At the scheduled time, if the task last dispatched by this schedule is still `created`, `delivered`, `acked` or `running`, this occurrence does not dispatch a new task. The history records it as skipped (已跳过), because the previous run had not finished (上一次还没结束). The schedule's own next time still moves forward. Before Hub `0.9.0-preview.88` such skips had no wait limit; from that release a run stuck too long is ended by a timeout, see the next section.
 
 If the node is offline, this occurrence is recorded as queued (排队中 · 节点离线) and is not pushed. It still counts as unfinished, so later occurrences keep being skipped until that task ends.
 
 **From desktop 0.2.150**, two or more consecutive skips that are all "previous run still active" collapse into one history row: "Skipped N times (HH:MM–HH:MM)", plus which run they were waiting on. A single skip, or a skip for another reason (the node is gone, the node is not usable, or a missed run was skipped), stays on its own row. The Hub still stores one row per tick. Collapsing is only how this page draws them. If the run being waited on is not on this page of history, the row says so and does not guess. Earlier desktop versions list every skip on its own row.
+
+## Alerts and timeout when a run is stuck {#stuck}
+
+From Hub `0.9.0-preview.88`, when a schedule keeps being blocked by the same unfinished task:
+
+- **Alert**: on the 3rd skip behind the same task, the person who created the schedule gets **one** notice, 「定时任务被卡住」 (scheduled task stuck), in the app in the target node's conversation. It names the schedule, the blocking task id, the node and that task's start time, and says when it will be released automatically. One notice per stuck episode; once a run is actually dispatched again, a new stuck episode alerts again. A Hub restart does not re-send it. No notice if the schedule has no creator or the creator has left the network.
+- **Timeout release**: if the blocking task has been open longer than the timeout, it is ended by the timeout (task status `expired`, the same state as a task nobody picked up within 24 hours) and this occurrence dispatches normally.
+  - Timeout = 6 × the schedule's interval, at least 1 hour, at most 24 hours. Daily and weekly schedules count as a one-day interval, so 24 hours.
+  - Examples: every 1 or 10 minutes → 1 hour; every 30 minutes → 3 hours; hourly → 6 hours; daily → 24 hours.
+  - The ended task's record stays and can still be read. Its run is recorded as `expired`, with the reason that the scheduler timed it out.
+  - A later reply from the node to that task is refused (`reply_task_terminal`) and changes nothing; the newly dispatched task is unaffected.
+  - If the timeout comes before the 3rd skip (common for long intervals), one 「定时任务已超时放行」 (released by timeout) notice goes out when it is released instead. So each stuck episode produces exactly one notice.
+- **Tuning** (operators, Hub environment variables):
+
+  | Environment variable | Default | Meaning |
+  |---|---|---|
+  | `COMMHUB_SCHEDULE_STUCK_NOTICE_SKIPS` | `3` | which skip behind the same task triggers the alert |
+  | `COMMHUB_SCHEDULE_STUCK_TIMEOUT_FACTOR` | `6` | timeout = this factor × the schedule's interval |
+  | `COMMHUB_SCHEDULE_STUCK_TIMEOUT_FLOOR_SEC` | `3600` | lower bound of the timeout (seconds) |
+  | `COMMHUB_SCHEDULE_STUCK_TIMEOUT_CAP_SEC` | `86400` | upper bound of the timeout (seconds) |
+
+In the run history endpoint `GET /api/scheduled-tasks/:id/runs`, every skipped row carries `blocked_by_task_id` (the blocking task) and `blocked_by_state` (`not_received`: the node has not picked it up; `in_progress`: the node is working on it).
+
+If the target node is degraded (Hub `0.9.0-preview.86`+, see [health and degraded refusal](/en/guide/codex-copresence#health)), the occurrence is recorded as failed with `node_degraded` and no task is created.
 
 ## A run while you are editing
 

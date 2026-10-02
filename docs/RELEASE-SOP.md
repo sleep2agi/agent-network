@@ -137,6 +137,10 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/guide/task-tags.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/multi-user.md` | 见门输出 | 下界：Hub `0.9.0-preview.68` 起服务器有成员 Agent 访问权限和人与人私聊接口。发新版不会变假 |
 > | `docs-site/docs/en/guide/multi-user.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/codex-copresence.md` | 见门输出 | 下界：「健康分层、降级拒收与自愈」一节 —— agent-node `2.5.0-preview.94` 起报健康、`.95` 看门狗、`.96` 卡死恢复；Hub `0.9.0-preview.84` 透传、`.86` 降级拒收、`.87` 登录失效通知。发新版不会变假 |
+> | `docs-site/docs/en/guide/codex-copresence.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/api/mcp-tools.md` | 见门输出 | 下界：`send_task` / `retry_task` / `reassign_task` 的 `force` 参数 Hub `0.9.0-preview.86` 起。发新版不会变假 |
+> | `docs-site/docs/en/api/mcp-tools.md` | 见门输出 | 同上(英文) |
 >
 > 🔴 **这张表第四次被修正:7 → 8 → 12 → 31。**
 > 前三次都是有人踩到之后手工补的,而 SOP 里那句「加新断言时同时加进这张表」靠人记 —— 记不住。

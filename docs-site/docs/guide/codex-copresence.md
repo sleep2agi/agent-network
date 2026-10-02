@@ -136,6 +136,79 @@ tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 实测（2026-07-31）：新建 TUI 的节点复现；同宿主既有共存节点未受影响（它们的 app-server 启动时带了 `approval_policy=never`）。**所以这是「新建 TUI 时」的坑，不是存量问题。**
 :::
 
+## 健康分层、降级拒收与自愈 {#health}
+
+「在线」只说明 bridge 进程还活着。`codex-app-server` 运行时的节点（共存和普通的都算）从 agent-node `2.5.0-preview.94` 起，会把另外几层分开报给 Hub。报告随 `report_status` 走，字段名是 `health`：
+
+| 层 | 内容 | 什么时候算坏 |
+|---|---|---|
+| `bridge` | 恒为 `ok`（能发出这份报告，bridge 就是活的） | — |
+| `app_server` | `{ ok, rtt_ms, last_error }`：对本机 app-server 做一次 WebSocket 握手，默认每 30 秒一次，握手最多等 5 秒 | `ok=false` |
+| `tui` | `{ ok, reason }`，**只有共存节点有**；`reason` 是 `running` / `session-missing` / `pane-dead` / `sleep-placeholder` / `tmux-unavailable` | `ok=false` |
+| `model_auth` | `ok` / `revoked` / `expired` / `unknown`，按最近一次模型调用的结果分类 | `revoked` 或 `expired` |
+
+- 某一层从好变坏或从坏变好，节点**立刻**补报一次，不等下一次心跳。探测间隔可以用 `ANET_CODEX_HEALTH_INTERVAL_MS` 调（毫秒，最小 1000，主要给测试用）。
+- Hub 只在内存里保留每个节点最新的一份，**10 分钟**过期。没报、报告过期、某层没报，一律当「不知道」，不当「健康」。Hub `0.9.0-preview.84` 起，`GET /api/status` 会带出这份报告（见 [REST 数据接口](/api/rest-data)）。
+
+### 降级的节点不接新任务
+
+Hub `0.9.0-preview.86` 起，如果一个节点的健康报告还新鲜，并且 `app_server.ok=false`、`tui.ok=false` 或 `model_auth` 是 `revoked` / `expired`，派给它的**新任务**会直接被拒，不再静默排队：
+
+- REST `POST /api/task` 返回 **409** `node_degraded`；MCP `send_task` / `retry_task` / `reassign_task` 返回同一个错误。错误里带上坏掉的每一层（`layers[].label` / `reason` / `hint`）和报告的年龄。
+- 定时任务的这一次执行记成失败，`error_code=node_degraded`，不建任务。
+- **逃生口**：用户令牌可以带 `force: true` 强制派发（比如明知 TUI 不在，但 bridge 还能干活）。节点令牌带 `force` 无效。
+- 回复、`send_message`、ack 不受影响。没有健康报告的老节点照旧可以派活。
+- 桌面 / 手机 app `0.2.192` 起，降级的节点在 Agent 列表和节点详情里显示琥珀色的「降级 · 原因」标签，点按或悬停能看到修法。
+
+### App Server 看门狗：死了就按原会话拉起来
+
+agent-node `2.5.0-preview.95` 起，每次 `app_server` 探测结果都会先交给看门狗：
+
+- **进程没了**：连续 2 次探测失败，或者刚收到进程退出 / WebSocket 断开之后的那一次失败，就重启。
+  - 共存节点（只在 Linux 上，要读 `/proc`）：在原来的 tmux 会话里，用原样的 argv（同一个 `--listen` 地址）、本节点自己的 `CODEX_HOME` 和身份标记重新拉起 app-server。起来以后核对新进程的 `CODEX_HOME`，对不上就杀掉，算这次重启失败。然后 bridge 按原来的 thread 重新接上（`thread/resume`，不会新开 thread）。
+  - 普通 `codex-app-server` 节点（app-server 是 bridge 的子进程）：重新起一个，并接回原 thread。
+- 重启期间，健康原因写的是 `restarting app-server (attempt k/N): …`，Hub 照样把它当降级。探测一恢复，健康立刻翻回 ok，派发门自己重新打开。
+- **次数上限**：同一个窗口里最多重启 `ANET_CODEX_APPSERVER_RESTART_MAX` 次（默认 3），窗口长度 `ANET_CODEX_APPSERVER_RESTART_WINDOW_MS`（默认 600000，即 10 分钟）。超过就放弃，健康原因变成 `app-server auto-restart gave up: … — restart the node by hand (anet node restart)`，节点保持降级。直到某次探测自己看到 app-server 又能应答（有人手动修好了），才回到看守状态。
+
+### 卡死（进程在、端口在、就是握不上手）
+
+agent-node `2.5.0-preview.96` 起，看门狗把「活着但卡死」和「死了」分开处理。卡死指的是进程还在、端口也还在监听，但每次握手都失败：要么连接被立刻断开（ws 1006），要么一直不应答。
+
+- 卡死期间，健康原因带上 `app-server is alive but not answering (k/M failed probes before restarting it)`，Hub 马上就能看到。
+- 连续 M 次探测失败后，先**严格核对**这个进程就是本节点当初起的那个。下面四条都要对：
+  1. tmux 会话 id 没变，这个进程仍是该会话里活着的 pane；
+  2. `/proc/<pid>/cmdline` 是 `app-server … --listen <本节点地址>`；
+  3. `/proc/<pid>/environ` 里的 `ANET_NODE_MARKER` 是本节点的（没有标记的节点一律不杀）；
+  4. `/proc/<pid>/environ` 里的 `CODEX_HOME` 是本节点自己的。
+
+  **任何一条对不上，只报降级（原因里写 `not killing it: …`），绝不发信号。**
+- 核对通过：先发 SIGTERM（pane 进程是进程组组长时发给整组，连它起的子进程一起），等一段宽限；还活着、而且仍是本节点的，再发 SIGKILL。然后走上面同一条拉起路径，和「进程没了」共用同一个次数上限。
+- 可调参数：
+
+  | 环境变量 | 默认 | 含义 |
+  |---|---|---|
+  | `ANET_CODEX_APPSERVER_HUNG_PROBES` | `4` | 活着但卡死时，连续几次探测失败才动手。按默认 30 秒一次，约 2 分钟持续握不上手 |
+  | `ANET_CODEX_APPSERVER_KILL_GRACE_MS` | `10000` | SIGTERM 之后等多久再 SIGKILL，给 codex 落盘会话记录（`thread/resume` 要读）的时间 |
+
+- **macOS / Windows**（没有 `/proc`）：和以前一样只报降级，不自动重启共存的 app-server，也不杀卡死的进程。
+
+看门狗不会切换账号，不会在节点之间拷贝凭据，也不会碰别的节点的进程。
+
+### 模型登录失效 {#model-login}
+
+`model_auth` 变成 `revoked`（refresh token 被作废）或 `expired`（登录过期，而且没能自动刷新）之后：
+
+- 节点不再接活：空闲时上报 `status=error`，`task` 里写着需要重新登录。Hub 也会按上一节把它当降级。
+- Hub `0.9.0-preview.87` 起，会给**节点主人**发**一条**通知，标题「节点登录失效」，出现在 app 里和这个节点的会话中，带未读角标。每次进入坏状态只发一次；节点重新报告 `ok` 之后才会再发。Hub 重启后，如果主人还有一条没读的同类通知，也不会重发。
+- 修法：在那台机器上，给**这个节点自己的** `CODEX_HOME` 重新登录：
+
+  ```bash
+  CODEX_HOME=<节点目录>/codex-home codex login
+  ```
+
+  不要拷别的节点的 `auth.json`。
+- 登录好之后，节点发现 `auth.json` 在出错之后被改写过，就退回 `unknown`、重新接活；下一次模型调用成功后报 `ok`。不用重启节点。
+
 ## 生命周期命令：`anet node codex …`
 
 重启 / 恢复共存节点以前靠人肉 runbook(见下文[手工安全重启](#safe-restart));现在把每一步「核什么」做成确定性的 CLI,正常流程不调用任何 LLM,只出机器可读 receipt。第一批两个只读命令:

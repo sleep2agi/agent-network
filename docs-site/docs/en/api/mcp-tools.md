@@ -356,6 +356,7 @@ Dispatch a task to a specified agent's inbox. **`send_task` triggers AI processi
 | `network_id` | string | | Network ID |
 | `parent_task_id` | string | | Parent task ID; child replies are auto-chained back to the parent task originator |
 | `meta` | object | | Structured task metadata; mainly for attachments `{ attachments: [{ type, path, url, mime, name, size }] }`, written to the task's `meta_json` column |
+| `force` | boolean | | Dispatch even when the target is degraded (otherwise `node_degraded`). Honoured for user tokens only; a node token is still refused. Hub `0.9.0-preview.86`+, see [health and degraded refusal](/en/guide/codex-copresence#health) |
 
 **Response**:
 
@@ -482,6 +483,7 @@ Retry a failed/cancelled/expired task.
 | `task_id` | string | &check; | Task ID |
 | `from_session` | string | | Sender identifier |
 | `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
+| `force` | boolean | | Dispatch even when the target is degraded (otherwise `node_degraded`). Honoured for user tokens only; a node token is still refused. Hub `0.9.0-preview.86`+, see [health and degraded refusal](/en/guide/codex-copresence#health) |
 
 **Response**:
 
@@ -548,6 +550,7 @@ Reassign a task to another agent.
 | `new_alias` | string | &check; | New target agent alias |
 | `from_session` | string | | Sender identifier |
 | `network_id` | string | | Network scope. Auto-resolved for utok_ callers with exactly one membership — optional then; required when the caller spans multiple networks (#517) |
+| `force` | boolean | | Dispatch even when the target is degraded (otherwise `node_degraded`). Honoured for user tokens only; a node token is still refused. Hub `0.9.0-preview.86`+, see [health and degraded refusal](/en/guide/codex-copresence#health) |
 
 **Response**:
 

@@ -137,6 +137,79 @@ tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 Measured 2026-07-31: reproduced on a freshly created TUI; pre-existing co-presence nodes on the same host were unaffected because their app-servers were started with `approval_policy=never`. **This is a new-TUI hazard, not a latent fleet problem.**
 :::
 
+## Layered health, degraded refusal and self-healing {#health}
+
+"Online" only means the bridge process is alive. From agent-node `2.5.0-preview.94`, nodes on the `codex-app-server` runtime (co-presence and ordinary alike) report the other layers to the Hub separately. The report travels with `report_status` as `health`:
+
+| Layer | Content | Counts as down when |
+|---|---|---|
+| `bridge` | always `ok` (if the report arrives, the bridge is alive) | — |
+| `app_server` | `{ ok, rtt_ms, last_error }`: one WebSocket handshake to the local app-server, every 30 s by default, waiting at most 5 s | `ok=false` |
+| `tui` | `{ ok, reason }`, **co-presence nodes only**; `reason` is `running` / `session-missing` / `pane-dead` / `sleep-placeholder` / `tmux-unavailable` | `ok=false` |
+| `model_auth` | `ok` / `revoked` / `expired` / `unknown`, classified from the last model call | `revoked` or `expired` |
+
+- When a layer goes down or comes back, the node reports **at once** instead of waiting for the next heartbeat. The probe interval is `ANET_CODEX_HEALTH_INTERVAL_MS` (milliseconds, minimum 1000, mainly for tests).
+- The Hub keeps only the latest report per node, in memory, for **10 minutes**. No report, a stale report, or a missing layer all mean "unknown", never "healthy". From Hub `0.9.0-preview.84`, `GET /api/status` includes the report (see [REST data endpoints](/en/api/rest-data)).
+
+### Degraded nodes don't take new tasks
+
+From Hub `0.9.0-preview.86`, if a node's health report is fresh and says `app_server.ok=false`, `tui.ok=false`, or `model_auth` is `revoked` / `expired`, **new tasks** to it are refused instead of queueing silently:
+
+- REST `POST /api/task` returns **409** `node_degraded`; MCP `send_task` / `retry_task` / `reassign_task` return the same error. It lists each failing layer (`layers[].label` / `reason` / `hint`) and the report's age.
+- A scheduled run is recorded as failed with `error_code=node_degraded`; no task is created.
+- **Escape hatch**: a user token may pass `force: true` to dispatch anyway (for example the TUI is gone but the bridge can still work). `force` from a node token is ignored.
+- Replies, `send_message` and acks are not affected. Old nodes that send no health report can be dispatched to as before.
+- From desktop/mobile app `0.2.192`, a degraded node shows an amber 「降级 · reason」 (degraded) badge in the agent list and node detail; tap or hover for the fix.
+
+### App Server watchdog: relaunch a dead app-server on the original session
+
+From agent-node `2.5.0-preview.95`, every `app_server` probe result goes through a watchdog:
+
+- **Process gone**: two failed probes in a row, or one failure right after a known process exit or WebSocket close, trigger a restart.
+  - Co-presence nodes (Linux only, it reads `/proc`): the app-server is relaunched in the original tmux session with the original argv (same `--listen` address), this node's own `CODEX_HOME` and identity marker. The new process's `CODEX_HOME` is verified; a mismatch kills it and counts as a failed restart. The bridge then re-attaches to the original thread (`thread/resume`, never a new thread).
+  - Ordinary `codex-app-server` nodes (the app-server is the bridge's child): a new one is spawned and the original thread resumed.
+- While restarting, the health reason is `restarting app-server (attempt k/N): …`, so the Hub still treats the node as degraded. As soon as a probe answers, health flips back to ok and dispatch reopens by itself.
+- **Budget**: at most `ANET_CODEX_APPSERVER_RESTART_MAX` restarts (default 3) per window of `ANET_CODEX_APPSERVER_RESTART_WINDOW_MS` (default 600000, i.e. 10 minutes). After that it gives up: the reason becomes `app-server auto-restart gave up: … — restart the node by hand (anet node restart)` and the node stays degraded until a probe sees the app-server answering again (someone fixed it by hand).
+
+### Hung: the process is alive, the port is open, handshakes still fail
+
+From agent-node `2.5.0-preview.96`, the watchdog treats "alive but hung" separately from "dead". Hung means the process is still there and the port still listens, but every handshake fails: the connection is dropped at once (ws 1006) or never answered.
+
+- While hung, the health reason carries `app-server is alive but not answering (k/M failed probes before restarting it)`, and the Hub sees it straight away.
+- After M failed probes in a row, the watchdog first **strictly verifies** that this is the process this node started. All four must hold:
+  1. the tmux session id is unchanged and the process is still that session's live pane;
+  2. `/proc/<pid>/cmdline` is `app-server … --listen <this node's address>`;
+  3. `ANET_NODE_MARKER` in `/proc/<pid>/environ` is this node's (a node without a marker is never killed);
+  4. `CODEX_HOME` in `/proc/<pid>/environ` is this node's own.
+
+  **If any check fails, it only reports degraded (the reason says `not killing it: …`) and never sends a signal.**
+- If the checks pass: SIGTERM (to the whole process group when the pane process leads it, so its children go too), then a grace period, then SIGKILL only if it is still alive and still ours. It then relaunches through the same path as above and shares the same restart budget.
+- Knobs:
+
+  | Environment variable | Default | Meaning |
+  |---|---|---|
+  | `ANET_CODEX_APPSERVER_HUNG_PROBES` | `4` | failed probes in a row before a live-but-hung app-server is restarted; about 2 minutes of failed handshakes at the default 30 s interval |
+  | `ANET_CODEX_APPSERVER_KILL_GRACE_MS` | `10000` | wait between SIGTERM and SIGKILL, so codex can flush the session history that `thread/resume` reads back |
+
+- **macOS / Windows** (no `/proc`): as before, report degraded only; the co-presence app-server is not restarted automatically and a hung process is not killed.
+
+The watchdog never switches accounts, never copies credentials between nodes, and never touches another node's processes.
+
+### Model login failure {#model-login}
+
+When `model_auth` becomes `revoked` (refresh token revoked) or `expired` (login expired and could not refresh):
+
+- The node stops taking work: when idle it reports `status=error` with a re-login note in `task`, and the Hub treats it as degraded (previous section).
+- From Hub `0.9.0-preview.87`, the **node's owner** gets **one** notice titled 「节点登录失效」 (node login failed). It appears in the app in that node's conversation, with an unread badge. One notice per entry into the bad state; it re-arms only after the node reports `ok` again. After a Hub restart it is not repeated while the owner still has an unread notice of the same kind.
+- Fix: on that machine, log in again **for this node's own** `CODEX_HOME`:
+
+  ```bash
+  CODEX_HOME=<node-dir>/codex-home codex login
+  ```
+
+  Do not copy another node's `auth.json`.
+- Once logged in, the node notices that `auth.json` was rewritten after the failure, falls back to `unknown` and takes work again; the next successful model call reports `ok`. No node restart is needed.
+
 ## Lifecycle commands: `anet node codex …` (read-only checks land first)
 
 Restarting or resuming a co-presence node used to be a manual runbook (see [Manual safe restart](#safe-restart) below). Every check in it is becoming a deterministic CLI step: no LLM on the happy path, machine-readable receipts only. The first two commands are read-only:

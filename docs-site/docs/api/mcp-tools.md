@@ -353,6 +353,7 @@ Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，�
 | `network_id` | string | | 网络 ID |
 | `parent_task_id` | string | | 父任务 ID；子任务回复后会自动沿任务链回传给父任务发起者 |
 | `meta` | object | | 结构化任务元数据；主要用于附件 `{ attachments: [{ type, path, url, mime, name, size }] }`，写入 task 的 `meta_json` 列 |
+| `force` | boolean | | 目标节点降级（返回 `node_degraded`）时仍强制派发。只对用户令牌生效，节点令牌带了也被拒。Hub `0.9.0-preview.86` 起，见[健康与降级](/guide/codex-copresence#health) |
 
 **返回值**：
 
@@ -489,6 +490,7 @@ send_task({
 | `task_id` | string | &check; | 任务 ID |
 | `from_session` | string | | 发送者标识 |
 | `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
+| `force` | boolean | | 目标节点降级（返回 `node_degraded`）时仍强制派发。只对用户令牌生效，节点令牌带了也被拒。Hub `0.9.0-preview.86` 起，见[健康与降级](/guide/codex-copresence#health) |
 
 **返回值**：
 
@@ -555,6 +557,7 @@ send_task({
 | `new_alias` | string | &check; | 新目标 Agent 别名 |
 | `from_session` | string | | 发送者标识 |
 | `network_id` | string | | Network 范围。utok_ 恰好 1 个成员网络时自动解析，可省略；跨多网络必须显式传（#517） |
+| `force` | boolean | | 目标节点降级（返回 `node_degraded`）时仍强制派发。只对用户令牌生效，节点令牌带了也被拒。Hub `0.9.0-preview.86` 起，见[健康与降级](/guide/codex-copresence#health) |
 
 **返回值**：
 
