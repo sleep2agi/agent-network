@@ -79,7 +79,10 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test anet_status_cache_test anet_owner_strict_test anet_req_list_mcp_test anet_req_errors_test anet_req_comment_test anet_req_people_mcp_test anet_req_status_part_test anet_ctx_cost_test anet_dept_heads_test anet_token_member_test anet_node_perm_test anet_dept_groups_test anet_dept_groups_sync_test anet_group_msgs_test anet_tool_audience_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+# Adding a PG test = add ONE `run_pg_tests_rc <db> <file>` line below; its database is derived from those lines here (no shared list to edit).
+PG_TEST_DBS="$(grep -oE '^run_pg_tests_rc [a-z0-9_]+' "${BASH_SOURCE[0]}" | awk '{print $2}' | sort -u)"
+[ -n "$PG_TEST_DBS" ] || { echo "FAIL harness: no run_pg_tests_rc databases found in ${BASH_SOURCE[0]}"; exit 1; }
+for db in $PG_TEST_DBS; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
