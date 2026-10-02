@@ -152,6 +152,7 @@ on:
       - 'tests/test609-dashboard-chat-doc-path/**'
       - 'tests/test637-database-url-guard/**'
       - 'tests/test2123-hub-postgres-ladder/**'
+      - 'tests/test-status-read-cache/**'
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
@@ -323,6 +324,7 @@ on:
       - 'tests/test609-dashboard-chat-doc-path/**'
       - 'tests/test637-database-url-guard/**'
       - 'tests/test2123-hub-postgres-ladder/**'
+      - 'tests/test-status-read-cache/**'
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
@@ -1329,6 +1331,7 @@ jobs:
           - test609-dashboard-chat-doc-path
           - test637-database-url-guard
           - test2123-hub-postgres-ladder
+          - test-status-read-cache
           - test649-token-cli
           - test651-init-no-token-prompt
           - test5-auth

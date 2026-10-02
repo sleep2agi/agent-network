@@ -34,7 +34,22 @@ export type NodeHealth = NonNullable<z.infer<typeof nodeHealthSchema>>;
 const store = new Map<string, { health: NodeHealth; at: number }>();
 const keyOf = (networkId: string | null | undefined, alias: string) => `${networkId ?? "default"}\0${alias}`;
 
+// #431 —— /api/status 的记忆化(status-read-cache.ts)按这两样判断正文还对不对:任何一次上报 → 版本 +1;
+// 任何一份报告过 TTL 的那一刻(degraded / health 字段会消失)→ 由 nodeHealthNextExpiryAt 给出的时刻失效。
+let version = 0;
+export function nodeHealthVersion(): number { return version; }
+/** 最早一份还没过期的报告的过期时刻(ms);一份都没有 → Infinity。 */
+export function nodeHealthNextExpiryAt(now = Date.now()): number {
+  let next = Infinity;
+  for (const v of store.values()) {
+    const at = v.at + NODE_HEALTH_TTL_MS;
+    if (at >= now && at < next) next = at;
+  }
+  return next;
+}
+
 export function recordNodeHealth(networkId: string | null | undefined, alias: string, health: NodeHealth, now = Date.now()): void {
+  version++;
   store.set(keyOf(networkId, alias), { health, at: now });
   // 有界:按 TTL 顺手清掉过期的,别让改过名/删掉的节点在内存里攒着。
   if (store.size > 256) {
@@ -54,4 +69,4 @@ export function readNodeHealth(
 }
 
 /** 测试用。 */
-export function clearNodeHealthStore(): void { store.clear(); }
+export function clearNodeHealthStore(): void { store.clear(); version++; }

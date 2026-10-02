@@ -1,5 +1,6 @@
 import { buildServeErrorResponse } from "./serve-error.js";
-import { maybeGzipResponse, trimLightTask } from "./http-gzip";
+import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip";
+import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
@@ -2310,6 +2311,11 @@ return Bun.serve({
         sql += ` AND node_id = ?${params.length}`;
       }
       sql += " ORDER BY updated_at DESC";
+      // #431 —— 同一份正文不重复算(status-read-cache.ts):键 = 最终 SQL + 参数(含调用者能看到谁)+ 投影;
+      // 写 sessions / 健康上报 / 健康过期就失效。正文逐字节等于当场重算(status-read-cache-http.test.ts)。
+      const memoKey = JSON.stringify([sql, params, isLight, withNodeId]);
+      const { body: statusBody, etag: statusEtag } = memoStatusBody(memoKey, () => {
+      let timeDependent = false;
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
@@ -2372,6 +2378,8 @@ return Bun.serve({
           // null = not reported / stale / older agent-node — never "healthy".
           ...(() => {
             const h = readNodeHealth(s.network_id, s.alias);
+            // health_observed_ms_ago 随时间走:带上它的正文不能缓存。
+            if (h) timeDependent = true;
             return { health: h?.health ?? null, health_observed_ms_ago: h?.observed_ms_ago ?? null };
           })(),
           ...degradedField(s.network_id, s.alias),
@@ -2384,8 +2392,16 @@ return Bun.serve({
         else acc.idle++;
         return acc;
       }, { idle: 0, working: 0, offline: 0, total: sessions.length });
-      const res = Response.json({ ok: true, sessions, summary });
-      if (aliasResolverRead) res.headers.set("X-Status-Projection", "alias-resolver");
+      return { body: JSON.stringify({ ok: true, sessions, summary }), cacheable: !timeDependent };
+      });
+      // 强 ETag = 正文哈希;If-None-Match 命中回 304 空体(旧 agent-node 不发,app / dashboard 接上后受益)。
+      const statusHeaders: Record<string, string> = { ETag: statusEtag, "Cache-Control": "private, no-cache" };
+      if (aliasResolverRead) statusHeaders["X-Status-Projection"] = "alias-resolver";
+      if (ifNoneMatchHits(req.headers.get("if-none-match"), statusEtag)) {
+        return withCors(req, new Response(null, { status: 304, headers: statusHeaders }));
+      }
+      // Content-Type 与 Response.json 的一致;同一份正文的 gzip 结果按 ETag 复用(http-gzip.ts)。
+      const res = markGzipReusable(new Response(statusBody, { headers: { ...statusHeaders, "Content-Type": "application/json;charset=utf-8" } }), statusEtag);
       return withCors(req, res);
     }
 

@@ -56,7 +56,9 @@ function gzipCached(key: string | undefined, raw: () => Promise<Uint8Array>): Pr
   }
   return raw().then(bytes => {
     if (bytes.byteLength < GZIP_MIN_BYTES) return { raw: bytes, gz: null };
-    const gz = Bun.gzipSync(bytes);
+    // 可复用的正文(带键)压一次、存起来、反复发:压缩级别拉到 9 —— 多花的那点 CPU 只花一次,
+    // 而线上每次都少发 ~3%(#431 实测:旧节点别名解析读 29.6 KB → 28.6 KB)。不带键的照旧默认级别。
+    const gz = key ? Bun.gzipSync(bytes, { level: 9 }) : Bun.gzipSync(bytes);
     if (key) gzipCacheStats.misses++;
     if (key && gz.byteLength <= GZIP_CACHE_MAX_BYTES / 4) {
       gzipCache.set(key, gz);
