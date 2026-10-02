@@ -15,12 +15,11 @@
 //
 // 收件人 = 节点主人:上报令牌绑定的 nodes.owner_user_id(RFC-036,建节点时定死),没有绑定(老令牌)就取
 //   铸这个节点令牌的用户(api_tokens.user_id —— 新令牌里两者相同)。只发给这一个人;不在本网络了就不发。
-// 怎么送:user_inbox(与 send_desktop_message 同一张表、同一条 /events/users/me 推送),from_session = 节点别名,
-//   所以 App 把它显示在**与该节点的会话**里(主动消息)+ 未读角标 + 通知。不新增渠道。
+// 怎么送:agent-notice.ts(user_inbox + /events/users/me,from_session = 节点别名)。
 
-import { db, uuidv4 } from "./db.js";
+import { db } from "./db.js";
 import { getUserNetworkRole } from "./auth.js";
-import { pushUserEvent } from "./push.js";
+import { sendAgentNotice } from "./agent-notice.js";
 import { degradedLayers } from "./node-health-guard.js";
 import type { NodeHealth } from "./node-health-store.js";
 
@@ -104,26 +103,11 @@ export function noteModelAuthHealth(input: { networkId: string; alias: string; t
     if (prev === undefined && hasUnreadNotice(owner, networkId, alias)) return [];
 
     const { title, text } = modelAuthNoticeText(alias, state);
-    const messageId = `dm_auth_${uuidv4()}`;
-    const meta = { model_auth_notice: { alias, state } };
-    db.run(
-      `INSERT INTO user_inbox (message_id, network_id, user_id, from_session, kind, title, content, severity, meta_json)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'warning', ?8)
-       ON CONFLICT(message_id) DO NOTHING`,
-      [messageId, networkId, owner, alias, MODEL_AUTH_NOTICE_KIND, title, text, JSON.stringify(meta)],
-    );
-    // 推送在写库之后:收到推送的 App 立刻回读得到这一行。
-    pushUserEvent(networkId, owner, {
-      type: "desktop_message",
-      message_id: messageId,
-      kind: MODEL_AUTH_NOTICE_KIND,
-      from: alias,
-      title,
-      message: text,
-      severity: "warning",
-      created_at: new Date().toISOString(),
-      meta,
+    const sent = sendAgentNotice({
+      networkId, userId: owner, fromAlias: alias, kind: MODEL_AUTH_NOTICE_KIND, title, text,
+      meta: { model_auth_notice: { alias, state } }, idPrefix: "dm_auth_",
     });
+    if (!sent) return [];
     return [owner];
   } catch (e: any) {
     console.error(`[model-auth-notify] ${input.alias}: ${e?.message ?? e}`);

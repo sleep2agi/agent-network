@@ -79,7 +79,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -215,6 +215,8 @@ run_pg_tests_rc anet_proj_viewer_can_test src/project-viewer-can-http.test.ts
 run_pg_tests_rc anet_health_dispatch_test src/node-health-dispatch-http.test.ts
 # 节点登录失效通知主人(#462):api_tokens ⋈ nodes 取主人、user_inbox 插入与「未读同类」查重 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_model_auth_notify_test src/model-auth-notify-http.test.ts
+# 定时任务卡住(#464):按挡路任务计数跳过、超时把它条件写成 expired 并镜像 run、通知创建者 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_sched_stuck_test src/scheduled-stuck-http.test.ts
 
 # RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
 # refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).

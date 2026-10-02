@@ -5,6 +5,8 @@ import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetwork
 import { canMessageAgent } from "./agent-access.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
+import { parseDbTimestampMs } from "./db-timestamp.js";
+import { blockerTimedOut, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
 
 export type ScheduleSpec =
   | { type: "once"; run_at: string }
@@ -203,6 +205,13 @@ function validateTarget(networkId: string, nodeId: unknown): { node_id: string; 
   return { node_id: node.node_id, alias: node.alias };
 }
 
+function stuckNoticeFor(row: ScheduledRow, reason: StuckNotice["reason"], blocker: { task_id: string; created_at: string }, skips: number, timeoutMs: number): StuckNotice {
+  return {
+    reason, scheduleId: row.schedule_id, scheduleName: row.name, networkId: row.network_id, createdBy: row.created_by,
+    alias: row.target_alias, timezone: row.timezone, taskId: blocker.task_id, taskCreatedAt: blocker.created_at, skips, timeoutMs,
+  };
+}
+
 type DispatchEvent = { alias: string; networkId: string; taskId: string; priority: string; state: "delivered" | "queued" };
 
 export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: string, advanceSchedule: boolean, advanceAfter = new Date()): { runId: string; taskId?: string; status: string; event?: DispatchEvent } {
@@ -210,6 +219,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
   let event: DispatchEvent | undefined;
   let finalStatus = "failed";
   let createdTaskId: string | undefined;
+  const notices: StuckNotice[] = [];
+  const timedOut: Array<{ taskId: string; fromStatus: string }> = [];
 
   db.transaction(() => {
     // UNIQUE(schedule_id, scheduled_for) is the cross-process claim. If two
@@ -225,8 +236,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       // received:节点那边有没有把这条任务取走过(inbox 行被 ack,或任务已进 acked/running)。
       // 跳过记录带上它,客户端才分得清「节点还没收到」和「节点在处理」—— 前者是投递故障,
       // 后者才是真的上一次还没做完。
-      const open = db.get<{ task_id: string; received: number }>(
-        `SELECT r.task_id,
+      const findOpen = () => db.get<{ task_id: string; received: number; created_at: string; status: string }>(
+        `SELECT r.task_id, t.created_at, t.status,
                 CASE WHEN t.status IN ('acked', 'running')
                        OR EXISTS (SELECT 1 FROM inbox i WHERE (i.task_id = r.task_id OR i.id = r.task_id) AND i.acked = 1)
                      THEN 1 ELSE 0 END AS received
@@ -236,6 +247,20 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
          ORDER BY r.created_at DESC LIMIT 1`,
         row.schedule_id, ...OPEN_TASK_STATUSES,
       );
+      let open = findOpen();
+      // #464 — a blocker open past the stuck timeout is ended as `expired` (the existing terminal state) and
+      // this occurrence dispatches normally. Bounded: each pass ends one exact open task or stops.
+      for (let guard = 0; open && guard < 20 && blockerTimedOut(open, row.schedule_json, advanceAfter); guard++) {
+        const limitMs = stuckTimeoutMs(row.schedule_json);
+        const ageMs = advanceAfter.getTime() - parseDbTimestampMs(open.created_at);
+        if (!expireStuckBlocker(open.task_id, row.network_id, ageMs, limitMs)) break;
+        timedOut.push({ taskId: open.task_id, fromStatus: open.status });
+        // Each stuck episode gets exactly one notice: if the stuck notice already went out (N skips), stay quiet.
+        if (skipsBlockedBy(row.schedule_id, open.task_id) < stuckNoticeSkips()) {
+          notices.push(stuckNoticeFor(row, "timed_out", open, skipsBlockedBy(row.schedule_id, open.task_id), limitMs));
+        }
+        open = findOpen();
+      }
       if (open) {
         finalStatus = "skipped";
         const blockedState = open.received ? "in_progress" : "not_received";
@@ -251,6 +276,9 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
             blockedState,
           ],
         );
+        // #464 — the Nth consecutive skip behind the same task tells the schedule's creator, once.
+        const skips = skipsBlockedBy(row.schedule_id, open.task_id);
+        if (skips === stuckNoticeSkips()) notices.push(stuckNoticeFor(row, "stuck", open, skips, stuckTimeoutMs(row.schedule_json)));
         if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
         return;
       }
@@ -349,6 +377,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
   // never turn a durably-created task into an API-level failure: callers may
   // retry an apparent failure and create a second manual occurrence.
   try {
+    for (const t of timedOut) logTaskEvent(t.taskId, t.fromStatus, "expired", "hub-scheduler", `stuck timeout; schedule=${row.schedule_id} run=${runId}`);
+    for (const n of notices) sendStuckNotice(n);
     if (createdTaskId) logTaskEvent(createdTaskId, null, "delivered", "hub-scheduler", `schedule=${row.schedule_id} run=${runId}`);
     if (event) {
       const pending = db.get<{ cnt: number }>("SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND network_id = ?2 AND acked = 0", event.alias, event.networkId);
