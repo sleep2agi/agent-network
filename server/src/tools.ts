@@ -13,6 +13,7 @@ import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
+import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict } from "./node-permissions.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
@@ -258,7 +259,7 @@ function guardNodePermissionTools(server: McpServer, tokenId: string, networkId:
   }
 }
 
-export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
+export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, listing: { includeProtocol?: boolean } = {}) {
   // 多用户 Agent 权限:用户令牌调用者在哪些网络里是受限成员(只看授权 Agent)。
   // 网络令牌不会走到这里 —— 受限成员的网络令牌在 resolveToken 就被拒了。
   const restrictedNets = enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : [];
@@ -6133,6 +6134,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ id, text, network_id }) => requirementsCall("POST", `/api/requirements/${encodeURIComponent(id)}/comments`, network_id, { text }),
   );
+
+  // #478:tools/list 只列这个调用者真能用的工具(tool-audience.ts)。只滤列表,tools/call 不变。
+  const caller: ToolCaller = callerTokenIsNetwork
+    ? { kind: "node", tokenId: callerTokenId ?? null, networkId: enforceNetworkId ?? null, includeProtocol: listing.includeProtocol === true }
+    : enforceUserId ? { kind: "user", includeProtocol: listing.includeProtocol === true } : { kind: "unknown" };
+  scopeToolsList(server, listedToolFilter(caller));
 }
 
 // ────────────────────────────────────────────────────────────────────

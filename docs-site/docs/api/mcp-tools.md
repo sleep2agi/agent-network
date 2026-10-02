@@ -2,6 +2,22 @@
 
 CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
 
+## 谁的 tools/list 里有哪些工具
+
+`tools/list` 按调用者给，只列这个令牌真能用的工具。工具照旧全部注册，`tools/call` 不变：调一个没列出来的工具，回的仍是它原来那个错误。
+
+| 调用者 | 不列的工具 | 原因 |
+|---|---|---|
+| 节点令牌（Agent） | `projects_create`、`projects_update`、`list_node_files`、`read_node_file`、`tail_node_logs` | 节点令牌调这些一律被拒（`user_token_required` / `node_token_cannot_*`） |
+| 节点令牌（Agent） | 协议工具：`get_*_request` / `ack_*_request`（配置、规则文件、建 / 停 / 起节点、探测）、`get_config_update`、`ack_config_update`、`list_my_pending_*`、`list_my_children`、`mark_tasks_*` | agent-node / daemon 按名字直接调，模型不需要。请求头带 `X-Anet-Tools: all`（或 `/mcp?tools=all`）时照列 |
+| 节点令牌，只读 / 受限模式 | 再加 `broadcast`、管节点 / 技能 / 探测的写工具、只有人能做的工具 | 这两种模式下这些一律被拒 |
+| 节点令牌，`COMMHUB_NODE_PERMISSIONS=enforce` | 再加只有人能做的工具（`upsert_provider`、`update_provider`、`upsert_network_secret`、`review_skill`） | 开关打开后一律被拒；默认 `log` 下它们调得通，所以照列 |
+| 用户令牌（人） | `report_status` 和全部协议工具 | 用户令牌调这些一律 `network_token_required` / `caller_not_a_daemon` |
+
+只藏「不看参数就一定被拒」的工具。要看参数才决定的（派活给谁、在哪个网络）一律照列；只看授权 Agent 的受限成员也不按这个藏，因为他换一个网络就可能调得通。每个工具归哪一类在 `server/src/tool-audience.ts`，新工具必须归类，否则测试不过。
+
+实测（74 个工具）：全部 71,559 B；节点 52 个 57,632 B（−19%）；用户 56 个 54,780 B（−23%）。
+
 ## 完整工具索引
 
 **协作（本页有详细说明）** · 17 个

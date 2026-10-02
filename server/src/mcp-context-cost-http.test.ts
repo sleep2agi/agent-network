@@ -21,9 +21,11 @@ if (!activeDbPath) throw new Error("mcp-context-cost requires COMMHUB_DB (or COM
 
 /**
  * tools/list 整份 JSON 的字节上限。#476 之前(main,含 #475)74 个工具 76,824 B;修剪后 71,399 B。
- * 上限留 ~1.1 KB 余量;加工具或加说明超过它,就在这里改数字并在 PR 里说为什么。
+ * #478 起 tools/list 按调用者给:这里的调用者是用户令牌,看到 56 个工具 54,780 B(不含节点 / 协议工具)。
+ * 上限跟着收到用户这一档(~1.7 KB 余量);节点 / 全部工具的上限在 tool-audience-http.test.ts。
+ * 加工具或加说明超过它,就在这里改数字并在 PR 里说为什么。
  */
-const TOOLS_LIST_MAX_BYTES = 72_500;
+const TOOLS_LIST_MAX_BYTES = 56_500;
 /** 单个工具(名字 + 描述 + 输入 schema)的上限;最大的是 report_status(节点心跳,~8.4 KB 的遥测结构)。 */
 const TOOL_MAX_BYTES = 9_000;
 /** 单条工具描述的上限(说明写进参数的 describe,或者拆短)。 */
