@@ -21,7 +21,7 @@ echo ""
 # 2. Start CommHub
 echo "2. Starting CommHub..."
 cd /app/server && bun run src/index.ts &
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:9200/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 curl -s http://127.0.0.1:9200/health | grep -q '"ok":true' && pass "CommHub started" || { fail "CommHub failed"; exit 1; }
 echo ""
 

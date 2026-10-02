@@ -86,7 +86,7 @@ echo ""
 echo "1. Starting CommHub server..."
 cd /app/server && COMMHUB_AUTH_TOKEN="${AUTH_TOKEN}" COMMHUB_DB="${DB_PATH}" bun run src/index.ts &
 SERVER_PID=$!
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:9200/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 HEALTH=$(curl -s http://127.0.0.1:9200/health 2>/dev/null)
 echo "$HEALTH" | grep -q '"ok":true' && pass "CommHub server started" || fail "CommHub server failed"
 echo ""

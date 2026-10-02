@@ -32,7 +32,7 @@ echo "Starting test server on :$PORT..."
 cd "$(dirname "$0")/../server"
 PORT=$PORT COMMHUB_DB="$DB" COMMHUB_AUTH_TOKEN="$TOKEN" bun run src/index.ts &
 SERVER_PID=$!
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "$BASE/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 
 if ! curl -s "$BASE/health" >/dev/null 2>&1; then
   echo "  ❌ Server failed to start"; exit 1

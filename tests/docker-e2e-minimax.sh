@@ -14,7 +14,7 @@ echo ""
 [ -n "$ANTHROPIC_BASE_URL" ] && pass "ANTHROPIC_BASE_URL set ($ANTHROPIC_BASE_URL)" || { fail "ANTHROPIC_BASE_URL missing"; exit 1; }
 
 cd /app/server && bun run src/index.ts &
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:9200/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 curl -s http://127.0.0.1:9200/health | grep -q '"ok":true' && pass "CommHub started" || { fail "CommHub failed"; exit 1; }
 
 mkdir -p /tmp/mm && cd /tmp/mm

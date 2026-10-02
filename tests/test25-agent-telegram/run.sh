@@ -83,7 +83,7 @@ echo ""
 
 echo "1. Start server..."
 cd /app/server && COMMHUB_AUTH_TOKEN="${AUTH_TOKEN}" bun run src/index.ts >"${WORKDIR}/server.log" 2>&1 &
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "${BASE}/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 curl -s "${BASE}/health" | grep -q '"ok":true' && pass "server started" || fail "server failed"
 echo ""
 

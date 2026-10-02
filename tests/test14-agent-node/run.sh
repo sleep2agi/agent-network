@@ -51,7 +51,7 @@ mkdir -p "${WORKDIR}/.anet/nodes/real-bot"
 echo "1. Starting server with COMMHUB_AUTH_TOKEN..."
 cd /app/server && COMMHUB_AUTH_TOKEN="${AUTH_TOKEN}" bun run src/index.ts >/tmp/test14-server.log 2>&1 &
 SERVER_PID=$!
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:9200/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 HEALTH=$(curl -s http://127.0.0.1:9200/health 2>/dev/null)
 echo "$HEALTH" | grep -q '"ok":true' && pass "server started" || { cat /tmp/test14-server.log; fail "server failed"; }
 echo ""
