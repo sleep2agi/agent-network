@@ -7,10 +7,13 @@
 //               能改:负责人是我 / 我建的 / 项目授权 can_edit;能删:负责人是我 / 我建的;不能管项目。
 //               viewer 只看 ④,什么都不能改。
 // owner/admin 角色与 Hub 管理员不看这一列。节点令牌(Agent)不经过这里 —— 规则原样不动。
+// RFC-040(#455)再加两个来源,和上面的取并集、只加不减:部门项目授权(授权给我的部门或它的上级 ⇒ 同按人授权),
+// 负责人权力(我负责的部门子树里的卡:可看 / 可改 / 可删;viewer 当负责人不算)。见 department-heads.ts。
 //
 // 判定是 fail-closed 的:task_access 只有字面 'all' 才放开;role 只有 owner/admin 才豁免。
 
 import { db } from "./db.js";
+import { deleteDepartmentGrantsForProject, departmentGrantsForMember, headCardsFor, isDepartmentCard, type DepartmentCards } from "./department-heads.js";
 
 // ── 表结构(放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次) ──
 // ALTER 的 DEFAULT 'all' 让**升级前已有的**成员行全部落在旧语义 —— 升级不收窄任何人;新成员按下面的
@@ -96,7 +99,7 @@ export function listProjectGrants(networkId: string, userId: string): ProjectGra
 const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 export const userRefPattern = (userId: string) => `%${likeEscape(`"kind":"user","id":"${userId}"`)}%`;
 
-type CardRow = { network_id: string; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null; project_id: string | null };
+type CardRow = { network_id: string; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null; project_id: string | null; agent_owner_json?: string | null };
 const refIs = (json: string | null, userId: string) => !!json && json.includes(`"kind":"user","id":"${userId}"`);
 const ownsCard = (row: CardRow, userId: string) => refIs(row.owner_json, userId);
 const createdCard = (row: CardRow, userId: string) => refIs(row.created_by_json, userId) || (!row.created_by_json && row.created_by === userId);
@@ -111,6 +114,18 @@ function projectGrant(networkId: string, userId: string, projectId: string | nul
   return row ? { project_id: projectId, can_edit: row.can_edit === 1 } : null;
 }
 
+/** 部门项目授权(RFC-040):null = 部门没授权这个项目;否则 = can_edit。 */
+function departmentGrant(networkId: string, userId: string, projectId: string | null): boolean | null {
+  if (!projectId) return null;
+  const grants = departmentGrantsForMember(networkId, userId);
+  return grants.has(projectId) ? grants.get(projectId)! : null;
+}
+/** 这张卡是不是我负责的部门(含下级)的卡。 */
+function headOf(userId: string, row: CardRow): boolean {
+  const cards = headCardsFor(row.network_id, userId);
+  return !!cards && isDepartmentCard(cards, row);
+}
+
 export type TaskCaller = { userId: string } | null;
 
 /** 看得见这张卡吗。caller=null(节点令牌 / 管理员 / 旧的全局令牌)恒为 true。 */
@@ -119,8 +134,9 @@ export function canSeeTask(caller: TaskCaller, row: CardRow): boolean {
   const m = memberRow(caller.userId, row.network_id);
   if (!scopedRow(m)) return true;
   if (projectGrant(row.network_id, caller.userId, row.project_id)) return true;
+  if (departmentGrant(row.network_id, caller.userId, row.project_id) !== null) return true;
   if (m?.member_role === "viewer") return false;
-  return ownsCard(row, caller.userId) || createdCard(row, caller.userId) || participates(row, caller.userId);
+  return ownsCard(row, caller.userId) || createdCard(row, caller.userId) || participates(row, caller.userId) || headOf(caller.userId, row);
 }
 
 /** 能改这张卡吗(PATCH / 勾子任务)。只对看得见的卡调用。 */
@@ -130,7 +146,23 @@ export function canEditTask(caller: TaskCaller, row: CardRow): boolean {
   if (!scopedRow(m)) return true;
   if (m?.member_role === "viewer") return false;
   if (ownsCard(row, caller.userId) || createdCard(row, caller.userId)) return true;
-  return projectGrant(row.network_id, caller.userId, row.project_id)?.can_edit === true;
+  if (projectGrant(row.network_id, caller.userId, row.project_id)?.can_edit === true) return true;
+  return departmentGrant(row.network_id, caller.userId, row.project_id) === true || headOf(caller.userId, row);
+}
+
+/**
+ * 这次能改,是不是**只**因为负责人身份(没有自己的 / 按人或部门授权的来源)。这种时候负责人只能把卡交给本部门的人
+ * (RFC-040 §1:改负责人只能改成本部门成员 / 其 Agent / 自己),返回本部门的人和节点;否则 null(不加限制)。
+ */
+export function headOnlyEditScope(caller: TaskCaller, row: CardRow): DepartmentCards | null {
+  if (!caller) return null;
+  const m = memberRow(caller.userId, row.network_id);
+  if (!scopedRow(m) || m?.member_role === "viewer") return null;
+  if (ownsCard(row, caller.userId) || createdCard(row, caller.userId)) return null;
+  if (projectGrant(row.network_id, caller.userId, row.project_id)?.can_edit === true) return null;
+  if (departmentGrant(row.network_id, caller.userId, row.project_id) === true) return null;
+  const cards = headCardsFor(row.network_id, caller.userId);
+  return cards && isDepartmentCard(cards, row) ? cards : null;
 }
 
 /**
@@ -159,7 +191,15 @@ export function canDeleteTask(caller: TaskCaller, row: CardRow): boolean {
   const m = memberRow(caller.userId, row.network_id);
   if (!scopedRow(m)) return true;
   if (m?.member_role === "viewer") return false;
-  return ownsCard(row, caller.userId) || createdCard(row, caller.userId);
+  return ownsCard(row, caller.userId) || createdCard(row, caller.userId) || headOf(caller.userId, row);
+}
+
+/** 这次能删只因为负责人身份(RFC-040 Q4:记 requirement_deleted_by_leader + 私信卡的负责人)。 */
+export function deletesAsHeadOnly(caller: TaskCaller, row: CardRow): boolean {
+  if (!caller) return false;
+  const m = memberRow(caller.userId, row.network_id);
+  if (!scopedRow(m) || m?.member_role === "viewer") return false;
+  return !ownsCard(row, caller.userId) && !createdCard(row, caller.userId) && headOf(caller.userId, row);
 }
 
 /**
@@ -170,14 +210,16 @@ export function canDeleteTask(caller: TaskCaller, row: CardRow): boolean {
 export type TaskPermissions = { edit: boolean; delete: boolean; edit_fields?: readonly string[] };
 export function taskPermissionsResolver(caller: TaskCaller): (row: CardRow) => TaskPermissions | null {
   if (!caller) return () => null;
-  const cache = new Map<string, { scoped: boolean; viewer: boolean; grants: Map<string, boolean> }>();
+  const cache = new Map<string, { scoped: boolean; viewer: boolean; grants: Map<string, boolean>; deptGrants: Map<string, boolean>; head: DepartmentCards | null }>();
   const ctxFor = (networkId: string) => {
     let c = cache.get(networkId);
     if (!c) {
       const m = memberRow(caller.userId, networkId);
       const scoped = scopedRow(m);
+      const viewer = m?.member_role === "viewer";
       const grants = new Map<string, boolean>(scoped ? listProjectGrants(networkId, caller.userId).map((g) => [g.project_id, g.can_edit] as [string, boolean]) : []);
-      cache.set(networkId, c = { scoped, viewer: m?.member_role === "viewer", grants });
+      const deptGrants = scoped ? departmentGrantsForMember(networkId, caller.userId) : new Map<string, boolean>();
+      cache.set(networkId, c = { scoped, viewer, grants, deptGrants, head: scoped && !viewer ? headCardsFor(networkId, caller.userId) : null });
     }
     return c;
   };
@@ -185,8 +227,9 @@ export function taskPermissionsResolver(caller: TaskCaller): (row: CardRow) => T
     const c = ctxFor(row.network_id);
     if (!c.scoped) return null;
     if (c.viewer) return { edit: false, delete: false };
-    const mine = ownsCard(row, caller.userId) || createdCard(row, caller.userId);
-    const edit = mine || (row.project_id ? c.grants.get(row.project_id) === true : false);
+    const head = !!c.head && isDepartmentCard(c.head, row);
+    const mine = ownsCard(row, caller.userId) || createdCard(row, caller.userId) || head;
+    const edit = mine || (row.project_id ? c.grants.get(row.project_id) === true || c.deptGrants.get(row.project_id) === true : false);
     if (!edit && participates(row, caller.userId)) return { edit, delete: mine, edit_fields: PARTICIPANT_EDIT_FIELDS };
     return { edit, delete: mine };
   };
@@ -199,6 +242,7 @@ export function taskPermissionsResolver(caller: TaskCaller): (row: CardRow) => T
 export function projectUseResolver(caller: TaskCaller, networkId: string): (projectId: string) => boolean {
   if (!caller || !isTaskScoped(caller.userId, networkId)) return () => true;
   const editable = new Set(listProjectGrants(networkId, caller.userId).filter((g) => g.can_edit).map((g) => g.project_id));
+  for (const [projectId, canEdit] of departmentGrantsForMember(networkId, caller.userId)) if (canEdit) editable.add(projectId);
   return (projectId) => editable.has(projectId);
 }
 
@@ -206,7 +250,7 @@ export function projectUseResolver(caller: TaskCaller, networkId: string): (proj
 export function canUseProject(caller: TaskCaller, networkId: string, projectId: string | null): boolean {
   if (!caller || !projectId) return true;
   if (!isTaskScoped(caller.userId, networkId)) return true;
-  return projectGrant(networkId, caller.userId, projectId)?.can_edit === true;
+  return projectGrant(networkId, caller.userId, projectId)?.can_edit === true || departmentGrant(networkId, caller.userId, projectId) === true;
 }
 
 /**
@@ -232,6 +276,16 @@ export function addTaskVisibilityScope(sql: string, params: unknown[], caller: T
     parts.push(`(network_id IN (${ph(members)}) AND (${mine} OR ${granted}))`);
   }
   if (viewers.length) parts.push(`(network_id IN (${ph(viewers)}) AND ${granted})`);
+  // RFC-040:部门项目授权(viewer 也有,和按人授权一样只给「看」)+ 负责人本部门的卡(viewer 没有)。只加析取项。
+  for (const s of scoped) {
+    const extra: string[] = [];
+    const deptProjects = [...departmentGrantsForMember(s.networkId, caller.userId).keys()];
+    if (deptProjects.length) extra.push(`project_id IN (${ph(deptProjects)})`);
+    const head = s.viewer ? null : headCardsFor(s.networkId, caller.userId);
+    if (head?.users.size) extra.push(`owner_json IN (${ph([...head.users].map((id) => JSON.stringify({ kind: "user", id })))})`);
+    if (head?.nodes.size) extra.push(`agent_owner_json IN (${ph([...head.nodes].map((id) => JSON.stringify({ kind: "node", id })))})`);
+    if (extra.length) parts.push(`(network_id = ?${params.push(s.networkId)} AND (${extra.join(" OR ")}))`);
+  }
   return `${sql} AND (${parts.join(" OR ")})`;
 }
 
@@ -240,7 +294,10 @@ export function addProjectVisibilityScope(sql: string, params: unknown[], caller
   if (!caller || !isTaskScoped(caller.userId, networkId)) return sql;
   const uid = params.push(caller.userId);
   const net = params.push(networkId);
-  return `${sql} AND project_id IN (SELECT project_id FROM network_member_project_grants WHERE user_id = ?${uid} AND network_id = ?${net})`;
+  const personal = `project_id IN (SELECT project_id FROM network_member_project_grants WHERE user_id = ?${uid} AND network_id = ?${net})`;
+  const deptProjects = [...departmentGrantsForMember(networkId, caller.userId).keys()];
+  if (!deptProjects.length) return `${sql} AND ${personal}`;
+  return `${sql} AND (${personal} OR project_id IN (${deptProjects.map((id) => `?${params.push(id)}`).join(", ")}))`;
 }
 
 export type ReplaceTaskGrantsResult =
@@ -302,6 +359,7 @@ export function deleteTaskGrantsForMember(networkId: string, userId: string): vo
 }
 export function deleteTaskGrantsForProject(projectId: string): void {
   db.run("DELETE FROM network_member_project_grants WHERE project_id = ?1", [projectId]);
+  deleteDepartmentGrantsForProject(projectId);
 }
 
 // 被拒的写入审计限频:同一 (用户, 卡) 每小时最多记一条,别让重试刷爆审计表。

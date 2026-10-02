@@ -5,6 +5,7 @@ import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
+import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
@@ -1281,7 +1282,9 @@ return Bun.serve({
       // 节点令牌:user 仍是签发它的用户(旧 agent-node 靠它打日志),但只列它绑定的那个网络,
       // 并用 credential 说清楚这是一个节点身份 —— user.role 不是这个调用者的权限。
       const allNetworks = getUserAllNetworks(resolved.user.user_id);
-      const networks = resolved.networkId ? allNetworks.filter((n: any) => n.network_id === resolved.networkId) : allNetworks;
+      // RFC-040:managed_department_ids = 我负责的部门 + 全部下级(空 = 不是负责人;viewer 恒空;节点令牌不是人,恒空)。
+      const networks = (resolved.networkId ? allNetworks.filter((n: any) => n.network_id === resolved.networkId) : allNetworks)
+        .map((n: any) => ({ ...n, managed_department_ids: resolved.networkId ? [] : managedDepartmentIds(n.network_id, resolved.user.user_id) }));
       const credential = resolved.networkId
         ? { kind: "node", network_id: resolved.networkId, node_alias: resolved.tokenName?.startsWith("node:") ? resolved.tokenName.slice(5) : null, acts_as_owner: false }
         : { kind: "user" };
@@ -1722,25 +1725,76 @@ return Bun.serve({
     }
 
     // ── 组织架构(board #419):部门 + 成员所在部门。读:网络任何成员 / 本网络的节点令牌 / Hub 管理员;
-    // 写:网络 owner / admin、Hub 管理员(节点令牌不能写)。规则在 departments.ts。 ──
+    // 写:网络 owner / admin、Hub 管理员(节点令牌不能写)。规则在 departments.ts。
+    // RFC-040(#455)部门负责人:每次请求按 leader_user_id 现算「我负责的部门 + 全部下级」(department-heads.ts),
+    // 在这棵子树里也能写;越出子树 → 403 department_scope_denied(固定一个错误)。不是负责人的成员与以前逐字节相同。 ──
     const deptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments(?:\/([^/]+))?$/);
     const memberDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/department$/);
-    if (deptMatch || memberDeptMatch) {
+    const deptSubMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments\/([^/]+)\/(project-grants|nodes)$/);
+    if (deptMatch || memberDeptMatch || deptSubMatch) {
       const token = requestToken(req, { allowQueryToken: false });
       const resolved = token ? resolveToken(token) : null;
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
-      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch)![1]);
+      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch ?? deptSubMatch)![1]);
       if (resolved.networkId && resolved.networkId !== netId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       const hubAdmin = isHubAdminCredential(resolved);
       const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
       if (!hubAdmin && !role && !resolved.networkId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       if (!db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)) return withCors(req, Response.json({ ok: false, error: "network_not_found" }, { status: 404 }));
-      if (deptMatch && !deptMatch[2] && req.method === "GET") {
-        return withCors(req, Response.json({ ok: true, network_id: netId, ...listDepartments(netId) }));
-      }
       const canManage = hubAdmin || (!resolved.networkId && (role === "owner" || role === "admin"));
+      // 负责人范围:只算人(节点令牌不是人);owner / admin 本来全管,不必算。viewer 在 headScope 里恒为空。
+      const head = canManage || resolved.networkId ? { managed: new Set<string>(), strict: new Set<string>() } : headScope(netId, resolved.user.user_id);
+      const isHead = head.managed.size > 0;
+      const scopeDenied = () => withCors(req, Response.json({ ok: false, error: DEPARTMENT_SCOPE_DENIED }, { status: 403 }));
+      if (deptMatch && !deptMatch[2] && req.method === "GET") {
+        const listed = listDepartments(netId);
+        // viewer_can:manage = 能改名 / 移动 / 删除 / 换负责人;create_child = 能在它下面建子部门。
+        // project_grants(部门项目授权)只给 owner / admin:项目 id 不对只看相关任务的成员公开。
+        const departments = listed.departments.map((d) => ({ ...d, viewer_can: { manage: canManage || head.strict.has(d.id), create_child: canManage || head.managed.has(d.id) } }));
+        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
+      }
+      if (deptSubMatch) {
+        const deptId = decodeURIComponent(deptSubMatch[2]);
+        const subtree = departmentSubtree(netId, deptId);
+        if (!subtree.size) return withCors(req, Response.json({ ok: false, error: "department_not_found" }, { status: 404 }));
+        if (deptSubMatch[3] === "nodes") {
+          // 本部门(含下级)成员拥有的节点:只读的状态与健康(RFC-040 Q3 —— 能管人 ≠ 能用 / 能管他的 Agent)。
+          if (req.method !== "GET") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+          if (!canManage && !head.managed.has(deptId)) return scopeDenied();
+          const owners = membersIn(netId, subtree);
+          const rows = db.all<{ node_id: string; alias: string | null; display_name: string | null; owner_user_id: string | null }>(
+            "SELECT node_id, alias, display_name, owner_user_id FROM nodes WHERE network_id = ?1 AND owner_user_id IS NOT NULL ORDER BY alias, node_id", netId,
+          ).filter((n) => owners.has(n.owner_user_id!));
+          const nodes = rows.map((n) => {
+            const session = db.get<{ status: string | null; last_seen_at: string | null }>(
+              "SELECT status, last_seen_at FROM sessions WHERE node_id = ?1 AND network_id = ?2 ORDER BY last_seen_at DESC LIMIT 1", n.node_id, netId,
+            );
+            const h = n.alias ? readNodeHealth(netId, n.alias) : null;
+            return {
+              node_id: n.node_id, alias: n.alias, display_name: n.display_name, owner_user_id: n.owner_user_id,
+              status: session?.status ?? "offline", last_seen_at: session?.last_seen_at ?? null,
+              health: h?.health ?? null, degraded: degradedLayers(h?.health).map((l) => ({ layer: l.layer, label: l.label, reason: l.reason })),
+            };
+          });
+          return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, nodes }));
+        }
+        // 部门项目授权:只有 owner / admin(和按人授权一样)。
+        if (!canManage) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+        if (req.method === "GET") {
+          return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, project_grants: listDepartmentProjectGrants(netId, deptId).map(({ project_id, can_edit }) => ({ project_id, can_edit })) }));
+        }
+        if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+        let grantBody: Record<string, unknown> = {};
+        try { const b = await req.json(); grantBody = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+        const r = replaceDepartmentProjectGrants(netId, deptId, grantBody.project_grants, resolved.user.user_id);
+        if (!r.ok) return withCors(req, Response.json({ ok: false, error: r.error, ...(r.detail ? { detail: r.detail } : {}) }, { status: r.status }));
+        auditDepartment(resolved.user, "department_project_grants_set", netId, JSON.stringify({ id: deptId, project_grants: r.project_grants }));
+        // 子树里的人看见的卡变了:断开实时流让它按新权限重连。
+        for (const uid of membersIn(netId, subtree)) closeUserStreamsInNetwork(netId, uid);
+        return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, project_grants: r.project_grants }));
+      }
       if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
-      if (!canManage) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+      if (!canManage && !isHead) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
       let body: Record<string, unknown> = {};
       if (req.method !== "DELETE") {
         try { const b = await req.json(); body = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
@@ -1749,27 +1803,66 @@ return Bun.serve({
         const { status, ...rest } = r;
         return withCors(req, Response.json(rest, { status: r.ok ? okStatus : status ?? 400 }));
       };
+      // 负责人的写:只在本部门子树里。部门 / 上级不存在的情况交给 departments.ts 回原来的 404 / 400。
+      const exists = (id: unknown) => typeof id === "string" && departmentSubtree(netId, id).size > 0;
+      const blank = (v: unknown) => v === undefined || v === null || v === "";
+      const inManaged = (id: unknown) => typeof id === "string" && head.managed.has(id);
+      const leaderOk = (v: unknown) => blank(v) || (typeof v === "string" && membersIn(netId, head.managed).has(v));
+      const via = canManage ? "admin" : "leader";
+      // 组织架构变了,负责人们的「本部门」跟着变:断开他们(和被调动的人)的实时流,按新权限重连。
+      const leadersBefore = departmentLeaders(netId);
+      const kick = (extra: string[] = []) => { for (const uid of new Set([...leadersBefore, ...departmentLeaders(netId), ...extra])) closeUserStreamsInNetwork(netId, uid); };
       if (memberDeptMatch) {
         if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
         const targetUid = decodeURIComponent(memberDeptMatch[2]);
+        if (!canManage) {
+          // 调动只在子树内:人原来在本部门(含下级),目标也在本部门。调进 / 调出(含「未分配」)归管理员。
+          const current = db.get<{ department_id: string | null }>("SELECT department_id FROM network_members WHERE network_id = ?1 AND user_id = ?2", netId, targetUid);
+          if (current && (!inManaged(current.department_id) || (!inManaged(body.department_id) && (blank(body.department_id) || exists(body.department_id))))) return scopeDenied();
+        }
         const r = setMemberDepartment(netId, targetUid, body.department_id);
-        if (r.ok) auditDepartment(resolved.user, "member_department_set", netId, `${targetUid} → ${r.department_id ?? "(unassigned)"}`);
+        if (r.ok) {
+          auditDepartment(resolved.user, "member_department_set", netId, `${targetUid} → ${r.department_id ?? "(unassigned)"}${via === "leader" ? " via=leader" : ""}`);
+          kick([targetUid]);
+        }
         return reply(r);
       }
       const deptId = deptMatch![2] ? decodeURIComponent(deptMatch![2]) : null;
+      const tag = (detail: Record<string, unknown>) => JSON.stringify(via === "leader" ? { ...detail, via } : detail);
       if (!deptId && req.method === "POST") {
+        if (!canManage) {
+          // 只能建在本部门(含下级)下面;建顶层部门归管理员。新部门的负责人必须是本部门成员。
+          if (blank(body.parent_id) || (exists(body.parent_id) && !inManaged(body.parent_id))) return scopeDenied();
+          if (!leaderOk(body.leader_user_id)) return scopeDenied();
+        }
         const r = createDepartment(netId, resolved.user.user_id, body);
-        if (r.ok) auditDepartment(resolved.user, "department_created", netId, JSON.stringify({ id: r.department.id, name: r.department.name, parent_id: r.department.parent_id }));
+        if (r.ok) {
+          auditDepartment(resolved.user, "department_created", netId, tag({ id: r.department.id, name: r.department.name, parent_id: r.department.parent_id }));
+          kick();
+        }
         return reply(r, 201);
       }
       if (deptId && req.method === "PATCH") {
+        if (!canManage && exists(deptId)) {
+          // 自己负责的那个部门(名字 / 上级 / 负责人)归上一级负责人或管理员;下级部门只能在子树里挪。
+          if (!head.strict.has(deptId)) return scopeDenied();
+          if (body.parent_id !== undefined && (blank(body.parent_id) || (exists(body.parent_id) && !inManaged(body.parent_id)))) return scopeDenied();
+          if (body.leader_user_id !== undefined && !leaderOk(body.leader_user_id)) return scopeDenied();
+        }
         const r = updateDepartment(netId, deptId, body);
-        if (r.ok) auditDepartment(resolved.user, "department_updated", netId, JSON.stringify({ id: deptId, ...body }));
+        if (r.ok) {
+          auditDepartment(resolved.user, "department_updated", netId, tag({ id: deptId, ...body }));
+          kick();
+        }
         return reply(r);
       }
       if (deptId && req.method === "DELETE") {
+        if (!canManage && exists(deptId) && !head.strict.has(deptId)) return scopeDenied();
         const r = deleteDepartment(netId, deptId);
-        if (r.ok) auditDepartment(resolved.user, "department_deleted", netId, deptId);
+        if (r.ok) {
+          auditDepartment(resolved.user, "department_deleted", netId, via === "leader" ? `${deptId} via=leader` : deptId);
+          kick();
+        }
         return reply(r as { ok: boolean; status?: number } & Record<string, unknown>);
       }
       return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
