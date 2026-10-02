@@ -107,16 +107,18 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `list_host_supervisors` | List host_supervisor daemons in this network, with online status |
 | `list_my_children` | Daemon pulls the list of children it spawned |
 
-**Providers & secret vault — owner/admin** · 7
+**Providers & secret vault — owner/admin** · 9
 
 | Tool | What it does |
 |------|------|
 | `list_providers` | List providers and models (never returns secret values) |
 | `upsert_provider` | Create or update a provider |
+| `update_provider` | Edit an existing provider's name / base_url / models / enabled (at least one; vendor, secret and network are immutable); admin+ |
 | `list_network_secrets` | List vault key NAMES only, never values (RFC-028) |
 | `upsert_network_secret` | Write or replace a vault secret (AES-GCM encrypted) |
 | `probe_provider_model` | Dispatch a connectivity probe to a daemon |
 | `get_probe_request` | Daemon pulls a pending probe request |
+| `ack_probe_request` | Daemon reports a probe result (strict whitelist: exactly 4 fields, any extra one is `-32602`) |
 | `get_probe_results` | Query probe history, optionally filtered by provider/model/daemon |
 
 **Internal signals — called by agent-node** · 3

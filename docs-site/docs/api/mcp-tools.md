@@ -104,16 +104,18 @@ CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `list_host_supervisors` | 列本网络的 host_supervisor daemon（含在线状态） |
 | `list_my_children` | daemon 拉取自己派生的子节点清单 |
 
-**Provider 与密钥金库（owner/admin）** · 7 个
+**Provider 与密钥金库（owner/admin）** · 9 个
 
 | 工具 | 说明 |
 |------|------|
 | `list_providers` | 列本网络 provider 与模型（从不返回密钥值） |
 | `upsert_provider` | 新建或更新 provider |
+| `update_provider` | 改已有 provider 的名称 / base_url / 模型 / 启停（至少一项；vendor、密钥、网络不可改），admin 以上 |
 | `list_network_secrets` | 列金库密钥**名**（从不返回值），RFC-028 |
 | `upsert_network_secret` | 写入或替换金库密钥值（AES-GCM 加密） |
 | `probe_provider_model` | 向 daemon 派连通性探测 |
 | `get_probe_request` | daemon 拉取待处理的探测请求 |
+| `ack_probe_request` | daemon 回报探测结果（严格白名单：只收 4 个字段，多一个就 `-32602`） |
 | `get_probe_results` | 查探测历史（可按 provider/model/daemon 过滤） |
 
 **内部信号（agent-node 自动调用）** · 3 个
