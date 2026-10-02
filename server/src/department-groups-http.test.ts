@@ -185,20 +185,19 @@ describe("who can read", () => {
 
 describe("deleting a department unlinks its group", () => {
   test("group and members stay with department_id = null; the id can get a fresh group later", async () => {
-    const tmp = (await send(U.owner.token, "POST", D(), { name: "临时项目组", id: "dept_tmp_dg" })).body.department.id as string;
-    const place = (dept: string | null) => send(U.owner.token, "PUT", `/api/networks/${NET}/members/${U.carol.id}/department`, { department_id: dept });
-    expect((await place(tmp)).status).toBe(200);
+    // carol 当负责人但不放进部门:部门是空的(能删),而她在 roster 里。(第 2 个 PR 起调出部门会被同步移出群,
+    // 所以「删部门时群里还有人」只会是负责人或手动拉的人。)
+    const tmp = (await send(U.owner.token, "POST", D(), { name: "临时项目组", id: "dept_tmp_dg", leader_user_id: U.carol.id })).body.department.id as string;
     const created = await send(U.owner.token, "POST", D(`/${tmp}/group`), {});
     expect(created.status).toBe(201);
     expect(ids(created.body.members)).toEqual([U.carol.id]);
-    expect((await place(null)).status).toBe(200);
     expect((await send(U.owner.token, "DELETE", D(`/${tmp}`))).status).toBe(200);
 
     const after = await send(U.owner.token, "GET", CG(`/${created.body.group.id}`));
     expect(after.status).toBe(200);
     expect(after.body.group.department_id).toBe(null);
     expect(ids(after.body.members)).toEqual([U.carol.id]);
-    // 解除关联后,carol 仍是这个群的成员(本 PR 不做自动退出)。
+    // 解除关联后不再对账:carol 仍是这个群的成员(她已不是任何部门的负责人)。
     expect((await send(U.carol.token, "GET", CG(`/${created.body.group.id}`))).status).toBe(200);
 
     // 同一个部门 id 再建:不被已解除关联的旧群挡住(唯一索引允许多个 NULL)。

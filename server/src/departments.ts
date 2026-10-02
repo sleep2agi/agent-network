@@ -12,7 +12,10 @@
 
 import { db, logAudit } from "./db.js";
 import { deleteDepartmentGrants, deleteDepartmentGrantsForNetwork } from "./department-heads.js";
-import { deleteChatGroupsForNetwork, unlinkDepartmentGroup } from "./department-groups.js";
+import { deleteChatGroupsForNetwork, removeMemberFromChatGroups, syncDepartmentGroups, unlinkDepartmentGroup } from "./department-groups.js";
+
+// auth.ts 的 removeNetworkMember 从这里拿(auth.ts 只 import departments.js 一行,文档钉着它的行号)。
+export { removeMemberFromChatGroups };
 
 try { db.exec("ALTER TABLE network_members ADD COLUMN department_id TEXT"); } catch {}
 db.exec(`
@@ -161,10 +164,14 @@ export function createDepartment(networkId: string, actor: string, body: Record<
       ...(parentId === null ? [networkId] : [networkId, parentId]),
     )?.n ?? 0)
     : body.sort as number;
-  db.run(
-    "INSERT INTO network_departments (network_id, department_id, name, parent_id, leader_user_id, sort, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-    [networkId, id, name, parentId, leader, sort, actor],
-  );
+  db.transaction(() => {
+    db.run(
+      "INSERT INTO network_departments (network_id, department_id, name, parent_id, leader_user_id, sort, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+      [networkId, id, name, parentId, leader, sort, actor],
+    );
+    // RFC-042 §4:新部门带负责人 → 上级部门群的 roster 多了这个负责人。没有负责人的新部门是空的,roster 不变。
+    if (leader !== null) syncDepartmentGroups(networkId);
+  });
   return { ok: true, department: publicOne(networkId, id) };
 }
 
@@ -199,10 +206,14 @@ export function updateDepartment(networkId: string, id: string, body: Record<str
   }
   if (!touched) return fail(400, "empty_patch");
   if ((name !== cur.name || parentId !== cur.parent_id) && siblingNameTaken(networkId, parentId, name, id)) return fail(409, "department_name_taken");
-  db.run(
-    "UPDATE network_departments SET name = ?3, parent_id = ?4, leader_user_id = ?5, sort = ?6, updated_at = datetime('now') WHERE network_id = ?1 AND department_id = ?2",
-    [networkId, id, name, parentId, leader, sort],
-  );
+  db.transaction(() => {
+    db.run(
+      "UPDATE network_departments SET name = ?3, parent_id = ?4, leader_user_id = ?5, sort = ?6, updated_at = datetime('now') WHERE network_id = ?1 AND department_id = ?2",
+      [networkId, id, name, parentId, leader, sort],
+    );
+    // RFC-042 §4:改上级(子树变了)/ 换负责人 → 同一事务对账部门群。只改名 / 排序不影响 roster。
+    if (parentId !== cur.parent_id || leader !== cur.leader_user_id) syncDepartmentGroups(networkId);
+  });
   return { ok: true, department: publicOne(networkId, id) };
 }
 
@@ -218,6 +229,8 @@ export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: s
     deleteDepartmentGrants(networkId, id);
     // RFC-042:部门群解除关联(群和成员、以后的聊天记录都留着),不删。
     unlinkDepartmentGroup(networkId, id);
+    // 删掉的部门的负责人可能还在上级部门群的 roster 里(负责人不必在本部门):对账一次。解除关联的群不再对账。
+    syncDepartmentGroups(networkId);
   });
   return { ok: true, deleted: id };
 }
@@ -227,7 +240,11 @@ export function setMemberDepartment(networkId: string, userId: string, departmen
   if (!isMember(networkId, userId)) return fail(404, "member_not_found");
   const dept = departmentId === null || departmentId === "" ? null : departmentId;
   if (dept !== null && (typeof dept !== "string" || !one(networkId, dept))) return fail(400, "department_not_found");
-  db.run("UPDATE network_members SET department_id = ?3 WHERE network_id = ?1 AND user_id = ?2", [networkId, userId, dept]);
+  db.transaction(() => {
+    db.run("UPDATE network_members SET department_id = ?3 WHERE network_id = ?1 AND user_id = ?2", [networkId, userId, dept]);
+    // RFC-042 §4:调进 / 调出 → 同一事务对账部门群(manual 行不动)。
+    syncDepartmentGroups(networkId);
+  });
   return { ok: true, user_id: userId, department_id: dept as string | null };
 }
 
