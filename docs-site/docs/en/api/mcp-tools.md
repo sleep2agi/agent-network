@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-CommHub Server registers **69** MCP Tools, all called through `POST /mcp` (Streamable HTTP). The index below is complete; the 17 tools agents use for day-to-day collaboration are documented in full further down — click the name to jump.
+CommHub Server registers **72** MCP Tools, all called through `POST /mcp` (Streamable HTTP). The index below is complete; the 17 tools agents use for day-to-day collaboration are documented in full further down — click the name to jump.
 
 ## Complete tool index
 
@@ -128,7 +128,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `mark_tasks_runtime_submitted` | Internal agent-node signal: which task bodies reached the runtime |
 
 
-**Requirements / task board (usable by agents, see [below](#requirements-task-board))** · 7
+**Requirements / task board (usable by agents, see [below](#requirements-task-board))** · 10
 
 | Tool | What it does |
 |------|------|
@@ -139,6 +139,9 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `requirements_checklist_toggle` | Set one checklist item done / not done; only that item is written |
 | `requirements_upsert_by_external_ref` | Idempotent sync by `external_ref` (e.g. `github:owner/repo#123`): create if missing, patch if present |
 | `projects_list` | List the network's projects (id, name, color, sort, archived) |
+| `projects_create` | Create a project (name 1–40 characters, unique in the network; optional color / sort), same as the app's 管理项目 → 新建; task-scoped members and viewers get 403 |
+| `projects_update` | Rename / recolour / reorder a project, or `archived: true / false` to archive / unarchive; only the fields you pass change; same permissions |
+| `requirements_events` | Read the task activity timeline (field-level changes: who, when, old → new, newest first); `requirement_id` (`req_…` or `"#N"`) for one task, `since` / `limit` / `cursor` to page; same visibility as `requirements_list` |
 
 ---
 

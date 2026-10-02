@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-CommHub Server 注册 **69 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
+CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
 
 ## 完整工具索引
 
@@ -125,7 +125,7 @@ CommHub Server 注册 **69 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `mark_tasks_runtime_submitted` | agent-node 内部信号：标记已提交给运行时的任务 |
 
 
-**需求池 / 任务看板（Agent 可用，详见[下文](#需求池-任务看板)）** · 7 个
+**需求池 / 任务看板（Agent 可用，详见[下文](#需求池-任务看板)）** · 10 个
 
 | 工具 | 说明 |
 |------|------|
@@ -136,6 +136,9 @@ CommHub Server 注册 **69 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `requirements_checklist_toggle` | 把一个子任务设为完成 / 未完成，只写这一项 |
 | `requirements_upsert_by_external_ref` | 按 `external_ref`（如 `github:owner/repo#123`）幂等同步：没有就建，有就改 |
 | `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档） |
+| `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；仅相关任务的成员和 viewer 403 |
+| `projects_update` | 改项目的名字 / 颜色 / 排序，或 `archived: true / false` 归档 / 取消归档；只改传了的字段，权限同上 |
+| `requirements_events` | 读任务的动态（字段级改动流水：谁、何时、旧值 → 新值，从新到旧）；`requirement_id`（`req_…` 或 `"#N"`）只看一条，`since` / `limit` / `cursor` 翻页；可见范围同 `requirements_list` |
 
 ---
 

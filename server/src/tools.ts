@@ -5888,9 +5888,66 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_list",
-    "List requirement projects in your network (id, name, color, sort, archived).",
+    "List requirement projects in your network (id, name, color, sort, archived). Manage them with projects_create / projects_update.",
     { network_id: z.string().max(200).optional() },
     async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
+  );
+
+  // Agent parity (app task audit 2026-10-02 M3): what people do under 管理项目 and the task 动态 timeline. Both go
+  // through the same REST handlers as the app, so every permission check is the app's own: project management needs
+  // write access and is refused to 「仅相关任务」(task-scoped) members; events use the task list's visibility.
+  server.tool(
+    "projects_create",
+    "Create a requirement project in your network (same as 管理项目 → 新建 in the app). name 1–40 characters, unique in the network; color #RRGGBB (default: next palette colour); sort integer. Returns { project }. Refused (403) for task-scoped members and read-only roles.",
+    {
+      network_id: z.string().max(200).optional(),
+      name: z.string().min(1).max(40),
+      color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      sort: z.number().int().optional(),
+    },
+    async (args) => requirementsCall("POST", "/api/requirements/projects", args.network_id, pick(args, ["name", "color", "sort"])),
+  );
+
+  server.tool(
+    "projects_update",
+    "Rename, recolour, reorder, archive or unarchive a requirement project (same as 管理项目 in the app). Only the fields you pass change. archived=true hides it from pickers (its tasks keep project_id); archived=false brings it back. Returns { project }. Refused (403) for task-scoped members and read-only roles.",
+    {
+      network_id: z.string().max(200).optional(),
+      id: z.string().min(1).max(200).describe("project id (proj_…), from projects_list"),
+      name: z.string().min(1).max(40).optional(),
+      color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      sort: z.number().int().optional(),
+      archived: z.boolean().optional(),
+    },
+    async (args) => requirementsCall("PATCH", `/api/requirements/projects/${encodeURIComponent(args.id)}`, args.network_id, pick(args, ["name", "color", "sort", "archived"])),
+  );
+
+  server.tool(
+    "requirements_events",
+    "Read the task activity timeline (the app's 动态): field-level changes — who, when, old → new — newest first. Pass requirement_id (req_… or \"#N\") for one task, or omit it for the whole network. since (ISO) = only changes after it; limit 1–500 (default 200); next_cursor → pass as cursor for the next page; server_time → use as the next since. Same visibility as requirements_list: tasks you can't see (and hidden Agents) are left out.",
+    {
+      network_id: z.string().max(200).optional(),
+      requirement_id: z.string().min(1).max(200).optional(),
+      since: z.string().max(40).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+      cursor: z.string().max(20).optional(),
+    },
+    async (args) => {
+      let card = args.requirement_id;
+      // "#N" → the card's id, resolved exactly like requirements_get (same scope; a card you can't see is a 404 here too).
+      if (card && /^#\d+$/.test(card)) {
+        const got = await requirementsCall("GET", `/api/requirements/${encodeURIComponent(card)}`, args.network_id);
+        const parsed = JSON.parse(got.content[0].text) as { requirement?: { id?: string } };
+        if (!parsed.requirement?.id) return got;
+        card = parsed.requirement.id;
+      }
+      const q = new URLSearchParams();
+      if (card) q.set("requirement_id", card);
+      if (args.since) q.set("since", args.since);
+      if (args.limit !== undefined) q.set("limit", String(args.limit));
+      if (args.cursor) q.set("cursor", args.cursor);
+      return requirementsCall("GET", `/api/requirements/events${q.size ? `?${q}` : ""}`, args.network_id);
+    },
   );
 }
 
