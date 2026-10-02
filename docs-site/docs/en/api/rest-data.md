@@ -52,6 +52,13 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 The `summary` field is a count aggregated by status ([`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)): the `working` bucket collapses `working / blocked / error / waiting_input / running / busy`; `offline` is sessions whose `updated_at` is older than 10 minutes (the server recomputes this on every GET and writes back to the DB); everything else counts as `idle`.
 
+**Node health** (Hub `0.9.0-preview.84`+, see [health and degraded refusal](/en/guide/codex-copresence#health)):
+
+- Each row carries `health` (the node's layered health `{bridge, app_server, tui, model_auth}` reported within the last 10 minutes, or `null` when absent or stale; `null` means "unknown", not healthy) and `health_observed_ms_ago` (the report's age in milliseconds).
+- From Hub `0.9.0-preview.86`, a row whose node has a layer known to be down also carries `degraded: [{ layer, label, reason }]` (also in the `light=1` projection). Healthy and unknown nodes have **no** such field, so the response is byte-identical to before. New tasks to a node with `degraded` are refused (`node_degraded`, see `POST /api/task` below).
+
+**ETag / 304** (Hub `0.9.0-preview.88`+): every response carries a strong `ETag` (a hash of the body) and `Cache-Control: private, no-cache`. Send `If-None-Match: <last ETag>` and, if nothing changed, the Hub answers **304** with an empty body; reuse the previous body. Desktop/mobile app `0.2.194` reads this way. Older clients that send no `If-None-Match` still get 200 with the full body.
+
 ---
 
 ### GET /api/tasks
@@ -1072,6 +1079,7 @@ token in the query string.
 | 400 | `network_id required for user token when multiple networks are available` | utok\_ caller has multiple networks; must specify `network_id` |
 | 403 | `access denied to requested network` | utok\_ caller is not a member of `network_id` |
 | 403 | `permission_denied` | Role is insufficient (viewer cannot write) |
+| 409 | `node_degraded` | The target's health report says a layer is down (Hub `0.9.0-preview.86`+). The body has `layers[]` (`layer` / `label` / `reason` / `hint`), `hint`, `health_observed_ms_ago` and `force_allowed`. A user token may send `"force": true` in the body to dispatch anyway; a node token may not. See [health and degraded refusal](/en/guide/codex-copresence#health) |
 
 A `new_task` SSE event is pushed to the target alias on success.
 

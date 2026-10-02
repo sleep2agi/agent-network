@@ -16,6 +16,7 @@
 | `send_task` 返回 `ok` 而不是 `alias_offline` | 中等 | 说明路由通、消息已入队。**它不说明有人会去处理。** |
 | `status = offline` | 中等（不是结论） | 比 `idle` 有信息，但**不足以判定它死了**。至少有一条路径会把一个活着的节点标成 offline，见下。 |
 | `status = blocked` | 无效（比 `idle` 还弱） | 一个 `blocked` 节点完全可能在几十秒内答完一条任务。`blocked` 说的是**没有出口**，不是「它停了」，见下。 |
+| `degraded` 字段 / app 里的「降级 · 原因」标签 | 强（只对「它干不了」这一方向） | 来自节点自己最近 10 分钟内的分层健康报告：App Server 握不上手、共存 TUI 不在、或模型登录失效。有它就基本确定这时派过去的活不会被执行（Hub `0.9.0-preview.86` 起直接拒收，`node_degraded`）。**没有它不说明健康**：老节点、非 `codex-app-server` 节点、报告过期都不会带这个字段。见[健康与降级](/guide/codex-copresence#health)。 |
 | 它自己回了一句话 | **硬证据** | 这是唯一与观察者视角无关的信号。 |
 
 **结论：只有最后一格算数。** 前四格全绿也可能是一个死节点；前四格全灰，它也可能只是
@@ -96,8 +97,10 @@ commhub_send_task(alias="<节点>", task="收到请只回一句 `git rev-parse -
 
 ## 这一页不回答什么
 
-它不回答「为什么坏了」，也不提供自愈。节点级的崩溃自愈目前**没有**内置机制
-（Hub 有看门狗，节点没有），相关讨论见
+它不回答「为什么坏了」，也不提供自愈。节点级的自愈目前只有一块：`codex-app-server` 节点的
+App Server 看门狗（agent-node `2.5.0-preview.95` 起，app-server 死了或卡死时按原会话重新拉起，共存节点只在 Linux 上，
+见[健康与降级](/guide/codex-copresence#health)）。bridge 进程本身崩溃的自愈仍然**没有**内置机制，
+相关讨论见
 [issue #534](https://github.com/sleep2agi/agent-network/issues/534)；
 「失败后仍报 idle」那一格见
 [issue #811](https://github.com/sleep2agi/agent-network/issues/811)。

@@ -52,6 +52,13 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 `summary` 字段是按 status 聚合的计数（[`server/src/server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)）：`working` 类把 `working / blocked / error / waiting_input / running / busy` 都归一进去；`offline` 类是 server 端 `updated_at` 落后 10 分钟的 session（每次 GET 实时计算并写回 DB）；其他算 `idle`。
 
+**节点健康**（Hub `0.9.0-preview.84` 起，见[健康与降级](/guide/codex-copresence#health)）：
+
+- 每行带 `health`（节点最近 10 分钟内上报的分层健康 `{bridge, app_server, tui, model_auth}`，没有或已过期为 `null`；`null` 表示「不知道」，不表示健康）和 `health_observed_ms_ago`（报告的年龄，毫秒）。
+- Hub `0.9.0-preview.86` 起，某一层确知坏了时，这一行再带 `degraded: [{ layer, label, reason }]`（`light=1` 的精简投影里也有）。不降级、不知道时**没有**这个字段，响应与以前逐字节相同。派给带 `degraded` 的节点的新任务会被拒（`node_degraded`，见下面的 `POST /api/task`）。
+
+**ETag / 304**（Hub `0.9.0-preview.88` 起）：每个响应带强 `ETag`（正文的哈希）和 `Cache-Control: private, no-cache`。请求带上 `If-None-Match: <上次的 ETag>`，数据没变时返回 **304** 空体，客户端沿用上次的正文。桌面 / 手机 app `0.2.194` 起这样读。不带 `If-None-Match` 的旧客户端照旧拿到 200 和完整正文。
+
 ---
 
 ### GET /api/tasks
@@ -1143,6 +1150,7 @@ SSE 连接数，以及权威 runtime submission/consumption 时间戳。它不�
 | 400 | `network_id required for user token when multiple networks are available` | utok\_ 调用方有多个 network，必须显式指定 `network_id` |
 | 403 | `access denied to requested network` | utok\_ 调用方不是 `network_id` 成员 |
 | 403 | `permission_denied` | 角色不足（viewer 不能写）|
+| 409 | `node_degraded` | 目标节点的健康报告说某一层坏了（Hub `0.9.0-preview.86` 起）。响应带 `layers[]`（`layer` / `label` / `reason` / `hint`）、`hint`、`health_observed_ms_ago`、`force_allowed`。用户令牌可在请求体里带 `"force": true` 强制派发；节点令牌不行。见[健康与降级](/guide/codex-copresence#health) |
 
 **不**写 audit log（[`/api/task` 处理函数 server.ts](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 没有 `logAudit` 调用，跟 `POST /api/networks` 的「不写」一致）；成功后给 target alias 推送 `new_task` SSE 事件。
 
