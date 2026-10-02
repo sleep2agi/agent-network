@@ -69,14 +69,51 @@ export function classifyModelAuthError(text: string): Exclude<ModelAuthState, "o
 
 export class ModelAuthTracker {
   private state: ModelAuthState = "unknown";
+  private failedAtMs: number | null = null;
+  constructor(private readonly now: () => number = () => Date.now()) {}
   get(): ModelAuthState { return this.state; }
   /** 一次模型调用成功 → ok。 */
-  noteSuccess(): void { this.state = "ok"; }
+  noteSuccess(): void { this.state = "ok"; this.failedAtMs = null; }
   /** 一次模型调用失败:只有登录类错误才改状态;其他失败(超时、工具报错)说明不了登录态。 */
   noteError(text: string): void {
     const cls = classifyModelAuthError(text);
-    if (cls) this.state = cls;
+    if (cls) { this.state = cls; this.failedAtMs = this.now(); }
   }
+  /**
+   * 本节点 CODEX_HOME 里的 auth.json 在登录失败**之后**被改写过 = 有人在这台节点上重新登录了
+   * → 退回 unknown(不再拒活,下一次模型调用的结果说了算)。只看本节点自己的文件;
+   * 这里不复制、不切换、不从别的节点搬任何凭据。
+   */
+  reconsiderAfterLogin(authFileMtimeMs: number | null): boolean {
+    if (!modelAuthBlocksWork(this.state) || this.failedAtMs === null || authFileMtimeMs === null) return false;
+    if (authFileMtimeMs <= this.failedAtMs) return false;
+    this.state = "unknown";
+    this.failedAtMs = null;
+    return true;
+  }
+}
+
+/**
+ * 登录态坏了(revoked / expired)的节点**不能接活**:任何一轮都会以同一个登录错误失败。
+ * 运维上 refresh token 被作废是可接受的(人会定期重新登录,周期不固定)——要的是**报出来**,
+ * 而不是自动换号、拷别的节点的 auth.json、或重新 stage 凭据。
+ */
+export function modelAuthBlocksWork(state: ModelAuthState): boolean {
+  return state === "revoked" || state === "expired";
+}
+
+export function describeModelAuthBlock(state: ModelAuthState, codexHome: string | undefined): string {
+  const where = codexHome ? `this node's CODEX_HOME (${codexHome})` : "this node's CODEX_HOME";
+  const how = codexHome ? ` — log in again there: CODEX_HOME=${codexHome} codex login` : " — log in again for this node";
+  return `model login ${state}: ${where} needs a fresh login${how}. Not taking work until then (do not copy another node's auth.json).`;
+}
+
+/** 登录态坏时把 idle 报成 error(带原因);working 等其他状态原样,不打断正在跑的那一轮。 */
+export function gateStatusOnModelAuth(
+  status: string, task: string | undefined, state: ModelAuthState, codexHome: string | undefined,
+): { status: string; task: string | undefined } {
+  if (status === "idle" && modelAuthBlocksWork(state)) return { status: "error", task: describeModelAuthBlock(state, codexHome) };
+  return { status, task };
 }
 
 // ── app_server:ws 握手 ─────────────────────────────────────────────────────
@@ -195,6 +232,8 @@ export interface CodexHealthMonitorOptions {
   probeTui?: (session: string) => TuiHealth;
   /** 任一层的 ok 翻转时回调(用于立刻补一次上报,而不是等 3 分钟心跳)。 */
   onChange?: (report: NodeHealthReport) => void;
+  /** 本节点 CODEX_HOME/auth.json 的 mtime(ms);用于发现「已重新登录」。没有就 null。 */
+  authFileMtimeMs?: () => number | null;
 }
 
 export function healthSignature(r: NodeHealthReport): string {
@@ -222,6 +261,7 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
       const url = opts.appServerUrl();
       appServer = url ? await opts.probeAppServer(url) : undefined;
       if (opts.tuiSession) tui = (opts.probeTui ?? probeTmuxTui)(opts.tuiSession);
+      if (opts.authFileMtimeMs) opts.modelAuth.reconsiderAfterLogin(opts.authFileMtimeMs());
     } catch (e: any) {
       appServer = { ok: false, rtt_ms: null, last_error: String(e?.message ?? e).slice(0, 200) };
     } finally {

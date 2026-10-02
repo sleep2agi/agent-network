@@ -8,6 +8,9 @@ import {
   classifyModelAuthError,
   classifyTuiPane,
   createCodexHealthMonitor,
+  describeModelAuthBlock,
+  gateStatusOnModelAuth,
+  modelAuthBlocksWork,
   isLoopbackWsUrl,
   ModelAuthTracker,
   parseTmuxPanes,
@@ -185,5 +188,71 @@ describe("#448 health monitor", () => {
     });
     const r = await m.tick();
     expect(r.app_server).toEqual({ ok: false, rtt_ms: null, last_error: "boom" });
+  });
+});
+
+describe("#448 owner constraint: a node whose own login is revoked/expired reports it cannot take work", () => {
+  const HOME_DIR = "/w/.anet/nodes/mine/codex-home";
+
+  test("revoked / expired block work; ok / unknown do not", () => {
+    expect(modelAuthBlocksWork("revoked")).toBe(true);
+    expect(modelAuthBlocksWork("expired")).toBe(true);
+    expect(modelAuthBlocksWork("ok")).toBe(false);
+    expect(modelAuthBlocksWork("unknown")).toBe(false);
+  });
+
+  test("idle is reported as error with a message naming THIS node's CODEX_HOME", () => {
+    const g = gateStatusOnModelAuth("idle", undefined, "revoked", HOME_DIR);
+    expect(g.status).toBe("error");
+    expect(g.task).toContain(`this node's CODEX_HOME (${HOME_DIR}) needs a fresh login`);
+    expect(g.task).toContain(`CODEX_HOME=${HOME_DIR} codex login`);
+  });
+
+  test("a running turn is not relabelled; a healthy login leaves idle alone", () => {
+    expect(gateStatusOnModelAuth("working", "t", "expired", HOME_DIR)).toEqual({ status: "working", task: "t" });
+    expect(gateStatusOnModelAuth("idle", undefined, "ok", HOME_DIR)).toEqual({ status: "idle", task: undefined });
+    expect(gateStatusOnModelAuth("idle", undefined, "unknown", HOME_DIR)).toEqual({ status: "idle", task: undefined });
+  });
+
+  test("the remedy is a fresh login on this node — never copying/switching credentials, never a fixed period", () => {
+    const msg = describeModelAuthBlock("revoked", HOME_DIR);
+    expect(msg).toContain("do not copy another node's auth.json");
+    for (const bad of [/switch/i, /\b7[- ]?day/i, /\bweek/i, /stage/i]) expect(msg).not.toMatch(bad);
+    // 正控:上面的反向断言确实能抓到东西
+    expect("re-stage the token").toMatch(/stage/i);
+  });
+
+  test("re-login on this node (auth.json rewritten after the failure) lifts the block; an older file does not", () => {
+    let t = 1_000;
+    const tr = new ModelAuthTracker(() => t);
+    tr.noteError("refresh token was already used");
+    expect(tr.get()).toBe("revoked");
+    expect(tr.reconsiderAfterLogin(900)).toBe(false);
+    expect(tr.reconsiderAfterLogin(null)).toBe(false);
+    expect(tr.get()).toBe("revoked");
+    expect(tr.reconsiderAfterLogin(1_500)).toBe(true);
+    expect(tr.get()).toBe("unknown");
+  });
+
+  test("monitor: re-login is noticed on the next tick and flips the report", async () => {
+    let t = 1_000;
+    let mtime = 500;
+    const tr = new ModelAuthTracker(() => t);
+    const changes: any[] = [];
+    const m = createCodexHealthMonitor({
+      appServerUrl: () => undefined, modelAuth: tr,
+      probeAppServer: async () => ({ ok: true, rtt_ms: 1, last_error: null }),
+      authFileMtimeMs: () => mtime,
+      onChange: (r) => changes.push(r),
+    });
+    await m.tick();
+    tr.noteError("Your refresh token has expired");
+    m.noteModelAuthMaybeChanged();
+    expect(changes.at(-1).model_auth).toBe("expired");
+    await m.tick();
+    expect(tr.get()).toBe("expired");
+    mtime = 2_000;
+    await m.tick();
+    expect(changes.at(-1).model_auth).toBe("unknown");
   });
 });

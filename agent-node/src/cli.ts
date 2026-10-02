@@ -1188,7 +1188,7 @@ if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && RUNTIME !== "codex-ap
 }
 
 // ── 日志：终端 + 文件 ──
-import { appendFileSync, mkdirSync } from "fs";
+import { appendFileSync, mkdirSync, statSync } from "fs";
 
 // #1019 —— 节点自己的版本号。sessions.version 这一列一直是空的:
 // 服务端早就收(report_status 的 schema 里有 `version`)也早就写
@@ -1203,7 +1203,7 @@ import { appendFileSync, mkdirSync } from "fs";
 //    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
-import { createCodexHealthMonitor, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
 const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
   ? preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)
@@ -1573,10 +1573,14 @@ const register = async () => {
   }
   return result;
 };
-const reportStatus = async (status: string, task?: string) => {
-  lastReportedStatus = { status, task };
+const reportStatus = async (rawStatus: string, rawTask?: string) => {
+  lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();
   const health = currentNodeHealth();
+  // #448 —— 登录态 revoked/expired 的节点不能接活:idle 报成 error 并写明「本节点 CODEX_HOME 要重新登录」。
+  const { status, task } = health
+    ? gateStatusOnModelAuth(rawStatus, rawTask, health.model_auth, NODE_CODEX_HOME)
+    : { status: rawStatus, task: rawTask };
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
     : RUNTIME === "claude"
@@ -3739,6 +3743,11 @@ async function processWithCodexAppServer(
   if (outcome.failed) codexModelAuth.noteError(outcome.replyText);
   else if (!outcome.skipped && !outcome.queued) codexModelAuth.noteSuccess();
   codexHealthMonitor?.noteModelAuthMaybeChanged();
+  // #448 —— 登录类失败要说清楚是**本节点** CODEX_HOME 需要重新登录,别让人去猜或去拷别人的凭据。
+  const authFailure = outcome.failed ? classifyModelAuthError(outcome.replyText) : null;
+  if (authFailure) {
+    throw new Error(`${describeModelAuthBlock(authFailure, NODE_CODEX_HOME)}\n${outcome.replyText.replace(/^codex-app-server 错误:\s*/, "")}`);
+  }
   return codexAppServerReplyOrThrow(outcome);
 }
 
@@ -6958,6 +6967,10 @@ if (RUNTIME === "codex-app-server") {
     probeAppServer: async (url) => {
       const { resolveWebSocketCtor } = await import("./runtime/codex-app-server-client");
       return probeAppServerWs(url, { wsCtor: resolveWebSocketCtor() });
+    },
+    authFileMtimeMs: () => {
+      if (!NODE_CODEX_HOME) return null;
+      try { return statSync(join(NODE_CODEX_HOME, "auth.json")).mtimeMs; } catch { return null; }
     },
     onChange: (report) => {
       log(`[health] app_server=${report.app_server ? (report.app_server.ok ? "ok" : `down(${report.app_server.last_error ?? "?"})`) : "-"} tui=${report.tui ? (report.tui.ok ? "ok" : report.tui.reason) : "-"} model_auth=${report.model_auth}`);
