@@ -54,6 +54,66 @@ Endpoints:
 
 The design and its trade-offs are in RFC-040.
 
+## A node's own permissions
+
+A node's (Agent's) permissions are a subset of its **owner's**, narrowed further by the node's own **mode**. The owner is `nodes.owner_user_id` of the node the token is bound to. For an older token that is not bound to a node, the owner is the user who minted it.
+
+There are three modes. The default is `normal`, so upgrading changes nothing for any node:
+
+| Mode | What the node can do |
+|---|---|
+| `normal` | Same as today. Whether it is narrowed to the owner's permissions depends on the Hub switch (below) |
+| `readonly` | Read, report status, reply to tasks sent to it. Writing tasks, dispatching, broadcasting and managing nodes are refused |
+| `restricted` | Only sees and edits task cards assigned to it: it is the Agent owner, a participant or the creator, plus subtasks of those cards. A card it creates must name itself as the Agent owner. It can dispatch only to Agents granted to its owner. It cannot broadcast, or subscribe to another session's stream or the network stream |
+
+**A mode takes effect as soon as it is set**, regardless of the switch. Only the node's owner, a network owner/admin, or a Hub admin can change it. A node token cannot change its own mode, and neither can a department head:
+
+```
+PUT /api/nodes/{node_id}/permission-mode   {"mode": "normal" | "readonly" | "restricted"}
+```
+
+The response is `{ok, node_id, permission_mode, previous}`, and the change writes the audit entry `node_permission_mode_changed`. Errors:
+
+- A caller who is not a member of the node's network gets 404.
+- A member who is neither the owner nor an owner/admin gets 403 `permission_denied`.
+- A node token gets 403 `user_token_required`.
+- An unknown mode gets 400 `invalid_permission_mode`.
+
+Every row of `GET /api/nodes` gains `permission_mode`.
+
+**Narrowing in normal mode is logged first and enforced later.** It is controlled by the Hub environment variable `COMMHUB_NODE_PERMISSIONS`:
+
+| Value | Behaviour |
+|---|---|
+| `log` (default) | Allow as before. Each would-be denial is merged per (node, route, reason, hour) into `node_permission_log` |
+| `enforce` | Log and refuse |
+| `off` | Normal mode is neither evaluated nor logged. Explicit read-only/restricted modes still apply |
+
+Reason codes for normal mode:
+
+- `beyond_owner_visibility`: a task card the owner cannot see or edit.
+- `agent_not_granted_to_owner`: an Agent not granted to the owner.
+- `human_only`: something only people may do (editing another node, creating or updating projects, writing providers or network secrets, reviewing skills).
+- `owner_unknown`: the owner is unknown.
+
+Explicit modes use `mode_readonly` and `mode_restricted_not_assigned`.
+
+A refusal is a 403 over REST; MCP returns the same body:
+
+```json
+{"ok": false, "error": "node_permission_denied", "reason": "mode_readonly", "route": "PATCH /api/requirements/:id", "hint": "…"}
+```
+
+**Report**: a network owner/admin (user token) can see how many times each node would have been blocked. The default window is 7 days:
+
+```
+GET /api/networks/{id}/node-permission-report?since=<ISO time>
+```
+
+The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
+
+See RFC-041 for the design and trade-offs.
+
 ## See also
 
 - [Accounts, Tokens & Roles](/en/guide/account-system)

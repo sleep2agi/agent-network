@@ -924,6 +924,7 @@ send_task({
 | `task not found` | 任务不存在 |
 | `task is terminal` | 任务已是终态，不能操作 |
 | `task status is X, not retryable` | 只有 failed/expired/cancelled 可重试 |
+| `node_permission_denied` | 节点令牌被节点自己的权限拒绝:节点是只读 / 受限模式,或 Hub 开关 `COMMHUB_NODE_PERMISSIONS=enforce` 时超出主人的权限。正文带 `reason`、`route`、`hint`,见 [节点自己的权限](/guide/multi-user#节点自己的权限) |
 
 ## 下一步
 

@@ -99,7 +99,7 @@ export function listProjectGrants(networkId: string, userId: string): ProjectGra
 const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 export const userRefPattern = (userId: string) => `%${likeEscape(`"kind":"user","id":"${userId}"`)}%`;
 
-type CardRow = { network_id: string; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null; project_id: string | null; agent_owner_json?: string | null };
+type CardRow = { network_id: string; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null; project_id: string | null; agent_owner_json?: string | null; parent_id?: string | null };
 const refIs = (json: string | null, userId: string) => !!json && json.includes(`"kind":"user","id":"${userId}"`);
 const ownsCard = (row: CardRow, userId: string) => refIs(row.owner_json, userId);
 const createdCard = (row: CardRow, userId: string) => refIs(row.created_by_json, userId) || (!row.created_by_json && row.created_by === userId);
@@ -126,10 +126,33 @@ function headOf(userId: string, row: CardRow): boolean {
   return !!cards && isDepartmentCard(cards, row);
 }
 
-export type TaskCaller = { userId: string } | null;
+/**
+ * 调用者。userId = 按谁的任务权限判;node(RFC-041,#487)= 节点令牌按**主人**的权限判时带上节点:
+ *   only=false(正常模式、执行开关打开)—— 主人能改的能改,另外「派给这个节点的」在主人看得见时也能改;
+ *   only=true (受限模式)—— 只看、只改派给这个节点的卡(负责 Agent / 参与人 / 它建的,及这些卡的子任务)。
+ */
+export type TaskCaller = { userId: string; node?: { id: string; only: boolean } } | null;
+
+export const nodeRefPattern = (nodeId: string) => `%${likeEscape(`"kind":"node","id":"${nodeId}"`)}%`;
+const nodeRefIs = (json: string | null | undefined, nodeId: string) => !!json && json.includes(`"kind":"node","id":"${nodeId}"`);
+const directlyAssigned = (row: Pick<CardRow, "agent_owner_json" | "participants_json" | "created_by_json">, nodeId: string) =>
+  nodeRefIs(row.agent_owner_json, nodeId) || nodeRefIs(row.participants_json, nodeId) || nodeRefIs(row.created_by_json, nodeId);
+
+/** 这张卡派给了这个节点吗:负责 Agent / 参与人有它 / 它建的,或者父卡是。 */
+export function cardAssignedToNode(row: CardRow, nodeId: string): boolean {
+  if (directlyAssigned(row, nodeId)) return true;
+  if (!row.parent_id) return false;
+  const parent = db.get<{ agent_owner_json: string | null; participants_json: string | null; created_by_json: string | null }>(
+    "SELECT agent_owner_json, participants_json, created_by_json FROM requirements WHERE requirement_id = ?1", row.parent_id);
+  return !!parent && directlyAssigned(parent, nodeId);
+}
 
 /** 看得见这张卡吗。caller=null(节点令牌 / 管理员 / 旧的全局令牌)恒为 true。 */
 export function canSeeTask(caller: TaskCaller, row: CardRow): boolean {
+  if (caller?.node?.only && !cardAssignedToNode(row, caller.node.id)) return false;
+  return canSeeTaskAsUser(caller, row);
+}
+function canSeeTaskAsUser(caller: TaskCaller, row: CardRow): boolean {
   if (!caller) return true;
   const m = memberRow(caller.userId, row.network_id);
   if (!scopedRow(m)) return true;
@@ -141,6 +164,13 @@ export function canSeeTask(caller: TaskCaller, row: CardRow): boolean {
 
 /** 能改这张卡吗(PATCH / 勾子任务)。只对看得见的卡调用。 */
 export function canEditTask(caller: TaskCaller, row: CardRow): boolean {
+  if (caller?.node) {
+    const assigned = cardAssignedToNode(row, caller.node.id) && canSeeTaskAsUser(caller, row);
+    return caller.node.only ? assigned : assigned || canEditTaskAsUser(caller, row);
+  }
+  return canEditTaskAsUser(caller, row);
+}
+function canEditTaskAsUser(caller: TaskCaller, row: CardRow): boolean {
   if (!caller) return true;
   const m = memberRow(caller.userId, row.network_id);
   if (!scopedRow(m)) return true;
@@ -174,7 +204,7 @@ export const PARTICIPANT_EDIT_FIELDS: readonly string[] = ["column", "checklist"
 
 /** 这个调用者是不是「只能以参与人身份改」这张卡(canEditTask 为 false、但他是卡上的参与人)。viewer 不算。 */
 export function canParticipantEditTask(caller: TaskCaller, row: CardRow): boolean {
-  if (!caller) return false;
+  if (!caller || caller.node) return false; // 参与人身份是人的;节点按 canEditTask 判
   const m = memberRow(caller.userId, row.network_id);
   if (!scopedRow(m) || m?.member_role === "viewer") return false;
   return participates(row, caller.userId);
@@ -258,6 +288,14 @@ export function canUseProject(caller: TaskCaller, networkId: string, projectId: 
  * 追加在已经按网络过滤过的 `FROM requirements WHERE …` 后面。
  */
 export function addTaskVisibilityScope(sql: string, params: unknown[], caller: TaskCaller): string {
+  const scoped = addTaskVisibilityScopeAsUser(sql, params, caller);
+  if (!caller?.node?.only) return scoped;
+  // 受限节点:再只留派给它的卡(及其子任务)。
+  const pat = params.push(nodeRefPattern(caller.node.id));
+  const mine = (t: string) => `${t}agent_owner_json LIKE ?${pat} ESCAPE '\\' OR ${t}participants_json LIKE ?${pat} ESCAPE '\\' OR ${t}created_by_json LIKE ?${pat} ESCAPE '\\'`;
+  return `${scoped} AND (${mine("")} OR parent_id IN (SELECT p.requirement_id FROM requirements p WHERE ${mine("p.")}))`;
+}
+function addTaskVisibilityScopeAsUser(sql: string, params: unknown[], caller: TaskCaller): string {
   if (!caller) return sql;
   const scoped = taskScopedNetworks(caller.userId);
   if (!scoped.length) return sql;

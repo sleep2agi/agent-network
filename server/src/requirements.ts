@@ -10,9 +10,10 @@ import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from ".
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
+import { nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, type NodeIdentity, type Verdict } from "./node-permissions.js";
 import {
   addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, deletesAsHeadOnly, headOnlyEditScope, canParticipantEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject, projectUseResolver,
-  isTaskScoped, PARTICIPANT_EDIT_FIELDS, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
+  cardAssignedToNode, isTaskScoped, PARTICIPANT_EDIT_FIELDS, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
 import { notifyLeaderDeleted, notifyParticipantChange } from "./requirement-notify.js";
 import { departmentCardsFor, departmentSubtree } from "./department-heads.js";
@@ -93,10 +94,66 @@ function jsonError(error: string, status: number, ctx?: ErrorContext): Response 
 }
 
 // ── 任务的人员权限(RFC-038 §9,判定在 task-access.ts) ──
-// 节点令牌(Agent)、Hub 管理员、没有身份的旧全局令牌:不受任务权限约束(null)。
+// Hub 管理员、没有身份的旧全局令牌:不受任务权限约束(null)。
+// 节点令牌(RFC-041,#487):受限模式 → 按主人的权限且只碰派给它的卡;执行开关为 enforce → 按主人的权限;
+// 其余(默认 log 下的正常 / 只读节点)→ null,与以前一样(只读的写在 nodeTaskGate 里拒)。
 function taskCaller(ctx: RequirementsRequestContext): TaskCaller {
-  if (!ctx.auth || ctx.isNodeToken || ctx.isAdmin) return null;
+  if (!ctx.auth || ctx.isAdmin) return null;
+  if (ctx.isNodeToken) return nodeTaskCaller(ctx);
   return { userId: ctx.auth.userId };
+}
+
+const nodeIdentities = new WeakMap<RequirementsRequestContext, NodeIdentity | null>();
+function nodeIdent(ctx: RequirementsRequestContext): NodeIdentity | null {
+  if (!ctx.isNodeToken) return null;
+  if (!nodeIdentities.has(ctx)) nodeIdentities.set(ctx, nodeIdentity(ctx.auth?.tokenId, ctx.auth?.networkId));
+  return nodeIdentities.get(ctx) ?? null;
+}
+function nodeTaskCaller(ctx: RequirementsRequestContext): TaskCaller {
+  const id = nodeIdent(ctx);
+  if (!id?.ownerUserId) return null;
+  if (id.mode === "restricted") return { userId: id.ownerUserId, node: { id: id.logKey, only: true } };
+  if (nodePermissionsFlag() === "enforce") return { userId: id.ownerUserId, node: { id: id.logKey, only: false } };
+  return null;
+}
+
+/**
+ * RFC-041 —— 节点的一次任务写(建 / 改 / 勾检查项 / 评论 / upsert)先过这里。row=null 是新建(create 给出目标项目、
+ * 负责 Agent、父卡)。只读 → 必拒;受限 → 不是派给它的必拒;正常 → 主人看不见 / 改不了时按开关记录或拒。
+ */
+function nodeTaskGate(ctx: RequirementsRequestContext, route: string, row: Row | null, create?: { networkId: string; projectId: string | null; agentOwnerJson: string | null; parentId: string | null }): Response | null {
+  const id = nodeIdent(ctx);
+  if (!id) return null;
+  const sample = row ? `#${row.seq ?? "?"} ${row.requirement_id}` : create?.projectId ?? undefined;
+  let verdict: Verdict = null;
+  if (id.mode === "readonly") verdict = { reason: "mode_readonly", sample };
+  else if (id.mode === "restricted") {
+    const nodeRef = JSON.stringify({ kind: "node", id: id.logKey });
+    const parent = create?.parentId ? db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id = ?1`, create.parentId) : undefined;
+    const assigned = row ? cardAssignedToNode(row, id.logKey) : create?.agentOwnerJson === nodeRef || (!!parent && cardAssignedToNode(parent, id.logKey));
+    if (!assigned) verdict = { reason: "mode_restricted_not_assigned", sample };
+  } else if (!id.ownerUserId) verdict = { reason: "owner_unknown", sample };
+  else {
+    const asOwner: TaskCaller = { userId: id.ownerUserId, node: { id: id.logKey, only: false } };
+    const ok = row ? canSeeTask(asOwner, row) && canEditTask(asOwner, row) : canUseProject(asOwner, create!.networkId, create!.projectId);
+    if (!ok) verdict = { reason: "beyond_owner_visibility", sample };
+  }
+  return nodeDecide(id, route, verdict) ? Response.json(nodePermissionDeniedBody(verdict!.reason, route), { status: 403 }) : null;
+}
+
+/** 正常模式的节点读到了主人看不见的卡:只记录(执行时 taskCaller 已按主人收窄,读不到)。主人不受任务范围限制时什么都不做。 */
+function nodeReadNote(ctx: RequirementsRequestContext, route: string, row: Row | null): void {
+  const id = nodeIdent(ctx);
+  if (!id?.ownerUserId || id.mode === "restricted" || nodePermissionsFlag() !== "log" || !isTaskScoped(id.ownerUserId, id.networkId)) return;
+  const asOwner: TaskCaller = { userId: id.ownerUserId };
+  if (row) {
+    if (!canSeeTask(asOwner, row)) nodeDecide(id, route, { reason: "beyond_owner_visibility", sample: `#${row.seq ?? "?"} ${row.requirement_id}` });
+    return;
+  }
+  const all = Number(db.get<{ n: number | string }>("SELECT COUNT(*) AS n FROM requirements WHERE network_id = ?1", id.networkId)?.n ?? 0);
+  const params: unknown[] = [id.networkId];
+  const seen = Number(db.get<{ n: number | string }>(addTaskVisibilityScope("SELECT COUNT(*) AS n FROM requirements WHERE network_id = ?1", params, asOwner), ...params)?.n ?? 0);
+  if (all > seen) nodeDecide(id, route, { reason: "beyond_owner_visibility", sample: `list: ${all - seen} card(s) the owner cannot see` });
 }
 /**
  * 看得见但没权限写:403,并按 (用户, 卡) 每小时最多记一条审计。
@@ -825,6 +882,8 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   const createdAt = new Date().toISOString();
   let people;
   try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId), ctx.strictOwner === true); } catch (e) { return errorFrom(e); }
+  const nodeDenied = nodeTaskGate(ctx, "POST /api/requirements", null, { networkId, projectId, agentOwnerJson: people.agentOwnerJson, parentId });
+  if (nodeDenied) return nodeDenied;
   const actor = JSON.stringify(actorOf(ctx));
   try {
     // 领号、插入、记「新建」这条动态在同一个事务里:插入被唯一索引挡下时,号和动态一起回滚,不留空洞。
@@ -862,6 +921,8 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400, { sent: Object.keys(body), writable: PATCH_FIELDS });
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
   if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+  const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id", row);
+  if (nodeDenied) return nodeDenied;
   const caller = taskCaller(ctx);
   if (!canEditTask(caller, row)) {
     // 参与人:只放状态和检查项;别的字段点名拒绝。不是参与人 → 与今天一样。
@@ -1299,6 +1360,7 @@ function rememberList(key: string, entry: ListCacheEntry): void {
 function listCacheAcl(ctx: RequirementsRequestContext): string | null {
   const caller = taskCaller(ctx);
   if (!caller) return `open:${ctx.isAdmin ? 1 : 0}:${ctx.isNodeToken ? 1 : 0}`;
+  if (caller.node) return null; // 按节点收窄的列表不缓存(模式随时可改)
   if (restrictedNetworkIds(caller.userId).length > 0) return null;
   const members = db.all<Record<string, unknown>>("SELECT * FROM network_members WHERE user_id = ?1 ORDER BY network_id", caller.userId);
   const networks = members.map(m => String(m.network_id));
@@ -1417,6 +1479,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (changes && url.searchParams.get("updated_since") === null) return jsonError("updated_since_required", 400);
     // changes 模式:server_time 取在读表之前,下次拿它当 updated_since,读表期间的写入不会漏(>= 会重复回一次,客户端按 id 覆盖)。
     const serverTime = new Date().toISOString();
+    nodeReadNote(ctx, "GET /api/requirements", null);
     const cacheKey = changes || url.searchParams.get("q") ? null : listCacheKey(ctx);
     const acl = cacheKey ? listCacheAcl(ctx) : null;
     const generation = requirementsGeneration;
@@ -1470,7 +1533,11 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
       return Response.json({ ...data, created: true }, { status: 201 });
     }
     const { external_ref: _ref, network_id: _net, client_id: _client, ...patch } = body;
-    if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(patch, k))) return Response.json({ ok: true, requirement: toPublicFor(ctx, existing), created: false });
+    if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(patch, k))) {
+      // 没有要改的字段 = 读回这张卡:受限节点只能读派给它的(与列表同一个可见范围)。
+      if (!canSeeTask(taskCaller(ctx), existing)) return jsonError("upsert_not_allowed", 403);
+      return Response.json({ ok: true, requirement: toPublicFor(ctx, existing), created: false });
+    }
     const res = patchRequirement(ctx, existing, patch);
     if (res.status !== 200) return res;
     const data = await res.json() as Record<string, unknown>;
@@ -1491,6 +1558,8 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const row = scopedRow(ctx, decodeURIComponent(commentMatch[1]));
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    const nodeDenied = nodeTaskGate(ctx, "POST /api/requirements/:id/comments", row);
+    if (nodeDenied) return nodeDenied;
     const at = new Date().toISOString();
     const event = db.transaction(() => {
       recordRequirementEvents(db, row, JSON.stringify(actorOf(ctx)), [{ kind: "comment", field: null, old: null, new: { text } }], at);
@@ -1508,6 +1577,8 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const row = scopedRow(ctx, decodeURIComponent(itemMatch[1]));
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id/checklist/:item", row);
+    if (nodeDenied) return nodeDenied;
     if (!canEditTask(taskCaller(ctx), row) && !canParticipantEditTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_read_only");
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
     const items = storedChecklist(row.checklist_json);
@@ -1533,6 +1604,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
   const id = decodeURIComponent(match[1]);
   if (req.method === "GET") {
     const row = scopedRow(ctx, id);
+    if (!(row instanceof Response)) nodeReadNote(ctx, "GET /api/requirements/:id", row);
     return row instanceof Response ? row : Response.json({ ok: true, requirement: toPublicFor(ctx, row) });
   }
   if (req.method === "DELETE") {

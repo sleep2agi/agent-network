@@ -24,6 +24,7 @@ import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./r
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
 import { canMessageAgent, isAgentRestricted, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
+import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
@@ -317,6 +318,18 @@ function countNetworkUploads(networkId: string): number {
   }
   return count;
 }
+
+// RFC-041(#487):节点令牌的一次 REST 写 / 订阅先按 node-permissions.ts 判。用户令牌 → null(不判)。
+function restNodeDenied(req: Request, restAuth: { networkId: string | null; tokenId: string | null } | null, route: string, verdictOf: (id: NodeIdentity) => Verdict): Response | null {
+  if (!restAuth?.networkId) return null;
+  const id = nodeIdentity(restAuth.tokenId, restAuth.networkId);
+  if (!id) return null;
+  const verdict = verdictOf(id);
+  return nodeDecide(id, route, verdict) ? withCors(req, Response.json(nodePermissionDeniedBody(verdict!.reason, route), { status: 403 })) : null;
+}
+/** 写别的节点 = 只有人能做;写自己 = 只看模式。 */
+const nodeTargetVerdict = (targetNodeId: string) => (id: NodeIdentity): Verdict =>
+  id.nodeId && id.nodeId === targetNodeId ? writeVerdict(id, targetNodeId) : humanOnlyVerdict(id, targetNodeId);
 
 function userTokenRequired(req: Request): Response {
   return withCors(req, Response.json({ ok: false, error: "user_token_required", message: "this endpoint acts on a user account; node tokens cannot use it" }, { status: 403 }));
@@ -1007,11 +1020,9 @@ return Bun.serve({
     //   1. legacy AUTH_TOKEN (master) → any network
     //   2/3. ntok_ / utok_ → must CURRENTLY be a member of the requested
     //        network. Membership is checked unconditionally — there is NO
-    //        token-bound-network shortcut. removeNetworkMember deletes the
-    //        membership row but does NOT revoke the user's ntok, so the
-    //        network_members lookup IS the revocation mechanism: an ntok
-    //        bound to this network whose owner was removed must lose the
-    //        stream (审查修复 per 通信龙 #461 review, finding 1).
+    //        token-bound-network shortcut (审查修复 per 通信龙 #461 review,
+    //        finding 1). Since #488 removeNetworkMember also revokes the
+    //        user's tokens and resolveToken refuses a non-member's ntok.
     const netEventsMatch = url.pathname.match(/^\/events\/network\/(.+)$/);
     if (netEventsMatch && req.method === "GET") {
       const authErr = requireAuth(req);
@@ -1028,6 +1039,8 @@ return Bun.serve({
       if (!observerRole) {
         return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       }
+      const streamDenied = restNodeDenied(req, authCtx, "SSE /events/network/:id", (id) => streamVerdict(id, "network"));
+      if (streamDenied) return streamDenied;
       // 多用户 Agent 权限:受限成员只收到自己是一端的路由事件(自己发的 / 发给自己的),
       // 看不到网络里别人和各个 Agent 之间的流量。
       if (isAgentRestricted(authCtx.userId, observedNetId)) {
@@ -1103,6 +1116,11 @@ return Bun.serve({
         if (!session && authCtx.networkId !== scopedNetId) {
           return withCors(req, Response.json({ ok: false, error: "session not in requested network" }, { status: 403 }));
         }
+        const streamDenied = restNodeDenied(req, authCtx, "SSE /events/:session", (id) => streamVerdict(id, {
+          alias: sessionName,
+          nodeId: db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", sessionName, scopedNetId)?.node_id ?? null,
+        }));
+        if (streamDenied) return streamDenied;
         return createSSEStream(sessionName, scopedNetId);
       }
 
@@ -2271,6 +2289,67 @@ return Bun.serve({
     // GET  /api/dm?network_id=&with=<user_id>[&limit&before]  → 双向会话记录(新的在前)
     // GET  /api/dm/threads?network_id=                       → 每个对方一行 + 未读数
     // 已读沿用 POST /api/messages/ack(私信就是收件人 user_inbox 里的行)。
+    // ── RFC-041(#487):节点自己的权限 —— 改模式、看「本来会拦」的报表。只给人(用户令牌)。 ──
+    const permModeMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/permission-mode$/);
+    if (permModeMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const mode = body?.mode;
+      if (!NODE_PERMISSION_MODES.includes(mode)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_permission_mode", message: `mode must be one of ${NODE_PERMISSION_MODES.join(", ")}` }, { status: 400 }));
+      }
+      const nodeRef = decodeURIComponent(permModeMatch[1]);
+      const node = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; permission_mode: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, permission_mode FROM nodes WHERE node_id = ?1", nodeRef);
+      const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
+      // 看不见这个节点(不在它的网络里)与不存在同一个 404。
+      if (!node || !node.network_id || (!role && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      // 节点主人、网络 owner / admin、Hub 管理员能改;部门负责人和别的成员不能(RFC-041 §2.3 / §2.4)。
+      if (!isAdmin && node.owner_user_id !== restAuth.userId && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its permission mode" }, { status: 403 }));
+      }
+      const previous = (node.permission_mode || "normal") as NodePermissionMode;
+      db.run("UPDATE nodes SET permission_mode = ?1 WHERE node_id = ?2", [mode, node.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode }), getClientIP(req), node.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node.node_id, permission_mode: mode, previous }));
+    }
+    const permReportMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/node-permission-report$/);
+    if (permReportMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = decodeURIComponent(permReportMatch[1]);
+      const role = getUserNetworkRole(restAuth.userId, networkId);
+      if (!isAdmin && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const sinceRaw = url.searchParams.get("since");
+      const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Date.now() - 7 * 86_400_000;
+      if (!Number.isFinite(sinceMs)) return withCors(req, Response.json({ ok: false, error: "invalid_since" }, { status: 400 }));
+      const sinceHour = new Date(sinceMs).toISOString().slice(0, 13);
+      const rows = db.all<{ node_id: string; route: string; reason: string; hits: number | string; sample: string | null; last_hour: string }>(
+        `SELECT node_id, route, reason, SUM(hits) AS hits, MAX(sample) AS sample, MAX(hour) AS last_hour
+           FROM node_permission_log WHERE network_id = ?1 AND hour >= ?2
+          GROUP BY node_id, route, reason ORDER BY node_id, route, reason`,
+        networkId, sinceHour);
+      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }> }>();
+      for (const r of rows) {
+        let entry = byNode.get(r.node_id);
+        if (!entry) {
+          const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", r.node_id);
+          entry = { node_id: r.node_id, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [] };
+          byNode.set(r.node_id, entry);
+        }
+        const hits = Number(r.hits);
+        entry.total += hits;
+        entry.by_reason[r.reason] = (entry.by_reason[r.reason] ?? 0) + hits;
+        entry.routes.push({ route: r.route, reason: r.reason, hits, sample: r.sample, last_hour: r.last_hour });
+      }
+      const nodes = [...byNode.values()].sort((a, b) => b.total - a.total || a.node_id.localeCompare(b.node_id));
+      return withCors(req, Response.json({ ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(), total: nodes.reduce((n, e) => n + e.total, 0), nodes }));
+    }
+
     if (url.pathname === "/api/dm" || url.pathname === "/api/dm/threads") {
       if (!restAuth || !requestToken(req).startsWith("utok_")) {
         return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
@@ -3190,6 +3269,11 @@ return Bun.serve({
       }
       const canonical = resolveCanonicalAlias(taskNetId, body.alias);
       const targetAlias = canonical.alias;
+      const nodeDenied = restNodeDenied(req, restAuth, "POST /api/task", (id) => dispatchVerdict(id, {
+        alias: targetAlias,
+        nodeId: db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", targetAlias, taskNetId)?.node_id ?? null,
+      }));
+      if (nodeDenied) return nodeDenied;
       const target = resolveRestDeliveryTarget(targetAlias, taskNetId);
       if (target.state === "not_found") {
         return withCors(req, Response.json({
@@ -3425,6 +3509,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, restScope.networkId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const broadcastDenied = restNodeDenied(req, restAuth, "POST /api/broadcast", broadcastVerdict);
+      if (broadcastDenied) return broadcastDenied;
       let sql = "SELECT alias, node_id, network_id FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
@@ -3797,6 +3883,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const nodeWriteDenied = restNodeDenied(req, restAuth, "DELETE /api/nodes/:id", nodeTargetVerdict(node.node_id));
+      if (nodeWriteDenied) return nodeWriteDenied;
 
       db.transaction(() => {
         db.run("DELETE FROM nodes WHERE node_id = ?1", [node.node_id]);
@@ -3907,6 +3995,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const nodeWriteDenied = restNodeDenied(req, restAuth, "PUT /api/nodes/:id/attrs", nodeTargetVerdict(node.node_id));
+      if (nodeWriteDenied) return nodeWriteDenied;
 
       // Optimistic lock BEFORE any narrowing work, so a losing writer never
       // has side effects.
@@ -4006,6 +4096,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const nodeWriteDenied = restNodeDenied(req, restAuth, "PUT /api/nodes/:id/avatar", nodeTargetVerdict(node.node_id));
+      if (nodeWriteDenied) return nodeWriteDenied;
 
       db.run(
         "UPDATE nodes SET avatar_url = ?1, updated_at = datetime('now') WHERE node_id = ?2",
@@ -4271,7 +4363,7 @@ return Bun.serve({
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
-                        display_name, team, tags, attrs_revision
+                        display_name, team, tags, attrs_revision, permission_mode
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
