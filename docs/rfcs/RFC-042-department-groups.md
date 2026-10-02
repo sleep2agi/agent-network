@@ -126,6 +126,7 @@ CREATE TABLE chat_group_members (
 | 1 | Hub:两张表 + 建群 / 查群接口 + 权限 + 删部门解除关联 + 测试(SQLite + PG 梯子) | API 能建、能查,成员快照正确 |
 | 2 | Hub:成员同步(第 4 节)+ 手动成员 + 改群名 | 调人后群成员自动变 |
 | 3 | Hub:群消息表 + 发 / 读 / 未读 + 实时推送 | 能在群里聊天(API 层) |
+| 3b | Hub:App 补口(只增字段):会话行 `last_message` 预览、成员带 `username / display_name`、群对象带 `viewer_can`、`/health` 能力位 `chat_groups`(§10) | App 不用额外请求就能画会话列表、成员名和按钮 |
 | 4 | app:部门页「建部门群」按钮(有权才显示)、会话列表里出现群、群聊页(桌面 / 手机两套交互,照微信) | 用户可用 |
 
 每个 Hub PR 合入后按 runbook 发 preview、升生产;app 在 3 合入后做。
@@ -215,3 +216,16 @@ CREATE TABLE chat_group_reads (
 私信文件与受限成员的群附件可见性、不能借群解锁别人的私信文件、删网络连带清理。变异(逐条注入、跑、`cp` 还原、`cmp` 核对):
 去掉文件可见性里的成员过滤、去掉消息接口的成员判断、去掉未读的入群时间条件、关掉 `client_request_id` 去重、去掉私信文件分支的群放行 —— 五条全部被测试抓到。
 
+## 10. App 补口(第 3b 个 PR,2026-10-03,只增字段)
+
+App(agent-network-app PR #684)做群界面时缺的四样。全部只增响应字段,零改表。
+
+| 字段 | 出现在 | 形状 / 口径 |
+|---|---|---|
+| `last_message` | `GET /api/dm/threads` 的每个 `group_threads` 行;`GET …/chat-groups` 每个群 | `{text, attachment_count, sender_user_id, sender_name, at}` 或 `null`。`text` = 去敏后的正文,空白折成一个空格、取前 80 个字符(按码点);只有附件 → `text: ""`、`attachment_count` = 附件数(没附件是 0)。`sender_name` = 发信人当前的 display_name(非空)否则 username(账号没了回落 `from_session`)。`at` = 那条消息的 `created_at`(= `last_at` / `last_message_at`)。没有消息,或我不是成员(管理身份看到的非成员群)→ `null`,和 `last_message_at` 同一口径 |
+| `username`、`display_name` | 每个成员行:`GET …/chat-groups/:gid`、`GET / POST …/departments/:dept/group` 的 `members`,`POST …/chat-groups/:gid/members` 的 `member` | `display_name` 与 people 接口(`requirements_people`)同一口径:没设或等于 username → `""` |
+| `viewer_can` | 每个群对象:`GET …/chat-groups` 每行、`GET …/chat-groups/:gid`、`PATCH …/chat-groups/:gid`、`GET / POST …/departments/:dept/group` 的 `group` | `{manage, post}`。`manage` = `canManageGroup`(改名 / 拉人 / 移人放行的同一个函数:owner / admin / Hub 管理员,或挂部门的群的该部门(含上级)负责人);`post` = 当前是群成员(消息 / 已读接口放行的同一条件) |
+| `chat_groups` | `/health` 的 `capabilities` | 有它 = 本节和 §5、§9 的群接口都在;App 按它决定显不显示群入口,不必试探接口 |
+
+预览是一次查询批量取(每个我在里面的群按 `MAX(seq)` 走 `(group_id, seq)` 索引),不逐群发查询。
+测试在 `group-messages-http.test.ts` 末尾一组(SQLite + PG 梯子);变异:`viewer_can.manage` 去掉负责人分支、恒 true,`post` 恒 true —— 三条都被抓到。

@@ -83,7 +83,11 @@ export type ChatGroup = {
   created_at: string;
   updated_at: string;
 };
-export type ChatGroupMember = { user_id: string; source: string; joined_at: string };
+// username / display_name(App 补口,只增):display_name 与 people 接口同一口径 —— 没设或等于 username → ""。
+export type ChatGroupMember = { user_id: string; source: string; joined_at: string; username: string; display_name: string };
+/** 群接口上「我能做什么」(App 补口,只增)。和服务端真正放行的判据是同一个:manage = canManageGroup(改名 / 拉人 / 移人),
+ *  post = 当前是群成员(group-messages.ts memberGroup:发消息 / 读历史 / 标已读)。 */
+export type GroupViewerCan = { manage: boolean; post: boolean };
 
 type Fail = { ok: false; status: number; error: string };
 const fail = (status: number, error: string): Fail => ({ ok: false, status, error });
@@ -170,11 +174,26 @@ export function createDepartmentGroup(networkId: string, departmentId: string, a
   return { ok: true, group: toPublic(groupRow(networkId, groupId)!), members: listGroupMembers(groupId) };
 }
 
+/** people 接口的 display_name 口径(requirements-people.ts):没设或等于 username → ""(App 自己回落到 username)。 */
+export function publicDisplayName(username: string | null | undefined, displayName: string | null | undefined): string {
+  return !displayName || displayName === username ? "" : displayName;
+}
+
+type MemberRow = { user_id: string; source: string; joined_at: string; username: string | null; display_name: string | null };
+const MEMBER_SELECT = `SELECT m.user_id, m.source, m.joined_at, u.username, u.display_name
+  FROM chat_group_members m LEFT JOIN users u ON u.user_id = m.user_id`;
+const toMember = (r: MemberRow): ChatGroupMember => ({
+  user_id: r.user_id, source: r.source, joined_at: r.joined_at,
+  username: r.username ?? "", display_name: publicDisplayName(r.username, r.display_name),
+});
+
 export function listGroupMembers(groupId: string): ChatGroupMember[] {
-  return db.all<ChatGroupMember>(
-    "SELECT user_id, source, joined_at FROM chat_group_members WHERE group_id = ?1 ORDER BY joined_at, user_id",
-    groupId,
-  );
+  return db.all<MemberRow>(`${MEMBER_SELECT} WHERE m.group_id = ?1 ORDER BY m.joined_at, m.user_id`, groupId).map(toMember);
+}
+
+/** viewer_can,见 GroupViewerCan。isMember 由调用方给(列表里已经批量算过,不再逐行查)。 */
+export function groupViewerCan(group: { department_id: string | null }, isMember: boolean, canManage: boolean, managedDepartments: ReadonlySet<string>): GroupViewerCan {
+  return { manage: canManageGroup(group, canManage, managedDepartments), post: isMember };
 }
 
 /** 我能看到的群:我在里面的;canManage(owner / admin / Hub 管理员)看到本网络全部。 */
@@ -190,13 +209,13 @@ export function listVisibleGroups(networkId: string, userId: string | null, canM
  * 读一个群:群成员、canManage,或挂部门的群的负责人(managedDepartments 含该部门)。别人一律 null(调用方回 404,
  * 不暴露存在与否)。挂部门的群读之前先对账一次(兜底,§4),所以判「是不是成员」用的是对账后的结果。
  */
-export function readGroup(networkId: string, groupId: string, userId: string | null, canManage: boolean, managedDepartments: ReadonlySet<string> = new Set()): { group: ChatGroup; members: ChatGroupMember[]; is_member: boolean } | null {
+export function readGroup(networkId: string, groupId: string, userId: string | null, canManage: boolean, managedDepartments: ReadonlySet<string> = new Set()): { group: ChatGroup & { viewer_can: GroupViewerCan }; members: ChatGroupMember[]; is_member: boolean } | null {
   const r = groupRow(networkId, groupId);
   if (!r) return null;
   if (r.department_id !== null) db.transaction(() => { syncDepartmentGroups(networkId, groupId); });
   const member = !!userId && isGroupMember(groupId, userId);
   if (!member && !canManageGroup(r, canManage, managedDepartments)) return null;
-  return { group: toPublic(r), members: listGroupMembers(groupId), is_member: member };
+  return { group: { ...toPublic(r), viewer_can: groupViewerCan(r, member, canManage, managedDepartments) }, members: listGroupMembers(groupId), is_member: member };
 }
 
 /** 删部门时调用(和删部门同一事务):解除关联,群和成员留着。 */
@@ -320,7 +339,7 @@ export function addManualMember(networkId: string, groupId: string, userId: unkn
     "INSERT INTO chat_group_members (group_id, user_id, network_id, source) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(group_id, user_id) DO NOTHING",
     [groupId, userId, networkId, GROUP_SOURCE_MANUAL],
   );
-  const member = db.get<ChatGroupMember>("SELECT user_id, source, joined_at FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2", groupId, userId)!;
+  const member = toMember(db.get<MemberRow>(`${MEMBER_SELECT} WHERE m.group_id = ?1 AND m.user_id = ?2`, groupId, userId)!);
   return { ok: true, member };
 }
 

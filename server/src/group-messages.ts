@@ -24,7 +24,7 @@ import { DM_FILE_SCOPE, FILE_ID_REGEX, validateAttachments } from "./uploads.js"
 import { restrictedMemberCanUseFile } from "./restricted-files.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { MAX_DM_CHARS, dmParticipantSeesFile, networkFileEntry } from "./human-dm.js";
-import { isGroupMember } from "./department-groups.js";
+import { isGroupMember, publicDisplayName } from "./department-groups.js";
 
 // 两张表的 DDL 在 department-groups.ts 里(和 chat_groups 一起建,删网络时一起删,不形成模块环)。
 
@@ -197,7 +197,49 @@ export function groupUnreadFor(groupId: string, userId: string): number {
   return Number(r?.unread ?? 0);
 }
 
-export type GroupThread = { group_id: string; name: string; department_id: string | null; last_at: string | null; unread: number; last_read_seq: number };
+/**
+ * 会话列表里的最后一条预览(App 补口,只增)。text = 正文(去敏后)空白折成一个空格、取前 80 个字符(按码点,不切坏 emoji);
+ * 只有附件 → text 为 "",attachment_count 是附件数。sender_name = 发信人当前的 display_name(非空)否则 username
+ * (账号没了回落到发送时的 from_session)。at = 这条消息的 created_at(与 last_at 同值)。
+ */
+export type GroupLastMessage = { text: string; attachment_count: number; sender_user_id: string; sender_name: string; at: string };
+export const LAST_MESSAGE_PREVIEW_CHARS = 80;
+
+/**
+ * 我在这个网络里每个群的最后一条消息,一次查询(按群取 MAX(seq) 走 (group_id, seq) 索引,不逐群发查询)。
+ * 只覆盖我**当前**在里面的群 —— 不是成员的群(管理身份看得到群资料)不给预览,和 last_message_at 同一口径。
+ */
+export function lastGroupMessagesFor(networkId: string, userId: string): Map<string, GroupLastMessage> {
+  const rows = db.all<{ group_id: string; sender_user_id: string; from_session: string; content: string; meta_json: string | null; created_at: string; username: string | null; display_name: string | null }>(
+    `SELECT g.group_id, g.sender_user_id, g.from_session, g.content, g.meta_json, g.created_at, u.username, u.display_name
+       FROM chat_group_members m
+       JOIN chat_group_messages g ON g.group_id = m.group_id
+        AND g.seq = (SELECT MAX(g2.seq) FROM chat_group_messages g2 WHERE g2.group_id = m.group_id)
+       LEFT JOIN users u ON u.user_id = g.sender_user_id
+      WHERE m.network_id = ?1 AND m.user_id = ?2`,
+    networkId, userId,
+  );
+  const out = new Map<string, GroupLastMessage>();
+  for (const r of rows) {
+    const content = String(redactMessageRow({ content: r.content }).content ?? "");
+    let attachmentCount = 0;
+    try {
+      const list = JSON.parse(r.meta_json ?? "null")?.attachments;
+      if (Array.isArray(list)) attachmentCount = list.length;
+    } catch {}
+    const name = publicDisplayName(r.username, r.display_name).trim() || r.username || r.from_session;
+    out.set(r.group_id, {
+      text: [...content.replace(/\s+/g, " ").trim()].slice(0, LAST_MESSAGE_PREVIEW_CHARS).join(""),
+      attachment_count: attachmentCount,
+      sender_user_id: r.sender_user_id,
+      sender_name: name,
+      at: r.created_at,
+    });
+  }
+  return out;
+}
+
+export type GroupThread = { group_id: string; name: string; department_id: string | null; last_at: string | null; unread: number; last_read_seq: number; last_message: GroupLastMessage | null };
 
 /** 我在这个网络里的群会话:每个群一行,最后一条时间 + 我的未读数。按最后一条时间倒序(没消息的排最后),和私信会话列表同序。 */
 export function listGroupThreads(networkId: string, userId: string): GroupThread[] {
@@ -211,9 +253,10 @@ export function listGroupThreads(networkId: string, userId: string): GroupThread
       WHERE m.network_id = ?1 AND m.user_id = ?2`,
     networkId, userId,
   );
+  const last = lastGroupMessagesFor(networkId, userId);
   // 排序放在 JS 里:SQLite 和 PG 对 DESC 里 NULL 的位置相反。
   return rows
-    .map((r) => ({ group_id: r.group_id, name: r.name, department_id: r.department_id, last_at: r.last_at, unread: Number(r.unread ?? 0), last_read_seq: Number(r.last_read_seq ?? 0) }))
+    .map((r) => ({ group_id: r.group_id, name: r.name, department_id: r.department_id, last_at: r.last_at, unread: Number(r.unread ?? 0), last_read_seq: Number(r.last_read_seq ?? 0), last_message: last.get(r.group_id) ?? null }))
     .sort((a, b) => (b.last_at ?? "").localeCompare(a.last_at ?? "") || a.group_id.localeCompare(b.group_id));
 }
 

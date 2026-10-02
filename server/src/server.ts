@@ -5,7 +5,7 @@ import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
-import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
+import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -128,7 +128,9 @@ const SERVER_VERSION = (() => {
 // Feature flags advertised on /health (see the /health handler). Exported for tests.
 // node_permission_mode(#489):节点有 permission_mode、GET /api/nodes 每行带 viewer_can.permission_mode,
 // PUT /api/nodes/:id/permission-mode 与 GET /api/networks/:id/node-permission-report 可用(RFC-041 第一阶段)。
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode"] as const;
+// chat_groups(RFC-042,#457):部门群可用 —— …/departments/:dept/group、…/chat-groups(资料 / 成员 / 消息 / 已读)、
+// GET /api/dm/threads 的 group_threads;群对象带 viewer_can {manage, post},会话行带 last_message 预览,成员带 username / display_name。
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here
@@ -1818,7 +1820,8 @@ return Bun.serve({
             if (!group || (!mayCreate && !isGroupMember(group.id, resolved.user.user_id))) {
               return withCors(req, Response.json({ ok: false, error: "department_group_not_found" }, { status: 404 }));
             }
-            return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, group, members: listGroupMembers(group.id) }));
+            const viewerCan = groupViewerCan(group, isGroupMember(group.id, resolved.user.user_id), canManage, head.managed);
+            return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, group: { ...group, viewer_can: viewerCan }, members: listGroupMembers(group.id) }));
           }
           if (req.method !== "POST") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
           if (!mayCreate) return isHead ? scopeDenied() : withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
@@ -1830,7 +1833,8 @@ return Bun.serve({
             return withCors(req, Response.json({ ok: false, ...rest }, { status }));
           }
           auditDepartment(resolved.user, "department_group_created", netId, JSON.stringify({ id: deptId, group_id: r.group.id, members: r.members.length, ...(canManage ? {} : { via: "leader" }) }));
-          return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, group: r.group, members: r.members }, { status: 201 }));
+          const createdCan = groupViewerCan(r.group, r.members.some((m) => m.user_id === resolved.user.user_id), canManage, head.managed);
+          return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, group: { ...r.group, viewer_can: createdCan }, members: r.members }, { status: 201 }));
         }
         // 部门项目授权:只有 owner / admin(和按人授权一样)。
         if (!canManage) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
@@ -1943,18 +1947,20 @@ return Bun.serve({
       const gid = chatGroupsMatch[2] ? decodeURIComponent(chatGroupsMatch[2]) : null;
       const sub = chatGroupsMatch[3];
       const memberUid = chatGroupsMatch[4] ? decodeURIComponent(chatGroupsMatch[4]) : null;
+      // viewer 当负责人不获得任何东西(headScope 已保证);owner / admin 本来全管,不必算。
+      const managed = canManage ? new Set<string>() : headScope(netId, resolved.user.user_id).managed;
       if (!gid) {
         if (req.method !== "GET") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
         // 第三个 PR:每个群附上我的 unread / last_message_at(只对我在里面的群;管理者看到的非成员群是 0 / null —— 不让管理身份窥探消息时间)。
+        // App 补口(只增):last_message 预览(同一口径,非成员群 null)和 viewer_can {manage, post}(与写接口同一判据)。
+        // listGroupThreads 已经批量带上 last_message,整张列表固定几次查询,不逐群查。
         const threads = new Map(listGroupThreads(netId, resolved.user.user_id).map((t) => [t.group_id, t]));
         const groups = listVisibleGroups(netId, resolved.user.user_id, canManage).map((g) => {
           const t = g.is_member ? threads.get(g.id) : undefined;
-          return { ...g, unread: t?.unread ?? 0, last_message_at: t?.last_at ?? null };
+          return { ...g, unread: t?.unread ?? 0, last_message_at: t?.last_at ?? null, last_message: t?.last_message ?? null, viewer_can: groupViewerCan(g, g.is_member, canManage, managed) };
         });
         return withCors(req, Response.json({ ok: true, network_id: netId, groups }));
       }
-      // viewer 当负责人不获得任何东西(headScope 已保证);owner / admin 本来全管,不必算。
-      const managed = canManage ? new Set<string>() : headScope(netId, resolved.user.user_id).managed;
       const notFound = () => withCors(req, Response.json({ ok: false, error: "group_not_found" }, { status: 404 }));
       // 第三个 PR(群消息):GET / POST …/:gid/messages、POST …/:gid/read。只认**当前群成员** —— owner / admin / 负责人
       // 不是成员也读不到消息(他们看得到群资料,但消息只给群里的人);别人(含被移出的人)一律 404 group_not_found。
@@ -2008,7 +2014,7 @@ return Bun.serve({
         const r = renameGroup(netId, gid, body);
         if (!r.ok) return failed(r);
         auditDepartment(resolved.user, "chat_group_renamed", netId, JSON.stringify({ group_id: gid, name: r.group.name, ...via }));
-        return withCors(req, Response.json({ ok: true, network_id: netId, group: r.group }));
+        return withCors(req, Response.json({ ok: true, network_id: netId, group: { ...r.group, viewer_can: groupViewerCan(r.group, isGroupMember(gid, resolved.user.user_id), canManage, managed) } }));
       }
       if (!memberUid) {
         const r = addManualMember(netId, gid, body.user_id);
@@ -2511,7 +2517,7 @@ return Bun.serve({
           return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
         }
         if (url.pathname === "/api/dm/threads") {
-          // group_threads(RFC-042 第三个 PR,只增字段):我在里面的群,每个带 unread / last_at —— App 私信未读角标可以一起算。
+          // group_threads(RFC-042 第三个 PR,只增字段):我在里面的群,每个带 unread / last_at / last_message 预览 —— App 私信未读角标可以一起算。
           return withCors(req, Response.json({ ok: true, network_id: dmNet, threads: listDmThreads(dmNet, restAuth.userId), group_threads: listGroupThreads(dmNet, restAuth.userId) }));
         }
         const other = url.searchParams.get("with") ?? "";

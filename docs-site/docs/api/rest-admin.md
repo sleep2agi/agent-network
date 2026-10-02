@@ -476,7 +476,7 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_abc/agent-grant
 
 - `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` —— 写进对方的 user_inbox(`kind=human_dm`),经 `/events/users/me` 推送;发信人 `sender_user_id` 由 Hub 按令牌写入,请求体里的 `from` 一律忽略。同一个 `client_request_id` 重试不产生第二条。对方不存在与不在本网络同为 404 `dm_target_not_in_network`。受限成员附带看不见的文件 → 403 `attachment_not_accessible`；附带一个自己看不见的私信文件（`purpose=dm` 上传、自己既不是上传者也不在带着它的私信里）同样 403。私信的附件先用 `POST /api/upload?purpose=dm` 上传。
 - `GET /api/dm?network_id=&with=<user_id>[&limit&before]` —— 我和这个人的双向记录,新的在前,每条带 `direction: in | out`。
-- `GET /api/dm/threads?network_id=` —— 每个对方一行:`{other_user_id, last_at, unread}`。
+- `GET /api/dm/threads?network_id=` —— 每个对方一行:`{other_user_id, last_at, unread}`。 另带 `group_threads`:我在里面的每个部门群一行 `{group_id, name, department_id, last_at, unread, last_read_seq, last_message}`,`last_message` = `{text(前 80 字;只有附件时为空), attachment_count, sender_user_id, sender_name, at}` 或 `null`。Hub 的 `/health` `capabilities` 含 `chat_groups` 时才有群接口。
 
 已读沿用 `POST /api/messages/ack`(私信就是收件人 user_inbox 里的行)。
 
