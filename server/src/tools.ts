@@ -1167,7 +1167,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (node_id) {
         try {
           const nodeRuntime = ag?.includes(":") ? ag.split(":")[1] + "-sdk" : ag ?? null;
-          upsertNodeWithSec1Guard({
+          const upserted = upsertNodeWithSec1Guard({
             node_id,
             callerNetworkId: effectiveNetId ?? null,
             callerUserId: enforceUserId ?? null,
@@ -1182,6 +1182,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             hostname: hn ?? null,
             config_snapshot: cfgSnap ?? null,
           });
+          // The session row above already took node_id; a refused identity claim
+          // must not leave this session pointing at another node's row.
+          if (upserted.result === "refused" && upserted.reason === "identity_mismatch") {
+            db.run("UPDATE sessions SET node_id = NULL WHERE resume_id = ?1 AND node_id = ?2", [resume_id, node_id]);
+          }
         } catch {}
       }
 
@@ -6171,7 +6176,7 @@ export interface UpsertNodeWithSec1GuardInput {
 }
 export type UpsertNodeOutcome =
   | { result: "inserted" | "updated"; node_id: string }
-  | { result: "refused"; reason: "cross_network" | "token_node_mismatch" | "owner_mismatch"; existingNet: string | null; callerNet: string | null }
+  | { result: "refused"; reason: "cross_network" | "token_node_mismatch" | "owner_mismatch" | "identity_mismatch"; existingNet: string | null; callerNet: string | null }
   | { result: "skipped"; reason: "missing_node_id" };
 
 const _norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
@@ -6200,8 +6205,8 @@ export function trustedConfigSnapshotForNode(
 
 export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): UpsertNodeOutcome {
   if (!input.node_id) return { result: "skipped", reason: "missing_node_id" };
-  const existing = db.get<{ network_id: string | null; owner_user_id: string | null }>(
-    "SELECT network_id, owner_user_id FROM nodes WHERE node_id = ?1",
+  const existing = db.get<{ network_id: string | null; owner_user_id: string | null; alias: string | null; config_path: string | null }>(
+    "SELECT network_id, owner_user_id, alias, config_path FROM nodes WHERE node_id = ?1",
     input.node_id,
   );
   const callerNet = input.callerNetworkId;
@@ -6223,6 +6228,20 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
   }
   if (existing?.owner_user_id && input.callerUserId !== existing.owner_user_id) {
     return { result: "refused", reason: "owner_mismatch", existingNet: existing.network_id, callerNet };
+  }
+  // A node_id copied into another node's config (or a hand-backfilled id that
+  // collides) must not relabel the row: the upsert below would COALESCE the
+  // reporter's alias over the owner's. A legit rename moves nodes.alias itself
+  // (rename.ts), so "different alias AND a different config file" is never the
+  // same node. Unowned legacy rows are exactly where this collision lives.
+  if (
+    existing?.alias && input.alias && existing.alias !== input.alias
+    && existing.config_path && input.config_path && existing.config_path !== input.config_path
+  ) {
+    console.warn(
+      `[commhub] 🚫 report_status node upsert refused (identity_mismatch): node_id=${input.node_id} row-alias=${existing.alias} reporter-alias=${input.alias}`,
+    );
+    return { result: "refused", reason: "identity_mismatch", existingNet: existing.network_id, callerNet };
   }
 
   // Legacy / first-write paths: row missing OR network_id NULL → claim.
