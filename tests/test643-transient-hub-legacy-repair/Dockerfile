@@ -6,9 +6,9 @@ RUN apt-get update \
 
 WORKDIR /workspace
 COPY agent-network/package.json ./agent-network/package.json
-COPY server/package.json ./server/package.json
+COPY server/package.json server/package-lock.json ./server/
 RUN cd agent-network && bun install --ignore-scripts \
-  && cd /workspace/server && bun install --ignore-scripts
+  && cd /workspace/server && bun install --frozen-lockfile --ignore-scripts
 
 COPY agent-network ./agent-network
 COPY server ./server

@@ -4,8 +4,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl jq ca-cert
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 
-COPY server/package.json ./server/package.json
-RUN cd server && bun install --ignore-scripts
+COPY server/package.json server/package-lock.json ./server/
+RUN cd server && bun install --frozen-lockfile --ignore-scripts
 COPY agent-network/package.json ./agent-network/package.json
 RUN cd agent-network && bun install --ignore-scripts
 COPY agent-node/package.json ./agent-node/package.json

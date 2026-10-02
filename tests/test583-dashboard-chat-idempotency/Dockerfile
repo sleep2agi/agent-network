@@ -1,7 +1,7 @@
 FROM oven/bun:1
 WORKDIR /work/server
-COPY server/package.json ./package.json
-RUN bun install
+COPY server/package.json server/package-lock.json ./
+RUN bun install --frozen-lockfile
 COPY server/src ./src
 COPY agent-node/src/shared /work/agent-node/src/shared
 COPY tests/test583-dashboard-chat-idempotency/run.sh /work/run.sh
