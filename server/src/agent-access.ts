@@ -475,4 +475,9 @@ export const RESTRICTED_MEMBER_TOOLS: ReadonlySet<string> = new Set([
   "requirements_checklist_toggle",
   "requirements_upsert_by_external_ref",
   "projects_list",
+  // 2026-10-02(app 任务页审计 M3):和 app「管理项目」/「动态」同一个 REST 处理,权限也同一套 —— 项目管理对仅相关任务的
+  // 成员和 viewer 一律 403;动态按任务可见性过滤,受限成员看不见的节点在里面隐去(listEvents 的 hiddenNodeFilter)。
+  "projects_create",
+  "projects_update",
+  "requirements_events",
 ]);
