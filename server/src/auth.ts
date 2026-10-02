@@ -1,7 +1,7 @@
 /**
  * V3 Auth module — user registration, login, token management
  */
-import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork, removeMemberFromChatGroups } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
+import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork, groupTx, removeMemberFromChatGroups } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
 import { WEAK_PASSWORDS } from "./password-dict.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
 import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, NEW_MEMBER_TASK_ACCESS, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
@@ -682,7 +682,7 @@ export function removeNetworkMember(networkId: string, userId: string): { ok: bo
   const member = db.get<any>("SELECT role FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
   if (!member) return { ok: false, error: "not a member" };
   if (member.role === "owner") return { ok: false, error: "cannot remove owner" };
-  db.transaction(() => {
+  groupTx(() => { // RFC-042 §9.3:同 db.transaction,另在提交后推 group_membership_changed(移出网络 → 他所在每个群)
     db.run("DELETE FROM network_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
     // #488 —— 他在这个网络里的令牌(节点令牌 / 邀请码令牌)一起吊销;resolveToken 也会拒非成员的令牌,这里让库里的状态如实。
     db.run("UPDATE api_tokens SET revoked_at = datetime('now') WHERE network_id = ?1 AND user_id = ?2 AND revoked_at IS NULL", [networkId, userId]);

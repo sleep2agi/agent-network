@@ -114,7 +114,7 @@ CREATE TABLE chat_group_members (
 三个写接口:管群的人(owner / admin / Hub 管理员 / 该部门(含上级)负责人)才能调;群成员但管不了 → 403 `group_manage_denied`;
 别人 → 404 `group_not_found`;节点令牌 → 403 `humans_only`。外加 §4 的同步。
 第 3 个 PR:`POST/GET …/chat-groups/:gid/messages`(附件沿用私信的文件校验)、`POST …/chat-groups/:gid/read`,
-推 `group_message` 到每个成员的 `/events/users/me`。细节见 §9(入群 / 退群事件 `group_membership_changed` 推迟,见 §9.3)。
+推 `group_message` 到每个成员的 `/events/users/me`。细节见 §9。入群 / 退群推 `group_membership_changed`(§9.3,已做,2026-10-03)。
 
 审计:`department_group_created`(负责人建的带 `via: "leader"`),第 2 个 PR 起加 `chat_group_renamed`、`chat_group_member_added/removed`
 (只记手动操作;同步引起的进出不逐条记审计,原因在调人 / 改部门那条审计里)。
@@ -195,7 +195,7 @@ CREATE TABLE chat_group_reads (
 | 正文 / 附件上限 | 和私信相同:1 万字(`MAX_DM_CHARS`),附件 ≤ 20 个(`validateAttachments`),空正文且无附件 → 400 `message_required` | 照私信 |
 | 频率限制 | **和私信一样不单独限流**(私信今天没有专门的限流,只有上传 60/小时) | 「与私信一致」;真要限流应该私信、群一起加,另开 |
 | 推送 | 新事件 `group_message`,发给**发送那一刻**的每个群成员(现查 `chat_group_members`),**含发信人自己**(多端同步,App 按 `message_id` 去重),每人带自己的 `unread`。标已读推 `group_read {group_id, last_read_seq, unread}` 给自己(多端角标一起清) | 复用 `/events/users/me`;被同步移出的人自然不在收件人里 |
-| `group_membership_changed`(入群 / 退群事件) | **推迟**到 app 那一步按需加 | 成员变化发生在调人 / 改部门的事务里,要在提交后推,得改 `departments.ts` 的四个写路径;app 现在可以在收到 `group_message` 或刷新会话列表时拿到最新群列表,不阻塞聊天 |
+| `group_membership_changed`(入群 / 退群事件) | **已做(2026-10-03,补口 PR)**。事件 `{type: "group_membership_changed", network_id, group_id, member_user_id, change: "added"\|"removed", source, at}` 推到 `/events/users/me`,收件人 = 被加 / 被移的那个人 ∪ **提交后**的当前群成员。`source`:`manual`(手动拉 / 移)、`department`(部门同步:调进调出、改上级、换负责人、建 / 删部门、建群播种)、`network_removal`(移出网络)。被加 / 被移的人放在 `member_user_id`,因为用户事件信封里的 `user_id` 一律是**收件人**(`pushUserEvent` 的口径,不改)。**只在最外层事务提交之后推**:写路径改走 `groupTx()`(代替 `db.transaction`),事务里每次增删成员行记一笔,最外层正常返回才推;整个回滚一条不推,内层 savepoint 回滚只丢内层那几笔。没有改表 | App 不必等 15 秒轮询或第一条消息就能看到新群 / 群消失。注意:调部门 / 换负责人这两类写会照 RFC-040 踢掉当事人的用户流(权限变了要重连重新鉴权),事件在踢之前已入队;App 重连后本来就会重拉列表 |
 | 发消息时要不要先对账一次成员 | **不对账** | 第 2 个 PR 起每个写路径已同事务对账;每条消息都按整网算一次部门树不值得。`GET …/chat-groups/:gid` 的兜底对账仍在 |
 | 附件可见性 | 私信文件(`?purpose=dm` 上传)和受限成员两条下载分支各加一个「或」:**当前**是某个群的成员、且那个群里有消息带着这个文件(`groupMemberSeesFile`)。不带 purpose 的网络文件对不受限成员本来就可见,不变 | 镜像私信「参与者可见」,收窄到「当前成员」;被移出立刻失效 |
 | 附件转发 | 和私信同一条规矩:私信文件只能由看得见它的人发进群(上传者、带它的私信里的人、带它的群的当前成员);受限成员只能发自己能用的(自己传的 / 别人发给他的 / 他所在群里的) | 否则把别人私信里的 `file_id` 塞进群,就给全群解锁了它 |

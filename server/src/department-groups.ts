@@ -17,9 +17,14 @@
 //   source='manual' 永远不动(手动拉的人后来进了部门也保持 manual —— 宁可多留一个人,不静默踢人)。
 //   调人 / 建部门(带负责人)/ 改上级 / 换负责人 / 删部门 都在各自的事务里调它一次;移出网络删他在本网络的全部群成员行。
 // - 读一个挂部门的群时顺手对账一次(兜底:修掉第 1 个 PR 上线到第 2 个 PR 上线之间的漂移)。
+//
+// RFC-042 §9.3 补口:入群 / 退群实时事件 group_membership_changed。成员行在事务里变,事件只在**最外层事务提交之后**推:
+// 写路径一律走 groupTx()(代替 db.transaction),事务里每一处增删成员行都 recordMembershipChange() 记一笔;
+// groupTx 正常返回且已回到最外层 → flush;抛错(整个回滚,或内层 savepoint 回滚)→ 丢掉这一层记下的那些。
 
 import { db, uuidv4 } from "./db.js";
 import { departmentSubtree, membersIn } from "./department-heads.js";
+import { pushUserEvent } from "./push.js";
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS chat_groups (
@@ -70,6 +75,66 @@ db.exec(`
 
 export const GROUP_SOURCE_DEPARTMENT = "department";
 export const GROUP_SOURCE_MANUAL = "manual";
+
+// ── 入群 / 退群事件(RFC-042 §9.3 补口)──
+
+export const GROUP_MEMBERSHIP_EVENT = "group_membership_changed";
+/** 事件里的 source = 这次变化的起因:manual(手动拉 / 移)、department(部门同步,含建群播种)、network_removal(移出网络)。 */
+export type MembershipChangeSource = "manual" | "department" | "network_removal";
+export type MembershipChange = { network_id: string; group_id: string; user_id: string; change: "added" | "removed"; source: MembershipChangeSource; at: string };
+
+let txDepth = 0;
+let pending: MembershipChange[] = [];
+
+/** 事务里记一笔成员变化。不在 groupTx 里(单条自动提交的写)→ 这条语句已经提交了,立刻推。 */
+function recordMembershipChange(c: Omit<MembershipChange, "at">): void {
+  const change = { ...c, at: new Date().toISOString() };
+  if (txDepth > 0) pending.push(change);
+  else flushMembershipChanges([change]);
+}
+
+/**
+ * 代替 db.transaction:可嵌套(内层是 savepoint)。内层抛错 → 只丢掉内层记下的变化(内层 savepoint 回滚了,外层可能照常提交);
+ * 最外层正常返回(= 已提交)→ 推;最外层抛错(= 回滚)→ 一条不推。
+ */
+export function groupTx<T>(fn: () => T): T {
+  const mark = pending.length;
+  txDepth++;
+  let ok = false;
+  try {
+    const out = db.transaction(fn);
+    ok = true;
+    return out;
+  } finally {
+    txDepth--;
+    if (!ok) pending.length = mark;
+    else if (txDepth === 0) {
+      const batch = pending;
+      pending = [];
+      flushMembershipChanges(batch);
+    }
+  }
+}
+
+/**
+ * 推 group_membership_changed:每一笔发给「被加 / 被移的那个人」和「提交后这个群的当前成员」。
+ * pushUserEvent 的信封里 user_id 是**收件人**(所有用户事件同一口径),所以被加 / 被移的人放在 member_user_id。
+ */
+function flushMembershipChanges(batch: MembershipChange[]): void {
+  if (!batch.length) return;
+  const membersOf = new Map<string, string[]>();
+  for (const c of batch) {
+    let current = membersOf.get(c.group_id);
+    if (!current) {
+      current = db.all<{ user_id: string }>("SELECT user_id FROM chat_group_members WHERE group_id = ?1", c.group_id).map((r) => r.user_id);
+      membersOf.set(c.group_id, current);
+    }
+    const event = { type: GROUP_MEMBERSHIP_EVENT, group_id: c.group_id, member_user_id: c.user_id, change: c.change, source: c.source, at: c.at };
+    for (const uid of new Set([c.user_id, ...current])) {
+      try { pushUserEvent(c.network_id, uid, event); } catch {}
+    }
+  }
+}
 const NAME_MAX = 40;
 
 type GroupRow = { group_id: string; network_id: string; name: string; department_id: string | null; created_by: string | null; created_at: string; updated_at: string };
@@ -153,7 +218,7 @@ export function createDepartmentGroup(networkId: string, departmentId: string, a
   const groupId = `grp_${uuidv4().replace(/-/g, "").slice(0, 20)}`;
   const roster = departmentGroupRoster(networkId, departmentId);
   try {
-    db.transaction(() => {
+    groupTx(() => {
       db.run(
         "INSERT INTO chat_groups (group_id, network_id, name, department_id, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
         [groupId, networkId, name, departmentId, actorUserId],
@@ -163,6 +228,7 @@ export function createDepartmentGroup(networkId: string, departmentId: string, a
           "INSERT INTO chat_group_members (group_id, user_id, network_id, source) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(group_id, user_id) DO NOTHING",
           [groupId, uid, networkId, GROUP_SOURCE_DEPARTMENT],
         );
+        recordMembershipChange({ network_id: networkId, group_id: groupId, user_id: uid, change: "added", source: "department" });
       }
     });
   } catch (err) {
@@ -212,7 +278,7 @@ export function listVisibleGroups(networkId: string, userId: string | null, canM
 export function readGroup(networkId: string, groupId: string, userId: string | null, canManage: boolean, managedDepartments: ReadonlySet<string> = new Set()): { group: ChatGroup & { viewer_can: GroupViewerCan }; members: ChatGroupMember[]; is_member: boolean } | null {
   const r = groupRow(networkId, groupId);
   if (!r) return null;
-  if (r.department_id !== null) db.transaction(() => { syncDepartmentGroups(networkId, groupId); });
+  if (r.department_id !== null) groupTx(() => { syncDepartmentGroups(networkId, groupId); });
   const member = !!userId && isGroupMember(groupId, userId);
   if (!member && !canManageGroup(r, canManage, managedDepartments)) return null;
   return { group: { ...toPublic(r), viewer_can: groupViewerCan(r, member, canManage, managedDepartments) }, members: listGroupMembers(groupId), is_member: member };
@@ -291,11 +357,13 @@ export function syncDepartmentGroups(networkId: string, onlyGroupId?: string): S
         "INSERT INTO chat_group_members (group_id, user_id, network_id, source) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(group_id, user_id) DO NOTHING",
         [g.group_id, uid, networkId, GROUP_SOURCE_DEPARTMENT],
       );
+      recordMembershipChange({ network_id: networkId, group_id: g.group_id, user_id: uid, change: "added", source: "department" });
       added++;
     }
     for (const r of current) {
       if (r.source !== GROUP_SOURCE_DEPARTMENT || roster.has(r.user_id)) continue;
       db.run("DELETE FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2 AND source = ?3", [g.group_id, r.user_id, GROUP_SOURCE_DEPARTMENT]);
+      recordMembershipChange({ network_id: networkId, group_id: g.group_id, user_id: r.user_id, change: "removed", source: "department" });
       removed++;
     }
   }
@@ -304,7 +372,9 @@ export function syncDepartmentGroups(networkId: string, onlyGroupId?: string): S
 
 /** 移出网络时调用(和删 network_members 同一事务):他在本网络所有群里的行都删,不论来源。 */
 export function removeMemberFromChatGroups(networkId: string, userId: string): void {
+  const groups = db.all<{ group_id: string }>("SELECT group_id FROM chat_group_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
   db.run("DELETE FROM chat_group_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
+  for (const g of groups) recordMembershipChange({ network_id: networkId, group_id: g.group_id, user_id: userId, change: "removed", source: "network_removal" });
 }
 
 /**
@@ -335,10 +405,13 @@ export function addManualMember(networkId: string, groupId: string, userId: unkn
   if (typeof userId !== "string" || !userId) return fail(400, "user_id_required");
   if (!db.get("SELECT 1 AS x FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId)) return fail(400, "not_network_member");
   if (isGroupMember(groupId, userId)) return fail(409, "already_group_member");
-  db.run(
-    "INSERT INTO chat_group_members (group_id, user_id, network_id, source) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(group_id, user_id) DO NOTHING",
-    [groupId, userId, networkId, GROUP_SOURCE_MANUAL],
-  );
+  groupTx(() => {
+    const r = db.run(
+      "INSERT INTO chat_group_members (group_id, user_id, network_id, source) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(group_id, user_id) DO NOTHING",
+      [groupId, userId, networkId, GROUP_SOURCE_MANUAL],
+    );
+    if (r.changes > 0) recordMembershipChange({ network_id: networkId, group_id: groupId, user_id: userId, change: "added", source: "manual" });
+  });
   const member = toMember(db.get<MemberRow>(`${MEMBER_SELECT} WHERE m.group_id = ?1 AND m.user_id = ?2`, groupId, userId)!);
   return { ok: true, member };
 }
@@ -353,6 +426,9 @@ export function removeManualMember(networkId: string, groupId: string, userId: s
   const row = db.get<{ source: string }>("SELECT source FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2", groupId, userId);
   if (!row) return fail(404, "group_member_not_found");
   if (row.source === GROUP_SOURCE_DEPARTMENT && group.department_id !== null) return fail(409, "department_member");
-  db.run("DELETE FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2", [groupId, userId]);
+  groupTx(() => {
+    const r = db.run("DELETE FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2", [groupId, userId]);
+    if (r.changes > 0) recordMembershipChange({ network_id: networkId, group_id: groupId, user_id: userId, change: "removed", source: "manual" });
+  });
   return { ok: true, user_id: userId };
 }

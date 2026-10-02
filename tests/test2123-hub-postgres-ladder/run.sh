@@ -247,6 +247,8 @@ run_pg_tests_rc anet_dept_groups_test src/department-groups-http.test.ts
 run_pg_tests_rc anet_dept_groups_sync_test src/department-groups-sync-http.test.ts
 # 部门群消息(RFC-042 第三个 PR,#457):BIGSERIAL seq 游标翻页、client_request_id 去重(ON CONFLICT DO NOTHING 的 changes)、已读位置 upsert 只前进(excluded + CASE)、未读子查询(LEFT JOIN + COALESCE)、群附件可见性(JOIN + LIKE … ESCAPE)—— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_group_msgs_test src/group-messages-http.test.ts
+# 入群 / 退群事件(RFC-042 §9.3 补口,#457):提交后才推 group_membership_changed —— PG 上嵌套事务是 savepoint,内层回滚只丢内层那几笔、外层回滚一条不推。
+run_pg_tests_rc anet_group_member_ev_test src/group-membership-events-http.test.ts
 
 # RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
 # refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).
