@@ -46,6 +46,8 @@ const GOLDEN_RESPONSE_KEYS = {
     "process_in_flight_count", "network_id", "registered_at", "updated_at",
     "node_id", "session_id", "config_path", "channels", "last_seen_at", "model",
     "external_schedules", "rules_file_capable", "skills_capable", "files_capable", "logs_capable", "runtime", "host", "process_telemetry",
+    // #448 — layered node health (memory-only; null when not reported or stale).
+    "health", "health_observed_ms_ago",
   ],
   task: [
     "task_id", "from_node_id", "from_name", "to_node_id", "to_name", "priority",
