@@ -337,12 +337,18 @@ export function isExpiredSessionToken(token: string): boolean {
   return !!row;
 }
 
-export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null; tokenId: string | null } | null {
+export type TokenRejection = "node_owner_restricted" | "not_network_member";
+
+/** 查令牌行并判它能不能用:没有这一行 → null;有但被拒 → { rejected };能用 → { row }。 */
+function lookupToken(token: string): { row: any; rejected?: undefined } | { row?: undefined; rejected: TokenRejection } | null {
   const tHash = hashToken(token);
   const cutoff = idleCutoffOffset();
   const row = db.get<any>(
     `SELECT t.token_id, t.user_id, t.network_id, t.scope, t.name AS token_name,
-            u.username, u.display_name, u.email, u.role
+            u.username, u.display_name, u.email, u.role,
+            CASE WHEN t.network_id IS NULL THEN 1
+                 WHEN EXISTS (SELECT 1 FROM network_members nm WHERE nm.network_id = t.network_id AND nm.user_id = t.user_id) THEN 1
+                 ELSE 0 END AS is_member
      FROM api_tokens t JOIN users u ON t.user_id = u.user_id
      WHERE t.token_hash = ?1
        AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))
@@ -352,10 +358,34 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
 
   if (!row) return null;
 
+  // #488 —— 网络令牌只在它的用户还是这个网络的成员时有效。被移出网络的人留下的令牌(移出前签发的、
+  // 或移出时还没自动吊销的老数据)以前照样解析:MCP 每个工具都拒,REST 读却能拿到整个网络的名册。
+  if (row.network_id && !Number(row.is_member)) return { rejected: "not_network_member" };
+
   // 多用户 Agent 权限:网络令牌(ntok_ / 邀请码令牌)的权限是「这个网络里的一切」,
   // 受限成员在受限网络里不能持有它 —— 否则拿它就绕过了授权过滤。这里是唯一的解析入口,
   // 在这里拒绝,所有 REST / MCP / SSE 路径一起生效(含升级前就签发、后来才被设为受限的令牌)。
-  if (row.network_id && isAgentRestricted(row.user_id, row.network_id)) return null;
+  if (row.network_id && isAgentRestricted(row.user_id, row.network_id)) return { rejected: "node_owner_restricted" };
+  return { row };
+}
+
+/**
+ * 令牌存在、但因为主人的网络成员身份被拒时,说清楚为什么(给 401 带上 reason / hint)。
+ * 只在调用者真的持有这枚令牌时才有输出 —— 不认识的令牌一律 null,不泄露任何东西。
+ */
+export function tokenRejection(token: string | null | undefined): { reason: TokenRejection; hint: string } | null {
+  if (!token) return null;
+  const r = lookupToken(token);
+  if (!r?.rejected) return null;
+  return r.rejected === "not_network_member"
+    ? { reason: r.rejected, hint: "this token's owner is no longer a member of its network; ask a network admin to re-invite them, then create a new token" }
+    : { reason: r.rejected, hint: "this token's owner only has access to granted Agents in this network, and network tokens need full Agent access; ask a network admin to set the owner's Agent access to all" };
+}
+
+export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null; tokenId: string | null } | null {
+  const found = lookupToken(token);
+  if (!found?.row) return null;
+  const row = found.row;
 
   // Update last_used(节流:见 LAST_USED_WRITE_INTERVAL_SECONDS)
   db.run(
@@ -652,9 +682,13 @@ export function removeNetworkMember(networkId: string, userId: string): { ok: bo
   const member = db.get<any>("SELECT role FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
   if (!member) return { ok: false, error: "not a member" };
   if (member.role === "owner") return { ok: false, error: "cannot remove owner" };
-  db.run("DELETE FROM network_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
-  deleteAgentGrants(networkId, userId);
-  deleteTaskGrantsForMember(networkId, userId);
+  db.transaction(() => {
+    db.run("DELETE FROM network_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
+    // #488 —— 他在这个网络里的令牌(节点令牌 / 邀请码令牌)一起吊销;resolveToken 也会拒非成员的令牌,这里让库里的状态如实。
+    db.run("UPDATE api_tokens SET revoked_at = datetime('now') WHERE network_id = ?1 AND user_id = ?2 AND revoked_at IS NULL", [networkId, userId]);
+    deleteAgentGrants(networkId, userId);
+    deleteTaskGrantsForMember(networkId, userId);
+  });
   return { ok: true };
 }
 
