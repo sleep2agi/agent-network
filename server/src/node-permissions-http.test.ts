@@ -221,6 +221,24 @@ describe("PUT /api/nodes/:id/permission-mode", () => {
   });
 });
 
+describe("GET /api/nodes viewer_can.permission_mode (#489)", () => {
+  test("true exactly for the callers PUT …/permission-mode accepts; node tokens get false; /health advertises it", async () => {
+    const canFor = async (token: string, nodeKey: string) =>
+      (await call(token, "GET", `/api/nodes?node_id=${node[nodeKey].id}&network_id=${net}`)).body.nodes?.[0]?.viewer_can?.permission_mode;
+    expect(await canFor(user.boss.token, "nN")).toBe(true);   // 网络 owner
+    expect(await canFor(user.sco.token, "nS")).toBe(true);    // 节点主人(普通成员)
+    expect(await canFor(user.sco.token, "nN")).toBe(false);   // 成员,不是主人
+    expect(await canFor(user.mem.token, "nN")).toBe(false);
+    expect(await canFor(node.nN.token, "nN")).toBe(false);    // 节点令牌永远不能改
+    const list = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}`);
+    expect(list.body.nodes.every((n: any) => !("owner_user_id" in n))).toBe(true);
+    const health = await fetch(`${base}/health`).then((r) => r.json()) as any;
+    expect(health.capabilities).toContain("node_permission_mode");
+    // 与写接口一致:viewer_can=false 的人 PUT 得到 403
+    expect((await call(user.mem.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "normal" })).status).toBe(403);
+  });
+});
+
 describe("GET /api/networks/:id/node-permission-report", () => {
   test("owner sees would-have-blocked counts per node; members and node tokens are refused", async () => {
     const r = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);

@@ -72,7 +72,7 @@ Hub 0.9.0-preview.68 起，服务器提供两样已经生效的能力：成员�
 PUT /api/nodes/{node_id}/permission-mode   {"mode": "normal" | "readonly" | "restricted"}
 ```
 
-返回 `{ok, node_id, permission_mode, previous}`，记审计 `node_permission_mode_changed`。不是这个网络的成员返回 404；成员但不是主人或 owner / admin 返回 403 `permission_denied`；节点令牌返回 403 `user_token_required`；模式写错返回 400 `invalid_permission_mode`。`GET /api/nodes` 的每一行多一个 `permission_mode`。
+返回 `{ok, node_id, permission_mode, previous}`，记审计 `node_permission_mode_changed`。不是这个网络的成员返回 404；成员但不是主人或 owner / admin 返回 403 `permission_denied`；节点令牌返回 403 `user_token_required`；模式写错返回 400 `invalid_permission_mode`。`GET /api/nodes` 的每一行多一个 `permission_mode`,以及 `viewer_can.permission_mode`:当前调用者能不能改这个节点的模式(与上面的写接口同一判据,节点令牌恒为 `false`)。客户端据此决定显示不显示「权限」设置。支持这些的 Hub 在 `/health` 的 `capabilities` 里带 `node_permission_mode`。
 
 **正常模式的收紧先记录、后执行**。Hub 环境变量 `COMMHUB_NODE_PERMISSIONS`：
 

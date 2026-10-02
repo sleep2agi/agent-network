@@ -79,7 +79,7 @@ The response is `{ok, node_id, permission_mode, previous}`, and the change write
 - A node token gets 403 `user_token_required`.
 - An unknown mode gets 400 `invalid_permission_mode`.
 
-Every row of `GET /api/nodes` gains `permission_mode`.
+Every row of `GET /api/nodes` gains `permission_mode`, and `viewer_can.permission_mode`: whether the caller may change this node's mode. It uses the same rule as the write endpoint above, and is always `false` for node tokens. Clients use it to decide whether to show the permissions setting. A Hub that supports all of this lists `node_permission_mode` in `/health` `capabilities`.
 
 **Narrowing in normal mode is logged first and enforced later.** It is controlled by the Hub environment variable `COMMHUB_NODE_PERMISSIONS`:
 
