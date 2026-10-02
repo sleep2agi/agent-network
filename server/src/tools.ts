@@ -12,7 +12,8 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
-import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS } from "./agent-access.js";
+import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
+import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict } from "./node-permissions.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
 import { handleRequirementsRequest } from "./requirements.js";
@@ -200,11 +201,69 @@ function guardRestrictedMemberTools(server: McpServer, restrictedNets: string[],
   }
 }
 
+// RFC-041 第一阶段(#487):节点令牌的每个 MCP 工具先按 NODE_TOOL_CLASS 判一次(node-permissions.ts)。
+// log 模式下正常节点照常放行、只记录;显式的只读 / 受限模式立刻生效。requirements_* 在 requirements.ts 里按卡判。
+function guardNodePermissionTools(server: McpServer, tokenId: string, networkId: string): void {
+  const denied = (reason: Parameters<typeof nodePermissionDeniedBody>[0], route: string) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(nodePermissionDeniedBody(reason, route)) }],
+  });
+  const taskTarget = (taskId: unknown): { to: AgentRef; from: string | null } | null => {
+    if (typeof taskId !== "string" || !taskId) return null;
+    const t = db.get<{ to_name: string | null; to_node_id: string | null; from_name: string | null }>(
+      "SELECT to_name, to_node_id, from_name FROM tasks WHERE task_id = ?1 AND network_id = ?2", taskId, networkId);
+    return t ? { to: { alias: t.to_name, nodeId: t.to_node_id }, from: t.from_name } : null;
+  };
+  const aliasTarget = (alias: unknown): AgentRef | null => {
+    if (typeof alias !== "string" || !alias.trim()) return null;
+    const canonical = resolveCanonicalAlias(networkId, alias.trim()).alias;
+    const session = db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", canonical, networkId);
+    return { alias: canonical, nodeId: session?.node_id ?? null };
+  };
+  const verdictFor = (id: NodeIdentity, name: string, args: Record<string, unknown>): Verdict => {
+    switch (NODE_TOOL_CLASS[name]) {
+      case "dispatch": {
+        if (name === "retry_task" || name === "cancel_task") {
+          const t = taskTarget(args.task_id);
+          if (!t) return null; // 没这个任务:交给工具自己回 not found
+          if (name === "cancel_task" && t.from && id.aliases.includes(t.from)) return null; // 撤回自己派的
+          return dispatchVerdict(id, t.to);
+        }
+        const target = aliasTarget(name === "reassign_task" ? args.new_alias : args.alias);
+        return target ? dispatchVerdict(id, target) : null;
+      }
+      case "broadcast": return broadcastVerdict(id);
+      case "node_write": return writeVerdict(id, name);
+      case "human_only": return humanOnlyVerdict(id, name);
+      default: return null; // always / read / requirements(按卡判)/ 没归类的(test 保证没有)
+    }
+  };
+  const wrap = (name: string, handler: (...callArgs: any[]) => any) => async (...callArgs: any[]) => {
+    const cls = NODE_TOOL_CLASS[name];
+    if (cls && cls !== "always" && cls !== "read" && cls !== "requirements") {
+      const id = nodeIdentity(tokenId, networkId);
+      const args = callArgs[0] && typeof callArgs[0] === "object" ? callArgs[0] as Record<string, unknown> : {};
+      const verdict = id ? verdictFor(id, name, args) : null;
+      if (id && nodeDecide(id, `mcp:${name}`, verdict)) return denied(verdict!.reason, `mcp:${name}`);
+    }
+    return handler(...callArgs);
+  };
+  const anyServer = server as any;
+  for (const method of ["tool", "registerTool"] as const) {
+    const original = anyServer[method].bind(server);
+    anyServer[method] = (...regArgs: any[]) => {
+      const last = regArgs.length - 1;
+      if (typeof regArgs[0] === "string" && typeof regArgs[last] === "function") regArgs[last] = wrap(regArgs[0], regArgs[last]);
+      return original(...regArgs);
+    };
+  }
+}
+
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
   // 多用户 Agent 权限:用户令牌调用者在哪些网络里是受限成员(只看授权 Agent)。
   // 网络令牌不会走到这里 —— 受限成员的网络令牌在 resolveToken 就被拒了。
   const restrictedNets = enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : [];
   if (restrictedNets.length) guardRestrictedMemberTools(server, restrictedNets, enforceUserId!);
+  if (callerTokenIsNetwork && callerTokenId && enforceNetworkId) guardNodePermissionTools(server, callerTokenId, enforceNetworkId);
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
   // an agent's send_task call always claimed from='hub' and peer agents

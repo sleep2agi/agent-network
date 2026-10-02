@@ -54,6 +54,52 @@ Hub 0.9.0-preview.68 起，服务器提供两样已经生效的能力：成员�
 
 设计和取舍见 RFC-040。
 
+## 节点自己的权限
+
+节点（Agent）的权限是它**主人**权限的子集，再按节点自己的**模式**往下收。主人是令牌绑定节点的 `nodes.owner_user_id`；没绑定节点的老令牌，主人是铸令牌的人。
+
+三种模式，默认「正常」，升级不改任何节点的行为：
+
+| 模式 | 能做什么 |
+|---|---|
+| `normal` 正常 | 和今天一样；按 Hub 开关决定是否收紧到主人的权限（见下） |
+| `readonly` 只读 | 能读、能上报状态、能回复派给它的任务；写任务、派活、广播、管理节点一律拒 |
+| `restricted` 受限 | 只看、只改派给它的任务卡（负责 Agent 是它、参与人有它、它建的，及这些卡的子任务）；新建的卡必须把负责 Agent 设成自己；派活只能给主人被授权的 Agent；不能广播，不能订阅别的会话或整个网络的推送 |
+
+**模式设了就立刻生效**，不看开关。只有节点主人、网络 owner / admin（和 Hub 管理员）能改，节点令牌不能改自己的模式，部门负责人也不能改：
+
+```
+PUT /api/nodes/{node_id}/permission-mode   {"mode": "normal" | "readonly" | "restricted"}
+```
+
+返回 `{ok, node_id, permission_mode, previous}`，记审计 `node_permission_mode_changed`。不是这个网络的成员返回 404；成员但不是主人或 owner / admin 返回 403 `permission_denied`；节点令牌返回 403 `user_token_required`；模式写错返回 400 `invalid_permission_mode`。`GET /api/nodes` 的每一行多一个 `permission_mode`。
+
+**正常模式的收紧先记录、后执行**。Hub 环境变量 `COMMHUB_NODE_PERMISSIONS`：
+
+| 值 | 行为 |
+|---|---|
+| `log`（默认） | 照常放行；「本来会被拒」的按 (节点, 路由, 原因, 小时) 合并记进 `node_permission_log` |
+| `enforce` | 记录并拒绝 |
+| `off` | 正常模式不判也不记（显式的只读 / 受限仍然生效） |
+
+正常模式会被收紧的情况（原因码）：主人看不见或改不了的任务卡 `beyond_owner_visibility`、主人没被授权的 Agent `agent_not_granted_to_owner`、只有人能做的事 `human_only`（改别的节点、建 / 改项目、写供应商 / 网络密钥、审技能）、不知道主人是谁 `owner_unknown`。显式模式的原因码是 `mode_readonly` 和 `mode_restricted_not_assigned`。
+
+被拒时 REST 返回 403，MCP 返回同样的正文：
+
+```json
+{"ok": false, "error": "node_permission_denied", "reason": "mode_readonly", "route": "PATCH /api/requirements/:id", "hint": "…"}
+```
+
+**报表**：网络 owner / admin（用户令牌）可以看过去一段时间每个节点「本来会被拦」的次数，默认 7 天：
+
+```
+GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
+```
+
+返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
+
+设计和取舍见 RFC-041。
+
 ## 相关
 
 - [账号、Token 与角色](/guide/account-system)

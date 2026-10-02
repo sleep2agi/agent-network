@@ -1324,6 +1324,7 @@ jobs:
           - qa-hub-20-model-auth-notify
           - qa-hub-21-schedule-stuck
           - qa-hub-22-department-heads
+          - qa-hub-23-node-permissions
           - qa-node-04-codex-app-server-reply-routing
           - test599-skillhub
           - test600-public-skillhub

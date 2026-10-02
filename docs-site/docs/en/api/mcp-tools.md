@@ -919,6 +919,7 @@ The `text` field is a JSON string that needs to be parsed.
 | `task not found` | Task doesn't exist |
 | `task is terminal` | Task is in a terminal state, cannot be operated on |
 | `task status is X, not retryable` | Only failed/expired/cancelled tasks can be retried |
+| `node_permission_denied` | A node token was refused by the node's own permissions: the node is in read-only/restricted mode, or it went beyond its owner's permissions while the Hub switch is `COMMHUB_NODE_PERMISSIONS=enforce`. The body carries `reason`, `route` and `hint`; see [A node's own permissions](/en/guide/multi-user#a-node-s-own-permissions) |
 
 ## Next steps
 
