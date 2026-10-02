@@ -1,5 +1,6 @@
 // 需求池。长期卡片，存在 Hub 上，手机和电脑读同一份。
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
+import { errorBody, errorFrom, RequirementFieldError, type ErrorContext } from "./requirements-errors.js";
 import { createHash } from "node:crypto";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
@@ -84,19 +85,9 @@ type Row = {
   completed_at_approx: number | null;
 };
 
-function jsonError(error: string, status: number): Response {
-  return Response.json({ ok: false, error }, { status });
-}
-
-/** 人员字段写错时告诉调用方怎么改(MCP 的 Agent 读得到 hint,app 只看 error)。 */
-const ASSIGNMENT_HINTS: Record<string, string> = {
-  owner_must_be_human: "owner (负责人) must be a person: {kind:'user', id}. To assign a node / Agent, use agent_owner: {kind:'node', id}.",
-  agent_owner_must_be_agent: "agent_owner (负责 Agent) must be a node: {kind:'node', id}. To assign a person, use owner: {kind:'user', id}.",
-};
-function assignmentError(e: unknown): Response {
-  const error = (e as Error).message;
-  const hint = ASSIGNMENT_HINTS[error];
-  return Response.json({ ok: false, error, ...(hint ? { hint } : {}) }, { status: 400 });
+// #472:错误码原样,统一补 field / message / hint(requirements-errors.ts,唯一出口)。
+function jsonError(error: string, status: number, ctx?: ErrorContext): Response {
+  return Response.json(errorBody(error, ctx), { status });
 }
 
 // ── 任务的人员权限(RFC-038 §9,判定在 task-access.ts) ──
@@ -278,10 +269,10 @@ function projectNameTaken(networkId: string, name: string, except?: string): boo
 /** 卡片上的 project_id:null 清空;字符串必须是同一网络、未归档的项目。 */
 function projectRef(value: unknown, networkId: string): string | null {
   if (value === null) return null;
-  if (typeof value !== "string" || !value) throw new Error("invalid_project");
+  if (typeof value !== "string" || !value) throw new RequirementFieldError("invalid_project", "project_id", value);
   const row = db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, value);
-  if (!row || row.network_id !== networkId) throw new Error("project_not_in_network");
-  if (row.archived) throw new Error("project_archived");
+  if (!row || row.network_id !== networkId) throw new RequirementFieldError("project_not_in_network", "project_id", value);
+  if (row.archived) throw new RequirementFieldError("project_archived", "project_id", value);
   return row.project_id;
 }
 
@@ -529,15 +520,15 @@ const SELECT = "requirement_id, network_id, title, column_name, priority, due_on
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
-function personRef(value: unknown, networkId: string, hidden: HiddenNode = null): PersonRef {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_person');
+function personRef(value: unknown, networkId: string, hidden: HiddenNode = null, field = 'owner'): PersonRef {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequirementFieldError('invalid_person', field);
   const row = value as Record<string, unknown>;
-  if ((row.kind !== 'user' && row.kind !== 'node') || typeof row.id !== 'string' || !row.id.trim()) throw new Error('invalid_person');
+  if ((row.kind !== 'user' && row.kind !== 'node') || typeof row.id !== 'string' || !row.id.trim()) throw new RequirementFieldError('invalid_person', field);
   const exists = row.kind === 'user'
     ? db.get("SELECT 1 FROM network_members m JOIN users u ON u.user_id=m.user_id WHERE m.network_id=?1 AND m.user_id=?2", networkId, row.id)
     : db.get("SELECT 1 FROM nodes WHERE network_id=?1 AND node_id=?2", networkId, row.id);
   // 没授权的节点与不存在的节点同一个错误,不给受限成员留 node_id 探测差异。
-  if (!exists || (row.kind === 'node' && hidden?.(row.id as string))) throw new Error('person_not_in_network');
+  if (!exists || (row.kind === 'node' && hidden?.(row.id as string))) throw new RequirementFieldError('person_not_in_network', field);
   return { kind: row.kind, id: row.id };
 }
 
@@ -564,13 +555,13 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
   if (coerced && agentOwnerLocked) throw new Error('agent_owner_not_granted');
   if ('agent_owner' in body) {
     if (agentOwnerLocked) throw new Error('agent_owner_not_granted');
-    agentOwner = body.agent_owner === null ? null : personRef(body.agent_owner, networkId, hidden);
+    agentOwner = body.agent_owner === null ? null : personRef(body.agent_owner, networkId, hidden, 'agent_owner');
     if (agentOwner && agentOwner.kind !== 'node') throw new Error('agent_owner_must_be_agent');
   }
   let participants = current ? JSON.parse(current.participants_json || '[]') : [];
   if ('participants' in body) {
     if (!Array.isArray(body.participants) || body.participants.length > 100) throw new Error('invalid_participants');
-    const refs = body.participants.map(value => personRef(value, networkId, hidden));
+    const refs = body.participants.map(value => personRef(value, networkId, hidden, 'participants'));
     // 参与人是整体替换:把受限成员看不见的那些节点原样留下,别让他「保存」时静默删掉。
     const keptHidden = hidden ? participants.filter((ref: unknown) => isHiddenRef(ref, hidden)) : [];
     participants = [...new Map([...keptHidden, ...refs].map((ref: PersonRef) => [`${ref.kind}:${ref.id}`, ref])).values()];
@@ -758,7 +749,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   const scoped = !!caller && isTaskScoped(caller.userId, networkId);
   let projectId: string | null = null;
   if (body.project_id !== undefined) {
-    try { projectId = projectRef(body.project_id, networkId); } catch (e) { return jsonError((e as Error).message, 400); }
+    try { projectId = projectRef(body.project_id, networkId); } catch (e) { return errorFrom(e); }
     // scoped 成员只能建进自己 can_edit 的项目;没授权的项目与不存在的项目同一个错误。
     if (!canUseProject(caller, networkId, projectId)) return jsonError("project_not_in_network", 400);
   }
@@ -777,7 +768,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   if (ref) {
     const existing = rowByExternalRef(networkId, ref);
     // 同一个外部条目再建一次 = 冲突,回已有的 id(同步方改用 upsert,或按这个 id PATCH)。
-    if (existing) return Response.json({ ok: false, error: "external_ref_exists", existing_id: existing.requirement_id }, { status: 409 });
+    if (existing) return Response.json({ ...errorBody("external_ref_exists"), existing_id: existing.requirement_id }, { status: 409 });
   }
   if (clientId) {
     const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
@@ -787,7 +778,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   const id = `req_${crypto.randomUUID()}`;
   const createdAt = new Date().toISOString();
   let people;
-  try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId), ctx.strictOwner === true); } catch (e) { return assignmentError(e); }
+  try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId), ctx.strictOwner === true); } catch (e) { return errorFrom(e); }
   const actor = JSON.stringify(actorOf(ctx));
   try {
     // 领号、插入、记「新建」这条动态在同一个事务里:插入被唯一索引挡下时,号和动态一起回滚,不留空洞。
@@ -807,7 +798,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
     // 并发的同一个 external_ref / client_id:唯一索引挡住了第二个,回已有的那条。
     if (ref) {
       const existing = rowByExternalRef(networkId, ref);
-      if (existing) return Response.json({ ok: false, error: "external_ref_exists", existing_id: existing.requirement_id }, { status: 409 });
+      if (existing) return Response.json({ ...errorBody("external_ref_exists"), existing_id: existing.requirement_id }, { status: 409 });
     }
     if (!clientId) return jsonError("insert_failed", 500);
     const existing = db.get<Row>(`SELECT ${SELECT} FROM requirements WHERE network_id = ?1 AND client_id = ?2`, networkId, clientId);
@@ -822,7 +813,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
 // ── 修改(省略的字段保留原值) ──
 const PATCH_FIELDS = ["column", "issues", "tags", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "description", "checklist", "project_id", "external_ref", "external_url", "archived", "parent_id", "start"];
 function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Record<string, unknown>): Response {
-  if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
+  if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400, { sent: Object.keys(body), writable: PATCH_FIELDS });
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
   if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
   const caller = taskCaller(ctx);
@@ -873,10 +864,10 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     assignee = body.assignee.trim().slice(0, 80);
   }
   let people;
-  try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id), ctx.strictOwner === true); } catch (e) { return assignmentError(e); }
+  try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id), ctx.strictOwner === true); } catch (e) { return errorFrom(e); }
   let projectId = row.project_id;
   if (has("project_id")) {
-    try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return jsonError((e as Error).message, 400); }
+    try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return errorFrom(e); }
     // scoped 成员只能挪进自己 can_edit 的项目;没授权的项目与不存在的项目同一个错误。
     if (projectId !== row.project_id && !canUseProject(caller, row.network_id, projectId)) return jsonError("project_not_in_network", 400);
   }
@@ -886,7 +877,7 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     if (next === undefined) return jsonError("invalid_external_ref", 400);
     if (next && next !== row.external_ref) {
       const taken = rowByExternalRef(row.network_id, next);
-      if (taken) return Response.json({ ok: false, error: "external_ref_exists", existing_id: taken.requirement_id }, { status: 409 });
+      if (taken) return Response.json({ ...errorBody("external_ref_exists"), existing_id: taken.requirement_id }, { status: 409 });
     }
     ref = next;
   }
@@ -967,7 +958,7 @@ function scopedRow(ctx: RequirementsRequestContext, id: string): Row | Response 
   const rows = db.all<Row>(`${sql} LIMIT 2`, ...params);
   if (rows.length > 1) {
     const networks = rows.map(r => r.network_id);
-    return Response.json({ ok: false, error: "ambiguous_seq", networks, message: `#${seq} exists in more than one network you can see (${networks.join(", ")}); pass network_id to pick one` }, { status: 409 });
+    return Response.json({ ...errorBody("ambiguous_seq"), networks, message: `#${seq} exists in more than one network you can see (${networks.join(", ")}); pass network_id to pick one` }, { status: 409 });
   }
   return rows[0] ?? jsonError("requirement_not_found", 404);
 }
@@ -1455,7 +1446,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
   if (req.method !== "PATCH") return jsonError("not_found", 404);
   let body: Record<string, unknown>;
   try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
-  if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400);
+  if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400, { sent: Object.keys(body), writable: PATCH_FIELDS });
   const row = scopedRow(ctx, id);
   if (row instanceof Response) return row;
   return patchRequirement(ctx, row, body);
