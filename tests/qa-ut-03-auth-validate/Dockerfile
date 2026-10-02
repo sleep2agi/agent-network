@@ -1,7 +1,10 @@
 FROM oven/bun:1
 
 WORKDIR /app
-COPY server/package.json server/package.json
+COPY server/package.json server/package-lock.json server/
+# #466 —— 测试 import server/src(db.ts 的 import 链会带上 zod 等,#2247 起经 node-health-store)。
+# 依赖照 lockfile 装;以前没装也能绿,只是因为那条 import 链碰巧零依赖。
+RUN cd server && bun install --frozen-lockfile
 COPY server/src/ server/src/
 ENV COMMHUB_DB=/tmp/qa-ut-03.db
 

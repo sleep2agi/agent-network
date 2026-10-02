@@ -1,6 +1,6 @@
-import { createAdapter, type DbAdapter } from "./db-adapter";
+import { createAdapter, type DbAdapter } from "./db-adapter"; import { withStatementHook } from "./status-read-cache"; // #431 写 sessions 的语句让 /api/status 缓存失效
 
-export const db: DbAdapter = createAdapter();
+export const db: DbAdapter = withStatementHook(createAdapter());
 
 // Schema
 db.exec(`
