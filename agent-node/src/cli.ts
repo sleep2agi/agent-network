@@ -1203,7 +1203,9 @@ import { appendFileSync, mkdirSync, statSync } from "fs";
 //    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
-import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { createAppServerWatchdog, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
+import { appsrvSessionFor, captureAppServerLaunch, linuxProcView, listTmuxPanes, markerStillOurs, realRelaunchDeps, relaunchAppServer, relaunchBlocker, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
 const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
   ? preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)
@@ -1255,6 +1257,14 @@ const NODE_CODEX_HOME: string | undefined = (RUNTIME === "codex" || RUNTIME === 
 // 只给 codex-app-server 运行时开;其他运行时不带这一格(旧 Hub 本来就丢弃未知顶层键)。
 const codexModelAuth = new ModelAuthTracker();
 let codexHealthMonitor: ReturnType<typeof createCodexHealthMonitor> | null = null;
+// #461 —— app-server 看门狗(下面健康探针那段创建);进程退出 / ws 断开时提前叫醒它。
+let codexAppServerWatchdog: ReturnType<typeof createAppServerWatchdog> | null = null;
+let codexWatchdogStopping = false;
+let lastCodexAppServerUrl: string | undefined;
+function wakeCodexWatchdog(): void {
+  codexAppServerWatchdog?.noteExit();
+  setTimeout(() => { void codexHealthMonitor?.tick(); }, 1_000).unref?.();
+}
 let lastReportedStatus: { status: string; task?: string } = { status: "idle" };
 function currentNodeHealth(): NodeHealthReport | undefined {
   return codexHealthMonitor?.snapshot();
@@ -2272,11 +2282,19 @@ async function ensureCodexAppServerSession(): Promise<
       onExit: (info) => {
         warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
         if (openedRef) codexAppServerSessionManager.invalidate(openedRef);
+        wakeCodexWatchdog();
       },
       log,
       warn,
     });
     openedRef = opened;
+    lastCodexAppServerUrl = opened.url;
+    // #461 —— 共存拓扑没有 exit 事件(app-server 不是我们的子进程):ws 被对端断开(1006)就当它可能没了。
+    opened.client.on("close", (ev: { code?: number }) => {
+      if (codexWatchdogStopping) return;
+      warn(`[codex-app-server] ws closed code=${ev?.code ?? "?"}; checking the app-server`);
+      wakeCodexWatchdog();
+    });
     return opened;
   });
   writebackCodexThread(session.threadId);
@@ -6953,8 +6971,55 @@ if (RUNTIME === "codex-app-server") {
   const tuiSession = process.env.ANET_COPRESENCE_BRIDGE === "1"
     ? (process.env.ANET_CODEX_TUI_SESSION || ALIAS)
     : undefined;
+  // #461 —— app-server 看门狗:探针连续失败 / 已知退出 → 按原会话重启(共存:按启动快照在原 tmux 会话里
+  // 重新拉起 + 桥重接原 thread;自有:重新 spawn + resume 原 thread),窗口内次数有上限,放弃后保持降级。
+  const copresenceAppServer = process.env.ANET_COPRESENCE_BRIDGE === "1" && !!codexAppServerUrl;
+  const appsrvSession = copresenceAppServer && tuiSession ? appsrvSessionFor(tuiSession) : undefined;
+  const nodeMarker = process.env.ANET_NODE_MARKER || undefined;
+  let appsrvSnapshot: AppServerLaunchSnapshot | null = null;
+  const refreshAppsrvSnapshot = () => {
+    if (!appsrvSession || !codexAppServerUrl || process.platform !== "linux") return;
+    const r = captureAppServerLaunch({ session: appsrvSession, url: codexAppServerUrl, marker: nodeMarker, panes: listTmuxPanes(), proc: linuxProcView });
+    if (r.ok && r.snapshot.pid !== appsrvSnapshot?.pid) {
+      appsrvSnapshot = r.snapshot;
+      log(`[app-server-watchdog] launch snapshot tmux=${r.snapshot.session} pid=${r.snapshot.pid} argv0=${r.snapshot.argv[0]}`);
+    } else if (!r.ok && !appsrvSnapshot) {
+      warn(`[app-server-watchdog] no launch snapshot yet: ${r.reason}`);
+    }
+  };
+  refreshAppsrvSnapshot();
+  codexAppServerWatchdog = createAppServerWatchdog({
+    ...watchdogLimitsFromEnv(process.env),
+    canRestart: () => {
+      if (codexWatchdogStopping) return "node is shutting down";
+      if (!copresenceAppServer) return null;
+      if (process.platform !== "linux") return `co-presence app-server auto-restart needs Linux /proc (this host is ${process.platform})`;
+      if (!NODE_CODEX_HOME) return "this node has no CODEX_HOME";
+      if (configFilePath && !markerStillOurs(join(dirname(configFilePath), "copresence-identity.json"), nodeMarker)) {
+        return "co-presence identity marker is gone or replaced (node is being stopped or restarted)";
+      }
+      return relaunchBlocker(appsrvSnapshot, { marker: nodeMarker, token: AUTH_TOKEN, panes: listTmuxPanes, proc: linuxProcView });
+    },
+    restart: async () => {
+      if (copresenceAppServer && appsrvSnapshot && NODE_CODEX_HOME) {
+        appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, token: AUTH_TOKEN, log }));
+      }
+      // 丢掉断了的会话,按原 thread 重新接上(自有拓扑这一步就是重新 spawn)。
+      codexAppServerSessionManager.invalidate(codexAppServerSessionManager.current());
+      const reopened = await ensureCodexAppServerSession();
+      log(`[app-server-watchdog] bridge re-attached ${reopened.url ?? "?"} thread=${reopened.threadId}`);
+    },
+    onSettled: () => { setTimeout(() => { void codexHealthMonitor?.tick(); }, 500).unref?.(); },
+    log,
+    warn,
+  });
   codexHealthMonitor = createCodexHealthMonitor({
-    appServerUrl: () => codexAppServerUrl || codexAppServerSessionManager.current()?.url,
+    appServerUrl: () => codexAppServerUrl || codexAppServerSessionManager.current()?.url || lastCodexAppServerUrl,
+    intervalMs: healthIntervalFromEnv(process.env),
+    onAppServerProbe: (h) => {
+      if (h.ok) refreshAppsrvSnapshot();
+      return codexAppServerWatchdog ? codexAppServerWatchdog.observe(h) : h;
+    },
     tuiSession,
     modelAuth: codexModelAuth,
     probeAppServer: async (url) => {
@@ -7166,6 +7231,7 @@ let shuttingDown = false;
 const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
+  codexWatchdogStopping = true;
   ownerScheduleConsumer?.stop();
   sideThreadNodeRuntime?.close();
   sideThreadOwnedSession?.client.close();
