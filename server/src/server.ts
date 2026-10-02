@@ -2,6 +2,7 @@ import { buildServeErrorResponse } from "./serve-error.js";
 import { maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
+import { assertNodeHealthy } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -750,6 +751,9 @@ const TaskSchema = z.object({
   // stays unified regardless of transport (REST or MCP).
   attachments: z.any().optional(),
   meta: z.any().optional(),
+  // #460 — dispatch even when the target reports a degraded health layer. Honoured for user
+  // tokens only (a node token cannot override another node's health). Old clients never send it.
+  force: z.boolean().optional(),
 });
 
 const BroadcastSchema = z.object({
@@ -3210,6 +3214,12 @@ return Bun.serve({
         if (!lc.ok) {
           return withCors(req, Response.json(lc, { status: 409 }));
         }
+      }
+      // #460 — refuse dispatch to a node whose fresh health says a layer is down (409, same as the
+      // lifecycle guard above). Unknown / stale health = allowed: old nodes keep working.
+      {
+        const hg = assertNodeHealthy(targetAlias, taskNetId ?? null, { force: body.force === true, forceAllowed: !restAuth?.networkId });
+        if (!hg.ok) return withCors(req, Response.json(hg, { status: 409 }));
       }
       // Mirror send_task MCP: write inbox + tasks rows in a single
       // transaction so the dispatch is visible to dashboard's Tasks page

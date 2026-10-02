@@ -1,5 +1,6 @@
 import { db, logTaskEvent } from "./db.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
+import { assertNodeHealthy } from "./node-health-guard.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent } from "./agent-access.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
@@ -285,6 +286,19 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       db.run(
         "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'target_not_active', error_message = ?1, completed_at = datetime('now') WHERE run_id = ?2",
         [String((lifecycle as any).error || "target_not_active").slice(0, 500), runId],
+      );
+      if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+      return;
+    }
+
+    // #460 — the target reports a degraded layer (App Server down / TUI gone / login revoked): the run fails
+    // with that reason instead of queueing a task nobody will execute. Unknown / stale health runs as before.
+    const health = assertNodeHealthy(node.alias, row.network_id, { forceAllowed: false });
+    if (!health.ok) {
+      finalStatus = "failed";
+      db.run(
+        "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'node_degraded', error_message = ?1, completed_at = datetime('now') WHERE run_id = ?2",
+        [health.message.slice(0, 500), runId],
       );
       if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
