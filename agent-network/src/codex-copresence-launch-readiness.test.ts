@@ -85,11 +85,17 @@ describe("Codex co-presence launch readiness", () => {
     const body = cli.slice(start, end);
     const receipt = body.indexOf("bridgeClientHealthReceipt(wsUrl, threadId)");
     const rendered = body.indexOf("probePosixOwnedLoopbackConnection(tuiIdentity.pid, port)");
+    // #2255: the probe is polled (not a single shot) and its outcome gates success.
+    const polled = body.lastIndexOf("await waitForPosixOwnedLoopbackConnection(", rendered);
+    const gate = body.indexOf('if (attribution.outcome !== "connected") {', rendered);
     const success = body.indexOf("✅ 共存节点");
     expect(receipt).toBeGreaterThan(0);
     expect(rendered).toBeGreaterThan(receipt);
-    expect(success).toBeGreaterThan(rendered);
-    expect(body.slice(rendered, success)).toContain("process.exit(1)");
+    expect(polled).toBeGreaterThan(receipt);
+    expect(polled).toBeLessThan(rendered);
+    expect(gate).toBeGreaterThan(rendered);
+    expect(success).toBeGreaterThan(gate);
+    expect(body.slice(gate, success)).toContain("process.exit(1)");
   });
 
   test("fresh path performs no thread RPC and launches deferred bridge before remote-only TUI", () => {
