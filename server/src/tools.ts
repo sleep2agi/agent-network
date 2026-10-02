@@ -148,9 +148,9 @@ function scheduledReplyRecipient(taskId: string, networkId: string | null | unde
 // 方无影响，只是错误形态更一致）。
 const NODE_ID_ALIAS_FIELDS = {
   node_id: z.string().min(1).max(200).optional()
-    .describe("Target child node ID (canonical, #1281). The value create_node returns. Must be in caller's network."),
+    .describe("Child node id (as returned by create_node), in your network."),
   child_node_id: z.string().min(1).max(200).optional()
-    .describe("DEPRECATED alias for node_id (#1281): kept for back-compat with pre-unification clients; prefer node_id."),
+    .describe("Deprecated alias of node_id."),
 } as const;
 
 /** #1281 — 把 node_id / child_node_id 收敛成单一内部 id。两个都传且不等 ⇒
@@ -1639,7 +1639,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional().describe("Network scope"),
       parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends."),
       meta: z.any().optional().describe("Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
-      force: z.boolean().optional().describe("#460 — dispatch even when the target reports a degraded health layer (user tokens only; ignored for node tokens)"),
+      force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
@@ -1972,7 +1972,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // `attachments` before this schema entry existed would see `ok:true`
       // and never learn the attachments were dropped. Validated by
       // validateAttachments (uploads.ts) — the same helper the REST path uses.
-      attachments: z.any().optional().describe("Optional attachment array; parity with send_task's meta.attachments. Each item: {type:'file', file_id, name?, mime?, size?}. Persisted into tasks.meta_json + inbox.meta_json."),
+      attachments: z.any().optional().describe("Attachments, like send_task's meta.attachments: [{type:'file', file_id, name?, mime?, size?}]."),
       // #507 — optional structured metadata (parity with send_task L837). If
       // both `attachments` (top-level) and `meta.attachments` are supplied,
       // top-level wins (same rule as REST /api/task L2101).
@@ -2359,7 +2359,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to retry"),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
-      force: z.boolean().optional().describe("#460 — dispatch even when the target reports a degraded health layer (user tokens only; ignored for node tokens)"),
+      force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ task_id, from_session: _fromIn, network_id: netId, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
@@ -2578,7 +2578,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       new_alias: z.string().min(1).max(200).describe("Target agent alias"),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
-      force: z.boolean().optional().describe("#460 — dispatch even when the target reports a degraded health layer (user tokens only; ignored for node tokens)"),
+      force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ task_id, new_alias, from_session: _fromIn, network_id: netId, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
@@ -3509,7 +3509,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node to send back its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) from its working directory. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported rules_file_capable (claude-code sessions)."),
+      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting rules_file_capable)."),
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("read", { node_id, child_node_id, alias, network_id }),
@@ -3520,7 +3520,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node to overwrite its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) in its working directory with `content`. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported rules_file_capable (claude-code sessions)."),
+      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting rules_file_capable)."),
       content: z.string().max(RULES_FILE_MAX_BYTES).describe("Full new file content (UTF-8). The node writes it atomically."),
       network_id: z.string().max(200).optional(),
     },
@@ -3532,7 +3532,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node to list the skills its runtime loads (name, scope project|user|system, display path, frontmatter description). Read-only; no path argument. Poll get_rules_file_result — content is JSON {skills:[…]}.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported skills_capable."),
+      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("skills_list", { node_id, child_node_id, alias, network_id }),
@@ -3543,7 +3543,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node for one skill's SKILL.md by name. Read-only; the node resolves the name under its own runtime's skills roots — no path argument. Poll get_rules_file_result — content is JSON {name, scope, path_rel, description, content}.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported skills_capable."),
+      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),
       name: z.string().min(1).max(64).describe("Skill directory name, [A-Za-z0-9._-]."),
       network_id: z.string().max(200).optional(),
     },
@@ -3555,7 +3555,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node to list one directory level of its work dir (project folder view, read-only). `path` is relative to the work dir (default: the root); absolute paths and .. are refused. Poll get_rules_file_result — content is JSON {path, entries:[{name,type,size?,mtime?,hidden_reason?,no_descend?}], truncated, total}. User logins only.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported files_capable."),
+      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting files_capable)."),
       path: z.string().max(NODE_FILE_PATH_MAX).optional().describe("Directory relative to the node's work dir; omit or \"\" for the root."),
       network_id: z.string().max(200).optional(),
     },
@@ -3567,7 +3567,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node for one text file under its work dir (project folder view, read-only, 256 KiB cap; binary / too large → size only; secret-looking files → name only). `path` is relative to the work dir. Poll get_rules_file_result — content is JSON {path, name, kind, size?, mtime?, content?, hidden_reason?}. User logins only.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported files_capable."),
+      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting files_capable)."),
       path: z.string().min(1).max(NODE_FILE_PATH_MAX).describe("File path relative to the node's work dir."),
       network_id: z.string().max(200).optional(),
     },
@@ -3579,7 +3579,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node for the tail of its own agent-node run log (read-only, redacted on the node before it leaves). No path argument: the node reads only its own log directory. User logins only; the node's owner or a network owner/admin. Poll get_rules_file_result — content is JSON {files, lines:[{ts, level, text, key}], truncated, matched, now_ts}; it is handed out once and then purged.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Target by alias instead of node_id — resolves to the node row, or to a session that reported logs_capable."),
+      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting logs_capable)."),
       lines: z.number().int().min(1).max(LOGS_MAX_LINES).optional().describe("How many of the newest matching lines (default 500, max 2000)."),
       level: z.enum(["info", "warn", "error"]).optional().describe("Only lines of exactly this level."),
       grep: z.string().min(1).max(LOGS_GREP_MAX).optional().describe("Case-insensitive substring, matched after redaction."),
@@ -5844,9 +5844,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // (requirements.ts personRef;找不到 / 别名对上多个 → 400 + hint)。给了 id 就只看 id。
   const reqPerson = z.object({
     kind: z.enum(["user", "node"]),
-    id: z.string().min(1).max(200).optional().describe("user_id / node_id (from requirements_people)"),
-    username: z.string().min(1).max(100).optional().describe("kind 'user' only: the member's username, resolved in the task's network"),
-    alias: z.string().min(1).max(200).optional().describe("kind 'node' only: the Agent's alias, resolved in the task's network"),
+    // #476 —— 这三格的说明不写在这里:reqPerson 在 3 个工具 × 3 个字段里展开,每份都复制一遍(~1.6 KB)。
+    // 写法在 owner / agent_owner / participants 的 describe 里各说一次。
+    id: z.string().min(1).max(200).optional(),
+    username: z.string().min(1).max(100).optional(),
+    alias: z.string().min(1).max(200).optional(),
   });
   const reqChecklistItem = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(), text: z.string().min(1).max(500), done: z.boolean().optional() });
   const reqFields = {
@@ -5859,9 +5861,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
     project_id: z.string().max(200).nullable().optional(),
-    owner: reqPerson.nullable().optional().describe("负责人 (a person): {kind:'user', id} or {kind:'user', username}; a node here is rejected with 400 owner_must_be_human — use agent_owner for nodes"),
-    agent_owner: reqPerson.nullable().optional().describe("负责 Agent: {kind:'node', id} or {kind:'node', alias}"),
-    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the whole participant list ({kind, id}, {kind:'user', username} or {kind:'node', alias}) (omitted people are removed; [] clears it). To add or remove a few people without touching the others, use participants_add / participants_remove on requirements_update."),
+    owner: reqPerson.nullable().optional().describe("负责人 (a person): {kind:'user', id | username} (ids / usernames from requirements_people; names resolve in the task's network); a node is rejected with owner_must_be_human — use agent_owner"),
+    agent_owner: reqPerson.nullable().optional().describe("负责 Agent: {kind:'node', id | alias}"),
+    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the whole list (written like owner / agent_owner; omitted people are removed, [] clears). To add or remove a few, use participants_add / participants_remove on requirements_update."),
     external_url: z.string().max(500).nullable().optional(),
     parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
   };
@@ -5869,14 +5871,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
   // #475 —— status 是 column 的别名(列表的筛选参数就叫 status,Agent 写任务时也常这么写)。只在 MCP 这层换名,REST 不变;
   // 两个都给且不同 → 400 status_conflicts_with_column,不替调用方挑一个。
-  const reqStatus = z.enum(["pool", "doing", "done"]).optional().describe("alias of column (same values); if both are sent they must match");
+  const reqStatus = z.enum(["pool", "doing", "done"]).optional().describe("alias of column; must match it if both are sent");
   const withColumn = (args: Record<string, unknown>, call: (args: Record<string, unknown>) => Promise<{ content: { type: "text"; text: string }[] }>) => {
     if (args.status === undefined) return call(args);
     if (args.column !== undefined && args.column !== args.status) return Promise.resolve({ content: [{ type: "text" as const, text: JSON.stringify({ ...errorBody("status_conflicts_with_column"), status: 400 }) }] });
     return call({ ...args, column: args.status });
   };
-  const reqPeopleDelta = (verb: string) => z.array(reqPerson).max(100).optional().describe(`${verb} these people ${verb === "add" ? "to" : "from"} the participant list, keeping everyone else (atomic; ${verb === "add" ? "already present = no change" : "not present = no change"}). Cannot be combined with participants.`);
-  const REQ_ID_DESC = "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)";
+  const reqPeopleDelta = (verb: string) => z.array(reqPerson).max(100).optional().describe(`${verb === "add" ? "Add to" : "Remove from"} the participant list, keeping the rest (atomic; not with participants).`);
+  const REQ_ID_DESC = "requirement id (req_…) or short number \"#N\" (per network; with several networks also pass network_id)";
 
   // #471 —— MCP 的列表默认省流:summary 视图 + 50 张一页(REST 的默认 full + 500 不变,App 靠它)。
   // 生产实测 122 张卡:旧默认(full、500)148 KB,summary 81 KB —— 一次调用就塞满 Agent 的上下文。
@@ -5904,7 +5906,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_list",
     {
-      description: `List requirement tasks in your network. Defaults (MCP): view='summary' and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page, newest first — about 0.5 KB per task, so a page stays small. has_more + next_cursor → pass cursor for the next page. Summary rows drop description and checklist bodies (has_description, checklist_count instead); for full text read one task with requirements_get, or pass view='full' (several KB per task — keep limit small). Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact label), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q = search title / description / owner, agent and participant names / project name / tags (space-separated terms are ANDed). limit ≤ 1000. Each task carries children {total, done}. changes=true (needs updated_since) returns only tasks changed since then, archived ones included, plus deleted ids and server_time to pass as the next updated_since. Unknown parameters are rejected (-32602) with the list of valid ones.`,
+      description: `List requirement tasks in your network, newest first. Defaults (MCP): view='summary' (no description / checklist bodies; has_description, checklist_count instead; ~0.5 KB per task) and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page; has_more + next_cursor → pass cursor. Full text: requirements_get, or view='full' with a small limit (≤ 1000). Filters: seq (#N), status, project_id ('none'), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q searches title / description / people / project / tags (terms ANDed). Rows carry children {total, done}. changes=true (with updated_since) returns only tasks changed since then, archived included, plus deleted ids and server_time for the next updated_since. Unknown parameters are rejected (-32602).`,
       // Strict: registerTool honours a constructed object's unknownKeys (server.tool() would strip them silently).
       inputSchema: z.strictObject(reqListShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
@@ -5935,7 +5937,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_people",
     {
-      description: "Look up the people in your network and the Agents they own, to fill task person fields. Each row: user_id, username, display_name (\"\" if not set), role, department {id, name} or null, agents [{node_id, alias}]; Agents with no owner in this network are listed in agents_without_owner (first page only). q filters by username / display name / department / Agent alias (case-insensitive substring). 50 people per page (limit ≤ 200); has_more + next_offset → pass offset. Agents you are not granted are left out. Person fields on requirements_create / requirements_update / requirements_upsert_by_external_ref accept {kind:'user', id} or {kind:'user', username} (owner, participants) and {kind:'node', id} or {kind:'node', alias} (agent_owner, participants), resolved in the task's own network only.",
+      description: "Look up the people in your network and the Agents they own, to fill task person fields. Each row: user_id, username, display_name (\"\" if not set), role, department {id, name} or null, agents [{node_id, alias}]; Agents with no owner in this network are listed in agents_without_owner (first page only). q filters by username / display name / department / Agent alias (case-insensitive substring). 50 people per page (limit ≤ 200); has_more + next_offset → pass offset. Agents you are not granted are left out. Task person fields take these ids, or {kind:'user', username} / {kind:'node', alias}.",
       inputSchema: z.strictObject(reqPeopleShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
           ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqPeopleKeys.join(", ")}`
@@ -6020,17 +6022,27 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async (args) => requirementsCall("PATCH", `/api/requirements/projects/${encodeURIComponent(args.id)}`, args.network_id, pick(args, ["name", "color", "sort", "archived"])),
   );
 
-  server.tool(
+  // #476 —— 不带 requirement_id 的全网动态默认 50 条(REST 默认 200 不变,App 走 REST);严格参数同 #471。
+  const REQ_EVENTS_NETWORK_DEFAULT_LIMIT = 50;
+  const reqEventsShape = {
+    network_id: z.string().max(200).optional(),
+    requirement_id: z.string().min(1).max(200).optional().describe(REQ_ID_DESC),
+    since: z.string().max(40).optional().describe("ISO; only events after it"),
+    limit: z.number().int().min(1).max(500).optional(),
+    cursor: z.string().max(20).optional().describe("next_cursor from the previous page (older events)"),
+  };
+  const reqEventsKeys = Object.keys(reqEventsShape);
+  server.registerTool(
     "requirements_events",
-    "Read the task activity timeline (the app's 动态): field-level changes — who, when, old → new — and comments (kind=comment, text in new.text; add one with requirements_comment), newest first. Pass requirement_id (req_… or \"#N\") for one task, or omit it for the whole network. since (ISO) = only changes after it; limit 1–500 (default 200); next_cursor → pass as cursor for the next page; server_time → use as the next since. Same visibility as requirements_list: tasks you can't see (and hidden Agents) are left out.",
     {
-      network_id: z.string().max(200).optional(),
-      requirement_id: z.string().min(1).max(200).optional(),
-      since: z.string().max(40).optional(),
-      limit: z.number().int().min(1).max(500).optional(),
-      cursor: z.string().max(20).optional(),
+      description: `Read the task activity timeline (the app's 动态), newest first: field-level changes (who, when, old → new) and comments (kind=comment, text in new.text; add one with requirements_comment). With requirement_id (req_… or "#N"): that task's events (limit default 200). Without it: the whole network, ${REQ_EVENTS_NETWORK_DEFAULT_LIMIT} per page by default. limit ≤ 500; next_cursor → pass as cursor for older events; server_time → use as the next since. Same visibility as requirements_list. Unknown parameters are rejected (-32602).`,
+      inputSchema: z.strictObject(reqEventsShape, {
+        error: (iss: any) => iss.code === "unrecognized_keys"
+          ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqEventsKeys.join(", ")}`
+          : undefined,
+      }) as any,
     },
-    async (args) => {
+    async (args: any) => {
       let card = args.requirement_id;
       // "#N" → the card's id, resolved exactly like requirements_get (same scope; a card you can't see is a 404 here too).
       if (card && /^#\d+$/.test(card)) {
@@ -6043,6 +6055,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (card) q.set("requirement_id", card);
       if (args.since) q.set("since", args.since);
       if (args.limit !== undefined) q.set("limit", String(args.limit));
+      else if (!card) q.set("limit", String(REQ_EVENTS_NETWORK_DEFAULT_LIMIT));
       if (args.cursor) q.set("cursor", args.cursor);
       return requirementsCall("GET", `/api/requirements/events${q.size ? `?${q}` : ""}`, args.network_id);
     },
