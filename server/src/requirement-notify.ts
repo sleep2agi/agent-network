@@ -132,3 +132,34 @@ export function notifyParticipantChange(input: { before: NoticeCard; after: Noti
   if (pending.size > 5_000) for (const [k, p] of pending) if (now - p.startedAt >= COALESCE_WINDOW_MS) pending.delete(k);
   return sent;
 }
+
+/**
+ * RFC-040 Q4:部门负责人(只凭负责人身份)删了本部门的一张卡 → 私信卡的负责人。
+ * 卡没有人类负责人时,私信负责 Agent 的主人(这张卡正是因为那个 Agent 才算「本部门的卡」)。
+ * 删的人就是收件人 / 收件人已不在网络 → 不发。返回收件人(测试用),没发 → null。
+ */
+export function notifyLeaderDeleted(input: { card: NoticeCard & { agent_owner_json?: string | null }; actorUserId: string }): string | null {
+  const { card, actorUserId } = input;
+  let target = userIdOf(parse(card.owner_json));
+  if (!target) {
+    const agent = parse(card.agent_owner_json ?? null) as { kind?: unknown; id?: unknown } | null;
+    if (agent?.kind === "node" && typeof agent.id === "string") {
+      target = db.get<{ owner_user_id: string | null }>("SELECT owner_user_id FROM nodes WHERE node_id = ?1 AND network_id = ?2", agent.id, card.network_id)?.owner_user_id ?? null;
+    }
+  }
+  if (!target || target === actorUserId) return null;
+  const user = db.get<{ username: string; display_name: string | null }>("SELECT username, display_name FROM users WHERE user_id = ?1", actorUserId);
+  if (!user) return null;
+  const actorName = user.display_name?.trim() || user.username;
+  const number = card.seq ? ` #${card.seq}` : "";
+  const sent = sendNoticeDm({
+    networkId: card.network_id,
+    targetUserId: target,
+    sender: { userId: actorUserId, username: user.username },
+    title: "任务删除",
+    metaJson: JSON.stringify({ task_notice: { requirement_id: card.requirement_id, seq: card.seq ?? null, network_id: card.network_id, deleted: true } }),
+    messageId: `dm_task_${uuidv4()}`,
+    text: `${actorName}(部门负责人)删除了你负责的任务${number}「${card.title}」`,
+  });
+  return sent ? target : null;
+}

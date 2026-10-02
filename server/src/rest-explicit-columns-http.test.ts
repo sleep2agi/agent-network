@@ -32,6 +32,8 @@ const GOLDEN_RESPONSE_KEYS = {
   authMeNetwork: [
     "network_id", "network_name", "owner_id", "description", "settings",
     "created_at", "updated_at", "visibility", "max_members", "member_role", "agent_access", "task_access",
+    // RFC-040(#455):不是列,是每次请求现算的「我负责的部门 + 全部下级」(department-heads.ts)。
+    "managed_department_ids",
   ],
   networkDetail: [
     "network_id", "network_name", "owner_id", "description", "settings",

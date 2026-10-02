@@ -11,6 +11,7 @@
 // 只有空部门(没有子部门、没有成员)能删;负责人必须是本网络成员;人离开网络后,作为负责人的引用读出来是 null。
 
 import { db, logAudit } from "./db.js";
+import { deleteDepartmentGrants, deleteDepartmentGrantsForNetwork } from "./department-heads.js";
 
 try { db.exec("ALTER TABLE network_members ADD COLUMN department_id TEXT"); } catch {}
 db.exec(`
@@ -210,7 +211,11 @@ export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: s
   const children = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_departments WHERE network_id = ?1 AND parent_id = ?2", networkId, id)?.n ?? 0;
   const members = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_members WHERE network_id = ?1 AND department_id = ?2", networkId, id)?.n ?? 0;
   if (children || members) return { ...fail(409, "department_not_empty"), children, members };
-  db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [networkId, id]);
+  // RFC-040:部门的项目授权(network_department_project_grants)和部门同一事务删掉。
+  db.transaction(() => {
+    db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [networkId, id]);
+    deleteDepartmentGrants(networkId, id);
+  });
   return { ok: true, deleted: id };
 }
 
@@ -226,6 +231,7 @@ export function setMemberDepartment(networkId: string, userId: string, departmen
 /** 网络删掉时一起清(和项目授权同一时机调用)。 */
 export function deleteDepartmentsForNetwork(networkId: string): void {
   db.run("DELETE FROM network_departments WHERE network_id = ?1", [networkId]);
+  deleteDepartmentGrantsForNetwork(networkId);
 }
 
 export function auditDepartment(user: { user_id: string; username: string }, action: string, networkId: string, detail: string): void {

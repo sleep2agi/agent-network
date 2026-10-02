@@ -11,10 +11,11 @@ import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-s
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
 import {
-  addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, canParticipantEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject, projectUseResolver,
+  addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, deletesAsHeadOnly, headOnlyEditScope, canParticipantEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject, projectUseResolver,
   isTaskScoped, PARTICIPANT_EDIT_FIELDS, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
 } from "./task-access.js";
-import { notifyParticipantChange } from "./requirement-notify.js";
+import { notifyLeaderDeleted, notifyParticipantChange } from "./requirement-notify.js";
+import { departmentCardsFor, departmentSubtree } from "./department-heads.js";
 import { diffRequirement, ensureRequirementEvents, eventPublic, recordRequirementEvents, type EventRow } from "./requirement-events.js";
 import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
@@ -910,6 +911,15 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   }
   let people;
   try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id), ctx.strictOwner === true); } catch (e) { return errorFrom(e); }
+  // RFC-040:只凭负责人身份改这张卡时,负责人 / 负责 Agent 只能交给本部门的人(或自己)/ 本部门成员的 Agent,
+  // 不能把卡推出本部门(推出去等于替别的部门派活)。清空(null)不限制。
+  const headOnly = (has("owner") || has("agent_owner")) ? headOnlyEditScope(caller, row) : null;
+  if (headOnly) {
+    const owner = people.ownerJson ? JSON.parse(people.ownerJson) as PersonRef : null;
+    const agent = people.agentOwnerJson ? JSON.parse(people.agentOwnerJson) as PersonRef : null;
+    if (has("owner") && owner && owner.id !== caller!.userId && !headOnly.users.has(owner.id)) return jsonError("department_scope_denied", 403, { field: "owner" });
+    if (has("agent_owner") && agent && !headOnly.nodes.has(agent.id)) return jsonError("department_scope_denied", 403, { field: "agent_owner" });
+  }
   let projectId = row.project_id;
   if (has("project_id")) {
     try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return errorFrom(e); }
@@ -1043,12 +1053,36 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
   if (ref !== null) sql += ` AND external_ref = ?${params.push(ref)}`;
   const parent = q.get("parent_id");
   if (parent !== null) sql += parent === "none" ? " AND parent_id IS NULL" : ` AND parent_id = ?${params.push(parent)}`;
+  // RFC-040:department_id= —— 负责人是这个部门(含下级)的成员、或负责 Agent 归这些成员所有的卡。可见范围照旧由上面的
+  // addTaskVisibilityScope 管,这里只再收窄。部门按调用者看得见的网络找(部门 id 只在网络内唯一)。
+  const dept = q.get("department_id");
+  if (dept !== null) {
+    if (!dept || !/^[A-Za-z0-9_-]{1,64}$/.test(dept)) return jsonError("department_not_found", 400);
+    const networks = ctx ? departmentNetworks(ctx, dept) : [];
+    if (!networks.length) return jsonError("department_not_found", 400);
+    const parts: string[] = [];
+    for (const networkId of networks) {
+      const cards = departmentCardsFor(networkId, departmentSubtree(networkId, dept));
+      const ors: string[] = [];
+      if (cards.users.size) ors.push(`owner_json IN (${[...cards.users].map((id) => `?${params.push(JSON.stringify({ kind: "user", id }))}`).join(", ")})`);
+      if (cards.nodes.size) ors.push(`agent_owner_json IN (${[...cards.nodes].map((id) => `?${params.push(JSON.stringify({ kind: "node", id }))}`).join(", ")})`);
+      if (ors.length) parts.push(`(network_id = ?${params.push(networkId)} AND (${ors.join(" OR ")}))`);
+    }
+    sql += parts.length ? ` AND (${parts.join(" OR ")})` : " AND 1=0";
+  }
   if (q.get("top_level") === "1") sql += " AND parent_id IS NULL";
   // Explicit archived-only wins over the legacy include-all switch.
   // changes=1 看得见「被归档」这一改动:默认连归档的一起回(行上 archived: true),客户端据此把它移出看板。
   if (q.get("archived") === "true") sql += " AND COALESCE(archived, 0) = 1";
   else if (q.get("include_archived") !== "1" && q.get("changes") !== "1") sql += " AND COALESCE(archived, 0) = 0";
   return sql;
+}
+
+/** department_id 筛选:调用者作用域里有这个部门的网络。 */
+function departmentNetworks(ctx: RequirementsRequestContext, deptId: string): string[] {
+  const params: unknown[] = [deptId];
+  const sql = addHumanNetworkScope("SELECT DISTINCT network_id FROM network_departments WHERE department_id = ?1", params, ctx.scope);
+  return db.all<{ network_id: string }>(sql, ...params).map((r) => r.network_id);
 }
 
 const LIST_ORDER = " ORDER BY created_at DESC, requirement_id DESC";
@@ -1160,7 +1194,7 @@ function deletedSince(ctx: RequirementsRequestContext, sinceIso: string): string
 const EVENTS_PAGE_DEFAULT = 200;
 const EVENTS_PAGE_MAX = 500;
 const EVENTS_SCAN_MAX = 5000;
-type VisibilityRow = { network_id: string; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null; project_id: string | null };
+type VisibilityRow = { network_id: string; owner_json: string | null; participants_json: string | null; created_by: string | null; created_by_json: string | null; project_id: string | null; agent_owner_json?: string | null };
 
 function listEvents(ctx: RequirementsRequestContext): Response {
   const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
@@ -1187,7 +1221,8 @@ function listEvents(ctx: RequirementsRequestContext): Response {
     let ok = seen.get(id);
     if (ok === undefined) {
       const cols = "network_id, owner_json, participants_json, created_by, created_by_json, project_id";
-      const row = db.get<VisibilityRow>(`SELECT ${cols} FROM requirements WHERE requirement_id = ?1`, id)
+      // agent_owner_json:负责人按「负责 Agent 归本部门成员」也认得这张卡(RFC-040);墓碑表没有这一列。
+      const row = db.get<VisibilityRow>(`SELECT ${cols}, agent_owner_json FROM requirements WHERE requirement_id = ?1`, id)
         ?? db.get<VisibilityRow>(`SELECT ${cols} FROM requirement_tombstones WHERE requirement_id = ?1`, id);
       seen.set(id, ok = !!row && row.network_id === networkId && canSeeTask(caller, row));
     }
@@ -1506,6 +1541,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
     if (!canDeleteTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_delete_denied");
+    const byLeader = deletesAsHeadOnly(taskCaller(ctx), row);
     // 子需求不跟着删:先解挂(变成顶层),再删父卡。
     const deletedAt = new Date().toISOString();
     db.transaction(() => {
@@ -1517,6 +1553,11 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     });
     // 硬删除以前不留痕(RFC-038 §9.1):记下是谁删了哪张(标题 + 短号),卡本身已经没了。
     if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_deleted", "requirement", row.requirement_id, JSON.stringify({ title: row.title, seq: row.seq ?? null }).slice(0, 1000), undefined, row.network_id);
+    // RFC-040 Q4:只凭部门负责人身份删的,另记一条并私信卡的负责人(人;没有就私信负责 Agent 的主人)。
+    if (byLeader && ctx.auth) {
+      const notified = notifyLeaderDeleted({ card: row, actorUserId: ctx.auth.userId });
+      logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_deleted_by_leader", "requirement", row.requirement_id, JSON.stringify({ title: row.title, seq: row.seq ?? null, owner: row.owner_json ? JSON.parse(row.owner_json) : null, agent_owner: row.agent_owner_json ? JSON.parse(row.agent_owner_json) : null, notified }).slice(0, 1000), undefined, row.network_id);
+    }
     return Response.json({ ok: true, deleted: row.requirement_id });
   }
   if (req.method !== "PATCH") return jsonError("not_found", 404);

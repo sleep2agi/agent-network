@@ -5896,6 +5896,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     external_ref: z.string().max(200).optional(),
     include_archived: z.boolean().optional(),
     parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
+    department_id: z.string().max(64).optional().describe("owner (or its Agent's owner) in this department or below"),
     top_level: z.boolean().optional(), q: z.string().max(200).optional(),
     limit: z.number().int().min(1).max(1000).optional().describe(`page size, default ${REQ_LIST_MCP_DEFAULT_LIMIT}`),
     cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
@@ -5906,7 +5907,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_list",
     {
-      description: `List requirement tasks in your network, newest first. Defaults (MCP): view='summary' (no description / checklist bodies; has_description, checklist_count instead; ~0.5 KB per task) and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page; has_more + next_cursor → pass cursor. Full text: requirements_get, or view='full' with a small limit (≤ 1000). Filters: seq (#N), status, project_id ('none'), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q searches title / description / people / project / tags (terms ANDed). Rows carry children {total, done}. changes=true (with updated_since) returns only tasks changed since then, archived included, plus deleted ids and server_time for the next updated_since. Unknown parameters are rejected (-32602).`,
+      description: `List requirement tasks in your network, newest first. Defaults (MCP): view='summary' (no description / checklist bodies; has_description, checklist_count instead; ~0.5 KB per task) and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page; has_more + next_cursor → pass cursor. Full text: requirements_get, or view='full' with a small limit (≤ 1000). Filters: seq (#N), status, project_id ('none'), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact), updated_since (ISO), external_ref, parent_id / top_level, department_id (owner in it or below), include_archived; q searches title / description / people / project / tags (terms ANDed). Rows carry children {total, done}. changes=true (with updated_since) returns only tasks changed since then, archived included, plus deleted ids and server_time for the next updated_since. Unknown parameters are rejected (-32602).`,
       // Strict: registerTool honours a constructed object's unknownKeys (server.tool() would strip them silently).
       inputSchema: z.strictObject(reqListShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
@@ -5916,7 +5917,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async (args: any) => {
       const q = new URLSearchParams();
-      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "tag", "updated_since", "external_ref", "parent_id", "q", "limit", "cursor", "view"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "tag", "updated_since", "external_ref", "parent_id", "department_id", "q", "limit", "cursor", "view"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
       if (!q.has("view")) q.set("view", "summary");
       if (!q.has("limit")) q.set("limit", String(REQ_LIST_MCP_DEFAULT_LIMIT));
       if (args.include_archived) q.set("include_archived", "1");
