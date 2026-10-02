@@ -94,7 +94,7 @@ export function decodeCursor(raw: string): Cursor | null {
   }
 }
 
-export type ListQuery = { limit: number; cursor: Cursor | null; terms: string[]; /** 整句当任务 ID 去对(taskIdQuery);空 = 没有搜索。 */ idQuery: string };
+export type ListQuery = { limit: number; cursor: Cursor | null; terms: string[]; /** 整句当任务 ID 去对(taskIdQuery);空 = 没有搜索。 */ idQuery: string; /** #471 —— 只要带这个标签的卡(精确、区分大小写);null = 不按标签筛。 */ tag: string | null };
 
 /**
  * 任务 ID(同 App 的 task-short-id.ts matchesTaskId):「#42」「42」精确对短号 seq;完整 id,或 8 位以上的
@@ -134,5 +134,12 @@ export function parseListQuery(params: URLSearchParams): ListQuery | { error: st
   const q = params.get("q") ?? "";
   if (q.length > MAX_QUERY_LENGTH) return { error: "invalid_q" };
   const terms = searchTerms(q);
-  return { limit, cursor, terms, idQuery: terms.length ? taskIdQuery(q) : "" };
+  // #471 —— tag=:和卡片标签同一套规范(去首尾空白、1–20 个字符、不含控制字符);不带 = 旧行为。
+  const rawTag = params.get("tag");
+  let tag: string | null = null;
+  if (rawTag !== null) {
+    tag = rawTag.trim();
+    if (!tag || [...tag].length > 20 || /[\u0000-\u001f\u007f]/u.test(tag)) return { error: "invalid_tag" };
+  }
+  return { limit, cursor, terms, idQuery: terms.length ? taskIdQuery(q) : "", tag };
 }

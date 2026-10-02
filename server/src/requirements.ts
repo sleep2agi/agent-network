@@ -1031,7 +1031,7 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
     where += ` AND (created_at < ?${a} OR (created_at = ?${a} AND requirement_id < ?${b}))`;
   }
   let rows: Row[];
-  if (!lq.terms.length) {
+  if (!lq.terms.length && lq.tag === null) {
     rows = db.all<Row>(`SELECT ${SELECT} ${where}${LIST_ORDER} LIMIT ${lq.limit + 1}`, ...params);
   } else {
     // seq(任务短号,#2139):启动迁移 ensureRequirementSeq 在 SQLite / PostgreSQL 上都加这一列,SELECT 本来就带它。
@@ -1042,7 +1042,9 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
       let m = maps.get(r.network_id);
       if (!m) maps.set(r.network_id, m = searchNameMaps(ctx, r.network_id));
       const row = { name: r.title, description: r.description || "", assignee: r.assignee || "", tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
-      if (matchesTaskId(r, lq.idQuery) || matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
+      // #471 —— tag= 在这里按存好的标签数组精确比(JSON 列,SQLite / PostgreSQL 写法不同,所以不进 SQL)。
+      if (lq.tag !== null && !row.tags.includes(lq.tag)) continue;
+      if (!lq.terms.length || matchesTaskId(r, lq.idQuery) || matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
       if (hits.length > lq.limit) break;
     }
     const byId = new Map(hits.length ? db.all<Row>(`SELECT ${SELECT} FROM requirements WHERE requirement_id IN (${hits.map((_, i) => `?${i + 1}`).join(",")})`, ...hits).map(r => [r.requirement_id, r]) : []);

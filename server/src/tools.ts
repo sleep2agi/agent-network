@@ -5861,31 +5861,49 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
   const REQ_ID_DESC = "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)";
 
-  server.tool(
+  // #471 —— MCP 的列表默认省流:summary 视图 + 50 张一页(REST 的默认 full + 500 不变,App 靠它)。
+  // 生产实测 122 张卡:旧默认(full、500)148 KB,summary 81 KB —— 一次调用就塞满 Agent 的上下文。
+  // 输入 schema 严格:写错 / 不认识的参数(比如以前的 tag)原来会被静默丢掉、回整张表;现在回 -32602 并列出能用的参数。
+  const REQ_LIST_MCP_DEFAULT_LIMIT = 50;
+  const reqListShape = {
+    network_id: z.string().max(200).optional(),
+    seq: z.number().int().positive().optional().describe("short number (#N) of one task in this network"),
+    status: z.enum(["pool", "doing", "done"]).optional(),
+    project_id: z.string().max(200).optional(),
+    owner: z.string().max(210).optional(),
+    agent_owner: z.string().max(210).optional(),
+    tag: z.string().min(1).max(80).optional().describe("only tasks carrying this label (exact, case-sensitive)"),
+    updated_since: z.string().max(40).optional(),
+    external_ref: z.string().max(200).optional(),
+    include_archived: z.boolean().optional(),
+    parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
+    top_level: z.boolean().optional(), q: z.string().max(200).optional(),
+    limit: z.number().int().min(1).max(1000).optional().describe(`page size, default ${REQ_LIST_MCP_DEFAULT_LIMIT}`),
+    cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
+    view: z.enum(["full", "summary"]).optional().describe("default summary (no description / checklist bodies; has_description, checklist_count instead); full = everything"),
+    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (archived included) + deleted ids + server_time"),
+  };
+  const reqListKeys = Object.keys(reqListShape);
+  server.registerTool(
     "requirements_list",
-    "List requirement tasks in your network. Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q = search title / description / owner, agent and participant names / project name / tags (space-separated terms are ANDed). Newest first, 500 per page by default (limit ≤ 1000); has_more + next_cursor → pass cursor for the next page. Each task carries children {total, done}. view='summary' drops description and checklist bodies (adds has_description, checklist_count) — much smaller; use requirements_get for one task's full text. changes=true (needs updated_since) returns only tasks changed since then, archived ones included, plus deleted ids and server_time to pass as the next updated_since.",
     {
-      network_id: z.string().max(200).optional(),
-      seq: z.number().int().positive().optional().describe("short number (#N) of one task in this network"),
-      status: z.enum(["pool", "doing", "done"]).optional(),
-      project_id: z.string().max(200).optional(),
-      owner: z.string().max(210).optional(),
-      agent_owner: z.string().max(210).optional(),
-      updated_since: z.string().max(40).optional(),
-      external_ref: z.string().max(200).optional(),
-      include_archived: z.boolean().optional(),
-      parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
-      top_level: z.boolean().optional(), q: z.string().max(200).optional(), limit: z.number().int().min(1).max(1000).optional(), cursor: z.string().max(600).optional(),
-      view: z.enum(["full", "summary"]).optional().describe("summary = no description / checklist bodies (has_description, checklist_count instead)"),
-      changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (archived included) + deleted ids + server_time"),
+      description: `List requirement tasks in your network. Defaults (MCP): view='summary' and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page, newest first — about 0.5 KB per task, so a page stays small. has_more + next_cursor → pass cursor for the next page. Summary rows drop description and checklist bodies (has_description, checklist_count instead); for full text read one task with requirements_get, or pass view='full' (several KB per task — keep limit small). Filters: seq (the per-network short number shown as #N), status (pool/doing/done), project_id ('none' = no project), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact label), updated_since (ISO), external_ref, parent_id / top_level, include_archived; q = search title / description / owner, agent and participant names / project name / tags (space-separated terms are ANDed). limit ≤ 1000. Each task carries children {total, done}. changes=true (needs updated_since) returns only tasks changed since then, archived ones included, plus deleted ids and server_time to pass as the next updated_since. Unknown parameters are rejected (-32602) with the list of valid ones.`,
+      // Strict: registerTool honours a constructed object's unknownKeys (server.tool() would strip them silently).
+      inputSchema: z.strictObject(reqListShape, {
+        error: (iss: any) => iss.code === "unrecognized_keys"
+          ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqListKeys.join(", ")}`
+          : undefined,
+      }) as any,
     },
-    async (args) => {
+    async (args: any) => {
       const q = new URLSearchParams();
-      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "updated_since", "external_ref", "parent_id", "q", "limit", "cursor", "view"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      for (const k of ["seq", "status", "project_id", "owner", "agent_owner", "tag", "updated_since", "external_ref", "parent_id", "q", "limit", "cursor", "view"] as const) if (args[k] !== undefined) q.set(k, String(args[k]));
+      if (!q.has("view")) q.set("view", "summary");
+      if (!q.has("limit")) q.set("limit", String(REQ_LIST_MCP_DEFAULT_LIMIT));
       if (args.include_archived) q.set("include_archived", "1");
       if (args.top_level) q.set("top_level", "1");
       if (args.changes) q.set("changes", "1");
-      return requirementsCall("GET", `/api/requirements${q.size ? `?${q}` : ""}`, args.network_id);
+      return requirementsCall("GET", `/api/requirements?${q}`, args.network_id);
     },
   );
 
