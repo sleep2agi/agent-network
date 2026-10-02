@@ -95,6 +95,10 @@ if (args[0] === "app-server") {
   // short create/start/restart probes. Printing a pane and exiting can never
   // satisfy PID+birth+socket health, and would only test a weaker old launcher.
   const remote = args[args.indexOf("--remote") + 1];
+  // #2255: like the real codex TUI (0.155.1 measured: banner at ~170 ms, websocket at ~221 ms) this fake paints before it
+  // connects. ANET_TEST_TUI_CONNECT_DELAY_MS widens that gap so a launcher that probes the connection only once is caught.
+  const connectDelay = Number(process.env.ANET_TEST_TUI_CONNECT_DELAY_MS || "0");
+  if (connectDelay > 0) await Bun.sleep(connectDelay);
   const ws = new WebSocket(remote);
   await new Promise((resolve, reject) => {
     ws.addEventListener("open", resolve, { once: true });

@@ -72,8 +72,9 @@ cp /tmp/test1220-pending.ts agent-node/src/runtime/codex-app-server/pending-thre
 # 🔴 这条锚 2026-08-28 因为产品拆 if 而 count=0 红过一次。变异测试锚的是**代码形状**,
 #    任何改动那几行的人都要同步这里 —— 门会说 `mutation anchor count=0, expected=1`,
 #    不会静默放过。
+# 2026-10-02(#2255):单次探测改成轮询(waitForPosixOwnedLoopbackConnection),守门的那行跟着新形状走。
 bun /mutate.ts agent-network/bin/cli.ts \
-  'if (!probePosixOwnedLoopbackConnection(tuiIdentity.pid, port)) {' \
+  'if (attribution.outcome !== "connected") {' \
   'if (false) {'
 expect_red posix-pid-attribution bun test agent-network/src/codex-copresence-launch-readiness.test.ts
 cp /tmp/test1220-cli.ts agent-network/bin/cli.ts

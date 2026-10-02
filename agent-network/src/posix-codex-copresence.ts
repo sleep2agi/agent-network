@@ -99,3 +99,43 @@ export function probePosixOwnedLoopbackConnection(rootPid: number, port: number,
   }
   return false;
 }
+
+/**
+ * #2255 (2026-10-02) —— 一次探不到 ≠ 没连上。`anet node start` 等到 TUI 画出 banner(「OpenAI Codex」)就只探一次:
+ * 实测真 codex 0.155.1 先画 banner(~170 ms)、后建 ws(~221 ms),假 TUI 同样先打印后连接。空闲机器上 400 ms 的
+ * 「等画出来」恰好把这几十毫秒盖住;CI runner / 忙的机器上盖不住,启动就以「managed TUI tree has no attributable
+ * connection」失败 —— 会话其实好好的。Windows 那条路径一直是轮询(TUI_HEALTH_MS 内反复探),这里对齐。
+ *
+ * 每 intervalMs 探一次,直到:探到(connected)/ TUI 退了(tui-exited,不再白等)/ 到点(deadline)。
+ * 判据本身不变:仍是 probePosixOwnedLoopbackConnection 的 fail-closed 归属,只是不再只给一次机会。
+ */
+/** 与 Windows 路径的 TUI_HEALTH_MS 同一个预算(cli.ts):TUI 活着却 25 s 都没连上,才判失败。 */
+export const POSIX_TUI_ATTRIBUTION_MS = 25_000;
+
+export type PosixAttributionResult = { outcome: "connected" | "tui-exited" | "deadline"; probes: number; waitedMs: number };
+
+export async function waitForPosixOwnedLoopbackConnection(opts: {
+  rootPid: number;
+  port: number;
+  deadlineMs: number;
+  intervalMs?: number;
+  /** TUI 还在不在(pid 还活着、而且还是同一个进程)。不在就别等了。 */
+  alive: () => boolean;
+  probe?: (rootPid: number, port: number) => boolean;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+}): Promise<PosixAttributionResult> {
+  const probe = opts.probe ?? ((pid, port) => probePosixOwnedLoopbackConnection(pid, port));
+  const sleep = opts.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = opts.now ?? (() => Date.now());
+  const interval = Math.max(10, opts.intervalMs ?? 250);
+  const started = now();
+  let probes = 0;
+  for (;;) {
+    probes++;
+    if (probe(opts.rootPid, opts.port)) return { outcome: "connected", probes, waitedMs: now() - started };
+    if (!opts.alive()) return { outcome: "tui-exited", probes, waitedMs: now() - started };
+    if (now() - started >= opts.deadlineMs) return { outcome: "deadline", probes, waitedMs: now() - started };
+    await sleep(interval);
+  }
+}

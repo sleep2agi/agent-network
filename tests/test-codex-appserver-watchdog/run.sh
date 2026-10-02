@@ -111,4 +111,15 @@ expect_red unit-foreign-marker 'a foreign process is never signalled' bun test a
 cp /tmp/relaunch.ts agent-node/src/runtime/codex-appserver-relaunch.ts
 (cd agent-node && bun run build >/dev/null)
 
+echo "L8 #2255 the TUI paints before it connects (fake delays its websocket 2 s): start still succeeds"
+ANET_TEST_TUI_CONNECT_DELAY_MS=2000 run_e2e tui_late_connect 19249
+
+echo "L8 witnessed red: attribution probed only once (gives up on the first miss)"
+cp agent-network/src/posix-codex-copresence.ts /tmp/posix.ts
+bun /mutate.ts agent-network/src/posix-codex-copresence.ts \
+  'if (now() - started >= opts.deadlineMs) return { outcome: "deadline", probes, waitedMs: now() - started };' \
+  'return { outcome: "deadline", probes, waitedMs: now() - started };'
+ANET_TEST_TUI_CONNECT_DELAY_MS=2000 ANET_TESTWD_TIMEOUT_MS=15000 expect_red single-shot-attribution 'TUI second-client health failed' run_e2e tui_single_shot 19250
+cp /tmp/posix.ts agent-network/src/posix-codex-copresence.ts
+
 echo "TESTWD PASS"
