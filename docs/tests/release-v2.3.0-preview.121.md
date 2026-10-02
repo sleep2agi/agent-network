@@ -16,6 +16,12 @@ Since `.120`, `agent-network/` has one change:
 - Daemon `start_node` / `create_node`, `project up/restart`, the boot sweep and `node restart` all go through `anet node start`, so they are covered by the launcher change.
 - Pairing pins bumped to `agent-node 2.5.0-preview.94` / `agent-network 2.3.0-preview.121`.
 
+## Install
+
+```bash
+npm i -g @sleep2agi/agent-network@2.3.0-preview.121 @sleep2agi/agent-node@2.5.0-preview.94
+```
+
 ## Upgrade
 
 ```bash
