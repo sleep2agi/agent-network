@@ -6,7 +6,7 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
-import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
+import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupTx, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -1817,7 +1817,7 @@ return Bun.serve({
           if (req.method === "GET") {
             const linked = getDepartmentGroup(netId, deptId);
             // 兜底对账(RFC-042 §4):读之前先把成员对齐,再判「是不是成员」。
-            if (linked) db.transaction(() => { syncDepartmentGroups(netId, linked.id); });
+            if (linked) groupTx(() => { syncDepartmentGroups(netId, linked.id); });
             const group = linked ? getDepartmentGroup(netId, deptId) : null;
             if (!group || (!mayCreate && !isGroupMember(group.id, resolved.user.user_id))) {
               return withCors(req, Response.json({ ok: false, error: "department_group_not_found" }, { status: 404 }));
