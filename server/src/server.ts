@@ -27,7 +27,7 @@ import { canMessageAgent, isAgentRestricted, listAgentGrants, listGroupGrants, g
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
-import { register, login, resolveToken, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, adminDeleteEmptyNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, tokenRejection, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, adminDeleteEmptyNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
@@ -225,7 +225,8 @@ function requireAuth(req: Request, options: RequestTokenOptions = {}): Response 
     return null;
   }
 
-  return Response.json({ error: "unauthorized" }, { status: 401 });
+  // #488 —— 令牌存在但因主人的成员身份被拒:说清楚为什么(reason + hint),节点日志里一眼看懂为什么掉线。
+  return Response.json({ error: "unauthorized", ...(tokenRejection(token) ?? {}) }, { status: 401 });
 }
 
 function getClientIP(req: Request, server?: any): string {
@@ -325,7 +326,7 @@ function requireAdminAuth(req: Request): Response | null {
   const token = requestToken(req);
   if (!token) return Response.json({ ok: false, error: "auth required" }, { status: 401 });
   const resolved = resolveToken(token);
-  if (!resolved) return Response.json({ ok: false, error: "invalid token" }, { status: 401 });
+  if (!resolved) return Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 });
   if (!isHubAdminCredential(resolved)) return Response.json({ ok: false, error: "admin required" }, { status: 403 });
   return null;
 }
@@ -1278,7 +1279,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       // 节点令牌:user 仍是签发它的用户(旧 agent-node 靠它打日志),但只列它绑定的那个网络,
       // 并用 credential 说清楚这是一个节点身份 —— user.role 不是这个调用者的权限。
       const allNetworks = getUserAllNetworks(resolved.user.user_id);
@@ -1295,7 +1296,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
@@ -1320,7 +1321,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
@@ -1342,7 +1343,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
@@ -1362,7 +1363,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       try {
         const body = await req.json() as any;
         if (!body.network_id || !body.old_alias || !body.new_alias) {
@@ -1381,7 +1382,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       try {
         const body = await req.json() as any;
         if (!body.txn_id) return withCors(req, Response.json({ ok: false, error: "txn_id required" }, { status: 400 }));
@@ -1398,7 +1399,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       try {
         const body = await req.json() as any;
         if (!body.txn_id) return withCors(req, Response.json({ ok: false, error: "txn_id required" }, { status: 400 }));
@@ -1416,7 +1417,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const tokens = listTokens(resolved.user.user_id);
       return withCors(req, Response.json({ ok: true, tokens }));
@@ -1426,7 +1427,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
@@ -1443,7 +1444,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const result = revokeToken(resolved.user.user_id, tokenDeleteMatch[1]);
       if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "token_revoked", "token", tokenDeleteMatch[1]);
@@ -1456,7 +1457,7 @@ return Bun.serve({
       const token = requestToken(req, { allowQueryToken: false });
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const sessions = listSessions(resolved.user.user_id, resolved.tokenId);
       return withCors(req, Response.json({ ok: true, sessions, current_token_id: resolved.tokenId, idle_timeout_days: sessionIdleDays() }));
@@ -1466,7 +1467,7 @@ return Bun.serve({
       const token = requestToken(req, { allowQueryToken: false });
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       // 当前令牌必须是一次登录会话,否则「保留当前这个」无从说起(API 令牌调用会把所有会话都撤掉)。
       const current = resolved.tokenId ? listSessions(resolved.user.user_id, resolved.tokenId).find((x) => x.is_current) : undefined;
@@ -1481,7 +1482,7 @@ return Bun.serve({
       const token = requestToken(req, { allowQueryToken: false });
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const targetId = decodeURIComponent(sessionDeleteMatch[1]);
       const result = revokeSession(resolved.user.user_id, targetId);
@@ -1495,7 +1496,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       // V3.13: ntok_ can only see its bound network; utok_ sees all member networks
       if (resolved.networkId) {
         // ntok_ — only return the bound network
@@ -1525,7 +1526,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
@@ -1874,7 +1875,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const netId = membersMatch[1];
       const targetUid = membersMatch[2];
@@ -1926,7 +1927,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const netId = url.pathname.split("/")[3];
       const callerRole = getUserNetworkRole(resolved.user.user_id, netId);
@@ -1943,7 +1944,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const body = await req.json() as any;
       const result = joinByInvite(body.invite_code, resolved.user.user_id);
@@ -2001,7 +2002,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       const networkId = netDetailMatch[1];
       const network = db.get<any>(`SELECT ${NETWORK_REST_SELECT} FROM networks WHERE network_id = ?1`, networkId);
       if (!network) return withCors(req, Response.json({ ok: false, error: "network not found" }, { status: 404 }));
@@ -2033,7 +2034,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       // Hub 管理员删别人的网络:同一个资源、同一个动词,只是换一条判据 —— 只允许空网络
       // (计数见 auth.ts adminDeleteEmptyNetwork)。owner 自己删仍走下面原来的路径,行为不变。
@@ -2057,7 +2058,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
@@ -3727,7 +3728,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (!isHubAdminCredential(resolved)) return withCors(req, Response.json({ ok: false, error: "admin only" }, { status: 403 }));
       const limit = Math.min(Number(url.searchParams.get("limit")) || 200, LOG_RING_CAP);
       const since = url.searchParams.get("since"); // ISO timestamp; only return logs newer
@@ -3743,7 +3744,7 @@ return Bun.serve({
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       // 审计日志是账号的记录;节点令牌不能读签发者(常是管理员)的审计日志。
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);

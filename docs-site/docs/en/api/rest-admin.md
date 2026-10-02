@@ -114,7 +114,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L418) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
+The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L448) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
 
@@ -137,7 +137,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L470) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L500) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
 
 Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 
@@ -284,6 +284,8 @@ curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 | 400 | `cannot remove owner` | Target is the owner (delete the whole network to remove the owner — see [DELETE /api/networks/:id](/en/api/rest#delete-api-networks-id)) |
 
 Writes audit log `action='member_removed'`; the `detail` column records `<user_id>`.
+
+In the same transaction, every token the removed user holds **for this network** is revoked (node tokens and invite-code tokens get `revoked_at` set to now; their tokens for other networks are untouched). Even for older tokens left behind without revocation, the Hub only accepts a network token while its user is still a member of that network: a non-member's token gets 401 with `reason: "not_network_member"` on every REST / MCP / SSE path. A restricted member's network token (Agent access limited to granted Agents) is likewise 401 with `reason: "node_owner_restricted"`; both carry a `hint` saying how to recover.
 
 ### POST /api/networks/:id/invite
 

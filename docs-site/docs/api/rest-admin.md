@@ -114,7 +114,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-每行 6 字段对照 [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L418) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
+每行 6 字段对照 [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L448) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
 
 ### DELETE /api/auth/tokens/:id
 
@@ -137,7 +137,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L470) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
+| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L500) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
 
 写 audit log `action='token_revoked'`。撤销后该 token 的下一次请求拿 401 `invalid token`。
 
@@ -284,6 +284,8 @@ curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 | 400 | `cannot remove owner` | 目标是 owner（删除网络才能移除 owner，见 [DELETE /api/networks/:id](/api/rest#delete-api-networks-id)） |
 
 写 audit log `action='member_removed'`，`detail` 字段记 `<user_id>`。
+
+同一个事务里吊销被移除者**在这个网络**的所有令牌（节点令牌、邀请码令牌，`revoked_at` 置为当前时间；他在别的网络的令牌不动）。即使是移除前留下、没被吊销的老令牌，Hub 也只认仍是该网络成员的用户的网络令牌：非成员的令牌在所有 REST / MCP / SSE 路径上返回 401，`reason: "not_network_member"`。受限成员（Agent 访问只到授权的 Agent）的网络令牌同样是 401，`reason: "node_owner_restricted"`，两者都带 `hint` 说明怎么恢复。
 
 ### POST /api/networks/:id/invite
 

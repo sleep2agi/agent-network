@@ -159,8 +159,8 @@ describe("#461 GET /events/network/:id — auth", () => {
   test("membership removal revokes observer access — ntok exploit repro (通信龙 review finding 1)", async () => {
     // Exact repro of the review's exploit: add user C to network A, mint
     // an ntok BOUND to A, remove C from A — the same live ntok must lose
-    // the stream. network_members IS the revocation mechanism because
-    // removeNetworkMember does not revoke the user's tokens; the old
+    // the stream. (Before #488 network_members was the only revocation
+    // mechanism — removeNetworkMember did not revoke tokens; the old
     // `!role && authCtx.networkId !== observedNetId` OR-form let the
     // token's network binding bypass the membership check (utok would
     // not catch this: its authCtx.networkId is null, so only ntok
@@ -182,10 +182,12 @@ describe("#461 GET /events/network/:id — auth", () => {
 
     const removed = removeNetworkMember(memberNetworkId, outsiderUserId);
     expect(removed.ok).toBe(true);
-    // The review's failing probe: /events/network/A with the still-live
-    // network-bound token → must now be 403, not 200.
+    // The review's failing probe: /events/network/A with the network-bound
+    // token → must no longer be 200. Since #488 removeNetworkMember revokes
+    // the user's tokens for that network and resolveToken rejects a
+    // non-member's network token, so the token itself is refused (401).
     const afterRemoval = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(ntok) });
-    expect(afterRemoval.status).toBe(403);
+    expect(afterRemoval.status).toBe(401);
     // utok of the removed user is denied too.
     const utokAfter = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(outsiderToken) });
     expect(utokAfter.status).toBe(403);
