@@ -37,6 +37,12 @@ export type RequirementsRequestContext = {
   isAdmin: boolean;
   isNodeToken: boolean;
   scope: RestNetworkScope;
+  /**
+   * #470 —— 负责人(owner)只收人,传节点一律 400 owner_must_be_human,不走旧 App 的「节点负责人 → 负责 Agent」兼容。
+   * MCP 工具(Agent 与人经 MCP 的调用)总是严格:那条兼容只为 App ≤ 0.2.142 的 REST 保存存在,Agent 走它会
+   * 静默清空人类负责人(task-lifecycle 测试报告问题 1)。REST 上带 agent_owner 的新客户端也严格(见 assignments)。
+   */
+  strictOwner?: boolean;
 };
 
 const COLUMNS = new Set(["pool", "doing", "done"]);
@@ -80,6 +86,17 @@ type Row = {
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ ok: false, error }, { status });
+}
+
+/** 人员字段写错时告诉调用方怎么改(MCP 的 Agent 读得到 hint,app 只看 error)。 */
+const ASSIGNMENT_HINTS: Record<string, string> = {
+  owner_must_be_human: "owner (负责人) must be a person: {kind:'user', id}. To assign a node / Agent, use agent_owner: {kind:'node', id}.",
+  agent_owner_must_be_agent: "agent_owner (负责 Agent) must be a node: {kind:'node', id}. To assign a person, use owner: {kind:'user', id}.",
+};
+function assignmentError(e: unknown): Response {
+  const error = (e as Error).message;
+  const hint = ASSIGNMENT_HINTS[error];
+  return Response.json({ ok: false, error, ...(hint ? { hint } : {}) }, { status: 400 });
 }
 
 // ── 任务的人员权限(RFC-038 §9,判定在 task-access.ts) ──
@@ -529,7 +546,7 @@ function personRef(value: unknown, networkId: string, hidden: HiddenNode = null)
 // 旧客户端兼容(App ≤ 0.2.142 只有一个「负责人」,可以选节点):请求里 owner 是节点、又**没带** agent_owner
 // → 当成设置负责 Agent,负责人清空,照常 200,并回 owner_coerced_to_agent_owner: true。
 // 带了 agent_owner 的就是新客户端,保持严格:owner 是节点 → 400 owner_must_be_human。
-function assignments(body: Record<string, unknown>, networkId: string, current?: Row, hidden: HiddenNode = null) {
+function assignments(body: Record<string, unknown>, networkId: string, current?: Row, hidden: HiddenNode = null, strictOwner = false) {
   let owner = current?.owner_json ? JSON.parse(current.owner_json) : null;
   let agentOwner = current?.agent_owner_json ? JSON.parse(current.agent_owner_json) : null;
   let coerced: PersonRef | null = null;
@@ -538,7 +555,7 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
   if ('owner' in body) {
     owner = body.owner === null ? null : personRef(body.owner, networkId, hidden);
     if (owner && owner.kind !== 'user') {
-      if ('agent_owner' in body) throw new Error('owner_must_be_human');
+      if (strictOwner || 'agent_owner' in body) throw new Error('owner_must_be_human');
       coerced = owner;
       agentOwner = owner;
       owner = null;
@@ -770,7 +787,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
   const id = `req_${crypto.randomUUID()}`;
   const createdAt = new Date().toISOString();
   let people;
-  try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId)); } catch (e) { return jsonError((e as Error).message, 400); }
+  try { people = assignments(body, networkId, undefined, hiddenNodeFilter(ctx, networkId), ctx.strictOwner === true); } catch (e) { return assignmentError(e); }
   const actor = JSON.stringify(actorOf(ctx));
   try {
     // 领号、插入、记「新建」这条动态在同一个事务里:插入被唯一索引挡下时,号和动态一起回滚,不留空洞。
@@ -856,7 +873,7 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     assignee = body.assignee.trim().slice(0, 80);
   }
   let people;
-  try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id)); } catch (e) { return jsonError((e as Error).message, 400); }
+  try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id), ctx.strictOwner === true); } catch (e) { return assignmentError(e); }
   let projectId = row.project_id;
   if (has("project_id")) {
     try { projectId = projectRef(body.project_id, row.network_id); } catch (e) { return jsonError((e as Error).message, 400); }

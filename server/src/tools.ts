@@ -5833,6 +5833,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       isAdmin: false,
       isNodeToken: callerTokenIsNetwork,
       scope,
+      // #470:经 MCP 的写一律严格 —— owner 传节点回 400 owner_must_be_human(+ hint),不走旧 App 的兼容改写。
+      strictOwner: true,
     });
     const data = res ? await res.json() : { ok: false, error: "not_found" };
     return { content: [{ type: "text" as const, text: JSON.stringify(res && !res.ok && data && typeof data === "object" ? { ...data, status: res.status } : data) }] };
@@ -5849,7 +5851,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
     project_id: z.string().max(200).nullable().optional(),
-    owner: reqPerson.nullable().optional().describe("负责人: must be {kind:'user'}"),
+    owner: reqPerson.nullable().optional().describe("负责人 (a person): must be {kind:'user', id}; a node here is rejected with 400 owner_must_be_human — use agent_owner for nodes"),
     agent_owner: reqPerson.nullable().optional().describe("负责 Agent: must be {kind:'node'}"),
     participants: z.array(reqPerson).max(100).optional(),
     external_url: z.string().max(500).nullable().optional(),
