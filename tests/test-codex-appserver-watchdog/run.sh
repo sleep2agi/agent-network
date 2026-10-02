@@ -49,6 +49,9 @@ run_e2e() {
 echo "L3 real Hub + anet co-presence + built agent-node: kill → degraded → relaunch → ok → give up"
 run_e2e baseline 19242
 
+echo "L3b #465 hung app-server (alive, port listening): close1006 → SIGTERM, silent+ignores SIGTERM → SIGKILL, relaunch; foreign marker never killed"
+ANET_TESTWD_SCENARIO=hung run_e2e hung 19245
+
 # expect_red LABEL WHY CMD… — the mutant must fail, and fail for WHY (a red for an unrelated reason —
 # a crash, a port clash — would otherwise read exactly like the guard catching the mutation).
 expect_red() {
@@ -89,5 +92,23 @@ expect_red unit-budget 'gives up after N restarts inside the window' bun test ag
 (cd agent-node && bun run build >/dev/null)
 ANET_TESTWD_TIMEOUT_MS=15000 expect_red e2e-budget 'timeout waiting for hub shows gave up' run_e2e no_budget 19244
 cp /tmp/watchdog.ts agent-node/src/runtime/codex-appserver-watchdog.ts
+
+echo "L6 witnessed red (#465): the hung kill path is disabled (a hung app-server is never recovered)"
+cp agent-node/src/cli.ts /tmp/agent-node-cli.ts
+bun /mutate.ts agent-node/src/cli.ts \
+  'if (restartOpts?.killHung && appsrvSnapshot && NODE_CODEX_HOME) {' \
+  'if (false) {'
+(cd agent-node && bun run build >/dev/null)
+ANET_TESTWD_SCENARIO=hung ANET_TESTWD_TIMEOUT_MS=25000 expect_red no-hung-kill 'timeout waiting for close1006: relaunch #2' run_e2e no_hung_kill 19246
+cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
+
+echo "L7 witnessed red (#465): the marker check is dropped from the strict identity check (a foreign process would be signalled)"
+cp agent-node/src/runtime/codex-appserver-relaunch.ts /tmp/relaunch.ts
+bun /mutate.ts agent-node/src/runtime/codex-appserver-relaunch.ts \
+  'if (envVarFromEnviron(environ, "ANET_NODE_MARKER") !== deps.marker) return' \
+  'if (false) return'
+expect_red unit-foreign-marker 'a foreign process is never signalled' bun test agent-node/src/runtime/codex-appserver-relaunch.test.ts
+cp /tmp/relaunch.ts agent-node/src/runtime/codex-appserver-relaunch.ts
+(cd agent-node && bun run build >/dev/null)
 
 echo "TESTWD PASS"

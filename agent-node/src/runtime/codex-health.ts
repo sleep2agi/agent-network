@@ -252,6 +252,8 @@ function appServerPhase(h: AppServerHealth | undefined): string {
   const e = h?.last_error ?? "";
   if (/^restarting app-server\b/.test(e)) return "restarting";
   if (/auto-restart gave up/.test(e)) return "gave_up";
+  // #465 —— 活着但不应答(正在数探针 / 身份核对不过不杀):也是一次翻转,立刻报上去,别等心跳。
+  if (/alive but not answering/.test(e)) return "hung";
   return "-";
 }
 

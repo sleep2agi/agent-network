@@ -15,6 +15,7 @@ COPY agent-node ./agent-node
 COPY agent-network ./agent-network
 COPY server ./server
 COPY tests/test751-codex-copresence-windows ./tests/test751-codex-copresence-windows
+COPY tests/test-codex-appserver-watchdog/hung-proxy.mjs ./tests/test-codex-appserver-watchdog/hung-proxy.mjs
 COPY tests/test-codex-appserver-watchdog/e2e.mjs /e2e.mjs
 COPY tests/test-codex-appserver-watchdog/run.sh /run.sh
 COPY tests/test584-dashboard-codex-delivery/mutate.ts /mutate.ts

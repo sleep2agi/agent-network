@@ -1204,8 +1204,8 @@ import { appendFileSync, mkdirSync, statSync } from "fs";
 import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
 import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
-import { createAppServerWatchdog, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
-import { appsrvSessionFor, captureAppServerLaunch, linuxProcView, listTmuxPanes, markerStillOurs, realRelaunchDeps, relaunchAppServer, relaunchBlocker, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
+import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
+import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
 const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
   ? preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)
@@ -6979,7 +6979,7 @@ if (RUNTIME === "codex-app-server") {
   let appsrvSnapshot: AppServerLaunchSnapshot | null = null;
   const refreshAppsrvSnapshot = () => {
     if (!appsrvSession || !codexAppServerUrl || process.platform !== "linux") return;
-    const r = captureAppServerLaunch({ session: appsrvSession, url: codexAppServerUrl, marker: nodeMarker, panes: listTmuxPanes(), proc: linuxProcView });
+    const r = captureAppServerLaunch({ session: appsrvSession, url: codexAppServerUrl, marker: nodeMarker, panes: listTmuxPanes(), proc: linuxProcView, sessionId: tmuxSessionId(appsrvSession) });
     if (r.ok && r.snapshot.pid !== appsrvSnapshot?.pid) {
       appsrvSnapshot = r.snapshot;
       log(`[app-server-watchdog] launch snapshot tmux=${r.snapshot.session} pid=${r.snapshot.pid} argv0=${r.snapshot.argv[0]}`);
@@ -6988,19 +6988,35 @@ if (RUNTIME === "codex-app-server") {
     }
   };
   refreshAppsrvSnapshot();
+  // 动手之前的前置条件(死了的重启和卡死的重启共用);返回原因 = 只报告。
+  const copresenceRestartPrecheck = (): string | null => {
+    if (process.platform !== "linux") return `co-presence app-server auto-restart needs Linux /proc (this host is ${process.platform})`;
+    if (!NODE_CODEX_HOME) return "this node has no CODEX_HOME";
+    if (configFilePath && !markerStillOurs(join(dirname(configFilePath), "copresence-identity.json"), nodeMarker)) {
+      return "co-presence identity marker is gone or replaced (node is being stopped or restarted)";
+    }
+    return null;
+  };
+  const hungKillGraceMs = hungKillGraceFromEnv(process.env);
   codexAppServerWatchdog = createAppServerWatchdog({
     ...watchdogLimitsFromEnv(process.env),
     canRestart: () => {
       if (codexWatchdogStopping) return "node is shutting down";
       if (!copresenceAppServer) return null;
-      if (process.platform !== "linux") return `co-presence app-server auto-restart needs Linux /proc (this host is ${process.platform})`;
-      if (!NODE_CODEX_HOME) return "this node has no CODEX_HOME";
-      if (configFilePath && !markerStillOurs(join(dirname(configFilePath), "copresence-identity.json"), nodeMarker)) {
-        return "co-presence identity marker is gone or replaced (node is being stopped or restarted)";
-      }
-      return relaunchBlocker(appsrvSnapshot, { marker: nodeMarker, token: AUTH_TOKEN, panes: listTmuxPanes, proc: linuxProcView });
+      return copresenceRestartPrecheck() ?? relaunchBlocker(appsrvSnapshot, { marker: nodeMarker, token: AUTH_TOKEN, panes: listTmuxPanes, proc: linuxProcView });
     },
-    restart: async () => {
+    // #465 —— 进程活着但一直握不上手:只在共存 + Linux + 前置条件都满足时才算「卡死可处理」,其余平台照旧只报告。
+    appServerAlive: () => !codexWatchdogStopping && copresenceAppServer && !copresenceRestartPrecheck() && !!appsrvSnapshot
+      && AUTH_TOKEN.startsWith("ntok_") && snapshotProcessStillAlive(appsrvSnapshot, { marker: nodeMarker, proc: linuxProcView }),
+    canKillHung: () => {
+      if (!NODE_CODEX_HOME) return "this node has no CODEX_HOME";
+      return hungKillVeto(appsrvSnapshot, { marker: nodeMarker, codexHome: NODE_CODEX_HOME, panes: listTmuxPanes, proc: linuxProcView, sessionId: tmuxSessionId });
+    },
+    restart: async (_cause, restartOpts) => {
+      if (restartOpts?.killHung && appsrvSnapshot && NODE_CODEX_HOME) {
+        const how = await terminateHungAppServer(appsrvSnapshot, realHungKillDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, graceMs: hungKillGraceMs, log }));
+        log(`[app-server-watchdog] hung app-server stopped (${how}); relaunching on the original session`);
+      }
       if (copresenceAppServer && appsrvSnapshot && NODE_CODEX_HOME) {
         appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, token: AUTH_TOKEN, log }));
       }
