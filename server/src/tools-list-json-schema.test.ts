@@ -19,7 +19,8 @@ import { registerTools } from "./tools.js";
 
 async function connect() {
   const server = new McpServer({ name: "list-tools-test", version: "1" });
-  registerTools(server, undefined, "net_list_tools", "u_list_tools", "u_list_tools", false, "tok_list_tools");
+  // 没有用户 / 节点身份的调用者 = tools/list 不按角色过滤(#478),这里要的正是「每个登记的工具」。
+  registerTools(server, undefined, "net_list_tools", null, "u_list_tools", false, "tok_list_tools");
   const client = new Client({ name: "list-tools-client", version: "1" });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   await server.connect(st);

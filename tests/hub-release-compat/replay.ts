@@ -32,10 +32,10 @@ function shape(v: unknown): unknown {
   return typeof v;
 }
 
-async function call(step: string, method: string, path: string, token?: string, body?: unknown) {
+async function call(step: string, method: string, path: string, token?: string, body?: unknown, extraHeaders: Record<string, string> = {}) {
   const res = await fetch(base + path, {
     method,
-    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}), "MCP-Protocol-Version": "2025-03-26" },
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}), "MCP-Protocol-Version": "2025-03-26", ...extraHeaders },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -179,7 +179,15 @@ await call("files.missing", "GET", "/api/files/f_does_not_exist", t);
 await sse("events.users.me", `/events/users/me?network_id=${nid}`, t);
 await sse("events.network", `/events/network/${nid}`, t);
 // MCP tools the app calls: compare their input schemas.
-const tools = await call("mcp.tools_list", "POST", "/mcp", n, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+// #478 起 tools/list 按调用者给:节点令牌看不到只有人能用的工具、默认也不列协议工具(带 X-Anet-Tools: all 才列),
+// 人看不到节点 / 协议工具。兼容要回答的是「有没有哪个调用者丢了工具」,所以比的是两边的并集:
+// 节点令牌(带 opt-in 头)∪ 用户令牌。旧 Hub 不认这个头、两边都是全集,并集就是原来那份 —— 基线不受影响。
+const nodeTools = await call("mcp.tools_list", "POST", "/mcp", n, { jsonrpc: "2.0", id: 2, method: "tools/list" }, { "X-Anet-Tools": "all" });
+const userTools = await call("mcp.tools_list.user", "POST", "/mcp", t, { jsonrpc: "2.0", id: 3, method: "tools/list" });
+delete out["mcp.tools_list.user"];
+const unionByName = new Map<string, any>();
+for (const x of [...(nodeTools?.result?.tools ?? []), ...(userTools?.result?.tools ?? [])]) if (!unionByName.has(x.name)) unionByName.set(x.name, x);
+const tools = { result: { tools: [...unionByName.values()] } };
 // Keep the raw tools too: compare.ts checks tools/list per tool name (tools-compat.ts),
 // because the merged array shape cannot tell an added property from a removed one.
 out["mcp.tools_list"] = { status: out["mcp.tools_list"].status, shape: "<per-tool>", tools: (tools?.result?.tools ?? []).map((x: any) => ({ name: x.name, inputSchema: x.inputSchema })) } as any;

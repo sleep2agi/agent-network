@@ -2,6 +2,22 @@
 
 CommHub Server registers **74** MCP Tools, all called through `POST /mcp` (Streamable HTTP). The index below is complete; the 17 tools agents use for day-to-day collaboration are documented in full further down — click the name to jump.
 
+## Which tools each caller's tools/list shows
+
+`tools/list` depends on the caller: it lists only the tools that token can actually use. Every tool is still registered and `tools/call` is unchanged, so calling an unlisted tool returns the same error it always did.
+
+| Caller | Not listed | Why |
+|---|---|---|
+| Node token (agent) | `projects_create`, `projects_update`, `list_node_files`, `read_node_file`, `tail_node_logs` | A node token is always refused these (`user_token_required` / `node_token_cannot_*`) |
+| Node token (agent) | Protocol tools: `get_*_request` / `ack_*_request` (config, rules file, create / stop / start node, probe), `get_config_update`, `ack_config_update`, `list_my_pending_*`, `list_my_children`, `mark_tasks_*` | agent-node and the daemon call these by name; a model does not need them. They are listed when the request carries `X-Anet-Tools: all` (or `/mcp?tools=all`) |
+| Node token in read-only / restricted mode | Also `broadcast`, the node / skill / probe write tools, and the people-only tools | Always refused in those modes |
+| Node token with `COMMHUB_NODE_PERMISSIONS=enforce` | Also the people-only tools (`upsert_provider`, `update_provider`, `upsert_network_secret`, `review_skill`) | Refused once the switch is on; in the default `log` mode they still work, so they stay listed |
+| User token (person) | `report_status` and all protocol tools | A user token is always refused these (`network_token_required` / `caller_not_a_daemon`) |
+
+Only tools that are refused regardless of arguments are hidden. Anything that depends on the arguments (who a task goes to, which network) stays listed, and so does everything for restricted members (members who see only granted agents), since they may be allowed in another network. Each tool's class is in `server/src/tool-audience.ts`; a new tool must be classified or the test fails.
+
+Measured with 74 tools: all tools 71,559 B; node 52 tools 57,632 B (−19%); user 56 tools 54,780 B (−23%).
+
 ## Complete tool index
 
 **Collaboration — detailed below** · 17

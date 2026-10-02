@@ -3,6 +3,7 @@ import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip"
 import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
+import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
 import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
@@ -186,12 +187,12 @@ function sweepStaleRateLimits(): void {
 }
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, includeProtocolTools = false): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId);
+  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId, { includeProtocol: includeProtocolTools });
   return server;
 }
 
@@ -1002,7 +1003,8 @@ return Bun.serve({
         }
         labelRoute(req, mcpParsedBody === undefined ? "?" : mcpRouteLabel(mcpParsedBody));
       }
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null);
+      // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
+      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url));
       await mcpServer.connect(transport);
       const response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
       // Disconnect after response to prevent McpServer leak
