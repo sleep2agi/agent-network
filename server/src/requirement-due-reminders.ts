@@ -34,6 +34,7 @@ import { canSeeAgent } from "./agent-access.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pushEvent } from "./push.js";
 import { pendingInboxCount } from "./inbox-count.js";
+import { parseHubTimestamp } from "./hub-timestamp.js";
 
 export const DUE_REMINDER_KIND = "task_due";
 export const DUE_REMINDER_SENDER = "任务提醒";
@@ -228,7 +229,8 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
   }
   const baselines = new Map(
     db.all<{ network_id: string; sent_at: string }>("SELECT network_id, sent_at FROM requirement_due_reminders WHERE kind = ?1", BASELINE_KIND)
-      .map((b) => [b.network_id, Date.parse(b.sent_at)]),
+      .map((b) => [b.network_id, parseHubTimestamp(b.sent_at)] as const)
+      .filter((e): e is readonly [string, number] => e[1] !== null),
   );
   const params: unknown[] = [lo, hi];
   const netFilter = allow ? ` AND network_id IN (${allow.map((id) => `?${params.push(id)}`).join(", ")})` : "";
