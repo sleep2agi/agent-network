@@ -250,3 +250,30 @@ describe("#460 scheduled tasks", () => {
     expect(taskCount()).toBe(before);
   });
 });
+
+describe("#460 /api/status carries `degraded` only for degraded nodes", () => {
+  const row = async (light: boolean) => {
+    const r = await api(ownerToken, `/api/status?network_id=${encodeURIComponent(networkId)}${light ? "&light=1" : ""}`);
+    expect(r.status).toBe(200);
+    return r.body.sessions.find((x: any) => x.alias === TARGET);
+  };
+  test("unknown / healthy → no `degraded` key at all (light response bytes unchanged)", async () => {
+    expect("degraded" in (await row(true))).toBe(false);
+    setHealth(HEALTHY);
+    expect("degraded" in (await row(true))).toBe(false);
+    expect("degraded" in (await row(false))).toBe(false);
+  });
+  test("degraded → light and full rows list the failing layers with the app's labels", async () => {
+    setHealth({ bridge: "ok", app_server: { ok: false, rtt_ms: null, last_error: "refused" }, model_auth: "revoked" });
+    const want = [
+      { layer: "app_server", label: "App Server 断开", reason: "refused" },
+      { layer: "model_auth", label: "需要重新登录", reason: "revoked" },
+    ];
+    expect((await row(true)).degraded).toEqual(want);
+    expect((await row(false)).degraded).toEqual(want);
+  });
+  test("stale → no `degraded`", async () => {
+    setHealth(DOWN_APP, Date.now() - NODE_HEALTH_TTL_MS - 1_000);
+    expect("degraded" in (await row(true))).toBe(false);
+  });
+});
