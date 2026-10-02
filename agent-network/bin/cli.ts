@@ -148,6 +148,7 @@ import {
   describeCodexRefreshFailure,
   type NodeFingerprint,
 } from "../src/codex-auth-fingerprint";
+import { applyNodeCodexHome, resolveNodeCodexHome, verifyProcessTreeCodexHome } from "../src/codex-home-enforce";
 import {
   describeMissingDeps,
   isLoopbackHub,
@@ -316,6 +317,47 @@ function startNodeTmuxSession(sessionName: string, alias: string) {
 function tmuxSessionRunning(name: string): boolean {
   try { execFileSync("tmux", ["has-session", "-t", exactSession(name)], { stdio: "pipe" }); return true; }
   catch { return false; }
+}
+/** #448 — pane pids of one session, matched by string equality (tmux `-t` is a prefix match, `=name` fails on CJK). */
+function tmuxSessionPanePids(sessionName: string): number[] {
+  try {
+    const out = execFileSync("tmux", ["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}"], {
+      encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+    }).toString();
+    return out.split("\n")
+      .map((line) => line.split("\t"))
+      .filter(([name, pid]) => name === sessionName && /^\d+$/.test(pid ?? ""))
+      .map(([, pid]) => Number(pid));
+  } catch { return []; }
+}
+/**
+ * #448 — after a co-presence tmux session is up, read /proc/<pid>/environ of its
+ * pane process tree and refuse (kill the node's sessions, exit 1) unless every
+ * process carrying CODEX_HOME carries exactly this node's. Unreadable/non-Linux
+ * is printed as skipped, never as verified.
+ */
+function assertCopresenceSessionsCodexHome(
+  sessions: string[], expected: string, displayName: string, allSessions: string[],
+): void {
+  for (const session of sessions) {
+    const pids = tmuxSessionPanePids(session);
+    if (pids.length === 0) {
+      console.error(`[anet] ⚠ CODEX_HOME check: no pane found for tmux session ${session} (skipped)`);
+      continue;
+    }
+    for (const pid of pids) {
+      const verdict = verifyProcessTreeCodexHome({ rootPid: pid, expected, label: `tmux ${session}` });
+      if (!verdict.ok) {
+        console.error(`[anet] ❌ ${verdict.message}`);
+        console.error(`[anet]    Refusing to run ${displayName} with another node's CODEX_HOME (login state + sessions would be shared). (#448)`);
+        for (const s of allSessions) killTmuxSession(s);
+        console.error(`[anet]    Stopped this node's tmux sessions: ${allSessions.join(", ")}`);
+        process.exit(1);
+      }
+      if (verdict.skipped) console.error(`[anet] ⚠ CODEX_HOME check for ${session} skipped: ${verdict.skipped}`);
+    }
+  }
+  console.log(`[anet] CODEX_HOME verified on ${sessions.join(", ")} → ${expected}`);
 }
 // #122 — gate auto-tmux on tmux actually being installed. The CLI never
 // hard-depends on tmux (a fresh dev box without it should still get a working
@@ -1518,6 +1560,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     execFileSync("tmux", [
       "new-session", "-d", "-s", appsrvSession, "-c", process.cwd(),
       "-e", `ANET_NODE_MARKER=${identityMarker}`,
+      // #448 — the pane's first process gets its env from the tmux SERVER, which
+      // may carry another node's CODEX_HOME; set it here too, not only via export.
+      "-e", `CODEX_HOME=${opts.codexHome}`,
       "bash", "-lc", appsrvCmd,
     ], { stdio: "pipe" });
   } catch (e: any) {
@@ -1547,6 +1592,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     process.exit(1);
   }
   console.log(`[anet] ① app-server READY on ${wsUrl}`);
+  assertCopresenceSessionsCodexHome([appsrvSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
 
   // #P3fix必修5 — the marker file itself was already written before the
   // first tmux session (see prepareIdentityForStart above); everything from
@@ -1631,6 +1677,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   if (freshDeferred) { delete rawCfg.codexThreadId; delete rawCfg.codexRecoveryVerification; }
   else { rawCfg.codexThreadId = threadId; rawCfg.codexRecoveryVerification = profile.codexRecoveryVerification; }
   delete rawCfg.session;
+  // #448 — the bridge (and every later respawn) recomputes CODEX_HOME from this
+  // config, never from its env; a `--codex-home` override must therefore live here.
+  if (opts.codexHome !== resolve(join(nodesDir(), resolved.id, "codex-home"))) rawCfg.codexHome = opts.codexHome;
+  else delete rawCfg.codexHome;
   atomicWritePrivateJson(rawCfgPath, rawCfg);
 
   // #1856 PR-B — restart/resume run with --tui-first: the exact-session TUI must be
@@ -1660,6 +1710,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
         "-e", `ANET_NODE_MARKER=${identityMarker}`,
         "-e", "ANET_COPRESENCE_BRIDGE=1",
+        "-e", `CODEX_HOME=${opts.codexHome}`,
+        // #448 — health.tui probes this exact session name.
+        "-e", `ANET_CODEX_TUI_SESSION=${tuiSession}`,
         "bash", "-lc", bridgeCmd,
       ], { stdio: "pipe" });
     } catch (e: any) {
@@ -1711,6 +1764,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       execFileSync("tmux", [
         "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
         "-e", `ANET_NODE_MARKER=${identityMarker}`,
+        "-e", `CODEX_HOME=${opts.codexHome}`,
         "bash", "-lc", tuiCmd,
       ], { stdio: "pipe" });
     } catch (e: any) {
@@ -1781,6 +1835,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // a node was unusable on 2026-08-20 the ✅ had already been printed over a
   // TUI parked on an interactive prompt.
   if (!tuiFirst) await requireTuiPainted();
+  assertCopresenceSessionsCodexHome([appsrvSession, bridgeSession, tuiSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
 
   // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
   //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
@@ -2249,6 +2304,8 @@ interface Profile {
   codexProjectDir?: string;
   /** #1969 — codex-sdk runtime: explicit codex binary (agent-node passes it as codexPathOverride). */
   codexBin?: string;
+  /** #448 — explicit `--codex-home` override, persisted so every respawn recomputes it from config, not env. */
+  codexHome?: string;
   opencodeMode?: "headless" | "copresence";
   model?: string;
   channels: string[];
@@ -6550,6 +6607,20 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     }
     Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
 
+    // #448 — CODEX_HOME for codex runtimes comes from this node's own config/dir,
+    // never from the launching env (a tmux server or daemon env can carry another
+    // node's). Applied once here; every respawn in the supervisor loop below,
+    // including the exit-75 restart after update_node_config, reuses this env and
+    // re-checks the child's /proc environ.
+    let expectedCodexHome: string | undefined;
+    if (runtime === "codex-app-server" || runtime === "codex-sdk") {
+      let rawNodeCfg: Record<string, unknown> = {};
+      try { rawNodeCfg = JSON.parse(readFileSync(join(nodesDir(), nodeId, "config.json"), "utf-8")); } catch { /* resolver treats {} as "no own home" */ }
+      const applied = applyNodeCodexHome(env, resolveNodeCodexHome({ nodeDir: join(nodesDir(), nodeId), config: rawNodeCfg }));
+      if (applied.note) console.log(`[anet] ${applied.note}`);
+      expectedCodexHome = applied.codexHome;
+    }
+
     if (runtime === "opencode-cli") {
       if (!opencodeLaunchIdentity) {
         throw new Error("opencode launch identity missing after successful compatibility gate");
@@ -6706,6 +6777,18 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         }));
         if (runtime === "opencode-cli") activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
+        if (expectedCodexHome && child.pid) {
+          const verdict = verifyProcessTreeCodexHome({ rootPid: child.pid, expected: expectedCodexHome, label: "agent-node" });
+          if (!verdict.ok) {
+            console.error(`[anet] ❌ ${verdict.message}`);
+            console.error(`[anet]    Refusing to run ${displayName} with another node's CODEX_HOME. (#448)`);
+            try { child.kill("SIGKILL"); } catch {}
+            try { rmSync(pidFile, { force: true }); } catch {}
+            lastNonRestartCode = 1;
+            return;
+          }
+          if (verdict.skipped) console.log(`[anet] CODEX_HOME check skipped: ${verdict.skipped}`);
+        }
 
         let settled = false;
         const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
@@ -7278,7 +7361,8 @@ async function startCommand() {
     }
     await startCopresenceOrchestration(id, {
       codexBin: opts["codex-bin"] || "codex",
-      codexHome: opts["codex-home"] || codexHomeDefault,
+      // #448 — absolute, and from the node's own config/dir; never from the environment.
+      codexHome: resolve(opts["codex-home"] || (typeof prof.codexHome === "string" && prof.codexHome ? prof.codexHome : codexHomeDefault)),
       model: opts.model,
       port: opts.port ? Number(opts.port) : undefined,
       dangerFullAccess: opts["dangerously-allow-full-access"] === "true",
@@ -7702,6 +7786,8 @@ function codexRestartActions(ctx: CodexLifecycleCtx, peer: { id: string; profile
       const argv = [...process.execArgv, process.argv[1], "node", "start", displayName, "--copresence", "--tui-first"];
       if (prof.codexCopresenceFullAccess) argv.push("--dangerously-allow-full-access", "--yes-danger-full-access");
       const env = { ...process.env }; delete env.ANET_COPRESENCE_BRIDGE; delete env.ANET_NODE_MARKER;
+      // #448 — the launcher computes CODEX_HOME from the node; do not hand it whatever this shell carries.
+      delete env.CODEX_HOME;
       dismissCodexUpdatePrompt(codexHome, say);
       say(`launching: anet node start ${shellQuote(displayName)} --copresence --tui-first`);
       const r = spawnSync(process.execPath, argv, { env, encoding: "utf-8", timeout: 240_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 8 * 1024 * 1024 });

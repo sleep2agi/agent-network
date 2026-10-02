@@ -23,6 +23,7 @@ import { CodexAppServerBridge } from "../codex-app-server-bridge";
 import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
 import { describeRolloutSize, resolveResumeTimeoutMs } from "./resume-timeout";
 import { resolveTimeoutEnvMs } from "./timeout-env";
+import { verifyProcessTreeCodexHome, type ProcReader } from "../../codex-home-enforce";
 
 export interface CodexAppServerRuntimeSession {
   client: CodexAppServerClient;
@@ -31,6 +32,8 @@ export interface CodexAppServerRuntimeSession {
   proc: ChildProcess | null;
   /** The thread the bridge is bound to (final id after create-or-resume). */
   threadId: string;
+  /** #448 — the app-server ws url (owned or shared), for the health probe. */
+  url?: string;
   get isRunning(): boolean;
 }
 
@@ -155,6 +158,17 @@ export async function openCodexAppServerRuntime(opts: {
   commhubMcpUrl?: string;
   /** CommHub bearer token (node ntok) — passed to the app-server via env. */
   commhubToken?: string;
+  /**
+   * #448 — this node's own CODEX_HOME (from resolveNodeCodexHome, never from
+   * the inherited env). When set, an OWNED app-server is spawned with exactly
+   * this value and its /proc environ is checked after it binds; a mismatch
+   * kills the child and fails the open. Ignored for shared servers (the
+   * launcher that spawned that server checks it).
+   */
+  codexHome?: string;
+  /** Test seam for the /proc check. */
+  procReader?: ProcReader;
+  procPlatform?: string;
   onThread?: (threadId: string, created: boolean) => void | Promise<void>;
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   /** #1930 — see CodexAppServerBridgeOptions.shouldStartQueued. */
@@ -187,9 +201,10 @@ export async function openCodexAppServerRuntime(opts: {
       });
       // Token via env only (never in argv/config) so it can't leak through a
       // process list or on-disk config.
-      const childEnv = wireCommhub
+      const childEnv: NodeJS.ProcessEnv = wireCommhub
         ? { ...process.env, [COMMHUB_MCP_TOKEN_ENV]: opts.commhubToken }
-        : process.env;
+        : { ...process.env };
+      if (opts.codexHome) childEnv.CODEX_HOME = opts.codexHome;
       log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}${wireCommhub ? " (+commhub MCP)" : ""}`);
       proc = spawn(binary, spawnArgs, {
         stdio: ["ignore", "pipe", "pipe"],
@@ -200,6 +215,17 @@ export async function openCodexAppServerRuntime(opts: {
       );
       if (opts.onExit) proc.on("exit", (code, signal) => opts.onExit!({ code, signal }));
       await waitWs(url);
+      if (opts.codexHome && proc.pid) {
+        const verdict = verifyProcessTreeCodexHome({
+          rootPid: proc.pid, expected: opts.codexHome, label: "owned app-server",
+          reader: opts.procReader, platform: opts.procPlatform,
+        });
+        if (!verdict.ok) {
+          throw new Error(`refusing to use the owned app-server: ${verdict.message} (#448 fail-closed)`);
+        }
+        if (verdict.skipped) log(`[codex-app-server] CODEX_HOME check skipped: ${verdict.skipped}`);
+        else log(`[codex-app-server] CODEX_HOME verified on ${verdict.checked.length} process(es)`);
+      }
     } else {
       log(`[codex-app-server] attaching to shared server ${url}`);
     }
@@ -245,6 +271,7 @@ export async function openCodexAppServerRuntime(opts: {
       bridge,
       proc,
       threadId: bridge.getThreadId(),
+      url,
       get isRunning() {
         // Owned server: the child must be alive. Shared server: rely on the
         // ws client's connection state.

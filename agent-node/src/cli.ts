@@ -1188,7 +1188,7 @@ if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && RUNTIME !== "codex-ap
 }
 
 // ── 日志：终端 + 文件 ──
-import { appendFileSync, mkdirSync } from "fs";
+import { appendFileSync, mkdirSync, statSync } from "fs";
 
 // #1019 —— 节点自己的版本号。sessions.version 这一列一直是空的:
 // 服务端早就收(report_status 的 schema 里有 `version`)也早就写
@@ -1202,6 +1202,8 @@ import { appendFileSync, mkdirSync } from "fs";
 //    只拷 src/ 会 `error: Could not resolve: "../package.json"`。
 //    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
+import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
+import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
 const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
   ? preparePrivateLogDirectory(LOG_DIR, persistenceRedactorHandle)
@@ -1235,6 +1237,28 @@ const error = (msg: string) => _log("error", 3, msg);
 // silent either: the operator who typed it is entitled to know it did
 // nothing. `warn` is deliberate — this survives `ANET_LOG_LEVEL=warn`.
 if (LOG_LEVEL_RESOLUTION.warning) warn(`[log] ${LOG_LEVEL_RESOLUTION.warning}`);
+// #448 —— codex 运行时的 CODEX_HOME 由本节点自己的 config/nodeDir 算出来,不从环境继承。
+// 现场:launcher 的包装 shell 带着**另一台节点**的 CODEX_HOME(tmux 服务器全局环境),只因
+// 包装脚本里的 export 恰好又盖了一次才没出事。这里在任何人读 process.env.CODEX_HOME 之前改正它;
+// 本进程之后 spawn 的 app-server 用同一个值,并在起来后核对 /proc/<pid>/environ。
+const NODE_CODEX_HOME: string | undefined = (RUNTIME === "codex" || RUNTIME === "codex-app-server")
+  ? (() => {
+    const applied = applyNodeCodexHome(
+      process.env as Record<string, string | undefined>,
+      resolveNodeCodexHome({ nodeDir: NODE_DIR, config: fileConfig }),
+    );
+    if (applied.note) warn(`[codex] ${applied.note}`);
+    return applied.codexHome;
+  })()
+  : undefined;
+// #448 —— 分层健康(只报告):bridge / app_server / tui / model_auth,随 report_status 的 `health` 上报。
+// 只给 codex-app-server 运行时开;其他运行时不带这一格(旧 Hub 本来就丢弃未知顶层键)。
+const codexModelAuth = new ModelAuthTracker();
+let codexHealthMonitor: ReturnType<typeof createCodexHealthMonitor> | null = null;
+let lastReportedStatus: { status: string; task?: string } = { status: "idle" };
+function currentNodeHealth(): NodeHealthReport | undefined {
+  return codexHealthMonitor?.snapshot();
+}
 const taskTraceLog = (line: string) => {
   if (process.env.ANET_TASK_TRACE_FORMAT !== "json") return log(line);
   console.log(line);
@@ -1522,6 +1546,8 @@ const register = async () => {
     files_capable: true,
     // 同一门铃也答 logs_tail(node-logs.ts,本节点运行日志只读查看,返回前脱敏)。
     logs_capable: true,
+    // #448 —— 分层健康;旧 Hub 静默丢弃该键。
+    ...(currentNodeHealth() ? { health: currentNodeHealth() } : {}),
   };
   // 🔴 启动注册是 `await register()`（本文件底部、顶层、**无 catch**），所以这里
   //    抛出什么都会让整个进程退出。#1225 实测到的那次就是这样：hub 的
@@ -1547,8 +1573,14 @@ const register = async () => {
   }
   return result;
 };
-const reportStatus = async (status: string, task?: string) => {
+const reportStatus = async (rawStatus: string, rawTask?: string) => {
+  lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();
+  const health = currentNodeHealth();
+  // #448 —— 登录态 revoked/expired 的节点不能接活:idle 报成 error 并写明「本节点 CODEX_HOME 要重新登录」。
+  const { status, task } = health
+    ? gateStatusOnModelAuth(rawStatus, rawTask, health.model_auth, NODE_CODEX_HOME)
+    : { status: rawStatus, task: rawTask };
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
     : RUNTIME === "claude"
@@ -1604,6 +1636,8 @@ const reportStatus = async (status: string, task?: string) => {
     // #1958 — grok: the model the session actually ran with. Hub's report_status
     // schema already accepts `model`; on a hub that ignores it nothing breaks.
     ...(RUNTIME === "grok" && grokEffectiveModel ? { model: grokEffectiveModel } : {}),
+    // #448 —— 分层健康(codex-app-server);旧 Hub 静默丢弃该键,不会拒整份上报。
+    ...(health ? { health } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       ...buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
@@ -2232,6 +2266,7 @@ async function ensureCodexAppServerSession(): Promise<
       sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN || undefined,
+      codexHome: NODE_CODEX_HOME,
       shouldStartQueued: (task) => queuedRowStillPendingOnHub(task.taskId),
       onThread: (threadId) => writebackCodexThread(threadId),
       onExit: (info) => {
@@ -3697,6 +3732,15 @@ async function processWithCodexAppServer(
 
   // Throw failed outcomes into processTask's existing failure path so the Hub
   // records `failed`, rather than the old false-success `replied` state.
+  // #448 — the outcome also classifies the model login state for health.model_auth.
+  if (outcome.failed) codexModelAuth.noteError(outcome.replyText);
+  else if (!outcome.skipped && !outcome.queued) codexModelAuth.noteSuccess();
+  codexHealthMonitor?.noteModelAuthMaybeChanged();
+  // #448 —— 登录类失败要说清楚是**本节点** CODEX_HOME 需要重新登录,别让人去猜或去拷别人的凭据。
+  const authFailure = outcome.failed ? classifyModelAuthError(outcome.replyText) : null;
+  if (authFailure) {
+    throw new Error(`${describeModelAuthBlock(authFailure, NODE_CODEX_HOME)}\n${outcome.replyText.replace(/^codex-app-server 错误:\s*/, "")}`);
+  }
   return codexAppServerReplyOrThrow(outcome);
 }
 
@@ -6903,6 +6947,32 @@ if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
   }
 }
 
+// #448 —— 分层健康探针:每 30s 一次 ws 握手 + (共存节点)TUI pane 检查。任一层翻转时立即补报一次
+// 当前状态,不等 3 分钟心跳。纯报告:不改调度,不拒任务。
+if (RUNTIME === "codex-app-server") {
+  const tuiSession = process.env.ANET_COPRESENCE_BRIDGE === "1"
+    ? (process.env.ANET_CODEX_TUI_SESSION || ALIAS)
+    : undefined;
+  codexHealthMonitor = createCodexHealthMonitor({
+    appServerUrl: () => codexAppServerUrl || codexAppServerSessionManager.current()?.url,
+    tuiSession,
+    modelAuth: codexModelAuth,
+    probeAppServer: async (url) => {
+      const { resolveWebSocketCtor } = await import("./runtime/codex-app-server-client");
+      return probeAppServerWs(url, { wsCtor: resolveWebSocketCtor() });
+    },
+    authFileMtimeMs: () => {
+      if (!NODE_CODEX_HOME) return null;
+      try { return statSync(join(NODE_CODEX_HOME, "auth.json")).mtimeMs; } catch { return null; }
+    },
+    onChange: (report) => {
+      log(`[health] app_server=${report.app_server ? (report.app_server.ok ? "ok" : `down(${report.app_server.last_error ?? "?"})`) : "-"} tui=${report.tui ? (report.tui.ok ? "ok" : report.tui.reason) : "-"} model_auth=${report.model_auth}`);
+      void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
+    },
+  });
+  codexHealthMonitor.start();
+}
+
 // `/btw` has a wholly separate command consumer and derived Codex threads.
 // It is opt-in, Codex-app-server-only, and never enters inbox/FIFO/steer.
 const sideThreadsEnabled = fileConfig?.flags?.sideThreads === true || process.env.ANET_ENABLE_SIDE_THREADS === "1";
@@ -6930,6 +7000,7 @@ if (sideThreadsEnabled) {
         sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
         commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
         commhubToken: AUTH_TOKEN || undefined,
+        codexHome: NODE_CODEX_HOME,
         log: (message) => log(`[side-thread-owned] ${message}`),
         warn: (message) => warn(`[side-thread-owned] ${message}`),
       }));

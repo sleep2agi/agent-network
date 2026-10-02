@@ -58,6 +58,10 @@ export function serializeProfileForConfigJson(
     ...((normalized.codexProjectDir ?? profile.codexProjectDir)
       ? { codexProjectDir: normalized.codexProjectDir ?? profile.codexProjectDir }
       : {}),
+    // #448 — `--codex-home` 显式指定的 CODEX_HOME;桥和每次重生都只从 config 读它,不从环境继承。漏在白名单里 = 一存就丢。
+    ...((normalized.codexHome ?? profile.codexHome)
+      ? { codexHome: normalized.codexHome ?? profile.codexHome }
+      : {}),
     // #1969 — codex-sdk 运行时用哪个 codex 可执行文件(agent-node 读 config.codexBin)。漏在白名单里 = 一存就丢。
     ...((normalized.codexBin ?? profile.codexBin)
       ? { codexBin: normalized.codexBin ?? profile.codexBin }
