@@ -9,8 +9,8 @@ COPY agent-node/package.json ./agent-node/package.json
 RUN cd agent-node && bun install --ignore-scripts
 COPY agent-network/package.json ./agent-network/package.json
 RUN cd agent-network && bun install --ignore-scripts
-COPY server/package.json ./server/package.json
-RUN cd server && bun install --ignore-scripts
+COPY server/package.json server/package-lock.json ./server/
+RUN cd server && bun install --frozen-lockfile --ignore-scripts
 COPY agent-node ./agent-node
 COPY agent-network ./agent-network
 COPY server ./server

@@ -1,8 +1,8 @@
 FROM oven/bun:1.3.14
 
 WORKDIR /repo
-COPY server/package.json /repo/server/package.json
-RUN cd /repo/server && bun install
+COPY server/package.json server/package-lock.json /repo/server/
+RUN cd /repo/server && bun install --frozen-lockfile
 COPY server /repo/server
 COPY tests/test660-explicit-prod-db-optin /repo/tests/test660-explicit-prod-db-optin
 RUN chmod +x /repo/tests/test660-explicit-prod-db-optin/run.sh

@@ -1,8 +1,8 @@
 FROM oven/bun:1.3.14
 
 WORKDIR /workspace
-COPY server/package.json ./server/package.json
-RUN cd server && bun install --ignore-scripts
+COPY server/package.json server/package-lock.json ./server/
+RUN cd server && bun install --frozen-lockfile --ignore-scripts
 COPY server ./server
 COPY docs-site/docs/api/rest-data.md ./docs-site/docs/api/rest-data.md
 COPY docs-site/docs/en/api/rest-data.md ./docs-site/docs/en/api/rest-data.md

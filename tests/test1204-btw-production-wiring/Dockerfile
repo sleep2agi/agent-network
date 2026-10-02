@@ -5,9 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 COPY agent-node/package.json agent-node/package.json
-COPY server/package.json server/package.json
+COPY server/package.json server/package-lock.json server/
 RUN cd agent-node && bun install --ignore-scripts \
-    && cd ../server && bun install --ignore-scripts
+    && cd ../server && bun install --frozen-lockfile --ignore-scripts
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 LABEL org.opencontainers.image.revision=$SOURCE_COMMIT

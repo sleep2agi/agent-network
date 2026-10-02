@@ -7,8 +7,8 @@ RUN apt-get update \
   && command -v script >/dev/null \
   && rm -rf /var/lib/apt/lists/*
 
-COPY server/package.json server/bun.lock* ./server/
-RUN cd server && bun install --ignore-scripts
+COPY server/package.json server/bun.lock* server/package-lock.json ./server/
+RUN cd server && bun install --frozen-lockfile --ignore-scripts
 
 COPY agent-network/package.json agent-network/bun.lock* ./agent-network/
 RUN cd agent-network && bun install --ignore-scripts
