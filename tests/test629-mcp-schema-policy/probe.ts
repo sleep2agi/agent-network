@@ -23,7 +23,7 @@ const expectedTools = [
   "list_my_children", "upsert_network_secret", "list_network_secrets", "upsert_provider",
   "update_provider", "list_providers", "probe_provider_model", "get_probe_results",
   "get_probe_request", "ack_probe_request",
-  "requirements_list", "requirements_get", "requirements_create", "requirements_update",
+  "requirements_list", "requirements_people", "requirements_get", "requirements_create", "requirements_update",
   "requirements_checklist_toggle", "requirements_upsert_by_external_ref", "projects_list",
   "projects_create", "projects_update", "requirements_events", "requirements_comment",
 ];

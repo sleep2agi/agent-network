@@ -482,4 +482,6 @@ export const RESTRICTED_MEMBER_TOOLS: ReadonlySet<string> = new Set([
   "requirements_events",
   // #474:评论走同一个 REST 处理 —— 看不见的任务 404、只读角色 403;受限成员的评论和他的其他任务写一样按可见性准入。
   "requirements_comment",
+  // #473:通讯录同 /api/requirements/people 的可见范围 —— 受限成员看不见的 Agent 不出现(hiddenNodeFilter)。
+  "requirements_people",
 ]);
