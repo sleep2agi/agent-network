@@ -79,7 +79,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test anet_status_cache_test anet_owner_strict_test anet_req_list_mcp_test anet_req_errors_test anet_req_comment_test anet_req_people_mcp_test anet_req_status_part_test anet_ctx_cost_test anet_dept_heads_test anet_token_member_test anet_node_perm_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test anet_status_cache_test anet_owner_strict_test anet_req_list_mcp_test anet_req_errors_test anet_req_comment_test anet_req_people_mcp_test anet_req_status_part_test anet_ctx_cost_test anet_dept_heads_test anet_token_member_test anet_node_perm_test anet_dept_groups_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -237,6 +237,8 @@ run_pg_tests_rc anet_sched_stuck_test src/scheduled-stuck-http.test.ts
 run_pg_tests_rc anet_token_member_test src/network-token-membership-http.test.ts
 # 节点自己的权限(RFC-041 第一阶段,#487):permission_mode 列、node_permission_log 按小时合并的 upsert、受限节点的 LIKE … ESCAPE 子查询、报表聚合 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_node_perm_test src/node-permissions-http.test.ts
+# 部门群(RFC-042 第一个 PR,#457):chat_groups 的 (network_id, department_id) 唯一索引允许多个 NULL、ON CONFLICT DO NOTHING 播种成员、删部门同事务解除关联 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_dept_groups_test src/department-groups-http.test.ts
 
 # RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
 # refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).
