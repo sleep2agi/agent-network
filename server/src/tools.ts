@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { nodeHealthSchema, recordNodeHealth } from "./node-health-store.js";
+import { assertNodeHealthy } from "./node-health-guard.js";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
@@ -1632,8 +1633,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional().describe("Network scope"),
       parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends."),
       meta: z.any().optional().describe("Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
+      force: z.boolean().optional().describe("#460 — dispatch even when the target reports a degraded health layer (user tokens only; ignored for node tokens)"),
     },
-    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       const authOrigin: TaskAuthOrigin = callerTokenIsNetwork
         ? "node"
@@ -1786,6 +1788,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       {
         const lc = assertNodeActive(targetAlias, effectiveNetId ?? null);
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
+      // #460 — a node whose fresh health says a layer is down will not run the task: refuse instead of queueing silently.
+      {
+        const hg = assertNodeHealthy(targetAlias, effectiveNetId ?? null, { force, forceAllowed: !callerTokenIsNetwork });
+        if (!hg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(hg) }] };
       }
 
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
@@ -2346,8 +2353,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to retry"),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      force: z.boolean().optional().describe("#460 — dispatch even when the target reports a degraded health layer (user tokens only; ignored for node tokens)"),
     },
-    async ({ task_id, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ task_id, from_session: _fromIn, network_id: netId, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
@@ -2366,6 +2374,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       {
         const lc = assertNodeActive(task.to_name, effectiveNetId ?? task.network_id ?? null);
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
+      // #460 — a node whose fresh health says a layer is down will not run the task: refuse instead of queueing silently.
+      {
+        const hg = assertNodeHealthy(task.to_name, effectiveNetId ?? task.network_id ?? null, { force, forceAllowed: !callerTokenIsNetwork });
+        if (!hg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(hg) }] };
       }
       db.transaction(() => {
         // Reset task status
@@ -2559,8 +2572,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       new_alias: z.string().min(1).max(200).describe("Target agent alias"),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      force: z.boolean().optional().describe("#460 — dispatch even when the target reports a degraded health layer (user tokens only; ignored for node tokens)"),
     },
-    async ({ task_id, new_alias, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ task_id, new_alias, from_session: _fromIn, network_id: netId, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
@@ -2581,6 +2595,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       {
         const lc = assertNodeActive(reassignedAlias, effectiveNetId ?? task.network_id ?? null);
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
+      // #460 — a node whose fresh health says a layer is down will not run the task: refuse instead of queueing silently.
+      {
+        const hg = assertNodeHealthy(reassignedAlias, effectiveNetId ?? task.network_id ?? null, { force, forceAllowed: !callerTokenIsNetwork });
+        if (!hg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(hg) }] };
       }
       db.transaction(() => {
         // Ack old inbox to prevent original agent from picking it up

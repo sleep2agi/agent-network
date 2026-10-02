@@ -2,6 +2,7 @@ import { buildServeErrorResponse } from "./serve-error.js";
 import { maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
+import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -750,7 +751,17 @@ const TaskSchema = z.object({
   // stays unified regardless of transport (REST or MCP).
   attachments: z.any().optional(),
   meta: z.any().optional(),
+  // #460 — dispatch even when the target reports a degraded health layer. Honoured for user
+  // tokens only (a node token cannot override another node's health). Old clients never send it.
+  force: z.boolean().optional(),
 });
+
+/** #460 — `{ degraded: [{ layer, label, reason }] }` when the node's fresh health says a layer is down, else `{}`. */
+function degradedField(networkId: string | null | undefined, alias: string): { degraded?: Array<{ layer: string; label: string; reason: string }> } {
+  const h = readNodeHealth(networkId ?? "default", alias);
+  const layers = degradedLayers(h?.health);
+  return layers.length ? { degraded: layers.map(l => ({ layer: l.layer, label: l.label, reason: l.reason })) } : {};
+}
 
 const BroadcastSchema = z.object({
   message: z.string().min(1).max(10000),
@@ -2317,6 +2328,10 @@ return Bun.serve({
             // Only when filtering by node_id (or for the old alias resolver), so the unfiltered light response
             // keeps its exact bytes.
             ...(withNodeId ? { node_id: s.node_id ?? null } : {}),
+            // #460 — the app's list reads the light projection; a node whose fresh health says a layer is down
+            // carries the failing layers here (the same ones dispatch refuses with node_degraded). Absent for every
+            // healthy / unknown node, so the response is byte-identical unless something is actually degraded.
+            ...degradedField(s.network_id, s.alias),
           };
         }
         const externalSchedules = (() => {
@@ -2359,6 +2374,7 @@ return Bun.serve({
             const h = readNodeHealth(s.network_id, s.alias);
             return { health: h?.health ?? null, health_observed_ms_ago: h?.observed_ms_ago ?? null };
           })(),
+          ...degradedField(s.network_id, s.alias),
         };
       });
       const summary = sessions.reduce((acc: any, session: any) => {
@@ -3210,6 +3226,12 @@ return Bun.serve({
         if (!lc.ok) {
           return withCors(req, Response.json(lc, { status: 409 }));
         }
+      }
+      // #460 — refuse dispatch to a node whose fresh health says a layer is down (409, same as the
+      // lifecycle guard above). Unknown / stale health = allowed: old nodes keep working.
+      {
+        const hg = assertNodeHealthy(targetAlias, taskNetId ?? null, { force: body.force === true, forceAllowed: !restAuth?.networkId });
+        if (!hg.ok) return withCors(req, Response.json(hg, { status: 409 }));
       }
       // Mirror send_task MCP: write inbox + tasks rows in a single
       // transaction so the dispatch is visible to dashboard's Tasks page
