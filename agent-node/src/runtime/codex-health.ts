@@ -234,10 +234,29 @@ export interface CodexHealthMonitorOptions {
   onChange?: (report: NodeHealthReport) => void;
   /** 本节点 CODEX_HOME/auth.json 的 mtime(ms);用于发现「已重新登录」。没有就 null。 */
   authFileMtimeMs?: () => number | null;
+  /**
+   * #461 —— 每次 app_server 探针结果先交给看门狗(codex-appserver-watchdog.ts):它可能发起重启,
+   * 并把「正在重启 / 已放弃」写进 last_error。返回值就是要上报的 app_server。
+   */
+  onAppServerProbe?: (h: AppServerHealth) => AppServerHealth;
+}
+
+/** 探测间隔:默认 30s;ANET_CODEX_HEALTH_INTERVAL_MS 可调(≥ 1000,测试用),非法值退回默认。 */
+export function healthIntervalFromEnv(env: NodeJS.ProcessEnv): number {
+  const n = Number(env.ANET_CODEX_HEALTH_INTERVAL_MS);
+  return Number.isInteger(n) && n >= 1_000 ? n : 30_000;
+}
+
+/** #461 —— 看门狗的阶段也算翻转(开始重启 / 放弃),这样「放弃了」能立刻报上去,而不是等 3 分钟心跳。 */
+function appServerPhase(h: AppServerHealth | undefined): string {
+  const e = h?.last_error ?? "";
+  if (/^restarting app-server\b/.test(e)) return "restarting";
+  if (/auto-restart gave up/.test(e)) return "gave_up";
+  return "-";
 }
 
 export function healthSignature(r: NodeHealthReport): string {
-  return [r.app_server?.ok ?? "-", r.tui?.ok ?? "-", r.tui?.reason ?? "-", r.model_auth].join("|");
+  return [r.app_server?.ok ?? "-", appServerPhase(r.app_server), r.tui?.ok ?? "-", r.tui?.reason ?? "-", r.model_auth].join("|");
 }
 
 export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
@@ -260,6 +279,7 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
     try {
       const url = opts.appServerUrl();
       appServer = url ? await opts.probeAppServer(url) : undefined;
+      if (appServer && opts.onAppServerProbe) appServer = opts.onAppServerProbe(appServer);
       if (opts.tuiSession) tui = (opts.probeTui ?? probeTmuxTui)(opts.tuiSession);
       if (opts.authFileMtimeMs) opts.modelAuth.reconsiderAfterLogin(opts.authFileMtimeMs());
     } catch (e: any) {

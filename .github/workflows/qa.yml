@@ -35,6 +35,7 @@ on:
       - '.github/workflows/windows-real-codex-gate.yml'
       - 'tests/test1191-windows-steer-contract/**'
       - 'tests/test1220-codex-tui-client-health/**'
+      - 'tests/test-codex-appserver-watchdog/**'
       - 'tests/test1183-sync-pinned-dryrun/**'
       - 'tests/test1193-side-thread-contract/**'
       - 'tests/test1195-side-thread-hub-contract/**'
@@ -215,6 +216,7 @@ on:
       - '.github/workflows/windows-real-codex-gate.yml'
       - 'tests/test1191-windows-steer-contract/**'
       - 'tests/test1220-codex-tui-client-health/**'
+      - 'tests/test-codex-appserver-watchdog/**'
       - 'tests/test1271-daemon-start-node/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
@@ -1357,6 +1359,7 @@ jobs:
           - test1225-opencode-copresence-onecommand
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
+          - test-codex-appserver-watchdog
           - test1271-daemon-start-node
           - test1178-codex-upgrade-recovery
           - test736-pm2-fleet-rebuild
