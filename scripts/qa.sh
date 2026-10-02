@@ -57,9 +57,11 @@ L0_TESTS=(
   # 无需 bun install,ms 级。hub 侧那半在 server/src/rules-file-transport.test.ts,
   # 由 test798(server unit)按 find *.test.ts 自动收进去。
   "rules-file:agent-node/src/runtime/rules-file.test.ts"
-  # observer-avatar-http.test.ts 不进 L0：它启真 HTTP server，import 链需要
-  # MCP SDK，而 CI 的 L0 层按设计不跑 bun install（ms 级零依赖预算）。
-  # 它的 CI 归属是会安装依赖的层级；本地跑法见该文件头注释的门禁命令。
+  # observer-avatar-http.test.ts 不进 L0：它启真 HTTP server，按 ms 级预算不属于这一层。
+  # 它的 CI 归属是 server unit 那一层；本地跑法见该文件头注释的门禁命令。
+  # 🔴 #466:CI 的 L0 job 在跑本脚本之前会 `bun install --frozen-lockfile`(server/)——
+  #    L0 的测试 import server/src,而 db.ts 的 import 链会长(#2247 起经 node-health-store 带上 zod)。
+  #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
 L1_TESTS=(
   # #1253 —— grok 换模型 hot→restart 回退路径。纯本地:跑 agent-node 源码的

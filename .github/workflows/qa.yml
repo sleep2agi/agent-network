@@ -797,6 +797,13 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      # #466 —— L0 的测试会 import server/src(db.ts → … → zod 等)。以前这一层不装依赖,只是因为那几条
+      # 测试碰巧只走到零依赖的模块;import 链一长(#2247:db.ts 引入 node-health-store → zod/v4)
+      # 就在「任何测试开始之前」红,而 main 上恰好是绿的。依赖照 lockfile 装,不靠运气。
+      - name: Install server dependencies (L0 imports server/src)
+        working-directory: server
+        run: bun install --frozen-lockfile
+
       - name: Show QA test inventory
         run: bash scripts/qa.sh --list
 
