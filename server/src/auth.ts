@@ -1,7 +1,7 @@
 /**
  * V3 Auth module — user registration, login, token management
  */
-import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
+import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
 import { WEAK_PASSWORDS } from "./password-dict.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
 import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, NEW_MEMBER_TASK_ACCESS, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
@@ -445,7 +445,7 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
     // single-network user to "ambiguous" or auto-resolve writes INTO the
     // deleted network. Remove memberships with the network.
     db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
-    deleteNetworkAgentGroups(networkId); // #2144
+    deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); // #2144, #419 (one line: docs pin auth.ts line numbers)
   });
   return { ok: true };
 }
@@ -588,7 +588,8 @@ export function getNetworkMembers(networkId: string) {
             (SELECT COUNT(*) FROM network_member_agent_grants g WHERE g.network_id = nm.network_id AND g.user_id = nm.user_id) AS agent_grant_count,
             CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.task_access = 'all' THEN 'all' ELSE 'scoped' END AS task_access,
             (SELECT COUNT(*) FROM network_member_project_grants pg WHERE pg.network_id = nm.network_id AND pg.user_id = nm.user_id) AS task_project_count,
-            (SELECT COUNT(*) FROM network_member_group_grants gg WHERE gg.network_id = nm.network_id AND gg.user_id = nm.user_id) AS agent_group_count
+            (SELECT COUNT(*) FROM network_member_group_grants gg WHERE gg.network_id = nm.network_id AND gg.user_id = nm.user_id) AS agent_group_count,
+            nm.department_id
      FROM network_members nm JOIN users u ON nm.user_id = u.user_id
      WHERE nm.network_id = ?1 ORDER BY nm.joined_at`,
     networkId);
@@ -836,6 +837,8 @@ const NETWORK_CLEANUP_TABLES = [
   "task_events", "task_terminal_events", "scheduled_task_runs", "external_schedule_edits",
   // 标签颜色:网络本身的元数据(标签本体在 requirements 行里,那张表是阻断项)。
   "network_tags",
+  // 组织架构(board #419):部门是网络本身的元数据。
+  "network_departments",
 ];
 
 function tableExists(name: string): boolean {

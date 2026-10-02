@@ -2,6 +2,7 @@ import { buildServeErrorResponse } from "./serve-error.js";
 import { maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
+import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
@@ -1706,6 +1707,60 @@ return Bun.serve({
       if (isNodeCredential(resolved)) return withCors(req, Response.json({ ok: true, network_id: netId, humans }));
       const presence = getUserPresence(humans.map((h) => h.user_id));
       return withCors(req, Response.json({ ok: true, network_id: netId, humans: humans.map((h) => ({ ...h, ...presence.get(h.user_id)! })) }));
+    }
+
+    // ── 组织架构(board #419):部门 + 成员所在部门。读:网络任何成员 / 本网络的节点令牌 / Hub 管理员;
+    // 写:网络 owner / admin、Hub 管理员(节点令牌不能写)。规则在 departments.ts。 ──
+    const deptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments(?:\/([^/]+))?$/);
+    const memberDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/department$/);
+    if (deptMatch || memberDeptMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch)![1]);
+      if (resolved.networkId && resolved.networkId !== netId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      const hubAdmin = isHubAdminCredential(resolved);
+      const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
+      if (!hubAdmin && !role && !resolved.networkId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      if (!db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)) return withCors(req, Response.json({ ok: false, error: "network_not_found" }, { status: 404 }));
+      if (deptMatch && !deptMatch[2] && req.method === "GET") {
+        return withCors(req, Response.json({ ok: true, network_id: netId, ...listDepartments(netId) }));
+      }
+      const canManage = hubAdmin || (!resolved.networkId && (role === "owner" || role === "admin"));
+      if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+      if (!canManage) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+      let body: Record<string, unknown> = {};
+      if (req.method !== "DELETE") {
+        try { const b = await req.json(); body = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      }
+      const reply = (r: { ok: boolean; status?: number } & Record<string, unknown>, okStatus = 200) => {
+        const { status, ...rest } = r;
+        return withCors(req, Response.json(rest, { status: r.ok ? okStatus : status ?? 400 }));
+      };
+      if (memberDeptMatch) {
+        if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+        const targetUid = decodeURIComponent(memberDeptMatch[2]);
+        const r = setMemberDepartment(netId, targetUid, body.department_id);
+        if (r.ok) auditDepartment(resolved.user, "member_department_set", netId, `${targetUid} → ${r.department_id ?? "(unassigned)"}`);
+        return reply(r);
+      }
+      const deptId = deptMatch![2] ? decodeURIComponent(deptMatch![2]) : null;
+      if (!deptId && req.method === "POST") {
+        const r = createDepartment(netId, resolved.user.user_id, body);
+        if (r.ok) auditDepartment(resolved.user, "department_created", netId, JSON.stringify({ id: r.department.id, name: r.department.name, parent_id: r.department.parent_id }));
+        return reply(r, 201);
+      }
+      if (deptId && req.method === "PATCH") {
+        const r = updateDepartment(netId, deptId, body);
+        if (r.ok) auditDepartment(resolved.user, "department_updated", netId, JSON.stringify({ id: deptId, ...body }));
+        return reply(r);
+      }
+      if (deptId && req.method === "DELETE") {
+        const r = deleteDepartment(netId, deptId);
+        if (r.ok) auditDepartment(resolved.user, "department_deleted", netId, deptId);
+        return reply(r as { ok: boolean; status?: number } & Record<string, unknown>);
+      }
+      return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
     }
 
     // ── V3.13: Network members + invites ──
