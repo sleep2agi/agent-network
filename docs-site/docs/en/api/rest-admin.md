@@ -476,7 +476,7 @@ Human-to-human direct messages between two users of the same network (restricted
 
 - `POST /api/dm` `{network_id?, to_user_id | to_username, message, attachments?, client_request_id?}` — written to the recipient's user_inbox (`kind=human_dm`) and pushed over `/events/users/me`; the hub records `sender_user_id` from the token and ignores any `from` in the body. Retrying with the same `client_request_id` does not create a second message. Unknown users and users outside the network both get 404 `dm_target_not_in_network`. A restricted member attaching a file they cannot see gets 403 `attachment_not_accessible`, and so does anyone attaching a DM file they cannot see (uploaded with `purpose=dm`, and they are neither the uploader nor in a DM that carries it). Upload DM attachments with `POST /api/upload?purpose=dm`.
 - `GET /api/dm?network_id=&with=<user_id>[&limit&before]` — both directions with that person, newest first, each row with `direction: in | out`.
-- `GET /api/dm/threads?network_id=` — one row per counterpart: `{other_user_id, last_at, unread}`.
+- `GET /api/dm/threads?network_id=` — one row per counterpart: `{other_user_id, last_at, unread}`. Also `group_threads`: one row per department group I am in, `{group_id, name, department_id, last_at, unread, last_read_seq, last_message}`, where `last_message` is `{text (first 80 chars; empty when the message is attachments only), attachment_count, sender_user_id, sender_name, at}` or `null`. Group endpoints exist when the hub's `/health` `capabilities` contains `chat_groups`.
 
 Mark read with `POST /api/messages/ack` (a DM is a row in the recipient's user_inbox).
 

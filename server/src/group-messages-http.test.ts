@@ -369,6 +369,100 @@ describe("removed by sync: no history, no push, no attachments", () => {
   });
 });
 
+describe("app API polish: last_message / member names / viewer_can / health capability", () => {
+  // 状态:研发部群 = head(负责人)/ alice / bob / carol / viewer;owner 不是成员但能管(网络 owner + Hub 管理员)。
+  const LONG = "第一行\n  第二行 " + "字".repeat(100);
+  test("group_threads and chat-groups rows carry last_message: 80-char preview, attachments-only → empty text + count", async () => {
+    db.run("UPDATE users SET display_name = ?2 WHERE user_id = ?1", [U.alice.id, "爱丽丝"]);
+    const r1 = await post("alice", "rd", { message: LONG });
+    expect(r1.status).toBe(200);
+    const preview = ("第一行 第二行 " + "字".repeat(100)).slice(0, 80);
+    const expected = { text: preview, attachment_count: 0, sender_user_id: U.alice.id, sender_name: "爱丽丝", at: r1.body.message.created_at };
+    const th = await send(U.head.token, "GET", `/api/dm/threads?network_id=${NET}`);
+    expect(th.status).toBe(200);
+    const row = th.body.group_threads.find((g: any) => g.group_id === GRP.rd);
+    expect(row.last_message).toEqual(expected);
+    expect([...row.last_message.text].length).toBe(80);
+    expect(row.last_at).toBe(expected.at);
+    const list = await send(U.head.token, "GET", CG());
+    expect(list.body.groups.find((g: any) => g.id === GRP.rd).last_message).toEqual(expected);
+
+    const fid = await upload(U.bob.token, "png-bytes-preview");
+    const r2 = await post("bob", "rd", { attachments: [...att(fid), ...att(fid)] });
+    expect(r2.status).toBe(200);
+    const th2 = await send(U.alice.token, "GET", `/api/dm/threads?network_id=${NET}`);
+    // bob 没设 display_name → sender_name 回落到 username
+    expect(th2.body.group_threads.find((g: any) => g.group_id === GRP.rd).last_message).toEqual({ text: "", attachment_count: 2, sender_user_id: U.bob.id, sender_name: U.bob.username, at: r2.body.message.created_at });
+  });
+  test("last_message is null for a group with no messages and for a group I can see but am not in", async () => {
+    const d = await send(U.owner.token, "POST", `/api/networks/${NET}/departments`, { name: "空群部" });
+    expect(d.status).toBe(201);
+    await place("dave", d.body.department.id);
+    const g = await send(U.owner.token, "POST", `/api/networks/${NET}/departments/${d.body.department.id}/group`, {});
+    expect(g.status).toBe(201);
+    GRP.empty = g.body.group.id;
+    const mine = await send(U.dave.token, "GET", CG());
+    expect(mine.body.groups.find((x: any) => x.id === GRP.empty).last_message).toBeNull();
+    // owner 看得到研发部群(管理身份)但不是成员:不给预览
+    const owner = await send(U.owner.token, "GET", CG());
+    const rd = owner.body.groups.find((x: any) => x.id === GRP.rd);
+    expect(rd.is_member).toBe(false);
+    expect(rd.last_message).toBeNull();
+    await place("dave", DEPT.market);
+  });
+  test("members carry username + display_name (empty when unset or equal to username)", async () => {
+    db.run("UPDATE users SET display_name = ?2 WHERE user_id = ?1", [U.bob.id, U.bob.username]);
+    const r = await send(U.alice.token, "GET", CG(`/${GRP.rd}`));
+    expect(r.status).toBe(200);
+    const by = (id: string) => r.body.members.find((m: any) => m.user_id === id);
+    expect(by(U.alice.id)).toMatchObject({ username: U.alice.username, display_name: "爱丽丝", source: "department" });
+    expect(by(U.bob.id)).toMatchObject({ username: U.bob.username, display_name: "" });       // 等于 username
+    expect(by(U.carol.id)).toMatchObject({ username: U.carol.username, display_name: "" });   // 没设
+    for (const m of r.body.members) expect(typeof m.username === "string" && m.username.length > 0).toBe(true);
+    const d = await send(U.alice.token, "GET", `/api/networks/${NET}/departments/${DEPT.rd}/group`);
+    expect(d.status).toBe(200);
+    expect(d.body.members.find((m: any) => m.user_id === U.alice.id)).toMatchObject({ username: U.alice.username, display_name: "爱丽丝" });
+    // 手动拉人的返回行也带名字
+    const added = await send(U.head.token, "POST", CG(`/${GRP.rd}/members`), { user_id: U.dave.id });
+    expect(added.status).toBe(201);
+    expect(added.body.member).toMatchObject({ user_id: U.dave.id, username: U.dave.username, display_name: "", source: "manual" });
+    expect((await send(U.head.token, "DELETE", CG(`/${GRP.rd}/members/${U.dave.id}`))).status).toBe(200);
+  });
+  test("viewer_can matches what the write endpoints actually allow", async () => {
+    const can = async (who: string, gid: string) => (await send(U[who].token, "GET", CG(`/${gid}`))).body.group?.viewer_can;
+    expect(await can("alice", GRP.rd)).toEqual({ manage: false, post: true });   // 普通成员
+    expect(await can("head", GRP.rd)).toEqual({ manage: true, post: true });     // 部门负责人 + 成员
+    expect(await can("head", GRP.backend)).toEqual({ manage: true, post: false }); // 上级负责人,不在子部门群
+    expect(await can("owner", GRP.rd)).toEqual({ manage: true, post: false });   // 网络 owner,不是成员
+    // 与写接口对照:manage=false → 改名 403;post=false → 发消息 404
+    expect((await send(U.alice.token, "PATCH", CG(`/${GRP.rd}`), { name: "x" })).status).toBe(403);
+    expect((await send(U.owner.token, "POST", msgs("rd"), { message: "x" })).status).toBe(404);
+    const renamed = await send(U.head.token, "PATCH", CG(`/${GRP.rd}`), { name: "研发部" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.group.viewer_can).toEqual({ manage: true, post: true });
+    // 列表行同口径
+    const rows = (await send(U.alice.token, "GET", CG())).body.groups;
+    expect(rows.find((g: any) => g.id === GRP.rd).viewer_can).toEqual({ manage: false, post: true });
+    const headRows = (await send(U.head.token, "GET", CG())).body.groups;
+    expect(headRows.find((g: any) => g.id === GRP.rd).viewer_can).toEqual({ manage: true, post: true });
+    // 部门群接口:GET / POST
+    const dg = await send(U.alice.token, "GET", `/api/networks/${NET}/departments/${DEPT.rd}/group`);
+    expect(dg.body.group.viewer_can).toEqual({ manage: false, post: true });
+    const dh = await send(U.head.token, "GET", `/api/networks/${NET}/departments/${DEPT.rd}/group`);
+    expect(dh.body.group.viewer_can).toEqual({ manage: true, post: true });
+    const nd = await send(U.owner.token, "POST", `/api/networks/${NET}/departments`, { name: "新建部", parent_id: DEPT.rd });
+    expect(nd.status).toBe(201);
+    const created = await send(U.head.token, "POST", `/api/networks/${NET}/departments/${nd.body.department.id}/group`, {});
+    expect(created.status).toBe(201);
+    expect(created.body.group.viewer_can).toEqual({ manage: true, post: false }); // 上级负责人建的,自己不在这个子部门
+    expect(created.body.members).toEqual([]);
+  });
+  test("/health advertises chat_groups", async () => {
+    const health = await fetch(`${BASE}/health`).then((r) => r.json()) as any;
+    expect(health.capabilities).toContain("chat_groups");
+  });
+});
+
 describe("delete network", () => {
   test("messages and read cursors go with the network", async () => {
     const tmp = register(`gm_tmp_${Date.now()}`, PW);
