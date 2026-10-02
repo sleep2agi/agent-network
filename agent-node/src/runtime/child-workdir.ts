@@ -124,12 +124,29 @@ export function otherNodeIn(dir: string, name: string): string | null {
   return null;
 }
 
+/** 节点工作目录一律 ASCII(owner 定的规则:别再出现 `~/吉他大师` 这种目录)。
+ *
+ * 🔴 拒绝而不是警告:警告只会写进 daemon 日志,建节点的人在桌面端看不到;而这条规则没有
+ *    例外 —— 拒绝能把原因带回确认页,用户点「改」换个名字就行。
+ * 🔴 只看 **$HOME 以下**那一段:家目录本身不归用户在这里选(Windows 上 `C:\Users\<中文名>`
+ *    是真实存在的),把它算进去会让那台机器上**每一个**默认路径都被拒。
+ *    hub 不做这条:它不知道 daemon 的 $HOME,分不出哪一段是家目录(hub 只判形状)。 */
+export function assertWorkdirAscii(abs: string, env: WorkdirEnv): void {
+  const platform = env.platform ?? process.platform;
+  const p = pathApi(platform);
+  const home = p.resolve(env.home);
+  const rel = isSameOrUnder(abs, home, platform) ? p.relative(home, abs) : abs;
+  const bad = [...rel].find(ch => ch.charCodeAt(0) > 0x7e);
+  if (bad !== undefined) throw new WorkdirError("workdir_not_ascii");
+}
+
 /** 解析 + 校验 + 落地一个请求里的 workdir。返回 realpath 之后的绝对路径。
  *  新建的目录(含中间层)是 0700;已存在的目录不改权限 —— 那是用户自己的项目。 */
 export function prepareChildWorkdir(raw: unknown, name: string, env: WorkdirEnv): string {
   const platform = env.platform ?? process.platform;
   const abs = expandWorkdir(raw, env);
   assertWorkdirAllowed(abs, env);
+  assertWorkdirAscii(abs, env);
   if (existsSync(abs)) {
     let st;
     try { st = statSync(abs); } catch (e: any) { throw new WorkdirError("workdir_create_failed", e?.code || "stat"); }
