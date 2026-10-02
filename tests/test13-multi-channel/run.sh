@@ -96,7 +96,7 @@ echo ""
 
 echo "1. Start server + register"
 cd /app/server && COMMHUB_AUTH_TOKEN="$AUTH_TOKEN" bun run src/index.ts &
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "$BASE/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 curl -s "$BASE/health" | grep -q '"ok":true' && pass "server started" || fail "server start"
 
 REG1=$(curl -s -X POST "$BASE/api/auth/register" -H "$GLOBAL_AUTH" -H "Content-Type: application/json" -d '{"username":"multiowner","password":"pass123456"}')

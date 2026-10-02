@@ -47,7 +47,7 @@ echo ""
 echo "Setup. Start server and prepare config..."
 cd /app/server && COMMHUB_AUTH_TOKEN="${AUTH_TOKEN}" bun run src/index.ts >"${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "$BASE/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 HEALTH=$(curl -s "$BASE/health" 2>/dev/null)
 echo "$HEALTH" | grep -q '"ok":true' || { cat "${SERVER_LOG}"; echo "server failed"; exit 1; }
 

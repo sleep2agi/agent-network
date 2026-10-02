@@ -43,7 +43,7 @@ rm -f "$HUB_DB" "${HUB_DB}-wal" "${HUB_DB}-shm" 2>/dev/null
 mkdir -p "$WORK"
 COMMHUB_DB="$HUB_DB" PORT="$HUB_PORT" bun run /app/server/src/index.ts > /tmp/309-hub.log 2>&1 &
 HUB_PID=$!
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "$HUB_BASE/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 curl -sf "$HUB_BASE/health" > /dev/null || { bad "hub failed"; exit 1; }
 ok "isolated hub :$HUB_PORT up"
 

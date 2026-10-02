@@ -32,6 +32,7 @@ type safe_rm_rf > /dev/null 2>&1 || {
   exit 99
 }
 source /app/lib/e2e-agent-bootstrap.sh
+source /app/lib/wait-ready.sh
 
 PASS=0
 FAIL=0
@@ -107,7 +108,7 @@ rm -f /tmp/commhub-pack.db /tmp/commhub-pack.db-wal /tmp/commhub-pack.db-shm
 COMMHUB_DB=/tmp/commhub-pack.db PORT=9211 \
   commhub-server > /tmp/pack-hub.log 2>&1 &
 HUB_PID=$!
-sleep 4
+wait_http_ready "http://127.0.0.1:9211/health" 30 /tmp/pack-hub.log || true  # #479: poll /health every 250 ms (≤30 s) instead of a fixed sleep
 curl -s http://127.0.0.1:9211/health | grep -q '"ok":true' \
   && pass "commhub-server (from .tgz) started on :9211" \
   || { fail "commhub-server failed"; cat /tmp/pack-hub.log | tail -20; exit 1; }

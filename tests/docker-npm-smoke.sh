@@ -30,7 +30,7 @@ echo ""
 # 3. Start commhub-server
 echo "3. Starting commhub-server from npm..."
 cd /app/server && bunx @sleep2agi/commhub-server &
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:9200/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 HEALTH=$(curl -s http://127.0.0.1:9200/health 2>/dev/null)
 echo "$HEALTH" | grep -q '"ok":true' && pass "commhub-server started from npm" || fail "server failed to start"
 echo ""

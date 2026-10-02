@@ -82,7 +82,7 @@ echo ""
 
 echo "2. Start server"
 bunx @sleep2agi/commhub-server >/tmp/test17-server.log 2>&1 &
-sleep 4
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "$BASE/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 HC=$(curl -s "$BASE/health" || true)
 if echo "$HC" | grep -q '"ok":true'; then
   pass "bunx server start"

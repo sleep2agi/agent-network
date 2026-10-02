@@ -16,7 +16,7 @@ BASE="http://127.0.0.1:9200"
 # 1. Server startup
 echo "1. Server startup"
 cd /app/server && COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" bun run src/index.ts &
-sleep 3
+for _ in $(seq 1 120); do curl -sf -o /dev/null --max-time 2 "$BASE/health" && break; sleep 0.25; done  # #479: poll /health (≤30 s) instead of a fixed sleep
 curl -s "$BASE/health" | grep -q '"ok":true' && pass "server started" || fail "server start"
 curl -s "$BASE/health" | grep -q '"v3_auth":true' && pass "v3 auth enabled" || fail "v3 auth"
 curl -s "$BASE/health" | grep -q '"multi_network":true' && pass "multi network" || fail "multi network"
