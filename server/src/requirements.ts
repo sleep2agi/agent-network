@@ -17,6 +17,7 @@ import {
 } from "./task-access.js";
 import { notifyLeaderDeleted, notifyParticipantChange } from "./requirement-notify.js";
 import { departmentCardsFor, departmentSubtree } from "./department-heads.js";
+import { dueReminderTimezone, dueWithinSql, ensureDueReminders, overdueSql } from "./requirement-due-reminders.js";
 import { diffRequirement, ensureRequirementEvents, eventPublic, recordRequirementEvents, type EventRow } from "./requirement-events.js";
 import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
@@ -31,6 +32,7 @@ ensureRequirementCompletedAt(db);
 ensureNetworkTags(db);
 ensureRequirementTombstones(db);
 ensureRequirementEvents(db);
+ensureDueReminders(db);
 
 type RequestAuth = { userId: string; networkId: string | null; username: string; tokenId?: string | null; tokenName?: string | null } | null;
 
@@ -1132,6 +1134,18 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
     sql += parts.length ? ` AND (${parts.join(" OR ")})` : " AND 1=0";
   }
   if (q.get("top_level") === "1") sql += " AND parent_id IS NULL";
+  // #494 —— 到期筛选(只看没完成的卡;「今天」按到期提醒同一个时区,见 requirement-due-reminders.ts)。
+  const overdue = q.get("overdue");
+  if (overdue !== null) {
+    if (!["1", "true", "0", "false"].includes(overdue)) return jsonError("invalid_overdue", 400);
+    const cond = overdueSql(params, Date.now(), dueReminderTimezone());
+    sql += overdue === "1" || overdue === "true" ? ` AND ${cond}` : ` AND NOT ${cond}`;
+  }
+  const within = q.get("due_within_days");
+  if (within !== null) {
+    if (!/^\d{1,3}$/.test(within) || Number(within) > 365) return jsonError("invalid_due_within_days", 400);
+    sql += ` AND ${dueWithinSql(params, Number(within), Date.now(), dueReminderTimezone())}`;
+  }
   // Explicit archived-only wins over the legacy include-all switch.
   // changes=1 看得见「被归档」这一改动:默认连归档的一起回(行上 archived: true),客户端据此把它移出看板。
   if (q.get("archived") === "true") sql += " AND COALESCE(archived, 0) = 1";
@@ -1480,7 +1494,8 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     // changes 模式:server_time 取在读表之前,下次拿它当 updated_since,读表期间的写入不会漏(>= 会重复回一次,客户端按 id 覆盖)。
     const serverTime = new Date().toISOString();
     nodeReadNote(ctx, "GET /api/requirements", null);
-    const cacheKey = changes || url.searchParams.get("q") ? null : listCacheKey(ctx);
+    // overdue / due_within_days 随时间变化而不随写入变化:不进按 generation 失效的缓存。
+    const cacheKey = changes || url.searchParams.get("q") || url.searchParams.has("overdue") || url.searchParams.has("due_within_days") ? null : listCacheKey(ctx);
     const acl = cacheKey ? listCacheAcl(ctx) : null;
     const generation = requirementsGeneration;
     const cached = cacheKey && acl !== null ? listCache.get(cacheKey) : undefined;
