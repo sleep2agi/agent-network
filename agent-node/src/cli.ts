@@ -3701,14 +3701,7 @@ async function processWithCodexAppServer(
 ): Promise<string> {
   const { codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
-  let session: Awaited<ReturnType<typeof ensureCodexAppServerSession>>;
-  try {
-    session = await ensureCodexAppServerSession();
-  } catch (openError: any) {
-    codexModelAuth.noteError(String(openError?.message ?? openError));
-    codexHealthMonitor?.noteModelAuthMaybeChanged();
-    throw openError;
-  }
+  const session = await ensureCodexAppServerSession();
 
   let lastActivityHeartbeatAt = Date.now();
   const outcome = await codexAppServerThink(session, {
