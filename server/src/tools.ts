@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
+import { nodeHealthSchema, recordNodeHealth } from "./node-health-store.js";
 import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
@@ -827,8 +828,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       files_capable: z.literal(true).optional(),
       // Node run-log view — same doorbell, op logs_tail.
       logs_capable: z.literal(true).optional(),
+      // #448 — layered node health (bridge / app_server / tui / model_auth).
+      // Report-only, memory-only; any malformed shape degrades to "not reported"
+      // instead of rejecting the whole report (see node-health-store.ts).
+      health: nodeHealthSchema,
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -1051,6 +1056,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           );
         }
       });
+      // #448 — only the node token bound to this alias may speak for its health
+      // (same rule as the *_capable flags above).
+      const acceptedHealth = nodeHealth && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias
+        ? nodeHealth
+        : undefined;
+      if (acceptedHealth) recordNodeHealth(sessionNetId, effectiveAlias, acceptedHealth);
       pushEvent(effectiveAlias, {
         type: "status_update",
         alias: effectiveAlias,
@@ -1059,6 +1070,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         progress: progress ?? null,
         host: statusHostTelemetry,
         process_telemetry: statusProcessTelemetry,
+        ...(acceptedHealth ? { health: acceptedHealth } : {}),
       }, sessionNetId);
 
       // V2: sync tasks table — report_status(working) → tasks.running

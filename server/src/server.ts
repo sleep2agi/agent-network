@@ -1,6 +1,7 @@
 import { buildServeErrorResponse } from "./serve-error.js";
 import { maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
+import { readNodeHealth } from "./node-health-store.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
@@ -2297,6 +2298,12 @@ return Bun.serve({
             uptime_seconds: s.process_uptime_seconds ?? null,
             in_flight_count: s.process_in_flight_count ?? null,
           },
+          // #448 — latest layered health the node reported (memory-only, 10 min TTL);
+          // null = not reported / stale / older agent-node — never "healthy".
+          ...(() => {
+            const h = readNodeHealth(s.network_id, s.alias);
+            return { health: h?.health ?? null, health_observed_ms_ago: h?.observed_ms_ago ?? null };
+          })(),
         };
       });
       const summary = sessions.reduce((acc: any, session: any) => {
