@@ -5,6 +5,7 @@ import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
+import { createDepartmentGroup, getDepartmentGroup, isGroupMember, listGroupMembers, listVisibleGroups, readGroup } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -1751,7 +1752,7 @@ return Bun.serve({
     // 在这棵子树里也能写;越出子树 → 403 department_scope_denied(固定一个错误)。不是负责人的成员与以前逐字节相同。 ──
     const deptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments(?:\/([^/]+))?$/);
     const memberDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/department$/);
-    const deptSubMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments\/([^/]+)\/(project-grants|nodes)$/);
+    const deptSubMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments\/([^/]+)\/(project-grants|nodes|group)$/);
     if (deptMatch || memberDeptMatch || deptSubMatch) {
       const token = requestToken(req, { allowQueryToken: false });
       const resolved = token ? resolveToken(token) : null;
@@ -1798,6 +1799,30 @@ return Bun.serve({
             };
           });
           return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, nodes }));
+        }
+        if (deptSubMatch[3] === "group") {
+          // RFC-042(#457)部门群:GET 看部门挂着的群,POST 建群。Agent(节点令牌)不进群,一律 403。
+          // 建:owner / admin / Hub 管理员,或这个部门(含上级)的负责人。读:上面这些人,和群成员;别人 → 404(不暴露有没有群)。
+          if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "humans_only" }, { status: 403 }));
+          const mayCreate = canManage || head.managed.has(deptId);
+          if (req.method === "GET") {
+            const group = getDepartmentGroup(netId, deptId);
+            if (!group || (!mayCreate && !isGroupMember(group.id, resolved.user.user_id))) {
+              return withCors(req, Response.json({ ok: false, error: "department_group_not_found" }, { status: 404 }));
+            }
+            return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, group, members: listGroupMembers(group.id) }));
+          }
+          if (req.method !== "POST") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+          if (!mayCreate) return isHead ? scopeDenied() : withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+          let groupBody: Record<string, unknown> = {};
+          try { const t = await req.text(); const b = t ? JSON.parse(t) : {}; groupBody = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+          const r = createDepartmentGroup(netId, deptId, resolved.user.user_id, groupBody);
+          if (!r.ok) {
+            const { ok: _ok, status, ...rest } = r;
+            return withCors(req, Response.json({ ok: false, ...rest }, { status }));
+          }
+          auditDepartment(resolved.user, "department_group_created", netId, JSON.stringify({ id: deptId, group_id: r.group.id, members: r.members.length, ...(canManage ? {} : { via: "leader" }) }));
+          return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, group: r.group, members: r.members }, { status: 201 }));
         }
         // 部门项目授权:只有 owner / admin(和按人授权一样)。
         if (!canManage) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
@@ -1887,6 +1912,29 @@ return Bun.serve({
         return reply(r as { ok: boolean; status?: number } & Record<string, unknown>);
       }
       return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+    }
+
+    // ── RFC-042(#457):群(目前只有部门群)。只读:GET …/chat-groups = 我在里面的群(owner / admin / Hub 管理员看到全部);
+    // GET …/chat-groups/:gid = 群资料 + 成员(群成员或 owner / admin;别人 404)。建群走 POST …/departments/:dept/group。
+    // Agent(节点令牌)不进群,一律 403。 ──
+    const chatGroupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/chat-groups(?:\/([^/]+))?$/);
+    if (chatGroupsMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "humans_only" }, { status: 403 }));
+      if (req.method !== "GET") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+      const netId = decodeURIComponent(chatGroupsMatch[1]);
+      const hubAdmin = isHubAdminCredential(resolved);
+      const role = getUserNetworkRole(resolved.user.user_id, netId);
+      if (!hubAdmin && !role) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      const canManage = hubAdmin || role === "owner" || role === "admin";
+      if (!chatGroupsMatch[2]) {
+        return withCors(req, Response.json({ ok: true, network_id: netId, groups: listVisibleGroups(netId, resolved.user.user_id, canManage) }));
+      }
+      const got = readGroup(netId, decodeURIComponent(chatGroupsMatch[2]), resolved.user.user_id, canManage);
+      if (!got) return withCors(req, Response.json({ ok: false, error: "group_not_found" }, { status: 404 }));
+      return withCors(req, Response.json({ ok: true, network_id: netId, ...got }));
     }
 
     // ── V3.13: Network members + invites ──

@@ -12,6 +12,7 @@
 
 import { db, logAudit } from "./db.js";
 import { deleteDepartmentGrants, deleteDepartmentGrantsForNetwork } from "./department-heads.js";
+import { deleteChatGroupsForNetwork, unlinkDepartmentGroup } from "./department-groups.js";
 
 try { db.exec("ALTER TABLE network_members ADD COLUMN department_id TEXT"); } catch {}
 db.exec(`
@@ -215,6 +216,8 @@ export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: s
   db.transaction(() => {
     db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [networkId, id]);
     deleteDepartmentGrants(networkId, id);
+    // RFC-042:部门群解除关联(群和成员、以后的聊天记录都留着),不删。
+    unlinkDepartmentGroup(networkId, id);
   });
   return { ok: true, deleted: id };
 }
@@ -232,6 +235,7 @@ export function setMemberDepartment(networkId: string, userId: string, departmen
 export function deleteDepartmentsForNetwork(networkId: string): void {
   db.run("DELETE FROM network_departments WHERE network_id = ?1", [networkId]);
   deleteDepartmentGrantsForNetwork(networkId);
+  deleteChatGroupsForNetwork(networkId); // RFC-042:网络没了,群一起删
 }
 
 export function auditDepartment(user: { user_id: string; username: string }, action: string, networkId: string, detail: string): void {
