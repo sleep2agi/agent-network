@@ -56,11 +56,12 @@ export type EventCard = {
   archived: number | null;
 };
 
-export type EventKind = "created" | "changed" | "deleted";
+export type EventKind = "created" | "changed" | "deleted" | "comment";
 /**
  * field(kind = changed):column / title / priority / due / start / assignee / owner / agent_owner / participants /
  * tags / checklist_item(勾选或取消一项:{id,text,done})/ checklist(增删改条目:{total,done})/
  * description(只记字数,不存正文)/ project / parent / archived。
+ * kind = comment(#474):field 为 null,new = { text }(评论正文,≤ 4000 字),只追加,不对应任何字段的改动。
  */
 export type EventDraft = { kind: EventKind; field: string | null; old: unknown; new: unknown };
 

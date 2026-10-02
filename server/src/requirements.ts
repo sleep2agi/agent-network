@@ -578,12 +578,16 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
  * 节点令牌(Agent,比如把 GitHub issue 同步进任务的 TM 节点)可用的操作 —— 只在它自己的网络里
  * (令牌绑定的网络,范围由 resolveRestNetworkScope 强制)。删除卡片、管理项目仍然只给人。
  */
-const NODE_TOKEN_OPERATIONS: ReadonlySet<string> = new Set<string>(["read", "create", "patch", "checklist_item", "upsert", "projects_read"]);
+/** 一条评论最多这么多字(去掉首尾空白后);进展 / 结论写得下,又不至于让动态列表里一条撑爆。 */
+export const COMMENT_MAX_CHARS = 4000;
+
+const NODE_TOKEN_OPERATIONS: ReadonlySet<string> = new Set<string>(["read", "create", "patch", "checklist_item", "comment", "upsert", "projects_read"]);
 function operationOf(req: Request, url: URL): string {
   if (/^\/api\/requirements\/projects(\/|$)/.test(url.pathname)) return req.method === "GET" ? "projects_read" : "projects_write";
   if (url.pathname === "/api/requirements/tags/ops") return "tags_write";
   if (req.method === "GET") return "read";
   if (/^\/api\/requirements\/[^/]+\/checklist\/[^/]+$/.test(url.pathname)) return "checklist_item";
+  if (/^\/api\/requirements\/[^/]+\/comments$/.test(url.pathname)) return "comment";
   if (url.pathname === "/api/requirements/upsert") return "upsert";
   if (req.method === "DELETE") return "delete";
   if (req.method === "PATCH") return "patch";
@@ -1386,6 +1390,28 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (res.status !== 200) return res;
     const data = await res.json() as Record<string, unknown>;
     return Response.json({ ...data, created: false });
+  }
+
+  // #474 评论 / 进展(MCP 任务生命周期测试报告问题 5):以前 Agent 只能读全文再整段改写 description,两次调用、
+  // 并发会覆盖别人刚写的。评论是一条只追加的动态(requirement_events kind=comment,正文存在 new.text),
+  // 不碰 requirements 表的任何一列;谁能看见这张卡谁就能读到,能写这个网络(非只读角色)又看得见它的人能发。
+  const commentMatch = url.pathname.match(/^\/api\/requirements\/([^/]+)\/comments$/);
+  if (commentMatch) {
+    if (req.method !== "POST") return jsonError("not_found", 404);
+    let body: Record<string, unknown>;
+    try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return jsonError("invalid_comment", 400);
+    if (text.length > COMMENT_MAX_CHARS) return jsonError("comment_too_long", 400);
+    const row = scopedRow(ctx, decodeURIComponent(commentMatch[1]));
+    if (row instanceof Response) return row;
+    if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
+    const at = new Date().toISOString();
+    const event = db.transaction(() => {
+      recordRequirementEvents(db, row, JSON.stringify(actorOf(ctx)), [{ kind: "comment", field: null, old: null, new: { text } }], at);
+      return db.get<EventRow>("SELECT id, network_id, requirement_id, seq, title, actor_json, kind, field, old_json, new_json, created_at FROM requirement_events WHERE requirement_id = ?1 AND kind = 'comment' ORDER BY id DESC LIMIT 1", row.requirement_id)!;
+    });
+    return Response.json({ ok: true, event: eventPublic(event) }, { status: 201 });
   }
 
   const itemMatch = url.pathname.match(/^\/api\/requirements\/([^/]+)\/checklist\/([^/]+)$/);

@@ -130,7 +130,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `mark_tasks_runtime_submitted` | Internal agent-node signal: which task bodies reached the runtime |
 
 
-**Requirements / task board (usable by agents, see [below](#requirements-task-board))** · 10
+**Requirements / task board (usable by agents, see [below](#requirements-task-board))** · 11
 
 | Tool | What it does |
 |------|------|
@@ -143,7 +143,8 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `projects_list` | List the network's projects (id, name, color, sort, archived) |
 | `projects_create` | Create a project (name 1–40 characters, unique in the network; optional color / sort), same as the app's 管理项目 → 新建; task-scoped members and viewers get 403 |
 | `projects_update` | Rename / recolour / reorder a project, or `archived: true / false` to archive / unarchive; only the fields you pass change; same permissions |
-| `requirements_events` | Read the task activity timeline (field-level changes: who, when, old → new, newest first); `requirement_id` (`req_…` or `"#N"`) for one task, `since` / `limit` / `cursor` to page; same visibility as `requirements_list` |
+| `requirements_events` | Read the task activity timeline (field-level changes: who, when, old → new; and comments, `kind: "comment"` with the text in `new.text`; newest first); `requirement_id` (`req_…` or `"#N"`) for one task, `since` / `limit` / `cursor` to page; same visibility as `requirements_list` |
+| `requirements_comment` | Add a comment / progress note to a task (`{id, text}`, markdown, 1–4000 characters): **append-only**, never rewrites the description, shows in the timeline (`kind: "comment"`) under the caller (person or agent). Anyone who can see the task and is not read-only in the network may comment; can't see it → 404, viewer → 403. Hub ≥ preview.89 |
 
 ---
 
@@ -860,7 +861,7 @@ Tasks (requirement cards) live on the Hub; the app's 任务 page and agents read
 
 **Permissions**
 - User tokens: same as the app (viewers are read-only).
-- Node tokens (agents): **read, create, patch, toggle checklist items, upsert and list projects** in the network the token is bound to only. Other networks' tasks are invisible (404); writes always land in the token's own network — a `network_id` in the body cannot move them.
+- Node tokens (agents): **read, create, patch, toggle checklist items, comment, upsert and list projects** in the network the token is bound to only. Other networks' tasks are invisible (404); writes always land in the token's own network — a `network_id` in the body cannot move them.
 - **Delete is human-only** (REST `DELETE /api/requirements/{id}`; node tokens get 403 `user_token_required`); agents archive with `archived: true`. Creating / editing / deleting projects is human-only too.
 - Every task records `created_by` / `updated_by`: `{kind: "user" | "node", id}`; a node token is recorded as its bound `node_id`.
 
@@ -880,6 +881,7 @@ Everywhere an `{id}` is accepted (REST `GET` / `PATCH` / `DELETE` / checklist to
 | POST | `/api/requirements/upsert` | Create or patch by `external_ref` (omitted fields, including status, are kept); returns `{requirement, created}` |
 | PATCH | `/api/requirements/{id}` | Patch (omitted fields kept) |
 | PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`; only that item |
+| POST | `/api/requirements/{id}/comments` | `{text}` (1–4000 characters, trimmed) adds one comment, append-only; returns 201 `{event}` (`kind: "comment"`, `new.text`). Empty → 400 `invalid_comment`, too long → 400 `comment_too_long`; there is no route to edit or delete a comment. Comments are kept 180 days, like field changes |
 | DELETE | `/api/requirements/{id}` | Delete (humans only); children are kept and detached |
 | GET | `/api/requirements/projects` | Projects (creating / editing / deleting projects is human-only) |
 | GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them. A Hub with the `tag_ops` capability also returns `counts` / `colors` / `can_manage` |

@@ -127,7 +127,7 @@ CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `mark_tasks_runtime_submitted` | agent-node 内部信号：标记已提交给运行时的任务 |
 
 
-**需求池 / 任务看板（Agent 可用，详见[下文](#需求池-任务看板)）** · 10 个
+**需求池 / 任务看板（Agent 可用，详见[下文](#需求池-任务看板)）** · 11 个
 
 | 工具 | 说明 |
 |------|------|
@@ -140,7 +140,8 @@ CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档） |
 | `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；仅相关任务的成员和 viewer 403 |
 | `projects_update` | 改项目的名字 / 颜色 / 排序，或 `archived: true / false` 归档 / 取消归档；只改传了的字段，权限同上 |
-| `requirements_events` | 读任务的动态（字段级改动流水：谁、何时、旧值 → 新值，从新到旧）；`requirement_id`（`req_…` 或 `"#N"`）只看一条，`since` / `limit` / `cursor` 翻页；可见范围同 `requirements_list` |
+| `requirements_events` | 读任务的动态（字段级改动流水：谁、何时、旧值 → 新值；以及评论 `kind: "comment"`，正文在 `new.text`，从新到旧）；`requirement_id`（`req_…` 或 `"#N"`）只看一条，`since` / `limit` / `cursor` 翻页；可见范围同 `requirements_list` |
+| `requirements_comment` | 给任务发一条评论 / 进展（`{id, text}`，markdown 1–4000 字）：**只追加**，不改描述，出现在动态里（`kind: "comment"`），署名是调用者（人或 Agent）。看得见这张任务、且在这个网络里不是只读角色的都能发；看不见 → 404，viewer → 403。Hub ≥ preview.89 |
 
 ---
 
@@ -865,7 +866,7 @@ send_task({
 
 **权限**
 - 用户令牌：与 App 相同（viewer 只读）。
-- 节点令牌（Agent）：只在它绑定的网络里**读、建、改、勾子任务、upsert、读项目**。跨网络的任务看不到（404）；写入永远落在自己的网络，body 里的 `network_id` 不能把它带到别的网络。
+- 节点令牌（Agent）：只在它绑定的网络里**读、建、改、勾子任务、评论、upsert、读项目**。跨网络的任务看不到（404）；写入永远落在自己的网络，body 里的 `network_id` 不能把它带到别的网络。
 - **删除只给人**（REST `DELETE /api/requirements/{id}`，节点令牌 403 `user_token_required`）；Agent 用 `archived: true` 归档。建 / 改 / 删项目也只给人。
 - 每条任务记录 `created_by` / `updated_by`：`{kind: "user" | "node", id}`，节点令牌记为它绑定的 `node_id`。
 
@@ -885,6 +886,7 @@ send_task({
 | POST | `/api/requirements/upsert` | 按 `external_ref` 建或改（省略的字段、包括状态，保留）；响应 `{requirement, created}` |
 | PATCH | `/api/requirements/{id}` | 修改（省略的字段保留） |
 | PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`，只改这一项 |
+| POST | `/api/requirements/{id}/comments` | `{text}`（1–4000 字，首尾空白去掉）发一条评论，只追加；回 201 `{event}`（`kind: "comment"`，`new.text`）。空 → 400 `invalid_comment`，超长 → 400 `comment_too_long`；没有改 / 删评论的接口。评论和字段改动一样保留 180 天 |
 | DELETE | `/api/requirements/{id}` | 删除（只有人）；子需求保留并解挂 |
 | GET | `/api/requirements/projects` | 项目列表（建 / 改 / 删项目只有人） |
 | GET | `/api/requirements/tags` | 当前网络里出现过的标签（去重、排序，含归档任务上的）。节点令牌可以读。有 `tag_ops` 能力的 Hub 另带 `counts` / `colors` / `can_manage` |

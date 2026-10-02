@@ -102,6 +102,8 @@ const ENTRIES: Record<string, Entry> = {
   invalid_updated_since: { field: 'updated_since', message: 'updated_since must be an ISO 8601 time.', hint: 'Use server_time from the previous changes=true response.' },
   updated_since_required: { field: 'updated_since', message: 'changes=true needs updated_since.', hint: 'Pass updated_since (ISO time; server_time from the last call).' },
   invalid_since: { field: 'since', message: 'since must be an ISO 8601 time.', hint: 'Use server_time from the previous requirements_events response.' },
+  invalid_comment: { field: 'text', message: 'A comment needs non-empty text.', hint: 'Pass text (markdown), e.g. a progress note or a conclusion.' },
+  comment_too_long: { field: 'text', message: 'A comment can be at most 4000 characters.', hint: 'Split it into several comments, or put the long part in the description.' },
   insert_failed: { message: 'The hub could not save the task.', hint: 'Retry once; if it fails again, report it.' },
 };
 
