@@ -1,7 +1,7 @@
 /**
  * V3 Auth module — user registration, login, token management
  */
-import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
+import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork, removeMemberFromChatGroups } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
 import { WEAK_PASSWORDS } from "./password-dict.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
 import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, NEW_MEMBER_TASK_ACCESS, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
@@ -687,7 +687,7 @@ export function removeNetworkMember(networkId: string, userId: string): { ok: bo
     // #488 —— 他在这个网络里的令牌(节点令牌 / 邀请码令牌)一起吊销;resolveToken 也会拒非成员的令牌,这里让库里的状态如实。
     db.run("UPDATE api_tokens SET revoked_at = datetime('now') WHERE network_id = ?1 AND user_id = ?2 AND revoked_at IS NULL", [networkId, userId]);
     deleteAgentGrants(networkId, userId);
-    deleteTaskGrantsForMember(networkId, userId);
+    deleteTaskGrantsForMember(networkId, userId); removeMemberFromChatGroups(networkId, userId); // RFC-042:他在本网络所有群里的行(不论来源)。同一行:文档钉着 auth.ts 的行号
   });
   return { ok: true };
 }

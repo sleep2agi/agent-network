@@ -5,7 +5,7 @@ import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
-import { createDepartmentGroup, getDepartmentGroup, isGroupMember, listGroupMembers, listVisibleGroups, readGroup } from "./department-groups.js";
+import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -1806,7 +1806,10 @@ return Bun.serve({
           if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "humans_only" }, { status: 403 }));
           const mayCreate = canManage || head.managed.has(deptId);
           if (req.method === "GET") {
-            const group = getDepartmentGroup(netId, deptId);
+            const linked = getDepartmentGroup(netId, deptId);
+            // 兜底对账(RFC-042 §4):读之前先把成员对齐,再判「是不是成员」。
+            if (linked) db.transaction(() => { syncDepartmentGroups(netId, linked.id); });
+            const group = linked ? getDepartmentGroup(netId, deptId) : null;
             if (!group || (!mayCreate && !isGroupMember(group.id, resolved.user.user_id))) {
               return withCors(req, Response.json({ ok: false, error: "department_group_not_found" }, { status: 404 }));
             }
@@ -1914,27 +1917,70 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
     }
 
-    // ── RFC-042(#457):群(目前只有部门群)。只读:GET …/chat-groups = 我在里面的群(owner / admin / Hub 管理员看到全部);
-    // GET …/chat-groups/:gid = 群资料 + 成员(群成员或 owner / admin;别人 404)。建群走 POST …/departments/:dept/group。
-    // Agent(节点令牌)不进群,一律 403。 ──
-    const chatGroupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/chat-groups(?:\/([^/]+))?$/);
+    // ── RFC-042(#457):群(目前只有部门群)。
+    // GET …/chat-groups = 我在里面的群(owner / admin / Hub 管理员看到全部);GET …/chat-groups/:gid = 群资料 + 成员
+    // (群成员、owner / admin、该部门(含上级)负责人;别人 404)。建群走 POST …/departments/:dept/group。
+    // 第二个 PR:PATCH …/chat-groups/:gid {name} 改群名;POST …/chat-groups/:gid/members {user_id} 手动拉人;
+    // DELETE …/chat-groups/:gid/members/:uid 手动移人(source='department' 的人 → 409 department_member)。
+    // 管群 = owner / admin / Hub 管理员,或挂部门的群的该部门(含上级)负责人。看得见但管不了 → 403 group_manage_denied;
+    // 看不见 → 404 group_not_found(不暴露有没有群)。Agent(节点令牌)不进群,一律 403 humans_only。 ──
+    const chatGroupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/chat-groups(?:\/([^/]+)(?:\/(members)(?:\/([^/]+))?)?)?$/);
     if (chatGroupsMatch) {
       const token = requestToken(req, { allowQueryToken: false });
       const resolved = token ? resolveToken(token) : null;
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "humans_only" }, { status: 403 }));
-      if (req.method !== "GET") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
       const netId = decodeURIComponent(chatGroupsMatch[1]);
       const hubAdmin = isHubAdminCredential(resolved);
       const role = getUserNetworkRole(resolved.user.user_id, netId);
       if (!hubAdmin && !role) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       const canManage = hubAdmin || role === "owner" || role === "admin";
-      if (!chatGroupsMatch[2]) {
+      const gid = chatGroupsMatch[2] ? decodeURIComponent(chatGroupsMatch[2]) : null;
+      const sub = chatGroupsMatch[3];
+      const memberUid = chatGroupsMatch[4] ? decodeURIComponent(chatGroupsMatch[4]) : null;
+      if (!gid) {
+        if (req.method !== "GET") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
         return withCors(req, Response.json({ ok: true, network_id: netId, groups: listVisibleGroups(netId, resolved.user.user_id, canManage) }));
       }
-      const got = readGroup(netId, decodeURIComponent(chatGroupsMatch[2]), resolved.user.user_id, canManage);
-      if (!got) return withCors(req, Response.json({ ok: false, error: "group_not_found" }, { status: 404 }));
-      return withCors(req, Response.json({ ok: true, network_id: netId, ...got }));
+      // viewer 当负责人不获得任何东西(headScope 已保证);owner / admin 本来全管,不必算。
+      const managed = canManage ? new Set<string>() : headScope(netId, resolved.user.user_id).managed;
+      const notFound = () => withCors(req, Response.json({ ok: false, error: "group_not_found" }, { status: 404 }));
+      if (!sub && req.method === "GET") {
+        const got = readGroup(netId, gid, resolved.user.user_id, canManage, managed);
+        if (!got) return notFound();
+        return withCors(req, Response.json({ ok: true, network_id: netId, ...got }));
+      }
+      const allowed = (!sub && req.method === "PATCH") || (sub && !memberUid && req.method === "POST") || (sub && memberUid && req.method === "DELETE");
+      if (!allowed) return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+      const group = groupById(netId, gid);
+      if (!group) return notFound();
+      if (!canManageGroup(group, canManage, managed)) {
+        return isGroupMember(gid, resolved.user.user_id)
+          ? withCors(req, Response.json({ ok: false, error: "group_manage_denied" }, { status: 403 }))
+          : notFound();
+      }
+      let body: Record<string, unknown> = {};
+      if (req.method !== "DELETE") {
+        try { const t = await req.text(); const b = t ? JSON.parse(t) : {}; body = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      }
+      const via = canManage ? {} : { via: "leader" };
+      const failed = (r: { status: number; error: string }) => withCors(req, Response.json({ ok: false, error: r.error }, { status: r.status }));
+      if (!sub) {
+        const r = renameGroup(netId, gid, body);
+        if (!r.ok) return failed(r);
+        auditDepartment(resolved.user, "chat_group_renamed", netId, JSON.stringify({ group_id: gid, name: r.group.name, ...via }));
+        return withCors(req, Response.json({ ok: true, network_id: netId, group: r.group }));
+      }
+      if (!memberUid) {
+        const r = addManualMember(netId, gid, body.user_id);
+        if (!r.ok) return failed(r);
+        auditDepartment(resolved.user, "chat_group_member_added", netId, JSON.stringify({ group_id: gid, user_id: r.member.user_id, ...via }));
+        return withCors(req, Response.json({ ok: true, network_id: netId, group_id: gid, member: r.member }, { status: 201 }));
+      }
+      const r = removeManualMember(netId, gid, memberUid);
+      if (!r.ok) return failed(r);
+      auditDepartment(resolved.user, "chat_group_member_removed", netId, JSON.stringify({ group_id: gid, user_id: memberUid, ...via }));
+      return withCors(req, Response.json({ ok: true, network_id: netId, group_id: gid, removed: memberUid }));
     }
 
     // ── V3.13: Network members + invites ──

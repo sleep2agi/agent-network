@@ -1,4 +1,4 @@
-// 部门群(RFC-042,看板 #457,父任务 #419)—— 第一个 PR:表结构 + 建群 / 查群 + 权限。
+// 部门群(RFC-042,看板 #457,父任务 #419)—— 第一个 PR:表结构 + 建群 / 查群 + 权限;第二个 PR:成员同步 + 手动成员 + 改群名。
 //
 // Hub 今天没有任何「人类群聊」:人与人只有一对一私信(human-dm.ts,走 user_inbox),agent_groups 是 Agent 授权分组,
 // 不是聊天。所以部门群先落一个通用的群(chat_groups),再用一个可空的 department_id 把它挂到部门上。
@@ -10,7 +10,13 @@
 // - 建群时成员 = 部门子树里的成员 ∪ 子树里各部门的负责人(source='department')。之后的自动加入 / 退出是下一个 PR。
 // - Agent(节点令牌)不进群、也不能读写群。
 // - 删部门 = 解除关联(department_id 置空),群和成员都留着;删网络 = 群一起删。
-// - 读:群成员,和网络 owner / admin / Hub 管理员(管理用)。别人 → 404(不暴露群是否存在)。
+// - 读:群成员,和网络 owner / admin / Hub 管理员(管理用),和部门(含上级)负责人。别人 → 404(不暴露群是否存在)。
+//
+// 第二个 PR(RFC-042 §4):
+// - syncDepartmentGroups():roster 有、群里没有 → 插 source='department';群里 source='department'、roster 没了 → 删;
+//   source='manual' 永远不动(手动拉的人后来进了部门也保持 manual —— 宁可多留一个人,不静默踢人)。
+//   调人 / 建部门(带负责人)/ 改上级 / 换负责人 / 删部门 都在各自的事务里调它一次;移出网络删他在本网络的全部群成员行。
+// - 读一个挂部门的群时顺手对账一次(兜底:修掉第 1 个 PR 上线到第 2 个 PR 上线之间的漂移)。
 
 import { db, uuidv4 } from "./db.js";
 import { departmentSubtree, membersIn } from "./department-heads.js";
@@ -158,12 +164,16 @@ export function listVisibleGroups(networkId: string, userId: string | null, canM
   return rows.filter((r) => canManage || mine.has(r.group_id)).map((r) => ({ ...toPublic(r), is_member: mine.has(r.group_id) }));
 }
 
-/** 读一个群:群成员或 canManage。别人一律 null(调用方回 404,不暴露存在与否)。 */
-export function readGroup(networkId: string, groupId: string, userId: string | null, canManage: boolean): { group: ChatGroup; members: ChatGroupMember[]; is_member: boolean } | null {
+/**
+ * 读一个群:群成员、canManage,或挂部门的群的负责人(managedDepartments 含该部门)。别人一律 null(调用方回 404,
+ * 不暴露存在与否)。挂部门的群读之前先对账一次(兜底,§4),所以判「是不是成员」用的是对账后的结果。
+ */
+export function readGroup(networkId: string, groupId: string, userId: string | null, canManage: boolean, managedDepartments: ReadonlySet<string> = new Set()): { group: ChatGroup; members: ChatGroupMember[]; is_member: boolean } | null {
   const r = groupRow(networkId, groupId);
   if (!r) return null;
+  if (r.department_id !== null) db.transaction(() => { syncDepartmentGroups(networkId, groupId); });
   const member = !!userId && isGroupMember(groupId, userId);
-  if (!member && !canManage) return null;
+  if (!member && !canManageGroup(r, canManage, managedDepartments)) return null;
   return { group: toPublic(r), members: listGroupMembers(groupId), is_member: member };
 }
 
@@ -176,4 +186,130 @@ export function unlinkDepartmentGroup(networkId: string, departmentId: string): 
 export function deleteChatGroupsForNetwork(networkId: string): void {
   db.run("DELETE FROM chat_group_members WHERE network_id = ?1", [networkId]);
   db.run("DELETE FROM chat_groups WHERE network_id = ?1", [networkId]);
+}
+
+// ── 第二个 PR:成员同步(RFC-042 §4)──
+
+type SyncResult = { added: number; removed: number };
+
+/**
+ * 对账本网络挂部门的群(onlyGroupId 给了就只对那一个)。调用方负责事务:它总在调人 / 改部门的同一个事务里被调用
+ * (db.transaction 可嵌套,PG 上是 savepoint)。树、成员、负责人各读一次,在内存里算(部门 ≤ 500)。
+ */
+export function syncDepartmentGroups(networkId: string, onlyGroupId?: string): SyncResult {
+  const groups = onlyGroupId === undefined
+    ? db.all<{ group_id: string; department_id: string }>("SELECT group_id, department_id FROM chat_groups WHERE network_id = ?1 AND department_id IS NOT NULL", networkId)
+    : db.all<{ group_id: string; department_id: string }>("SELECT group_id, department_id FROM chat_groups WHERE network_id = ?1 AND group_id = ?2 AND department_id IS NOT NULL", networkId, onlyGroupId);
+  if (!groups.length) return { added: 0, removed: 0 };
+  const depts = db.all<{ department_id: string; parent_id: string | null; leader_user_id: string | null }>(
+    "SELECT department_id, parent_id, leader_user_id FROM network_departments WHERE network_id = ?1", networkId,
+  );
+  const members = db.all<{ user_id: string; department_id: string | null }>("SELECT user_id, department_id FROM network_members WHERE network_id = ?1", networkId);
+  const memberIds = new Set(members.map((m) => m.user_id));
+  const known = new Set(depts.map((d) => d.department_id));
+  const children = new Map<string, string[]>();
+  for (const d of depts) {
+    if (d.parent_id === null || !known.has(d.parent_id)) continue;
+    const list = children.get(d.parent_id) ?? [];
+    list.push(d.department_id);
+    children.set(d.parent_id, list);
+  }
+  const leaderOf = new Map(depts.map((d) => [d.department_id, d.leader_user_id]));
+  const byDept = new Map<string, string[]>();
+  for (const m of members) {
+    if (!m.department_id) continue;
+    const list = byDept.get(m.department_id) ?? [];
+    list.push(m.user_id);
+    byDept.set(m.department_id, list);
+  }
+  let added = 0;
+  let removed = 0;
+  for (const g of groups) {
+    // 和 departmentGroupRoster() 同一个口径:子树成员 ∪ 子树负责人(仍是网络成员)。部门不存在 → 空(删部门已先解除关联)。
+    const roster = new Set<string>();
+    if (known.has(g.department_id)) {
+      const stack = [g.department_id];
+      const seen = new Set<string>();
+      while (stack.length) {
+        const id = stack.pop()!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        for (const uid of byDept.get(id) ?? []) roster.add(uid);
+        const leader = leaderOf.get(id);
+        if (leader && memberIds.has(leader)) roster.add(leader);
+        for (const c of children.get(id) ?? []) stack.push(c);
+      }
+    }
+    const current = db.all<{ user_id: string; source: string }>("SELECT user_id, source FROM chat_group_members WHERE group_id = ?1", g.group_id);
+    const have = new Set(current.map((r) => r.user_id));
+    for (const uid of roster) {
+      if (have.has(uid)) continue; // 已在群里(含 manual 行:保持 manual,不升级)
+      db.run(
+        "INSERT INTO chat_group_members (group_id, user_id, network_id, source) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(group_id, user_id) DO NOTHING",
+        [g.group_id, uid, networkId, GROUP_SOURCE_DEPARTMENT],
+      );
+      added++;
+    }
+    for (const r of current) {
+      if (r.source !== GROUP_SOURCE_DEPARTMENT || roster.has(r.user_id)) continue;
+      db.run("DELETE FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2 AND source = ?3", [g.group_id, r.user_id, GROUP_SOURCE_DEPARTMENT]);
+      removed++;
+    }
+  }
+  return { added, removed };
+}
+
+/** 移出网络时调用(和删 network_members 同一事务):他在本网络所有群里的行都删,不论来源。 */
+export function removeMemberFromChatGroups(networkId: string, userId: string): void {
+  db.run("DELETE FROM chat_group_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
+}
+
+/**
+ * 谁能管一个群(改名 / 手动拉人、移人):网络 owner / admin / Hub 管理员;挂部门的群另加该部门(含上级)的负责人。
+ * managedDepartments = headScope(...).managed。
+ */
+export function canManageGroup(group: { department_id: string | null }, canManage: boolean, managedDepartments: ReadonlySet<string>): boolean {
+  return canManage || (group.department_id !== null && managedDepartments.has(group.department_id));
+}
+
+export function groupById(networkId: string, groupId: string): ChatGroup | null {
+  const r = groupRow(networkId, groupId);
+  return r ? toPublic(r) : null;
+}
+
+export type GroupWriteResult<T> = ({ ok: true } & T) | Fail;
+
+export function renameGroup(networkId: string, groupId: string, body: Record<string, unknown>): GroupWriteResult<{ group: ChatGroup }> {
+  if (typeof body.name !== "string") return fail(400, "invalid_group_name");
+  const name = body.name.trim();
+  if (!name || [...name].length > NAME_MAX) return fail(400, "invalid_group_name");
+  db.run("UPDATE chat_groups SET name = ?3, updated_at = datetime('now') WHERE network_id = ?1 AND group_id = ?2", [networkId, groupId, name]);
+  return { ok: true, group: groupById(networkId, groupId)! };
+}
+
+/** 手动拉人:必须是本网络成员(人);已在群里 → 409 already_group_member(不论来源)。 */
+export function addManualMember(networkId: string, groupId: string, userId: unknown): GroupWriteResult<{ member: ChatGroupMember }> {
+  if (typeof userId !== "string" || !userId) return fail(400, "user_id_required");
+  if (!db.get("SELECT 1 AS x FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId)) return fail(400, "not_network_member");
+  if (isGroupMember(groupId, userId)) return fail(409, "already_group_member");
+  db.run(
+    "INSERT INTO chat_group_members (group_id, user_id, network_id, source) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(group_id, user_id) DO NOTHING",
+    [groupId, userId, networkId, GROUP_SOURCE_MANUAL],
+  );
+  const member = db.get<ChatGroupMember>("SELECT user_id, source, joined_at FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2", groupId, userId)!;
+  return { ok: true, member };
+}
+
+/**
+ * 手动移人:只移 source='manual' 的行。source='department' → 409 department_member(下一次对账会把他加回来;
+ * 要移出请调整部门)。不在群里 → 404 group_member_not_found。解除关联的群(部门已删)不再对账,所以那里的行谁都能移。
+ */
+export function removeManualMember(networkId: string, groupId: string, userId: string): GroupWriteResult<{ user_id: string }> {
+  const group = groupRow(networkId, groupId);
+  if (!group) return fail(404, "group_not_found");
+  const row = db.get<{ source: string }>("SELECT source FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2", groupId, userId);
+  if (!row) return fail(404, "group_member_not_found");
+  if (row.source === GROUP_SOURCE_DEPARTMENT && group.department_id !== null) return fail(409, "department_member");
+  db.run("DELETE FROM chat_group_members WHERE group_id = ?1 AND user_id = ?2", [groupId, userId]);
+  return { ok: true, user_id: userId };
 }
