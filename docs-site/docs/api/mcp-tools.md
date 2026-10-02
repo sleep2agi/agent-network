@@ -104,16 +104,18 @@ CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `list_host_supervisors` | 列本网络的 host_supervisor daemon（含在线状态） |
 | `list_my_children` | daemon 拉取自己派生的子节点清单 |
 
-**Provider 与密钥金库（owner/admin）** · 7 个
+**Provider 与密钥金库（owner/admin）** · 9 个
 
 | 工具 | 说明 |
 |------|------|
 | `list_providers` | 列本网络 provider 与模型（从不返回密钥值） |
 | `upsert_provider` | 新建或更新 provider |
+| `update_provider` | 改已有 provider 的名称 / base_url / 模型 / 启停（至少一项；vendor、密钥、网络不可改），admin 以上 |
 | `list_network_secrets` | 列金库密钥**名**（从不返回值），RFC-028 |
 | `upsert_network_secret` | 写入或替换金库密钥值（AES-GCM 加密） |
 | `probe_provider_model` | 向 daemon 派连通性探测 |
 | `get_probe_request` | daemon 拉取待处理的探测请求 |
+| `ack_probe_request` | daemon 回报探测结果（严格白名单：只收 4 个字段，多一个就 `-32602`） |
 | `get_probe_results` | 查探测历史（可按 provider/model/daemon 过滤） |
 
 **内部信号（agent-node 自动调用）** · 3 个
@@ -129,7 +131,7 @@ CommHub Server 注册 **72 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 
 | 工具 | 说明 |
 |------|------|
-| `requirements_list` | 列本网络的任务；按 status / project_id / owner / agent_owner / updated_since / external_ref / parent_id / top_level 过滤，默认不含已归档；`view: "summary"` 不带描述与子任务正文（小得多，全文用 `requirements_get`）；`changes: true` + `updated_since` 只回之后改过的（含归档）+ `deleted` + `server_time`（Hub ≥ preview.75） |
+| `requirements_list` | 列本网络的任务，从新到旧；按 status / project_id / owner / agent_owner / `tag`（精确、区分大小写）/ updated_since / external_ref / parent_id / top_level / `q` 过滤，默认不含已归档。**MCP 默认 `view: "summary"` + 每页 50 张**（summary 不带描述与检查项正文，每张约 0.5–0.8 KB，一页通常 30–40 KB）；`has_more` + `next_cursor` 翻页（传 `cursor`），`limit` ≤ 1000。要全文：单张用 `requirements_get`，或传 `view: "full"`（每张几 KB，`limit` 要小）。**参数严格**：不认识的参数（如把 `tag` 写成 `tags`）直接报错 `-32602`，错误里列出全部可用参数，不会再静默回整张表。`changes: true` + `updated_since` 只回之后改过的（含归档）+ `deleted` + `server_time`（Hub ≥ preview.75）。REST `GET /api/requirements` 的默认不变（full、500 张） |
 | `requirements_get` | 按 id 取一条任务（含描述、子任务、负责人、项目、external_ref） |
 | `requirements_create` | 新建任务；同网络重复的 `external_ref` 返回 409 `external_ref_exists` + `existing_id` |
 | `requirements_update` | 修改任务，省略的字段保留；`archived: true` 归档（Agent 不能删除） |
@@ -877,7 +879,7 @@ send_task({
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/requirements` | 列表；过滤参数 `seq`（短号，正整数）、`status`、`project_id`（`none` = 无项目）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`（ISO）、`external_ref`、`parent_id`（`none` = 顶层）/ `top_level=1`；默认不含归档，`include_archived=1` 含全部，`archived=true` 仅归档（优先于 `include_archived`）；`q` 服务端搜索（标题、描述、负责人 / 负责 Agent / 参与人显示名、项目名、标签；空格隔开的词同时满足；调用者看不见的 Agent 名字不参与匹配；整句也当任务 ID 匹配：`#N` / `N` 对短号 seq，完整 id 或 8 位以上前缀对 id，全角 `＃` 按半角算）；分页 `limit`（默认 500，最多 1000）+ `cursor`，响应带 `has_more` / `next_cursor`，按 `created_at`、`id` 倒序；响应带 `capabilities` |
+| GET | `/api/requirements` | 列表；过滤参数 `seq`（短号，正整数）、`status`、`project_id`（`none` = 无项目）、`owner` / `agent_owner`（`user:<id>` / `node:<id>` / `none`）、`updated_since`（ISO）、`external_ref`、`tag`（只要带这个标签的卡，精确、区分大小写；不合法 → 400 `invalid_tag`）、`parent_id`（`none` = 顶层）/ `top_level=1`；默认不含归档，`include_archived=1` 含全部，`archived=true` 仅归档（优先于 `include_archived`）；`q` 服务端搜索（标题、描述、负责人 / 负责 Agent / 参与人显示名、项目名、标签；空格隔开的词同时满足；调用者看不见的 Agent 名字不参与匹配；整句也当任务 ID 匹配：`#N` / `N` 对短号 seq，完整 id 或 8 位以上前缀对 id，全角 `＃` 按半角算）；分页 `limit`（默认 500，最多 1000）+ `cursor`，响应带 `has_more` / `next_cursor`，按 `created_at`、`id` 倒序；响应带 `capabilities` |
 | GET | `/api/requirements/{id}` | 一条；`{id}` 也可以是 `%23N`（短号 `#N`） |
 | POST | `/api/requirements` | 新建；重复 `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
 | POST | `/api/requirements/upsert` | 按 `external_ref` 建或改（省略的字段、包括状态，保留）；响应 `{requirement, created}` |

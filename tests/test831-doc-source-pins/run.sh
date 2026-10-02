@@ -590,4 +590,25 @@ cp /tmp/l8-tools.bak "$ROOT/server/src/tools.ts"
 python3 "$COVCHECK" "$ROOT" >/dev/null || fail "L8 复原之后没有回绿"
 echo "  复原后回绿 ✓"
 
+# witnessed-red(#471):用 server.registerTool( 注册的新 tool 也必须被收进来。
+# 原来的正则只认 server.tool(,于是 registerTool 注册的工具(严格 schema 的那几个)结构上看不见 ——
+# 上面那条变异证明不了这条路。
+cp "$ROOT/server/src/tools.ts" /tmp/l8-tools.bak
+python3 - "$ROOT" <<'PYX'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])/'server'/'src'/'tools.ts'
+t = p.read_text(encoding='utf-8')
+needle = 'server.registerTool('
+assert t.count(needle) > 0, "L8 变异找不到 registerTool 注册点"
+p.write_text(t.replace(needle, 'server.registerTool(\n    "l8_probe_registertool",\n    { description: "probe" },\n    async () => ({}),\n  );\n  server.registerTool(', 1), encoding='utf-8')
+PYX
+if python3 "$COVCHECK" "$ROOT" >/dev/null 2>&1; then
+  cp /tmp/l8-tools.bak "$ROOT/server/src/tools.ts"
+  fail "L8 变异存活:registerTool 注册的新 tool 没写进索引,门却是绿的"
+fi
+echo "  MUTATION_RED new-registertool-not-in-index rc=1"
+cp /tmp/l8-tools.bak "$ROOT/server/src/tools.ts"
+python3 "$COVCHECK" "$ROOT" >/dev/null || fail "L8 复原之后没有回绿(registerTool)"
+echo "  复原后回绿 ✓"
+
 echo "RESULT: PASS"

@@ -107,16 +107,18 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `list_host_supervisors` | List host_supervisor daemons in this network, with online status |
 | `list_my_children` | Daemon pulls the list of children it spawned |
 
-**Providers & secret vault — owner/admin** · 7
+**Providers & secret vault — owner/admin** · 9
 
 | Tool | What it does |
 |------|------|
 | `list_providers` | List providers and models (never returns secret values) |
 | `upsert_provider` | Create or update a provider |
+| `update_provider` | Edit an existing provider's name / base_url / models / enabled (at least one; vendor, secret and network are immutable); admin+ |
 | `list_network_secrets` | List vault key NAMES only, never values (RFC-028) |
 | `upsert_network_secret` | Write or replace a vault secret (AES-GCM encrypted) |
 | `probe_provider_model` | Dispatch a connectivity probe to a daemon |
 | `get_probe_request` | Daemon pulls a pending probe request |
+| `ack_probe_request` | Daemon reports a probe result (strict whitelist: exactly 4 fields, any extra one is `-32602`) |
 | `get_probe_results` | Query probe history, optionally filtered by provider/model/daemon |
 
 **Internal signals — called by agent-node** · 3
@@ -132,7 +134,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 
 | Tool | What it does |
 |------|------|
-| `requirements_list` | List tasks in your network; filter by status / project_id / owner / agent_owner / updated_since / external_ref / parent_id / top_level; archived ones hidden by default; `view: "summary"` drops description and checklist bodies (much smaller — use `requirements_get` for full text); `changes: true` + `updated_since` returns only tasks changed since then (archived included) plus `deleted` and `server_time` (Hub ≥ preview.75) |
+| `requirements_list` | List tasks in your network, newest first; filter by status / project_id / owner / agent_owner / `tag` (exact, case-sensitive) / updated_since / external_ref / parent_id / top_level / `q`; archived ones hidden by default. **MCP defaults to `view: "summary"` and 50 per page** (summary drops description and checklist bodies, about 0.5–0.8 KB per task, so a page is typically 30–40 KB); page with `has_more` + `next_cursor` (pass it as `cursor`), `limit` ≤ 1000. For full text use `requirements_get` for one task, or pass `view: "full"` (several KB per task; keep `limit` small). **Parameters are strict**: an unknown one (say `tags` instead of `tag`) fails with `-32602` listing every valid parameter, instead of silently returning the whole table. `changes: true` + `updated_since` returns only tasks changed since then (archived included) plus `deleted` and `server_time` (Hub ≥ preview.75). The REST `GET /api/requirements` defaults are unchanged (full, 500) |
 | `requirements_get` | Get one task by id (description, checklist, owners, project, external_ref) |
 | `requirements_create` | Create a task; a duplicate `external_ref` in the network returns 409 `external_ref_exists` + `existing_id` |
 | `requirements_update` | Patch a task, omitted fields kept; `archived: true` archives it (agents cannot delete) |
@@ -872,7 +874,7 @@ Everywhere an `{id}` is accepted (REST `GET` / `PATCH` / `DELETE` / checklist to
 
 | Method | Path | Notes |
 |------|------|------|
-| GET | `/api/requirements` | List; filters `seq` (short number, positive integer), `status`, `project_id` (`none` = no project), `owner` / `agent_owner` (`user:<id>` / `node:<id>` / `none`), `updated_since` (ISO), `external_ref`, `parent_id` (`none` = top level) / `top_level=1`; excludes archived by default, `include_archived=1` includes all, `archived=true` returns only archived (takes precedence over `include_archived`); `q` server-side search (title, description, owner / agent owner / participant display names, project name, tags; space-separated terms must all match; names of agents the caller cannot see are not matched; the whole query is also matched as a task id: `#N` / `N` against the short number seq, a full id or an 8+ character prefix against the id, full-width `＃` counts as `#`); paging with `limit` (default 500, max 1000) + `cursor`, the response carries `has_more` / `next_cursor`, newest first by `created_at` then `id`; the response carries `capabilities` |
+| GET | `/api/requirements` | List; filters `seq` (short number, positive integer), `status`, `project_id` (`none` = no project), `owner` / `agent_owner` (`user:<id>` / `node:<id>` / `none`), `updated_since` (ISO), `external_ref`, `tag` (only tasks carrying this label, exact and case-sensitive; invalid → 400 `invalid_tag`), `parent_id` (`none` = top level) / `top_level=1`; excludes archived by default, `include_archived=1` includes all, `archived=true` returns only archived (takes precedence over `include_archived`); `q` server-side search (title, description, owner / agent owner / participant display names, project name, tags; space-separated terms must all match; names of agents the caller cannot see are not matched; the whole query is also matched as a task id: `#N` / `N` against the short number seq, a full id or an 8+ character prefix against the id, full-width `＃` counts as `#`); paging with `limit` (default 500, max 1000) + `cursor`, the response carries `has_more` / `next_cursor`, newest first by `created_at` then `id`; the response carries `capabilities` |
 | GET | `/api/requirements/{id}` | One task; `{id}` may also be `%23N` (short number `#N`) |
 | POST | `/api/requirements` | Create; duplicate `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
 | POST | `/api/requirements/upsert` | Create or patch by `external_ref` (omitted fields, including status, are kept); returns `{requirement, created}` |

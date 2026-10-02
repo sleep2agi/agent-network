@@ -20,7 +20,7 @@
 
 ## 判据
 
-1. `tools.ts` 里每个 `server.tool("name", …)` 的 name，都必须在 mcp-tools.md 的
+1. `tools.ts` 里每个 `server.tool("name", …)` / `server.registerTool("name", …)` 的 name，都必须在 mcp-tools.md 的
    **索引区**（页首到第一个 `---` 之间）出现为 `` `name` `` 或 `` [`name`](#name) ``。
 2. 索引里出现的每个反引号工具名，都必须真的在 `tools.ts` 里注册过 —— 挡住
    `update_provider` 那种「文档点名了一个不存在的工具」。
@@ -44,7 +44,9 @@ TOOLS_TS = "server/src/tools.ts"
 # 🔴 字符类必须含数字：写成 [a-z_]+ 时 `probe_v2` 这类名字**看不见**，
 #    这道门会少算一个却仍然报绿 —— 盲区在「怎么把要判的东西收进来」，不在判据。
 #    2026-08-26 就是靠一次带数字的变异存活才发现的。
-REGISTRATION = re.compile(r'server\.tool\(\s*\n?\s*"([a-z0-9_]+)"')
+# 🔴 `server.registerTool(` 也要收:用它注册的工具(带严格 schema 的 ack_probe_request / update_provider /
+#    requirements_list,#471)原来**结构上看不见** —— 同 test629 修过的那个取集洞。
+REGISTRATION = re.compile(r'server\.(?:tool|registerTool)\(\s*\n?\s*"([a-z0-9_]+)"')
 # 索引区里的工具名：`name` 或 [`name`](#name)
 INDEX_NAME = re.compile(r'\[?`([a-z0-9_]+)`')
 
