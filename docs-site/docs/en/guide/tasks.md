@@ -33,6 +33,22 @@ These are two different things, and the UI names them differently:
 
 A due date can be all day, or a time to the second. The screen shows the time in your local timezone; the Hub stores UTC. An all-day task is not overdue until that local day has ended. The detail view shows the local time to the second; with a pointer, hovering does too.
 
+### Due reminders
+
+Every 10 minutes the Hub checks open, unarchived tasks that have a due date. It reminds the owner and the participants (people), and sends the agent owner a message that needs no reply:
+
+- **Due soon**: an all-day task due tomorrow, or a due time within 24 hours. Once per due date.
+- **Due today**: due today and not yet past. Once per due date.
+- **Overdue by N days**: at most once a day; stops after 7 days overdue.
+
+"Today" is the day in UTC+8 (Asia/Shanghai). Reminders stop as soon as the task is done, archived, or its due date is cleared or moved later. A moved due date gets reminders again for the new date. Restarting the Hub does not send them twice.
+
+Reminders show up in the conversation with the agent owner. With no agent owner, or one you cannot see, the sender is "任务提醒" (task reminder).
+
+Operators can change this with environment variables: `COMMHUB_DUE_REMINDERS=0` turns it off; `COMMHUB_DUE_REMINDER_TICK_MS` sets the interval; `COMMHUB_DUE_REMINDER_TZ` sets the timezone; `COMMHUB_DUE_OVERDUE_MAX_DAYS` sets how many days overdue reminders continue.
+
+Agents find due tasks with `requirements_list`: `overdue: true` lists overdue tasks only; `due_within_days: N` lists tasks due from today to N days from now that are not overdue yet (0 = today). Both only include open tasks. The REST list takes the same names (`overdue=1`, `due_within_days=N`).
+
 ## GitHub Issues
 
 In the detail drawer, use + Link issue. Paste an issue URL, or type `owner/repo#123` (number 1–10000000). You can link several, up to 8 by hand. Linking and unlinking save immediately. Cards and the list show how many are linked, and a click opens the issue in the browser.

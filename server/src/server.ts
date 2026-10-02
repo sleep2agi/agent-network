@@ -70,6 +70,7 @@ import { resolveRestFromSession } from "./rest-identity.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
+import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
@@ -4910,6 +4911,8 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   patrolDeliveredStaleTasks();
   const deliveredStalePatrolTimer = setInterval(patrolDeliveredStaleTasks, deliveredStalePatrolMs);
   const scheduledTaskTimer = startScheduledTaskScheduler();
+  // #492 —— 任务到期提醒(默认每 10 分钟;COMMHUB_DUE_REMINDERS=0 关掉)。bootServer 不起它,测试按需直接调 runDueReminders。
+  const dueReminderTimer = startDueReminderTimer();
 
   // The Bun.serve socket is what keeps the process alive; the periodic
   // jobs must not — otherwise a test (or a future caller) that stops the
@@ -4920,6 +4923,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   (taskPatrolTimer as any)?.unref?.();
   (deliveredStalePatrolTimer as any)?.unref?.();
   (scheduledTaskTimer as any)?.unref?.();
+  (dueReminderTimer as any)?.unref?.();
 
   // ── Graceful shutdown ───────────────────────────────
   function shutdown() {
@@ -4930,6 +4934,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     clearInterval(taskPatrolTimer);
     clearInterval(deliveredStalePatrolTimer);
     clearInterval(scheduledTaskTimer);
+    if (dueReminderTimer) clearInterval(dueReminderTimer);
     db.close();
     process.exit(0);
   }

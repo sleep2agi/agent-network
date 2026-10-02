@@ -106,6 +106,8 @@ const ENTRIES: Record<string, Entry> = {
   client_id_taken: { field: 'client_id', message: 'That client_id was already used for another task.', hint: 'Generate a new client_id for each new task.' },
   // ── 列表 / 事件 ──
   invalid_view: { field: 'view', message: 'view must be full or summary.' },
+  invalid_overdue: { field: 'overdue', message: 'overdue must be true or false (REST: 1 / 0 / true / false).' },
+  invalid_due_within_days: { field: 'due_within_days', message: 'due_within_days must be an integer from 0 to 365 (0 = due later today).' },
   invalid_limit: { field: 'limit', message: 'limit is out of range.' },
   invalid_cursor: { field: 'cursor', message: 'cursor is not one this hub issued.', hint: 'Pass next_cursor from the previous page unchanged, or start again without cursor.' },
   invalid_updated_since: { field: 'updated_since', message: 'updated_since must be an ISO 8601 time.', hint: 'Use server_time from the previous changes=true response.' },
