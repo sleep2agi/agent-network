@@ -124,7 +124,9 @@ const SERVER_VERSION = (() => {
 })();
 
 // Feature flags advertised on /health (see the /health handler). Exported for tests.
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id"] as const;
+// node_permission_mode(#489):节点有 permission_mode、GET /api/nodes 每行带 viewer_can.permission_mode,
+// PUT /api/nodes/:id/permission-mode 与 GET /api/networks/:id/node-permission-report 可用(RFC-041 第一阶段)。
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here
@@ -4363,7 +4365,7 @@ return Bun.serve({
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
-                        display_name, team, tags, attrs_revision, permission_mode
+                        display_name, team, tags, attrs_revision, permission_mode, owner_user_id
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
@@ -4404,6 +4406,17 @@ return Bun.serve({
         }
       })();
 
+      // RFC-041(#489):调用者能不能改这个节点的权限模式 —— 与 PUT /api/nodes/:id/permission-mode 同一判据
+      // (节点主人、网络 owner / admin、Hub 管理员;只给用户令牌)。客户端据此决定显示「权限」一行,不自己推导规则。
+      const netRoles = new Map<string, string | null>();
+      const canSetPermissionMode = (r: Record<string, any>): boolean => {
+        if (!restAuth || restAuth.networkId) return false;
+        if (isAdmin || (r.owner_user_id && r.owner_user_id === restAuth.userId)) return true;
+        if (!r.network_id) return false;
+        if (!netRoles.has(r.network_id)) netRoles.set(r.network_id, getUserNetworkRole(restAuth.userId, r.network_id));
+        const role = netRoles.get(r.network_id);
+        return role === "owner" || role === "admin";
+      };
       const rows = rawRows.map(r => {
         let role: string | null = null;
         const snap = r.config_snapshot;
@@ -4411,7 +4424,7 @@ return Bun.serve({
           try { role = (typeof snap === "string" ? JSON.parse(snap) : snap)?.role ?? null; }
           catch { /* malformed snapshot — leave role null */ }
         }
-        const { config_snapshot, ...rest } = r;
+        const { config_snapshot, owner_user_id, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
@@ -4427,6 +4440,7 @@ return Bun.serve({
           role,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
+          viewer_can: { permission_mode: canSetPermissionMode(r) },
         };
       });
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
