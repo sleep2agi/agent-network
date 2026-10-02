@@ -26,6 +26,8 @@ From this version on, a node token (`ntok_`) cannot call the account, token, net
 
 ## Department heads
 
+Live from Hub 0.9.0-preview.91; the app has a 「管理本部门」 (Manage my department) entry from 0.2.196.
+
 Each department in the org chart can have a head. A head manages **their department**: the department they lead and every department below it. There is no new role. Head status is worked out from the department's head field on every request, so removing someone as head takes their powers away on the very next request. A viewer who is a head gets no powers.
 
 What a head can do, inside their department only:
@@ -36,6 +38,10 @@ What a head can do, inside their department only:
 - View the status and health of department members' Agents, read-only. Dispatching to an Agent or talking to it still follows Agent grants, and only the node's owner and admins can manage it.
 
 A write outside the department returns 403 `department_scope_denied`. A member who is not a head gets the same 403 `owner/admin required` as before.
+
+**Appointing a head**: an owner or admin opens Settings → User management → Members and departments in the app, selects the department, and sets its head. The head must be a member of the network. Setting a viewer is accepted, but a viewer gets no head powers. For example, make alice head of 「研发部」 (R&D) and she manages R&D and the 「前端组」 (Frontend) and 「后端组」 (Backend) teams below it. A head can also set heads for their own sub-departments, picking only from people in their department. Clearing or replacing the head removes the old head's powers immediately.
+
+**In the app**: a head sees 「管理本部门」 (Manage my department). On desktop it sits in the sidebar above People; on the phone it is at the top of Settings. It opens the same department tree, with departments outside theirs greyed out. Each department has members, tasks, and Agents; the Agents are read-only. The app only offers actions the Hub allows. Members who are not heads do not see the entry.
 
 **Department project grants**: an owner or admin can grant a project to a department, and the grant also covers every department below it. As with grants to a person, a grant lets people see the project's cards, and `can_edit` lets them edit them.
 
@@ -52,7 +58,7 @@ Endpoints:
 | `GET /api/networks/{id}/departments/{dept}/nodes` | Nodes owned by members of the department and its sub-departments: alias, status, health, owner. Read-only. Heads, owners, and admins |
 | `GET /api/requirements?department_id=` | Only cards whose owner is in that department (sub-departments included), or whose Agent belongs to such a person, within what the caller can see. Also a `requirements_list` parameter in MCP |
 
-The design and its trade-offs are in RFC-040.
+The design and its trade-offs are in [RFC-040](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-040-department-head-permissions.md).
 
 ## A node's own permissions
 
