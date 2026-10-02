@@ -541,6 +541,18 @@ function personRef(value: unknown, networkId: string, hidden: HiddenNode = null,
   return { kind: row.kind, id: row.id };
 }
 
+// participants_remove 的一项 → "kind:id"。给了 id 就直接按 id 比(已经离开网络的人也能从列表里减掉,不查在不在网络里);
+// 没给 id 的形状交给 personRef 解析。受限成员看不见的节点与不存在同一个错误(不给他留探测差异)。
+function participantKey(value: unknown, networkId: string, hidden: HiddenNode, field: string): string {
+  const row = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  if (row && (row.kind === 'user' || row.kind === 'node') && typeof row.id === 'string' && row.id.trim()) {
+    if (row.kind === 'node' && hidden?.(row.id)) throw new RequirementFieldError('person_not_in_network', field);
+    return `${row.kind}:${row.id}`;
+  }
+  const ref = personRef(value, networkId, hidden, field);
+  return `${ref.kind}:${ref.id}`;
+}
+
 // 负责人只能是人类,负责 Agent 只能是节点;参与人两种都行。库里旧的节点负责人照样读出来(启动迁移会挪走),
 // 只有这次请求显式写了 owner / agent_owner 才校验种类。
 // 旧客户端兼容(App ≤ 0.2.142 只有一个「负责人」,可以选节点):请求里 owner 是节点、又**没带** agent_owner
@@ -574,6 +586,26 @@ function assignments(body: Record<string, unknown>, networkId: string, current?:
     // 参与人是整体替换:把受限成员看不见的那些节点原样留下,别让他「保存」时静默删掉。
     const keptHidden = hidden ? participants.filter((ref: unknown) => isHiddenRef(ref, hidden)) : [];
     participants = [...new Map([...keptHidden, ...refs].map((ref: PersonRef) => [`${ref.kind}:${ref.id}`, ref])).values()];
+  }
+  // #475 —— 增量改参与人:participants_add / participants_remove 在当前列表上加 / 减(同步读改写,中间不让出,
+  // 并发的另一个请求插不进来),不碰别的参与人。加已有的人 = 不变;减不在列表里的人 = 不变。
+  // 和整体替换的 participants 不能同时用;同一个人既加又减 = 400,不猜先后。
+  if ('participants_add' in body || 'participants_remove' in body) {
+    if ('participants' in body) throw new RequirementFieldError('participants_conflict', 'participants');
+    const list = (key: string): unknown[] => {
+      const value = body[key];
+      if (value === undefined) return [];
+      if (!Array.isArray(value) || value.length > 100) throw new RequirementFieldError('invalid_participants_delta', key);
+      return value;
+    };
+    const add: PersonRef[] = list('participants_add').map(value => personRef(value, networkId, hidden, 'participants_add'));
+    const remove = new Set(list('participants_remove').map(value => participantKey(value, networkId, hidden, 'participants_remove')));
+    if (add.some(ref => remove.has(`${ref.kind}:${ref.id}`))) throw new RequirementFieldError('participants_add_remove_overlap', 'participants_remove');
+    const next = new Map<string, PersonRef>(participants.map((ref: PersonRef) => [`${ref.kind}:${ref.id}`, ref]));
+    for (const ref of add) if (!next.has(`${ref.kind}:${ref.id}`)) next.set(`${ref.kind}:${ref.id}`, ref);
+    for (const key of remove) next.delete(key);
+    if (next.size > 100) throw new RequirementFieldError('too_many_participants', 'participants_add');
+    participants = [...next.values()];
   }
   return {
     coerced,
@@ -824,7 +856,7 @@ async function createRequirement(ctx: RequirementsRequestContext, body: Record<s
 }
 
 // ── 修改(省略的字段保留原值) ──
-const PATCH_FIELDS = ["column", "issues", "tags", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "description", "checklist", "project_id", "external_ref", "external_url", "archived", "parent_id", "start"];
+const PATCH_FIELDS = ["column", "issues", "tags", "name", "priority", "due", "assignee", "owner", "agent_owner", "participants", "participants_add", "participants_remove", "description", "checklist", "project_id", "external_ref", "external_url", "archived", "parent_id", "start"];
 function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Record<string, unknown>): Response {
   if (!PATCH_FIELDS.some(k => Object.prototype.hasOwnProperty.call(body, k))) return jsonError("empty_patch", 400, { sent: Object.keys(body), writable: PATCH_FIELDS });
   const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);

@@ -134,15 +134,15 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `requirements_list` | 列本网络的任务，从新到旧；按 status / project_id / owner / agent_owner / `tag`（精确、区分大小写）/ updated_since / external_ref / parent_id / top_level / `q` 过滤，默认不含已归档。**MCP 默认 `view: "summary"` + 每页 50 张**（summary 不带描述与检查项正文，每张约 0.5–0.8 KB，一页通常 30–40 KB）；`has_more` + `next_cursor` 翻页（传 `cursor`），`limit` ≤ 1000。要全文：单张用 `requirements_get`，或传 `view: "full"`（每张几 KB，`limit` 要小）。**参数严格**：不认识的参数（如把 `tag` 写成 `tags`）直接报错 `-32602`，错误里列出全部可用参数，不会再静默回整张表。`changes: true` + `updated_since` 只回之后改过的（含归档）+ `deleted` + `server_time`（Hub ≥ preview.75）。REST `GET /api/requirements` 的默认不变（full、500 张） |
 | `requirements_people` | 查本网络的人和他们名下的 Agent，用来填任务的人员字段：每行 `user_id`、`username`、`display_name`（没设为 `""`）、`role`、`department`（`{id, name}` 或 `null`）、`agents: [{node_id, alias}]`；没有主人的 Agent 在 `agents_without_owner`（只在第一页）。`q` 按用户名 / 显示名 / 部门 / Agent 别名筛（不区分大小写的子串）；每页 50 人（`limit` ≤ 200），`has_more` + `next_offset` 翻页（传 `offset`）。受限成员看不见的 Agent 不出现。参数严格（不认识的参数 → `-32602`） |
 | `requirements_get` | 按 id 取一条任务（含描述、子任务、负责人、项目、external_ref） |
-| `requirements_create` | 新建任务；同网络重复的 `external_ref` 返回 409 `external_ref_exists` + `existing_id` |
-| `requirements_update` | 修改任务，省略的字段保留；`archived: true` 归档（Agent 不能删除） |
+| `requirements_create` | 新建任务；状态用 `column`（`pool` / `doing` / `done`），也收别名 `status`（两个都给且不同 → 400 `status_conflicts_with_column`）；同网络重复的 `external_ref` 返回 409 `external_ref_exists` + `existing_id` |
+| `requirements_update` | 修改任务，省略的字段保留；`status` 同 `column`（同上）。**`participants` 是整体替换**（没写进去的人会被删掉，`[]` 清空）；只想加 / 减几个人用 `participants_add` / `participants_remove`：在当前列表上增减、不动别人，加已有的 / 减不在的都是不变；和 `participants` 不能同时用（400 `participants_conflict`），同一个人既加又减 → 400 `participants_add_remove_overlap`；`archived: true` 归档（Agent 不能删除） |
 | `requirements_checklist_toggle` | 把一个子任务设为完成 / 未完成，只写这一项 |
-| `requirements_upsert_by_external_ref` | 按 `external_ref`（如 `github:owner/repo#123`）幂等同步：没有就建，有就改 |
-| `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档） |
-| `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；仅相关任务的成员和 viewer 403 |
+| `requirements_upsert_by_external_ref` | 按 `external_ref`（如 `github:owner/repo#123`）幂等同步：没有就建，有就改；也收 `status` 别名 |
+| `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档）。节点令牌（Agent）**只能读项目** |
+| `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；要人的令牌：节点令牌（Agent）只能读项目，调这个 → 403 `user_token_required`；仅相关任务的成员和 viewer 也 403 |
 | `projects_update` | 改项目的名字 / 颜色 / 排序，或 `archived: true / false` 归档 / 取消归档；只改传了的字段，权限同上 |
 | `requirements_events` | 读任务的动态（字段级改动流水：谁、何时、旧值 → 新值；以及评论 `kind: "comment"`，正文在 `new.text`，从新到旧）；`requirement_id`（`req_…` 或 `"#N"`）只看一条，`since` / `limit` / `cursor` 翻页；可见范围同 `requirements_list` |
-| `requirements_comment` | 给任务发一条评论 / 进展（`{id, text}`，markdown 1–4000 字）：**只追加**，不改描述，出现在动态里（`kind: "comment"`），署名是调用者（人或 Agent）。看得见这张任务、且在这个网络里不是只读角色的都能发；看不见 → 404，viewer → 403。Hub ≥ preview.89 |
+| `requirements_comment` | 给任务发一条评论 / 进展（`{id, text}`，markdown 1–4000 字）：**只追加**，不改描述，出现在动态里（`kind: "comment"`），署名是调用者（人或 Agent）。看得见这张任务、且在这个网络里不是只读角色的都能发；看不见 → 404，viewer → 403。Hub ≥ preview.90 |
 
 ---
 
@@ -885,7 +885,7 @@ send_task({
 | GET | `/api/requirements/{id}` | 一条；`{id}` 也可以是 `%23N`（短号 `#N`） |
 | POST | `/api/requirements` | 新建；重复 `external_ref` → 409 `{error:"external_ref_exists", existing_id}` |
 | POST | `/api/requirements/upsert` | 按 `external_ref` 建或改（省略的字段、包括状态，保留）；响应 `{requirement, created}` |
-| PATCH | `/api/requirements/{id}` | 修改（省略的字段保留） |
+| PATCH | `/api/requirements/{id}` | 修改（省略的字段保留）；`participants` 整体替换，`participants_add` / `participants_remove` 增量改（同 MCP）。REST 不收 `status` 别名（仍回 `empty_patch`，提示用 `column`） |
 | PATCH | `/api/requirements/{id}/checklist/{itemId}` | `{done: true\|false}`，只改这一项 |
 | POST | `/api/requirements/{id}/comments` | `{text}`（1–4000 字，首尾空白去掉）发一条评论，只追加；回 201 `{event}`（`kind: "comment"`，`new.text`）。空 → 400 `invalid_comment`，超长 → 400 `comment_too_long`；没有改 / 删评论的接口。评论和字段改动一样保留 180 天 |
 | DELETE | `/api/requirements/{id}` | 删除（只有人）；子需求保留并解挂 |

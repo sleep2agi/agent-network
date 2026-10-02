@@ -14,6 +14,7 @@ import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS } from "./agent-access.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
+import { errorBody } from "./requirements-errors.js";
 import { handleRequirementsRequest } from "./requirements.js";
 import {
   buildAnetArgs as _unused_buildAnetArgs,           // ensure module is loaded
@@ -5860,12 +5861,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     project_id: z.string().max(200).nullable().optional(),
     owner: reqPerson.nullable().optional().describe("负责人 (a person): {kind:'user', id} or {kind:'user', username}; a node here is rejected with 400 owner_must_be_human — use agent_owner for nodes"),
     agent_owner: reqPerson.nullable().optional().describe("负责 Agent: {kind:'node', id} or {kind:'node', alias}"),
-    participants: z.array(reqPerson).max(100).optional(),
+    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the whole participant list ({kind, id}, {kind:'user', username} or {kind:'node', alias}) (omitted people are removed; [] clears it). To add or remove a few people without touching the others, use participants_add / participants_remove on requirements_update."),
     external_url: z.string().max(500).nullable().optional(),
     parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
   };
   const pick = (args: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => args[k] !== undefined).map(k => [k, args[k]]));
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
+  // #475 —— status 是 column 的别名(列表的筛选参数就叫 status,Agent 写任务时也常这么写)。只在 MCP 这层换名,REST 不变;
+  // 两个都给且不同 → 400 status_conflicts_with_column,不替调用方挑一个。
+  const reqStatus = z.enum(["pool", "doing", "done"]).optional().describe("alias of column (same values); if both are sent they must match");
+  const withColumn = (args: Record<string, unknown>, call: (args: Record<string, unknown>) => Promise<{ content: { type: "text"; text: string }[] }>) => {
+    if (args.status === undefined) return call(args);
+    if (args.column !== undefined && args.column !== args.status) return Promise.resolve({ content: [{ type: "text" as const, text: JSON.stringify({ ...errorBody("status_conflicts_with_column"), status: 400 }) }] });
+    return call({ ...args, column: args.status });
+  };
+  const reqPeopleDelta = (verb: string) => z.array(reqPerson).max(100).optional().describe(`${verb} these people ${verb === "add" ? "to" : "from"} the participant list, keeping everyone else (atomic; ${verb === "add" ? "already present = no change" : "not present = no change"}). Cannot be combined with participants.`);
   const REQ_ID_DESC = "requirement id (req_…) or its short number \"#N\" (e.g. \"#42\", per network; a user token that sees several networks must also pass network_id, else 409 ambiguous_seq)";
 
   // #471 —— MCP 的列表默认省流:summary 视图 + 50 张一页(REST 的默认 full + 500 不变,App 靠它)。
@@ -5948,16 +5958,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_create",
-    "Create a requirement task. name is required. A duplicate external_ref in the network returns 409 external_ref_exists with existing_id — use requirements_upsert_by_external_ref for syncing.",
-    { network_id: z.string().max(200).optional(), ...reqFields, name: z.string().min(1).max(80), external_ref: z.string().max(200).optional() },
-    async (args) => requirementsCall("POST", "/api/requirements", args.network_id, pick(args, REQ_WRITE_KEYS)),
+    "Create a requirement task. name is required. column (or its alias status) = pool / doing / done. A duplicate external_ref in the network returns 409 external_ref_exists with existing_id — use requirements_upsert_by_external_ref for syncing.",
+    { network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, name: z.string().min(1).max(80), external_ref: z.string().max(200).optional() },
+    async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
 
   server.tool(
     "requirements_update",
-    "Patch a requirement task (id or \"#N\"); omitted fields keep their value. archived=true hides it from the default list (agents cannot delete).",
-    { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional(), ...reqFields, external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
-    async (args) => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(args, REQ_WRITE_KEYS)),
+    "Patch a requirement task (id or \"#N\"); omitted fields keep their value. column (or its alias status) moves it between pool / doing / done. participants REPLACES the whole list; to add or remove people without dropping the others use participants_add / participants_remove. archived=true hides it from the default list (agents cannot delete).",
+    { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, participants_add: reqPeopleDelta("add"), participants_remove: reqPeopleDelta("remove"), external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
+    async (args) => withColumn(args, a => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(a, [...REQ_WRITE_KEYS, "participants_add", "participants_remove"]))),
   );
 
   server.tool(
@@ -5969,14 +5979,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_upsert_by_external_ref",
-    "Idempotent sync: create the task for external_ref (e.g. github:owner/repo#123) or, if it already exists in the network, patch it (omitted fields — including status — are kept). Returns { requirement, created }.",
-    { network_id: z.string().max(200).optional(), external_ref: z.string().min(1).max(200), ...reqFields, archived: z.boolean().optional() },
-    async (args) => requirementsCall("POST", "/api/requirements/upsert", args.network_id, pick(args, REQ_WRITE_KEYS)),
+    "Idempotent sync: create the task for external_ref (e.g. github:owner/repo#123) or, if it already exists in the network, patch it (omitted fields — including column / status — are kept). Returns { requirement, created }.",
+    { network_id: z.string().max(200).optional(), external_ref: z.string().min(1).max(200), ...reqFields, status: reqStatus, archived: z.boolean().optional() },
+    async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements/upsert", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
 
   server.tool(
     "projects_list",
-    "List requirement projects in your network (id, name, color, sort, archived). Manage them with projects_create / projects_update.",
+    "List requirement projects in your network (id, name, color, sort, archived). Node (Agent) tokens can only read projects; creating / changing them (projects_create / projects_update) needs a person's token.",
     { network_id: z.string().max(200).optional() },
     async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
   );
@@ -5986,7 +5996,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // write access and is refused to 「仅相关任务」(task-scoped) members; events use the task list's visibility.
   server.tool(
     "projects_create",
-    "Create a requirement project in your network (same as 管理项目 → 新建 in the app). name 1–40 characters, unique in the network; color #RRGGBB (default: next palette colour); sort integer. Returns { project }. Refused (403) for task-scoped members and read-only roles.",
+    "Create a requirement project in your network (same as 管理项目 → 新建 in the app). name 1–40 characters, unique in the network; color #RRGGBB (default: next palette colour); sort integer. Returns { project }. Needs a person's token: node (Agent) tokens can only read projects (403 user_token_required). Also refused (403) for task-scoped members and read-only roles.",
     {
       network_id: z.string().max(200).optional(),
       name: z.string().min(1).max(40),
@@ -5998,7 +6008,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_update",
-    "Rename, recolour, reorder, archive or unarchive a requirement project (same as 管理项目 in the app). Only the fields you pass change. archived=true hides it from pickers (its tasks keep project_id); archived=false brings it back. Returns { project }. Refused (403) for task-scoped members and read-only roles.",
+    "Rename, recolour, reorder, archive or unarchive a requirement project (same as 管理项目 in the app). Only the fields you pass change. archived=true hides it from pickers (its tasks keep project_id); archived=false brings it back. Returns { project }. Needs a person's token: node (Agent) tokens can only read projects (403 user_token_required). Also refused (403) for task-scoped members and read-only roles.",
     {
       network_id: z.string().max(200).optional(),
       id: z.string().min(1).max(200).describe("project id (proj_…), from projects_list"),

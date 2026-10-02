@@ -48,6 +48,11 @@ const ENTRIES: Record<string, Entry> = {
   agent_owner_must_be_agent: { field: 'agent_owner', message: 'agent_owner (负责 Agent) must be a node.', hint: "Use agent_owner: {kind:'node', id}. To assign a person, use owner: {kind:'user', id}." },
   agent_owner_not_granted: { field: 'agent_owner', message: 'The current responsible Agent is one you are not granted, so you cannot replace or clear it.', hint: 'Leave agent_owner out of the patch.' },
   invalid_participants: { field: 'participants', message: 'participants must be an array of up to 100 persons {kind, id}; it replaces the whole list.', hint: 'Send the full list you want (read it first with requirements_get).' },
+  invalid_participants_delta: { field: 'participants_add', message: 'participants_add / participants_remove must each be an array of up to 100 persons ({kind, id}, {kind:"user", username} or {kind:"node", alias}).', hint: PERSON_IDS },
+  participants_conflict: { field: 'participants', message: 'participants (replace the whole list) cannot be combined with participants_add / participants_remove.', hint: 'Use participants_add / participants_remove to change a few people, or participants alone to replace the list.' },
+  participants_add_remove_overlap: { field: 'participants_remove', message: 'The same person is in both participants_add and participants_remove.', hint: 'Send each person in only one of the two lists.' },
+  too_many_participants: { field: 'participants_add', message: 'A task can have at most 100 participants.', hint: 'Remove some with participants_remove first.' },
+  status_conflicts_with_column: { field: 'status', message: 'status is an alias of column, and the two values sent differ.', hint: 'Send only one of them (pool, doing or done).' },
   invalid_assignee: { field: 'assignee', message: 'assignee must be a string (legacy free-text field).', hint: 'Prefer owner / agent_owner.' },
   // ── 项目 ──
   invalid_project: { field: 'project_id', message: 'project_id must be a project id string or null.', hint: 'Call projects_list to get project ids (proj_…); null removes the task from its project.' },
