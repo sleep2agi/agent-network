@@ -48,8 +48,8 @@ CREATE TABLE chat_group_members (
 );
 ```
 
-群消息表(第 3 个 PR 加,同样只增):`chat_group_messages`(一条消息一行,不按人复制),每人已读位置记在
-`chat_group_members` 新增的可空列 `last_read_at`(`ADD COLUMN`,不改旧列)。
+群消息表(第 3 个 PR 加,同样只增):`chat_group_messages`(一条消息一行,不按人复制),每人已读位置记在新表
+`chat_group_reads`(**改了**:原计划给 `chat_group_members` 加列,实际另开一张表 —— 零改列,见 §9)。
 
 ## 3. 权限
 
@@ -114,7 +114,7 @@ CREATE TABLE chat_group_members (
 三个写接口:管群的人(owner / admin / Hub 管理员 / 该部门(含上级)负责人)才能调;群成员但管不了 → 403 `group_manage_denied`;
 别人 → 404 `group_not_found`;节点令牌 → 403 `humans_only`。外加 §4 的同步。
 第 3 个 PR:`POST/GET …/chat-groups/:gid/messages`(附件沿用私信的文件校验)、`POST …/chat-groups/:gid/read`,
-推 `group_message` 到每个成员的 `/events/users/me`;入群 / 退群推 `group_membership_changed`。
+推 `group_message` 到每个成员的 `/events/users/me`。细节见 §9(入群 / 退群事件 `group_membership_changed` 推迟,见 §9.3)。
 
 审计:`department_group_created`(负责人建的带 `via: "leader"`),第 2 个 PR 起加 `chat_group_renamed`、`chat_group_member_added/removed`
 (只记手动操作;同步引起的进出不逐条记审计,原因在调人 / 改部门那条审计里)。
@@ -143,3 +143,75 @@ CREATE TABLE chat_group_members (
 - Agent 进群、群里 @Agent 派活(会和 RFC-020 的 IM 群聊语义打架,另开)。
 - 自建群(非部门群)的创建入口:表已支持,产品入口等有需求再开。
 - 群公告、置顶、禁言、群主转让。
+
+## 9. 第 3 个 PR:群消息 / 未读 / 实时推送(2026-10-03 定)
+
+原则:**照私信(`human-dm.ts`)做**,App 能直接复用私信界面;和私信不一样的地方逐条写在下面。
+
+### 9.1 数据(只增,两张新表,零改列)
+
+```sql
+CREATE TABLE chat_group_messages (
+  seq            INTEGER PRIMARY KEY AUTOINCREMENT,  -- PG 上是 BIGSERIAL;翻页游标、已读位置都用它
+  message_id     TEXT NOT NULL UNIQUE,              -- gm_<32 hex>
+  group_id       TEXT NOT NULL,
+  network_id     TEXT NOT NULL,
+  sender_user_id TEXT NOT NULL,
+  from_session   TEXT NOT NULL,                     -- 发信时的用户名(和私信行同名同义)
+  content        TEXT NOT NULL DEFAULT '',
+  meta_json      TEXT,                              -- {"attachments":[…]},和私信同形
+  created_at     TEXT NOT NULL                      -- 毫秒 UTC 文本,和私信同格式
+);
+CREATE TABLE chat_group_reads (
+  group_id TEXT NOT NULL, user_id TEXT NOT NULL, network_id TEXT NOT NULL,
+  last_read_seq INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (group_id, user_id)
+);
+```
+
+- DDL 和 `chat_groups` 放在一起(`department-groups.ts`),删网络时群、成员、消息、已读位置一起删(`deleteChatGroupsForNetwork`)。
+- 已读位置另开一张表、不给 `chat_group_members` 加列:零改列;被移出群时成员行删掉,已读行留着也无害(未读口径另有入群时间兜底,见 9.4)。
+
+### 9.2 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/networks/:id/chat-groups/:gid/messages` | `{message, attachments?, client_request_id?}` → 200 `{message, duplicate, delivered_to}`。`message` 行形状对齐私信行(`message_id / network_id / sender_user_id / from_session / content / meta_json / created_at / direction`),另加 `group_id`、`seq`、`kind: "group_message"` |
+| `GET` | `/api/networks/:id/chat-groups/:gid/messages?limit=&before=` | 新的在前,`limit` 1–200(缺省 50),`before` = 上一页最老一条的 `seq`;返回 `{messages, next_before, unread}`(读历史**不**标已读)。`before` 不是数字 → 400 `invalid_before` |
+| `POST` | `/api/networks/:id/chat-groups/:gid/read` | `{seq?}`,缺省 = 最新一条;超过最新按最新;只前进不后退。→ `{last_read_seq, unread}`。`seq` 不是非负整数 → 400 `invalid_seq` |
+
+只增字段:`GET …/chat-groups` 每个群加 `unread`、`last_message_at`(只对我在里面的群有值;管理者看到的非成员群是 `0 / null` —— 不让管理身份窥探消息时间);
+`GET /api/dm/threads` 加 `group_threads: [{group_id, name, department_id, last_at, unread, last_read_seq}]`(App 私信未读角标一起算)。
+
+### 9.3 定下的细节
+
+| 问题 | 定的 | 理由 |
+|---|---|---|
+| 谁能发 / 读 / 标已读 | **只认当前群成员**。非成员一律 404 `group_not_found`(含 owner / admin / 负责人 —— 他们看得到群资料,§3,但读不到消息);节点令牌 403 `humans_only`;不在网络里 403 | 管理身份不等于聊天参与者;404 不暴露群是否存在 |
+| 被移出的人(同步移出 / 手动移出 / 移出网络) | **立刻整群不可读**:历史 404、收不到推送、打不开群里的附件。重新入群后整段历史又可见 | 默认值:「移出 = 看不到」最简单、最不会泄露;群历史属于群,不属于某个人 |
+| 新入群的人能看到入群前的历史吗 | **能**(读权限只看「现在是不是成员」) | 部门群是部门的知识沉淀;不按人切历史也省一张表 |
+| 去重 | 按 `(群, 发信人, client_request_id)` 定出同一个 `message_id`(sha256 取 32 位),`INSERT … ON CONFLICT(message_id) DO NOTHING`;重投返回原消息、`duplicate: true`、不再推送、不再记审计。**不按内容去重**:同一个人连发两条一样的话就是两条 | 照私信;内容哈希去重会吞掉用户真的重复发的消息(已知 bug 的教训) |
+| 正文 / 附件上限 | 和私信相同:1 万字(`MAX_DM_CHARS`),附件 ≤ 20 个(`validateAttachments`),空正文且无附件 → 400 `message_required` | 照私信 |
+| 频率限制 | **和私信一样不单独限流**(私信今天没有专门的限流,只有上传 60/小时) | 「与私信一致」;真要限流应该私信、群一起加,另开 |
+| 推送 | 新事件 `group_message`,发给**发送那一刻**的每个群成员(现查 `chat_group_members`),**含发信人自己**(多端同步,App 按 `message_id` 去重),每人带自己的 `unread`。标已读推 `group_read {group_id, last_read_seq, unread}` 给自己(多端角标一起清) | 复用 `/events/users/me`;被同步移出的人自然不在收件人里 |
+| `group_membership_changed`(入群 / 退群事件) | **推迟**到 app 那一步按需加 | 成员变化发生在调人 / 改部门的事务里,要在提交后推,得改 `departments.ts` 的四个写路径;app 现在可以在收到 `group_message` 或刷新会话列表时拿到最新群列表,不阻塞聊天 |
+| 发消息时要不要先对账一次成员 | **不对账** | 第 2 个 PR 起每个写路径已同事务对账;每条消息都按整网算一次部门树不值得。`GET …/chat-groups/:gid` 的兜底对账仍在 |
+| 附件可见性 | 私信文件(`?purpose=dm` 上传)和受限成员两条下载分支各加一个「或」:**当前**是某个群的成员、且那个群里有消息带着这个文件(`groupMemberSeesFile`)。不带 purpose 的网络文件对不受限成员本来就可见,不变 | 镜像私信「参与者可见」,收窄到「当前成员」;被移出立刻失效 |
+| 附件转发 | 和私信同一条规矩:私信文件只能由看得见它的人发进群(上传者、带它的私信里的人、带它的群的当前成员);受限成员只能发自己能用的(自己传的 / 别人发给他的 / 他所在群里的) | 否则把别人私信里的 `file_id` 塞进群,就给全群解锁了它 |
+| 私信转发群里看到的私信文件 | **不放开**(私信的转发判据不改) | 这个 PR 只动群;要放开另议 |
+
+### 9.4 未读口径
+
+`unread(我, 群) = 群里满足以下三条的消息数`:不是我发的;`created_at > 我的 joined_at`;`seq > 我的 last_read_seq`(没有已读行按 0)。
+
+- 入群时间兜底:新入群的人不会一进来就几百条未读;重新入群 `joined_at` 刷新,离开期间的消息不算未读。
+- `joined_at` 是秒级、`created_at` 是毫秒级的同格式 UTC 文本(SQLite / PG 一致),逐字比较即时间先后;入群那一秒里发的消息算未读(宁可多一条)。
+- 一处定义(`UNREAD_SUBQUERY`),推送、群列表、`/api/dm/threads`、`read` 返回值都用它。
+
+### 9.5 测试
+
+`server/src/group-messages-http.test.ts`(SQLite 本地 + test2123 PG 梯子):发 / 历史 / 翻页 / 校验、`client_request_id` 去重、未读与已读只前进、
+推送只到当前成员(含发信人、带各自未读、重投不推)、非成员 / 管理者 404、节点 403、被同步移出后历史 / 推送 / 附件全部失效、重新入群、
+私信文件与受限成员的群附件可见性、不能借群解锁别人的私信文件、删网络连带清理。变异(逐条注入、跑、`cp` 还原、`cmp` 核对):
+去掉文件可见性里的成员过滤、去掉消息接口的成员判断、去掉未读的入群时间条件、关掉 `client_request_id` 去重、去掉私信文件分支的群放行 —— 五条全部被测试抓到。
+

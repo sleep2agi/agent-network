@@ -42,6 +42,28 @@ db.exec(`
     PRIMARY KEY (group_id, user_id)
   );
   CREATE INDEX IF NOT EXISTS idx_chat_group_members_user ON chat_group_members(network_id, user_id);
+  -- 第三个 PR(群消息,group-messages.ts):一条消息一行,每人已读位置一行。只增。
+  CREATE TABLE IF NOT EXISTS chat_group_messages (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id      TEXT NOT NULL UNIQUE,
+    group_id        TEXT NOT NULL,
+    network_id      TEXT NOT NULL,
+    sender_user_id  TEXT NOT NULL,
+    from_session    TEXT NOT NULL,
+    content         TEXT NOT NULL DEFAULT '',
+    meta_json       TEXT,
+    created_at      TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_group_messages_group ON chat_group_messages(group_id, seq);
+  CREATE INDEX IF NOT EXISTS idx_chat_group_messages_network ON chat_group_messages(network_id);
+  CREATE TABLE IF NOT EXISTS chat_group_reads (
+    group_id      TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    network_id    TEXT NOT NULL,
+    last_read_seq INTEGER NOT NULL DEFAULT 0,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, user_id)
+  );
 `);
 // 唯一索引 (network_id, department_id):SQLite 与 PostgreSQL 都允许多行 NULL,所以解除关联的群(department_id 为空)不受限,
 // 而同一个部门只能挂一个群。
@@ -182,8 +204,10 @@ export function unlinkDepartmentGroup(networkId: string, departmentId: string): 
   db.run("UPDATE chat_groups SET department_id = NULL, updated_at = datetime('now') WHERE network_id = ?1 AND department_id = ?2", [networkId, departmentId]);
 }
 
-/** 删网络时调用:群和成员一起删。 */
+/** 删网络时调用:群、成员、群消息、已读位置一起删。 */
 export function deleteChatGroupsForNetwork(networkId: string): void {
+  db.run("DELETE FROM chat_group_reads WHERE network_id = ?1", [networkId]);
+  db.run("DELETE FROM chat_group_messages WHERE network_id = ?1", [networkId]);
   db.run("DELETE FROM chat_group_members WHERE network_id = ?1", [networkId]);
   db.run("DELETE FROM chat_groups WHERE network_id = ?1", [networkId]);
 }

@@ -23,6 +23,7 @@ import { pendingInboxCount } from "./inbox-count.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
+import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
 import { canMessageAgent, isAgentRestricted, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
@@ -456,6 +457,10 @@ export function normalizeEntry(
 //     legacy master token still pass above, as for every other file.
 //     Files uploaded any other way never become DM-scoped, including when
 //     they are later forwarded into a DM.
+//     RFC-042 (#457, group messages): a DM-scoped file is also readable by
+//     the CURRENT members of a chat group with a message carrying it
+//     (group-messages.ts groupMemberSeesFile); the same widening applies to
+//     restricted members below. Removed members lose it immediately.
 //   - Everything else → deny (404). New uploads in production always
 //     carry a truthy owner_id (requireAuth blocks the null-owner-
 //     producing path when DEV_OPEN=off and no legacy master token is
@@ -483,12 +488,12 @@ export function authorizeFileDownload(
     // 私信文件:只看是不是这段私信里的人,与受限 / 不受限无关。
     if (entry.dmScoped) {
       if (entry.ownerId !== null && entry.ownerId === principal.userId) return true;
-      return !!fileId && dmParticipantSeesFile(principal.userId, entry.networkId, fileId);
+      return !!fileId && (dmParticipantSeesFile(principal.userId, entry.networkId, fileId) || groupMemberSeesFile(principal.userId, entry.networkId, fileId));
     }
     // 多用户 Agent 权限:受限成员只能下载自己传的,或者出现在自己与授权 Agent 往来 / 自己收件箱里的文件。
     if (!isAgentRestricted(principal.userId, entry.networkId)) return true;
     if (entry.ownerId !== null && entry.ownerId === principal.userId) return true;
-    return !!fileId && restrictedMemberSeesFile(principal.userId, principal.username, entry.networkId, fileId);
+    return !!fileId && (restrictedMemberSeesFile(principal.userId, principal.username, entry.networkId, fileId) || groupMemberSeesFile(principal.userId, entry.networkId, fileId));
   }
 
   if (principal.kind === "ntok" || principal.kind === "utok") {
@@ -1924,7 +1929,7 @@ return Bun.serve({
     // DELETE …/chat-groups/:gid/members/:uid 手动移人(source='department' 的人 → 409 department_member)。
     // 管群 = owner / admin / Hub 管理员,或挂部门的群的该部门(含上级)负责人。看得见但管不了 → 403 group_manage_denied;
     // 看不见 → 404 group_not_found(不暴露有没有群)。Agent(节点令牌)不进群,一律 403 humans_only。 ──
-    const chatGroupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/chat-groups(?:\/([^/]+)(?:\/(members)(?:\/([^/]+))?)?)?$/);
+    const chatGroupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/chat-groups(?:\/([^/]+)(?:\/(members|messages|read)(?:\/([^/]+))?)?)?$/);
     if (chatGroupsMatch) {
       const token = requestToken(req, { allowQueryToken: false });
       const resolved = token ? resolveToken(token) : null;
@@ -1940,17 +1945,51 @@ return Bun.serve({
       const memberUid = chatGroupsMatch[4] ? decodeURIComponent(chatGroupsMatch[4]) : null;
       if (!gid) {
         if (req.method !== "GET") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
-        return withCors(req, Response.json({ ok: true, network_id: netId, groups: listVisibleGroups(netId, resolved.user.user_id, canManage) }));
+        // 第三个 PR:每个群附上我的 unread / last_message_at(只对我在里面的群;管理者看到的非成员群是 0 / null —— 不让管理身份窥探消息时间)。
+        const threads = new Map(listGroupThreads(netId, resolved.user.user_id).map((t) => [t.group_id, t]));
+        const groups = listVisibleGroups(netId, resolved.user.user_id, canManage).map((g) => {
+          const t = g.is_member ? threads.get(g.id) : undefined;
+          return { ...g, unread: t?.unread ?? 0, last_message_at: t?.last_at ?? null };
+        });
+        return withCors(req, Response.json({ ok: true, network_id: netId, groups }));
       }
       // viewer 当负责人不获得任何东西(headScope 已保证);owner / admin 本来全管,不必算。
       const managed = canManage ? new Set<string>() : headScope(netId, resolved.user.user_id).managed;
       const notFound = () => withCors(req, Response.json({ ok: false, error: "group_not_found" }, { status: 404 }));
+      // 第三个 PR(群消息):GET / POST …/:gid/messages、POST …/:gid/read。只认**当前群成员** —— owner / admin / 负责人
+      // 不是成员也读不到消息(他们看得到群资料,但消息只给群里的人);别人(含被移出的人)一律 404 group_not_found。
+      if (sub === "messages" || sub === "read") {
+        if (memberUid) return notFound();
+        const ok = (sub === "messages" && (req.method === "GET" || req.method === "POST")) || (sub === "read" && req.method === "POST");
+        if (!ok) return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+        if (!memberGroup(netId, gid, resolved.user.user_id)) return notFound();
+        const failedMsg = (r: { status: number; error: string }) => withCors(req, Response.json({ ok: false, error: r.error }, { status: r.status }));
+        if (sub === "messages" && req.method === "GET") {
+          const page = listGroupMessages(gid, resolved.user.user_id, Number(url.searchParams.get("limit")) || 50, url.searchParams.get("before"));
+          if ("ok" in page) return failedMsg(page);
+          return withCors(req, Response.json({ ok: true, network_id: netId, group_id: gid, ...page, unread: groupUnreadFor(gid, resolved.user.user_id) }));
+        }
+        let mbody: Record<string, unknown> = {};
+        try { const t = await req.text(); const b = t ? JSON.parse(t) : {}; if (!b || typeof b !== "object" || Array.isArray(b)) throw new Error("not an object"); mbody = b as Record<string, unknown>; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+        if (sub === "read") {
+          const r = markGroupRead(netId, gid, resolved.user.user_id, mbody.seq);
+          if (!r.ok) return failedMsg(r);
+          return withCors(req, Response.json({ ok: true, network_id: netId, group_id: gid, last_read_seq: r.last_read_seq, unread: r.unread }));
+        }
+        const sent = sendGroupMessage({
+          networkId: netId, groupId: gid,
+          sender: { userId: resolved.user.user_id, username: resolved.user.username },
+          message: mbody.message, attachments: mbody.attachments, clientRequestId: mbody.client_request_id,
+        });
+        if (!sent.ok) return failedMsg(sent);
+        return withCors(req, Response.json({ ok: true, network_id: netId, group_id: gid, message: sent.message, duplicate: sent.duplicate, delivered_to: sent.delivered_to }));
+      }
       if (!sub && req.method === "GET") {
         const got = readGroup(netId, gid, resolved.user.user_id, canManage, managed);
         if (!got) return notFound();
         return withCors(req, Response.json({ ok: true, network_id: netId, ...got }));
       }
-      const allowed = (!sub && req.method === "PATCH") || (sub && !memberUid && req.method === "POST") || (sub && memberUid && req.method === "DELETE");
+      const allowed = (!sub && req.method === "PATCH") || (sub === "members" && !memberUid && req.method === "POST") || (sub === "members" && memberUid && req.method === "DELETE");
       if (!allowed) return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
       const group = groupById(netId, gid);
       if (!group) return notFound();
@@ -2472,7 +2511,8 @@ return Bun.serve({
           return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
         }
         if (url.pathname === "/api/dm/threads") {
-          return withCors(req, Response.json({ ok: true, network_id: dmNet, threads: listDmThreads(dmNet, restAuth.userId) }));
+          // group_threads(RFC-042 第三个 PR,只增字段):我在里面的群,每个带 unread / last_at —— App 私信未读角标可以一起算。
+          return withCors(req, Response.json({ ok: true, network_id: dmNet, threads: listDmThreads(dmNet, restAuth.userId), group_threads: listGroupThreads(dmNet, restAuth.userId) }));
         }
         const other = url.searchParams.get("with") ?? "";
         if (!other) return withCors(req, Response.json({ ok: false, error: "with_required" }, { status: 400 }));

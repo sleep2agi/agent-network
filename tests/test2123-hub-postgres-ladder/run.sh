@@ -79,7 +79,7 @@ TEST_PW="tester-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 psql_admin -d postgres -c "CREATE ROLE anet_ladder LOGIN PASSWORD '$LADDER_PW'" \
   -c "CREATE ROLE anet_tester LOGIN PASSWORD '$TEST_PW'"
 for db in commhub commhub_noflag; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_ladder"; done
-for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test anet_status_cache_test anet_owner_strict_test anet_req_list_mcp_test anet_req_errors_test anet_req_comment_test anet_req_people_mcp_test anet_req_status_part_test anet_ctx_cost_test anet_dept_heads_test anet_token_member_test anet_node_perm_test anet_dept_groups_test anet_dept_groups_sync_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
+for db in anet_sched_test anet_side_thread_test anet_evidence_test anet_acl_dm_test anet_skillhub_test anet_task_access_test anet_req_stats_test anet_tag_ops_test anet_sched_reply_test anet_req_slim_test anet_req_people_test anet_req_events_test anet_status_node_test anet_part_notify_test anet_proj_viewer_can_test anet_mcp_proj_events_test anet_departments_test anet_health_dispatch_test anet_model_auth_notify_test anet_sched_stuck_test anet_status_cache_test anet_owner_strict_test anet_req_list_mcp_test anet_req_errors_test anet_req_comment_test anet_req_people_mcp_test anet_req_status_part_test anet_ctx_cost_test anet_dept_heads_test anet_token_member_test anet_node_perm_test anet_dept_groups_test anet_dept_groups_sync_test anet_group_msgs_test; do psql_admin -d postgres -c "CREATE DATABASE $db OWNER anet_tester"; done
 LADDER_URL_BASE="postgres://anet_ladder:$LADDER_PW@127.0.0.1:$PG_PORT"
 
 # Positive control for the harness itself: the database we are about to hand
@@ -241,6 +241,8 @@ run_pg_tests_rc anet_node_perm_test src/node-permissions-http.test.ts
 run_pg_tests_rc anet_dept_groups_test src/department-groups-http.test.ts
 # 部门群成员同步(RFC-042 第二个 PR,#457):调人 / 改上级 / 换负责人 / 删部门 / 移出网络 同事务对账(嵌套事务 = savepoint)、按分支绑参的查询、手动成员 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_dept_groups_sync_test src/department-groups-sync-http.test.ts
+# 部门群消息(RFC-042 第三个 PR,#457):BIGSERIAL seq 游标翻页、client_request_id 去重(ON CONFLICT DO NOTHING 的 changes)、已读位置 upsert 只前进(excluded + CASE)、未读子查询(LEFT JOIN + COALESCE)、群附件可见性(JOIN + LIKE … ESCAPE)—— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_group_msgs_test src/group-messages-http.test.ts
 
 # RFC-039 S5: `commhub-server migrate-to-pg` end to end (seed on SQLite,
 # refusals, dry run, tamper → rollback, real copy, Hub on the copy to L5).
