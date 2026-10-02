@@ -32,7 +32,12 @@ const toolsSource = readFileSync("src/tools.ts", "utf8");
 const sdkVersion = JSON.parse(
   readFileSync("node_modules/@modelcontextprotocol/sdk/package.json", "utf8"),
 ).version as string;
-assert(/^1\.(?:29|30|31)\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
+// #498:server/package.json 把 SDK 钉成精确版本(生产 npm 装出来的就是它)。这道门审计的就是这一版 ——
+// 装出来的必须等于钉的那一版,而且是审计过的 1.32.x;换版本要改这里并重跑本审计。
+const pinnedSdk = JSON.parse(readFileSync("package.json", "utf8")).dependencies?.["@modelcontextprotocol/sdk"] as string;
+assert(/^\d+\.\d+\.\d+$/.test(pinnedSdk ?? ""), `MCP SDK is pinned to an exact version in server/package.json (${pinnedSdk})`);
+assert(sdkVersion === pinnedSdk, `installed MCP SDK matches the pin (${sdkVersion} vs ${pinnedSdk})`);
+assert(/^1\.32\./.test(sdkVersion), `real MCP SDK version is recorded (${sdkVersion})`);
 const registeredTools = [...toolsSource.matchAll(/server\.(?:tool|registerTool)\(\s*\n\s*"([^"]+)"/g)]
   .map(match => match[1]);
 assert(
