@@ -16,7 +16,7 @@ import { restrictedMemberCanUseFile } from "./restricted-files.js";
 import { redactMessageRow } from "./redact-tokens.js";
 
 export const HUMAN_DM_KIND = "human_dm";
-const MAX_DM_CHARS = 10_000;
+export const MAX_DM_CHARS = 10_000;
 
 export type HumanDmSendInput = {
   networkId: string;
@@ -153,7 +153,7 @@ export function rewriteUnreadNoticeDm(m: DmRow): boolean {
 }
 
 /** 带附件:文件必须属于这个网络(防把别的网络的 file_id 塞进来)。返回它的索引条目,不属于 → null。 */
-function networkFileEntry(networkId: string, fileId: string): UploadIndexEntry | null {
+export function networkFileEntry(networkId: string, fileId: string): UploadIndexEntry | null {
   if (!FILE_ID_REGEX.test(fileId)) return null;
   const path = indexEntryPath(fileId);
   if (!path || !existsSync(path)) return null;
