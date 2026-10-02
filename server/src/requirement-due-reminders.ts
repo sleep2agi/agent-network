@@ -18,6 +18,14 @@
 // 去重:requirement_due_reminders 主键 (requirement_id, kind, due_on, day),先 INSERT … ON CONFLICT DO NOTHING
 //   抢到这一行(changes = 1)才发 —— 重启、多次扫描、并发都不会重发。宁可漏一次(发送中途崩溃),不发两次。
 // 只加表:旧 Hub 回滚后不认识这张表也不碰它。
+//
+// 上线护栏(生产上有别的团队的网络和节点):
+//   COMMHUB_DUE_REMINDER_NETWORKS=<id,id,…>  只给这些网络发;不设 = 所有网络(自建 Hub 默认就有这个功能)。
+//   COMMHUB_DUE_REMINDER_NODES=1              给负责 Agent 节点发消息;默认关(人照常提醒)。
+//   开通时不补发:每个网络第一次被扫描到时记一行基线(kind='baseline',sent_at = 那一刻)。只有在基线**之后**才变成逾期的卡
+//     会收到「已逾期」提醒;基线之前就已经逾期的卡永远不发逾期提醒(打开功能 / 把网络加进白名单都不会刷一批旧卡)。
+//     选这个而不是「把旧卡逐张记成已发」:不用每卡每天写行,也不怕某张旧卡第一次没被扫到、第二天又冒出来。
+//     即将到期 / 今天到期不受基线影响(它们本来就只在临近时发一次)。
 
 import type { DbAdapter } from "./db-adapter.js";
 import { db, uuidv4 } from "./db.js";
@@ -63,6 +71,16 @@ export function dueReminderTimezone(): string {
   const tz = process.env.COMMHUB_DUE_REMINDER_TZ?.trim() || "Asia/Shanghai";
   try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return tz; } catch { return "Asia/Shanghai"; }
 }
+/** COMMHUB_DUE_REMINDER_NETWORKS:逗号分隔的网络 id;没设(或只有空白)→ null = 所有网络。 */
+export function reminderNetworks(): string[] | null {
+  const raw = process.env.COMMHUB_DUE_REMINDER_NETWORKS;
+  if (raw === undefined) return null;
+  const ids = raw.split(",").map((x) => x.trim()).filter(Boolean);
+  return ids.length ? ids : null;
+}
+export function nodeRemindersEnabled(): boolean { return process.env.COMMHUB_DUE_REMINDER_NODES === "1"; }
+export const BASELINE_KIND = "baseline";
+
 export function overdueMaxDays(): number { return Math.floor(envNumber("COMMHUB_DUE_OVERDUE_MAX_DAYS", 7, 0)); }
 
 // ── 时区小工具 ─────────────────────────────────────────────
@@ -95,6 +113,11 @@ export function localMidnightMs(date: string, tz: string): number {
 }
 
 const isDateOnly = (due: string) => due.length === 10;
+
+/** 从哪一刻起算逾期:日期型 = tz 里第二天零点;时刻型 = 那个时刻。 */
+export function overdueSinceMs(due: string, tz: string): number {
+  return isDateOnly(due) ? localMidnightMs(addDays(due, 1), tz) : Date.parse(due);
+}
 
 /** 这张卡此刻该发哪一档(没有 → null)。day = 去重用的那一天。 */
 export function dueReminderFor(due: string, nowMs: number, tz: string, maxOverdue = overdueMaxDays()): { kind: DueKind; day: string; overdueDays: number; dueDay: string } | null {
@@ -189,17 +212,41 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
   // 范围:最老 = 今天 - maxOverdue - 1(UTC 日期 ≤ 本地日期,多留一天);最新 < 今天 + 2(24 小时内的时刻型 UTC 日期 ≤ 明天)。
   const lo = addDays(today, -maxOverdue - 1);
   const hi = addDays(today, 2);
+  const allow = reminderNetworks();
+  const sentAt = new Date(nowMs).toISOString();
+  // 基线:范围内每个网络第一次被扫到的那一刻(已有就不动)。一条 INSERT … SELECT。
+  {
+    const bp: unknown[] = [BASELINE_KIND, sentAt];
+    // WHERE 必须有:SQLite 里「INSERT … SELECT … FROM t ON CONFLICT」会把 ON 读成 JOIN 约束(语法错),要一个 WHERE 隔开。
+    const where = ` WHERE 1=1${allow ? ` AND network_id IN (${allow.map((id) => `?${bp.push(id)}`).join(", ")})` : ""}`;
+    db.run(
+      `INSERT INTO requirement_due_reminders (requirement_id, kind, due_on, day, network_id, sent_at)
+       SELECT '__baseline__:' || network_id, ?1, '', '', network_id, ?2 FROM networks${where}
+       ON CONFLICT DO NOTHING`,
+      bp,
+    );
+  }
+  const baselines = new Map(
+    db.all<{ network_id: string; sent_at: string }>("SELECT network_id, sent_at FROM requirement_due_reminders WHERE kind = ?1", BASELINE_KIND)
+      .map((b) => [b.network_id, Date.parse(b.sent_at)]),
+  );
+  const params: unknown[] = [lo, hi];
+  const netFilter = allow ? ` AND network_id IN (${allow.map((id) => `?${params.push(id)}`).join(", ")})` : "";
   const rows = db.all<DueRow>(
     `SELECT requirement_id, network_id, seq, title, due_on, owner_json, participants_json, agent_owner_json
        FROM requirements
-      WHERE due_on IS NOT NULL AND due_on >= ?1 AND due_on < ?2 AND column_name <> 'done' AND COALESCE(archived, 0) = 0`,
-    lo, hi,
+      WHERE due_on IS NOT NULL AND due_on >= ?1 AND due_on < ?2 AND column_name <> 'done' AND COALESCE(archived, 0) = 0${netFilter}`,
+    ...params,
   );
   const out: DueReminderSent[] = [];
-  const sentAt = new Date(nowMs).toISOString();
   for (const row of rows) {
     const r = dueReminderFor(row.due_on, nowMs, tz, maxOverdue);
     if (!r) continue;
+    if (r.kind === "overdue") {
+      // 基线之前就已经逾期 → 不发(开通时不补发)。没有基线(网络行不存在)= 当作此刻开通。
+      const base = baselines.get(row.network_id) ?? nowMs;
+      if (overdueSinceMs(row.due_on, tz) < base) continue;
+    }
     try {
       const claimed = db.run(
         `INSERT INTO requirement_due_reminders (requirement_id, kind, due_on, day, network_id, sent_at)
@@ -213,7 +260,7 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
     }
   }
   // 去重行保留 RETENTION_DAYS 天(比逾期上限长得多,删掉的行不会再被需要)。
-  try { db.run("DELETE FROM requirement_due_reminders WHERE sent_at < ?1", [new Date(nowMs - RETENTION_DAYS * DAY_MS).toISOString()]); } catch {}
+  try { db.run("DELETE FROM requirement_due_reminders WHERE sent_at < ?1 AND kind <> ?2", [new Date(nowMs - RETENTION_DAYS * DAY_MS).toISOString(), BASELINE_KIND]); } catch {}
   return out;
 }
 
@@ -236,7 +283,7 @@ function deliver(row: DueRow, r: { kind: DueKind; overdueDays: number; dueDay: s
     if (id) users.push(userId);
   }
   let notifiedNode: string | null = null;
-  if (alias && assertNodeActive(alias, row.network_id).ok) {
+  if (alias && nodeRemindersEnabled() && assertNodeActive(alias, row.network_id).ok) {
     const id = uuidv4();
     const message = `[${title}] ${text}\n(这是提醒,不需要回复。requirement_id=${row.requirement_id})`;
     db.run(

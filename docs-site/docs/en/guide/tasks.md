@@ -35,7 +35,7 @@ A due date can be all day, or a time to the second. The screen shows the time in
 
 ### Due reminders
 
-Every 10 minutes the Hub checks open, unarchived tasks that have a due date. It reminds the owner and the participants (people), and sends the agent owner a message that needs no reply:
+Every 10 minutes the Hub checks open, unarchived tasks that have a due date. It reminds the owner and the participants (people). With node reminders on, the agent owner also gets a message that needs no reply:
 
 - **Due soon**: an all-day task due tomorrow, or a due time within 24 hours. Once per due date.
 - **Due today**: due today and not yet past. Once per due date.
@@ -45,7 +45,16 @@ Every 10 minutes the Hub checks open, unarchived tasks that have a due date. It 
 
 Reminders show up in the conversation with the agent owner. With no agent owner, or one you cannot see, the sender is "任务提醒" (task reminder).
 
-Operators can change this with environment variables: `COMMHUB_DUE_REMINDERS=0` turns it off; `COMMHUB_DUE_REMINDER_TICK_MS` sets the interval; `COMMHUB_DUE_REMINDER_TZ` sets the timezone; `COMMHUB_DUE_OVERDUE_MAX_DAYS` sets how many days overdue reminders continue.
+No backlog: the first time the Hub checks a network, it records that moment as the start. Only tasks that become overdue after it get overdue reminders. Turning the feature on, or adding a network to the allowlist, does not remind people about every task that was already overdue.
+
+Operators can change this with environment variables:
+
+- `COMMHUB_DUE_REMINDERS=0`: turns it off.
+- `COMMHUB_DUE_REMINDER_NETWORKS=<network id,network id>`: only these networks get reminders. Unset means all networks.
+- `COMMHUB_DUE_REMINDER_NODES=1`: also messages the agent owner. Off by default; only people are reminded.
+- `COMMHUB_DUE_REMINDER_TICK_MS`: the check interval.
+- `COMMHUB_DUE_REMINDER_TZ`: the timezone.
+- `COMMHUB_DUE_OVERDUE_MAX_DAYS`: how many days overdue reminders continue.
 
 Agents find due tasks with `requirements_list`: `overdue: true` lists overdue tasks only; `due_within_days: N` lists tasks due from today to N days from now that are not overdue yet (0 = today). Both only include open tasks. The REST list takes the same names (`overdue=1`, `due_within_days=N`).
 

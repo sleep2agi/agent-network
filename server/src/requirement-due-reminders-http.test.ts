@@ -18,6 +18,9 @@ process.env.COMMHUB_UPLOADS_DIR = join(DIR, "uploads");
 process.env.HOST = "127.0.0.1";
 delete process.env.COMMHUB_DUE_REMINDER_TZ;
 delete process.env.COMMHUB_DUE_OVERDUE_MAX_DAYS;
+delete process.env.COMMHUB_DUE_REMINDER_NETWORKS;
+// 节点提醒默认关;这个文件的大部分用例要看节点那一路,先打开(「默认关」单独一个用例)。
+process.env.COMMHUB_DUE_REMINDER_NODES = "1";
 const PW = "DueRemindPassw0rd!x";
 
 type U = { token: string; id: string; username: string };
@@ -111,6 +114,8 @@ beforeAll(async () => {
   const mod: any = await import("./server.js");
   hub = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
   BASE = `http://127.0.0.1:${hub.port}`;
+  // 基线:假装功能在 T0 之前 30 天就开着了(否则 T0 第一次扫描会把 NET 里所有逾期卡当「开通前就逾期」不发)。
+  due.runDueReminders({ now: T0 - 30 * DAY });
 }, 30_000);
 
 afterAll(() => {
@@ -253,6 +258,82 @@ describe("提醒", () => {
     } finally {
       db.run("UPDATE nodes SET lifecycle_state = 'active' WHERE node_id = ?1", [NODE_ID]);
     }
+  });
+});
+
+describe("上线护栏", () => {
+  const mkNet = (tag: string) => {
+    const r = (globalThis as any).__register(`dr_${tag}_${stamp}`, PW);
+    return { token: r.token as string, id: r.user.user_id as string, net: r.network_id as string };
+  };
+  async function cardIn(o: { token: string; id: string; net: string }, name: string, dueValue: string, extra: Record<string, unknown> = {}) {
+    const r = await send(o.token, "POST", "/api/requirements", { network_id: o.net, name, due: dueValue, owner: userRef(o.id), ...extra });
+    expect(r.status).toBe(201);
+    return r.body.requirement.id as string;
+  }
+  beforeAll(async () => { (globalThis as any).__register = (await import("./auth.js")).register; });
+
+  test("网络白名单:设了只发白名单里的网络;不设 = 所有网络", async () => {
+    const other = mkNet("other");
+    due.runDueReminders({ now: T0 - 30 * DAY }); // other 的基线
+    const mine = await card("dr-白名单内", "2026-10-11");
+    const theirs = await cardIn(other, "dr-白名单外", "2026-10-11");
+    process.env.COMMHUB_DUE_REMINDER_NETWORKS = ` ${NET} , `;
+    try {
+      const out = due.runDueReminders({ now: T0 });
+      expect(sentFor(out, mine)).toEqual(["due_soon"]);
+      expect(sentFor(out, theirs)).toEqual([]);
+      expect(db.get("SELECT COUNT(*) AS n FROM requirement_due_reminders WHERE requirement_id = ?1", theirs).n).toBe(0);
+    } finally { delete process.env.COMMHUB_DUE_REMINDER_NETWORKS; }
+    expect(sentFor(due.runDueReminders({ now: T0 }), theirs)).toEqual(["due_soon"]);
+  });
+
+  test("节点提醒默认关:人照收,节点 inbox 没有", async () => {
+    delete process.env.COMMHUB_DUE_REMINDER_NODES;
+    try {
+      const id = await card("dr-节点默认关", "2026-10-11");
+      const out = due.runDueReminders({ now: T0 + 4 * 3600_000 });
+      expect(sentFor(out, id)).toEqual(["due_soon"]);
+      expect(out.find(x => x.requirement_id === id)?.node).toBeNull();
+      expect(nodeMessages(id)).toEqual([]);
+      expect(userNotices(id)[owen.id]).toHaveLength(1);
+    } finally { process.env.COMMHUB_DUE_REMINDER_NODES = "1"; }
+  });
+
+  test("开通时不补发:基线前就逾期的卡不发逾期提醒(第二天也不发);基线后才逾期的照发;今天 / 明天到期照发", async () => {
+    const fresh = mkNet("fresh");
+    const old = await cardIn(fresh, "dr-开通前逾期", "2026-10-07");
+    const oldTime = await cardIn(fresh, "dr-开通前逾期时刻", "2026-10-10T09:00:00+08:00");
+    const today = await cardIn(fresh, "dr-开通当天到期", "2026-10-10");
+    const tomorrow = await cardIn(fresh, "dr-开通次日到期", "2026-10-11");
+    // fresh 网络第一次被扫到 = T0(10:00 东八)
+    const first = due.runDueReminders({ now: T0 });
+    expect(sentFor(first, old)).toEqual([]);
+    expect(sentFor(first, oldTime)).toEqual([]);
+    expect(sentFor(first, today)).toEqual(["due_today"]);
+    const base = db.get("SELECT sent_at FROM requirement_due_reminders WHERE kind = 'baseline' AND network_id = ?1", fresh.net);
+    expect(base.sent_at).toBe(new Date(T0).toISOString());
+    // 第二天:旧卡仍不发;「开通当天到期」是在基线之后才逾期的 → 发「已逾期 1 天」;明天到期 → 今天到期
+    const next = due.runDueReminders({ now: T0 + DAY });
+    expect(sentFor(next, old)).toEqual([]);
+    expect(sentFor(next, oldTime)).toEqual([]);
+    expect(sentFor(next, today)).toEqual(["overdue"]);
+    expect(sentFor(next, tomorrow)).toEqual(["due_today"]);
+    // 基线行不被保留期清掉
+    due.runDueReminders({ now: T0 + 90 * DAY });
+    expect(db.get("SELECT COUNT(*) AS n FROM requirement_due_reminders WHERE kind = 'baseline' AND network_id = ?1", fresh.net).n).toBe(1);
+  });
+
+  test("白名单后加进来的网络:以加进来那一刻为基线,不补发", async () => {
+    const late = mkNet("late");
+    process.env.COMMHUB_DUE_REMINDER_NETWORKS = NET;
+    try {
+      const old = await cardIn(late, "dr-后加网络旧卡", "2026-10-08");
+      due.runDueReminders({ now: T0 });
+      expect(db.get("SELECT COUNT(*) AS n FROM requirement_due_reminders WHERE kind = 'baseline' AND network_id = ?1", late.net).n).toBe(0);
+      process.env.COMMHUB_DUE_REMINDER_NETWORKS = `${NET},${late.net}`;
+      expect(sentFor(due.runDueReminders({ now: T0 + 3600_000 }), old)).toEqual([]);
+    } finally { delete process.env.COMMHUB_DUE_REMINDER_NETWORKS; }
   });
 });
 

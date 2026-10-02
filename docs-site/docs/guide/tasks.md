@@ -35,7 +35,7 @@ iOS 仍走 TestFlight，公开链接还没开。本页按桌面和 Android 上�
 
 ### 到期提醒
 
-Hub 每 10 分钟查一次没完成、没归档、设了预计完成的任务，提醒负责人和参与人（人），负责 Agent 收到一条不需要回复的消息：
+Hub 每 10 分钟查一次没完成、没归档、设了预计完成的任务，提醒负责人和参与人（人）。打开节点提醒后，负责 Agent 也会收到一条不需要回复的消息：
 
 - **即将到期**：全天任务明天到期，或时刻在 24 小时内。每个预计完成时间提醒一次。
 - **今天到期**：今天到期且还没到。每个预计完成时间提醒一次。
@@ -45,7 +45,16 @@ Hub 每 10 分钟查一次没完成、没归档、设了预计完成的任务，
 
 提醒出现在与负责 Agent 的会话里；没有负责 Agent，或你看不到它时，发信人是「任务提醒」。
 
-运维可以用环境变量调整：`COMMHUB_DUE_REMINDERS=0` 关闭，`COMMHUB_DUE_REMINDER_TICK_MS` 改间隔，`COMMHUB_DUE_REMINDER_TZ` 改时区，`COMMHUB_DUE_OVERDUE_MAX_DAYS` 改逾期提醒的天数上限。
+开通时不补发：每个网络第一次被检查的那一刻记为起点，只有在这之后才逾期的任务会收到「已逾期」提醒。打开这个功能，或把网络加进白名单，都不会把以前的逾期任务一次性提醒一遍。
+
+运维可以用环境变量调整：
+
+- `COMMHUB_DUE_REMINDERS=0`：关闭。
+- `COMMHUB_DUE_REMINDER_NETWORKS=<网络 id,网络 id>`：只提醒这些网络。不设就是所有网络。
+- `COMMHUB_DUE_REMINDER_NODES=1`：也给负责 Agent 发消息。默认不发，只提醒人。
+- `COMMHUB_DUE_REMINDER_TICK_MS`：检查间隔。
+- `COMMHUB_DUE_REMINDER_TZ`：时区。
+- `COMMHUB_DUE_OVERDUE_MAX_DAYS`：逾期提醒的天数上限。
 
 Agent 用 `requirements_list` 查到期任务：`overdue: true` 只列逾期的，`due_within_days: N` 列今天到 N 天后到期、还没逾期的（0 = 今天）。两者都只看没完成的任务。REST 列表用同名参数（`overdue=1`、`due_within_days=N`）。
 
