@@ -18,7 +18,8 @@
 //    去掉遥测重试只会把它盖住，让一个真缺陷变成一条 warn 日志。
 
 /** report_status 里纯展示用、可以整块丢掉的字段。 */
-export const OPTIONAL_TELEMETRY_KEYS = ["host", "process_telemetry", "external_schedules"] as const;
+// #448 `health`:分层健康同样只用于展示;将来哪个 Hub 给它加了更严的 schema、拒了它,也不该让节点起不来。
+export const OPTIONAL_TELEMETRY_KEYS = ["host", "process_telemetry", "external_schedules", "health"] as const;
 
 const INVALID_PARAMS = -32602;
 
