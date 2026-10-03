@@ -77,7 +77,11 @@ probe_plain_batch(){
   rmdir "$prompts_dir"
   mv "$disabled_prompts_dir" "$prompts_dir"
 
-  if [[ "$rc" -ne 0 ]] \
+  # #515 — exit-code convention (0 ok / 1 failure / 2 usage): non-interactive
+  # `create --batch` without --preset prints the fallback routes and exits 2
+  # (usage error; it exited 0 before #515). 2 also keeps it distinct from the
+  # --batch/--runtime conflict refusal above, which exits 1.
+  if [[ "$rc" -ne 2 ]] \
     || grep -Fq -- '--batch 与 --runtime 不能同用' "$log" \
     || ! grep -Fq -- 'vendor selector 不可用' "$log" \
     || ! grep -Fq -- '预设运行时(claude-agent-sdk / claude-code-cli / codex-sdk):用 --preset <model-id>' "$log" \

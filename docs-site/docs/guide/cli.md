@@ -63,6 +63,18 @@ anet node start my-agent
 
 不要把 `--dev-open` 或直接暴露的 `0.0.0.0:9200` 用于生产。公网部署见 [生产部署](/deploy/production)。
 
+<a id="anet-hub-stop"></a>
+**停止 Hub（`anet hub stop`）**：只停**监听在该端口上、且命令行确认是 `commhub-server`** 的进程，不按进程名匹配。找监听进程不依赖 `lsof`：Linux 依次用 `/proc/net/tcp(6)` 的 socket inode 对 `/proc/<pid>/fd`、`ss -ltnp`、`lsof`、`netstat`，macOS 用 `lsof`、`netstat -anv`，Windows 用 `netstat -ano`，取第一条能运行的；都不能运行时，用 `anet hub start` 写的 `~/.anet/server/hub-<port>.pid.json`（PID 已退出或已被别的程序复用时忽略）。输出会列出每条探测的结果、找到的 PID 和命令行，以及实际停掉了哪个 PID。先 SIGTERM，3 秒后仍在则在再次确认命令行后 SIGKILL。
+
+| 情况 | 动作 | 退出码 |
+|---|---|---|
+| 找到 `commhub-server` 并已停止 | 停止 | 0 |
+| 该端口没有监听、`/health` 也不应答 | 不动 | 0 |
+| 端口被别的程序占用，或读不到它的命令行 / 属主 | **拒绝**，打印 PID 和命令行 | 1 |
+| `/health` 有应答，但本机找不到它的 PID（没有任何探测可用，也没有 pid 文件） | 不动，提示用启动它的进程管理器（pm2、systemd 等）停 | 1 |
+| SIGKILL 后进程仍在，或 `/health` 仍有应答 | — | 1 |
+| `--port` 不是合法端口 | — | 2 |
+
 ## 账号、Network 与 Token
 
 ### 账号
@@ -348,6 +360,40 @@ token**，且改完要重启该 daemon 才生效）。
 | `anet license` / `anet activate <key>` | legacy 许可证兼容命令；Apache-2.0 用户通常无需使用 |
 
 旧别名 `anet create`、`anet start` 等仍为兼容保留，新文档统一使用 `anet node ...`。
+
+<a id="exit-codes"></a>
+
+## 退出码
+
+| 退出码 | 含义 |
+|---|---|
+| `0` | 成功；或只打印帮助（例如不带子命令的 `anet node`、`anet network`） |
+| `1` | 失败：未初始化 / 未登录 / 登录已过期、Hub 连不上或返回错误、找不到对象、本地写入失败、拒绝执行 |
+| `2` | 用法错误：缺少必需参数、未知子命令、非法取值 |
+
+脚本和 CI 可以直接用 `anet … || exit 1` 判断。下列情况在 #515 之前打印了错误却退出 0，现已改为非零：
+
+| 命令 | 情况 | 之前 → 现在 |
+|---|---|---|
+| `anet whoami` | 未登录 / 登录已过期 / Hub 连不上 | 0 → 1 |
+| `anet network <ls\|use\|info\|create\|delete\|rename\|invite\|join\|members>` | 未 init / 未登录、Hub 返回错误、找不到 Network、连不上 | 0 → 1 |
+| `anet network create\|use\|delete\|rename\|join`（缺参数）、`anet network <未知子命令>` | 用法错误 | 0 → 2 |
+| `anet token ls\|create\|revoke` | 未登录、Hub 返回错误、连不上 | 0 → 1 |
+| `anet token revoke`（缺 token id） | 用法错误 | 0 → 2 |
+| `anet passwd` | 未登录、两次密码不一致、Hub 拒绝、连不上 | 0 → 1 |
+| `anet activate` | 未 init、激活失败、连不上 / 缺 license key | 0 → 1 / 0 → 2 |
+| `anet status`、`anet tasks` | 没有配置 Hub；`anet tasks` 连不上 | 0 → 1 |
+| `anet hub start` | Hub 15 秒内没起来（含缺 Bun） | 0 → 1 |
+| `anet hub stop` | 见上方 [停止 Hub](#anet-hub-stop) | 0 → 1 / 2 |
+| `anet hub admin reset-user` | 缺 `--username` / 找不到 DB、重置失败 | 0 → 2 / 0 → 1 |
+| `anet hub <未知子命令>`、`anet node <未知子命令>`、`anet session <未知子命令>`、`anet batch <未知动词>` | 用法错误 | 0 → 2 |
+| `anet node resume`（缺节点名）、`anet logs`（缺节点名）、`anet batch <动词>`（缺前缀） | 用法错误 | 0 → 2 |
+| `anet project down`（有节点停失败）、`anet node delete`（节点进程拒绝退出） | 已经设置了退出码 1，但被 CLI 收尾的 `process.exit(0)` 覆盖 | 0 → 1 |
+| `anet upgrade` | 有包升级失败或查不到 registry | 0 → 1 |
+| `anet create --batch`、`anet batch cleanup` | 缺 Hub、预设/参数非法、自动登录失败、一个节点都没建成 | 0 → 1 / 2 |
+| `anet demo …` | 缺 Hub / token / key、建 Network 或节点失败 | 0 → 1 |
+
+一些较早的用法错误路径仍退出 `1`（同样是非零，脚本照样能判断），没有为了统一成 `2` 而改动。`anet hub status` 是状态查询，Hub 没运行时仍退出 `0`。
 
 ## 配置位置与环境变量
 

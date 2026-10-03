@@ -2386,6 +2386,8 @@ import { describeStaleRuntimeSupport } from "../src/daemon-runtime-staleness";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
 import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCurrentLoginSession, sameHub } from "../src/cli-auth-session";
+import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
+import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
 export { normalizeRuntime, type RuntimeName };
 
 function runtimeForExecution(
@@ -8389,7 +8391,7 @@ async function resumeCommand() {
   if (!ref) {
     console.error("Usage: anet node resume <node-name> --session <session-id>");
     console.error("Daily start/resume: anet node start <node-name>");
-    return;
+    markUsageError(); return;
   }
 
   const resolved = resolveNodeRef(ref);
@@ -8604,15 +8606,32 @@ async function runCommand() {
 
 // ── server ──
 
-// #199/#200 — find PIDs listening on a given TCP port (lsof-based). Used by
-// `anet hub stop` / `anet hub status` to identify the running commhub-server
-// process when the user doesn't have it in the foreground.
-function findHubPids(port: string | number): number[] {
+// #515 — pid file `anet hub start` writes for the hub it launched. Only a
+// fallback/cross-check for `anet hub stop` / `status` (see src/hub-stop.ts);
+// a stale file (pid dead, or pid reused by something that is not a
+// commhub-server) is ignored, never trusted.
+function hubPidFilePath(port: number | string): string { return join(home, ".anet", "server", `hub-${port}.pid.json`); }
+function readHubPidFile(port: number): HubPidRecord | null {
   try {
-    const out = execFileSync("lsof", ["-t", "-i", `:${port}`, "-sTCP:LISTEN"], { encoding: "utf-8" }).toString().trim();
-    if (!out) return [];
-    return out.split(/\s+/).map(x => parseInt(x.trim(), 10)).filter(n => !isNaN(n));
-  } catch { return []; }
+    const rec = JSON.parse(readFileSync(hubPidFilePath(port), "utf-8"));
+    if (!Number.isSafeInteger(rec?.pid) || rec.pid <= 1) return null;
+    return rec as HubPidRecord;
+  } catch { return null; }
+}
+function writeHubPidFile(rec: HubPidRecord): void {
+  try {
+    mkdirSync(join(home, ".anet", "server"), { recursive: true });
+    writeFileSync(hubPidFilePath(rec.port), JSON.stringify(rec, null, 2) + "\n", { mode: 0o600 });
+  } catch {}
+}
+function removeHubPidFile(port: number | string): void {
+  try { unlinkSync(hubPidFilePath(port)); } catch {}
+}
+async function hubHealthOk(port: number | string): Promise<boolean> {
+  try {
+    const h = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) }).then(r => r.json() as any);
+    return !!h?.ok;
+  } catch { return false; }
 }
 
 async function serverCommand() {
@@ -8776,6 +8795,7 @@ async function serverCommand() {
           console.error(`  ❌ Server failed to start. Check the bunx output above for the real error.`);
         }
         child?.kill();
+        markFailed(); // #515 — was exit 0: a script running `anet hub start` saw success.
         return;
       }
       console.log(`  ✅ Server running on ${hubUrl} (commhub-server v${serverVersion || "?"})`);
@@ -8796,6 +8816,17 @@ async function serverCommand() {
         console.error(`       npm cache clean --force`);
         console.error(`       anet hub start\n`);
       }
+    }
+
+    // #515 — record the hub we launched so `anet hub stop` can find it even on
+    // a machine where no socket probe (/proc, ss, lsof, netstat) works. Prefer
+    // the verified listener PID; fall back to the launcher's own PID.
+    if (child?.pid) {
+      let listenerPid: number | undefined;
+      try {
+        listenerPid = resolveHubListener(Number(port), defaultHubStopProbes(() => null)).hubPids[0]?.pid;
+      } catch {}
+      writeHubPidFile({ pid: listenerPid ?? child.pid, launcher_pid: child.pid, port: Number(port), started_at: new Date().toISOString() });
     }
 
     // Save hub URL + launch config. Do NOT touch gc.token here — that's owned by login.
@@ -8985,8 +9016,8 @@ async function serverCommand() {
       // Forward server output
       child.stdout?.pipe(process.stdout);
       child.stderr?.pipe(process.stderr);
-      child.on("exit", (code: number) => process.exit(code || 0));
-      process.on("SIGINT", () => { child.kill(); process.exit(0); });
+      child.on("exit", (code: number) => { removeHubPidFile(port); process.exit(code || 0); });
+      process.on("SIGINT", () => { child.kill(); removeHubPidFile(port); process.exit(0); });
     }
 
   } else if (sub === "admin" && args[2] === "reset-user") {
@@ -8994,13 +9025,13 @@ async function serverCommand() {
     const username = opts.username || opts.user;
     if (!username) {
       console.error("Usage: anet hub admin reset-user --username <user>");
-      return;
+      markUsageError(); return;
     }
     const dbPath = commhubDbPath();
     if (!existsSync(dbPath) && opts["i-am-on-the-hub-host"] !== "true") {
       console.error(`[anet] Refusing reset-user: local hub DB not found at ${dbPath}`);
       console.error(`[anet] Run this on the hub host, or pass --i-am-on-the-hub-host if COMMHUB_DB points to the DB.`);
-      return;
+      markFailed(); return;
     }
     const script = `
       import { Database } from "bun:sqlite";
@@ -9028,7 +9059,7 @@ async function serverCommand() {
       const result = JSON.parse(out);
       if (!result.ok) {
         console.error(`[anet] reset-user failed: ${result.error}`);
-        return;
+        markFailed(); return;
       }
       console.log(`[anet] User password reset: ${result.username}`);
       console.log(`[anet] user_id: ${result.user_id}`);
@@ -9037,7 +9068,7 @@ async function serverCommand() {
       console.log(`[anet] revoked utok_: ${result.revoked}`);
       console.log(`[anet] Save this password now; it will not be shown again.`);
     } catch (e: any) {
-      console.error(`[anet] reset-user failed: ${e.message}`);
+      console.error(`[anet] reset-user failed: ${e.message}`); markFailed();
     }
 
   } else if (sub === "config") {
@@ -9211,37 +9242,35 @@ async function serverCommand() {
     }
 
   } else if (sub === "stop") {
-    // #200 — graceful stop: lsof -ti:<port> → SIGTERM each → 3s grace → SIGKILL leftovers.
+    // #200 / #515 — graceful stop of the commhub-server that LISTENS on <port>.
+    // PID comes from a socket probe chain that does not need lsof
+    // (/proc/net/tcp → ss → lsof → netstat; netstat -ano on Windows), with the
+    // pid file `anet hub start` writes as the fallback when no probe can run.
+    // Every PID's command line must read as commhub-server before it is
+    // signalled; anything else on the port is reported and left alone.
+    // Exit: 0 stopped / nothing listening, 1 refused / could not stop.
     const opts = parseOpts();
     const sc = loadServerConfig();
-    const port = String(opts.port || sc.port || "9200");
-    const pids = findHubPids(port);
-    if (pids.length === 0) {
-      console.log(`[anet] No hub server listening on port ${port}.`);
+    const port = Number(opts.port || sc.port || "9200");
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      console.error(`[anet] hub stop: invalid --port ${opts.port}`);
+      markUsageError();
       return;
     }
-    console.log(`[anet] stopping hub (pid ${pids.join(", ")} on port ${port})...`);
-    for (const pid of pids) {
-      try { process.kill(pid, "SIGTERM"); } catch (e: any) {
-        console.warn(`[anet] ⚠ SIGTERM ${pid} failed: ${e?.message || e}`);
-      }
+    const result = await stopHub(port, {
+      probes: defaultHubStopProbes(readHubPidFile),
+      kill: (pid, signal) => { process.kill(pid, signal); },
+      sleep: (ms) => new Promise(r => setTimeout(r, ms)),
+      healthy: () => hubHealthOk(port),
+      log: (line) => console.log(line),
+      error: (line) => console.error(line),
+    });
+    if (result.code === 0) {
+      const rec = readHubPidFile(port);
+      if (rec && (result.killed.includes(rec.pid) || !pidAlive(rec.pid))) removeHubPidFile(port);
+    } else {
+      markFailed();
     }
-    const deadline = Date.now() + 3000;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 250));
-      if (findHubPids(port).length === 0) {
-        console.log(`[anet] ✅ Stopped.`);
-        return;
-      }
-    }
-    const leftover = findHubPids(port);
-    for (const pid of leftover) {
-      try { process.kill(pid, "SIGKILL"); } catch {}
-    }
-    await new Promise(r => setTimeout(r, 500));
-    const remaining = findHubPids(port);
-    if (remaining.length === 0) console.log(`[anet] ✅ Stopped (after SIGKILL).`);
-    else console.error(`[anet] ⚠ Hub pid(s) ${remaining.join(", ")} still on port ${port}; check manually.`);
 
   } else if (sub === "status") {
     // #200 + #214 维度 1 / F7-04 — show hub running state.
@@ -9268,25 +9297,16 @@ async function serverCommand() {
       if (h.ok) { healthy = true; version = h.version || "?"; }
     } catch {}
 
-    // Sanity-filter: dedup + drop implausible PIDs (Linux PID_MAX_LIMIT ≤
-    // 2^22 = 4194304). Some lsof builds emit fd numbers interleaved with
-    // PIDs when the format string is unexpected; the filter limits visible
-    // damage even if the env returns garbage.
-    const pidsRaw = findHubPids(port);
-    const pids = [...new Set(pidsRaw)].filter(p => Number.isInteger(p) && p > 0 && p < 4_194_304);
-    // A real commhub-server is 1 process. If lsof reports >5 distinct PIDs
-    // on the same port, the environment's lsof (e.g. busybox on alpine) is
-    // streaming garbage; show only a hint of the count instead of a
-    // misleading list.
-    const pidsDisplay = pids.length > 5
-      ? `${pids.slice(0, 3).join(", ")}, ... (+${pids.length - 3} more — lsof in this environment may be returning extra fd numbers)`
-      : pids.join(", ");
+    // #515 — same lsof-free probe chain as `hub stop` (src/hub-stop.ts).
+    const resolution = resolveHubListener(Number(port), defaultHubStopProbes(readHubPidFile));
+    const pids = [...new Set([...resolution.hubPids, ...resolution.refused].map(c => c.pid))];
+    const pidsDisplay = pids.join(", ");
 
     if (healthy) {
       console.log(`[anet] ✅ hub running on http://127.0.0.1:${port}`);
       console.log(`[anet]   server version: commhub-server v${version}`);
       if (pids.length > 0) console.log(`[anet]   pid(s):         ${pidsDisplay}`);
-      else console.log(`[anet]   pid(s):         (lsof unavailable in this environment — health check is authoritative)`);
+      else console.log(`[anet]   pid(s):         (${resolution.authority ? `${resolution.authority} shows no listener pid` : "no /proc, ss, lsof or netstat here"} — health check is authoritative)`);
     } else if (pids.length > 0) {
       console.log(`[anet] ⚠ port ${port} held but /health not OK on http://127.0.0.1:${port}`);
       console.log(`[anet]   pid(s):         ${pidsDisplay}`);
@@ -9299,6 +9319,7 @@ async function serverCommand() {
 
   } else {
     printHubHelp();
+    markUsageError(); // #515 — unknown `anet hub <sub>` (bare `anet hub` is `start`)
   }
 }
 
@@ -9951,6 +9972,7 @@ function sessionCommand() {
     console.log();
   } else {
     printSessionUsage();
+    markUsageError(); // #515 — unknown `anet session <sub>`
   }
 }
 
@@ -13275,6 +13297,9 @@ async function upgradeCommand() {
   const selfSkipped = selfPlan.action === "self-skip";
   const summary = `${upgraded} upgraded, ${upToDate} up-to-date, ${lazy} lazy${failed ? `, ${failed} failed` : ""}${selfSkipped ? ", 1 NEEDS MANUAL UPGRADE (anet self)" : ""}`;
   console.log(`\n[anet] Done. ${summary}.`);
+  // #515 — a package that failed to upgrade (or whose registry lookup failed)
+  // is a failure: exit 1 so `anet upgrade && …` does not proceed.
+  if (failed > 0) markFailed();
   if (selfSkipped) {
     console.log(`\n  ⚠️ anet CLI itself was NOT upgraded. Run this in a fresh shell:`);
     console.log(`      npm install -g @sleep2agi/agent-network@${channel}`);
@@ -13295,7 +13320,7 @@ async function upgradeCommand() {
 async function statusCommand() {
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!hub) { console.log("No hub configured. Run: anet init"); return; }
+  if (!hub) { console.log("No hub configured. Run: anet init"); markFailed(); return; }
 
   try {
     // #473: this summary line needs only the COUNT, so read the anonymous
@@ -13402,7 +13427,7 @@ async function statusCommand() {
       console.log();
     }
   } catch (e: any) {
-    console.error(`Failed to connect to ${hub}: ${e.message}`);
+    console.error(`Failed to connect to ${hub}: ${e.message}`); markFailed();
   }
 }
 
@@ -13411,7 +13436,7 @@ async function statusCommand() {
 async function tasksCommand() {
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!hub) { console.log("No hub configured. Run: anet init"); return; }
+  if (!hub) { console.log("No hub configured. Run: anet init"); markFailed(); return; }
   const opts = parseOpts();
   const status = opts.status || args[1];
   const limit = opts.limit || "20";
@@ -13453,7 +13478,7 @@ async function tasksCommand() {
     }
     console.log(`\n  Filter: anet tasks replied | anet tasks failed | anet tasks --status delivered\n`);
   } catch (e: any) {
-    console.error(friendlyError(e));
+    console.error(friendlyError(e)); markFailed();
   }
 }
 
@@ -14171,11 +14196,11 @@ async function whoamiCommand() {
   const gc = loadGlobal();
   const hub = gc.hub;
   const token = gc.token;
-  if (!hub || !token) { console.log("Not logged in. Run: anet login"); return; }
+  if (!hub || !token) { console.log("Not logged in. Run: anet login"); markFailed(); return; }
 
   try {
     const res = await fetch(`${hub}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json() as any);
-    if (!res.ok) { console.log("Session expired. Run: anet login"); return; }
+    if (!res.ok) { console.log("Session expired. Run: anet login"); markFailed(); return; }
     console.log(`\n  User: ${res.user.username} (${res.user.user_id})`);
     console.log(`  Role: ${res.user.role}`);
     console.log(`  Hub:  ${hub}`);
@@ -14187,7 +14212,7 @@ async function whoamiCommand() {
       }
     }
     console.log();
-  } catch (e: any) { console.error(friendlyError(e)); }
+  } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
 }
 
 // ── network ──
@@ -14219,15 +14244,15 @@ async function networkCommand() {
   const hub = gc.hub;
   const token = gc.token;
 
-  if (!hub) { console.error("Run 'anet init' first."); return; }
-  if (!token) { console.error("Run 'anet login' first."); return; }
+  if (!hub) { console.error("Run 'anet init' first."); markFailed(); return; }
+  if (!token) { console.error("Run 'anet login' first."); markFailed(); return; }
 
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
   if (sub === "create") {
     const name = args[2];
     const opts = parseOpts();
-    if (!name) { console.log("Usage: anet network create <name> [--description <desc>]"); return; }
+    if (!name) { console.log("Usage: anet network create <name> [--description <desc>]"); markUsageError(); return; }
     try {
       const res = await fetch(`${hub}/api/networks`, {
         method: "POST", headers,
@@ -14236,16 +14261,16 @@ async function networkCommand() {
       if (res.ok) {
         console.log(`[anet] Network "${name}" created (${res.network_id})`);
       } else {
-        console.error(`Failed: ${res.error}`);
+        console.error(`Failed: ${res.error}`); markFailed();
       }
-    } catch (e: any) { console.error(friendlyError(e)); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "ls" || sub === "list" || !sub) {
     try {
       const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
-      if (!res.ok) { console.error(res.error); return; }
+      if (!res.ok) { console.error(res.error); markFailed(); return; }
       if (!res.networks?.length) { console.log("\n  No networks. Create one: anet network create <name>\n"); return; }
       console.log("\n  Networks:\n");
       const roleIcon: Record<string, string> = { owner: "⭐", admin: "🔧", member: "👤", viewer: "👁" };
@@ -14256,31 +14281,31 @@ async function networkCommand() {
         console.log(`  ${icon} ${padDisplayEnd(n.network_name, 18)} ${role.padEnd(10)} ${n.network_id.slice(0, 12)}${current}`);
       }
       console.log();
-    } catch (e: any) { console.error(friendlyError(e)); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "use") {
     const name = args[2];
-    if (!name) { console.log("Usage: anet network use <name>"); return; }
+    if (!name) { console.log("Usage: anet network use <name>"); markUsageError(); return; }
     try {
       const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
       const net = res.networks?.find((n: any) => n.network_name === name || n.network_id === name);
-      if (!net) { console.error(`Network "${name}" not found.`); return; }
+      if (!net) { console.error(`Network "${name}" not found.`); markFailed(); return; }
       gc.network_id = net.network_id;
       gc.network_name = net.network_name;
       saveGlobal(gc);
       console.log(`[anet] Switched to network "${net.network_name}" (${net.network_id.slice(0, 12)})`);
-    } catch (e: any) { console.error(friendlyError(e)); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "info") {
     const netId = gc.network_id;
-    if (!netId) { console.log("No network selected. Run: anet network use <name>"); return; }
+    if (!netId) { console.log("No network selected. Run: anet network use <name>"); markFailed(); return; }
     try {
       const detail = await fetch(`${hub}/api/networks/${netId}`, { headers }).then(r => r.json() as any);
-      if (!detail.ok) { console.error(detail.error); return; }
+      if (!detail.ok) { console.error(detail.error); markFailed(); return; }
       const n = detail.network;
       const s = detail.stats;
       console.log(`\n  Network: ${n.network_name}`);
@@ -14296,18 +14321,18 @@ async function networkCommand() {
         for (const t of s.tasks) console.log(`      ${t.status}: ${t.count}`);
       }
       console.log();
-    } catch (e: any) { console.error(friendlyError(e)); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "delete") {
     const name = args[2];
-    if (!name) { console.log("Usage: anet network delete <name> --force"); return; }
+    if (!name) { console.log("Usage: anet network delete <name> --force"); markUsageError(); return; }
     const opts2 = parseOpts();
     try {
       const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
       const net = res.networks?.find((n: any) => n.network_name === name || n.network_id === name);
-      if (!net) { console.error(`Network "${name}" not found.`); return; }
+      if (!net) { console.error(`Network "${name}" not found.`); markFailed(); return; }
       if (opts2.force !== "true") {
         console.log(`[anet] This will delete network "${net.network_name}" (${net.network_id})`);
         console.log(`[anet] Run again with --force to confirm.`);
@@ -14317,32 +14342,32 @@ async function networkCommand() {
       if (del.ok) {
         console.log(`[anet] Network "${net.network_name}" deleted`);
         if (gc.network_id === net.network_id) { delete gc.network_id; delete gc.network_name; saveGlobal(gc); }
-      } else { console.error(`Failed: ${del.error}`); }
-    } catch (e: any) { console.error(friendlyError(e)); }
+      } else { console.error(`Failed: ${del.error}`); markFailed(); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "rename") {
     const name = args[2];
     const newName = args[3];
-    if (!name || !newName) { console.log("Usage: anet network rename <current-name> <new-name>"); return; }
+    if (!name || !newName) { console.log("Usage: anet network rename <current-name> <new-name>"); markUsageError(); return; }
     try {
       const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
       const net = res.networks?.find((n: any) => n.network_name === name || n.network_id === name);
-      if (!net) { console.error(`Network "${name}" not found.`); return; }
+      if (!net) { console.error(`Network "${name}" not found.`); markFailed(); return; }
       const rename = await fetch(`${hub}/api/networks/${net.network_id}`, { method: "PUT", headers, body: JSON.stringify({ name: newName }) }).then(r => r.json() as any);
       if (rename.ok) {
         console.log(`[anet] Renamed "${name}" → "${newName}"`);
         if (gc.network_id === net.network_id) { gc.network_name = newName; saveGlobal(gc); }
-      } else { console.error(`Failed: ${rename.error}`); }
-    } catch (e: any) { console.error(friendlyError(e)); }
+      } else { console.error(`Failed: ${rename.error}`); markFailed(); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "invite") {
     const opts = parseOpts();
     const netId = gc.network_id;
-    if (!netId) { console.error("No network selected. Run: anet network use <name>"); return; }
+    if (!netId) { console.error("No network selected. Run: anet network use <name>"); markFailed(); return; }
     const role = opts.role || "member";
     const maxUses = parseInt(opts.uses || "1", 10);
     const expiresDays = opts.expires ? parseInt(opts.expires, 10) : undefined;
@@ -14359,14 +14384,14 @@ async function networkCommand() {
         if (expiresDays) console.log(`  Expires:     ${expiresDays} days`);
         console.log(`\n  Share this with the invitee:`);
         console.log(`  anet network join ${res.invite_code}\n`);
-      } else { console.error(`Failed: ${res.error}`); }
-    } catch (e: any) { console.error(friendlyError(e)); }
+      } else { console.error(`Failed: ${res.error}`); markFailed(); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "join") {
     const code = args[2];
-    if (!code) { console.log("Usage: anet network join <invite-code>"); return; }
+    if (!code) { console.log("Usage: anet network join <invite-code>"); markUsageError(); return; }
     try {
       const res = await fetch(`${hub}/api/networks/join`, {
         method: "POST", headers,
@@ -14382,28 +14407,29 @@ async function networkCommand() {
         saveGlobal(gc);
         console.log(`[anet] Joined network "${gc.network_name || res.network_id}" as ${res.role}`);
         console.log(`[anet] Switched to this network.`);
-      } else { console.error(`Failed: ${res.error}`); }
-    } catch (e: any) { console.error(friendlyError(e)); }
+      } else { console.error(`Failed: ${res.error}`); markFailed(); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "members") {
     const netId = gc.network_id;
-    if (!netId) { console.error("No network selected. Run: anet network use <name>"); return; }
+    if (!netId) { console.error("No network selected. Run: anet network use <name>"); markFailed(); return; }
     try {
       const res = await fetch(`${hub}/api/networks/${netId}/members`, { headers }).then(r => r.json() as any);
-      if (!res.ok) { console.error(res.error); return; }
+      if (!res.ok) { console.error(res.error); markFailed(); return; }
       console.log(`\n  Members of ${gc.network_name || netId}:\n`);
       const roleIcon: Record<string, string> = { owner: "⭐", admin: "🔧", member: "👤", viewer: "👁" };
       for (const m of res.members) {
         console.log(`  ${roleIcon[m.role] || "?"} ${padDisplayEnd(String(m.display_name || m.username), 16)} ${m.role.padEnd(8)} joined ${m.joined_at?.slice(0, 10) || "?"}`);
       }
       console.log();
-    } catch (e: any) { console.error(friendlyError(e)); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   printNetworkUsage();
+  markUsageError(); // #515 — unknown `anet network <sub>`
 }
 
 // ── logs ──
@@ -14412,7 +14438,7 @@ function logsCommand() {
   const ref = args[1];
   if (!ref) {
     console.log("\nanet logs <node-name>   Show recent agent logs\nanet logs <node-name> --follow   Tail logs\n");
-    return;
+    markUsageError(); return;
   }
   const resolved = resolveNodeRef(ref);
   if (!resolved) { console.error(nodeNotFound(ref)); process.exit(1); }
@@ -14467,7 +14493,7 @@ anet token <command>
   const gc = loadGlobal();
   const hub = gc.hub;
   const token = gc.token;
-  if (!hub || !token) { console.error("Not logged in. Run: anet login"); return; }
+  if (!hub || !token) { console.error("Not logged in. Run: anet login"); markFailed(); return; }
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
   if (sub === "create") {
@@ -14479,26 +14505,26 @@ anet token <command>
         console.log(`  Name: ${name}`);
         console.log(`  ID:   ${res.token_id}`);
         console.log(`\n  ⚠ Save this token — it won't be shown again!\n`);
-      } else { console.error(`Failed: ${res.error}`); }
-    } catch (e: any) { console.error(friendlyError(e)); }
+      } else { console.error(`Failed: ${res.error}`); markFailed(); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   if (sub === "revoke") {
     const tokenId = args[2];
-    if (!tokenId) { console.log("Usage: anet token revoke <token-id>"); return; }
+    if (!tokenId) { console.log("Usage: anet token revoke <token-id>"); markUsageError(); return; }
     try {
       const res = await fetch(`${hub}/api/auth/tokens/${tokenId}`, { method: "DELETE", headers }).then(r => r.json() as any);
       if (res.ok) console.log(`  ✅ Token ${tokenId} revoked`);
-      else console.error(`Failed: ${res.error}`);
-    } catch (e: any) { console.error(friendlyError(e)); }
+      else { console.error(`Failed: ${res.error}`); markFailed(); }
+    } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
 
   // Default: list tokens (same as "ls")
   try {
     const res = await fetch(`${hub}/api/auth/tokens`, { headers }).then(r => r.json() as any);
-    if (!res.ok) { console.error(res.error); return; }
+    if (!res.ok) { console.error(res.error); markFailed(); return; }
     if (!res.tokens?.length) { console.log("\n  No tokens. Create one: anet token create <name>\n"); return; }
     console.log("\n  API Tokens:\n");
     // 🔴 表头里 ID 留 20 列,数据行却是 padEnd(22) —— 整张表从第二列起就错开 2。
@@ -14516,7 +14542,7 @@ anet token <command>
       console.log(`  ${padDisplayEnd(String(t.token_id || "?"), tW.id)} ${padDisplayEnd(String(t.name || "?"), tW.name)} ${padDisplayEnd(String(t.created_at || "?"), tW.created)} ${t.last_used_at || "never"}`);
     }
     console.log();
-  } catch (e: any) { console.error(friendlyError(e)); }
+  } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
 }
 
 // ── passwd ──
@@ -14525,7 +14551,7 @@ async function passwdCommand() {
   const gc = loadGlobal();
   const hub = gc.hub;
   const token = gc.token;
-  if (!hub || !token) { console.error("Not logged in. Run: anet login"); return; }
+  if (!hub || !token) { console.error("Not logged in. Run: anet login"); markFailed(); return; }
 
   const opts = parseOpts();
   const oldPw = opts["old-password"] || opts.old || await ask("Current password");
@@ -14536,12 +14562,12 @@ async function passwdCommand() {
     if (newPw !== confirmPw) {
       closeRL();
       console.error("[anet] Failed: passwords do not match");
-      return;
+      markFailed(); return;
     }
   }
   closeRL();
 
-  if (!oldPw || !newPw) { console.error("Both passwords required."); return; }
+  if (!oldPw || !newPw) { console.error("Both passwords required."); markFailed(); return; }
 
   try {
     const res = await fetch(`${hub}/api/auth/password`, {
@@ -14558,9 +14584,9 @@ async function passwdCommand() {
       console.log("[anet] Password changed successfully.");
       if (res.token) console.log("[anet] Login token rotated and saved.");
     } else {
-      console.error(`[anet] Failed: ${res.error}`);
+      console.error(`[anet] Failed: ${res.error}`); markFailed();
     }
-  } catch (e: any) { console.error(friendlyError(e)); }
+  } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
 }
 
 // ── demo ──
@@ -14717,8 +14743,8 @@ async function demoDebateCommand() {
 
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); return; }
-  if (!gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); return; }
+  if (!hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); markFailed(); return; }
+  if (!gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); markFailed(); return; }
 
   let topic = opts.topic || "";
   if (!topic) {
@@ -14731,12 +14757,12 @@ async function demoDebateCommand() {
       });
     });
   }
-  if (!topic) { console.error("  ❌ 议题不能为空."); return; }
+  if (!topic) { console.error("  ❌ 议题不能为空."); markFailed(); return; }
 
   const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
   if (!minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
-    return;
+    markFailed(); return;
   }
 
   const stepTimeout = parseInt(opts["step-timeout"] || "360", 10) * 1000;
@@ -14764,7 +14790,7 @@ async function demoDebateCommand() {
       networkId = await resolvePrimaryNetwork(hub, authHeaders());
     } catch (e: any) {
       console.error(`  ❌ ${e?.message || "无法读取当前 network"}`);
-      return;
+      markFailed(); return;
     }
     networkLabel = `(current network)`;
   } else {
@@ -14778,14 +14804,14 @@ async function demoDebateCommand() {
       }).then(r => r.json() as any);
       if (!r?.ok || !r.network_id) {
         console.error(`  ❌ 创建 network 失败: ${r?.error || "unknown"}. 用 --no-network 退到 default 或 --network <id> 指定.`);
-        return;
+        markFailed(); return;
       }
       createdNetworkId = r.network_id;
       networkId = createdNetworkId;
       networkLabel = `(${netName} ${createdNetworkId.slice(0, 16)})`;
     } catch (e: any) {
       console.error(`  ❌ 创建 network 抛出异常: ${e.message}. 用 --no-network 退到 default.`);
-      return;
+      markFailed(); return;
     }
   }
 
@@ -14848,7 +14874,7 @@ async function demoDebateCommand() {
           console.error(`     ❌ create ${alias}: ${e.message}`);
           restoreNetwork();
           delete process.env.ANET_INTERNAL_KEEP_PROCESS;
-          return;
+          markFailed(); return;
         }
       }
       // Inject systemPrompt for this role
@@ -14873,7 +14899,7 @@ async function demoDebateCommand() {
       startNodeTmuxSession(sessName, alias);
     } catch (e: any) {
       console.error(`     ❌ tmux ${alias}: ${e.message}`);
-      return;
+      markFailed(); return;
     }
   }
 
@@ -15116,8 +15142,8 @@ async function demoSocialMediaCommand() {
 
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); return; }
-  if (!gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); return; }
+  if (!hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); markFailed(); return; }
+  if (!gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); markFailed(); return; }
 
   let topic = opts.topic || "";
   if (!topic) {
@@ -15130,18 +15156,18 @@ async function demoSocialMediaCommand() {
       });
     });
   }
-  if (!topic) { console.error("  ❌ 主题不能为空."); return; }
+  if (!topic) { console.error("  ❌ 主题不能为空."); markFailed(); return; }
 
   const platform = (opts.platform || "xiaohongshu").toLowerCase();
   if (!SOCIAL_PLATFORMS.includes(platform as any)) {
     console.error(`  ❌ 平台 "${platform}" 不支持. 可选: ${SOCIAL_PLATFORMS.join(", ")}`);
-    return;
+    markUsageError(); return;
   }
 
   const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
   if (!minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=...");
-    return;
+    markFailed(); return;
   }
 
   const stepTimeout = parseInt(opts["step-timeout"] || "360", 10) * 1000;
@@ -15163,7 +15189,7 @@ async function demoSocialMediaCommand() {
       networkId = await resolvePrimaryNetwork(hub, authHeaders());
     } catch (e: any) {
       console.error(`  ❌ ${e?.message || "无法读取当前 network"}`);
-      return;
+      markFailed(); return;
     }
     networkLabel = `(current network)`;
   } else {
@@ -15176,14 +15202,14 @@ async function demoSocialMediaCommand() {
       }).then(r => r.json() as any);
       if (!r?.ok || !r.network_id) {
         console.error(`  ❌ 创建 network 失败: ${r?.error || "unknown"}.`);
-        return;
+        markFailed(); return;
       }
       createdNetworkId = r.network_id;
       networkId = createdNetworkId;
       networkLabel = `(${netName} ${createdNetworkId.slice(0, 16)})`;
     } catch (e: any) {
       console.error(`  ❌ 创建 network 抛出异常: ${e.message}.`);
-      return;
+      markFailed(); return;
     }
   }
 
@@ -15235,7 +15261,7 @@ async function demoSocialMediaCommand() {
           console.error(`     ❌ create ${alias}: ${e.message}`);
           restoreNetwork();
           delete process.env.ANET_INTERNAL_KEEP_PROCESS;
-          return;
+          markFailed(); return;
         }
       }
       const cfgPath = join(nodesRoot, alias, "config.json");
@@ -15258,7 +15284,7 @@ async function demoSocialMediaCommand() {
       startNodeTmuxSession(sessName, alias);
     } catch (e: any) {
       console.error(`     ❌ tmux ${alias}: ${e.message}`);
-      return;
+      markFailed(); return;
     }
   }
 
@@ -15629,8 +15655,8 @@ async function demoPrReviewCommand() {
   const mockRepliesFile = process.env.MOCK_LLM_REPLIES_FILE ?? "";
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!mockMode && !hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); return; }
-  if (!mockMode && !gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); return; }
+  if (!mockMode && !hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); markFailed(); return; }
+  if (!mockMode && !gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); markFailed(); return; }
 
   // 1. Resolve diff source
   let diff = "";
@@ -15641,7 +15667,7 @@ async function demoPrReviewCommand() {
     diffSource = r.source;
   } catch (e: any) {
     console.error(`  ❌ ${e.message}`);
-    return;
+    markFailed(); return;
   }
   const diffBytes = Buffer.byteLength(diff, "utf-8");
   const diffKb = (diffBytes / 1024).toFixed(1);
@@ -15652,7 +15678,7 @@ async function demoPrReviewCommand() {
   const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
   if (!mockMode && !minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
-    return;
+    markFailed(); return;
   }
 
   const stepTimeout = parseInt(opts["step-timeout"] || "180", 10) * 1000;
@@ -15704,7 +15730,7 @@ async function demoPrReviewCommand() {
       networkId = await resolvePrimaryNetwork(hub, authHeaders());
     } catch (e: any) {
       console.error(`  ❌ ${e?.message || "无法读取当前 network"}`);
-      return;
+      markFailed(); return;
     }
     networkLabel = `(current network)`;
   } else {
@@ -15718,14 +15744,14 @@ async function demoPrReviewCommand() {
       }).then(r => r.json() as any);
       if (!r?.ok || !r.network_id) {
         console.error(`  ❌ 创建 network 失败: ${r?.error || "unknown"}. 用 --no-network 退到 default 或 --network <id> 指定.`);
-        return;
+        markFailed(); return;
       }
       createdNetworkId = r.network_id;
       networkId = createdNetworkId;
       networkLabel = `(${netName} ${createdNetworkId.slice(0, 16)})`;
     } catch (e: any) {
       console.error(`  ❌ 创建 network 抛出异常: ${e.message}.`);
-      return;
+      markFailed(); return;
     }
   }
 
@@ -15772,7 +15798,7 @@ async function demoPrReviewCommand() {
           console.error(`     ❌ create ${alias}: ${e.message}`);
           restoreNetwork();
           delete process.env.ANET_INTERNAL_KEEP_PROCESS;
-          return;
+          markFailed(); return;
         }
       }
       const cfgPath = join(nodesRoot, alias, "config.json");
@@ -15796,7 +15822,7 @@ async function demoPrReviewCommand() {
       startNodeTmuxSession(sessName, alias);
     } catch (e: any) {
       console.error(`     ❌ tmux ${alias}: ${e.message}`);
-      return;
+      markFailed(); return;
     }
   }
   for (let i = 0; i < 30; i++) {
@@ -16016,14 +16042,14 @@ async function demoSciTeamCommand() {
   const gc = loadGlobal();
   if (!gc.hub) {
     console.error("[anet] 未找到 CommHub Server。先运行 'anet hub start' 或 'anet init --hub <url>'");
-    return;
+    markFailed(); return;
   }
 
   const internApiKey = opts["intern-api"] || opts["api-key"] || process.env.INTERN_API_KEY || await ask("书生 (Intern) API key");
   if (!internApiKey) {
     closeRL();
     console.error("[anet] 需要 Intern API key. 申请页: https://chat.intern-ai.org.cn/");
-    return;
+    markFailed(); return;
   }
 
   const countStr = opts.count || await ask("军团人数 (5-50)", "10");
@@ -16054,7 +16080,7 @@ async function demoSciTeamCommand() {
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);
-      return;
+      markFailed(); return;
     }
     gc.token = loginRes.token;
     gc.user = loginRes.user;
@@ -16094,7 +16120,7 @@ async function demoSciTeamCommand() {
 
   if (result.createdAliases.length === 0) {
     console.error("\n[anet] 没有任何 node 创建成功，退出。");
-    return;
+    markFailed(); return;
   }
 
   console.log(`\n[anet] 🏁 科研军团 ready.`);
@@ -16362,14 +16388,14 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
   if (verb === "cleanup") {
     if (!workdir) {
       console.error("[anet] cleanup 需要 --workdir <path> 指明清理目录。");
-      return;
+      markUsageError(); return;
     }
     // Use the same one-time expansion as createBatch. Besides matching create,
     // this prevents cleanup from treating a literal `~/...` as cwd-relative.
     const dir = normalizeBatchWorkdir(workdir);
     if (!existsSync(dir)) {
       console.error(`[anet] 工作目录不存在: ${dir}`);
-      return;
+      markFailed(); return;
     }
     const subdirs = readdirSync(dir).filter(name => name.startsWith("node") && statSync(join(dir, name)).isDirectory());
     for (const sub of subdirs) {
@@ -16462,7 +16488,7 @@ async function createBatchWizardCommand() {
   const gc = loadGlobal();
   if (!gc.hub) {
     console.error("[anet] 未找到 CommHub Server。先运行 'anet hub start' 或 'anet init --hub <url>'");
-    return;
+    markFailed(); return;
   }
 
   // 1. Vendor + model (vendor-first, #104-B B2.3)
@@ -16497,7 +16523,7 @@ async function createBatchWizardCommand() {
     if (!sel) {
       closeRL();
       console.error(`[anet] Unknown --preset: ${opts.preset}. 见 --help 的 vendor / model 列表。`);
-      return;
+      markUsageError(); return;
     }
     runtime = sel.runtime; model = sel.model; baseUrl = sel.baseUrl;
     requiresAuth = sel.requiresAuth;
@@ -16513,7 +16539,8 @@ async function createBatchWizardCommand() {
       console.error(`[anet]   预设运行时(claude-agent-sdk / claude-code-cli / codex-sdk):用 --preset <model-id>`);
       console.error(`[anet]   其它运行时(opencode-cli / grok-build-acp / grok-build-cli / codex-app-server):`);
       console.error(`[anet]     去掉 --batch,用 anet node create <name> --runtime <runtime>`);
-      return;
+      // #515 — non-interactive and no --preset: the caller must pass an argument → usage error (2).
+      markUsageError(); return;
     }
     runtime = sel.runtime; model = sel.model; baseUrl = sel.baseUrl;
     requiresAuth = sel.requiresAuth;
@@ -16537,7 +16564,7 @@ async function createBatchWizardCommand() {
     if (!apiKey) {
       closeRL();
       console.error("[anet] API key required.");
-      return;
+      markFailed(); return;
     }
   }
 
@@ -16552,7 +16579,7 @@ async function createBatchWizardCommand() {
     if (workdirMode !== "separate" && workdirMode !== "shared") {
       closeRL();
       console.error(`[anet] --workdir-mode must be 'separate' or 'shared', got: ${workdirMode}`);
-      return;
+      markUsageError(); return;
     }
   } else {
     try {
@@ -16630,7 +16657,7 @@ async function createBatchWizardCommand() {
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);
-      return;
+      markFailed(); return;
     }
     gc.token = loginRes.token;
     gc.user = loginRes.user;
@@ -16665,7 +16692,7 @@ async function createBatchWizardCommand() {
 
   if (result.createdAliases.length === 0) {
     console.error(`\n[anet] No nodes created.`);
-    return;
+    markFailed(); return;
   }
   console.log(`\n[anet] 🏁 Batch '${prefix}' ready. ${result.createdAliases.length} node launched.`);
   if (result.failedAliases.length > 0) {
@@ -16705,7 +16732,7 @@ async function batchCommand() {
   const validVerbs = ["start", "stop", "restart", "cleanup", "list"] as const;
   if (!(validVerbs as readonly string[]).includes(verb)) {
     console.error(`[anet] Unknown batch verb '${verb}'. Valid: ${validVerbs.join(" / ")}`);
-    return;
+    markUsageError(); return;
   }
 
   if (verb === "list") {
@@ -16715,7 +16742,7 @@ async function batchCommand() {
   const prefix = args[2];
   if (!prefix) {
     console.error(`[anet] Usage: anet batch ${verb} <prefix>`);
-    return;
+    markUsageError(); return;
   }
   const opts = parseOpts();
   const workdir = opts.workdir;
@@ -16968,12 +16995,12 @@ async function licenseCommand() {
 async function activateCommand() {
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!hub) { console.error("Run 'anet init' first."); return; }
+  if (!hub) { console.error("Run 'anet init' first."); markFailed(); return; }
 
   const key = args[1];
   if (!key) {
     console.log("\nUsage: anet activate <license-key>\n\nExample: anet activate anet-XXXX-XXXX-XXXX-XXXX\n");
-    return;
+    markUsageError(); return;
   }
 
   try {
@@ -16987,9 +17014,9 @@ async function activateCommand() {
       console.log(`\n  ✅ License activated: ${res.type.toUpperCase()}`);
       console.log(`  Valid for ${res.expires_in_days} days\n`);
     } else {
-      console.error(`  ❌ Activation failed: ${res.error}\n`);
+      console.error(`  ❌ Activation failed: ${res.error}\n`); markFailed();
     }
-  } catch (e: any) { console.error(friendlyError(e)); }
+  } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
 }
 
 // ── doctor (diagnostic) ──
@@ -17643,6 +17670,8 @@ switch (command) {
           }
         }
         console.log(`Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
+        // #515 — an unknown `anet node <sub>` is a usage error; bare `anet node` is a help request.
+        if (sub) markUsageError();
         break;
       }
     }
@@ -17730,8 +17759,12 @@ switch (command) {
 // means Node v24's strict ESM checker has nothing to scan. We exit
 // explicitly in both branches so readline / @inquirer signal handlers
 // don't keep the event loop alive past the dispatch.
+//
+// #515 — the success branch must exit with the code a command recorded
+// (markFailed / markUsageError / process.exitCode). A literal process.exit(0)
+// here overrode every `process.exitCode = 1` and made those failures exit 0.
 main().then(
-  () => { if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0); },
+  () => { if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(finalExitCode()); },
   (err: any) => {
     // #237 — Friendly classification for unhandled fetch errors. Replaces
     // the bare "FATAL: TypeError: fetch failed + 10-line Node stack" output

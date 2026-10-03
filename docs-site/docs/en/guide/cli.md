@@ -63,6 +63,18 @@ Common start options:
 
 Do not use `--dev-open` or expose `0.0.0.0:9200` directly in production. See [Production deployment](/en/deploy/production).
 
+<a id="anet-hub-stop"></a>
+**Stopping the Hub (`anet hub stop`)**: it only stops a process that **listens on that port and whose command line reads as `commhub-server`**; it never matches processes by name. Finding the listener does not need `lsof`: on Linux it tries `/proc/net/tcp(6)` socket inodes against `/proc/<pid>/fd`, then `ss -ltnp`, `lsof`, `netstat`; on macOS `lsof`, then `netstat -anv`; on Windows `netstat -ano`. The first one that can run decides. When none can run, it uses `~/.anet/server/hub-<port>.pid.json`, written by `anet hub start` (ignored if that PID has exited or now belongs to another program). The output lists every probe's result, the PID and command line it found, and which PID it actually stopped. It sends SIGTERM, and after 3 seconds SIGKILL to a survivor whose command line still reads as `commhub-server`.
+
+| Case | Action | Exit code |
+|---|---|---|
+| `commhub-server` found and stopped | stopped | 0 |
+| nothing listening on the port and `/health` does not answer | nothing | 0 |
+| the port belongs to another program, or its command line / owner cannot be read | **refused**; prints the PID and command line | 1 |
+| `/health` answers but its PID cannot be found on this machine (no probe works and no pid file) | nothing; tells you to stop it from the process manager that started it (pm2, systemd, …) | 1 |
+| still running after SIGKILL, or `/health` still answers | — | 1 |
+| `--port` is not a valid port | — | 2 |
+
 ## Accounts, Networks, and tokens
 
 ### Accounts
@@ -356,6 +368,40 @@ Resume a co-presence node with `anet node start <name> --copresence`; do not rep
 | `anet license` / `anet activate <key>` | Legacy license compatibility; Apache-2.0 users normally do not need these |
 
 Legacy aliases such as `anet create` and `anet start` remain for compatibility. New documentation uses `anet node ...` consistently.
+
+<a id="exit-codes"></a>
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success, or only help was printed (for example `anet node` or `anet network` with no subcommand) |
+| `1` | Failure: not initialized / not logged in / session expired, Hub unreachable or returned an error, object not found, local write failed, refused to act |
+| `2` | Usage error: missing required argument, unknown subcommand, invalid value |
+
+Scripts and CI can rely on `anet … || exit 1`. Before #515 the following printed an error but exited 0; they now exit non-zero:
+
+| Command | Case | Before → now |
+|---|---|---|
+| `anet whoami` | not logged in / session expired / Hub unreachable | 0 → 1 |
+| `anet network <ls\|use\|info\|create\|delete\|rename\|invite\|join\|members>` | not initialized / not logged in, Hub error, Network not found, unreachable | 0 → 1 |
+| `anet network create\|use\|delete\|rename\|join` (missing argument), `anet network <unknown>` | usage error | 0 → 2 |
+| `anet token ls\|create\|revoke` | not logged in, Hub error, unreachable | 0 → 1 |
+| `anet token revoke` (no token id) | usage error | 0 → 2 |
+| `anet passwd` | not logged in, passwords differ, Hub refused, unreachable | 0 → 1 |
+| `anet activate` | not initialized, activation failed, unreachable / no license key | 0 → 1 / 0 → 2 |
+| `anet status`, `anet tasks` | no Hub configured; `anet tasks` unreachable | 0 → 1 |
+| `anet hub start` | Hub did not come up within 15 s (including Bun missing) | 0 → 1 |
+| `anet hub stop` | see [Stopping the Hub](#anet-hub-stop) above | 0 → 1 / 2 |
+| `anet hub admin reset-user` | no `--username` / DB not found, reset failed | 0 → 2 / 0 → 1 |
+| `anet hub <unknown>`, `anet node <unknown>`, `anet session <unknown>`, `anet batch <unknown verb>` | usage error | 0 → 2 |
+| `anet node resume` (no node), `anet logs` (no node), `anet batch <verb>` (no prefix) | usage error | 0 → 2 |
+| `anet project down` (a node failed to stop), `anet node delete` (node process refused to exit) | already set exit code 1, but the CLI's final `process.exit(0)` overrode it | 0 → 1 |
+| `anet upgrade` | a package failed to upgrade or its registry lookup failed | 0 → 1 |
+| `anet create --batch`, `anet batch cleanup` | no Hub, invalid preset/option, auto-login failed, no node created | 0 → 1 / 2 |
+| `anet demo …` | no Hub / token / key, creating the Network or nodes failed | 0 → 1 |
+
+Some older usage-error paths still exit `1` (also non-zero, so scripts still catch them); they were not changed just to make them `2`. `anet hub status` is a status query and still exits `0` when the Hub is not running.
 
 ## Configuration locations and environment variables
 
