@@ -115,6 +115,19 @@ down at once (#505).
   `-S` and drops a foreign `$TMUX`; it refuses `kill-server` always.
   `agent-network/src/tmux-ratchet.test.ts` fails on a new raw `execFileSync("tmux", …)`.
 
+### Mutation anchors: refactoring a pinned line breaks a Docker suite you never ran
+
+Many Docker suites prove themselves with witnessed-red mutations that edit one exact source string
+(`sed -i 's/…/…/'`, `perl -0pi`, `run_mutation NAME LAYER FILE FROM TO PROBE`, `bun mutate.ts FILE BEFORE AFTER`,
+mode tables in `mutate.mjs`, inline `bun -e` / `python3 -` mutators). Change that string and the suite reports
+`MUTATION_NOOP` / `anchor count=0`, but only late, in L2 CI. `python3 scripts/check-mutation-pins.py`
+(the `mutation pin integrity` workflow, on every PR, about 3 s) finds every such anchor and checks
+that it still occurs in the current tree the number of times the harness expects. Exit `1` means a
+dead anchor: point the mutation at the new text and keep its meaning. Exit `2` means the
+ratchet in `scripts/mutation-pins-baseline.json` went up because a new harness hides its anchor or target
+behind a runtime value. Write anchors and targets as literals the gate can read, and don't raise the baseline.
+`--list` prints every anchor it checked; `--selftest` exercises each harness form.
+
 ## Code style
 
 - TypeScript strict mode
