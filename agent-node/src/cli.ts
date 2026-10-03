@@ -153,6 +153,7 @@ import {
 import { formatAttemptOutcome } from "./runtime/attempt-log-outcome";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
 import { superviseChild } from "./util/supervise-child";
+import { buildNodeSseHeaders, formatSupersededError, generateInstanceId, parseSupersededFrame, SupersedeBackoff } from "./util/sse-node-identity";
 import {
   validateLocalPatch,
   computeApplyMode as computeConfigApplyMode,
@@ -868,6 +869,11 @@ if (unsafeInitialGrokHubCredential) {
 // their shell — replies then landed in the wrong network and Dashboard
 // never saw them.
 let AUTH_TOKEN = fileConfig.token || globalConfig.token || process.env.COMMHUB_TOKEN || "";
+// #507 — per-process instance id, sent as X-Anet-Instance-Id on the SSE connect so the
+// Hub can tell "this process reconnected" from "a second copy of this node connected".
+const INSTANCE_ID = generateInstanceId();
+// #507 — superseded-by-another-copy state: backoff schedule + inbox suspension.
+const sseSupersede = new SupersedeBackoff();
 let persistenceRedactor: CredentialRedactor = createCredentialRedactor();
 // Consumers such as PendingReplyQueue live for the whole process. Delegate
 // through this stable handle so a node-token rotation immediately updates
@@ -5480,6 +5486,12 @@ async function processInbox() {
     await drainPendingReplies();
   }
 
+  // #507 — another copy of this node holds the Hub stream; it owns the inbox.
+  // Fetching here too is how a duplicated node runs one task twice.
+  if (sseSupersede.inboxSuspended) {
+    debug("skip inbox fetch: another copy of this node holds the Hub stream (#507)");
+    return;
+  }
   const messages = await getInbox();
   if (!messages.length) return;
   const processInboxMessage = async (msg: any) => {
@@ -5726,6 +5738,7 @@ async function processInbox() {
  */
 async function processOpencodeCopresenceMessages() {
   if (RUNTIME !== "opencode" || opencodeMode !== "copresence") return;
+  if (sseSupersede.inboxSuspended) return;  // #507 — see processInbox
 
   const messages = await getInbox();
   const pendingInformationalIds = new Set(
@@ -6525,9 +6538,7 @@ async function connectSSE() {
     onError: (err: any) => warn(`SSE error: ${err?.message || err}`),
     runOnce: async (ctrl) => {
       debug(`SSE connecting: ${sseUrl}`);
-      const sseHeaders: Record<string, string> = { Accept: "text/event-stream", "Cache-Control": "no-cache" };
-      if (AUTH_TOKEN) sseHeaders["Authorization"] = `Bearer ${AUTH_TOKEN}`;
-      const res = await fetch(sseUrl, { headers: sseHeaders });
+      const res = await fetch(sseUrl, { headers: buildNodeSseHeaders(AUTH_TOKEN, INSTANCE_ID) });
       if (!res.ok || !res.body) {
         if (res.status === 401) {
           if (reloadNodeToken()) {
@@ -6548,7 +6559,8 @@ async function connectSSE() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      while (true) {
+      let supersededFrameSeen = false;
+      while (!supersededFrameSeen) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -6557,8 +6569,22 @@ async function connectSSE() {
           if (!line.startsWith("data: ")) continue;
           try {
             const ev = JSON.parse(line.slice(6));
+            // #507 — the Hub kept a newer connection for this alias and is closing ours.
+            const superseded = parseSupersededFrame(ev);
+            if (superseded) {
+              supersededFrameSeen = true;
+              const decision = sseSupersede.onSuperseded(superseded, Date.now());
+              if (decision.kind === "back_off") {
+                error(formatSupersededError(ALIAS, INSTANCE_ID, superseded, decision.waitMs, decision.streak));
+                ctrl.deferNextAttempt(decision.waitMs);
+              } else {
+                log(`SSE stream replaced by this process's own reconnect (${superseded.reason}); reconnecting`);
+              }
+              break;
+            }
             if (ev.type === "connected") {
               log("SSE connected");
+              sseSupersede.noteConnected(Date.now());
               // Connection is real — reset backoff + downtime counter.
               ctrl.markStable();
               if (!firstConnect) {
@@ -6781,6 +6807,9 @@ async function connectSSE() {
           } catch {}
         }
       }
+      if (supersededFrameSeen) {
+        try { await reader.cancel(); } catch {}
+      }
       // Stream ended cleanly — iteration done. If markStable already
       // fired (the "connected" event arrived at least once), the
       // supervisor resets backoff; otherwise it doubles.
@@ -6809,6 +6838,7 @@ const STARTUP_MODEL_LABEL = MODEL
       : "claude-sonnet-4-6");
 log(`  model:   ${STARTUP_MODEL_LABEL} ${MODEL || RUNTIME === "grok" ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
+log(`  instance: ${INSTANCE_ID}`);
 // #214 维度 5 A6 — surface the grok ACP idle-timeout resolution so the
 // operator can see at a glance whether their `flags.grokAcpTimeoutMs`
 // setting actually took effect, or whether the runtime fell back to the
