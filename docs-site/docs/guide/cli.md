@@ -72,9 +72,21 @@ anet node start my-agent
 | `anet register` | 创建账号 |
 | `anet login` | 使用用户名和密码登录 |
 | `anet login --token <token>` | 使用已有 API token 登录 |
-| `anet logout` | 删除本机保存的登录 token；不会撤销 Hub 上的 token |
+| `anet logout` | 先在 Hub 上撤销本次登录会话，再删除本机保存的登录 token（见下方 [退出登录](#anet-logout)） |
 | `anet whoami` | 显示当前用户和可访问的 Network |
 | `anet passwd` | 修改密码并轮换当前登录 token |
+
+<a id="anet-logout"></a>
+**退出登录（`anet logout`）**：用保存的 token 调 `GET /api/auth/sessions` 取得 `current_token_id`，再 `DELETE /api/auth/sessions/<token_id>` 撤销这一条登录会话（与 app「设置 → 账号 → 登录设备 → 退出」同一对端点，见 [登录设备 API](/api/rest#sessions)），然后删除 `~/.anet/config.json` 里的 `token` / `user` / `network_id` / `network_name`（保留 `hub`）。输出只显示 token id，不显示 token。
+
+| 情况 | 本地 | 服务端 | 退出码 |
+|---|---|---|---|
+| 撤销成功 / token 在 Hub 上本来就已失效（401） | 删除 | 已失效 | 0 |
+| Hub 连不上、Hub 早于 v0.9.0-preview.70（`/api/auth/sessions` 404） | 删除 | **仍有效**，打印 ⚠ 警告与撤销方法 | 0 |
+| 保存的是 `anet login --token` 用的显式 API token 或节点 token | 删除 | **不撤销**（它可能还在别处用），打印 ⚠ 警告；用 `anet token revoke <token-id>` 撤 | 0 |
+| 本地配置文件写不了 | 未删除 | — | 1 |
+
+服务端仍有效时的撤销办法：app「设置 → 账号 → 登录设备」里退出那台设备；或重新 `anet login` 后 `anet passwd`（改密码会撤销其他所有登录会话）。`anet init project` 写进各项目 `.anet/.env` 的 `COMMHUB_TOKEN` 是同一个 token 的副本，服务端撤销后一起失效。
 
 ### Network
 
@@ -240,7 +252,7 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 | `anet doctor --fix` | 执行兼容迁移并修复可自动恢复的 token 问题；会修改配置 |
 | `anet upgrade [--channel latest|preview] [--dry-run]` | 检查并执行频道内升级 |
 | `anet config` / `anet config path` / `anet config json` | 查看全局配置摘要、路径或原始 JSON |
-| `anet init` | 配置 Hub URL |
+| `anet init` | 配置 Hub URL；换到**另一个** Hub 时，先在旧 Hub 上撤销保存的登录会话（尽力而为，失败只警告），再从配置里删掉旧 Hub 的 token 与登录信息——旧 token 不会发给新 Hub。之后重新 `anet login`。`anet login --hub <另一个 Hub>` 同样处理 |
 | `anet init project` | 在当前目录创建 CommHub MCP 项目配置 |
 | `anet setup` | 安装所选 runtime 的依赖 |
 

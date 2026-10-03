@@ -72,9 +72,21 @@ Do not use `--dev-open` or expose `0.0.0.0:9200` directly in production. See [Pr
 | `anet register` | Create an account |
 | `anet login` | Log in with username and password |
 | `anet login --token <token>` | Log in with an existing API token |
-| `anet logout` | Delete the locally saved login token; does not revoke it on the Hub |
+| `anet logout` | Revoke this login session on the Hub, then delete the locally saved login token (see [Logging out](#anet-logout) below) |
 | `anet whoami` | Show the current user and accessible Networks |
 | `anet passwd` | Change the password and rotate the current login token |
+
+<a id="anet-logout"></a>
+**Logging out (`anet logout`)**: with the saved token, calls `GET /api/auth/sessions` to get `current_token_id`, then `DELETE /api/auth/sessions/<token_id>` to revoke that login session (the same pair of endpoints the app's Settings → Account → Signed-in devices → sign out uses; see [Signed-in devices API](/en/api/rest#sessions)), then removes `token` / `user` / `network_id` / `network_name` from `~/.anet/config.json` (`hub` is kept). Output shows only the token id, never the token.
+
+| Case | Local | Server | Exit code |
+|---|---|---|---|
+| Revoked, or the token was already invalid on the Hub (401) | Removed | Invalid | 0 |
+| Hub unreachable, or Hub older than v0.9.0-preview.70 (`/api/auth/sessions` 404) | Removed | **Still valid**; prints a ⚠ warning and how to revoke it | 0 |
+| The saved token is an explicit API token (`anet login --token`) or a node token | Removed | **Not revoked** (it may be in use elsewhere); prints a ⚠ warning — revoke with `anet token revoke <token-id>` | 0 |
+| The local config file cannot be written | Not removed | — | 1 |
+
+If the token is still valid on the server: sign that device out in the app under Settings → Account → Signed-in devices, or `anet login` again and run `anet passwd` (changing the password signs out every other login session). The `COMMHUB_TOKEN` that `anet init project` writes into each project's `.anet/.env` is a copy of the same token and stops working once it is revoked.
 
 ### Networks
 
@@ -243,7 +255,7 @@ Channel settings are not hot-reloaded; restart the node after changing them. `an
 | `anet doctor --fix` | Apply compatibility migrations and repair recoverable token problems; modifies configuration |
 | `anet upgrade [--channel latest|preview] [--dry-run]` | Check and perform in-channel upgrades |
 | `anet config` / `anet config path` / `anet config json` | Show global config summary, path, or raw JSON |
-| `anet init` | Configure the Hub URL |
+| `anet init` | Configure the Hub URL. When switching to a **different** Hub, the saved login session is first revoked on the old Hub (best effort — a failure only warns), then the old Hub's token and login info are removed from the config; the old token is never sent to the new Hub. Run `anet login` again afterwards. `anet login --hub <another hub>` does the same |
 | `anet init project` | Create CommHub MCP project files in the current directory |
 | `anet setup` | Install dependencies for selected runtimes |
 

@@ -2366,6 +2366,7 @@ import {
 import { describeStaleRuntimeSupport } from "../src/daemon-runtime-staleness";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
+import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCurrentLoginSession, sameHub } from "../src/cli-auth-session";
 export { normalizeRuntime, type RuntimeName };
 
 function runtimeForExecution(
@@ -4153,7 +4154,7 @@ Other:
   anet register               Create new account
   anet login                  Login (username + password)
   anet login --token <tok>    Login with API token
-  anet logout                 Remove saved token
+  anet logout                 Revoke this login on the Hub, then remove the saved token
   anet passwd                 Change password
   anet whoami                 Show current user + networks
   anet network ls             List my networks
@@ -4280,6 +4281,10 @@ async function initGlobal() {
   }
 
   const gc = loadGlobal();
+  // #513: switching to a DIFFERENT hub must not carry the old hub's token over —
+  // every later command would send it to the new hub. Revoke it on the old hub
+  // (best effort) and drop the old login state.
+  if (gc.hub && !sameHub(gc.hub, hub)) await dropCredentialsForHubSwitch(gc, hub, !!token);
   gc.hub = hub;
   if (token) gc.token = token;
   else if (!gc.token) delete gc.token; // don't overwrite existing token with empty
@@ -13972,10 +13977,13 @@ async function loginCommand() {
   // Accept --hub on the login command directly so scripts (setup-anet.sh)
   // don't have to run a separate `anet init` step. If supplied, persist it
   // to gc.hub so subsequent commands work.
-  const hub = opts.hub || gc.hub;
+  const hub = opts.hub ? normalizeHubUrl(opts.hub) : gc.hub;
   if (!hub) { console.error("No hub configured. Pass --hub <url> or run 'anet init' first."); process.exit(1); }
-  if (opts.hub && opts.hub !== gc.hub) {
-    gc.hub = opts.hub;
+  if (opts.hub && !sameHub(hub, gc.hub)) {
+    // #513: the saved token belongs to the OLD hub — revoke it there and drop it,
+    // so it is never sent to the new hub (and is not left behind if this login fails).
+    await dropCredentialsForHubSwitch(gc, hub, true);
+    gc.hub = hub;
     saveGlobal(gc);
   }
 
@@ -14100,14 +14108,44 @@ async function loginCommand() {
   } catch (e: any) { console.error(friendlyError(e)); process.exit(1); }
 }
 
-function logoutCommand() {
+// #513 — `anet logout` = revoke this login session on the Hub, then remove local state.
+// Exit code: 0 whenever the local credentials were removed — including when the
+// Hub could not revoke it (unreachable / older Hub / API token), which prints a
+// ⚠ warning saying the token is STILL VALID on the Hub and how to revoke it.
+// 1 only when the local credentials could not be removed.
+async function logoutCommand() {
   const gc = loadGlobal();
-  delete gc.token;
-  delete gc.user;
-  delete gc.network_id;
-  delete gc.network_name;
-  saveGlobal(gc);
-  console.log("[anet] Logged out. Token removed.");
+  const hub: string | undefined = gc.hub;
+  const token: string | undefined = gc.token;
+  let report: { ok: boolean; lines: string[] } | null = null;
+  if (token && hub) report = describeRevokeOutcome(await revokeCurrentLoginSession(hub, token), hub);
+  else if (token) report = { ok: false, lines: [
+    "⚠ No hub configured, so the saved token could not be revoked on the server; it may STILL BE VALID there.",
+  ] };
+  clearLocalCredentials(gc);
+  try { saveGlobal(gc); }
+  catch (e: any) {
+    console.error(`❌ Could not remove local credentials from ${globalConfigPath()}: ${e?.message ?? e}`);
+    process.exit(1);
+  }
+  if (report) for (const l of report.lines) (report.ok ? console.log : console.error)(`[anet] ${l}`);
+  console.log(token ? "[anet] Logged out. Local token removed." : "[anet] Not logged in; nothing to revoke. Local login state cleared.");
+}
+
+// #513 — the saved token belongs to gc.hub; before pointing the config at a
+// different hub, revoke it there (it is only ever sent to its own hub) and drop it.
+async function dropCredentialsForHubSwitch(gc: Record<string, any>, newHub: string, replacingToken = false) {
+  const oldHub: string | undefined = gc.hub;
+  const oldToken: string | undefined = gc.token;
+  if (oldToken && oldHub) {
+    console.log(`[anet] Hub changes from ${normalizeHubUrl(oldHub)} to ${normalizeHubUrl(newHub)}; signing out of the old hub.`);
+    const report = describeRevokeOutcome(await revokeCurrentLoginSession(oldHub, oldToken), oldHub);
+    for (const l of report.lines) (report.ok ? console.log : console.error)(`[anet] ${l}`);
+  }
+  if (oldToken || gc.user || gc.network_id) {
+    clearLocalCredentials(gc);
+    console.log(`[anet] Old hub's login removed from ${globalConfigPath()}.${replacingToken ? "" : " Run: anet login"}`);
+  }
 }
 
 async function whoamiCommand() {
@@ -17633,7 +17671,7 @@ switch (command) {
 或一键 demo: cd demos/hello-world && docker compose up`);
     process.exit(1);
   }
-  case "logout": logoutCommand(); break;
+  case "logout": await logoutCommand(); break;
   case "whoami": await whoamiCommand(); break;
   case "network": await networkCommand(); break;
   case "run": await runCommand(); break;
