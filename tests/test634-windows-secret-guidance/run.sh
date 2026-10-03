@@ -49,7 +49,7 @@ cp /tmp/test634-guidance.ts agent-network/src/secret-shell-guidance.ts
 
 echo "L3 witnessed-red: bypass platform-aware guidance in migrate"
 cp agent-network/bin/cli.ts /tmp/test634-cli.ts
-sed -i 's/assignmentLines.push(formatSecretAssignment(process.platform, refName, value));/assignmentLines.push(`export ${refName}=${value}`);/' agent-network/bin/cli.ts
+sed -i 's/assignmentLines.push(formatSecretLoadCommand(process.platform, refName, dotenvPath));/assignmentLines.push(`export ${refName}=${value}`);/' agent-network/bin/cli.ts
 grep -Fq 'assignmentLines.push(`export ${refName}=${value}`);' agent-network/bin/cli.ts
 set +e
 run_tests > /tmp/test634-wiring-mutation.log 2>&1

@@ -197,7 +197,7 @@ import { exactSession, PANE_LIST_FORMAT, paneTargetFor } from "../src/tmux-exact
 import { execTmux, spawnSyncTmux, spawnTmux } from "../src/tmux";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
-  formatSecretAssignment,
+  formatSecretLoadCommand,
   secretPersistenceHeading,
   secretShellAction,
 } from "../src/secret-shell-guidance";
@@ -2282,10 +2282,19 @@ async function sseAllConnected(hub: string, aliases: string[]): Promise<"yes" | 
   return aliases.every(a => (detail.sessions[a] || 0) >= 1) ? "yes" : "no";
 }
 
+let warnedCorruptGlobal = false;
 function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
   repairPrivateFilePermissions(p);
-  if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
+  if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch (e: any) {
+    // #516 — a damaged login file used to read as "Not logged in" with no hint
+    // why. Say so once; the next saveGlobal (anet login / init) rewrites it.
+    if (!warnedCorruptGlobal && e instanceof SyntaxError) {
+      warnedCorruptGlobal = true;
+      console.error(`[anet] ⚠ ${p} is not valid JSON (${e.message}) — ignoring it.`);
+      console.error(`[anet]    Fix the file, or move it aside and log in again: mv ${shellQuote(p)} ${shellQuote(p + ".broken")} && anet login`);
+    }
+  }
   return {};
 }
 
@@ -2443,6 +2452,7 @@ import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
 import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCurrentLoginSession, sameHub } from "../src/cli-auth-session";
 import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
+import { errorText, formatTopLevelError, hubErrorText, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
 import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
 export { normalizeRuntime, type RuntimeName };
 
@@ -2670,46 +2680,8 @@ function commandExists(name: string, env?: NodeJS.ProcessEnv): boolean {
   }
 }
 
-// #237 — Friendly classification of Node `fetch` errors. Node's fetch throws
-// a bare `TypeError: fetch failed` with the real cause hidden in `err.cause`
-// (e.g. `{ code: 'ECONNREFUSED', address: '127.0.0.1', port: 9200 }`). Without
-// classification the user sees only the Node stack and has no idea whether
-// the hub is down, the URL is wrong, the network is broken, or DNS is failing.
-function classifyFetchError(err: any, url?: string): string {
-  const cause = err?.cause;
-  const code = cause?.code || err?.code;
-  const address = cause?.address;
-  const port = cause?.port;
-  const target = url ? `URL: ${url}` : (address ? `${address}:${port}` : "");
-  const isLoopback = url?.includes("127.0.0.1") || url?.includes("localhost") || address === "127.0.0.1" || address === "::1";
-  if (code === "ECONNREFUSED") {
-    if (isLoopback) {
-      return `连不上本地 hub (${target}). 请先在另一终端: anet hub start  然后重试.`;
-    }
-    return `连不上 ${target}. 服务可能未启动 — 检查目标主机/端口, 或网络/代理.`;
-  }
-  if (code === "ENOTFOUND") {
-    return `DNS 解析失败 (${target}). 检查网络/DNS/代理设置.`;
-  }
-  if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") {
-    return `连接超时 (${target}). 网络不稳定或目标无响应 — 检查防火墙/代理.`;
-  }
-  if (code === "ECONNRESET") {
-    return `连接被对端重置 (${target}). 服务可能在启动中或异常退出.`;
-  }
-  return `fetch 失败: ${err?.message || err}${target ? ` (${target})` : ""}`;
-}
-
-// #237 — Detect whether an arbitrary error came from a fetch call. Used by
-// the top-level FATAL handler so a bare TypeError surfaces as a friendly
-// classified message instead of an undecorated Node stack.
-function isFetchError(err: any): boolean {
-  if (!err) return false;
-  if (err instanceof TypeError && /fetch failed/i.test(err.message || "")) return true;
-  const cause = err?.cause;
-  if (cause && typeof cause === "object" && (cause.code || cause.syscall === "connect")) return true;
-  return false;
-}
+// #237 / #516 — fetch-error classification for the top-level catch now lives in
+// src/cli-errors.ts (describeCliError), next to the secret masking it must pass through.
 
 // #214 F7-02 / F7-10 / F7-11 — Levenshtein distance for did-you-mean
 // suggestions on typo'd commands. Pure function, ≤30 LOC, no deps.
@@ -3952,8 +3924,9 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
 // ── Help ──
 
 function friendlyError(e: any): string {
-  const msg = e?.message || String(e);
-  if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED")) {
+  // #516 — errorText: never `[object Object]`, tokens masked.
+  const msg = errorText(e);
+  if (isNetworkError(e) || msg.includes("fetch failed") || msg.includes("ECONNREFUSED")) {
     return "Cannot connect to CommHub server. Is it running?\n  Start: anet hub start\n  Or check: anet doctor";
   }
   if (msg.includes("401") || msg.includes("unauthorized")) {
@@ -3964,6 +3937,9 @@ function friendlyError(e: any): string {
   }
   if (msg.includes("429")) {
     return "Too many requests. Please wait a moment and try again.";
+  }
+  if (e instanceof SyntaxError) {
+    return "The hub answered with something that is not JSON — the hub address may point at the wrong service.\n  Check: anet config   (hub must be a CommHub URL, e.g. http://127.0.0.1:9200)";
   }
   return msg;
 }
@@ -4359,7 +4335,8 @@ async function initGlobal() {
     const data = await res.json() as any;
     console.log(`✅ CommHub v${data.version} — ${data.sessions_count ?? 0} sessions, ${data.sse_connections ?? 0} SSE`);
   } catch (e: any) {
-    console.error(`❌ Cannot reach ${hub}: ${e.message}`);
+    console.error(`❌ Cannot reach ${hub}: ${hubReachReason(e)}`);
+    console.error(`   Check the URL, or start a local hub first: anet hub start`);
     process.exit(1);
   }
 
@@ -4803,9 +4780,10 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
   // fresh shell. Closes the wizard-create-then-start deadlock without
   // forcing the user to manually `export`. Idempotent: merges with any
   // existing keys; .gitignore is ensured so the file never leaks via git.
+  const dotenvPath = join(nodesDir(), nodeId, ".env");
+  let persisted = false;
   try {
     const nodeDir = join(nodesDir(), nodeId);
-    const dotenvPath = join(nodeDir, ".env");
     const isOpencode = normalizeRuntime(profile) === "opencode-cli";
     if (isOpencode) prepareOpencodeNodeForProfileWrite(nodeDir);
     else mkdirSync(nodeDir, { recursive: true });
@@ -4819,16 +4797,29 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
       atomicWritePrivateFile(dotenvPath, body);
     }
     ensureNodeDotenvGitignore();
+    persisted = true;
   } catch (e: any) {
-    console.warn(`[anet] ⚠ could not write per-node .env: ${e?.message || e} — fall back to manual export only.`);
+    console.warn(`[anet] ⚠ could not write per-node .env: ${errorText(e)} — fall back to manual export only.`);
   }
 
+  // #516 — never echo the secret itself (it used to print `export NAME='sk-…'`
+  // in full). Show which value went where, masked, plus a command that loads
+  // it from the private .env file.
   console.log(`\n[anet] 🔐 ${rewrites.length} secret value(s) in env moved out of config.json (envRef shape, #125).`);
-  console.log(`[anet]    Persisted to .anet/nodes/${nodeId}/.env (mode 600, gitignored) — \`anet node start\` auto-loads it.`);
-  console.log(`[anet]    ${secretPersistenceHeading(process.platform)}`);
-  console.log("");
-  for (const { refName, value } of rewrites) {
-    console.log(`    ${formatSecretAssignment(process.platform, refName, value)}`);
+  if (persisted) {
+    console.log(`[anet]    Persisted to .anet/nodes/${nodeId}/.env (mode 600, gitignored) — \`anet node start\` auto-loads it.`);
+  } else {
+    console.log(`[anet]    ⚠ Not persisted: ${secretShellAction(process.platform)} each one yourself with the value you passed to --env before \`anet node start\`.`);
+  }
+  for (const { key, refName, value } of rewrites) {
+    console.log(`[anet]      env.${key} → ${refName} = ${maskSecret(value)}`);
+  }
+  if (persisted) {
+    console.log(`[anet]    ${secretPersistenceHeading(process.platform)}`);
+    console.log("");
+    for (const { refName } of rewrites) {
+      console.log(`    ${formatSecretLoadCommand(process.platform, refName, dotenvPath)}`);
+    }
   }
   console.log("");
 }
@@ -5974,16 +5965,22 @@ async function createCommand(idOverride?: string) {
       body: JSON.stringify({ network_id: gc.network_id, node_name: id, node_id: profile.node_id }),
     }).then(r => r.json() as any);
   } catch (e: any) {
-    console.error(`[anet] ❌ Could not reach hub: ${e.message}`);
-    console.error(`[anet]    Hub: ${gc.hub} — is it running? Try: anet hub start`);
+    if (isNetworkError(e)) {
+      console.error(`[anet] ❌ Could not reach hub: ${errorText(e)}`);
+      console.error(`[anet]    Hub: ${gc.hub} — is it running? Try: anet hub status   (local: anet hub start)`);
+    } else {
+      // #516 — a non-JSON answer (wrong URL, proxy page) is not "unreachable".
+      console.error(`[anet] ❌ The hub at ${gc.hub} did not answer like a CommHub hub: ${errorText(e)}`);
+      console.error(`[anet]    Check the address: anet config   — re-point it with: anet init --hub <url>`);
+    }
     process.exit(1);
   }
-  if (!nodeTokenRes.ok || !nodeTokenRes.token) {
-    if (nodeTokenRes.error?.includes("invalid token")) {
+  if (!nodeTokenRes?.ok || !nodeTokenRes.token) {
+    if (typeof nodeTokenRes?.error === "string" && nodeTokenRes.error.includes("invalid token")) {
       console.error(`[anet] ❌ Your login session has expired (server rotated the token).`);
       console.error(`[anet]    Run: anet login   then re-run: anet node create ${id}`);
     } else {
-      console.error(`[anet] ❌ Could not create node token: ${nodeTokenRes.error || "unknown"}`);
+      console.error(`[anet] ❌ Could not create node token: ${hubErrorText(nodeTokenRes)}`);
     }
     process.exit(1);
   }
@@ -6580,7 +6577,8 @@ function maybeWarnChannelResumeBlocker(
 
 async function launchAgent(id: string, forceNewSession = false, hubOverride?: string, admittedGeneration?: string) {
   const launchResolved = resolveNodeRef(id);
-  if (!launchResolved) throw new Error(`Node ${JSON.stringify(id)} not found`);
+  // #516 — was `throw new Error(...)` → `[anet] FATAL: Error: Node "x" not found` + stack.
+  if (!launchResolved) { console.error(nodeNotFound(id)); process.exit(1); }
   const launchGeneration = admittedGeneration || await admitNodeStart(launchResolved.id, Date.now());
   const resolved = resolveNodeRef(id);
   if (!resolved) {
@@ -6661,7 +6659,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
   if (runtime === "grok-build-cli") {
     console.log(`[anet] Token: configured (${token.startsWith("ntok_") ? "node" : "custom"})`);
   } else {
-    console.log(`[anet] Token: ${token.slice(0, 8)}...`);
+    console.log(`[anet] Token: ${maskSecret(token)}`);
   }
 
   // Fix 1 (#146 / RFC-018) — ensure node_id is persisted in the raw config.
@@ -9042,7 +9040,7 @@ async function serverCommand() {
           defaultAccountReady = true;
           console.log(`  ℹ  Admin account "${defaultUser}" already exists`);
         } else {
-          console.log(`  ⚠  Could not bootstrap admin account: ${reg.error}`);
+          console.log(`  ⚠  Could not bootstrap admin account: ${hubErrorText(reg)}`);
         }
       } catch (e: any) {
         console.log(`  ⚠  Admin account bootstrap skipped: ${e.message}`);
@@ -9971,7 +9969,8 @@ async function importCommand() {
     const data = await res.json() as any;
     sessions = data.sessions || [];
   } catch (e: any) {
-    console.error(`Cannot reach ${hub}: ${e.message}`);
+    console.error(`Cannot reach ${hub}: ${hubReachReason(e)}`);
+    console.error(`  Check the hub: anet hub status   (or re-point anet: anet init --hub <url>)`);
     process.exit(1);
   }
 
@@ -10877,7 +10876,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       }).then(r => r.json() as any).catch((e: any) => ({ ok: false, error: String(e?.message || e) }));
   if (!commit.ok) {
     // C1 失败: commhub 路由未切, 仍可干净回滚
-    console.error(`[anet] rename PHASE 2 C1 (commhub commit) failed: ${commit.error} — rolling back`);
+    console.error(`[anet] rename PHASE 2 C1 (commhub commit) failed: ${hubErrorText(commit)} — rolling back`);
     let bindingCleanupError: any;
     if (existsSync(newDir)) {
       try {
@@ -13432,13 +13431,24 @@ async function statusCommand() {
   const hub = gc.hub;
   if (!hub) { console.log("No hub configured. Run: anet init"); markFailed(); return; }
 
+  let statusReadError: string | null = null;
   try {
     // #473: this summary line needs only the COUNT, so read the anonymous
     // aggregate health.sse_connections — every user can read it. Using the
     // per-alias detail's key-count here was the regression that showed
     // non-admins "0 connected" (detail 403 → {} → 0) on a live hub.
     const [statusRes, sseCount, tasksRes] = await Promise.all([
-      fetch(`${hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ sessions: [] })),
+      // #516 — a hub that answers 401/502/HTML used to read as "0 agents".
+      fetch(`${hub}/api/status`, { headers: authHeaders() })
+        .then(async r => {
+          if (!r.ok) {
+            const body: any = await r.json().catch(() => null);
+            statusReadError = `the hub answered HTTP ${r.status}${body ? ` (${hubErrorText(body)})` : ""}`;
+            return { sessions: [] };
+          }
+          return r.json() as any;
+        })
+        .catch((e: any) => { statusReadError = hubReachReason(e); return { sessions: [] }; }),
       fetchSseConnectionCount(hub),
       fetch(`${hub}/api/tasks?limit=10`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ tasks: [] })),
     ]);
@@ -13467,6 +13477,10 @@ async function statusCommand() {
     const offline = sessions.filter((s: any) => classifyStatus(s) === "offline");
 
     console.log(`\n  CommHub: ${hub}`);
+    if (statusReadError) {
+      console.error(`  ⚠ Could not read the agent list: ${statusReadError}. The counts below are not real.`);
+      console.error(`    Next: ${/HTTP 401/.test(statusReadError) ? "anet login" : "anet hub status   (or check the hub URL: anet config)"}`);
+    }
     // 🔴 attention 单独一格。折进 working 会让「需要人看一眼」消失在一个看起来
     //    正常的数字里 —— 这正是 #1548 那一族问题:两种不同的事渲染成同一个词。
     const attnCount = summary.attention;
@@ -14106,7 +14120,7 @@ async function registerCommand() {
       body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register") }),
     }).then(r => r.json() as any);
 
-    if (!res.ok) { console.error(`Registration failed: ${res.error}`); process.exit(1); }
+    if (!res.ok) { console.error(`Registration failed: ${hubErrorText(res)}`); process.exit(1); }
 
     // Auto-login
     gc.token = res.token;
@@ -14145,7 +14159,7 @@ async function loginCommand() {
   if (opts.token) {
     try {
       const res = await fetch(`${hub}/api/auth/me`, { headers: { Authorization: `Bearer ${opts.token}` } }).then(r => r.json() as any);
-      if (!res.ok) { console.error(`Invalid token: ${res.error}`); process.exit(1); }
+      if (!res.ok) { console.error(`Invalid token: ${hubErrorText(res)}`); process.exit(1); }
       gc.token = opts.token;
       gc.user = res.user;
       gc.network_id = res.current_network;
@@ -14371,7 +14385,7 @@ async function networkCommand() {
       if (res.ok) {
         console.log(`[anet] Network "${name}" created (${res.network_id})`);
       } else {
-        console.error(`Failed: ${res.error}`); markFailed();
+        console.error(`Failed: ${hubErrorText(res)}`); markFailed();
       }
     } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
@@ -14452,7 +14466,7 @@ async function networkCommand() {
       if (del.ok) {
         console.log(`[anet] Network "${net.network_name}" deleted`);
         if (gc.network_id === net.network_id) { delete gc.network_id; delete gc.network_name; saveGlobal(gc); }
-      } else { console.error(`Failed: ${del.error}`); markFailed(); }
+      } else { console.error(`Failed: ${hubErrorText(del)}`); markFailed(); }
     } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
@@ -14469,7 +14483,7 @@ async function networkCommand() {
       if (rename.ok) {
         console.log(`[anet] Renamed "${name}" → "${newName}"`);
         if (gc.network_id === net.network_id) { gc.network_name = newName; saveGlobal(gc); }
-      } else { console.error(`Failed: ${rename.error}`); markFailed(); }
+      } else { console.error(`Failed: ${hubErrorText(rename)}`); markFailed(); }
     } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
@@ -14494,7 +14508,7 @@ async function networkCommand() {
         if (expiresDays) console.log(`  Expires:     ${expiresDays} days`);
         console.log(`\n  Share this with the invitee:`);
         console.log(`  anet network join ${res.invite_code}\n`);
-      } else { console.error(`Failed: ${res.error}`); markFailed(); }
+      } else { console.error(`Failed: ${hubErrorText(res)}`); markFailed(); }
     } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
@@ -14517,7 +14531,7 @@ async function networkCommand() {
         saveGlobal(gc);
         console.log(`[anet] Joined network "${gc.network_name || res.network_id}" as ${res.role}`);
         console.log(`[anet] Switched to this network.`);
-      } else { console.error(`Failed: ${res.error}`); markFailed(); }
+      } else { console.error(`Failed: ${hubErrorText(res)}`); markFailed(); }
     } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
@@ -14615,7 +14629,7 @@ anet token <command>
         console.log(`  Name: ${name}`);
         console.log(`  ID:   ${res.token_id}`);
         console.log(`\n  ⚠ Save this token — it won't be shown again!\n`);
-      } else { console.error(`Failed: ${res.error}`); markFailed(); }
+      } else { console.error(`Failed: ${hubErrorText(res)}`); markFailed(); }
     } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
@@ -14626,7 +14640,7 @@ anet token <command>
     try {
       const res = await fetch(`${hub}/api/auth/tokens/${tokenId}`, { method: "DELETE", headers }).then(r => r.json() as any);
       if (res.ok) console.log(`  ✅ Token ${tokenId} revoked`);
-      else { console.error(`Failed: ${res.error}`); markFailed(); }
+      else { console.error(`Failed: ${hubErrorText(res)}`); markFailed(); }
     } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
     return;
   }
@@ -14694,7 +14708,7 @@ async function passwdCommand() {
       console.log("[anet] Password changed successfully.");
       if (res.token) console.log("[anet] Login token rotated and saved.");
     } else {
-      console.error(`[anet] Failed: ${res.error}`); markFailed();
+      console.error(`[anet] Failed: ${hubErrorText(res)}`); markFailed();
     }
   } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
 }
@@ -14913,7 +14927,7 @@ async function demoDebateCommand() {
         body: JSON.stringify({ name: netName, description: `Auto-created for anet demo debate: ${topic.slice(0, 80)}` }),
       }).then(r => r.json() as any);
       if (!r?.ok || !r.network_id) {
-        console.error(`  ❌ 创建 network 失败: ${r?.error || "unknown"}. 用 --no-network 退到 default 或 --network <id> 指定.`);
+        console.error(`  ❌ 创建 network 失败: ${hubErrorText(r)}. 用 --no-network 退到 default 或 --network <id> 指定.`);
         markFailed(); return;
       }
       createdNetworkId = r.network_id;
@@ -15311,7 +15325,7 @@ async function demoSocialMediaCommand() {
         body: JSON.stringify({ name: netName, description: `Auto-created for anet demo socialmedia: ${topic.slice(0, 80)}` }),
       }).then(r => r.json() as any);
       if (!r?.ok || !r.network_id) {
-        console.error(`  ❌ 创建 network 失败: ${r?.error || "unknown"}.`);
+        console.error(`  ❌ 创建 network 失败: ${hubErrorText(r)}.`);
         markFailed(); return;
       }
       createdNetworkId = r.network_id;
@@ -15853,7 +15867,7 @@ async function demoPrReviewCommand() {
         body: JSON.stringify({ name: netName, description: `Auto-created for anet demo pr-review: ${diffSource}` }),
       }).then(r => r.json() as any);
       if (!r?.ok || !r.network_id) {
-        console.error(`  ❌ 创建 network 失败: ${r?.error || "unknown"}. 用 --no-network 退到 default 或 --network <id> 指定.`);
+        console.error(`  ❌ 创建 network 失败: ${hubErrorText(r)}. 用 --no-network 退到 default 或 --network <id> 指定.`);
         markFailed(); return;
       }
       createdNetworkId = r.network_id;
@@ -16189,7 +16203,7 @@ async function demoSciTeamCommand() {
       body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team") }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
-      console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);
+      console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);
       markFailed(); return;
     }
     gc.token = loginRes.token;
@@ -16766,7 +16780,7 @@ async function createBatchWizardCommand() {
       body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch") }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
-      console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);
+      console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);
       markFailed(); return;
     }
     gc.token = loginRes.token;
@@ -16868,7 +16882,8 @@ function configShowCommand() {
 
   console.log(`\n  anet config (${configPath})\n`);
   console.log(`  hub:          ${gc.hub || "(not set — run: anet init)"}`);
-  console.log(`  token:        ${gc.token ? gc.token.slice(0, 12) + "..." : "(not set — run: anet login)"}`);
+  // #516 — never print the token itself; prefix…last4 is enough to tell two apart.
+  console.log(`  token:        ${gc.token ? maskSecret(gc.token) : "(not set — run: anet login)"}`);
   console.log(`  user:         ${gc.user?.username || "(not logged in)"}`);
   console.log(`  network_id:   ${gc.network_id || "(none — run: anet network use)"}`);
   console.log(`  network_name: ${gc.network_name || "(none)"}`);
@@ -16883,12 +16898,14 @@ function configShowCommand() {
   if (sub === "path") {
     console.log(`\n  ${configPath}`);
   } else if (sub === "json") {
-    console.log(`\n${JSON.stringify(gc, null, 2)}`);
+    // #516 — "raw JSON" minus the secrets: token fields are masked. The file
+    // itself (anet config path) is the only place the full token lives.
+    console.log(`\n${JSON.stringify(redactSecretFields(gc), null, 2)}`);
   } else {
     console.log(`\n  Subcommands:`);
     console.log(`    anet config          Show config summary`);
     console.log(`    anet config path     Print config file path`);
-    console.log(`    anet config json     Print raw JSON`);
+    console.log(`    anet config json     Print the JSON (tokens masked)`);
   }
   console.log();
 }
@@ -17024,10 +17041,18 @@ async function migrateTokenToEnvRefCommand() {
   const nodeIdShort = (profile.node_id || nodeId).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 16);
   const newEnv: any = { ...envMap };
   const assignmentLines: string[] = [];
+  const dotenvPath = join(nodesDir(), nodeId, ".env");
+  const dotenvMerged = loadNodeDotenv(nodeId);
   for (const { key, value } of candidates) {
     const refName = `${key}_${nodeIdShort}`.toUpperCase();
+    if (/[\r\n]/.test(value)) {
+      console.error(`[anet] ❌ env.${key} contains a line break and cannot be stored in ${dotenvPath}; nothing was changed.`);
+      process.exit(1);
+    }
     newEnv[key] = { _envRef: refName };
-    assignmentLines.push(formatSecretAssignment(process.platform, refName, value));
+    dotenvMerged[refName] = value;
+    // #516 — print a command that loads the value from the private .env, never the value.
+    assignmentLines.push(formatSecretLoadCommand(process.platform, refName, dotenvPath));
   }
 
   // Backup the original config before overwriting, so users can revert.
@@ -17048,11 +17073,25 @@ async function migrateTokenToEnvRefCommand() {
   // every other field (the canonical writer is `saveProfile()`).
   const newProfile: any = { ...profile, env: newEnv };
   saveProfile(nodeId, newProfile);
+  // #516 — the values go to the per-node .env (mode 600, gitignored) that
+  // `anet node start` auto-loads, same as `anet node create` does (#193).
+  try {
+    const body = Object.entries(dotenvMerged).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
+    if (normalizeRuntime(newProfile) === "opencode-cli") writeOpencodePrivateProfileFile(join(nodesDir(), nodeId), ".env", body);
+    else atomicWritePrivateFile(dotenvPath, body);
+    ensureNodeDotenvGitignore();
+  } catch (e: any) {
+    console.error(`[anet] ❌ Could not write ${dotenvPath}: ${errorText(e)}`);
+    console.error(`[anet]    The original values are in the backup: ${bakPath}`);
+    process.exit(1);
+  }
 
   console.log(`\n[anet] ✅ Migrated ${candidates.length} env value(s) in node "${nodeId}":`);
   for (const { key } of candidates) console.log(`         env.${key} → { _envRef: "${key}_${nodeIdShort}".toUpperCase() }`);
   console.log(`[anet]    Backup written: ${bakPath}\n`);
-  console.log(`[anet] 🔑 Now ${secretShellAction(process.platform)} the secret values in your shell BEFORE starting this node:`);
+  console.log(`[anet] 🔐 Values saved to ${dotenvPath} (mode 600, gitignored) — \`anet node start\` auto-loads it.`);
+  for (const { key, value } of candidates) console.log(`[anet]      env.${key} = ${maskSecret(value)}`);
+  console.log(`[anet] 🔑 To ${secretShellAction(process.platform)} them in another shell:`);
   console.log("");
   for (const line of assignmentLines) console.log(`    ${line}`);
   console.log("");
@@ -17124,7 +17163,7 @@ async function activateCommand() {
       console.log(`\n  ✅ License activated: ${res.type.toUpperCase()}`);
       console.log(`  Valid for ${res.expires_in_days} days\n`);
     } else {
-      console.error(`  ❌ Activation failed: ${res.error}\n`); markFailed();
+      console.error(`  ❌ Activation failed: ${hubErrorText(res)}\n`); markFailed();
     }
   } catch (e: any) { console.error(friendlyError(e)); markFailed(); }
 }
@@ -17208,7 +17247,7 @@ async function migrateNode(id: string, opts: { hub: string; utok: string; networ
         return { ok: false, changes, error: `node-token request failed: ${body?.error || res.status}` };
       }
       raw.token = body.token;
-      changes.push(tokenStr ? `token→ntok_…${body.token.slice(-6)}` : `token=ntok_…${body.token.slice(-6)}`);
+      changes.push(tokenStr ? `token→${maskSecret(body.token)}` : `token=${maskSecret(body.token)}`);
     } catch (e: any) {
       return { ok: false, changes, error: `node-token request threw: ${e.message}` };
     }
@@ -17528,10 +17567,10 @@ async function doctorCommand() {
           if (body?.ok && body.token) {
             p.token = body.token;
             saveProfile(id, p);
-            console.log(`     ✅ ${id}: ntok_ re-issued (…${body.token.slice(-6)}), session/channels/role preserved`);
+            console.log(`     ✅ ${id}: ntok_ re-issued (${maskSecret(body.token)}), session/channels/role preserved`);
             ok++;
           } else {
-            console.log(`     ❌ ${id}: re-issue failed: ${body?.error || r.status}`);
+            console.log(`     ❌ ${id}: re-issue failed: ${body ? hubErrorText(body) : r.status}`);
             fail++;
           }
         } catch (e: any) {
@@ -17886,20 +17925,16 @@ switch (command) {
 main().then(
   () => { if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(finalExitCode()); },
   (err: any) => {
-    // #237 — Friendly classification for unhandled fetch errors. Replaces
-    // the bare "FATAL: TypeError: fetch failed + 10-line Node stack" output
-    // Vincent hit on a clean machine where the hub was unreachable. Falls
-    // through to the legacy FATAL handler for everything else.
-    if (isFetchError(err)) {
-      console.error(`[anet] ❌ ${classifyFetchError(err)}`);
-      if (process.env.DEBUG || process.env.ANET_DEBUG) {
-        console.error(err?.stack || err);
-      } else {
-        console.error(`[anet]    (set ANET_DEBUG=1 to see the underlying Node stack)`);
-      }
-      process.exit(1);
-    }
-    console.error("[anet] FATAL:", err?.stack || err?.message || err);
+    // #237 — fetch errors used to surface as a bare Node stack.
+    // #516 — every other uncaught error did too (`node start <unknown>`,
+    // EACCES on ~/.anet/config.json, OpenCode HOME refusal …), and the raw
+    // message could carry a token. Now: one plain sentence + the next command,
+    // secrets masked, stack only with ANET_DEBUG=1. Exit code stays 1 (#2321).
+    // A message that IS an error code keeps the `[anet] FATAL: Error: CODE`
+    // line that tests/lib/anet-failure-code.sh parses.
+    let hub: string | undefined;
+    try { hub = JSON.parse(readFileSync(globalConfigPath(), "utf-8"))?.hub; } catch { /* unreadable config is the error itself */ }
+    for (const line of formatTopLevelError(err, { hub })) console.error(line);
     process.exit(1);
   },
 );
