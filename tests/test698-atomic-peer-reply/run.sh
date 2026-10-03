@@ -97,6 +97,34 @@ run_cli_mutation() {
   echo "MUTATION_RED: $name rc=$rc"
 }
 
+# Same as run_cli_mutation, for source the real cli.ts imports (#519).
+run_cli_import_mutation() {
+  local name="$1" file="$2" sed_expr="$3"
+  local backup="/tmp/test698-${name}.bak"
+  cp "$file" "$backup"
+  local before after rc
+  before="$(sha256sum "$file" | cut -d' ' -f1)"
+  sed -i "$sed_expr" "$file"
+  after="$(sha256sum "$file" | cut -d' ' -f1)"
+  if [ "$before" = "$after" ]; then
+    echo "MUTATION_NOOP: $name"
+    mv "$backup" "$file"
+    exit 1
+  fi
+  set +e
+  bun /workspace/tests/test698-atomic-peer-reply/cli-wiring-e2e.ts \
+    >"/tmp/test698-mutation-${name}.log" 2>&1
+  rc=$?
+  set -e
+  mv "$backup" "$file"
+  if [ "$rc" -eq 0 ]; then
+    echo "MUTATION_SURVIVED: $name"
+    cat "/tmp/test698-mutation-${name}.log"
+    exit 1
+  fi
+  echo "MUTATION_RED: $name rc=$rc"
+}
+
 run_agent_wiring_mutation() {
   local name="$1" file="$2" sed_expr="$3"
   local backup="/tmp/test698-${name}.bak"
@@ -153,7 +181,10 @@ run_server_wiring_mutation() {
 }
 
 echo "L3 witnessed-red product gates"
-run_cli_mutation "cli-reply-type-lost" \
+# #519: the inbound filter moved from cli.ts into inbox-skip-close.ts
+# (classifyInboundSkip); cli.ts's shouldSkipMessage delegates to it.
+run_cli_import_mutation "cli-reply-type-lost" \
+  /workspace/agent-node/src/inbox-skip-close.ts \
   's/ || msgType === "reply"//'
 run_cli_mutation "cli-terminal-reply-egress-restored" \
   's/if (inboxTurn.kind === "terminal_peer_reply") return;/if (false) return;/'

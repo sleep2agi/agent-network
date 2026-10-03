@@ -14,7 +14,8 @@ echo "date=$(date -Is)"
 run_tests() {
   bun test \
     agent-node/src/inbox-skip-log.test.ts \
-    agent-node/src/inbox-skip-log-wiring.test.ts
+    agent-node/src/inbox-skip-log-wiring.test.ts \
+    agent-node/src/inbox-skip-close.test.ts
 }
 
 echo "L0 formatter and source wiring"
@@ -57,6 +58,38 @@ fi
 grep -Fq 'toContain' /tmp/test612-task-id.log
 echo "MUTATION_RED: full-task-id rc=$task_id_rc"
 cp /tmp/test612-log.ts agent-node/src/inbox-skip-log.ts
+
+echo "L3b witnessed-red (#519): self reply-loop guard removed"
+cp agent-node/src/inbox-skip-close.ts /tmp/test612-close.ts
+sed -i 's/if (from === alias \&\& !input.imBridge) return "self";/if (false) return "self";/' agent-node/src/inbox-skip-close.ts
+grep -Fq 'if (false) return "self";' agent-node/src/inbox-skip-close.ts
+set +e
+bun test agent-node/src/inbox-skip-close.test.ts >/tmp/test612-guard.log 2>&1
+guard_rc=$?
+set -e
+if [ "$guard_rc" -eq 0 ]; then
+  echo "MUTATION_FALSE_GREEN: self-loop-guard"
+  exit 1
+fi
+grep -Fq 'self-chaining model stops after one self task' /tmp/test612-guard.log
+echo "MUTATION_RED: self-loop-guard rc=$guard_rc"
+cp /tmp/test612-close.ts agent-node/src/inbox-skip-close.ts
+
+echo "L3c witnessed-red (#519): skipped task acked but not closed"
+cp agent-node/src/cli.ts /tmp/test612-cli.ts
+sed -i 's/const closed = await closeSkippedTask(hubToolCall, /const closed = await closeSkippedTaskNoop(hubToolCall, /' agent-node/src/cli.ts
+grep -Fq 'closeSkippedTaskNoop(hubToolCall, ' agent-node/src/cli.ts
+set +e
+bun test agent-node/src/inbox-skip-close.test.ts >/tmp/test612-close.log 2>&1
+close_rc=$?
+set -e
+if [ "$close_rc" -eq 0 ]; then
+  echo "MUTATION_FALSE_GREEN: skipped-task-close"
+  exit 1
+fi
+grep -Fq 'the skipped path closes the task after acking it' /tmp/test612-close.log
+echo "MUTATION_RED: skipped-task-close rc=$close_rc"
+cp /tmp/test612-cli.ts agent-node/src/cli.ts
 
 echo "L4 restored green"
 run_tests

@@ -222,6 +222,19 @@ Cancellation will:
 
 Cancellable statuses are `created`, `delivered`, `acked`, and `running`. Terminal states (`replied`, `failed`, `cancelled`, `expired`) cannot be cancelled directly.
 
+### Tasks agent-node declines or answers silently
+
+In two cases agent-node does **not** send a reply back to the sender. Since #519 both close the task with a terminal status and a reason in `result`, instead of leaving it `acked` forever:
+
+| Case | Model turn runs? | Terminal status | `result` |
+|---|---|---|---|
+| The sender is the node itself (`send_task` to yourself), or the task text starts with the node's own reply prefix `[alias]` | No (reply-loop guard, unchanged) | `cancelled` | `skipped by agent-node: self-sent task …` / `… own reply prefix …` |
+| The turn ran but produced a low-value reply such as "ok" or "done." (non-Dashboard task) | Yes | `replied` | the model's text + `[low-value reply withheld from sender by agent-node (#519)]` |
+
+The second case closes through `report_completion`: the result is recorded on the task, but **no reply is put in the sender's inbox**, so the sender is not woken up for an acknowledgement ping-pong.
+
+To wake a node **later**, do not `send_task` to yourself (it is cancelled, not run). Use a Hub scheduled task (sender `scheduler`) or `/aloop`.
+
 ## Reassigning Tasks
 
 Transfer a task from one agent to another:
