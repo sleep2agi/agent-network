@@ -78,6 +78,8 @@ See [tokens and permissions](/en/guide/account-system#tokens) and the [security 
 
 For another machine, log in there and run `anet node create` again. Copying `config.json` also copies `node_id` and `ntok_`, which can create identity, heartbeat, and SSE-routing conflicts.
 
+To copy a node on the same machine, use `anet node clone` / `anet node codex fork`; see [Copying a node (clone / fork) and cleaning up](/en/guide/copy-node).
+
 ## Task processing
 
 ```text

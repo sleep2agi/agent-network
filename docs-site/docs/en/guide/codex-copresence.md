@@ -280,6 +280,8 @@ Every step of `restart` runs in a fixed order with no reasoning: **preflight (be
 
 ### fork: inherit the history, renew everything else
 
+If you want the settings without the history, use `anet node clone`; the two are compared, with how to delete a copy, in [Copying a node (clone / fork) and cleaning up](/en/guide/copy-node).
+
 ```bash
 anet node codex fork <source> --name <target> --workdir <dir> --no-codex-login [--inherit-full-access] [--model <id>]   # <dir> is created when missing
 CODEX_HOME=<dir>/.anet/nodes/<target>/codex-home codex login --device-auth   # the new node logs in on its own (#514)

@@ -78,6 +78,8 @@ anet node migrate-token-to-envref my-agent
 
 跨机器部署时，应在目标机器登录并重新运行 `anet node create`。复制 `config.json` 会同时复制 `node_id` 和 `ntok_`，可能造成身份、心跳和 SSE 路由冲突。
 
+同一台机器上要复制节点，用 `anet node clone` / `anet node codex fork`，见 [复制节点（clone / fork）与清理](/guide/copy-node)。
+
 ## 任务处理
 
 ```text
