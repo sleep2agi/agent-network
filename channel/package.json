@@ -6,6 +6,6 @@
     "start": "bun run commhub-channel.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/sdk": "1.32.0"
   }
 }
