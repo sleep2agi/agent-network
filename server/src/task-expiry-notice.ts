@@ -22,6 +22,7 @@ import { parseDbTimestampMs } from "./db-timestamp.js";
 import { sendAgentNotice } from "./agent-notice.js";
 import { pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { pendingInboxCount } from "./inbox-count.js";
+import { QUEUE_HORIZON_SQL, QUEUE_OPEN_STATUSES_SQL } from "./task-queue-ahead.js";
 
 export const TASK_EXPIRED_NOTICE_KIND = "task_expired";
 
@@ -102,18 +103,23 @@ export function classifyExpirySender(row: Pick<ExpiredTaskRow, "task_id" | "netw
   return (nodeFirst ? (asAgent() ?? asUser()) : (asUser() ?? asAgent())) ?? { kind: "none", reason: "unknown" };
 }
 
-/** 过期那一刻,目标节点上比它早、还没结束的任务数(正在跑的也算)。 */
+/**
+ * 过期那一刻,目标节点上比它早、还没结束的任务数(正在跑的也算)。
+ * #519 —— 与 task-queue-ahead.ts 的 queue_ahead 同一口径:只数最近 24 小时(QUEUE_HORIZON_SQL)派出的。
+ * 以前没有下界,几个月前被遗弃在 acked / running 的行全算「排在前面」,通知会说前面还有几千个。
+ * 走 idx_tasks_to_created(to_name, created_at)的区间 [horizon, createdAt)。
+ */
 export function openTasksAhead(target: string, networkId: string | null, createdAt: string | null): number | null {
   if (!createdAt) return null;
   try {
     const row = networkId
       ? db.get<{ n: number }>(
         `SELECT COUNT(*) AS n FROM tasks WHERE to_name = ?1 AND network_id = ?2
-            AND status IN ('created', 'delivered', 'acked', 'running') AND created_at < ?3`,
+            AND status IN ${QUEUE_OPEN_STATUSES_SQL} AND created_at < ?3 AND created_at >= ${QUEUE_HORIZON_SQL}`,
         target, networkId, createdAt)
       : db.get<{ n: number }>(
         `SELECT COUNT(*) AS n FROM tasks WHERE to_name = ?1 AND network_id IS NULL
-            AND status IN ('created', 'delivered', 'acked', 'running') AND created_at < ?2`,
+            AND status IN ${QUEUE_OPEN_STATUSES_SQL} AND created_at < ?2 AND created_at >= ${QUEUE_HORIZON_SQL}`,
         target, createdAt);
     return Number(row?.n ?? 0);
   } catch { return null; }

@@ -244,6 +244,9 @@ run_pg_tests_rc anet_model_auth_notify_test src/model-auth-notify-http.test.ts
 run_pg_tests_rc anet_sched_stuck_test src/scheduled-stuck-http.test.ts
 # 任务过期通知发送方(#500):巡检的 consumed_at < expires_at 判据(TEXT 时间戳比较)、按分支绑参的「前面还有几个」计数、inbox reply 行 + user_inbox 通知、父任务不被改终态 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_expiry_notice_test src/task-expiry-notice-http.test.ts
+# 长时间无动静的已开工任务(#519):acked / running 的「每列都早于截止点 + NOT EXISTS 更晚的 task_events」判据(TEXT 时间戳 + datetime 偏移翻译)、
+# ORDER BY … LIMIT 500 + 每行带同样条件的守卫 UPDATE、COALESCE(result, ?) 写原因、task.stale_expired 事件;以及过期通知「前面还有几个」的 24 小时下界 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_stale_open_test src/task-stale-open-http.test.ts
 # 派活时的队列信息(#500 第二步):开着任务 COUNT + SUM(CASE) 按分支绑参、24 小时窗口(datetime 偏移翻译)、耗时样本 ORDER BY … LIMIT、
 # /api/status 全量 queue_depth 的 GROUP BY network_id, to_name、写 tasks 让全量缓存失效 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_queue_ahead_test src/task-queue-ahead-http.test.ts

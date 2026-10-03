@@ -24,6 +24,7 @@ import { createSSEStream, createNetworkObserverStream, createUserEventStream, pu
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
+import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
@@ -940,6 +941,15 @@ export function patrolExpiredTasks(): void {
       if (notices.length > 0) console.log(`[patrol] sent ${notices.length} expiry notice(s)`);
     }
   } catch {}
+  // #519 — acked/running with no activity for COMMHUB_STALE_OPEN_TASK_HOURS
+  // (default 0 = off) → expired, at most 500 per pass, no sender notice
+  // (task-stale-open.ts). Its own try: a failure here must not hide the TTL phase.
+  try {
+    const stale = expireStaleOpenTasks();
+    if (stale.length > 0) console.log(`[patrol] closed ${stale.length} stale acked/running task(s) (#519)`);
+  } catch (e: any) {
+    console.error(`[patrol] stale-open phase failed: ${e?.message || e}`);
+  }
 }
 
 function patrolDeliveredStaleTasks(): void {

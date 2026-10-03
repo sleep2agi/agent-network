@@ -114,6 +114,22 @@ sqlite3 ~/.commhub/commhub.db \
 - Dashboard 的 Audit Log
 - Hub 进程是否由可靠的进程管理器守护
 
+### 8. 收掉长时间无动静的已开工任务(可选)
+
+`COMMHUB_STALE_OPEN_TASK_HOURS`(写进 `~/.commhub/hub.env`):`acked` / `running` 状态、超过这么多小时没有任何动静的任务,由每 5 分钟一次的巡检结束为 `expired`(每次最多 500 条,不通知派活的一方)。**默认 `0`,关闭**;建议值 `72`。规则细节见 [任务生命周期](/concepts/task-lifecycle#长时间无动静的已开工任务)。
+
+打开前先在数据库副本上估算会结束多少历史行(只读打开原库,写到副本;下面的 SQL 是近似口径,没算 `task_events`):
+
+```bash
+sqlite3 'file:'"$HOME"'/.commhub/commhub.db?mode=ro' ".backup '/tmp/hub-copy.db'"
+sqlite3 /tmp/hub-copy.db "SELECT status, COUNT(*) FROM tasks
+  WHERE status IN ('acked','running')
+    AND COALESCE(consumed_at, runtime_submitted_at, started_at, delivered_at, created_at) < datetime('now','-72 hours')
+  GROUP BY status;"
+```
+
+数出来的行数 ÷ 500 ≈ 排空需要的巡检次数(每次间隔 5 分钟)。关掉:删掉那一行或设成 `0`,重启 Hub。已经结束的任务不会恢复。
+
 长期运行和开机恢复见 [让 Hub 常驻](/deploy/keep-alive)。把整台 Hub 换到另一台机器，见 [迁移 Hub](/deploy/hub-migration)。
 
 ## 部署方式
