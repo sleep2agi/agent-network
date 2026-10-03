@@ -113,6 +113,18 @@ anet node start codex-human
 这不是理论风险：生产节点 `外部团队节点` 因此静默重复运行约 2 天，另一个生产节点 `另一团队节点` 则持续约 9 天（[#535](https://github.com/sleep2agi/agent-network/issues/535)）。
 :::
 
+### 用哪个模型 {#model}
+
+启动时模型按这个顺序取，**一个值同时喂给 app-server（`-c model=`）、恢复线程（`thread/resume` 的 `model`）和 TUI（`-m`）**：
+
+1. 本次命令的 `--model <id>`（只对这一次启动生效，不写回配置）
+2. 节点配置 `.anet/nodes/<id>/config.json` 的 `model`（`anet node create --model` / `anet node edit --model` 写入）
+3. 内置默认
+
+启动输出会写明取到的值和来源，例如 `[anet] model: o3 (source: node config …)`；恢复已有会话时再打印一行线程实际所在的模型。`anet node codex start|restart|resume` 内部调用的也是这条路径。
+
+线程原先记录的模型与配置不同时，**以配置为准**：codex 0.155 实测，`thread/resume` 不带 `model` 时会回到 rollout 最后一条 `turn_context` 里的旧模型、并忽略 app-server 的 `-c model=`；而线程一旦被第一个客户端加载，后来的 TUI `resume -m` 也改不动它。所以 anet 在第一次 `thread/resume` 就带上配置的模型（#512）。
+
 ### 首次派活前必须看一眼 TUI 是否卡在审批框
 
 ::: danger 节点会「看起来完全健康」却什么都干不了

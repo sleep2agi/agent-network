@@ -241,9 +241,9 @@ import {
 } from "../src/bootstrap-password-db";
 import {
   CODEX_MODEL_CHOICES,
-  DEFAULT_CODEX_MODEL,
   defaultCodexModelForRuntime,
 } from "../src/codex-model-default";
+import { describeCodexModelSource, resolveCodexCopresenceModel } from "../src/codex-copresence-model";
 import { resolvePrimaryNetwork } from "../src/primary-network";
 
 const args = process.argv.slice(2);
@@ -515,7 +515,8 @@ async function createCodexCopresenceThread(
   ws: string,
   timeoutMs = 60_000,
   resumeThreadId?: string,
-): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean }> {
+  model?: string,
+): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean; resumedModel?: string }> {
   const WsCtor = await resolveCopresenceWebSocketCtor();
   const socket = new WsCtor(ws);
   const deadline = Date.now() + timeoutMs;
@@ -568,11 +569,14 @@ async function createCodexCopresenceThread(
     const plan = copresenceThreadPlan(resumeThreadId);
     if (plan.method === "thread/resume") {
       if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
-      const verification = await resumeAndVerifyCodexThread(
+      // #512 — the resolved model rides on thread/resume; without it codex resumes
+      // on the rollout's recorded model and ignores the app-server's -c model=.
+      const { resumedModel, ...verification } = await resumeAndVerifyCodexThread(
           plan.params.threadId,
           (method, params) => request(method, params, 15_000),
+          model,
         );
-      return { threadId: plan.params.threadId, verification, freshDeferred: false };
+      return { threadId: plan.params.threadId, verification, freshDeferred: false, resumedModel };
     }
     // A fresh Codex 0.148 thread cannot be resumed by a second client until
     // the human TUI owns/materializes it. Do not create or mutate a thread:
@@ -911,6 +915,13 @@ function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resol
   console.log(`[anet] recovery point created after prior runtime quiesced (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
 }
 
+/** #512 — say what the resumed thread is actually on; differs only if codex refused the override. */
+function reportResumedCodexModel(model: string, resumedModel: string | undefined): void {
+  if (resumedModel === undefined) return;
+  if (resumedModel === model) console.log(`[anet] resumed thread is on model ${resumedModel}`);
+  else console.error(`[anet] ⚠ resumed thread reports model ${resumedModel}, not the configured ${model}`);
+}
+
 async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
@@ -921,7 +932,7 @@ async function startWindowsCodexCopresence(
     throw new Error("Windows Codex co-presence needs an interactive console (Windows Terminal, PowerShell, or cmd.exe)");
   }
   const unsafeCmd = /[\r\n&|<>^%!`()\"]/;
-  if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(opts.model || "")) {
+  if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(model)) {
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
   const recoveryCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
@@ -986,7 +997,8 @@ async function startWindowsCodexCopresence(
       for (const line of describeCodexRefreshFailure(appLogTail)?.lines ?? []) console.error(line);
       throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
     }
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId);
+    const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId, model);
+    reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
     let freshDeferred = thread.freshDeferred;
     if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
@@ -1300,7 +1312,13 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const profile = resolved.profile;
   // Resolve once for both platform backends. Keeping a second default inside
   // the Windows branch lets Windows and POSIX silently drift.
-  const model = opts.model || DEFAULT_CODEX_MODEL;
+  // #512 — `opts.model` is ONLY the --model flag. The node's own config `model`
+  // (anet node create/edit --model) used to be skipped here, so every plain
+  // start, boot sweep and `anet node codex start|restart|resume` fell to the
+  // default. Order: flag > node config > default.
+  const resolvedModel = resolveCodexCopresenceModel(opts.model, (profile as { model?: unknown }).model);
+  const model = resolvedModel.model;
+  console.log(`[anet] model: ${model} (source: ${describeCodexModelSource(resolvedModel)})`);
   if (profile.runtime !== "codex-app-server") {
     console.error(`[anet] ❌ --copresence requires runtime=codex-app-server (node "${displayName}" is runtime=${profile.runtime}).`);
     console.error(`[anet]    Create a copresence-capable node with:`);
@@ -1628,7 +1646,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let threadId: string;
   let freshDeferred = false;
   try {
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId);
+    const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId, model);
+    reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;
     profile.codexRecoveryVerification = thread.verification;
