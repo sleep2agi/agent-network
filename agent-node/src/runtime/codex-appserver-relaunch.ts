@@ -14,7 +14,7 @@
 // 🔴 起来以后核对新进程树的 CODEX_HOME(/proc environ),不符就杀掉、本次重启算失败 —— 和 .94 的
 //    launcher / owned app-server 同一道检查(codex-home-enforce.ts)。
 
-import { execFileSync } from "node:child_process";
+import { execTmux } from "../tmux";
 import { chmodSync, existsSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
@@ -52,7 +52,7 @@ export function appsrvSessionFor(tuiSession: string): string {
 
 export function listTmuxPanes(): string | null {
   try {
-    return execFileSync("tmux", ["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}"], {
+    return execTmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}"], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000,
     });
   } catch { return null; }
@@ -61,7 +61,7 @@ export function listTmuxPanes(): string | null {
 export function tmuxSessionId(name: string): string | null {
   let out: string;
   try {
-    out = execFileSync("tmux", ["list-sessions", "-F", "#{session_id}\t#{session_name}"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
+    out = execTmux(["list-sessions", "-F", "#{session_id}\t#{session_name}"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
   } catch { return null; }
   for (const line of out.split("\n")) {
     const tab = line.indexOf("\t");
@@ -337,7 +337,7 @@ export function realRelaunchDeps(input: { codexHome: string; marker: string | un
     token: input.token,
     panes: listTmuxPanes,
     proc: linuxProcView,
-    tmux: (args) => { execFileSync("tmux", args, { stdio: "pipe", timeout: 10_000 }); },
+    tmux: (args) => { execTmux(args, { stdio: "pipe", timeout: 10_000 }); },
     sessionId: tmuxSessionId,
     waitPort: waitForPort,
     writeTokenFile: writeAppServerTokenFile,

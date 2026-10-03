@@ -16,7 +16,7 @@
 // 旧 Hub 不认 `health`:report_status 的顶层 schema 不是 strict,未知键被静默丢弃,不会拒整份上报
 // (见 server/src/tools.ts 的方框注释)。register-telemetry-fallback 也把它列为可丢的可选块。
 
-import { execFileSync } from "node:child_process";
+import { execTmux } from "../tmux";
 import { readFileSync } from "node:fs";
 
 export type ModelAuthState = "ok" | "revoked" | "expired" | "unknown";
@@ -207,7 +207,7 @@ export function classifyTuiPane(
 export function probeTmuxTui(session: string): TuiHealth {
   let out: string;
   try {
-    out = execFileSync("tmux", ["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}"], {
+    out = execTmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}"], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000,
     });
   } catch {

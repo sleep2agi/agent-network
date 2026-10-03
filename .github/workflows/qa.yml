@@ -29,6 +29,7 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
+      - 'tests/test505-tmux-socket-isolation/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
       - 'tests/test1212-windows-real-codex-gate/**'
@@ -211,6 +212,7 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
+      - 'tests/test505-tmux-socket-isolation/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
       - 'tests/test1212-windows-real-codex-gate/**'
@@ -471,6 +473,20 @@ jobs:
 
       - name: Run complete agent-network unit domain
         run: docker run --rm anet-test745-agent-network-unit
+
+      # #505 —— 子 agent 的 `TMUX_TMPDIR=$d tmux kill-server` 继承了父 pane 的 $TMUX,打到默认
+      # server 上,71 个节点一起掉。这一步在容器里起一个真的默认 server + 假会话,把 $TMUX 指过去,
+      # 验 src/tmux.ts:隔离时只碰 -S 指定的 socket、kill-server 一律拒、默认会话活到最后;
+      # 并把关掉隔离的变异件喂进去,断言它必红。镜像只有 tmux+bun+两份 helper,不装依赖。
+      - name: Build test505-tmux-socket-isolation
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test505-tmux-socket-isolation \
+            -f tests/test505-tmux-socket-isolation/Dockerfile .
+
+      - name: Run test505-tmux-socket-isolation
+        run: docker run --rm --network none anet-test505-tmux-socket-isolation
 
   server-unit:
     name: server unit (Docker, non-root)

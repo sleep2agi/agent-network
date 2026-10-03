@@ -186,7 +186,8 @@ describe("--tmux escape-hatch headless (#486 CR regression gate)", () => {
     // `wantTmux` is the flag; if the whole branch gets refactored the
     // gate needs updating too — failing here is that signal.
     expect(startBody).toContain("wantTmux");
-    expect(startBody).toContain('spawn("tmux"');
+    // #505: tmux is spawned through the socket-isolating helper (src/tmux.ts).
+    expect(startBody).toContain("spawnTmux(");
   });
 
   test("--tmux branch has a headless (no-TTY) codepath (`new-session -d`)", () => {

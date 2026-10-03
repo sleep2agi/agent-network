@@ -14,7 +14,7 @@
 // greps command lines — see the repo rule about `pgrep -f`/`pkill -f`
 // matching unrelated shells.
 
-import { execFileSync } from "child_process";
+import { execTmux } from "../../tmux";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -103,7 +103,7 @@ export function readAttachRecord(path: string): AttachRecord | undefined {
 export type TmuxRunner = (args: string[]) => string;
 
 export const defaultTmuxRunner: TmuxRunner = (args) =>
-  execFileSync("tmux", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
+  execTmux(args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
 
 /** Text the placeholder prints; also how a placeholder pane is recognised later. */
 export const ATTACH_PLACEHOLDER_MARKER = "[anet] node restarting, TUI will reattach";
