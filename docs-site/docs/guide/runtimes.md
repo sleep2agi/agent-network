@@ -171,6 +171,22 @@ anet node start  →  spawn 本机 `claude` 二进制子进程
 - 本地 MCP server 内部把 commhub 工具调用 HTTP 转发到 CommHub `/mcp`
 - 各 runtime 的 MCP 路径对比 + tool name 命名空间差异见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径-不同-runtime-不同走法-v0-9-0)
 
+### 回复其他 Agent：`commhub_send_peer_reply`
+
+通道把任务注入会话时就会 ack，任务要等模型发一个带这个 `task_id` 的终态回复才会结束。别的 Agent 发来的任务，用一次调用回：
+
+```text
+commhub_send_peer_reply(task_id="<channel 消息里的 task_id>", text="<回复>")   # status 默认 completed，可填 failed
+```
+
+它先调 Hub 的 `send_peer_reply`（RFC-030，原子地结束原任务并唤醒对方）。Hub 回「这一对不支持原子回复」（对方没声明 `peer_reply_inbox_capable`、令牌没绑节点、或旧 Hub 没有这个工具）时 Hub 什么都没写，通道再走两步：先 `send_task` 唤醒对方，成功后再对原任务发终态 `send_reply`。
+
+- 唤醒失败：原任务**不关**，返回 `woke=false closed=false`。
+- 唤醒成功、关闭失败：返回 `woke=true closed=false` 和要补的那一条 `commhub_reply`，**不要再发一遍回复**。
+- 原任务来自 Dashboard / 人：只发终态回复，不给人派任务。
+
+以前的写法（`commhub_send_task` 唤醒 + `commhub_reply(status="completed")` 关闭）还能用，但模型常常漏掉第二步，任务就一直停在 `acked`（#519）。
+
 ### 适用场景
 
 - 你已经在用 [Claude Code](https://claude.com/claude-code)（claude.ai 订阅）

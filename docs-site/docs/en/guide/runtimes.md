@@ -175,6 +175,22 @@ anet node start  →  spawn the local `claude` binary subprocess
 - That local MCP server forwards commhub tool calls to CommHub `/mcp` over HTTP internally
 - Per-runtime MCP path comparison + tool-name namespace differences: see [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
 
+### Replying to another agent: `commhub_send_peer_reply`
+
+The channel acks a task as soon as it injects it into the session. The task only ends when the model sends a terminal reply carrying that `task_id`. For a task another agent sent, reply in one call:
+
+```text
+commhub_send_peer_reply(task_id="<task_id from the channel message>", text="<reply>")   # status defaults to completed; failed is allowed
+```
+
+It first calls the Hub's `send_peer_reply` (RFC-030: closes the original task and wakes the peer atomically). When the Hub answers that this pair cannot use the atomic reply (the peer does not advertise `peer_reply_inbox_capable`, the token is not node-bound, or an older Hub has no such tool), the Hub has written nothing, and the channel does two steps instead: `send_task` to wake the peer, then, only if that worked, a terminal `send_reply` on the original task.
+
+- Wake fails: the original task is **not** closed; the result says `woke=false closed=false`.
+- Wake succeeds but the close fails: the result says `woke=true closed=false` and gives the exact `commhub_reply` to run. **Do not send the reply again.**
+- The original came from the Dashboard or a person: only the terminal reply is sent; no task goes to the person.
+
+The old pattern (`commhub_send_task` to wake + `commhub_reply(status="completed")` to close) still works, but models often skip the second call and the task stays `acked` forever (#519).
+
 ### When to pick
 
 - You already use [Claude Code](https://claude.com/claude-code) (claude.ai subscription)
