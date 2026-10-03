@@ -59,6 +59,8 @@ The `summary` field is a count aggregated by status ([`server/src/server.ts`](ht
 
 **ETag / 304** (Hub `0.9.0-preview.88`+): every response carries a strong `ETag` (a hash of the body) and `Cache-Control: private, no-cache`. Send `If-None-Match: <last ETag>` and, if nothing changed, the Hub answers **304** with an empty body; reuse the previous body. Desktop/mobile app `0.2.194` reads this way. Older clients that send no `If-None-Match` still get 200 with the full body.
 
+**`queue_depth`** (#500): every row of the full projection carries the number of open tasks on that node (same definition as `queue_ahead` in [MCP `send_task`](/en/api/mcp-tools#send-task)). The `light=1` projection and the old agent-node alias-resolver read (`X-Status-Projection: alias-resolver`) do **not** carry it, so those bodies are byte-identical to before. The cached full body is invalidated by any statement that writes the `tasks` table (the ETag changes with it); the light projections are not affected.
+
 ---
 
 ### GET /api/tasks
@@ -1038,6 +1040,8 @@ curl -X POST http://localhost:9200/api/task \
 
 `task_id` is the canonical task identifier. `message_id` is retained as a
 compatibility alias and currently has the same value.
+
+**Queue info** (#500): successful (200) and offline-queued (202 `alias_offline`) responses also carry `queue_ahead` / `target_busy` / `est_wait_minutes`, plus a `warning` when the queue is long; see [MCP `send_task`](/en/api/mcp-tools#send-task) for the definitions and an example. Advice only — the send is never refused because of them.
 
 ### MCP-first delegation and REST fallback
 

@@ -395,6 +395,28 @@ Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，�
 `renamed_from` / `renamed_to` 继续保留。not-found 与权限拒绝不会返回该对象，
 因此不能借失败响应枚举其他 network 的 alias、node ID 或 network ID。
 
+**队列信息**（#500）：成功和离线排队（`alias_offline`）的响应都另带下面几个字段。只是建议，**从不因此拒绝派活**；不认识它们的旧客户端照旧工作。幂等重放（`idempotent_replay`）不带。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `queue_ahead` | number | 派这一条**之前**目标上开着的任务数：`tasks` 行 `status ∈ created / delivered / acked / running`、最近 24 小时内派出、同一网络、任何发送方。消息（`send_message` / `broadcast`）不写 `tasks`，不算；终态（replied / failed / cancelled / expired）不算；超过 24 小时还没终态的遗弃行不算 |
+| `target_busy` | boolean | 目标上有一条已开工（`acked` / `running`，或带 `started_at` / `consumed_at`）的开着任务，或会话状态是 `working` / `busy` / `running` |
+| `est_wait_minutes` | number \| null | **粗估**：目标最近 24 小时 `replied` 任务耗时的中位数 × `queue_ahead`，四舍五入，上限 1440。前面没人 → `0`；样本少于 3 条 → `null`（不知道）。耗时从 `started_at` 算起，没有就退回派出时间，所以通常偏大 |
+| `warning` | string | 只在 `queue_ahead ≥ 3` 或 `est_wait_minutes > 30` 时出现：一句英文提示，建议换一个空闲节点（`get_all_status` 里 `status=idle`、`queue_depth=0` 的）、合并请求或加长 `ttl_seconds`，并提醒不要原样重发 |
+
+```json
+{
+  "ok": true,
+  "message_id": "uuid-xxx",
+  "actual_to": { "alias": "代码1号", "to_node_id": "node_xxx", "network_id": "net_xxx" },
+  "session_status": "working",
+  "queue_ahead": 3,
+  "target_busy": true,
+  "est_wait_minutes": 60,
+  "warning": "代码1号 already has 3 open task(s) ahead of this one (rough wait ~60 min, busy now). Your task is queued, not refused. It may expire before it starts (ttl 60 min). Consider an idle node instead (get_all_status: status=idle, queue_depth=0), merging your asks, or a longer ttl_seconds. Do not resend the same task."
+}
+```
+
 **示例**：
 
 ```typescript
@@ -720,7 +742,8 @@ send_task({
       "agent": "agent-node:codex",
       "node_id": "n_a1b2c3d4",
       "last_seen_at": "2026-04-12 10:00:00",
-      "network_id": "net_xxx"
+      "network_id": "net_xxx",
+      "queue_depth": 2
     }
   ],
   "summary": [
@@ -730,6 +753,8 @@ send_task({
   ]
 }
 ```
+
+每行另带 `queue_depth`（#500）：这个节点上开着的任务数（与 [`send_task`](#send-task) 响应里 `queue_ahead` 同一口径：`created / delivered / acked / running`、最近 24 小时、同一网络；消息不算）。一条 `GROUP BY` 查出全部节点，不是每行一查。要挑一个能马上接活的节点，看 `queue_depth=0` 比只看 `status` 可靠 —— 见下面「`status` 回答的是什么」。
 
 ::: warning `sessions` 行**没有** `model` 字段
 `get_all_status` 走 `SELECT * FROM sessions`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `SELECT * FROM sessions WHERE 1=1`，无 JOIN）。`sessions` 表 schema（[`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS sessions` + V2 migration [`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `ALTER TABLE sessions ADD COLUMN`）**有 `model` 列** —— V2 migration `ALTER TABLE sessions ADD COLUMN model`，且 `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_status` 段搜 `INSERT INTO sessions`（写这几列的是 `report_status`，不是本节这个 tool） 与 `model = COALESCE(?20, sessions.model)`）。所以 `get_all_status` 直接返回每个 session 的 `model`（agent 没传 `model` 参数时为 `null`）。`nodes` 表里也有一份 `model`（传 `node_id` 时由 `report_status` 同步），是更持久的来源。`summary` 是按 status 分组的全 scope 计数（同 `list_tasks` 的 `stats`）。

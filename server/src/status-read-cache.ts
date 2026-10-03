@@ -20,9 +20,14 @@ import type { DbAdapter } from "./db-adapter";
 import { nodeHealthNextExpiryAt, nodeHealthVersion } from "./node-health-store.js";
 
 let sessionsWriteGen = 0;
+// #500 step 2 —— 全量投影带 queue_depth(tasks 表的开着任务数):写 tasks 的语句也要让**全量**正文失效。
+// light / 别名解析器投影不读 tasks,不看这个代数(写任务不打掉它们的缓存)。
+let tasksWriteGen = 0;
 
 const WRITE_START = /^\s*(?:insert|update|delete|replace|upsert|merge|alter|drop|create|truncate|with)\b/i;
 const SESSIONS_WORD = /\bsessions\b/i;
+// `\b` 不在 `_` 与字母之间:scheduled_tasks / task_events 不命中,只有 tasks 表本身。
+const TASKS_WORD = /\btasks\b/i;
 
 /**
  * 每条经过 db 的语句都过一遍。写语句(含带 RETURNING 的、DDL)里点名了 sessions → 代数 +1。读语句不动。
@@ -30,13 +35,16 @@ const SESSIONS_WORD = /\bsessions\b/i;
  * (status-read-cache.test.ts 钉住这一点)。
  */
 export function noteStatement(sql: string): void {
-  if (WRITE_START.test(sql) && SESSIONS_WORD.test(sql)) sessionsWriteGen++;
+  if (!WRITE_START.test(sql)) return;
+  if (SESSIONS_WORD.test(sql)) sessionsWriteGen++;
+  if (TASKS_WORD.test(sql)) tasksWriteGen++;
 }
 
 /** 原生 exec(迁移 / DDL / 多语句):不逐句判断,一律失效。 */
-export function noteExec(): void { sessionsWriteGen++; }
+export function noteExec(): void { sessionsWriteGen++; tasksWriteGen++; }
 
 export function statusWriteGeneration(): number { return sessionsWriteGen; }
+export function statusTasksWriteGeneration(): number { return tasksWriteGen; }
 
 /**
  * db.ts 用它包住唯一的那个适配器:每条语句先报给上面两个函数。挂在这一个出口上,SQLite / PG 一样,
@@ -52,7 +60,7 @@ export function withStatementHook(inner: DbAdapter): DbAdapter {
   return inner;
 }
 
-type Entry = { gen: number; healthVer: number; validUntil: number; body: string; etag: string };
+type Entry = { gen: number; taskGen: number | null; healthVer: number; validUntil: number; body: string; etag: string };
 const MAX_ENTRIES = 64;
 const memo = new Map<string, Entry>();
 export const statusCacheStats = { hits: 0, misses: 0, uncacheable: 0 };
@@ -69,12 +77,18 @@ let bypass = false;
 /** 测试用:临时绕过缓存(既不读也不写),拿「当场重算」的那一份来对比,而不清掉缓存里已有的条目。 */
 export function __setStatusCacheBypassForTest(on: boolean): void { bypass = on; }
 
-export function memoStatusBody(key: string, compute: () => { body: string; cacheable: boolean }, now = Date.now()): { body: string; etag: string; hit: boolean } {
+export function memoStatusBody(
+  key: string,
+  compute: () => { body: string; cacheable: boolean },
+  now = Date.now(),
+  opts: { dependsOnTasks?: boolean } = {},
+): { body: string; etag: string; hit: boolean } {
   if (bypass) { const { body } = compute(); return { body, etag: etagOf(body), hit: false }; }
   const gen = sessionsWriteGen;
+  const taskGen = opts.dependsOnTasks ? tasksWriteGen : null;
   const healthVer = nodeHealthVersion();
   const hit = memo.get(key);
-  if (hit && hit.gen === gen && hit.healthVer === healthVer && now < hit.validUntil) {
+  if (hit && hit.gen === gen && hit.taskGen === taskGen && hit.healthVer === healthVer && now < hit.validUntil) {
     statusCacheStats.hits++;
     memo.delete(key);
     memo.set(key, hit); // LRU
@@ -89,7 +103,7 @@ export function memoStatusBody(key: string, compute: () => { body: string; cache
     return { body, etag, hit: false };
   }
   statusCacheStats.misses++;
-  memo.set(key, { gen, healthVer, validUntil: nodeHealthNextExpiryAt(now), body, etag });
+  memo.set(key, { gen, taskGen, healthVer, validUntil: nodeHealthNextExpiryAt(now), body, etag });
   while (memo.size > MAX_ENTRIES) memo.delete(memo.keys().next().value as string);
   return { body, etag, hit: false };
 }

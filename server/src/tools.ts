@@ -73,6 +73,7 @@ import {
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
+import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
 
@@ -1596,7 +1597,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_all_status",
-    "Get status of all sessions. Hub uses this for the patrol loop. " +
+    "Get status of all sessions (each row has queue_depth = open tasks). Hub uses this for the patrol loop. " +
       "Pass filter_alias (comma-separated) when you only care about specific " +
       "nodes — the unfiltered result is one row per session with 31 columns and " +
       "is large enough on a real fleet that callers cannot read it.",
@@ -1630,7 +1631,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         params.push(...aliases);
       }
       sql += " ORDER BY updated_at DESC";
-      const sessions = db.all(sql, ...params);
+      // #500 step 2 — queue_depth = open tasks on that node (task-queue-ahead.ts); one GROUP BY, not one query per row.
+      const rows = db.all<any>(sql, ...params);
+      const depth = queueDepthByNode(rows.map((r: any) => r.alias));
+      const sessions = rows.map((s: any) => ({ ...s, queue_depth: depth.get(queueDepthKey(s.network_id, s.alias)) ?? 0 }));
 
       // `summary` has always counted every session in the read scope, ignoring
       // filter_status / filter_server — and now filter_alias. That is fine for
@@ -1702,7 +1706,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "send_task",
-    "Dispatch a task to a session's inbox (by alias).",
+    "Dispatch a task to a session's inbox (by alias). The reply carries queue_ahead (open tasks already on the target), target_busy, est_wait_minutes (rough, null = no history) and, when the queue is long, a warning: queued, never refused — consider an idle node.",
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
       task: z.string().min(1).max(10000).describe("Task content"),
@@ -1879,6 +1883,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
       const targetNodeId = target.session?.node_id ?? null;
       const resolvedActualTo = actualTo(target, effectiveNetId);
+      // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).
+      const queueInfo = dispatchQueueInfo(targetAlias, effectiveNetId, target.session?.status, ttl_seconds || 3600);
       // 事务：inbox + tasks 双写 + 触碰目标 session 的 task/updated_at（让
       // dashboard 在派任务一刻就反映出"任务已下发"，不再等 agent 的
       // report_status 心跳；status 字段交给 agent，避免与 working/idle
@@ -1945,6 +1951,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               session_status: target.session.status ?? "offline",
               actual_to: resolvedActualTo,
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
+              ...(queueInfo ?? {}),
             }),
           }],
         };
@@ -1960,6 +1967,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               actual_to: resolvedActualTo,
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: target.session?.status ?? "unknown",
+              ...(queueInfo ?? {}),
             }),
           },
         ],
