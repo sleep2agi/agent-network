@@ -180,6 +180,7 @@ import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-
 import { describeUnsafePath } from "../src/unsafe-package-path-reason";
 import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-mode-preflight";
 import { exactSession, PANE_LIST_FORMAT, paneTargetFor } from "../src/tmux-exact-target";
+import { execTmux, spawnSyncTmux, spawnTmux } from "../src/tmux";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretAssignment,
@@ -289,7 +290,7 @@ function bunxAvailable(): boolean {
 
 function tmuxPaneTarget(sessionName: string): string | null {
   try {
-    const out = execFileSync("tmux", ["list-panes", "-a", "-F", PANE_LIST_FORMAT], {
+    const out = execTmux(["list-panes", "-a", "-F", PANE_LIST_FORMAT], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     return paneTargetFor(out, sessionName);
@@ -300,7 +301,7 @@ function tmuxPaneTarget(sessionName: string): string | null {
 
 /** Kill a session and report whether it is actually gone afterwards. */
 function killTmuxSession(sessionName: string): boolean {
-  try { execFileSync("tmux", ["kill-session", "-t", exactSession(sessionName)], { stdio: "pipe" }); } catch {}
+  try { execTmux(["kill-session", "-t", exactSession(sessionName)], { stdio: "pipe" }); } catch {}
   // Asking is not killing. `kill-session` failing is swallowed on purpose (a
   // session that is already gone is the common case and not an error), which
   // means the only way to know is to look afterwards — otherwise `node stop`
@@ -312,16 +313,16 @@ function startNodeTmuxSession(sessionName: string, alias: string) {
   // #117 helper used by `anet project up/restart` + the debate/social/PR-review
   // demos. Spawns a detached tmux session that runs `anet node start <alias>`
   // (which since #136 defaults to foreground — no auto-tmux nesting).
-  execFileSync("tmux", ["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)}`], { stdio: "pipe" });
+  execTmux(["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)}`], { stdio: "pipe" });
 }
 function tmuxSessionRunning(name: string): boolean {
-  try { execFileSync("tmux", ["has-session", "-t", exactSession(name)], { stdio: "pipe" }); return true; }
+  try { execTmux(["has-session", "-t", exactSession(name)], { stdio: "pipe" }); return true; }
   catch { return false; }
 }
 /** #448 — pane pids of one session, matched by string equality (tmux `-t` is a prefix match, `=name` fails on CJK). */
 function tmuxSessionPanePids(sessionName: string): number[] {
   try {
-    const out = execFileSync("tmux", ["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}"], {
+    const out = execTmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}"], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     return out.split("\n")
@@ -365,7 +366,7 @@ function assertCopresenceSessionsCodexHome(
 let tmuxAvailableCache: boolean | null = null;
 function tmuxAvailable(): boolean {
   if (tmuxAvailableCache !== null) return tmuxAvailableCache;
-  try { execFileSync("tmux", ["-V"], { stdio: "pipe" }); tmuxAvailableCache = true; }
+  try { execTmux(["-V"], { stdio: "pipe" }); tmuxAvailableCache = true; }
   catch { tmuxAvailableCache = false; }
   return tmuxAvailableCache;
 }
@@ -441,7 +442,7 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
         //   capture-pane -p -S -500  → includes = true
         // 这个函数找的是**一次性出现过**的那一行,不是「此刻屏幕上有什么」,
         // 所以它必须看回滚。(同文件 :810 早就带了 `-S -80`——正确写法一直在。)
-        const out = execFileSync("tmux", ["capture-pane", "-t", paneTarget, "-p", "-J", "-S", "-200"], {
+        const out = execTmux(["capture-pane", "-t", paneTarget, "-p", "-J", "-S", "-200"], {
           stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
         });
         if (out.includes(needle)) { resolve(true); return; }
@@ -466,7 +467,7 @@ function capturePane(sessionName: string, scrollbackLines?: number): string | nu
     if (!paneTarget) return null;
     const args = ["capture-pane", "-t", paneTarget, "-p"];
     if (scrollbackLines) args.push("-S", `-${scrollbackLines}`);
-    return execFileSync("tmux", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+    return execTmux(args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
   } catch { return null; }
 }
 
@@ -758,7 +759,7 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
       const forwardedEnv = process.env.COMMHUB_DB
         ? ["-e", `COMMHUB_DB=${process.env.COMMHUB_DB}`]
         : [];
-      execFileSync("tmux", [
+      execTmux([
         "new-session", "-d", "-s", ANET_HUB_TMUX_SESSION,
         ...forwardedEnv,
         `${selfCmd} 2>&1 | tee ${shellQuote(hubLog)}`,
@@ -1208,7 +1209,7 @@ async function startGrokCopresenceOrchestration(
   //    ensureLocalHubRunning above already learned this; the same reason applies.
   const nodeLog = join(tmpdir(), `anet-grok-copresence-${resolved.id}.log`);
   try {
-    execFileSync("tmux", [
+    execTmux([
       "new-session", "-d", "-s", nodeSession, "-c", process.cwd(),
       "-e", `${GROK_COPRESENCE_CHILD_ENV}=1`,
       "bash", "-lc", `exec ${selfCmd} node start ${shellQuote(displayName)} 2>&1 | tee ${shellQuote(nodeLog)}`,
@@ -1260,7 +1261,7 @@ async function startGrokCopresenceOrchestration(
 
   // ── piece ② the attachable TUI ───────────────────────────────────────────
   try {
-    execFileSync("tmux", [
+    execTmux([
       "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
       "bash", "-lc", `exec ${selfCmd} grok attach ${shellQuote(displayName)}`,
     ], { stdio: "pipe" });
@@ -1457,7 +1458,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // 3.0a. Without this check the very first new-session below dies with
   // tmux's raw usage dump and the operator has nothing to act on.
   assertTmuxSupportsSessionEnv(
-    () => execFileSync("tmux", ["-V"], { stdio: ["ignore", "pipe", "pipe"] }).toString(),
+    () => execTmux(["-V"], { stdio: ["ignore", "pipe", "pipe"] }).toString(),
     (m) => console.error(m),
     (m) => { console.error(m); process.exit(1); },
   );
@@ -1557,7 +1558,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
   try {
-    execFileSync("tmux", [
+    execTmux([
       "new-session", "-d", "-s", appsrvSession, "-c", process.cwd(),
       "-e", `ANET_NODE_MARKER=${identityMarker}`,
       // #448 — the pane's first process gets its env from the tmux SERVER, which
@@ -1602,7 +1603,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // degrades post-mortem detail, never reclaimability.
   const harvestSession = (session: string): SessionInfo | undefined => {
     try {
-      const panePid = Number(execFileSync("tmux", ["display-message", "-p", "-t", session, "#{pane_pid}"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
+      const panePid = Number(execTmux(["display-message", "-p", "-t", session, "#{pane_pid}"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
       if (!Number.isInteger(panePid) || panePid <= 0) return undefined;
       const enumer = realEnumerator();
       const stat = enumer.readStat(panePid);
@@ -1706,7 +1707,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       `exec ${selfInvoke} node start ${shellQuote(displayName)}`,
     ].join(" && ");
     try {
-      execFileSync("tmux", [
+      execTmux([
         "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
         "-e", `ANET_NODE_MARKER=${identityMarker}`,
         "-e", "ANET_COPRESENCE_BRIDGE=1",
@@ -1761,7 +1762,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       tuiInvocation,
     ].join(" ; ");
     try {
-      execFileSync("tmux", [
+      execTmux([
         "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
         "-e", `ANET_NODE_MARKER=${identityMarker}`,
         "-e", `CODEX_HOME=${opts.codexHome}`,
@@ -1930,7 +1931,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
   ].join(" ; ");
-  execFileSync("tmux", [
+  execTmux([
     "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
     "bash", "-lc", bridgeCommand,
   ], { stdio: "pipe" });
@@ -1944,7 +1945,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     let paneTail = "";
     try {
       const bridgePane = tmuxPaneTarget(bridgeSession);
-      paneTail = bridgePane ? execFileSync("tmux", ["capture-pane", "-p", "-t", bridgePane, "-S", "-80"], {
+      paneTail = bridgePane ? execTmux(["capture-pane", "-p", "-t", bridgePane, "-S", "-80"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).slice(-3_000) : "";
@@ -1959,7 +1960,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     process.exit(1);
   }
 
-  execFileSync("tmux", [
+  execTmux([
     "new-session", "-d", "-s", tuiSession, "-c", process.cwd(),
     "bash", "-lc", `exec ${shellQuote(attachScript)}`,
   ], { stdio: "pipe" });
@@ -4180,7 +4181,7 @@ function attachCommand() {
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   let listing: string;
   try {
-    listing = execFileSync("tmux", ["list-sessions", "-F", "#{session_id}\t#{session_name}"], {
+    listing = execTmux(["list-sessions", "-F", "#{session_id}\t#{session_name}"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -4204,7 +4205,7 @@ function attachCommand() {
     process.exit(1);
   }
 
-  const child = spawnSync("tmux", ["attach-session", "-t", session.id], { stdio: "inherit" });
+  const child = spawnSyncTmux(["attach-session", "-t", session.id], { stdio: "inherit" });
   if (child.error) {
     console.error(`[anet] tmux attach failed: ${child.error.message}`);
     process.exit(1);
@@ -7462,9 +7463,7 @@ async function startCommand() {
     // run would otherwise be mistaken for this launch's process.
     rmSync(join(nodesDir(), resolved.id, ".pid"), { force: true });
     try {
-      execFileSync(
-        "tmux",
-        ["new-session", "-d", "-s", alias, "-c", process.cwd(), inner],
+      execTmux(["new-session", "-d", "-s", alias, "-c", process.cwd(), inner],
         { stdio: "ignore" },
       );
     } catch (e: any) {
@@ -7580,9 +7579,7 @@ async function startCommand() {
       // `new-session -d`. `-A` still handles the rerun case (attach if
       // exists) which for detached-startup means "leave existing session
       // alone and consider it started".
-      const proc = spawnSync(
-        "tmux",
-        ["new-session", "-d", "-A", "-s", alias, "-c", process.cwd(), inner],
+      const proc = spawnSyncTmux(["new-session", "-d", "-A", "-s", alias, "-c", process.cwd(), inner],
         { stdio: ["ignore", "pipe", "pipe"] },
       );
       tmuxStderr = String(proc.stderr || "");
@@ -7637,7 +7634,7 @@ async function startCommand() {
   // sees a real PTY through the tmux client/server pair.
   const tmuxArgs = ["new", "-As", alias, "-c", process.cwd(), inner];
   try {
-    const child = spawn("tmux", tmuxArgs, { stdio: "inherit" });
+    const child = spawnTmux(tmuxArgs, { stdio: "inherit" });
     child.on("exit", code => process.exit(code || 0));
   } catch (e: any) {
     console.error(`[anet] ❌ tmux launch failed: ${e.message || e}`);
@@ -7737,7 +7734,7 @@ function codexRestartActions(ctx: CodexLifecycleCtx, peer: { id: string; profile
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const sessionIdExact = (name: string): string | null => {
     try {
-      const out = execFileSync("tmux", ["list-sessions", "-F", "#{session_name}\t#{session_id}"], { stdio: ["ignore", "pipe", "ignore"] }).toString();
+      const out = execTmux(["list-sessions", "-F", "#{session_name}\t#{session_id}"], { stdio: ["ignore", "pipe", "ignore"] }).toString();
       for (const line of out.split("\n")) { const [n, id] = line.split("\t"); if (n === name && id) return id; }
     } catch { /* no server */ }
     return null;
@@ -7757,7 +7754,7 @@ function codexRestartActions(ctx: CodexLifecycleCtx, peer: { id: string; profile
       const name = sessions[role];
       const id = sessionIdExact(name);
       if (!id) return { ok: true, detail: `${name} already gone` };
-      try { execFileSync("tmux", ["kill-session", "-t", id], { stdio: "pipe" }); } catch (e: any) { return { ok: false, detail: `tmux kill-session ${id}: ${e?.message ?? e}` }; }
+      try { execTmux(["kill-session", "-t", id], { stdio: "pipe" }); } catch (e: any) { return { ok: false, detail: `tmux kill-session ${id}: ${e?.message ?? e}` }; }
       const deadline = Date.now() + (role === "tui" ? 20_000 : 10_000);
       while (Date.now() < deadline) { if (prim.tmuxPanePid(name) === null) { say(`stopped ${role} (${name})`); return { ok: true, detail: `${name} gone` }; } await sleep(250); }
       return { ok: false, detail: `${name} still alive after kill-session` };
@@ -11529,7 +11526,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
       // 这里判的是「**此刻屏幕上有没有一个等人回答的提示框**」。加上回滚,一个
       // 早就被答掉、已经滚走的提示框会被重新识别成待处理,于是往一个并没有显示
       // 它的会话里 send-keys。**同一个 flag,这三处里两处该加、一处不该。**
-      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", paneTarget], {
+      pane = execTmux(["capture-pane", "-p", "-t", paneTarget], {
         encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
       }).toString();
     } catch {
@@ -11539,7 +11536,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
     if (prompt === "folder-trust" && !trustAnswered) {
       // Settle briefly so Ink's input handler is fully attached, then accept.
       await new Promise(r => setTimeout(r, 700));
-      try { execFileSync("tmux", ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" }); } catch {}
+      try { execTmux(["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" }); } catch {}
       trustAnswered = true;
       deadline = Date.now() + timeoutMs;  // fresh window for the prompt we came for
       await new Promise(r => setTimeout(r, 1000));
@@ -11549,7 +11546,7 @@ async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): 
       // Prompt is rendered and waiting. Settle briefly so Ink's input handler
       // is fully attached, then confirm with a single Enter.
       await new Promise(r => setTimeout(r, 700));
-      try { execFileSync("tmux", ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" }); } catch {}
+      try { execTmux(["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" }); } catch {}
       return true;
     }
     await new Promise(r => setTimeout(r, 1000));
@@ -11566,7 +11563,7 @@ function capturePaneReason(sessionName: string): string | null {
     // 🔴 同 #849:找的是「**曾经出现过**的那一行拒绝原因」,不是「此刻屏幕上有什么」。
     // 一个已经死掉的 pane,它的报错很可能已被后续输出顶出可见区 —— 不带 `-S` 就会
     // 拿到 null,调用方回退到一句泛化的失败文案,而真正的原因明明还在回滚里。
-    const pane = execFileSync("tmux", ["capture-pane", "-p", "-t", paneTarget, "-S", "-200"], {
+    const pane = execTmux(["capture-pane", "-p", "-t", paneTarget, "-S", "-200"], {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     return extractStartFailureReason(pane);
@@ -16157,7 +16154,7 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
   if (verb === "list") {
     let sessions: string[] = [];
     try {
-      const out = execSync("tmux list-sessions -F '#{session_name}' 2>/dev/null || true", { encoding: "utf-8" });
+      const out = execTmux(["list-sessions", "-F", "#{session_name}"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
       sessions = out.split("\n").filter(s => s && s.includes("-"));
     } catch {}
     const groups = new Map<string, string[]>();
@@ -16184,7 +16181,7 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
   // stop/restart/cleanup share a "kill matching tmux sessions" pass.
   let killedCount = 0;
   try {
-    const out = execSync("tmux list-sessions -F '#{session_name}' 2>/dev/null || true", { encoding: "utf-8" });
+    const out = execTmux(["list-sessions", "-F", "#{session_name}"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
     const sessions = out.split("\n").filter(s => s.startsWith(`${prefix}-`));
     for (const sess of sessions) {
       killTmuxSession(sess);

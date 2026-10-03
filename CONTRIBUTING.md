@@ -99,6 +99,22 @@ Every PR to `main` runs [`bash scripts/qa.sh`](./scripts/qa.sh) (L0 unit + L1 Do
 - The matrix + strategy live in [docs/qa/](./docs/qa/) — see [docs/qa/README.md](./docs/qa/README.md) for adding new tests (6-step flow).
 - v0 ship-readiness snapshot: [docs/qa/v0-summary.md](./docs/qa/v0-summary.md). Roadmap (which way the gate is going next): [docs/qa/v1-roadmap.md](./docs/qa/v1-roadmap.md).
 
+### tmux in tests: always `-L`/`-S` and `env -u TMUX`; never `kill-server` (#505)
+
+A test or script running inside a tmux pane inherits `$TMUX`, and `$TMUX` beats
+`TMUX_TMPDIR` when tmux picks its socket. So `TMUX_TMPDIR=$d tmux kill-server`
+from a pane kills the **default** server — that is how 71 production nodes went
+down at once (#505).
+
+- Every tmux call in a test names a private server: `tmux -L <unique-name> …` or
+  `tmux -S <socket> …`, **and** runs with `env -u TMUX -u TMUX_PANE`.
+- Never `kill-server`. Clean up with `kill-session -t =<name>` on your own server.
+- Tests that start real tmux sessions run inside Docker only.
+- Product code calls tmux only through `agent-network/src/tmux.ts` (copy:
+  `agent-node/src/tmux.ts`): with `ANET_TMUX_SOCKET` or `TMUX_TMPDIR` set it passes
+  `-S` and drops a foreign `$TMUX`; it refuses `kill-server` always.
+  `agent-network/src/tmux-ratchet.test.ts` fails on a new raw `execFileSync("tmux", …)`.
+
 ## Code style
 
 - TypeScript strict mode

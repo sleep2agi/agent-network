@@ -55,6 +55,7 @@ commhub_get_all_status()
 - **分层测试，从简单到复杂**：环境→认证→单点通信→完整流程→多用户→安全
 - **前一层不过就不跑后面的**：被依赖的原子能力必须先验证可靠
 - **所有测试在 Docker 里跑**：不碰本地环境，不改生产
+- **tmux 在测试里一律 `-L`/`-S` 私有 server + `env -u TMUX -u TMUX_PANE`；永远不 `kill-server`**（#505：子 agent 在 pane 里跑 `TMUX_TMPDIR=$d tmux kill-server`，继承的 `$TMUX` 优先于 `TMUX_TMPDIR`，打掉默认 server，71 个节点一起掉）。起真 tmux 会话的测试只在 Docker 里跑；产品代码只经 `agent-network/src/tmux.ts` 调 tmux（`tmux-ratchet.test.ts` 拦新增的裸调用）。
 - **测试可以自己跑**（早期"测试1-3号"分工已撤销；新增套件必须注册进 CI，见 check-test-suite-registration）
 - **发版一律走 GitHub Actions**（Vincent 2026-08-27 定：本机只开发不发包）：`release-gate (v0)` 发 preview，`promote to latest` 升 latest（要 owner ACK）
   - 发 preview 前 `docs/tests/release-v<版本>.md` 必须有 `## Install` 和 `## Upgrade` 两段且 Install 段含 `@<版本>`（闸 3；09-02 只抄了上一版说明的上半就红了一次）。先 `git show origin/main:docs/tests/release-v<上一版>.md | grep '^## '` 把骨架抄全。

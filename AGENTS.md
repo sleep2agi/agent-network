@@ -5,6 +5,7 @@
 - **分层测试，从简单到复杂**：环境→认证→单点通信→完整流程→多用户→安全
 - **前一层不过就不跑后面的**：被依赖的原子能力必须先验证可靠
 - **所有测试在 Docker 里跑**：不碰本地环境，不改生产
+- **tmux 在测试里一律 `-L`/`-S` 私有 server + `env -u TMUX -u TMUX_PANE`；永远不 `kill-server`**（#505：子 agent 在 pane 里跑 `TMUX_TMPDIR=$d tmux kill-server`，继承的 `$TMUX` 优先于 `TMUX_TMPDIR`，打掉默认 server，71 个节点一起掉）。起真 tmux 会话的测试只在 Docker 里跑；产品代码只经 `agent-network/src/tmux.ts` 调 tmux（`tmux-ratchet.test.ts` 拦新增的裸调用）。
 - **测试结果保存**：docs/tests/report-testN.txt
 - **每个测试套件独立 Dockerfile**：可并行构建和运行
 - **Docker 权限**：用 `sg docker -c '...'` 执行 docker 命令

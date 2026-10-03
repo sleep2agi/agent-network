@@ -3,6 +3,7 @@
 // 由纯判定层报 unknown —— 不冒充「量到了」。
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "fs";
 import { execFileSync } from "child_process";
+import { execTmux } from "./tmux";
 import { join } from "path";
 import { shortFingerprint } from "./codex-lifecycle-receipt";
 import type { PreflightFacts, ProcessFact, RolloutFact } from "./codex-lifecycle-preflight";
@@ -29,7 +30,7 @@ export function realPrimitives(opts: { hub: string; token: string; networkId?: s
       // 🔴 不用 `-t =name`:tmux 3.4 上对这类会话名(含 CJK)精确匹配返回空;`-t name` 又是前缀匹配,
       //    「通信牛」会命中「通信牛-appsrv」。列出全部 pane 后按 session_name **逐字相等**挑,不做任何前缀猜测。
       try {
-        const out = execFileSync("tmux", ["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
+        const out = execTmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
         for (const line of out.split("\n")) {
           const tab = line.indexOf("\t");
           if (tab < 0 || line.slice(0, tab) !== session) continue;
