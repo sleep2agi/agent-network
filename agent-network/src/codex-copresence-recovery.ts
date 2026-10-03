@@ -65,13 +65,31 @@ export function verifyCodexThreadHistory(
   };
 }
 
+/**
+ * #512 — `model` is the node's resolved model. It MUST ride on thread/resume:
+ * measured on codex 0.155 (Docker), a resume without it puts the thread back on
+ * the model recorded in the rollout's last turn_context and ignores the
+ * app-server's `-c model=`. This launcher is the first client to load the
+ * thread, and once loaded, later resumes without a model (the bridge's) keep
+ * whatever the first one set — so this is the request that decides the model
+ * for every subsequent turn: the configured model wins over the thread's
+ * recorded one.
+ *
+ * Returns the model the app-server reports for the resumed thread (if any) so
+ * the caller can say which model the session is actually on.
+ */
 export async function resumeAndVerifyCodexThread(
   threadId: string,
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
-): Promise<CodexRecoveryVerification> {
-  await request("thread/resume", { threadId });
+  model?: string,
+): Promise<CodexRecoveryVerification & { resumedModel?: string }> {
+  const params: Record<string, unknown> = { threadId };
+  if (typeof model === "string" && model.trim()) params.model = model.trim();
+  const resumed = await request("thread/resume", params);
   const read = await request("thread/read", { threadId, includeTurns: true });
-  return verifyCodexThreadHistory("thread/resume", threadId, read);
+  const verification = verifyCodexThreadHistory("thread/resume", threadId, read);
+  const resumedModel = (resumed as { model?: unknown } | null)?.model;
+  return typeof resumedModel === "string" ? { ...verification, resumedModel } : verification;
 }
 
 /** Private, node-local recovery point. config-recovery.json is deliberately

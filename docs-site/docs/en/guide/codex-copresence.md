@@ -114,6 +114,18 @@ anet node start codex-human
 This is not theoretical: the production node `外部团队节点` ran a silent duplicate for about two days, and another production node, `另一团队节点`, did so for about nine days after operators followed the generic hint ([#535](https://github.com/sleep2agi/agent-network/issues/535)).
 :::
 
+### Which model the node runs {#model}
+
+At start the model is resolved in this order, and **one value feeds the app-server (`-c model=`), the thread recovery (`thread/resume`'s `model`) and the TUI (`-m`)**:
+
+1. `--model <id>` on this command (this start only; not written back)
+2. `model` in the node config `.anet/nodes/<id>/config.json` (written by `anet node create --model` / `anet node edit --model`)
+3. the built-in default
+
+The start output names the value and its source, e.g. `[anet] model: o3 (source: node config …)`; when an existing session is resumed it also prints the model the thread is actually on. `anet node codex start|restart|resume` call this same path internally.
+
+When the thread was recorded on a different model, **the configured model wins**: measured on codex 0.155, a `thread/resume` without `model` puts the thread back on the model in the rollout's last `turn_context` and ignores the app-server's `-c model=`, and once the first client has loaded the thread a later TUI `resume -m` does not change it. So anet sends the configured model on that first `thread/resume` (#512).
+
 ### Check the TUI for a pending approval before the first dispatch
 
 ::: danger The node can look completely healthy while doing nothing
