@@ -383,7 +383,8 @@ export async function fetchOpenCodeJson(
         "content-type": "application/json",
         ...(init.headers ?? {}),
       },
-      // `timeoutMs <= 0` = no deadline (the operator disabled it).
+      // `timeoutMs <= 0` = no deadline here: the operator disabled it, or the
+      // caller passed its own `init.signal` (kept by the spread above).
       ...(timeoutMs > 0 ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       // Neither key is in the DOM RequestInit type. Node's fetch honours
       // `dispatcher` and ignores `timeout`; Bun is the other way round.
@@ -726,6 +727,16 @@ export async function openVettedOpenCodeCopresence(
           let message: any;
           const turnTimeoutMs = deadline > 0 ? Math.max(1, deadline - Date.now()) : 0;
           const turnDispatcher = openCodeTurnDispatcher(turnTimeoutMs);
+          // The deadline signal is held here, not created inside fetchJson, so
+          // the catch below can ask the signal itself whether it fired. The
+          // old test was `Date.now() >= deadline`, but Bun's
+          // AbortSignal.timeout runs on a different clock from Date.now() and
+          // routinely fires up to 1 ms before Date.now() reaches the same
+          // deadline (#517: measured 160/300 early in oven/bun:1.3.1). In that
+          // window our own deadline escaped as a bare
+          // "TimeoutError: The operation timed out" instead of the truthful
+          // OpenCodeCopresenceTimeoutError (CI run 37127942901, test230).
+          const turnSignal = turnTimeoutMs > 0 ? AbortSignal.timeout(turnTimeoutMs) : undefined;
           try {
             message = await fetchJson(url, password, `/session/${created.id}/message`, {
               method: "POST",
@@ -734,11 +745,12 @@ export async function openVettedOpenCodeCopresence(
                 model,
                 parts: [{ type: "text", text: visiblePrompt }],
               }),
-            }, turnTimeoutMs, turnDispatcher);
+              ...(turnSignal ? { signal: turnSignal } : {}),
+            }, 0, turnDispatcher);
           } catch (error: any) {
             // Only the bridge's own deadline becomes the "still running"
             // reply; any other POST failure keeps its real message.
-            if (deadline > 0 && Date.now() >= deadline
+            if (turnSignal?.aborted
               && (error?.name === "TimeoutError" || error?.name === "AbortError")) {
               // Say "still running" only when the submission provably landed
               // in the shared session; a POST that never arrived is "not
