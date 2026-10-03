@@ -200,8 +200,11 @@ anet node create <新名字> --from <源节点>
 opencode-cli 节点（运行时绑定和登录在节点配置之外，请用 `anet node create --runtime opencode-cli` 新建）、
 host daemon（`role=host_supervisor`）。
 
-codex 节点的登录不会被复制：首次启动时 anet 按常规把本机 `~/.codex` 的登录放进新节点；
-同一个账号被多个节点共用，在刷新 token 时会互相顶掉。要用独立账号，用
+codex 节点的登录不会被复制。一个登录只给一个节点（refresh token 一次性，共用会互相顶掉）：
+启动前先给新节点自己登录 `CODEX_HOME=<新节点目录>/codex-home codex login --device-auth`。
+没登录就启动时，anet 会把本机 `~/.codex` 的登录放进去——但如果本机已有别的节点在用这份登录，
+就拒绝启动（exit 1，`--allow-shared-codex-login` 可强行共享，不安全；见
+[一个登录只给一个节点](/guide/codex-copresence#one-login-per-node)）。要用登记过的账号，用
 `anet node codex account install <新名字> --source codex-login:<profile-id>`。
 要连 codex 会话历史一起带走，用 `anet node codex fork`（见 [Codex 共存](/guide/codex-copresence)）。
 

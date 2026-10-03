@@ -206,6 +206,39 @@ agent-node `2.5.0-preview.96` 起，看门狗把「活着但卡死」和「死�
 
 看门狗不会切换账号，不会在节点之间拷贝凭据，也不会碰别的节点的进程。
 
+### 一个登录只给一个节点 {#one-login-per-node}
+
+ChatGPT 登录的 refresh token 是**一次性**的,每刷新一次就换一个新的、旧的作废。同一份 `auth.json`(同一次登录)出现在两个节点的 `CODEX_HOME` 里,谁先刷新谁活,其余节点几天后报:
+
+```text
+Your access token could not be refreshed because you have since logged out or signed in to another account   (401 token_revoked)
+```
+
+所以 anet 在**把登录交给一个节点的那一刻**拦住共享(#514),默认拒绝、退出码 `1`:
+
+| 路径 | 什么时候拒绝 |
+|---|---|
+| `anet node start <name> --copresence` 把本机 `~/.codex/auth.json` 放进节点 | 节点的 `codex-home` 里**还没有** `auth.json`(新节点、clone 的首次启动),而本机已有**别的节点**在用这份登录 |
+| `anet node codex fork` | 总是会复制源节点正在用的登录 → 默认拒绝;用 `--no-codex-login` 不带登录 |
+| `anet node codex account install` | 这个 profile 的登录已被别的节点使用 |
+| `anet node clone` | 本来就不复制 `auth.json`;首次启动走上面第一行 |
+
+拒绝信息只列对方节点的**别名**,并给出修法和覆盖开关。修法:每个节点自己登录一次(SSH 上也能用设备码):
+
+```bash
+CODEX_HOME=<节点目录>/codex-home codex login --device-auth
+```
+
+`--allow-shared-codex-login` 可以强行共享,**不安全**:这几个节点会互相顶掉登录。只在你明确知道后果时用。
+
+几条规则:
+
+- **只拦新增的共享。**节点 `codex-home` 里已经有 `auth.json` 的(老节点)照常启动,如果它和别人共享,启动时打一段告警(#1918),`anet doctor` 会列出所有共享同一登录的节点组。
+- **本机登录**:第一个借用 `~/.codex` 登录的节点放行,并提示这份登录不要再给别的节点、也不要同时在本机直接跑 `codex`;第二个节点被拒。anet 看不到你是否在本机手动用 `codex`,这一点只能靠你遵守。
+- 比较用的是 refresh token 的 8 位 sha256 指纹,不是账号 id:同一个账号的两次独立登录互不影响,不算共享。anet 只读各节点公布在 `~/.anet/codex-auth-fingerprints/` 和节点目录里的指纹文件,**从不读别的节点的 `auth.json`**,也不打印任何 token。
+- 交给节点的登录会记下来源指纹(`.codex-auth-origin.json`):第一个节点刷新后它的副本换了新 token,而 `~/.codex` 里还是那个已经用掉的旧 token,下一个节点照样会被拦住。
+- API key 登录(`auth.json` 里没有 refresh token)不会轮换,不受这条规则限制。
+
 ### 模型登录失效 {#model-login}
 
 `model_auth` 变成 `revoked`（refresh token 被作废）或 `expired`（登录过期，而且没能自动刷新）之后：
@@ -247,11 +280,14 @@ anet node codex resume  <alias> --thread <36 位 thread id> --probe-from <peer>
 ### fork:继承历史,其余全新
 
 ```bash
-anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>]   # <dir> 不存在会自动建
+anet node codex fork <source> --name <target> --workdir <dir> --no-codex-login [--inherit-full-access] [--model <id>]   # <dir> 不存在会自动建
+CODEX_HOME=<dir>/.anet/nodes/<target>/codex-home codex login --device-auth   # 新节点自己登录(#514)
 cd <dir> && anet node codex start <target> --probe-from <source>      # 首次启动 = verify + nonce 验收
 ```
 
 fork 只读源节点(它的 auth.json / config.toml 和**那一个** rollout),在 `<dir>/.anet/nodes/<target>/` 造一个全新节点:新 `node_id` 与 CommHub 身份、新 `CODEX_HOME`(0700,auth.json 0600)、新 thread id(UUIDv7)、新工作目录、新 tmux 名;端口在首次启动时分配。rollout 是**流式复制并逐处改写 thread id**(定长 36 字符,字节数不变),不是共享同一文件;第一行必须是源 thread 的 `session_meta`,否则一个字节都不写。源节点的 `.anet-copresence.env`(含它的 CommHub token)、history、sqlite、缓存一律不带;完整访问也不继承,除非显式 `--inherit-full-access` 且源节点本来就开着。
+
+**登录不跟着 fork 走(#514)。**源节点正在用它的 `auth.json`,复制过去两个节点就共用一条一次性 refresh token 链(见[一个登录只给一个节点](#one-login-per-node))。所以不带 `--no-codex-login` 的 fork 默认拒绝(exit 1,在向 Hub 注册之前,什么都不留下);`--no-codex-login` 不复制 `auth.json`,receipt 的 `home_isolated` 写明首启前要登录;`--allow-shared-codex-login` 照旧复制,不安全。
 
 receipt 的 `fork_isolation` 要求身份 / HOME / thread / rollout 文件 / tmux 名五处都不同、rollout 等长复制且目标 HOME 里没有 token 文件;`identity_attested` 在 fork 阶段为 unknown(不阻塞),由首次 `start --probe-from` 闭环。`start` / `restart` / `resume` 必须在 `config.codexProjectDir` 记的目录里执行,否则拒绝(三段 tmux 的工作目录与 `.anet/nodes` 都是相对当前目录的)。
 

@@ -575,9 +575,11 @@ export function formatCloneSummary(r: { source: string; target: string; profile:
   }
   if (r.ledger.skipped.some((s) => s.item === "codex-home/auth.json")) {
     L.push("");
-    L.push(`  codex login: the clone does not reuse the source's auth.json. On first start anet stages this`);
-    L.push(`  host's ~/.codex login (one account shared by several nodes breaks on refresh — #1918).`);
-    L.push(`  For a separate account: anet node codex account install ${r.target} --source codex-login:<profile-id>`);
+    L.push(`  codex login: the clone does not reuse the source's auth.json. One login per node: log it in first,`);
+    L.push(`    CODEX_HOME=${join(r.targetNodeDir, "codex-home")} codex login --device-auth`);
+    L.push(`  Otherwise its first start stages this host's ~/.codex login — and refuses (exit 1) if another`);
+    L.push(`  node already uses that login (refresh tokens are single-use — #514, #1918).`);
+    L.push(`  For a registered account: anet node codex account install ${r.target} --source codex-login:<profile-id>`);
   }
   return L.join("\n");
 }

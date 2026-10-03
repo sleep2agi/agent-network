@@ -9,6 +9,7 @@ export type ParsedCliOptions = {
 // parsing so the two views of argv cannot drift.
 export const BOOLEAN_FLAGS = new Set([
   "--accept-dev-channels",
+  "--allow-shared-codex-login",  // #514
   "--all",
   "--copresence",
   "--dangerously-allow-full-access",
@@ -30,6 +31,7 @@ export const BOOLEAN_FLAGS = new Set([
   "--force",
   "--grok-headless",
   "--new-session",
+  "--no-codex-login",            // #514 (fork)
   "--no-auto-self",
   "--no-yolo",
   "--resume-latest",

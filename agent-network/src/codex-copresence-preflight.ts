@@ -23,6 +23,10 @@
 // `--no-inherit-codex-home` opts back into true isolation for anyone who wants
 // to log in inside the node HOME themselves.
 //
+// #514 narrows "SHARE": refresh tokens are single-use, so the host login may be
+// staged into a node that has none only while no OTHER node uses it
+// (codex-login-share-guard.ts). The second node is refused; one login per node.
+//
 // version.json rides the same mechanism, and is not cosmetic: it carries
 // `dismissed_version`, and without it the TUI opens on
 //
