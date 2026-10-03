@@ -153,7 +153,24 @@ expires_at = datetime('now', '+3600 seconds')
 含义：
 - 实际状态翻转最多比 `expires_at` 晚 ~5 分钟
 - **已经 `acked` 或 `running` 的任务不会被自动过期** —— agent 已经接手了，即使超过 TTL patrol 也不动它（所以状态机图里没有 `acked → expired` 边）。要终止一个卡住的 `running` 任务用 [`cancel_task`](/api/mcp-tools#cancel-task)
+- **节点已经取走的任务也不会被过期**(#500):状态还是 `delivered`、但 `consumed_at` 早于 `expires_at`(运行时已经把它带进一轮对话)的任务,patrol 不动它,留给节点做完。`consumed_at` 晚于期限(迟到的回执)不算
 :::
+
+### 过期时通知派活的一方
+
+patrol 把任务改成 `expired` 之后(事务提交后),Hub 会告诉**派活的一方**,按它平时收回复的路走:
+
+| 派活的一方 | 收到什么 |
+|---|---|
+| agent 节点 | inbox 一行 `type=reply`、`from_session=hub`、`requires_response=none`、`in_reply_to=<过期任务>`,并推 SSE `new_reply`(`status: "expired"`)。和 `send_reply` 同形,agent-node 与 claude-code channel 都会被它唤醒去拉 inbox。agent-node 把它当终态结果交给模型,**不会回复它**;claude-code channel 像其他回复一样把它注入会话 |
+| 人(Dashboard / App) | 一条 `kind=task_expired` 的 Hub 通知(`user_inbox` + `/events/users/me` 的 `desktop_message`),`from_session` 是目标节点 —— 出现在**与该节点的会话**里,带未读和通知 |
+| `scheduler` | 不发:排程的 run 记录已经是 `expired` |
+| `hub` / `api` / 认不出的发送方 | 不发 |
+
+- 正文带目标节点、等了多少分钟、期限、过期时目标上还有几个比它早且未结束的任务,以及建议:换一个空闲节点重新派(已过期任务不能 `reassign_task`),或稍后 `retry_task`;**不要原样重发新任务** —— 重发只会让队列更长。
+- 限流:同一次 patrol 里,同一个(发送方, 目标)只发**一条**,多条过期合并成一条摘要(列出每个 task id)。
+- 子任务过期:父任务的发送方收到一条「子任务已过期」;**父任务的状态和 `result` 不变**(执行者可能还在干活)。这一点与子任务**回复**不同 —— 子任务回复会经 `chainReplyToParent` 把父任务改成终态。
+- 每次通知在 `task_events` 记一行 `event_type=task.expiry_notice`(不会多出一条 `task.expired`)。
 
 ## 重试机制
 

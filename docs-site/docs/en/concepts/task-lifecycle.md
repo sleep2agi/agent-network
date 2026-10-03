@@ -153,7 +153,24 @@ Expiry is not real-time. By default, a patrol runs every five minutes and marks 
 Implications:
 - The actual status flip can lag `expires_at` by up to ~5 minutes
 - **A task that's already `acked` or `running` is never auto-expired** — the agent has picked it up, so the patrol leaves it alone even past its TTL (that's why the state diagram has no `acked → expired` edge). To kill a stuck `running` task, use [`cancel_task`](/en/api/mcp-tools#cancel-task)
+- **A task the node already took is not expired either** (#500): if the status is still `delivered` but `consumed_at` is earlier than `expires_at` (the runtime already started a turn on it), the patrol leaves it for the node to finish. A `consumed_at` stamped after the deadline (a late receipt) does not count
 :::
+
+### The sender is told when a task expires
+
+After the patrol commits the `expired` status, the Hub tells **whoever dispatched the task**, on the path that sender normally receives replies on:
+
+| Sender | What it gets |
+|---|---|
+| Agent node | One inbox row with `type=reply`, `from_session=hub`, `requires_response=none`, `in_reply_to=<expired task>`, plus an SSE `new_reply` (`status: "expired"`). Same shape as `send_reply`, so agent-node and the claude-code channel both wake on it and pull their inbox. agent-node hands it to the model as a terminal result and **does not reply to it**; the claude-code channel injects it into the session like any other reply |
+| Person (Dashboard / App) | One Hub notice with `kind=task_expired` (`user_inbox` + `desktop_message` on `/events/users/me`). `from_session` is the target node, so it appears **in the conversation with that node**, with an unread badge and a notification |
+| `scheduler` | Nothing: the schedule's run record already says `expired` |
+| `hub` / `api` / an unrecognized sender | Nothing |
+
+- The text names the target node, how many minutes the task waited, its TTL, and how many older unfinished tasks the target still had at expiry. It also gives guidance: send it to an idle node instead (`reassign_task` does not accept expired tasks), or `retry_task` later; **do not blindly resend a new task**, which only makes the queue longer.
+- Rate limit: within one patrol pass, one (sender, target) pair gets **one** notice. Several expiries are merged into one summary that lists every task id.
+- Child tasks: when a child task expires, the parent task's sender gets one "sub-task expired" notice. **The parent's status and `result` are not changed**, because its assignee may still be working. This differs from a child **reply**, which `chainReplyToParent` uses to move the parent to a terminal status.
+- Each notice writes one `task_events` row with `event_type=task.expiry_notice` (no extra `task.expired` row).
 
 ## Retry Mechanism
 

@@ -242,6 +242,8 @@ run_pg_tests_rc anet_ctx_cost_test src/mcp-context-cost-http.test.ts
 run_pg_tests_rc anet_model_auth_notify_test src/model-auth-notify-http.test.ts
 # 定时任务卡住(#464):按挡路任务计数跳过、超时把它条件写成 expired 并镜像 run、通知创建者 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_sched_stuck_test src/scheduled-stuck-http.test.ts
+# 任务过期通知发送方(#500):巡检的 consumed_at < expires_at 判据(TEXT 时间戳比较)、按分支绑参的「前面还有几个」计数、inbox reply 行 + user_inbox 通知、父任务不被改终态 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_expiry_notice_test src/task-expiry-notice-http.test.ts
 # 网络令牌按成员身份(#488):resolveToken 的 EXISTS(network_members) 判据、移出成员同事务吊销令牌、401 reason —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_token_member_test src/network-token-membership-http.test.ts
 # 节点自己的权限(RFC-041 第一阶段,#487):permission_mode 列、node_permission_log 按小时合并的 upsert、受限节点的 LIKE … ESCAPE 子查询、报表聚合 —— 在真 PostgreSQL 上。

@@ -22,6 +22,7 @@ import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
+import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
@@ -891,16 +892,24 @@ const wsTmuxIntervals = new Map<object, ReturnType<typeof setInterval>>();
 export function patrolExpiredTasks(): void {
   try {
     const expired = db.transaction(() => {
-      const due = db.all<{ task_id: string; network_id: string | null }>(
-        `SELECT task_id, network_id FROM tasks
+      // #500 — a task the node already took into a turn before its deadline
+      // (consumed_at < expires_at) is not "never picked up": the status only
+      // stays `delivered` because delivered → running needs a verbatim
+      // report_status match. Leave it for the node to finish. A consumed_at
+      // stamped AFTER the deadline (late receipt replay) does not save it.
+      const due = db.all<ExpiredTaskRow>(
+        `SELECT task_id, network_id, from_name, from_node_id, to_name, content, created_at, expires_at, parent_task_id, meta_json
+           FROM tasks
           WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
-            AND status IN ('created', 'delivered')`,
+            AND status IN ('created', 'delivered')
+            AND (consumed_at IS NULL OR consumed_at >= expires_at)`,
       );
-      const changed: Array<{ task_id: string; network_id: string | null }> = [];
+      const changed: ExpiredTaskRow[] = [];
       for (const task of due) {
         const result = db.run(
           `UPDATE tasks SET status = 'expired', completed_at = datetime('now')
-            WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
+            WHERE task_id = ?1 AND status IN ('created', 'delivered')
+              AND (consumed_at IS NULL OR consumed_at >= expires_at)`,
           [task.task_id],
         );
         // SQLite may include the AFTER UPDATE terminal-journal trigger write
@@ -925,6 +934,9 @@ export function patrolExpiredTasks(): void {
     if (expired.length > 0) {
       console.log(`[patrol] expired ${expired.length} stale task(s)`);
       for (const task of expired) logTaskEvent(task.task_id, null, "expired", "patrol");
+      // #500 — tell the sender, after commit (task-expiry-notice.ts).
+      const notices = notifyExpiredTasks(expired);
+      if (notices.length > 0) console.log(`[patrol] sent ${notices.length} expiry notice(s)`);
     }
   } catch {}
 }
