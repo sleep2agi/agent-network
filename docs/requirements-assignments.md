@@ -76,6 +76,7 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 - `view=summary`（capability `list_summary`）：每行去掉 `description` 和 `checklist`，换成 `has_description`（布尔）和 `checklist_count: {total, done}`，其余字段、顺序、分页都不变。响应带 `view: "summary"`。打开一张卡时用 `GET /api/requirements/{id}` 读全文。生产数据上的大小是 330 KB，gzip 42 KB（−83%）。`view=full` 等于不带；其他值返回 400 `invalid_view`。
 - `changes=1`（capability `changes`，必须同时带 `updated_since`，否则 400 `updated_since_required`）：
   - 只回 `updated_since` 之后改过的卡。**含归档的**，行上 `archived: true` 表示「移出看板」。显式带 `archived=true` 时仍然只回归档的卡。
+  - 「改过」= `updated_at >= updated_since`，**或**（行上带 `last_event` 时，即没传 `last_event=0`）这张卡在 `requirement_events` 里有 `created_at >= updated_since` 的流水（#506 跟进）。评论只追加流水、不动 `updated_at`，没有这一条的话「评论了」要等下次整读才出现。`updated_at` / `updatedAt` 的含义不变（卡本身最后一次被改，评论不算）。`last_event=0`（MCP `requirements_list` 默认）和不带 `changes=1` 的 `updated_since` 仍然只按 `updated_at` 过滤。
   - 加三个字段：
     - `deleted`：此后删掉的、调用者看得见的卡 id（墓碑表 `requirement_tombstones`）；
     - `server_time`：下次的 `updated_since`，在读表之前取，所以不漏，最多重复回一次；
@@ -122,7 +123,7 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
   - `actor`：`kind` 为 `user` / `node`；`display_name` 与 `GET /api/requirements/people` 的 `name` 同一规则（没设显示名时回落到用户名 / alias / node_name），找不到为 `null`。没有操作者的流水 `actor: null`。
   - `summary`（可缺省）：评论正文（空白压成一个空格）；`column` / `priority` / `due` / `start` / `archived` / `project` / `parent` 为「旧 → 新」的原始值（如 `pool → doing`，客户端自己本地化）；`title` 为新标题；`checklist_item` 为 `[x] 文字` / `[ ] 文字`；`checklist` 为 `done/total`；`tags` 为新标签逗号分隔。最长 120 字（超出以 `…` 结尾）。人员字段（`owner` / `agent_owner` / `participants`）、`description`、`created` 不给 `summary`。
 - 可见范围同行：只为这一页（已按调用者可见范围筛过）的卡取。Agent 受限的成员：看不见的节点当操作者时 `actor: null`；人员字段的改动在隐去看不见的节点之后前后一样的，只剩 `{type:"changed", field:null}`（不给 `summary`），透露的信息与 `updatedAt` 相同。
-- 一页一次查询（`MAX(id) … GROUP BY requirement_id`，走既有索引 `idx_requirement_events_card`），再按出现的人各一次查名字；不加表、不加列、不加索引。ETag 按响应体算，所以加一条评论 / 任何一条流水，列表的 ETag 都会变（列表缓存也随写入作废）。
+- 一页一次查询（`MAX(id) … GROUP BY requirement_id`，走既有索引 `idx_requirement_events_card`），再按出现的人各一次查名字；不加表、不加列、不加索引。ETag 按响应体算，所以加一条评论 / 任何一条流水，列表的 ETag 都会变（列表缓存也随写入作废）。增量读（`changes=1`）也回「游标之后有新流水」的卡，见上面「列表省流」。
 
 ## 升级
 

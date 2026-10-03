@@ -235,3 +235,110 @@ describe("#506 GET /api/requirements last_event", () => {
     }
   });
 });
+
+// #506 跟进 —— 评论不动 updated_at,所以增量读(changes=1 + updated_since)过去看不见它:「评论了」要等下次整读。
+// 现在 changes=1(且带 last_event)时,游标之后有新流水的卡也回。updated_at 语义不变(评论不改卡)。
+describe("#506 changes=1 returns cards whose newest event is after the cursor", () => {
+  const tick = () => new Promise(r => setTimeout(r, 5));
+  const changes = (t: string, since: string, extra = "", headers: Record<string, string> = {}) =>
+    list(t, `&changes=1&updated_since=${encodeURIComponent(since)}${extra}`, headers);
+  const cursorNow = async (t: string) => {
+    const base = await changes(t, new Date().toISOString());
+    expect(base.status).toBe(200);
+    await tick();
+    return base.body.server_time as string;
+  };
+
+  test("a comment after the cursor → that row comes back with the new last_event; untouched rows do not", async () => {
+    const a = await create(admin.token, { name: "增量评论 A" });
+    const b = await create(admin.token, { name: "增量评论 B" });
+    const before = rowOf(await list(admin.token), a.id);
+    await tick();
+    const since = await cursorNow(admin.token);
+    expect((await comment(member.token, a.id, "增量里看得到这条")).status).toBe(201);
+    const r = await changes(admin.token, since);
+    expect(r.status).toBe(200);
+    const ids = (r.body.requirements as any[]).map(x => x.id);
+    expect(ids).toEqual([a.id]);
+    expect(ids).not.toContain(b.id);
+    const row = rowOf(r, a.id);
+    expect(row.updatedAt).toBe(before.updatedAt); // updated_at 语义不变:评论不改卡
+    expect(row.last_event).toMatchObject({ type: "comment", actor: { id: member.id, kind: "user" }, summary: "增量里看得到这条" });
+    expect(r.body.deleted).toEqual([]);
+    // summary 视图同样回
+    const s = await changes(admin.token, since, "&view=summary");
+    expect((s.body.requirements as any[]).map(x => x.id)).toEqual([a.id]);
+    expect(rowOf(s, a.id).last_event.summary).toBe("增量里看得到这条");
+  });
+
+  test("no event and no update after the cursor → nothing returned; a comment then changes the result and its ETag", async () => {
+    const a = await create(admin.token, { name: "增量空" });
+    await tick();
+    const since = await cursorNow(admin.token);
+    const empty = await changes(admin.token, since);
+    expect(empty.status).toBe(200);
+    expect(empty.body.requirements).toEqual([]);
+    expect(empty.body.deleted).toEqual([]);
+    expect(empty.etag).toBeTruthy();
+    expect((await comment(admin.token, a.id, "空之后的评论")).status).toBe(201);
+    const after = await changes(admin.token, since, "", { "If-None-Match": empty.etag! });
+    expect(after.status).toBe(200);
+    expect(after.etag).not.toBe(empty.etag);
+    expect((after.body.requirements as any[]).map(x => x.id)).toEqual([a.id]);
+  });
+
+  test("full-list ETag changes on a comment (list cache invalidated by the write)", async () => {
+    const a = await create(admin.token, { name: "整表 ETag" });
+    const first = await list(admin.token);
+    expect((await list(admin.token, "", { "If-None-Match": first.etag! })).status).toBe(304);
+    expect((await comment(admin.token, a.id, "整表也变")).status).toBe(201);
+    const after = await list(admin.token, "", { "If-None-Match": first.etag! });
+    expect(after.status).toBe(200);
+    expect(after.etag).not.toBe(first.etag);
+  });
+
+  test("unchanged contracts: last_event=0 (MCP default) and plain updated_since (no changes=1) still filter by updated_at only", async () => {
+    const a = await create(admin.token, { name: "旧语义" });
+    await tick();
+    const since = await cursorNow(admin.token);
+    expect((await comment(admin.token, a.id, "只是一条评论")).status).toBe(201);
+    expect((await changes(admin.token, since, "&last_event=0")).body.requirements).toEqual([]);
+    const plain = await list(admin.token, `&updated_since=${encodeURIComponent(since)}`);
+    expect(plain.status).toBe(200);
+    expect(rowOf(plain, a.id)).toBeUndefined();
+    // MCP changes=true 默认不带 last_event → 同样不回;include_last_event=true → 回
+    const mDef = await mcp(nodeToken, "requirements_list", { changes: true, updated_since: since });
+    expect(mDef.isError).toBe(false);
+    expect(mDef.data.requirements.map((r: any) => r.id)).not.toContain(a.id);
+    const mOn = await mcp(nodeToken, "requirements_list", { changes: true, updated_since: since, include_last_event: true });
+    expect(mOn.isError).toBe(false);
+    expect(mOn.data.requirements.find((r: any) => r.id === a.id)?.last_event).toMatchObject({ type: "comment", summary: "只是一条评论" });
+  });
+
+  test("a real update after the cursor still comes back (updated_at path); a delete is reported in `deleted`, not as a row", async () => {
+    const a = await create(admin.token, { name: "增量改动" });
+    const d = await create(admin.token, { name: "增量删除" });
+    await comment(admin.token, d.id, "删之前的评论");
+    await tick();
+    const since = await cursorNow(admin.token);
+    expect((await send(admin.token, "PATCH", `/api/requirements/${a.id}?network_id=${NET}`, { priority: "high" })).status).toBe(200);
+    expect((await send(admin.token, "DELETE", `/api/requirements/${d.id}?network_id=${NET}`)).status).toBe(200);
+    const r = await changes(admin.token, since);
+    expect((r.body.requirements as any[]).map(x => x.id)).toEqual([a.id]);
+    expect(rowOf(r, a.id).last_event).toMatchObject({ type: "changed", field: "priority" });
+    expect(r.body.deleted).toEqual([d.id]);
+  });
+
+  test("visibility: a scoped member does not get a card it cannot see, even when it was commented on", async () => {
+    const hidden = await create(admin.token, { name: "scoped 看不见" });
+    const mine = await create(admin.token, { name: "scoped 看得见", owner: { kind: "user", id: scoped.id } });
+    await tick();
+    const since = await cursorNow(scoped.token);
+    expect((await comment(admin.token, hidden.id, "别人的卡上的评论")).status).toBe(201);
+    expect((await comment(admin.token, mine.id, "他的卡上的评论")).status).toBe(201);
+    const r = await changes(scoped.token, since);
+    expect(r.status).toBe(200);
+    expect((r.body.requirements as any[]).map(x => x.id)).toEqual([mine.id]);
+    expect(JSON.stringify(r.body)).not.toContain(hidden.id);
+  });
+});
