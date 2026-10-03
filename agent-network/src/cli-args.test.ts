@@ -23,6 +23,7 @@ describe("CLI argument parsing", () => {
     expect([...BOOLEAN_FLAGS].sort()).toEqual([
       "--accept-dev-channels",
       "--all",
+      "--allow-shared-codex-login",
       "--copresence",
       "--dangerously-allow-full-access",
       "--dev-open",
@@ -33,6 +34,7 @@ describe("CLI argument parsing", () => {
       "--grok-headless",
       "--new-session",
       "--no-auto-self",
+      "--no-codex-login",
       "--no-yolo",
       "--resume-latest",
       "--self",

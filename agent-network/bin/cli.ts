@@ -150,6 +150,17 @@ import {
   describeCodexRefreshFailure,
   type NodeFingerprint,
 } from "../src/codex-auth-fingerprint";
+import {
+  ALLOW_SHARED_CODEX_LOGIN_FLAG,
+  evaluateCodexLoginStaging,
+  homeCheckPendingOwnLogin,
+  newLoginStep,
+  recordCodexLoginOrigin,
+  sharedCodexLoginGroups,
+  type CodexLoginSource,
+  type EvaluateStagingOptions,
+  type EvaluatedStaging,
+} from "../src/codex-login-share-guard";
 import { applyNodeCodexHome, resolveNodeCodexHome, verifyProcessTreeCodexHome } from "../src/codex-home-enforce";
 import {
   describeMissingDeps,
@@ -671,6 +682,8 @@ interface CopresenceOptions {
   token: string;
   /** #1856 PR-B: restore the exact-session TUI before attaching the bridge (thread must be known). */
   tuiFirst?: boolean;
+  /** #514: --allow-shared-codex-login — stage a login another node already uses (unsafe). */
+  allowSharedCodexLogin?: boolean;
 }
 
 /** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
@@ -873,6 +886,34 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
     }
   }
   rmSync(windowsCopresenceRecordPath(nodesDir(), nodeId), { force: true });
+}
+
+/**
+ * #514 — the gate in front of every path that hands a codex node a credential.
+ * Fingerprints the credential about to be given (8 hex of the refresh token,
+ * never the token), finds OTHER nodes on this host that hold that chain (their
+ * published fingerprint files only — never their auth.json), and decides.
+ * Prints the decision; exits 1 (#2321: failure) on a refusal. The caller
+ * records the origin once the credential has actually been handed over.
+ */
+function gateCodexLoginStaging(o: EvaluateStagingOptions, beforeAnnounce?: (r: EvaluatedStaging) => void): EvaluatedStaging {
+  const r = evaluateCodexLoginStaging(o);
+  if (r.kind === "refuse") {
+    for (const l of r.lines) console.error(l);
+    process.exit(1);
+  }
+  // Bookkeeping first, then the announcement: an operator (or a test) who sees
+  // "now uses the host codex login" may stop the process right there, and the
+  // origin record must already be on disk by then.
+  beforeAnnounce?.(r);
+  for (const l of r.lines) console.error(l);
+  return r;
+}
+
+function recordCodexLoginOriginOrWarn(nodeDir: string, alias: string, fingerprint: string | null, source: CodexLoginSource): void {
+  if (!fingerprint) return;
+  const problem = recordCodexLoginOrigin({ nodeDir, alias, fingerprint, source });
+  if (problem) console.error(`[anet] ⚠ ${problem}`);
 }
 
 /**
@@ -1421,6 +1462,19 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       const plan = codexHomeStagePlan(hostCodexHome, opts.codexHome, (pth) => {
         try { return { mtimeMs: statSync(pth).mtimeMs }; } catch { return null; }
       }, join);
+      // #514 — refuse to hand the host login to a node that has none yet when
+      // another node on this host already uses it. Only "missing" counts as new
+      // sharing: a node that already has an auth.json is an existing node and
+      // is re-staged as before (the #1918 warning below still names any peers).
+      const authStep = newLoginStep(plan);
+      if (authStep) {
+        const nodeDir = join(nodesDir(), resolved.id);
+        const source: CodexLoginSource = { kind: "host", path: authStep.src };
+        gateCodexLoginStaging({
+          nodeDir, alias: displayName, targetCodexHome: opts.codexHome, sourceAuthPath: authStep.src,
+          source, allowShared: opts.allowSharedCodexLogin === true,
+        }, (gate) => recordCodexLoginOriginOrWarn(nodeDir, displayName, gate.fingerprint, source));
+      }
       for (const step of plan) {
         copyFileSync(step.src, step.dst);
         try { chmodIfPosix(step.dst, step.mode); } catch { /* best effort */ }
@@ -1436,9 +1490,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(`[anet] ⚠ could not stage CODEX_HOME state: ${(e as Error).message}`);
   }
 
-  // #1918 — staging above shares one login across nodes by design, and refresh
-  // tokens are one-time. Say so now, while an operator is watching, instead of
-  // days later when the first refresh silently locks everyone else out.
+  // #1918 — refresh tokens are one-time. #514 now refuses NEW sharing above;
+  // a node that already shares (it had an auth.json before this start) is only
+  // warned here, so an existing fleet keeps starting. Say so now, while an
+  // operator is watching, instead of days later when the first refresh
+  // silently locks everyone else out.
   const codexCredentialPeers = checkCodexCredentialSharingForNode(resolved.id, displayName, opts.codexHome);
 
   if (process.platform === "win32") {
@@ -4271,6 +4327,12 @@ Options:
                               Without them the TUI parks on the sign-in page or
                               the update prompt; use this only if you intend to
                               sign in inside that HOME yourself.
+  --allow-shared-codex-login  UNSAFE. Stage the host codex login into a node
+                              that has none even though another node on this
+                              host already uses it. Refresh tokens are
+                              single-use, so the nodes log each other out.
+                              Default: refuse (exit 1) — one login per node:
+                              CODEX_HOME=<node codex-home> codex login --device-auth
 `);
 }
 
@@ -7475,6 +7537,7 @@ async function startCommand() {
       hub: profileHub,
       token: profileTok,
       tuiFirst: opts["tui-first"] === "true",
+      allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",
     });
     return;
   }
@@ -7955,10 +8018,12 @@ async function codexLifecycleCommand() {
     console.error("  restart    确定性状态机(零 LLM):preflight → goal 状态 → 停 Bridge→TUI→App Server → 端口放掉 → 起(App Server→端口→exact TUI→Bridge)→ verify");
     console.error("             --probe-from <peer> [--probe-root <dir>]  用另一本地节点发 nonce 探针做跨节点身份验收(identity_attested;不给则 unknown → FAIL);peer 在别的 .anet 根时给 --probe-root");
     console.error("  start      同 restart 但要求三段都不在;resume --thread <id> 先把 exact thread 写进 config(要求唯一 rollout)再 start");
-    console.error("  fork       fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>]:继承历史,其余全新(node_id/CODEX_HOME/thread/端口/tmux 名);");
+    console.error("  fork       fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>] [--no-codex-login|--allow-shared-codex-login]:继承历史,其余全新(node_id/CODEX_HOME/thread/端口/tmux 名);");
     console.error("             rollout 复制并改写 id,源节点零触碰;之后在 <dir> 里 anet node codex start <target> --probe-from <source>");
     console.error("             #1951:<dir> 不存在会自动建;config.toml 里 [projects.\"<源工作区>\"] 改写成 <dir>;--model 覆盖源模型(源 rollout 末条 turn_context 不同时告警,provider 块不删);");
     console.error("             app-server 端口在 fork 时探一个空闲的写进 config(首次 start 优先用它,被占则重探);CODEX_HOME/AGENTS.md 随 fork 走;都记进 receipt 的 fork_options");
+    console.error("             #514:默认拒绝复制源的 auth.json(一个登录只能给一个节点,exit 1);--no-codex-login 不带登录、首启前 CODEX_HOME=<目标 codex-home> codex login --device-auth;");
+    console.error("             --allow-shared-codex-login 照旧复制(不安全:两节点会互相顶掉登录)。account install 同一规则");
     console.error("  account    register <profile-id> --from-codex-home <dir> | list | install <alias> --source codex-login:<profile-id> [--probe-from <peer>]");
     console.error("             登录源是本机受控 registry 的不透明引用(不收路径/stdin/env);install = fresh 模型探针 → 备份 → 0600 安装 → 完整重启 → verify;失败自动回滚");
     console.error("  rollback   rollback <alias> --receipt <id> [--probe-from <peer>]:只认原 install receipt 里的 backup_ref");
@@ -8022,7 +8087,7 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
   const target = String(opts.name ?? "");
   const workdirRaw = String(opts.workdir ?? "");
   if (!target || !workdirRaw) {
-    console.error("Usage: anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>] [--json]");
+    console.error("Usage: anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>] [--no-codex-login|--allow-shared-codex-login] [--json]");
     process.exit(2);
   }
   validateNodeName(target);
@@ -8091,10 +8156,37 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
   const srcRollout = sfacts.session.rolloutMatches[0];
   say(`source ${sourceName}: thread ${sp.codexThreadId}, rollout ${srcRollout.bytes} B`);
 
+  // #514 — copying the source's auth.json gives two nodes one refresh chain, and
+  // the source is by definition still using it. Refused by default (exit 1),
+  // BEFORE the hub registration below, so a refusal leaves nothing to clean up.
+  const forkNoLogin = opts["no-codex-login"] === "true";
+  const forkAllowShared = opts["allow-shared-codex-login"] === "true";
+  if (forkNoLogin && forkAllowShared) {
+    console.error(`[anet] node codex fork: --no-codex-login and ${ALLOW_SHARED_CODEX_LOGIN_FLAG} contradict each other`);
+    process.exit(2);
+  }
+  const forkTargetHome = join(targetNodesDir, target, "codex-home");
+  const forkLoginSource: CodexLoginSource = { kind: "fork", sourceAlias: sourceName };
+  const forkGate = forkNoLogin ? null : gateCodexLoginStaging({
+    nodeDir: join(targetNodesDir, target),
+    alias: target,
+    targetCodexHome: forkTargetHome,
+    sourceAuthPath: join(sourceHome, "auth.json"),
+    source: forkLoginSource,
+    allowShared: forkAllowShared,
+    knownHolders: [{ alias: sourceName, nodeDir: sourceDir, via: "current" }],
+    siblingRoots: [nodesDir(), targetNodesDir],
+    extraFix: [
+      `[anet]   For a fork: re-run with --no-codex-login (nothing is copied), then log the new node in before its first start:`,
+      `[anet]     anet node codex fork ${shellQuote(sourceName)} --name ${shellQuote(target)} --workdir ${shellQuote(workdir)} --no-codex-login`,
+    ],
+  });
+
   // 新身份先在 hub 上登记(拿 ntok),再动磁盘;磁盘先写 staging,最后一步 rename 进位。
   process.chdir(workdir);
   const createOpts = { ...opts, runtime: "codex-app-server", copresence: "true", hub: sp.hub ?? opts.hub, model: opts.model ?? sp.model } as unknown as ReturnType<typeof parseOpts>;
   delete (createOpts as any).name; delete (createOpts as any).workdir; delete (createOpts as any).json; delete (createOpts as any)["inherit-full-access"];
+  delete (createOpts as any)["no-codex-login"]; delete (createOpts as any)["allow-shared-codex-login"];
   createOpts._channels = createOpts._channels ?? []; createOpts._envs = createOpts._envs ?? [];
   const base = createProfileFromOpts(target, createOpts);
   const newThread = uuidV7(Date.now(), randomBytes(10));
@@ -8115,6 +8207,7 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
     mkdirSync(stagingHome, { recursive: true, mode: 0o700 });
     chmodSync(stagingHome, 0o700);
     for (const f of FORK_HOME_COPY) {
+      if (f.name === "auth.json" && forkNoLogin) continue; // #514: the target logs in on its own
       const from = join(sourceHome, f.name);
       if (!existsSync(from)) { if (f.required) throw new Error(`${f.name} missing in source CODEX_HOME`); continue; }
       copyFileSync(from, join(stagingHome, f.name));
@@ -8150,6 +8243,7 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
     }
     renameSync(stagingHome, join(targetNodesDir, target, "codex-home"));
     rmSync(staging, { recursive: true, force: true });
+    if (forkGate) recordCodexLoginOriginOrWarn(join(targetNodesDir, target), target, forkGate.fingerprint, forkLoginSource);
   } catch (e: any) {
     rmSync(staging, { recursive: true, force: true });
     console.error(`[anet] node codex fork: ❌ ${e?.message ?? e}`);
@@ -8183,9 +8277,13 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
   const workdirCheck: ReceiptCheck = tfacts.workdir.configProjectDir === workdir
     ? { key: "workdir_consistent", status: "pass", detail: `config.codexProjectDir=${workdir} (config only — live cwd/bridge are checked at first start)`, evidence: { config: workdir } }
     : { key: "workdir_consistent", status: "fail", detail: `config.codexProjectDir=${tfacts.workdir.configProjectDir} ≠ ${workdir}` };
-  const next = `next (run from ${workdir}):\n  anet node codex start ${shellQuote(target)} --probe-from ${shellQuote(sourceName)}   # first start = verify + nonce attestation`;
+  const next = `next (run from ${workdir}):\n  anet node codex start ${shellQuote(target)} --probe-from ${shellQuote(sourceName)}   # first start = verify + nonce attestation`
+    + (forkNoLogin ? `\n  first, log the new node in (--no-codex-login copied no login — #514):\n  CODEX_HOME=${shellQuote(targetHome)} codex login --device-auth` : "");
+  const targetHomeCheck = forkNoLogin && tfacts.home.authMode === null
+    ? homeCheckPendingOwnLogin(checkHome({ ...tfacts, home: { ...tfacts.home, authMode: 0o600, authBytes: 1 } }), targetHome)
+    : checkHome(tfacts);
   finish(targetDir, withTok.node_id ?? null, [
-    checkIdentity(tfacts), checkHome(tfacts), checkSession(tfacts), workdirCheck, isolation,
+    checkIdentity(tfacts), targetHomeCheck, checkSession(tfacts), workdirCheck, isolation,
     forkGapsCheck({ workdir_created: workdirCreated, trusted_rewritten: trustedRewritten, trusted_dropped: trustedDropped, model_override: modelOverride, source_last_model: sourceLastModel, port: assignedPort, agents_md_carried: agentsMdCarried }),
     { key: "identity_attested", status: "unknown", detail: `not started yet — ${next.split("\n")[1].trim()}` },
   ], next);
@@ -8237,7 +8335,7 @@ async function codexAccountCommand(sub: string, arg: string | undefined, opts: R
   }
   if (sub !== "install") { console.error("Usage: anet node codex account <register|list|install> …"); process.exit(2); }
   const alias = String(arg ?? "");
-  if (!alias) { console.error("Usage: anet node codex account install <alias> --source codex-login:<profile-id> [--probe-from <peer>] [--model <m>] [--json]"); process.exit(2); }
+  if (!alias) { console.error("Usage: anet node codex account install <alias> --source codex-login:<profile-id> [--probe-from <peer>] [--model <m>] [--allow-shared-codex-login] [--json]"); process.exit(2); }
   let src; try { src = parseSourceRef(String(opts.source ?? "")); } catch (e: any) { console.error(`[anet] account install: ${e.message}`); process.exit(2); }
   const reg = readRegistry(dir, hostId);
   let resolvedProfile; try { resolvedProfile = resolveProfile(dir, reg, src.profileId, hostId); } catch (e: any) { console.error(`[anet] account install: ${e.message}`); process.exit(2); }
@@ -8251,6 +8349,17 @@ async function codexAccountCommand(sub: string, arg: string | undefined, opts: R
   const peer = opts["probe-from"] ? resolveNodeRefAt(opts["probe-root"], String(opts["probe-from"])) : null;
   if (opts["probe-from"] && !peer) { console.error(`[anet] account install: --probe-from ${opts["probe-from"]}: unknown local node`); process.exit(2); }
   if (peer && peer.id === ctx.resolved.id) { console.error(`[anet] account install: --probe-from must be a *different* node`); process.exit(2); }
+  // #514 — a registered profile is a copy of some codex home's login; installing
+  // it into a node while another node holds that chain makes them share it.
+  const accountLoginSource: CodexLoginSource = { kind: "account", profileId: src.profileId };
+  const accountGate = gateCodexLoginStaging({
+    nodeDir: ctx.nodeDir,
+    alias: ctx.displayName,
+    targetCodexHome: ctx.codexHome,
+    sourceAuthPath: resolvedProfile.credentialFile,
+    source: accountLoginSource,
+    allowShared: opts["allow-shared-codex-login"] === "true",
+  });
   const restartActions = codexRestartActions({ ...ctx, verb: "restart" }, peer);
   const receiptId = `${ctx.startedAt.toISOString().replace(/[:.]/g, "-")}-${randomBytes(3).toString("hex")}`;
   const targetAuth = join(ctx.codexHome, "auth.json");
@@ -8306,6 +8415,7 @@ async function codexAccountCommand(sub: string, arg: string | undefined, opts: R
     },
   });
   const receipt = buildReceipt({ verb: "account-install", alias: ctx.displayName, nodeId: ctx.profile.node_id ?? null, startedAt: ctx.startedAt, checks: outcome.checks });
+  if (receipt.verdict === "PASS" && !outcome.rolledBack) recordCodexLoginOriginOrWarn(ctx.nodeDir, ctx.displayName, accountGate.fingerprint, accountLoginSource);
   const withRef = { ...receipt, id: receiptId, source_profile_id: src.profileId, source_account_fingerprint: resolvedProfile.entry.account_fingerprint, backup_ref: outcome.backupRef, stoppedAt: outcome.stoppedAt, rolledBack: outcome.rolledBack };
   const path = writeReceipt(ctx.nodeDir, withRef as any);
   if (json) console.log(JSON.stringify({ ...withRef, receiptPath: path }, null, 2));
@@ -17441,6 +17551,16 @@ async function doctorCommand() {
   const cliVer = (cmd: string) => formatCliVersion(String(execSync(cmd, { stdio: "pipe" })));
   try { check("Claude Code CLI", true, cliVer("claude --version")); } catch { warning("Claude Code CLI", "not found (needed for claude-code-cli runtime)"); }
   try { check("Codex CLI", true, cliVer("codex --version")); } catch { warning("Codex CLI", "not found (needed for codex-sdk runtime)"); }
+  // #514 — existing nodes that already share one codex login are warned, never
+  // refused; doctor is where an operator sees all such groups at once. Reads
+  // only the published 8-hex fingerprint files (#1918), never a credential.
+  for (const g of sharedCodexLoginGroups({ nodeRoots: [nodesDir()] })) {
+    warning(
+      "Shared codex login",
+      `${g.aliases.join(", ")} hold one refresh chain (fingerprint ${g.fingerprint}); refresh tokens are single-use, so whichever refreshes first logs the others out. ` +
+      `Fix per node: CODEX_HOME=<that node's codex-home> codex login --device-auth (#514)`,
+    );
+  }
   try { check("Bun runtime", true, cliVer("bun --version")); } catch { warning("Bun", "not found (needed for commhub-server)"); }
 
   // 5. .mcp.json

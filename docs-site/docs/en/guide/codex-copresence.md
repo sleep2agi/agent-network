@@ -207,6 +207,39 @@ From agent-node `2.5.0-preview.96`, the watchdog treats "alive but hung" separat
 
 The watchdog never switches accounts, never copies credentials between nodes, and never touches another node's processes.
 
+### One login per node {#one-login-per-node}
+
+ChatGPT refresh tokens are **single-use**: every refresh issues a new one and invalidates the old. When one `auth.json` (one login) sits in two nodes' `CODEX_HOME`, whichever node refreshes first keeps working and the others fail days later with:
+
+```text
+Your access token could not be refreshed because you have since logged out or signed in to another account   (401 token_revoked)
+```
+
+So anet stops the sharing **at the moment a node is handed a login** (#514) — refused by default, exit code `1`:
+
+| Path | Refused when |
+|---|---|
+| `anet node start <name> --copresence` staging this host's `~/.codex/auth.json` | the node's `codex-home` has **no** `auth.json` yet (a new node, a clone's first start) and **another node** on this host already uses that login |
+| `anet node codex fork` | always copies the login the source is using → refused by default; `--no-codex-login` forks without one |
+| `anet node codex account install` | another node already uses that profile's login |
+| `anet node clone` | never copies `auth.json`; its first start is the first row |
+
+The refusal names the other node(s) by **alias** only, with the fix and the override. The fix: log each node in on its own (device auth works over SSH):
+
+```bash
+CODEX_HOME=<node-dir>/codex-home codex login --device-auth
+```
+
+`--allow-shared-codex-login` shares anyway and is **unsafe**: those nodes will log each other out. Use it only when you mean it.
+
+Rules:
+
+- **Only new sharing is refused.** A node whose `codex-home` already has an `auth.json` (an existing node) still starts; if it shares, start prints a warning (#1918), and `anet doctor` lists every group of nodes on one login.
+- **The host login**: the first node to borrow `~/.codex` is allowed, with a note not to give that login to another node or run `codex` directly on this host at the same time; the second node is refused. anet cannot see whether you run `codex` on the host by hand — that part is on you.
+- Identity is an 8-hex sha256 fingerprint of the refresh token, not the account id: two separate logins on one account do not affect each other and are not sharing. anet reads only the fingerprint files nodes publish under `~/.anet/codex-auth-fingerprints/` and in their node dirs — **never another node's `auth.json`** — and prints no token.
+- A handed-over login also records its origin fingerprint (`.codex-auth-origin.json`): after the first node refreshes, its copy moves on while `~/.codex` still holds the spent token, and the next node is still stopped.
+- API-key logins (no refresh token in `auth.json`) do not rotate and are not affected.
+
 ### Model login failure {#model-login}
 
 When `model_auth` becomes `revoked` (refresh token revoked) or `expired` (login expired and could not refresh):
@@ -248,11 +281,14 @@ Every step of `restart` runs in a fixed order with no reasoning: **preflight (be
 ### fork: inherit the history, renew everything else
 
 ```bash
-anet node codex fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>]   # <dir> is created when missing
+anet node codex fork <source> --name <target> --workdir <dir> --no-codex-login [--inherit-full-access] [--model <id>]   # <dir> is created when missing
+CODEX_HOME=<dir>/.anet/nodes/<target>/codex-home codex login --device-auth   # the new node logs in on its own (#514)
 cd <dir> && anet node codex start <target> --probe-from <source>      # first start = verify + nonce attestation
 ```
 
 `fork` only reads the source node (its auth.json / config.toml and **that one** rollout) and builds a brand-new node under `<dir>/.anet/nodes/<target>/`: a new `node_id` and CommHub identity, a new `CODEX_HOME` (0700, auth.json 0600), a new thread id (UUIDv7), a new workdir and new tmux names; the port is assigned at first start. The rollout is **streamed and copied with every thread id rewritten** (fixed 36 characters, so the byte count is unchanged), never shared; the first line must be the source thread's `session_meta`, otherwise not a single byte is written. The source's `.anet-copresence.env` (its CommHub token), history, sqlite files and caches are never copied; full access is not inherited unless you pass `--inherit-full-access` and the source already has it.
+
+**The login does not travel with a fork (#514).** The source is using its `auth.json`; copying it puts two nodes on one single-use refresh chain (see [One login per node](#one-login-per-node)). A fork without `--no-codex-login` is therefore refused (exit 1, before any Hub registration, leaving nothing behind); `--no-codex-login` copies no `auth.json` and the receipt's `home_isolated` says the node must log in before its first start; `--allow-shared-codex-login` copies it as before and is unsafe.
 
 The receipt's `fork_isolation` requires identity / HOME / thread / rollout file / tmux names to all differ, a byte-equal rollout copy and no token file in the target HOME; `identity_attested` stays unknown at fork time (non-blocking) and is closed by the first `start --probe-from`. `start` / `restart` / `resume` must be run from the directory recorded in `config.codexProjectDir`, otherwise they refuse (the three tmux sessions' cwd and `.anet/nodes` are both relative to the current directory).
 

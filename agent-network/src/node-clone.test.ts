@@ -249,6 +249,42 @@ describe("runNodeClone — new identity, settings carried, secrets and state lef
   });
 });
 
+describe("#514 regression — a clone never inherits the source's codex login", () => {
+  it("no auth.json and no login records in the clone; its first host staging of the same login is refused", async () => {
+    writeSourceNode("codex-app-server");
+    const srcDir = join(work, ".anet", "nodes", "alpha");
+    const index = join(root, "fake-home", ".anet", "codex-auth-fingerprints");
+    // The source has started under #1918/#514: it published its fingerprint and its origin.
+    const { checkCodexCredentialSharing } = await import("./codex-auth-fingerprint");
+    const { evaluateCodexLoginStaging, CODEX_AUTH_ORIGIN_FILE, recordCodexLoginOrigin } = await import("./codex-login-share-guard");
+    checkCodexCredentialSharing({ nodeDir: srcDir, alias: "alpha", codexHome: join(srcDir, "codex-home"), indexDir: index, say: () => {} });
+    expect(recordCodexLoginOrigin({ nodeDir: srcDir, alias: "alpha", fingerprint: "0badf00d", source: { kind: "host", path: "x" }, indexDir: index })).toBeNull();
+    expect(existsSync(join(srcDir, ".codex-auth-fingerprint.json"))).toBe(true);   // positive control
+
+    const r = await runNodeClone(baseInput());
+    if (!r.ok) throw new Error(r.error);
+    expect(existsSync(join(r.targetNodeDir, "codex-home", "auth.json"))).toBe(false);
+    expect(existsSync(join(r.targetNodeDir, ".codex-auth-fingerprint.json"))).toBe(false);
+    expect(existsSync(join(r.targetNodeDir, CODEX_AUTH_ORIGIN_FILE))).toBe(false);
+    expect(r.ledger.skipped.map((s) => s.item)).toContain("codex-home/auth.json");
+
+    // First start of the clone on a host whose ~/.codex holds the SAME chain as the source.
+    const hostAuth = join(root, "fake-home", ".codex", "auth.json");
+    mkdirSync(join(hostAuth, ".."), { recursive: true });
+    writeFileSync(hostAuth, readFileSync(join(srcDir, "codex-home", "auth.json"), "utf-8"));
+    const gate = evaluateCodexLoginStaging({
+      nodeDir: r.targetNodeDir, alias: "beta", targetCodexHome: join(r.targetNodeDir, "codex-home"),
+      sourceAuthPath: hostAuth, source: { kind: "host", path: hostAuth }, allowShared: false, indexDir: index,
+    });
+    expect(gate.kind).toBe("refuse");
+    expect(gate.holders.map((h) => h.alias)).toEqual(["alpha"]);
+
+    const text = formatCloneSummary({ source: "alpha", target: "beta", profile: r.profile, ledger: r.ledger, targetNodeDir: r.targetNodeDir, sourceNodeId: "n_srcsrc01" });
+    expect(text).toContain(`CODEX_HOME=${join(r.targetNodeDir, "codex-home")} codex login --device-auth`);
+    expect(text).not.toContain("rt-source");
+  });
+});
+
 describe("refusals — nothing registered, nothing written", () => {
   async function refused(over: Partial<RunCloneInput>, needle: string) {
     let registered = 0;

@@ -202,9 +202,12 @@ Refused: an existing destination, a new name equal to the source's, a destinatio
 directory, a non-ASCII `--workdir`, opencode-cli nodes (their runtime binding and login live outside the node
 config — create one with `anet node create --runtime opencode-cli`), and host daemons (`role=host_supervisor`).
 
-A codex node's login is not copied. On first start anet stages this host's `~/.codex` login as it does for any
-node; one account shared by several nodes knocks the others out when its token refreshes. For a separate account
-use `anet node codex account install <new-name> --source codex-login:<profile-id>`. To carry the codex
+A codex node's login is not copied. One login per node (refresh tokens are single-use; sharing knocks the others
+out): log the new node in before starting it, `CODEX_HOME=<new-node-dir>/codex-home codex login --device-auth`.
+Started without a login, anet stages this host's `~/.codex` login — but refuses (exit 1) if another node on this
+host already uses it (`--allow-shared-codex-login` shares anyway, unsafely; see
+[One login per node](/en/guide/codex-copresence#one-login-per-node)). For a registered account use
+`anet node codex account install <new-name> --source codex-login:<profile-id>`. To carry the codex
 conversation history too, use `anet node codex fork` (see [Codex co-presence](/en/guide/codex-copresence)).
 
 ::: danger Never `cp -r` a node directory
