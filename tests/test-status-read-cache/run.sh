@@ -11,7 +11,8 @@
 #   L3  witnessed red: each mutation must turn L1 red, for the named test.
 #       #500 step 2: the full projection carries queue_depth (tasks table), so writes to `tasks` also invalidate
 #       the full body — task-queue-ahead-http.test.ts joins L1 and its tasks-write invalidation is mutated too.
-#       Follow-up: task-queue-ahead-scale.test.ts (57k tasks) pins the queue_depth plan off idx_tasks_status.
+#       Follow-up: task-queue-ahead-scale.test.ts (57k tasks) pins the queue_depth plan off idx_tasks_status and on
+#       the covering idx_tasks_created_queue.
 #
 # Throwaway everything: HOME=$(mktemp -d), temp SQLite, port 0 (never 9200).
 set -euo pipefail
@@ -95,8 +96,17 @@ cp /tmp/server.ts src/server.ts
 # Removing the index hint from the filter must turn the plan assertion (and the cost budget) red.
 cp src/task-queue-ahead.ts /tmp/tqa.ts
 bun /work/tests/mutate.ts src/task-queue-ahead.ts "WHERE (status || '') IN" "WHERE status IN"
-expect_red queue-depth-uses-status-index src/task-queue-ahead-scale.test.ts \
-  '#500 queue_depth at production scale (57k tasks, 31k stuck acked) > plans: never idx_tasks_status; whole table via idx_tasks_created, alias list and per-send via idx_tasks_to_created'
+SCALE_PLANS='#500 queue_depth at production scale (57k tasks, 31k stuck acked) > plans: never idx_tasks_status; whole table via covering idx_tasks_created_queue, alias list and per-send via idx_tasks_to_created'
+expect_red queue-depth-uses-status-index src/task-queue-ahead-scale.test.ts "$SCALE_PLANS"
 cp /tmp/tqa.ts src/task-queue-ahead.ts
+
+# Without the covering index the whole-table form falls back to idx_tasks_created + one task-row lookup per row
+# (+50 % on a production-copy /api/status read); the plan assertion must notice.
+cp src/db.ts /tmp/db.ts
+bun /work/tests/mutate.ts src/db.ts \
+  'db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_queue ON tasks(created_at, status, network_id, to_name)");' \
+  'db.exec("SELECT 1");'
+expect_red queue-depth-not-covering src/task-queue-ahead-scale.test.ts "$SCALE_PLANS"
+cp /tmp/db.ts src/db.ts
 
 echo "PASS test-status-read-cache"

@@ -1442,6 +1442,12 @@ migrateSessionsNetworkAliasUnique();
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_network ON sessions(network_id)"); } catch {}
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_network_alias_unique ON sessions(network_id, alias)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network ON tasks(network_id)"); } catch {}
+// #500 — covering index for the full /api/status queue_depth GROUP BY (task-queue-ahead.ts queueDepthQuery): the 24 h
+// created_at range plus every column that query reads, so it never touches the (wide) task rows. Here, not in the
+// CREATE TABLE block: tasks.network_id only exists after the ALTER above. On a read-only copy of the production DB
+// (57k tasks, 1.9k in the last 24 h) the statement went from ~3 ms (idx_tasks_created + one row lookup per task) to
+// ~0.3 ms; building it there took ~170 ms once. Plain composite index: the same DDL runs on PostgreSQL.
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_queue ON tasks(created_at, status, network_id, to_name)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodes_network ON nodes(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_network ON task_events(network_id)"); } catch {}

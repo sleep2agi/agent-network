@@ -129,9 +129,17 @@ export function dispatchQueueInfo(alias: string, networkId: string | null | unde
   }
 }
 
+let queueDepthOffForTest = false;
+/**
+ * Test-only: queueDepthByNode answers an empty map without querying (every row's queue_depth = 0), i.e. a full
+ * /api/status read does exactly the pre-#2325 work. The scale test alternates reads with it on and off against the
+ * same server so the queue_depth share is measured A/B in the same time window (robust to a busy CI runner).
+ */
+export function __setQueueDepthOffForTest(on: boolean): void { queueDepthOffForTest = on; }
+
 export const queueDepthKey = (networkId: string | null | undefined, alias: string) => `${networkId ?? ""}\u0000${alias}`;
 
-/** 别名不多于这个数时按别名查(走 idx_tasks_to_created);多了就扫最近 24 小时派出的任务(走 idx_tasks_created)。 */
+/** 别名不多于这个数时按别名查(走 idx_tasks_to_created);多了就扫最近 24 小时派出的任务(走覆盖索引 idx_tasks_created_queue)。 */
 export const QUEUE_DEPTH_ALIAS_LIST_MAX = 50;
 
 /**
@@ -141,6 +149,7 @@ export const QUEUE_DEPTH_ALIAS_LIST_MAX = 50;
  */
 export function queueDepthByNode(aliases?: Array<string | null | undefined>): Map<string, number> {
   const out = new Map<string, number>();
+  if (queueDepthOffForTest) return out;
   const q = queueDepthQuery(aliases);
   if (!q) return out;
   const rows = db.all<{ network_id: string | null; to_name: string; n: number | string }>(q.sql, ...q.params);
@@ -157,9 +166,11 @@ export function queueDepthQuery(aliases?: Array<string | null | undefined>): { s
   // On a production-shaped DB (57k tasks, 31k stuck in `acked` for weeks, ~1.9k created in the last 24 h) the
   // planner picked idx_tasks_status for `status IN (…)` and walked every open-status row ever written (~32k) to
   // keep the 24 h window: full /api/status went from ~8 ms to ~70 ms p50. Wrapping `status` makes that index
-  // unusable, so the scan is driven by the 24 h range on idx_tasks_created (EXPLAIN: `SEARCH tasks USING INDEX
-  // idx_tasks_created (created_at>?)`, plus a temp b-tree for the GROUP BY) — or, for the alias list, by
-  // idx_tasks_to_created. The GROUP BY must be wrapped too: grouping on the bare columns lets SQLite pick
+  // unusable, so the scan is driven by the 24 h range on the covering idx_tasks_created_queue (created_at, status,
+  // network_id, to_name) (EXPLAIN: `SEARCH tasks USING COVERING INDEX idx_tasks_created_queue (created_at>?)`, plus a
+  // temp b-tree for the GROUP BY; no task row is read) — or, for the alias list, by idx_tasks_to_created. Without the
+  // covering index it falls back to idx_tasks_created + one row lookup per task: ~3 ms on the production copy, which
+  // was still +50 % on a full /api/status read; covering, ~0.3 ms. The GROUP BY must be wrapped too: grouping on the bare columns lets SQLite pick
   // idx_tasks_network to avoid the sort, which is another full walk. `|| ''` is portable (SQLite and PostgreSQL;
   // a CTE/subquery gets flattened back, `+status` / `LIMIT -1` are SQLite-only). NULL || '' stays NULL on both, and
   // the selected expressions are the grouped ones (PostgreSQL requires that). task-queue-ahead-scale.test.ts pins
