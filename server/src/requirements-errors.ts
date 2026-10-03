@@ -106,6 +106,7 @@ const ENTRIES: Record<string, Entry> = {
   client_id_taken: { field: 'client_id', message: 'That client_id was already used for another task.', hint: 'Generate a new client_id for each new task.' },
   // ── 列表 / 事件 ──
   invalid_view: { field: 'view', message: 'view must be full or summary.' },
+  invalid_last_event: { field: 'last_event', message: 'last_event must be 1 or 0 (REST). On MCP use include_last_event: true / false.' },
   invalid_overdue: { field: 'overdue', message: 'overdue must be true or false (REST: 1 / 0 / true / false).' },
   invalid_due_within_days: { field: 'due_within_days', message: 'due_within_days must be an integer from 0 to 365 (0 = due later today).' },
   invalid_limit: { field: 'limit', message: 'limit is out of range.' },

@@ -106,7 +106,7 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
 
 ### 列表每行的最新动态（last_event，#506）
 
-- `GET /api/requirements`（含 `view=summary`、`changes=1`、`q=`，以及 MCP `requirements_list`）每行多一个字段 `last_event`（capability `last_event`）：这张卡在 `requirement_events` 里**最新的一条**，评论（`kind=comment`）也算。没有流水的卡（动态上线前建的、或过了 180 天保留期）为 `null`；字段总在。
+- `GET /api/requirements`（含 `view=summary`、`changes=1`、`q=`）每行多一个字段 `last_event`（capability `last_event`）；`last_event=0` 不带（其他值 400 `invalid_last_event`）。MCP `requirements_list` **默认不带**（守住 #471 的 Agent 上下文预算，一页 50 张约多 7 KB），传 `include_last_event: true` 才带。`last_event` 是这张卡在 `requirement_events` 里**最新的一条**，评论（`kind=comment`）也算。没有流水的卡（动态上线前建的、或过了 180 天保留期）为 `null`；字段总在。
 
   ```json
   "last_event": {

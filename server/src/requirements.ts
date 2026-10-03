@@ -1580,6 +1580,10 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (view !== null && view !== "full" && view !== "summary") return jsonError("invalid_view", 400);
     const changes = url.searchParams.get("changes") === "1";
     if (changes && url.searchParams.get("updated_since") === null) return jsonError("updated_since_required", 400);
+    // last_event=0:不带每行的 last_event(MCP requirements_list 默认这么调,保住 #471 的 Agent 上下文预算)。不带 / =1 = 带。
+    const lastEventParam = url.searchParams.get("last_event");
+    if (lastEventParam !== null && lastEventParam !== "0" && lastEventParam !== "1") return jsonError("invalid_last_event", 400);
+    const withLastEvent = lastEventParam !== "0";
     // changes 模式:server_time 取在读表之前,下次拿它当 updated_since,读表期间的写入不会漏(>= 会重复回一次,客户端按 id 覆盖)。
     const serverTime = new Date().toISOString();
     nodeReadNote(ctx, "GET /api/requirements", null);
@@ -1595,8 +1599,8 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     }
     const page = listPage(ctx, filtered, params, lq);
     // last_event(#506):每行最新一条动态(含评论),没有 = null。旧 App 不认识,忽略即可。
-    const lastEvents = lastEventsFor(ctx, page.rows);
-    const rows = page.rows.map(row => ({ ...toPublicFor(ctx, row), last_event: lastEvents.get(row.requirement_id) ?? null }));
+    const lastEvents = withLastEvent ? lastEventsFor(ctx, page.rows) : null;
+    const rows = lastEvents ? page.rows.map(row => ({ ...toPublicFor(ctx, row), last_event: lastEvents.get(row.requirement_id) ?? null })) : page.rows.map(row => toPublicFor(ctx, row));
     // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
     // has_more / next_cursor:后面还有没有(带 cursor=next_cursor 再读一页)。旧客户端不认识,忽略即可。
     const payload: Record<string, unknown> = { ok: true, requirements: view === "summary" ? rows.map(toSummary) : rows, capabilities: REQUIREMENT_CAPABILITIES, has_more: page.hasMore, next_cursor: page.nextCursor };

@@ -5978,12 +5978,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
     view: z.enum(["full", "summary"]).optional().describe("default summary (no description / checklist bodies; has_description, checklist_count instead); full = everything"),
     changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (archived included) + deleted ids + server_time"),
+    include_last_event: z.boolean().optional().describe("default false; true adds last_event per row (newest event incl. comments: type, field, actor, at, summary; null if none), ~150 B/row"),
   };
   const reqListKeys = Object.keys(reqListShape);
   server.registerTool(
     "requirements_list",
     {
-      description: `List requirement tasks in your network, newest first. Defaults (MCP): view='summary' (no description / checklist bodies; has_description, checklist_count instead; ~0.5 KB per task) and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page; has_more + next_cursor → pass cursor. Full text: requirements_get, or view='full' with a small limit (≤ 1000). Filters: seq (#N), status, project_id ('none'), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact), updated_since (ISO), overdue / due_within_days (open tasks only), external_ref, parent_id / top_level, department_id (owner in it or below), include_archived; q searches title / description / people / project / tags (terms ANDed). Rows carry children {total, done} and last_event (newest event incl. comments: type, field, actor, at, summary; null if none). changes=true (with updated_since) returns only tasks changed since then, archived included, plus deleted ids and server_time for the next updated_since. Unknown parameters are rejected (-32602).`,
+      description: `List requirement tasks in your network, newest first. Defaults (MCP): view='summary' (no description / checklist bodies; has_description, checklist_count instead; ~0.5 KB per task) and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page; has_more + next_cursor → pass cursor. Full text: requirements_get, or view='full' with a small limit (≤ 1000). Filters: seq (#N), status, project_id ('none'), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact), updated_since (ISO), overdue / due_within_days (open tasks only), external_ref, parent_id / top_level, department_id (owner in it or below), include_archived; q searches title / description / people / project / tags (terms ANDed). Rows carry children {total, done}; include_last_event=true adds last_event (newest event incl. comments). changes=true (with updated_since) returns only tasks changed since then, archived included, plus deleted ids and server_time for the next updated_since. Unknown parameters are rejected (-32602).`,
       // Strict: registerTool honours a constructed object's unknownKeys (server.tool() would strip them silently).
       inputSchema: z.strictObject(reqListShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
@@ -5999,6 +6000,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (args.include_archived) q.set("include_archived", "1");
       if (args.top_level) q.set("top_level", "1");
       if (args.changes) q.set("changes", "1");
+      // #506 —— REST 每行默认带 last_event(App 用);MCP 默认不带,守住 #471 的上下文预算。
+      if (!args.include_last_event) q.set("last_event", "0");
       if (args.overdue !== undefined) q.set("overdue", args.overdue ? "1" : "0");
       if (args.due_within_days !== undefined) q.set("due_within_days", String(args.due_within_days));
       return requirementsCall("GET", `/api/requirements?${q}`, args.network_id);

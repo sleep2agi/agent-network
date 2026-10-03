@@ -5,7 +5,8 @@
 //   - 节点(节点令牌)改状态 → actor.kind = "node",display_name = 节点名,summary「pool → doing」;
 //   - ETag:没变时 304,加一条评论之后同一个 If-None-Match 不再命中(列表缓存也作废);
 //   - 可见范围同行:受限成员看不见的节点 actor = null;scoped 成员看不见的卡根本不在列表里;
-//   - view=summary(MCP requirements_list 默认)同样带 last_event。
+//   - view=summary 同样带 last_event;REST last_event=0 不带(其他值 400 invalid_last_event);
+//   - MCP requirements_list 默认不带(守住 #471 的上下文预算),include_last_event=true 才带,参数严格(非布尔 → 报错)。
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +47,20 @@ const create = async (t: string, card: Record<string, unknown>) => {
 };
 const list = (t: string, qs = "", headers: Record<string, string> = {}) => send(t, "GET", `/api/requirements?network_id=${NET}${qs}`, undefined, headers);
 const rowOf = (r: R, id: string) => (r.body.requirements as any[]).find(x => x.id === id);
+async function mcp(token: string, name: string, args: Record<string, unknown>): Promise<{ data: any; text: string; isError: boolean }> {
+  const res = await fetch(`${BASE}/mcp`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-03-26" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+  });
+  const raw = await res.text();
+  const lines = raw.split("\n").filter(x => x.startsWith("data:"));
+  const out = lines.length ? JSON.parse(lines.at(-1)!.slice(5).trim()) : JSON.parse(raw);
+  const text = out.result?.content?.[0]?.text ?? out.error?.message ?? "";
+  let data: any = null;
+  try { data = JSON.parse(text); } catch {}
+  return { data, text, isError: !!out.error || !!out.result?.isError };
+}
 const comment = (t: string, id: string, text: string) => send(t, "POST", `/api/requirements/${id}/comments?network_id=${NET}`, { text });
 
 beforeAll(async () => {
@@ -175,6 +190,37 @@ describe("#506 GET /api/requirements last_event", () => {
     expect(rowOf(await list(admin.token), card.id).last_event).toMatchObject({ type: "changed", field: "agent_owner", actor: { id: admin.id, kind: "user" } });
     const seen = rowOf(await list(restricted.token), card.id).last_event;
     expect(seen).toEqual({ type: "changed", field: null, actor: { id: admin.id, kind: "user", display_name: "示例管理员" }, at: seen.at });
+  });
+
+  test("REST last_event=0 drops the field; any other value is 400 invalid_last_event with field", async () => {
+    const card = await create(admin.token, { name: "REST 开关示例" });
+    const off = await list(admin.token, "&last_event=0");
+    expect(off.status).toBe(200);
+    expect("last_event" in rowOf(off, card.id)).toBe(false);
+    expect(off.body.requirements.some((r: any) => "last_event" in r)).toBe(false);
+    expect(rowOf(await list(admin.token, "&last_event=1"), card.id).last_event).toMatchObject({ type: "created" });
+    const bad = await list(admin.token, "&last_event=yes");
+    expect(bad.status).toBe(400);
+    expect(bad.body).toMatchObject({ ok: false, error: "invalid_last_event", field: "last_event" });
+  });
+
+  test("MCP requirements_list: no last_event by default; include_last_event=true adds it; non-boolean rejected", async () => {
+    const card = await create(admin.token, { name: "MCP 开关示例" });
+    await comment(admin.token, card.id, "MCP 能看到的评论");
+    const def = await mcp(nodeToken, "requirements_list", {});
+    expect(def.isError).toBe(false);
+    expect(def.data.requirements.length).toBeGreaterThan(0);
+    expect(def.data.requirements.some((r: any) => "last_event" in r)).toBe(false);
+    expect(def.text).not.toContain(`"last_event":`); // (capabilities still lists "last_event" — the Hub supports it)
+    const off = await mcp(nodeToken, "requirements_list", { include_last_event: false });
+    expect(off.data.requirements.some((r: any) => "last_event" in r)).toBe(false);
+    const on = await mcp(nodeToken, "requirements_list", { include_last_event: true });
+    expect(on.isError).toBe(false);
+    expect(on.data.requirements.every((r: any) => "last_event" in r)).toBe(true);
+    expect(on.data.requirements.find((r: any) => r.id === card.id).last_event).toMatchObject({ type: "comment", actor: { id: admin.id, kind: "user" }, summary: "MCP 能看到的评论" });
+    const bad = await mcp(nodeToken, "requirements_list", { include_last_event: "yes" });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain("include_last_event");
   });
 
   test("one page of many cards: every row gets its own latest event", async () => {
