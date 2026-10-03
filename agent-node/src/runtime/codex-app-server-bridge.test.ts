@@ -1132,6 +1132,43 @@ describe("CodexAppServerBridge — authenticated Dashboard steering", () => {
     await app.stop();
   });
 
+  // #521: emitSteeredTask carries its own copy of the "interrupted is not a
+  // reply" mapping (finishOwnedTurn has the other). Before this test nothing
+  // drove a steered turn to `interrupted`, so deleting that branch left every
+  // test green and the Dashboard row would close as a successful reply holding
+  // whatever partial text the human turn had streamed.
+  test("an interrupted human turn surfaces the steered Dashboard row as an error, not a reply", async () => {
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize" || msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/steer") return respond({ result: { turnId: (msg.params as any).expectedTurnId } });
+        if (msg.method === "turn/start") return respond({ result: { turnId: "must-not-start" } });
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    app.broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: THREAD, turn: { id: "human-int", status: "inProgress" } } });
+    await tick(10);
+
+    const replies: Array<{ taskId: string; text: string }> = [];
+    const errors: Array<{ taskId: string; error: string }> = [];
+    bridge.on("task_reply", (event) => replies.push(event as never));
+    bridge.on("task_error", (event) => errors.push(event as never));
+    expect(await bridge.submitTask({ taskId: "dash-int", text: "stop halfway", steerIfExternalTurn: true }))
+      .toEqual({ started: true, turnId: "human-int", steered: true });
+
+    // Partial text streamed before the interrupt must not become the reply.
+    app.broadcast({ jsonrpc: "2.0", method: "item/agentMessage/delta", params: { threadId: THREAD, turnId: "human-int", delta: "half an answ" } });
+    app.broadcast({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: THREAD, turn: { id: "human-int", status: "interrupted" } } });
+    await tick(10);
+    expect(replies).toEqual([]);
+    expect(errors).toEqual([{ taskId: "dash-int", error: "Codex turn was interrupted without an error message" }]);
+    await client.close();
+    await app.stop();
+  });
+
   test("multiple Dashboard rows steer one human turn while ordinary agent work stays queued", async () => {
     const app = await startFakeApp({
       onRequest: (msg, respond) => {

@@ -26,7 +26,6 @@ test14-agent-node
 test15-telegram-mock
 test16-channel-plugin
 test18-error-paths
-test185-external-schedules
 test19-real-collab
 test2-collab
 test20-cli-ux
