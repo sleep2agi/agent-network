@@ -56,6 +56,10 @@ anet node start my-agent
 | `--username <user>` | 首次启动时指定管理员用户名 |
 | `--password <pass>` | 首次启动时显式指定管理员密码 |
 | `--dev-open` | 关闭鉴权，仅限隔离开发环境 |
+| `--version <v>` | 指定要启动的 `commhub-server` 版本（精确版本号，或 `latest` / `preview`） |
+| `--channel <c>` | `latest` 或 `preview`，覆盖默认按 anet 自身通道选版本的结果 |
+
+**启动的 Hub 版本**：不带 `--version` 时，`anet hub start` 先按已装 anet 的版本对照 `@sleep2agi/agent-network` 的 dist-tags 判断通道（等于或落后于 `latest` 判为 latest，比 `latest` 新的预发布版判为 preview；不能只看 `-preview.N` 后缀，`latest` 本身也带这个后缀），再取该通道对应的 `@sleep2agi/commhub-server` dist-tag，交给 `bunx` 精确版本号启动；该 tag 若比当前 anet 支持的最低版本还旧，则改用最低版本。启动时会打印一行 `Hub version: @sleep2agi/commhub-server@<版本>  [source: registry | cache | explicit | pinned minimum]`，说明版本和来源。查不到 npm registry 时，使用本机 bun 缓存里不低于最低版本的最新一版并告警；缓存里只有更旧的版本时**不会**静默启动它，而是打印两个版本号的告警，并提示用 `--version <缓存版本>` 显式启动。
 
 不要把 `--dev-open` 或直接暴露的 `0.0.0.0:9200` 用于生产。公网部署见 [生产部署](/deploy/production)。
 

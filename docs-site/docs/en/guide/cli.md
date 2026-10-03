@@ -56,6 +56,10 @@ Common start options:
 | `--username <user>` | Set the bootstrap administrator username |
 | `--password <pass>` | Explicitly set the bootstrap administrator password |
 | `--dev-open` | Disable authentication; isolated development only |
+| `--version <v>` | `commhub-server` version to launch (an exact version, or `latest` / `preview`) |
+| `--channel <c>` | `latest` or `preview`; overrides the channel picked from anet's own version |
+
+**Which Hub version starts**: without `--version`, `anet hub start` first decides the channel by comparing the installed anet version with the `@sleep2agi/agent-network` dist-tags (equal to or behind `latest` means latest; a prerelease newer than `latest` means preview; the `-preview.N` suffix alone says nothing, since `latest` carries it too). It then takes that channel's `@sleep2agi/commhub-server` dist-tag and launches that exact version through `bunx`. If that tag is older than the minimum this anet supports, it uses the minimum instead. Start prints one line, `Hub version: @sleep2agi/commhub-server@<version>  [source: registry | cache | explicit | pinned minimum]`, naming the version and where it came from. When the npm registry can't be reached, it uses the newest version in the local bun cache that meets the minimum, with a warning. If the cache only has older versions, it does **not** start one silently: it prints a warning naming both versions and tells you to pass `--version <cached version>` if you want it anyway.
 
 Do not use `--dev-open` or expose `0.0.0.0:9200` directly in production. See [Production deployment](/en/deploy/production).
 

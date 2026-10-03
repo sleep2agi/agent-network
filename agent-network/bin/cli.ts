@@ -57,6 +57,7 @@ import { describeCopresenceStartupFailure } from "../src/copresence-startup-diag
 import { describeCapability, describeFetchFailure, type CapabilityFetchFailure, type DaemonCapabilityRow } from "../src/daemon-capability-display";
 import { daemonPathWarnings } from "../src/daemon-runtime-path-preflight";
 import { formatHubVersionDetail } from "../src/hub-version-skew";
+import { bunInstallCacheDir, formatHubVersionBanner, isExactSemver, resolveHubServerVersion } from "../src/hub-server-version";
 import { nodeCountLine } from "../src/doctor-node-count";
 import { nodeNotFoundMessage } from "../src/node-not-found";
 import { columnWidth, lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
@@ -1984,11 +1985,14 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   console.log(`[anet]    mode:    opencode-cli copresence (native serve + full attach TUI)`);
 }
 
-// Pin commhub-server to a specific version to defeat bunx caching of older
-// versions (bunx with @preview caches the first-resolved version and may not
-// refetch). A `latest` agent-network release must pin a *stable* server.
-// `anet upgrade` (#88) surfaces this constant in its plan output so users
-// understand global-install version != version anet hub start actually runs.
+// Minimum commhub-server this CLI is known to work with (#511: a FLOOR, not
+// the default). `anet hub start` resolves the version from the commhub-server
+// dist-tag of the anet channel (see src/hub-server-version.ts) and only falls
+// back to / lifts up to this value when the registry is unreachable or the
+// channel tag is older. It used to be the only version ever launched, and
+// since nothing bumps it automatically it went a month stale (#511).
+// bunx is always given an exact version, never `@preview`, to defeat bunx
+// caching the first-resolved version of a floating tag.
 // 🔴 这个常量只能指向**已经发布到 npm 的**版本。release-gate 的 gate 2 会拿它
 // 去 `npm view` 核对,而 publish 要求四门全绿 —— 所以「本次要发的版本」不能提前
 // 写在这里,否则发它的那个 run 会被自己的 pin 卡死(鸡生蛋)。
@@ -8565,7 +8569,7 @@ async function serverCommand() {
       const h = await fetch(`${hubUrl}/health`).then(r => r.json() as any);
       if (h.ok) {
         serverAlreadyRunning = true;
-        console.log(`  ✅ CommHub Server already running on ${hubUrl}`);
+        console.log(`  ✅ CommHub Server already running on ${hubUrl} (commhub-server v${h.version || "?"}; not restarted — --version only applies to a fresh start)`);
       }
     } catch {}
 
@@ -8608,6 +8612,27 @@ async function serverCommand() {
         console.error(`\n     More info: https://bun.sh/install\n`);
         process.exit(1);
       }
+      // #511 — resolve which commhub-server to launch, and say where it came from.
+      const versionFlag = opts.version ?? opts["hub-version"];
+      if (versionFlag === "true" || (versionFlag && versionFlag !== "latest" && versionFlag !== "preview" && !isExactSemver(versionFlag))) {
+        console.error(`\n  ❌ --version needs an exact commhub-server version (e.g. 0.9.0-preview.95) or a channel (latest|preview); got "${versionFlag}".\n`);
+        process.exit(1);
+      }
+      const channelFlag = opts._channels[0];
+      if (channelFlag && channelFlag !== "latest" && channelFlag !== "preview") {
+        console.error(`\n  ❌ --channel must be "latest" or "preview" (got "${channelFlag}").\n`);
+        process.exit(1);
+      }
+      const hubVersion = resolveHubServerVersion({
+        explicit: versionFlag || null,
+        channelFlag: channelFlag || null,
+        anetVersion: getAnetVersion() || "",
+        floor: PINNED_SERVER_VERSION,
+        exec: (cmd, cmdArgs) => runLauncherSync(cmd, cmdArgs, { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "pipe"] }).toString(),
+        cacheDir: bunInstallCacheDir(),
+      });
+      console.log(`  ${formatHubVersionBanner(hubVersion)}`);
+      for (const w of hubVersion.warnings) console.error(`\n  ⚠️  ${w}\n`);
       console.log(`  Starting CommHub Server on port ${port} (bind ${host})...`);
       const env: Record<string, string> = {
         ...process.env as any,
@@ -8615,8 +8640,8 @@ async function serverCommand() {
         HOST: host,
         ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
       };
-      // Pin to a specific version (module-level constant) — see PINNED_SERVER_VERSION.
-      const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
+      // Always an exact version (resolved above) — see PINNED_SERVER_VERSION.
+      const serverArgs = ["--bun", `@sleep2agi/commhub-server@${hubVersion.version}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawnLauncher("bunx", serverArgs, { env, stdio: "inherit" });
       // #235 — Belt-and-braces: even with the preflight above, race
@@ -8668,6 +8693,9 @@ async function serverCommand() {
         return;
       }
       console.log(`  ✅ Server running on ${hubUrl} (commhub-server v${serverVersion || "?"})`);
+      if (serverVersion && serverVersion !== hubVersion.version) {
+        console.error(`\n  ⚠️  Asked bunx for commhub-server ${hubVersion.version} but the server reports v${serverVersion}.\n`);
+      }
       if (devOpen) {
         console.log(`  ⚠️  DEV OPEN MODE`);
       } else {
@@ -9207,6 +9235,10 @@ Options:
   --host <host>      Bind address (default: 127.0.0.1)
   --token <token>    Legacy master token (deprecated; prefer user/ntok auth)
   --dev-open         Disable hub auth for local development only
+  --version <v>      commhub-server version to launch (exact, or latest|preview).
+                     Default: the dist-tag of anet's own channel; start prints
+                     the version and its source (registry/cache/explicit).
+  --channel <c>      latest|preview — override the channel used for the default
 
 Options:
   --port <port>      Port (default: 9200 for server, 3000 for dashboard)
@@ -9218,6 +9250,7 @@ Example:
   anet hub dashboard             # Start Dashboard UI
   anet hub start --host 0.0.0.0  # Allow LAN agents
   anet hub start --port 8080     # Custom port
+  anet hub start --version <v>   # Run an exact commhub-server version
   anet hub config                # Show config
 `);
 }
@@ -13050,7 +13083,7 @@ async function upgradeCommand() {
       target: serverTarget,
       action: !serverTarget ? "lookup-failed"
         : (serverCur === serverTarget ? "up-to-date" : "upgrade"),
-      note: `(anet hub start uses pinned ${PINNED_SERVER_VERSION} — your global install is for direct CLI use only)`,
+      note: `(anet hub start runs the ${channel} dist-tag via bunx, minimum ${PINNED_SERVER_VERSION} — your global install is for direct CLI use only)`,
     });
   } else {
     plan.push({
@@ -13059,7 +13092,7 @@ async function upgradeCommand() {
       current: null,
       target: serverTarget,
       action: "lazy-skip",
-      note: `(not installed globally — \`anet hub start\` lazy-fetches pinned ${PINNED_SERVER_VERSION} via npx)`,
+      note: `(not installed globally — \`anet hub start\` lazy-fetches the ${channel} dist-tag via bunx, minimum ${PINNED_SERVER_VERSION})`,
     });
   }
 
