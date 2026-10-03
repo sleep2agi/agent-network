@@ -685,6 +685,38 @@ export interface OpencodeExitedProcessIdentity {
 interface LinuxProcessStat {
   identity: string;
   state: string;
+  /** Linux `/proc/<pid>/stat` field 9 (task flags); 0 where unavailable (macOS). */
+  flags: number;
+}
+
+/**
+ * #517 —— every procfs read the Linux live-reference scan depends on, behind
+ * one seam. The execve() window below lasts microseconds to milliseconds on a
+ * real kernel, so the unit test that pins its handling swaps in a scripted
+ * procfs instead of hoping to land inside it.
+ */
+export interface OpencodeLinuxProcfs {
+  listPids(): string[];
+  /** Owner uid of /proc/<pid>; throws (ENOENT/ESRCH) once the process is gone. */
+  ownerUid(pid: string): number;
+  read(pid: string, file: "stat" | "environ" | "cmdline"): string;
+  cwd(pid: string): string;
+  sleepMs(ms: number): void;
+}
+
+const SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
+const realLinuxProcfs: OpencodeLinuxProcfs = {
+  listPids: () => readdirSync("/proc"),
+  ownerUid: (pid) => statSync(`/proc/${pid}`).uid,
+  read: (pid, file) => readFileSync(`/proc/${pid}/${file}`, "utf8"),
+  cwd: (pid) => realpathSync(`/proc/${pid}/cwd`),
+  sleepMs: (ms) => { Atomics.wait(SLEEP_CELL, 0, 0, ms); },
+};
+let linuxProcfs: OpencodeLinuxProcfs = realLinuxProcfs;
+
+/** Test-only: replace (or with `null`, restore) the procfs the Linux scan reads. */
+export function setOpencodeLinuxProcfsForTest(fake: OpencodeLinuxProcfs | null): void {
+  linuxProcfs = fake ?? realLinuxProcfs;
 }
 
 function readLinuxProcessStat(pid: number): LinuxProcessStat | undefined {
@@ -699,13 +731,16 @@ function readLinuxProcessStat(pid: number): LinuxProcessStat | undefined {
     // /proc/<pid>/stat field 22 is the process start time in clock ticks. It
     // disambiguates PID reuse without trusting wall-clock timestamps. `comm`
     // may contain spaces or ')', hence lastIndexOf rather than split().
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const stat = linuxProcfs.read(String(pid), "stat");
     const close = stat.lastIndexOf(")");
     if (close < 0) return undefined;
     const fieldsFromState = stat.slice(close + 1).trim().split(/\s+/);
     const state = fieldsFromState[0];
+    const flags = Number(fieldsFromState[6]);
     const startTicks = fieldsFromState[19];
-    return state && startTicks ? { identity: `${pid}:${startTicks}`, state } : undefined;
+    return state && startTicks
+      ? { identity: `${pid}:${startTicks}`, state, flags: Number.isSafeInteger(flags) ? flags : 0 }
+      : undefined;
   } catch {
     return undefined;
   }
@@ -722,7 +757,7 @@ export function parseDarwinPsStat(output: string, pid: number): LinuxProcessStat
   if (!match) return undefined;
   const started = Date.parse(match[1]);
   if (!Number.isFinite(started)) return undefined;
-  return { identity: `${pid}:${Math.floor(started / 1000)}`, state: match[2].charAt(0) };
+  return { identity: `${pid}:${Math.floor(started / 1000)}`, state: match[2].charAt(0), flags: 0 };
 }
 
 function readDarwinProcessStat(pid: number): LinuxProcessStat | undefined {
@@ -821,6 +856,47 @@ function launchRootReferencedByLiveProcessDarwin(
   return false;
 }
 
+const PF_KTHREAD = 0x0020_0000;
+/** Waits between re-reads of an empty environ (≈255 ms in total). */
+const EXEC_SETTLE_DELAYS_MS = [1, 2, 4, 8, 16, 32, 64, 128];
+
+/**
+ * #517 —— read a process's environment once it can be trusted.
+ *
+ * `/proc/<pid>/environ` reads EMPTY for the whole stretch of execve() between
+ * the kernel installing the new address space (exec_mmap) and populating its
+ * argv/envp (create_elf_tables). A spawner is released at exec_mmap, so a tool
+ * subprocess caught there looks like a process with no environment at all —
+ * and the old single read declared it "does not reference this launch root"
+ * and deleted the live tree. Under CPU pressure ~10% of freshly spawned
+ * children were observed in that window.
+ *
+ * Returns the environment, `""` when the process provably has none to
+ * inherit (gone, zombie, kernel thread, or exec finished with an empty envp),
+ * or `undefined` when it is still inside execve() after the bounded wait. A
+ * non-empty cmdline marks a finished exec: since Linux 5.18 the kernel
+ * substitutes argv = {""} for an empty argv, so cmdline is never empty after
+ * create_elf_tables. Requiring the whole budget before accepting an empty envp
+ * keeps an `env -i` process from retaining roots forever without letting a
+ * descendant that is merely slow to finish exec read as unrelated.
+ */
+function readSettledLinuxEnviron(entry: string): string | undefined {
+  let cmdline = "";
+  for (let attempt = 0; ; attempt++) {
+    const environment = linuxProcfs.read(entry, "environ");
+    if (environment.length > 0) return environment;
+    const stat = readLinuxProcessStat(Number(entry));
+    if (!stat || stat.state === "Z" || stat.state === "X" || (stat.flags & PF_KTHREAD) !== 0) return "";
+    try {
+      cmdline = linuxProcfs.read(entry, "cmdline");
+    } catch {
+      return "";
+    }
+    if (attempt >= EXEC_SETTLE_DELAYS_MS.length) return cmdline.length > 0 ? "" : undefined;
+    linuxProcfs.sleepMs(EXEC_SETTLE_DELAYS_MS[attempt]);
+  }
+}
+
 function launchRootReferencedByLiveProcess(
   launchRoot: string,
   safeWorkspace: string | undefined,
@@ -830,7 +906,7 @@ function launchRootReferencedByLiveProcess(
   if (process.platform !== "linux") return undefined;
   let entries: string[];
   try {
-    entries = readdirSync("/proc");
+    entries = linuxProcfs.listPids();
   } catch {
     return undefined;
   }
@@ -862,19 +938,23 @@ function launchRootReferencedByLiveProcess(
       continue;
     }
     try {
-      if (statSync(`/proc/${entry}`).uid !== uid) continue;
+      if (linuxProcfs.ownerUid(entry) !== uid) continue;
     } catch (error: any) {
       if (error?.code === "ENOENT" || error?.code === "ESRCH") continue;
       continue;
     }
     try {
-      const environment = readFileSync(`/proc/${entry}/environ`, "utf8");
+      const environment = readSettledLinuxEnviron(entry);
+      // Still inside execve(): its post-exec environment cannot be observed
+      // yet, so it may be a tool descendant inheriting this exact root. Fail
+      // closed; a later release/sweep re-scans once the exec has finished.
+      if (environment === undefined) return true;
       for (const value of environment.split("\0")) {
         if (expected.has(value)) return true;
       }
       if (safeWorkspace !== undefined) {
         try {
-          const cwd = realpathSync(`/proc/${entry}/cwd`);
+          const cwd = linuxProcfs.cwd(entry);
           if (pathIsWithin(safeWorkspace, cwd)) return true;
         } catch {}
       }
