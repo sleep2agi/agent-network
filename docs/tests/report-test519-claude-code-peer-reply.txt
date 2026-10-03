@@ -1,0 +1,59 @@
+# report-test519: Claude Code channel commhub_send_peer_reply (#519, RFC-030)
+# Docker run of tests/test519-claude-code-peer-reply on a clean git archive of source_commit below.
+# FAIL lines under [L2] are the expected red output of each mutation.
+
+# test519 — claude-code channel peer reply closes the original task
+source_commit=bd51e85f2f63c83c3ed70aea2b6c29a99cd703fb
+[L0] unit
+src/channel-peer-reply.test.ts:
+ 17 pass
+ 0 fail
+ 53 expect() calls
+Ran 17 tests across 1 file. [47.00ms]
+[L1] real Hub + real channel bundle
+PASS: instructions route agent senders to commhub_send_peer_reply
+PASS: instructions no longer hedge on tool availability
+PASS: tools/list exposes commhub_send_peer_reply
+PASS: S1 atomic route
+PASS: S1 original task is terminal
+PASS: S1 capable peer received new_reply SSE
+PASS: S2 fallback route
+PASS: S2 original task is terminal
+PASS: S2 exactly one wake task to the peer
+PASS: S2 legacy peer received new_task SSE
+PASS: S3 fixture: human-origin task has no from_node_id
+PASS: S3 human origin → reply-only
+PASS: S3 original task is terminal
+PASS: S3 no task sent to the human
+PASS: S4 wake failure reported, nothing closed
+PASS: S4 original task still open after failed wake
+PASS: S5 old Hub → wake-then-close
+PASS: S5 original task is terminal
+PASS: S5 one wake task to the peer
+PASS: S6 close failure after wake is explicit
+PASS: S6 tells the model the exact recovery call
+PASS: S6 original still open
+PASS: S6 recovery commhub_reply closes it
+PASS: S7 task_id required
+PASS: S7 replying twice is rejected by the Hub
+PASS: S7 no new tasks from rejected calls
+test519 e2e: pass=26 fail=0
+[L2] witnessed-red mutations
+FAIL: S2 fallback route :: {"ok":false,"closed":false,"woke":false,"error":"peer_reply_unsupported","message":"recipient or caller does not support atomic peer replies","task_id":"d7dddc44-9e5d-4983-b0fd-3d0abeed0cbc","upstream":{"ok":false,"error":"peer_reply_unsupported","message":"recipient or caller does not support atomic peer replies","in_reply_to":"d7dddc44-9e5d-4983-b0fd-3d0abeed0cbc","reply_queued":false}}
+FAIL: S2 original task is terminal :: "acked"
+FAIL: S2 exactly one wake task to the peer :: []
+MUTATION_RED: capability-fallback-removed rc=1
+FAIL: S4 wake failure reported, nothing closed :: {"ok":true,"route":"wake-then-close","closed":true,"woke":true,"task_id":"d67237ab-bdc5-4974-8b9c-384fd14cac69","wake_task_id":null,"fallback_reason":"peer_reply_unsupported","upstream":{"ok":true,"message_id":"65f71943-5ae1-443d-ae45-87c3ed94c4f9","session_status":"unknown"}}
+FAIL: S4 original task still open after failed wake :: "replied"
+MUTATION_RED: close-despite-failed-wake rc=1
+FAIL: S5 old Hub → wake-then-close :: {"ok":false,"closed":false,"woke":false,"error":"MCP error -32602: Tool send_peer_reply not found","message":"MCP error -32602: Tool send_peer_reply not found","task_id":"d7dbc546-95b2-48ba-bca8-77313f4d3325","upstream":{"ok":false,"error":"MCP error -32602: Tool send_peer_reply not found"}}
+FAIL: S5 original task is terminal :: "acked"
+FAIL: S5 one wake task to the peer
+MUTATION_RED: old-hub-unknown-tool-not-recognised rc=1
+FAIL: tools/list exposes commhub_send_peer_reply :: ["commhub_reply","commhub_send_peer_reply_disabled","commhub_report_status","commhub_send_task","commhub_send_message","commhub_get_all_status","commhub_upload_file"]
+MUTATION_RED: tool-not-listed rc=1
+FAIL: instructions route agent senders to commhub_send_peer_reply
+FAIL: instructions no longer hedge on tool availability
+MUTATION_RED: instructions-reverted rc=1
+RESULT: PASS (mutations=5)
+run519=0
