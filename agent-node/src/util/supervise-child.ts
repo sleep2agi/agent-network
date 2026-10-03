@@ -54,6 +54,14 @@ export interface SupervisedIterationController {
    * the first call has effect within a single iteration.
    */
   markStable(): void;
+  /**
+   * #507 — wait at least `minWaitMs` (no jitter applied below it) before the
+   * NEXT iteration, regardless of the current backoff. Used by connectSSE when
+   * the Hub says another copy of this node took the stream: the normal ~1 s
+   * reconnect would just steal it back and flap. Last call within an
+   * iteration wins; the floor applies to one wait only.
+   */
+  deferNextAttempt(minWaitMs: number): void;
 }
 
 export interface SuperviseChildOpts {
@@ -128,7 +136,11 @@ export async function superviseChild(opts: SuperviseChildOpts): Promise<void> {
 
   while (!opts.shutdownGate()) {
     let stable = false;
+    let minNextWaitMs = 0;
     const ctrl: SupervisedIterationController = {
+      deferNextAttempt(minWaitMs: number) {
+        minNextWaitMs = Number.isFinite(minWaitMs) && minWaitMs > 0 ? minWaitMs : 0;
+      },
       markStable() {
         if (stable) return;
         stable = true;
@@ -157,7 +169,7 @@ export async function superviseChild(opts: SuperviseChildOpts): Promise<void> {
     // floor matches the pre-helper connectFeishu behaviour and avoids
     // a hot-loop edge case if a caller sets baseDelayMs very small.
     const jitterDelta = jitterRatio > 0 ? delay * jitterRatio * (random() * 2 - 1) : 0;
-    const waitMs = Math.max(100, Math.round(delay + jitterDelta));
+    const waitMs = Math.max(100, Math.round(delay + jitterDelta), minNextWaitMs);
     opts.onRetryWait?.(waitMs, delay);
     await sleep(waitMs);
     delay = Math.min(delay * 2, maxDelayMs);
