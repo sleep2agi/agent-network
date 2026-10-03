@@ -254,6 +254,11 @@ function appServerPhase(h: AppServerHealth | undefined): string {
   if (/auto-restart gave up/.test(e)) return "gave_up";
   // #465 —— 活着但不应答(正在数探针 / 身份核对不过不杀):也是一次翻转,立刻报上去,别等心跳。
   if (/alive but not answering/.test(e)) return "hung";
+  // The watchdog decided not to restart (someone else's process holds the port, the node is stopping, no launch
+  // snapshot…). Without its own phase this looked exactly like the plain "down" before it, so the reason only
+  // reached the Hub by luck, on some later status report (the 3-minute heartbeat, or a task ending). CI saw that
+  // as test-codex-appserver-watchdog timing out on "hub reports the foreign listener as degraded".
+  if (/; not restarting: /.test(e)) return "blocked";
   return "-";
 }
 
@@ -291,7 +296,12 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
     }
     const report = snapshot();
     const sig = healthSignature(report);
-    if (lastSig !== null && sig !== lastSig) opts.onChange?.(report);
+    // The first tick has no previous signature to differ from. A healthy first result adds nothing to the
+    // registration report the Hub already has; an unhealthy one must go out now — otherwise a node whose
+    // app-server died before the first probe (the watchdog is already restarting it) shows healthy on the Hub until
+    // the next flip or the 3-minute heartbeat.
+    const firstAndDown = lastSig === null && (report.app_server?.ok === false || report.tui?.ok === false);
+    if (firstAndDown || (lastSig !== null && sig !== lastSig)) opts.onChange?.(report);
     lastSig = sig;
     return report;
   };

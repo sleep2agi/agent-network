@@ -171,6 +171,26 @@ describe("#448 health monitor", () => {
     expect(changes[1].model_auth).toBe("revoked");
   });
 
+  test("the first tick reports a down result at once (healthy first tick stays quiet)", async () => {
+    // The app-server died before the first probe: the Hub only has the registration report (no health) and would
+    // otherwise keep showing the node healthy until the next flip.
+    for (const [appUp, tuiUp, expected] of [[false, true, 1], [true, false, 1], [true, true, 0]] as const) {
+      const changes: any[] = [];
+      const m = createCodexHealthMonitor({
+        appServerUrl: () => "ws://127.0.0.1:1",
+        tuiSession: "t",
+        modelAuth: new ModelAuthTracker(),
+        probeAppServer: async () => (appUp ? { ok: true, rtt_ms: 1, last_error: null } : { ok: false, rtt_ms: null, last_error: "refused" }),
+        probeTui: () => (tuiUp ? { ok: true, reason: "running" } : { ok: false, reason: "pane-dead" }),
+        onChange: (r) => changes.push(r),
+      });
+      await m.tick();
+      expect(changes.length).toBe(expected);
+      await m.tick();
+      expect(changes.length).toBe(expected); // same state on the 2nd tick: no repeat
+    }
+  });
+
   test("no url and no tui session → only bridge + model_auth (subset for non-copresence)", async () => {
     const m = createCodexHealthMonitor({
       appServerUrl: () => undefined,

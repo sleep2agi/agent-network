@@ -111,6 +111,23 @@ expect_red unit-foreign-marker 'a foreign process is never signalled' bun test a
 cp /tmp/relaunch.ts agent-node/src/runtime/codex-appserver-relaunch.ts
 (cd agent-node && bun run build >/dev/null)
 
+echo "L7b witnessed red: a declined restart / a down first probe is no longer reported at once (only via a later report)"
+# CI flake (PR #2328, twice): the probe hit the foreign listener before the bridge saw its ws close, so the 1st failure
+# went out raw and the 2nd ("not restarting: …") had the same signature → never reported → the e2e timed out waiting
+# for the Hub to show it. Same shape at start-up: a down first tick was never reported. The e2e race is timing-only,
+# so the reds are witnessed on the unit tests that pin both reports.
+cp agent-node/src/runtime/codex-health.ts /tmp/codex-health.ts
+bun /mutate.ts agent-node/src/runtime/codex-health.ts \
+  'if (/; not restarting: /.test(e)) return "blocked";' \
+  ''
+expect_red unit-blocked-flip 'a blocked restart is a signature flip too' bun test agent-node/src/runtime/codex-appserver-watchdog.test.ts
+cp /tmp/codex-health.ts agent-node/src/runtime/codex-health.ts
+bun /mutate.ts agent-node/src/runtime/codex-health.ts \
+  'if (firstAndDown || (lastSig !== null && sig !== lastSig))' \
+  'if (lastSig !== null && sig !== lastSig)'
+expect_red unit-first-tick-down 'the first tick reports a down result at once' bun test agent-node/src/runtime/codex-health.test.ts
+cp /tmp/codex-health.ts agent-node/src/runtime/codex-health.ts
+
 echo "L8 #2255 the TUI paints before it connects (fake delays its websocket 2 s): start still succeeds"
 ANET_TEST_TUI_CONNECT_DELAY_MS=2000 run_e2e tui_late_connect 19249
 
