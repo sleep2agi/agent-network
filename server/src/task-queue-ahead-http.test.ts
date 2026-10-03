@@ -300,5 +300,10 @@ describe("#500 queue_depth on status reads", () => {
     expect(r.ok).toBe(true);
     expect(rowOf(r, nodes.target.alias).queue_depth).toBe(1);
     expect(rowOf(r, nodes.idle.alias).queue_depth).toBe(0);
+    // filter_status + filter_alias on top of the network scope: every placeholder numbered (PG rejected the mix).
+    const f = await tool(bossToken, "get_all_status", { network_id: NET, filter_status: "idle", filter_alias: nodes.target.alias });
+    expect(f.ok).toBe(true);
+    expect(f.sessions.length).toBe(1);
+    expect(f.sessions[0].queue_depth).toBe(1);
   });
 });

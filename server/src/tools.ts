@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { nodeHealthSchema, recordNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
 import { noteModelAuthHealth } from "./model-auth-notify.js";
-import { parseAliasFilter } from "./alias-filter.js";
+import { numberedAliasInClause, parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
@@ -1622,12 +1622,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let sql = "SELECT * FROM sessions WHERE 1=1";
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, readScope, { alias: "alias", nodeId: "node_id" });
-      if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
-      if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
+      // Numbered placeholders only: the scope clause above already uses ?N, and the PG adapter numbers a bare `?`
+      // from $1 again — mixing the two bound the alias list to the wrong slots ("could not determine data type of
+      // parameter $3" on PostgreSQL; SQLite happened to number them right).
+      if (filter_status) { params.push(filter_status); sql += ` AND status = ?${params.length}`; }
+      if (filter_server) { params.push(filter_server); sql += ` AND server = ?${params.length}`; }
       const aliasFilter = parseAliasFilter(filter_alias);
       const aliases = aliasFilter.aliases;
       if (aliasFilter.sql) {
-        sql += aliasFilter.sql;
+        sql += numberedAliasInClause(aliases, params.length);
         params.push(...aliases);
       }
       sql += " ORDER BY updated_at DESC";
