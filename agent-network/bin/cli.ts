@@ -174,6 +174,7 @@ import {
   type GrokCopresenceSessionDisclosure,
 } from "../src/grok-copresence-disclosure";
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
+import { resolveUpgradeChannel, type DistTags, type ReleaseChannel } from "../src/upgrade-channel";
 import { parseTokenCreateName } from "../src/token-cli";
 import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
 import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
@@ -12360,8 +12361,6 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
 
 // ── upgrade (#88) — multi-package + dual-channel + Node-check + dry-run ─
 
-type ReleaseChannel = "preview" | "latest";
-
 interface UpgradePlanRow {
   pkg: string;          // npm package name
   display: string;      // short human label
@@ -12371,11 +12370,23 @@ interface UpgradePlanRow {
   note?: string;
 }
 
-// preview if version carries a prerelease tag, otherwise latest. The same
+// #510 — the channel is resolved by resolveUpgradeChannel() (src/upgrade-channel.ts)
+// against the live dist-tags of @sleep2agi/agent-network. A "-preview.N" suffix
+// does NOT mean preview here: latest is a promoted preview build. The same
 // channel applies to every package — we don't want one package on latest and
 // another on preview, that's how desyncs creep in.
-function detectChannel(version: string): ReleaseChannel {
-  return /-(preview|rc|alpha|beta|next)/i.test(version) ? "preview" : "latest";
+function fetchDistTags(pkg: string): DistTags | null {
+  try {
+    const out = runLauncherSync("npm", ["view", pkg, "dist-tags", "--json"], {
+      encoding: "utf-8",
+      timeout: 8000,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    const data = JSON.parse(out);
+    return data && typeof data === "object" ? data : null;
+  } catch {
+    return null;
+  }
 }
 
 // `npm view <pkg>@<channel> version` resolves a dist-tag to its current
@@ -12430,9 +12441,10 @@ function printManualAnetUpgrade(channel: ReleaseChannel = "latest") {
 // Detach a self-upgrade child so the current `anet upgrade` process can exit
 // cleanly before npm replaces its binary. stderr → /tmp/anet-self-upgrade.err
 // gives users a recovery breadcrumb if the spawn fails silently after we exit.
-function selfUpgradeDetached(channel: ReleaseChannel): never {
+function selfUpgradeDetached(channel: ReleaseChannel, version: string): never {
   const errLog = "/tmp/anet-self-upgrade.err";
-  const cmd = `npm install -g @sleep2agi/agent-network@${channel} 2>${shellQuote(errLog)} && anet -v`;
+  const cmd = `npm install -g ${shellQuote(`@sleep2agi/agent-network@${version}`)} 2>${shellQuote(errLog)} && anet -v`;
+  console.log(`\n[anet] Installing anet ${version} from the ${channel} channel.`);
   console.log(`\n[anet] ⚙️  auto self-upgrade: detaching npm install (this shell will exit).`);
   console.log(`[anet]   Log: ${errLog}`);
   console.log(`[anet]   When npm finishes, open a NEW terminal (or 'source ~/.bashrc') and run \`anet --version\` to verify ${channel}.`);
@@ -12941,34 +12953,32 @@ async function upgradeCommand() {
   // (for `anet node create --channel <plugin>` semantics). In the upgrade
   // context the same flag means release channel, so we read _channels[0].
   // This is unambiguous because `anet upgrade` doesn't use channel plugins.
-  const anetVersion = getAnetVersion();
-  const detected = detectChannel(anetVersion || "");
-  const channelFlag = opts._channels[0];
   // F7-09 — bare `--channel` (no value) used to silently fall through to
   // detected channel, leaving the user thinking they switched when they
   // didn't. parseOpts records the bare form as opts.channel = "true";
-  // catch and reject explicitly, mirroring the wrong-value branch below.
-  if (!channelFlag && opts.channel === "true") {
-    console.error(`[anet] ❌ --channel requires a value (preview|latest)`);
+  // resolveUpgradeChannel rejects it explicitly.
+  // #510 — without --channel, stay on the channel the user is on (decided
+  // against the live dist-tags); refuse rather than guess when unknowable.
+  const anetVersion = getAnetVersion();
+  const channelFlag = opts._channels[0] || (opts.channel === "true" ? "true" : undefined);
+  const resolution = resolveUpgradeChannel({
+    installed: anetVersion,
+    flag: channelFlag,
+    distTags: channelFlag ? null : fetchDistTags("@sleep2agi/agent-network"),
+  });
+  if (!resolution.ok) {
+    console.error(`[anet] ❌ ${resolution.error}`);
     process.exit(1);
   }
-  let channel: ReleaseChannel;
-  if (channelFlag === "preview" || channelFlag === "latest") {
-    channel = channelFlag;
-  } else if (channelFlag) {
-    console.error(`[anet] ❌ --channel must be "preview" or "latest" (got "${channelFlag}")`);
-    process.exit(1);
-  } else {
-    channel = detected;
-  }
+  const channel: ReleaseChannel = resolution.channel;
 
   // ── 2. Node version sanity ──
   const node = checkNodeVersion();
 
   // ── 3. Header ──
   console.log("\n[anet] anet upgrade");
-  const channelSrc = channelFlag ? "--channel override" : `detected from anet v${anetVersion}`;
-  console.log(`  Channel: ${channel} (${channelSrc})`);
+  console.log(`  Current: anet v${anetVersion || "unknown"}`);
+  console.log(`  Channel: ${channel} (${resolution.reason})`);
   if (node.ok) {
     console.log(`  Node:    v${node.current} ✓`);
   } else {
@@ -13076,6 +13086,11 @@ async function upgradeCommand() {
 
   // ── 5. Print plan ──
   printUpgradePlan(plan);
+  // #510 — say exactly what will be installed, before installing it.
+  const toInstall = plan.filter(p => p.action === "upgrade" && p.target);
+  console.log(`\n  Will install from the ${channel} channel:`);
+  if (toInstall.length === 0) console.log("    (nothing)");
+  for (const p of toInstall) console.log(`    ${p.pkg}@${p.target}`);
 
   // ── 6. Dry-run ──
   if (isDryRun) {
@@ -13097,7 +13112,7 @@ async function upgradeCommand() {
     if (p.action !== "upgrade") continue;
     console.log(`\n  ▶ Upgrading ${p.display} → ${p.target}...`);
     try {
-      installGlobalPackage(`${p.pkg}@${channel}`);
+      installGlobalPackage(`${p.pkg}@${p.target}`);
       console.log(`  ✅ ${p.display} now at ${p.target}`);
       upgraded++;
     } catch (e: any) {
@@ -13120,7 +13135,7 @@ async function upgradeCommand() {
       printManualAnetUpgrade(channel);
     }
   } else if (isSelf && selfPlan.action === "upgrade") {
-    selfUpgradeDetached(channel);  // process.exit
+    selfUpgradeDetached(channel, selfPlan.target!);  // process.exit
   } else if (selfPlan.action === "self-skip") {
     console.log(`\n  anet (self): ⚠️ NEEDS MANUAL UPGRADE — ${selfPlan.current} → ${selfPlan.target}`);
     console.log("    (skipped to avoid replacing the running CLI mid-execution)");
