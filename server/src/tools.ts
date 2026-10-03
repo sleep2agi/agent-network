@@ -5977,7 +5977,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     limit: z.number().int().min(1).max(1000).optional().describe(`page size, default ${REQ_LIST_MCP_DEFAULT_LIMIT}`),
     cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
     view: z.enum(["full", "summary"]).optional().describe("default summary (no description / checklist bodies; has_description, checklist_count instead); full = everything"),
-    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (archived included) + deleted ids + server_time"),
+    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (archived included; with include_last_event also ones with a newer event, e.g. a comment) + deleted ids + server_time"),
     include_last_event: z.boolean().optional().describe("default false; true adds last_event per row (newest event incl. comments: type, field, actor, at, summary; null if none), ~150 B/row"),
   };
   const reqListKeys = Object.keys(reqListShape);

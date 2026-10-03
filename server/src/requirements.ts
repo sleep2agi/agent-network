@@ -1105,7 +1105,16 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
   if (since !== null) {
     const ms = Date.parse(since);
     if (!Number.isFinite(ms)) return jsonError("invalid_updated_since", 400);
-    sql += ` AND updated_at >= ?${params.push(new Date(ms).toISOString())}`;
+    const n = params.push(new Date(ms).toISOString());
+    // #506 —— 增量(changes=1)且带 last_event 时,「之后有新流水」的卡也算改过:评论只追加 requirement_events、
+    // 不动 updated_at(updatedAt 是「卡本身最后一次被改」,评论不算 —— 见 last_event 测试),不这样评论要等下次整读才出现。
+    // 同一个占位符用两次(SQLite / PostgreSQL 都认,没有绑了不用的参数);子查询走 idx_requirement_events_created,
+    // 只扫游标之后的流水。不带 changes 的 updated_since 照旧只按 updated_at 过滤(同步方 / MCP 筛选语义不变);
+    // last_event=0(MCP 默认)行上没有动态可看,也照旧。
+    const eventsToo = q.get("changes") === "1" && q.get("last_event") !== "0";
+    sql += eventsToo
+      ? ` AND (updated_at >= ?${n} OR requirement_id IN (SELECT requirement_id FROM requirement_events WHERE created_at >= ?${n}))`
+      : ` AND updated_at >= ?${n}`;
   }
   const seq = q.get("seq");
   if (seq !== null) {

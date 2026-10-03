@@ -214,7 +214,8 @@ run_pg_tests_rc anet_owner_strict_test src/requirements-owner-strict-mcp-http.te
 run_pg_tests_rc anet_req_errors_test src/requirements-errors-mcp-http.test.ts
 # #474 评论:只追加、进动态 kind=comment、看不见 404 / 只读 403、不改任务本身 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_req_comment_test src/requirements-comment-http.test.ts
-# #506 列表每行 last_event:MAX(id) GROUP BY 子查询 + IN 绑参(每个都用上)、评论算最新、节点操作者、ETag 随评论变、受限成员隐去 —— 在真 PostgreSQL 上。
+# #506 列表每行 last_event:MAX(id) GROUP BY 子查询 + IN 绑参(每个都用上)、评论算最新、节点操作者、ETag 随评论变、受限成员隐去;
+# #506 跟进:changes=1 的 updated_since 同一个占位符用两次(updated_at OR requirement_events.created_at 子查询)—— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_req_last_event_test src/requirements-last-event-http.test.ts
 run_pg_tests_rc anet_tool_audience_test src/tool-audience-http.test.ts
 run_pg_tests_rc anet_dept_heads_test src/department-heads-http.test.ts
