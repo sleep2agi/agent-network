@@ -13,10 +13,11 @@ npm install -g @sleep2agi/agent-network@preview
 
 anet --help
 anet <command> --help
+anet <command> <subcommand> --help   # e.g. anet node delete --help
 anet -v
 ```
 
-Node.js 22.13+ and Bun 1.2+ are required. `--help` only prints help; it does not mint a token, start a service, or perform another business action.
+Node.js 22.13+ and Bun 1.2+ are required. `--help` (or `-h`) only prints help; it does not mint a token, start a service, or perform another business action. Every command and subcommand has its own usage text and exits 0.
 
 ## Shortest startup path
 
@@ -140,7 +141,7 @@ See [Token model](/en/guide/account-system#tokens) for token types, scopes, and 
 | `anet node stop <name>` | Stop the node and its same-name tmux session |
 | `anet node restart <name>` | Stop and start one node |
 | `anet node resume <name> [--session <id>]` | Resume the saved or specified session |
-| `anet node delete <name> --force` | Delete local node configuration |
+| `anet node delete <name> --force` | Delete the local node configuration and the node's row on the Hub |
 | `anet node rename <ref> <new>` | Rename a node already registered with the Hub |
 | `anet node clone <src> <new>` | Copy a node's settings into a node with a **new identity** (see "Clone a node" below) |
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | Change an existing node's runtime / model; **takes effect on restart** |
@@ -148,6 +149,22 @@ See [Token model](/en/guide/account-system#tokens) for token types, scopes, and 
 | `anet info <name>` | Show node configuration, process, and recent tasks |
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
+
+`anet node delete <name> --force` deletes the local files (`.anet/nodes/<id>/`) first, then the
+node's row on the Hub, so it does not keep showing as "offline" in the app or dashboard.
+
+- The Hub row is matched **only by the `node_id` in the local config**, never by name. A node on
+  another machine that reuses the same name is not deleted; anet prints
+  `Left untouched: … belong to other node_id(s)`.
+- If the Hub is unreachable or refuses, the local files are still deleted, anet prints a warning with
+  the **exact retry command**, and exits `1`:
+  ```bash
+  anet node delete <node_id> --hub-only            # remove only the Hub row
+  anet node delete <node_id> --hub-only --hub <url> # when the node used a different Hub than your login
+  ```
+- With no Hub configured, only the local files are removed and the exit code is `0`. Very old node
+  configs have no `node_id`; their Hub row cannot be matched safely, so anet leaves it and tells you to
+  remove it in the app or dashboard.
 
 `node delete` does not automatically revoke the node's issued `ntok_`. To invalidate it completely, also run `anet token revoke <token-id>`.
 
@@ -378,7 +395,7 @@ Legacy aliases such as `anet create` and `anet start` remain for compatibility. 
 
 | Code | Meaning |
 |---|---|
-| `0` | Success, or only help was printed (for example `anet node` or `anet network` with no subcommand) |
+| `0` | Success, or only help was printed (for example `anet node` or `anet network` with no subcommand, or any command / subcommand with `--help` or `-h`) |
 | `1` | Failure: not initialized / not logged in / session expired, Hub unreachable or returned an error, object not found, local write failed, refused to act |
 | `2` | Usage error: missing required argument, unknown subcommand, invalid value |
 
@@ -401,6 +418,7 @@ Scripts and CI can rely on `anet … || exit 1`. Before #515 the following print
 | `anet node resume` (no node), `anet logs` (no node), `anet batch <verb>` (no prefix) | usage error | 0 → 2 |
 | `anet project down` (a node failed to stop), `anet node delete` (node process refused to exit) | already set exit code 1, but the CLI's final `process.exit(0)` overrode it | 0 → 1 |
 | `anet upgrade` | a package failed to upgrade or its registry lookup failed | 0 → 1 |
+| `anet node delete --force` | local files deleted, but the Hub row was not removed (unreachable / refused); prints a `--hub-only` retry command | new: 1 |
 | `anet create --batch`, `anet batch cleanup` | no Hub, invalid preset/option, auto-login failed, no node created | 0 → 1 / 2 |
 | `anet demo …` | no Hub / token / key, creating the Network or nodes failed | 0 → 1 |
 

@@ -13,10 +13,11 @@ npm install -g @sleep2agi/agent-network@preview
 
 anet --help
 anet <command> --help
+anet <command> <subcommand> --help   # 例如 anet node delete --help
 anet -v
 ```
 
-需要 Node.js 22.13+ 和 Bun 1.2+。`--help` 只显示帮助，不会创建 token、启动服务或执行其他业务操作。
+需要 Node.js 22.13+ 和 Bun 1.2+。`--help`（或 `-h`）只显示帮助，不会创建 token、启动服务或执行其他业务操作。每个命令和子命令都有自己的用法说明，退出码 0。
 
 ## 最短启动路径
 
@@ -140,7 +141,7 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 | `anet node stop <name>` | 停止节点及其同名 tmux session |
 | `anet node restart <name>` | 停止后重新启动单个节点 |
 | `anet node resume <name> [--session <id>]` | 使用保存的会话或指定会话恢复 |
-| `anet node delete <name> --force` | 删除本地节点配置 |
+| `anet node delete <name> --force` | 删除本地节点配置，并删掉它在 Hub 上的那一行 |
 | `anet node rename <ref> <new>` | 重命名已在 Hub 注册的节点 |
 | `anet node clone <src> <new>` | 复制节点设置，生成一个**新身份**的节点（见下文「复制节点」） |
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | 改已存在节点的 runtime / 模型；**要重启才生效** |
@@ -148,6 +149,19 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
+
+`anet node delete <name> --force` 先删本地（`.anet/nodes/<id>/`），再删 Hub 上这个节点的那一行，
+这样它不会在 app / dashboard 里一直显示「离线」。
+
+- Hub 上的行**只按本地配置里的 `node_id` 匹配**，从不按名字。别的机器上同名的节点（名字复用）
+  不会被删；anet 会打印 `Left untouched: … belong to other node_id(s)`。
+- Hub 连不上或拒绝时，本地照样删掉，anet 打印警告和**原样可用的重试命令**，退出码 `1`：
+  ```bash
+  anet node delete <node_id> --hub-only            # 只删 Hub 上那一行
+  anet node delete <node_id> --hub-only --hub <url> # 节点用的不是当前登录的 Hub 时
+  ```
+- 没配置 Hub 时只删本地，退出码 `0`。很早的节点配置里没有 `node_id`，那时 Hub 上的行无法安全匹配，
+  anet 不碰它并提示到 app / dashboard 里删。
 
 `node delete` 不会自动撤销该节点已签发的 `ntok_`；需要彻底失效时另行执行 `anet token revoke <token-id>`。
 
@@ -370,7 +384,7 @@ token**，且改完要重启该 daemon 才生效）。
 
 | 退出码 | 含义 |
 |---|---|
-| `0` | 成功；或只打印帮助（例如不带子命令的 `anet node`、`anet network`） |
+| `0` | 成功；或只打印帮助（例如不带子命令的 `anet node`、`anet network`，或任何命令 / 子命令加 `--help`、`-h`） |
 | `1` | 失败：未初始化 / 未登录 / 登录已过期、Hub 连不上或返回错误、找不到对象、本地写入失败、拒绝执行 |
 | `2` | 用法错误：缺少必需参数、未知子命令、非法取值 |
 
@@ -393,6 +407,7 @@ token**，且改完要重启该 daemon 才生效）。
 | `anet node resume`（缺节点名）、`anet logs`（缺节点名）、`anet batch <动词>`（缺前缀） | 用法错误 | 0 → 2 |
 | `anet project down`（有节点停失败）、`anet node delete`（节点进程拒绝退出） | 已经设置了退出码 1，但被 CLI 收尾的 `process.exit(0)` 覆盖 | 0 → 1 |
 | `anet upgrade` | 有包升级失败或查不到 registry | 0 → 1 |
+| `anet node delete --force` | 本地已删，但 Hub 上那一行没删掉（连不上 / 被拒）；会打印 `--hub-only` 重试命令 | 新行为：1 |
 | `anet create --batch`、`anet batch cleanup` | 缺 Hub、预设/参数非法、自动登录失败、一个节点都没建成 | 0 → 1 / 2 |
 | `anet demo …` | 缺 Hub / token / key、建 Network 或节点失败 | 0 → 1 |
 

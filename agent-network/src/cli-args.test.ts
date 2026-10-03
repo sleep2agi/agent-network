@@ -32,6 +32,7 @@ describe("CLI argument parsing", () => {
       "--follow",
       "--force",
       "--grok-headless",
+      "--hub-only",
       "--new-session",
       "--no-auto-self",
       "--no-codex-login",

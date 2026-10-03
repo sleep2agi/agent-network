@@ -30,6 +30,7 @@ export const BOOLEAN_FLAGS = new Set([
   //    已核:全仓没有任何一处读它们的**值**(force 3 处、yes 2 处,全是布尔式)。
   "--force",
   "--grok-headless",
+  "--hub-only",                  // #516 (node delete <node_id> --hub-only)
   "--new-session",
   "--no-codex-login",            // #514 (fork)
   "--no-auto-self",
