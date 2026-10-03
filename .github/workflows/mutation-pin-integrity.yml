@@ -1,4 +1,9 @@
-# tests/*/run.sh 里的 `sed -i 's/PAT/…/' <file>` —— PAT 必须还能在目标文件里命中。
+# tests/ 下每一种变异 harness 的锚点 —— 都必须还能在当前源码里命中预期次数。
+#   sed -i / perl -0pi / grep -Fc 计数守卫 / run_mutation 这类 shell helper /
+#   bun mutate.ts FILE BEFORE AFTER / mutate.mjs 模式表 / 内联 bun -e、python3 - 变异器。
+#   解析不了的列为 unchecked 并对 scripts/mutation-pins-baseline.json 做棘轮(rc=2)。
+#   10-03/04 两次漏网(PR #2320 → test697 run_mutation、PR #2325 → test-status-read-cache
+#   mutate.ts)都是旧版只认 sed 形态,等 L2 Docker 套件 MUTATION_NOOP 才发现。
 #
 # 🔴 **无 paths 过滤，故意的**（同 proc-gone-assertions.yml 的理由）。
 #    这道门要守的是「**任何**改动是否把某条变异守卫钉住的那一行重构掉了」——

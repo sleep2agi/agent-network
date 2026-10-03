@@ -1,0 +1,43 @@
+{
+  "_comment": "Ratchet for scripts/check-mutation-pins.py. `unchecked`: mutation anchors the gate cannot resolve statically, per harness file -- may only go down. `known_stale`: anchors already dead on main when this gate learned to see them; each one should be fixed and removed, never added to. Regenerate with --write-baseline only after REMOVING entries.",
+  "unchecked": {
+    "total": 4,
+    "by_file": {
+      "tests/lib/mutation-guard.test.sh": 2,
+      "tests/test225-grok-preview-package-live/run.sh": 1,
+      "tests/test611-cli-boolean-flags/run.sh": 1
+    }
+  },
+  "known_stale": [
+    {
+      "harness": "tests/test185-external-schedules/mutate-heartbeat.mjs",
+      "target": "agent-node/src/cli.ts",
+      "anchor_sha1": "17b419538d090fe3",
+      "anchor": "    external_schedules: readExternalSchedulesSnapshot(configFilePath),\n"
+    },
+    {
+      "harness": "tests/test573-codex-turn-reconcile/mutate.mjs",
+      "target": "agent-node/src/runtime/codex-app-server-bridge.ts",
+      "anchor_sha1": "f3fae67ca300202f",
+      "anchor": "      const recovered = this.finishOwnedTurn(activeAtStart, {\n"
+    },
+    {
+      "harness": "tests/test573-codex-turn-reconcile/mutate.mjs",
+      "target": "agent-node/src/runtime/codex-app-server/runtime.ts",
+      "anchor_sha1": "236617cafe53eef5",
+      "anchor": "    bridge.on(\"task_error\", onError);\n    scheduleReconciliation();\n\n    bridge\n"
+    },
+    {
+      "harness": "tests/test573-codex-turn-reconcile/mutate.mjs",
+      "target": "agent-node/src/runtime/codex-app-server-bridge.ts",
+      "anchor_sha1": "dc7ca07fbb3a0377",
+      "anchor": ": terminal.status === \"interrupted\"\n          ? \"Codex turn was interrupted without an error message"
+    },
+    {
+      "harness": "tests/test575-opencode-reply-ownership/mutate.mjs",
+      "target": "agent-node/src/runtime/opencode-copresence/runtime.ts",
+      "anchor_sha1": "31addd1650cd1531",
+      "anchor": "          if (message?.info?.role !== \"assistant\" || message?.info?.parentID !== messageId) {"
+    }
+  ]
+}
