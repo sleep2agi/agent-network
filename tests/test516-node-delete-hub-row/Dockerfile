@@ -11,6 +11,7 @@ RUN cd agent-network && bun install --ignore-scripts
 COPY server ./server
 COPY agent-network ./agent-network
 COPY tests/test516-node-delete-hub-row ./tests/test516-node-delete-hub-row
+COPY tests/lib/safe-rm.sh ./tests/lib/safe-rm.sh
 
 ARG SOURCE_COMMIT
 ENV TEST516D_SOURCE_COMMIT=$SOURCE_COMMIT

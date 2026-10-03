@@ -11,6 +11,7 @@
 # M1–M3 are witnessed reds: each one breaks one rule and the cases must go red.
 # A mutation that does not apply is a failure too (MUTATION_NOOP).
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 
 ARTIFACT_DIR=${ARTIFACT_DIR:-/artifacts}
 REPORT="$ARTIFACT_DIR/report-test516-node-delete-hub-row.txt"
@@ -132,7 +133,7 @@ run_cases() {
   echo "  PASS C"
 
   stop_hub || true
-  cd /; rm -rf "$WORK"
+  cd /; safe_rm_rf "$WORK"
   return 0
 }
 
