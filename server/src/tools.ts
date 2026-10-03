@@ -8,6 +8,7 @@ import { parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
+import { deferOfflineIfAnotherCopyConnected } from "./node-identity-conflict.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
@@ -963,6 +964,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           db.run("UPDATE api_tokens SET name = ?1 WHERE token_id = ?2", [`node:${effectiveAlias}`, callerTokenId]);
         } catch {}
       }
+      // #507 — a second copy of this node (same token + alias) may still be connected;
+      // its sibling's shutdown offline must not take the node offline under it.
+      const offlineDeferred = deferOfflineIfAnotherCopyConnected(effectiveAlias, sessionNetId, status, resume_id);
+      const priorStatus = offlineDeferred
+        ? db.get<{ status: string | null }>("SELECT status FROM sessions WHERE resume_id = ?1", resume_id)?.status
+        : null;
+      const storedStatus = offlineDeferred ? (priorStatus && priorStatus !== "offline" ? priorStatus : "idle") : status;
       const trimmedOutput = output?.slice(0, 4000);
       const hostHostname = host?.hostname || hn || null;
       const hostIp = host?.ip || clientIP || null;
@@ -1063,7 +1071,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              external_schedules = COALESCE(?34, sessions.external_schedules),
              peer_reply_inbox_capable = ?35,
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
+          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, storedStatus, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
         );
         if (handover) {
           // 换 resume_id 那条路径上 ON CONFLICT 不会触发;INSERT 完再把没上报(仍为 NULL)的
@@ -1133,7 +1141,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         type: "status_update",
         alias: effectiveAlias,
         ...(canonical.renamed ? { renamed_from: alias } : {}),
-        status,
+        status: storedStatus,
         progress: progress ?? null,
         host: statusHostTelemetry,
         process_telemetry: statusProcessTelemetry,
@@ -1205,6 +1213,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               resume_id,
               alias: effectiveAlias,
               ...(canonical.renamed ? { renamed_from: alias } : {}),
+              ...(offlineDeferred ? { offline_deferred: true, reason: "node_identity_conflict" } : {}),
               inbox_count: row?.cnt ?? 0,
             }),
           },

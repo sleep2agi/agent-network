@@ -88,6 +88,36 @@ type SSEClient = {
   subscriberUserId?: string;
   /** 只推满足条件的事件(受限成员的网络观察流用)。缺省 = 全推。 */
   eventFilter?: (event: Record<string, unknown>) => boolean;
+  /** #507 — set only on a node's OWN task stream (/events/<alias> opened with the
+   *  node token bound to that alias). Dashboard monitors / master-token streams on
+   *  the same key leave it unset and are never superseded or counted here. */
+  node?: NodeSubscriberInfo;
+};
+
+/** #507 — what the Hub knows about one node-scoped SSE connection. No tokens. */
+export type NodeSubscriberInfo = {
+  nodeId: string | null;
+  /** Optional, client-supplied (`X-Anet-Instance-Id` header or `?instance_id=`).
+   *  null = the client did not say (every agent-node released so far). */
+  instanceId: string | null;
+  remote: string | null;
+  userAgent: string | null;
+  connectedAt: number;
+};
+
+/** #507 — one supersede of a node-scoped connection by a newer one. */
+export type NodeIdentityConflict = {
+  key: string;
+  alias: string;
+  networkId: string | null;
+  nodeId: string | null;
+  /** "same" = both connections carried the same instance id (a reconnect of the
+   *  same process; not reported as a conflict). "different" = both carried ids and
+   *  they differ (two live copies). "unknown" = at least one carried none. */
+  instanceMatch: "same" | "different" | "unknown";
+  superseded: NodeSubscriberInfo;
+  current: NodeSubscriberInfo;
+  at: number;
 };
 
 // 一个 session 可能有多个 SSE 连接（重连时短暂并存）
@@ -158,6 +188,9 @@ function closeClient(client: SSEClient, reason: string): void {
     // we're done with it.
   }
   console.log(`[${ts()}] SSE ✕ ${printableKey(client.key)} closed (reason=${reason})`);
+  if (client.node && reason !== SUPERSEDED_REASON && !hasLiveNodeClient(client.key)) {
+    notifyNodeDrained(client.key);
+  }
   if (isUserStreamClient(client)) {
     touchUserSeen(client.subscriberUserId!);
     if (!isUserOnline(client.subscriberUserId!)) notifyPresence(client.subscriberUserId!, false);
@@ -260,12 +293,112 @@ function ensureLivenessSweep(): void {
 // Public API
 // ─────────────────────────────────────────────────────────────────────
 
-/** 创建 SSE Response 并注册到 clients map */
-export function createSSEStream(sessionName: string, networkId?: string | null): Response {
+/** 创建 SSE Response 并注册到 clients map。
+ *  #507 — pass `opts.node` only for a node's own stream (node token bound to this
+ *  alias); such a stream supersedes any older node-scoped stream on the same key. */
+export function createSSEStream(
+  sessionName: string,
+  networkId?: string | null,
+  opts: { node?: Omit<NodeSubscriberInfo, "connectedAt"> } = {},
+): Response {
   return createStreamForKey(
     clientKey(sessionName, networkId),
     { type: "connected", session: sessionName, network_id: networkId ?? null },
+    opts.node ? { node: { ...opts.node, connectedAt: Date.now() } } : {},
   );
+}
+
+// ── #507 node identity conflict: at most ONE node-scoped subscriber per key ──
+//
+// Before #507 every connection on `${networkId}:${alias}` received every push. A
+// node directory copied verbatim (same node token, same alias) and started
+// elsewhere therefore got every new_task twice — both copies ran it — and either
+// copy's shutdown report_status(offline) marked the node offline while the other
+// was still connected.
+//
+// Policy: NEWEST CONNECTION WINS. Measured reconnect path (agent-node connectSSE →
+// superviseChild): a restarted process's old socket is closed by the OS, so a
+// legit restart never overlaps its own previous stream; an overlap only happens
+// with (a) a half-open ghost the Hub has not reaped yet (up to STUCK_CLOSE_MS) or
+// (b) a second live copy. In (a) the new connection is the real one — keeping the
+// old would park tasks on a dead socket — so the newest must win. In (b) the
+// loser reconnects ~1 s later and wins back: the copies flap, which is loud
+// (log + node_identity_conflict event + /api/stats/sse) instead of silently
+// double-executing. An "only if both alive > N s" rule cannot tell (a) from (b):
+// a ghost looks alive to the Hub until it is reaped.
+export const SUPERSEDED_REASON = "superseded_by_new_connection";
+const REPLACED_REASON = "replaced_by_reconnect";
+
+let nodeConflictListener: ((c: NodeIdentityConflict) => void) | null = null;
+let nodeDrainedListener: ((alias: string, networkId: string | null) => void) | null = null;
+
+/** Called for every supersede whose instances are not provably the same process. */
+export function onNodeIdentityConflict(cb: ((c: NodeIdentityConflict) => void) | null): void {
+  nodeConflictListener = cb;
+}
+
+/** Called when the LAST node-scoped subscriber of a key goes away (not when it is
+ *  superseded — the newer connection is still there). */
+export function onNodeSubscribersDrained(cb: ((alias: string, networkId: string | null) => void) | null): void {
+  nodeDrainedListener = cb;
+}
+
+function splitClientKey(key: string): { alias: string; networkId: string | null } {
+  const i = key.indexOf(":");
+  const net = key.slice(0, i);
+  return { alias: key.slice(i + 1), networkId: net === "global" ? null : net };
+}
+
+function hasLiveNodeClient(key: string): boolean {
+  return (clients.get(key) ?? []).some((c) => !c.closed && !!c.node);
+}
+
+function notifyNodeDrained(key: string): void {
+  if (!nodeDrainedListener) return;
+  const { alias, networkId } = splitClientKey(key);
+  try { nodeDrainedListener(alias, networkId); } catch (e: any) {
+    console.log(`[${ts()}] node drained listener failed: ${e?.message || e}`);
+  }
+}
+
+/** Is a node-scoped (node-token) subscriber connected on this alias right now? */
+export function hasNodeSubscriber(sessionName: string, networkId?: string | null): boolean {
+  return hasLiveNodeClient(clientKey(sessionName, networkId));
+}
+
+/** Keep only `keep` among the node-scoped clients of `key`; close the others with
+ *  a final `node_connection_superseded` frame. Dashboard monitors are untouched. */
+function enforceSingleNodeSubscriber(key: string, keep: SSEClient): void {
+  const arr = clients.get(key);
+  if (!arr || !keep.node) return;
+  for (const old of arr) {
+    if (old === keep || old.closed || !old.node) continue;
+    const a = old.node.instanceId, b = keep.node.instanceId;
+    const instanceMatch: NodeIdentityConflict["instanceMatch"] = a && b ? (a === b ? "same" : "different") : "unknown";
+    const reason = instanceMatch === "same" ? REPLACED_REASON : SUPERSEDED_REASON;
+    tryEnqueueBytes(old, old.encoder.encode(`data: ${JSON.stringify({
+      type: "node_connection_superseded",
+      reason,
+      instance_match: instanceMatch,
+      // The newer connection's network origin, so the loser's log says WHERE the
+      // other copy runs. Never a token.
+      by: { instance_id: keep.node.instanceId, remote: keep.node.remote },
+    })}\n\n`));
+    closeClient(old, reason);
+    if (instanceMatch !== "same" && nodeConflictListener) {
+      const { alias, networkId } = splitClientKey(key);
+      try {
+        nodeConflictListener({
+          key: printableKey(key), alias, networkId,
+          nodeId: keep.node.nodeId ?? old.node.nodeId,
+          instanceMatch, superseded: old.node, current: keep.node, at: Date.now(),
+        });
+      } catch (e: any) {
+        console.log(`[${ts()}] node conflict listener failed: ${e?.message || e}`);
+      }
+    }
+  }
+  pruneClosed(key);
 }
 
 /** #461 — 创建网络级观察者 SSE Response（dashboard 观察第三方流量）。
@@ -295,7 +428,7 @@ export function createUserEventStream(networkId: string, userId: string): Respon
 function createStreamForKey(
   key: string,
   initialEvent: Record<string, unknown>,
-  opts: { subscriberUserId?: string; eventFilter?: (event: Record<string, unknown>) => boolean } = {},
+  opts: { subscriberUserId?: string; eventFilter?: (event: Record<string, unknown>) => boolean; node?: NodeSubscriberInfo } = {},
 ): Response {
   const encoder = new TextEncoder();
   let client: SSEClient;
@@ -310,6 +443,7 @@ function createStreamForKey(
         key,
         ...(opts.subscriberUserId ? { subscriberUserId: opts.subscriberUserId } : {}),
         ...(opts.eventFilter ? { eventFilter: opts.eventFilter } : {}),
+        ...(opts.node ? { node: opts.node } : {}),
       };
 
       const presenceUser = isUserStreamClient(client) ? client.subscriberUserId! : null;
@@ -318,6 +452,7 @@ function createStreamForKey(
       clients.get(key)!.push(client);
       if (presenceUser) touchUserSeen(presenceUser);
       console.log(`[${ts()}] SSE ← ${printableKey(key)} connected (${clients.get(key)!.length} clients)`);
+      if (client.node) enforceSingleNodeSubscriber(key, client);
 
       // Send initial connected frame through the backpressure guard so
       // even the first byte respects the contract.
@@ -406,9 +541,16 @@ function rekeyClient(oldSessionName: string, newSessionName: string, networkId?:
   for (const c of oldClients) c.key = newKey;
 
   const existing = clients.get(newKey) || [];
-  clients.set(newKey, existing.concat(oldClients));
+  const merged = existing.concat(oldClients);
+  clients.set(newKey, merged);
   clients.delete(oldKey);
   console.log(`[${ts()}] SSE ↔ rekey ${oldKey} → ${newKey} (${oldClients.length} clients)`);
+  // #507 — a rename can merge two node-scoped streams onto one key; newest wins.
+  const nodeClients = merged.filter((c) => !c.closed && c.node);
+  if (nodeClients.length > 1) {
+    const newest = nodeClients.reduce((a, b) => (b.node!.connectedAt >= a.node!.connectedAt ? b : a));
+    enforceSingleNodeSubscriber(newKey, newest);
+  }
   return oldClients.length;
 }
 

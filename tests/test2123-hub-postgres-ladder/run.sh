@@ -227,6 +227,8 @@ run_pg_tests_rc anet_departments_test src/departments-http.test.ts
 run_pg_tests_rc anet_proj_viewer_can_test src/project-viewer-can-http.test.ts
 # 降级节点拒收新任务(#460):REST /api/task 409、MCP send_task / retry / reassign、定时任务 run 记 node_degraded —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_health_dispatch_test src/node-health-dispatch-http.test.ts
+# 同一节点两份副本(#507):节点 SSE 只留最新一条、任务只投一份、副本停机不把另一份标离线(会话行 UPDATE + audit_log)—— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_node_conflict_test src/node-identity-conflict-http.test.ts
 # MCP requirements_list 省流(#471):summary + 50 默认、严格参数、tag= 精确筛 + 游标翻页、REST 默认不变 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_req_list_mcp_test src/requirements-list-mcp-slim-http.test.ts
 # MCP requirements_people + 人员字段按名字写(#473):成员 ⋈ 部门 ⋈ 节点主人、只在任务所在网络里解析、受限成员看不见的 Agent —— 在真 PostgreSQL 上。

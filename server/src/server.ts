@@ -18,6 +18,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
+import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
@@ -243,6 +244,24 @@ function getClientIP(req: Request, server?: any): string {
   if (direct) return direct;
   const fwd = req.headers.get("x-forwarded-for");
   return fwd ? fwd.split(",")[0].trim() : (req.headers.get("x-real-ip") ?? "unknown");
+}
+
+// #507 — what identifies one node-scoped SSE connection (no tokens). instance_id is
+// optional and client-supplied (`X-Anet-Instance-Id` header or `?instance_id=`); no
+// released agent-node sends it yet, so absence means "unknown instance".
+const INSTANCE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+function nodeSubscriberInfo(req: Request, server: any, tokenId: string | null, alias: string, networkId: string) {
+  const rawInstance = req.headers.get("x-anet-instance-id") ?? new URL(req.url).searchParams.get("instance_id");
+  const instanceId = rawInstance && INSTANCE_ID_RE.test(rawInstance) ? rawInstance : null;
+  const direct = server?.requestIP?.(req);
+  const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const hop = direct?.address ? `${direct.address}:${direct.port}` : null;
+  const remote = fwd ? `${fwd}${hop ? ` via ${hop}` : ""}` : hop;
+  const bound = tokenId
+    ? db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", tokenId)?.bound_node_id ?? null
+    : null;
+  const nodeId = bound ?? db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", alias, networkId)?.node_id ?? null;
+  return { nodeId, instanceId, remote, userAgent: req.headers.get("user-agent")?.slice(0, 200) ?? null };
 }
 
 function isLocalhostIP(ip: string): boolean {
@@ -1134,6 +1153,12 @@ return Bun.serve({
           nodeId: db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", sessionName, scopedNetId)?.node_id ?? null,
         }));
         if (streamDenied) return streamDenied;
+        // #507 — the node's OWN stream (token bound to this alias) is node-scoped:
+        // at most one per (network, alias), newest wins. A node token watching some
+        // other alias stays a plain monitor and can never supersede that node.
+        if (authCtx.tokenName === `node:${sessionName}` && authCtx.networkId === scopedNetId) {
+          return createSSEStream(sessionName, scopedNetId, { node: nodeSubscriberInfo(req, server, authCtx.tokenId, sessionName, scopedNetId) });
+        }
         return createSSEStream(sessionName, scopedNetId);
       }
 
@@ -2573,13 +2598,13 @@ return Bun.serve({
         const bound = restAuth.networkId;
         const sse = getSSEStats();
         const sessions = Object.fromEntries(Object.entries(sse.sessions).filter(([key]) => key.split(":").includes(bound)));
-        return withCors(req, Response.json({ ok: true, total: Object.values(sessions).reduce((a, b) => a + b, 0), sessions, scope: "network", network_id: bound }));
+        return withCors(req, Response.json({ ok: true, total: Object.values(sessions).reduce((a, b) => a + b, 0), sessions, scope: "network", network_id: bound, identity_conflicts: recentNodeIdentityConflicts(bound) }));
       }
       if (restAuth && !isAdmin) {
         return withCors(req, Response.json({ ok: false, error: "admin or master token required" }, { status: 403 }));
       }
       const sse = getSSEStats();
-      return withCors(req, Response.json({ ok: true, total: sse.total, sessions: sse.sessions }));
+      return withCors(req, Response.json({ ok: true, total: sse.total, sessions: sse.sessions, identity_conflicts: recentNodeIdentityConflicts() }));
     }
 
     // ── REST: all sessions status ──
