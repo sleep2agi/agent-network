@@ -43,7 +43,7 @@ let hub: any = null;
 let BASE = "", NET = "", token = "";
 let mod: any;
 let expectedOpen = new Map<string, number>();
-let seedMs = 0;
+let seedMs = 0, regMs = 0;
 
 const pct = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 const plan = (sql: string, params: any[]) => (db.all("EXPLAIN QUERY PLAN " + sql, ...params) as Array<{ detail: string }>).map((r) => r.detail).join(" | ");
@@ -73,6 +73,10 @@ beforeAll(async () => {
     [count, NET],
   );
   const NODE_OF = (expr: string) => `'scale-node-' || ((${expr}) % ${NODES})`;
+  // Throwaway DB only: no fsync, and a page cache big enough that the seed transaction never spills to the WAL
+  // mid-way (test638 runs this file under `strace -f`, where every write syscall is expensive).
+  regMs = performance.now() - seedStart;
+  db.exec("PRAGMA synchronous = OFF; PRAGMA cache_size = -131072;");
   db.transaction(() => {
     db.run(`${SEQ}
       INSERT INTO sessions (resume_id, alias, status, agent, network_id, node_id, updated_at, last_seen_at, task)
@@ -109,7 +113,7 @@ describe.skipIf(PG)("#500 queue_depth at production scale (57k tasks, 31k stuck 
     expect(total).toBe(STUCK_ACKED + STUCK_RUNNING + OLD_DONE + RECENT);
     const stale = Number(db.get("SELECT COUNT(*) AS n FROM tasks WHERE network_id = ?1 AND status IN ('acked','running') AND created_at < datetime('now', '-86400 seconds')", NET).n);
     expect(stale).toBe(STUCK_ACKED + STUCK_RUNNING);
-    console.log(`[seed] ${total} tasks in ${seedMs.toFixed(0)} ms`);
+    console.log(`[seed] ${total} tasks in ${seedMs.toFixed(0)} ms (register ${regMs.toFixed(0)} ms)`);
     // Positive control: the shape is one where the #2325 statement really does go through idx_tasks_status.
     expect(plan(SQL_2325, [])).toContain("idx_tasks_status");
 
