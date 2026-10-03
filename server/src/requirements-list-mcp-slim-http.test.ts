@@ -25,8 +25,10 @@ const TASKS = 120;
  * 一页 summary(50 张;每张中文标题、3 个标签、负责人 + 参与人、8 条检查项、1.5 KB 正文)的字节上限。
  * 这批数据实测 39.7 KB(≈ 795 B / 张,中文 3 字节 / 字);生产 122 张 summary 81 KB ≈ 670 B / 张 → 50 张约 33 KB。
  * 上限 45 KB。同一批数据走旧默认(full、500 张)是整张表 120 张全文。
+ * #506 每行加 last_event(最新一条动态,含评论;这批数据上是 created:类型 + 操作者 id / 名字 + 时间):
+ * 实测 39 720 → 46 983 B(+145 B / 张)。上限按同样约 13% 的余量抬到 53 KB —— 这是有意加的字段,不是放宽省流。
  */
-const SUMMARY_PAGE_MAX_BYTES = 45_000;
+const SUMMARY_PAGE_MAX_BYTES = 53_000;
 
 let server: any;
 let base = "";
