@@ -8,36 +8,5 @@
       "tests/test611-cli-boolean-flags/run.sh": 1
     }
   },
-  "known_stale": [
-    {
-      "harness": "tests/test185-external-schedules/mutate-heartbeat.mjs",
-      "target": "agent-node/src/cli.ts",
-      "anchor_sha1": "17b419538d090fe3",
-      "anchor": "    external_schedules: readExternalSchedulesSnapshot(configFilePath),\n"
-    },
-    {
-      "harness": "tests/test573-codex-turn-reconcile/mutate.mjs",
-      "target": "agent-node/src/runtime/codex-app-server-bridge.ts",
-      "anchor_sha1": "f3fae67ca300202f",
-      "anchor": "      const recovered = this.finishOwnedTurn(activeAtStart, {\n"
-    },
-    {
-      "harness": "tests/test573-codex-turn-reconcile/mutate.mjs",
-      "target": "agent-node/src/runtime/codex-app-server/runtime.ts",
-      "anchor_sha1": "236617cafe53eef5",
-      "anchor": "    bridge.on(\"task_error\", onError);\n    scheduleReconciliation();\n\n    bridge\n"
-    },
-    {
-      "harness": "tests/test573-codex-turn-reconcile/mutate.mjs",
-      "target": "agent-node/src/runtime/codex-app-server-bridge.ts",
-      "anchor_sha1": "dc7ca07fbb3a0377",
-      "anchor": ": terminal.status === \"interrupted\"\n          ? \"Codex turn was interrupted without an error message"
-    },
-    {
-      "harness": "tests/test575-opencode-reply-ownership/mutate.mjs",
-      "target": "agent-node/src/runtime/opencode-copresence/runtime.ts",
-      "anchor_sha1": "31addd1650cd1531",
-      "anchor": "          if (message?.info?.role !== \"assistant\" || message?.info?.parentID !== messageId) {"
-    }
-  ]
+  "known_stale": []
 }
