@@ -183,6 +183,7 @@ on:
       - 'tests/test693-agent-local-upload/**'
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
+      - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -357,6 +358,7 @@ on:
       - 'tests/test693-agent-local-upload/**'
       - 'tests/test697-codex-default-model/**'
       - 'tests/test698-atomic-peer-reply/**'
+      - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -1409,6 +1411,7 @@ jobs:
           - test693-agent-local-upload
           - test697-codex-default-model
           - test698-atomic-peer-reply
+          - test519-claude-code-peer-reply
           - test750-codex-copresence-onecommand
           - test1225-opencode-copresence-onecommand
           - test1191-windows-steer-contract

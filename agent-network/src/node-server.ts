@@ -44,6 +44,7 @@ import {
 import { attachLocalLinks } from "./reply-local-links";
 import { drainRulesFileRequests, handleRulesFileEvent } from "./node-server-rules-file";
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
+import { PEER_REPLY_TOOL_NAME, sendChannelPeerReply } from "./channel-peer-reply";
 
 // ── .env loader helper ────────────────────────────────
 
@@ -258,6 +259,9 @@ log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}..
 
 // V2: track task_id → originator alias for send_reply routing
 const taskOriginators = new Map<string, string>();
+// #519 — meta task_id is the inbox ROW id; the Hub's reply tools key on the
+// logical tasks.task_id (they differ after a Hub re-queue).
+const taskLogicalIds = new Map<string, string>();
 
 // ── MCP Server with Channel capability ──────────────
 // name 不要拼 alias！Claude Code 用 meta.user 自动加 "· xxx" 后缀
@@ -282,11 +286,8 @@ const mcp = new Server(
           `  task_id is the inbox row id (changes when the Hub re-queues, identical when the node re-reads); ts is the Hub-side creation time.`,
           `These are tasks dispatched by the hub or other sessions via the CommHub Server.`,
           `Reply routing (IMPORTANT — the tool you pick determines whether the receiver actually gets woken up):`,
-          `  • If the sender is another agent node, replying takes TWO actions — send_task wakes them but does NOT close the task you were sent:`,
-          `      1. commhub_send_task(alias="<their alias>", task="<your reply>") — wakes the peer via new_task SSE. commhub_reply does NOT wake agent peers (Vincent 2026-07-28 全网规则).`,
-          `      2. commhub_reply(task_id="<the task_id you were sent>", status="completed") — terminalizes the ORIGINAL task.`,
-          `    Skip step 2 and the peer wakes up, but their task stays "delivered" forever: they will keep re-reporting "still awaiting reply". The Hub does NOT redeliver — that repetition comes from the peer's own logic, so only closing the task stops it.`,
-          `    If your runtime has commhub_send_peer_reply, it does both in one call (RFC-030). Check your own tool list for it — do not infer it from a version number.`,
+          `  • If the sender is another agent node: commhub_send_peer_reply(task_id="<the task_id you were sent>", text="<your reply>") — ONE call that wakes the peer AND closes the task you were sent (RFC-030). Do not also send_task the same reply.`,
+          `    Only if commhub_send_peer_reply is missing from your tool list: commhub_send_task(alias, task) to wake them, THEN commhub_reply(task_id, status="completed") to close. Skip the close and the task stays open forever (#519).`,
           `  • Only use commhub_reply when the sender is the Dashboard/UI (task_id came from a browser chat). Use status="completed" (terminal) so send_reply routes it, updates the task row (Dashboard displays it), and emits new_reply SSE for the live Dashboard viewer. Non-terminal status (in_progress/blocked/error) just updates your session status and does NOT reach the Dashboard.`,
           `You can also use commhub_report_status to update your session status.`,
           `Session alias: ${ALIAS}`,
@@ -300,7 +301,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "commhub_reply",
-      description: "Reply to a Dashboard/UI-originated CommHub task, AND close an agent-to-agent task you were sent. ⚠ For agent peers this does not replace commhub_send_task — it does NOT wake them (Vincent 2026-07-28 全网规则) — but it IS what terminalizes the original task, so a peer reply needs both: send_task to wake, then commhub_reply(status=\"completed\") to close. status=\"completed\" (terminal) routes to send_reply and emits new_reply SSE for the live Dashboard; non-terminal status (in_progress/blocked/error) only updates session status (report_status) and does NOT reach the Dashboard.",
+      description: "Reply to a Dashboard/UI task. For an agent sender use commhub_send_peer_reply (this does NOT wake agents). status=\"completed\" closes the task via send_reply and reaches the live Dashboard; in_progress/blocked/error only update session status and do NOT reach it.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -314,6 +315,20 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           attachments: ATTACHMENTS_SCHEMA,
         },
         required: ["text"],
+      },
+    },
+    {
+      name: PEER_REPLY_TOOL_NAME,
+      description: "Answer a task another AGENT node sent you, in one call: wakes that agent with your reply AND closes the task_id you were sent (RFC-030; falls back to send_task + terminal reply when the Hub or peer lacks atomic support). Use this instead of commhub_send_task + commhub_reply.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          task_id: { type: "string", description: "task_id of the <channel> message you are answering" },
+          text: { type: "string", description: "Your reply / result" },
+          status: { type: "string", enum: ["completed", "failed"], description: "Outcome (default completed); both close the task" },
+          alias: { type: "string", description: "Optional: the sender alias (only needed if the call says peer_alias_unknown)" },
+        },
+        required: ["task_id", "text"],
       },
     },
     {
@@ -507,6 +522,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
       output: text,
     });
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+
+  if (name === PEER_REPLY_TOOL_NAME) {
+    const result = await sendChannelPeerReply((args ?? {}) as any, {
+      call: callCommHub,
+      fromAlias: ALIAS,
+      originatorOf: (id) => taskOriginators.get(id),
+      logicalTaskIdOf: (id) => taskLogicalIds.get(id),
+    });
+    if (result.closed) {
+      const id = String((args as any)?.task_id ?? "").trim();
+      taskOriginators.delete(id);
+      taskLogicalIds.delete(id);
+    }
+    log(`peer reply task=${String(result.task_id ?? "?").slice(0, 8)} route=${result.route ?? "-"} woke=${result.woke} closed=${result.closed}${result.error ? ` error=${result.error}` : ""}`);
+    return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 
   if (name === "commhub_report_status") {
@@ -779,6 +810,7 @@ const drainChannelInbox = createSingleFlight(async () => {
     const meta = inboundChannelMeta(msg);
     // V2: remember who sent this task so send_reply knows the target
     taskOriginators.set(msg.id, msg.from_session || "hub");
+    if (typeof msg.task_id === "string" && msg.task_id) taskLogicalIds.set(msg.id, msg.task_id);
 
     await mcp.notification({
       method: "notifications/claude/channel",
