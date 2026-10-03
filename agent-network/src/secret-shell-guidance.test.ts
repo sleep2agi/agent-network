@@ -3,6 +3,7 @@ import {
   formatSecretAssignment,
   secretPersistenceHeading,
   secretShellAction,
+  formatSecretLoadCommand,
 } from "./secret-shell-guidance";
 
 describe("#379 secret shell guidance", () => {
@@ -21,5 +22,17 @@ describe("#379 secret shell guidance", () => {
     expect(secretPersistenceHeading("win32")).toContain("PowerShell $PROFILE");
     expect(secretPersistenceHeading("win32")).not.toContain(".bashrc");
     expect(secretShellAction("win32")).toBe("set");
+  });
+});
+
+describe("#516 load command never contains the secret", () => {
+  test("POSIX reads the value from the .env file", () => {
+    const line = formatSecretLoadCommand("linux", "API_TOKEN_NODE", "/h/o'x/.env");
+    expect(line).toBe(`export API_TOKEN_NODE="$(sed -n 's/^API_TOKEN_NODE=//p' '/h/o'\\''x/.env' | head -n 1)"`);
+  });
+  test("Windows reads the value from the .env file", () => {
+    const line = formatSecretLoadCommand("win32", "API_TOKEN_NODE", "C:\\a'b\\.env");
+    expect(line).toContain("$env:API_TOKEN_NODE=");
+    expect(line).toContain("Get-Content 'C:\\a''b\\.env'");
   });
 });

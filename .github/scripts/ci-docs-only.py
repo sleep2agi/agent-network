@@ -96,6 +96,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "security-orphan-gates": {
         "test630-file-download-header-auth", "test634-windows-secret-guidance",
         "test623-feishu-scrub-health", "test30-v0.8-auth-deprecation",
+        "test516-anet-secret-masking",
     },
 }
 MATRIX_JOBS = ("grok-green-suites", "hub-boundary-gates", "hub-orphan-gates")

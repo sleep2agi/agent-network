@@ -266,7 +266,7 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 | `anet doctor` | 检查配置、Hub、依赖、secret 与 Channel |
 | `anet doctor --fix` | 执行兼容迁移并修复可自动恢复的 token 问题；会修改配置 |
 | `anet upgrade [--channel latest|preview] [--dry-run]` | 检查并执行频道内升级 |
-| `anet config` / `anet config path` / `anet config json` | 查看全局配置摘要、路径或原始 JSON |
+| `anet config` / `anet config path` / `anet config json` | 查看全局配置摘要、路径或 JSON（token 打码） |
 | `anet init` | 配置 Hub URL；换到**另一个** Hub 时，先在旧 Hub 上撤销保存的登录会话（尽力而为，失败只警告），再从配置里删掉旧 Hub 的 token 与登录信息——旧 token 不会发给新 Hub。之后重新 `anet login`。`anet login --hub <另一个 Hub>` 同样处理 |
 | `anet init project` | 在当前目录创建 CommHub MCP 项目配置 |
 | `anet setup` | 安装所选 runtime 的依赖 |
@@ -397,6 +397,14 @@ token**，且改完要重启该 daemon 才生效）。
 | `anet demo …` | 缺 Hub / token / key、建 Network 或节点失败 | 0 → 1 |
 
 一些较早的用法错误路径仍退出 `1`（同样是非零，脚本照样能判断），没有为了统一成 `2` 而改动。`anet hub status` 是状态查询，Hub 没运行时仍退出 `0`。
+
+## 报错与密钥
+
+- 出错时 anet 打印一句说明和下一步要敲的命令，不打印堆栈。要看堆栈：`ANET_DEBUG=1 anet …`。
+- 以错误码为消息的致命错误仍是 `[anet] FATAL: Error: <CODE>` 这一行，方便脚本从日志里取码。
+- anet 不在输出里打印完整密钥：`anet config`、`anet config json`、`anet node start`、`anet doctor` 显示的 token 都是 `utok_…ab12` 这种「前缀…末 4 位」；报错里出现的 token、`Bearer` 头和 URL 里的 `token=` 参数同样打码。
+- `anet node create --env KEY=…` 和 `anet node migrate-token-to-envref` 把密钥写进 `.anet/nodes/<node>/.env`（权限 600、已加入 gitignore），只打印打码后的值和一条从该文件读取的 `export` 命令。
+- 例外：`anet token create` 和 `anet hub admin reset-user` 的用途就是发出新凭据，只显示这一次。
 
 ## 配置位置与环境变量
 

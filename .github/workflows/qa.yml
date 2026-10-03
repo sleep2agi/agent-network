@@ -194,6 +194,7 @@ on:
       - 'agent-node/src/cli.ts'
       - 'tests/test630-file-download-header-auth/**'
       - 'tests/test634-windows-secret-guidance/**'
+      - 'tests/test516-anet-secret-masking/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -370,6 +371,7 @@ on:
       - 'agent-node/src/cli.ts'
       - 'tests/test630-file-download-header-auth/**'
       - 'tests/test634-windows-secret-guidance/**'
+      - 'tests/test516-anet-secret-masking/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -1234,6 +1236,22 @@ jobs:
           docker cp "run-anet-test634:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test634/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test634"
           docker rm -f "run-anet-test634" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #516 — anet 打印配置/登录态/节点信息/报错时,完整密钥一个字节都不许出现。
+      # 见证红 4 条:掩码改恒等 / config json 原样打印 / create 回显 --env 值 / 脱敏改直通。
+      - name: Build + run test516-anet-secret-masking
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test516 \
+            -f tests/test516-anet-secret-masking/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test516" -e ARTIFACT_DIR=/tmp/art \
+            anet-test516 || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test516"
+          docker cp "run-anet-test516:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test516/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test516"
+          docker rm -f "run-anet-test516" >/dev/null 2>&1 || true
           exit $rc
 
       - name: Build + run test623-feishu-scrub-health

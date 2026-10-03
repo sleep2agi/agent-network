@@ -269,7 +269,7 @@ Channel settings are not hot-reloaded; restart the node after changing them. `an
 | `anet doctor` | Check configuration, Hub, dependencies, secrets, and channels |
 | `anet doctor --fix` | Apply compatibility migrations and repair recoverable token problems; modifies configuration |
 | `anet upgrade [--channel latest|preview] [--dry-run]` | Check and perform in-channel upgrades |
-| `anet config` / `anet config path` / `anet config json` | Show global config summary, path, or raw JSON |
+| `anet config` / `anet config path` / `anet config json` | Show global config summary, path, or JSON (tokens masked) |
 | `anet init` | Configure the Hub URL. When switching to a **different** Hub, the saved login session is first revoked on the old Hub (best effort — a failure only warns), then the old Hub's token and login info are removed from the config; the old token is never sent to the new Hub. Run `anet login` again afterwards. `anet login --hub <another hub>` does the same |
 | `anet init project` | Create CommHub MCP project files in the current directory |
 | `anet setup` | Install dependencies for selected runtimes |
@@ -405,6 +405,14 @@ Scripts and CI can rely on `anet … || exit 1`. Before #515 the following print
 | `anet demo …` | no Hub / token / key, creating the Network or nodes failed | 0 → 1 |
 
 Some older usage-error paths still exit `1` (also non-zero, so scripts still catch them); they were not changed just to make them `2`. `anet hub status` is a status query and still exits `0` when the Hub is not running.
+
+## Errors and secrets
+
+- On an error anet prints one sentence and the next command to run, without a stack trace. To see the stack: `ANET_DEBUG=1 anet …`.
+- A fatal error whose message is an error code still prints `[anet] FATAL: Error: <CODE>`, so scripts can pull the code from logs.
+- anet never prints a full secret: `anet config`, `anet config json`, `anet node start` and `anet doctor` show tokens as `utok_…ab12` (prefix…last 4). Tokens, `Bearer` headers and `token=` URL parameters inside error messages are masked the same way.
+- `anet node create --env KEY=…` and `anet node migrate-token-to-envref` write the secret to `.anet/nodes/<node>/.env` (mode 600, gitignored) and print only the masked value plus an `export` command that reads it from that file.
+- Exceptions: `anet token create` and `anet hub admin reset-user` exist to hand out a new credential and show it once.
 
 ## Configuration locations and environment variables
 
