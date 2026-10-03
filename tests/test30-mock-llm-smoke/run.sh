@@ -122,11 +122,17 @@ grep -Fq '[3/6] 广播 review task 给 3 reviewer (parallel)' /tmp/test30.demo.o
   && pass "real pr-review fan-out, barrier, and markdown use deterministic replies" \
   || fail "real demo orchestration"
 
+# #515 — a failed Hub preflight now exits 1 (it exited 0 before), so capture rc
+# instead of letting `set -e` end the suite, and pin it.
+set +e
 env -u MOCK_LLM_REPLIES_FILE HOME=$demo_home \
   bun "$ROOT/agent-network/bin/cli.ts" demo pr-review \
     --diff "$FIXTURES/sample.diff" --suffix real30 --out /tmp/test30-real.md \
     >/tmp/test30.real.out 2>/tmp/test30.real.err
-grep -Fq "没有 hub" /tmp/test30.real.err \
+real_rc=$?
+set -e
+[[ "$real_rc" -eq 1 ]] \
+  && grep -Fq "没有 hub" /tmp/test30.real.err \
   && ! grep -Fq '使用确定性 mock LLM' /tmp/test30.real.out \
   && [[ ! -e /tmp/test30-real.md ]] \
   && pass "unset mock env preserves the real Hub preflight" \
