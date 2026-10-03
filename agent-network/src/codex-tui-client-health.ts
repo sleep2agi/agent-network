@@ -48,13 +48,26 @@ export function requirePromotedCodexPendingThread(value: unknown, pendingThreadI
   return pendingThreadId;
 }
 
+/**
+ * argv for the human TUI attached to the co-presence app-server.
+ *
+ * #505 — the permission override is only passed on the FRESH path. On
+ * `resume --remote <ws> <thread>` codex 0.155.1 exits immediately with
+ *   "Error: Permission overrides are not supported when resuming a remote task."
+ * (anet then reports "TUI tmux session exited during startup"). Measured in
+ * Docker against a real app-server + real thread: 0.155.1 rejects
+ * resume + --dangerously-bypass-approvals-and-sandbox and accepts it fresh
+ * (TUI up, "permissions: YOLO mode"); 0.133.0 (agent-node's pin) accepts both.
+ * Nothing is lost by dropping it on resume: the app-server itself is started
+ * with `-c approval_policy=… -c sandbox_mode=…` from the same posture.
+ */
 export function codexTuiLaunchArgs(remote: string, model: string, threadId?: string, dangerFullAccess = false): string[] {
   if (!LOOPBACK_WS.test(remote) || !model) throw new Error("refusing invalid Codex TUI launch identity");
   const args = threadId
     ? (THREAD_ID.test(threadId) ? ["resume", "--remote", remote, threadId, "-m", model] : [])
     : ["--remote", remote, "-m", model];
   if (args.length === 0) throw new Error("refusing invalid Codex TUI thread identity");
-  if (dangerFullAccess) args.push("--dangerously-bypass-approvals-and-sandbox");
+  if (dangerFullAccess && !threadId) args.push("--dangerously-bypass-approvals-and-sandbox");
   return args;
 }
 
