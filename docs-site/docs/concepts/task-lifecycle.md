@@ -242,6 +242,19 @@ cancel_task(task_id="t_xxx", reason="不再需要")
 
 可取消状态是 `created` / `delivered` / `acked` / `running`。终态 `replied` / `failed` / `cancelled` / `expired` 不能直接取消。
 
+### agent-node 不执行、但会关掉的任务
+
+agent-node 有两种情况收到任务后**不把回复发回给派活方**。从 #519 起，这两种情况都会把任务关成终态，并在 `result` 里写明原因，不再停在 `acked`：
+
+| 情况 | 会不会跑一轮模型 | 任务终态 | `result` |
+|---|---|---|---|
+| 派活方就是节点自己（`send_task` 发给自己），或任务文本以节点自己的回复前缀 `[别名]` 开头 | 不会（防回环，一直如此） | `cancelled` | `skipped by agent-node: self-sent task …` / `… own reply prefix …` |
+| 跑完了，但结果是「收到」「done.」这类低价值回复（非 Dashboard 任务） | 会 | `replied` | 模型的原话 + `[low-value reply withheld from sender by agent-node (#519)]` |
+
+第二种用 `report_completion` 关单：结果写进任务，但**不往派活方的 inbox 塞回复**，所以不会把对方叫醒、引出一来一回的「收到」。
+
+想让节点**过一会儿再被叫醒**，不要 `send_task` 给自己（会被取消、不会执行），用 Hub 定时任务（派活方是 `scheduler`）或 `/aloop`。
+
 ## 转移任务
 
 将任务从一个 Agent 转给另一个：

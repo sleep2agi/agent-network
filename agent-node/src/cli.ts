@@ -193,6 +193,7 @@ import {
   shouldDrainPendingReplies,
 } from "./inbox-dispatch";
 import { formatInboxSkipLog } from "./inbox-skip-log";
+import { classifyInboundSkip, closeLowValueTask, closeSkippedTask, formatCloseOutcome, type HubToolCall } from "./inbox-skip-close";
 import { createSingleFlight } from "./util/single-flight";
 import { createCodexSessionManager } from "./runtime/codex-app-server/session-manager";
 import { buildGrokChildEnv } from "./runtime/grok-child-env";
@@ -5436,23 +5437,22 @@ function isIMBridgeMessage(msg: any): boolean {
 }
 
 function shouldSkipMessage(from: string, content: string, msgType?: string, msg?: any): string | null {
-  if (from === ALIAS && !isIMBridgeMessage(msg)) return "self";
-  if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
-  const actionable = msgType === "task" || msgType === "broadcast" || msgType === "reply";
-  // Don't cooldown explicit tasks — humans often send rapid follow-ups from
-  // Dashboard, and terminal peer replies must reach the runtime even when
-  // short or rapid. Apply cooldown only to non-actionable chatter.
-  if (!actionable && from !== "hub" && from !== "api") {
-    const now = Date.now();
-    if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
-  }
-  // Only apply low-value/agent-chatter filter to non-task types. Tasks are
-  // explicit human or system requests and must always be processed.
-  if (!actionable && isLowValueText(content)) {
-    return "low-value-inbound";
-  }
-  return null;
+  // #519 — logic lives in inbox-skip-close.ts so the verdict is unit-testable.
+  return classifyInboundSkip({
+    alias: ALIAS,
+    from,
+    content,
+    msgType,
+    imBridge: isIMBridgeMessage(msg),
+    lastReplyAt: lastReplyTime[from],
+    now: Date.now(),
+    cooldownMs: COOLDOWN_MS,
+    isLowValue: (text) => isLowValueText(text),
+  });
 }
+
+// #519 — tool caller for closing tasks the node declines to answer.
+const hubToolCall: HubToolCall = async (tool, args) => parseToolJson(await callCommHub(tool, args));
 
 // ── Inbox + SSE ──
 //
@@ -5568,6 +5568,11 @@ async function processInbox() {
           messageType: msgType,
         }));
         await ackAndRecordConsumed(msg, "skipped");
+        // #519 — acking alone left the task `acked` forever with no reason on
+        // record. Close it explicitly (cancelled + reason); no turn runs.
+        const closed = await closeSkippedTask(hubToolCall, { taskId: logicalTaskId, msgType, reason: skip });
+        if (closed.kind === "error") warn(formatCloseOutcome(logicalTaskId, closed));
+        else if (closed.kind !== "not-applicable") log(formatCloseOutcome(logicalTaskId, closed));
         return;
       }
 
@@ -5689,6 +5694,11 @@ async function processInbox() {
           ? `skip reply: low-value (${result.length} chars; content withheld)`
           : `skip reply: low-value (${result.slice(0, 30)})`);
         await ackAndRecordConsumed(msg, "low-value");
+        // #519 — the turn ran; record its result and close the task without an
+        // inbox reply, so the sender is not woken by an acknowledgement.
+        const closed = await closeLowValueTask(hubToolCall, { alias: ALIAS, taskId: logicalTaskId, msgType, result });
+        if (closed.kind === "error") warn(formatCloseOutcome(logicalTaskId, closed));
+        else if (closed.kind !== "not-applicable") log(formatCloseOutcome(logicalTaskId, closed));
         return;
       }
 
