@@ -314,12 +314,19 @@ describe("#514 the CLI actually gates every staging path (source contract)", () 
 
   test("a refusal is exit 1 (#2321: failure), not 2", () => {
     const fn = cli.slice(at("function gateCodexLoginStaging"), at("function recordCodexLoginOriginOrWarn"));
-    expect(fn).toContain(`if (r.kind === "refuse") process.exit(1);`);
+    expect(fn).toContain(`process.exit(1);`);
+    expect(fn).not.toContain(`process.exit(2)`);
   });
 
   test("host staging: gated on a NEW login, before any file is copied", () => {
     expect(at("const authStep = newLoginStep(plan);")).toBeLessThan(at("copyFileSync(step.src, step.dst);"));
     expect(cli).toContain(`allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",`);
+    // The origin record is written BEFORE the "now uses the host login" lines are
+    // printed (CI flake on 3ea41aec: a kill at that line raced the write).
+    const fn = cli.slice(at("function gateCodexLoginStaging"), at("function recordCodexLoginOriginOrWarn"));
+    expect(fn.indexOf("beforeAnnounce?.(r);")).toBeGreaterThan(-1);
+    expect(fn.indexOf("beforeAnnounce?.(r);")).toBeLessThan(fn.lastIndexOf("for (const l of r.lines) console.error(l);"));
+    expect(cli).toContain("(gate) => recordCodexLoginOriginOrWarn(nodeDir, displayName, gate.fingerprint, source)");
   });
 
   test("fork: gated before the hub registration and the copy; --no-codex-login skips auth.json", () => {

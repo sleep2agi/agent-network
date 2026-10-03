@@ -896,10 +896,17 @@ async function stopPriorWindowsCopresence(nodeId: string): Promise<void> {
  * Prints the decision; exits 1 (#2321: failure) on a refusal. The caller
  * records the origin once the credential has actually been handed over.
  */
-function gateCodexLoginStaging(o: EvaluateStagingOptions): EvaluatedStaging {
+function gateCodexLoginStaging(o: EvaluateStagingOptions, beforeAnnounce?: (r: EvaluatedStaging) => void): EvaluatedStaging {
   const r = evaluateCodexLoginStaging(o);
+  if (r.kind === "refuse") {
+    for (const l of r.lines) console.error(l);
+    process.exit(1);
+  }
+  // Bookkeeping first, then the announcement: an operator (or a test) who sees
+  // "now uses the host codex login" may stop the process right there, and the
+  // origin record must already be on disk by then.
+  beforeAnnounce?.(r);
   for (const l of r.lines) console.error(l);
-  if (r.kind === "refuse") process.exit(1);
   return r;
 }
 
@@ -1463,11 +1470,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       if (authStep) {
         const nodeDir = join(nodesDir(), resolved.id);
         const source: CodexLoginSource = { kind: "host", path: authStep.src };
-        const gate = gateCodexLoginStaging({
+        gateCodexLoginStaging({
           nodeDir, alias: displayName, targetCodexHome: opts.codexHome, sourceAuthPath: authStep.src,
           source, allowShared: opts.allowSharedCodexLogin === true,
-        });
-        recordCodexLoginOriginOrWarn(nodeDir, displayName, gate.fingerprint, source);
+        }, (gate) => recordCodexLoginOriginOrWarn(nodeDir, displayName, gate.fingerprint, source));
       }
       for (const step of plan) {
         copyFileSync(step.src, step.dst);
