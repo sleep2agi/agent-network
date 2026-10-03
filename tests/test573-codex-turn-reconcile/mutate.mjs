@@ -37,11 +37,23 @@ if (mutation === "drop-watchdog-start") {
 } else if (mutation === "accept-interrupted") {
   // An interrupted owned turn is reported as a successful reply. Only the
   // finishOwnedTurn copy is mutated (the network-task path #573 covers); the
-  // emitSteeredTask copy belongs to #577's steered human turns.
+  // emitSteeredTask copy belongs to #577's steered human turns and has its own
+  // mutation below (accept-steered-interrupted).
   replaceExactlyOnce(
     "src/runtime/codex-app-server-bridge.ts",
     '        : terminal.status === "interrupted"\n          ? "Codex turn was interrupted without an error message"\n          : undefined);\n    if (turnErr) {\n',
     '        : false\n          ? "Codex turn was interrupted without an error message"\n          : undefined);\n    if (turnErr) {\n',
+  );
+} else if (mutation === "accept-steered-interrupted") {
+  // #521: the emitSteeredTask copy of the same mapping. An interrupted human
+  // TUI turn that a Dashboard row was steered into is reported as a successful
+  // reply carrying the partial streamed text. The anchor runs into the
+  // steered-only `const text = state.finalText` line so it cannot match the
+  // finishOwnedTurn copy above.
+  replaceExactlyOnce(
+    "src/runtime/codex-app-server-bridge.ts",
+    '        : terminal.status === "interrupted"\n          ? "Codex turn was interrupted without an error message"\n          : undefined);\n    const text = state.finalText',
+    '        : false\n          ? "Codex turn was interrupted without an error message"\n          : undefined);\n    const text = state.finalText',
   );
 } else {
   throw new Error(`unknown mutation: ${mutation}`);
