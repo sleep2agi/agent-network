@@ -11,6 +11,7 @@
 #   L3  witnessed red: each mutation must turn L1 red, for the named test.
 #       #500 step 2: the full projection carries queue_depth (tasks table), so writes to `tasks` also invalidate
 #       the full body — task-queue-ahead-http.test.ts joins L1 and its tasks-write invalidation is mutated too.
+#       Follow-up: task-queue-ahead-scale.test.ts (57k tasks) pins the queue_depth plan off idx_tasks_status.
 #
 # Throwaway everything: HOME=$(mktemp -d), temp SQLite, port 0 (never 9200).
 set -euo pipefail
@@ -25,7 +26,7 @@ run_tests() {
 echo "== L1 cached == recomputed; existing /api/status suites unchanged"
 for f in src/status-read-cache-http.test.ts src/status-alias-resolver-http.test.ts src/status-alias-filter-http.test.ts \
          src/status-node-id-filter-http.test.ts src/node-health-dispatch-http.test.ts src/http-gzip.test.ts src/requirements-etag-http.test.ts \
-         src/task-queue-ahead-http.test.ts; do
+         src/task-queue-ahead-http.test.ts src/task-queue-ahead-scale.test.ts; do
   run_tests "$f"
 done
 
@@ -89,5 +90,13 @@ cp /tmp/cache.ts src/status-read-cache.ts
 bun /work/tests/mutate.ts src/server.ts '}, Date.now(), { dependsOnTasks: !isLight });' '}, Date.now(), { dependsOnTasks: false });'
 expect_red full-projection-ignores-tasks src/task-queue-ahead-http.test.ts "$TASKS_INVALIDATION"
 cp /tmp/server.ts src/server.ts
+
+# #500 follow-up — at production scale (57k tasks, 31k stuck acked) queue_depth must not go through idx_tasks_status.
+# Removing the index hint from the filter must turn the plan assertion (and the cost budget) red.
+cp src/task-queue-ahead.ts /tmp/tqa.ts
+bun /work/tests/mutate.ts src/task-queue-ahead.ts "WHERE (status || '') IN" "WHERE status IN"
+expect_red queue-depth-uses-status-index src/task-queue-ahead-scale.test.ts \
+  '#500 queue_depth at production scale (57k tasks, 31k stuck acked) > plans: never idx_tasks_status; whole table via idx_tasks_created, alias list and per-send via idx_tasks_to_created'
+cp /tmp/tqa.ts src/task-queue-ahead.ts
 
 echo "PASS test-status-read-cache"
