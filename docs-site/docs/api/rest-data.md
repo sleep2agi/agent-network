@@ -59,6 +59,8 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 **ETag / 304**（Hub `0.9.0-preview.88` 起）：每个响应带强 `ETag`（正文的哈希）和 `Cache-Control: private, no-cache`。请求带上 `If-None-Match: <上次的 ETag>`，数据没变时返回 **304** 空体，客户端沿用上次的正文。桌面 / 手机 app `0.2.194` 起这样读。不带 `If-None-Match` 的旧客户端照旧拿到 200 和完整正文。
 
+**`queue_depth`**（#500）：完整投影的每一行带这个节点上开着的任务数（口径同 [MCP `send_task`](/api/mcp-tools#send-task) 的 `queue_ahead`）。`light=1` 和旧 agent-node 别名解析读法（`X-Status-Projection: alias-resolver`）**不带**，那两种正文逐字节不变。完整投影的缓存在任何写 `tasks` 表的语句之后失效（ETag 随之变化）；精简投影不受影响。
+
 ---
 
 ### GET /api/tasks
@@ -1113,6 +1115,8 @@ curl -X POST http://localhost:9200/api/task \
 alias 被改名时这里给 canonical alias，旧 `renamed_from` / `renamed_to` 字段仍保留。
 `to_node_id` 对尚未上报稳定 node identity 的旧节点可为 `null`。`alias_not_found`
 和权限拒绝响应不返回 `actual_to`，避免把错误接口变成跨 network 枚举入口。
+
+**队列信息**（#500）：成功（200）和离线排队（202 `alias_offline`）的响应同样带 `queue_ahead` / `target_busy` / `est_wait_minutes`，队列长时再带 `warning`；含义、口径和示例见 [MCP `send_task`](/api/mcp-tools#send-task)。只是建议，从不因此拒绝派活。
 
 ### MCP 优先与 REST fallback
 

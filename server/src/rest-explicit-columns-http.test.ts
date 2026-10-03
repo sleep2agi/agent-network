@@ -50,6 +50,8 @@ const GOLDEN_RESPONSE_KEYS = {
     "external_schedules", "rules_file_capable", "skills_capable", "files_capable", "logs_capable", "runtime", "host", "process_telemetry",
     // #448 — layered node health (memory-only; null when not reported or stale).
     "health", "health_observed_ms_ago",
+    // #500 step 2 — open tasks on that node (task-queue-ahead.ts); full projection only.
+    "queue_depth",
   ],
   task: [
     "task_id", "from_node_id", "from_name", "to_node_id", "to_name", "priority",

@@ -388,6 +388,28 @@ Dispatch a task to a specified agent's inbox. **`send_task` triggers AI processi
 }
 ```
 
+**Queue info** (#500): successful and offline-queued (`alias_offline`) responses also carry the fields below. They are advice only — **the send is never refused because of them**, and older clients that do not know them keep working. Idempotent replays (`idempotent_replay`) do not carry them.
+
+| Field | Type | Meaning |
+|------|------|------|
+| `queue_ahead` | number | Open tasks already on the target **before** this one: `tasks` rows with `status ∈ created / delivered / acked / running`, dispatched in the last 24 hours, same network, any sender. Messages (`send_message` / `broadcast`) never write `tasks`, so they do not count; terminal rows (replied / failed / cancelled / expired) do not count; rows older than 24 hours that never reached a terminal state are treated as abandoned and do not count |
+| `target_busy` | boolean | The target has a started open task (`acked` / `running`, or a `started_at` / `consumed_at` stamp), or its session status is `working` / `busy` / `running` |
+| `est_wait_minutes` | number \| null | **Rough estimate**: median duration of the target's `replied` tasks in the last 24 hours × `queue_ahead`, rounded, capped at 1440. Nothing ahead → `0`; fewer than 3 samples → `null` (unknown). Durations start at `started_at` and fall back to the dispatch time, so the estimate usually runs high |
+| `warning` | string | Present only when `queue_ahead ≥ 3` or `est_wait_minutes > 30`: one sentence suggesting an idle node instead (`status=idle`, `queue_depth=0` in `get_all_status`), merging asks, or a longer `ttl_seconds`, and not to resend the same task |
+
+```json
+{
+  "ok": true,
+  "message_id": "uuid-xxx",
+  "actual_to": { "alias": "coder-1", "to_node_id": "node_xxx", "network_id": "net_xxx" },
+  "session_status": "working",
+  "queue_ahead": 3,
+  "target_busy": true,
+  "est_wait_minutes": 60,
+  "warning": "coder-1 already has 3 open task(s) ahead of this one (rough wait ~60 min, busy now). Your task is queued, not refused. It may expire before it starts (ttl 60 min). Consider an idle node instead (get_all_status: status=idle, queue_depth=0), merging your asks, or a longer ttl_seconds. Do not resend the same task."
+}
+```
+
 **Example**:
 
 ```typescript
@@ -713,7 +735,8 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
       "agent": "agent-node:codex",
       "node_id": "n_a1b2c3d4",
       "last_seen_at": "2026-04-12 10:00:00",
-      "network_id": "net_xxx"
+      "network_id": "net_xxx",
+      "queue_depth": 2
     }
   ],
   "summary": [
@@ -723,6 +746,8 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
   ]
 }
 ```
+
+Each row also carries `queue_depth` (#500): the number of open tasks on that node (same definition as `queue_ahead` in the [`send_task`](#send-task) response: `created / delivered / acked / running`, last 24 hours, same network; messages do not count). One `GROUP BY` covers every node — not one query per row. To pick a node that can start right away, `queue_depth=0` is more reliable than `status` alone.
 
 ::: warning The `sessions` row has **no `model` field**
 `get_all_status` runs `SELECT * FROM sessions` ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `SELECT * FROM sessions WHERE 1=1`, no JOIN). The `sessions` table schema ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS sessions` + V2 migration [`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `ALTER TABLE sessions ADD COLUMN`) **has a `model` column** — the V2 migration runs `ALTER TABLE sessions ADD COLUMN model`, and `report_status`'s `sessions` upsert unconditionally writes `sessions.model = COALESCE(model, old)` ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `INSERT INTO sessions` inside `report_status` (these columns are written by `report_status`, not by the tool documented in this section) and `model = COALESCE(?20, sessions.model)`). So `get_all_status` returns each session's `model` directly (`null` if the agent never passed a `model` parameter). The `nodes` table also keeps a copy of `model` (synced by `report_status` when `node_id` is passed) as the more durable source. `summary` is the status-grouped count over the entire scope (same as `list_tasks`'s `stats`).

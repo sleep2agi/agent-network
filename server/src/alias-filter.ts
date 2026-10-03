@@ -30,3 +30,13 @@ export function parseAliasFilter(raw: string | undefined | null): AliasFilter {
     sql: aliases.length > 0 ? ` AND alias IN (${aliases.map(() => "?").join(",")})` : "",
   };
 }
+
+/**
+ * The same `alias IN (…)` clause with numbered placeholders, starting after `paramsSoFar` already-bound
+ * parameters. Use it when the query already carries numbered `?N` placeholders: the PG adapter numbers a bare
+ * `?` from $1 again, so mixing the two binds the aliases to the wrong slots (SQLite happens to number them right).
+ */
+export function numberedAliasInClause(aliases: string[], paramsSoFar: number): string {
+  if (aliases.length === 0) return "";
+  return ` AND alias IN (${aliases.map((_, i) => `?${paramsSoFar + i + 1}`).join(",")})`;
+}

@@ -1,6 +1,7 @@
 import { buildServeErrorResponse } from "./serve-error.js";
 import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
+import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
@@ -2671,10 +2672,14 @@ return Bun.serve({
       const memoKey = JSON.stringify([sql, params, isLight, withNodeId]);
       const { body: statusBody, etag: statusEtag } = memoStatusBody(memoKey, () => {
       let timeDependent = false;
+      const rows = db.all<any>(sql, ...params);
+      // #500 step 2 — full projection only: queue_depth = open tasks on that node (task-queue-ahead.ts), one query for
+      // all rows. The light / alias-resolver projections keep their exact bytes and do not read tasks.
+      const depth = isLight ? null : queueDepthByNode(rows.map((r: any) => r.alias));
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
-      const sessions = db.all(sql, ...params).map((s: any) => {
+      const sessions = rows.map((s: any) => {
         if (isLight) {
           return {
             alias: s.alias,
@@ -2738,6 +2743,7 @@ return Bun.serve({
             return { health: h?.health ?? null, health_observed_ms_ago: h?.observed_ms_ago ?? null };
           })(),
           ...degradedField(s.network_id, s.alias),
+          queue_depth: depth?.get(queueDepthKey(s.network_id, s.alias)) ?? 0,
         };
       });
       const summary = sessions.reduce((acc: any, session: any) => {
@@ -2748,7 +2754,7 @@ return Bun.serve({
         return acc;
       }, { idle: 0, working: 0, offline: 0, total: sessions.length });
       return { body: JSON.stringify({ ok: true, sessions, summary }), cacheable: !timeDependent };
-      });
+      }, Date.now(), { dependsOnTasks: !isLight });
       // 强 ETag = 正文哈希;If-None-Match 命中回 304 空体(旧 agent-node 不发,app / dashboard 接上后受益)。
       const statusHeaders: Record<string, string> = { ETag: statusEtag, "Cache-Control": "private, no-cache" };
       if (aliasResolverRead) statusHeaders["X-Status-Projection"] = "alias-resolver";
@@ -3609,6 +3615,8 @@ return Bun.serve({
         const hg = assertNodeHealthy(targetAlias, taskNetId ?? null, { force: body.force === true, forceAllowed: !restAuth?.networkId });
         if (!hg.ok) return withCors(req, Response.json(hg, { status: 409 }));
       }
+      // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).
+      const queueInfo = dispatchQueueInfo(targetAlias, taskNetId, target.session?.status, ttlSeconds);
       // Mirror send_task MCP: write inbox + tasks rows in a single
       // transaction so the dispatch is visible to dashboard's Tasks page
       // and the parent_task_id lineage chain. Previously this endpoint
@@ -3661,6 +3669,7 @@ return Bun.serve({
           session_status: target.session.status ?? "offline",
           actual_to: actualTo,
           ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
+          ...(queueInfo ?? {}),
         }, { status: 202 }));
       }
       return withCors(req, Response.json({
@@ -3669,6 +3678,7 @@ return Bun.serve({
         message_id: id,
         actual_to: actualTo,
         ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
+        ...(queueInfo ?? {}),
       }));
     }
 

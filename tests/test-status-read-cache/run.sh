@@ -9,6 +9,8 @@
 #       Accept-Encoding: gzip, deflate, no If-None-Match) at production's read:write ratio; full reads; a
 #       client that sends If-None-Match. Gated only on "the cache is used" (hits > 0).
 #   L3  witnessed red: each mutation must turn L1 red, for the named test.
+#       #500 step 2: the full projection carries queue_depth (tasks table), so writes to `tasks` also invalidate
+#       the full body — task-queue-ahead-http.test.ts joins L1 and its tasks-write invalidation is mutated too.
 #
 # Throwaway everything: HOME=$(mktemp -d), temp SQLite, port 0 (never 9200).
 set -euo pipefail
@@ -22,7 +24,8 @@ run_tests() {
 
 echo "== L1 cached == recomputed; existing /api/status suites unchanged"
 for f in src/status-read-cache-http.test.ts src/status-alias-resolver-http.test.ts src/status-alias-filter-http.test.ts \
-         src/status-node-id-filter-http.test.ts src/node-health-dispatch-http.test.ts src/http-gzip.test.ts src/requirements-etag-http.test.ts; do
+         src/status-node-id-filter-http.test.ts src/node-health-dispatch-http.test.ts src/http-gzip.test.ts src/requirements-etag-http.test.ts \
+         src/task-queue-ahead-http.test.ts; do
   run_tests "$f"
 done
 
@@ -49,13 +52,13 @@ expect_red() {
 echo "== L3 witnessed red"
 cp src/status-read-cache.ts /tmp/cache.ts
 bun /work/tests/mutate.ts src/status-read-cache.ts \
-  'if (WRITE_START.test(sql) && SESSIONS_WORD.test(sql)) sessionsWriteGen++;' \
+  'if (SESSIONS_WORD.test(sql)) sessionsWriteGen++;' \
   'if (false) sessionsWriteGen++;'
 expect_red writes-never-invalidate src/status-read-cache-http.test.ts \
   'GET /api/status bodies are byte-identical with the cache > random writes / health reports / expiry: cached == recomputed, and the cache is really used'
 cp /tmp/cache.ts src/status-read-cache.ts
 
-bun /work/tests/mutate.ts src/status-read-cache.ts 'hit.gen === gen && hit.healthVer === healthVer &&' 'hit.gen === gen &&'
+bun /work/tests/mutate.ts src/status-read-cache.ts 'hit.taskGen === taskGen && hit.healthVer === healthVer &&' 'hit.taskGen === taskGen &&'
 expect_red health-reports-never-invalidate src/status-read-cache-http.test.ts \
   'GET /api/status bodies are byte-identical with the cache > random writes / health reports / expiry: cached == recomputed, and the cache is really used'
 cp /tmp/cache.ts src/status-read-cache.ts
@@ -71,6 +74,20 @@ bun /work/tests/mutate.ts src/server.ts \
   'return { body: JSON.stringify({ ok: true, sessions, summary }), cacheable: true };'
 expect_red time-dependent-body-cached src/status-read-cache-http.test.ts \
   'GET /api/status bodies are byte-identical with the cache > full projection with a health report is not cached (its body moves with time)'
+cp /tmp/server.ts src/server.ts
+
+# #500 step 2 — a write that touches only `tasks` must invalidate the cached full body (queue_depth moves).
+TASKS_INVALIDATION='#500 queue_depth on status reads > a write that touches only tasks invalidates the cached full body (new ETag, new queue_depth); light stays cached'
+bun /work/tests/mutate.ts src/status-read-cache.ts 'if (TASKS_WORD.test(sql)) tasksWriteGen++;' 'if (false) tasksWriteGen++;'
+expect_red tasks-writes-never-counted src/task-queue-ahead-http.test.ts "$TASKS_INVALIDATION"
+cp /tmp/cache.ts src/status-read-cache.ts
+
+bun /work/tests/mutate.ts src/status-read-cache.ts 'hit.taskGen === taskGen && ' ''
+expect_red tasks-generation-not-compared src/task-queue-ahead-http.test.ts "$TASKS_INVALIDATION"
+cp /tmp/cache.ts src/status-read-cache.ts
+
+bun /work/tests/mutate.ts src/server.ts '}, Date.now(), { dependsOnTasks: !isLight });' '}, Date.now(), { dependsOnTasks: false });'
+expect_red full-projection-ignores-tasks src/task-queue-ahead-http.test.ts "$TASKS_INVALIDATION"
 cp /tmp/server.ts src/server.ts
 
 echo "PASS test-status-read-cache"
