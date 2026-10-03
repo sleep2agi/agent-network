@@ -118,6 +118,7 @@ See [Token model](/en/guide/account-system#tokens) for token types, scopes, and 
 | `anet node resume <name> [--session <id>]` | Resume the saved or specified session |
 | `anet node delete <name> --force` | Delete local node configuration |
 | `anet node rename <ref> <new>` | Rename a node already registered with the Hub |
+| `anet node clone <src> <new>` | Copy a node's settings into a node with a **new identity** (see "Clone a node" below) |
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | Change an existing node's runtime / model; **takes effect on restart** |
 | `anet node ls` | List local nodes and network state |
 | `anet info <name>` | Show node configuration, process, and recent tasks |
@@ -146,6 +147,48 @@ Common creation options:
 | `--tools <list>` | Configure tools for runtimes that support this option |
 
 `anet session ls` lists Claude Code sessions for the current directory. Session semantics differ by runtime; do not use a Claude session ID as a Codex thread ID.
+
+### Clone a node
+
+To get "another node just like this one":
+
+```bash
+anet node clone <source> <new-name>
+# same thing
+anet node create <new-name> --from <source>
+```
+
+The new node is **registered with the Hub as its own node** (the same endpoint `anet node create` uses) and gets
+its own `node_id` and `ntok_`. It is not started unless you pass `--start`. A table at the end lists every item as
+**copied / regenerated / skipped**.
+
+| Category | What |
+|---|---|
+| Copied | runtime, model, tools, permission flags, system prompt, non-secret env, the commhub channel; with `--workdir` also the rules file (`CLAUDE.md` / `AGENTS.md`), skills directories and `.mcp.json` (env / header values blanked); for codex nodes `codex-home/config.toml`, `AGENTS.md`, `skills/` |
+| Regenerated | `node_id`, alias, `ntok_`, the claude-code-cli session id, grok co-presence sockets, `codexProjectDir` |
+| Not copied | the token, every session / thread id, logs, pid / lock files, goals, inbox, channel bot credentials, codex `auth.json`, co-presence identity files, and the **values** of secret env entries (the key names are kept as an envRef pointing at the new node; fill them in before starting) |
+
+| Option | Purpose |
+|---|---|
+| `--workdir <dir>` | Put the clone in another project directory (created if missing). **The path must be ASCII** (a node name may be Chinese, a directory may not). Without it the clone shares the source's project directory, rules file and skills |
+| `--model <id>` | Use a different model |
+| `--start` | Start right after cloning (skipped, with a hint, while secrets are still unset) |
+
+Refused: an existing destination, a new name equal to the source's, a destination inside the source node's own
+directory, a non-ASCII `--workdir`, opencode-cli nodes (their runtime binding and login live outside the node
+config — create one with `anet node create --runtime opencode-cli`), and host daemons (`role=host_supervisor`).
+
+A codex node's login is not copied. On first start anet stages this host's `~/.codex` login as it does for any
+node; one account shared by several nodes knocks the others out when its token refreshes. For a separate account
+use `anet node codex account install <new-name> --source codex-login:<profile-id>`. To carry the codex
+conversation history too, use `anet node codex fork` (see [Codex co-presence](/en/guide/codex-copresence)).
+
+::: danger Never `cp -r` a node directory
+`.anet/nodes/<name>/config.json` holds the node's `node_id` and `ntok_`. A verbatim copy is **the same Hub
+identity** as the source: both processes subscribe to the same inbox, every task runs twice and is answered twice,
+and the Dashboard cannot tell which one replied. Logs, sessions and the codex login are shared too. Always use
+`anet node clone` to copy a node.
+:::
 
 ## Project-wide lifecycle
 

@@ -165,6 +165,7 @@ on:
       - 'tests/test615-network-name/**'
       - 'tests/test617-feishu-ws-readiness/**'
       - 'tests/test618-claude-vendor-env/**'
+      - 'tests/test509-node-clone/**'
       - 'tests/test621-test384-layer-isolation/**'
       - 'tests/test624-task-cursor-pagination/**'
       - 'tests/test625-explicit-env-crlf/**'
@@ -338,6 +339,7 @@ on:
       - 'tests/test615-network-name/**'
       - 'tests/test617-feishu-ws-readiness/**'
       - 'tests/test618-claude-vendor-env/**'
+      - 'tests/test509-node-clone/**'
       - 'tests/test621-test384-layer-isolation/**'
       - 'tests/test624-task-cursor-pagination/**'
       - 'tests/test625-explicit-env-crlf/**'
@@ -1389,6 +1391,7 @@ jobs:
           - test615-network-name
           - test617-feishu-ws-readiness
           - test618-claude-vendor-env
+          - test509-node-clone
           - test621-test384-layer-isolation
           - test624-task-cursor-pagination
           - test625-explicit-env-crlf

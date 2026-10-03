@@ -118,6 +118,7 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 | `anet node resume <name> [--session <id>]` | 使用保存的会话或指定会话恢复 |
 | `anet node delete <name> --force` | 删除本地节点配置 |
 | `anet node rename <ref> <new>` | 重命名已在 Hub 注册的节点 |
+| `anet node clone <src> <new>` | 复制节点设置，生成一个**新身份**的节点（见下文「复制节点」） |
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | 改已存在节点的 runtime / 模型；**要重启才生效** |
 | `anet node ls` | 列出本地节点及网络状态 |
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
@@ -145,6 +146,46 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 | `--tools <list>` | 为支持该选项的 runtime 配置工具集 |
 
 `anet session ls` 可列出当前目录下的 Claude Code sessions。不同 runtime 的会话语义不同，不要把 Claude session ID 当作 Codex thread ID 使用。
+
+### 复制节点
+
+想要「再来一个和它一样的节点」，用：
+
+```bash
+anet node clone <源节点> <新名字>
+# 等价写法
+anet node create <新名字> --from <源节点>
+```
+
+新节点会在 Hub 上**重新注册**（和 `anet node create` 走同一个接口），拿到自己的 `node_id` 和 `ntok_`；
+不加 `--start` 不会启动。完成后会打印一张表，逐项列出 **copied / regenerated / skipped**。
+
+| 类别 | 内容 |
+|---|---|
+| 复制 | runtime、模型、工具、权限 flags、system prompt、非机密 env、commhub channel；`--workdir` 时还有规则文件（`CLAUDE.md` / `AGENTS.md`）、skills 目录、`.mcp.json`（其中 env / header 的值清空）；codex 节点的 `codex-home/config.toml`、`AGENTS.md`、`skills/` |
+| 重新生成 | `node_id`、别名、`ntok_`、claude-code-cli 的 session id、grok 共存 socket、`codexProjectDir` |
+| 不复制 | token、所有 session / thread id、日志、pid / 锁、goals、inbox、channel 的 bot 凭据、codex `auth.json`、共存身份文件、机密 env 的**值**（只保留键名，改成指向新节点的 envRef，启动前自己填） |
+
+| 参数 | 说明 |
+|---|---|
+| `--workdir <dir>` | 放到另一个项目目录（不存在会创建）；**路径必须是英文 / ASCII**（节点名可以是中文，目录不行）。不加时和源节点在同一个项目目录，规则文件和 skills 共用 |
+| `--model <id>` | 换一个模型 |
+| `--start` | 建完立即启动（有待填的机密时不启动，并提示先填） |
+
+会拒绝：目标已存在、新名字和源节点同名、目标落在源节点自己的目录里、非 ASCII 的 `--workdir`、
+opencode-cli 节点（运行时绑定和登录在节点配置之外，请用 `anet node create --runtime opencode-cli` 新建）、
+host daemon（`role=host_supervisor`）。
+
+codex 节点的登录不会被复制：首次启动时 anet 按常规把本机 `~/.codex` 的登录放进新节点；
+同一个账号被多个节点共用，在刷新 token 时会互相顶掉。要用独立账号，用
+`anet node codex account install <新名字> --source codex-login:<profile-id>`。
+要连 codex 会话历史一起带走，用 `anet node codex fork`（见 [Codex 共存](/guide/codex-copresence)）。
+
+::: danger 不要 `cp -r` 节点目录
+`.anet/nodes/<name>/config.json` 里存着节点的 `node_id` 和 `ntok_`。原样拷贝出来的「新节点」
+和源节点是**同一个 Hub 身份**：两个进程都订阅同一个收件箱，同一个任务会被执行两次、回两次复，
+而且 Dashboard 分不清是谁在回。日志、session、codex 登录也一起被共用。复制节点请一律用 `anet node clone`。
+:::
 
 ## 项目批量管理
 

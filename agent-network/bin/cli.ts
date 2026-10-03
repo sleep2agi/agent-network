@@ -40,6 +40,7 @@ import { buildReceipt, formatReceiptSummary, writeReceipt, type LifecycleVerb, t
 import { hubHealthTimeoutMs, HUB_HEALTH_TIMEOUT_ENV } from "../src/hub-health-timeout";
 import { anetClientLabel } from "../src/login-client-label";
 import { evaluateCodexPreflight, evaluateCodexVerify, checkIdentity, checkHome, checkSession } from "../src/codex-lifecycle-preflight";
+import { NODE_CLONE_USAGE, formatCloneSummary, parseCloneArgs, realpathLoose, runNodeClone } from "../src/node-clone";
 import { FORK_HOME_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, forkRolloutPath, readLastTurnContextModel, rewriteRollout, rewriteTrustedProjects, uuidV7 } from "../src/codex-lifecycle-fork";
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
@@ -4044,6 +4045,7 @@ Quick start:
 
 Node Management:
   anet node create <name>       Create a new agent node
+  anet node clone <src> <new>   Copy a node's settings under a new identity (never cp -r)
   anet node start <name>        Start a node
   anet node start --all         Start every node in cwd (= anet project up)
   anet node stop <name>         Stop a running node
@@ -5527,6 +5529,64 @@ Telegram setup:
   // which is what Node v24 ESM strict mode actually warns about.
 }
 
+// #509 — `anet node clone <src> <new>` / `anet node create <new> --from <src>`.
+// Logic lives in src/node-clone.ts; this only wires it to the CLI's resolver, Hub registration and create writer.
+async function nodeCloneCommand(tokens: string[], mode: "clone" | "create-from") {
+  const parsed = parseCloneArgs(tokens, mode);
+  if (!parsed.ok) {
+    if ("help" in parsed) { console.log(NODE_CLONE_USAGE); return; }
+    console.error(`[anet] ❌ ${parsed.error}`);
+    console.error(NODE_CLONE_USAGE);
+    process.exit(2);
+  }
+  const a = parsed.args;
+  validateNodeName(a.target);
+  const source = resolveNodeRef(a.source);
+  if (!source) { console.error(nodeNotFound(a.source)); process.exit(1); }
+  if (a.model) a.model = validateModel(a.model);
+  const sourceWorkdir = realpathLoose(process.cwd());
+  const sourceNodeDir = realpathLoose(join(nodesDir(), source.id));
+  const targetWorkdir = a.workdir ? realpathLoose(normalizeBatchWorkdir(a.workdir)) : sourceWorkdir;
+  // Same name check `anet node create` does (by dir id, node_id or alias), in the directory the clone lands in.
+  if (existsSync(targetWorkdir) && resolveNodeRefAt(targetWorkdir, a.target)) {
+    console.error(`[anet] ❌ clone refused: a node named "${a.target}" already exists in ${targetWorkdir}`);
+    process.exit(1);
+  }
+  let raw: Record<string, any>;
+  try { raw = JSON.parse(readFileSync(join(sourceNodeDir, "config.json"), "utf-8")); }
+  catch (e: any) { console.error(`[anet] ❌ cannot read ${join(sourceNodeDir, "config.json")}: ${e?.message ?? e}`); process.exit(1); }
+  if (!raw.hub && !loadGlobal().hub) { console.error("[anet] ❌ no hub configured — run: anet login"); process.exit(1); }
+  const r = await runNodeClone({
+    sourceId: source.id,
+    sourceProfile: raw,
+    target: a.target,
+    sourceNodeDir,
+    sourceWorkdir,
+    targetWorkdir,
+    explicitWorkdir: Boolean(a.workdir),
+    modelOverride: a.model,
+    newNodeId: generateNodeId,
+    newSession: () => randomUUID(),
+    grokFields: (nodeId) => grokBuildCliCreationFields("grok-build-cli", nodeId) as Record<string, unknown>,
+    register: (p) => requestNodeToken(p as Profile, a.target),
+    persist: (p) => { process.chdir(targetWorkdir); saveCreatedNode(a.target, p as Profile); },
+  });
+  if (!r.ok) {
+    console.error(`[anet] ❌ clone ${r.stage === "refused" ? "refused" : "failed"}: ${r.error}`);
+    if (r.stage === "write") console.error(`[anet]    the Hub already holds a registration for "${a.target}" — clean it with: anet node delete ${shellQuote(a.target)}`);
+    process.exit(1);
+  }
+  console.log(formatCloneSummary({ source: nodeDisplayName(source.id, source.profile), target: a.target, profile: r.profile, ledger: r.ledger, targetNodeDir: r.targetNodeDir, sourceNodeId: raw.node_id }));
+  const where = targetWorkdir === sourceWorkdir ? "" : `cd ${shellQuote(targetWorkdir)} && `;
+  if (!a.start) { console.log(`\nStart: ${where}anet node start ${shellQuote(a.target)}`); return; }
+  if (r.ledger.secrets.length) {
+    console.log(`\n[anet] not starting: set the ${r.ledger.secrets.length} secret(s) above first, then: ${where}anet node start ${shellQuote(a.target)}`);
+    return;
+  }
+  args.length = 0; args.push("start", a.target);
+  await startCommand();
+}
+
 async function createCommand(idOverride?: string) {
   // Batch mode: `anet create --batch` enters the multi-node wizard
   // (issue #55, Vincent 4335). All other create flows fall through to the
@@ -5548,6 +5608,8 @@ async function createCommand(idOverride?: string) {
     }
     return await createBatchWizardCommand();
   }
+  // #509 — `--from <src>` used to be parsed and silently dropped (a default node got built). It means clone.
+  if (!idOverride && args.includes("--from")) return await nodeCloneCommand(args.slice(1), "create-from");
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
@@ -17459,6 +17521,8 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       // get the generic node usage.
       if (args[1] === "start") {
         printNodeStartHelp();
+      } else if (args[1] === "clone" || (args[1] === "create" && args.includes("--from"))) {
+        console.log(NODE_CLONE_USAGE);
       } else if (args[1] === "loop") {
         args.splice(0, 1); // drop "node" so nodeLoopCommand sees args[1] as alias slot (no alias → prints loop help)
         // strip --help so it's not treated as an alias literal
@@ -17469,7 +17533,7 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
         await nodeLoopCommand();
         process.exit(0);
       } else {
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
       }
       break;
     default:
@@ -17495,6 +17559,7 @@ switch (command) {
       case "resume": args.splice(0, 1); await resumeCommand(); break;
       case "delete": args.splice(0, 1); await deleteCommand(); break;
       case "rename": args.splice(0, 1); await renameCommand(); break;
+      case "clone": await nodeCloneCommand(args.slice(2), "clone"); break;
       case "edit": args.splice(0, 1); await nodeEditCommand(); break;
       case "loop": args.splice(0, 1); await nodeLoopCommand(); break;
       case "ls": case "list": await lsCommand(); break;
@@ -17516,11 +17581,11 @@ switch (command) {
           const redirect = nodeSubcommandRedirect(sub, args[2]);
           if (redirect) { for (const line of redirect) console.log(line); }
           else {
-            const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex"]);
+            const suggestion = suggestSimilar(sub, ["create", "clone", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex"]);
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
         break;
       }
     }
