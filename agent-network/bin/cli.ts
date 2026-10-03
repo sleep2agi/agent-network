@@ -9249,7 +9249,7 @@ Example:
   anet hub dashboard             # Start Dashboard UI
   anet hub start --host 0.0.0.0  # Allow LAN agents
   anet hub start --port 8080     # Custom port
-  anet hub start --version 0.9.0-preview.95   # Run an exact Hub version
+  anet hub start --version <v>   # Run an exact commhub-server version
   anet hub config                # Show config
 `);
 }
