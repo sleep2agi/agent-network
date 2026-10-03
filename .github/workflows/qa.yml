@@ -195,6 +195,7 @@ on:
       - 'tests/test630-file-download-header-auth/**'
       - 'tests/test634-windows-secret-guidance/**'
       - 'tests/test516-anet-secret-masking/**'
+      - 'tests/test516-node-delete-hub-row/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -372,6 +373,7 @@ on:
       - 'tests/test630-file-download-header-auth/**'
       - 'tests/test634-windows-secret-guidance/**'
       - 'tests/test516-anet-secret-masking/**'
+      - 'tests/test516-node-delete-hub-row/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -1252,6 +1254,23 @@ jobs:
           docker cp "run-anet-test516:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test516/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test516"
           docker rm -f "run-anet-test516" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #516 part 2 — anet node delete 也删 Hub 上那一行(按 node_id,不按别名)。
+      # 真 CLI × 真 Hub(随机端口、HOME=mktemp):A 删掉 / B Hub 挂了照删本地 + 退出 1 + 重试命令可用 /
+      # C node_id 不符(别名复用)不碰那一行。见证红 3 条:按别名删 / 失败退 0 / 不调 Hub。
+      - name: Build + run test516-node-delete-hub-row
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test516d \
+            -f tests/test516-node-delete-hub-row/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test516d" -e ARTIFACT_DIR=/tmp/art \
+            anet-test516d || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test516d"
+          docker cp "run-anet-test516d:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test516d/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test516d"
+          docker rm -f "run-anet-test516d" >/dev/null 2>&1 || true
           exit $rc
 
       - name: Build + run test623-feishu-scrub-health

@@ -2452,6 +2452,8 @@ import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
 import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCurrentLoginSession, sameHub } from "../src/cli-auth-session";
 import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
+import { describeHubRemoval, removeNodeFromHub } from "../src/node-delete-hub";
+import { COMMAND_HELP, NODE_DELETE_USAGE, lookupCommandHelp } from "../src/cli-help";
 import { errorText, formatTopLevelError, hubErrorText, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
 import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
 export { normalizeRuntime, type RuntimeName };
@@ -4104,7 +4106,7 @@ Node Management:
   anet node start --all         Start every node in cwd (= anet project up)
   anet node stop <name>         Stop a running node
   anet node resume <name>       Resume interrupted session
-  anet node delete <name>       Delete node and config
+  anet node delete <name>       Delete node locally and on the Hub
   anet node rename <ref> <new>  Rename a node
   anet node edit <ref>          Change a node's runtime or model
   anet node restart <name>      Stop then start a node
@@ -9437,7 +9439,8 @@ async function serverCommand() {
 // regression even though the routes were still wired).
 function printHubHelp() {
   console.log(`
-anet hub <command>
+Usage: anet hub <command>
+       anet server <command>   (alias)
 
   start [options]    Start CommHub Server (bootstraps admin account; login separately)
   stop  [--port <p>] Stop the running CommHub Server (SIGTERM → 3s grace → SIGKILL)
@@ -9564,7 +9567,7 @@ Subcommands:
   list                 List locally-configured daemon nodes
 
 Options:
-  --force              init only。两种用法,第二种是产品自己给出的修法却没人写在这里:
+  --force              init only。两种用法:
                        ① 覆盖一个**非** daemon 的同名配置;
                        ② 对**已经是** daemon 的配置重跑一次 init —— 回填后来新增的
                           runtime(\`anet daemon list\` 报「少 N 个」时走这条)。
@@ -10045,7 +10048,7 @@ async function importCommand() {
 
 function printSessionUsage() {
   console.log(`
-anet session <command>
+Usage: anet session <command>
 
   ls    List Claude Code sessions in current project
 `);
@@ -11573,7 +11576,7 @@ interface ProjectNode { id: string; alias: string; profile: Profile | null; inva
 
 function printProjectUsage() {
   console.log(`
-anet project <up|restart|down> [options]
+Usage: anet project <up|restart|down> [options]
 
   up        Start every node under cwd's .anet/nodes/ (skip already-running)
   restart   Kill any existing tmux session and start fresh (every node)
@@ -12046,7 +12049,7 @@ async function nodeLoopCommand() {
   const taskText = args[2];
   if (!aliasRef || !taskText) {
     console.log(`
-anet node loop <alias> "<task>" --every <interval>
+Usage: anet node loop <alias> "<task>" --every <interval>
 
   Schedule a recurring task on a running node. The node will be woken at
   the chosen interval and asked to make an incremental advance on the
@@ -12192,13 +12195,13 @@ to stop one.
 async function deleteCommand() {
   const ref = args[1];
   if (!ref) {
-    console.log(`
-anet node delete <node-id|node-name>
-
-Delete a node and its config. Use --force to skip confirmation.
-`);
+    console.log(NODE_DELETE_USAGE);
     return;
   }
+  const opts = parseOpts();
+  // #516 — retry path printed when the Hub half failed: the local files are
+  // already gone, so the ref is the node_id from the warning.
+  if (opts["hub-only"] === "true") { await deleteHubRowOnly(ref, opts); return; }
 
   const resolved = resolveNodeRef(ref);
   if (!resolved) {
@@ -12208,7 +12211,6 @@ Delete a node and its config. Use --force to skip confirmation.
 
   const { id: nodeId, profile } = resolved;
   const displayName = nodeDisplayName(nodeId, profile);
-  const opts = parseOpts();
 
   // Stop if running + notify server
   const stopResult = await stopNode(nodeId);
@@ -12228,6 +12230,7 @@ Delete a node and its config. Use --force to skip confirmation.
   if (opts.force !== "true" && opts.yes !== "true") {
     console.log(`[anet] This will delete "${displayName}" (node_id: ${profile.node_id || "-"})`);
     console.log(`[anet]   ${nodeDir}`);
+    console.log(`[anet]   and its row on the Hub (matched by node_id only)`);
     console.log(`[anet] Run again with --force to confirm.`);
     return;
   }
@@ -12240,13 +12243,45 @@ Delete a node and its config. Use --force to skip confirmation.
   removeOpencodeRuntimeBinding(nodeDir, opencodeBindingHome());
   rmSync(nodeDir, { recursive: true, force: true });
   console.log(`[anet] Deleted "${displayName}"`);
+
+  // #516 — then the Hub row, by the local node_id only (never by alias: aliases
+  // are reused). Unreachable / refused ⇒ warn with the retry command, exit 1.
+  const gc = loadGlobal();
+  const hub = profile.hub || gc.hub;
+  const sameHub = !profile.hub || !gc.hub || String(profile.hub).replace(/\/+$/, "") === String(gc.hub).replace(/\/+$/, "");
+  const token = sameHub ? (gc.token || profile.token) : profile.token;
+  const removal = await removeNodeFromHub({ hub, token, nodeId: profile.node_id, alias: displayName });
+  const out = describeHubRemoval(removal, { displayName, hub: sameHub ? undefined : hub });
+  for (const line of out.info) console.log(line);
+  for (const line of out.warn) console.error(line);
+  if (removal.kind === "failed") markFailed(); // hub half failed: exit 1 (#2321)
+}
+
+/** `anet node delete <node_id> --hub-only [--hub <url>]` — remove only the Hub row, by exact node_id. */
+async function deleteHubRowOnly(ref: string, opts: Record<string, string>) {
+  const gc = loadGlobal();
+  const local = resolveNodeRef(ref);
+  const nodeId = local?.profile.node_id || ref;
+  const hub = opts.hub || local?.profile.hub || gc.hub;
+  const token = opts.token || process.env.COMMHUB_TOKEN || gc.token || local?.profile.token;
+  if (!hub) {
+    console.error(`[anet] No Hub configured. Pass --hub <url>, or set one with: anet init --hub <url>`);
+    markFailed();
+    return;
+  }
+  const displayName = local ? nodeDisplayName(local.id, local.profile) : nodeId;
+  const removal = await removeNodeFromHub({ hub, token, nodeId, alias: local ? displayName : undefined });
+  const out = describeHubRemoval(removal, { displayName, hub: opts.hub });
+  for (const line of out.info) console.log(line);
+  for (const line of out.warn) console.error(line.replace("Local files were deleted, but the ", "The "));
+  if (removal.kind === "failed") markFailed();
 }
 
 // ── channel ──
 
 function printChannelUsage() {
   console.log(`
-anet channel <command>
+Usage: anet channel <command>
 
   add <type> <node-id>          Add channel to a node
   allow feishu <node-id>        Manage feishu allowFrom / allowChats (--add-from/--add-chat/--rm-from/--rm-chat; repeatable)
@@ -12744,7 +12779,7 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
 async function opencodeCommand() {
   const sub = args[1];
   if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
-    console.log(`anet opencode <sub>
+    console.log(`Usage: anet opencode <sub>
 
 Subcommands:
   upgrade-pin <version>   Reinstall and smoke the exact release pin.
@@ -13764,7 +13799,7 @@ import { renderWakeLogJson, renderWakeLogText } from "./goal-wake-log-render";
 
 function printGoalUsage() {
   console.log(`
-anet goal <command>
+Usage: anet goal <command>
 
   list [node]                  List scheduled goals for one node, or all nodes
   show <node> <goal-id>        Show one goal in detail (including progress log)
@@ -14343,7 +14378,7 @@ async function whoamiCommand() {
 
 function printNetworkUsage() {
   console.log(`
-anet network <command>
+Usage: anet network <command>
 
   ls                    List my networks
   create <name>         Create a new network
@@ -14597,7 +14632,7 @@ async function tokenCommand() {
 
   if (sub === "--help" || sub === "-h" || sub === "help") {
     console.log(`
-anet token <command>
+Usage: anet token <command>
 
   ls                    List all tokens
   create <name>         Create a new API token (legacy positional form)
@@ -16834,7 +16869,7 @@ async function batchCommand() {
   const sub = args[1];
   if (!sub || sub === "-h" || sub === "--help" || sub.startsWith("-")) {
     console.log(`
-  anet batch <verb> <prefix>                # batch lifecycle ops (issue #55)
+  Usage: anet batch <verb> <prefix>         # batch lifecycle ops (issue #55)
 
   Verbs:
     start <prefix>                        re-launch (Phase 1: hint re-run create)
@@ -17702,6 +17737,16 @@ async function main() {
 // per-subcommand help printer when one exists; fall back to global for the
 // rest (preserves #215 safety against side-effects in token/run/etc.).
 if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
+  // #516 — a subcommand's own usage (src/cli-help.ts) wins. Checked from depth 2
+  // so bare groups keep their richer printers below (hub / project / daemon …).
+  {
+    const specific = lookupCommandHelp(args, 2);
+    if (specific !== null) { console.log(specific); process.exit(0); }
+  }
+  // #516 — the group handlers below are handed ONLY the help flag. They used to
+  // get the real argv, so `anet network create --help` ran `create` with the
+  // name "--help", `anet goal show --help` / `anet daemon up --help` did work.
+  const groupHelpOnly = () => { args.splice(1, args.length - 1, "--help"); };
   switch (command) {
     case "hub":
     case "server":
@@ -17727,17 +17772,20 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       // 直接返回。而 network 一进来就 loadGlobal() 读 hub/token、channel 一进来
       // parseOpts()、session 的 !sub 直接跑 ls —— 那三个没有前置 help 守卫,
       // 路由过去会有副作用,正是 #215 那条 default 要防的东西,留着不动。
-    case "opencode": await opencodeCommand(); break;
-    case "goal":     await goalCommand();     break;
-    case "token":    await tokenCommand();    break;
-    case "batch":    await batchCommand();    break;
+    case "opencode": groupHelpOnly(); await opencodeCommand(); break;
+    case "goal":     groupHelpOnly(); await goalCommand();     break;
+    case "token":    groupHelpOnly(); await tokenCommand();    break;
+    case "batch":    groupHelpOnly(); await batchCommand();    break;
     case "network":
+      groupHelpOnly();
       await networkCommand();
       break;
     case "channel":
+      groupHelpOnly();
       await channelCommand();
       break;
     case "session":
+      groupHelpOnly();
       sessionCommand();
       break;
     case "daemon":
@@ -17748,12 +17796,9 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       // convention concluded `anet daemon` had no subcommands and never
       // found init/start/up/list. Drop the help flag and let daemonCommand
       // take the bare-invocation path, which is the help it already has.
-      {
-        for (const flag of ["--help", "-h"]) {
-          const i = args.indexOf(flag);
-          if (i >= 0) args.splice(i, 1);
-        }
-      }
+      // #516 — drop everything after `daemon`, not just the flag: `anet daemon up --help`
+      // used to become `anet daemon up` and create + start a daemon.
+      args.splice(1);
       await daemonCommand();
       process.exit(0);
     case "node":
@@ -17765,22 +17810,23 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       if (args[1] === "start") {
         printNodeStartHelp();
       } else if (args[1] === "clone" || (args[1] === "create" && args.includes("--from"))) {
-        console.log(NODE_CLONE_USAGE);
+        console.log(`Usage: ${NODE_CLONE_USAGE}`);
       } else if (args[1] === "loop") {
-        args.splice(0, 1); // drop "node" so nodeLoopCommand sees args[1] as alias slot (no alias → prints loop help)
-        // strip --help so it's not treated as an alias literal
-        const hi = args.indexOf("--help");
-        if (hi >= 0) args.splice(hi, 1);
-        const hi2 = args.indexOf("-h");
-        if (hi2 >= 0) args.splice(hi2, 1);
+        // #516 — keep only "loop": with an alias left in place nodeLoopCommand
+        // would schedule a goal instead of printing its help.
+        args.splice(0, args.length, "loop");
         await nodeLoopCommand();
         process.exit(0);
       } else {
-        console.log(`Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
+        console.log(COMMAND_HELP["node"]);
       }
       break;
-    default:
-      printHelp();
+    default: {
+      // #516 — a command's own usage, not the 139-line global help.
+      const own = lookupCommandHelp(args, 1);
+      if (own !== null) console.log(own);
+      else printHelp();
+    }
   }
   process.exit(0);
 }
