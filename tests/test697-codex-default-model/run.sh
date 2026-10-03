@@ -206,6 +206,18 @@ probe_picker_default
 
 echo "L7b copresence production entry passes the supported default to tmux"
 create_node copresence-default codex-app-server
+# #512 — start now honours the node config's `model` (flag > config > default).
+# `node create` writes the default INTO config.json, so a freshly created node
+# never reaches the built-in default at start. Drop `model` to exercise the
+# default leg for real (configs without `model` take exactly this path).
+strip_node_model() {
+  local cfg="$PROJECT_DIR/.anet/nodes/$1/config.json"
+  jq 'del(.model)' "$cfg" > "$cfg.tmp"
+  chmod 0600 "$cfg.tmp"
+  mv "$cfg.tmp" "$cfg"
+  jq -e 'has("model") | not' "$cfg" >/dev/null
+}
+strip_node_model copresence-default
 FAKE_TMUX_LOG=/tmp/test697-fake-tmux.log
 : > "$FAKE_TMUX_LOG"
 cat > "$FAKE_BIN/tmux" <<'SH'
@@ -228,6 +240,27 @@ grep -Fq -- "-c model='gpt-5.6-sol'" "$FAKE_TMUX_LOG" || {
   echo "COPRESENCE_DEFAULT_MODEL_NOT_WIRED"
   cat "$FAKE_TMUX_LOG"
   cat /tmp/test697-copresence.log
+  exit 1
+}
+
+echo "L7b2 copresence start uses the node config model when no --model is given (#512)"
+create_node copresence-config codex-app-server --model cfg-model-697
+jq -e '.model == "cfg-model-697"' "$PROJECT_DIR/.anet/nodes/copresence-config/config.json" >/dev/null
+probe_copresence_node_config() {
+  : > "$FAKE_TMUX_LOG"
+  (
+    cd "$PROJECT_DIR"
+    HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+      timeout 5 "${ANET[@]}" node start copresence-config --copresence \
+        --codex-bin "$FAKE_BIN/codex"
+  ) >/tmp/test697-copresence-config.log 2>&1 || true
+  grep -Fq -- "-c model='cfg-model-697'" "$FAKE_TMUX_LOG" \
+    && grep -Fq "[anet] model: cfg-model-697 (source: node config" /tmp/test697-copresence-config.log
+}
+probe_copresence_node_config || {
+  echo "COPRESENCE_NODE_CONFIG_MODEL_IGNORED"
+  cat "$FAKE_TMUX_LOG"
+  cat /tmp/test697-copresence-config.log
   exit 1
 }
 
@@ -791,10 +824,15 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   run_mutation startup-label-regressed L6 \
     "$ROOT/agent-node/src/cli.ts" \
     '? DEFAULT_CODEX_MODEL' '? "gpt-5.5"' probe_startup_label
+  # #512 moved the co-presence default out of cli.ts into the resolver.
   run_mutation copresence-default-regressed L7b \
+    "$ROOT/agent-network/src/codex-copresence-model.ts" \
+    'fallback: string = DEFAULT_CODEX_MODEL,' \
+    'fallback: string = "gpt-4.1-legacy",' probe_copresence_default
+  run_mutation copresence-node-config-ignored L7b2 \
     "$ROOT/agent-network/bin/cli.ts" \
-    'const model = opts.model || DEFAULT_CODEX_MODEL;' \
-    'const model = opts.model || "gpt-4.1-legacy";' probe_copresence_default
+    'resolveCodexCopresenceModel(opts.model, (profile as { model?: unknown }).model)' \
+    'resolveCodexCopresenceModel(opts.model, undefined)' probe_copresence_node_config
   run_mutation copresence-explicit-overwritten L7b \
     "$ROOT/agent-network/bin/cli.ts" \
     'model: opts.model,' 'model: undefined,' probe_copresence_explicit
