@@ -124,7 +124,11 @@ describe("view=summary", () => {
     expect(summary.body.requirements.map((r: any) => r.id)).toEqual(full.body.requirements.map((r: any) => r.id));
     const one = await send(admin.token, "GET", `/api/requirements/${card.id}?network_id=${NET}`);
     expect(one.body.requirement.description).toBe(f.description);
-    expect(summary.text.length).toBeLessThan(full.text.length / 2);
+    // 比的是 summary 省掉的那部分(正文 / 子任务):两边一样多的 last_event(#506,每行约 150 B)不算,
+    // 否则这张只有几行的小表上,固定开销会把比例拉过一半。
+    const bare = (body: any) => JSON.stringify({ ...body, requirements: body.requirements.map(({ last_event: _l, ...r }: any) => r) }).length;
+    expect(summary.body.requirements.every((r: any) => "last_event" in r)).toBe(true);
+    expect(bare(summary.body)).toBeLessThan(bare(full.body) / 2);
   });
 
   test("view=full is the plain list; an unknown view is a 400", async () => {

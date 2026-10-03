@@ -729,7 +729,7 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
 // list_summary:GET 认 view=summary(不带描述正文与子任务条目,见 toSummary);changes:GET 认 changes=1 + updated_since
 // (改过的卡含归档的,加上 deleted 墓碑与 server_time,见 listChanges)。
 // events:GET /api/requirements/events —— 字段级的改动流水(谁、何时、旧值 → 新值,requirement-events.ts)。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes", "events"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes", "events", "last_event"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -1260,6 +1260,95 @@ function deletedSince(ctx: RequirementsRequestContext, sinceIso: string): string
   return db.all<TombstoneRow>(sql, ...params).filter(row => canSeeTask(caller, row)).map(row => row.requirement_id);
 }
 
+// ── 列表每行的「最新动态」(#506)──
+// 卡片上一行「谁 · 刚刚 · 干了什么」。以前 App 只能拿 updatedAt / updated_by 拼,评论不改卡、所以不算;也说不出改了什么。
+// 这里从 requirement_events(评论也在里面,kind=comment)取每张卡最新的一条:一页只一次查询
+// (MAX(id) GROUP BY,走 idx_requirement_events_card;SQLite / PostgreSQL 同一句),再按出现的人一次查名字。
+// 只算这一页的卡(已经按调用者可见范围筛过);受限成员看不见的节点:actor 隐去,
+// 人员字段(owner / agent_owner / participants)的改动隐去之后前后一样的,只剩「改过」(field / summary 都不给)——
+// 与 updatedAt 透露的信息相同,不多泄一个字。180 天保留期外 / 没有流水的卡 = null。
+export type LastEvent = {
+  type: string;
+  field: string | null;
+  actor: { id: string; kind: "user" | "node"; display_name: string | null } | null;
+  at: string;
+  summary?: string;
+};
+const LAST_EVENT_SUMMARY_MAX = 120;
+const clip = (s: string) => (s.length > LAST_EVENT_SUMMARY_MAX ? `${s.slice(0, LAST_EVENT_SUMMARY_MAX - 1)}…` : s);
+const isRef = (v: unknown): v is { kind: string; id: string } => !!v && typeof v === "object" && typeof (v as { id?: unknown }).id === "string" && ((v as { kind?: unknown }).kind === "user" || (v as { kind?: unknown }).kind === "node");
+
+/** 一条流水 → 一句话(人员字段不给:名字另有 actor 显示,引用里的 id 对卡片没用)。 */
+function lastEventSummary(ev: ReturnType<typeof eventPublic>): string | undefined {
+  const text = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
+  if (ev.kind === "comment") {
+    const t = (ev.new as { text?: unknown } | null)?.text;
+    return typeof t === "string" ? clip(t.replace(/\s+/g, " ").trim()) : undefined;
+  }
+  if (ev.kind !== "changed") return undefined;
+  switch (ev.field) {
+    case "column": case "priority": case "due": case "start": case "archived": case "project": case "parent":
+      return clip(`${text(ev.old)} → ${text(ev.new)}`);
+    case "title": return typeof ev.new === "string" ? clip(ev.new) : undefined;
+    case "checklist_item": {
+      const item = ev.new as { text?: unknown; done?: unknown } | null;
+      return item && typeof item.text === "string" ? clip(`${item.done ? "[x]" : "[ ]"} ${item.text}`) : undefined;
+    }
+    case "checklist": {
+      const c = ev.new as { total?: unknown; done?: unknown } | null;
+      return c ? `${Number(c.done ?? 0)}/${Number(c.total ?? 0)}` : undefined;
+    }
+    case "tags": return Array.isArray(ev.new) ? clip(ev.new.join(", ")) : undefined;
+    default: return undefined;
+  }
+}
+
+function lastEventsFor(ctx: RequirementsRequestContext, rows: readonly Row[]): Map<string, LastEvent> {
+  const out = new Map<string, LastEvent>();
+  if (!rows.length) return out;
+  const ids = rows.map(r => r.requirement_id);
+  const marks = ids.map((_, i) => `?${i + 1}`).join(",");
+  const events = db.all<EventRow>(
+    `SELECT id, network_id, requirement_id, seq, title, actor_json, kind, field, old_json, new_json, created_at FROM requirement_events
+     WHERE id IN (SELECT MAX(id) FROM requirement_events WHERE requirement_id IN (${marks}) GROUP BY requirement_id)`,
+    ...ids,
+  );
+  if (!events.length) return out;
+  const pubs = events.map(eventPublic);
+  const userIds = new Set<string>(), nodeIds = new Set<string>();
+  for (const ev of pubs) if (isRef(ev.actor)) (ev.actor.kind === "user" ? userIds : nodeIds).add(ev.actor.id);
+  // 名字规则同 GET /api/requirements/people 的 name(没设显示名 → 用户名 / alias / node_name)。
+  const names = new Map<string, string>();
+  if (userIds.size) {
+    const u = [...userIds];
+    for (const r of db.all<{ id: string; name: string }>(`SELECT user_id AS id, COALESCE(NULLIF(display_name,''), username) AS name FROM users WHERE user_id IN (${u.map((_, i) => `?${i + 1}`).join(",")})`, ...u)) names.set(`user:${r.id}`, r.name);
+  }
+  if (nodeIds.size) {
+    const n = [...nodeIds];
+    for (const r of db.all<{ id: string; name: string }>(`SELECT node_id AS id, COALESCE(NULLIF(display_name,''), NULLIF(alias,''), node_name) AS name FROM nodes WHERE node_id IN (${n.map((_, i) => `?${i + 1}`).join(",")})`, ...n)) names.set(`node:${r.id}`, r.name);
+  }
+  const networkOf = new Map(rows.map(r => [r.requirement_id, r.network_id] as const));
+  const hiddenBy = new Map<string, HiddenNode>();
+  for (const ev of pubs) {
+    const networkId = networkOf.get(ev.requirement_id)!;
+    if (!hiddenBy.has(networkId)) hiddenBy.set(networkId, hiddenNodeFilter(ctx, networkId));
+    const hidden = hiddenBy.get(networkId)!;
+    const actor = isRef(ev.actor) && !isHiddenRef(ev.actor, hidden)
+      ? { id: ev.actor.id, kind: ev.actor.kind as "user" | "node", display_name: names.get(`${ev.actor.kind}:${ev.actor.id}`) ?? null }
+      : null;
+    let field = ev.field;
+    let summary = lastEventSummary(ev);
+    if (hidden && (field === "owner" || field === "agent_owner" || field === "participants")) {
+      const strip = (v: unknown) => (Array.isArray(v) ? v.filter(ref => !isHiddenRef(ref, hidden)) : isHiddenRef(v, hidden) ? null : v);
+      if (JSON.stringify(strip(ev.old)) === JSON.stringify(strip(ev.new))) { field = null; summary = undefined; }
+    }
+    const last: LastEvent = { type: ev.kind, field, actor, at: ev.at };
+    if (summary !== undefined) last.summary = summary;
+    out.set(ev.requirement_id, last);
+  }
+  return out;
+}
+
 // ── 任务动态(requirement-events.ts)──
 // GET /api/requirements/events?network_id&since&limit&cursor&requirement_id:一个网络的改动流水,按 id 从新到旧。
 // 可见范围与列表相同:卡还在 → 按当前这张卡判断调用者看不看得见;删掉了 → 按墓碑(过了墓碑保留期的删除,
@@ -1491,6 +1580,10 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (view !== null && view !== "full" && view !== "summary") return jsonError("invalid_view", 400);
     const changes = url.searchParams.get("changes") === "1";
     if (changes && url.searchParams.get("updated_since") === null) return jsonError("updated_since_required", 400);
+    // last_event=0:不带每行的 last_event(MCP requirements_list 默认这么调,保住 #471 的 Agent 上下文预算)。不带 / =1 = 带。
+    const lastEventParam = url.searchParams.get("last_event");
+    if (lastEventParam !== null && lastEventParam !== "0" && lastEventParam !== "1") return jsonError("invalid_last_event", 400);
+    const withLastEvent = lastEventParam !== "0";
     // changes 模式:server_time 取在读表之前,下次拿它当 updated_since,读表期间的写入不会漏(>= 会重复回一次,客户端按 id 覆盖)。
     const serverTime = new Date().toISOString();
     nodeReadNote(ctx, "GET /api/requirements", null);
@@ -1505,7 +1598,9 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
       return conditionalBody(ctx.req, cached.body, cached.etag);
     }
     const page = listPage(ctx, filtered, params, lq);
-    const rows = page.rows.map(row => toPublicFor(ctx, row));
+    // last_event(#506):每行最新一条动态(含评论),没有 = null。旧 App 不认识,忽略即可。
+    const lastEvents = withLastEvent ? lastEventsFor(ctx, page.rows) : null;
+    const rows = lastEvents ? page.rows.map(row => ({ ...toPublicFor(ctx, row), last_event: lastEvents.get(row.requirement_id) ?? null })) : page.rows.map(row => toPublicFor(ctx, row));
     // capabilities:客户端按这个决定显示哪些功能(预计完成能不能带时刻、有没有项目…),不用靠猜字段。
     // has_more / next_cursor:后面还有没有(带 cursor=next_cursor 再读一页)。旧客户端不认识,忽略即可。
     const payload: Record<string, unknown> = { ok: true, requirements: view === "summary" ? rows.map(toSummary) : rows, capabilities: REQUIREMENT_CAPABILITIES, has_more: page.hasMore, next_cursor: page.nextCursor };

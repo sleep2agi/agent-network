@@ -104,6 +104,26 @@ GET `/api/requirements/people?network_id=...` 返回当前网络的候选人：
   - 可见性在读出之后过滤，一页最多扫 5000 条；扫满还没凑够就带 `next_cursor` 返回，接着翻即可。
 - 升级 / 回滚：只新建一张表和三个索引（`CREATE … IF NOT EXISTS`）。旧 Hub 不认识这张表，也不碰它；回滚期间的改动没有流水，再升回来接着记。
 
+### 列表每行的最新动态（last_event，#506）
+
+- `GET /api/requirements`（含 `view=summary`、`changes=1`、`q=`）每行多一个字段 `last_event`（capability `last_event`）；`last_event=0` 不带（其他值 400 `invalid_last_event`）。MCP `requirements_list` **默认不带**（守住 #471 的 Agent 上下文预算，一页 50 张约多 7 KB），传 `include_last_event: true` 才带。`last_event` 是这张卡在 `requirement_events` 里**最新的一条**，评论（`kind=comment`）也算。没有流水的卡（动态上线前建的、或过了 180 天保留期）为 `null`；字段总在。
+
+  ```json
+  "last_event": {
+    "type": "comment",
+    "field": null,
+    "actor": { "id": "<user_id 或 node_id>", "kind": "user", "display_name": "示例成员" },
+    "at": "2026-10-03T08:00:00.000Z",
+    "summary": "已经复现，正在修。"
+  }
+  ```
+
+  - `type`：`created` / `changed` / `comment`（同流水的 `kind`）；`field`：`changed` 时改的字段（同流水），其余为 `null`。
+  - `actor`：`kind` 为 `user` / `node`；`display_name` 与 `GET /api/requirements/people` 的 `name` 同一规则（没设显示名时回落到用户名 / alias / node_name），找不到为 `null`。没有操作者的流水 `actor: null`。
+  - `summary`（可缺省）：评论正文（空白压成一个空格）；`column` / `priority` / `due` / `start` / `archived` / `project` / `parent` 为「旧 → 新」的原始值（如 `pool → doing`，客户端自己本地化）；`title` 为新标题；`checklist_item` 为 `[x] 文字` / `[ ] 文字`；`checklist` 为 `done/total`；`tags` 为新标签逗号分隔。最长 120 字（超出以 `…` 结尾）。人员字段（`owner` / `agent_owner` / `participants`）、`description`、`created` 不给 `summary`。
+- 可见范围同行：只为这一页（已按调用者可见范围筛过）的卡取。Agent 受限的成员：看不见的节点当操作者时 `actor: null`；人员字段的改动在隐去看不见的节点之后前后一样的，只剩 `{type:"changed", field:null}`（不给 `summary`），透露的信息与 `updatedAt` 相同。
+- 一页一次查询（`MAX(id) … GROUP BY requirement_id`，走既有索引 `idx_requirement_events_card`），再按出现的人各一次查名字；不加表、不加列、不加索引。ETag 按响应体算，所以加一条评论 / 任何一条流水，列表的 ETag 都会变（列表缓存也随写入作废）。
+
 ## 升级
 
 - 加列只加不改：`agent_owner_json`、`description`、`checklist_json`、`project_id` 都在 `db.ts` 既有的加列循环里；旧行为 NULL，读出为 `null` / `""` / `[]` / `null`。`requirement_projects` 表由 `requirements-migrate.ts` 的 `CREATE TABLE IF NOT EXISTS` 建。
