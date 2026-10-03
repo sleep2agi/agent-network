@@ -112,6 +112,15 @@ echo "$MEMBERS" | jq -e --arg u "$MEMBER_USER_ID" \
   && ok "member user joined network (role=member)" \
   || bad "member not present with role=member (add resp=$ADD_M members=$MEMBERS)"
 
+# 🔴 #2084 起新加入的成员默认 agent_access=granted(受限成员):create_node 会先被受限成员的闸
+#    拒掉(agent_access_restricted),根本走不到场景 B 要验的角色门 —— B 因此在 main 上一直红(#2283)。
+#    这里把他放开成 all,B 才是在验「member 角色不能建节点」本身;并回读确认真的放开了。
+GRANT_M=$(curl -sS -X PUT "$HUB_BASE/api/networks/$NET_ID/members/$MEMBER_USER_ID/agent-grants" -H "Authorization: Bearer $UTOK" \
+  -H 'Content-Type: application/json' -d '{"agent_access":"all","grants":[]}')
+[[ "$(echo "$GRANT_M" | jq -r .agent_access 2>/dev/null)" == "all" && "$(echo "$GRANT_M" | jq -r .restricted 2>/dev/null)" == "false" ]] \
+  && ok "member agent_access=all (not a restricted member, so B reaches the role gate)" \
+  || bad "could not lift member to agent_access=all: $GRANT_M"
+
 # ── 0.A bring up daemon (used by A + B + C + D + F + K) ───────────
 DAEMON_NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
   -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
