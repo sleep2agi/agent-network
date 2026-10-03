@@ -218,6 +218,19 @@ async function advance(ms: number): Promise<void> {
   await flushMicrotasks();
 }
 
+// Under the fake clock bun's own per-test timeout never fires, so a bare
+// `await thinking` on a promise that a mutation left unsettled would hang the
+// whole run instead of going red. Every expected outcome must already have
+// happened at the current fake time; anything else is a failure, reported now.
+async function settledNow<T>(promise: Promise<T>): Promise<T> {
+  type State = { done: false } | { done: true; value: T };
+  let state = { done: false } as State;
+  void promise.then((value) => { state = { done: true, value }; });
+  await flushMicrotasks();
+  if (!state.done) throw new Error("codexAppServerThink has not settled at the current fake time");
+  return state.value;
+}
+
 describe("codexAppServerThink — terminal-event reconciliation watchdog", () => {
   beforeEach(() => {
     jest.useFakeTimers();
@@ -242,7 +255,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     await advance(5);
     expect(evidence).toEqual([]);
     await advance(20);
-    expect((await thinking).queued).toBe(true);
+    expect((await settledNow(thinking)).queued).toBe(true);
     expect(evidence).toEqual([]);
   });
 
@@ -263,7 +276,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     bridge.emit("task_started", { taskId: "other_task", turnId: "other_turn" });
     bridge.emit("task_started", { taskId: "task_exact_evidence", turnId: "duplicate" });
     bridge.emit("task_reply", { taskId: "task_exact_evidence", text: "done" });
-    await thinking;
+    await settledNow(thinking);
     expect(evidence).toEqual([
       "submitted:task_exact_evidence",
       "consumed:task_exact_evidence",
@@ -295,7 +308,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     expect(settled).toBe(false);
     bridge.emit("task_reply", { taskId: "task_long_active", text: "finished after the original deadline" });
 
-    expect(await thinking).toEqual({
+    expect(await settledNow(thinking)).toEqual({
       replyText: "finished after the original deadline",
       failed: false,
       queued: false,
@@ -319,7 +332,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       bridge.emit("task_activity", { taskId: "different_task", turnId: "turn_other", kind: "agent_delta" });
     }
 
-    const result = await thinking;
+    const result = await settledNow(thinking);
     expect(result.failed).toBe(true);
     expect(result.replyText).toContain("无活动");
   });
@@ -343,7 +356,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       // Let a deliberately broken mutation settle and clear its timers so the
       // suite reports the assertion instead of waiting for the queue deadline.
       bridge.emit("task_reply", { taskId: bridge.taskId, text: "test cleanup" });
-      await thinking;
+      await settledNow(thinking);
     }
 
     expect(observed.kind).toBe("result");
@@ -368,7 +381,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
 
     await advance(80);
     bridge.emit("task_reply", { taskId: "task_never_starts", text: "late ghost" });
-    const result = await thinking;
+    const result = await settledNow(thinking);
     expect(result.failed).toBe(true);
     expect(result.queued).toBe(true);
     expect(result.replyText).toContain("在队列中等待 1 秒仍未开始");
@@ -394,7 +407,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     });
     await advance(80);
     bridge.emit("task_reply", { taskId: "task_event_lost", text: "late after lost event" });
-    const result = await thinking;
+    const result = await settledNow(thinking);
     expect(result.failed).toBe(true);
     expect(result.queued).toBe(false);
     expect(result.replyText).toContain("开始处理后");
@@ -425,7 +438,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       const lateReply = setTimeout(() => {
         bridge.emit("task_reply", { taskId, text: "ghost execution completed" });
       }, 260);
-      const result = await thinking;
+      const result = await settledNow(thinking);
       clearTimeout(lateReply);
       expect(result.failed).toBe(true);
       expect(result.queued).toBe(true);
@@ -457,7 +470,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     await advance(15);
     bridge.emit("task_reply", { taskId: "task_waits_then_starts", text: "done" });
 
-    expect(await thinking).toEqual({ replyText: "done", failed: false, queued: false });
+    expect(await settledNow(thinking)).toEqual({ replyText: "done", failed: false, queued: false });
   });
 
   test("another task starting cannot arm this task's timeout", async () => {
@@ -478,7 +491,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
     bridge.emit("task_started", { taskId: "task_still_queued", turnId: "turn_mine" });
     await advance(55);
     bridge.emit("task_reply", { taskId: "task_still_queued", text: "too late" });
-    const result = await thinking;
+    const result = await settledNow(thinking);
     expect(result.failed).toBe(true);
     expect(result.replyText).toContain("任务 task_still_queued 超时");
   });
@@ -496,7 +509,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       log: (line) => logs.push(line),
     });
     await advance(5);
-    const result = await thinking;
+    const result = await settledNow(thinking);
 
     expect(result).toEqual({
       replyText: "recovered-by-watchdog",
@@ -520,7 +533,7 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       reconciliationIntervalMs: 5,
     });
     await advance(5);
-    await thinking;
+    await settledNow(thinking);
     expect(bridge.submitted).toMatchObject({
       taskId: "task_dashboard",
       text: "follow-up",
