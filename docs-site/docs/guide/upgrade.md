@@ -30,6 +30,12 @@ anet upgrade --dry-run
 `--dry-run` 只解析目标版本并打印动作，不安装任何包。默认沿用当前 CLI 的发布通道；
 只有明确要切换时才加 `--channel latest` 或 `--channel preview`。
 
+当前通道按已装 anet 版本与 npm dist-tags 比对得出（`latest` 本身也是 `-preview.N` 形式的版本号，
+所以不能只看版本号后缀）：等于 `latest` 指向的版本或是正式版 → `latest`；等于 `preview` 指向的版本、
+或比 `latest` 更新 → `preview`；比 `latest` 旧 → 留在 `latest`。版本号无法解析、或是预发布版本却查不到 dist-tags
+时，`anet upgrade` 直接拒绝并提示用 `--channel` 指定，不会替你猜。开始安装前会打印
+`Channel:` 一行（含判定依据）和 `Will install from the <通道> channel:` 下要装的每个包的确切版本。
+
 ## 2. 停止 Hub 并备份
 
 先停止真正管理 Hub 的进程管理器。前台运行可用 `Ctrl-C`；PM2/systemd 部署应使用

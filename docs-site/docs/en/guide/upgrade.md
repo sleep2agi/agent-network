@@ -32,6 +32,16 @@ anet upgrade --dry-run
 current CLI channel is kept by default. Use `--channel latest` or
 `--channel preview` only when you intentionally want to switch channels.
 
+The current channel is decided by comparing the installed anet version with the
+npm dist-tags (the `latest` build itself carries a `-preview.N` version, so the
+suffix alone says nothing): equal to the `latest` version or a stable release →
+`latest`; equal to the `preview` version or newer than `latest` → `preview`;
+older than `latest` → stays on `latest`. If the installed version cannot be
+parsed, or it is a prerelease and the dist-tags cannot be fetched, `anet upgrade` refuses and asks you to
+pass `--channel` instead of guessing. Before installing it prints a `Channel:`
+line (with the reason) and, under `Will install from the <channel> channel:`, the
+exact version of every package it will install.
+
 ## 2. Stop the Hub and back up state
 
 Stop the supervisor that actually owns the Hub. Use `Ctrl-C` for a foreground
