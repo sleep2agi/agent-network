@@ -301,7 +301,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "commhub_reply",
-      description: "Reply to a Dashboard/UI-originated CommHub task. For an agent sender use commhub_send_peer_reply instead (this does NOT wake agent peers). status=\"completed\" (terminal) routes to send_reply, closes the task and emits new_reply SSE for the live Dashboard; non-terminal status (in_progress/blocked/error) only updates session status (report_status) and does NOT reach the Dashboard.",
+      description: "Reply to a Dashboard/UI task. For an agent sender use commhub_send_peer_reply (this does NOT wake agents). status=\"completed\" closes the task via send_reply and reaches the live Dashboard; in_progress/blocked/error only update session status and do NOT reach it.",
       inputSchema: {
         type: "object" as const,
         properties: {
