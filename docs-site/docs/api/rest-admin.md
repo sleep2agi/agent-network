@@ -120,7 +120,7 @@ curl http://localhost:9200/api/auth/tokens \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-撤销 Token（hub 端立即吊销，跟 `anet logout` 仅本机清 token 区别开）。
+撤销 Token（hub 端立即吊销）。`anet logout` 撤销的是当前**登录会话**（走 [`DELETE /api/auth/sessions/:token_id`](/api/rest#sessions)），不撤显式 API token。
 
 ```bash
 curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \

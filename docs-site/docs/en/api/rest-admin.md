@@ -120,7 +120,7 @@ The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
 
-Revoke a token (immediate server-side invalidation — distinct from `anet logout` which only clears the local token).
+Revoke a token (immediate server-side invalidation). `anet logout` revokes the current **login session** instead (via [`DELETE /api/auth/sessions/:token_id`](/en/api/rest#sessions)) and does not revoke explicit API tokens.
 
 ```bash
 curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
