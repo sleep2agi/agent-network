@@ -20,10 +20,12 @@ stateDiagram-v2
 
     acked --> running: report_status(working)
     acked --> cancelled: cancel_task
+    acked --> expired: no activity for N hours (patrol, off by default)
 
     running --> replied: send_reply(replied) / report_completion
     running --> failed: send_reply(failed)
     running --> cancelled: cancel_task
+    running --> expired: no activity for N hours (patrol, off by default)
 
     replied --> [*]
     failed --> delivered: retry_task
@@ -152,7 +154,7 @@ Expiry is not real-time. By default, a patrol runs every five minutes and marks 
 
 Implications:
 - The actual status flip can lag `expires_at` by up to ~5 minutes
-- **A task that's already `acked` or `running` is never auto-expired** — the agent has picked it up, so the patrol leaves it alone even past its TTL (that's why the state diagram has no `acked → expired` edge). To kill a stuck `running` task, use [`cancel_task`](/en/api/mcp-tools#cancel-task)
+- **A task that's already `acked` or `running` does not expire by TTL** — the agent has picked it up, so the patrol leaves it alone even past its TTL. To kill a stuck `running` task, use [`cancel_task`](/en/api/mcp-tools#cancel-task). The exception is the [stale started tasks](#stale-started-tasks) rule below, which is off by default
 - **A task the node already took is not expired either** (#500): if the status is still `delivered` but `consumed_at` is earlier than `expires_at` (the runtime already started a turn on it), the patrol leaves it for the node to finish. A `consumed_at` stamped after the deadline (a late receipt) does not count
 :::
 
@@ -171,6 +173,24 @@ After the patrol commits the `expired` status, the Hub tells **whoever dispatche
 - Rate limit: within one patrol pass, one (sender, target) pair gets **one** notice. Several expiries are merged into one summary that lists every task id.
 - Child tasks: when a child task expires, the parent task's sender gets one "sub-task expired" notice. **The parent's status and `result` are not changed**, because its assignee may still be working. This differs from a child **reply**, which `chainReplyToParent` uses to move the parent to a terminal status.
 - Each notice writes one `task_events` row with `event_type=task.expiry_notice` (no extra `task.expired` row).
+- "Older unfinished tasks on the target" counts only tasks dispatched **within the last 24 hours** (the same rule as `queue_ahead` in the dispatch response). Older rows that are still open are almost all abandoned and are not a queue.
+
+### Stale started tasks
+
+Once a task is acked, it ends only when its assignee sends a terminal result with that task_id (`send_reply` / `report_completion` / `cancel_task`). When the assignee never closes it (for example it answered the peer with `send_task` but never called `commhub_reply` on the original, or the runtime restarted mid-turn), the task stays `acked` / `running` forever and shows under "running" in the App as "N days".
+
+Set `COMMHUB_STALE_OPEN_TASK_HOURS=<N>` (**default `0` = off**, recommended `72`) and every patrol pass also does this:
+
+- A task in `acked` or `running` whose **latest activity** is older than N hours becomes `expired`. `completed_at` is set to now and `result` (when empty) to `stale: no activity for <N>h (was <old status>) — closed by hub patrol (#519)`.
+- "Latest activity" is the latest of `created_at`, `delivered_at`, `started_at`, `consumed_at`, `runtime_submitted_at` and the task's newest `task_events` row. A task that is still moving (the runtime just took it, or an event was just recorded) is left alone.
+- At most **500** tasks per pass, oldest first. A backlog drains over several passes (one every 5 minutes).
+- `task_events` gets one row with `event_type=task.stale_expired` (`from_status` is the old status), and no extra `task.expired` row. The task's inbox rows are marked acknowledged.
+- **The sender is not notified** and the parent task is not touched. In most cases the sender already got its answer through another message, and a notice days later is only noise.
+- A later `send_reply` to the task is rejected like any reply to a terminal task: `reply_task_terminal`. Use `retry_task` to deliver it again.
+
+::: warning Estimate the backlog before turning it on
+The first pass after you turn it on closes every historical `acked` / `running` row older than N hours (500 per pass). On a shared Hub, count how many rows that is on a **copy** of the database before deciding.
+:::
 
 ## Retry Mechanism
 

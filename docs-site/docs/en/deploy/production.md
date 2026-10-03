@@ -115,6 +115,22 @@ At minimum, monitor:
 - the Dashboard Audit Log
 - whether a reliable process manager supervises the Hub
 
+### 8. Close started tasks that went stale (optional)
+
+`COMMHUB_STALE_OPEN_TASK_HOURS` (put it in `~/.commhub/hub.env`): tasks in `acked` / `running` with no activity for this many hours are ended as `expired` by the patrol that runs every 5 minutes (at most 500 per pass, the sender is not notified). **Default `0`, off**; recommended `72`. See [Task lifecycle](/en/concepts/task-lifecycle#stale-started-tasks) for the exact rule.
+
+Before turning it on, estimate how many historical rows it will close, on a copy of the database (open the original read-only and write the copy; the SQL below is an approximation that ignores `task_events`):
+
+```bash
+sqlite3 'file:'"$HOME"'/.commhub/commhub.db?mode=ro' ".backup '/tmp/hub-copy.db'"
+sqlite3 /tmp/hub-copy.db "SELECT status, COUNT(*) FROM tasks
+  WHERE status IN ('acked','running')
+    AND COALESCE(consumed_at, runtime_submitted_at, started_at, delivered_at, created_at) < datetime('now','-72 hours')
+  GROUP BY status;"
+```
+
+Rows ÷ 500 ≈ the number of patrol passes needed to drain them (5 minutes apart). To turn it off, remove the line or set it to `0` and restart the Hub. Tasks already closed stay closed.
+
 For long-running service and reboot recovery, see [Keeping the Hub running](/en/deploy/keep-alive). To move the whole Hub to another machine, see [Moving the Hub](/en/deploy/hub-migration).
 
 ## Deployment modes

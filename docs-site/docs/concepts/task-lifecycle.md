@@ -20,10 +20,12 @@ stateDiagram-v2
 
     acked --> running: report_status(working)
     acked --> cancelled: cancel_task
+    acked --> expired: 无动静超过 N 小时（巡检，默认关闭）
 
     running --> replied: send_reply(replied) / report_completion
     running --> failed: send_reply(failed)
     running --> cancelled: cancel_task
+    running --> expired: 无动静超过 N 小时（巡检，默认关闭）
 
     replied --> [*]
     failed --> delivered: retry_task
@@ -152,7 +154,7 @@ expires_at = datetime('now', '+3600 seconds')
 
 含义：
 - 实际状态翻转最多比 `expires_at` 晚 ~5 分钟
-- **已经 `acked` 或 `running` 的任务不会被自动过期** —— agent 已经接手了，即使超过 TTL patrol 也不动它（所以状态机图里没有 `acked → expired` 边）。要终止一个卡住的 `running` 任务用 [`cancel_task`](/api/mcp-tools#cancel-task)
+- **已经 `acked` 或 `running` 的任务不会因为 TTL 过期** —— agent 已经接手了，即使超过 TTL patrol 也不动它。要终止一个卡住的 `running` 任务用 [`cancel_task`](/api/mcp-tools#cancel-task)。例外是下面的[「长时间无动静的已开工任务」](#长时间无动静的已开工任务)规则，它默认关闭
 - **节点已经取走的任务也不会被过期**(#500):状态还是 `delivered`、但 `consumed_at` 早于 `expires_at`(运行时已经把它带进一轮对话)的任务,patrol 不动它,留给节点做完。`consumed_at` 晚于期限(迟到的回执)不算
 :::
 
@@ -171,6 +173,24 @@ patrol 把任务改成 `expired` 之后(事务提交后),Hub 会告诉**派活�
 - 限流:同一次 patrol 里,同一个(发送方, 目标)只发**一条**,多条过期合并成一条摘要(列出每个 task id)。
 - 子任务过期:父任务的发送方收到一条「子任务已过期」;**父任务的状态和 `result` 不变**(执行者可能还在干活)。这一点与子任务**回复**不同 —— 子任务回复会经 `chainReplyToParent` 把父任务改成终态。
 - 每次通知在 `task_events` 记一行 `event_type=task.expiry_notice`(不会多出一条 `task.expired`)。
+- 「目标上还有几个比它早且未结束的任务」只数**最近 24 小时内**派出的(与派活响应里的 `queue_ahead` 同一口径)。更早的还开着的行几乎都是被遗弃的,不算排队。
+
+### 长时间无动静的已开工任务
+
+任务被 ack 之后,只有执行者带着这个 task_id 回终态(`send_reply` / `report_completion` / `cancel_task`)才会结束。执行者没收尾时(例如用 `send_task` 回了对方、却没有对原任务 `commhub_reply`;或者运行时重启丢了那一轮),任务会一直停在 `acked` / `running`,在 App 的「正在运行」里显示「N 天」。
+
+设置 `COMMHUB_STALE_OPEN_TASK_HOURS=<N>`(**默认 `0` = 关闭**,建议值 `72`)后,patrol 每次运行时还会做一件事:
+
+- 状态是 `acked` 或 `running`,且**最近一次动静**早于 N 小时前的任务,改为 `expired`,`completed_at` 记当时,`result`(原来为空时)写 `stale: no activity for <N>h (was <原状态>) — closed by hub patrol (#519)`。
+- 「最近一次动静」取 `created_at`、`delivered_at`、`started_at`、`consumed_at`、`runtime_submitted_at` 和这条任务最新一条 `task_events` 中最晚的那个。还在推进的任务(运行时刚取走、刚记过事件)不会被碰。
+- 每次 patrol 最多结束 **500** 条,最老的先结束;积压分多次排空(每 5 分钟一次)。
+- `task_events` 记一行 `event_type=task.stale_expired`(`from_status` 是原状态),不会多出一条 `task.expired`。任务的 inbox 行同时置为已确认。
+- **不通知派活的一方**,也不改父任务。多数情况下对方早已通过别的消息拿到了答复,几天后再来一条通知只是噪音。
+- 之后再对这条任务 `send_reply`,会和对任何终态任务一样被拒绝:`reply_task_terminal`。需要再做就用 `retry_task` 重新投递。
+
+::: warning 打开前先估算积压
+第一次打开时,所有早于 N 小时、还停在 `acked` / `running` 的历史行都会被结束(每次 500 条)。在共享的 Hub 上,先在数据库**副本**上数一下会关掉多少行,再决定是否打开。
+:::
 
 ## 重试机制
 
