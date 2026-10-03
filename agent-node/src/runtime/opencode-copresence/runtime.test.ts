@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { spawn, spawnSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import { runtimeErrorReplyText } from "../unverified-reply-text";
 import {
   linuxProcessGroupIsGone,
@@ -587,12 +587,18 @@ describe("OpenCode copresence task deadline", () => {
       let thrown: any;
       try { await runtime.submit("long build", 400); } catch (error) { thrown = error; }
       const elapsed = Date.now() - started;
+      const traceAtThrow = readFileSync(log, "utf8");
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
       expect(thrown.phase).toBe("reply");
       expect(thrown.timeoutMs).toBe(400);
       // One budget for the task, not per phase, and not the old 300s.
       expect(elapsed).toBeGreaterThanOrEqual(380);
-      expect(elapsed).toBeLessThan(2_000);
+      // The bridge stopped waiting while the turn was still running. This
+      // used to be `elapsed < 2_000` against a 2_500 ms fake turn, a
+      // wall-clock margin an overloaded runner can eat (#517); the fake's own
+      // trace orders the two events causally instead.
+      expect(traceAtThrow).toContain("POST /session/ses_test123/message");
+      expect(traceAtThrow).not.toContain("TURN_DONE");
       // The CommHub reply is the truthful wording, not "opencode 错误: ...aborted".
       const reply = runtimeErrorReplyText("opencode", thrown);
       expect(reply).toBe(thrown.userReplyText);
@@ -627,6 +633,32 @@ describe("OpenCode copresence task deadline", () => {
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
       expect(thrown.phase).toBe("admission");
       expect(runtimeErrorReplyText("opencode", thrown)).toContain("opencode 任务未提交");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 20_000);
+
+  test("its own deadline is recognised by the abort signal, not by the wall clock (#517)", async () => {
+    // Bun's AbortSignal.timeout and Date.now() are different clocks: the
+    // signal routinely fires up to 1 ms before Date.now() reaches the same
+    // deadline. When the POST rejection was classified by
+    // `Date.now() >= deadline`, that window let a bare DOMException
+    // "TimeoutError: The operation timed out" escape (CI run 37127942901).
+    // Freezing Date.now() makes the window as wide as the whole turn, so the
+    // misclassification is red on every run rather than a rare flake.
+    const { f, runtime } = await open({ FAKE_TURN_MS: "2000" });
+    try {
+      let thrown: any;
+      setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+      try {
+        try { await runtime.submit("deadline under a frozen clock", 300); } catch (error) { thrown = error; }
+      } finally {
+        setSystemTime();
+      }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      expect(thrown.timeoutMs).toBe(300);
     } finally {
       await runtime.close();
       f.close();
