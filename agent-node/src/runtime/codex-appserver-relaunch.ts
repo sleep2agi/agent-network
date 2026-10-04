@@ -19,7 +19,8 @@ import { chmodSync, existsSync, readFileSync, readlinkSync, unlinkSync, writeFil
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { envVarFromEnviron, verifyProcessTreeCodexHome, type ProcReader } from "../codex-home-enforce";
-import { parseTmuxPanes } from "./codex-health";
+import { parseTmuxPanes, TMUX_PANE_LIST_ARGS } from "./codex-health";
+import { parseTmuxRows, tmuxListArgs } from "../tmux-format";
 
 export interface AppServerLaunchSnapshot {
   session: string;
@@ -52,7 +53,7 @@ export function appsrvSessionFor(tuiSession: string): string {
 
 export function listTmuxPanes(): string | null {
   try {
-    return execTmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}"], {
+    return execTmux(TMUX_PANE_LIST_ARGS, {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000,
     });
   } catch { return null; }
@@ -61,11 +62,18 @@ export function listTmuxPanes(): string | null {
 export function tmuxSessionId(name: string): string | null {
   let out: string;
   try {
-    out = execTmux(["list-sessions", "-F", "#{session_id}\t#{session_name}"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
+    out = execTmux(TMUX_SESSION_ID_LIST_ARGS, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
   } catch { return null; }
-  for (const line of out.split("\n")) {
-    const tab = line.indexOf("\t");
-    if (tab > 0 && line.slice(tab + 1) === name) return line.slice(0, tab);
+  return sessionIdFor(out, name);
+}
+
+/** argv for `execTmux`: `-u list-sessions -F '#{session_id}|ANETSEP|#{session_name}'` (#556). */
+export const TMUX_SESSION_ID_LIST_ARGS: readonly string[] = tmuxListArgs(["list-sessions"], ["#{session_id}", "#{session_name}"]);
+
+/** TMUX_SESSION_ID_LIST_ARGS 的输出里,名字逐字等于 `name` 的那个会话的 id(旧 TAB 行仍认)。 */
+export function sessionIdFor(out: string, name: string): string | null {
+  for (const [id, session] of parseTmuxRows(out, 2)) {
+    if (id && session === name) return id;
   }
   return null;
 }

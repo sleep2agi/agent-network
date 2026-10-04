@@ -27,6 +27,7 @@ on:
       - 'docs/qa/**'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test556-node-tmux-format-locale/**'
       - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test505-tmux-socket-isolation/**'
@@ -221,6 +222,7 @@ on:
       - 'scripts/qa.sh'
       - '.github/workflows/qa.yml'
       - 'tests/test725-agent-node-unit-ci/**'
+      - 'tests/test556-node-tmux-format-locale/**'
       - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test505-tmux-socket-isolation/**'
@@ -562,6 +564,20 @@ jobs:
 
       - name: Run complete agent-node unit domain
         run: docker run --rm anet-test725-agent-node-unit
+
+      # #556 —— agent-node 那半边的 #533:非 UTF-8 locale(LANG=C)下 tmux 把 -F 输出里的 TAB 和中文会话名
+      # 的每个字节都换成 `_`,codex-health 因此把中文名的共存 TUI 判成 session-missing、app-server 重启拿不到
+      # 会话 id。私有 socket 上起真 tmux + 中文会话,LANG=C 调真的 probeTmuxTui / tmuxSessionId,
+      # 并把去掉 `-u` 的变异件喂进去断言它必红。只依赖 node: 内建,不装 npm 依赖。
+      - name: Build test556-node-tmux-format-locale
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test556-node-tmux-format-locale \
+            -f tests/test556-node-tmux-format-locale/Dockerfile .
+
+      - name: Run test556-node-tmux-format-locale
+        run: docker run --rm --network none anet-test556-node-tmux-format-locale
 
   test1755-rules-file-e2e:
     # app#225 —— 节点规则文件(CLAUDE.md/AGENTS.md)端到端:真 hub + 真 agent-node

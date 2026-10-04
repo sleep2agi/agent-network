@@ -15,6 +15,7 @@
 // matching unrelated shells.
 
 import { execTmux } from "../../tmux";
+import { tmuxUtf8Args } from "../../tmux-format";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -114,7 +115,8 @@ function placeholderCommand(): string {
 
 function paneField(tmux: TmuxRunner, pane: string, field: string): string | undefined {
   try {
-    return tmux(["display-message", "-p", "-t", pane, `#{${field}}`]).trim();
+    // `-u`: outside a UTF-8 locale tmux rewrites every non-ASCII byte of the value to `_` (#556).
+    return tmux(tmuxUtf8Args(["display-message", "-p", "-t", pane, `#{${field}}`])).trim();
   } catch {
     return undefined;
   }
