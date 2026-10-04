@@ -264,3 +264,37 @@ export function resolveOpencodePackageBinaryFromPath(
   const detail = rejected[0] ? `; first rejected candidate: ${rejected[0]}` : "";
   throw new Error(`no trusted exact opencode-ai package entrypoint found on PATH${detail}`);
 }
+
+/**
+ * Board #541 — resolve the first trusted package entrypoint matching any of
+ * `acceptedVersions`, trying each version across the whole PATH in order (the
+ * release pin first), and report which exact version was admitted. Every
+ * candidate still goes through the full `validateOpencodePackageBinary`
+ * identity gate; only the accepted version set is wider. When nothing matches,
+ * the error from the first (release-pin) attempt is rethrown so diagnostics
+ * keep naming the pin the operator should install.
+ */
+export function resolveAcceptedOpencodePackageBinaryFromPath(
+  searchPath: string,
+  options: Omit<ValidateOpencodePackageBinaryOptions, "expectedVersion"> & {
+    acceptedVersions: readonly string[];
+  },
+  platform: NodeJS.Platform = process.platform,
+): { binary: string; version: string } {
+  if (options.acceptedVersions.length === 0) {
+    throw new Error("no accepted opencode versions configured");
+  }
+  let firstError: unknown;
+  for (const version of options.acceptedVersions) {
+    try {
+      const binary = resolveOpencodePackageBinaryFromPath(searchPath, {
+        expectedVersion: version,
+        forbiddenRoots: options.forbiddenRoots,
+      }, platform);
+      return { binary, version };
+    } catch (error) {
+      if (firstError === undefined) firstError = error;
+    }
+  }
+  throw firstError;
+}

@@ -59,7 +59,7 @@ try:
             fail("interrupted helper unexpectedly exited zero")
         assert_plugin_absent("interrupted helper exit")
     else:
-        # OpenCode 1.18.1 renders this through OpenTUI. Sending the full line
+        # OpenCode 1.18.34 renders this through OpenTUI. Sending the full line
         # in the same PTY chunk as the prompt match can be consumed as an
         # empty submit; model a human keystroke cadence instead, without ever
         # attaching a logfile or printing the buffer/key.

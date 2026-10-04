@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Pin opencode to the exact version RFC-029 PR② verified against.
-ARG OPENCODE_VERSION=1.18.1
+ARG OPENCODE_VERSION=1.18.34
 RUN npm i -g "opencode-ai@${OPENCODE_VERSION}" --silent \
     && test "$(opencode --version)" = "${OPENCODE_VERSION}"
 

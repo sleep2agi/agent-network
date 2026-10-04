@@ -92,11 +92,11 @@ OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可�
 
 ## 安全与生命周期
 
-- OpenCode 版本严格固定为 `opencode-ai@1.18.1`。
+- OpenCode 版本严格固定为 `opencode-ai@1.18.34`(#541 从 `1.18.1` 升上来)。过渡期内已装 `1.18.1` 的主机仍可启动,启动时打印一行升级提示;升级命令 `anet opencode upgrade-pin 1.18.34`(或 `npm install -g opencode-ai@1.18.34`),装好后下次 start 自动用新版本。其他任何版本(含 OpenCode 2 `@opencode/cli`)一律拒绝。
 - 版本探针不接触 vendor credential；通过包身份校验后才生成一次性运行环境。
 - TUI launcher 位于节点私有目录，mode 必须为 `0700`；它包含本次启动的 loopback 密码和 CommHub token export，不得复制、打印或提交。serve/attach 子进程也通过环境变量持有这些 secret；同 UID 用户与 root 可经 `/proc/<pid>/environ` 或进程环境读取，因此安全边界是“同 UID + 私有目录”，不是 secret 不进入 `/proc`/tmux 环境。
 - CommHub token 只通过每节点私有环境变量交给 OpenCode；MCP 配置正文只保存 `{env:...}` 引用，不内嵌 token。每个节点必须独占自己的启动环境，不能共用 attach launcher 或 server。
-- 安全模式固定 OpenCode 1.18.1，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。若未来放宽版本 pin，必须同时重新验证 wildcard 优先级并恢复可证明的默认 deny（或重新生成完整内建 deny 列表），不得直接沿用当前逐项列表。
+- 安全模式固定 OpenCode 1.18.34(过渡期兼容 1.18.1)，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。若未来放宽版本 pin，必须同时重新验证 wildcard 优先级并恢复可证明的默认 deny（或重新生成完整内建 deny 列表），不得直接沿用当前逐项列表。1.18.1 → 1.18.34 已按源码逐项比对(#541):环境变量开关、config 路径/managed config/指令发现、permission 模块、内建工具集合、serve/attach 参数与 session REST 路由均未变,逐项 deny 列表可沿用。
 - server 使用 detached process group；停止前复核 PID、PGRP、Linux start ticks，身份漂移时拒绝误杀。
 - `SIGINT`、`SIGTERM` 和 tmux 关闭 pane 使用的 `SIGHUP` 全部进入同一 cleanup；少了 `SIGHUP` 会在 `tmux kill-session` 后遗留 detached server。
 - 启动桥时显式传递 PATH、`ANET_AGENT_NODE_BIN` 和可选 `ANET_OPENCODE_SAFE_BASE`，不能依赖长期 tmux server 的陈旧环境。
@@ -165,4 +165,4 @@ sg docker -c 'docker rmi anet-test228:dev'
 ## 接第三方 OpenAI 兼容网关(2026-09-17 实测)
 
 安全模式下 `renderSafeRuntimeConfig`(`agent-node/src/runtime/opencode-acp/child-env.ts`)只保留 `anthropic`/`openai` 两个 provider id 且 `options` 清空,子进程 env 白名单不含 `OPENAI_BASE_URL`;节点目录里的 `opencode.json` 加 baseURL 会在下次 start 被丢掉。可行路径:`flags.opencodeUnsafeTools=true`(不再设 `OPENCODE_DISABLE_PROJECT_CONFIG`,工作区根目录 `opencode.json` 生效)+ `provider.anthropic.options.baseURL` + `provider.anthropic.models.<model>` + `--model anthropic/<model>`。`openai` preset 走 Responses API,兼容网关通常 500;自定义 provider id 被凭据白名单剥掉;内置 id 的 `npm` 不可覆盖。
-部署前置:`opencode-ai@1.18.1` 装在 umask 0022 的独立前缀;无 `/run/user/<uid>` 时用 `ANET_OPENCODE_SAFE_BASE` 指 0700 且父目录不带组写位、不在 `$HOME` 下的目录;agent-node 必须是所用 anet 的精确配对版本。
+部署前置:`opencode-ai@1.18.34` 装在 umask 0022 的独立前缀;无 `/run/user/<uid>` 时用 `ANET_OPENCODE_SAFE_BASE` 指 0700 且父目录不带组写位、不在 `$HOME` 下的目录;agent-node 必须是所用 anet 的精确配对版本。

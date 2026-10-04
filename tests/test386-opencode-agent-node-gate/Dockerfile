@@ -26,7 +26,7 @@ RUN mkdir -p /home/bun/prefix /home/bun/project /home/bun/probe \
 USER bun
 RUN umask 0002 \
   && cd /home/bun/prefix \
-  && HOME=/home/bun bun add --exact opencode-ai@1.18.1 \
+  && HOME=/home/bun bun add --exact opencode-ai@1.18.34 \
   && chmod -R g+w /home/bun/prefix \
   && mkdir -p /home/bun/.config /home/bun/.local/share \
       /home/bun/.cache /home/bun/.local/state

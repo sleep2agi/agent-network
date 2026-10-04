@@ -3,7 +3,7 @@ FROM node:22-bookworm-slim
 # 这些镜像里 npm 只负责装依赖,供应链检查另有门(check-supply-chain),关掉 audit/fund 不改变任何判据。
 ENV npm_config_audit=false npm_config_fund=false
 
-ARG OPENCODE_VERSION=1.18.1
+ARG OPENCODE_VERSION=1.18.34
 # 🔴 故意留空:下面 line 72-73 把这两个 ARG 灌进 ENV *_UNDER_TEST,而 run.sh 用
 #    ${*_UNDER_TEST:-<从源码常量派生>}。ARG 一旦有硬编码默认值,ENV 就永远非空,
 #    run.sh 的派生分支永远不会执行 —— 那个"改成派生"的修改会是一次空转,而且

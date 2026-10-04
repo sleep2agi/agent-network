@@ -2,8 +2,8 @@
 # `opencode-cli` runtime + pin-check behavior. No think(), no real
 # opencode turn (PR② does that). Two scenarios in one container:
 #   A. opencode NOT installed → `anet node start` clear error
-#      pointing at `npm install -g opencode-ai@1.18.1`.
-#   B. opencode-ai@1.18.1 installed → `assertStartCompatibility`
+#      pointing at `npm install -g opencode-ai@1.18.34`.
+#   B. opencode-ai@1.18.34 installed → `assertStartCompatibility`
 #      passes, `anet node start` hands off to agent-node which
 #      immediately hits the PR① `processTask` stub returning a
 #      clear "not yet implemented (RFC-029 PR②)" reply.

@@ -14,7 +14,41 @@ import {
 } from "fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 
-export const OPENCODE_DEFAULT_PIN = "1.18.1";
+export const OPENCODE_DEFAULT_PIN = "1.18.34";
+
+/**
+ * Board #541 — earlier release pins still accepted for one transition window,
+ * so a host holding the previous exact install keeps working after upgrading
+ * the anet/agent-node pair. Must stay byte-identical to agent-network's
+ * `OPENCODE_TRANSITION_VERSIONS`; the launcher prints the upgrade note.
+ */
+export const OPENCODE_TRANSITION_VERSIONS: readonly string[] = Object.freeze(["1.18.1"]);
+
+/** Release pin first, then transition versions. */
+export const OPENCODE_ACCEPTED_VERSIONS: readonly string[] = Object.freeze([
+  OPENCODE_DEFAULT_PIN,
+  ...OPENCODE_TRANSITION_VERSIONS.filter((version) => version !== OPENCODE_DEFAULT_PIN),
+]);
+
+export function isAcceptedOpencodeVersion(version: string): boolean {
+  return OPENCODE_ACCEPTED_VERSIONS.includes(version);
+}
+
+/** One-line upgrade note when a transition version was admitted, else null. */
+export function opencodeTransitionNote(version: string): string | null {
+  if (version === OPENCODE_DEFAULT_PIN || !OPENCODE_TRANSITION_VERSIONS.includes(version)) return null;
+  return (
+    `opencode-ai@${version} is the previous release pin and is still accepted for now; ` +
+    `upgrade to the vetted opencode-ai@${OPENCODE_DEFAULT_PIN} with: anet opencode upgrade-pin ${OPENCODE_DEFAULT_PIN}`
+  );
+}
+
+function unsupportedOpencodeVersion(version: string): Error {
+  return new Error(
+    `unsupported opencode version ${version}; this agent-node is vetted only for ` +
+    `opencode-ai@${OPENCODE_DEFAULT_PIN} (transition: ${OPENCODE_TRANSITION_VERSIONS.join(", ") || "none"})`,
+  );
+}
 
 const WORKSPACE_ROOT_MARKERS = [
   ".git",
@@ -324,13 +358,21 @@ function commandFromPath(name: string, searchPath: string): string {
 export function resolvePinnedOpencodeBinaryAttestation(
   opts: ResolvePinnedOpencodeBinaryOptions = {},
 ): PinnedOpencodeBinaryAttestation {
-  const expectedVersion = opts.expectedVersion ?? OPENCODE_DEFAULT_PIN;
-  if (expectedVersion !== OPENCODE_DEFAULT_PIN) {
-    throw new Error(
-      `unsupported opencode version ${expectedVersion}; this agent-node is vetted only for ` +
-      `opencode-ai@${OPENCODE_DEFAULT_PIN}`,
-    );
+  if (opts.expectedVersion === undefined) {
+    // No launcher-selected version (direct agent-node start): admit the
+    // release pin, else a transition version, each through the full gate.
+    let firstError: unknown;
+    for (const version of OPENCODE_ACCEPTED_VERSIONS) {
+      try {
+        return resolvePinnedOpencodeBinaryAttestation({ ...opts, expectedVersion: version });
+      } catch (error) {
+        if (firstError === undefined) firstError = error;
+      }
+    }
+    throw firstError;
   }
+  const expectedVersion = opts.expectedVersion;
+  if (!isAcceptedOpencodeVersion(expectedVersion)) throw unsupportedOpencodeVersion(expectedVersion);
 
   let candidate: string;
   if (opts.requestedBinary) {
@@ -383,13 +425,8 @@ export function revalidatePinnedOpencodeBinary(
   attestation: PinnedOpencodeBinaryAttestation,
   opts: RevalidatePinnedOpencodeBinaryOptions = {},
 ): string {
-  const expectedVersion = opts.expectedVersion ?? OPENCODE_DEFAULT_PIN;
-  if (expectedVersion !== OPENCODE_DEFAULT_PIN) {
-    throw new Error(
-      `unsupported opencode version ${expectedVersion}; this agent-node is vetted only for ` +
-      `opencode-ai@${OPENCODE_DEFAULT_PIN}`,
-    );
-  }
+  const expectedVersion = opts.expectedVersion ?? attestation.expectedVersion;
+  if (!isAcceptedOpencodeVersion(expectedVersion)) throw unsupportedOpencodeVersion(expectedVersion);
   if (attestation.expectedVersion !== expectedVersion) {
     throw new Error("resolved opencode attestation version changed after probe");
   }

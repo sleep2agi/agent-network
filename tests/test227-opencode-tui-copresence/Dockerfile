@@ -1,6 +1,6 @@
 FROM oven/bun:1.3.1
 
-ARG OPENCODE_VERSION=1.18.1
+ARG OPENCODE_VERSION=1.18.34
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl jq nodejs npm procps tmux && \
     rm -rf /var/lib/apt/lists/* && \

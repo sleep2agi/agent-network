@@ -26,7 +26,7 @@ RUN mkdir -p /harness/mock-global/node_modules/opencode-ai/bin \
   && cat > /harness/mock-global/node_modules/opencode-ai/bin/opencode.exe <<'SH'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--version" ]]; then
-  echo "1.18.1"
+  echo "1.18.34"
   exit 0
 fi
 exec node /harness/mock-opencode.mjs
@@ -34,7 +34,7 @@ SH
 RUN cat > /harness/mock-global/node_modules/opencode-ai/package.json <<'JSON'
 {
   "name": "opencode-ai",
-  "version": "1.18.1",
+  "version": "1.18.34",
   "bin": {
     "opencode": "bin/opencode.exe"
   }

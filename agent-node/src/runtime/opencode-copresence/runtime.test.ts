@@ -42,7 +42,7 @@ if (command === "serve") {
     if (req.headers.authorization !== expectedAuth) { res.writeHead(401); return res.end("unauthorized"); }
     const body = await new Promise((resolve) => { let s=""; req.on("data", c => s+=c); req.on("end", () => resolve(s)); });
     const json = body ? JSON.parse(body) : {};
-    if (req.url === "/global/health") return send(res, { healthy:true, version:"1.18.1" });
+    if (req.url === "/global/health") return send(res, { healthy:true, version:"1.18.34" });
     if (req.url === "/session/status") return send(res, statuses);
     if (req.url === "/session" && req.method === "POST") {
       const id = "ses_test123";
@@ -94,7 +94,7 @@ if (command === "serve") {
       // legacy fake records it at the end. FAKE_USER_FIRST opts into the real
       // order (the timeout path reads history to see whether it landed).
       if (env.FAKE_USER_FIRST === "1") messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
-      // Like OpenCode 1.18.1, a client disconnect does not stop the turn.
+      // Like OpenCode 1.18.34, a client disconnect does not stop the turn.
       await new Promise(r => setTimeout(r, Number(env.FAKE_TURN_MS || 25)));
       const prompt = json.parts?.[0]?.text || "";
       const reply = "FAKE_REPLY:" + prompt;
@@ -114,7 +114,7 @@ if (command === "serve") {
       }
       lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] };
       if (env.FAKE_PROVIDER_ERROR) {
-        // #540: OpenCode 1.18.1 reports a failed model call as an assistant
+        // #540: OpenCode 1.18.34 reports a failed model call as an assistant
         // message with info.error set and only step book-end parts.
         lastResponse = {
           info:{role:"assistant",parentID,error:{name:"APIError",data:{message:env.FAKE_PROVIDER_ERROR,statusCode:401,isRetryable:false}}},
@@ -147,7 +147,7 @@ if (command === "serve") {
     for (const part of value.parts || []) console.log(JSON.stringify({type:"text",part}));
   }).catch(e => { console.error(e.message); process.exitCode=1; });
 } else if (args.includes("--version") || command === "--version") {
-  console.log("1.18.1");
+  console.log("1.18.34");
 } else {
   console.error("unsupported fake command", args.join(" "));
   process.exit(2);
@@ -624,8 +624,8 @@ describe("OpenCode native serve+attach copresence", () => {
 // as a failure. The fix synthesizes a marker naming the emitted part types
 // so the caller always receives a non-empty reply and the throw was removed.
 //
-// The part-type universe checked here comes from opencode 1.18.1's own
-// OpenAPI /doc schema (probed 2026-08-30 against a real 1.18.1 binary):
+// The part-type universe checked here comes from opencode 1.18.34's own
+// OpenAPI /doc schema (probed 2026-08-30 against a real 1.18.34 binary):
 // TextPart is one of 13 variants (Tool, Reasoning, File, Patch,
 // StepStart, StepFinish, Snapshot, Agent, Retry, Compaction, Subtask,
 // FilePartSource[Text]). A completed turn with zero TextPart is a

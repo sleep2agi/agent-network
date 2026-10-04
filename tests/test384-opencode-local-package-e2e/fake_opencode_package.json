@@ -1,6 +1,6 @@
 {
   "name": "opencode-ai",
-  "version": "1.18.1",
+  "version": "1.18.34",
   "bin": {
     "opencode": "bin/opencode.exe"
   }

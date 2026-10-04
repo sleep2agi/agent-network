@@ -97,7 +97,7 @@ bun test \
   src/runtime/opencode-acp/runtime.test.ts >> "$REPORT" 2>&1
 pass "agent-node OpenCode package, child-env, profile-state, ACP client/events, and runtime unit tests"
 
-# Exact 1.18.1 loads /etc/opencode after OPENCODE_CONFIG_CONTENT and can start
+# Exact 1.18.34 loads /etc/opencode after OPENCODE_CONFIG_CONTENT and can start
 # a managed local MCP during config load. Safe mode must refuse the real system
 # source before version probe/spawn; the fixture command must remain untouched.
 [ ! -e /etc/opencode ] || fail "managed-config fixture path already exists in test image"
@@ -129,7 +129,7 @@ bun -e '
       workDir,
       launchBase,
       binary: "/test/opencode-global/node_modules/opencode-ai/bin/opencode.exe",
-      expectedVersion: "1.18.1",
+      expectedVersion: "1.18.34",
     });
     process.exit(2);
   } catch (error) {
@@ -154,10 +154,10 @@ pass "agent-network release bundle build"
 su -s /bin/bash bun -c \
   'umask 0002 && bun /test/nonroot-real-package.ts' >> "$REPORT" 2>&1 \
   || fail "non-root umask-0002 real opencode-ai package identity gates"
-pass "non-root uid=gid=1000 umask-0002 real opencode-ai@1.18.1 passes network and agent-node gates"
+pass "non-root uid=gid=1000 umask-0002 real opencode-ai@1.18.34 passes network and agent-node gates"
 
 # Bundle-level regression for CLI terminator semantics: the fake exact-pinned
-# OpenCode reports 1.18.1 but exits 64 for auth login. The helper must return
+# OpenCode reports 1.18.34 but exits 64 for auth login. The helper must return
 # nonzero (not have process.exitCode overwritten by main().then), leave the old
 # persistent credential byte-for-byte intact, and clean its disposable root.
 rm -rf /tmp/test386-auth-work /tmp/test386-auth-home
@@ -243,7 +243,7 @@ jq -e '.argv | index("opencode-cli") != null' \
   || fail "exact preview did not receive runtime=opencode-cli"
 jq -e '
   .opencodeBinary == "/test/opencode-global/node_modules/opencode-ai/bin/opencode.exe"
-  and .opencodeVersion == "1.18.1"
+  and .opencodeVersion == "1.18.34"
   and (.opencodeSafeBase == null)
   and (.path | startswith("/test/bin:/test/exact-bin:"))
   and .executable == "/test/exact-global/node_modules/@sleep2agi/agent-node/dist/cli.js"
@@ -259,6 +259,71 @@ jq -e '
 grep -Fq "using installed exact @sleep2agi/agent-node@$EXPECT_NODE" \
   /tmp/test386-success.log || fail "exact installed agent-node diagnostic is missing"
 pass "stale global bypassed; later exact global received protected PATH/binary/version/base; npx was not executed"
+
+# Board #541 — the release pin moved 1.18.1 → 1.18.34. A host still holding
+# the previous exact global install must keep starting (one transition window)
+# with a one-line upgrade note, and the launcher must hand the *found* version
+# to the paired agent-node. Any other version stays refused with the pin hint.
+make_global_opencode() {
+  local root="$1" version="$2"
+  rm -rf "$root"
+  mkdir -p -m 755 "$root" "$root/node_modules" "$root/node_modules/opencode-ai" \
+    "$root/node_modules/opencode-ai/bin" "$root/bin"
+  printf '#!/bin/sh\nset -eu\nif [ "${1:-}" = "--version" ]; then printf "%%s\\n" "%s"; exit 0; fi\nexit 64\n' \
+    "$version" > "$root/node_modules/opencode-ai/bin/opencode.exe"
+  printf '{"name":"opencode-ai","version":"%s","bin":{"opencode":"bin/opencode.exe"}}\n' \
+    "$version" > "$root/node_modules/opencode-ai/package.json"
+  chmod 755 "$root/node_modules/opencode-ai/bin/opencode.exe"
+  chmod 644 "$root/node_modules/opencode-ai/package.json"
+  ln -s "$root/node_modules/opencode-ai/bin/opencode.exe" "$root/bin/opencode"
+}
+run_transition_start() {
+  local label="$1" opencode_bin="$2"
+  rm -rf /tmp/test386-work-$label /tmp/test386-home-$label \
+    /tmp/test386-exact-preview-launch.json /tmp/test386-npx-args
+  mkdir -p /tmp/test386-work-$label/.anet/nodes/gate /tmp/test386-home-$label
+  install -m 600 /test/config.json /tmp/test386-work-$label/.anet/nodes/gate/config.json
+  write_opencode_binding /tmp/test386-work-$label/.anet/nodes/gate /tmp/test386-home-$label
+  set +e
+  (
+    cd /tmp/test386-work-$label
+    HOME=/tmp/test386-home-$label \
+    PATH="$opencode_bin:/test/exact-bin:$PATH" \
+    npm_config_registry=http://127.0.0.1:4873 \
+    bun /repo/agent-network/dist/bin/cli.js node start gate
+  ) > /tmp/test386-$label.log 2>&1
+  transition_rc=$?
+  set -e
+  mask_log < /tmp/test386-$label.log >> "$REPORT"
+}
+
+make_global_opencode /test/legacy-global 1.18.1
+run_transition_start legacy /test/legacy-global/bin
+[ "$transition_rc" -eq 0 ] || fail "previous pin opencode-ai@1.18.1 no longer starts (rc=$transition_rc)"
+jq -e '
+  .opencodeBinary == "/test/legacy-global/node_modules/opencode-ai/bin/opencode.exe"
+  and .opencodeVersion == "1.18.1"
+' /tmp/test386-exact-preview-launch.json >/dev/null \
+  || fail "launcher did not hand the admitted transition version 1.18.1 to agent-node"
+grep -Fq 'opencode-ai@1.18.1 is the previous release pin' /tmp/test386-legacy.log \
+  || fail "transition start printed no upgrade note"
+grep -Fq 'anet opencode upgrade-pin 1.18.34' /tmp/test386-legacy.log \
+  || fail "transition note does not name the upgrade command"
+pass "previous pin opencode-ai@1.18.1 still starts, hands 1.18.1 to agent-node, prints the upgrade note"
+
+run_transition_start current /test/bin
+[ "$transition_rc" -eq 0 ] || fail "release pin start exited $transition_rc"
+! grep -Fq 'previous release pin' /tmp/test386-current.log \
+  || fail "release pin start printed the transition note"
+pass "release pin opencode-ai@1.18.34 starts without a transition note"
+
+make_global_opencode /test/unvetted-global 1.18.2
+run_transition_start unvetted /test/unvetted-global/bin
+[ "$transition_rc" -ne 0 ] || fail "unvetted opencode-ai@1.18.2 was accepted"
+[ ! -e /tmp/test386-exact-preview-launch.json ] || fail "unvetted opencode-ai@1.18.2 reached agent-node"
+grep -Fq 'npm install -g opencode-ai@1.18.34' /tmp/test386-unvetted.log \
+  || fail "unvetted refusal does not name the release-pin install command"
+pass "unvetted opencode-ai@1.18.2 is refused with the release-pin install command"
 
 # A package-shaped exact-version OpenCode under the current project is still
 # attacker-controlled. It is first on PATH, but the bundle must reject the

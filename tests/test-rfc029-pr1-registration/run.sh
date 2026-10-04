@@ -5,9 +5,9 @@
 #   S1: normalize-runtime unit tests all pass (21/21 including 5 new).
 #   S2: wizard help / usage strings surface `opencode-cli` as a choice.
 #   S3: `anet node start X` on a node whose runtime is `opencode-cli`
-#       hard-fails with a clear "install opencode-ai@1.18.1" message
+#       hard-fails with a clear "install opencode-ai@1.18.34" message
 #       when opencode is NOT on PATH.
-#   S4: with `opencode-ai@1.18.1` installed, `anet node start` passes
+#   S4: with `opencode-ai@1.18.34` installed, `anet node start` passes
 #       the version pin, spawns agent-node, and agent-node's PR①
 #       processTask stub returns a clear "not yet implemented" line
 #       (proving the runtime registration reaches all four seams:
@@ -91,7 +91,7 @@ write_opencode_binding() {
 # config.json, then run `bun run bin/cli.ts node start`. The launcher
 # runs assertStartCompatibility which spawns `opencode --version`
 # under the hood. Without a `opencode` on PATH, it should exit 1
-# with a message pointing at `npm install -g opencode-ai@1.18.1`.
+# with a message pointing at `npm install -g opencode-ai@1.18.34`.
 export HOME=/tmp/anethome-s3
 mkdir -p "$HOME/.anet/nodes/testnode"
 # agent-network's `node start` resolves node dirs from cwd/.anet/nodes,
@@ -150,14 +150,14 @@ write_opencode_binding \
   echo "exit=$rc"
   echo '```'
   echo
-  # We expect exit=1 and a clear "install opencode-ai@1.18.1" hint.
+  # We expect exit=1 and a clear "install opencode-ai@1.18.34" hint.
   cd /repo/agent-network
   set +e
   out=$( HOME="$HOME" bun run bin/cli.ts node start testnode 2>&1 | head -40 )
   rc=$?
   set -e
-  if [[ "$rc" -ne 0 ]] && echo "$out" | grep -qE 'opencode-ai@1\.18\.1'; then
-    echo "  ✓ hard-fail with pin hint (exit=$rc, mentions opencode-ai@1.18.1)"
+  if [[ "$rc" -ne 0 ]] && echo "$out" | grep -qE 'opencode-ai@1\.18\.34'; then
+    echo "  ✓ hard-fail with pin hint (exit=$rc, mentions opencode-ai@1.18.34)"
   else
     echo "  ✗ expected exit != 0 + pin hint; got exit=$rc"
     echo "$out" | tail -20 >> "$REPORT"
@@ -172,11 +172,11 @@ write_opencode_binding \
 # (b) processTask reaches the PR① opencode-cli stub. We DON'T need a
 # real hub — agent-node's first heartbeat will fail, but that's after
 # the runtime dispatch branch we care about.
-echo "## S4 — install opencode-ai@1.18.1, verify pin passes + processTask stub" >> "$REPORT"
+echo "## S4 — install opencode-ai@1.18.34, verify pin passes + processTask stub" >> "$REPORT"
 echo >> "$REPORT"
 echo '```' >> "$REPORT"
 {
-  npm install -g opencode-ai@1.18.1 >/dev/null 2>&1 && echo "  installed opencode-ai@1.18.1"
+  npm install -g opencode-ai@1.18.34 >/dev/null 2>&1 && echo "  installed opencode-ai@1.18.34"
   echo "  opencode --version: $(opencode --version | head -1)"
 } >> "$REPORT" 2>&1
 echo '```' >> "$REPORT"
