@@ -196,6 +196,7 @@ on:
       - 'tests/test634-windows-secret-guidance/**'
       - 'tests/test516-anet-secret-masking/**'
       - 'tests/test516-node-delete-hub-row/**'
+      - 'tests/test522-node-delete-locate-stop/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -374,6 +375,7 @@ on:
       - 'tests/test634-windows-secret-guidance/**'
       - 'tests/test516-anet-secret-masking/**'
       - 'tests/test516-node-delete-hub-row/**'
+      - 'tests/test522-node-delete-locate-stop/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -1271,6 +1273,23 @@ jobs:
           docker cp "run-anet-test516d:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test516d/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test516d"
           docker rm -f "run-anet-test516d" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #522 — anet node delete 从源目录找得到 --workdir 副本(只打印 cd 命令、不代删)/ 同名多候选拒绝 /
+      # 删前跑完整 node stop(共存 tmux 会话按身份停,名字相近的会话不动)。tmux 走私有 -L 套接字。
+      # 见证红 4 条:只看当前目录 / 多候选取第一个 / 只停 pidfile 进程 / 按会话名前缀杀。
+      - name: Build + run test522-node-delete-locate-stop
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test522 \
+            -f tests/test522-node-delete-locate-stop/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test522" -e ARTIFACT_DIR=/tmp/art \
+            anet-test522 || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test522"
+          docker cp "run-anet-test522:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test522/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test522"
+          docker rm -f "run-anet-test522" >/dev/null 2>&1 || true
           exit $rc
 
       - name: Build + run test623-feishu-scrub-health

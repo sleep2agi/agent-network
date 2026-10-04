@@ -1,5 +1,9 @@
 FROM oven/bun:1.3.14
 
+# procps: `anet node delete` runs the full `anet node stop` (#522), which reads the process table with ps.
+RUN apt-get update && apt-get install -y --no-install-recommends procps \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /workspace
 
 COPY server/package.json server/package-lock.json ./server/
