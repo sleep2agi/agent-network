@@ -114,6 +114,7 @@ Codex TUI co-presence lifecycle. Verbs:
   anet node codex fork <source> --name <target> --workdir <dir>
   anet node codex account <register|list|install> ...
   anet node codex rollback <alias> --receipt <id>
+  anet node codex login-status [--json]   Every codex node here: logged in? shared login?
 
 Exit codes: 0 = PASS, 2 = FAIL or usage error.`,
   "node codex preflight": `Usage: anet node codex preflight <alias> [--json]
@@ -160,6 +161,12 @@ and verifies, and rolls back on failure.`,
   "node codex rollback": `Usage: anet node codex rollback <alias> --receipt <id> [--probe-from <peer>]
 
 Restore the backup recorded in an install receipt.`,
+  "node codex login-status": `Usage: anet node codex login-status [--json]
+
+One row per codex node in this directory: alias, runtime, CODEX_HOME, logged in,
+account (e-mail or fingerprint), and which other nodes share the same login (same
+refresh-token chain: they log each other out, #1918). Read-only; never prints a token.
+A node without a login logs in on its own: CODEX_HOME=<its codex-home> codex login [--device-auth]`,
 
   // ── legacy top-level aliases of node commands ──
   "create": `Usage: anet create <name> [options]

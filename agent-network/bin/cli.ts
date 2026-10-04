@@ -8354,13 +8354,6 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
 // login PROFILES (keyed by profile id, its --json shape is consumed as is);
 // this one lists the NODES in this workspace and the login each one holds.
 function codexLoginStatusCommand(opts: Record<string, string>) {
-  if (args.includes("--help") || args.includes("-h")) {
-    console.log("Usage: anet node codex login-status [--json]");
-    console.log("  One row per codex node in this directory: alias, runtime, CODEX_HOME, logged in, account (e-mail or fingerprint),");
-    console.log("  and which other nodes share the same login (same refresh-token chain — they log each other out, #1918).");
-    console.log("  Read-only. Never prints a token. A node with no login gets its own: CODEX_HOME=<its codex-home> codex login [--device-auth]");
-    return;
-  }
   const rows = codexNodeLoginStatus({ nodesRoot: nodesDir(), env: process.env, home: homedir() });
   if (opts.json === "true") { console.log(JSON.stringify(rows, null, 2)); return; }
   for (const l of formatCodexLoginStatus(rows, process.cwd())) console.log(l);
