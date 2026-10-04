@@ -11,8 +11,10 @@ import {
 import type { Stats } from "fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "path";
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
+import { opencodeGenerationSupport } from "./opencode-versions";
 
-const OPENCODE_PACKAGE_NAME = "opencode-ai";
+// V1 package identity comes from the shared supported-versions table (#542).
+const OPENCODE_PACKAGE_NAME = opencodeGenerationSupport("v1").packageName;
 const OPENCODE_PACKAGE_BIN = "bin/opencode.exe";
 const MAX_PACKAGE_JSON_BYTES = 1024 * 1024;
 const WORKSPACE_ROOT_MARKERS = [

@@ -70,6 +70,7 @@ import { OPENCODE_KEYLESS_FREE_MODEL_NOTE, opencodeFreeTierSafePresetWarning } f
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
+import { backfillOpencodeGeneration, stampOpencodeGeneration } from "../src/opencode-generation-record";
 import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
@@ -2733,7 +2734,8 @@ function saveProfile(id: string, profile: Profile) {
   } else {
     ensurePrivateDirectory(dir);
   }
-  const normalized = normalizeStoredProfile(id, profile);
+  // #542 — an OpenCode node records its generation (absent → "v1"; never overwritten).
+  const normalized = normalizeStoredProfile(id, isOpencode ? stampOpencodeGeneration(profile) : profile);
   const toSave = serializeProfileForConfigJson(normalized, profile);
   const body = JSON.stringify(toSave, null, 2) + "\n";
   if (isOpencode) {
@@ -6809,6 +6811,15 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       console.log(`[anet] persisted canonical node_id ${profile.node_id} (legacy config had none).`);
     }
   } catch {}
+  // #542 — a pre-#542 OpenCode node gains `opencodeGeneration: "v1"` once;
+  // only that key is appended, and only to a canonical, field-less config.
+  if (runtime === "opencode-cli") {
+    const dir = join(nodesDir(), nodeId);
+    backfillOpencodeGeneration({
+      read: () => readOpencodePrivateProfileFile(dir, "config.json"),
+      write: (body) => { writeOpencodePrivateProfileFile(dir, "config.json", body); },
+    });
+  }
 
   if (
     runtime === "codex-sdk" ||

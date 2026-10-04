@@ -67,6 +67,9 @@ export interface OpencodeAcpClientOptions {
   env?: NodeJS.ProcessEnv;
   /** Binary name / path. Defaults to `"opencode"` (found via $PATH). */
   binary?: string;
+  /** argv after the binary (#542: from the OpenCode backend). Defaults to
+   *  the V1 `["acp"]`. */
+  args?: string[];
 }
 
 export interface OpencodeAcpExitInfo {
@@ -106,7 +109,7 @@ export class OpencodeAcpClient extends EventEmitter {
     // NOTE: `opencode acp` v1.17.13 IGNORES --port/--hostname (see
     // Phase 0b U8 finding — flags are accepted for CLI parsing but
     // the server binds to stdio only). Do not pass them here.
-    this.child = spawn(bin, ["acp"], {
+    this.child = spawn(bin, opts.args ?? ["acp"], {
       cwd: opts.cwd ?? process.cwd(),
       // `spawn()` inherits process.env when `env` is undefined. Use an empty
       // object as the lower-level default so a caller can never accidentally

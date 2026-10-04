@@ -13,16 +13,21 @@ import {
   statSync,
 } from "fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "path";
+import { OPENCODE_V1_PIN, acceptedOpencodeVersionsFor, isAcceptedOpencodeVersionFor } from "../opencode-versions";
 
-export const OPENCODE_DEFAULT_PIN = "1.18.34";
+/** V1 release pin — derived from the shared supported-versions table (#542). */
+export const OPENCODE_DEFAULT_PIN = OPENCODE_V1_PIN;
 
 /**
  * Board #541 — earlier release pins still accepted for one transition window,
  * so a host holding the previous exact install keeps working after upgrading
- * the anet/agent-node pair. Must stay byte-identical to agent-network's
- * `OPENCODE_TRANSITION_VERSIONS`; the launcher prints the upgrade note.
+ * the anet/agent-node pair. Derived from the shared supported-versions table
+ * (#542: v1 accepted versions minus the pin), the same table anet's
+ * `OPENCODE_TRANSITION_VERSIONS` reads; the launcher prints the upgrade note.
  */
-export const OPENCODE_TRANSITION_VERSIONS: readonly string[] = Object.freeze(["1.18.1"]);
+export const OPENCODE_TRANSITION_VERSIONS: readonly string[] = Object.freeze(
+  acceptedOpencodeVersionsFor("v1").filter((version) => version !== OPENCODE_DEFAULT_PIN),
+);
 
 /** Release pin first, then transition versions. */
 export const OPENCODE_ACCEPTED_VERSIONS: readonly string[] = Object.freeze([
@@ -31,7 +36,7 @@ export const OPENCODE_ACCEPTED_VERSIONS: readonly string[] = Object.freeze([
 ]);
 
 export function isAcceptedOpencodeVersion(version: string): boolean {
-  return OPENCODE_ACCEPTED_VERSIONS.includes(version);
+  return isAcceptedOpencodeVersionFor("v1", version);
 }
 
 /** One-line upgrade note when a transition version was admitted, else null. */

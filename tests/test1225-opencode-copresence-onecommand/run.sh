@@ -46,9 +46,10 @@ node --version >>"$REPORT"; bun --version >>"$REPORT"; tmux -V >>"$REPORT"
 #    写死的话，哪天 OPENCODE_BUILTIN_PIN 升了，stub 还报旧版本 →
 #    copresence 启动会在**更早**的 revalidatePinnedOpencodeBinary 处退出，
 #    于是本套件想测的编排段走不到，而它**看起来照样绿**（同 test384 记着的坑）。
-PIN_SRC="$ROOT/agent-network/src/opencode-pin.ts"
-OPENCODE_PIN=$(sed -n 's/^export const OPENCODE_BUILTIN_PIN = "\([^"]*\)";$/\1/p' "$PIN_SRC")
-[ -n "$OPENCODE_PIN" ] || fail "从 $PIN_SRC 读不出 OPENCODE_BUILTIN_PIN —— 常量改名了？"
+#    #542 起 pin 只写在共享版本表里（OPENCODE_BUILTIN_PIN 由它派生）。
+PIN_SRC="$ROOT/agent-network/src/opencode-versions.ts"
+OPENCODE_PIN=$(sed -n 's/^export const OPENCODE_V1_PIN = "\([^"]*\)";$/\1/p' "$PIN_SRC")
+[ -n "$OPENCODE_PIN" ] || fail "从 $PIN_SRC 读不出 OPENCODE_V1_PIN —— 常量改名了？"
 log "opencode pin (源码派生): $OPENCODE_PIN"
 
 cat >/usr/local/bin/opencode <<STUB
@@ -103,6 +104,20 @@ CFG="$WORK/.anet/nodes/$NODE/config.json"
 [ "$(field "$CFG" runtime)" = "opencode-cli" ] || fail "runtime 没写成 opencode-cli"
 pass "create 写出 opencode-cli 节点（$CFG）"
 
+# #542 —— create 记下 OpenCode 代际；随后删掉它，模拟 #542 之前建的老节点，
+#   L3a 的 start 必须把它补回 v1，且不改别的字段（opencodeMode 除外，那是 --copresence 本来就写的）。
+[ "$(field "$CFG" opencodeGeneration)" = "v1" ] || fail "create 没写 opencodeGeneration=v1"
+python3 - "$CFG" <<'PY'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+del cfg["opencodeGeneration"]
+open(p, "w").write(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+PY
+[ "$(field "$CFG" opencodeGeneration)" = "None" ] || fail "没能把 opencodeGeneration 删掉"
+cp "$CFG" /tmp/test1225-legacy-config.json
+pass "create 写下 opencodeGeneration=v1（已删掉，模拟老节点）"
+
 # ── L3 ───────────────────────────────────────────────────────────────────────
 # 🔴 这一层实际红在哪，是**量出来的**，不是我设计时以为的那样：
 #    我原以为 stub 会走到 copresence 启动然后 serve 失败。实测不是 ——
@@ -126,6 +141,15 @@ log "start exit=$START_RC"
 # 判据①：copresence 模式**写进了 profile**（start 之前 saveProfile 那一步）
 [ "$(field "$CFG" opencodeMode)" = "copresence" ] \
   || fail "--copresence 没把 opencodeMode 写进 profile"
+# #542 —— 老节点（无 opencodeGeneration）start 后补成 v1，其余字段一个不动。
+[ "$(field "$CFG" opencodeGeneration)" = "v1" ] || fail "start 没把老节点补成 opencodeGeneration=v1"
+python3 - /tmp/test1225-legacy-config.json "$CFG" <<'PY' || fail "start 补 opencodeGeneration 时改动了别的字段"
+import json, sys
+old, new = (json.load(open(p)) for p in sys.argv[1:3])
+for key in ("opencodeGeneration", "opencodeMode"):
+    old.pop(key, None); new.pop(key, None)
+sys.exit(0 if old == new else 1)
+PY
 
 # 判据②：失败输出必须指认**等的是哪个文件**
 grep -Fq "$NODE_DIR/opencode-attach.sh" "$START_OUT" \
