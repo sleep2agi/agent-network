@@ -174,7 +174,7 @@ import {
 } from "./runtime/daemon-create-capability";
 import { daemonHome, resolveDefaultWorkdirRoot } from "./runtime/child-workdir";
 import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
-import { buildCodexSdkThreadOptions, buildCodexStdioThreadStartParams, rebuildCodexSdkThread } from "./codex-sdk-thread-options";
+import { buildCodexSdkThreadOptions, openCodexStdioThread, rebuildCodexSdkThread } from "./codex-sdk-thread-options";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 import {
   backupOpencodeConfig,
@@ -3356,6 +3356,11 @@ async function processWithCodex(
 // Preview.N+1 (after Vincent macOS verify) will flip the default.
 let codexStdio: import("./runtime/codex-stdio-client").CodexStdioClient | null = null;
 let codexStdioThreadId: string | null = null;
+// #553 — the thread this node continues: the recorded `session` at boot, then
+// the thread of the last turn that completed. It survives an app-server exit
+// (which only clears codexStdioThreadId), so the respawned app-server resumes
+// it instead of quietly opening a new conversation.
+let codexStdioRecordedThreadId: string | null = SESSION_ID || null;
 
 async function ensureCodexStdio(): Promise<import("./runtime/codex-stdio-client").CodexStdioClient> {
   if (codexStdio) return codexStdio;
@@ -3394,11 +3399,20 @@ async function processWithCodexStdio(
     // #538 — params come from the node's `flags` (sandboxMode → `sandbox`,
     // approvalPolicy) via the shared builder; the old `sandboxPolicy`
     // full-access literal was ignored by app-server's thread/start.
-    const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);
-    const startResp = await client.request<{ thread: { id: string } }>("thread/start", opts);
-    codexStdioThreadId = startResp.thread.id;
-    log(`[codex-stdio] thread/start → ${codexStdioThreadId}`);
-    if (codexStdioThreadId) writebackSession(codexStdioThreadId);
+    //
+    // #553 — a recorded thread is continued with `thread/resume` (thread/start
+    // ignores a threadId key and always opens a new thread). If the resume
+    // fails the task fails with one actionable line; it never falls back to a
+    // fresh thread.
+    const opened = await openCodexStdioThread(client, {
+      recordedThreadId: codexStdioRecordedThreadId,
+      flags: fileConfig?.flags,
+      model: resolveCodexModel(MODEL),
+      alias: ALIAS,
+      configPath: configFilePath,
+    });
+    codexStdioThreadId = opened.threadId;
+    log(`[codex-stdio] ${opened.resumed ? "thread/resume" : "thread/start"} → ${codexStdioThreadId}`);
   }
 
   // Build UserInput[] mirroring the SDK runtime's text + local_image shape.
@@ -3446,6 +3460,12 @@ async function processWithCodexStdio(
     }
   });
   log(`[codex-stdio] turn done | items=${itemCount} | turn_id=${turnId.slice(0, 8)}`);
+  // #553 — record the thread only now: codex writes the rollout once a turn
+  // ran, so an id recorded at thread/start could name a thread it cannot load.
+  if (codexStdioThreadId && codexStdioThreadId !== codexStdioRecordedThreadId) {
+    codexStdioRecordedThreadId = codexStdioThreadId;
+    writebackSession(codexStdioThreadId);
+  }
   return finalText || "（无回复）";
 }
 
