@@ -270,7 +270,11 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/guide/copy-node.md
 #     docs-site/docs/en/guide/copy-node.md
 # 只动分母；uniq / occ 是否变化以本套件在该提交上的实跑为准。
-[[ "$files" -eq 121 ]] || fail "预期扫 121 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-10-04:121 → 123。新增 Codex 节点速查页（#532，中英各一份）:
+#     docs-site/docs/guide/codex-cheatsheet.md
+#     docs-site/docs/en/guide/codex-cheatsheet.md
+#   两页都没有 #L 源码行号 pin。本套件先在该提交上红("预期扫 121 …,实际 123")才来抬。
+[[ "$files" -eq 123 ]] || fail "预期扫 123 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
 # 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——
