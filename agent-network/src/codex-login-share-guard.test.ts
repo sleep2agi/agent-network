@@ -308,8 +308,17 @@ describe("#514 the CLI actually gates every staging path (source contract)", () 
   const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf-8").replace(/\r\n?/g, "\n");
   const at = (needle: string) => { const i = cli.indexOf(needle); expect(i).toBeGreaterThan(-1); return i; };
 
-  test("three gate call sites: host staging, fork, account install", () => {
-    expect(cli.match(/gateCodexLoginStaging\(\{/g)?.length).toBe(3);
+  test("four gate call sites: host staging, fork, account install, adopt (#528)", () => {
+    expect(cli.match(/gateCodexLoginStaging\(\{/g)?.length).toBe(4);
+  });
+
+  test("adopt (#528): no login by default; --allow-shared-codex-login is gated before the hub registration and the copy", () => {
+    const fn = cli.slice(at("async function codexAdoptCommand"), at("// ── #1856 PR-D"));
+    const g = fn.indexOf("const gate = allowShared ? gateCodexLoginStaging({");
+    expect(g).toBeGreaterThan(-1);
+    expect(g).toBeLessThan(fn.indexOf("const withTok = await ensureNodeToken(draft, target);"));
+    expect(g).toBeLessThan(fn.indexOf("for (const f of FORK_HOME_COPY) {"));
+    expect(fn).toContain(`if (f.name === "auth.json" && !allowShared) continue;`);
   });
 
   test("a refusal is exit 1 (#2321: failure), not 2", () => {

@@ -98,6 +98,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
         "test623-feishu-scrub-health", "test30-v0.8-auth-deprecation",
         "test516-anet-secret-masking", "test516-node-delete-hub-row",
         "test522-node-delete-locate-stop",
+        "test528-codex-adopt",
         "test532-codex-menu",
     },
 }

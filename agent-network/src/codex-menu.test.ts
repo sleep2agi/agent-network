@@ -220,6 +220,33 @@ describe("#532 actions map to existing commands", () => {
   });
 });
 
+describe("#528 menu: adopt an existing codex conversation", () => {
+  it("a at the node prompt asks for a name, prints the command, runs after y", async () => {
+    const io = scripted(["a", "my-agent", "y"]);
+    const rec = recorder();
+    expect(await codexMenu(rows(), io, rec.runner(io), { cwd: "/w" })).toBe(0);
+    expect(rec.ran.map(commandLine)).toEqual(["anet node codex adopt my-agent"]);
+    expect(rec.outAtRun()).toContain("Will run 将执行:\n  anet node codex adopt my-agent\n");
+  });
+  it("a at the action prompt works too (single-node shortcut skips the node prompt)", async () => {
+    const io = scripted(["a", "my-agent", "y"]);
+    const rec = recorder();
+    await codexMenu(rows().slice(0, 1), io, rec.runner(io), { cwd: "/w" });
+    expect(rec.ran.map(commandLine)).toEqual(["anet node codex adopt my-agent"]);
+  });
+  it("n, an empty name or end of input runs nothing", async () => {
+    for (const lines of [["a", "my-agent", "n"], ["a", ""], ["a", "two words"], ["a"]]) {
+      const io = scripted(lines);
+      const rec = recorder();
+      expect(await codexMenu(rows(), io, rec.runner(io), { cwd: "/w" })).toBe(0);
+      expect(rec.ran).toEqual([]);
+    }
+  });
+  it("the cheat sheet has the adopt line", () => {
+    expect(CODEX_CHEAT_SHEET).toContain("anet node codex adopt my-agent");
+  });
+});
+
 describe("#532 nothing secret reaches the screen", () => {
   it("across every action and both nodes", async () => {
     for (let n = 1; n <= 2; n++) for (let a = 1; a <= 9; a++) {

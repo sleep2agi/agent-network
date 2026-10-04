@@ -24,7 +24,7 @@ export interface ReceiptCheck {
 }
 
 export type LifecycleVerb =
-  | "preflight" | "verify" | "start" | "restart" | "resume" | "fork" | "account-install" | "rollback";
+  | "preflight" | "verify" | "start" | "restart" | "resume" | "fork" | "adopt" | "account-install" | "rollback";
 
 export interface LifecycleReceipt {
   readonly format: "anet-codex-lifecycle-receipt/1";
@@ -50,6 +50,8 @@ export const REQUIRED_CHECKS: Readonly<Record<LifecycleVerb, readonly string[]>>
   resume: ["identity_match", "home_isolated", "workdir_consistent", "session_exact", "rollout_intact", "start_order", "child_env_attested", "identity_attested"],
   // fork 只创建不启动:identity_attested 留给首次 start(--probe-from);目标侧要求 exact thread + 唯一 rollout。
   fork: ["identity_match", "fork_isolation", "home_isolated", "workdir_consistent", "session_exact"],
+  // #528 adopt = fork whose source is a raw CODEX_HOME thread: same target-side requirements.
+  adopt: ["identity_match", "fork_isolation", "home_isolated", "workdir_consistent", "session_exact"],
   // account-install 内含一次完整 restart(after 阶段的 check 原样并入),外加探针/安装/验证三项;identity_attested 仍由 --probe-from 闭环。
   "account-install": ["identity_match", "home_isolated", "session_exact", "account_probe", "account_installed", "account_verified", "start_order", "identity_attested"],
   rollback: ["identity_match", "home_isolated", "session_exact", "rollback_restore", "account_verified", "start_order"],

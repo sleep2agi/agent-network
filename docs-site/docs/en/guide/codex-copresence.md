@@ -342,6 +342,16 @@ The receipt's `fork_isolation` requires identity / HOME / thread / rollout file 
 
 `fork` also does the chores operators used to do by hand (#1951), all recorded in the receipt's `fork_options` check: a missing `--workdir` is created; the copied `config.toml`'s `[projects."<source workspace>"]` table header is rewritten to `<dir>` (header only, every other line stays byte-identical; if a target table already exists the source table is dropped rather than duplicated); `--model <id>` goes into the target config, with a warning when the source rollout's last `turn_context` ran a different model (provider blocks are kept — app-server refuses to load if one is missing); a free loopback port is probed at fork time and written to the config, first `start` prefers it and re-probes if taken; `CODEX_HOME/AGENTS.md` rides along.
 
+### adopt: a conversation started outside anet becomes a node {#adopt}
+
+```bash
+anet node codex adopt <new-name> --thread <id-or-unique-prefix> [--from-home <dir>] [--workdir <dir>] [--model <id>]
+CODEX_HOME=<workdir>/.anet/nodes/<new-name>/codex-home codex login --device-auth
+cd <workdir> && anet node codex start <new-name>
+```
+
+`adopt` is `fork` with a raw `CODEX_HOME` (default `~/.codex`) and a thread id as the source instead of an anet node (#528). Without `--thread` it lists that home's conversations (time, cwd, first prompt, short id): a terminal picks one by number, a non-terminal gets the list and exit code 2. The thread id must name exactly one rollout (a full id or a unique prefix); 0 or several are refused. That rollout is streamed into the new node's own `CODEX_HOME` with the thread id and recorded `cwd` rewritten exactly as fork does (the header may carry `session_id` or, from older codex builds, only `id`); `config.toml` / `AGENTS.md` / `version.json` come along with the trusted-project header rewritten. The source home is never written. No `auth.json` is copied unless `--allow-shared-codex-login` (unsafe). The receipt (verb `adopt`) has the same checks as a fork receipt. Walkthrough: [Copying a node](/en/guide/copy-node).
+
 ### Account migration: `account install` and `rollback`
 
 ```bash

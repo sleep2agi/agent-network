@@ -237,6 +237,8 @@ host already uses it (`--allow-shared-codex-login` shares anyway, unsafely; see
 [One login per node](/en/guide/codex-copresence#one-login-per-node)). For a registered account use
 `anet node codex account install <new-name> --source codex-login:<profile-id>`. To carry the codex
 conversation history too, use `anet node codex fork` (see [Codex co-presence](/en/guide/codex-copresence)).
+A conversation you started with `codex` outside anet becomes a node with
+`anet node codex adopt <new-name> --thread <id>` (see [Copying a node](/en/guide/copy-node)).
 
 ::: danger Never `cp -r` a node directory
 `.anet/nodes/<name>/config.json` holds the node's `node_id` and `ntok_`. A verbatim copy is **the same Hub

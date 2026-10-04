@@ -341,6 +341,16 @@ receipt 的 `fork_isolation` 要求身份 / HOME / thread / rollout 文件 / tmu
 
 fork 顺手把几件以前要手工做的事做了(#1951),都记在 receipt 的 `fork_options` 里:`--workdir` 不存在就建;复制来的 `config.toml` 里 `[projects."<源工作区>"]` 表头改写成 `<dir>`(只改表头,别的行一字不动;目标表已存在则丢掉源表,不重复);`--model <id>` 写进目标配置,源 rollout 末条 `turn_context` 用的模型不同时打一句告警(provider 块保留,删了 app-server 拒载);fork 时探一个空闲回环端口写进 config,首次 `start` 优先用它、被占再探;`CODEX_HOME/AGENTS.md` 随 fork 走。
 
+### adopt:把 anet 之外开的对话收编成节点 {#adopt}
+
+```bash
+anet node codex adopt <新名字> --thread <完整 id 或唯一前缀> [--from-home <dir>] [--workdir <dir>] [--model <id>]
+CODEX_HOME=<workdir>/.anet/nodes/<新名字>/codex-home codex login --device-auth
+cd <workdir> && anet node codex start <新名字>
+```
+
+`adopt` 就是源换成「一个裸 `CODEX_HOME`(默认 `~/.codex`)+ 一个 thread id」的 `fork`(#528)。不给 `--thread` 时列出该 home 里的对话(时间、cwd、第一句提问、短 id):终端里按编号选,非终端只打印列表、退出码 2。thread id 必须恰好对应一个 rollout(完整 id 或唯一前缀),0 个或多个都拒绝。那一个 rollout 流式复制进新节点自己的 `CODEX_HOME`,thread id 与记录的 `cwd` 按 fork 的同一套规则改写(表头带 `session_id`,或旧版 codex 只带 `id`,都认);`config.toml` / `AGENTS.md` / `version.json` 随之复制并改写 trusted project 表头。源 home 从不写入。默认不复制 `auth.json`,`--allow-shared-codex-login` 才复制(不安全)。receipt(verb `adopt`)的检查项与 fork 相同。操作步骤见 [复制节点](/guide/copy-node)。
+
 ### 账号迁移:`account install` 与 `rollback`
 
 ```bash
