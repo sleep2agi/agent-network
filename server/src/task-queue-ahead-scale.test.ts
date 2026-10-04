@@ -9,9 +9,9 @@
 //      the whole-table one is driven by the covering idx_tasks_created_queue (no task-row lookups), the alias list
 //      and the per-send count by idx_tasks_to_created;
 //   2. the cost, relative only (no absolute ms, so a slow runner can't fail it): the queue_depth statement is at most
-//      half the #2325 statement measured on the same DB in the same loop, and a full /api/status read (cache
-//      bypassed) with queue_depth is at most 50 % slower than the same read with it switched off (= the pre-#2325
-//      read), alternated request by request on the same server;
+//      half the #2325 statement measured on the same DB in the same loop; and, on the low percentile of alternated
+//      samples (#517), the statement costs at most half a full /api/status read (cache bypassed) without it, and that
+//      read with queue_depth is at most 50 % slower than with it switched off (= the pre-#2325 read);
 //   3. the counts are still right at that scale (stale `acked` rows are outside the 24 h window).
 //
 // 跑法:cd server && COMMHUB_DB=/tmp/x.db bun test src/task-queue-ahead-scale.test.ts
@@ -35,6 +35,8 @@ const RECENT = 1_900;         // created in the last 24 h
 const OPEN_EVERY = 30;        // 3 in every OPEN_EVERY recent tasks are still open (~190 of 1.9k; see the cost test)
 const HOT = "scale-node-7";   // most stuck rows land on this one (the per-send plan must not care)
 const N = 25;
+/** #517: A/B pairs per pass, the percentile compared, and how many extra passes a failing pass gets. */
+const AB_PAIRS = 60, LOW_P = 0.2, RETRIES = 2;
 /** The #2325 statement (bare columns): the in-test baseline the fixed query is measured against. */
 const SQL_2325 = `SELECT network_id, to_name, COUNT(*) AS n FROM tasks
   WHERE status IN ('created', 'delivered', 'acked', 'running') AND created_at >= datetime('now', '-86400 seconds')
@@ -170,34 +172,56 @@ describe.skipIf(PG)("#500 queue_depth at production scale (57k tasks, 31k stuck 
       s0 = performance.now(); db.all(SQL_2325); const b = performance.now() - s0;
       if (i >= 3) { fixed.push(a); old.push(b); }
     }
-    // Full /api/status, cache bypassed, A/B request by request: queue_depth on vs off (off = the pre-#2325 read).
-    // Alternating (and flipping the order every iteration) keeps both arms in the same time window — the first
-    // version of this budget timed the statement and the read in separate loops and compared them, which a busy
-    // runner (test638 runs two aggregates at once) skews: CI saw 2.10 ms vs a 5.25 ms read and failed.
+    // Measured locally (this fixture, covering index): ≈ 0.15× (1.0 vs 6.5 ms); on the production copy 0.3 vs 55 ms.
+    const qP50 = pct(fixed, 0.5), oldP50 = pct(old, 0.5);
+    console.log(`[perf] queue_depth p50=${qP50.toFixed(2)}ms vs #2325 statement p50=${oldP50.toFixed(2)}ms`);
+    expect(qP50).toBeLessThanOrEqual(0.5 * oldP50);
+
+    // Second budget: queue_depth adds at most +50 % to a full /api/status read (cache bypassed) — the same read
+    // with it switched off is the pre-#2325 read. #517: the first version compared the p50 of `with` and `without`
+    // on a ~4 ms read and asserted the *difference*; under test638's concurrent aggregates a difference of two
+    // noisy p50s is mostly noise (CI #2355: statement 0.64 ms, yet with−without = 2.4 ms > 2.03 ms budget). Now:
+    //   - each pass alternates A/B request by request (order flipped every pair) and also times the bare
+    //     queue_depth statement between the reads, so all three series share one time window;
+    //   - it compares a low percentile (LOW_P) rather than the p50: scheduler noise only ever adds time, so the
+    //     lower tail is the closest a busy runner gets to the real cost;
+    //   - it asserts both what the comment claims — the statement's own cost ≤ 50 % of the read without it — and
+    //     the end-to-end with/without delta on the same low percentile;
+    //   - a failing pass is re-measured up to RETRIES more times; the real regression (the #2325 statement through
+    //     idx_tasks_status, 5–8× the fixed cost) fails every pass, noise does not.
     const cache = await import("./status-read-cache.js");
     cache.__setStatusCacheBypassForTest(true);
-    const on: number[] = [], off: number[] = [];
     const readOnce = async (depthOn: boolean) => {
       mod.__setQueueDepthOffForTest(!depthOn);
       const s0 = performance.now();
       await (await fetch(`${BASE}/api/status?network_id=${NET}`, { headers: { Authorization: `Bearer ${token}` } })).text();
       return performance.now() - s0;
     };
-    try {
-      for (let i = 0; i < 2 * N + 3; i++) {
+    const abPass = async () => {
+      const on: number[] = [], off: number[] = [], q: number[] = [];
+      for (let i = 0; i < AB_PAIRS + 3; i++) {
         const first = i % 2 === 0;
         const a = await readOnce(first), b = await readOnce(!first);
-        if (i >= 3) { (first ? on : off).push(a); (first ? off : on).push(b); }
+        mod.__setQueueDepthOffForTest(false);
+        const s0 = performance.now(); mod.queueDepthByNode(); const c = performance.now() - s0;
+        if (i >= 3) { (first ? on : off).push(a); (first ? off : on).push(b); q.push(c); }
+      }
+      const onLow = pct(on, LOW_P), offLow = pct(off, LOW_P), qLow = pct(q, LOW_P);
+      return { onLow, offLow, qLow, onP50: pct(on, 0.5), offP50: pct(off, 0.5),
+        okDirect: qLow <= 0.5 * offLow, okRead: onLow - offLow <= 0.5 * offLow };
+    };
+    let r: Awaited<ReturnType<typeof abPass>> | null = null;
+    try {
+      for (let attempt = 0; attempt <= RETRIES; attempt++) {
+        r = await abPass();
+        console.log(`[perf] pass ${attempt + 1}: p${LOW_P * 100} queue_depth=${r.qLow.toFixed(2)}ms; full /api/status (bypass) p${LOW_P * 100} with=${r.onLow.toFixed(2)}ms without=${r.offLow.toFixed(2)}ms (+${(100 * (r.onLow - r.offLow) / r.offLow).toFixed(0)}%); p50 with=${r.onP50.toFixed(2)}ms without=${r.offP50.toFixed(2)}ms; direct ${r.okDirect ? "ok" : "OVER"} read ${r.okRead ? "ok" : "OVER"}`);
+        if (r.okDirect && r.okRead) break;
       }
     } finally {
       mod.__setQueueDepthOffForTest(false);
       cache.__setStatusCacheBypassForTest(false);
     }
-    const qP50 = pct(fixed, 0.5), oldP50 = pct(old, 0.5), onP50 = pct(on, 0.5), offP50 = pct(off, 0.5);
-    console.log(`[perf] queue_depth p50=${qP50.toFixed(2)}ms vs #2325 statement p50=${oldP50.toFixed(2)}ms; full /api/status (bypass) p50 with=${onP50.toFixed(2)}ms without=${offP50.toFixed(2)}ms (+${(100 * (onP50 - offP50) / offP50).toFixed(0)}%) p90 with=${pct(on, 0.9).toFixed(2)}ms`);
-    // Measured locally (this fixture, covering index): ≈ 0.15× (1.0 vs 6.5 ms); on the production copy 0.3 vs 55 ms.
-    expect(qP50).toBeLessThanOrEqual(0.5 * oldP50);
-    // Why the budget is "vs the same read without queue_depth", and what it was measured at (2026-10-04):
+    // What the read budget was measured at (2026-10-04, p50s, before #517):
     //   production copy (VACUUM INTO of the live DB: 306 sessions, 57k tasks, 64 open in the last 24 h on 4 nodes),
     //   full /api/status p50, cache bypassed, 3 runs each —
     //     pre-#2325 10.5–11.3 ms · #2325 68–71 ms · first fix (idx_tasks_created + row lookups) 16.1–17.1 ms (+50 %,
@@ -205,7 +229,8 @@ describe.skipIf(PG)("#500 queue_depth at production scale (57k tasks, 31k stuck 
     //   this fixture: +17–31 %. It is harsher than production: ~190 open tasks in the window spread over ~150 nodes
     //   (3× production's open count, ~38× its groups) and one-word session rows that make the rest of the read cheap.
     //   With the original 1-in-7 open share (813 open) it measured +55–62 % even with the covering index — the
-    //   GROUP BY over 300 groups, not the index. CI's 67 % (before the covering index) is consistent with that plus the separate-loop skew above.
-    expect(onP50 - offP50).toBeLessThanOrEqual(0.5 * offP50);
-  }, 60_000);
+    //   GROUP BY over 300 groups, not the index.
+    expect(r!.qLow).toBeLessThanOrEqual(0.5 * r!.offLow);
+    expect(r!.onLow - r!.offLow).toBeLessThanOrEqual(0.5 * r!.offLow);
+  }, 120_000);
 });

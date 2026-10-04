@@ -4,8 +4,10 @@
 // 场景:NET 里 300 个节点;50 个组,每组 6 个节点(合起来覆盖全部 300 个)。
 //   baseline —— bob 直接授权这 300 个节点(没有组);
 //   groups   —— alice 授权这 50 个组(没有直接授权),可见集合与 bob 完全相同。
-// 两人看到的 Agent 一样多,差值就是「按组展开」本身的代价(交替量 15 轮,取每轮差值的中位数)。团队要求 ≈2 ms 以内(本机实测 −0.5~+1.9 ms);
+// 两人看到的 Agent 一样多,差值就是「按组展开」本身的代价。团队要求 ≈2 ms 以内(本机实测 −0.5~+1.9 ms);
 // 断言放宽到 max(5 ms, 基线的 15%)—— CI 容器比本机慢时两边一起变慢,绝对差也跟着放大。数字打印出来。
+// #517:差值怎么量见 lowDelta*() —— 交替且每轮翻转先后、样本 40 对、比两边的 p20(不是每轮差值的中位数)、
+// 一轮超标再重量最多 2 轮。界限本身(max(5 ms, 15%))没动。
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
@@ -30,10 +32,11 @@ const PER_GROUP = NODES / GROUPS;
 const BOUND_MS = 5;
 const bound = (base: number) => Math.max(BOUND_MS, base * 0.15);
 // CI 容器里一次 visibleAgents() 约 65 ms(本机约 28 ms):原来 40 次 × 两边再加预热,顶破了 bun 默认的 5 s 单测超时(#2131 CI 实测)。
-// 15 次取中位数足够稳;性能用例另给显式超时。
+// 性能用例另给显式超时(差值守卫最坏 3 轮 × 40 对,见 lowDelta)。
 const WARMUP = 3;
-const ITER = 15;
 const PERF_TIMEOUT_MS = 60_000;
+// #517 差值守卫:每轮 DELTA_PAIRS 对、比两边的 LOW_P 分位、超标再量最多 RETRIES 轮。
+const DELTA_PAIRS = 40, LOW_P = 0.2, RETRIES = 2;
 
 const json = (token: string) => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 async function send(token: string, method: string, path: string, payload?: unknown) {
@@ -56,15 +59,46 @@ function pairedDelta(a: () => void, b: () => void, n: number): { a: number; b: n
   }
   return { a: median(as), b: median(bs), delta: median(ds) };
 }
-async function pairedDeltaAsync(a: () => Promise<void>, b: () => Promise<void>, n: number): Promise<{ a: number; b: number; delta: number }> {
-  for (let i = 0; i < WARMUP; i++) { await a(); await b(); }
-  const as: number[] = [], bs: number[] = [], ds: number[] = [];
-  for (let i = 0; i < n; i++) {
-    let t = performance.now(); await a(); const ta = performance.now() - t;
-    t = performance.now(); await b(); const tb = performance.now() - t;
-    as.push(ta); bs.push(tb); ds.push(tb - ta);
+const pct = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+type LowDelta = { a: number; b: number; delta: number; aP50: number; bP50: number; ok: boolean };
+/**
+ * #517 —— 「组授权比直接授权多出多少」的稳健量法。旧做法(15 对、每轮固定先 A 后 B、取每轮差值中位数)在 test638
+ * 两份 aggregate 并发时红过(本地 2 核 + 忙循环邻居实测 paired-delta 7.34 ms > 5 ms,同一轮两边中位数差出 10 ms)——
+ * 量的是负载,不是组展开。现在:
+ *   - 每轮翻转先后(偶数轮 A→B,奇数轮 B→A),「第二个总吃前一个的 GC / 调度」这类顺序偏差两边对半分;
+ *   - 每边 DELTA_PAIRS 个样本,比两边各自的 LOW_P 分位:调度噪声只会加时间,低尾最接近真实成本;
+ *   - 一轮超标就整轮重量,最多 RETRIES 次;真回归(组路径每节点多查一次,#2133 那种 N+1)每一轮都超。
+ */
+function lowDelta(a: () => void, b: () => void, bound: (base: number) => number): LowDelta {
+  let r: LowDelta | null = null;
+  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+    for (let i = 0; i < WARMUP; i++) { a(); b(); }
+    const as: number[] = [], bs: number[] = [];
+    for (let i = 0; i < DELTA_PAIRS; i++) {
+      const time = (f: () => void) => { const t = performance.now(); f(); return performance.now() - t; };
+      if (i % 2 === 0) { as.push(time(a)); bs.push(time(b)); } else { bs.push(time(b)); as.push(time(a)); }
+    }
+    const lowA = pct(as, LOW_P), lowB = pct(bs, LOW_P);
+    r = { a: lowA, b: lowB, delta: lowB - lowA, aP50: pct(as, 0.5), bP50: pct(bs, 0.5), ok: lowB - lowA <= bound(lowA) };
+    if (r.ok) return r;
   }
-  return { a: median(as), b: median(bs), delta: median(ds) };
+  return r!;
+}
+async function lowDeltaAsync(a: () => Promise<void>, b: () => Promise<void>, bound: (base: number) => number, label: string): Promise<LowDelta> {
+  let r: LowDelta | null = null;
+  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+    for (let i = 0; i < WARMUP; i++) { await a(); await b(); }
+    const as: number[] = [], bs: number[] = [];
+    const time = async (f: () => Promise<void>) => { const t = performance.now(); await f(); return performance.now() - t; };
+    for (let i = 0; i < DELTA_PAIRS; i++) {
+      if (i % 2 === 0) { as.push(await time(a)); bs.push(await time(b)); } else { bs.push(await time(b)); as.push(await time(a)); }
+    }
+    const lowA = pct(as, LOW_P), lowB = pct(bs, LOW_P);
+    r = { a: lowA, b: lowB, delta: lowB - lowA, aP50: pct(as, 0.5), bP50: pct(bs, 0.5), ok: lowB - lowA <= bound(lowA) };
+    console.log(`[perf] ${label} pass ${attempt + 1}: p${LOW_P * 100} direct-300=${lowA.toFixed(2)}ms groups-50x6=${lowB.toFixed(2)}ms delta=${r.delta.toFixed(2)}ms bound=${bound(lowA).toFixed(2)}ms (p50 ${r.aP50.toFixed(2)} / ${r.bP50.toFixed(2)}) ${r.ok ? "ok" : "OVER"}`);
+    if (r.ok) return r;
+  }
+  return r!;
 }
 
 beforeAll(async () => {
@@ -123,8 +157,8 @@ describe("Agent 分组:性能守卫(50 组 × 300 节点)", () => {
   });
 
   test(`visibleAgents():组展开的额外开销 ≤ max(${BOUND_MS} ms, 基线 15%)(目标 ≈2 ms)`, () => {
-    const r = pairedDelta(() => { visibleAgents(bob.id, NET); }, () => { visibleAgents(alice.id, NET); }, ITER);
-    console.log(`[perf] visibleAgents median: direct-300=${r.a.toFixed(2)}ms groups-50x6=${r.b.toFixed(2)}ms paired-delta=${r.delta.toFixed(2)}ms bound=${bound(r.a).toFixed(2)}ms`);
+    const r = lowDelta(() => { visibleAgents(bob.id, NET); }, () => { visibleAgents(alice.id, NET); }, bound);
+    console.log(`[perf] visibleAgents p${LOW_P * 100}: direct-300=${r.a.toFixed(2)}ms groups-50x6=${r.b.toFixed(2)}ms delta=${r.delta.toFixed(2)}ms bound=${bound(r.a).toFixed(2)}ms (p50 ${r.aP50.toFixed(2)} / ${r.bP50.toFixed(2)})`);
     expect(r.delta).toBeLessThanOrEqual(bound(r.a));
   }, PERF_TIMEOUT_MS);
 
@@ -157,8 +191,7 @@ describe("Agent 分组:性能守卫(50 组 × 300 节点)", () => {
       const body = await r.json() as any;
       if ((body.sessions ?? []).length !== NODES) throw new Error(`expected ${NODES} sessions, got ${(body.sessions ?? []).length}`);
     };
-    const r = await pairedDeltaAsync(() => hit(bob.token), () => hit(alice.token), ITER);
-    console.log(`[perf] GET /api/status median: direct-300=${r.a.toFixed(2)}ms groups-50x6=${r.b.toFixed(2)}ms paired-delta=${r.delta.toFixed(2)}ms bound=${bound(r.a).toFixed(2)}ms`);
+    const r = await lowDeltaAsync(() => hit(bob.token), () => hit(alice.token), bound, "GET /api/status");
     expect(r.delta).toBeLessThanOrEqual(bound(r.a));
   }, PERF_TIMEOUT_MS);
 
