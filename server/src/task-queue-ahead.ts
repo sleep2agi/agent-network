@@ -52,13 +52,23 @@ function scoped(sql: string, params: any[], networkId: string | null | undefined
 
 /** 目标上开着的任务数 + 其中已开工的数。一条查询。 */
 export function openTaskCounts(alias: string, networkId: string | null | undefined): { open: number; started: number } {
+  const q = openTaskCountsQuery(alias, networkId);
+  const row = db.get<{ open_n: number | string | null; started_n: number | string | null }>(q.sql, ...q.params);
+  return { open: Number(row?.open_n ?? 0) || 0, started: Number(row?.started_n ?? 0) || 0 };
+}
+
+/**
+ * The statement openTaskCounts runs (exported for the plan assertion). Unlike queueDepthQuery below it needs no
+ * index hint: the to_name equality + created_at range always wins idx_tasks_to_created, even for a node with tens of
+ * thousands of stuck `acked` rows (task-queue-ahead-scale.test.ts pins that plan).
+ */
+export function openTaskCountsQuery(alias: string, networkId: string | null | undefined): { sql: string; params: any[] } {
   const params: any[] = [alias];
   let sql = `SELECT COUNT(*) AS open_n,
       SUM(CASE WHEN status IN ('acked', 'running') OR started_at IS NOT NULL OR consumed_at IS NOT NULL THEN 1 ELSE 0 END) AS started_n
     FROM tasks WHERE to_name = ?1 AND status IN ${QUEUE_OPEN_STATUSES_SQL} AND created_at >= ${QUEUE_HORIZON_SQL}`;
   sql = scoped(sql, params, networkId);
-  const row = db.get<{ open_n: number | string | null; started_n: number | string | null }>(sql, ...params);
-  return { open: Number(row?.open_n ?? 0) || 0, started: Number(row?.started_n ?? 0) || 0 };
+  return { sql, params };
 }
 
 /** 目标最近 24 小时 replied 任务的耗时中位数(分钟);样本不够 → null。一条查询。 */
@@ -119,9 +129,17 @@ export function dispatchQueueInfo(alias: string, networkId: string | null | unde
   }
 }
 
+let queueDepthOffForTest = false;
+/**
+ * Test-only: queueDepthByNode answers an empty map without querying (every row's queue_depth = 0), i.e. a full
+ * /api/status read does exactly the pre-#2325 work. The scale test alternates reads with it on and off against the
+ * same server so the queue_depth share is measured A/B in the same time window (robust to a busy CI runner).
+ */
+export function __setQueueDepthOffForTest(on: boolean): void { queueDepthOffForTest = on; }
+
 export const queueDepthKey = (networkId: string | null | undefined, alias: string) => `${networkId ?? ""}\u0000${alias}`;
 
-/** 别名不多于这个数时按别名查(走 idx_tasks_to_created);多了就一次扫全部开着的任务(走 idx_tasks_status)。 */
+/** 别名不多于这个数时按别名查(走 idx_tasks_to_created);多了就扫最近 24 小时派出的任务(走覆盖索引 idx_tasks_created_queue)。 */
 export const QUEUE_DEPTH_ALIAS_LIST_MAX = 50;
 
 /**
@@ -131,17 +149,38 @@ export const QUEUE_DEPTH_ALIAS_LIST_MAX = 50;
  */
 export function queueDepthByNode(aliases?: Array<string | null | undefined>): Map<string, number> {
   const out = new Map<string, number>();
+  if (queueDepthOffForTest) return out;
+  const q = queueDepthQuery(aliases);
+  if (!q) return out;
+  const rows = db.all<{ network_id: string | null; to_name: string; n: number | string }>(q.sql, ...q.params);
+  for (const r of rows) out.set(queueDepthKey(r.network_id, r.to_name), Number(r.n) || 0);
+  return out;
+}
+
+/** The statement queueDepthByNode runs (exported so the scale test can EXPLAIN exactly this SQL). null = nothing to ask. */
+export function queueDepthQuery(aliases?: Array<string | null | undefined>): { sql: string; params: any[] } | null {
   const wanted = aliases ? [...new Set(aliases.filter((a): a is string => typeof a === "string" && a.length > 0))] : null;
-  if (wanted && wanted.length === 0) return out;
+  if (wanted && wanted.length === 0) return null;
   const params: any[] = [];
-  let sql = `SELECT network_id, to_name, COUNT(*) AS n FROM tasks
-      WHERE status IN ${QUEUE_OPEN_STATUSES_SQL} AND created_at >= ${QUEUE_HORIZON_SQL}`;
+  // 🔴 The `|| ''` wrappers are deliberate — they are index hints, not data transforms (#500 follow-up to #2325).
+  // On a production-shaped DB (57k tasks, 31k stuck in `acked` for weeks, ~1.9k created in the last 24 h) the
+  // planner picked idx_tasks_status for `status IN (…)` and walked every open-status row ever written (~32k) to
+  // keep the 24 h window: full /api/status went from ~8 ms to ~70 ms p50. Wrapping `status` makes that index
+  // unusable, so the scan is driven by the 24 h range on the covering idx_tasks_created_queue (created_at, status,
+  // network_id, to_name) (EXPLAIN: `SEARCH tasks USING COVERING INDEX idx_tasks_created_queue (created_at>?)`, plus a
+  // temp b-tree for the GROUP BY; no task row is read) — or, for the alias list, by idx_tasks_to_created. Without the
+  // covering index it falls back to idx_tasks_created + one row lookup per task: ~3 ms on the production copy, which
+  // was still +50 % on a full /api/status read; covering, ~0.3 ms. The GROUP BY must be wrapped too: grouping on the bare columns lets SQLite pick
+  // idx_tasks_network to avoid the sort, which is another full walk. `|| ''` is portable (SQLite and PostgreSQL;
+  // a CTE/subquery gets flattened back, `+status` / `LIMIT -1` are SQLite-only). NULL || '' stays NULL on both, and
+  // the selected expressions are the grouped ones (PostgreSQL requires that). task-queue-ahead-scale.test.ts pins
+  // the plan and a latency budget.
+  let sql = `SELECT (network_id || '') AS network_id, (to_name || '') AS to_name, COUNT(*) AS n FROM tasks
+      WHERE (status || '') IN ${QUEUE_OPEN_STATUSES_SQL} AND created_at >= ${QUEUE_HORIZON_SQL}`;
   if (wanted && wanted.length <= QUEUE_DEPTH_ALIAS_LIST_MAX) {
     sql += ` AND to_name IN (${wanted.map((_, i) => `?${i + 1}`).join(", ")})`;
     params.push(...wanted);
   }
-  sql += " GROUP BY network_id, to_name";
-  const rows = db.all<{ network_id: string | null; to_name: string; n: number | string }>(sql, ...params);
-  for (const r of rows) out.set(queueDepthKey(r.network_id, r.to_name), Number(r.n) || 0);
-  return out;
+  sql += " GROUP BY (network_id || ''), (to_name || '')";
+  return { sql, params };
 }
