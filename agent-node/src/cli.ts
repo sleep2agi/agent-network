@@ -174,6 +174,7 @@ import {
 } from "./runtime/daemon-create-capability";
 import { daemonHome, resolveDefaultWorkdirRoot } from "./runtime/child-workdir";
 import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
+import { buildCodexSdkThreadOptions, rebuildCodexSdkThread } from "./codex-sdk-thread-options";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 import {
   backupOpencodeConfig,
@@ -2118,18 +2119,9 @@ function buildCodexWakeDeps(): CodexWakeDeps {
       const sdkMod = await loadCodexSdkModule();
       return createCodex(sdkMod.Codex, CODEX_CONFIG, getCodexBinResolution());
     },
-    buildOpts: () => {
-      // Mirror cli.ts:1417-1424 normal-task codex opts so wake behavior
-      // matches the operator's runtime config (yolo flags, model, etc.).
-      const cfgFlags = (fileConfig?.flags || {}) as Record<string, unknown>;
-      return {
-        skipGitRepoCheck: cfgFlags.skipGitRepoCheck === false ? false : true,
-        approvalPolicy: typeof cfgFlags.approvalPolicy === "string" ? cfgFlags.approvalPolicy : "never",
-        model: resolveCodexModel(MODEL),
-        sandboxMode: typeof cfgFlags.sandboxMode === "string" ? cfgFlags.sandboxMode : "danger-full-access",
-        modelReasoningEffort: "low" as const,
-      };
-    },
+    // #534 — same builder as the normal-task start/resume and retry paths, so
+    // a wake honours the operator's sandbox/approval flags and model.
+    buildOpts: () => buildCodexSdkThreadOptions(fileConfig?.flags, resolveCodexModel(MODEL)),
     log,
     warn,
   };
@@ -3215,14 +3207,8 @@ async function processWithCodex(
     // defaults if config flags absent. This keeps current runtime behavior
     // identical (always yolo for codex-sdk) while making the permission
     // posture visible + per-node overridable.
-    const cfgFlags = (fileConfig?.flags || {}) as Record<string, unknown>;
-    const codexOpts = {
-      skipGitRepoCheck: cfgFlags.skipGitRepoCheck === false ? false : true,
-      approvalPolicy: (typeof cfgFlags.approvalPolicy === "string" ? cfgFlags.approvalPolicy : "never") as any,
-      model: codexModel,
-      sandboxMode: (typeof cfgFlags.sandboxMode === "string" ? cfgFlags.sandboxMode : "danger-full-access") as any,
-      modelReasoningEffort: "low" as const,
-    };
+    // #534 — one builder for start, resume, goal wake and the retry below.
+    const codexOpts = buildCodexSdkThreadOptions(fileConfig?.flags, codexModel);
     // #1645 —— 起线程前看一眼 codex 自己的 models 缓存:上游给了本机不认识的档位,
     // resume 会以 unknown variant 致命退出、表现为 300s 超时。只警告,不拦。
     // #1973 —— 用 #1969 解析出的实际 codex 版本判断,不再只信硬编码的 0.133 档位集合。
@@ -3347,13 +3333,9 @@ async function processWithCodex(
     }
     log(`codex thread error: ${e.message}, 重建`);
     const codex = createCodex(Codex, CODEX_CONFIG, getCodexBinResolution());
-    codexThread = codex.startThread({
-      skipGitRepoCheck: true,
-      approvalPolicy: "never" as const,
-      model: resolveCodexModel(MODEL),
-      sandboxMode: "danger-full-access" as const,
-      modelReasoningEffort: "low" as const,
-    });
+    // #534 — the rebuild used to hard-code danger-full-access + never, so a
+    // read-only / workspace-write node silently got full access on retry.
+    codexThread = rebuildCodexSdkThread(codex, fileConfig?.flags, resolveCodexModel(MODEL));
     const turn = await codexThread.run(input);
     const dt = Date.now() - t0;
     log(`[codex] retry done | ${dt}ms`);
