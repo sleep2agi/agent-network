@@ -221,7 +221,12 @@ async function hungScenario({ statusRow, dispatch, appserverReason, appUrl, code
   const row = await statusRow();
   if (!row?.degraded) fail("expected the node to stay degraded while a foreign process holds its port");
   pass(`foreign-marker hung listener (pid ${foreign}) never killed after 8 s of failed probes; node stays degraded — ${appserverReason(row)}`);
-  execFileSync("kill", ["-KILL", String(foreign), ...proxyPids().map(String)]);
+  // Cleanup only (the assertions above are done). The foreign pane's own command line names hung-proxy.mjs, so it is
+  // in proxyPids() too; one `kill -KILL a a b` fails when `a` is reaped between the two signals (seen under load).
+  // Signal each pid once and let an already-gone one be.
+  for (const pid of new Set([foreign, ...proxyPids()])) {
+    try { process.kill(pid, "SIGKILL"); } catch (e) { if (e?.code !== "ESRCH") throw e; }
+  }
 }
 
 try {

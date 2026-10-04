@@ -144,6 +144,28 @@ describe("health monitor + watchdog", () => {
     expect(new Set([plainDown, restarting, gaveUp]).size).toBe(3);
   });
 
+  test("a blocked restart is a signature flip too: the reason reaches the Hub at once, not at the next heartbeat", async () => {
+    // The probe error stays byte-identical ("Connection ended"); only the watchdog's verdict changes on the 2nd probe.
+    const reports: string[] = [];
+    const wd = createAppServerWatchdog({
+      canRestart: () => "tmux session x-appsrv still has a live pane; not replacing it",
+      restart: async () => { throw new Error("must not restart"); },
+    });
+    const mon = createCodexHealthMonitor({
+      appServerUrl: () => "ws://127.0.0.1:1",
+      modelAuth: new ModelAuthTracker(),
+      probeAppServer: async () => down,
+      onAppServerProbe: (h) => wd.observe(h),
+      onChange: (r) => reports.push(r.app_server?.last_error ?? ""),
+    });
+    await mon.tick(); // 1st failure: below the threshold, the raw probe error (first tick, never up: quiet)
+    await mon.tick(); // 2nd failure: the watchdog looks, and declines
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatch(/; not restarting: tmux session x-appsrv still has a live pane/);
+    await mon.tick();
+    expect(reports).toHaveLength(1); // stable verdict: no report on every tick
+  });
+
   test("end to end: server dies → degraded+restarting → restart rebinds → ok, each flip reported", async () => {
     // A bare TCP server that answers the ws upgrade; "dying" = closing it, "restart" = listening again on the same port.
     let srv: NetServer | null = null;

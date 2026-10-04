@@ -239,6 +239,13 @@ export interface CodexHealthMonitorOptions {
    * 并把「正在重启 / 已放弃」写进 last_error。返回值就是要上报的 app_server。
    */
   onAppServerProbe?: (h: AppServerHealth) => AppServerHealth;
+  /**
+   * true once the bridge has really been connected to the app-server (a session opened). Gates the first-tick
+   * report below: a down first probe is news only if the layer was up before. Without it, a node still starting
+   * (or a platform whose TUI probe can never pass, e.g. Windows without tmux) would be reported degraded and the
+   * Hub's dispatch guard would refuse its tasks.
+   */
+  appServerWasUp?: () => boolean;
 }
 
 /** 探测间隔:默认 30s;ANET_CODEX_HEALTH_INTERVAL_MS 可调(≥ 1000,测试用),非法值退回默认。 */
@@ -254,6 +261,11 @@ function appServerPhase(h: AppServerHealth | undefined): string {
   if (/auto-restart gave up/.test(e)) return "gave_up";
   // #465 —— 活着但不应答(正在数探针 / 身份核对不过不杀):也是一次翻转,立刻报上去,别等心跳。
   if (/alive but not answering/.test(e)) return "hung";
+  // The watchdog decided not to restart (someone else's process holds the port, the node is stopping, no launch
+  // snapshot…). Without its own phase this looked exactly like the plain "down" before it, so the reason only
+  // reached the Hub by luck, on some later status report (the 3-minute heartbeat, or a task ending). CI saw that
+  // as test-codex-appserver-watchdog timing out on "hub reports the foreign listener as degraded".
+  if (/; not restarting: /.test(e)) return "blocked";
   return "-";
 }
 
@@ -291,7 +303,13 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
     }
     const report = snapshot();
     const sig = healthSignature(report);
-    if (lastSig !== null && sig !== lastSig) opts.onChange?.(report);
+    // The first tick has no previous signature to differ from. A healthy first result adds nothing to the
+    // registration report the Hub already has. A down one is reported only for a layer known to have been up — the
+    // app-server the bridge already connected to died before the first probe (the watchdog is already restarting
+    // it), which the Hub would otherwise not see until the next flip or the 3-minute heartbeat. A layer that has
+    // never been up (start-up, a TUI not opened yet, no tmux on this platform) stays quiet, as before.
+    const firstAndDown = lastSig === null && report.app_server?.ok === false && opts.appServerWasUp?.() === true;
+    if (firstAndDown || (lastSig !== null && sig !== lastSig)) opts.onChange?.(report);
     lastSig = sig;
     return report;
   };
