@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { classifyUnsafePath, describeUnsafePath } from "./unsafe-package-path-reason";
+import { classifyUnsafePath, describeUnsafeDirectory, describeUnsafePath } from "./unsafe-package-path-reason";
 
 const ME = 1000;
 
@@ -45,4 +45,32 @@ test("an ownership failure does not send the reader chasing umask", () => {
 
 test("the mode is printed octal and zero-padded, so 0644 never reads as 420", () => {
   expect(describeUnsafePath("/p", { uid: ME, mode: 0o066, processUid: ME })).toContain("066");
+});
+
+// #535 — the directory branch used to throw with no path at all.
+
+test("#535 a sticky world-writable ancestor (/tmp) is named, and the fix is the npm cache, not chmod", () => {
+  const msg = describeUnsafeDirectory("/tmp", { uid: 0, mode: 0o41777, processUid: ME, ancestorOf: "/tmp/h/.npm/_npx/aa/node_modules/@sleep2agi/agent-node/dist" });
+  expect(msg).toContain("directory /tmp");
+  expect(msg).toContain("1777");
+  expect(msg).toContain("an ancestor of the agent-node package at /tmp/h/.npm");
+  expect(msg).toContain("npm_config_cache");
+  expect(msg).toContain("Do NOT chmod");
+});
+
+test("#535 a group-writable package directory gets the exact chmod for that path", () => {
+  const msg = describeUnsafeDirectory("/home/x/.npm/_npx/aa/node_modules/@sleep2agi/agent-node/dist", { uid: ME, mode: 0o40775, processUid: ME });
+  expect(msg).toContain("chmod g-w /home/x/.npm/_npx/aa/node_modules/@sleep2agi/agent-node/dist");
+});
+
+test("#535 a directory owned by another account names the uid and the chown", () => {
+  const msg = describeUnsafeDirectory("/srv/pkgs", { uid: ME + 7, mode: 0o40755, processUid: ME });
+  expect(msg).toContain(`uid ${ME + 7}`);
+  expect(msg).toContain("chown $(id -u) /srv/pkgs");
+});
+
+test("#535 the file branch prints the real package root, not a <package root> placeholder", () => {
+  const msg = describeUnsafePath("/home/x/.npm/_npx/aa/node_modules/@sleep2agi/agent-node/dist/cli.js", NPM_EXTRACTED_BIN);
+  expect(msg).toContain("chmod -R g-w,o-w /home/x/.npm/_npx/aa/node_modules/@sleep2agi/agent-node`");
+  expect(msg).not.toContain("<package root>");
 });

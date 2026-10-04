@@ -151,6 +151,18 @@ $CLI node create sdknode --runtime codex-sdk --copresence --hub "$HUB" >>"$REPOR
   || fail "codexCopresence written onto a codex-sdk node"
 pass "flag, codex-cli alias, and real interactive picker all record co-presence only on the supported runtime"
 
+# #535 — a co-presence start now stops at `needs-login` before step ① when the node's
+# CODEX_HOME has no usable login. These layers assert what the launcher decides AFTER that
+# gate, so give each node that will be started a clearly fake API-key login of its own.
+seed_fake_codex_login() {
+  local home=".anet/nodes/$1/codex-home"
+  mkdir -p "$home" && chmod 700 "$home"
+  printf '{"OPENAI_API_KEY":"sk-fake-test750-%s"}\n' "$1" >"$home/auth.json"
+  chmod 600 "$home/auth.json"
+}
+seed_fake_codex_login withflag
+seed_fake_codex_login noflag
+
 log "[L3] start routes on the recorded field, with no flag"
 set +e
 $CLI node start withflag --accept-dev-channels >"$WORK/withflag.start" 2>&1

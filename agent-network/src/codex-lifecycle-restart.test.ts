@@ -143,15 +143,33 @@ describe("#1856 PR-B restart state machine", () => {
     expect((await runCodexRestart("restart", swap)).checks.find((c) => c.key === "rollout_intact")!.status).toBe("fail");
   });
 
-  test("no probe peer → identity_attested unknown → verdict FAIL with a hint (fail-closed)", async () => {
+  test("#535 no probe peer (single node) → identity_attested n/a with a hint → verdict PASS", async () => {
     const a = actions({ nonceProbe: undefined });
     const out = await runCodexRestart("restart", a);
     const id = out.checks.find((c) => c.key === "identity_attested")!;
-    expect(id.status).toBe("unknown");
+    expect(id.status).toBe("n/a");
     expect(id.detail).toContain("--probe-from");
     const v = receiptVerdict("restart", out.checks);
+    expect(v.verdict).toBe("PASS");
+    expect(v.blocking).toEqual([]);
+    for (const verb of ["start", "resume"] as const) {
+      const o = await runCodexRestart(verb, actions({ nonceProbe: undefined, liveSessions: async () => ({ bridge: false, tui: false, appsrv: false }) }));
+      expect(receiptVerdict(verb, o.checks).verdict).toBe("PASS");
+    }
+  });
+
+  test("#535 n/a on a peer-backed failure does not exist: a wrong-alias probe still FAILs and is the only blocker", async () => {
+    const out = await runCodexRestart("restart", actions({ nonceProbe: async () => ({ ok: false, detail: "nonce came back from another node" }) }));
+    expect(receiptVerdict("restart", out.checks)).toEqual({ verdict: "FAIL", blocking: ["identity_attested"] });
+  });
+
+  test("#535 stopped at preflight_before → blocking lists only the before-checks that failed, not every unproduced key", async () => {
+    const a = actions({ gate: async (phase) => (phase === "before" ? gate(PRE, { home_isolated: "fail", workdir_consistent: "unknown" }) : gate(VER)) });
+    const out = await runCodexRestart("restart", a);
+    expect(out.stoppedAt).toBe("preflight_before");
+    const v = receiptVerdict("restart", out.checks);
     expect(v.verdict).toBe("FAIL");
-    expect(v.blocking).toEqual(["identity_attested"]);
+    expect(v.blocking).toEqual(["before:home_isolated"]);
   });
 
   test("probe answered by the wrong alias → identity_attested fail", async () => {

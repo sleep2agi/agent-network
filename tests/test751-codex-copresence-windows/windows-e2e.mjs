@@ -131,7 +131,9 @@ if (firstConfig.runtime !== "codex-app-server" || firstConfig.codexCopresence !=
 const codexHome = join(project, ".anet", "nodes", "windows-picker", "codex-home");
 env.ANET_TEST751_CODEX_HOME = codexHome;
 mkdirSync(codexHome, { recursive: true });
-writeFileSync(join(codexHome, "auth.json"), "{}\n");
+// #535 — co-presence start now stops at needs-login (exit 3) when the node's CODEX_HOME has no usable
+// login; `{}` is "not logged in". A clearly fake API key is a usable login shape; nothing here calls a model.
+writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-fake-test751-windows" }) + "\n");
 
 async function startAndStop(label) {
   console.log(`PHASE ${label}`);

@@ -100,6 +100,31 @@ for tool in codex opencode claude grok; do
   chmod 0755 "$FAKE_BIN/$tool"
 done
 
+# #535 — a co-presence start now (a) resolves the paired agent-node BEFORE any tmux session
+# and (b) stops at needs-login when the node's CODEX_HOME has no usable login. This image has
+# no npx, so give the L7b starts an exact, package-shaped agent-node stub (the shape the
+# identity check accepts; same recipe as test750) and each started node a clearly fake login.
+PAIRED_VERSION=$(bun -e "console.log(require('$ROOT/agent-node/package.json').version)")
+[[ -n "$PAIRED_VERSION" ]] || { echo "PAIRED_VERSION_UNREADABLE"; exit 1; }
+PAIR_BASE="/run/user/$(id -u)/test697-paired-agent-node"
+PAIR_ROOT="$PAIR_BASE/node_modules/@sleep2agi/agent-node"
+mkdir -p "$PAIR_ROOT/dist"
+chmod 700 "/run/user/$(id -u)" "$PAIR_BASE"
+printf '{"name":"@sleep2agi/agent-node","version":"%s","publishConfig":{"tag":"preview"},"bin":{"agent-node":"dist/cli.js"}}\n' \
+  "$PAIRED_VERSION" >"$PAIR_ROOT/package.json"
+printf '%s\n' '#!/usr/bin/env node' \
+  'if (process.argv.includes("--help")) { console.log("--runtime codex-app-server"); process.exit(0); }' \
+  'process.exit(1);' >"$PAIR_ROOT/dist/cli.js"
+chmod 644 "$PAIR_ROOT/package.json"
+chmod 755 "$PAIR_ROOT" "$PAIR_ROOT/dist" "$PAIR_ROOT/dist/cli.js"
+PAIRED_AGENT_NODE_BIN="$PAIR_ROOT/dist/cli.js"
+seed_fake_codex_login() {
+  local home="$PROJECT_DIR/.anet/nodes/$1/codex-home"
+  mkdir -p "$home" && chmod 700 "$home"
+  printf '{"OPENAI_API_KEY":"sk-fake-test697-%s"}\n' "$1" >"$home/auth.json"
+  chmod 600 "$home/auth.json"
+}
+
 create_node() {
   local name=$1 runtime=$2
   shift 2
@@ -218,6 +243,7 @@ strip_node_model() {
   jq -e 'has("model") | not' "$cfg" >/dev/null
 }
 strip_node_model copresence-default
+seed_fake_codex_login copresence-default
 FAKE_TMUX_LOG=/tmp/test697-fake-tmux.log
 : > "$FAKE_TMUX_LOG"
 cat > "$FAKE_BIN/tmux" <<'SH'
@@ -232,7 +258,7 @@ SH
 chmod 0755 "$FAKE_BIN/tmux"
 (
   cd "$PROJECT_DIR"
-  HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+  HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" ANET_AGENT_NODE_BIN="$PAIRED_AGENT_NODE_BIN" \
     timeout 5 "${ANET[@]}" node start copresence-default --copresence \
       --codex-bin "$FAKE_BIN/codex"
 ) >/tmp/test697-copresence.log 2>&1 || true
@@ -246,11 +272,12 @@ grep -Fq -- "-c model='gpt-5.6-sol'" "$FAKE_TMUX_LOG" || {
 echo "L7b2 copresence start uses the node config model when no --model is given (#512)"
 create_node copresence-config codex-app-server --model cfg-model-697
 jq -e '.model == "cfg-model-697"' "$PROJECT_DIR/.anet/nodes/copresence-config/config.json" >/dev/null
+seed_fake_codex_login copresence-config
 probe_copresence_node_config() {
   : > "$FAKE_TMUX_LOG"
   (
     cd "$PROJECT_DIR"
-    HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+    HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" ANET_AGENT_NODE_BIN="$PAIRED_AGENT_NODE_BIN" \
       timeout 5 "${ANET[@]}" node start copresence-config --copresence \
         --codex-bin "$FAKE_BIN/codex"
   ) >/tmp/test697-copresence-config.log 2>&1 || true
@@ -795,7 +822,7 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     : > "$FAKE_TMUX_LOG"
     (
       cd "$PROJECT_DIR"
-      HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+      HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" ANET_AGENT_NODE_BIN="$PAIRED_AGENT_NODE_BIN" \
         timeout 5 "${ANET[@]}" node start copresence-default --copresence \
           --codex-bin "$FAKE_BIN/codex"
     ) >/tmp/test697-mut-copresence.log 2>&1 || true
@@ -805,7 +832,7 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     : > "$FAKE_TMUX_LOG"
     (
       cd "$PROJECT_DIR"
-      HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" \
+      HOME="$HOME_DIR" PATH="$FAKE_BIN:$PATH" FAKE_TMUX_LOG="$FAKE_TMUX_LOG" ANET_AGENT_NODE_BIN="$PAIRED_AGENT_NODE_BIN" \
         timeout 5 "${ANET[@]}" node start copresence-default --copresence \
           --model o3 --codex-bin "$FAKE_BIN/codex"
     ) >/tmp/test697-mut-copresence-explicit.log 2>&1 || true
