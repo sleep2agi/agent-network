@@ -1034,7 +1034,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           `SELECT tmux_name, server, ip, hostname, agent, project_dir, version, node_id, session_id, config_path,
                   channels, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
                   disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct,
-                  process_uptime_seconds, process_in_flight_count, external_schedules, registered_at
+                  process_uptime_seconds, process_in_flight_count, external_schedules, registered_at,
+                  rules_file_capable, skills_capable, files_capable, logs_capable
              FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3
              ORDER BY updated_at DESC LIMIT 1`,
           effectiveAlias, resume_id, sessionNetId,
@@ -1102,6 +1103,26 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              handover.process_rss_bytes ?? null, handover.process_rss_mb ?? null, handover.process_cpu_pct ?? null,
              handover.process_uptime_seconds ?? null, handover.process_in_flight_count ?? null, handover.external_schedules ?? null,
              handover.registered_at ?? null],
+          );
+        }
+        // #550 — the sticky capability flags survive a session handover. The
+        // DELETE+INSERT above starts the new resume_id row at the column default
+        // (0), so a node whose MCP channel reconnected under a new resume_id lost
+        // its rules-file / skills / files / logs doorbell until it next reported
+        // the flag (board #548). Carry each flag that was 1 on the replaced row —
+        // only-ever-set-to-1, and under the same binding as setting it: a node
+        // token bound to this alias. Fixed statement, every parameter used (PG).
+        if (handover && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
+          db.run(
+            `UPDATE sessions SET
+               rules_file_capable = CASE WHEN ?2 = 1 THEN 1 ELSE rules_file_capable END,
+               skills_capable = CASE WHEN ?3 = 1 THEN 1 ELSE skills_capable END,
+               files_capable = CASE WHEN ?4 = 1 THEN 1 ELSE files_capable END,
+               logs_capable = CASE WHEN ?5 = 1 THEN 1 ELSE logs_capable END
+             WHERE resume_id = ?1`,
+            [resume_id,
+             Number(handover.rules_file_capable) === 1 ? 1 : 0, Number(handover.skills_capable) === 1 ? 1 : 0,
+             Number(handover.files_capable) === 1 ? 1 : 0, Number(handover.logs_capable) === 1 ? 1 : 0],
           );
         }
         // app#225 follow-up — separate statement on purpose: the INSERT above is
