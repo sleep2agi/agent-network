@@ -29,6 +29,7 @@ import { codexLoginFactsOfHome, effectiveCodexHome } from "./codex-node-login";
 import { displayWidth, padDisplayEnd } from "./display-width";
 import { normalizeRuntime } from "./normalize-runtime";
 import { execTmux } from "./tmux";
+import { tmuxUtf8Args } from "./tmux-format";
 
 export type CodexKind = "co-presence" | "codex-sdk";
 
@@ -68,8 +69,8 @@ export interface CollectEnv {
 
 function realTmuxSessions(): Set<string> {
   try {
-    // One name per line, no separator: tmux outside a UTF-8 locale rewrites a tab in -F to "_".
-    const out = execTmux(["list-sessions", "-F", "#{session_name}"], {
+    // One name per line; `-u` because outside a UTF-8 locale tmux rewrites every byte of a CJK name to "_" (#533).
+    const out = execTmux(tmuxUtf8Args(["list-sessions", "-F", "#{session_name}"]), {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });

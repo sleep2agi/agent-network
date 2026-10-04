@@ -1,3 +1,5 @@
+import { TMUX_FIELD_SEP, tmuxFormat, tmuxUtf8Args } from "./tmux-format";
+
 // tmux `-t` resolves a session name by PREFIX unless the name is written
 // `=name`. Every human-facing string in this CLI already spells the exact form
 // (`tmux attach -t '=<alias>'`, with a comment explaining why) — but every tmux
@@ -69,29 +71,33 @@ export function ensureExactSession(nameOrTarget: string): string {
 // session name EXACTLY in code, where string equality is unambiguous — rather
 // than asking tmux to disambiguate for us.
 
-/** One row of `tmux list-panes -a -F '#{session_name}\t#{window_index}.#{pane_index}'`. */
+/** One row of `tmux -u list-panes -a -F PANE_LIST_FORMAT` (session, `window.pane`). */
 export interface PaneRow {
   session: string;
   /** `window.pane`, e.g. `0.0`. */
   coord: string;
 }
 
-// tmux 3.3a (including Debian's build used by our Linux images) sanitizes a
-// literal TAB in a format string to `_`.  A visible marker survives tmux's
-// formatter unchanged; keep TAB parsing as backwards-compatible input for
-// callers/tests that captured the older wire shape.
-const PANE_FIELD_MARKER = "::ANET_PANE::";
+// tmux outside a UTF-8 locale sanitizes a literal TAB — and every byte of a
+// CJK session name — to `_` (#533). PANE_LIST_ARGS therefore runs tmux with
+// `-u` and joins fields with the printable TMUX_FIELD_SEP (see tmux-format.ts).
+// The older `::ANET_PANE::` marker and a bare TAB are still accepted as input
+// for callers/tests that captured an older wire shape.
+const LEGACY_PANE_FIELD_MARKER = "::ANET_PANE::";
 
 export function parsePaneRows(listOutput: string): PaneRow[] {
   const rows: PaneRow[] = [];
   for (const line of listOutput.split("\n")) {
     if (!line) continue;
-    // Split on the LAST marker (or legacy TAB): a session name may contain the
-    // delimiter only if someone worked hard at it, and the coordinate cannot.
-    const markerIndex = line.lastIndexOf(PANE_FIELD_MARKER);
-    const i = markerIndex >= 0 ? markerIndex : line.lastIndexOf("\t");
+    // Split on the LAST separator: a session name may contain the delimiter
+    // only if someone worked hard at it, and the coordinate cannot.
+    let i = -1;
+    let width = 1;
+    for (const sep of [TMUX_FIELD_SEP, LEGACY_PANE_FIELD_MARKER, "\t"]) {
+      i = line.lastIndexOf(sep);
+      if (i >= 0) { width = sep.length; break; }
+    }
     if (i <= 0) continue;
-    const width = markerIndex >= 0 ? PANE_FIELD_MARKER.length : 1;
     rows.push({ session: line.slice(0, i), coord: line.slice(i + width).trim() });
   }
   return rows;
@@ -110,4 +116,7 @@ export function paneTargetFor(listOutput: string, sessionName: string): string |
 }
 
 /** The format string the two functions above expect. */
-export const PANE_LIST_FORMAT = `#{session_name}${PANE_FIELD_MARKER}#{window_index}.#{pane_index}`;
+export const PANE_LIST_FORMAT = tmuxFormat(["#{session_name}", "#{window_index}.#{pane_index}"]);
+
+/** Full argv (`-u list-panes -a -F …`) for `execTmux`; locale-proof (#533). */
+export const PANE_LIST_ARGS: readonly string[] = tmuxUtf8Args(["list-panes", "-a", "-F", PANE_LIST_FORMAT]);

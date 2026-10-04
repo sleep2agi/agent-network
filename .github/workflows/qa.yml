@@ -30,6 +30,7 @@ on:
       - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test505-tmux-socket-isolation/**'
+      - 'tests/test533-tmux-format-locale/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
       - 'tests/test1212-windows-real-codex-gate/**'
@@ -223,6 +224,7 @@ on:
       - 'tests/test1755-rules-file-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test505-tmux-socket-isolation/**'
+      - 'tests/test533-tmux-format-locale/**'
       - 'tests/test746-setup-bun-pin/**'
       - 'tests/test751-codex-copresence-windows/**'
       - 'tests/test1212-windows-real-codex-gate/**'
@@ -507,6 +509,20 @@ jobs:
 
       - name: Run test505-tmux-socket-isolation
         run: docker run --rm --network none anet-test505-tmux-socket-isolation
+
+      # #533 —— 非 UTF-8 locale(LANG=C)下 tmux 把 -F 输出里的 TAB 和中文会话名的每个字节都换成 `_`,
+      # `anet attach 通信牛` 因此报「not running」。这里在私有 socket 上起真 tmux + 中文会话,
+      # LANG=C 跑真的 `anet attach`,并把去掉 `-u` 的变异件喂进去断言它必红。
+      # Dockerfile 在 npm ci 之前与 test745 逐字相同,复用同一 job 的层缓存。
+      - name: Build test533-tmux-format-locale
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test533-tmux-format-locale \
+            -f tests/test533-tmux-format-locale/Dockerfile .
+
+      - name: Run test533-tmux-format-locale
+        run: docker run --rm --network none anet-test533-tmux-format-locale
 
   server-unit:
     name: server unit (Docker, non-root)

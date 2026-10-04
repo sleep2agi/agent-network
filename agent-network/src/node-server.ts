@@ -22,6 +22,7 @@ import { randomUUID } from "crypto";
 import { join } from "path";
 import { hostname } from "os";
 import { execTmux } from "./tmux";
+import { tmuxUtf8Args } from "./tmux-format";
 import { encodeCwd } from "./project-key";
 import { loadOwnerOnlyEnvFile } from "./owner-env-file";
 import { createActivityLogSink } from "./node-activity-log";
@@ -90,7 +91,7 @@ function getTmuxSessionName(): string {
   //    ⇒ 平台上没有 tmux 就不要去问；并且显式丢弃子进程 stderr，不让它进管道。
   if (process.platform === "win32") return "";
   try {
-    return execTmux(["display-message", "-p", "#S"], {
+    return execTmux(tmuxUtf8Args(["display-message", "-p", "#S"]), {
       encoding: "utf-8",
       timeout: 2000,
       stdio: ["ignore", "pipe", "ignore"],

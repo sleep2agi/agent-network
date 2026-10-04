@@ -77,7 +77,7 @@ QA_YML = ".github/workflows/qa.yml"
 # 宿主上执行仓库代码的 job(test-lib-meta、windows-codex-copresence、qa)不在表里。
 SKIPPABLE_JOBS: dict[str, set[str]] = {
     "doc-claims": {"test846-doc-claims"},
-    "agent-network-unit": {"test745-agent-network-unit-ci", "test505-tmux-socket-isolation"},
+    "agent-network-unit": {"test745-agent-network-unit-ci", "test505-tmux-socket-isolation", "test533-tmux-format-locale"},
     "server-unit": {"test798-server-unit-ci"},
     "agent-node-unit": {"test725-agent-node-unit-ci"},
     "test1755-rules-file-e2e": {"test1755-rules-file-e2e"},

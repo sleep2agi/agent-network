@@ -207,13 +207,14 @@ import {
 import { parseCliOptions, positionalArgs } from "../src/cli-args";
 import { resolveUpgradeChannel, type DistTags, type ReleaseChannel } from "../src/upgrade-channel";
 import { parseTokenCreateName } from "../src/token-cli";
-import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
+import { findExactTmuxSession, parseTmuxSessions, SESSION_LIST_ARGS } from "../src/tmux-attach";
 import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
 import { describeUnsafePath } from "../src/unsafe-package-path-reason";
 import { codexHomeLoginState, describeCodexNeedsLogin, NEEDS_LOGIN_EXIT_CODE } from "../src/codex-copresence-login-gate";
 import { bridgeLaunchFailureLines, CODEX_BRIDGE_LOG_NAME, codexBridgeTeeCommand } from "../src/codex-copresence-bridge-log";
 import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-mode-preflight";
-import { exactSession, PANE_LIST_FORMAT, paneTargetFor } from "../src/tmux-exact-target";
+import { exactSession, PANE_LIST_ARGS, paneTargetFor } from "../src/tmux-exact-target";
+import { parseTmuxRows, tmuxListArgs, tmuxUtf8Args } from "../src/tmux-format";
 import { execTmux, spawnSyncTmux, spawnTmux } from "../src/tmux";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
@@ -324,7 +325,7 @@ function bunxAvailable(): boolean {
 
 function tmuxPaneTarget(sessionName: string): string | null {
   try {
-    const out = execTmux(["list-panes", "-a", "-F", PANE_LIST_FORMAT], {
+    const out = execTmux(PANE_LIST_ARGS, {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     return paneTargetFor(out, sessionName);
@@ -356,11 +357,10 @@ function tmuxSessionRunning(name: string): boolean {
 /** #448 — pane pids of one session, matched by string equality (tmux `-t` is a prefix match, `=name` fails on CJK). */
 function tmuxSessionPanePids(sessionName: string): number[] {
   try {
-    const out = execTmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}"], {
+    const out = execTmux(tmuxListArgs(["list-panes", "-a"], ["#{session_name}", "#{pane_pid}"]), {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
     }).toString();
-    return out.split("\n")
-      .map((line) => line.split("\t"))
+    return parseTmuxRows(out, 2)
       .filter(([name, pid]) => name === sessionName && /^\d+$/.test(pid ?? ""))
       .map(([, pid]) => Number(pid));
   } catch { return []; }
@@ -1760,7 +1760,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // degrades post-mortem detail, never reclaimability.
   const harvestSession = (session: string): SessionInfo | undefined => {
     try {
-      const panePid = Number(execTmux(["display-message", "-p", "-t", session, "#{pane_pid}"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
+      const panePid = Number(execTmux(tmuxUtf8Args(["display-message", "-p", "-t", session, "#{pane_pid}"]), { stdio: ["ignore", "pipe", "ignore"] }).toString().trim());
       if (!Number.isInteger(panePid) || panePid <= 0) return undefined;
       const enumer = realEnumerator();
       const stat = enumer.readStat(panePid);
@@ -4355,7 +4355,7 @@ function attachCommand() {
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   let listing: string;
   try {
-    listing = execTmux(["list-sessions", "-F", "#{session_id}\t#{session_name}"], {
+    listing = execTmux(SESSION_LIST_ARGS, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -8035,8 +8035,8 @@ function codexRestartActions(ctx: CodexLifecycleCtx, peer: { id: string; profile
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const sessionIdExact = (name: string): string | null => {
     try {
-      const out = execTmux(["list-sessions", "-F", "#{session_name}\t#{session_id}"], { stdio: ["ignore", "pipe", "ignore"] }).toString();
-      for (const line of out.split("\n")) { const [n, id] = line.split("\t"); if (n === name && id) return id; }
+      const out = execTmux(tmuxListArgs(["list-sessions"], ["#{session_name}", "#{session_id}"]), { stdio: ["ignore", "pipe", "ignore"] }).toString();
+      for (const [n, id] of parseTmuxRows(out, 2)) { if (n === name && id) return id; }
     } catch { /* no server */ }
     return null;
   };
@@ -16938,7 +16938,7 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
   if (verb === "list") {
     let sessions: string[] = [];
     try {
-      const out = execTmux(["list-sessions", "-F", "#{session_name}"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+      const out = execTmux(tmuxUtf8Args(["list-sessions", "-F", "#{session_name}"]), { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
       sessions = out.split("\n").filter(s => s && s.includes("-"));
     } catch {}
     const groups = new Map<string, string[]>();
@@ -16965,7 +16965,7 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
   // stop/restart/cleanup share a "kill matching tmux sessions" pass.
   let killedCount = 0;
   try {
-    const out = execTmux(["list-sessions", "-F", "#{session_name}"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+    const out = execTmux(tmuxUtf8Args(["list-sessions", "-F", "#{session_name}"]), { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
     const sessions = out.split("\n").filter(s => s.startsWith(`${prefix}-`));
     for (const sess of sessions) {
       killTmuxSession(sess);
