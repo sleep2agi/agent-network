@@ -13,9 +13,18 @@ import {
 import { join } from "path";
 import {
   discoverOpencodeForbiddenRoots,
+  OPENCODE_ACCEPTED_VERSIONS,
+  OPENCODE_DEFAULT_PIN,
+  OPENCODE_TRANSITION_VERSIONS,
+  isAcceptedOpencodeVersion,
   opencodeOwnedPathModeIsSafe,
+  opencodeTransitionNote,
   resolvePinnedOpencodeBinary,
+  resolvePinnedOpencodeBinaryAttestation,
+  revalidatePinnedOpencodeBinary,
 } from "./binary";
+
+const PIN = OPENCODE_DEFAULT_PIN;
 
 function makeTrustedRoot(label: string): string {
   if (process.platform !== "linux" || process.getuid === undefined) {
@@ -50,7 +59,7 @@ function packageStub(base: string, label: string, opts: PackageStubOptions = {})
   const executableName = opts.executableName ?? "opencode.exe";
   const binary = join(binDir, executableName);
   const packageJson = join(packageRoot, "package.json");
-  const manifestVersion = opts.manifestVersion ?? "1.18.1";
+  const manifestVersion = opts.manifestVersion ?? PIN;
   mkdirSync(fixtureRoot, { mode: 0o700 });
   if (opts.npmLayout !== false) mkdirSync(nodeModules, { mode: 0o700 });
   mkdirSync(packageRoot, { mode: opts.packageDirMode ?? 0o700 });
@@ -114,7 +123,7 @@ describe("resolvePinnedOpencodeBinary", () => {
       const fixture = packageStub(root, "opencode-ai", { probeMarker: marker });
       expect(resolvePinnedOpencodeBinary({
         requestedBinary: fixture.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
         probeCwd,
       })).toBe(fixture.binary);
@@ -131,7 +140,7 @@ describe("resolvePinnedOpencodeBinary", () => {
       const shimDir = pathShim(root, fixture.binary);
       expect(resolvePinnedOpencodeBinary({
         searchPath: shimDir,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
       })).toBe(fixture.binary);
     } finally {
@@ -148,7 +157,7 @@ describe("resolvePinnedOpencodeBinary", () => {
       const fixture = packageStub(project, "node_modules-opencode-ai", { probeMarker: marker });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: fixture.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
         forbiddenRoots: [project],
       })).toThrow("overlaps forbidden root");
@@ -164,21 +173,21 @@ describe("resolvePinnedOpencodeBinary", () => {
       const wrongName = packageStub(root, "wrong-name", { name: "forged-opencode-ai" });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: wrongName.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
-      })).toThrow("not opencode-ai@1.18.1");
+      })).toThrow(`not opencode-ai@${PIN}`);
 
       const wrongVersion = packageStub(root, "wrong-version", { manifestVersion: "1.17.13" });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: wrongVersion.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
-      })).toThrow("not opencode-ai@1.18.1");
+      })).toThrow(`not opencode-ai@${PIN}`);
 
       const wrongBin = packageStub(root, "wrong-bin", { declaredBin: "bin/other.exe" });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: wrongBin.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
       })).toThrow("bin.opencode=bin/opencode.exe");
 
@@ -188,7 +197,7 @@ describe("resolvePinnedOpencodeBinary", () => {
       });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: wrongEntrypoint.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
       })).toThrow("canonical opencode-ai bin/opencode.exe");
 
@@ -197,7 +206,7 @@ describe("resolvePinnedOpencodeBinary", () => {
       });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: outsideNpmLayout.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
       })).toThrow("node_modules/opencode-ai");
     } finally {
@@ -260,9 +269,9 @@ describe("resolvePinnedOpencodeBinary", () => {
       const fixture = packageStub(root, "opencode-ai", { reportedVersion: "1.17.13" });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: fixture.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
-      })).toThrow("expected opencode-ai@1.18.1");
+      })).toThrow(`expected opencode-ai@${PIN}`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -279,7 +288,7 @@ describe("resolvePinnedOpencodeBinary", () => {
         requestedBinary: fixture.binary,
         expectedVersion: "1.18.2",
         probeEnv: process.env,
-      })).toThrow("vetted only for opencode-ai@1.18.1");
+      })).toThrow(`vetted only for opencode-ai@${PIN}`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -296,7 +305,7 @@ describe("resolvePinnedOpencodeBinary", () => {
       mkdirSync(app, { recursive: true, mode: 0o700 });
       expect(() => resolvePinnedOpencodeBinary({
         requestedBinary: fixture.binary,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
         forbiddenRoots: discoverOpencodeForbiddenRoots(app),
       })).toThrow("overlaps forbidden root");
@@ -331,7 +340,7 @@ describe("resolvePinnedOpencodeBinary", () => {
       expect(resolvePinnedOpencodeBinary({
         requestedBinary: trusted.binary,
         searchPath: hostilePath,
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
         probeEnv: process.env,
       })).toBe(trusted.binary);
     } finally {
@@ -344,5 +353,102 @@ describe("resolvePinnedOpencodeBinary", () => {
       requestedBinary: "opencode",
       probeEnv: process.env,
     })).toThrow("absolute path");
+  });
+});
+
+// Board #541 — the release pin moved 1.18.1 → 1.18.34. A host still holding
+// the previous exact install must keep starting (with an upgrade note) for one
+// transition window; anything else stays rejected.
+describe("opencode pin transition (#541)", () => {
+  test("release pin is opencode-ai@1.18.34; 1.18.1 is the only transition version", () => {
+    expect(OPENCODE_DEFAULT_PIN).toBe("1.18.34");
+    expect([...OPENCODE_TRANSITION_VERSIONS]).toEqual(["1.18.1"]);
+    expect([...OPENCODE_ACCEPTED_VERSIONS]).toEqual(["1.18.34", "1.18.1"]);
+    expect(isAcceptedOpencodeVersion("1.18.34")).toBe(true);
+    expect(isAcceptedOpencodeVersion("1.18.1")).toBe(true);
+    for (const v of ["1.18.2", "1.18.33", "1.18.35", "2.0.22", ""]) {
+      expect(isAcceptedOpencodeVersion(v)).toBe(false);
+    }
+  });
+
+  test("transition note names the found version and the exact upgrade command", () => {
+    expect(opencodeTransitionNote("1.18.34")).toBeNull();
+    expect(opencodeTransitionNote("1.18.2")).toBeNull();
+    const note = opencodeTransitionNote("1.18.1")!;
+    expect(note).toContain("opencode-ai@1.18.1");
+    expect(note).toContain("anet opencode upgrade-pin 1.18.34");
+    expect(note).not.toContain("\n");
+  });
+
+  test("launcher-selected transition version is admitted and revalidates without an explicit version", () => {
+    const root = makeTrustedRoot("opencode-bin-transition");
+    try {
+      const fixture = packageStub(root, "opencode-ai", { manifestVersion: "1.18.1" });
+      const attestation = resolvePinnedOpencodeBinaryAttestation({
+        requestedBinary: fixture.binary,
+        expectedVersion: "1.18.1",
+        probeEnv: process.env,
+      });
+      expect(attestation.expectedVersion).toBe("1.18.1");
+      expect(revalidatePinnedOpencodeBinary(attestation, { expectedVersion: "1.18.1" })).toBe(fixture.binary);
+      expect(revalidatePinnedOpencodeBinary(attestation)).toBe(fixture.binary);
+      expect(() => revalidatePinnedOpencodeBinary(attestation, { expectedVersion: PIN }))
+        .toThrow("attestation version changed");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("without a launcher version, PATH resolution admits the pin, else the transition version", () => {
+    const legacyRoot = makeTrustedRoot("opencode-bin-default-legacy");
+    const currentRoot = makeTrustedRoot("opencode-bin-default-current");
+    try {
+      const legacy = packageStub(legacyRoot, "opencode-ai", { manifestVersion: "1.18.1" });
+      const legacyOnly = resolvePinnedOpencodeBinaryAttestation({
+        searchPath: pathShim(legacyRoot, legacy.binary),
+        probeEnv: process.env,
+      });
+      expect(legacyOnly.expectedVersion).toBe("1.18.1");
+      expect(legacyOnly.binary).toBe(legacy.binary);
+      expect(revalidatePinnedOpencodeBinary(legacyOnly)).toBe(legacy.binary);
+
+      const current = packageStub(currentRoot, "opencode-ai");
+      const pinned = resolvePinnedOpencodeBinaryAttestation({
+        searchPath: pathShim(currentRoot, current.binary),
+        probeEnv: process.env,
+      });
+      expect(pinned.expectedVersion).toBe(PIN);
+      expect(pinned.binary).toBe(current.binary);
+    } finally {
+      rmSync(legacyRoot, { recursive: true, force: true });
+      rmSync(currentRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("without a launcher version, an unvetted install is still rejected with the release-pin error", () => {
+    const root = makeTrustedRoot("opencode-bin-default-unvetted");
+    try {
+      const other = packageStub(root, "opencode-ai", { manifestVersion: "1.18.2" });
+      expect(() => resolvePinnedOpencodeBinaryAttestation({
+        searchPath: pathShim(root, other.binary),
+        probeEnv: process.env,
+      })).toThrow(`not opencode-ai@${PIN}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a package whose manifest says 1.18.1 but reports another version is rejected", () => {
+    const root = makeTrustedRoot("opencode-bin-transition-lie");
+    try {
+      const fixture = packageStub(root, "opencode-ai", { manifestVersion: "1.18.1", reportedVersion: "1.18.2" });
+      expect(() => resolvePinnedOpencodeBinary({
+        requestedBinary: fixture.binary,
+        expectedVersion: "1.18.1",
+        probeEnv: process.env,
+      })).toThrow("expected opencode-ai@1.18.1; resolved binary reports 1.18.2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

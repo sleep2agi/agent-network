@@ -184,7 +184,7 @@ import {
   writeOpencodeConfig,
   writebackOpencodeSession,
 } from "./runtime/opencode-acp/profile-state";
-import { OPENCODE_DEFAULT_PIN } from "./runtime/opencode-acp/binary";
+import { OPENCODE_DEFAULT_PIN, isAcceptedOpencodeVersion, opencodeTransitionNote } from "./runtime/opencode-acp/binary";
 import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
 import { shouldSkipTerminalTask } from "./runtime/terminal-task-guard";
 import {
@@ -663,12 +663,16 @@ if (RUNTIME === "opencode" && !configFilePath) {
   process.exit(1);
 }
 if (RUNTIME === "opencode" && INITIAL_OPENCODE_VERSION !== undefined
-  && INITIAL_OPENCODE_VERSION !== OPENCODE_DEFAULT_PIN) {
+  && !isAcceptedOpencodeVersion(INITIAL_OPENCODE_VERSION)) {
   console.error(
     `[${ALIAS}] Refusing ANET_OPENCODE_VERSION=${INITIAL_OPENCODE_VERSION}; ` +
     `this agent-node is vetted only for opencode-ai@${OPENCODE_DEFAULT_PIN}.`,
   );
   process.exit(1);
+}
+if (RUNTIME === "opencode" && INITIAL_OPENCODE_VERSION !== undefined) {
+  const note = opencodeTransitionNote(INITIAL_OPENCODE_VERSION);
+  if (note) console.warn(`[${ALIAS}] ${note}`);
 }
 
 // fileConfig.env is intentionally merged before runtime selection. Restore

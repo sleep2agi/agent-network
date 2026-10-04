@@ -2,7 +2,7 @@
 set -eu
 
 if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' '1.18.1'
+  printf '%s\n' '1.18.34'
   exit 0
 fi
 exit 64

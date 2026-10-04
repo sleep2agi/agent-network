@@ -52,7 +52,7 @@ async function runScenario(
       workDir,
       sessionId: opts.sessionId,
       binary: MOCK,
-      expectedVersion: "1.18.1",
+      expectedVersion: "1.18.34",
       log: (m) => logs.push(m),
       warn: (m) => warns.push(m),
     });

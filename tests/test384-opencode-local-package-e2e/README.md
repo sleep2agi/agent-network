@@ -6,7 +6,7 @@ It uses an isolated loopback CommHub and `/tmp` SQLite DB only.
 Layers stop on first failure:
 
 1. exact candidate versions / `publishConfig.tag=preview`, local
-   build/pack/install, SHA-256 capture, exact `opencode-ai@1.18.1`, and bundle
+   build/pack/install, SHA-256 capture, exact `opencode-ai@1.18.34`, and bundle
    markers;
 2. isolated CommHub registration and real `anet login`;
 3. a pre-seeded `.anet/nodes/<alias>` symlink is rejected before profile token
@@ -29,7 +29,7 @@ Layers stop on first failure:
    project-local `opencode-ai` package impersonator are never executed;
 7. explicit ACP handshake rejection cleanup and `SIGTERM` while `initialize`
    is still unresolved, each followed by a PID-level orphan check;
-8. exact 1.18.1 malicious-ancestor negative gates: every external-workspace
+8. exact 1.18.34 malicious-ancestor negative gates: every external-workspace
    ancestor rejects `opencode.jsonc`, `opencode.json`, `.opencode`, `AGENTS.md`,
    `CLAUDE.md`, `CONTEXT.md`, `.claude`, `.agents`, and `.git`, and the same
    inode/candidate scan runs after the version probe immediately before ACP
@@ -51,7 +51,7 @@ base. The base and every ancestor must have no group/other write bit, otherwise
 safe launch must hard-fail instead of falling back to project cwd or `/tmp`.
 
 ```sh
-sg docker -c 'docker build --build-arg OPENCODE_VERSION=1.18.1 -t anet-test384 -f tests/test384-opencode-local-package-e2e/Dockerfile .'
+sg docker -c 'docker build --build-arg OPENCODE_VERSION=1.18.34 -t anet-test384 -f tests/test384-opencode-local-package-e2e/Dockerfile .'
 sg docker -c 'docker run --rm -v "$PWD/docs/tests:/report" anet-test384'
 ```
 

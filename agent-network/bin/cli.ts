@@ -113,7 +113,7 @@ import {
 } from "../src/opencode-safe-root";
 import {
   discoverOpencodeForbiddenRoots,
-  resolveOpencodePackageBinaryFromPath,
+  resolveAcceptedOpencodePackageBinaryFromPath,
   validateOpencodePackageBinary,
 } from "../src/opencode-package-binary";
 import {
@@ -3376,8 +3376,10 @@ async function setupCommand() {
 // attest the exact built-in pin, but cannot select a different upstream
 // version: only a new maintainer-vetted preview can bump the release pin.
 import {
+  acceptedOpencodeVersions,
   formatOpencodePackageIdentityFailure,
   opencodeExactInstallCommand,
+  opencodeLegacyPinNote,
   readEffectivePin,
   writePinOverride,
   OPENCODE_BUILTIN_PIN,
@@ -3418,17 +3420,17 @@ function checkOpencodePin():
   | ({ ok: true } & OpencodeLaunchIdentity)
   | { ok: false; found: string | null; hint: string } {
   const effective = readEffectivePin();
-  const expected = effective.version;
+  let expected = effective.version;
   const forbiddenRoots = discoverOpencodeForbiddenRoots();
   let raw = "";
   let binary = "";
   let probe: ReturnType<typeof createOpencodeProbeContext> | undefined;
   let failure: string | undefined;
   try {
-    binary = resolveOpencodePackageBinaryFromPath(process.env.PATH ?? "", {
-      expectedVersion: expected,
+    ({ binary, version: expected } = resolveAcceptedOpencodePackageBinaryFromPath(process.env.PATH ?? "", {
+      acceptedVersions: acceptedOpencodeVersions(effective.version),
       forbiddenRoots,
-    });
+    }));
     probe = createOpencodeProbeContext(".anet-opencode-version-");
     revalidateOpencodeSafeExternalRoot(probe.root);
     raw = execFileSync(binary, ["--version"], {
@@ -3457,15 +3459,19 @@ function checkOpencodePin():
     return {
       ok: false,
       found: null,
-      hint: formatOpencodePackageIdentityFailure(expected, failure),
+      hint: formatOpencodePackageIdentityFailure(effective.version, failure),
     };
   }
-  // opencode --version prints just the semver (e.g. "1.18.1"). Match
+  // opencode --version prints just the semver (e.g. "1.18.34"). Match
   // the first x.y.z substring so future format tweaks (build metadata
   // suffix) don't break the pin check.
   const m = raw.match(/(\d+\.\d+\.\d+)/);
   const found = m ? m[1] : raw;
-  if (found === expected) return { ok: true, binary, version: expected };
+  if (found === expected) {
+    const legacyNote = opencodeLegacyPinNote(found, effective.version);
+    if (legacyNote) console.warn(`[anet] ${legacyNote}`);
+    return { ok: true, binary, version: expected };
+  }
   const sourceNote = effective.source === "override-file"
     ? ` (from ${opencodeUsePinSource()}; smoke passed ${effective.smokePassedAt})`
     : ` (baked-in default)`;
@@ -3474,7 +3480,7 @@ function checkOpencodePin():
     found,
     hint:
       `Expected opencode-ai@${expected}${sourceNote}; found ${found}.\n` +
-      `  → Install the exact release pin: ${opencodeExactInstallCommand(expected)}\n` +
+      `  → Install the exact release pin: ${opencodeExactInstallCommand(effective.version)}\n` +
       `  → A different upstream version requires a newly vetted agent-network preview.`,
   };
 }

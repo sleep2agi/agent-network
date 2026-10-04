@@ -12,9 +12,13 @@ import { join } from "path";
 import {
   discoverOpencodeForbiddenRoots,
   opencodeVerifierSupportsPlatform,
+  resolveAcceptedOpencodePackageBinaryFromPath,
   resolveOpencodePackageBinaryFromPath,
   validateOpencodePackageBinary,
 } from "./opencode-package-binary";
+import { OPENCODE_BUILTIN_PIN, acceptedOpencodeVersions } from "./opencode-pin";
+
+const PIN = OPENCODE_BUILTIN_PIN;
 
 const cleanup: string[] = [];
 
@@ -44,11 +48,12 @@ function makePackage(parent: string, overrides: Record<string, unknown> = {}): {
   const binary = join(bin, "opencode.exe");
   const packageJson = join(root, "package.json");
   mkdirSync(bin, { recursive: true, mode: 0o755 });
-  writeFileSync(binary, "#!/bin/sh\nprintf '%s\\n' 1.18.1\n", { mode: 0o755 });
+  const version = typeof overrides.version === "string" ? overrides.version : PIN;
+  writeFileSync(binary, `#!/bin/sh\nprintf '%s\\n' ${version}\n`, { mode: 0o755 });
   writeFileSync(packageJson, JSON.stringify({
     name: "opencode-ai",
-    version: "1.18.1",
-    // The 1.18.1 tarball spells this with `./`; registry metadata may display
+    version: PIN,
+    // The 1.18.1/1.18.34 tarballs spell this with `./`; registry metadata may display
     // the normalized form. The verifier accepts only these equivalent bytes.
     bin: { opencode: "./bin/opencode.exe" },
     ...overrides,
@@ -61,7 +66,7 @@ describe("validateOpencodePackageBinary", () => {
     const base = safeTestBase();
     const fixture = makePackage(base);
     expect(validateOpencodePackageBinary(fixture.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toBe(fixture.binary);
   });
 
@@ -70,7 +75,7 @@ describe("validateOpencodePackageBinary", () => {
     mkdirSync(project, { mode: 0o700 });
     const fixture = makePackage(project);
     expect(() => validateOpencodePackageBinary(fixture.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
       forbiddenRoots: [project],
     })).toThrow("project/node-local");
   });
@@ -90,7 +95,7 @@ describe("validateOpencodePackageBinary", () => {
 
     expect(resolveOpencodePackageBinaryFromPath(
       `${localBin}:${globalBin}`,
-      { expectedVersion: "1.18.1", forbiddenRoots: [project] },
+      { expectedVersion: PIN, forbiddenRoots: [project] },
     )).toBe(global.binary);
   });
 
@@ -118,7 +123,7 @@ describe("validateOpencodePackageBinary", () => {
     expect(forbiddenRoots).toContain(repo);
     expect(resolveOpencodePackageBinaryFromPath(
       `${localBin}:${globalBin}`,
-      { expectedVersion: "1.18.1", forbiddenRoots },
+      { expectedVersion: PIN, forbiddenRoots },
     )).toBe(global.binary);
   });
 
@@ -136,12 +141,12 @@ describe("validateOpencodePackageBinary", () => {
   test("accepts both exact registry spellings of bin.opencode", () => {
     const dotted = makePackage(safeTestBase());
     expect(validateOpencodePackageBinary(dotted.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toBe(dotted.binary);
 
     const plain = makePackage(safeTestBase(), { bin: { opencode: "bin/opencode.exe" } });
     expect(validateOpencodePackageBinary(plain.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toBe(plain.binary);
   });
 
@@ -154,7 +159,7 @@ describe("validateOpencodePackageBinary", () => {
       const parent = safeTestBase();
       const fixture = makePackage(parent, override);
       expect(() => validateOpencodePackageBinary(fixture.binary, {
-        expectedVersion: "1.18.1",
+        expectedVersion: PIN,
       })).toThrow("package identity");
     }
   });
@@ -163,13 +168,13 @@ describe("validateOpencodePackageBinary", () => {
     const first = makePackage(safeTestBase());
     chmodSync(first.binary, 0o777);
     expect(() => validateOpencodePackageBinary(first.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toThrow("unsafe file ownership or mode");
 
     const writableBin = makePackage(safeTestBase());
     chmodSync(join(writableBin.root, "bin"), 0o777);
     expect(() => validateOpencodePackageBinary(writableBin.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toThrow("unsafe directory ownership or mode");
 
     const writableParent = join(safeTestBase(), "writable-parent");
@@ -177,7 +182,7 @@ describe("validateOpencodePackageBinary", () => {
     chmodSync(writableParent, 0o777);
     const second = makePackage(writableParent);
     expect(() => validateOpencodePackageBinary(second.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toThrow("unsafe directory ownership or mode");
   });
 
@@ -187,7 +192,7 @@ describe("validateOpencodePackageBinary", () => {
     renameSync(fixture.packageJson, target);
     symlinkSync(target, fixture.packageJson);
     expect(() => validateOpencodePackageBinary(fixture.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toThrow("unsafe file ownership or mode");
   });
 });
@@ -215,13 +220,13 @@ describe("#739 cwd 参与信任判定", () => {
     // 基线对照 —— 先证明这个 fixture 本身是可信的,否则下面的红是无意义的:
     // 如果它本来就不合法,再怎么改 forbiddenRoots 都会失败,断言就成了同义反复。
     expect(validateOpencodePackageBinary(fixture.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toBe(fixture.binary);
 
     // 只多传一个 forbiddenRoots: ["/"],同一个 fixture 就被拒了。
     // 变量只有这一个,所以拒因确实来自 cwd,不是来自包本身。
     expect(() => validateOpencodePackageBinary(fixture.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
       forbiddenRoots: ["/"],
     })).toThrow("project/node-local");
   });
@@ -234,11 +239,11 @@ describe("#739 cwd 参与信任判定", () => {
     const fixture = makePackage(join(prefix, "lib"));
 
     expect(validateOpencodePackageBinary(fixture.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
     })).toBe(fixture.binary);
 
     expect(() => validateOpencodePackageBinary(fixture.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
       forbiddenRoots: [prefix],
     })).toThrow("project/node-local");
   });
@@ -251,7 +256,7 @@ describe("#739 cwd 参与信任判定", () => {
     mkdirSync(project, { mode: 0o700 });
     const impostor = makePackage(project);
     expect(() => validateOpencodePackageBinary(impostor.binary, {
-      expectedVersion: "1.18.1",
+      expectedVersion: PIN,
       forbiddenRoots: [project],
     })).toThrow("project/node-local");
   });
@@ -266,11 +271,65 @@ describe("#1845 platform gate", () => {
     expect(opencodeVerifierSupportsPlatform("win32")).toBe(false);
   });
   test("win32 is refused before PATH is scanned, naming the platform", () => {
-    expect(() => resolveOpencodePackageBinaryFromPath("", { expectedVersion: "1.18.1" }, "win32"))
+    expect(() => resolveOpencodePackageBinaryFromPath("", { expectedVersion: PIN }, "win32"))
       .toThrow(/requires Linux or macOS \(got win32\)/);
   });
   test("darwin reaches the PATH scan (empty PATH → not-found, not a platform error)", () => {
-    expect(() => resolveOpencodePackageBinaryFromPath("", { expectedVersion: "1.18.1" }, "darwin"))
+    expect(() => resolveOpencodePackageBinaryFromPath("", { expectedVersion: PIN }, "darwin"))
       .toThrow(/no trusted exact opencode-ai package entrypoint found on PATH/);
+  });
+});
+
+// Board #541 — pin moved 1.18.1 → 1.18.34; the previous exact install keeps
+// resolving for one transition window, the release pin wins when both exist,
+// and every other version is still refused with release-pin diagnostics.
+describe("resolveAcceptedOpencodePackageBinaryFromPath (#541 transition)", () => {
+  function globalInstall(base: string, label: string, version: string) {
+    const pkg = makePackage(join(base, label), { version });
+    const bin = join(base, label, "bin");
+    mkdirSync(bin, { recursive: true, mode: 0o755 });
+    symlinkSync(pkg.binary, join(bin, "opencode"));
+    return { ...pkg, bin };
+  }
+
+  test("a host still on the previous pin 1.18.1 resolves and reports 1.18.1", () => {
+    const base = safeTestBase();
+    const legacy = globalInstall(base, "legacy", "1.18.1");
+    expect(resolveAcceptedOpencodePackageBinaryFromPath(legacy.bin, {
+      acceptedVersions: acceptedOpencodeVersions(),
+    })).toEqual({ binary: legacy.binary, version: "1.18.1" });
+  });
+
+  test("the release pin wins even when the transition version is earlier on PATH", () => {
+    const base = safeTestBase();
+    const legacy = globalInstall(base, "legacy", "1.18.1");
+    const current = globalInstall(base, "current", PIN);
+    expect(resolveAcceptedOpencodePackageBinaryFromPath(`${legacy.bin}:${current.bin}`, {
+      acceptedVersions: acceptedOpencodeVersions(),
+    })).toEqual({ binary: current.binary, version: PIN });
+  });
+
+  test("an unvetted version is refused with the release-pin error", () => {
+    const base = safeTestBase();
+    const other = globalInstall(base, "other", "1.18.2");
+    expect(() => resolveAcceptedOpencodePackageBinaryFromPath(other.bin, {
+      acceptedVersions: acceptedOpencodeVersions(),
+    })).toThrow(`not exact opencode-ai@${PIN} package identity`);
+  });
+
+  test("the transition version still goes through the project-local identity gate", () => {
+    const base = safeTestBase();
+    const project = join(base, "project");
+    mkdirSync(project, { mode: 0o700 });
+    const local = globalInstall(project, "payload", "1.18.1");
+    expect(() => resolveAcceptedOpencodePackageBinaryFromPath(local.bin, {
+      acceptedVersions: acceptedOpencodeVersions(),
+      forbiddenRoots: [project],
+    })).toThrow("no trusted exact opencode-ai package entrypoint found on PATH");
+  });
+
+  test("an empty accepted set is a configuration error, not a silent pass", () => {
+    expect(() => resolveAcceptedOpencodePackageBinaryFromPath("", { acceptedVersions: [] }))
+      .toThrow("no accepted opencode versions configured");
   });
 });

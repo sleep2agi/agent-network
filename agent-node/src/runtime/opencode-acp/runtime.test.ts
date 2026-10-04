@@ -53,7 +53,7 @@ function makePackageBinary(launchBase: string, script: string): string {
   mkdirSync(binDir, { mode: 0o700 });
   writeFileSync(join(packageRoot, "package.json"), JSON.stringify({
     name: "opencode-ai",
-    version: "1.18.1",
+    version: "1.18.34",
     bin: { opencode: "./bin/opencode.exe" },
   }), { mode: 0o600 });
   writeFileSync(binary, script, { mode: 0o700 });
@@ -63,7 +63,7 @@ function makePackageBinary(launchBase: string, script: string): string {
 function makeStubBinary(launchBase: string, script: string): string {
   return makePackageBinary(launchBase, `#!/usr/bin/env bun
 if (process.argv.includes("--version")) {
-  console.log("1.18.1");
+  console.log("1.18.34");
   process.exit(0);
 }
 ${script}`);
@@ -198,7 +198,7 @@ if (process.argv.includes("--version")) {
     markerWorkDir: marker.workDir,
     launchEntries: readdirSync(${JSON.stringify(launchBase)}).filter((name) => name.startsWith(".anet-opencode-launch-")),
   }));
-  console.log("1.18.1");
+  console.log("1.18.34");
   process.exit(0);
 }
 writeFileSync(${JSON.stringify(runtimeCapture)}, JSON.stringify({
@@ -466,7 +466,7 @@ describe("openOpencodeRuntime — opening lifecycle", () => {
 import { writeFileSync } from "fs";
 if (process.argv.includes("--version")) {
   writeFileSync(${JSON.stringify(candidate)}, "{}", { mode: 0o600 });
-  console.log("1.18.1");
+  console.log("1.18.34");
   process.exit(0);
 }
 writeFileSync(${JSON.stringify(acpStarted)}, "spawned", { mode: 0o600 });
@@ -506,7 +506,7 @@ if (process.argv.includes("--version")) {
     version: "1.18.0",
     bin: { opencode: "./bin/opencode.exe" },
   }));
-  console.log("1.18.1");
+  console.log("1.18.34");
   process.exit(0);
 }
 writeFileSync(${JSON.stringify(acpStarted)}, "spawned");
@@ -520,7 +520,7 @@ process.stdin.resume();
       } catch (error: any) {
         thrown = error;
       }
-      expect(thrown?.message).toContain("opencode-ai@1.18.1");
+      expect(thrown?.message).toContain("opencode-ai@1.18.34");
       expect(existsSync(acpStarted)).toBe(false);
       expect(runtimeLaunchArtifacts(launchBase)).toEqual([]);
     } finally {
@@ -539,7 +539,7 @@ import { writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 if (process.argv.includes("--version")) {
   writeFileSync(fileURLToPath(import.meta.url), "#!/usr/bin/env bun\\nprocess.exit(91);\\n", { mode: 0o700 });
-  console.log("1.18.1");
+  console.log("1.18.34");
   process.exit(0);
 }
 writeFileSync(${JSON.stringify(acpStarted)}, "spawned");
@@ -578,7 +578,7 @@ process.stdin.resume();
       const projectBinary = makePackageBinary(projectDir, `#!/usr/bin/env bun
 import { writeFileSync } from "fs";
 writeFileSync(${JSON.stringify(projectProbe)}, "executed");
-console.log("1.18.1");
+console.log("1.18.34");
 `);
       let projectError: Error | undefined;
       try {
@@ -597,7 +597,7 @@ console.log("1.18.1");
       const workDirBinary = makePackageBinary(workDir, `#!/usr/bin/env bun
 import { writeFileSync } from "fs";
 writeFileSync(${JSON.stringify(workDirProbe)}, "executed");
-console.log("1.18.1");
+console.log("1.18.34");
 `);
       let workDirError: Error | undefined;
       try {

@@ -11,7 +11,7 @@ text—rejects it. An explicit `ANET_AGENT_NODE_BIN` cannot bypass the same exac
 pair check. The normal fallback scenario also injects a stale OpenCode binary
 through profile `PATH` plus forged `ANET_OPENCODE_BIN/VERSION` values and proves
 the network launcher overwrites those fields with the pre-profile canonical
-1.18.1 identity. The same fixture injects `NODE_OPTIONS`, `BUN_OPTIONS`,
+1.18.34 identity. The same fixture injects `NODE_OPTIONS`, `BUN_OPTIONS`,
 `NODE_V8_COVERAGE`, and `LD_PRELOAD` canaries and proves no profile loader or
 pre-entrypoint write hook reaches the exact agent-node process. A final
 scenario removes the exact global entry and proves startup hard-fails with an

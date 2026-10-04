@@ -78,7 +78,7 @@ async function runHappyLive() {
   const runtime = await openOpencodeRuntime({
     cwd: projectCwd,
     workDir,
-    expectedVersion: process.env.OPENCODE_VERSION_UNDER_TEST || "1.18.1",
+    expectedVersion: process.env.OPENCODE_VERSION_UNDER_TEST || "1.18.34",
     binarySearchPath: process.env.PATH || "",
     log: (m) => { logs.push(m); process.stderr.write(`[runtime.log] ${m}\n`); },
     warn: (m) => { warns.push(m); process.stderr.write(`[runtime.warn] ${m}\n`); },

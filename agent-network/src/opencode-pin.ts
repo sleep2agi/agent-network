@@ -19,7 +19,32 @@ import { join, dirname } from "path";
  * Version this branch was validated against by the maintainers.
  * Bumped when a new opencode-ai release passes the full Docker/E2E gate.
  */
-export const OPENCODE_BUILTIN_PIN = "1.18.1";
+export const OPENCODE_BUILTIN_PIN = "1.18.34";
+
+/**
+ * Earlier release pins that remain accepted for one transition window so a
+ * host still holding the previous exact install keeps starting after an anet
+ * upgrade (board #541). Each entry passed the full Docker/E2E gate when it was
+ * the pin; start prints `opencodeLegacyPinNote()` so the operator upgrades.
+ * Must stay byte-identical to agent-node's `OPENCODE_TRANSITION_VERSIONS`.
+ */
+export const OPENCODE_TRANSITION_VERSIONS: readonly string[] = Object.freeze(["1.18.1"]);
+
+/** Versions a start may accept, preferred first: the release pin, then the
+ * transition versions. The order matters — a PATH holding both resolves to
+ * the release pin. */
+export function acceptedOpencodeVersions(pin = OPENCODE_BUILTIN_PIN): string[] {
+  return [pin, ...OPENCODE_TRANSITION_VERSIONS.filter((version) => version !== pin)];
+}
+
+/** One-line upgrade note when a start accepted a transition version, else null. */
+export function opencodeLegacyPinNote(found: string, pin = OPENCODE_BUILTIN_PIN): string | null {
+  if (found === pin || !OPENCODE_TRANSITION_VERSIONS.includes(found)) return null;
+  return (
+    `opencode-ai@${found} is the previous release pin and is still accepted for now; ` +
+    `upgrade to the vetted opencode-ai@${pin} with: anet opencode upgrade-pin ${pin}`
+  );
+}
 
 /** Exact upstream remediation shared by every CLI failure path. */
 export function opencodeExactInstallCommand(version = OPENCODE_BUILTIN_PIN): string {

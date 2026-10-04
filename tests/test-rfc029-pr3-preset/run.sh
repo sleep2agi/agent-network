@@ -129,7 +129,7 @@ step "S4 unvetted pin exits nonzero" \
   "$([[ "$S4_RC" -ne 0 ]] && echo yes || echo no)" "yes"
 
 step "S4 vetted-only refusal emitted" \
-  "$(grep -Fq 'Refusing opencode-ai@99.99.99: this preview is vetted only for opencode-ai@1.18.1' "$S4_LOG" && echo yes || echo no)" "yes"
+  "$(grep -Fq 'Refusing opencode-ai@99.99.99: this preview is vetted only for opencode-ai@1.18.34' "$S4_LOG" && echo yes || echo no)" "yes"
 
 if [[ ! -e "$S4_NPM_SENTINEL" ]]; then
   step "S4 npm was NOT invoked" "no" "no"

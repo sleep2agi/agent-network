@@ -7,7 +7,7 @@ import {
   withOpenCodeFreeTierHint,
 } from "./opencode-provider-error";
 
-// Shape captured from opencode-ai@1.18.1 `POST /session/:id/message` with
+// Shape captured from opencode-ai@1.18.34 `POST /session/:id/message` with
 // `opencode/nemotron-3-ultra-free` and one tool disabled (Docker, #540).
 const FREE_TIER_MESSAGE = {
   info: {
@@ -34,7 +34,7 @@ describe("#540 opencode provider errors", () => {
     expect(openCodeTurnError(null)).toBeNull();
   });
 
-  test("reads the upstream name and message from the real 1.18.1 shape", () => {
+  test("reads the upstream name and message from the real 1.18.34 shape", () => {
     expect(openCodeTurnError(FREE_TIER_MESSAGE)).toEqual({
       name: "APIError",
       message: "Error from provider (Console): OpenCode's free tier can only be used from within OpenCode",
