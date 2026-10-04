@@ -207,6 +207,44 @@ From agent-node `2.5.0-preview.96`, the watchdog treats "alive but hung" separat
 
 The watchdog never switches accounts, never copies credentials between nodes, and never touches another node's processes.
 
+### Why every codex node has its own CODEX_HOME {#why-own-codex-home}
+
+Every codex node (`codex-sdk` or co-presence `codex-app-server`) uses a `CODEX_HOME` **of its own**, for three reasons:
+
+1. **Refresh tokens are single-use.** A ChatGPT login rotates its refresh token on every refresh and voids the old one; put one login into two `CODEX_HOME`s and whichever refreshes first wins, the other is logged out (#1918, #514 — see the next section).
+2. **Sessions are stored per home.** codex keeps its sessions (rollouts) under `CODEX_HOME/sessions/`; two nodes on one home mix their histories.
+3. **Stop / delete find processes by CODEX_HOME.** `anet node stop` / `delete` tell which processes belong to a node by its own `CODEX_HOME` (plus the co-presence marker); two nodes on one home cannot be told apart.
+
+The cost is **one `codex login` per node**. anet makes that step visible:
+
+- **The next step at create time.** When `anet node create` / `anet node clone` makes a codex node that will not have a usable login (none in its own `codex-home`, and its first start may not legitimately borrow this host's `~/.codex` login), the command ends with the exact command that logs **this** node in. It is printed, never run, and nothing is copied from another node:
+
+  ```text
+  [anet] Next step — my-node has no codex login yet. Each codex node logs in on its own, in its own CODEX_HOME
+      mkdir -p -m 700 <node-dir>/codex-home && CODEX_HOME=<node-dir>/codex-home codex login
+  [anet]   On a headless machine / over SSH use device auth instead:
+      mkdir -p -m 700 <node-dir>/codex-home && CODEX_HOME=<node-dir>/codex-home codex login --device-auth
+  [anet]   Then: anet node start my-node
+  ```
+
+  The `mkdir` appears only while the directory does not exist (codex refuses a `CODEX_HOME` that does not exist). `--device-auth` is the codex CLI's own device-code login, for machines without a browser. A `codex-sdk` node without a `codex-home` of its own uses codex's default `~/.codex`, and the step names that directory. `anet node codex fork --no-codex-login` already prints the same login command in its result.
+
+- **Login status at a glance: `anet node codex login-status [--json]`.** One row per codex node in the current directory:
+
+  ```text
+  ALIAS  RUNTIME                         LOGGED IN  ACCOUNT            SHARED WITH  CODEX_HOME
+  one    codex-app-server (co-presence)  yes        you@example.com    ⚠ two        <ws>/.anet/nodes/one/codex-home
+  two    codex-app-server (co-presence)  yes        you@example.com    ⚠ one        <ws>/.anet/nodes/two/codex-home
+  three  codex-app-server (co-presence)  no         -                  -            <ws>/.anet/nodes/three/codex-home
+  ```
+
+  - `ACCOUNT`: the e-mail in the `id_token` (decoded locally, no network); without one, the account fingerprint `acct:<16 hex>`.
+  - `SHARED WITH`: other nodes holding the **same login** (the same refresh-token chain, same 8-hex fingerprint) — they will log each other out. Nodes in other workspaces are matched only by the fingerprint files they publish; their `auth.json` is never read.
+  - Nodes on the same account that each logged in on their own are **not** sharing (that is the recommended setup); `--json` lists them under `same_account_as`.
+  - Read-only; no token ever appears in the output.
+
+  Why a separate command instead of `anet node codex account list`: that one lists the host's registered login **profiles** (keyed by profile id; its `--json` shape is already consumed). This one lists the **nodes** in this directory and the login each holds.
+
 ### One login per node {#one-login-per-node}
 
 ChatGPT refresh tokens are **single-use**: every refresh issues a new one and invalidates the old. When one `auth.json` (one login) sits in two nodes' `CODEX_HOME`, whichever node refreshes first keeps working and the others fail days later with:
