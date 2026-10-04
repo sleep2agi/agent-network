@@ -182,6 +182,7 @@ export const CODEX_CHEAT_SHEET = [
   "  switch model 换模型       anet node edit my-node --model <id>  then restart",
   "  copy 复制节点             anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login",
   "                            (codex-sdk: anet node clone my-node my-copy)",
+  "  adopt 收编已有 codex 对话  anet node codex adopt my-agent       (lists ~/.codex conversations; --thread <id> skips the list)",
   "  delete 删除               anet node delete my-node --force",
   "  who is logged in 登录状态  anet node codex login-status",
   "Interactive menu 交互菜单: run `anet node codex` in a terminal.",
@@ -227,6 +228,15 @@ export function commandLine(cmd: PlannedCommand): string {
 }
 
 export interface ActionInput { model?: string; newName?: string; workdir?: string }
+
+/** #528 — not about an existing node: turn a codex conversation started outside anet into a new one. */
+export const ADOPT_KEY = "a";
+export function planAdopt(newName: string): PlannedCommand {
+  return {
+    argv: ["anet", "node", "codex", "adopt", newName],
+    note: "lists the conversations in ~/.codex and asks which one; ~/.codex is only read and its login is not copied",
+  };
+}
 
 export function planAction(row: CodexNodeRow, action: MenuAction, input: ActionInput = {}): PlannedCommand {
   const a = row.alias;
@@ -276,15 +286,16 @@ export interface MenuIO {
 
 export type Runner = (cmd: PlannedCommand) => Promise<number>;
 
-async function pick(io: MenuIO, prompt: string, max: number): Promise<number | null> {
+async function pick(io: MenuIO, prompt: string, max: number): Promise<number | "adopt" | null> {
   for (;;) {
     const ans = await io.readLine(prompt);
     if (ans === null) return null;
     const t = ans.trim().toLowerCase();
     if (t === "q" || t === "quit" || t === "exit") return null;
+    if (t === ADOPT_KEY) return "adopt";
     const n = Number(t);
     if (Number.isInteger(n) && n >= 1 && n <= max) return n - 1;
-    io.write(`  please type a number 1-${max}, or q to quit\n`);
+    io.write(`  please type a number 1-${max}, ${ADOPT_KEY} to adopt a codex conversation, or q to quit\n`);
   }
 }
 
@@ -295,14 +306,17 @@ export async function codexMenu(rows: CodexNodeRow[], io: MenuIO, run: Runner, c
 
   const ni = rows.length === 1
     ? (io.write(`Only one codex node: ${rows[0].alias}\n`), 0)
-    : await pick(io, `Pick a node 选节点 [1-${rows.length}, q=quit]: `, rows.length);
+    : await pick(io, `Pick a node 选节点 [1-${rows.length}, ${ADOPT_KEY}=adopt a codex conversation 收编已有对话, q=quit]: `, rows.length);
   if (ni === null) { io.write("Bye — nothing was run.\n"); return 0; }
+  if (ni === "adopt") return adoptFromMenu(io, run);
   const row = rows[ni];
 
   io.write(`\n${row.alias} (${row.kind}, ${row.state}) — what do you want to do? 要做什么?\n`);
   MENU_ACTIONS.forEach((m, i) => io.write(`  ${i + 1}) ${m.label}\n`));
-  const ai = await pick(io, `Action 操作 [1-${MENU_ACTIONS.length}, q=quit]: `, MENU_ACTIONS.length);
+  io.write(`  ${ADOPT_KEY}) adopt a codex conversation as a new node 收编已有 codex 对话\n`);
+  const ai = await pick(io, `Action 操作 [1-${MENU_ACTIONS.length}, ${ADOPT_KEY}, q=quit]: `, MENU_ACTIONS.length);
   if (ai === null) { io.write("Bye — nothing was run.\n"); return 0; }
+  if (ai === "adopt") return adoptFromMenu(io, run);
   const action = MENU_ACTIONS[ai].key;
 
   const input: ActionInput = {};
@@ -339,6 +353,19 @@ export async function codexMenu(rows: CodexNodeRow[], io: MenuIO, run: Runner, c
 
   const code = await run(cmd);
   if (code === 0 && cmd.after) io.write(`\n${cmd.after}\n`);
+  if (code !== 0) io.write(`\n[anet] that command exited ${code}. Same command, by hand: ${commandLine(cmd)}\n`);
+  return code;
+}
+
+/** #528 — ask for the new node's name, print the command, run only after y. adopt itself asks which conversation. */
+async function adoptFromMenu(io: MenuIO, run: Runner): Promise<number> {
+  const name = ((await io.readLine("Name of the new node 新节点名: ")) ?? "").trim();
+  if (!name || /\s/.test(name) || name.startsWith("-")) { io.write("Aborted — the new node needs a name (no spaces); nothing was run.\n"); return 0; }
+  const cmd = planAdopt(name);
+  io.write(`\nWill run 将执行:\n  ${commandLine(cmd)}\n  (${cmd.note})\n`);
+  const confirmed = /^(y|yes)$/i.test(((await io.readLine("Run it? 执行? [y/N]: ")) ?? "").trim());
+  if (!confirmed) { io.write("Aborted — nothing was run. 已取消,未执行。\n"); return 0; }
+  const code = await run(cmd);
   if (code !== 0) io.write(`\n[anet] that command exited ${code}. Same command, by hand: ${commandLine(cmd)}\n`);
   return code;
 }

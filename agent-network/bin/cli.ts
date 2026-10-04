@@ -8591,8 +8591,9 @@ async function codexAdoptCommand(target: string, opts: Record<string, string>) {
   const homeCheck = !allowShared && tfacts.home.authMode === null
     ? homeCheckPendingOwnLogin(checkHome({ ...tfacts, home: { ...tfacts.home, authMode: 0o600, authBytes: 1 } }), targetHomeFinal)
     : checkHome(tfacts);
-  const loginStep = allowShared ? "" : `\n  1. log the new node in (adopt never copies a login — #514):\n     CODEX_HOME=${shellQuote(targetHomeFinal)} codex login --device-auth`;
-  const next = `next (run from ${workdir}):${loginStep}\n  ${allowShared ? "1" : "2"}. anet node codex start ${shellQuote(target)}   # add --probe-from <another local node> for the identity check`;
+  const startCmd = `cd ${shellQuote(workdir)} && anet node codex start ${shellQuote(target)}`;
+  // #529 helper: the exact command that logs THIS node in (adopt never copies a login — #514).
+  const next = allowShared ? `next: ${startCmd}` : codexLoginNextStepLines({ alias: target, codexHome: targetHomeFinal, homeExists: true, then: startCmd }).join("\n");
   const checks: ReceiptCheck[] = [
     checkIdentity(tfacts), homeCheck, checkSession(tfacts), workdirCheck, isolation,
     forkGapsCheck({ workdir_created: workdirCreated, trusted_rewritten: trustedRewritten, trusted_dropped: trustedDropped, model_override: modelOverride, source_last_model: sourceLastModel, port: assignedPort, agents_md_carried: agentsMdCarried }),

@@ -25,6 +25,7 @@ anet node codex
 | 接着聊上一次 | 在跑：`anet attach my-node`；停了：`anet node codex start my-node`（自动接回记录的会话） | 在跑：`anet attach my-node`；停了：`anet node start my-node --tmux` |
 | 换模型 | `anet node edit my-node --model <模型>`，再重启 | 同左 |
 | 复制一个节点 | `anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login` | `anet node clone my-node my-copy` |
+| 把 anet 之外开的 codex 对话收编成节点 | `anet node codex adopt my-agent`(列出 `~/.codex` 里的对话;`--thread <id>` 直接指定) | 同左 |
 | 删除 | `anet node delete my-node --force` | 同左 |
 | 看每个节点有没有登录 | `anet node codex login-status` | 同左 |
 
@@ -35,6 +36,7 @@ anet node codex
   所以复制出来的节点要自己登录一次，`--no-codex-login` 就是这个意思。
 - **接着聊**：`anet attach` 进入节点的 tmux 会话；`Ctrl-B` 再按 `D` 退出来，节点继续跑。
 - **换模型**只改配置，重启后才生效。
+- **收编**（adopt）把你在 anet 之外用 `codex` 开过的对话变成一个新节点；菜单里在选节点或选操作时输入 `a`。`~/.codex` 只被读取、登录不会被复制，新节点要单独登录。见 [复制节点](/guide/copy-node)。
 - **删除**会先把节点停掉，再删 `.anet/nodes/<节点>/` 和 Hub 上这个节点的那一行，不能撤销。
   不加 `--force` 只预览要删什么。
 - 每条命令的完整参数：`anet node codex --help`、[CLI 参考](/guide/cli)、[Codex TUI 人机共存](/guide/codex-copresence)、[复制节点](/guide/copy-node)。

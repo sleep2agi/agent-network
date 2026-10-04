@@ -152,7 +152,7 @@ run_cases() {
   [ "$rc" -eq 0 ] || { echo "FAIL: F rc=$rc"; return 1; }
   wa=$(realpath "$wa")
   check_node "$wa" n-full "$A" /proj/a "conversation A: fix the flaky test" || return 1
-  printf '%s\n' "$out" | grep -Fq "CODEX_HOME='$wa/.anet/nodes/n-full/codex-home' codex login --device-auth" || { echo "FAIL: F did not print the node's own login command"; return 1; }
+  printf '%s\n' "$out" | grep -Fxq "    CODEX_HOME=$wa/.anet/nodes/n-full/codex-home codex login --device-auth" || { echo "FAIL: F did not print the node's own login command"; return 1; }
   grep -Fq "[projects.\"$wa\"]" "$wa/.anet/nodes/n-full/codex-home/config.toml" || { echo "FAIL: F trusted project not rewritten"; return 1; }
   [ -e "$wa/.anet/nodes/n-full/codex-home/AGENTS.md" ] || { echo "FAIL: F AGENTS.md not carried"; return 1; }
   [ "$(cfg "$wa" n-full model)" = "gpt-5-a" ] || { echo "FAIL: F model is not the conversation's last model"; return 1; }

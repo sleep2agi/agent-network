@@ -27,6 +27,7 @@ Replace `my-node` with your node's name, and type the commands **in the director
 | continue the last conversation | running: `anet attach my-node`; stopped: `anet node codex start my-node` (the recorded thread resumes) | running: `anet attach my-node`; stopped: `anet node start my-node --tmux` |
 | switch model | `anet node edit my-node --model <id>`, then restart | same |
 | copy a node | `anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login` | `anet node clone my-node my-copy` |
+| turn a codex conversation started outside anet into a node | `anet node codex adopt my-agent` (lists `~/.codex` conversations; `--thread <id>` skips the list) | same |
 | delete | `anet node delete my-node --force` | same |
 | see which nodes are logged in | `anet node codex login-status` | same |
 
@@ -37,6 +38,7 @@ Notes:
   so a copy logs in on its own — that is what `--no-codex-login` means.
 - **Continue**: `anet attach` enters the node's tmux session; press `Ctrl-B` then `D` to leave it running.
 - **Switch model** only changes the config; it takes effect after a restart.
+- **Adopt** creates a new node from a conversation you started with `codex` outside anet; in the menu, type `a` at the node or action prompt. `~/.codex` is only read and its login is not copied, so log the new node in on its own. See [Copying a node](/en/guide/copy-node).
 - **Delete** stops the node first, then removes `.anet/nodes/<node>/` and the node's row on the Hub. It cannot be undone.
   Without `--force` it only previews what would be deleted.
 - Every flag of every command: `anet node codex --help`, the [CLI reference](/en/guide/cli),
