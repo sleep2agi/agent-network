@@ -125,7 +125,14 @@ cp /tmp/codex-health.ts agent-node/src/runtime/codex-health.ts
 bun /mutate.ts agent-node/src/runtime/codex-health.ts \
   'if (firstAndDown || (lastSig !== null && sig !== lastSig))' \
   'if (lastSig !== null && sig !== lastSig)'
-expect_red unit-first-tick-down 'the first tick reports a down result at once' bun test agent-node/src/runtime/codex-health.test.ts
+expect_red unit-first-tick-down 'the first tick reports a down app-server only if the bridge had been connected to it' bun test agent-node/src/runtime/codex-health.test.ts
+cp /tmp/codex-health.ts agent-node/src/runtime/codex-health.ts
+# …and only for an app-server the bridge had been connected to: without that gate a node still starting up (or a
+# Windows node, whose tmux TUI probe always says session-missing) is reported degraded and its tasks are refused.
+bun /mutate.ts agent-node/src/runtime/codex-health.ts \
+  ' && opts.appServerWasUp?.() === true;' \
+  ';'
+expect_red unit-first-tick-gate 'the first tick reports a down app-server only if the bridge had been connected to it' bun test agent-node/src/runtime/codex-health.test.ts
 cp /tmp/codex-health.ts agent-node/src/runtime/codex-health.ts
 
 echo "L8 #2255 the TUI paints before it connects (fake delays its websocket 2 s): start still succeeds"

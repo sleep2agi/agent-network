@@ -171,23 +171,30 @@ describe("#448 health monitor", () => {
     expect(changes[1].model_auth).toBe("revoked");
   });
 
-  test("the first tick reports a down result at once (healthy first tick stays quiet)", async () => {
-    // The app-server died before the first probe: the Hub only has the registration report (no health) and would
-    // otherwise keep showing the node healthy until the next flip.
-    for (const [appUp, tuiUp, expected] of [[false, true, 1], [true, false, 1], [true, true, 0]] as const) {
+  test("the first tick reports a down app-server only if the bridge had been connected to it", async () => {
+    // [app up, tui up, bridge was connected, expected onChange count after the first tick]
+    const cases: Array<[boolean, boolean, boolean | undefined, number, string]> = [
+      [false, true, true, 1, "app-server the bridge was attached to died before the first probe → reported now"],
+      [false, true, false, 0, "start-up: the app-server has never been up → quiet (not degraded on the Hub)"],
+      [false, true, undefined, 0, "no gate wired → quiet (old behaviour)"],
+      [true, false, true, 0, "TUI never seen (Windows: no tmux → session-missing) → quiet, tasks not refused"],
+      [true, true, true, 0, "healthy first tick → quiet"],
+    ];
+    for (const [appUp, tuiUp, wasUp, expected, why] of cases) {
       const changes: any[] = [];
       const m = createCodexHealthMonitor({
         appServerUrl: () => "ws://127.0.0.1:1",
         tuiSession: "t",
         modelAuth: new ModelAuthTracker(),
         probeAppServer: async () => (appUp ? { ok: true, rtt_ms: 1, last_error: null } : { ok: false, rtt_ms: null, last_error: "refused" }),
-        probeTui: () => (tuiUp ? { ok: true, reason: "running" } : { ok: false, reason: "pane-dead" }),
+        probeTui: () => (tuiUp ? { ok: true, reason: "running" } : { ok: false, reason: "session-missing" }),
+        ...(wasUp === undefined ? {} : { appServerWasUp: () => wasUp }),
         onChange: (r) => changes.push(r),
       });
       await m.tick();
-      expect(changes.length).toBe(expected);
+      expect({ why, n: changes.length }).toEqual({ why, n: expected });
       await m.tick();
-      expect(changes.length).toBe(expected); // same state on the 2nd tick: no repeat
+      expect({ why, n: changes.length }).toEqual({ why, n: expected }); // same state on the 2nd tick: no repeat
     }
   });
 

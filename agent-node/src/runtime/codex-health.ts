@@ -239,6 +239,13 @@ export interface CodexHealthMonitorOptions {
    * 并把「正在重启 / 已放弃」写进 last_error。返回值就是要上报的 app_server。
    */
   onAppServerProbe?: (h: AppServerHealth) => AppServerHealth;
+  /**
+   * true once the bridge has really been connected to the app-server (a session opened). Gates the first-tick
+   * report below: a down first probe is news only if the layer was up before. Without it, a node still starting
+   * (or a platform whose TUI probe can never pass, e.g. Windows without tmux) would be reported degraded and the
+   * Hub's dispatch guard would refuse its tasks.
+   */
+  appServerWasUp?: () => boolean;
 }
 
 /** 探测间隔:默认 30s;ANET_CODEX_HEALTH_INTERVAL_MS 可调(≥ 1000,测试用),非法值退回默认。 */
@@ -297,10 +304,11 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
     const report = snapshot();
     const sig = healthSignature(report);
     // The first tick has no previous signature to differ from. A healthy first result adds nothing to the
-    // registration report the Hub already has; an unhealthy one must go out now — otherwise a node whose
-    // app-server died before the first probe (the watchdog is already restarting it) shows healthy on the Hub until
-    // the next flip or the 3-minute heartbeat.
-    const firstAndDown = lastSig === null && (report.app_server?.ok === false || report.tui?.ok === false);
+    // registration report the Hub already has. A down one is reported only for a layer known to have been up — the
+    // app-server the bridge already connected to died before the first probe (the watchdog is already restarting
+    // it), which the Hub would otherwise not see until the next flip or the 3-minute heartbeat. A layer that has
+    // never been up (start-up, a TUI not opened yet, no tmux on this platform) stays quiet, as before.
+    const firstAndDown = lastSig === null && report.app_server?.ok === false && opts.appServerWasUp?.() === true;
     if (firstAndDown || (lastSig !== null && sig !== lastSig)) opts.onChange?.(report);
     lastSig = sig;
     return report;

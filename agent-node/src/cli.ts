@@ -1268,6 +1268,8 @@ let codexHealthMonitor: ReturnType<typeof createCodexHealthMonitor> | null = nul
 let codexAppServerWatchdog: ReturnType<typeof createAppServerWatchdog> | null = null;
 let codexWatchdogStopping = false;
 let lastCodexAppServerUrl: string | undefined;
+/** The bridge has connected to the app-server at least once (gates the health monitor's first-tick report). */
+let codexAppServerEverOpened = false;
 function wakeCodexWatchdog(): void {
   codexAppServerWatchdog?.noteExit();
   setTimeout(() => { void codexHealthMonitor?.tick(); }, 1_000).unref?.();
@@ -2296,6 +2298,7 @@ async function ensureCodexAppServerSession(): Promise<
     });
     openedRef = opened;
     lastCodexAppServerUrl = opened.url;
+    codexAppServerEverOpened = true;
     // #461 —— 共存拓扑没有 exit 事件(app-server 不是我们的子进程):ws 被对端断开(1006)就当它可能没了。
     opened.client.on("close", (ev: { code?: number }) => {
       if (codexWatchdogStopping) return;
@@ -7072,6 +7075,7 @@ if (RUNTIME === "codex-app-server") {
   codexHealthMonitor = createCodexHealthMonitor({
     appServerUrl: () => codexAppServerUrl || codexAppServerSessionManager.current()?.url || lastCodexAppServerUrl,
     intervalMs: healthIntervalFromEnv(process.env),
+    appServerWasUp: () => codexAppServerEverOpened,
     onAppServerProbe: (h) => {
       if (h.ok) refreshAppsrvSnapshot();
       return codexAppServerWatchdog ? codexAppServerWatchdog.observe(h) : h;

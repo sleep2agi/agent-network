@@ -158,13 +158,12 @@ describe("health monitor + watchdog", () => {
       onAppServerProbe: (h) => wd.observe(h),
       onChange: (r) => reports.push(r.app_server?.last_error ?? ""),
     });
-    await mon.tick(); // 1st failure: below the threshold, the raw probe error
-    expect(reports).toEqual([down.last_error]);
+    await mon.tick(); // 1st failure: below the threshold, the raw probe error (first tick, never up: quiet)
     await mon.tick(); // 2nd failure: the watchdog looks, and declines
-    expect(reports).toHaveLength(2);
-    expect(reports[1]).toMatch(/; not restarting: tmux session x-appsrv still has a live pane/);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatch(/; not restarting: tmux session x-appsrv still has a live pane/);
     await mon.tick();
-    expect(reports).toHaveLength(2); // stable verdict: no report on every tick
+    expect(reports).toHaveLength(1); // stable verdict: no report on every tick
   });
 
   test("end to end: server dies → degraded+restarting → restart rebinds → ok, each flip reported", async () => {
