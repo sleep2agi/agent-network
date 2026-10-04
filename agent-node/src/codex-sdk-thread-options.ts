@@ -14,6 +14,8 @@
 // unconfigured nodes still get skipGitRepoCheck=true, approvalPolicy=never,
 // sandboxMode=danger-full-access, modelReasoningEffort=low.
 
+import { codexTimeoutDetail } from "./runtime/sdk-timeout-detail";
+
 export const CODEX_SDK_DEFAULT_APPROVAL_POLICY = "never";
 export const CODEX_SDK_DEFAULT_SANDBOX_MODE = "danger-full-access";
 
@@ -200,4 +202,211 @@ export async function openCodexStdioThread(
   }
   const resp = await rpc.request<{ thread: { id: string } }>("thread/start", buildCodexStdioThreadStartParams(o.flags, o.model));
   return { threadId: resp.thread.id, resumed: false };
+}
+
+// ── #554 — the direct-stdio turn: a deadline, and codex's errors as failures
+//
+// Before #554 `processWithCodexStdio` waited for `turn/completed` with no
+// deadline (a turn that never finished hung the task — and the node's think
+// queue behind it — forever), and ignored codex's `error` notification and
+// the turn's `failed` status, so a failed turn replied 「（无回复）」.
+//
+// Measured against real `codex app-server` 0.133.0 and 0.155.1 (fresh
+// CODEX_HOME, model endpoint on 127.0.0.1):
+//   - an HTTP 400/401 from the model → `error {error:{message,…}, willRetry:false,
+//     threadId, turnId}` then `turn/completed {turn:{status:"failed",
+//     error:{message}}}` with the same message (both versions);
+//   - connection refused → 0.133 the same failed pair at once; 0.155 only
+//     `error {willRetry:true, message:"Reconnecting... waiting for network"}`
+//     at 5/10/20/40s… and never completes: that is the hang the deadline is for;
+//   - `turn/interrupt {threadId, turnId}` on the running turn → `{}` and then
+//     `turn/completed {status:"interrupted", error:null}`; a wrong turn id →
+//     -32600 `expected active turn id <x> but found <y>`.
+// `willRetry:true` errors are codex retrying on its own — logged, not failures.
+//
+// The deadline is the codex lanes' existing knob (CODEX_TIMEOUT_MS /
+// --codex-timeout-ms / flags.timeout / flags.codexTimeoutMs, default 300s,
+// 0 = no deadline) — the caller passes `currentCodexTimeoutMs()`.
+
+/** The JSON-RPC + notification surface the turn watcher needs (CodexStdioClient satisfies it). */
+export interface CodexStdioTurnRpc extends CodexStdioThreadRpc {
+  on(event: "notification", listener: (msg: { method?: string; params?: any }) => void): unknown;
+  off(event: "notification", listener: (msg: { method?: string; params?: any }) => void): unknown;
+}
+
+export interface CodexStdioTurnOutcome {
+  turnId: string;
+  finalText: string;
+  itemCount: number;
+  /** `turn.status` from turn/completed (undefined when the server omitted it). */
+  status?: string;
+  /** The upstream failure, or null for a successful (possibly empty) turn. */
+  failure: string | null;
+}
+
+export const CODEX_STDIO_INTERRUPT_TIMEOUT_MS = 10_000;
+
+/** A non-retrying codex `error` notification's message, or null (retrying / malformed). */
+export function codexStdioFatalErrorMessage(params: unknown): string | null {
+  const p = (params && typeof params === "object" ? params : {}) as { willRetry?: unknown; error?: { message?: unknown } };
+  if (p.willRetry === true) return null;
+  const m = p.error?.message;
+  return typeof m === "string" && m.trim() ? m : "codex reported an error without a message";
+}
+
+/**
+ * The turn's failure, mirroring the app-server bridge's mapping
+ * (codex-app-server-bridge.ts finishOwnedTurn): the turn's own error message,
+ * else the non-retrying `error` notification seen for it, else a fixed line
+ * for a failed / interrupted status. null = success.
+ */
+export function codexStdioTurnFailure(
+  turn: { status?: unknown; error?: { message?: unknown } | null } | undefined,
+  fatalError: string | null,
+): string | null {
+  const own = turn?.error?.message;
+  if (typeof own === "string" && own.trim()) return own;
+  if (fatalError) return fatalError;
+  if (turn?.status === "failed") return "Codex turn failed without an error message";
+  if (turn?.status === "interrupted") return "Codex turn was interrupted without an error message";
+  return null;
+}
+
+export class CodexStdioTurnError extends Error {
+  readonly code = "codex_stdio_turn_failed";
+  constructor(readonly upstream: string, readonly turnId: string) {
+    super(`codex turn failed: ${upstream.replace(/\s+/g, " ").trim().slice(0, 500)}`);
+    this.name = "CodexStdioTurnError";
+  }
+}
+
+export class CodexStdioTurnTimeoutError extends Error {
+  readonly code = "codex_stdio_turn_timeout";
+  constructor(
+    message: string,
+    readonly timeoutMs: number,
+    /** true = turn/interrupt was accepted; false = the turn may still be running. */
+    readonly interrupted: boolean,
+  ) {
+    super(message);
+    this.name = "CodexStdioTurnTimeoutError";
+  }
+}
+
+export interface CodexStdioTurnWatch {
+  /** The id turn/start answered with; notifications for other turns are ignored from then on. */
+  setTurnId(id: string | null): void;
+  /** Resolves on turn/completed (failure or not); rejects with CodexStdioTurnTimeoutError at the deadline. */
+  done: Promise<CodexStdioTurnOutcome>;
+  /** Stop watching (turn/start itself failed). `done` then never settles. */
+  cancel(): void;
+  /** Settle `done` with this error now (the app-server exited mid-turn). No-op once settled. */
+  fail(err: Error): void;
+}
+
+/**
+ * Watch one direct-stdio turn. Arm it BEFORE sending turn/start (codex may
+ * push the turn's notifications before the turn/start response).
+ */
+export function watchCodexStdioTurn(
+  rpc: CodexStdioTurnRpc,
+  o: { threadId: string; timeoutMs: number; log?: (line: string) => void; now?: () => number },
+): CodexStdioTurnWatch {
+  const now = o.now ?? Date.now;
+  const log = o.log ?? (() => {});
+  let turnId: string | null = null;
+  let finalText = "";
+  let itemCount = 0;
+  let fatalError: string | null = null;
+  let evSeen = 0;
+  let lastEvAt = now();
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let resolveDone!: (v: CodexStdioTurnOutcome) => void;
+  let rejectDone!: (e: Error) => void;
+  const done = new Promise<CodexStdioTurnOutcome>((res, rej) => { resolveDone = res; rejectDone = rej; });
+  done.catch(() => {}); // the caller may attach later; never an unhandled rejection
+
+  const notOurs = (p: any): boolean => {
+    const id = p?.turn?.id ?? p?.turnId ?? null;
+    return Boolean(turnId && id && id !== turnId);
+  };
+  const stop = () => {
+    settled = true;
+    if (timer) clearTimeout(timer);
+    rpc.off("notification", onNotification);
+  };
+  function onNotification(msg: { method?: string; params?: any }): void {
+    if (settled) return;
+    const p = msg?.params;
+    if (notOurs(p)) return;
+    evSeen++;
+    lastEvAt = now();
+    if (msg.method === "item/completed") {
+      const it = p?.item;
+      if (!it) return;
+      itemCount++;
+      if (it.type === "agentMessage" && typeof it.text === "string") finalText = it.text;
+    } else if (msg.method === "error") {
+      const fatal = codexStdioFatalErrorMessage(p);
+      if (fatal) {
+        fatalError = fatal;
+        log(`[codex-stdio] ✗ codex error: ${fatal.replace(/\s+/g, " ").slice(0, 300)}`);
+      } else {
+        log(`[codex-stdio] codex error (willRetry): ${String(p?.error?.message ?? "").slice(0, 200)}`);
+      }
+    } else if (msg.method === "turn/completed") {
+      stop();
+      const id = p?.turn?.id ?? p?.turnId ?? turnId ?? "";
+      resolveDone({
+        turnId: id,
+        finalText,
+        itemCount,
+        status: typeof p?.turn?.status === "string" ? p.turn.status : undefined,
+        failure: codexStdioTurnFailure(p?.turn, fatalError),
+      });
+    }
+  }
+  rpc.on("notification", onNotification);
+
+  if (o.timeoutMs > 0) {
+    timer = setTimeout(async () => {
+      if (settled) return;
+      stop();
+      const sinceLast = now() - lastEvAt;
+      const detail = codexTimeoutDetail(evSeen, sinceLast);
+      const lastErr = fatalError ? `;codex 最后报错: ${fatalError.replace(/\s+/g, " ").slice(0, 200)}` : "";
+      let interrupted = false;
+      let how: string;
+      if (!turnId) {
+        how = "turn/start 尚未返回 turn id,无法 turn/interrupt";
+      } else {
+        try {
+          await rpc.request("turn/interrupt", { threadId: o.threadId, turnId }, CODEX_STDIO_INTERRUPT_TIMEOUT_MS);
+          interrupted = true;
+          how = `已用 turn/interrupt 中止 turn ${turnId}`;
+        } catch (e) {
+          how = `turn/interrupt 失败(${(e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 160)})`;
+        }
+      }
+      log(`[codex-stdio] ✗ turn timed out after ${o.timeoutMs}ms; ${detail}; ${how}`);
+      rejectDone(new CodexStdioTurnTimeoutError(
+        `codex-stdio 调用超时 (${Math.round(o.timeoutMs / 1000)}s) — ${detail}${lastErr};${how}。` +
+          `确切原因见节点日志里 [codex-stdio] 开头那几行。`,
+        o.timeoutMs,
+        interrupted,
+      ));
+    }, o.timeoutMs);
+  }
+
+  return {
+    setTurnId(id) { if (id) turnId = id; },
+    done,
+    cancel() { if (!settled) stop(); },
+    fail(err) {
+      if (settled) return;
+      stop();
+      rejectDone(err);
+    },
+  };
 }

@@ -160,8 +160,8 @@ expect_mutation_red \
 expect_mutation_red \
   codex-stdio-submitted \
   src/cli.ts \
-  $'evidence?.submitted();\n      log(`[codex-stdio]' \
-  $'void evidence;\n      log(`[codex-stdio]' \
+  $'evidence?.submitted();\n        log(`[codex-stdio]' \
+  $'void evidence;\n        log(`[codex-stdio]' \
   src/task-runtime-evidence.test.ts \
   'SDK and direct-stdio boundaries'
 
