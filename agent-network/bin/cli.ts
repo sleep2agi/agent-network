@@ -46,6 +46,7 @@ import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
 import { runCodexRestart, type RestartActions, type GoalState as LifecycleGoalState } from "../src/codex-lifecycle-restart";
+import { runCodexMenu } from "../src/codex-menu";
 import { alreadyRunningMessage, runningNodePid } from "../src/node-running-guard";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
@@ -8086,6 +8087,8 @@ async function codexLifecycleCommand() {
     console.error("  canary     canary <alias>... [--probe-from <peer>]:逐个 verify,第一个 FAIL 即停(后面的不碰);批量重启/换号前先跑它");
     console.error("  login-status [--json]:当前目录每个 codex 节点一行 —— CODEX_HOME、是否已登录、账号(邮箱/指纹)、与谁共用同一份登录(#529);只读,不打印任何 token");
   };
+  // #532 — bare `anet node codex`: a menu for humans (TTY) / table + cheat sheet (piped). src/codex-menu.ts
+  if (!verb) process.exit(await runCodexMenu(listProfileIds().map((id) => { const p = loadProfile(id); return { id, alias: nodeDisplayName(id, p), profile: p as Record<string, any> | null }; }), { nodesDir: nodesDir(), home }));
   const landed = ["preflight", "verify", "canary", "start", "restart", "resume", "fork", "account", "rollback"];
   if (verb === "login-status") { codexLoginStatusCommand(opts); return; }
   if (!verb || !ref || !landed.includes(verb)) { usage(); process.exit(verb ? 2 : 0); }

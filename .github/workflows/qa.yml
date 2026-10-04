@@ -197,6 +197,7 @@ on:
       - 'tests/test516-anet-secret-masking/**'
       - 'tests/test516-node-delete-hub-row/**'
       - 'tests/test522-node-delete-locate-stop/**'
+      - 'tests/test532-codex-menu/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -376,6 +377,7 @@ on:
       - 'tests/test516-anet-secret-masking/**'
       - 'tests/test516-node-delete-hub-row/**'
       - 'tests/test522-node-delete-locate-stop/**'
+      - 'tests/test532-codex-menu/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -1290,6 +1292,23 @@ jobs:
           docker cp "run-anet-test522:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test522/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test522"
           docker rm -f "run-anet-test522" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #532 — bare `anet node codex`: menu (pty via `script`) prints the exact command and runs it only
+      # after y / the typed name; piped prints table + cheat sheet; no token in any output. tmux -L private.
+      # 见证红 4 条:去掉 y/N / 去掉输入节点名 / 去掉非 TTY 分支 / token 进表格。
+      - name: Build + run test532-codex-menu
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test532 \
+            -f tests/test532-codex-menu/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test532" -e ARTIFACT_DIR=/tmp/art \
+            anet-test532 || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test532"
+          docker cp "run-anet-test532:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test532/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test532"
+          docker rm -f "run-anet-test532" >/dev/null 2>&1 || true
           exit $rc
 
       - name: Build + run test623-feishu-scrub-health

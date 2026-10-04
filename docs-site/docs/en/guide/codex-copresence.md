@@ -295,6 +295,8 @@ When `model_auth` becomes `revoked` (refresh token revoked) or `expired` (login 
 
 ## Lifecycle commands: `anet node codex …` (read-only checks land first)
 
+> Don't want to remember the commands below? Run `anet node codex` with no arguments in the node's directory: it lists the nodes, lets you pick an action, prints the equivalent command and asks before running it. One-page version: [Codex node cheat sheet](/en/guide/codex-cheatsheet).
+
 Restarting or resuming a co-presence node used to be a manual runbook (see [Manual safe restart](#safe-restart) below). Every check in it is becoming a deterministic CLI step: no LLM on the happy path, machine-readable receipts only. The first two commands are read-only:
 
 ```bash
