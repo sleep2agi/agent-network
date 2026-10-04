@@ -23,6 +23,7 @@ anet node codex
 | 看看它好不好（自检） | `anet node codex verify my-node` | `anet info my-node` |
 | 登录 codex | `CODEX_HOME=<节点目录>/codex-home codex login --device-auth` | `codex login --device-auth`（用本机 `~/.codex` 的登录） |
 | 接着聊上一次 | 在跑：`anet attach my-node`；停了：`anet node codex start my-node`（自动接回记录的会话） | 在跑：`anet attach my-node`；停了：`anet node start my-node --tmux` |
+| 恢复以前的某段对话 | `anet resume my-node --pick`（列出这个节点的对话，按编号选）；已知 id：`anet resume my-node --thread <id>` | 同左 |
 | 换模型 | `anet node edit my-node --model <模型>`，再重启 | 同左 |
 | 复制一个节点 | `anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login` | `anet node clone my-node my-copy` |
 | 把 anet 之外开的 codex 对话收编成节点 | `anet node codex adopt my-agent`(列出 `~/.codex` 里的对话;`--thread <id>` 直接指定) | 同左 |
@@ -35,6 +36,10 @@ anet node codex
   一个 codex 登录只给一个节点用（见 [一个登录只给一个节点](/guide/codex-copresence#one-login-per-node)），
   所以复制出来的节点要自己登录一次，`--no-codex-login` 就是这个意思。
 - **接着聊**：`anet attach` 进入节点的 tmux 会话；`Ctrl-B` 再按 `D` 退出来，节点继续跑。
+- **恢复对话**：`anet resume my-node` 接回配置里记录的那段对话；`--pick` 列出节点自己 `CODEX_HOME/sessions` 里的对话
+  （时间、短 id、第一句话），按编号选；不在终端里时只打印列表和一条可复制的 `anet resume my-node --thread <id>`，退出码 2。
+  `--thread` 接完整 id 或唯一前缀，必须在这个节点的 `CODEX_HOME` 里存在。记录的对话找不到、没登录、节点还在跑时，
+  它**不会**悄悄开一段新对话，而是打一行原因和下一步（要新对话请用 `anet node start`）。菜单里选「选一段历史对话恢复」就是这条命令。
 - **换模型**只改配置，重启后才生效。
 - **收编**（adopt）把你在 anet 之外用 `codex` 开过的对话变成一个新节点；菜单里在选节点或选操作时输入 `a`。`~/.codex` 只被读取、登录不会被复制，新节点要单独登录。见 [复制节点](/guide/copy-node)。
 - **删除**会先把节点停掉，再删 `.anet/nodes/<节点>/` 和 Hub 上这个节点的那一行，不能撤销。

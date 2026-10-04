@@ -37,6 +37,7 @@ describe("CLI argument parsing", () => {
       "--no-auto-self",
       "--no-codex-login",
       "--no-yolo",
+      "--pick",
       "--resume-latest",
       "--self",
       "--tmux",
@@ -80,6 +81,12 @@ describe("CLI argument parsing", () => {
     expect(parsed._channels).toEqual(["server:commhub", "feishu:ops"]);
     expect(parsed._envs).toEqual(["A=1"]);
     expect(positionalArgs(argv)).toEqual(["node-a", "node-b"]);
+  });
+
+  test("#536 --pick never swallows the node name", () => {
+    const argv = ["resume", "--pick", "my-node"];
+    expect(parseCliOptions(argv).pick).toBe("true");
+    expect(positionalArgs(argv)).toEqual(["resume", "my-node"]);
   });
 
   test("key=value remains unsupported and is treated as the complete key", () => {

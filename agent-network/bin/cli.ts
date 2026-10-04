@@ -48,6 +48,7 @@ import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credent
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
 import { runCodexRestart, SINGLE_NODE_UNATTESTED_DETAIL, type RestartActions, type GoalState as LifecycleGoalState } from "../src/codex-lifecycle-restart";
 import { runCodexMenu } from "../src/codex-menu";
+import { decideCodexResume, gatherCodexResumeFacts, parsePickAnswer, resumeConfigShouldRollBack } from "../src/codex-resume";
 import { alreadyRunningMessage, runningNodePid } from "../src/node-running-guard";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
 import { classifySessionStatus, summarizeSessions } from "../src/session-status-class";
@@ -4245,6 +4246,7 @@ Session:
   anet node start <name> --tmux            Start in a tmux session (attach with a terminal; detached when headless)
   anet node start <name> --new-session     Start with fresh Claude session
   anet node resume <name> --session <id> Resume specific session
+  anet resume <name> --pick|--thread <id>  Codex node: pick / resume a thread from its own CODEX_HOME
   anet session ls                          List Claude Code sessions
 
 Co-presence (human TUI + network agent share one thread):
@@ -8198,6 +8200,7 @@ async function codexLifecycleCommand() {
   }
 
   // ── start / restart / resume:确定性状态机(src/codex-lifecycle-restart.ts),这里只提供真实动作 ──
+  let resumeThreadBefore: { value: unknown } | null = null;
   if (verb === "resume") {
     const thread = String(opts.thread ?? "");
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(thread)) {
@@ -8213,6 +8216,7 @@ async function codexLifecycleCommand() {
     if (stored.codexThreadId !== thread) {
       saveProfile(resolved.id, { ...(stored as any), codexThreadId: thread });
       say(`config codexThreadId ${stored.codexThreadId ?? "(none)"} → ${thread} (rollout ${matches[0].path})`);
+      resumeThreadBefore = { value: stored.codexThreadId };
     }
   }
   const peer = opts["probe-from"] ? resolveNodeRefAt(opts["probe-root"], String(opts["probe-from"])) : null;
@@ -8220,6 +8224,13 @@ async function codexLifecycleCommand() {
   if (peer && peer.id === resolved.id) { console.error(`[anet] node codex ${verb}: --probe-from must be a *different* node`); process.exit(2); }
   const actions = codexRestartActions(ctx, peer);
   const outcome = await runCodexRestart(verb as "start" | "restart" | "resume", actions);
+  if (resumeThreadBefore && resumeConfigShouldRollBack(outcome.stoppedAt)) {
+    // #536 — nothing was touched: the config must not name a thread the node is not running.
+    const cur = (loadStoredProfile(resolved.id) ?? profile) as Record<string, any>;
+    const { codexThreadId: _drop, ...rest } = cur;
+    saveProfile(resolved.id, (resumeThreadBefore.value ? { ...rest, codexThreadId: resumeThreadBefore.value } : rest) as any);
+    say(`stopped at ${outcome.stoppedAt} — config codexThreadId restored to ${resumeThreadBefore.value ?? "(none)"}`);
+  }
   const receipt = buildReceipt({ verb: verb as LifecycleVerb, alias: displayName, nodeId: profile.node_id ?? null, startedAt, checks: outcome.checks });
   const path = writeReceipt(nodeDir, receipt);
   if (opts.json === "true") console.log(JSON.stringify({ ...receipt, stoppedAt: outcome.stoppedAt, rolledBack: outcome.rolledBack, receiptPath: path }, null, 2));
@@ -8845,6 +8856,8 @@ async function resumeCommand() {
   let nodeId = resolved?.id || ref;
   let profile = resolved?.profile || null;
   const opts = parseOpts();
+  // #536 — codex nodes resume a thread from their own CODEX_HOME, or refuse with the next step.
+  if (resolved && ["codex-sdk", "codex-app-server"].includes(normalizeRuntime(resolved.profile))) { await codexResumeCommand(resolved, opts); return; }
   const sessionId = opts.session;
 
   if (!sessionId) {
@@ -8880,6 +8893,48 @@ async function resumeCommand() {
 
   console.log(`[anet] Saved session ${sessionId.slice(0, 8)}... to .anet/nodes/${nodeId}/config.json\n`);
   await launchAgent(nodeId, false);
+}
+
+// #536 — `anet resume <codex node> [--thread <id> | --pick]`. Decision: src/codex-resume.ts.
+async function codexResumeCommand(resolved: { id: string; profile: Profile }, opts: Record<string, string>) {
+  const alias = nodeDisplayName(resolved.id, resolved.profile);
+  const node = { id: resolved.id, alias, profile: resolved.profile as Record<string, any> };
+  const facts = gatherCodexResumeFacts(node, { nodesDir: nodesDir(), home });
+  if (!facts) { console.error(`[anet] resume: ${alias} is not a codex node`); process.exit(2); }
+  const tty = !!(process.stdin.isTTY && process.stdout.isTTY);
+  let decision = decideCodexResume(facts, { thread: opts.thread ?? opts.session, pick: opts.pick === "true", tty });
+  if (decision.kind === "ask") {
+    for (const l of decision.lines) console.log(l);
+    const answer = parsePickAnswer(await ask(`Resume which one? number (empty = cancel)`), decision.choices);
+    closeRL();
+    if (answer.kind === "cancel") { console.error("[anet] resume: cancelled — nothing was resumed"); process.exit(1); }
+    if (answer.kind === "bad") { console.error(`[anet] resume: ${answer.message} — nothing was resumed`); process.exit(2); }
+    decision = decideCodexResume(facts, { thread: answer.threadId, tty });
+  }
+  if (decision.kind === "refuse" || decision.kind === "list") {
+    const d = decision;
+    const out = d.kind === "list" ? console.log : console.error;
+    d.lines.forEach((l, i) => out(i === 0 && d.kind === "refuse" ? `[anet] resume: ${l}` : l));
+    process.exit(d.code);
+  }
+  if (decision.kind === "already") { console.log(`[anet] ${decision.lines[0]}`); return; }
+  if (decision.kind !== "resume") return;
+  console.log(`[anet] resume ${alias}: thread ${decision.threadId} (${decision.rolloutPath})`);
+  if (facts.kind === "co-presence") {
+    // The co-presence lifecycle controller owns codexThreadId + the three tmux sessions.
+    args.splice(0, args.length, "codex", "resume", alias, "--thread", decision.threadId);
+    await codexLifecycleCommand();
+    return;
+  }
+  if (decision.changed) {
+    const stored = loadStoredProfile(resolved.id) || resolved.profile;
+    stored.session = decision.threadId;
+    await ensureNodeToken(stored, resolved.id);
+    saveProfile(resolved.id, stored);
+    console.log(`[anet] Saved session ${decision.threadId} to .anet/nodes/${resolved.id}/config.json`);
+  }
+  args.splice(0, args.length, "start", alias, ...(opts.tmux === "true" ? ["--tmux"] : []));
+  await startCommand();
 }
 
 function showProfiles(cmd: string) {

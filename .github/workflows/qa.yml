@@ -200,6 +200,7 @@ on:
       - 'tests/test522-node-delete-locate-stop/**'
       - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
+      - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -382,6 +383,7 @@ on:
       - 'tests/test522-node-delete-locate-stop/**'
       - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
+      - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
@@ -1313,6 +1315,23 @@ jobs:
           docker cp "run-anet-test532:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test532/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test532"
           docker rm -f "run-anet-test532" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #536 — anet resume <codex node> [--thread <id>|--pick]:夹具节点 + 夹具 CODEX_HOME(3 条合成 rollout),无 codex/无登录/无 Hub。
+      # 非 TTY 列表+可复制命令 / pty 选号 / 唯一前缀 / 记录的 thread 不见了拒绝 / 外来 id 拒绝 / 未登录 rc1 / 在跑拒绝或 attach / 共存走 node codex resume 且失败回滚 codexThreadId。
+      # 见证红 4 条:codex 节点退回旧 resume 路径 / 非 TTY 仍提问 / 去掉登录检查 / 去掉在跑检查。
+      - name: Build + run test536-codex-resume
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test536 \
+            -f tests/test536-codex-resume/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test536" -e ARTIFACT_DIR=/tmp/art \
+            anet-test536 || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test536"
+          docker cp "run-anet-test536:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test536/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test536"
+          docker rm -f "run-anet-test536" >/dev/null 2>&1 || true
           exit $rc
 
       # #528 — anet node codex adopt:把 anet 之外开的 codex 对话(夹具 CODEX_HOME,3 条合成 rollout)收编成节点。

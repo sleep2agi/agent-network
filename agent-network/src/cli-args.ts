@@ -35,6 +35,7 @@ export const BOOLEAN_FLAGS = new Set([
   "--no-codex-login",            // #514 (fork)
   "--no-auto-self",
   "--no-yolo",
+  "--pick",                      // #536 (anet resume <codex node> --pick)
   "--resume-latest",
   "--self",
   "--tmux",
