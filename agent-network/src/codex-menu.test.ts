@@ -164,14 +164,14 @@ describe("#532 menu: confirm before run", () => {
 describe("#532 menu: delete needs the typed name", () => {
   it("y is not enough; the wrong name aborts", async () => {
     for (const typed of ["y", "my-nod", "MY-NODE", ""]) {
-      const io = scripted(["1", "9", typed]);
+      const io = scripted(["1", "10", typed]);
       const rec = recorder();
       await codexMenu(rows(), io, rec.runner(io), { cwd: "/w" });
       expect(rec.ran).toEqual([]);
     }
   });
   it("the exact name runs delete --force", async () => {
-    const io = scripted(["1", "9", "my-node"]);
+    const io = scripted(["1", "10", "my-node"]);
     const rec = recorder();
     await codexMenu(rows(), io, rec.runner(io), { cwd: "/w" });
     expect(rec.ran.map(commandLine)).toEqual(["anet node delete my-node --force"]);
@@ -192,6 +192,10 @@ describe("#532 actions map to existing commands", () => {
     expect(line(cp, "continue")).toBe("anet attach my-node");
     expect(line(stopped, "continue")).toBe("anet node codex start my-node");
     expect(planAction(stopped, "continue").note).toContain(THREAD);
+    // #536 — the picker is `anet resume <alias> --pick` for both kinds.
+    expect(line(stopped, "pick")).toBe("anet resume my-node --pick");
+    expect(line(sdk, "pick")).toBe("anet resume my-sdk --pick");
+    expect(planAction(cp, "pick").note).toContain("stop it first");
     expect(line(cp, "model", { model: "o3-pro" })).toBe("anet node edit my-node --model o3-pro");
     expect(line(cp, "copy", { newName: "my-copy", workdir: "/w2/my-copy" })).toBe("anet node codex fork my-node --name my-copy --workdir /w2/my-copy --no-codex-login");
     expect(line(sdk, "copy", { newName: "my-copy" })).toBe("anet node clone my-sdk my-copy");
@@ -200,18 +204,18 @@ describe("#532 actions map to existing commands", () => {
     expect(commandLine({ argv: ["anet", "node", "stop", "my node's"] })).toBe(`anet node stop 'my node'\\''s'`);
   });
   it("model and copy prompts feed the command; empty answers abort", async () => {
-    let io = scripted(["1", "7", "o3-pro", "y"]);
+    let io = scripted(["1", "8", "o3-pro", "y"]);
     let rec = recorder();
     await codexMenu(rows(), io, rec.runner(io), { cwd: "/w/proj" });
     expect(rec.ran.map(commandLine)).toEqual(["anet node edit my-node --model o3-pro"]);
     expect(io.out()).toContain("takes effect after a restart: anet node codex restart my-node");
 
-    io = scripted(["1", "8", "my-copy", "", "y"]);
+    io = scripted(["1", "9", "my-copy", "", "y"]);
     rec = recorder();
     await codexMenu(rows(), io, rec.runner(io), { cwd: "/w/proj" });
     expect(rec.ran.map(commandLine)).toEqual(["anet node codex fork my-node --name my-copy --workdir /w/my-copy --no-codex-login"]);
 
-    for (const lines of [["1", "7", ""], ["1", "7", "two words"], ["1", "8", ""], ["1", "8", "my-node"]]) {
+    for (const lines of [["1", "8", ""], ["1", "8", "two words"], ["1", "9", ""], ["1", "9", "my-node"]]) {
       io = scripted(lines);
       rec = recorder();
       await codexMenu(rows(), io, rec.runner(io), { cwd: "/w/proj" });

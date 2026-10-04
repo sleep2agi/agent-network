@@ -179,6 +179,7 @@ export const CODEX_CHEAT_SHEET = [
   "  check health 自检         anet node codex verify my-node       (codex-sdk: anet info my-node)",
   "  log in 登录               CODEX_HOME=<node>/codex-home codex login --device-auth   (the menu prints the exact path)",
   "  continue 接着聊上一次     anet attach my-node                  (stopped: start it — the recorded thread resumes)",
+  "  resume an older one 选历史 anet resume my-node --pick          (lists the node's threads; --thread <id> picks one directly)",
   "  switch model 换模型       anet node edit my-node --model <id>  then restart",
   "  copy 复制节点             anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login",
   "                            (codex-sdk: anet node clone my-node my-copy)",
@@ -192,7 +193,7 @@ export const CODEX_CHEAT_SHEET = [
 
 // ── actions ──────────────────────────────────────────────────────────────
 
-export type MenuAction = "start" | "stop" | "restart" | "verify" | "login" | "continue" | "model" | "copy" | "delete";
+export type MenuAction = "start" | "stop" | "restart" | "verify" | "login" | "continue" | "pick" | "model" | "copy" | "delete";
 
 export const MENU_ACTIONS: { key: MenuAction; label: string }[] = [
   { key: "start", label: "start 启动" },
@@ -201,6 +202,7 @@ export const MENU_ACTIONS: { key: MenuAction; label: string }[] = [
   { key: "verify", label: "verify 自检" },
   { key: "login", label: "log in 登录 codex" },
   { key: "continue", label: "continue the last conversation 接着聊上一次" },
+  { key: "pick", label: "resume an earlier conversation (pick one) 选一段历史对话恢复" },
   { key: "model", label: "change model 换模型" },
   { key: "copy", label: "copy (fork) to a new node 复制节点" },
   { key: "delete", label: "delete 删除" },
@@ -261,6 +263,12 @@ export function planAction(row: CodexNodeRow, action: MenuAction, input: ActionI
       return cp
         ? { argv: ["anet", "node", "codex", "start", a], note: row.threadId ? `resumes thread ${row.threadId}` : "no thread recorded yet — a fresh conversation starts" }
         : { argv: ["anet", "node", "start", a, "--tmux"], note: row.threadId ? `resumes session ${row.threadId}` : "no session recorded yet — a fresh conversation starts" };
+    case "pick":
+      // #536 — the picker lists this node's threads (CODEX_HOME/sessions) and asks; it refuses while the node runs.
+      return {
+        argv: ["anet", "resume", a, "--pick"],
+        note: row.running ? "the node is running — stop it first (anet node stop); the picker only lists then" : "lists this node's codex conversations and asks which one; nothing starts until you choose",
+      };
     case "model":
       return { argv: ["anet", "node", "edit", a, "--model", String(input.model ?? "")], after: `takes effect after a restart: anet node ${cp ? "codex restart" : "restart"} ${displayQuote(a)}` };
     case "copy":

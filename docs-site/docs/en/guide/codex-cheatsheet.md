@@ -25,6 +25,7 @@ Replace `my-node` with your node's name, and type the commands **in the director
 | check its health | `anet node codex verify my-node` | `anet info my-node` |
 | log in to codex | `CODEX_HOME=<node dir>/codex-home codex login --device-auth` | `codex login --device-auth` (the host's `~/.codex` login) |
 | continue the last conversation | running: `anet attach my-node`; stopped: `anet node codex start my-node` (the recorded thread resumes) | running: `anet attach my-node`; stopped: `anet node start my-node --tmux` |
+| resume an earlier conversation | `anet resume my-node --pick` (lists this node's conversations, pick by number); known id: `anet resume my-node --thread <id>` | same |
 | switch model | `anet node edit my-node --model <id>`, then restart | same |
 | copy a node | `anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login` | `anet node clone my-node my-copy` |
 | turn a codex conversation started outside anet into a node | `anet node codex adopt my-agent` (lists `~/.codex` conversations; `--thread <id>` skips the list) | same |
@@ -37,6 +38,12 @@ Notes:
   One codex login serves one node (see [One login per node](/en/guide/codex-copresence#one-login-per-node)),
   so a copy logs in on its own — that is what `--no-codex-login` means.
 - **Continue**: `anet attach` enters the node's tmux session; press `Ctrl-B` then `D` to leave it running.
+- **Resume**: `anet resume my-node` continues the conversation recorded in the node's config. `--pick` lists the
+  conversations in the node's own `CODEX_HOME/sessions` (time, short id, first line) and asks for a number; outside a
+  terminal it prints the list and a copy-paste `anet resume my-node --thread <id>`, and exits 2. `--thread` takes a full id
+  or a unique prefix, and it must exist in this node's `CODEX_HOME`. When the recorded conversation is missing, the node is
+  not logged in, or it is still running, it does **not** quietly start a new conversation: it prints one line with the reason
+  and the next step (a new conversation is `anet node start`). The menu's "resume an earlier conversation" runs this command.
 - **Switch model** only changes the config; it takes effect after a restart.
 - **Adopt** creates a new node from a conversation you started with `codex` outside anet; in the menu, type `a` at the node or action prompt. `~/.codex` is only read and its login is not copied, so log the new node in on its own. See [Copying a node](/en/guide/copy-node).
 - **Delete** stops the node first, then removes `.anet/nodes/<node>/` and the node's row on the Hub. It cannot be undone.

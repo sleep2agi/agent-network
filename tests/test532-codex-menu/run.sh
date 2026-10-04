@@ -134,16 +134,16 @@ case_C() {
 case_D() {
   setup
   local out="$WORK/d1.out"
-  menu_pty '2\n9\nmy-sd\n' "$out"
+  menu_pty '2\n10\nmy-sd\n' "$out"
   cp "$out" "$ARTIFACT_DIR/D1-delete-wrong-name.txt"
   grep -Eq '^  anet node delete my-sdk --force' "$out" || { echo "    delete command not printed"; return 1; }
   [ -f "$PROJ/.anet/nodes/my-sdk/config.json" ] || { echo "    wrong name deleted the node"; return 1; }
   grep -Fq 'Name did not match' "$out" || { echo "    no mismatch message"; return 1; }
   out="$WORK/d2.out"
-  menu_pty '2\n9\ny\n' "$out"
+  menu_pty '2\n10\ny\n' "$out"
   [ -f "$PROJ/.anet/nodes/my-sdk/config.json" ] || { echo "    y alone deleted the node"; return 1; }
   out="$WORK/d3.out"
-  menu_pty '2\n9\nmy-sdk\n' "$out"
+  menu_pty '2\n10\nmy-sdk\n' "$out"
   cp "$out" "$ARTIFACT_DIR/D3-delete-typed.txt"
   [ ! -e "$PROJ/.anet/nodes/my-sdk" ] || { echo "    typed name did not delete"; cat "$out"; return 1; }
   [ -f "$PROJ/.anet/nodes/my-node/config.json" ] || { echo "    deleted the wrong node"; return 1; }
@@ -155,7 +155,7 @@ case_E() {
   # every pty path through every action of both nodes, answering n / a wrong name
   setup
   local n a out
-  for n in 1 2; do for a in 1 2 3 4 5 6 7 8 9; do
+  for n in 1 2; do for a in 1 2 3 4 5 6 7 8 9 10; do
     out="$WORK/e-$n-$a.out"
     menu_pty "$n\n$a\nx-model\nx-name\n\nn\n" "$out"
   done; done
