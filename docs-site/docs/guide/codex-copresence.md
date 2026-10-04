@@ -279,6 +279,8 @@ anet node codex resume  <alias> --thread <36 位 thread id> --probe-from <peer>
 
 ### fork:继承历史,其余全新
 
+只要设置、不要历史时用 `anet node clone`;两者对照和删除方法见 [复制节点(clone / fork)与清理](/guide/copy-node)。
+
 ```bash
 anet node codex fork <source> --name <target> --workdir <dir> --no-codex-login [--inherit-full-access] [--model <id>]   # <dir> 不存在会自动建
 CODEX_HOME=<dir>/.anet/nodes/<target>/codex-home codex login --device-auth   # 新节点自己登录(#514)

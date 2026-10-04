@@ -187,6 +187,8 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 
 ### 复制节点
 
+完整说明（clone 与 fork 的对照、复制项清单、codex 登录、怎么删干净）见 [复制节点（clone / fork）与清理](/guide/copy-node)。
+
 想要「再来一个和它一样的节点」，用：
 
 ```bash

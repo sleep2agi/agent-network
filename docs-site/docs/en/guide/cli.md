@@ -191,6 +191,8 @@ Common creation options:
 
 ### Clone a node
 
+Full guide (clone vs fork, what is copied, the codex login, deleting the copy): [Copying a node (clone / fork) and cleaning up](/en/guide/copy-node).
+
 To get "another node just like this one":
 
 ```bash
