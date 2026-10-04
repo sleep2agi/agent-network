@@ -19,6 +19,9 @@ process.env.HOST = "127.0.0.1";
 delete process.env.COMMHUB_DUE_REMINDER_TZ;
 delete process.env.COMMHUB_DUE_OVERDUE_MAX_DAYS;
 delete process.env.COMMHUB_DUE_REMINDER_NETWORKS;
+delete process.env.COMMHUB_DUE_REMINDERS;
+delete process.env.COMMHUB_DUE_REMINDERS_NETWORKS;
+delete process.env.COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS;
 // 节点提醒默认关;这个文件的大部分用例要看节点那一路,先打开(「默认关」单独一个用例)。
 process.env.COMMHUB_DUE_REMINDER_NODES = "1";
 const PW = "DueRemindPassw0rd!x";
@@ -334,6 +337,131 @@ describe("上线护栏", () => {
       process.env.COMMHUB_DUE_REMINDER_NETWORKS = `${NET},${late.net}`;
       expect(sentFor(due.runDueReminders({ now: T0 + 3600_000 }), old)).toEqual([]);
     } finally { delete process.env.COMMHUB_DUE_REMINDER_NETWORKS; }
+  });
+
+  // ── #524 按网络开关 ────────────────────────────────────
+  const SCOPE_VARS = ["COMMHUB_DUE_REMINDERS", "COMMHUB_DUE_REMINDERS_NETWORKS", "COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS", "COMMHUB_DUE_REMINDER_NETWORKS"];
+  async function withEnv<T>(vars: Record<string, string>, fn: () => T | Promise<T>): Promise<T> {
+    const saved = Object.fromEntries(SCOPE_VARS.map((k) => [k, process.env[k]]));
+    for (const k of SCOPE_VARS) delete process.env[k];
+    Object.assign(process.env, vars);
+    try { return await fn(); } finally {
+      for (const k of SCOPE_VARS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]!; }
+    }
+  }
+  const baselineCount = (net: string) => db.get("SELECT COUNT(*) AS n FROM requirement_due_reminders WHERE kind = 'baseline' AND network_id = ?1", net).n;
+  const rowCount = (id: string) => db.get("SELECT COUNT(*) AS n FROM requirement_due_reminders WHERE requirement_id = ?1", id).n;
+
+  test("#524 范围解析:各种组合 / 空白值 / 只绑本分支用到的参数", async () => {
+    const S = (vars: Record<string, string>) => withEnv(vars, () => due.dueReminderScope());
+    // 都不设 = 原样:所有网络
+    expect(await S({})).toEqual({ mode: "all", exclude: [] });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "1" })).toEqual({ mode: "all", exclude: [] });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0" })).toEqual({ mode: "off" });
+    // 旧名白名单不能在 =0 时打开(行为不变)
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDER_NETWORKS: "net_a" })).toEqual({ mode: "off" });
+    expect(await S({ COMMHUB_DUE_REMINDER_NETWORKS: "net_a" })).toEqual({ mode: "only", include: ["net_a"], exclude: [] });
+    // 新名白名单:=0 时也打开,只给名单里的
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: " net_a , net_b,net_a, " })).toEqual({ mode: "only", include: ["net_a", "net_b"], exclude: [] });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "1", COMMHUB_DUE_REMINDERS_NETWORKS: "net_a" })).toEqual({ mode: "only", include: ["net_a"], exclude: [] });
+    // 黑名单
+    expect(await S({ COMMHUB_DUE_REMINDERS: "1", COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: "net_x" })).toEqual({ mode: "all", exclude: ["net_x"] });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: "net_x" })).toEqual({ mode: "off" });
+    expect(await S({ COMMHUB_DUE_REMINDERS_NETWORKS: "net_a,net_x", COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: "net_x" })).toEqual({ mode: "only", include: ["net_a"], exclude: ["net_x"] });
+    // 空 / 空白 / 只有逗号 = 没设
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: "" })).toEqual({ mode: "off" });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: "  , ,  " })).toEqual({ mode: "off" });
+    expect(await S({ COMMHUB_DUE_REMINDERS_NETWORKS: "   ", COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: " , " })).toEqual({ mode: "all", exclude: [] });
+    // SQL:每个分支只 push 自己用到的参数
+    const p1: unknown[] = ["lo", "hi"];
+    expect(due.dueScopeSql({ mode: "all", exclude: [] }, p1)).toBe("");
+    expect(p1).toEqual(["lo", "hi"]);
+    const p2: unknown[] = ["lo", "hi"];
+    expect(due.dueScopeSql({ mode: "all", exclude: ["net_x"] }, p2)).toBe(" AND network_id NOT IN (?3)");
+    expect(p2).toEqual(["lo", "hi", "net_x"]);
+    const p3: unknown[] = ["lo", "hi"];
+    expect(due.dueScopeSql({ mode: "only", include: ["net_a", "net_b"], exclude: [] }, p3)).toBe(" AND network_id IN (?3, ?4)");
+    expect(p3).toEqual(["lo", "hi", "net_a", "net_b"]);
+    const p4: unknown[] = [];
+    expect(due.dueScopeSql({ mode: "only", include: [], exclude: ["net_x"] }, p4)).toBeNull();
+    expect(due.dueScopeSql({ mode: "off" }, p4)).toBeNull();
+    expect(p4).toEqual([]);
+  });
+
+  test("#524 COMMHUB_DUE_REMINDERS=0 + 白名单:只有白名单网络收到;别的网络的行连基线都不写", async () => {
+    const other = mkNet("allow_other");
+    const mine = await card("dr-524-白名单内", "2026-10-11");
+    const theirs = await cardIn(other, "dr-524-白名单外", "2026-10-11");
+    const out = await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: ` ${NET} ,` }, () => due.runDueReminders({ now: T0 }));
+    expect(sentFor(out, mine)).toEqual(["due_soon"]);
+    expect(userNotices(mine)[owen.id]).toHaveLength(1);
+    expect(sentFor(out, theirs)).toEqual([]);
+    expect(rowCount(theirs)).toBe(0);
+    expect(baselineCount(other.net)).toBe(0);
+    // 对照:=0 不带白名单 → 整个关掉,谁都不发
+    const fresh = await card("dr-524-全关", "2026-10-11");
+    const off = await withEnv({ COMMHUB_DUE_REMINDERS: "0" }, () => due.runDueReminders({ now: T0 }));
+    expect(off).toEqual([]);
+    expect(rowCount(fresh)).toBe(0);
+    // 白名单空白 = 没设 → 仍然关
+    expect(await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: " , " }, () => due.runDueReminders({ now: T0 }))).toEqual([]);
+  });
+
+  test("#524 黑名单:功能开着时被排除的网络不发、不写基线;其余照发", async () => {
+    const other = mkNet("excl_other");
+    const mine = await card("dr-524-未排除", "2026-10-11");
+    const theirs = await cardIn(other, "dr-524-被排除", "2026-10-11");
+    const out = await withEnv({ COMMHUB_DUE_REMINDERS: "1", COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: other.net }, () => due.runDueReminders({ now: T0 }));
+    expect(sentFor(out, mine)).toEqual(["due_soon"]);
+    expect(sentFor(out, theirs)).toEqual([]);
+    expect(rowCount(theirs)).toBe(0);
+    expect(baselineCount(other.net)).toBe(0);
+    // 白名单里也点了名 → 排除优先;白名单只剩它 → 什么都不扫
+    const both = mkNet("excl_both");
+    const c = await cardIn(both, "dr-524-白名单又被排除", "2026-10-11");
+    const out2 = await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: both.net, COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: both.net }, () => due.runDueReminders({ now: T0 }));
+    expect(out2).toEqual([]);
+    expect(rowCount(c)).toBe(0);
+    expect(baselineCount(both.net)).toBe(0);
+  });
+
+  test("#524 默认不变:两个新变量都不设 → 所有网络照发;黑名单空白 = 没设", async () => {
+    const other = mkNet("dflt_other");
+    const mine = await card("dr-524-默认", "2026-10-11");
+    const theirs = await cardIn(other, "dr-524-默认别的网络", "2026-10-11");
+    const out = await withEnv({}, () => due.runDueReminders({ now: T0 }));
+    expect(sentFor(out, mine)).toEqual(["due_soon"]);
+    expect(sentFor(out, theirs)).toEqual(["due_soon"]);
+    const other2 = mkNet("dflt_blank");
+    const theirs2 = await cardIn(other2, "dr-524-黑名单空白", "2026-10-11");
+    const out2 = await withEnv({ COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: "  " }, () => due.runDueReminders({ now: T0 }));
+    expect(sentFor(out2, theirs2)).toEqual(["due_soon"]);
+  });
+
+  test("#524 启动:=0 不起定时器;=0 + 白名单起;各打一行范围日志(只有网络 id)", async () => {
+    const logs: string[] = [];
+    const g = globalThis as any;
+    const orig = { log: console.log, setTimeout: g.setTimeout, setInterval: g.setInterval };
+    // 不起真定时器(否则 30 秒后会用真时钟扫一遍,干扰后面的用例):只记下调了几次。
+    let timers = 0;
+    console.log = (...a: unknown[]) => { logs.push(a.map(String).join(" ")); };
+    g.setTimeout = () => { timers++; return { unref() {} }; };
+    g.setInterval = () => { timers++; return { fake: true }; };
+    try {
+      const off = await withEnv({ COMMHUB_DUE_REMINDERS: "0" }, () => due.startDueReminderTimer());
+      expect(off).toBeNull();
+      expect(timers).toBe(0);
+      const on = await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: "net_placeholder_a" }, () => due.startDueReminderTimer());
+      expect(on).toEqual({ fake: true } as any);
+      expect(timers).toBe(2);
+      await withEnv({ COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: "net_placeholder_x" }, () => due.startDueReminderTimer());
+    } finally { console.log = orig.log; g.setTimeout = orig.setTimeout; g.setInterval = orig.setInterval; }
+    const scopeLogs = logs.filter((l) => l.startsWith("[due-reminders] scope:"));
+    expect(scopeLogs).toEqual([
+      "[due-reminders] scope: off",
+      "[due-reminders] scope: only networks net_placeholder_a",
+      "[due-reminders] scope: all networks except net_placeholder_x",
+    ]);
   });
 });
 
