@@ -124,6 +124,7 @@ import {
 } from "../src/opencode-runtime-binding";
 import { connectGrokAttach } from "../src/grok-attach-client";
 import { ambientTypeScriptTranspiler, nodeServerPayloadFor } from "../src/node-server-payload";
+import { applyNodeServerPayload } from "../src/node-server-version";
 import {
   agentNodeHelpSupportsGrokCopresence,
   buildGrokAgentNodeEnv,
@@ -2424,7 +2425,7 @@ function findBundledNodeServerJs(): string | null {
   return null;
 }
 
-function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean }): "wrote" | "exists" | "no-source" {
+function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean }): "wrote" | "exists" | "no-source" | "kept-newer" {
   const exists = existsSync(targetPath);
   if (exists && !opts.overwrite) return "exists";
   const src = findBundledNodeServerJs();
@@ -2439,8 +2440,10 @@ function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean })
     src,
     ambientTypeScriptTranspiler(),
   );
-  writeFileSync(targetPath, payload);
-  return "wrote";
+  // #549 — never downgrade a newer existing file (an older anet resuming a
+  // node used to strip rules-file support and node_id reporting this way).
+  const applied = applyNodeServerPayload(targetPath, payload, src);
+  return applied === "kept-newer" ? "kept-newer" : "wrote";
 }
 
 function saveServerConfig(data: Record<string, any>) {
@@ -4475,7 +4478,7 @@ async function initProject() {
   const serverTs = join(anetDir, "node-server.js");
   const refreshed = refreshNodeServerJsAt(serverTs, { overwrite: false });
   if (refreshed === "wrote")        console.log(`  ✅ .anet/node-server.js`);
-  else if (refreshed === "exists")  console.log("  Channel plugin: exists");
+  else if (refreshed === "exists" || refreshed === "kept-newer") console.log("  Channel plugin: exists");
   else {
     console.log(`  ❌ Cannot find node-server.js source`);
     console.log(`  Fix: cp $(npm root -g)/@sleep2agi/agent-network/src/node-server.ts .anet/node-server.js`);
@@ -6319,9 +6322,9 @@ function ensureMcpJson(profile: Profile) {
       // TypeScript and kept failing three layers later as
       // "CommHub MCP readiness preflight failed (1)".
       const src = nodeServerPayloadFor(readFileSync(p, "utf-8"), p, ambientTypeScriptTranspiler());
-      const dst = existsSync(serverTs) ? readFileSync(serverTs, "utf-8") : "";
-      if (src !== dst) {
-        writeFileSync(serverTs, src);
+      // #549 — keeps (and warns about) an existing file whose version marker is
+      // newer than this anet's; equal/older/unmarked files are refreshed as before.
+      if (applyNodeServerPayload(serverTs, src, p) === "wrote") {
         console.log(`[anet] Updated .anet/node-server.js`);
       }
       found = true;
