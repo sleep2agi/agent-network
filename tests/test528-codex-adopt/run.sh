@@ -227,7 +227,7 @@ check_red first-match src/codex-adopt.ts /tmp/test528-adopt.ts
 
 echo "M3 witnessed-red (S): the source rollout is rewritten in place (same bytes, new mtime)"
 sed -i 's|thread.cwd ? { from: thread.cwd, to: workdir } : undefined);$|& writeFileSync(thread.path, readFileSync(thread.path));|' bin/cli.ts
-check_red moves-source bin/cli.ts /tmp/test528-cli.ts
+check_red rewrites-source bin/cli.ts /tmp/test528-cli.ts
 
 echo "M4 witnessed-red (F): the recorded cwd is not rewritten"
 sed -i 's|thread.cwd ? { from: thread.cwd, to: workdir } : undefined);$|undefined);|' bin/cli.ts
