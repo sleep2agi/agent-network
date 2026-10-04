@@ -15,6 +15,10 @@ COPY agent-network/ ./
 # outside this directory.
 COPY agent-node/package.json /repo/agent-node/package.json
 COPY agent-node/src/runtime/opencode-acp/ /repo/agent-node/src/runtime/opencode-acp/
+# #542: binary.ts reads the shared supported-versions table; runtime.ts goes
+# through the OpenCode backend seam.
+COPY agent-node/src/runtime/opencode-versions.ts /repo/agent-node/src/runtime/opencode-versions.ts
+COPY agent-node/src/runtime/opencode-backend.ts /repo/agent-node/src/runtime/opencode-backend.ts
 COPY agent-node/src/runtime/opencode-timeout.ts /repo/agent-node/src/runtime/opencode-timeout.ts
 COPY agent-node/src/util/timeout.ts /repo/agent-node/src/util/timeout.ts
 COPY tests/test386-opencode-agent-node-gate/ /test/

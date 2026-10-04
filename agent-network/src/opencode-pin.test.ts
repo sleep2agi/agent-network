@@ -124,14 +124,18 @@ describe("opencode-pin — 1.18.1 → 1.18.34 transition (#541)", () => {
   });
 
   test("agent-network and agent-node agree on the pin and the transition set", async () => {
+    // #542 — both sides now derive from the one supported-versions table;
+    // byte-identity of its two copies is held by opencode-versions-parity.test.ts.
     const { readFileSync } = await import("fs");
     const src = readFileSync(
       join(import.meta.dir, "..", "..", "agent-node", "src", "runtime", "opencode-acp", "binary.ts"),
       "utf8",
     );
-    expect(src).toContain(`export const OPENCODE_DEFAULT_PIN = "${OPENCODE_BUILTIN_PIN}";`);
-    expect(src).toContain(
-      `export const OPENCODE_TRANSITION_VERSIONS: readonly string[] = Object.freeze(${JSON.stringify([...OPENCODE_TRANSITION_VERSIONS])});`,
-    );
+    expect(src).toContain("export const OPENCODE_DEFAULT_PIN = OPENCODE_V1_PIN;");
+    expect(src).toContain('acceptedOpencodeVersionsFor("v1").filter((version) => version !== OPENCODE_DEFAULT_PIN)');
+    const { acceptedOpencodeVersionsFor, OPENCODE_V1_PIN } = await import("./opencode-versions");
+    expect(OPENCODE_BUILTIN_PIN).toBe(OPENCODE_V1_PIN);
+    expect([...acceptedOpencodeVersionsFor("v1")]).toEqual(acceptedOpencodeVersions());
+    expect([...OPENCODE_TRANSITION_VERSIONS]).toEqual(acceptedOpencodeVersionsFor("v1").slice(1));
   });
 });

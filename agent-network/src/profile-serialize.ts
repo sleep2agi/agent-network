@@ -69,6 +69,11 @@ export function serializeProfileForConfigJson(
     ...((normalized.opencodeMode ?? profile.opencodeMode)
       ? { opencodeMode: normalized.opencodeMode ?? profile.opencodeMode }
       : {}),
+    // #542 — OpenCode generation ("v1" | "v2"). Persisted verbatim when
+    // present (an absent key means v1); a whitelist miss = lost on every save.
+    ...((normalized.opencodeGeneration ?? profile.opencodeGeneration)
+      ? { opencodeGeneration: normalized.opencodeGeneration ?? profile.opencodeGeneration }
+      : {}),
     ...(normalized.grokSession ? { grokSession: normalized.grokSession } : {}),
     ...(normalized.grokCliSession ? { grokCliSession: normalized.grokCliSession } : {}),
     ...(typeof normalized.grokCopresence === "boolean"

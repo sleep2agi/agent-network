@@ -37,7 +37,6 @@ import {
 import { resolve } from "path";
 import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
 import {
-  buildOpencodeChildEnv,
   cleanupOpencodeChildEnv,
   discardUnspawnedOpencodeChildEnv,
   readOpencodeProcessIdentity,
@@ -46,10 +45,9 @@ import {
 } from "./child-env";
 import {
   discoverOpencodeForbiddenRoots,
-  revalidatePinnedOpencodeBinary,
-  resolvePinnedOpencodeBinaryAttestation,
   type PinnedOpencodeBinaryAttestation,
 } from "./binary";
+import { OPENCODE_V1_BACKEND, type OpencodeBackend } from "../opencode-backend";
 import {
   reduceOpencodeAcpNotification,
   reduceOpencodeAcpResponse,
@@ -119,6 +117,8 @@ export interface OpencodeRuntimeSession {
  * boot or after a supervisor-detected restart.
  */
 export async function openOpencodeRuntime(opts: {
+  /** #542 — upstream generation seam; defaults to OpenCode V1. */
+  backend?: OpencodeBackend;
   cwd: string;
   workDir: string;
   /** Explicit trusted-task opt-in. Safe mode is the default. */
@@ -141,6 +141,7 @@ export async function openOpencodeRuntime(opts: {
   /** Internal/test-only trusted external launch base override. */
   launchBase?: string;
 }): Promise<OpencodeRuntimeSession> {
+  const backend = opts.backend ?? OPENCODE_V1_BACKEND;
   const log = opts.log ?? ((m: string) => console.log(m));
   const warn = opts.warn ?? ((m: string) => console.warn(m));
   const workDir = resolve(opts.workDir);
@@ -204,7 +205,7 @@ export async function openOpencodeRuntime(opts: {
     // root that deliberately contains no copied auth.json. The credential-
     // bearing runtime root does not exist yet, so a rejected candidate never
     // receives (or can discover beside its cwd) the selected vendor key.
-    const probeEnv = buildOpencodeChildEnv({
+    const probeEnv = backend.buildChildEnv({
       workDir,
       cwd: projectCwd,
       // Binary acceptance is never a trusted-task operation. Even when the
@@ -217,7 +218,7 @@ export async function openOpencodeRuntime(opts: {
     let pinnedBinary: PinnedOpencodeBinaryAttestation | undefined;
     try {
       const probeCwd = revalidateOpencodeChildLaunch(workDir, probeEnv);
-      pinnedBinary = resolvePinnedOpencodeBinaryAttestation({
+      pinnedBinary = backend.resolveBinary({
         requestedBinary: opts.binary,
         expectedVersion: opts.expectedVersion,
         searchPath: opts.binarySearchPath,
@@ -235,7 +236,7 @@ export async function openOpencodeRuntime(opts: {
     // Only an accepted exact package gets a second, credential-bearing root.
     // Keep every validation inside this catch boundary so any failure discards
     // copied auth immediately.
-    childEnv = buildOpencodeChildEnv({
+    childEnv = backend.buildChildEnv({
       workDir,
       cwd: projectCwd,
       unsafeTools,
@@ -243,11 +244,11 @@ export async function openOpencodeRuntime(opts: {
       credentialMode: "runtime",
     });
     effectiveCwd = revalidateOpencodeChildLaunch(workDir, childEnv);
-    const spawnedBinary = revalidatePinnedOpencodeBinary(pinnedBinary, {
+    const spawnedBinary = backend.revalidateBinary(pinnedBinary, {
       expectedVersion: opts.expectedVersion,
       forbiddenRoots,
     });
-    client.start({ cwd: effectiveCwd, env: childEnv, binary: spawnedBinary });
+    client.start({ cwd: effectiveCwd, env: childEnv, binary: spawnedBinary, args: backend.acpArgs() });
     spawnAttempted = true;
     const childPid = client.processId;
     const childIdentity = childPid === undefined

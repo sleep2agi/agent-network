@@ -5,17 +5,15 @@ import { createServer } from "net";
 import { join } from "path";
 import { resolve } from "path";
 import {
-  buildOpencodeChildEnv,
   cleanupOpencodeChildEnv,
   discardUnspawnedOpencodeChildEnv,
   revalidateOpencodeChildLaunch,
 } from "../opencode-acp/child-env";
 import {
   discoverOpencodeForbiddenRoots,
-  revalidatePinnedOpencodeBinary,
-  resolvePinnedOpencodeBinaryAttestation,
   type PinnedOpencodeBinaryAttestation,
 } from "../opencode-acp/binary";
+import { OPENCODE_V1_BACKEND, type OpencodeBackend } from "../opencode-backend";
 import { ownershipChainVerdict, unverifiedOwnerError } from "./reply-ownership";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
@@ -124,6 +122,8 @@ export interface OpenCodeCopresenceSession {
 }
 
 export interface OpenVettedOpenCodeCopresenceOptions {
+  /** #542 — upstream generation seam; defaults to OpenCode V1. */
+  backend?: OpencodeBackend;
   binary: string;
   env: NodeJS.ProcessEnv;
   cwd: string;
@@ -140,6 +140,8 @@ export interface OpenVettedOpenCodeCopresenceOptions {
 }
 
 export interface OpenOpenCodeCopresenceOptions {
+  /** #542 — upstream generation seam; defaults to OpenCode V1. */
+  backend?: OpencodeBackend;
   cwd: string;
   workDir: string;
   model?: string;
@@ -315,6 +317,14 @@ function normalizeNoticeSender(sender: string | undefined): string | undefined {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+/** Launcher word for an upstream argv token: subcommands and flags (plain
+ *  lowercase words, optionally `-`/`--` prefixed) stay bare, every value is
+ *  single-quoted. Either spelling means the same to the shell; this keeps the
+ *  launcher byte-identical to the pre-#542 hand-written line. */
+function launcherWord(token: string): string {
+  return /^-{0,2}[a-z][a-z-]*$/.test(token) ? token : shellQuote(token);
 }
 
 async function reserveLoopbackPort(): Promise<number> {
@@ -551,6 +561,7 @@ async function stopProcessGroup(
 }
 
 function writeAttachScript(
+  backend: OpencodeBackend,
   path: string,
   binary: string,
   env: NodeJS.ProcessEnv,
@@ -573,7 +584,7 @@ function writeAttachScript(
     // #1957 — record this launcher's pid/ticks/pane so the runtime can stop
     // exactly this TUI on close and relaunch the next launcher in its pane.
     ...renderAttachRecordShell(attachRecordPath(recordDir), sessionId),
-    `exec ${shellQuote(binary)} attach ${shellQuote(url)} --session ${shellQuote(sessionId)} --dir ${shellQuote(cwd)} --pure`,
+    `exec ${shellQuote(binary)} ${backend.attachArgs({ url, sessionId, cwd }).map(launcherWord).join(" ")}`,
     "",
   ];
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
@@ -593,6 +604,7 @@ export async function openVettedOpenCodeCopresence(
   opts: OpenVettedOpenCodeCopresenceOptions,
 ): Promise<OpenCodeCopresenceSession> {
   const requiredModel = requireOpenCodeCopresenceModel(opts.model);
+  const backend = opts.backend ?? OPENCODE_V1_BACKEND;
   const log = opts.log ?? (() => {});
   const warn = opts.warn ?? (() => {});
   const port = await reserveLoopbackPort();
@@ -603,9 +615,7 @@ export async function openVettedOpenCodeCopresence(
     OPENCODE_SERVER_USERNAME: USERNAME,
     OPENCODE_SERVER_PASSWORD: password,
   };
-  const child = spawn(opts.binary, [
-    "serve", "--hostname", "127.0.0.1", "--port", String(port), "--pure",
-  ], {
+  const child = spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port }), {
     cwd: opts.cwd,
     env: childEnv,
     stdio: ["pipe", "pipe", "pipe"],
@@ -638,6 +648,7 @@ export async function openVettedOpenCodeCopresence(
       throw new Error("OpenCode POST /session returned an invalid session id");
     }
     writeAttachScript(
+      backend,
       attachScriptPath,
       opts.binary,
       opts.env,
@@ -855,11 +866,12 @@ export async function openOpenCodeCopresenceRuntime(
   opts: OpenOpenCodeCopresenceOptions,
 ): Promise<OpenCodeCopresenceSession> {
   const model = requireOpenCodeCopresenceModel(opts.model);
+  const backend = opts.backend ?? OPENCODE_V1_BACKEND;
   const workDir = resolve(opts.workDir);
   const projectCwd = resolve(opts.cwd);
   const unsafeTools = opts.unsafeTools === true;
   const forbiddenRoots = [workDir, ...discoverOpencodeForbiddenRoots(projectCwd)];
-  const probeEnv = buildOpencodeChildEnv({
+  const probeEnv = backend.buildChildEnv({
     workDir,
     cwd: projectCwd,
     unsafeTools: false,
@@ -870,7 +882,7 @@ export async function openOpenCodeCopresenceRuntime(
   let binaryAttestation: PinnedOpencodeBinaryAttestation | undefined;
   try {
     const probeCwd = revalidateOpencodeChildLaunch(workDir, probeEnv);
-    binaryAttestation = resolvePinnedOpencodeBinaryAttestation({
+    binaryAttestation = backend.resolveBinary({
       requestedBinary: opts.binary,
       expectedVersion: opts.expectedVersion,
       searchPath: opts.binarySearchPath,
@@ -885,7 +897,7 @@ export async function openOpenCodeCopresenceRuntime(
   }
   if (!binaryAttestation) throw new Error("opencode copresence version probe returned no accepted binary");
 
-  const childEnv = buildOpencodeChildEnv({
+  const childEnv = backend.buildChildEnv({
     workDir,
     cwd: projectCwd,
     unsafeTools,
@@ -924,11 +936,12 @@ export async function openOpenCodeCopresenceRuntime(
       });
     }
     const effectiveCwd = revalidateOpencodeChildLaunch(workDir, childEnv);
-    const binary = revalidatePinnedOpencodeBinary(binaryAttestation, {
+    const binary = backend.revalidateBinary(binaryAttestation, {
       expectedVersion: opts.expectedVersion,
       forbiddenRoots,
     });
     core = await openVettedOpenCodeCopresence({
+      backend,
       binary,
       env: childEnv,
       cwd: effectiveCwd,

@@ -14,21 +14,27 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
+import { OPENCODE_V1_PIN, acceptedOpencodeVersionsFor } from "./opencode-versions";
 
 /**
  * Version this branch was validated against by the maintainers.
- * Bumped when a new opencode-ai release passes the full Docker/E2E gate.
+ * Bumped when a new opencode-ai release passes the full Docker/E2E gate —
+ * in the shared supported-versions table (`opencode-versions.ts`, #542),
+ * which agent-node's package gate reads from its byte-identical copy.
  */
-export const OPENCODE_BUILTIN_PIN = "1.18.34";
+export const OPENCODE_BUILTIN_PIN = OPENCODE_V1_PIN;
 
 /**
  * Earlier release pins that remain accepted for one transition window so a
  * host still holding the previous exact install keeps starting after an anet
  * upgrade (board #541). Each entry passed the full Docker/E2E gate when it was
  * the pin; start prints `opencodeLegacyPinNote()` so the operator upgrades.
- * Must stay byte-identical to agent-node's `OPENCODE_TRANSITION_VERSIONS`.
+ * Derived from the shared supported-versions table (#542: v1 accepted
+ * versions minus the pin) — agent-node's gate reads the same table.
  */
-export const OPENCODE_TRANSITION_VERSIONS: readonly string[] = Object.freeze(["1.18.1"]);
+export const OPENCODE_TRANSITION_VERSIONS: readonly string[] = Object.freeze(
+  acceptedOpencodeVersionsFor("v1").filter((version) => version !== OPENCODE_BUILTIN_PIN),
+);
 
 /** Versions a start may accept, preferred first: the release pin, then the
  * transition versions. The order matters — a PATH holding both resolves to
