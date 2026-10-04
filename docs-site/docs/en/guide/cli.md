@@ -133,6 +133,8 @@ See [Token model](/en/guide/account-system#tokens) for token types, scopes, and 
 
 ## Nodes
 
+Codex nodes without memorising commands: run `anet node codex` in the node's directory, pick a node and an action; it prints the equivalent command and asks before running it. Cheat sheet: [Codex node cheat sheet](/en/guide/codex-cheatsheet).
+
 | Command | Purpose |
 |---|---|
 | `anet node create <name>` | Create a node; opens the runtime wizard when omitted |

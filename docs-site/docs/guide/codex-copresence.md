@@ -294,6 +294,8 @@ CODEX_HOME=<节点目录>/codex-home codex login --device-auth
 
 ## 生命周期命令：`anet node codex …`
 
+> 不想记下面这些命令：在节点目录里直接敲 `anet node codex`，会列出节点、让你选操作，执行前打印等价命令并确认。一页速查见 [Codex 节点速查：我想……就敲……](/guide/codex-cheatsheet)。
+
 重启 / 恢复共存节点以前靠人肉 runbook(见下文[手工安全重启](#safe-restart));现在把每一步「核什么」做成确定性的 CLI,正常流程不调用任何 LLM,只出机器可读 receipt。第一批两个只读命令:
 
 ```bash

@@ -103,6 +103,8 @@ List the nodes in this directory's .anet/nodes/ and whether they are running.`,
 Move the node's token out of config.json into the node's .env file and leave an
 env reference in config.json.`,
   "node codex": `Usage: anet node codex <verb> <alias> [options]
+       anet node codex              (no arguments: interactive menu in a terminal;
+                                     piped: the node table + a cheat sheet)
 
 Codex TUI co-presence lifecycle. Verbs:
   anet node codex preflight <alias>   Read-only consistency check

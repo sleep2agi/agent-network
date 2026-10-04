@@ -133,6 +133,8 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 
 ## 节点
 
+codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节点、选操作，执行前会打印等价命令并确认。速查表见 [Codex 节点速查：我想……就敲……](/guide/codex-cheatsheet)。
+
 | 命令 | 作用 |
 |---|---|
 | `anet node create <name>` | 创建节点；未指定 runtime 时进入向导 |
