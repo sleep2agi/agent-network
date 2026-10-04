@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildCodexSdkThreadOptions,
+  buildCodexStdioThreadStartParams,
   rebuildCodexSdkThread,
   type CodexSdkThreadOptions,
 } from "./codex-sdk-thread-options";
@@ -137,5 +138,65 @@ describe("#534 cli.ts has no second option literal", () => {
   test("no hard-coded codex-sdk permission literal remains", () => {
     expect(cli).not.toMatch(/sandboxMode:\s*"danger-full-access"/);
     expect(cli).not.toMatch(/approvalPolicy:\s*"never"/);
+  });
+});
+
+describe("#538 ANET_CODEX_STDIO_DIRECT=1 thread/start params", () => {
+  test("configured read-only / never reaches the wire as `sandbox` + `approvalPolicy`", () => {
+    expect(buildCodexStdioThreadStartParams({ sandboxMode: "read-only", approvalPolicy: "never" }, "o3")).toEqual({
+      model: "o3",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    });
+  });
+
+  test("workspace-write is passed through, not escalated", () => {
+    const p = buildCodexStdioThreadStartParams({ sandboxMode: "workspace-write" }, "m");
+    expect(p.sandbox).toBe("workspace-write");
+    expect(p.approvalPolicy).toBe("on-request");
+  });
+
+  test("unconfigured node keeps the pre-#538 wire posture and is NOT escalated to full access", () => {
+    for (const flags of [undefined, null, {}, { sandboxMode: 1, approvalPolicy: true }]) {
+      const p = buildCodexStdioThreadStartParams(flags, "m");
+      expect(p).toEqual({ model: "m", approvalPolicy: "on-request" });
+      expect("sandbox" in p).toBe(false);
+    }
+  });
+
+  test("no `sandboxPolicy` key (app-server thread/start ignores it) and no full-access value ever", () => {
+    const shapes = [undefined, {}, { sandboxMode: "read-only" }, { approvalPolicy: "never" }];
+    for (const flags of shapes) {
+      const p = buildCodexStdioThreadStartParams(flags, "m") as unknown as Record<string, unknown>;
+      expect("sandboxPolicy" in p).toBe(false);
+      expect(JSON.stringify(p)).not.toMatch(/dangerFullAccess|danger-full-access/);
+    }
+  });
+
+  test("threadId is carried only when a session id is set", () => {
+    expect(buildCodexStdioThreadStartParams({}, "m", "sess-1").threadId).toBe("sess-1");
+    expect("threadId" in buildCodexStdioThreadStartParams({}, "m", "")).toBe(false);
+    expect("threadId" in buildCodexStdioThreadStartParams({}, "m", null)).toBe(false);
+  });
+});
+
+describe("#538 cli.ts stdio lane goes through the builder", () => {
+  const cli = readFileSync(join(import.meta.dir, "cli.ts"), "utf8");
+
+  test("processWithCodexStdio builds thread/start from fileConfig.flags", () => {
+    const start = cli.indexOf("async function processWithCodexStdio(");
+    const end = cli.indexOf('client.request<{ thread: { id: string } }>("thread/start", opts)', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const body = cli.slice(start, end);
+    expect(body).toContain(
+      "const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);",
+    );
+    expect(body).not.toMatch(/sandboxPolicy\s*:/);
+    expect(body).not.toMatch(/approvalPolicy:\s*"on-request"/);
+  });
+
+  test("no hard-coded app-server full-access literal remains in cli.ts", () => {
+    expect(cli).not.toMatch(/sandboxPolicy:\s*\{\s*type:\s*"dangerFullAccess"/);
   });
 });
