@@ -6,7 +6,7 @@
  * installs coexist on one machine (a global one, private prefixes, npx), so an
  * *older* anet resuming a node replaced a *newer* server — and the node quietly
  * lost rules-file support (#1977) and node_id reporting (#2074). Nothing
- * errored; the features just stopped. (Board #548: the 通信龙 node lost its
+ * errored; the features just stopped. (Board #548: a production node lost its
  * rules file this way.)
  *
  * The fix is a machine-readable marker on the file's first line(s):
