@@ -28,6 +28,7 @@ Replace `my-node` with your node's name, and type the commands **in the director
 | switch model | `anet node edit my-node --model <id>`, then restart | same |
 | copy a node | `anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login` | `anet node clone my-node my-copy` |
 | delete | `anet node delete my-node --force` | same |
+| see which nodes are logged in | `anet node codex login-status` | same |
 
 Notes:
 

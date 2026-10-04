@@ -46,7 +46,7 @@ beforeAll(() => {
 afterAll(() => { rmSync(root, { recursive: true, force: true }); });
 
 function rows(sessions: string[] = ["my-node", "my-node-appsrv", "my-node-桥"]): CodexNodeRow[] {
-  return collectCodexRows(nodes, { nodesDir, home, tmuxSessions: () => new Set(sessions), pidAlive: () => false });
+  return collectCodexRows(nodes, { nodesDir, home, env: {}, tmuxSessions: () => new Set(sessions), pidAlive: () => false });
 }
 
 function scripted(lines: string[]): MenuIO & { out: () => string } {
@@ -77,6 +77,22 @@ describe("#532 collectCodexRows", () => {
     expect(rows([])[0].state).toBe("stopped");
     // a similarly named session is not ours
     expect(rows(["my-node-old"])[0].state).toBe("stopped");
+  });
+});
+
+describe("#532 login column uses the #529 helper", () => {
+  it("an auth.json with no tokens is not a login; the host login counts for codex-sdk", () => {
+    const authPath = join(nodesDir, "my-node", "codex-home", "auth.json");
+    const keep = require("node:fs").readFileSync(authPath, "utf-8");
+    try {
+      writeFileSync(authPath, "{}");
+      expect(rows()[0].loggedIn).toBe(false);
+    } finally { writeFileSync(authPath, keep); }
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex", "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-host-fixture" }));
+    try {
+      expect(rows()[1]).toMatchObject({ loggedIn: true, loginWhere: "host", codexHome: null });
+    } finally { rmSync(join(home, ".codex"), { recursive: true, force: true }); }
   });
 });
 

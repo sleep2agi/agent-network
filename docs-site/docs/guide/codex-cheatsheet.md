@@ -26,6 +26,7 @@ anet node codex
 | 换模型 | `anet node edit my-node --model <模型>`，再重启 | 同左 |
 | 复制一个节点 | `anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login` | `anet node clone my-node my-copy` |
 | 删除 | `anet node delete my-node --force` | 同左 |
+| 看每个节点有没有登录 | `anet node codex login-status` | 同左 |
 
 几点说明：
 

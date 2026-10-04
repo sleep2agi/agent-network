@@ -21,11 +21,11 @@
 //    login state is "auth.json exists and is non-empty", nothing more.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DEFAULT_CODEX_MODEL } from "./codex-model-default";
-import { resolveNodeCodexHome } from "./codex-home-enforce";
+import { codexLoginFactsOfHome, effectiveCodexHome } from "./codex-node-login";
 import { displayWidth, padDisplayEnd } from "./display-width";
 import { normalizeRuntime } from "./normalize-runtime";
 import { execTmux } from "./tmux";
@@ -59,6 +59,8 @@ export interface CollectEnv {
   nodesDir: string;
   /** $HOME — only used to locate the host's ~/.codex/auth.json. */
   home: string;
+  /** The environment a start would inherit (CODEX_HOME); defaults to process.env. */
+  env?: Record<string, string | undefined>;
   /** Exact tmux session names on the server anet uses (empty when none). */
   tmuxSessions?: () => Set<string>;
   pidAlive?: (pid: number) => boolean;
@@ -81,9 +83,6 @@ function realPidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function nonEmptyFile(path: string): boolean {
-  try { return statSync(path).isFile() && statSync(path).size > 0; } catch { return false; }
-}
 
 /** Only codex nodes: co-presence (codex-app-server) and codex-sdk. */
 export function collectCodexRows(nodes: CodexMenuNode[], env: CollectEnv): CodexNodeRow[] {
@@ -115,9 +114,11 @@ export function collectCodexRows(nodes: CodexMenuNode[], env: CollectEnv): Codex
       state = running ? "running" : "stopped";
     }
 
-    const home = resolveNodeCodexHome({ nodeDir, config: p }).codexHome;
-    const loginWhere: "node" | "host" = home ? "node" : "host";
-    const authFile = join(home ?? join(env.home, ".codex"), "auth.json");
+    // #529 helper: the CODEX_HOME a start would use, and what its auth.json says (never a token).
+    const eff = effectiveCodexHome(nodeDir, p, env.env ?? process.env, env.home);
+    const ownHome = eff.source === "config.codexHome" || eff.source === "node-codex-home" || eff.source === "config.env";
+    const loginWhere: "node" | "host" = ownHome ? "node" : "host";
+    const home = ownHome ? eff.codexHome : null;
 
     const threadRaw = kind === "co-presence" ? p.codexThreadId : p.session;
     const threadId = typeof threadRaw === "string" && threadRaw.trim() ? threadRaw.trim() : null;
@@ -129,7 +130,7 @@ export function collectCodexRows(nodes: CodexMenuNode[], env: CollectEnv): Codex
       kind,
       state,
       running,
-      loggedIn: nonEmptyFile(authFile),
+      loggedIn: codexLoginFactsOfHome(eff.codexHome).loggedIn,
       loginWhere,
       codexHome: home,
       threadId,
@@ -182,6 +183,7 @@ export const CODEX_CHEAT_SHEET = [
   "  copy 复制节点             anet node codex fork my-node --name my-copy --workdir ../my-copy --no-codex-login",
   "                            (codex-sdk: anet node clone my-node my-copy)",
   "  delete 删除               anet node delete my-node --force",
+  "  who is logged in 登录状态  anet node codex login-status",
   "Interactive menu 交互菜单: run `anet node codex` in a terminal.",
   "Full reference 完整说明: anet node codex --help · https://anet.sh/guide/codex-cheatsheet",
   "",
