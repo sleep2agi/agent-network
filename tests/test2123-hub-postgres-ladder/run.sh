@@ -242,6 +242,9 @@ run_pg_tests_rc anet_ctx_cost_test src/mcp-context-cost-http.test.ts
 run_pg_tests_rc anet_model_auth_notify_test src/model-auth-notify-http.test.ts
 # 定时任务卡住(#464):按挡路任务计数跳过、超时把它条件写成 expired 并镜像 run、通知创建者 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_sched_stuck_test src/scheduled-stuck-http.test.ts
+# 定时任务连续失败(#523):「最近一次成功之后的 failed 数」(TEXT 比较 scheduled_for)、去重条件写(COALESCE(key, '') <> ?2 / ISO 时间比较)、
+# 自动暂停条件写、/runs 的 LEFT JOIN tasks + CASE/SUBSTR 取失败原因 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_sched_failing_test src/scheduled-failures-http.test.ts
 # 任务过期通知发送方(#500):巡检的 consumed_at < expires_at 判据(TEXT 时间戳比较)、按分支绑参的「前面还有几个」计数、inbox reply 行 + user_inbox 通知、父任务不被改终态 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_expiry_notice_test src/task-expiry-notice-http.test.ts
 # 长时间无动静的已开工任务(#519):acked / running 的「每列都早于截止点 + NOT EXISTS 更晚的 task_events」判据(TEXT 时间戳 + datetime 偏移翻译)、

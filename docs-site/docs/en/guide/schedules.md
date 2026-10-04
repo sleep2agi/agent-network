@@ -78,6 +78,24 @@ In the run history endpoint `GET /api/scheduled-tasks/:id/runs`, every skipped r
 
 If the target node is degraded (Hub `0.9.0-preview.86`+, see [health and degraded refusal](/en/guide/codex-copresence#health)), the occurrence is recorded as failed with `node_degraded` and no task is created.
 
+## Alerts when a schedule keeps failing {#failing}
+
+From the Hub release that carries #523 (not on latest yet), a schedule whose **every run fails** also alerts its creator instead of failing silently:
+
+- **What counts as a failure**: a run whose history status is `failed`. That covers a dispatched task the node ended as failed (for example an upstream model refusal) and a run that failed at dispatch (node missing, not active, degraded, or the creator lost access). Skipped, cancelled, timed-out (`expired`, covered by the previous section) and still-open runs neither count nor break the streak.
+- **Alert**: when the failures since the last successful run reach 5, the person who created the schedule gets **one** notice, 「定时任务连续失败」 (schedule keeps failing), through the same path as the stuck alert: in the app, in the target node's conversation. It names the schedule, the target node, the failure count, the latest error (truncated to 300 characters) and how to pause it.
+- **No repeats**: while the schedule has not succeeded again, it does not alert again for 24 hours; after a success, another 5 consecutive failures alert again. A Hub restart does not re-send it. No notice if the schedule has no creator or the creator has left the network.
+- **By default it only alerts and never pauses.** An operator can turn on auto-pause: at the Mth consecutive failure the schedule becomes paused (same as a manual pause, no next run time) and one 「定时任务连续失败，已自动暂停」 (auto-paused) notice goes out. Resume it once the cause is fixed.
+- **Tuning** (for operators, Hub environment variables):
+
+  | Environment variable | Default | Meaning |
+  |---|---|---|
+  | `COMMHUB_SCHEDULE_FAILURE_NOTICE_RUNS` | `5` | which consecutive failure triggers the alert |
+  | `COMMHUB_SCHEDULE_FAILURE_RENOTICE_SEC` | `86400` | while it keeps failing, how long before alerting again (seconds) |
+  | `COMMHUB_SCHEDULE_FAILURE_AUTO_PAUSE_RUNS` | `0` (off) | set to M (≥1) to auto-pause at the Mth consecutive failure |
+
+The run history endpoint `GET /api/scheduled-tasks/:id/runs` also returns `consecutive_failures` (failures since the last success), `failure_alert_threshold` (N above) and `last_failure_alert_at` (time of the last alert, or `null`). For a run whose task the node ended as failed, `error_message` is the node's failure reason (up to 500 characters).
+
 ## A run while you are editing
 
 **From desktop 0.2.150**, if the schedule runs once while you are editing, saving does not drop what is in the form. The client compares the fields you changed with the fields that changed on the server. When those are not the same fields, it keeps your draft and saves. A comparison is shown only when the same field was changed to two different values: your change (你的修改) and the current server value (最新版本). Keep mine (用我的覆盖) saves your change. Use the server value (用最新的) puts that value into the conflicting fields and leaves you in the form. Keep editing (继续编辑) leaves the draft as you typed it and continues against the newer copy. If the schedule was cancelled or deleted, the draft stays in the form and cannot be saved. Earlier desktop versions could discard the whole draft on this kind of save conflict.

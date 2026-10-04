@@ -1422,6 +1422,7 @@ jobs:
           - qa-hub-16-rest-task-api
           - qa-hub-20-model-auth-notify
           - qa-hub-21-schedule-stuck
+          - qa-hub-24-schedule-failing
           - qa-hub-22-department-heads
           - qa-hub-23-node-permissions
           - qa-node-04-codex-app-server-reply-routing

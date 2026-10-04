@@ -7,6 +7,7 @@ import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { blockerTimedOut, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
+import { evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
 
 export type ScheduleSpec =
   | { type: "once"; run_at: string }
@@ -379,6 +380,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
   try {
     for (const t of timedOut) logTaskEvent(t.taskId, t.fromStatus, "expired", "hub-scheduler", `stuck timeout; schedule=${row.schedule_id} run=${runId}`);
     for (const n of notices) sendStuckNotice(n);
+    // #523 — a run that failed at dispatch counts toward the consecutive-failure alert (task failures arrive via db.ts).
+    if (finalStatus === "failed") evaluateScheduleFailures(row.schedule_id, advanceAfter);
     if (createdTaskId) logTaskEvent(createdTaskId, null, "delivered", "hub-scheduler", `schedule=${row.schedule_id} run=${runId}`);
     if (event) {
       const pending = db.get<{ cnt: number }>("SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND network_id = ?2 AND acked = 0", event.alias, event.networkId);
@@ -548,10 +551,16 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   if (sub === "runs" && req.method === "GET") {
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
     const runs = db.all(
-      "SELECT run_id, schedule_id, scheduled_for, task_id, status, error_code, error_message, blocked_by_task_id, blocked_by_state, created_at, completed_at FROM scheduled_task_runs WHERE schedule_id = ?1 AND network_id = ?2 ORDER BY created_at DESC LIMIT ?3",
+      // #523 — a task that ended `failed` leaves run.error_message empty; its reason is the task's reply text.
+      `SELECT r.run_id, r.schedule_id, r.scheduled_for, r.task_id, r.status, r.error_code,
+              CASE WHEN r.error_message IS NULL AND r.status = 'failed' THEN SUBSTR(t.result, 1, 500) ELSE r.error_message END AS error_message,
+              r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at
+         FROM scheduled_task_runs r
+         LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
+        WHERE r.schedule_id = ?1 AND r.network_id = ?2 ORDER BY r.created_at DESC, r.scheduled_for DESC LIMIT ?3`,
       row.schedule_id, row.network_id, limit,
     );
-    return Response.json({ ok: true, runs });
+    return Response.json({ ok: true, runs, ...failureSummary(row.schedule_id) });
   }
   if (!sub && req.method === "GET") return Response.json({ ok: true, schedule: decodeRow(row) });
   if (!writeAllowed(ctx, row.network_id)) return jsonError("permission_denied", 403);

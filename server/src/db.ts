@@ -1596,6 +1596,12 @@ try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN misfire_policy TEXT NOT NU
 // whether the node had ever picked it up: not_received | in_progress.
 try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN blocked_by_task_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN blocked_by_state TEXT"); } catch {}
+// #523 — consecutive-failure alert bookkeeping (scheduled-failures.ts). Additive and nullable:
+// an older Hub never reads them, so rolling back is safe. failure_alert_at = ISO time of the last
+// alert; failure_alert_key = the last successful run_id at that moment ('' = none yet), so a
+// success in between re-arms the alert.
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN failure_alert_at TEXT"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN failure_alert_key TEXT"); } catch {}
 
 // RFC-036 / B4 — owner-authorized edits of node-host managed schedules.
 // This is intentionally separate from Hub scheduled_tasks: these rows are
@@ -1986,6 +1992,18 @@ export function chainReplyToParent(
 
 const SCHEDULED_RUN_TERMINAL_STATUSES = new Set(["replied", "failed", "cancelled", "expired"]);
 
+// #523 — called after a run row is closed by its task's terminal state. Registered by
+// scheduled-failures.ts (a hook, not an import: that module depends on db.ts). Never throws.
+type ScheduledRunTerminalHook = (scheduleId: string, status: string) => void;
+let scheduledRunTerminalHook: ScheduledRunTerminalHook | null = null;
+export function setScheduledRunTerminalHook(fn: ScheduledRunTerminalHook | null): void { scheduledRunTerminalHook = fn; }
+function fireScheduledRunTerminalHook(scheduleId: string, status: string): void {
+  if (!scheduledRunTerminalHook) return;
+  try { scheduledRunTerminalHook(scheduleId, status); } catch (e: any) {
+    console.error(`[scheduled-tasks] run terminal hook failed schedule=${scheduleId}: ${e?.message || e}`);
+  }
+}
+
 type ScheduledTaskLifecycleRow = {
   task_id: string;
   network_id: string | null;
@@ -2041,6 +2059,7 @@ export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: stri
         WHERE run_id = ?4 AND task_id = ?5 AND network_id = ?6 AND schedule_id = ?7`,
       [task.status, errorCode, task.completed_at, binding.run_id, task.task_id, task.network_id, binding.schedule_id],
     );
+    if (updated.changes === 1) fireScheduledRunTerminalHook(binding.schedule_id, task.status);
     return { matched: updated.changes === 1, status: task.status };
   }
 
