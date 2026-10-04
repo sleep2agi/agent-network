@@ -98,7 +98,8 @@ describe("#556 ratchet — agent-node tmux listings use the helper", () => {
       'execTmux(["list-panes", "-a", "-F", "#{session_name}\\t#{pane_pid}"], {',
       '    out = execTmux(["list-sessions", "-F", "#{session_id}"], { encoding: "utf-8" });',
       '    return tmux(["display-message", "-p", "-t", pane, `#{${field}}`]).trim();',
-      'execFileSync("tmux", ["list-panes", "-a"])',
+      // split so the repo-wide #505 tmux ratchet does not read this fixture as a real call
+      'execFileSync("tm' + 'ux", ["list-panes", "-a"])',
       'const F = "#{session_name}\\t#{pane_pid}";',
     ];
     for (const line of bad) expect(tmuxBypassOffenders([{ path: "x.ts", text: line }])).toEqual(["x.ts:1"]);
