@@ -43,8 +43,10 @@ write_opencode_binding() {
 # 那会把这几条断言变成永远通过)。
 PAIR_SRC=/repo/agent-network/src/opencode-agent-node-pair.ts
 [ -f "$PAIR_SRC" ] || fail "cannot find $PAIR_SRC — refusing to assert against an unknown pair"
-EXPECT_NETWORK=$(sed -n 's/^export const OPENCODE_AGENT_NETWORK_VERSION = "\([^"]*\)";$/\1/p' "$PAIR_SRC")
-EXPECT_NODE=$(sed -n 's/^export const OPENCODE_AGENT_NODE_VERSION = "\([^"]*\)";$/\1/p' "$PAIR_SRC")
+# The constants are now derived (= PAIRED_AGENT_*_VERSION), so a literal sed
+# reads nothing; evaluate the module instead. Still fail-closed below.
+EXPECT_NETWORK=$(bun -e "import { OPENCODE_AGENT_NETWORK_VERSION as v } from '$PAIR_SRC'; console.log(v)" 2>/dev/null || true)
+EXPECT_NODE=$(bun -e "import { OPENCODE_AGENT_NODE_VERSION as v } from '$PAIR_SRC'; console.log(v)" 2>/dev/null || true)
 [ -n "$EXPECT_NETWORK" ] || fail "could not read OPENCODE_AGENT_NETWORK_VERSION from $PAIR_SRC"
 [ -n "$EXPECT_NODE" ]    || fail "could not read OPENCODE_AGENT_NODE_VERSION from $PAIR_SRC"
 printf -- '- expected pair (from source): agent-network@%s + agent-node@%s\n' \
