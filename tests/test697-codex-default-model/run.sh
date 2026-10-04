@@ -554,6 +554,39 @@ probe_non_codex_runtime_model_absent() {
 echo "L7g non-Codex agent-node runtime does not receive the Codex default"
 probe_non_codex_runtime_model_absent
 
+# #534 — a node configured read-only / on-request must keep that posture on
+# every codex-sdk lane: goal wake, first-turn startThread, and the
+# "codex thread error, 重建" retry (forced by TEST697_CODEX_FAIL_FIRST=1).
+probe_configured_flags_every_sdk_lane() {
+  local backup rc=0 flags_ok
+  backup=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  cp "$RUNTIME_CFG" "$backup"
+  jq 'del(.session) | .flags = ((.flags // {}) + {sandboxMode:"read-only",approvalPolicy:"on-request",skipGitRepoCheck:false})' \
+    "$backup" > "$RUNTIME_CFG"
+  flags_ok='.sandboxMode=="read-only" and .approvalPolicy=="on-request" and .skipGitRepoCheck==false'
+  if probe_goal_wake_model; then
+    jq -se "map(select(.kind==\"startThread\")) | length >= 1 and all(.[]; .value | $flags_ok)" "$CODEX_CAPTURE" >/dev/null \
+      || { echo "WAKE_FLAGS_IGNORED"; cat "$CODEX_CAPTURE"; rc=1; }
+  else
+    rc=1
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    if probe_sdk_task_models; then
+      jq -se "(map(select(.kind==\"startThread\")) | length >= 2 and all(.[]; .value | $flags_ok))
+              and (map(select(.kind==\"run\")) | length >= 1 and all(.[]; .value | $flags_ok))" "$CODEX_CAPTURE" >/dev/null \
+        || { echo "SDK_RETRY_FLAGS_IGNORED"; cat "$CODEX_CAPTURE"; rc=1; }
+    else
+      rc=1
+    fi
+  fi
+  cp "$backup" "$RUNTIME_CFG"
+  rm -f "$backup"
+  return "$rc"
+}
+
+echo "L7h configured sandbox/approval flags survive wake, first turn and retry (#534)"
+probe_configured_flags_every_sdk_lane
+
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
   run_mutation() {
@@ -846,7 +879,8 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     probe_batch_preset_explicit_mutation
   run_mutation wake-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
-    'model: resolveCodexModel(MODEL),' 'model: MODEL || "gpt-4.1-legacy",' \
+    'buildOpts: () => buildCodexSdkThreadOptions(fileConfig?.flags, resolveCodexModel(MODEL)),' \
+    'buildOpts: () => buildCodexSdkThreadOptions(fileConfig?.flags, MODEL || "gpt-4.1-legacy"),' \
     probe_goal_wake_model
   run_mutation sdk-thread-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
@@ -863,9 +897,21 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     probe_sdk_task_models
   run_mutation sdk-retry-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
-    $'      model: resolveCodexModel(MODEL),\n      sandboxMode: "danger-full-access" as const,' \
-    $'      model: MODEL || "gpt-4.1-legacy",\n      sandboxMode: "danger-full-access" as const,' \
+    'codexThread = rebuildCodexSdkThread(codex, fileConfig?.flags, resolveCodexModel(MODEL));' \
+    'codexThread = rebuildCodexSdkThread(codex, fileConfig?.flags, MODEL || "gpt-4.1-legacy");' \
     probe_sdk_task_models
+  # #534 — the retry used to hard-code full access; putting that literal back
+  # must turn the configured-flags probe red.
+  run_mutation sdk-retry-flags-hardcoded-regressed L7h \
+    "$ROOT/agent-node/src/cli.ts" \
+    'codexThread = rebuildCodexSdkThread(codex, fileConfig?.flags, resolveCodexModel(MODEL));' \
+    'codexThread = codex.startThread({ skipGitRepoCheck: true, approvalPolicy: "never" as const, model: resolveCodexModel(MODEL), sandboxMode: "danger-full-access" as const, modelReasoningEffort: "low" as const });' \
+    probe_configured_flags_every_sdk_lane
+  run_mutation wake-flags-ignored-regressed L7h \
+    "$ROOT/agent-node/src/cli.ts" \
+    'buildOpts: () => buildCodexSdkThreadOptions(fileConfig?.flags, resolveCodexModel(MODEL)),' \
+    'buildOpts: () => buildCodexSdkThreadOptions(undefined, resolveCodexModel(MODEL)),' \
+    probe_configured_flags_every_sdk_lane
   run_mutation stdio-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
     $'      model: resolveCodexModel(MODEL),\n      approvalPolicy: "on-request",' \
