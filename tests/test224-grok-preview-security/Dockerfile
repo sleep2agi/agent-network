@@ -22,6 +22,7 @@ COPY agent-node/src ./agent-node/src
 COPY agent-node/README.md agent-node/LICENSE agent-node/NOTICE ./agent-node/
 COPY agent-network/bin ./agent-network/bin
 COPY agent-network/src ./agent-network/src
+COPY agent-network/scripts/stamp-node-server-version.mjs ./agent-network/scripts/stamp-node-server-version.mjs
 COPY agent-network/tsconfig.json agent-network/README.md agent-network/LICENSE agent-network/NOTICE ./agent-network/
 COPY tests/test224-grok-preview-security ./tests/test224-grok-preview-security
 COPY tests/lib/safe-rm.sh ./tests/lib/safe-rm.sh
