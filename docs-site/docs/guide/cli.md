@@ -230,6 +230,7 @@ codex 节点的登录不会被复制。一个登录只给一个节点（refresh 
 [一个登录只给一个节点](/guide/codex-copresence#one-login-per-node)）。要用登记过的账号，用
 `anet node codex account install <新名字> --source codex-login:<profile-id>`。
 要连 codex 会话历史一起带走，用 `anet node codex fork`（见 [Codex 共存](/guide/codex-copresence)）。
+在 anet 之外直接用 `codex` 开过的对话，用 `anet node codex adopt <新名字> --thread <id>` 收编成节点（见 [复制节点](/guide/copy-node)）。
 
 ::: danger 不要 `cp -r` 节点目录
 `.anet/nodes/<name>/config.json` 里存着节点的 `node_id` 和 `ntok_`。原样拷贝出来的「新节点」

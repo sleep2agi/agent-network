@@ -198,6 +198,7 @@ on:
       - 'tests/test516-anet-secret-masking/**'
       - 'tests/test516-node-delete-hub-row/**'
       - 'tests/test522-node-delete-locate-stop/**'
+      - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -379,6 +380,7 @@ on:
       - 'tests/test516-anet-secret-masking/**'
       - 'tests/test516-node-delete-hub-row/**'
       - 'tests/test522-node-delete-locate-stop/**'
+      - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -1311,6 +1313,23 @@ jobs:
           docker cp "run-anet-test532:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test532/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test532"
           docker rm -f "run-anet-test532" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #528 — anet node codex adopt:把 anet 之外开的 codex 对话(夹具 CODEX_HOME,3 条合成 rollout)收编成节点。
+      # 完整 id / 唯一前缀 / 歧义前缀拒绝 / 非 TTY 列表 / TTY 选号;只一条 rollout、id+cwd 改写、不复制 auth.json;源 home 前后逐字节+mtime 不变。
+      # 见证红 5 条:默认复制登录 / 歧义取第一个 / 原地重写源 rollout / cwd 不改写 / 无 TTY 仍提问。
+      - name: Build + run test528-codex-adopt
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test528 \
+            -f tests/test528-codex-adopt/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test528" -e ARTIFACT_DIR=/tmp/art \
+            anet-test528 || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test528"
+          docker cp "run-anet-test528:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test528/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test528"
+          docker rm -f "run-anet-test528" >/dev/null 2>&1 || true
           exit $rc
 
       - name: Build + run test623-feishu-scrub-health

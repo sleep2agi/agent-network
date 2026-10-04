@@ -231,7 +231,7 @@ describe("#516 --help everywhere", () => {
     expect(paths.filter((p) => !p.includes(" ")).length).toBeGreaterThanOrEqual(40);
     expect(paths.filter((p) => p.includes(" ")).length).toBeGreaterThanOrEqual(60);
     for (const known of [
-      "login", "node", "node delete", "node create", "node codex", "node codex fork",
+      "login", "node", "node delete", "node create", "node codex", "node codex fork", "node codex adopt",
       "hub start", "hub dashboard", "daemon init", "project up", "network create",
       "token create", "goal show", "channel add", "opencode auth-login", "init project",
     ]) expect(paths).toContain(known);

@@ -7,6 +7,7 @@
 |---|---|---|
 | 同样的设置，从空白对话开始 | `anet node clone <源> <新名字>` | 除 opencode-cli 外的节点 |
 | 同样的设置，**连 codex 对话历史一起带走** | `anet node codex fork <源> --name <新名字> --workdir <目录>` | 只限 codex 共存节点（`codex-app-server`） |
+| 把一段**在 anet 之外开的 codex 对话**变成节点 | `anet node codex adopt <新名字> --thread <id>` | 源是 `~/.codex`（或任一 `CODEX_HOME`）里的一个 thread |
 | 换一台机器部署 | 在那台机器上 `anet login` 后重新 `anet node create` | 任意 |
 
 ::: tip 你的 anet 有没有这些命令
@@ -67,6 +68,26 @@ cd ~/my-node-copy && anet node codex start my-node-copy --probe-from my-node
 - 之后的 `anet node codex start/restart` 要在 `--workdir` 目录里执行。
 
 细节（receipt 的每一项检查）见 [Codex TUI 人机共存](/guide/codex-copresence) 的「fork：继承历史，其余全新」一节。
+
+## adopt：把一段已有的 codex 对话收编成节点
+
+你在 anet 之外直接跑过 `codex`（TUI），想让这段对话以后由一个 anet 节点接着做——用 `adopt`。
+它就是「源不是 anet 节点」的 fork：源是一个 `CODEX_HOME`（默认 `~/.codex`）里的一个 thread。
+
+```bash
+cd ~/my-project
+anet node codex adopt my-agent                     # 终端里不给 --thread：列出最近的对话，按编号选
+anet node codex adopt my-agent --thread 01a0b2c3   # 完整 thread id，或能唯一确定它的前缀（至少 4 位）
+CODEX_HOME=~/my-project/.anet/nodes/my-agent/codex-home codex login --device-auth
+anet node codex start my-agent
+```
+
+- 列表每行是：开始时间（UTC）、短 id、当时的工作目录、第一句提问（截断）。不在终端里（脚本/管道）又没给 `--thread` 时，只打印这张表和用法，退出码 2。
+- `--from-home <dir>` 读别的 `CODEX_HOME`；`--workdir <dir>` 指定节点放在哪（默认当前目录，不存在会创建）；`--model <id>` 指定模型（默认用这段对话最后一次用的模型）。
+- 只复制**那一个** rollout，改写成新的 thread id，记录的工作目录改写成 `--workdir`；`config.toml`、`AGENTS.md`、`version.json` 随之复制，`config.toml` 里那个工作目录的 `[projects."…"]` 改写成新目录。新 `node_id`、Hub 身份、端口、tmux 名。
+- **源 home 只读**：不改、不移、不删任何文件，原来的 `codex resume` 照样能用。
+- 前缀对应 0 个或多个对话、或同一个 thread 有多个 rollout 文件时，拒绝（退出码 2），并列出候选。
+- **默认不复制登录**（`auth.json`）：那份登录还在被你本人的 codex 用着，复制过去两边会互相顶掉（见下文）。按上面第三行给新节点单独登录。`--allow-shared-codex-login` 强制复制，不安全。
 
 ## 复制了什么、新建了什么
 

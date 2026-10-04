@@ -78,7 +78,10 @@ export async function rewriteRollout(src: string, dst: string, oldId: string, ne
       if (lines === 0) {
         let meta: any;
         try { meta = JSON.parse(line); } catch { throw new Error("rewriteRollout: first line is not JSON — refusing (not a codex rollout)"); }
-        if (meta?.type !== "session_meta" || meta?.payload?.session_id !== oldId) {
+        // #528: older codex builds wrote only payload.id (no session_id); a rollout adopted from a user's own
+        // ~/.codex may be that old. session_id wins when present.
+        const metaId = meta?.payload?.session_id ?? meta?.payload?.id;
+        if (meta?.type !== "session_meta" || typeof metaId !== "string" || metaId.toLowerCase() !== oldId.toLowerCase()) {
           throw new Error(`rewriteRollout: first line is not session_meta for ${oldId} — refusing`);
         }
         mkdirSync(join(dst, ".."), { recursive: true, mode: 0o700 });

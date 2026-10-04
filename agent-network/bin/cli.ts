@@ -42,6 +42,7 @@ import { anetClientLabel } from "../src/login-client-label";
 import { evaluateCodexPreflight, evaluateCodexVerify, checkIdentity, checkHome, checkSession } from "../src/codex-lifecycle-preflight";
 import { NODE_CLONE_USAGE, formatCloneSummary, parseCloneArgs, realpathLoose, runNodeClone } from "../src/node-clone";
 import { FORK_HOME_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, forkRolloutPath, readLastTurnContextModel, rewriteRollout, rewriteTrustedProjects, uuidV7 } from "../src/codex-lifecycle-fork";
+import { formatThreadList, listExternalThreads, resolveExternalThread } from "../src/codex-adopt";
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
@@ -8133,7 +8134,7 @@ async function codexLifecycleCommand() {
   const ref = args[2];
   const opts = parseOpts();
   const usage = () => {
-    console.error("Usage: anet node codex <preflight|verify|canary|start|restart|resume|fork|account|rollback> <alias> [--json] [--probe-from <peer>] [--thread <id>]  |  anet node codex login-status [--json]");
+    console.error("Usage: anet node codex <preflight|verify|canary|start|restart|resume|fork|adopt|account|rollback> <alias> [--json] [--probe-from <peer>] [--thread <id>]  |  anet node codex login-status [--json]");
     console.error("  preflight  只读核对:alias↔node_id、CODEX_HOME/auth、工作目录四处一致、exact thread + 唯一 rollout、端口归属、tmux 拓扑");
     console.error("  verify     preflight + 子进程环境核对(CODEX_HOME / token 短指纹)+ 跨节点身份验收(PR-B 前恒为 unknown → FAIL)");
     console.error("  exit 0 = PASS;exit 2 = FAIL(receipt 里列 blocking);receipt 落在 .anet/nodes/<id>/receipts/,凭据只记短指纹");
@@ -8146,6 +8147,8 @@ async function codexLifecycleCommand() {
     console.error("             app-server 端口在 fork 时探一个空闲的写进 config(首次 start 优先用它,被占则重探);CODEX_HOME/AGENTS.md 随 fork 走;都记进 receipt 的 fork_options");
     console.error("             #514:默认拒绝复制源的 auth.json(一个登录只能给一个节点,exit 1);--no-codex-login 不带登录、首启前 CODEX_HOME=<目标 codex-home> codex login --device-auth;");
     console.error("             --allow-shared-codex-login 照旧复制(不安全:两节点会互相顶掉登录)。account install 同一规则");
+    console.error("  adopt      adopt <new-name> --thread <id|唯一前缀> [--from-home <dir>(默认 ~/.codex)] [--workdir <dir>] [--model <id>]:#528 把 anet 之外开的 codex 对话收编成新共存节点;");
+    console.error("             源 home 只读;只复制那一个 rollout 并改写 id/cwd;默认不复制登录(--allow-shared-codex-login 照旧复制,不安全);无 --thread 时列出对话");
     console.error("  account    register <profile-id> --from-codex-home <dir> | list | install <alias> --source codex-login:<profile-id> [--probe-from <peer>]");
     console.error("             登录源是本机受控 registry 的不透明引用(不收路径/stdin/env);install = fresh 模型探针 → 备份 → 0600 安装 → 完整重启 → verify;失败自动回滚");
     console.error("  rollback   rollback <alias> --receipt <id> [--probe-from <peer>]:只认原 install receipt 里的 backup_ref");
@@ -8154,11 +8157,12 @@ async function codexLifecycleCommand() {
   };
   // #532 — bare `anet node codex`: a menu for humans (TTY) / table + cheat sheet (piped). src/codex-menu.ts
   if (!verb) process.exit(await runCodexMenu(listProfileIds().map((id) => { const p = loadProfile(id); return { id, alias: nodeDisplayName(id, p), profile: p as Record<string, any> | null }; }), { nodesDir: nodesDir(), home }));
-  const landed = ["preflight", "verify", "canary", "start", "restart", "resume", "fork", "account", "rollback"];
+  const landed = ["preflight", "verify", "canary", "start", "restart", "resume", "fork", "adopt", "account", "rollback"];
   if (verb === "login-status") { codexLoginStatusCommand(opts); return; }
   if (!verb || !ref || !landed.includes(verb)) { usage(); process.exit(verb ? 2 : 0); }
   if (verb === "canary") { await codexCanaryCommand(positionalArgs(args.slice(2)), opts); return; }
   if (verb === "fork") { await codexForkCommand(ref, opts); return; }
+  if (verb === "adopt") { await codexAdoptCommand(ref, opts); return; }
   if (verb === "account") { await codexAccountCommand(ref, args[3], opts); return; }
   if (verb === "rollback") { await codexRollbackCommand(ref, opts); return; }
   const ctx = await codexLifecycleCtx(verb, ref, opts);
@@ -8425,6 +8429,180 @@ function codexLoginStatusCommand(opts: Record<string, string>) {
   const rows = codexNodeLoginStatus({ nodesRoot: nodesDir(), env: process.env, home: homedir() });
   if (opts.json === "true") { console.log(JSON.stringify(rows, null, 2)); return; }
   for (const l of formatCodexLoginStatus(rows, process.cwd())) console.log(l);
+}
+
+// ── #528 —— anet node codex adopt <new-name> --thread <id|prefix> [--from-home <dir>] ──
+// fork whose source is a raw CODEX_HOME + thread id instead of an anet node. The source home is only read.
+const CODEX_ADOPT_USAGE = "Usage: anet node codex adopt <new-name> --thread <id-or-unique-prefix> [--from-home <dir>] [--workdir <dir>] [--model <id>] [--no-codex-login|--allow-shared-codex-login] [--json]";
+async function codexAdoptCommand(target: string, opts: Record<string, string>) {
+  const json = opts.json === "true";
+  validateNodeName(target);
+  const fail = (m: string, code = 2): never => { console.error(`[anet] node codex adopt: ${m}`); process.exit(code); };
+  const fromRaw = typeof opts["from-home"] === "string" && opts["from-home"] !== "true" ? String(opts["from-home"]) : join(home, ".codex");
+  if (!existsSync(fromRaw) || !statSync(fromRaw).isDirectory()) fail(`--from-home ${fromRaw} is not a directory (default: ~/.codex)`);
+  const fromHome = realpathSync(fromRaw);
+  const threads = listExternalThreads(fromHome);
+  if (threads.length === 0) fail(`no codex conversations under ${join(fromHome, "sessions")} — nothing to adopt`);
+
+  let query = typeof opts.thread === "string" && opts.thread !== "true" ? String(opts.thread) : "";
+  if (!query) {
+    const list = formatThreadList(threads);
+    if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+      console.error(`[anet] node codex adopt: --thread is required. Conversations in ${fromHome} (newest first):`);
+      for (const l of list) console.error(l);
+      console.error(CODEX_ADOPT_USAGE);
+      process.exit(2);
+    }
+    console.log(`Conversations in ${fromHome} (newest first):`);
+    for (const l of list) console.log(l);
+    const pick = (await ask(`Adopt which one as "${target}"? number (empty = cancel)`)).trim();
+    closeRL();
+    const n = Number(pick);
+    if (!pick) fail("cancelled", 1);
+    if (!Number.isInteger(n) || n < 1 || n > Math.min(threads.length, 20)) fail(`"${pick}" is not one of the numbers above`);
+    query = threads[n - 1].threadId;
+  }
+  const res = resolveExternalThread(threads, query);
+  if (res.kind === "invalid") fail(res.reason);
+  if (res.kind === "none") fail(`no conversation in ${fromHome} matches thread "${query}" (run without --thread to list them)`);
+  if (res.kind === "ambiguous") {
+    console.error(`[anet] node codex adopt: thread "${query}" matches ${new Set(res.matches.map((t) => t.threadId)).size} conversations — give more of the id; refusing:`);
+    for (const t of res.matches) console.error(`  ${t.threadId}  ${t.cwd ?? "(cwd unknown)"}  ${t.path}`);
+    process.exit(2);
+  }
+  if (res.kind === "duplicate") {
+    console.error(`[anet] node codex adopt: thread ${res.matches[0].threadId} has ${res.matches.length} rollout files — need exactly one; refusing:`);
+    for (const t of res.matches) console.error(`  ${t.path}`);
+    process.exit(2);
+  }
+  const thread = (res as Extract<typeof res, { kind: "ok" }>).thread;
+
+  const noLogin = opts["no-codex-login"] === "true";
+  const allowShared = opts["allow-shared-codex-login"] === "true";
+  if (noLogin && allowShared) fail(`--no-codex-login and ${ALLOW_SHARED_CODEX_LOGIN_FLAG} contradict each other`);
+  let workdirCreated = false;
+  const workdirRaw = typeof opts.workdir === "string" && opts.workdir !== "true" ? String(opts.workdir) : process.cwd();
+  try { workdirCreated = ensureForkWorkdir(workdirRaw).created; } catch (e: any) { fail(e?.message ?? String(e)); }
+  const workdir = realpathSync(workdirRaw);
+  const cwdRoot = realpathLoose(process.cwd());
+  const targetNodesDir = join(workdir, ".anet", "nodes");
+  if (existsSync(join(targetNodesDir, target))) fail(`${join(targetNodesDir, target)} already exists — refusing to overwrite`);
+  const targetHomeFinal = join(targetNodesDir, target, "codex-home");
+  if (targetHomeFinal === fromHome || targetHomeFinal.startsWith(fromHome + "/")) fail(`the new node would live inside --from-home ${fromHome}; pick another --workdir`);
+  const say = (m: string) => { if (!json) console.log(`[anet] codex adopt: ${m}`); };
+  const startedAt = new Date();
+  const srcStat = statSync(thread.path);
+  say(`source ${fromHome}: thread ${thread.threadId}, rollout ${srcStat.size} B, cwd ${thread.cwd ?? "(unknown)"}`);
+
+  // #514 — by default nothing is copied: the source home is someone's live login. --allow-shared-codex-login copies it (unsafe).
+  const loginSource: CodexLoginSource = { kind: "host", path: fromHome };
+  const gate = allowShared ? gateCodexLoginStaging({
+    nodeDir: join(targetNodesDir, target),
+    alias: target,
+    targetCodexHome: targetHomeFinal,
+    sourceAuthPath: join(fromHome, "auth.json"),
+    source: loginSource,
+    allowShared: true,
+    siblingRoots: [nodesDir(), targetNodesDir],
+  }) : null;
+
+  process.chdir(workdir);
+  const gc = loadGlobal();
+  let sourceLastModel: string | null = null;
+  try { sourceLastModel = readLastTurnContextModel(thread.path).model; } catch { sourceLastModel = null; }
+  const modelOverride: string | null = typeof opts.model === "string" && opts.model.trim() && opts.model !== "true" ? opts.model.trim() : null;
+  if (modelOverride && sourceLastModel && sourceLastModel !== modelOverride) {
+    console.error(`[anet] node codex adopt: ⚠ the conversation last ran model ${sourceLastModel}; the node is configured for ${modelOverride} — it switches on its next turn.`);
+  }
+  const createOpts = { runtime: "codex-app-server", copresence: "true", ...(opts.hub ? { hub: opts.hub } : {}), ...((modelOverride ?? sourceLastModel) ? { model: modelOverride ?? sourceLastModel } : {}), _channels: [], _envs: [] } as unknown as ReturnType<typeof parseOpts>;
+  const base = createProfileFromOpts(target, createOpts);
+  const newThread = uuidV7(Date.now(), randomBytes(10));
+  const draft: Profile = { ...base, codexCopresence: true, codexThreadId: newThread, codexProjectDir: workdir };
+  const withTok = await ensureNodeToken(draft, target);
+  say(`hub identity for ${target}: node_id ${withTok.node_id}`);
+  const hub: string = (withTok as any).hub || gc.hub;
+  const staging = join(targetNodesDir, `.adopt-${target}-${process.pid}`);
+  const stagingHome = join(staging, "codex-home");
+  let rewrite: Awaited<ReturnType<typeof rewriteRollout>> | null = null;
+  let agentsMdCarried = false, trustedRewritten = 0, trustedDropped = 0;
+  const assignedPort = await findFreeLoopbackPort();
+  try {
+    mkdirSync(stagingHome, { recursive: true, mode: 0o700 });
+    chmodSync(stagingHome, 0o700);
+    for (const f of FORK_HOME_COPY) {
+      if (f.name === "auth.json" && !allowShared) continue; // #514: never by default
+      const from = join(fromHome, f.name);
+      if (!existsSync(from)) { if (f.name === "auth.json") throw new Error(`auth.json missing in ${fromHome}`); continue; }
+      copyFileSync(from, join(stagingHome, f.name));
+      chmodSync(join(stagingHome, f.name), f.mode);
+      if (f.name === "AGENTS.md") agentsMdCarried = true;
+    }
+    const stagedToml = join(stagingHome, "config.toml");
+    if (thread.cwd && existsSync(stagedToml)) {
+      const r = rewriteTrustedProjects(readFileSync(stagedToml, "utf-8"), thread.cwd, workdir);
+      if (r.rewritten + r.dropped > 0) { writeFileSync(stagedToml, r.text, { mode: 0o600 }); chmodSync(stagedToml, 0o600); }
+      trustedRewritten = r.rewritten; trustedDropped = r.dropped;
+    }
+    const dst = forkRolloutPath(stagingHome, startedAt, newThread);
+    rewrite = await rewriteRollout(thread.path, dst, thread.threadId, newThread, thread.cwd ? { from: thread.cwd, to: workdir } : undefined);
+    say(`rollout copied: ${rewrite.lines} lines, ${rewrite.bytesOut} B, ${rewrite.replacements} id rewrites, ${rewrite.cwdReplacements} cwd rewrites (${thread.cwd ?? "?"} → ${workdir})`);
+    saveProfile(target, withTok);
+    {
+      const rawCfgPath = join(targetNodesDir, target, "config.json");
+      const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+      rawCfg.codexAppServerPort = assignedPort;
+      atomicWritePrivateJson(rawCfgPath, rawCfg);
+    }
+    renameSync(stagingHome, targetHomeFinal);
+    rmSync(staging, { recursive: true, force: true });
+    if (gate) recordCodexLoginOriginOrWarn(join(targetNodesDir, target), target, gate.fingerprint, loginSource);
+    if (workdir !== cwdRoot) rememberCopyWorkdir(cwdRoot, target, workdir);
+  } catch (e: any) {
+    rmSync(staging, { recursive: true, force: true });
+    console.error(`[anet] node codex adopt: ❌ ${e?.message ?? e}`);
+    console.error(`[anet]    nothing was moved into ${join(targetNodesDir, target)}; the hub may hold a registration for "${target}" — anet node delete ${shellQuote(target)} cleans it.`);
+    process.exit(2);
+  }
+
+  const targetDir = join(nodesDir(), target);
+  const tprim = realPrimitives({ hub, token: withTok.token || gc.token, networkId: (withTok as any).network_id || gc.network_id });
+  const tfacts = await gatherCodexFacts(tprim, {
+    alias: target,
+    nodeId: withTok.node_id ?? null,
+    nodeDir: targetDir,
+    codexHome: targetHomeFinal,
+    configToken: withTok.token ?? null,
+    codexProjectDir: workdir,
+    codexThreadId: newThread,
+    codexAppServerUrl: null,
+    sessions: copresenceTmuxSessions(target),
+    recordedPids: { appsrv: null, bridge: null, tui: null },
+    markerUuid: null,
+  });
+  const targetRollout = tfacts.session.rolloutMatches.length === 1 ? tfacts.session.rolloutMatches[0] : null;
+  const isolation = checkForkIsolation({
+    source: { nodeId: null, homeReal: fromHome, threadId: thread.threadId, alias: `codex-home:${fromHome}`, rolloutInode: srcStat.ino, rolloutBytes: srcStat.size },
+    target: { nodeId: withTok.node_id ?? null, homeReal: tfacts.home.dir, threadId: newThread, alias: target, rolloutInode: targetRollout?.inode ?? null, rolloutBytes: targetRollout?.bytes ?? null, envFilePresent: existsSync(join(targetHomeFinal, ".anet-copresence.env")) },
+    rewrite,
+  });
+  const workdirCheck: ReceiptCheck = tfacts.workdir.configProjectDir === workdir
+    ? { key: "workdir_consistent", status: "pass", detail: `config.codexProjectDir=${workdir} (config only — live cwd/bridge are checked at first start)`, evidence: { config: workdir } }
+    : { key: "workdir_consistent", status: "fail", detail: `config.codexProjectDir=${tfacts.workdir.configProjectDir} ≠ ${workdir}` };
+  const homeCheck = !allowShared && tfacts.home.authMode === null
+    ? homeCheckPendingOwnLogin(checkHome({ ...tfacts, home: { ...tfacts.home, authMode: 0o600, authBytes: 1 } }), targetHomeFinal)
+    : checkHome(tfacts);
+  const loginStep = allowShared ? "" : `\n  1. log the new node in (adopt never copies a login — #514):\n     CODEX_HOME=${shellQuote(targetHomeFinal)} codex login --device-auth`;
+  const next = `next (run from ${workdir}):${loginStep}\n  ${allowShared ? "1" : "2"}. anet node codex start ${shellQuote(target)}   # add --probe-from <another local node> for the identity check`;
+  const checks: ReceiptCheck[] = [
+    checkIdentity(tfacts), homeCheck, checkSession(tfacts), workdirCheck, isolation,
+    forkGapsCheck({ workdir_created: workdirCreated, trusted_rewritten: trustedRewritten, trusted_dropped: trustedDropped, model_override: modelOverride, source_last_model: sourceLastModel, port: assignedPort, agents_md_carried: agentsMdCarried }),
+    { key: "identity_attested", status: "unknown", detail: "not started yet — closed by the first anet node codex start --probe-from <peer>" },
+  ];
+  const receipt = buildReceipt({ verb: "adopt", alias: target, nodeId: withTok.node_id ?? null, startedAt, checks });
+  const path = writeReceipt(targetDir, receipt);
+  if (json) console.log(JSON.stringify({ ...receipt, fromHome, sourceThread: thread.threadId, workdir, receiptPath: path }, null, 2));
+  else { console.log(formatReceiptSummary(receipt)); console.log(next); console.log(`receipt: ${path}`); }
+  process.exit(receipt.verdict === "PASS" ? 0 : 2);
 }
 
 // ── #1856 PR-D —— anet node codex account register|list|install / rollback ──

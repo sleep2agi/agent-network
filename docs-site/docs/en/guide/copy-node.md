@@ -7,6 +7,7 @@ When you want "another node just like this one", there are two commands. Both gi
 |---|---|---|
 | The same settings, starting from an empty conversation | `anet node clone <source> <new-name>` | Every runtime except opencode-cli |
 | The same settings **plus the codex conversation history** | `anet node codex fork <source> --name <new-name> --workdir <dir>` | Codex co-presence nodes only (`codex-app-server`) |
+| A **codex conversation started outside anet** as a node | `anet node codex adopt <new-name> --thread <id>` | The source is a thread in `~/.codex` (or any `CODEX_HOME`) |
 | The node on another machine | `anet login` there, then a fresh `anet node create` | Any |
 
 ::: tip Does your anet have these commands?
@@ -69,6 +70,26 @@ cd ~/my-node-copy && anet node codex start my-node-copy --probe-from my-node
 - Run later `anet node codex start/restart` commands from the `--workdir` directory.
 
 Details (every check in the receipt) are in the "fork" section of [Codex TUI Co-presence](/en/guide/codex-copresence).
+
+## adopt: turn an existing codex conversation into a node
+
+You ran `codex` (the TUI) yourself, outside anet, and want an anet node to carry that conversation on — use `adopt`.
+It is a fork whose source is not an anet node but one thread in a `CODEX_HOME` (default `~/.codex`).
+
+```bash
+cd ~/my-project
+anet node codex adopt my-agent                     # in a terminal, without --thread: lists recent conversations, pick by number
+anet node codex adopt my-agent --thread 01a0b2c3   # the full thread id, or a prefix that names exactly one (4+ characters)
+CODEX_HOME=~/my-project/.anet/nodes/my-agent/codex-home codex login --device-auth
+anet node codex start my-agent
+```
+
+- Each row of the list shows the start time (UTC), a short id, the working directory it ran in, and its first prompt (truncated). Without a terminal (a script or a pipe) and without `--thread`, adopt prints that list and the usage and exits with code 2.
+- `--from-home <dir>` reads another `CODEX_HOME`; `--workdir <dir>` puts the node elsewhere (default: the current directory, created when missing); `--model <id>` sets the model (default: the model the conversation last used).
+- Only **that one** rollout is copied, rewritten to a new thread id, with its recorded working directory rewritten to `--workdir`. `config.toml`, `AGENTS.md` and `version.json` come along; the `[projects."…"]` table for the old working directory in `config.toml` is rewritten to the new one. The node gets a new `node_id`, Hub identity, port and tmux names.
+- **The source home is only read**: no file in it is changed, moved or deleted, and `codex resume` there keeps working.
+- A prefix that matches no conversation or several, or a thread with more than one rollout file, is refused (exit code 2) with the candidates listed.
+- **The login is not copied by default** (`auth.json`): your own codex is still using it, and two holders log each other out (next sections). Log the new node in on its own, as in the third line above. `--allow-shared-codex-login` forces the copy and is unsafe.
 
 ## What is copied, what is new
 

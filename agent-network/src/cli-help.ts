@@ -114,6 +114,7 @@ Codex TUI co-presence lifecycle. Verbs:
   anet node codex restart <alias>     Deterministic stop + start + verify
   anet node codex resume <alias> --thread <id>
   anet node codex fork <source> --name <target> --workdir <dir>
+  anet node codex adopt <new-name> --thread <id> [--from-home <dir>]
   anet node codex account <register|list|install> ...
   anet node codex rollback <alias> --receipt <id>
   anet node codex login-status [--json]   Every codex node here: logged in? shared login?
@@ -154,6 +155,26 @@ Options:
                                 nodes will log each other out)
 
 Then: cd <dir> && anet node codex start <target> --probe-from <source>`,
+  "node codex adopt": `Usage: anet node codex adopt <new-name> --thread <id-or-unique-prefix> [options]
+
+Turn a Codex TUI conversation started outside anet (a thread in ~/.codex, or in
+any CODEX_HOME) into a new Codex co-presence node. Only that one rollout is
+copied, with its thread id and cwd rewritten; node_id, CODEX_HOME, port and tmux
+names are new. The source home is only read, never changed.
+
+Options:
+  --thread <id>                 Full thread id or a unique prefix (≥ 4 chars).
+                                Without it: a TTY picks from a list; otherwise
+                                the list is printed and the exit code is 2
+  --from-home <dir>             The CODEX_HOME to read (default: ~/.codex)
+  --workdir <dir>               Where the node lives (default: current directory)
+  --model <id>                  Model (default: the conversation's last model)
+  --no-codex-login              The default: no login is copied
+  --allow-shared-codex-login    Copy the source's auth.json (unsafe: the source
+                                and the node will log each other out)
+
+Then: CODEX_HOME=<node dir>/codex-home codex login --device-auth
+      anet node codex start <new-name>`,
   "node codex account": `Usage: anet node codex account register <profile-id> --from-codex-home <dir>
        anet node codex account list
        anet node codex account install <alias> --source codex-login:<profile-id> [--probe-from <peer>]
