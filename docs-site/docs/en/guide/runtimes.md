@@ -41,6 +41,12 @@ For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/gro
 > agent-network ≥ `2.3.0-preview.87` and agent-node ≥ `2.5.0-preview.67`.
 > It requires an explicit model (`--model <provider/model>`, e.g. OpenCode's built-in free `opencode/mimo-v2.6-flash-free`, no key needed);
 > without one it fails at start with `OpenCode copresence requires an explicit provider/model`. The desktop wizard ≥ 0.2.61 supplies one by default.
+>
+> ⚠️ **Free Zen models and the default safe preset do not mix.** OpenCode Zen's free tier rejects any request with a tool
+> disabled (`OpenCode's free tier can only be used from within OpenCode`), and the default preset below disables them all, so
+> every task fails. `anet node create` prints the exact command for either remedy: set `flags.opencodeUnsafeTools = true`
+> (trusted tasks only), or keep the safe preset and use a keyed provider (`anet opencode auth-login <node> --provider anthropic`).
+> The task then fails with that explanation instead of replying `[opencode: assistant returned no reply]` (#540).
 
 > **By default it cannot run `bash`: that is the design, not a fault.** `opencode-cli`'s safe
 > default disables every local tool: `bash` / `read` / `glob` / `grep` / `edit` / `write` /

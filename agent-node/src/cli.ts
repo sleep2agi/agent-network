@@ -3590,6 +3590,10 @@ async function processWithOpencode(
     opencodeRuntimeSession = opened;
   }
 
+  // #540: the ACP lane already fails a provider error (JSON-RPC -32603
+  // carrying the upstream text); only the Zen free-tier rejection needs the
+  // readable safe-preset explanation.
+  const { withOpenCodeFreeTierHint } = await import("./runtime/opencode-provider-error");
   const outcome = await opencodeThink(opencodeRuntimeSession, {
     prompt: task,
     cwd: process.cwd(),
@@ -3600,7 +3604,7 @@ async function processWithOpencode(
     warn,
     onSubmitted: evidence?.submitted,
     onConsumed: evidence?.consumed,
-  });
+  }).catch((error: unknown) => { throw withOpenCodeFreeTierHint(error); });
 
   const u = outcome.state.usage;
   log(

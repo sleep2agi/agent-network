@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, setSystemTime, test } from "bun:test";
 import { runtimeErrorReplyText } from "../unverified-reply-text";
+import { OpenCodeProviderError } from "../opencode-provider-error";
 import {
   linuxProcessGroupIsGone,
   readLinuxProcessGroupIdentity,
@@ -112,6 +113,16 @@ if (command === "serve") {
         parentID = "msg_summary_1";
       }
       lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"text",text:reply}] };
+      if (env.FAKE_PROVIDER_ERROR) {
+        // #540: OpenCode 1.18.1 reports a failed model call as an assistant
+        // message with info.error set and only step book-end parts.
+        lastResponse = {
+          info:{role:"assistant",parentID,error:{name:"APIError",data:{message:env.FAKE_PROVIDER_ERROR,statusCode:401,isRetryable:false}}},
+          parts:[{type:"step-start"}],
+        };
+      } else if (env.FAKE_EMPTY_TURN === "1") {
+        lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"step-start"},{type:"step-finish"}] };
+      }
       messages[id].push(lastResponse);
       delete statuses[id];
       trace("TURN_DONE " + prompt);
@@ -367,6 +378,60 @@ describe("OpenCode native serve+attach copresence", () => {
       }
       f.close();
     }
+  }, 15_000);
+
+  // #540 — a provider failure must fail the task with the upstream text, not
+  // reply "[opencode: assistant returned no reply]" as a success.
+  async function submitOnce(env: Record<string, string>) {
+    const f = fixture(env);
+    let runtime: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
+    try {
+      runtime = await openVettedOpenCodeCopresence({
+        binary: f.binary,
+        env: f.env,
+        cwd: f.root,
+        workDir: f.root,
+        model: "opencode/fake",
+        startupTimeoutMs: 5_000,
+      });
+      try {
+        return { result: await runtime.submit("task:provider", 5_000), error: undefined as any };
+      } catch (error) {
+        return { result: undefined, error: error as any };
+      }
+    } finally {
+      await runtime?.close();
+      f.close();
+    }
+  }
+
+  test("#540 fails the task with the upstream message when the turn carries info.error", async () => {
+    const { result, error } = await submitOnce({ FAKE_PROVIDER_ERROR: "Invalid API key for provider" });
+    expect(result).toBeUndefined();
+    expect(error).toBeInstanceOf(OpenCodeProviderError);
+    expect(error.code).toBe("opencode_provider_error");
+    expect(error.freeTierRejected).toBe(false);
+    expect(error.message).toContain("APIError: Invalid API key for provider");
+    const reply = runtimeErrorReplyText("opencode", error);
+    expect(reply).toStartWith("opencode 错误: ");
+    expect(reply).toContain("Invalid API key for provider");
+    expect(reply).not.toContain("returned no reply");
+  }, 15_000);
+
+  test("#540 maps the Zen free-tier rejection to the safe-preset hint", async () => {
+    const { error } = await submitOnce({
+      FAKE_PROVIDER_ERROR: "OpenCode's free tier can only be used from within OpenCode",
+    });
+    expect(error).toBeInstanceOf(OpenCodeProviderError);
+    expect(error.freeTierRejected).toBe(true);
+    expect(error.message).toContain("flags.opencodeUnsafeTools=true");
+    expect(error.message).toContain("free tier can only be used from within OpenCode");
+  }, 15_000);
+
+  test("#540 a genuinely empty successful turn still replies, distinguishable from a failure", async () => {
+    const { result, error } = await submitOnce({ FAKE_EMPTY_TURN: "1" });
+    expect(error).toBeUndefined();
+    expect(result?.replyText).toBe("[opencode: assistant returned no reply]");
   }, 15_000);
 
   test("shows the network sender in both the toast title and message body", async () => {
