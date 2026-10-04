@@ -206,6 +206,44 @@ agent-node `2.5.0-preview.96` 起，看门狗把「活着但卡死」和「死�
 
 看门狗不会切换账号，不会在节点之间拷贝凭据，也不会碰别的节点的进程。
 
+### 为什么每个 codex 节点都有自己的 CODEX_HOME {#why-own-codex-home}
+
+每个 codex 节点（`codex-sdk` 或共存 `codex-app-server`）都用**自己的** `CODEX_HOME`，原因有三：
+
+1. **refresh token 是一次性的。**ChatGPT 登录每刷新一次就换新、旧的作废；同一份登录放进两个 `CODEX_HOME`，谁先刷新谁活，另一个被顶掉（#1918、#514，见下一节）。
+2. **会话按 HOME 存。**codex 把会话（rollout）存在 `CODEX_HOME/sessions/` 下；两个节点共用一个 HOME，两边的历史就混在一起。
+3. **停止 / 删除按 CODEX_HOME 认进程。**`anet node stop` / `delete` 靠节点自己的 `CODEX_HOME`（加共存标记）认出哪些进程属于这个节点；共用 HOME 就分不清。
+
+代价是**每个节点要单独 `codex login` 一次**。anet 把这一步摆到明面上：
+
+- **创建时给出下一步。**`anet node create` / `anet node clone` 建出的 codex 节点如果启动后不会有可用登录（节点自己的 `codex-home` 里没有，首启也不会合法地借用本机 `~/.codex` 登录），命令最后会打印给**这个节点**登录的确切命令，不会替你执行，也不会从别的节点拷 `auth.json`：
+
+  ```text
+  [anet] Next step — my-node has no codex login yet. Each codex node logs in on its own, in its own CODEX_HOME
+      mkdir -p -m 700 <节点目录>/codex-home && CODEX_HOME=<节点目录>/codex-home codex login
+  [anet]   On a headless machine / over SSH use device auth instead:
+      mkdir -p -m 700 <节点目录>/codex-home && CODEX_HOME=<节点目录>/codex-home codex login --device-auth
+  [anet]   Then: anet node start my-node
+  ```
+
+  `mkdir` 只在目录还不存在时出现（codex 不接受不存在的 `CODEX_HOME`）。`--device-auth` 是 codex CLI 自带的设备码登录，适合没有浏览器的机器。`codex-sdk` 节点没有自己的 `codex-home` 时用的是 codex 默认的 `~/.codex`，提示里给的就是那个目录。`anet node codex fork --no-codex-login` 一直会在结果里给出同样的登录命令。
+
+- **一眼看登录状态：`anet node codex login-status [--json]`。**当前目录下每个 codex 节点一行：
+
+  ```text
+  ALIAS  RUNTIME                         LOGGED IN  ACCOUNT            SHARED WITH  CODEX_HOME
+  one    codex-app-server (co-presence)  yes        you@example.com    ⚠ two        <ws>/.anet/nodes/one/codex-home
+  two    codex-app-server (co-presence)  yes        you@example.com    ⚠ one        <ws>/.anet/nodes/two/codex-home
+  three  codex-app-server (co-presence)  no         -                  -            <ws>/.anet/nodes/three/codex-home
+  ```
+
+  - `ACCOUNT`：`id_token` 里的邮箱（本地解码，不联网）；没有邮箱时显示账号指纹 `acct:<16 位>`。
+  - `SHARED WITH`：和这个节点持有**同一份登录**（同一条 refresh token 链，8 位指纹相同）的其他节点——它们会互相顶掉。别的工作区的节点只看它们公布的指纹文件，从不读它们的 `auth.json`。
+  - 同一个账号、但各自单独登录的节点**不算**共享（那正是推荐做法），`--json` 里放在 `same_account_as`。
+  - 只读；任何 token 都不会出现在输出里。
+
+  为什么另起一个命令、不放进 `anet node codex account list`：那个命令列的是本机登记的登录 **profile**（按 profile id，`--json` 形状已有人用），这里列的是本目录的**节点**和各自持有的登录。
+
 ### 一个登录只给一个节点 {#one-login-per-node}
 
 ChatGPT 登录的 refresh token 是**一次性**的,每刷新一次就换一个新的、旧的作废。同一份 `auth.json`(同一次登录)出现在两个节点的 `CODEX_HOME` 里,谁先刷新谁活,其余节点几天后报:

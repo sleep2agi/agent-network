@@ -109,6 +109,16 @@ Put the same `auth.json` into two nodes' `CODEX_HOME` and whichever refreshes fi
 "Same login" is decided by a short fingerprint of the refresh token; anet never reads another node's `auth.json`.
 See [one login per node](/en/guide/codex-copresence#one-login-per-node).
 
+## Each codex node logs in on its own
+
+Every codex node has its own `CODEX_HOME`: refresh tokens are single-use (a shared login logs the other node out), sessions are stored per home, and stop/delete find processes by `CODEX_HOME`. So a copied codex node logs in once on its own:
+
+- When `anet node clone` makes a codex node whose first start will not have a usable login, the command ends with the exact command that logs it in (`CODEX_HOME=<new node dir>/codex-home codex login`, or `--device-auth` without a browser), followed by `anet node start`. Printed only, never run; no `auth.json` is copied.
+- `anet node codex fork --no-codex-login` prints the same command in its result.
+- `anet node codex login-status [--json]` lists every codex node in this directory: `CODEX_HOME`, logged in or not, account (e-mail or fingerprint), and which other nodes share the same login. No token is printed.
+
+See [why every codex node has its own CODEX_HOME](/en/guide/codex-copresence#why-own-codex-home).
+
 ## Deleting the copy
 
 ```bash

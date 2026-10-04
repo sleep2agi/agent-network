@@ -173,6 +173,7 @@ import {
   type EvaluatedStaging,
 } from "../src/codex-login-share-guard";
 import { applyNodeCodexHome, resolveNodeCodexHome, verifyProcessTreeCodexHome } from "../src/codex-home-enforce";
+import { codexCreateLoginGap, codexLoginNextStepLines, codexNodeLoginStatus, formatCodexLoginStatus } from "../src/codex-node-login";
 import {
   describeMissingDeps,
   isLoopbackHub,
@@ -925,6 +926,33 @@ function recordCodexLoginOriginOrWarn(nodeDir: string, alias: string, fingerprin
   if (!fingerprint) return;
   const problem = recordCodexLoginOrigin({ nodeDir, alias, fingerprint, source });
   if (problem) console.error(`[anet] ⚠ ${problem}`);
+}
+
+/**
+ * #529 — at the end of create / clone: a codex node that will not have a usable
+ * login gets the exact command that logs THIS node in (its own CODEX_HOME).
+ * Printed only, never run; nothing is copied from another node (#514).
+ * "Will have a login" includes a co-presence node whose first start may stage
+ * the host login — asked of the same #514 gate start uses, read-only.
+ */
+function printCodexLoginNextStep(nodeDir: string, alias: string, then: string): boolean {
+  let cfg: Record<string, unknown> | null = null;
+  try { cfg = JSON.parse(readFileSync(join(nodeDir, "config.json"), "utf-8")); } catch { return false; }
+  const gap = codexCreateLoginGap({
+    nodeDir, config: cfg, env: process.env, home: homedir(),
+    hostLoginWouldBeStaged: (hostAuth) => {
+      try {
+        return evaluateCodexLoginStaging({
+          nodeDir, alias, targetCodexHome: join(nodeDir, "codex-home"), sourceAuthPath: hostAuth,
+          source: { kind: "host", path: hostAuth }, allowShared: false,
+        }).kind === "ok";
+      } catch { return false; }
+    },
+  });
+  if (!gap) return false;
+  console.log("");
+  for (const l of codexLoginNextStepLines({ alias, codexHome: gap.codexHome, homeExists: gap.homeExists, then })) console.log(l);
+  return true;
 }
 
 /**
@@ -5613,7 +5641,7 @@ Telegram setup:
     console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
   }
   printProfileSummary(id, loadProfile(id) || profile);
-  console.log(`\nStart: anet node start ${id}`);
+  if (!printCodexLoginNextStep(join(nodesDir(), id), nodeDisplayName(id, profile), `anet node start ${id}`)) console.log(`\nStart: anet node start ${id}`);
   // #135 v2 fix — let the dispatch-end exit handle clean shutdown (see top
   // of switch block at end of file). The preview.1 inline `process.exit(0)`
   // here was counterproductive: process.exit inside an async function leaves
@@ -5684,7 +5712,10 @@ async function nodeCloneCommand(tokens: string[], mode: "clone" | "create-from")
   if (targetWorkdir !== sourceWorkdir) rememberCopyWorkdir(sourceWorkdir, a.target, targetWorkdir);
   console.log(formatCloneSummary({ source: nodeDisplayName(source.id, source.profile), target: a.target, profile: r.profile, ledger: r.ledger, targetNodeDir: r.targetNodeDir, sourceNodeId: raw.node_id }));
   const where = targetWorkdir === sourceWorkdir ? "" : `cd ${shellQuote(targetWorkdir)} && `;
-  if (!a.start) { console.log(`\nStart: ${where}anet node start ${shellQuote(a.target)}`); return; }
+  if (!a.start) {
+    if (!printCodexLoginNextStep(r.targetNodeDir, a.target, `${where}anet node start ${shellQuote(a.target)}`)) console.log(`\nStart: ${where}anet node start ${shellQuote(a.target)}`);
+    return;
+  }
   if (r.ledger.secrets.length) {
     console.log(`\n[anet] not starting: set the ${r.ledger.secrets.length} secret(s) above first, then: ${where}anet node start ${shellQuote(a.target)}`);
     return;
@@ -6060,7 +6091,7 @@ async function createCommand(idOverride?: string) {
   console.log(`[anet]    Restrict tools:        edit .anet/nodes/${id}/config.json → "tools": ["Read","Bash",...]`);
   console.log(`[anet]    Disable auto-skip:     edit .anet/nodes/${id}/config.json → "flags.dangerouslySkipPermissions": false`);
   console.log(`[anet]    Inspect current set:   anet info ${id}`);
-  console.log(`\nStart: anet node start ${id}`);
+  if (!printCodexLoginNextStep(join(nodesDir(), id), nodeDisplayName(id, profile), `anet node start ${id}`)) console.log(`\nStart: anet node start ${id}`);
   closeRL();
   // Only exit if invoked directly from the CLI (top-level command). When called
   // from demoDebateCommand or other in-process orchestration, just return so
@@ -8036,7 +8067,7 @@ async function codexLifecycleCommand() {
   const ref = args[2];
   const opts = parseOpts();
   const usage = () => {
-    console.error("Usage: anet node codex <preflight|verify|canary|start|restart|resume|fork|account|rollback> <alias> [--json] [--probe-from <peer>] [--thread <id>]");
+    console.error("Usage: anet node codex <preflight|verify|canary|start|restart|resume|fork|account|rollback> <alias> [--json] [--probe-from <peer>] [--thread <id>]  |  anet node codex login-status [--json]");
     console.error("  preflight  只读核对:alias↔node_id、CODEX_HOME/auth、工作目录四处一致、exact thread + 唯一 rollout、端口归属、tmux 拓扑");
     console.error("  verify     preflight + 子进程环境核对(CODEX_HOME / token 短指纹)+ 跨节点身份验收(PR-B 前恒为 unknown → FAIL)");
     console.error("  exit 0 = PASS;exit 2 = FAIL(receipt 里列 blocking);receipt 落在 .anet/nodes/<id>/receipts/,凭据只记短指纹");
@@ -8053,8 +8084,10 @@ async function codexLifecycleCommand() {
     console.error("             登录源是本机受控 registry 的不透明引用(不收路径/stdin/env);install = fresh 模型探针 → 备份 → 0600 安装 → 完整重启 → verify;失败自动回滚");
     console.error("  rollback   rollback <alias> --receipt <id> [--probe-from <peer>]:只认原 install receipt 里的 backup_ref");
     console.error("  canary     canary <alias>... [--probe-from <peer>]:逐个 verify,第一个 FAIL 即停(后面的不碰);批量重启/换号前先跑它");
+    console.error("  login-status [--json]:当前目录每个 codex 节点一行 —— CODEX_HOME、是否已登录、账号(邮箱/指纹)、与谁共用同一份登录(#529);只读,不打印任何 token");
   };
   const landed = ["preflight", "verify", "canary", "start", "restart", "resume", "fork", "account", "rollback"];
+  if (verb === "login-status") { codexLoginStatusCommand(opts); return; }
   if (!verb || !ref || !landed.includes(verb)) { usage(); process.exit(verb ? 2 : 0); }
   if (verb === "canary") { await codexCanaryCommand(positionalArgs(args.slice(2)), opts); return; }
   if (verb === "fork") { await codexForkCommand(ref, opts); return; }
@@ -8314,6 +8347,16 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
     forkGapsCheck({ workdir_created: workdirCreated, trusted_rewritten: trustedRewritten, trusted_dropped: trustedDropped, model_override: modelOverride, source_last_model: sourceLastModel, port: assignedPort, agents_md_carried: agentsMdCarried }),
     { key: "identity_attested", status: "unknown", detail: `not started yet — ${next.split("\n")[1].trim()}` },
   ], next);
+}
+
+// ── #529 —— anet node codex login-status [--json] ──
+// A separate verb, not `account list`: that one lists the host's registered
+// login PROFILES (keyed by profile id, its --json shape is consumed as is);
+// this one lists the NODES in this workspace and the login each one holds.
+function codexLoginStatusCommand(opts: Record<string, string>) {
+  const rows = codexNodeLoginStatus({ nodesRoot: nodesDir(), env: process.env, home: homedir() });
+  if (opts.json === "true") { console.log(JSON.stringify(rows, null, 2)); return; }
+  for (const l of formatCodexLoginStatus(rows, process.cwd())) console.log(l);
 }
 
 // ── #1856 PR-D —— anet node codex account register|list|install / rollback ──

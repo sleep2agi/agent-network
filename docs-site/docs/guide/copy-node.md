@@ -107,6 +107,16 @@ ChatGPT 登录的 refresh token 是**一次性**的：每刷新一次换一个�
 判断「是不是同一个登录」用的是 refresh token 的短指纹，不读别的节点的 `auth.json`。
 详见 [一个登录只给一个节点](/guide/codex-copresence#one-login-per-node)。
 
+## 每个 codex 节点自己登录
+
+每个 codex 节点都有自己的 `CODEX_HOME`：refresh token 一次性（共用登录会互相顶掉）、会话按 HOME 存、停止/删除按 `CODEX_HOME` 认进程。所以复制出来的 codex 节点要自己登录一次：
+
+- `anet node clone` 建出的 codex 节点如果首启不会有可用登录，命令最后一段就是给它登录的确切命令（`CODEX_HOME=<新节点目录>/codex-home codex login`，无浏览器用 `--device-auth`），之后才是 `anet node start`。只打印，不执行，不拷任何 `auth.json`。
+- `anet node codex fork --no-codex-login` 的结果里也给出同样的命令。
+- `anet node codex login-status [--json]` 列出本目录每个 codex 节点：`CODEX_HOME`、是否已登录、账号（邮箱或指纹）、和谁共用同一份登录。不打印 token。
+
+详见 [为什么每个 codex 节点都有自己的 CODEX_HOME](/guide/codex-copresence#why-own-codex-home)。
+
 ## 删掉复制出来的节点
 
 ```bash
