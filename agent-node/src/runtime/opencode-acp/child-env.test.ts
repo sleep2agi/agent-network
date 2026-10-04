@@ -29,6 +29,8 @@ import {
   opencodeManagedConfigCandidates,
   readOpencodeProcessIdentity,
   revalidateOpencodeChildLaunch,
+  setOpencodeLinuxProcfsForTest,
+  type OpencodeLinuxProcfs,
 } from "./child-env";
 
 function makeLaunchBase(label: string): string {
@@ -40,6 +42,44 @@ function makeLaunchBase(label: string): string {
   const launchBase = mkdtempSync(join(userRuntime, `.anet-${label}-`));
   expect(statSync(launchBase).mode & 0o777).toBe(0o700);
   return launchBase;
+}
+
+/**
+ * #517 —— Bun emits a ChildProcess "spawn" event before the child has finished
+ * execve(): until then /proc/<pid>/environ shows the *spawner's* environment
+ * (pre-exec) or nothing at all (mid-exec), so a launch-root reference scan run
+ * right after "spawn" can legitimately miss the child. These tests stand the
+ * child in for an already-running OpenCode/tool process, so wait for the child
+ * itself to say it is running (it can only print after exec completed).
+ */
+function spawnIdleChild(env: NodeJS.ProcessEnv): ChildProcess {
+  return spawn(process.execPath, ["-e", "process.stdout.write('ready\\n'); setInterval(() => {}, 1000)"], {
+    env,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+}
+
+function childReady(child: ChildProcess): Promise<void> {
+  return new Promise((resolveReady, rejectReady) => {
+    let seen = "";
+    const onData = (chunk: Buffer) => {
+      seen += chunk.toString("utf8");
+      if (seen.includes("ready\n")) { cleanup(); resolveReady(); }
+    };
+    const onExit = (code: number | null, signal: string | null) => {
+      cleanup();
+      rejectReady(new Error(`idle child exited before ready (code=${code} signal=${signal})`));
+    };
+    const onError = (error: Error) => { cleanup(); rejectReady(error); };
+    const cleanup = () => {
+      child.stdout!.off("data", onData);
+      child.off("exit", onExit);
+      child.off("error", onError);
+    };
+    child.stdout!.on("data", onData);
+    child.once("exit", onExit);
+    child.once("error", onError);
+  });
 }
 
 function pathIsWithin(root: string, candidate: string): boolean {
@@ -771,14 +811,11 @@ describe("buildOpencodeChildEnv — deny-by-default boundary", () => {
         launchIno: String(orphanRootStat.ino),
       }), { mode: 0o600 });
 
-      orphan = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-        env: {
-          PATH: process.env.PATH,
-          XDG_DATA_HOME: join(orphanRoot, "data"),
-        },
-        stdio: "ignore",
+      orphan = spawnIdleChild({
+        PATH: process.env.PATH,
+        XDG_DATA_HOME: join(orphanRoot, "data"),
       });
-      await once(orphan, "spawn");
+      await childReady(orphan);
 
       const whileLive = buildOpencodeChildEnv({
         workDir,
@@ -826,15 +863,12 @@ describe("buildOpencodeChildEnv — deny-by-default boundary", () => {
         parentEnv: {},
       });
       const directRoot = dirname(directEnv.XDG_DATA_HOME!);
-      direct = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-        env: {
-          PATH: process.env.PATH,
-          XDG_DATA_HOME: directEnv.XDG_DATA_HOME,
-          PWD: directEnv.PWD,
-        },
-        stdio: "ignore",
+      direct = spawnIdleChild({
+        PATH: process.env.PATH,
+        XDG_DATA_HOME: directEnv.XDG_DATA_HOME,
+        PWD: directEnv.PWD,
       });
-      await once(direct, "spawn");
+      await childReady(direct);
       const directPid = direct.pid!;
       const directIdentity = readOpencodeProcessIdentity(directPid);
       expect(directIdentity).toBeDefined();
@@ -868,15 +902,9 @@ describe("buildOpencodeChildEnv — deny-by-default boundary", () => {
         XDG_DATA_HOME: descendantEnv.XDG_DATA_HOME,
         PWD: descendantEnv.PWD,
       };
-      direct = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-        env: inheritedEnv,
-        stdio: "ignore",
-      });
-      descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-        env: inheritedEnv,
-        stdio: "ignore",
-      });
-      await Promise.all([once(direct, "spawn"), once(descendant, "spawn")]);
+      direct = spawnIdleChild(inheritedEnv);
+      descendant = spawnIdleChild(inheritedEnv);
+      await Promise.all([childReady(direct), childReady(descendant)]);
       const pid = direct.pid!;
       const identity = readOpencodeProcessIdentity(pid);
       expect(identity).toBeDefined();
@@ -905,14 +933,11 @@ describe("buildOpencodeChildEnv — deny-by-default boundary", () => {
         parentEnv: {},
       });
       const mismatchRoot = dirname(mismatchEnv.XDG_DATA_HOME!);
-      direct = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-        env: {
-          PATH: process.env.PATH,
-          XDG_DATA_HOME: mismatchEnv.XDG_DATA_HOME,
-        },
-        stdio: "ignore",
+      direct = spawnIdleChild({
+        PATH: process.env.PATH,
+        XDG_DATA_HOME: mismatchEnv.XDG_DATA_HOME,
       });
-      await once(direct, "spawn");
+      await childReady(direct);
       const mismatchPid = direct.pid!;
       const mismatchIdentity = readOpencodeProcessIdentity(mismatchPid);
       expect(mismatchIdentity).toBeDefined();
@@ -940,6 +965,101 @@ describe("buildOpencodeChildEnv — deny-by-default boundary", () => {
       rmSync(launchBase, { recursive: true, force: true });
       rmSync(workDir, { recursive: true, force: true });
     }
+  });
+
+  test("#517 a process caught inside execve() is never read as unrelated to the launch root", () => {
+    // /proc/<pid>/environ (and cmdline) read EMPTY between exec_mmap and
+    // create_elf_tables. A spawner is released at exec_mmap, so a tool
+    // descendant is routinely observable in that window. Scripted procfs:
+    // the real window is too short to hit deterministically.
+    const PF_KTHREAD = 0x0020_0000;
+    const uid = process.getuid!();
+    type FakeProc = { state: string; flags?: number; environ: () => string; cmdline: () => string };
+    const statLine = (pid: string, proc: FakeProc) =>
+      [`${pid} (fake proc) ${proc.state}`, 1, 1, 1, 0, -1, proc.flags ?? 0, ...Array(12).fill(0), 4242, 0, 0].join(" ");
+    const install = (procs: Record<string, FakeProc>) => {
+      const slept: number[] = [];
+      const fake: OpencodeLinuxProcfs = {
+        listPids: () => Object.keys(procs),
+        ownerUid: () => uid,
+        read: (pid, file) => {
+          const proc = procs[pid];
+          if (!proc) throw Object.assign(new Error("gone"), { code: "ENOENT" });
+          return file === "stat" ? statLine(pid, proc) : file === "environ" ? proc.environ() : proc.cmdline();
+        },
+        cwd: () => "/",
+        sleepMs: (ms) => { slept.push(ms); },
+      };
+      setOpencodeLinuxProcfsForTest(fake);
+      return slept;
+    };
+    const run = (label: string, procs: (env: NodeJS.ProcessEnv) => Record<string, FakeProc>) => {
+      const workDir = mkdtempSync(join(tmpdir(), `opencode-exec-window-${label}-`));
+      const launchBase = makeLaunchBase(`exec-window-${label}`);
+      try {
+        const env = buildOpencodeChildEnv({
+          workDir,
+          cwd: join(workDir, "requested-project"),
+          launchBase,
+          parentEnv: {},
+        });
+        const root = dirname(env.XDG_DATA_HOME!);
+        const slept = install(procs(env));
+        let released: boolean;
+        try {
+          released = cleanupOpencodeChildEnv(workDir, env);
+        } finally {
+          setOpencodeLinuxProcfsForTest(null);
+        }
+        const outcome = { released, rootExists: existsSync(root), slept };
+        if (existsSync(root)) expect(cleanupOpencodeChildEnv(workDir, env)).toBe(true);
+        return outcome;
+      } finally {
+        setOpencodeLinuxProcfsForTest(null);
+        rmSync(launchBase, { recursive: true, force: true });
+        rmSync(workDir, { recursive: true, force: true });
+      }
+    };
+
+    // 1. A descendant mid-exec that finishes on the third look: it inherits
+    //    this root, so the tree must be retained.
+    const settles = run("settles", (env) => {
+      let looks = 0;
+      const execDone = () => looks >= 3;
+      return {
+        "4242": {
+          state: "R",
+          environ: () => (++looks, execDone() ? `PATH=/usr/bin\0XDG_DATA_HOME=${env.XDG_DATA_HOME}\0` : ""),
+          cmdline: () => (execDone() ? "opencode\0" : ""),
+        },
+      };
+    });
+    expect(settles.released).toBe(false);
+    expect(settles.rootExists).toBe(true);
+
+    // 2. Still inside execve() after the whole bounded wait: unknown is not
+    //    "unrelated" — fail closed, and the wait is bounded.
+    const stuck = run("stuck", () => ({ "4242": { state: "D", environ: () => "", cmdline: () => "" } }));
+    expect(stuck.released).toBe(false);
+    expect(stuck.rootExists).toBe(true);
+    expect(stuck.slept.length).toBeGreaterThan(0);
+    expect(stuck.slept.reduce((a, b) => a + b, 0)).toBeLessThan(1_000);
+
+    // 3. Exec finished with a genuinely empty envp (`env -i`): nothing to
+    //    inherit, so it must not retain every launch tree forever.
+    const envless = run("envless", () => ({ "4242": { state: "S", environ: () => "", cmdline: () => "daemon\0" } }));
+    expect(envless.released).toBe(true);
+    expect(envless.rootExists).toBe(false);
+
+    // 4. Zombies and kernel threads have no user address space to write with.
+    const zombie = run("zombie", () => ({ "4242": { state: "Z", environ: () => "", cmdline: () => "" } }));
+    expect(zombie.released).toBe(true);
+    expect(zombie.slept).toEqual([]);
+    const kthread = run("kthread", () => ({
+      "2": { state: "S", flags: PF_KTHREAD, environ: () => "", cmdline: () => "" },
+    }));
+    expect(kthread.released).toBe(true);
+    expect(kthread.slept).toEqual([]);
   });
 
   test("rejects symlinks at workDir and every security-sensitive state layer", () => {
