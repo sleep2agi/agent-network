@@ -800,6 +800,136 @@ SH
 echo "L7j direct-stdio lane resumes the recorded thread on the real codex app-server (#553)"
 probe_real_appserver_resume
 
+# #554 — the direct-stdio turn on the REAL bundled `codex app-server`: a turn
+# codex fails must fail the task with codex's own message (not 「（无回复）」),
+# and a turn that never finishes must fail at the codex lanes' deadline
+# (CODEX_TIMEOUT_MS) after a turn/interrupt — leaving the thread usable.
+# Hermetic like L7j: throwaway CODEX_HOME, model endpoint on 127.0.0.1 only.
+TASK_ROW=/tmp/test697-task-row.json
+
+wait_task_terminal() { # task_id → writes the row to $TASK_ROW once status is terminal
+  local id=$1 st
+  for _ in $(seq 1 160); do
+    curl -fsS "http://127.0.0.1:9697/api/tasks?task_id=$id&skip_stats=1" \
+      -H "Authorization: Bearer $(jq -r '.token' "$HOME_DIR/.anet/config.json")" > "$TASK_ROW" 2>/dev/null || true
+    st=$(jq -r '.tasks[0].status // ""' "$TASK_ROW" 2>/dev/null || true)
+    case "$st" in completed|replied|failed|error|cancelled|timeout) return 0 ;; esac
+    sleep 0.25
+  done
+  echo "TASK_NOT_TERMINAL id=$id"; cat "$TASK_ROW" 2>/dev/null || true; cat "$RUNTIME_LOG"
+  return 1
+}
+
+# Sets REAL554_HOME / REAL554_BACKUP / REAL554_SHIM_BACKUP; $1 = model base_url.
+real554_setup() {
+  REAL554_BACKUP=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  cp "$RUNTIME_CFG" "$REAL554_BACKUP"
+  REAL554_SHIM_BACKUP=$(mktemp /tmp/test697-codex-shim.XXXXXX)
+  cp "$FAKE_BIN/codex" "$REAL554_SHIM_BACKUP"
+  REAL554_HOME=$(mktemp -d "$HOME_DIR/codex-home-554.XXXXXX")
+  cat > "$REAL554_HOME/config.toml" <<TOML
+model_provider = "test697offline"
+[model_providers.test697offline]
+name = "test697offline"
+base_url = "$1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+TOML
+  cat > "$FAKE_BIN/codex" <<'SH'
+#!/usr/bin/env bash
+exec "$TEST697_REAL_CODEX" "$@" < <(tee -a "$TEST697_REAL_CAPTURE")
+SH
+  chmod 0755 "$FAKE_BIN/codex"
+  jq 'del(.session)' "$REAL554_BACKUP" > "$RUNTIME_CFG"
+  printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
+  : > "$REAL_CAPTURE"
+}
+
+real554_teardown() {
+  stop_runtime_node
+  cp "$REAL554_SHIM_BACKUP" "$FAKE_BIN/codex"
+  chmod 0755 "$FAKE_BIN/codex"
+  rm -f "$REAL554_SHIM_BACKUP"
+  cp "$REAL554_BACKUP" "$RUNTIME_CFG"
+  rm -f "$REAL554_BACKUP"
+  safe_rm_rf "$REAL554_HOME"
+}
+
+probe_real_appserver_turn_error() {
+  local rc=0 id st result
+  # 127.0.0.1:9 refuses → 0.133 sends error{willRetry:false} + turn/completed{status:"failed"}.
+  real554_setup "http://127.0.0.1:9/v1"
+  start_runtime_node real554err ANET_CODEX_STDIO_DIRECT=1 CODEX_HOME="$REAL554_HOME" \
+    TEST697_REAL_CODEX="$REAL_CODEX" TEST697_REAL_CAPTURE="$REAL_CAPTURE" || rc=1
+  if [[ "$rc" -eq 0 ]]; then
+    send_runtime_task real554err && id=$(jq -r '.task_id // .id // ""' /tmp/test697-task.json) \
+      && [[ -n "$id" ]] && wait_task_terminal "$id" || rc=1
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    st=$(jq -r '.tasks[0].status' "$TASK_ROW"); result=$(jq -r '.tasks[0].result // ""' "$TASK_ROW")
+    if [[ "$st" != "failed" ]] \
+      || ! grep -Fq 'codex turn failed: stream disconnected before completion' <<<"$result" \
+      || grep -Fq '（无回复）' <<<"$result" \
+      || ! grep -Fq '[codex-stdio] turn done | status=failed' "$RUNTIME_LOG" \
+      || [[ -z "$(jq -r '.session // ""' "$RUNTIME_CFG")" ]]; then
+      echo "REAL_TURN_ERROR_NOT_FAILED status=$st result=$result"; cat "$REAL_CAPTURE"; cat "$RUNTIME_LOG"; rc=1
+    else
+      echo "  codex error → task $st: ${result:0:160}"
+    fi
+  fi
+  real554_teardown
+  return "$rc"
+}
+
+probe_real_appserver_turn_timeout() {
+  local rc=0 id1 st result hang_pid hang_port=9554 n tag="t$$-$RANDOM-$(date +%s%N)"
+  # A model endpoint that accepts and never answers: the turn never completes.
+  bun -e "require('node:net').createServer((s) => s.on('data', () => {})).listen($hang_port, '127.0.0.1')" &
+  hang_pid=$!
+  for _ in $(seq 1 40); do (exec 3<>"/dev/tcp/127.0.0.1/$hang_port") 2>/dev/null && break; sleep 0.1; done
+  real554_setup "http://127.0.0.1:$hang_port/v1"
+  start_runtime_node real554to ANET_CODEX_STDIO_DIRECT=1 CODEX_HOME="$REAL554_HOME" CODEX_TIMEOUT_MS=3000 \
+    TEST697_REAL_CODEX="$REAL_CODEX" TEST697_REAL_CAPTURE="$REAL_CAPTURE" || rc=1
+  # Two tasks: the second proves the interrupted thread accepts a new turn.
+  for n in 1 2; do
+    [[ "$rc" -eq 0 ]] || break
+    send_runtime_task "real554to$n-$tag" && id1=$(jq -r '.task_id // .id // ""' /tmp/test697-task.json) \
+      && [[ -n "$id1" ]] && wait_task_terminal "$id1" || { rc=1; break; }
+    st=$(jq -r '.tasks[0].status' "$TASK_ROW"); result=$(jq -r '.tasks[0].result // ""' "$TASK_ROW")
+    if [[ "$st" != "failed" ]] || ! grep -Fq 'codex-stdio 调用超时 (3s)' <<<"$result" \
+      || ! grep -Fq '已用 turn/interrupt 中止 turn' <<<"$result"; then
+      echo "REAL_TURN_TIMEOUT_NOT_FAILED task=$n status=$st result=$result"; cat "$REAL_CAPTURE"; cat "$RUNTIME_LOG"; rc=1
+    else
+      echo "  task $n: hung turn → $st after interrupt: ${result:0:140}"
+    fi
+  done
+  if [[ "$rc" -eq 0 ]]; then
+    # Both of OUR tasks reached codex as a turn, and every turn the node
+    # started got exactly one turn/interrupt {threadId, turnId} for a distinct
+    # turn. (A hung task a red mutation left pending on the hub may be
+    # redelivered first — it is just one more interrupted turn.)
+    if ! jq -se --arg tag "$tag" '
+        (map(select(.method=="turn/start" and (.params.input[0].text|contains($tag)))) | length) == 2
+        and (map(select(.method=="turn/start")) | length) == (map(select(.method=="turn/interrupt")) | length)
+        and (map(select(.method=="turn/interrupt")) | all(.[]; (.params.threadId|type)=="string" and (.params.turnId|type)=="string"))
+        and ((map(select(.method=="turn/interrupt") | .params.turnId) | unique | length) == (map(select(.method=="turn/interrupt")) | length))
+        and ((map(select(.method=="thread/start")) | length) == 1)' "$REAL_CAPTURE" >/dev/null \
+      || grep -Fq 'turn not interrupted' "$RUNTIME_LOG"; then
+      echo "REAL_TURN_TIMEOUT_INTERRUPT_WRONG"; cat "$REAL_CAPTURE"; cat "$RUNTIME_LOG"; rc=1
+    fi
+  fi
+  real554_teardown
+  kill "$hang_pid" >/dev/null 2>&1 || true
+  wait "$hang_pid" 2>/dev/null || true
+  return "$rc"
+}
+
+echo "L7k direct-stdio turn: codex error fails the task with codex's message (#554)"
+probe_real_appserver_turn_error
+echo "L7l direct-stdio turn: CODEX_TIMEOUT_MS deadline + turn/interrupt (#554)"
+probe_real_appserver_turn_timeout
+
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
   run_mutation() {
@@ -1159,6 +1289,28 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     '      const cause = e instanceof Error ? e.message : String(e);' \
     '      const cause = e instanceof Error ? e.message : String(e); { const r = await rpc.request<{ thread: { id: string } }>("thread/start", buildCodexStdioThreadStartParams(o.flags, o.model)); return { threadId: r.thread.id, resumed: false }; }' \
     probe_real_appserver_resume
+  # #554 — a failed turn must fail the task; the turn must have the codex
+  # lanes' deadline and be interrupted at it.
+  run_mutation stdio-turn-failure-swallowed L7k \
+    "$ROOT/agent-node/src/cli.ts" \
+    '  if (outcome.failure !== null) throw new CodexStdioTurnError(outcome.failure, turnId);' \
+    '  void CodexStdioTurnError;' \
+    probe_real_appserver_turn_error
+  run_mutation stdio-turn-status-ignored L7k \
+    "$ROOT/agent-node/src/codex-sdk-thread-options.ts" \
+    '        failure: codexStdioTurnFailure(p?.turn, fatalError),' \
+    '        failure: null,' \
+    probe_real_appserver_turn_error
+  run_mutation stdio-turn-timeout-knob-ignored L7l \
+    "$ROOT/agent-node/src/cli.ts" \
+    '    timeoutMs: currentCodexTimeoutMs(),' \
+    '    timeoutMs: 0,' \
+    probe_real_appserver_turn_timeout
+  run_mutation stdio-turn-not-interrupted L7l \
+    "$ROOT/agent-node/src/codex-sdk-thread-options.ts" \
+    '          await rpc.request("turn/interrupt", { threadId: o.threadId, turnId }, CODEX_STDIO_INTERRUPT_TIMEOUT_MS);' \
+    '          await rpc.request("turn/interrupt-disabled", { threadId: o.threadId, turnId }, CODEX_STDIO_INTERRUPT_TIMEOUT_MS);' \
+    probe_real_appserver_turn_timeout
   run_mutation_all explicit-runtime-model-ignored L7e \
     "$ROOT/agent-node/src/cli.ts" \
     'resolveCodexModel(MODEL)' 'resolveCodexModel(undefined)' 5 \

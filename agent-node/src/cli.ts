@@ -174,7 +174,15 @@ import {
 } from "./runtime/daemon-create-capability";
 import { daemonHome, resolveDefaultWorkdirRoot } from "./runtime/child-workdir";
 import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
-import { buildCodexSdkThreadOptions, openCodexStdioThread, rebuildCodexSdkThread } from "./codex-sdk-thread-options";
+import {
+  buildCodexSdkThreadOptions,
+  CodexStdioTurnError,
+  CodexStdioTurnTimeoutError,
+  openCodexStdioThread,
+  rebuildCodexSdkThread,
+  watchCodexStdioTurn,
+  type CodexStdioTurnOutcome,
+} from "./codex-sdk-thread-options";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 import {
   backupOpencodeConfig,
@@ -3420,52 +3428,66 @@ async function processWithCodexStdio(
   if (images?.length) for (const p of images) input.push({ type: "localImage", path: p });
 
   // Listen for the item.completed agentMessage and turn.completed for THIS turn.
-  // Notification methods are camelCase per #120 R225-R230 POC: item/completed
-  // and turn/completed events arrive on the EventEmitter by method name.
-  let finalText = "";
-  let itemCount = 0;
-  const turnId = await new Promise<string>(async (resolveTurn, rejectTurn) => {
-    let pendingTurnId: string | null = null;
-
-    const onItemCompleted = (params: { thread_id?: string; threadId?: string; turn_id?: string; turnId?: string; item?: { type?: string; text?: string } }) => {
-      const it = params?.item;
-      if (!it) return;
-      itemCount++;
-      if (it.type === "agentMessage" && typeof it.text === "string") finalText = it.text;
-    };
-    const onTurnCompleted = (params: { turn?: { id?: string }; turnId?: string }) => {
-      const id = params?.turn?.id ?? params?.turnId ?? null;
-      if (pendingTurnId && id && id !== pendingTurnId) return; // not our turn
-      client.off("item/completed", onItemCompleted);
-      client.off("turn/completed", onTurnCompleted);
-      resolveTurn(id || pendingTurnId || "");
-    };
-    client.on("item/completed", onItemCompleted);
-    client.on("turn/completed", onTurnCompleted);
-
-    try {
-      const tStart = Date.now();
-      const turnResp = await client.request<{ turn?: { id?: string }; turnId?: string }>("turn/start", { threadId: codexStdioThreadId, input });
-      pendingTurnId = (turnResp?.turn?.id ?? turnResp?.turnId) || null;
-      // Direct stdio does not yet send/echo clientUserMessageId, so the
-      // response turn id is admission evidence only (the #587 race proved it
-      // is not authoritative ownership). Report submitted, never consumed,
-      // until this lane grows an exact identity echo.
-      evidence?.submitted();
-      log(`[codex-stdio] turn/start → ${pendingTurnId ?? "(no id)"} ${(Date.now() - tStart)}ms`);
-    } catch (e: any) {
-      client.off("item/completed", onItemCompleted);
-      client.off("turn/completed", onTurnCompleted);
-      rejectTurn(e);
-    }
+  // Notification methods are camelCase per #120 R225-R230 POC.
+  //
+  // #554 — the watcher (codex-sdk-thread-options.ts) gives the turn the codex
+  // lanes' deadline (CODEX_TIMEOUT_MS / flags.timeout, default 300s; at the
+  // deadline the turn is stopped with turn/interrupt) and turns codex's
+  // non-retrying `error` notification / a failed or interrupted turn into a
+  // task failure carrying the upstream message, instead of 「（无回复）」.
+  const watch = watchCodexStdioTurn(client, {
+    threadId: codexStdioThreadId!,
+    timeoutMs: currentCodexTimeoutMs(),
+    log,
   });
-  log(`[codex-stdio] turn done | items=${itemCount} | turn_id=${turnId.slice(0, 8)}`);
+  // An app-server that exits mid-turn never sends turn/completed: fail now,
+  // not at the deadline.
+  const onExitMidTurn = (info: { code: number | null; signal: string | null }) =>
+    watch.fail(new Error(`codex app-server exited mid-turn (code=${info.code} signal=${info.signal})`));
+  client.once("exit", onExitMidTurn);
+  let outcome: CodexStdioTurnOutcome;
+  try {
+    outcome = await new Promise<CodexStdioTurnOutcome>(async (resolveTurn, rejectTurn) => {
+      try {
+        const tStart = Date.now();
+        const turnResp = await client.request<{ turn?: { id?: string }; turnId?: string }>("turn/start", { threadId: codexStdioThreadId, input });
+        const pendingTurnId = (turnResp?.turn?.id ?? turnResp?.turnId) || null;
+        watch.setTurnId(pendingTurnId);
+        // Direct stdio does not yet send/echo clientUserMessageId, so the
+        // response turn id is admission evidence only (the #587 race proved it
+        // is not authoritative ownership). Report submitted, never consumed,
+        // until this lane grows an exact identity echo.
+        evidence?.submitted();
+        log(`[codex-stdio] turn/start → ${pendingTurnId ?? "(no id)"} ${(Date.now() - tStart)}ms`);
+      } catch (e: any) {
+        watch.cancel();
+        rejectTurn(e);
+        return;
+      }
+      watch.done.then(resolveTurn, rejectTurn);
+    });
+  } catch (e) {
+    if (e instanceof CodexStdioTurnTimeoutError && !e.interrupted && codexStdio === client) {
+      // The turn may still be running and would collide with the next
+      // turn/start: restart the app-server; the next task resumes the
+      // recorded thread (#553).
+      log(`[codex-stdio] turn not interrupted — restarting codex app-server for the next task`);
+      void client.close().catch(() => {});
+    }
+    throw e;
+  } finally {
+    client.off("exit", onExitMidTurn);
+  }
+  const { finalText, itemCount, turnId } = outcome;
+  log(`[codex-stdio] turn done | status=${outcome.status ?? "?"} | items=${itemCount} | turn_id=${turnId.slice(0, 8)}`);
   // #553 — record the thread only now: codex writes the rollout once a turn
   // ran, so an id recorded at thread/start could name a thread it cannot load.
+  // (#554: a turn that completed as failed also ran — its rollout exists.)
   if (codexStdioThreadId && codexStdioThreadId !== codexStdioRecordedThreadId) {
     codexStdioRecordedThreadId = codexStdioThreadId;
     writebackSession(codexStdioThreadId);
   }
+  if (outcome.failure !== null) throw new CodexStdioTurnError(outcome.failure, turnId);
   return finalText || "（无回复）";
 }
 

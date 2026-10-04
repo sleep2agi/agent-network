@@ -164,7 +164,11 @@ export class CodexStdioClient extends EventEmitter {
     if ("method" in msg && msg.method) {
       // Emit on the method name itself for typed listeners (e.g. on("agentMessage/delta", ...))
       // and a generic "notification" event for broad observers.
-      this.emit(msg.method, msg.params);
+      // #554 — codex's `error` NOTIFICATION must not be emitted as the
+      // EventEmitter's reserved "error" event: that is the subprocess-error
+      // channel (an Error instance), and with no listener it throws inside
+      // this stdout handler. Observe it via the generic "notification" event.
+      if (msg.method !== "error") this.emit(msg.method, msg.params);
       this.emit("notification", msg);
     } else {
       this.emit("malformed", msg);

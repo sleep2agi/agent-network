@@ -10,6 +10,11 @@ import {
   buildCodexStdioThreadStartParams,
   codexStdioResumeRefusal,
   CodexStdioResumeError,
+  codexStdioFatalErrorMessage,
+  codexStdioTurnFailure,
+  CodexStdioTurnError,
+  CodexStdioTurnTimeoutError,
+  watchCodexStdioTurn,
   isCodexThreadGoneError,
   openCodexStdioThread,
   rebuildCodexSdkThread,
@@ -330,5 +335,197 @@ describe("#553 direct-stdio lane resumes the recorded thread", () => {
   test("the refusal is one line even when codex's message has newlines", () => {
     const line = codexStdioResumeRefusal({ alias: "a", threadId: T, cause: "no rollout found for thread id x\n  at y" });
     expect(line.includes("\n")).toBe(false);
+  });
+});
+
+// #554 — a fake app-server notification stream shaped like the real 0.133.0 /
+// 0.155.1 captures quoted in codex-sdk-thread-options.ts.
+function fakeTurnRpc(opts: { interruptError?: string } = {}) {
+  const { EventEmitter } = require("node:events") as typeof import("node:events");
+  const ee = new EventEmitter();
+  const calls: Array<{ method: string; params: any }> = [];
+  return {
+    calls,
+    on: (ev: "notification", l: (m: any) => void) => ee.on(ev, l),
+    off: (ev: "notification", l: (m: any) => void) => ee.off(ev, l),
+    listeners: () => ee.listenerCount("notification"),
+    push: (method: string, params: unknown) => ee.emit("notification", { method, params }),
+    async request<R>(method: string, params?: unknown): Promise<R> {
+      calls.push({ method, params });
+      if (method === "turn/interrupt" && opts.interruptError) throw new Error(opts.interruptError);
+      return {} as R;
+    },
+  };
+}
+const TH = "01a1071f-4468-7623-a54f-bbedf2fd4e3d";
+const TU = "01a1071f-4491-7c63-a421-a5c247c58ef6";
+const UPSTREAM = "unexpected status 401 Unauthorized: probe says 401, url: http://127.0.0.1:1/v1/responses";
+
+describe("#554 direct-stdio turn: codex errors fail the task", () => {
+  test("error(willRetry:false) + turn/completed failed → failure carries the upstream message", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 0 });
+    w.setTurnId(TU);
+    rpc.push("error", { error: { message: UPSTREAM, codexErrorInfo: "other", additionalDetails: null }, willRetry: false, threadId: TH, turnId: TU });
+    rpc.push("turn/completed", { threadId: TH, turn: { id: TU, items: [], status: "failed", error: { message: UPSTREAM } } });
+    const out = await w.done;
+    expect(out.status).toBe("failed");
+    expect(out.failure).toBe(UPSTREAM);
+    expect(out.finalText).toBe("");
+    expect(rpc.listeners()).toBe(0);
+  });
+
+  test("a non-retrying error notification fails the turn even when turn/completed carries no error", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 0 });
+    w.setTurnId(TU);
+    rpc.push("error", { error: { message: "boom from upstream" }, willRetry: false, turnId: TU });
+    rpc.push("turn/completed", { threadId: TH, turn: { id: TU, status: "completed", error: null } });
+    expect((await w.done).failure).toBe("boom from upstream");
+  });
+
+  test("willRetry:true errors (0.155 'Reconnecting...') are not failures", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 0 });
+    w.setTurnId(TU);
+    rpc.push("error", { error: { message: "Reconnecting... waiting for network" }, willRetry: true, turnId: TU });
+    rpc.push("item/completed", { turnId: TU, item: { type: "agentMessage", text: "hello" } });
+    rpc.push("turn/completed", { threadId: TH, turn: { id: TU, status: "completed", error: null } });
+    const out = await w.done;
+    expect(out.failure).toBeNull();
+    expect(out.finalText).toBe("hello");
+  });
+
+  test("an empty successful turn is still a success (caller replies 「（无回复）」)", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 0 });
+    w.setTurnId(TU);
+    rpc.push("turn/completed", { threadId: TH, turn: { id: TU, status: "completed", error: null } });
+    const out = await w.done;
+    expect(out.failure).toBeNull();
+    expect(out.finalText).toBe("");
+  });
+
+  test("notifications for another turn are ignored", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 0 });
+    w.setTurnId(TU);
+    rpc.push("error", { error: { message: "someone else's" }, willRetry: false, turnId: "other" });
+    rpc.push("turn/completed", { turn: { id: "other", status: "failed", error: { message: "x" } } });
+    rpc.push("turn/completed", { turn: { id: TU, status: "completed" } });
+    expect((await w.done).failure).toBeNull();
+  });
+
+  test("failure mapping mirrors the app-server bridge", () => {
+    expect(codexStdioTurnFailure({ status: "failed", error: { message: "m" } }, null)).toBe("m");
+    expect(codexStdioTurnFailure({ status: "failed", error: null }, "from-notification")).toBe("from-notification");
+    expect(codexStdioTurnFailure({ status: "failed", error: null }, null)).toBe("Codex turn failed without an error message");
+    expect(codexStdioTurnFailure({ status: "interrupted", error: null }, null)).toBe("Codex turn was interrupted without an error message");
+    expect(codexStdioTurnFailure({ status: "completed", error: null }, null)).toBeNull();
+    expect(codexStdioTurnFailure(undefined, null)).toBeNull();
+    expect(codexStdioFatalErrorMessage({ willRetry: true, error: { message: "x" } })).toBeNull();
+    expect(codexStdioFatalErrorMessage({ willRetry: false, error: { message: "x" } })).toBe("x");
+    expect(new CodexStdioTurnError("a\n b", TU).message).toBe("codex turn failed: a b");
+  });
+
+  test("fail() settles the turn at once (app-server exited mid-turn)", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 60_000 });
+    w.fail(new Error("codex app-server exited mid-turn (code=1 signal=null)"));
+    await expect(w.done).rejects.toThrow(/exited mid-turn/);
+    expect(rpc.listeners()).toBe(0);
+  });
+});
+
+describe("#554 direct-stdio turn: deadline + turn/interrupt", () => {
+  test("a turn that never completes times out, is interrupted with {threadId, turnId}, and fails", async () => {
+    const rpc = fakeTurnRpc();
+    const logs: string[] = [];
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 40, log: (l) => logs.push(l) });
+    w.setTurnId(TU);
+    rpc.push("error", { error: { message: "Reconnecting... waiting for network" }, willRetry: true, turnId: TU });
+    let err: unknown;
+    try { await w.done; } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(CodexStdioTurnTimeoutError);
+    const t = err as CodexStdioTurnTimeoutError;
+    expect(t.interrupted).toBe(true);
+    expect(t.timeoutMs).toBe(40);
+    expect(t.message).toContain("codex-stdio 调用超时");
+    expect(t.message).toContain("期间 1 个事件");
+    expect(t.message).toContain(`已用 turn/interrupt 中止 turn ${TU}`);
+    expect(rpc.calls).toEqual([{ method: "turn/interrupt", params: { threadId: TH, turnId: TU } }]);
+    expect(rpc.listeners()).toBe(0);
+    // a late turn/completed (the interrupted turn) changes nothing
+    rpc.push("turn/completed", { turn: { id: TU, status: "interrupted" } });
+  });
+
+  test("a failed interrupt is reported and marks the turn as possibly still running", async () => {
+    const rpc = fakeTurnRpc({ interruptError: "codex JSON-RPC error -32600: expected active turn id x but found y" });
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 20 });
+    w.setTurnId(TU);
+    const err = await w.done.catch((e) => e);
+    expect(err).toBeInstanceOf(CodexStdioTurnTimeoutError);
+    expect(err.interrupted).toBe(false);
+    expect(err.message).toContain("turn/interrupt 失败");
+    expect(err.message).toContain("期间 0 个事件");
+  });
+
+  test("timeout 0 = no deadline (the codex lanes' existing sentinel)", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 0 });
+    w.setTurnId(TU);
+    const race = await Promise.race([w.done.then(() => "done", () => "rejected"), new Promise((r) => setTimeout(() => r("pending"), 60))]);
+    expect(race).toBe("pending");
+    expect(rpc.calls).toEqual([]);
+    w.cancel();
+  });
+
+  test("completion before the deadline clears the timer (no interrupt)", async () => {
+    const rpc = fakeTurnRpc();
+    const w = watchCodexStdioTurn(rpc, { threadId: TH, timeoutMs: 30 });
+    w.setTurnId(TU);
+    rpc.push("turn/completed", { turn: { id: TU, status: "completed" } });
+    await w.done;
+    await new Promise((r) => setTimeout(r, 60));
+    expect(rpc.calls).toEqual([]);
+  });
+});
+
+describe("#554 cli.ts stdio lane wiring", () => {
+  const cli = readFileSync(join(import.meta.dir, "cli.ts"), "utf8");
+  const start = cli.indexOf("async function processWithCodexStdio(");
+  const body = cli.slice(start, cli.indexOf("\n}\n", start));
+
+  test("the turn is watched with the codex lanes' timeout knob, armed before turn/start", () => {
+    const arm = body.indexOf("watchCodexStdioTurn(client, {");
+    expect(arm).toBeGreaterThan(0);
+    expect(body).toContain("timeoutMs: currentCodexTimeoutMs(),");
+    expect(arm).toBeLessThan(body.indexOf('"turn/start"'));
+    expect(body).toContain("watch.setTurnId(pendingTurnId);");
+  });
+
+  test("a failed turn throws instead of replying 「（无回复）」, after the thread is recorded", () => {
+    const thr = body.indexOf("if (outcome.failure !== null) throw new CodexStdioTurnError(outcome.failure, turnId);");
+    expect(thr).toBeGreaterThan(body.indexOf("writebackSession(codexStdioThreadId)"));
+    expect(thr).toBeLessThan(body.indexOf('return finalText || "（无回复）";'));
+  });
+
+  test("an un-interrupted timeout restarts the app-server; an exit mid-turn fails the watch", () => {
+    expect(body).toContain("e instanceof CodexStdioTurnTimeoutError && !e.interrupted");
+    expect(body).toContain("void client.close()");
+    expect(body).toContain('client.once("exit", onExitMidTurn);');
+  });
+});
+
+describe("#554 CodexStdioClient does not emit codex's error notification as the reserved 'error' event", () => {
+  test("dispatch routes method=error only through 'notification'", () => {
+    const { CodexStdioClient } = require("./runtime/codex-stdio-client");
+    const c = new CodexStdioClient();
+    const seen: string[] = [];
+    c.on("notification", (m: any) => seen.push(m.method));
+    // No "error" listener: emitting the reserved event would throw here.
+    (c as any).dispatch({ method: "error", params: { error: { message: "x" }, willRetry: false } });
+    (c as any).dispatch({ method: "turn/completed", params: {} });
+    expect(seen).toEqual(["error", "turn/completed"]);
   });
 });
