@@ -15,6 +15,8 @@ COPY agent-network/ ./
 # outside this directory.
 COPY agent-node/package.json /repo/agent-node/package.json
 COPY agent-node/src/runtime/opencode-acp/ /repo/agent-node/src/runtime/opencode-acp/
+COPY agent-node/src/runtime/opencode-timeout.ts /repo/agent-node/src/runtime/opencode-timeout.ts
+COPY agent-node/src/util/timeout.ts /repo/agent-node/src/util/timeout.ts
 COPY tests/test386-opencode-agent-node-gate/ /test/
 
 # Real-package compatibility diagnostic for the common developer layout:
