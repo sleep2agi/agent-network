@@ -55,8 +55,10 @@ printf -- '- expected pair (from source): agent-network@%s + agent-node@%s\n' \
 # 夹具里的版本号同样从常量派生。它们代表「被信任的那个确切版本」,写死的话
 # release 一升常量,夹具就不再是「确切版本」,而这个失败看起来像产品坏了。
 export EXPECT_NODE_SPEC="@sleep2agi/agent-node@$EXPECT_NODE"
-for fixture in /repo/tests/test386-opencode-agent-node-gate/exact-node/package.json \
-               /repo/tests/test386-opencode-agent-node-gate/project-agent-node/package.json; do
+# The Dockerfile copies this directory to /test and installs the fixtures into
+# their node_modules layouts at build time, so rewrite those installed copies.
+for fixture in /test/exact-global/node_modules/@sleep2agi/agent-node/package.json \
+               /test/project-work/node_modules/@sleep2agi/agent-node/package.json; do
   [ -f "$fixture" ] || fail "fixture missing: $fixture"
   tmp=$(mktemp)
   EXPECT_NODE="$EXPECT_NODE" node -e '
@@ -67,6 +69,7 @@ for fixture in /repo/tests/test386-opencode-agent-node-gate/exact-node/package.j
     fs.writeFileSync(process.argv[2], JSON.stringify(j, null, 2) + "\n");
   ' "$fixture" "$tmp" || fail "could not rewrite fixture version: $fixture"
   mv "$tmp" "$fixture"
+  chmod 644 "$fixture"
 done
 printf -- '- fixtures pinned to agent-node@%s\n' "$EXPECT_NODE" >> "$REPORT"
 
