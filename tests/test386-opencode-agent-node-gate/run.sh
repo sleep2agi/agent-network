@@ -271,7 +271,8 @@ pass "stale global bypassed; later exact global received protected PATH/binary/v
 # to the paired agent-node. Any other version stays refused with the pin hint.
 make_global_opencode() {
   local root="$1" version="$2"
-  rm -rf "$root"
+  # Each caller passes a fresh path; refuse rather than delete if it already exists.
+  if [ -e "$root" ]; then echo "make_global_opencode: $root already exists" >&2; return 1; fi
   mkdir -p -m 755 "$root" "$root/node_modules" "$root/node_modules/opencode-ai" \
     "$root/node_modules/opencode-ai/bin" "$root/bin"
   printf '#!/bin/sh\nset -eu\nif [ "${1:-}" = "--version" ]; then printf "%%s\\n" "%s"; exit 0; fi\nexit 64\n' \
