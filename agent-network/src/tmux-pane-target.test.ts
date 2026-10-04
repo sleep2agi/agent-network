@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { PANE_LIST_FORMAT, exactSession, paneTargetFor, parsePaneRows } from "./tmux-exact-target";
+import { PANE_LIST_ARGS, PANE_LIST_FORMAT, exactSession, paneTargetFor, parsePaneRows } from "./tmux-exact-target";
+import { TMUX_FIELD_SEP } from "./tmux-format";
 
 const LIST = [
   "A站Grok\t0.0",
@@ -40,7 +41,9 @@ test("rows split on the last tab, so the coordinate is never mistaken for the na
 });
 
 test("the portable visible pane marker survives tmux builds that sanitize control characters", () => {
-  expect(PANE_LIST_FORMAT).toContain("::ANET_PANE::");
+  expect(PANE_LIST_FORMAT).toContain(TMUX_FIELD_SEP);
+  expect(paneTargetFor(`linux-node${TMUX_FIELD_SEP}2.3\n`, "linux-node")).toBe("linux-node:2.3");
+  // legacy marker still parses
   expect(paneTargetFor("linux-node::ANET_PANE::2.3\n", "linux-node")).toBe("linux-node:2.3");
 });
 
@@ -65,7 +68,8 @@ test.skipIf(!tmuxAvailable())("real tmux: '=name' fails for capture-pane on a no
     // …but capture-pane does not. This is the whole reason for the coordinate.
     expect(() => execFileSync("tmux", ["capture-pane", "-p", "-t", exactSession(S)], { stdio: "pipe" })).toThrow();
 
-    const out = execFileSync("tmux", ["list-panes", "-a", "-F", PANE_LIST_FORMAT], { encoding: "utf-8" }).toString();
+    // PANE_LIST_ARGS carries -u: without it a non-UTF-8 locale prints this name as `_` (#533).
+    const out = execFileSync("tmux", [...PANE_LIST_ARGS], { encoding: "utf-8" }).toString();
     const coord = paneTargetFor(out, S);
     expect(coord).toBe(`${S}:0.0`);
     expect(() => execFileSync("tmux", ["capture-pane", "-p", "-t", coord!], { stdio: "pipe" })).not.toThrow();

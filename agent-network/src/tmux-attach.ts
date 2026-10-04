@@ -1,14 +1,15 @@
+import { parseTmuxRows, tmuxListArgs } from "./tmux-format";
+
 export type TmuxSession = { id: string; name: string };
 
+/** argv for `execTmux`: `-u list-sessions -F '#{session_id}|ANETSEP|#{session_name}'` (#533). */
+export const SESSION_LIST_ARGS: readonly string[] = tmuxListArgs(["list-sessions"], ["#{session_id}", "#{session_name}"]);
+
+/** Parse SESSION_LIST_ARGS output (legacy `id\tname` rows still accepted). */
 export function parseTmuxSessions(output: string): TmuxSession[] {
   const sessions: TmuxSession[] = [];
-  for (const line of output.split(/\r?\n/)) {
-    if (!line) continue;
-    const tab = line.indexOf("\t");
-    if (tab <= 0) continue;
-    const id = line.slice(0, tab);
-    const name = line.slice(tab + 1);
-    if (name) sessions.push({ id, name });
+  for (const [id, name] of parseTmuxRows(output, 2)) {
+    if (id && name) sessions.push({ id, name });
   }
   return sessions;
 }
