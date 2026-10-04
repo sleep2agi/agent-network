@@ -21,6 +21,11 @@
 //
 // 上线护栏(生产上有别的团队的网络和节点):
 //   COMMHUB_DUE_REMINDER_NETWORKS=<id,id,…>  只给这些网络发;不设 = 所有网络(自建 Hub 默认就有这个功能)。
+//   #524 按网络开关(一个 Hub 上多个团队的网络,只想给自己的网络开):
+//   COMMHUB_DUE_REMINDERS_NETWORKS=<id,id,…>          白名单。COMMHUB_DUE_REMINDERS=0 时也生效:只给这些网络发。
+//   COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS=<id,id,…>  黑名单。功能开着时这些网络不发(白名单里也排除)。
+//   两个新变量都不设 → 行为与之前完全相同。生效范围在 startHub 时打一行日志(只有网络 id)。
+//   过滤写在扫描 SQL 的 WHERE 里(基线 INSERT 与候选 SELECT 同一个条件),范围外网络的行根本不会被读出来。
 //   COMMHUB_DUE_REMINDER_NODES=1              给负责 Agent 节点发消息;默认关(人照常提醒)。
 //   开通时不补发:每个网络第一次被扫描到时记一行基线(kind='baseline',sent_at = 那一刻)。只有在基线**之后**才变成逾期的卡
 //     会收到「已逾期」提醒;基线之前就已经逾期的卡永远不发逾期提醒(打开功能 / 把网络加进白名单都不会刷一批旧卡)。
@@ -72,12 +77,59 @@ export function dueReminderTimezone(): string {
   const tz = process.env.COMMHUB_DUE_REMINDER_TZ?.trim() || "Asia/Shanghai";
   try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return tz; } catch { return "Asia/Shanghai"; }
 }
+/** 逗号分隔的网络 id;没设(或只有空白 / 逗号)→ null。去重,保持顺序。 */
+function envIdList(name: string): string[] | null {
+  const raw = process.env[name];
+  if (raw === undefined) return null;
+  const ids = [...new Set(raw.split(",").map((x) => x.trim()).filter(Boolean))];
+  return ids.length ? ids : null;
+}
 /** COMMHUB_DUE_REMINDER_NETWORKS:逗号分隔的网络 id;没设(或只有空白)→ null = 所有网络。 */
 export function reminderNetworks(): string[] | null {
-  const raw = process.env.COMMHUB_DUE_REMINDER_NETWORKS;
-  if (raw === undefined) return null;
-  const ids = raw.split(",").map((x) => x.trim()).filter(Boolean);
-  return ids.length ? ids : null;
+  return envIdList("COMMHUB_DUE_REMINDER_NETWORKS");
+}
+
+/**
+ * #524 生效范围。
+ *   off  —— 不扫描(COMMHUB_DUE_REMINDERS=0 且没设 COMMHUB_DUE_REMINDERS_NETWORKS)。
+ *   all  —— 所有网络,减去 exclude。
+ *   only —— 只扫 include(已减去 exclude;可能为空 = 什么都不扫)。
+ * 白名单 = COMMHUB_DUE_REMINDERS_NETWORKS ∪ COMMHUB_DUE_REMINDER_NETWORKS(旧名);但只有新名能在 COMMHUB_DUE_REMINDERS=0 时打开。
+ * 白名单一旦设了就收窄(包括 COMMHUB_DUE_REMINDERS=1):宁可少发,不给没点名的网络发。
+ */
+export type DueReminderScope =
+  | { mode: "off" }
+  | { mode: "all"; exclude: string[] }
+  | { mode: "only"; include: string[]; exclude: string[] };
+
+export function dueReminderScope(): DueReminderScope {
+  const allow = envIdList("COMMHUB_DUE_REMINDERS_NETWORKS");
+  const legacy = envIdList("COMMHUB_DUE_REMINDER_NETWORKS");
+  const exclude = envIdList("COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS") ?? [];
+  if (process.env.COMMHUB_DUE_REMINDERS === "0" && !allow) return { mode: "off" };
+  if (!allow && !legacy) return { mode: "all", exclude };
+  const include = [...new Set([...(allow ?? []), ...(legacy ?? [])])].filter((id) => !exclude.includes(id));
+  return { mode: "only", include, exclude };
+}
+
+export function describeDueReminderScope(scope: DueReminderScope = dueReminderScope()): string {
+  if (scope.mode === "off") return "off";
+  if (scope.mode === "all") return scope.exclude.length ? `all networks except ${scope.exclude.join(",")}` : "all networks";
+  return scope.include.length ? `only networks ${scope.include.join(",")}` : "no networks (allowlist empty after exclude)";
+}
+
+/**
+ * 范围条件(拼在 WHERE 后面)。只 push 这个分支真正用到的参数(PG 预编译拒绝绑了没用的参数)。
+ * null = 范围为空,调用方不该查询。
+ */
+export function dueScopeSql(scope: DueReminderScope, params: unknown[]): string | null {
+  if (scope.mode === "off") return null;
+  if (scope.mode === "only") {
+    if (!scope.include.length) return null;
+    return ` AND network_id IN (${scope.include.map((id) => `?${params.push(id)}`).join(", ")})`;
+  }
+  if (!scope.exclude.length) return "";
+  return ` AND network_id NOT IN (${scope.exclude.map((id) => `?${params.push(id)}`).join(", ")})`;
 }
 export function nodeRemindersEnabled(): boolean { return process.env.COMMHUB_DUE_REMINDER_NODES === "1"; }
 export const BASELINE_KIND = "baseline";
@@ -213,13 +265,15 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
   // 范围:最老 = 今天 - maxOverdue - 1(UTC 日期 ≤ 本地日期,多留一天);最新 < 今天 + 2(24 小时内的时刻型 UTC 日期 ≤ 明天)。
   const lo = addDays(today, -maxOverdue - 1);
   const hi = addDays(today, 2);
-  const allow = reminderNetworks();
+  const scope = dueReminderScope();
+  // 范围为空(关闭 / 白名单全被排除)→ 什么都不读、不写基线。
+  if (dueScopeSql(scope, []) === null) return [];
   const sentAt = new Date(nowMs).toISOString();
   // 基线:范围内每个网络第一次被扫到的那一刻(已有就不动)。一条 INSERT … SELECT。
   {
     const bp: unknown[] = [BASELINE_KIND, sentAt];
     // WHERE 必须有:SQLite 里「INSERT … SELECT … FROM t ON CONFLICT」会把 ON 读成 JOIN 约束(语法错),要一个 WHERE 隔开。
-    const where = ` WHERE 1=1${allow ? ` AND network_id IN (${allow.map((id) => `?${bp.push(id)}`).join(", ")})` : ""}`;
+    const where = ` WHERE 1=1${dueScopeSql(scope, bp) ?? ""}`;
     db.run(
       `INSERT INTO requirement_due_reminders (requirement_id, kind, due_on, day, network_id, sent_at)
        SELECT '__baseline__:' || network_id, ?1, '', '', network_id, ?2 FROM networks${where}
@@ -233,7 +287,7 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
       .filter((e): e is readonly [string, number] => e[1] !== null),
   );
   const params: unknown[] = [lo, hi];
-  const netFilter = allow ? ` AND network_id IN (${allow.map((id) => `?${params.push(id)}`).join(", ")})` : "";
+  const netFilter = dueScopeSql(scope, params) ?? "";
   const rows = db.all<DueRow>(
     `SELECT requirement_id, network_id, seq, title, due_on, owner_json, participants_json, agent_owner_json
        FROM requirements
@@ -299,9 +353,14 @@ function deliver(row: DueRow, r: { kind: DueKind; overdueDays: number; dueDay: s
   return { requirement_id: row.requirement_id, kind: r.kind as DueKind, users, node: notifiedNode };
 }
 
-/** startHub 里调用。COMMHUB_DUE_REMINDERS=0 关掉;bootServer(测试)不调用它。第一次扫描延后一个间隔外的 30 秒,不和启动抢。 */
+/**
+ * startHub 里调用。COMMHUB_DUE_REMINDERS=0 关掉(除非设了 COMMHUB_DUE_REMINDERS_NETWORKS,见 dueReminderScope);
+ * bootServer(测试)不调用它。第一次扫描延后一个间隔外的 30 秒,不和启动抢。启动时打一行生效范围(只有网络 id)。
+ */
 export function startDueReminderTimer(): ReturnType<typeof setInterval> | null {
-  if (process.env.COMMHUB_DUE_REMINDERS === "0") return null;
+  const scope = dueReminderScope();
+  console.log(`[due-reminders] scope: ${describeDueReminderScope(scope)}`);
+  if (scope.mode === "off") return null;
   const ms = envNumber("COMMHUB_DUE_REMINDER_TICK_MS", 10 * 60_000, 1_000);
   const tick = () => { try { runDueReminders(); } catch (e: any) { console.error(`[due-reminders] tick failed: ${e?.message || e}`); } };
   const first = setTimeout(tick, Math.min(ms, 30_000));

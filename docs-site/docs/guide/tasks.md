@@ -49,8 +49,12 @@ Hub 每 10 分钟查一次没完成、没归档、设了预计完成的任务，
 
 运维可以用环境变量调整：
 
-- `COMMHUB_DUE_REMINDERS=0`：关闭。
-- `COMMHUB_DUE_REMINDER_NETWORKS=<网络 id,网络 id>`：只提醒这些网络。不设就是所有网络。
+- `COMMHUB_DUE_REMINDERS=0`：关闭（除非同时设了下面的 `COMMHUB_DUE_REMINDERS_NETWORKS`）。
+- `COMMHUB_DUE_REMINDERS_NETWORKS=<网络 id,网络 id>`：只提醒这些网络。和 `COMMHUB_DUE_REMINDERS=0` 一起用时，只给这些网络打开，别的网络照样关着——一个 Hub 上有多个团队、只想先给自己的网络开时用它。
+- `COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS=<网络 id,网络 id>`：功能开着时，这些网络不提醒；白名单里点了名也一样排除。
+- `COMMHUB_DUE_REMINDER_NETWORKS=<网络 id,网络 id>`：旧名，只提醒这些网络，不设就是所有网络；它不能在 `COMMHUB_DUE_REMINDERS=0` 时打开提醒。
+
+上面几个名单：值为空或只有空白、逗号，等于没设。名单一旦设了就只发名单里的网络（`COMMHUB_DUE_REMINDERS=1` 也一样）。都不设时行为不变。Hub 启动时在日志里打一行生效范围（只有网络 id），例如 `[due-reminders] scope: only networks <网络 id>`。范围外网络的任务不会被读出来，也不会记起点；以后把它加进来时，从加进来那一刻算起。
 - `COMMHUB_DUE_REMINDER_NODES=1`：也给负责 Agent 发消息。默认不发，只提醒人。
 - `COMMHUB_DUE_REMINDER_TICK_MS`：检查间隔。
 - `COMMHUB_DUE_REMINDER_TZ`：时区。
