@@ -17,6 +17,7 @@
 // (见 server/src/tools.ts 的方框注释)。register-telemetry-fallback 也把它列为可丢的可选块。
 
 import { execTmux } from "../tmux";
+import { parseTmuxRows, tmuxListArgs } from "../tmux-format";
 import { readFileSync } from "node:fs";
 
 export type ModelAuthState = "ok" | "revoked" | "expired" | "unknown";
@@ -171,17 +172,22 @@ export async function probeAppServerWs(
 export interface TmuxPaneRow { session: string; pid: number; dead: boolean; command: string }
 
 /**
- * `tmux list-panes -a -F '#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}'`
- * 的输出 → 行。会话名**逐字相等**比较:tmux 3.4 上 `-t =名` 对 CJK 名返回空、`-t 名` 是前缀匹配
+ * `TMUX_PANE_LIST_ARGS`(`tmux -u list-panes -a -F …`,字段用 `|ANETSEP|` 分隔)的输出 → 行。
+ * 旧的 TAB 分隔行仍可解析(夹具/旧调用方)。字段数不是 4 的行直接丢弃,不猜。
+ * 🔴 #556:不带 `-u` 时,非 UTF-8 locale(LANG=C/POSIX)下 tmux 3.3a 把 TAB 和中文会话名的每个字节
+ *    都换成 `_` —— 中文名的节点永远「session-missing」。会话名**逐字相等**比较:tmux 3.4 上 `-t =名` 对 CJK 名返回空、`-t 名` 是前缀匹配
  * (会命中 `<名>-appsrv`),所以不能交给 tmux 去找。
  */
+/** argv for `execTmux`: `-u list-panes -a -F '<session>|ANETSEP|<pid>|ANETSEP|<dead>|ANETSEP|<cmd>'` (#556). */
+export const TMUX_PANE_LIST_ARGS: readonly string[] = tmuxListArgs(
+  ["list-panes", "-a"],
+  ["#{session_name}", "#{pane_pid}", "#{pane_dead}", "#{pane_current_command}"],
+);
+
 export function parseTmuxPanes(out: string): TmuxPaneRow[] {
   const rows: TmuxPaneRow[] = [];
-  for (const line of out.split("\n")) {
-    if (!line) continue;
-    const [session, pid, dead, command] = line.split("\t");
-    if (session === undefined || pid === undefined) continue;
-    rows.push({ session, pid: Number(pid), dead: dead === "1", command: command ?? "" });
+  for (const [session, pid, dead, command] of parseTmuxRows(out, 4)) {
+    rows.push({ session, pid: Number(pid), dead: dead === "1", command });
   }
   return rows;
 }
@@ -207,7 +213,7 @@ export function classifyTuiPane(
 export function probeTmuxTui(session: string): TuiHealth {
   let out: string;
   try {
-    out = execTmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}"], {
+    out = execTmux(TMUX_PANE_LIST_ARGS, {
       encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000,
     });
   } catch {
