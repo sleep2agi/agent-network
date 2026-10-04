@@ -199,7 +199,7 @@ register() → callCommHub("report_status", {
 
 **触发**: `anet node delete <node-name>` （首次提示，再加 `--force` 才真删）
 
-**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function deleteCommand(`）。
+**前置条件**: 不强制 offline —— `anet node delete --force` 会先跑一遍和 `anet node stop` 相同的 `stopResolvedNode(...)`（含共存 tmux 会话的身份门控停止 + 通知 hub offline），停不干净就退出、不删；之后再删本地目录（#522）（[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) —— 搜 `async function deleteCommand(`）。
 
 **实际数据变更**:
 1. **本地**: `rmSync(.anet/nodes/<id>/, { recursive: true, force: true })` —— 删整个目录（含 config.json、channels/、logs/；目录名是 alias / node_name，不是内部 node_id 字段；R209 chain 一致）

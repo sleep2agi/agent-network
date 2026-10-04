@@ -150,8 +150,15 @@ See [Token model](/en/guide/account-system#tokens) for token types, scopes, and 
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
 
-`anet node delete <name> --force` deletes the local files (`.anet/nodes/<id>/`) first, then the
-node's row on the Hub, so it does not keep showing as "offline" in the app or dashboard.
+`anet node delete <name> --force` first runs the same stop as `anet node stop` (co-presence tmux
+sessions included: codex co-presence by marker + `CODEX_HOME`, others by exact session name, never a prefix), then deletes the local
+files (`.anet/nodes/<id>/`), then the node's row on the Hub, so it does not keep showing as "offline"
+in the app or dashboard. If the stop cannot be proven, it exits with an error and deletes nothing.
+
+- When the node is not in the current directory (a clone / codex fork made with `--workdir`), anet finds
+  it through the source directory's `.anet/child-workdirs.json` and the codex login index, **does not
+  delete it for you**, and prints `cd <dir> && anet node delete <name>`, exit code `1`.
+- When several nodes match the name, it refuses and lists a delete-by-`node_id` command for each.
 
 - The Hub row is matched **only by the `node_id` in the local config**, never by name. A node on
   another machine that reuses the same name is not deleted; anet prints

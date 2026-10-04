@@ -109,13 +109,26 @@ ChatGPT 登录的 refresh token 是**一次性**的：每刷新一次换一个�
 
 ## 删掉复制出来的节点
 
-先停，再删。在**新节点所在的目录**里运行（用了 `--workdir` 的，先 `cd` 进那个目录）：
-
 ```bash
-anet node stop my-node-copy
 anet node delete my-node-copy            # 只预览：列出要删的目录和 node_id，不动手
 anet node delete my-node-copy --force    # 真删
 ```
+
+- **不用先停**：`--force` 先做一遍和 `anet node stop` 完全相同的停止，包括共存节点（codex / grok / opencode）的 tmux 会话。
+  codex 共存节点按它自己的身份（共存标记 + `CODEX_HOME`）认；没有标记的节点只认 `<name>`、`<name>-appsrv`、`<name>-桥`
+  这三个**完整**会话名，从不按前缀匹配 —— 名字相近的别的会话不受影响。
+  停不干净（比如进程拒绝退出）就报错退出，**什么都不删**。
+- **不用记副本放在哪**：clone / codex fork 会在源目录的 `.anet/child-workdirs.json` 里记下副本在哪。
+  从源目录运行时，anet 找到它后**不会替你删**，而是打印一条原样可用的命令，退出码 `1`：
+
+  ```text
+  [anet] "my-node-copy" is not in this directory; it lives in /home/me/my-node-copy/.anet/nodes/my-node-copy (node_id n_yyyyyyyy).
+  [anet] Nothing was stopped or deleted. Run it from there:
+    cd '/home/me/my-node-copy' && anet node delete 'my-node-copy' --force
+  ```
+
+- 同名的节点有好几个（比如两个不同目录里都有 `my-node-copy`）时，anet **拒绝删除**，列出每一个的 `cd … && anet node delete <node_id>`，
+  让你按 node_id 选一个。
 
 `--force` 先删本地 `.anet/nodes/my-node-copy/`（包括它的 `codex-home`），再按本地配置里的 `node_id`
 删掉 Hub 上的那一行，这样它不会在 app / dashboard 里一直显示「离线」：

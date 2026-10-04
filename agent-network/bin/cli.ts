@@ -147,9 +147,20 @@ import {
 } from "../src/codex-copresence-preflight";
 import {
   checkCodexCredentialSharing,
+  codexFingerprintIndexDir,
   describeCodexRefreshFailure,
   type NodeFingerprint,
 } from "../src/codex-auth-fingerprint";
+import {
+  decideDeleteTarget,
+  formatDeleteAmbiguous,
+  formatDeleteElsewhere,
+  matchNodesInRoot,
+  otherNodeRoots,
+  recordChildWorkdir,
+  type DeleteTarget,
+  type NodeMatch,
+} from "../src/node-locate";
 import {
   ALLOW_SHARED_CODEX_LOGIN_FLAG,
   evaluateCodexLoginStaging,
@@ -5611,6 +5622,19 @@ Telegram setup:
 }
 
 // #509 — `anet node clone <src> <new>` / `anet node create <new> --from <src>`.
+/**
+ * #522 — note in `<sourceRoot>/.anet/child-workdirs.json` that a copy made from
+ * here lives in `workdir`, so `anet node delete <alias>` run from here can point
+ * at it. Best effort: the copy itself already exists, so a failure only warns.
+ */
+function rememberCopyWorkdir(sourceRoot: string, alias: string, workdir: string): void {
+  try {
+    recordChildWorkdir(sourceRoot, alias, workdir, resolveNodeRefAt(sourceRoot, alias) !== null);
+  } catch (e: any) {
+    console.error(`[anet] ⚠ could not record where "${alias}" lives (${e?.message ?? e}); to delete it later, run anet node delete from ${workdir}`);
+  }
+}
+
 // Logic lives in src/node-clone.ts; this only wires it to the CLI's resolver, Hub registration and create writer.
 async function nodeCloneCommand(tokens: string[], mode: "clone" | "create-from") {
   const parsed = parseCloneArgs(tokens, mode);
@@ -5657,6 +5681,7 @@ async function nodeCloneCommand(tokens: string[], mode: "clone" | "create-from")
     if (r.stage === "write") console.error(`[anet]    the Hub already holds a registration for "${a.target}" — clean it with: anet node delete ${shellQuote(a.target)}`);
     process.exit(1);
   }
+  if (targetWorkdir !== sourceWorkdir) rememberCopyWorkdir(sourceWorkdir, a.target, targetWorkdir);
   console.log(formatCloneSummary({ source: nodeDisplayName(source.id, source.profile), target: a.target, profile: r.profile, ledger: r.ledger, targetNodeDir: r.targetNodeDir, sourceNodeId: raw.node_id }));
   const where = targetWorkdir === sourceWorkdir ? "" : `cd ${shellQuote(targetWorkdir)} && `;
   if (!a.start) { console.log(`\nStart: ${where}anet node start ${shellQuote(a.target)}`); return; }
@@ -8111,6 +8136,7 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
   const sourceName = nodeDisplayName(source.id, source.profile);
   if (sourceName === target) { console.error(`[anet] node codex fork: --name must differ from the source alias`); process.exit(2); }
   const sourceDir = join(nodesDir(), source.id);
+  const forkSourceRoot = realpathLoose(process.cwd());
   const sourceHome = join(sourceDir, "codex-home");
   const targetNodesDir = join(workdir, ".anet", "nodes");
   if (existsSync(join(targetNodesDir, target))) {
@@ -8244,6 +8270,7 @@ async function codexForkCommand(sourceRef: string, opts: Record<string, string>)
     renameSync(stagingHome, join(targetNodesDir, target, "codex-home"));
     rmSync(staging, { recursive: true, force: true });
     if (forkGate) recordCodexLoginOriginOrWarn(join(targetNodesDir, target), target, forkGate.fingerprint, forkLoginSource);
+    if (workdir !== forkSourceRoot) rememberCopyWorkdir(forkSourceRoot, target, workdir);
   } catch (e: any) {
     rmSync(staging, { recursive: true, force: true });
     console.error(`[anet] node codex fork: ❌ ${e?.message ?? e}`);
@@ -11198,7 +11225,18 @@ Stop a running agent node.
     console.error(nodeNotFound(ref));
     process.exit(1);
   }
+  await stopResolvedNode(resolved, stopInvokedAt);
+}
 
+/**
+ * The whole of `anet node stop` once the node is resolved: lifecycle receipt,
+ * co-presence identity teardown (marker / CODEX_HOME), the legacy exact-name
+ * tmux sweep for marker-less nodes, pidfile, sockets, hub offline.
+ * Every failure exits the process non-zero — `anet node delete` (#522) relies on
+ * that: it calls this before touching any file, so a node that could not be
+ * proven stopped is never deleted.
+ */
+async function stopResolvedNode(resolved: { id: string; profile: Profile }, stopInvokedAt: number = Date.now()) {
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   let stopGeneration = "";
   let stopProcesses: LifecycleProcessIdentity[] = [];
@@ -12203,23 +12241,30 @@ async function deleteCommand() {
   // already gone, so the ref is the node_id from the warning.
   if (opts["hub-only"] === "true") { await deleteHubRowOnly(ref, opts); return; }
 
-  const resolved = resolveNodeRef(ref);
-  if (!resolved) {
+  const force = opts.force === "true" || opts.yes === "true";
+  // #522 — look beyond this directory (clone/fork --workdir copies) and never
+  // pick one of several same-name nodes. See src/node-locate.ts.
+  const target = locateNodeForDelete(ref);
+  if (target.kind === "none") {
+    console.error(nodeNotFound(ref));
+    process.exit(1);
+  }
+  if (target.kind === "ambiguous") {
+    for (const line of formatDeleteAmbiguous(ref, target.matches, shellQuote)) console.error(line);
+    process.exit(1);
+  }
+  if (target.kind === "elsewhere") {
+    for (const line of formatDeleteElsewhere(ref, target.match, force, shellQuote)) console.error(line);
+    process.exit(1);
+  }
+  const resolved = { id: target.match.id, profile: loadProfile(target.match.id) };
+  if (!resolved.profile) {
     console.error(nodeNotFound(ref));
     process.exit(1);
   }
 
-  const { id: nodeId, profile } = resolved;
+  const { id: nodeId, profile } = resolved as { id: string; profile: Profile };
   const displayName = nodeDisplayName(nodeId, profile);
-
-  // Stop if running + notify server
-  const stopResult = await stopNode(nodeId);
-  if (stopResult.status === "survived") {
-    console.error(`[anet] Refusing to delete "${displayName}": pid ${stopResult.pid} survived SIGTERM.`);
-    process.exitCode = 1;
-    return;
-  }
-  await notifyServerOffline(profile, nodeId);
 
   const nodeDir = join(nodesDir(), nodeId);
   if (!existsSync(nodeDir)) {
@@ -12227,13 +12272,20 @@ async function deleteCommand() {
     process.exit(1);
   }
 
-  if (opts.force !== "true" && opts.yes !== "true") {
+  if (!force) {
     console.log(`[anet] This will delete "${displayName}" (node_id: ${profile.node_id || "-"})`);
+    console.log(`[anet]   (stopping it first, co-presence tmux sessions included)`);
     console.log(`[anet]   ${nodeDir}`);
     console.log(`[anet]   and its row on the Hub (matched by node_id only)`);
     console.log(`[anet] Run again with --force to confirm.`);
     return;
   }
+
+  // #522 — the same stop `anet node stop` performs, co-presence sessions
+  // included (identity-gated by the node's marker / CODEX_HOME, never by a
+  // name prefix). It exits non-zero on anything it cannot prove stopped, so a
+  // failed stop never reaches the rmSync below. It also notifies the hub offline.
+  await stopResolvedNode({ id: nodeId, profile });
 
   // The runtime identity lives outside the project tree so a config downgrade
   // cannot bypass it. Remove that exact record first for every runtime: this
@@ -12255,6 +12307,21 @@ async function deleteCommand() {
   for (const line of out.info) console.log(line);
   for (const line of out.warn) console.error(line);
   if (removal.kind === "failed") markFailed(); // hub half failed: exit 1 (#2321)
+}
+
+/** #522 — every node `ref` could mean: this directory plus the roots anet's indexes point at. */
+function locateNodeForDelete(ref: string): DeleteTarget {
+  const cwdRoot = process.cwd();
+  const inRoot = (root: string): NodeMatch[] => {
+    const back = process.cwd();
+    try {
+      process.chdir(root);
+      return matchNodesInRoot(realpathLoose(root), ref, listProfileIds().map(id => ({ id, profile: loadProfile(id) })));
+    } catch { return []; } finally { process.chdir(back); }
+  };
+  const matches = [...inRoot(cwdRoot)];
+  for (const root of otherNodeRoots(cwdRoot, codexFingerprintIndexDir())) matches.push(...inRoot(root));
+  return decideDeleteTarget(cwdRoot, matches);
 }
 
 /** `anet node delete <node_id> --hub-only [--hub <url>]` — remove only the Hub row, by exact node_id. */

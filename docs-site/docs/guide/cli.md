@@ -150,8 +150,13 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
 
-`anet node delete <name> --force` 先删本地（`.anet/nodes/<id>/`），再删 Hub 上这个节点的那一行，
-这样它不会在 app / dashboard 里一直显示「离线」。
+`anet node delete <name> --force` 先做一遍和 `anet node stop` 相同的停止（共存节点的 tmux 会话也一起停：
+codex 共存按标记 + `CODEX_HOME` 认，其余只认完整会话名、不按前缀），再删本地（`.anet/nodes/<id>/`），最后删 Hub 上这个节点的那一行，
+这样它不会在 app / dashboard 里一直显示「离线」。停不干净就报错退出，什么都不删。
+
+- 节点不在当前目录（clone / codex fork 用了 `--workdir`）时，anet 按源目录 `.anet/child-workdirs.json` 和 codex 登录索引找到它，
+  **不替你删**，而是打印 `cd <目录> && anet node delete <name>`，退出码 `1`。
+- 同名的节点有好几个时拒绝删除，列出每一个按 `node_id` 删的命令。
 
 - Hub 上的行**只按本地配置里的 `node_id` 匹配**，从不按名字。别的机器上同名的节点（名字复用）
   不会被删；anet 会打印 `Left untouched: … belong to other node_id(s)`。

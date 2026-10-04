@@ -111,13 +111,28 @@ See [one login per node](/en/guide/codex-copresence#one-login-per-node).
 
 ## Deleting the copy
 
-Stop it, then delete it. Run this **in the directory the copy lives in** (if you used `--workdir`, `cd` there first):
-
 ```bash
-anet node stop my-node-copy
 anet node delete my-node-copy            # preview only: lists the directory and node_id, changes nothing
 anet node delete my-node-copy --force    # actually delete
 ```
+
+- **No need to stop it first**: `--force` first runs exactly the stop `anet node stop` does, co-presence (codex / grok / opencode)
+  tmux sessions included. A codex co-presence node is identified by its own identity (co-presence marker + `CODEX_HOME`); a node
+  without a marker only by the **exact** session names `<name>`, `<name>-appsrv` and `<name>-桥`, never a prefix, so a different
+  session with a similar name is left alone. If the stop cannot be proven (say a process refuses to exit),
+  delete exits with an error and **deletes nothing**.
+- **No need to remember where a `--workdir` copy went**: clone and codex fork note where the copy went in the source directory's
+  `.anet/child-workdirs.json`. Run from the source directory, anet finds it but **does not delete it for you**; it prints the exact
+  command to run and exits `1`:
+
+  ```text
+  [anet] "my-node-copy" is not in this directory; it lives in /home/me/my-node-copy/.anet/nodes/my-node-copy (node_id n_yyyyyyyy).
+  [anet] Nothing was stopped or deleted. Run it from there:
+    cd '/home/me/my-node-copy' && anet node delete 'my-node-copy' --force
+  ```
+
+- If several nodes match the name (say `my-node-copy` exists in two directories), anet **refuses**, and lists a
+  `cd … && anet node delete <node_id>` for each one so you pick by node_id.
 
 `--force` removes the local `.anet/nodes/my-node-copy/` (including its `codex-home`), then removes the node's row on the Hub,
 matched by the `node_id` in the local config, so it does not keep showing as "offline" in the app / dashboard:
