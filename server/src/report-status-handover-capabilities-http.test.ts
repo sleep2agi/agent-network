@@ -5,7 +5,7 @@
 // the DELETE + INSERT handover path. That path carried registered_at and the
 // descriptive columns, but not the capability flags, so the new row started at
 // the column default 0 — although the flags are meant to be sticky (only ever set
-// to 1). Board #548: the 通信龙 node's MCP channel reconnected under a new
+// to 1). Board #548: a production node's MCP channel reconnected under a new
 // resume_id and the rules-file / skills / files / logs doorbells went dark.
 //
 // Pinned through the real HTTP entrance (POST /mcp with the node's own token):
