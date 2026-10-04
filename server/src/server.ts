@@ -83,6 +83,7 @@ import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 import { createProductionSideThreadTransport } from "./side-thread-production.js";
 import { parseHubTimestamp } from "./hub-timestamp";
+import { logTaskRejection } from "./task-rejection-log.js";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -3411,15 +3412,18 @@ return Bun.serve({
 
     // ── REST: send task ──
     if (url.pathname === "/api/task" && req.method === "POST") {
+      // #552 — every non-2xx below goes through reject() so it leaves one log line
+      // (status, error, user, requested alias/network/client_request_id; never token/text).
       let raw: unknown;
+      const reject = (res: Response) => logTaskRejection(res, restAuth?.username, raw);
       try {
         raw = await req.json();
       } catch {
-        return withCors(req, Response.json({ error: "invalid JSON" }, { status: 400 }));
+        return reject(withCors(req, Response.json({ error: "invalid JSON" }, { status: 400 })));
       }
       const parsed = TaskSchema.safeParse(raw);
       if (!parsed.success) {
-        return withCors(req, Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 }));
+        return reject(withCors(req, Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 })));
       }
       const body = parsed.data;
       let taskNetId: string | null = null;
@@ -3427,7 +3431,7 @@ return Bun.serve({
         taskNetId = restAuth.networkId;
       } else if (body.network_id) {
         if (restAuth && !isAdmin && !getUserNetworkRole(restAuth.userId, body.network_id)) {
-          return withCors(req, Response.json({ ok: false, error: "access denied to requested network" }, { status: 403 }));
+          return reject(withCors(req, Response.json({ ok: false, error: "access denied to requested network" }, { status: 403 })));
         }
         taskNetId = body.network_id;
       } else {
@@ -3436,34 +3440,34 @@ return Bun.serve({
           : null;
       }
       if (restAuth && !taskNetId) {
-        return withCors(req, Response.json({
+        return reject(withCors(req, Response.json({
           ok: false,
           error: "network_id_required",
           message: "network_id is required when the user token has zero or multiple network memberships",
-        }, { status: 400 }));
+        }, { status: 400 })));
       }
       // 多用户 Agent 权限:受限成员只能给授权且 can_message 的 Agent 发;
       // 目标不存在 / 没授权 / 只读授权 → 同一个 403,不留 alias 探测差异。发件人固定为自己的用户名。
       const restrictedSender = !!restAuth && !isAdmin && !restAuth.networkId && isAgentRestricted(restAuth.userId, taskNetId!);
       if (restrictedSender) {
         if (!canRestWriteNetworkAsHuman(restAuth, taskNetId, isAdmin)) {
-          return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+          return reject(withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 })));
         }
         const restrictedTarget = resolveCanonicalAlias(taskNetId, body.alias).alias;
         const restrictedSession = db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", restrictedTarget, taskNetId);
         if (!restrictedSession || !canMessageAgent(restAuth!.userId, taskNetId, { alias: restrictedTarget, nodeId: restrictedSession.node_id })) {
-          return withCors(req, Response.json({ ok: false, error: "agent_not_granted", message: "this agent has not been granted to you; ask a network admin" }, { status: 403 }));
+          return reject(withCors(req, Response.json({ ok: false, error: "agent_not_granted", message: "this agent has not been granted to you; ask a network admin" }, { status: 403 })));
         }
         if (typeof body.from === "string" && body.from.trim() && body.from.trim() !== restAuth!.username) {
-          return withCors(req, Response.json({ ok: false, error: "from_session_identity_mismatch", message: "restricted members always send as their own username" }, { status: 403 }));
+          return reject(withCors(req, Response.json({ ok: false, error: "from_session_identity_mismatch", message: "restricted members always send as their own username" }, { status: 403 })));
         }
         for (const raw of [(body as any).attachments, (body as any).meta?.attachments]) {
           if (restrictedMemberAttachmentsDenied(restAuth!.userId, restAuth!.username, taskNetId!, raw)) {
-            return withCors(req, Response.json({ ok: false, error: "attachment_not_accessible" }, { status: 403 }));
+            return reject(withCors(req, Response.json({ ok: false, error: "attachment_not_accessible" }, { status: 403 })));
           }
         }
       } else if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
-        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+        return reject(withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 })));
       }
       const canonical = resolveCanonicalAlias(taskNetId, body.alias);
       const targetAlias = canonical.alias;
@@ -3471,17 +3475,17 @@ return Bun.serve({
         alias: targetAlias,
         nodeId: db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", targetAlias, taskNetId)?.node_id ?? null,
       }));
-      if (nodeDenied) return nodeDenied;
+      if (nodeDenied) return reject(nodeDenied);
       const target = resolveRestDeliveryTarget(targetAlias, taskNetId);
       if (target.state === "not_found") {
-        return withCors(req, Response.json({
+        return reject(withCors(req, Response.json({
           ok: false,
           error: "alias_not_found",
           message: target.message,
           alias: targetAlias,
           queued: false,
           ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
-        }, { status: 404 }));
+        }, { status: 404 })));
       }
       // Identity binding, mirroring the MCP transport (tools.ts defaultFrom /
       // fromIdentityMismatchReply). Both transports resolve the same
@@ -3507,13 +3511,13 @@ return Bun.serve({
         requestedFrom: body.from,
       });
       if (!identity.ok) {
-        return withCors(req, Response.json({
+        return reject(withCors(req, Response.json({
           ok: false,
           error: identity.error,
           message: identity.message,
           token_alias: identity.tokenAlias,
           requested_from_session: identity.requestedFromSession,
-        }, { status: 403 }));
+        }, { status: 403 })));
       }
       const fromSession = identity.fromSession;
       const ttlSeconds = (body as any).ttl_seconds || 3600;
@@ -3528,7 +3532,7 @@ return Bun.serve({
       // size cap, etc.).
       const attachmentsResult = validateAttachments((body as any).attachments ?? (body as any).meta?.attachments);
       if (!attachmentsResult.ok) {
-        return withCors(req, Response.json({ ok: false, error: "bad_attachments", message: attachmentsResult.error }, { status: 400 }));
+        return reject(withCors(req, Response.json({ ok: false, error: "bad_attachments", message: attachmentsResult.error }, { status: 400 })));
       }
       const mergedMeta = attachmentsResult.attachments.length
         ? { ...((body as any).meta && typeof (body as any).meta === "object" ? (body as any).meta : {}), attachments: attachmentsResult.attachments }
@@ -3616,14 +3620,14 @@ return Bun.serve({
       {
         const lc = assertNodeActive(targetAlias, taskNetId ?? null);
         if (!lc.ok) {
-          return withCors(req, Response.json(lc, { status: 409 }));
+          return reject(withCors(req, Response.json(lc, { status: 409 })));
         }
       }
       // #460 — refuse dispatch to a node whose fresh health says a layer is down (409, same as the
       // lifecycle guard above). Unknown / stale health = allowed: old nodes keep working.
       {
         const hg = assertNodeHealthy(targetAlias, taskNetId ?? null, { force: body.force === true, forceAllowed: !restAuth?.networkId });
-        if (!hg.ok) return withCors(req, Response.json(hg, { status: 409 }));
+        if (!hg.ok) return reject(withCors(req, Response.json(hg, { status: 409 })));
       }
       // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).
       const queueInfo = dispatchQueueInfo(targetAlias, taskNetId, target.session?.status, ttlSeconds);
