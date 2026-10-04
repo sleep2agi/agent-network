@@ -16,7 +16,7 @@ import {
 import type { Stats } from "fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "path";
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
-import { describeUnsafePath } from "./unsafe-package-path-reason";
+import { describeUnsafeDirectory, describeUnsafePath } from "./unsafe-package-path-reason";
 
 export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.135";
 export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.102";
@@ -66,7 +66,7 @@ function isWithin(root: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function assertSafePackagePath(path: string, kind: "file" | "directory"): Stats {
+function assertSafePackagePath(path: string, kind: "file" | "directory", ancestorOf?: string): Stats {
   const stat = lstatSync(path) as Stats;
   if (
     (kind === "file" ? !stat.isFile() : !stat.isDirectory())
@@ -86,7 +86,14 @@ function assertSafePackagePath(path: string, kind: "file" | "directory"): Stats 
         describeUnsafePath(path, { uid: stat.uid, mode: stat.mode, processUid: process.getuid?.() ?? stat.uid }),
       );
     }
-    throw new Error("resolved agent-node package has unsafe ownership or mode");
+    // #535 — this branch used to name nothing; the audit's offender was an ANCESTOR (/tmp, 1777).
+    if (kind === "directory" && stat.isDirectory() && !stat.isSymbolicLink() && process.platform !== "win32") {
+      throw new Error(
+        `resolved agent-node package has unsafe ownership or mode — ` +
+        describeUnsafeDirectory(path, { uid: stat.uid, mode: stat.mode, processUid: process.getuid?.() ?? stat.uid, ancestorOf }),
+      );
+    }
+    throw new Error(`resolved agent-node package has unsafe ownership or mode — ${path} is not a plain ${kind} (symlink or wrong type)`);
   }
   return stat;
 }
@@ -111,9 +118,9 @@ function readPackageJsonNoFollow(path: string): any {
 function assertSafeAncestors(packageRoot: string): void {
   let current = packageRoot;
   while (true) {
-    assertSafePackagePath(current, "directory");
+    assertSafePackagePath(current, "directory", current === packageRoot ? undefined : packageRoot);
     if (realpathSync(current) !== current) {
-      throw new Error("resolved agent-node package has a symlinked ancestor");
+      throw new Error(`resolved agent-node package has a symlinked ancestor: ${current}`);
     }
     const parent = dirname(current);
     if (parent === current) break;

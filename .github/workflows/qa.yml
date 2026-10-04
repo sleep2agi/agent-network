@@ -37,6 +37,7 @@ on:
       - 'tests/test1191-windows-steer-contract/**'
       - 'tests/test1220-codex-tui-client-health/**'
       - 'tests/test-codex-appserver-watchdog/**'
+      - 'tests/test-codex-copresence-first-start/**'
       - 'tests/test1183-sync-pinned-dryrun/**'
       - 'tests/test1193-side-thread-contract/**'
       - 'tests/test1195-side-thread-hub-contract/**'
@@ -227,6 +228,7 @@ on:
       - 'tests/test1191-windows-steer-contract/**'
       - 'tests/test1220-codex-tui-client-health/**'
       - 'tests/test-codex-appserver-watchdog/**'
+      - 'tests/test-codex-copresence-first-start/**'
       - 'tests/test1271-daemon-start-node/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
@@ -1495,6 +1497,9 @@ jobs:
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
           - test-codex-appserver-watchdog
+          # #535: first co-presence start with a slow agent-node fetch, bridge failure tail,
+          # needs-login, single-node verify. Real Hub + tmux + 30 s fake npx (x2 with its witnessed red).
+          - test-codex-copresence-first-start
           - test1271-daemon-start-node
           - test1178-codex-upgrade-recovery
           - test736-pm2-fleet-rebuild

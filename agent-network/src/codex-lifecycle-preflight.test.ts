@@ -124,13 +124,29 @@ describe("receipt verdict — no partial success", () => {
     expect(v.verdict).toBe("FAIL");
     expect(v.blocking).toEqual(["identity_match"]);
   });
-  test("verify without a cross-node attestation is FAIL, never PASS", () => {
+  test("verify with an unknown attestation is FAIL, never PASS", () => {
     const checks = evaluateCodexVerify(good(), { key: "identity_attested", status: "unknown", detail: "probe not implemented yet" });
     const v = receiptVerdict("verify", checks);
     expect(v.verdict).toBe("FAIL");
     expect(v.blocking).toEqual(["identity_attested"]);
     const ok = evaluateCodexVerify(good(), { key: "identity_attested", status: "pass", detail: "peer ack" });
     expect(receiptVerdict("verify", ok).verdict).toBe("PASS");
+  });
+  test("#535 single node: identity_attested n/a passes verify; n/a is accepted ONLY for identity_attested", () => {
+    const na = evaluateCodexVerify(good(), { key: "identity_attested", status: "n/a", detail: "single node" });
+    expect(receiptVerdict("verify", na)).toEqual({ verdict: "PASS", blocking: [] });
+    const r = buildReceipt({ verb: "verify", alias: "x", nodeId: "n_1", startedAt: new Date(0), checks: na });
+    expect(formatReceiptSummary(r)).toContain("PASS: verify x (not applicable: identity_attested)");
+    // fail-closed: any other required key marked n/a still blocks.
+    const sneaky = na.map((c) => (c.key === "home_isolated" ? { ...c, status: "n/a" as const } : c));
+    expect(receiptVerdict("verify", sneaky)).toEqual({ verdict: "FAIL", blocking: ["home_isolated"] });
+  });
+  test("#535 FAIL lists only failed checks, not passing or never-produced ones", () => {
+    const checks = evaluateCodexVerify({ ...good(), hubNodeId: "n_9" }, { key: "identity_attested", status: "n/a", detail: "single node" });
+    const v = receiptVerdict("verify", checks);
+    expect(v.verdict).toBe("FAIL");
+    expect(v.blocking).toEqual(checks.filter((c) => c.status === "fail").map((c) => c.key));
+    expect(v.blocking).not.toContain("identity_attested");
   });
   test("a required check that is simply missing blocks too", () => {
     expect(receiptVerdict("restart", evaluateCodexPreflight(good())).blocking).toEqual(expect.arrayContaining(["stop_order", "start_order", "child_env_attested", "identity_attested", "goal_state_preserved"]));

@@ -46,7 +46,7 @@ export interface RestartActions {
   start(): Promise<{ ok: boolean; detail: string }>;
   /** hub 上该 node_id 是否在超时内回到 online/idle。 */
   waitHubOnline(): Promise<{ ok: boolean; detail: string }>;
-  /** 跨节点 nonce 探针;未配置时返回 undefined(check 记 unknown)。 */
+  /** 跨节点 nonce 探针;未配置时为 undefined(check 记 n/a,#535:单节点不阻塞)。 */
   nonceProbe?: () => Promise<{ ok: boolean; detail: string; evidence?: Record<string, unknown> }>;
 }
 
@@ -57,6 +57,10 @@ export interface RestartOutcome {
   readonly stoppedAt: string;
   readonly rolledBack: boolean;
 }
+
+/** #535 — shared with the CLI's verify/canary so every verb says the same thing. */
+export const SINGLE_NODE_UNATTESTED_DETAIL =
+  "not applicable: no --probe-from <peer> given (single node) — cross-node nonce attestation skipped; pass --probe-from <alias> to attest";
 
 const check = (key: string, status: ReceiptCheck["status"], detail: string, evidence?: Record<string, unknown>): ReceiptCheck =>
   evidence ? { key, status, detail, evidence } : { key, status, detail };
@@ -180,7 +184,8 @@ export async function runCodexRestart(verb: RestartVerb, actions: RestartActions
     const p = await actions.nonceProbe();
     checks.push(check("identity_attested", p.ok ? "pass" : "fail", p.detail, p.evidence));
   } else {
-    checks.push(check("identity_attested", "unknown", "no probe peer configured — pass --probe-from <alias> for cross-node attestation"));
+    // #535 — no peer given = single-node run: attestation is not applicable, not failed.
+    checks.push(check("identity_attested", "n/a", SINGLE_NODE_UNATTESTED_DETAIL));
   }
   const failed = checks.filter((c) => c.status === "fail").map((c) => c.key);
   return { verb, checks, stoppedAt: failed.length > 0 ? `verify_after(${failed.join(",")})` : "done", rolledBack };

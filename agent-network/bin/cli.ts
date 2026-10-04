@@ -45,7 +45,7 @@ import { FORK_HOME_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, f
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
-import { runCodexRestart, type RestartActions, type GoalState as LifecycleGoalState } from "../src/codex-lifecycle-restart";
+import { runCodexRestart, SINGLE_NODE_UNATTESTED_DETAIL, type RestartActions, type GoalState as LifecycleGoalState } from "../src/codex-lifecycle-restart";
 import { runCodexMenu } from "../src/codex-menu";
 import { alreadyRunningMessage, runningNodePid } from "../src/node-running-guard";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
@@ -205,6 +205,8 @@ import { parseTokenCreateName } from "../src/token-cli";
 import { findExactTmuxSession, parseTmuxSessions } from "../src/tmux-attach";
 import { classifyPanePrompt, extractStartFailureReason } from "../src/tmux-pane-prompt";
 import { describeUnsafePath } from "../src/unsafe-package-path-reason";
+import { codexHomeLoginState, describeCodexNeedsLogin, NEEDS_LOGIN_EXIT_CODE } from "../src/codex-copresence-login-gate";
+import { bridgeLaunchFailureLines, CODEX_BRIDGE_LOG_NAME, codexBridgeTeeCommand } from "../src/codex-copresence-bridge-log";
 import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-mode-preflight";
 import { exactSession, PANE_LIST_FORMAT, paneTargetFor } from "../src/tmux-exact-target";
 import { execTmux, spawnSyncTmux, spawnTmux } from "../src/tmux";
@@ -1537,6 +1539,17 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // silently locks everyone else out.
   const codexCredentialPeers = checkCodexCredentialSharingForNode(resolved.id, displayName, opts.codexHome);
 
+  // #535 (audit P1-3) — "✅ 就绪" used to be printed over a TUI parked on Codex's sign-in page, and the
+  // bridge died 120 s later waiting for a thread nobody could create. Decide BEFORE any session starts.
+  // Judged by the #529 helper (codexLoginFactsOfHome) on opts.codexHome: the home THIS launch hands to all
+  // three sessions (--codex-home > config.codexHome > <node>/codex-home), after host-login staging above.
+  const loginGate = codexHomeLoginState(opts.codexHome);
+  if (loginGate.state === "needs-login") {
+    for (const line of describeCodexNeedsLogin({ alias: displayName, codexHome: opts.codexHome, reason: loginGate.reason })) console.error(line);
+    process.exit(NEEDS_LOGIN_EXIT_CODE);
+  }
+  if (loginGate.state === "unknown") console.log(`[anet] codex login: ${loginGate.reason}`);
+
   if (process.platform === "win32") {
     try {
       await startWindowsCodexCopresence(resolved, displayName, opts, model);
@@ -1544,6 +1557,28 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     } catch (e) {
       console.error(`[anet] ❌ Windows Codex co-presence failed: ${(e as Error).message}`);
       console.error(`[anet]    Cleanup: anet node stop ${displayName}`);
+      process.exit(1);
+    }
+  }
+
+  // #535 (audit P1-1) — the bridge (piece ②) runs agent-node, and on a fresh machine the first
+  // `npx @sleep2agi/agent-node@<paired>` fetch alone took ~32 s — longer than the 25 s bridge wait,
+  // so every first start failed. Resolve (and, if needed, download) it HERE, before any tmux
+  // session exists, with its own progress line; the bridge gets the validated entrypoint and the
+  // 25 s wait measures only the bridge.
+  let pairedAgentNodeEntrypoint: string | undefined;
+  {
+    const t0 = Date.now();
+    if (!process.env.ANET_AGENT_NODE_BIN) {
+      console.log(`[anet] ⓪ agent-node: resolving ${PAIRED_AGENT_NODE_SPEC} (the first run on a machine downloads it via npx — can take a minute)…`);
+    }
+    try {
+      const plan = resolveCodexAgentNodeLaunchPlan();
+      pairedAgentNodeEntrypoint = plan.argsPrefix[0];
+      console.log(`[anet] ⓪ agent-node READY (${plan.source}, ${((Date.now() - t0) / 1000).toFixed(1)}s): ${pairedAgentNodeEntrypoint}`);
+    } catch (error: any) {
+      console.error(`[anet] ❌ agent-node for the bridge could not be resolved — nothing was started.`);
+      for (const line of String(error?.message || error).split(/\r?\n/)) console.error(`[anet]    ${line}`);
       process.exit(1);
     }
   }
@@ -1819,9 +1854,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // #1856 PR-D — 桥再入用**当前这份 anet**(execPath + execArgv + argv[1]),不用 PATH 上的 `anet`:
     // 真机上 PATH 里是另一个版本,它不认这份 profile,把桥当成 claude-code-cli 起了;沿用 PATH 等于让桥的运行时取决于环境。
     const selfInvoke = [process.execPath, ...process.execArgv, process.argv[1]].map(shellQuote).join(" ");
+    // #535 (audit P1-2) — when the bridge died its tmux session went with it, and the printed
+    // `tmux attach` pointed at nothing: the real error was gone. Its output now also goes to
+    // <node>/codex-bridge.log (0600, truncated each start, capped), and a failure prints the tail.
+    const bridgeLog = join(nodesDir(), resolved.id, CODEX_BRIDGE_LOG_NAME);
+    try { writeFileSync(bridgeLog, "", { mode: 0o600 }); chmodIfPosix(bridgeLog, 0o600); } catch { /* best-effort: the tee still creates it */ }
     const bridgeCmd = [
       `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
       `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN`,
+      codexBridgeTeeCommand(shellQuote(bridgeLog)),
       `exec ${selfInvoke} node start ${shellQuote(displayName)}`,
     ].join(" && ");
     try {
@@ -1832,6 +1873,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         "-e", `CODEX_HOME=${opts.codexHome}`,
         // #448 — health.tui probes this exact session name.
         "-e", `ANET_CODEX_TUI_SESSION=${tuiSession}`,
+        // #535 — the entrypoint ⓪ already resolved and validated; the bridge re-validates it, no npx.
+        ...(pairedAgentNodeEntrypoint ? ["-e", `ANET_CODEX_PAIRED_AGENT_NODE=${pairedAgentNodeEntrypoint}`] : []),
         "bash", "-lc", bridgeCmd,
       ], { stdio: "pipe" });
     } catch (e: any) {
@@ -1851,9 +1894,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       25_000,
     );
     if (!bridgeReady) {
-      console.error(`[anet] ❌ bridge did not attach to the shared app-server before TUI launch.`);
-      console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${bridgeSession}`)}`);
-      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      await new Promise((r) => setTimeout(r, 300)); // let tee flush the last lines
+      let logText = "";
+      try { logText = readFileSync(bridgeLog, "utf8"); } catch { /* reported as missing below */ }
+      for (const line of bridgeLaunchFailureLines({
+        bridgeAlive: tmuxSessionRunning(bridgeSession),
+        attachCommand: `tmux attach -t ${shellQuote(`=${bridgeSession}`)}`,
+        logPath: bridgeLog, logText, waitedSeconds: 25,
+        cleanupCommand: `anet node stop ${shellQuote(displayName)}`,
+      })) console.error(line);
       process.exit(1);
     }
     if (pendingRecoveryId) {
@@ -3597,12 +3646,19 @@ function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   const explicit = process.env.ANET_AGENT_NODE_BIN;
   let rawEntrypoint: string;
   let source: AgentNodeLaunchPlan["source"];
+  // #535 — the co-presence launcher resolved (and validated) the paired package before starting
+  // this bridge; reuse that entrypoint instead of a second npx round-trip. Only inside the bridge,
+  // and it is validated below exactly like an npx result (exact version, safe path, capability).
+  const prelaunched = process.env.ANET_COPRESENCE_BRIDGE === "1" ? process.env.ANET_CODEX_PAIRED_AGENT_NODE : undefined;
   if (explicit) {
     if (!isAbsolute(explicit) || !existsSync(explicit)) {
       throw pairedAgentNodeError("ANET_AGENT_NODE_BIN must name an existing absolute agent-node CLI path");
     }
     rawEntrypoint = explicit;
     source = "explicit";
+  } else if (prelaunched && isAbsolute(prelaunched) && existsSync(prelaunched)) {
+    rawEntrypoint = prelaunched;
+    source = "paired";
   } else {
     let output: string;
     try {
@@ -7935,7 +7991,8 @@ async function codexLifecycleCtx(verb: string, ref: string, opts: Record<string,
       markerUuid: m.kind === "ok" ? m.marker.marker : null,
     });
   };
-  const unattested = { key: "identity_attested", status: "unknown" as const, detail: "cross-node nonce probe not run — pass --probe-from <peer> (restart/start/resume) for attestation" };
+  // #535 — no peer = single node: n/a, not FAIL (verify/canary used to exit 2 on every healthy single node).
+  const unattested = { key: "identity_attested", status: "n/a" as const, detail: SINGLE_NODE_UNATTESTED_DETAIL };
   const say = (m: string) => { if (opts.json !== "true") console.log(`[anet] codex ${verb}: ${m}`); };
   return { verb, opts, resolved, profile, displayName, nodeDir, recorded, gc, startedAt, hub, codexHome, sessions, prim, gather, unattested, say };
 }
@@ -8073,7 +8130,7 @@ async function codexLifecycleCommand() {
     console.error("  verify     preflight + 子进程环境核对(CODEX_HOME / token 短指纹)+ 跨节点身份验收(PR-B 前恒为 unknown → FAIL)");
     console.error("  exit 0 = PASS;exit 2 = FAIL(receipt 里列 blocking);receipt 落在 .anet/nodes/<id>/receipts/,凭据只记短指纹");
     console.error("  restart    确定性状态机(零 LLM):preflight → goal 状态 → 停 Bridge→TUI→App Server → 端口放掉 → 起(App Server→端口→exact TUI→Bridge)→ verify");
-    console.error("             --probe-from <peer> [--probe-root <dir>]  用另一本地节点发 nonce 探针做跨节点身份验收(identity_attested;不给则 unknown → FAIL);peer 在别的 .anet 根时给 --probe-root");
+    console.error("             --probe-from <peer> [--probe-root <dir>]  用另一本地节点发 nonce 探针做跨节点身份验收(identity_attested;不给则 n/a,单节点照样可以 PASS);peer 在别的 .anet 根时给 --probe-root");
     console.error("  start      同 restart 但要求三段都不在;resume --thread <id> 先把 exact thread 写进 config(要求唯一 rollout)再 start");
     console.error("  fork       fork <source> --name <target> --workdir <dir> [--inherit-full-access] [--model <id>] [--no-codex-login|--allow-shared-codex-login]:继承历史,其余全新(node_id/CODEX_HOME/thread/端口/tmux 名);");
     console.error("             rollout 复制并改写 id,源节点零触碰;之后在 <dir> 里 anet node codex start <target> --probe-from <source>");

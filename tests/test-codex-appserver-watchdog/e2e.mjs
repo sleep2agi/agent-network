@@ -235,7 +235,9 @@ try {
   command(["node", "create", alias, "--runtime", "codex-cli", "--hub", hub]);
   const codexHome = join(project, ".anet", "nodes", alias, "codex-home");
   mkdirSync(codexHome, { recursive: true });
-  writeFileSync(join(codexHome, "auth.json"), "{}\n");
+  // #535 — the launcher now refuses a node with no usable login (needs-login) before starting
+  // anything; `{}` is "not logged in". A clearly fake API key is a usable login shape.
+  writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: `sk-fake-testwd-${runId}` }) + "\n");
   await commandAsync(["node", "start", alias, "--codex-bin", codexWrapper, "--no-inherit-codex-home", "--accept-dev-channels"]);
   const cfgPath = join(project, ".anet", "nodes", alias, "config.json");
   await waitUntil("thread promoted", () => JSON.parse(readFileSync(cfgPath, "utf8")).codexThreadId === "thread_windows_e2e");

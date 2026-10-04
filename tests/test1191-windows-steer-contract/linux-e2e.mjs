@@ -99,7 +99,8 @@ try {
   command(["node", "create", alias, "--runtime", "codex-cli", "--hub", hub]);
   const codexHome = join(project, ".anet", "nodes", alias, "codex-home");
   mkdirSync(codexHome, { recursive: true });
-  writeFileSync(join(codexHome, "auth.json"), "{}\n");
+  // #535 — co-presence start now stops at needs-login when the node has no usable login; `{}` is not one.
+  writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-fake-test1191" }) + "\n");
 
   let startOutput;
   try {

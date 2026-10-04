@@ -1,7 +1,7 @@
 // #1856 —— Codex TUI 共存节点生命周期控制器的 receipt 合同。
 //
 // 一份 receipt = 一次生命周期动作(preflight / verify / start / restart / resume / fork / account / rollback)
-// 的结构化证据。每个不变量一条 check,状态只有三种:pass / fail / unknown。
+// 的结构化证据。每个不变量一条 check,状态:pass / fail / unknown / n/a(n/a 只对 NOT_APPLICABLE_OK 里的 key 有效,#535)。
 // 🔴 整体判定只在**每一条要求的 check 都是 pass** 时才是 PASS;fail 或 unknown 任一条都是 FAIL,
 //    并把阻塞项列出来 —— 「部分成功」不能冒充整体成功(外部团队 派工第 14 条)。
 // 🔴 敏感值(token / 账号 id / 凭据)不进 receipt:调用方只能放 shortFingerprint() 的短指纹。
@@ -10,7 +10,9 @@ import { createHash } from "crypto";
 import { mkdirSync, renameSync, writeFileSync } from "fs";
 import { join } from "path";
 
-export type CheckStatus = "pass" | "fail" | "unknown";
+// #535 —— "n/a" = 这条检查对本次运行不适用(目前只有一种:单节点、没给 --probe-from 时的 identity_attested)。
+//   只有 NOT_APPLICABLE_OK 里的 key 可以用 n/a 满足「必须 pass」;别的 key 给 n/a 仍然阻塞(fail-closed)。
+export type CheckStatus = "pass" | "fail" | "unknown" | "n/a";
 
 export interface ReceiptCheck {
   readonly key: string;
@@ -70,13 +72,29 @@ export function redactReceipt<T>(value: T, key = ""): T {
   return value;
 }
 
+/**
+ * #535 — required checks that may be "n/a" instead of "pass". identity_attested needs a second
+ * local node to send the nonce; a user with one node has no peer, and a verdict that can never be
+ * PASS for them is a verdict nobody can act on (audit: verify/canary/restart rc=2 on a healthy node).
+ * "n/a" stays visible in the receipt and in the summary line; it never turns into "pass".
+ */
+export const NOT_APPLICABLE_OK: ReadonlySet<string> = new Set(["identity_attested"]);
+
 export const INFORMATIONAL_PREFIXES: readonly string[] = ["before:", "source:", "restart:", "rollback:"];
+
+/** before:home_isolated → home_isolated; rollout_before (restart's renamed snapshot) → rollout_intact. */
+export function unprefixedCheckKey(key: string): string {
+  if (key === "rollout_before") return "rollout_intact";
+  const p = INFORMATIONAL_PREFIXES.find((x) => key.startsWith(x));
+  return p ? key.slice(p.length) : key;
+}
 
 export function receiptVerdict(verb: LifecycleVerb, checks: readonly ReceiptCheck[]): { verdict: "PASS" | "FAIL"; blocking: string[] } {
   const byKey = new Map(checks.map((c) => [c.key, c]));
   const blocking: string[] = [];
   for (const key of REQUIRED_CHECKS[verb]) {
     const c = byKey.get(key);
+    if (c && c.status === "n/a" && NOT_APPLICABLE_OK.has(key)) continue;
     if (!c || c.status !== "pass") blocking.push(key);
   }
   // 任何额外 check 若 fail 也阻塞(比如 preflight 顺手量到的东西);unknown 的额外项不阻塞,但会留在 checks 里。
@@ -87,7 +105,22 @@ export function receiptVerdict(verb: LifecycleVerb, checks: readonly ReceiptChec
     if (INFORMATIONAL_PREFIXES.some((p) => c.key.startsWith(p))) continue;
     blocking.push(c.key);
   }
-  return { verdict: blocking.length === 0 ? "PASS" : "FAIL", blocking };
+  if (blocking.length === 0) return { verdict: "PASS", blocking };
+  // #535 — the blocking list names what to fix. When a run stops early (restart at preflight_before),
+  // most required keys were never produced and the old list read "blocking: identity_match,
+  // home_isolated, session_exact…" while the receipt showed those same checks ✓ (as before:<key>).
+  // So: if a check that explains a blocker actually failed, list exactly those failed checks (with
+  // their real, possibly prefixed, key: before:home_isolated explains a missing home_isolated); else
+  // the present-but-unknown required ones; only if neither exists, the missing ones.
+  // A failed check that does NOT explain any blocker (fork's informational source:… snapshot) stays
+  // out — listing it would point at something that is not why the run failed.
+  const reasons = new Set(blocking);
+  // before:* fails always explain: the restart state machine refuses to touch a process on ANY of them.
+  const explains = (k: string) => reasons.has(k) || reasons.has(unprefixedCheckKey(k)) || k.startsWith("before:") || k === "rollout_before";
+  const failed = checks.filter((c) => c.status === "fail" && explains(c.key)).map((c) => c.key);
+  if (failed.length > 0) return { verdict: "FAIL", blocking: Array.from(new Set(failed)) };
+  const unknownRequired = blocking.filter((k) => byKey.has(k));
+  return { verdict: "FAIL", blocking: unknownRequired.length > 0 ? unknownRequired : blocking };
 }
 
 export function buildReceipt(opts: {
@@ -122,8 +155,10 @@ export function writeReceipt(nodeDir: string, receipt: LifecycleReceipt): string
 
 /** 终端摘要:一行一 check,PASS/FAIL 在最后;不打印 evidence 里的长值。 */
 export function formatReceiptSummary(receipt: LifecycleReceipt): string {
-  const icon = (s: CheckStatus) => (s === "pass" ? "✓" : s === "fail" ? "✗" : "?");
+  const icon = (s: CheckStatus) => (s === "pass" ? "✓" : s === "fail" ? "✗" : s === "n/a" ? "-" : "?");
   const lines = receipt.checks.map((c) => `  ${icon(c.status)} ${c.key.padEnd(22)} ${c.detail}`);
-  lines.push(`${receipt.verdict === "PASS" ? "PASS" : "FAIL"}: ${receipt.verb} ${receipt.alias}${receipt.blocking.length ? ` — blocking: ${receipt.blocking.join(", ")}` : ""}`);
+  const na = receipt.checks.filter((c) => c.status === "n/a").map((c) => c.key);
+  const naNote = receipt.verdict === "PASS" && na.length ? ` (not applicable: ${na.join(", ")})` : "";
+  lines.push(`${receipt.verdict === "PASS" ? "PASS" : "FAIL"}: ${receipt.verb} ${receipt.alias}${naNote}${receipt.blocking.length ? ` — blocking: ${receipt.blocking.join(", ")}` : ""}`);
   return lines.join("\n");
 }

@@ -348,6 +348,7 @@ const NODE_DIR_SKIP_NOTES: Record<string, string> = {
   channels: "channel bot credentials are per node",
   "copresence-identity.json": "co-presence identity of the source",
   "opencode-attach.sh": "attach script of the source",
+  "codex-bridge.log": "bridge output of the source",
 };
 
 const SECRET_FILE_RX = /^(\.env.*|.*\.pem|.*\.key|id_.*|auth\.json|credentials.*|.*\.p12|.*\.pfx|\.npmrc|\.netrc|\.git-credentials)$/i;

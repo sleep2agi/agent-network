@@ -73,6 +73,12 @@ Linux/macOS/WSL 启动会创建三个带同一身份标记的 tmux session；Win
 
 Windows 会把 app-server 与 bridge 的 PID、进程创建时间和日志位置写入节点私有状态。`stop` 只有在 PID 与创建时间同时匹配时才会调用 `taskkill /T`，避免 PID 复用时误杀无关进程；凭据目录用 Windows ACL 限制为当前用户、SYSTEM 与 Administrators。
 
+### 首次启动、未登录、bridge 起不来（#535）
+
+- **⓪ agent-node**：在建任何 tmux session 之前，启动器先解析与本版 anet 配对的 `@sleep2agi/agent-node`（新机器第一次会经 npx 下载，可能要一分钟，期间会打印 `⓪ agent-node: resolving …`），bridge 直接用这份已校验的入口，不再自己跑 npx。所以下载耗时不再吃掉 bridge 的 25 秒等待。
+- **未登录 = `needs-login`**：节点 CODEX_HOME 里没有可用登录（`auth.json` 里既没有 ChatGPT token 也没有 API key）时，不再打印「✅ 就绪」，而是打印 `needs-login`、该节点 CODEX_HOME 的确切登录命令（`CODEX_HOME=<节点>/codex-home codex login --device-auth`），**什么都不启动**，退出码 3。登录后再 `anet node start <节点>`。凭据存在系统 keyring（`cli_auth_credentials_store = "keyring"/"auto"`）或环境里有 `OPENAI_API_KEY`/`CODEX_API_KEY` 时不拦。
+- **bridge 失败看得见**：bridge 的输出同时写进 `<节点目录>/codex-bridge.log`（0600，每次启动清空，上限约 2 MB）。bridge 没接上时直接打印它最后 20 行和日志路径；bridge 会话已经退出时不再给一个 attach 不上的 `tmux attach`。
+
 ### tmux 目标必须精确匹配
 
 `codex-human` 同时也是另外两个 session 名的前缀。tmux 的普通 `-t codex-human`
@@ -313,7 +319,7 @@ anet node codex resume  <alias> --thread <36 位 thread id> --probe-from <peer>
 
 `restart` 的每一步顺序固定、不做推理:**preflight(before)** 任一项 fail 就不碰进程 → 读 **goal 状态**(读不到或 schema 不认识 = 不明,直接 STOP)→ 按依赖反向 **停 Bridge → TUI → App Server**(先断任务入口,再让 TUI 把 rollout 刷完,最后放掉端口)→ 等 rollout 字节数稳定(大会话慢刷盘)→ 等端口空闲(占用者若核实是本节点残留的 app-server 才定向 TERM,外来进程一律 FAIL 不动)→ 交给启动器 `anet node start --copresence --tui-first`(**App Server → 端口就绪 → exact-session TUI 完全恢复 → Bridge**;bridge 晚于 TUI,任务不会落到人看不见的会话上)→ **verify(after)**:preflight 全项 + 子进程环境 + rollout 前后比对(同一文件、字节只增不减)+ goal 文件未变 + hub 回到在线 + 跨节点 nonce 验收。启动失败自动回滚一次(按原配置再起);再失败就停在已停状态,receipt 记到哪一步。
 
-`--probe-from <peer>`(peer 住在别的 `.anet` 根时加 `--probe-root <dir>`)用另一个本地节点通过 hub 给目标发一条带随机 nonce 的任务,等目标回复经 hub 落到 peer 的收件箱,且 hub 标注的发送者正是目标 alias,`identity_attested` 才算 pass;不给 peer 时该项 unknown,整体 **FAIL**(有意:不许「大概是它」)。`resume --thread` 只接受完整 36 位 id 且该 id 在本节点 CODEX_HOME 下恰有一个 rollout,才写进 config;不接受前缀,不猜「最近一个」。
+`--probe-from <peer>`(peer 住在别的 `.anet` 根时加 `--probe-root <dir>`)用另一个本地节点通过 hub 给目标发一条带随机 nonce 的任务,等目标回复经 hub 落到 peer 的收件箱,且 hub 标注的发送者正是目标 alias,`identity_attested` 才算 pass;不给 peer(单节点)时该项记 `n/a`:摘要里显示 `-`,结论行带 `(not applicable: identity_attested)`,不阻塞 —— 健康的单节点得 PASS(exit 0);给了 peer 但回错人仍是 **FAIL**。失败时 `blocking:` 只列真正失败的检查。`resume --thread` 只接受完整 36 位 id 且该 id 在本节点 CODEX_HOME 下恰有一个 rollout,才写进 config;不接受前缀,不猜「最近一个」。
 
 `--json` 输出整份 receipt(含 `stoppedAt` / `rolledBack`),供 Dashboard「体检」按钮消费。
 
