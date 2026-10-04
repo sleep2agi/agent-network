@@ -174,7 +174,7 @@ import {
 } from "./runtime/daemon-create-capability";
 import { daemonHome, resolveDefaultWorkdirRoot } from "./runtime/child-workdir";
 import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
-import { buildCodexSdkThreadOptions, rebuildCodexSdkThread } from "./codex-sdk-thread-options";
+import { buildCodexSdkThreadOptions, buildCodexStdioThreadStartParams, rebuildCodexSdkThread } from "./codex-sdk-thread-options";
 import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 import {
   backupOpencodeConfig,
@@ -3390,12 +3390,11 @@ async function processWithCodexStdio(
     // -32600 error surfaces unknown variants with the valid alternatives
     // listed, so if a future codex version renames any of these the next
     // smoke run will pinpoint exactly which one.
-    const opts: Record<string, unknown> = {
-      model: resolveCodexModel(MODEL),
-      approvalPolicy: "on-request",
-      sandboxPolicy: { type: "dangerFullAccess" },
-    };
-    if (SESSION_ID) (opts as Record<string, unknown>).threadId = SESSION_ID;
+    //
+    // #538 — params come from the node's `flags` (sandboxMode → `sandbox`,
+    // approvalPolicy) via the shared builder; the old `sandboxPolicy`
+    // full-access literal was ignored by app-server's thread/start.
+    const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);
     const startResp = await client.request<{ thread: { id: string } }>("thread/start", opts);
     codexStdioThreadId = startResp.thread.id;
     log(`[codex-stdio] thread/start → ${codexStdioThreadId}`);

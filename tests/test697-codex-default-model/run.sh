@@ -614,6 +614,40 @@ probe_configured_flags_every_sdk_lane() {
 echo "L7h configured sandbox/approval flags survive wake, first turn and retry (#534)"
 probe_configured_flags_every_sdk_lane
 
+# #538 — the ANET_CODEX_STDIO_DIRECT=1 lane must send the node's configured
+# sandbox / approval on thread/start (`sandbox` + `approvalPolicy`, the
+# ThreadStartParams wire names), and an unconfigured node must not be given a
+# sandbox override (no silent escalation) nor the dead `sandboxPolicy` key.
+probe_configured_flags_stdio_lane() {
+  local backup rc=0
+  backup=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  cp "$RUNTIME_CFG" "$backup"
+  jq 'del(.session) | .flags = ((.flags // {}) + {sandboxMode:"read-only",approvalPolicy:"never"})' \
+    "$backup" > "$RUNTIME_CFG"
+  if probe_stdio_task_model; then
+    jq -se 'length >= 1 and all(.[]; .sandbox=="read-only" and .approvalPolicy=="never" and (has("sandboxPolicy") | not))' \
+      "$STDIO_CAPTURE" >/dev/null || { echo "STDIO_FLAGS_IGNORED"; cat "$STDIO_CAPTURE"; rc=1; }
+  else
+    rc=1
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    jq 'del(.session) | .flags = ((.flags // {}) | del(.sandboxMode, .approvalPolicy))' \
+      "$backup" > "$RUNTIME_CFG"
+    if probe_stdio_task_model; then
+      jq -se 'length >= 1 and all(.[]; (has("sandbox") | not) and .approvalPolicy=="on-request" and (has("sandboxPolicy") | not))' \
+        "$STDIO_CAPTURE" >/dev/null || { echo "STDIO_UNCONFIGURED_POSTURE_CHANGED"; cat "$STDIO_CAPTURE"; rc=1; }
+    else
+      rc=1
+    fi
+  fi
+  cp "$backup" "$RUNTIME_CFG"
+  rm -f "$backup"
+  return "$rc"
+}
+
+echo "L7i configured sandbox/approval flags reach the direct-stdio thread/start (#538)"
+probe_configured_flags_stdio_lane
+
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
   run_mutation() {
@@ -941,9 +975,21 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     probe_configured_flags_every_sdk_lane
   run_mutation stdio-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
-    $'      model: resolveCodexModel(MODEL),\n      approvalPolicy: "on-request",' \
-    $'      model: MODEL || "gpt-4.1-legacy",\n      approvalPolicy: "on-request",' \
+    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);' \
+    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, MODEL || "gpt-4.1-legacy", SESSION_ID);' \
     probe_stdio_task_model
+  # #538 — the stdio lane used to ignore the node's flags; dropping them again
+  # (or restoring the old full-access literal) must turn L7i red.
+  run_mutation stdio-flags-ignored-regressed L7i \
+    "$ROOT/agent-node/src/cli.ts" \
+    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);' \
+    'const opts = buildCodexStdioThreadStartParams(undefined, resolveCodexModel(MODEL), SESSION_ID);' \
+    probe_configured_flags_stdio_lane
+  run_mutation stdio-flags-hardcoded-regressed L7i \
+    "$ROOT/agent-node/src/cli.ts" \
+    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);' \
+    'const opts: Record<string, unknown> = { model: resolveCodexModel(MODEL), approvalPolicy: "on-request", sandboxPolicy: { type: "dangerFullAccess" } }; if (SESSION_ID) opts.threadId = SESSION_ID;' \
+    probe_configured_flags_stdio_lane
   run_mutation_all explicit-runtime-model-ignored L7e \
     "$ROOT/agent-node/src/cli.ts" \
     'resolveCodexModel(MODEL)' 'resolveCodexModel(undefined)' 5 \
