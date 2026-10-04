@@ -17,6 +17,7 @@ import {
   type PinnedOpencodeBinaryAttestation,
 } from "../opencode-acp/binary";
 import { ownershipChainVerdict, unverifiedOwnerError } from "./reply-ownership";
+import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
   linuxProcessGroupIsGone,
   readLinuxProcessGroupIdentity,
@@ -792,6 +793,18 @@ export async function openVettedOpenCodeCopresence(
           // idle admission or before an unconfirmed POST.
           evidence?.onSubmitted?.();
           evidence?.onConsumed?.();
+          // #540: a failed model call still comes back as an assistant
+          // message; the failure lives on info.error and the parts are
+          // usually empty. Fail the task with the upstream text instead of
+          // replying "[opencode: assistant returned no reply]".
+          const turnError = openCodeTurnError(message);
+          if (turnError) {
+            warn(`[opencode-copresence] provider error for this turn: ${turnError.name}: ${turnError.message}`);
+            const partial = (message?.parts ?? []).some((p: any) => p?.type === "text" && typeof p.text === "string" && p.text.trim())
+              ? parseMessageReply(message)
+              : "";
+            throw new OpenCodeProviderError(turnError, partial);
+          }
           // parseMessageReply now always returns a non-empty string (either
           // the joined text or a marker naming the non-text part types the
           // model emitted). #1451: the old `if (!replyText) throw` here

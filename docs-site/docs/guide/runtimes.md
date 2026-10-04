@@ -41,6 +41,12 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 > agent-network ≥ `2.3.0-preview.87` 且 agent-node ≥ `2.5.0-preview.67`。
 > 它必须带显式模型（`--model <provider/model>`，如 OpenCode 自带的免费模型 `opencode/mimo-v2.6-flash-free`，不需要 key）；
 > 不带模型会在启动时报 `OpenCode copresence requires an explicit provider/model`。桌面端 ≥ 0.2.61 的向导会默认填一个。
+>
+> ⚠️ **免费 Zen 模型和默认安全预设不能同时用。** OpenCode Zen 免费档会拒绝任何关掉了工具的请求
+> （`OpenCode's free tier can only be used from within OpenCode`），而下面的默认预设把工具全关了，所以每个任务都会失败。
+> `anet node create` 会打印两条出路的确切命令：设 `flags.opencodeUnsafeTools = true`（仅限可信任务），或保留安全预设、
+> 换带 key 的 provider（`anet opencode auth-login <节点> --provider anthropic`）。任务会带着这段说明失败，
+> 不再回 `[opencode: assistant returned no reply]` 冒充成功（#540）。
 
 > **默认它跑不了 `bash`，这是设计，不是故障。** `opencode-cli` 的安全默认把全部本机工具
 > 关掉：`bash` / `read` / `glob` / `grep` / `edit` / `write` / `list` / `task` / `skill`，外加

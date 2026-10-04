@@ -65,6 +65,7 @@ import { nodeNotFoundMessage } from "../src/node-not-found";
 import { columnWidth, lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
 import { describeLocalProcess, LOCAL_VS_HUB_NOTE, type LocalProcessState } from "../src/local-process-state";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
+import { OPENCODE_KEYLESS_FREE_MODEL_NOTE, opencodeFreeTierSafePresetWarning } from "../src/opencode-free-tier";
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
@@ -4983,7 +4984,7 @@ function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts
     console.warn(
       `[anet] ⚠ opencode-cli preset '${preset.id}' selected but ${preset.envKey} is not set — ` +
       `no vendor credential written; auth.json reset to an empty object. ` +
-      `Keyless/free models can still start without a credential.`,
+      OPENCODE_KEYLESS_FREE_MODEL_NOTE,
     );
     console.warn(`[anet]   To add this vendor later, run the node-scoped sandboxed login:`);
     console.warn(
@@ -5001,8 +5002,15 @@ function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts
   console.log(`[anet]   Code tools require flags.opencodeUnsafeTools=true for trusted tasks; use Docker/VM for isolation.`);
 }
 
-function printOpencodeCreationSecurityDisclosure(profile: Profile): void {
+function printOpencodeCreationSecurityDisclosure(id: string, profile: Profile): void {
   const unsafeTools = profile.flags?.opencodeUnsafeTools === true;
+  // #540 — a Zen free model under the safe preset fails every task upstream.
+  for (const line of opencodeFreeTierSafePresetWarning({
+    nodeId: id,
+    model: profile.model,
+    unsafeTools,
+    configFile: join(nodesDir(), id, "config.json"),
+  })) console.warn(line);
   console.log(`\n[anet] ${unsafeTools ? "⚠" : "🛡"} OpenCode tool/cwd policy:`);
   if (unsafeTools) {
     console.log(`[anet]    Built-in: bash / read / glob / grep / edit / write / list / task / skill ENABLED`);
@@ -5690,7 +5698,7 @@ Telegram setup:
     printClaudeCodeNotice();
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
-    printOpencodeCreationSecurityDisclosure(profile);
+    printOpencodeCreationSecurityDisclosure(id, profile);
   } else if (profile.grokCopresence === true) {
     printGrokCopresenceWarning(id, profile.tools, "configured");
   } else {
@@ -6120,7 +6128,7 @@ async function createCommand(idOverride?: string) {
     printClaudeCodeNotice();
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
-    printOpencodeCreationSecurityDisclosure(profile);
+    printOpencodeCreationSecurityDisclosure(id, profile);
   } else if (profile.grokCopresence === true) {
     printGrokCopresenceWarning(id, profile.tools, "configured");
     console.log(`[anet]   One command brings up the node and its shared TUI together.`);
