@@ -12,6 +12,11 @@ rl.on("line", (line) => {
   if (req.method === "thread/start") {
     appendFileSync(capture, JSON.stringify(req.params) + "\n");
     send({ jsonrpc: "2.0", id: req.id, result: { thread: { id: "stdio-697" } } });
+  } else if (req.method === "thread/resume") {
+    // #553 — a recorded session is continued with thread/resume (real
+    // app-server semantics are exercised by L7j against the bundled binary).
+    appendFileSync(capture, JSON.stringify(req.params) + "\n");
+    send({ jsonrpc: "2.0", id: req.id, result: { thread: { id: req.params.threadId } } });
   } else if (req.method === "turn/start") {
     send({ jsonrpc: "2.0", id: req.id, result: { turn: { id: "turn-697" } } });
     setTimeout(() => {

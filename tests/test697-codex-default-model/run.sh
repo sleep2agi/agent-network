@@ -648,6 +648,158 @@ probe_configured_flags_stdio_lane() {
 echo "L7i configured sandbox/approval flags reach the direct-stdio thread/start (#538)"
 probe_configured_flags_stdio_lane
 
+# #553 — the direct-stdio lane against the REAL `codex app-server` bundled with
+# agent-node (no fake). `thread/start` ignores a threadId key, so a recorded
+# thread must come back through `thread/resume`; a thread whose rollout is gone
+# must fail the task with one actionable line and NEVER open a fresh thread.
+# Hermetic: throwaway CODEX_HOME whose only model provider is 127.0.0.1:9
+# (connection refused → the 0.133 turn fails at once, rollout still written);
+# nothing reaches the network, no login, no real ~/.codex.
+REAL_CODEX_LIST=$(find "$ROOT/agent-node/node_modules/@openai" -path '*/vendor/*/bin/codex' -type f)
+REAL_CODEX=${REAL_CODEX_LIST%%$'\n'*}
+[[ -n "$REAL_CODEX" && -x "$REAL_CODEX" ]] || { echo "REAL_CODEX_MISSING under $ROOT/agent-node/node_modules/@openai"; exit 1; }
+REAL_CAPTURE=/tmp/test697-real-appserver-requests.jsonl
+
+real_capture_count() { # method → number of requests of that method in $REAL_CAPTURE
+  jq -s --arg m "$1" 'map(select(.method==$m)) | length' "$REAL_CAPTURE"
+}
+
+wait_for_real_count() { # method count
+  for _ in $(seq 1 120); do
+    [[ "$(real_capture_count "$1" 2>/dev/null || echo 0)" -ge "$2" ]] && return 0
+    sleep 0.25
+  done
+  echo "REAL_CAPTURE_TIMEOUT method=$1 want>=$2"; cat "$REAL_CAPTURE" 2>/dev/null || true; cat "$RUNTIME_LOG"
+  return 1
+}
+
+wait_for_log() { # fixed-string pattern in $RUNTIME_LOG, Nth occurrence
+  local want=${2:-1} n
+  for _ in $(seq 1 120); do
+    n=$(grep -Fc -- "$1" "$RUNTIME_LOG" || true)
+    [[ "${n:-0}" -ge "$want" ]] && return 0
+    sleep 0.25
+  done
+  echo "LOG_TIMEOUT pattern=$1 want>=$want"; cat "$RUNTIME_LOG"
+  return 1
+}
+
+probe_real_appserver_resume() {
+  local backup codex_home codex_shim_backup rc=0 t1 t2 n_start n_resume
+  backup=$(mktemp /tmp/test697-runtime-config.XXXXXX)
+  cp "$RUNTIME_CFG" "$backup"
+  codex_shim_backup=$(mktemp /tmp/test697-codex-shim.XXXXXX)
+  cp "$FAKE_BIN/codex" "$codex_shim_backup"
+  codex_home=$(mktemp -d "$HOME_DIR/codex-home-553.XXXXXX")
+  cat > "$codex_home/config.toml" <<'TOML'
+model_provider = "test697offline"
+[model_providers.test697offline]
+name = "test697offline"
+base_url = "http://127.0.0.1:9/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+TOML
+  # `codex` on PATH = the real binary, with every JSON-RPC request agent-node
+  # sends teed into $REAL_CAPTURE (one JSON object per line).
+  cat > "$FAKE_BIN/codex" <<'SH'
+#!/usr/bin/env bash
+exec "$TEST697_REAL_CODEX" "$@" < <(tee -a "$TEST697_REAL_CAPTURE")
+SH
+  chmod 0755 "$FAKE_BIN/codex"
+  jq 'del(.session) | .flags = ((.flags // {}) + {sandboxMode:"read-only",approvalPolicy:"never"})' \
+    "$backup" > "$RUNTIME_CFG"
+  printf '%s\n' '{"version":1,"goals":[]}' > "$GOALS_PATH"
+  local -a env553=(ANET_CODEX_STDIO_DIRECT=1 CODEX_HOME="$codex_home"
+    TEST697_REAL_CODEX="$REAL_CODEX" TEST697_REAL_CAPTURE="$REAL_CAPTURE")
+
+  # Run 1 — nothing recorded: one thread/start, then the id is recorded once the turn ran.
+  : > "$REAL_CAPTURE"
+  start_runtime_node real1 "${env553[@]}" || rc=1
+  if [[ "$rc" -eq 0 ]]; then
+    send_runtime_task real1 && wait_for_real_count turn/start 1 && wait_for_log '[codex-stdio] turn done' 1 || rc=1
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    t1=$(jq -r '.session // ""' "$RUNTIME_CFG")
+    n_start=$(real_capture_count thread/start); n_resume=$(real_capture_count thread/resume)
+    if [[ -z "$t1" || "$n_start" -ne 1 || "$n_resume" -ne 0 ]]; then
+      echo "REAL_RUN1_WRONG session=$t1 thread/start=$n_start thread/resume=$n_resume"; rc=1
+    elif ! jq -se 'map(select(.method=="thread/start")) | all(.[]; (.params|has("threadId")|not) and .params.sandbox=="read-only" and .params.approvalPolicy=="never")' "$REAL_CAPTURE" >/dev/null; then
+      echo "REAL_RUN1_START_PARAMS_WRONG"; cat "$REAL_CAPTURE"; rc=1
+    elif [[ -z "$(find "$codex_home/sessions" -name "rollout-*-$t1.jsonl" -type f 2>/dev/null)" ]]; then
+      echo "REAL_RUN1_NO_ROLLOUT for recorded $t1"; find "$codex_home" -type f; rc=1
+    fi
+  fi
+  # Same process, second task: same thread, no new start/resume.
+  if [[ "$rc" -eq 0 ]]; then
+    send_runtime_task real1b && wait_for_real_count turn/start 2 && wait_for_log '[codex-stdio] turn done' 2 || rc=1
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    if [[ "$(real_capture_count thread/start)" -ne 1 || "$(real_capture_count thread/resume)" -ne 0 ]] \
+      || ! jq -se --arg t "$t1" 'map(select(.method=="turn/start")) | length == 2 and all(.[]; .params.threadId==$t)' "$REAL_CAPTURE" >/dev/null; then
+      echo "REAL_SAME_PROCESS_SECOND_TASK_WRONG t1=$t1"; cat "$REAL_CAPTURE"; rc=1
+    else
+      echo "  run1: one thread/start → recorded $t1 (rollout present); second task reused it"
+    fi
+  fi
+  stop_runtime_node
+
+  # Run 2 — node restarted with session=t1: the next task resumes t1 (no thread/start).
+  if [[ "$rc" -eq 0 ]]; then
+    : > "$REAL_CAPTURE"
+    start_runtime_node real2 "${env553[@]}" || rc=1
+    if [[ "$rc" -eq 0 ]]; then
+      send_runtime_task real2 && wait_for_real_count turn/start 1 && wait_for_log '[codex-stdio] turn done' 1 || rc=1
+    fi
+    if [[ "$rc" -eq 0 ]]; then
+      t2=$(jq -r '.session // ""' "$RUNTIME_CFG")
+      if [[ "$(real_capture_count thread/start)" -ne 0 || "$(real_capture_count thread/resume)" -ne 1 ]] \
+        || ! jq -se --arg t "$t1" '
+            (map(select(.method=="thread/resume")) | all(.[]; .params.threadId==$t and .params.sandbox=="read-only" and .params.approvalPolicy=="never"))
+            and (map(select(.method=="turn/start")) | all(.[]; .params.threadId==$t))' "$REAL_CAPTURE" >/dev/null \
+        || [[ "$t2" != "$t1" ]] \
+        || ! grep -Fq "[codex-stdio] thread/resume → $t1" "$RUNTIME_LOG"; then
+        echo "REAL_RESTART_DID_NOT_RESUME t1=$t1 session_after=$t2"; cat "$REAL_CAPTURE"; cat "$RUNTIME_LOG"; rc=1
+      else
+        echo "  restart resumed $t1 via thread/resume (thread/start=0, session unchanged)"
+      fi
+    fi
+    stop_runtime_node
+  fi
+
+  # Run 3 — t1's rollout is gone: the task fails with the actionable line, no fresh thread.
+  if [[ "$rc" -eq 0 ]]; then
+    mv "$codex_home/sessions" "$codex_home/sessions.gone"
+    : > "$REAL_CAPTURE"
+    start_runtime_node real3 "${env553[@]}" || rc=1
+    if [[ "$rc" -eq 0 ]]; then
+      send_runtime_task real3 && wait_for_log "recorded codex thread $t1 cannot be resumed" 1 || rc=1
+    fi
+    if [[ "$rc" -eq 0 ]]; then
+      sleep 1
+      if [[ "$(real_capture_count thread/start)" -ne 0 || "$(real_capture_count turn/start)" -ne 0 ]] \
+        || ! grep -Fq "refusing to start a fresh thread in its place. Pick another: anet resume $RUNTIME_NODE_ALIAS --pick" "$RUNTIME_LOG" \
+        || [[ "$(jq -r '.session // ""' "$RUNTIME_CFG")" != "$t1" ]]; then
+        echo "REAL_GONE_THREAD_NOT_REFUSED t1=$t1"; cat "$REAL_CAPTURE"; cat "$RUNTIME_LOG"; rc=1
+      else
+        echo "  gone thread refused (thread/start=0 turn/start=0): $(grep -F -m1 'cannot be resumed' "$RUNTIME_LOG")"
+      fi
+    fi
+    stop_runtime_node
+  fi
+
+  cp "$codex_shim_backup" "$FAKE_BIN/codex"
+  chmod 0755 "$FAKE_BIN/codex"
+  rm -f "$codex_shim_backup"
+  cp "$backup" "$RUNTIME_CFG"
+  rm -f "$backup"
+  safe_rm_rf "$codex_home"
+  return "$rc"
+}
+
+echo "L7j direct-stdio lane resumes the recorded thread on the real codex app-server (#553)"
+probe_real_appserver_resume
+
 if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
   echo "L8 witnessed-red mutations"
   run_mutation() {
@@ -975,21 +1127,38 @@ if [[ "${TEST697_SKIP_MUTATIONS:-0}" != "1" ]]; then
     probe_configured_flags_every_sdk_lane
   run_mutation stdio-model-injection-regressed L7d \
     "$ROOT/agent-node/src/cli.ts" \
-    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);' \
-    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, MODEL || "gpt-4.1-legacy", SESSION_ID);' \
+    $'      flags: fileConfig?.flags,\n      model: resolveCodexModel(MODEL),' \
+    $'      flags: fileConfig?.flags,\n      model: MODEL || "gpt-4.1-legacy",' \
     probe_stdio_task_model
   # #538 — the stdio lane used to ignore the node's flags; dropping them again
   # (or restoring the old full-access literal) must turn L7i red.
   run_mutation stdio-flags-ignored-regressed L7i \
     "$ROOT/agent-node/src/cli.ts" \
-    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);' \
-    'const opts = buildCodexStdioThreadStartParams(undefined, resolveCodexModel(MODEL), SESSION_ID);' \
+    $'      flags: fileConfig?.flags,\n      model: resolveCodexModel(MODEL),' \
+    $'      flags: undefined,\n      model: resolveCodexModel(MODEL),' \
     probe_configured_flags_stdio_lane
   run_mutation stdio-flags-hardcoded-regressed L7i \
-    "$ROOT/agent-node/src/cli.ts" \
-    'const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);' \
-    'const opts: Record<string, unknown> = { model: resolveCodexModel(MODEL), approvalPolicy: "on-request", sandboxPolicy: { type: "dangerFullAccess" } }; if (SESSION_ID) opts.threadId = SESSION_ID;' \
+    "$ROOT/agent-node/src/codex-sdk-thread-options.ts" \
+    '  if (typeof cfgFlags.sandboxMode === "string") params.sandbox = cfgFlags.sandboxMode;' \
+    '  (params as unknown as Record<string, unknown>).sandboxPolicy = { type: "dangerFullAccess" }; params.approvalPolicy = "on-request";' \
     probe_configured_flags_stdio_lane
+  # #553 — the recorded thread must be resumed on the real app-server, and a
+  # thread that is gone must never be replaced by a fresh one.
+  run_mutation stdio-recorded-thread-ignored L7j \
+    "$ROOT/agent-node/src/cli.ts" \
+    '      recordedThreadId: codexStdioRecordedThreadId,' \
+    '      recordedThreadId: null,' \
+    probe_real_appserver_resume
+  run_mutation stdio-resume-via-thread-start L7j \
+    "$ROOT/agent-node/src/codex-sdk-thread-options.ts" \
+    '  const recorded = o.recordedThreadId || "";' \
+    '  const recorded = ""; const _legacy = o.recordedThreadId;' \
+    probe_real_appserver_resume
+  run_mutation stdio-gone-thread-silently-replaced L7j \
+    "$ROOT/agent-node/src/codex-sdk-thread-options.ts" \
+    '      const cause = e instanceof Error ? e.message : String(e);' \
+    '      const cause = e instanceof Error ? e.message : String(e); { const r = await rpc.request<{ thread: { id: string } }>("thread/start", buildCodexStdioThreadStartParams(o.flags, o.model)); return { threadId: r.thread.id, resumed: false }; }' \
+    probe_real_appserver_resume
   run_mutation_all explicit-runtime-model-ignored L7e \
     "$ROOT/agent-node/src/cli.ts" \
     'resolveCodexModel(MODEL)' 'resolveCodexModel(undefined)' 5 \

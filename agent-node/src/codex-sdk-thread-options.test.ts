@@ -6,7 +6,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildCodexSdkThreadOptions,
+  buildCodexStdioThreadResumeParams,
   buildCodexStdioThreadStartParams,
+  codexStdioResumeRefusal,
+  CodexStdioResumeError,
+  isCodexThreadGoneError,
+  openCodexStdioThread,
   rebuildCodexSdkThread,
   type CodexSdkThreadOptions,
 } from "./codex-sdk-thread-options";
@@ -173,30 +178,157 @@ describe("#538 ANET_CODEX_STDIO_DIRECT=1 thread/start params", () => {
     }
   });
 
-  test("threadId is carried only when a session id is set", () => {
-    expect(buildCodexStdioThreadStartParams({}, "m", "sess-1").threadId).toBe("sess-1");
-    expect("threadId" in buildCodexStdioThreadStartParams({}, "m", "")).toBe(false);
-    expect("threadId" in buildCodexStdioThreadStartParams({}, "m", null)).toBe(false);
+  test("#553 thread/start never carries a threadId (codex ignores it and opens a new thread)", () => {
+    const p = buildCodexStdioThreadStartParams({}, "m") as unknown as Record<string, unknown>;
+    expect("threadId" in p).toBe(false);
   });
 });
 
-describe("#538 cli.ts stdio lane goes through the builder", () => {
+describe("#538/#553 cli.ts stdio lane goes through the shared opener", () => {
   const cli = readFileSync(join(import.meta.dir, "cli.ts"), "utf8");
+  const start = cli.indexOf("async function processWithCodexStdio(");
+  const end = cli.indexOf("\n}\n", start);
+  const body = cli.slice(start, end);
 
-  test("processWithCodexStdio builds thread/start from fileConfig.flags", () => {
-    const start = cli.indexOf("async function processWithCodexStdio(");
-    const end = cli.indexOf('client.request<{ thread: { id: string } }>("thread/start", opts)', start);
+  test("processWithCodexStdio opens the thread with the recorded id + fileConfig.flags", () => {
     expect(start).toBeGreaterThan(0);
-    expect(end).toBeGreaterThan(start);
-    const body = cli.slice(start, end);
-    expect(body).toContain(
-      "const opts = buildCodexStdioThreadStartParams(fileConfig?.flags, resolveCodexModel(MODEL), SESSION_ID);",
-    );
+    expect(body).toContain("const opened = await openCodexStdioThread(client, {");
+    expect(body).toContain("recordedThreadId: codexStdioRecordedThreadId,");
+    expect(body).toContain("flags: fileConfig?.flags,");
+    expect(body).toContain("model: resolveCodexModel(MODEL),");
     expect(body).not.toMatch(/sandboxPolicy\s*:/);
     expect(body).not.toMatch(/approvalPolicy:\s*"on-request"/);
+    // no direct thread/start that could bypass the resume
+    expect(body).not.toMatch(/request(<[^>]*>+)?\(\s*"thread\/(start|resume)"/);
+  });
+
+  test("the thread id is recorded after the turn, not at thread/start", () => {
+    const open = body.indexOf("openCodexStdioThread(");
+    const turn = body.indexOf('"turn/start"');
+    const write = body.indexOf("writebackSession(codexStdioThreadId)");
+    expect(open).toBeGreaterThan(0);
+    expect(write).toBeGreaterThan(turn);
+    expect(body.indexOf("writebackSession(")).toBe(write);
+  });
+
+  test("the recorded id starts from the boot session and survives an app-server exit", () => {
+    expect(cli).toContain("let codexStdioRecordedThreadId: string | null = SESSION_ID || null;");
+    const ensure = cli.slice(cli.indexOf("async function ensureCodexStdio("), start);
+    expect(ensure).toContain("codexStdioThreadId = null;");
+    expect(ensure).not.toContain("codexStdioRecordedThreadId");
   });
 
   test("no hard-coded app-server full-access literal remains in cli.ts", () => {
     expect(cli).not.toMatch(/sandboxPolicy:\s*\{\s*type:\s*"dangerFullAccess"/);
+  });
+});
+
+// #553 — a fake JSON-RPC peer that answers like the real app-server did
+// (0.133.0 / 0.155.1 measurements in codex-sdk-thread-options.ts).
+function fakeAppServer(opts: { threads?: string[]; resumeError?: string; resumeAnswersWith?: string } = {}) {
+  const calls: Array<{ method: string; params: any }> = [];
+  const known = new Set(opts.threads ?? []);
+  let n = 0;
+  return {
+    calls,
+    async request<R>(method: string, params?: unknown): Promise<R> {
+      calls.push({ method, params });
+      if (method === "thread/start") {
+        const id = `0199aaaa-0000-7000-8000-00000000000${++n}`;
+        return { thread: { id } } as R;
+      }
+      if (method === "thread/resume") {
+        const id = (params as { threadId: string }).threadId;
+        if (opts.resumeError) throw new Error(opts.resumeError);
+        if (!known.has(id)) throw new Error(`codex JSON-RPC error -32600: no rollout found for thread id ${id}`);
+        return { thread: { id: opts.resumeAnswersWith ?? id } } as R;
+      }
+      throw new Error(`unexpected ${method}`);
+    },
+  };
+}
+
+describe("#553 direct-stdio lane resumes the recorded thread", () => {
+  const T = "0199bbbb-1111-7000-8000-000000000553";
+
+  test("resume params carry threadId + the node's sandbox/approval, like thread/start", () => {
+    expect(buildCodexStdioThreadResumeParams({ sandboxMode: "read-only", approvalPolicy: "never" }, "o3", T)).toEqual({
+      threadId: T,
+      model: "o3",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    });
+    const unconfigured = buildCodexStdioThreadResumeParams(undefined, "m", T) as unknown as Record<string, unknown>;
+    expect(unconfigured).toEqual({ threadId: T, model: "m", approvalPolicy: "on-request" });
+    expect("sandboxPolicy" in unconfigured).toBe(false);
+  });
+
+  test("a recorded thread is resumed with thread/resume and thread/start is never sent", async () => {
+    const rpc = fakeAppServer({ threads: [T] });
+    const got = await openCodexStdioThread(rpc, {
+      recordedThreadId: T,
+      flags: { sandboxMode: "workspace-write", approvalPolicy: "never" },
+      model: "m",
+      alias: "n1",
+    });
+    expect(got).toEqual({ threadId: T, resumed: true });
+    expect(rpc.calls.map((c) => c.method)).toEqual(["thread/resume"]);
+    expect(rpc.calls[0].params).toEqual({ threadId: T, model: "m", approvalPolicy: "never", sandbox: "workspace-write" });
+  });
+
+  test("no recorded thread → thread/start, with no threadId", async () => {
+    for (const recordedThreadId of [undefined, null, ""]) {
+      const rpc = fakeAppServer();
+      const got = await openCodexStdioThread(rpc, { recordedThreadId, flags: {}, model: "m", alias: "n1" });
+      expect(got.resumed).toBe(false);
+      expect(rpc.calls.map((c) => c.method)).toEqual(["thread/start"]);
+      expect("threadId" in rpc.calls[0].params).toBe(false);
+    }
+  });
+
+  test("a recorded thread with no rollout fails with one actionable line and never starts a fresh thread", async () => {
+    const rpc = fakeAppServer({ threads: [] });
+    let err: unknown;
+    try {
+      await openCodexStdioThread(rpc, { recordedThreadId: T, flags: {}, model: "m", alias: "n1", configPath: "/x/config.json" });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(CodexStdioResumeError);
+    const msg = (err as Error).message;
+    expect(msg.split("\n")).toHaveLength(1);
+    expect(msg).toContain(`recorded codex thread ${T} cannot be resumed`);
+    expect(msg).toContain("no rollout found");
+    expect(msg).toContain("refusing to start a fresh thread");
+    expect(msg).toContain("anet resume n1 --pick");
+    expect(msg).toContain('remove "session" from /x/config.json');
+    expect(rpc.calls.map((c) => c.method)).toEqual(["thread/resume"]);
+  });
+
+  test("any other resume failure (timeout / app-server exit) also fails without a fresh thread", async () => {
+    const rpc = fakeAppServer({ threads: [T], resumeError: "codex request 'thread/resume' (id=2) timed out after 60000ms" });
+    await expect(openCodexStdioThread(rpc, { recordedThreadId: T, flags: {}, model: "m", alias: "n1" })).rejects.toThrow(
+      /thread\/resume of recorded thread .* failed \(codex request 'thread\/resume' .*timed out.*\) — not starting a fresh thread/,
+    );
+    expect(rpc.calls.map((c) => c.method)).toEqual(["thread/resume"]);
+  });
+
+  test("an app-server that answers resume with a different thread is refused", async () => {
+    const rpc = fakeAppServer({ threads: [T], resumeAnswersWith: "0199cccc-0000-7000-8000-000000000000" });
+    await expect(openCodexStdioThread(rpc, { recordedThreadId: T, flags: {}, model: "m", alias: "n1" })).rejects.toThrow(
+      /answered with thread 0199cccc/,
+    );
+  });
+
+  test("codex's measured thread-gone wordings are recognised (0.133 + 0.155)", () => {
+    expect(isCodexThreadGoneError("codex JSON-RPC error -32600: no rollout found for thread id 019a0000-0000-7000-8000-000000000000")).toBe(true);
+    expect(isCodexThreadGoneError("codex JSON-RPC error -32600: invalid thread id: invalid character")).toBe(true);
+    expect(isCodexThreadGoneError("codex JSON-RPC error -32600: invalid session id: invalid character")).toBe(true);
+    expect(isCodexThreadGoneError("codex app-server exited (code=1 signal=null)")).toBe(false);
+  });
+
+  test("the refusal is one line even when codex's message has newlines", () => {
+    const line = codexStdioResumeRefusal({ alias: "a", threadId: T, cause: "no rollout found for thread id x\n  at y" });
+    expect(line.includes("\n")).toBe(false);
   });
 });
