@@ -333,3 +333,51 @@ describe("resolveAcceptedOpencodePackageBinaryFromPath (#541 transition)", () =>
       .toThrow("no accepted opencode versions configured");
   });
 });
+
+describe("#543 — scoped V2 package identity (@opencode/cli)", () => {
+  function makeV2Package(parent: string, version = "2.0.22") {
+    const root = join(parent, "node_modules", "@opencode", "cli");
+    const bin = join(root, "bin");
+    mkdirSync(bin, { recursive: true, mode: 0o755 });
+    const binary = join(bin, "opencode.exe");
+    writeFileSync(binary, `#!/bin/sh\nprintf 'opencode v%s\\n' ${version}\n`, { mode: 0o755 });
+    writeFileSync(join(root, "package.json"), JSON.stringify({
+      name: "@opencode/cli",
+      version,
+      bin: { opencode: "./bin/opencode.exe", opencode2: "./bin/opencode.exe" },
+    }), { mode: 0o644 });
+    return { root, binary };
+  }
+
+  test("V2 package admitted only when the caller names @opencode/cli", () => {
+    const fixture = makeV2Package(safeTestBase());
+    expect(validateOpencodePackageBinary(fixture.binary, { expectedVersion: "2.0.22", packageName: "@opencode/cli" }))
+      .toBe(fixture.binary);
+    // Default (V1) gate: never admits the V2 package.
+    expect(() => validateOpencodePackageBinary(fixture.binary, { expectedVersion: "2.0.22" }))
+      .toThrow("not inside a node_modules/opencode-ai wrapper");
+  });
+
+  test("the V2 gate refuses opencode-ai and a manifest/version mismatch", () => {
+    const v1 = makePackage(safeTestBase());
+    expect(() => validateOpencodePackageBinary(v1.binary, { expectedVersion: PIN, packageName: "@opencode/cli" }))
+      .toThrow("not inside a node_modules/@opencode/cli wrapper");
+    const v2 = makeV2Package(safeTestBase(), "2.0.21");
+    expect(() => validateOpencodePackageBinary(v2.binary, { expectedVersion: "2.0.22", packageName: "@opencode/cli" }))
+      .toThrow("not exact @opencode/cli@2.0.22 package identity");
+  });
+
+  test("PATH resolution with packageName finds the V2 entrypoint through npm's bin symlink", () => {
+    const base = safeTestBase();
+    const fixture = makeV2Package(base);
+    const pathBin = join(base, "bin");
+    mkdirSync(pathBin, { mode: 0o755 });
+    symlinkSync(fixture.binary, join(pathBin, "opencode"));
+    expect(resolveAcceptedOpencodePackageBinaryFromPath(pathBin, {
+      acceptedVersions: ["2.0.22"],
+      packageName: "@opencode/cli",
+    }, "linux")).toEqual({ binary: fixture.binary, version: "2.0.22" });
+    expect(() => resolveAcceptedOpencodePackageBinaryFromPath(pathBin, { acceptedVersions: acceptedOpencodeVersions() }, "linux"))
+      .toThrow("no trusted exact opencode-ai package entrypoint found on PATH");
+  });
+});

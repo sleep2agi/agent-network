@@ -144,6 +144,20 @@ export interface ValidateOpencodePackageBinaryOptions {
   /** A package payload may not be inside, or contain, the current project or
    * node state tree. This rejects project-local same-version impersonators. */
   forbiddenRoots?: readonly string[];
+  /** #543 — npm package that must own the entrypoint. Absent = V1
+   *  `opencode-ai`, exactly the pre-#543 gate; V2 passes `@opencode/cli`. */
+  packageName?: string;
+}
+
+/** `<…>/node_modules/<packageName>` for plain and scoped names alike. For
+ *  `opencode-ai` this is exactly the pre-#543 two-basename check. */
+function isNodeModulesPackageRoot(packageRoot: string, packageName: string): boolean {
+  let current = packageRoot;
+  for (const segment of packageName.split("/").reverse()) {
+    if (basename(current) !== segment) return false;
+    current = dirname(current);
+  }
+  return basename(current) === "node_modules";
 }
 
 /** Current cwd plus every enclosing source-workspace boundary. This catches a
@@ -185,14 +199,15 @@ export function validateOpencodePackageBinary(
     throw new Error("opencode package entrypoint must be absolute");
   }
 
+  const packageName = options.packageName ?? OPENCODE_PACKAGE_NAME;
   const binary = realpathSync(rawBinary);
   const packageRoot = dirname(dirname(binary));
-  if (basename(packageRoot) !== OPENCODE_PACKAGE_NAME || basename(dirname(packageRoot)) !== "node_modules") {
-    throw new Error("resolved opencode binary is not inside a node_modules/opencode-ai wrapper");
+  if (!isNodeModulesPackageRoot(packageRoot, packageName)) {
+    throw new Error(`resolved opencode binary is not inside a node_modules/${packageName} wrapper`);
   }
   const expectedBinary = join(packageRoot, OPENCODE_PACKAGE_BIN);
   if (binary !== expectedBinary || realpathSync(expectedBinary) !== expectedBinary) {
-    throw new Error("resolved opencode binary is outside the canonical opencode-ai package payload");
+    throw new Error(`resolved opencode binary is outside the canonical ${packageName} package payload`);
   }
 
   assertSafePackageAncestors(dirname(binary));
@@ -218,7 +233,7 @@ export function validateOpencodePackageBinary(
     ? pkg.bin.opencode.replace(/^\.\//, "")
     : undefined;
   if (
-    pkg?.name !== OPENCODE_PACKAGE_NAME
+    pkg?.name !== packageName
     || pkg?.version !== options.expectedVersion
     || typeof pkg?.bin !== "object"
     || pkg.bin === null
@@ -226,7 +241,7 @@ export function validateOpencodePackageBinary(
     || declaredBin !== OPENCODE_PACKAGE_BIN
   ) {
     throw new Error(
-      `resolved executable is not exact ${OPENCODE_PACKAGE_NAME}@${options.expectedVersion} package identity`,
+      `resolved executable is not exact ${packageName}@${options.expectedVersion} package identity`,
     );
   }
   return binary;
@@ -264,7 +279,7 @@ export function resolveOpencodePackageBinaryFromPath(
     }
   }
   const detail = rejected[0] ? `; first rejected candidate: ${rejected[0]}` : "";
-  throw new Error(`no trusted exact opencode-ai package entrypoint found on PATH${detail}`);
+  throw new Error(`no trusted exact ${options.packageName ?? OPENCODE_PACKAGE_NAME} package entrypoint found on PATH${detail}`);
 }
 
 /**
@@ -292,6 +307,7 @@ export function resolveAcceptedOpencodePackageBinaryFromPath(
       const binary = resolveOpencodePackageBinaryFromPath(searchPath, {
         expectedVersion: version,
         forbiddenRoots: options.forbiddenRoots,
+        ...(options.packageName ? { packageName: options.packageName } : {}),
       }, platform);
       return { binary, version };
     } catch (error) {

@@ -72,6 +72,12 @@ import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
 import { backfillOpencodeGeneration, stampOpencodeGeneration } from "../src/opencode-generation-record";
+import {
+  applyOpencodeGenerationCreateOption,
+  opencodeGenerationInstallCommand,
+  opencodeStartGenerationRefusal,
+} from "../src/opencode-generation-create";
+import { opencodeGenerationOfConfig, opencodeGenerationSupport } from "../src/opencode-versions";
 import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
@@ -2504,6 +2510,8 @@ interface Profile {
   /** #448 — explicit `--codex-home` override, persisted so every respawn recomputes it from config, not env. */
   codexHome?: string;
   opencodeMode?: "headless" | "copresence";
+  /** #542/#543 — OpenCode generation ("v1" when absent; "v2" = preview). */
+  opencodeGeneration?: string;
   model?: string;
   channels: string[];
   env: Record<string, string>;
@@ -3863,7 +3871,46 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   return previewPlan;
 }
 
-function assertStartCompatibility(runtime: RuntimeName) {
+/** #543 — exact package/version gate for a non-V1 OpenCode generation (V2
+ *  preview): same trust boundary as checkOpencodePin, other package row. */
+function checkOpencodeGenerationBinary(generation: "v2"):
+  | ({ ok: true } & OpencodeLaunchIdentity)
+  | { ok: false; hint: string } {
+  const support = opencodeGenerationSupport(generation);
+  const forbiddenRoots = discoverOpencodeForbiddenRoots();
+  let probe: ReturnType<typeof createOpencodeProbeContext> | undefined;
+  try {
+    const { binary, version } = resolveAcceptedOpencodePackageBinaryFromPath(process.env.PATH ?? "", {
+      acceptedVersions: support.acceptedVersions,
+      forbiddenRoots,
+      packageName: support.packageName,
+    });
+    probe = createOpencodeProbeContext(".anet-opencode-version-");
+    revalidateOpencodeSafeExternalRoot(probe.root);
+    const raw = execFileSync(binary, ["--version"], {
+      encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 5_000, cwd: probe.root.cwd, env: probe.env,
+    }).trim();
+    validateOpencodePackageBinary(binary, { expectedVersion: version, forbiddenRoots, packageName: support.packageName });
+    // V2 prints "opencode v2.0.22".
+    const found = raw.match(/(\d+\.\d+\.\d+)/)?.[1] ?? raw;
+    if (found !== version) {
+      return { ok: false, hint: `Expected ${support.packageName}@${version}; ${binary} reports ${found}.\n  → Install exact: ${opencodeGenerationInstallCommand(generation)}` };
+    }
+    return { ok: true, binary, version };
+  } catch (e: any) {
+    return {
+      ok: false,
+      hint: `Expected trusted ${support.packageName}@${support.pin}; ${e?.message || e}\n  → Install exact: ${opencodeGenerationInstallCommand(generation)}` +
+        `\n  → ${support.packageName} and opencode-ai both install an \`opencode\` command: use a separate npm prefix (npm i -g --prefix …) to keep both.`,
+    };
+  } finally {
+    if (probe) {
+      try { cleanupOpencodeSafeExternalRoot(probe.root); } catch {}
+    }
+  }
+}
+
+function assertStartCompatibility(runtime: RuntimeName, profile?: Profile, nodeId?: string) {
   if (runtime === "codex-app-server") {
     try {
       resolveCodexAgentNodeLaunchPlan();
@@ -3879,6 +3926,33 @@ function assertStartCompatibility(runtime: RuntimeName) {
   // point, and its message-schema stability across upstream releases
   // is unproven. Reject any drift from the pinned version so a
   // silent `latest` bump can't wedge running nodes.
+  if (runtime === "opencode-cli" && profile && opencodeGenerationOfConfig(profile) !== "v1") {
+    // #543 — OpenCode V2 preview: refused unless co-presence + flags.opencodeUnsafeTools=true.
+    const refusal = opencodeStartGenerationRefusal(profile, {
+      copresence: process.env.ANET_OPENCODE_MODE === "copresence",
+      configFile: nodeId ? join(nodesDir(), nodeId, "config.json") : undefined,
+    });
+    if (refusal) {
+      console.error(`[anet] ❌ ${refusal}`);
+      process.exit(1);
+    }
+    const check = checkOpencodeGenerationBinary("v2");
+    if (!check.ok) {
+      console.error(`[anet] Incompatible OpenCode v2 runtime.`);
+      console.error(`[anet] ${check.hint}`);
+      process.exit(1);
+    }
+    console.warn(`[anet] ⚠ OpenCode v2 co-presence PREVIEW (${check.binary}): every local tool is enabled (flags.opencodeUnsafeTools=true); trusted tasks only.`);
+    opencodeLaunchIdentity = { binary: check.binary, version: check.version };
+    try {
+      resolveOpencodeAgentNodeLaunchPlan();
+    } catch (error: any) {
+      console.error(`[anet] Incompatible agent-node for opencode-cli.`);
+      console.error(`[anet] ${error?.message || error}`);
+      process.exit(1);
+    }
+    return;
+  }
   if (runtime === "opencode-cli") {
     const check = checkOpencodePin();
     if (!check.ok) {
@@ -4727,7 +4801,14 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
             ? { session: opts.session }
             : {}),
   };
-  return profile;
+  if (runtime !== "opencode-cli") return profile;
+  // #543 — `--opencode-generation v2` (preview) only behind --opencode-unsafe-tools.
+  const generationApplied = applyOpencodeGenerationCreateOption(profile, opts);
+  if (!generationApplied.ok) {
+    console.error(`[anet] ❌ ${generationApplied.refusal}`);
+    process.exit(1);
+  }
+  return generationApplied.profile;
 }
 
 // #125 fix (preview.3) — share one resolver between the two launchAgent paths
@@ -6766,7 +6847,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     printGrokCopresenceWarning(nodeId, profile.tools, willResume ? "resume" : "new");
   }
   checkRuntimeDependency(runtime, "start");
-  assertStartCompatibility(runtime);
+  assertStartCompatibility(runtime, profile, nodeId);
 
   // Prepare the local commhub stdio artifact. grok-build-cli consumes it from
   // its isolated GROK_HOME and still refuses every project/host MCP config.
