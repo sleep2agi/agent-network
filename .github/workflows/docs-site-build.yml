@@ -88,6 +88,17 @@ jobs:
         run: npm run build
         working-directory: docs-site
 
+      # #568 首页手机宽度不许横向溢出(320–430px × 中/英 × 正常/125% rem/120% zoom,
+      # 微信 UA + isMobile)。见证:origin/main c179375f 上 0/30 组合干净、rc=1
+      # (「CLI 保留全部能力」两张卡片的正文与 curl 命令被裁);修复后 30/30、rc=0。
+      # 🔴 那次红里「盒子出界」判据是 0 条 —— 卡片被 .VPHome 的 overflow 兜住、
+      #    scrollWidth 也等于视口宽度,只有「文字被裁」那一层抓到了。别删那一层。
+      - name: home page fits phone widths (#568)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:home-mobile
+        working-directory: docs-site
+
       # 分母承重:上面那步在 docs/ 被清空时**也会 rc=0** —— 0 个页面、0 条死链,
       # 打印出来和真绿几乎一样。把「磁盘上有几篇 md」和「渲染出几个 html」绑在一起。
       - name: rendered-page denominator

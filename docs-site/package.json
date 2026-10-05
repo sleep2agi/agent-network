@@ -13,7 +13,8 @@
     "prebuild": "npm run skillhub:build",
     "build": "vitepress build docs",
     "preview": "vitepress preview docs",
-    "test:update-route": "node scripts/check-desktop-update-route.mjs"
+    "test:update-route": "node scripts/check-desktop-update-route.mjs",
+    "test:home-mobile": "node scripts/check-home-mobile-overflow.mjs"
   },
   "keywords": [
     "agent-network",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "esbuild": "^0.25.12",
     "mermaid": "^11.15.0",
+    "playwright": "1.62.1",
     "vitepress": "^1.6.4",
     "vitepress-plugin-mermaid": "^2.0.17"
   },
