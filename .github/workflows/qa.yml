@@ -686,6 +686,8 @@ jobs:
     # 自己的 HOME、空 cwd —— 节点对它不是本地的,一切经 Hub。远程 stop(答 n 不派发 / 答 y 停掉)→ start → restart → 换模型;
     # 没 daemon 的机器拒绝、受限成员拒绝(COMMHUB_TOKEN 放 admin 令牌也不用)、viewer 显示 Hub 的 permission_denied。
     # 见证红 4 条:去掉在线 daemon 检查 / 不确认就派发 / 改用 getToken()(COMMHUB_TOKEN 压过登录)/ 不等结果就报成功。
+    # #570:手工 `anet node start` 起的节点(无 daemon 关联)远程 restart / 换模型成功、stop/start 仍拒;
+    # 不报 config_update_capable 的节点 restart/edit 派发前拒;见证红 +2(restart 又要求 daemon / 去掉能力位检查)。
     # 冷构建含三次 bun install + 两次 npm pack(同 qa-create-node-workdir 的形状),进不了 L1 —— 独立 job。
     name: node --remote e2e (Docker, real hub + daemon)
     needs: changes
