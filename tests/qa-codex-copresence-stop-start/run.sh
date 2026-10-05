@@ -197,8 +197,24 @@ else
   tm capture-pane -p -t "=$C:" 2>/dev/null | tail -20 | sed 's/^/      /'
 fi
 C_TID=$(cfg "$C" .codexThreadId | tr -d '"')
+# The submitted turn cannot reach a model (--network none) and codex keeps retrying it ("Working").
+# Stopping a node in the middle of a turn is a different scenario (CI saw a marker pid outlive
+# grace+KILL there); this one is about restarting a used thread, so let the turn end first:
+# interrupt it the way a human would (Esc) and wait until the TUI is idle.
+C_IDLE=0
+for _ in $(seq 1 30); do
+  tm capture-pane -p -t "=$C:" 2>/dev/null | grep -Fq "Working" || { C_IDLE=1; break; }
+  tm send-keys -t "=$C:" Escape; sleep 1
+done
+[[ "$C_IDLE" == 1 ]] && ok "C: the turn was interrupted and the TUI is idle before stop" \
+  || { bad "C: the TUI still shows a running turn after 30 s"; tm capture-pane -p -t "=$C:" | grep -v '^\s*$' | tail -6 | sed 's/^/      | /'; }
+C_M1=$(marker "$C")
 stop_node "$C" 1
-[[ "$STOP_RC" == 0 ]] && ok "C: stop rc=0" || bad "C: stop rc=$STOP_RC"
+if [[ "$STOP_RC" == 0 ]]; then ok "C: stop rc=0"; else
+  bad "C: stop rc=$STOP_RC"
+  echo "    full stop log:"; sed 's/^/      /' "/tmp/stop-$C-1.log"
+  for p in $(marker_pids "$C_M1"); do echo "    survivor pid=$p stat=$(awk '{print $3}' /proc/$p/stat 2>/dev/null) cmd=$(tr '\0' ' ' </proc/$p/cmdline 2>/dev/null | cut -c1-120)"; done
+fi
 start_node "$C" second
 [[ "$START_RC" == 0 ]] && triplet_up "$C" && ok "C: start after stop brought the node back up" \
   || bad "C: start after stop failed (rc=$START_RC): $(grep -m1 -F '❌' "/tmp/start-$C-second.log")"
