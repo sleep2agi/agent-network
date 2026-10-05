@@ -3,7 +3,7 @@ import {
   ValidationError,
   validateName, validateRuntime, validateModel, validateFlagValue, RUNTIMES,
   validateEnvRefs, validateChannelsP1, serializeEnvLocal, buildAnetArgs,
-  MAX_ENV_KEYS_PER_NODE,
+  MAX_ENV_KEYS_PER_NODE, validateFlagsForRuntime, COPRESENCE_FLAG_RUNTIMES,
 } from "./create-node-validate.js";
 
 const okSecret = (k: string, _net: string, key: string) => k === key ? `value-of-${k}` : undefined;
@@ -271,5 +271,40 @@ describe("#1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致", () => {
     // 正控：不在名单里的仍然被拒，证明上面不是"什么都放行"
     expect(() => validateRuntime("definitely-not-a-runtime")).toThrow();
     expect(() => validateRuntime("")).toThrow();
+  });
+});
+
+// #584 —— app「Codex（TUI 共存）」经 daemon 建出来的是无头节点:create_node 没有任何字段能表达「要共存」。
+describe("#584 flags.copresence —— 建节点时的共存开关", () => {
+  test("is a known flag key and must be boolean", () => {
+    expect(() => validateFlagValue("copresence", true)).not.toThrow();
+    expect(() => validateFlagValue("copresence", false)).not.toThrow();
+    for (const bad of ["true", 1, null, {}]) {
+      try { validateFlagValue("copresence", bad); throw new Error("did not throw"); }
+      catch (e) { expect((e as ValidationError).code).toBe("flag_value_invalid"); }
+    }
+  });
+  test("only codex-app-server accepts it — elsewhere it would be swallowed silently", () => {
+    expect(() => validateFlagsForRuntime("codex-app-server", { copresence: true })).not.toThrow();
+    expect(() => validateFlagsForRuntime("claude-agent-sdk", { permissionMode: "default" })).not.toThrow();
+    expect(() => validateFlagsForRuntime("claude-agent-sdk", undefined)).not.toThrow();
+    for (const rt of ["claude-agent-sdk", "claude-code-cli", "codex-sdk", "grok-build-acp", "grok-build-cli", "opencode-cli"]) {
+      try { validateFlagsForRuntime(rt, { copresence: true }); throw new Error(`did not throw for ${rt}`); }
+      catch (e) {
+        expect((e as ValidationError).code).toBe("flag_not_applicable_to_runtime");
+        expect((e as ValidationError).detail).toMatchObject({ field: "copresence", runtime: rt, applicable: [...COPRESENCE_FLAG_RUNTIMES] });
+      }
+    }
+  });
+  test("buildAnetArgs emits the CLI's boolean `--copresence` (no value), and nothing for false", () => {
+    expect(buildAnetArgs({ name: "cx", runtime: "codex-app-server", flags: { copresence: true } }))
+      .toEqual(["node", "create", "cx", "--runtime", "codex-app-server", "--copresence"]);
+    expect(buildAnetArgs({ name: "cx", runtime: "codex-app-server", flags: { copresence: false } }))
+      .toEqual(["node", "create", "cx", "--runtime", "codex-app-server"]);
+    expect(() => buildAnetArgs({ name: "cx", runtime: "codex-sdk", flags: { copresence: true } })).toThrow(ValidationError);
+  });
+  test("the old request shape (no flag) is unchanged", () => {
+    expect(buildAnetArgs({ name: "cx", runtime: "codex-app-server", flags: { permissionMode: "default" } }))
+      .toEqual(["node", "create", "cx", "--runtime", "codex-app-server", "--permission-mode", "default"]);
   });
 });

@@ -544,6 +544,9 @@ export function validateFlagValueDaemon(k: string, v: unknown): void {
         throw new Error(`flag_value_invalid:${k}:must be integer 1..86400`);
       }
       return;
+    case "copresence":
+      if (typeof v !== "boolean") throw new Error(`flag_value_invalid:${k}:must be boolean`);
+      return;
     default:
       throw new Error(`flag_key_unknown:${k}`);
   }
@@ -561,6 +564,28 @@ export interface DaemonNodeSpec {
 
 function kebab(k: string): string { return k.replace(/([A-Z])/g, "-$1").toLowerCase(); }
 
+/** #584 —— hub 的 COPRESENCE_FLAG_RUNTIMES 的副本(两个包之间没有依赖)。 */
+const COPRESENCE_FLAG_RUNTIMES_DAEMON: ReadonlySet<string> = new Set(["codex-app-server"]);
+
+/**
+ * #584 —— 把 node_spec.flags 拆成「写进子节点 config 的那份」和「建节点时的开关」。
+ *
+ * `flags.copresence` 不是 agent 的运行参数,是建节点时的开关(app 向导「Codex（TUI 共存）」):
+ * true ⇒ 子节点 config 顶层写 `codexCopresence: true`,这是 `anet node start` 唯一会读的那个字段
+ * (agent-network/src/codex-copresence-profile.ts codexCopresenceRequested)。daemon 不跑
+ * `anet node create`,所以 CLI 的 codexCopresenceCreateFields 走不到 —— 这里是它在 daemon 侧的对应物。
+ * 不拆出来的话,它会躺在 config.flags 里,任何人都不读,节点照样无头起来。
+ */
+export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" | "flags">): {
+  flags: Record<string, unknown>;
+  codexCopresence?: true;
+} {
+  const flags: Record<string, unknown> = { ...(spec.flags || {}) };
+  const wanted = flags.copresence === true;
+  delete flags.copresence;
+  return wanted && spec.runtime === "codex-app-server" ? { flags, codexCopresence: true } : { flags };
+}
+
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   if (!spec.name || !NAME_RE.test(spec.name)) throw new Error("node_name_invalid");
   if (!VALID_RUNTIMES.has(spec.runtime)) throw new Error("runtime_invalid");
@@ -570,7 +595,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
   if (spec.model) args.push("--model", spec.model);
   for (const [k, v] of Object.entries(spec.flags || {})) {
-    if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"].includes(k)) {
+    if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence"].includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
     }
     // §4.2.2 daemon double-layer: defense in depth (per 通信牛 PR
@@ -578,6 +603,12 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
     // could smuggle `maxTurns: "DROP TABLE"` etc; we type/range
     // check before String() coerces into argv.
     validateFlagValueDaemon(k, v);
+    if (k === "copresence") {
+      // #584 —— 同 hub validateFlagsForRuntime:别的 runtime 收下它而不生效 = 又一个静默无头。
+      if (!COPRESENCE_FLAG_RUNTIMES_DAEMON.has(spec.runtime)) throw new Error(`flag_not_applicable_to_runtime:${k}:${spec.runtime}`);
+      if (v === true) args.push("--copresence");   // CLI 的布尔开关,不吃值
+      continue;
+    }
     args.push(`--${kebab(k)}`, String(v));
   }
   return args;
@@ -779,7 +810,8 @@ export async function handleCreateNodeDoorbell(
   const childDir = join(childWorkDir, ".anet", "nodes", req.node_spec.name);
   try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
   const childCfgPath = join(childDir, "config.json");
-  const flagsObj: Record<string, unknown> = req.node_spec.flags || {};
+  // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
+  const { flags: flagsObj, codexCopresence } = childConfigFieldsFromSpec(req.node_spec);
   // Best-effort: also derive `permissionMode` etc into a `flags` block
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
@@ -793,6 +825,7 @@ export async function handleCreateNodeDoorbell(
       hub: deps.hubUrl,
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),
+      ...(codexCopresence ? { codexCopresence } : {}),
     };
     atomicWriteJson(childCfgPath, childCfg);
     deps.log(`[create-node] wrote child config: ${childCfgPath}`);
