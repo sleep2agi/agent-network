@@ -1389,3 +1389,69 @@
   .VPHero .image { order: 3 !important; margin: 24px 0 0 !important; }
   .VPHero .main { margin-top: 24px !important; } /* 标题原本贴着导航栏下沿(实测 titleTop 56 < navBottom 64) */
 }
+
+/* ---------- 2026-10-05 #566 首页「应用内一览」:任务看板 / 任务详情 / 定时任务截图 ----------
+   截图来源:agent-network-app 0.2.209 web 导出 + 仓内 layout-sweep 页内桩(无 hub),示例数据全是虚构名字
+   (Alex / Mia / Sam,research-agent / code-reviewer / ops-bot / docs-writer),浅色,1280×800 @2x,WebP。
+   桌面图文两栏、逐行左右交替;≤860px 单栏(图在上)。颜色只用品牌变量。 */
+.feature-shots {
+  max-width: 1152px;
+  margin: 88px auto 0;
+  padding: 0 24px;
+}
+.feature-shots-heading { max-width: 680px; margin-bottom: 40px; }
+.feature-shots-heading h2 {
+  margin: 8px 0 10px;
+  border: 0;
+  padding: 0;
+  font-size: clamp(1.65rem, 3vw, 2.35rem);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+.feature-shots-heading p { margin: 0; color: var(--vp-c-text-2); font-size: 1rem; line-height: 1.7; }
+.feature-shot {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 48px;
+  align-items: center;
+  margin: 0 0 64px;
+}
+.feature-shot:last-child { margin-bottom: 0; }
+.feature-shot:nth-of-type(even) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); }
+.feature-shot:nth-of-type(even) .feature-shot-frame { order: 2; }
+.feature-shot-frame {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--vp-c-bg-soft);
+  box-shadow: 0 28px 70px -40px rgba(27, 101, 219, 0.45), 0 12px 28px -18px rgba(15, 20, 25, 0.25);
+}
+.feature-shot-frame img { display: block; width: 100%; height: auto; aspect-ratio: 2560 / 1600; }
+.feature-shot figcaption { min-width: 0; }
+.feature-shot-kicker {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.feature-shot h3 {
+  margin: 14px 0 10px;
+  font-size: 1.35rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--vp-c-text-1);
+}
+.feature-shot p { margin: 0; color: var(--vp-c-text-2); font-size: 0.98rem; line-height: 1.75; }
+@media (max-width: 860px) {
+  .feature-shots { margin-top: 64px; }
+  .feature-shot, .feature-shot:nth-of-type(even) { grid-template-columns: minmax(0, 1fr); gap: 20px; margin-bottom: 48px; }
+  .feature-shot:nth-of-type(even) .feature-shot-frame { order: 0; }
+  .feature-shot-frame { border-radius: 10px; }
+}
+@media (max-width: 640px) {
+  .feature-shots { padding: 0; } /* 外层 .vp-doc 容器已经给了 24px 边距,再叠一层手机上截图只剩 ~290px 宽 */
+}

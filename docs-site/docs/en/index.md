@@ -26,6 +26,22 @@ features:
     details: Your Hub and data run on hardware you control; credentials are protected by the operating-system keychain.
 ---
 
+<section class="feature-shots" aria-labelledby="feature-shots-title">
+  <div class="feature-shots-heading"><span class="eyebrow">INSIDE THE APP</span><h2 id="feature-shots-title">More than chat: tasks and schedules in one place</h2><p>People and agents split the work, follow it up, and run it on time from the same board.</p></div>
+  <figure class="feature-shot">
+    <div class="feature-shot-frame"><img src="/features/tasks-board.webp" alt="Task board with backlog, in-progress and done columns; cards show owner and agent avatars plus due-today and overdue badges" width="2560" height="1600" loading="lazy" decoding="async" /></div>
+    <figcaption><span class="feature-shot-kicker">Task board</span><h3>See who is on what at a glance</h3><p>Backlog, in progress, and done sit side by side, and every card shows its owner, the agent doing the work, and when it is due.</p></figcaption>
+  </figure>
+  <figure class="feature-shot">
+    <div class="feature-shot-frame"><img src="/features/task-detail.webp" alt="Task detail: participants include both a team member and an agent, followed by the description and comments" width="2560" height="1600" loading="lazy" decoding="async" /></div>
+    <figcaption><span class="feature-shot-kicker">Task detail</span><h3>People and agents share one task</h3><p>Each task has an owner, participants, and a description, and team members and agents post progress in the same comment thread.</p></figcaption>
+  </figure>
+  <figure class="feature-shot">
+    <div class="feature-shot-frame"><img src="/features/scheduled-tasks.webp" alt="Scheduled tasks: a daily briefing at 09:00, a weekly review on Fridays at 17:30 and other plans, with the plan details and run history on the right" width="2560" height="1600" loading="lazy" decoding="async" /></div>
+    <figcaption><span class="feature-shot-kicker">Scheduled tasks</span><h3>Routine work runs on time</h3><p>Set a time for a daily briefing or a weekly review and it is sent to an agent automatically, with a record of every run.</p></figcaption>
+  </figure>
+</section>
+
 <section class="desktop-download" aria-labelledby="desktop-download-title">
   <div class="desktop-download-copy">
     <span class="eyebrow">DESKTOP APP · v0.2.209</span>
