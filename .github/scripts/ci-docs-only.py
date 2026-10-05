@@ -89,7 +89,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
         "qa-rfc027-stop-delete", "test224-grok-preview-security",
     },
     "test225-known-failures": {"test225-grok-preview-package-live"},
-    "hub-daemon-gate": {"test735-hub-daemon-rebuild"},
+    "hub-daemon-gate": {"test735-hub-daemon-rebuild", "test2124-hub-launcher-env-scrub"},
     "private-config-gates": {
         "test631-private-config-permissions", "test646-config-node-id-precedence",
     },

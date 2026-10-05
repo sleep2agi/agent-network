@@ -127,6 +127,37 @@ fail_slow() {
   exit 1
 }
 
+# --- 清掉继承来的「节点身份」环境变量（必须在 source hub.env 之前，hub.env 仍然说了算）---
+#
+# 🔴 2026-10-05 实测：生产 hub 进程的环境里带着**某个 grok 节点的身份** ——
+#    COMMHUB_ALIAS/COMMHUB_TOKEN/COMMHUB_NODE_ID、ANET_NODE_MARKER、CLAUDE_CODE_*、
+#    CODEX_*、GROK_*、TMUX… 全是从「谁在节点的 TUI/会话里执行了那次重启」继承来的，
+#    pm2 God 进程本身没有。两个后果：
+#      1. 共存回收器按 ANET_NODE_MARKER 认进程 —— 带着节点 marker 的 hub
+#         曾被当成节点残留 KILL 过（同形状的旧事故）。
+#      2. 一个节点令牌躺在 hub 的进程环境里（/proc/<pid>/environ）。
+#    hub 自己（server/src）不读这里的任何一个名字（2026-10-05 逐个 grep 过；
+#    它读的是 COMMHUB_DB/COMMHUB_AUTH_TOKEN/COMMHUB_DUE_*/COMMHUB_RETENTION_* 等配置，
+#    以及 ANET_HUB_SECRET_VAULT_KEY、ANET_SSE_*），所以这里是**显式名单**，不是「清掉
+#    所有 COMMHUB_*」—— 后者会把合法配置一起清掉。
+#    只打印**名字**，绝不打印值（里面有令牌）。
+_scrub_node_identity_env() {
+  local name scrubbed=""
+  for name in $(compgen -e); do
+    case "$name" in
+      COMMHUB_ALIAS|COMMHUB_TOKEN|COMMHUB_NODE_ID|COMMHUB_RESUME_ID|COMMHUB_URL|\
+      ANET_NODE_MARKER|ANET_CODEX_COMMHUB_TOKEN|ANET_INTERNAL_GROK_COPRESENCE_PROFILE|\
+      ANET_CONFIG_UPDATE_CAPABLE|\
+      CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_PLUGIN_DATA|CLAUDE_CODE_*|\
+      CODEX_*|GROK_*|TMUX|TMUX_PANE)
+        unset "$name" && scrubbed="$scrubbed $name"
+        ;;
+    esac
+  done
+  log "清除继承的节点身份环境变量（只列名）：${scrubbed:- (无)}"
+}
+_scrub_node_identity_env
+
 # --- 预检 1：bun 可执行 ---
 [ -x "$BUN_BIN" ] || fail_slow "找不到 bun：$BUN_BIN"
 

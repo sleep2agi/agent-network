@@ -126,6 +126,7 @@ on:
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
       - 'tests/test735-hub-daemon-rebuild/**'
+      - 'tests/test2124-hub-launcher-env-scrub/**'
       - 'tests/test660-explicit-prod-db-optin/**'
       - 'tests/test661-explicit-bootstrap-db/**'
       - 'tests/test683-hub-lifecycle-watcher/**'
@@ -312,6 +313,7 @@ on:
       - 'tests/test219-grok-copresence/**'
       - 'tests/test605-grok-startup-model-label/**'
       - 'tests/test735-hub-daemon-rebuild/**'
+      - 'tests/test2124-hub-launcher-env-scrub/**'
       - 'tests/test660-explicit-prod-db-optin/**'
       - 'tests/test661-explicit-bootstrap-db/**'
       - 'tests/test683-hub-lifecycle-watcher/**'
@@ -1157,6 +1159,24 @@ jobs:
           docker cp "run-anet-test735-hub-daemon-rebuild:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test735-hub-daemon-rebuild/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test735-hub-daemon-rebuild"
           docker rm -f "run-anet-test735-hub-daemon-rebuild" >/dev/null 2>&1 || true
+          exit $rc
+
+      # test2124: 启动器必须清掉继承来的节点身份环境变量(COMMHUB_TOKEN/ANET_NODE_MARKER/
+      #   CLAUDE_CODE_*/CODEX_*/GROK_*/TMUX…),且 hub.env 仍然说了算。
+      #   基线: L1 HUB_LAUNCHER_ENV_SCRUB_PASS + MUTATION_RED scrub-call-removed + RESULT: PASS
+      #   对 origin/main 的启动器(无清理)实测 RESULT: FAIL。
+      - name: Build + run test2124-hub-launcher-env-scrub
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test2124-hub-launcher-env-scrub \
+            -f tests/test2124-hub-launcher-env-scrub/Dockerfile .
+          rc=0
+          docker run --name "run-anet-test2124-hub-launcher-env-scrub" --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test2124-hub-launcher-env-scrub || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test2124-hub-launcher-env-scrub"
+          docker cp "run-anet-test2124-hub-launcher-env-scrub:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test2124-hub-launcher-env-scrub/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test2124-hub-launcher-env-scrub"
+          docker rm -f "run-anet-test2124-hub-launcher-env-scrub" >/dev/null 2>&1 || true
           exit $rc
 
       # #1324: 本 job 的套件都往 $ARTIFACT_DIR 写报告,但容器带 --rm 时报告随容器一起
