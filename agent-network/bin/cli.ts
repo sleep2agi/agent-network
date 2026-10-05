@@ -354,6 +354,19 @@ function killTmuxSession(sessionName: string): boolean {
   // is still running.
   return !tmuxSessionRunning(sessionName);
 }
+/** #1130 / #571 — the pid in `<nodesDir>/<id>/.pid` if it is alive AND still an
+ *  agent-node/anet process (pid reuse is checked via its command line); else null.
+ *  Shared by `anet node start`'s already-running guard and `anet project up`. */
+function liveNodePidFromPidfile(nodeId: string): number | null {
+  const pidFile = join(nodesDir(), nodeId, ".pid");
+  return runningNodePid({
+    pidFileContent: existsSync(pidFile) ? readFileSync(pidFile, "utf-8") : null,
+    isAlive: (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } },
+    commandOf: (pid) => {
+      try { return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; }
+    },
+  });
+}
 function startNodeTmuxSession(sessionName: string, alias: string) {
   // #117 helper used by `anet project up/restart` + the debate/social/PR-review
   // demos. Spawns a detached tmux session that runs `anet node start <alias>`
@@ -6835,14 +6848,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
   //   原进程还活着而 hub 从此不再推送。`anet project up` 早就 skip already-running,这里对齐。
   //   pid 会被复用,所以除了 kill -0 还要看那个 pid 的命令行是不是 agent-node(读不到就按活着处理)。
   {
-    const pidFile = join(nodesDir(), nodeId, ".pid");
-    const running = runningNodePid({
-      pidFileContent: existsSync(pidFile) ? readFileSync(pidFile, "utf-8") : null,
-      isAlive: (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } },
-      commandOf: (pid) => {
-        try { return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; }
-      },
-    });
+    const running = liveNodePidFromPidfile(nodeId);
     if (running !== null) {
       for (const line of alreadyRunningMessage(displayName, running)) console.error(line);
       process.exit(1);
@@ -12622,8 +12628,19 @@ async function projectUp(invokedAs = "anet project up") {
       alreadyUp++;
       continue;
     }
+    // #571 — a node can be running outside a tmux session named after it (bare
+    // `anet node start`, a daemon child, another tmux socket). Deleting its .pid
+    // here defeated the #1130 guard in `anet node start` and started a second
+    // copy of the same alias. A live agent-node pid ⇒ skip; only a dead/reused
+    // pid is cleared below.
+    const livePid = liveNodePidFromPidfile(n.id);
+    if (livePid !== null) {
+      console.log(`  ⏭  ${n.alias} — already running (pid ${livePid}, not in tmux)`);
+      alreadyUp++;
+      continue;
+    }
     try {
-      rmSync(join(nodesDir(), n.id, ".pid"), { force: true });  // clear stale pid so verify sees only the fresh process
+      rmSync(join(nodesDir(), n.id, ".pid"), { force: true });  // clear stale pid (dead / reused) so verify sees only the fresh process
       startNodeTmuxSession(n.alias, n.alias);
       console.log(`  ▶  ${n.alias} — starting…`);
       spawned.push(n);

@@ -19,7 +19,7 @@
 //     before rebuildChildrenMapOnBoot lands is the common cause. Hub-side
 //     sweeper / reconciliation picks up the row eventually.
 
-import { chmodSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -177,6 +177,35 @@ function moveWorkdirToTrash(
   }
 }
 
+/** #571 — 这个 daemon 自己建的子节点,`anet node start` 起的 agent-node 的 argv 里
+ *  带 `--config <childWorkDir>/.anet/nodes/<alias>/config.json`(绝对路径,cwd 为
+ *  realpath)。这里给出这条路径的两种拼法(原样 + realpath 过的 workdirRoot),供
+ *  清扫做**身份**匹配 —— 只看 `--alias` 会命中同机其他工作目录/HOME/网络里同名的节点。
+ *  alias 不是单段名(含 / 或 . / ..)时返回空集:宁可不清扫,也不拼出越界路径。 */
+export function expectedChildConfigPaths(workdirRoot: string, alias: string): string[] {
+  if (!alias || alias === "." || alias === ".." || /[\/\0]/.test(alias)) return [];
+  const out = new Set<string>([join(workdirRoot, alias, "config.json")]);
+  try { out.add(join(realpathSync(workdirRoot), alias, "config.json")); } catch { /* root gone — raw form only */ }
+  return [...out];
+}
+
+/** #571 — map 未命中时,daemon 对这个 child 有没有**本地记录**:它自己写下的
+ *  `<workdirRoot>/<alias>/config.json` 是普通文件,且(若写了 node_id)node_id 等于请求里的。
+ *  没有 = 这不是本 daemon 建的节点(手工起的、别人建的、别的工作目录里的)。 */
+function hasLocalChildRecord(workdirRoot: string, alias: string, child_node_id: string): boolean {
+  const [cfgPath] = expectedChildConfigPaths(workdirRoot, alias);
+  if (!cfgPath) return false;
+  try {
+    const st = lstatSync(cfgPath);
+    if (!st.isFile()) return false;
+  } catch { return false; }
+  try {
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    if (typeof cfg?.node_id === "string" && cfg.node_id !== child_node_id) return false;
+  } catch { /* 读不懂的 config 仍是本 daemon 布局里的那个目录 — 按有记录处理 */ }
+  return true;
+}
+
 export async function handleStopDoorbell(
   event: { request_id: string },
   deps: StopDoorbellDeps,
@@ -225,14 +254,32 @@ export async function handleStopDoorbell(
     // 对称的 stop 路径仍走老的 noop 分支 → hub 卡 stopping(finding-3 的症状)。
     //
     // 这里两个 action 统一收敛:map 只提供过 entry.pid(命中路径的 pgid 信号用),
-    // child_alias 来自 hub 请求、sweepOrphansForAlias 按 alias(pgrep+/proc token
+    // child_alias 来自 hub 请求、清扫(#571 起为 sweepOrphansForChild,alias+--config 身份)按 alias(pgrep+/proc token
     // 精确)找进程——所以「daemon 重启但子节点还在跑」这种情况 sweep 会把它 SIGTERM
     // 掉,ack stopped 才是诚实的;子节点已崩则 sweep 无命中、ack stopped 同样诚实。
     // 🔴 workdir 只在 action==='delete' 时搬(stop 保留 config);stop 的 delete_config
     //    本就是 false,这里再叠一层 action 显式门,防任何 stop 请求误带 delete_config。
     deps.log(`[stop-daemon] ${action} without map entry (expected after stop / crash): ${child_node_id}`);
+    // #571 —— 🔴 此前这里对**任何** child 都按 alias 全机 pgrep + SIGTERM,不看工作目录 /
+    // HOME / 网络。hub 把一个手工起的节点(没有任何 daemon 链接)的 stop 路由过来时,这台
+    // 机器上所有 `--alias <同名>` 的 agent-node 都会被杀。现在分两层:
+    //   ① stop 且本地没有这个 child 的记录(不在 map、盘上也没有它的 config)⇒ 拒绝,
+    //      ack stop_failed 把原因带回 hub,**不发任何信号**。
+    //   ② 其余情况的清扫只认身份:argv 里 `--alias` 与 `--config` 都必须是本 daemon 给这个
+    //      child 写的那份 config(sweepOrphansForChild)。
+    // delete 在「map 无 + 盘上无 config」时仍收敛(#1286:配置已不在 = delete 的终态已成立),
+    // 但同样只做身份清扫。
+    if (action === "stop" && !(child_alias && hasLocalChildRecord(workdirRoot, child_alias, child_node_id))) {
+      const why = `not_my_child: daemon has no local record of ${child_alias || "(no alias)"} (${child_node_id}) — ` +
+        `no children-map entry and no config at ${child_alias ? join(workdirRoot, child_alias, "config.json") : workdirRoot}; ` +
+        `refusing to signal processes by alias. If this node was started by hand, stop it on its machine with \`anet node stop <alias>\`.`;
+      deps.warn(`[stop-daemon] ${why}`);
+      await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: why.slice(0, 1000) })
+        .catch((e: any) => { deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`); });
+      return;
+    }
     if (child_alias) {
-      await sweepOrphansForAlias(child_alias, signalProcess, deps, `${action} without map entry`);
+      await sweepOrphansForChild(child_alias, expectedChildConfigPaths(workdirRoot, child_alias), signalProcess, deps, `${action} without map entry`);
     }
     const backup = (action === "delete" && delete_config && child_alias)
       ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
@@ -252,6 +299,9 @@ export async function handleStopDoorbell(
     });
     return;
   }
+
+  // #571 — 身份清扫要用的 config 路径;delete 会在清扫前把目录搬走,所以先算好。
+  const childConfigPaths = expectedChildConfigPaths(workdirRoot, entry.alias);
 
   // SIGTERM → grace → SIGKILL
   //
@@ -323,7 +373,7 @@ export async function handleStopDoorbell(
       // Defense-in-depth: the wrapper may have died (crash / external
       // kill) while the detached grandchild kept running. Sweep any
       // stray agent-node process matching this alias and SIGTERM it.
-      await sweepOrphansForAlias(entry.alias, signalProcess, deps, "wrapper was already dead");
+      await sweepOrphansForChild(entry.alias, childConfigPaths, signalProcess, deps, "wrapper was already dead");
     }
   } catch (e: any) {
     if (e?.code === "ESRCH") {
@@ -361,7 +411,7 @@ export async function handleStopDoorbell(
   // 是哪一步。这三行把那段变成可读的:下次复现直接看日志停在哪一行,就定位到哪一步。
   // 🔴 它们不改变任何行为,唯一作用是让下一次复现能给出答案而不是又一次「停住了」。
   deps.log(`[stop-daemon] entering residual sweep alias=${entry.alias}`);
-  await sweepOrphansForAlias(entry.alias, signalProcess, deps, "post-pgid-signal residual sweep");
+  await sweepOrphansForChild(entry.alias, childConfigPaths, signalProcess, deps, "post-pgid-signal residual sweep");
   deps.log(`[stop-daemon] residual sweep returned alias=${entry.alias}`);
 
   childrenMap.delete(child_node_id);
@@ -391,12 +441,18 @@ export async function handleStopDoorbell(
  * ever calls this with the daemon's own alias by mistake, the
  * self-pid guard keeps it harmless.
  */
-async function sweepOrphansForAlias(
+async function sweepOrphansForChild(
   alias: string,
+  configPaths: string[],
   signalProcess: (pid: number, sig: NodeJS.Signals | 0) => void,
   deps: StopDoorbellDeps,
   reason: string,
 ): Promise<void> {
+  // #571 — 没有可认的 config 路径就不清扫:只凭 alias 会杀到别的工作目录里的同名节点。
+  if (configPaths.length === 0) {
+    deps.warn(`[stop-daemon] orphan sweep skipped (${reason}): no child config path to match for alias=${alias}`);
+    return;
+  }
   try {
     // SHOULD-FIX nit (PR #349 ack): drop the unused `readFileSync` from
     // this destructure — it's exported by node:fs, not node:child_process,
@@ -429,7 +485,7 @@ async function sweepOrphansForAlias(
     for (const p of candidates) {
       let cmdline: string | null = null;
       try { cmdline = fs.readFileSync(`/proc/${p}/cmdline`, "utf8"); } catch { continue; }
-      if (!cmdlineMatchesAlias(cmdline, alias)) continue;
+      if (!cmdlineMatchesChild(cmdline, alias, configPaths)) continue;
       deps.warn(`[stop-daemon] sweeping orphan pid=${p} alias=${alias} (${reason})`);
       try { signalProcess(p, "SIGTERM"); } catch { /* may already be dead */ }
     }
@@ -541,6 +597,14 @@ function cmdlineMatchesAlias(cmdline: string | null, alias: string): boolean {
   return argv.some(t => t === "agent-node" || t.endsWith("/agent-node") || t.endsWith("/cli.js"));
 }
 
+/** #571 — 身份匹配:cmdlineMatchesAlias **且** argv 里 `--config <path>` 是给定路径之一。
+ *  同一 alias 在别的工作目录 / HOME 下的 agent-node,`--config` 指向别处,不会命中。 */
+function cmdlineMatchesChild(cmdline: string | null, alias: string, configPaths: string[]): boolean {
+  if (!cmdlineMatchesAlias(cmdline, alias)) return false;
+  const argv = (cmdline as string).split("\0").filter(Boolean);
+  return argv.some((tok, i) => tok === "--config" && configPaths.includes(argv[i + 1] ?? ""));
+}
+
 export interface RebuildResult {
   total_children_from_hub: number;
   recovered: number;        // children whose pid was found and registered
@@ -620,4 +684,4 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
 
 // Exported for unit tests so they can exercise cmdlineMatchesAlias
 // without spawning real processes.
-export const _internals = { cmdlineMatchesAlias };
+export const _internals = { cmdlineMatchesAlias, cmdlineMatchesChild };

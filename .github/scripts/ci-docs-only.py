@@ -84,6 +84,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "qa-node-logs-e2e": {"qa-node-logs-e2e"},
     "qa-create-node-workdir": {"qa-create-node-workdir"},
     "test562b-node-remote": {"test562b-node-remote"},
+    "test571-lifecycle-safety": {"test571-lifecycle-safety"},
     "recovered-suites": {
         "test597-dashboard-slash-namespace", "test679-task-trace",
         "qa-daemon-lifecycle-e2e", "qa-rfc024-config-apply",

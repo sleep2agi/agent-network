@@ -115,11 +115,16 @@ describe("handleStopDoorbell — stop without map entry converges (#1448 finding
   // 留在 stopping 卡死。改后：与 delete 一样 sweep(按 alias 找并 SIGTERM 任何还
   // 在跑的子进程)+ ack `stopped` 收敛。这条断言 expect "stopped" 在改前会红
   // (拿到 "noop_not_my_child")——witnessed-red。
-  test("unknown/absent child on stop → sweep + ack stopped (not noop)", async () => {
+  // 「未命中 map 但盘上有本 daemon 写的 config」= crash / daemon 重启后的 stop → 收敛。
+  test("child with a local config but no map entry on stop → ack stopped (not noop)", async () => {
+    const workdirRoot = join(scratch, "nodes");
+    mkdirSync(join(workdirRoot, "known"), { recursive: true });
+    writeFileSync(join(workdirRoot, "known", "config.json"), JSON.stringify({ node_id: "node_known", alias: "known" }));
     const { acks, deps } = makeDeps({
+      workdirRoot,
       getStopReturn: {
         ok: true, request_id: "sr_x",
-        child_node_id: "node_unknown", child_alias: "unknown",
+        child_node_id: "node_known", child_alias: "known",
         action: "stop", delete_config: false, grace_seconds: 10, force: false,
       },
     });
@@ -128,6 +133,100 @@ describe("handleStopDoorbell — stop without map entry converges (#1448 finding
     expect(acks[0].tool).toBe("ack_stop_request");
     expect(acks[0].args.status).toBe("stopped");
     expect(acks[0].args.backup_path).toBeUndefined();   // stop 不搬 config
+  });
+});
+
+// #571 —— map 未命中且本地没有记录的 stop:此前按 alias 全机 pgrep + SIGTERM(不看工作目录 /
+// HOME / 网络)并 ack stopped。现在拒绝:ack stop_failed(not_my_child),不发任何信号。
+describe("#571 handleStopDoorbell — stop of a child this daemon has no record of", () => {
+  test("no map entry + no config on disk → stop_failed not_my_child, zero signals", async () => {
+    const workdirRoot = join(scratch, "nodes-571");
+    mkdirSync(workdirRoot, { recursive: true });
+    const { acks, fakeSignals, deps } = makeDeps({
+      workdirRoot,
+      getStopReturn: {
+        ok: true, request_id: "sr_571",
+        child_node_id: "node_unknown", child_alias: "unknown",
+        action: "stop", delete_config: false, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "sr_571" }, deps);
+    expect(acks.length).toBe(1);
+    expect(acks[0].args.status).toBe("stop_failed");
+    expect(String(acks[0].args.error)).toContain("not_my_child");
+    expect(fakeSignals.length).toBe(0);
+  });
+
+  test("config on disk belongs to a different node_id → still refused", async () => {
+    const workdirRoot = join(scratch, "nodes-571b");
+    mkdirSync(join(workdirRoot, "dup"), { recursive: true });
+    writeFileSync(join(workdirRoot, "dup", "config.json"), JSON.stringify({ node_id: "node_other", alias: "dup" }));
+    const { acks, fakeSignals, deps } = makeDeps({
+      workdirRoot,
+      getStopReturn: {
+        ok: true, request_id: "sr_571b",
+        child_node_id: "node_requested", child_alias: "dup",
+        action: "stop", delete_config: false, grace_seconds: 10, force: false,
+      },
+    });
+    await handleStopDoorbell({ request_id: "sr_571b" }, deps);
+    expect(acks[0].args.status).toBe("stop_failed");
+    expect(fakeSignals.length).toBe(0);
+  });
+
+  test("identity matcher needs --alias AND this daemon's --config path", async () => {
+    const { _internals } = await import("./stop-daemon");
+    const mine = "/w/daemon/.anet/nodes/dup/config.json";
+    const other = "/w/other/.anet/nodes/n_1/config.json";
+    const argv = (cfg: string) => ["/usr/bin/agent-node", "--config", cfg, "--alias", "dup", "--runtime", "x"].join("\0");
+    expect(_internals.cmdlineMatchesChild(argv(mine), "dup", [mine])).toBe(true);
+    expect(_internals.cmdlineMatchesChild(argv(other), "dup", [mine])).toBe(false);
+    expect(_internals.cmdlineMatchesChild(["agent-node", "--alias", "dup"].join("\0"), "dup", [mine])).toBe(false);
+    expect(_internals.cmdlineMatchesChild(argv(mine), "dup", [])).toBe(false);
+  });
+
+  // 真进程:同机两个 `--alias dup` 的 agent-node,一个是本 daemon 的 child(--config 在
+  // workdirRoot 下),一个在别的工作目录。map 未命中的 stop 只能清掉前者。改前两个都被 SIGTERM。
+  test("real processes: map-miss stop sweeps only the process whose --config is ours", async () => {
+    const { spawn } = await import("node:child_process");
+    const workdirRoot = join(scratch, "daemon", ".anet", "nodes");
+    const alias = "dup571-" + Math.floor(Math.random() * 1e6);
+    mkdirSync(join(workdirRoot, alias), { recursive: true });
+    writeFileSync(join(workdirRoot, alias, "config.json"), JSON.stringify({ node_id: "node_dup571", alias }));
+    const mineCfg = join(workdirRoot, alias, "config.json");
+    const otherCfg = join(scratch, "other", ".anet", "nodes", "n_571", "config.json");
+    // `bash -c 'sleep 60; :' <argv0> …` keeps bash alive with the fake argv in /proc/<pid>/cmdline.
+    const start = (cfg: string) => {
+      const c = spawn("bash", ["-c", "sleep 60; :", "/opt/fake/agent-node", "--config", cfg, "--alias", alias],
+        { stdio: "ignore", detached: true });
+      c.unref();
+      return c.pid!;
+    };
+    const minePid = start(mineCfg);
+    const otherPid = start(otherCfg);
+    const alive = (p: number) => { try { process.kill(p, 0); return true; } catch { return false; } };
+    try {
+      await new Promise(r => setTimeout(r, 300));
+      expect(alive(minePid) && alive(otherPid)).toBe(true);
+      const acks: any[] = [];
+      await handleStopDoorbell({ request_id: "sr_real" }, {
+        workdirRoot,
+        callCommHub: async (tool: string, args: any) => {
+          if (tool === "get_stop_request") return {
+            ok: true, request_id: "sr_real", child_node_id: "node_dup571", child_alias: alias,
+            action: "stop", delete_config: false, grace_seconds: 5, force: false,
+          };
+          acks.push(args); return { ok: true };
+        },
+        log: () => {}, warn: () => {},
+      });
+      for (let i = 0; i < 30 && alive(minePid); i++) await new Promise(r => setTimeout(r, 100));
+      expect(acks.at(-1).status).toBe("stopped");
+      expect(alive(minePid)).toBe(false);
+      expect(alive(otherPid)).toBe(true);   // 改前:被按 alias 一起 SIGTERM
+    } finally {
+      for (const p of [minePid, otherPid]) { try { process.kill(p, "SIGKILL"); } catch { /* gone */ } }
+    }
   });
 });
 
