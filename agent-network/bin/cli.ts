@@ -47,7 +47,7 @@ import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
 import { runCodexRestart, SINGLE_NODE_UNATTESTED_DETAIL, type RestartActions, type GoalState as LifecycleGoalState } from "../src/codex-lifecycle-restart";
-import { runCodexMenu } from "../src/codex-menu";
+import { confirmAndRun, readlineIO, runCodexMenu } from "../src/codex-menu";
 import { runNodeMenu } from "../src/node-menu";
 import { decideCodexResume, gatherCodexResumeFacts, parsePickAnswer, resumeConfigShouldRollBack } from "../src/codex-resume";
 import { alreadyRunningMessage, runningNodePid } from "../src/node-running-guard";
@@ -57,6 +57,8 @@ import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../s
 import { oneLineCell } from "../src/one-line-cell";
 import { padDisplayEnd } from "../src/display-width";
 import { formatMachineGroups, groupNodesByMachine, machineGroupsJson, parseNodeLsAllArgs, pickNetwork } from "../src/node-ls-all";
+import { evaluateOutcome as evaluateRemoteOutcome, explainHubRefusal as explainRemoteHubRefusal, isRemoteInvocation, parseRemoteArgs, planRemote, precheck, resolveRemoteTarget, timeoutMessage as remoteTimeoutMessage, toolCall as remoteToolCall, type Observation as RemoteObservation, type RemoteVerb } from "../src/node-remote";
+import { parseCommhubToolResult } from "../src/commhub-response";
 import { formatHubTime } from "../src/hub-time-display";
 import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
@@ -4299,6 +4301,8 @@ Node Management:
   anet node loop <name> ...     Schedule a recurring goal on a node
   anet node ls                  List all nodes
   anet node ls --all            Every node the Hub shows you, grouped by machine [--network <id|name>] [--json]
+  anet node stop <name> --remote Act on a node on another machine via its daemon (also start / restart) [--yes] [--wait <s>]
+  anet node edit <n> --remote   Switch a node on another machine to --model <id>
   anet node codex <verb> <ref>  Codex TUI co-presence lifecycle: preflight|verify|canary|start|restart|resume|fork|account|rollback
   anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
@@ -9225,6 +9229,153 @@ async function nodeLsAllCommand() {
     return;
   }
   for (const line of formatMachineGroups(groups, { network: pick.network, nowMs: Date.now(), daemonsError })) console.log(line);
+}
+
+// #562 step 2 — `anet node <start|stop|restart> <alias> --remote` / `anet node edit <alias> --model <id> --remote`.
+// Acts on a node on ANOTHER machine through the Hub's existing lifecycle tools (the ones the app calls):
+// start/stop go to that machine's daemon (host_supervisor), restart/edit to the node itself.
+// Auth exactly like `node ls --all`: the token saved by `anet login`, never COMMHUB_TOKEN; a node token is refused.
+// Confirm with the #561 menu's confirm helper (confirmAndRun); --yes skips it. Waits (bounded) for the hub to
+// show the result. Pure logic: src/node-remote.ts.
+async function nodeRemoteCommand(verb: RemoteVerb, rest: string[]) {
+  const flags = parseRemoteArgs(verb, rest);
+  if (flags.error) { console.error(`[anet] ${flags.error}`); markUsageError(); return; }
+  const alias = flags.alias!;
+  const gc = loadGlobal();
+  const hub = (gc.hub || "").replace(/\/+$/, "");
+  const token = String(gc.token || ""); // the `anet login` token only — never COMMHUB_TOKEN
+  if (!hub || !token) { console.error("[anet] Not logged in. Run: anet login"); markFailed(); return; }
+  if (token.startsWith("ntok_")) {
+    console.error("[anet] The saved login is a node token; remote node management acts as you, not as a node. Run: anet login");
+    markFailed(); return;
+  }
+  const headers = { Authorization: `Bearer ${token}` };
+  const getJson = async (path: string): Promise<{ ok: boolean; status: number; body: any; reason?: string }> => {
+    try {
+      const r = await fetch(`${hub}${path}`, { headers, signal: AbortSignal.timeout(20_000) });
+      const body: any = await r.json().catch(() => null);
+      return { ok: r.ok && !!body && body.ok !== false, status: r.status, body };
+    } catch (e: any) {
+      return { ok: false, status: 0, body: null, reason: hubReachReason(e) };
+    }
+  };
+  const failText = (r: { status: number; body: any; reason?: string }) =>
+    r.reason ?? `HTTP ${r.status}${r.body ? ` (${hubErrorText(r.body)})` : ""}`;
+
+  const nets = await getJson("/api/networks");
+  if (!nets.ok || !Array.isArray(nets.body?.networks)) {
+    console.error(`[anet] Could not list your networks: ${failText(nets)}`);
+    if (nets.status === 401) console.error("  Next: anet login");
+    markFailed(); return;
+  }
+  const pick = pickNetwork(nets.body.networks, flags.network, gc.network_id);
+  if (!pick.ok) { console.error(`[anet] ${pick.error}`); markFailed(); return; }
+  const netId = pick.network.network_id;
+  const netQ = `network_id=${encodeURIComponent(netId)}`;
+
+  const readState = async () => {
+    const [nodes, status, sup] = await Promise.all([
+      getJson(`/api/nodes?${netQ}&alias=${encodeURIComponent(alias)}`),
+      getJson(`/api/status?${netQ}`),
+      getJson(`/api/host-supervisors?${netQ}`),
+    ]);
+    return { nodes, status, sup };
+  };
+  const first = await readState();
+  for (const [what, r] of [["nodes", first.nodes], ["node list", first.status], ["daemons", first.sup]] as const) {
+    if (!r.ok) { console.error(`[anet] Could not read ${what} from the hub: ${failText(r)}`); markFailed(); return; }
+  }
+  const resolved = resolveRemoteTarget(alias, first.nodes.body.nodes, first.status.body.sessions, first.sup.body.daemons);
+  if (!resolved.ok) { console.error(`[anet] ${resolved.message}`); markFailed(); return; }
+  const t = resolved.target;
+
+  const readConfig = async () => getJson(`/api/nodes/${encodeURIComponent(t.node_id)}/config`);
+  let cfg: any = null;
+  if (verb === "restart" || verb === "edit") {
+    const c = await readConfig();
+    if (!c.ok) { console.error(`[anet] Could not read ${alias}'s config revision: ${failText(c)}`); markFailed(); return; }
+    cfg = c.body;
+  }
+  const pre = precheck(verb, t, cfg);
+  console.log(`Node ${alias} — on ${t.hostname ?? "(unknown host)"}, daemon ${t.daemon.alias} online; hub state: ${t.lifecycle_state}${t.session_status ? ` / ${t.session_status}` : ""}`);
+  if (pre.kind === "noop") { console.log(pre.message); return; }
+  if (pre.kind === "refuse") { console.error(`[anet] ${pre.message}`); markFailed(); return; }
+
+  const baseRevision = typeof cfg?.config_revision === "number" ? cfg.config_revision : 0;
+  const before: RemoteObservation = {
+    lifecycle_state: t.lifecycle_state, session_status: t.session_status, session_seen: t.session_seen,
+    config_revision: cfg ? baseRevision : null, model: cfg?.model ?? t.model,
+  };
+  const plan = planRemote({ verb, target: t, networkId: netId, model: flags.model, force: flags.force });
+  let dispatched = false;
+  const dispatch = async (): Promise<number> => {
+    dispatched = true;
+    const call = remoteToolCall(verb, t, netId, { model: flags.model, force: flags.force, baseRevision });
+    let res: any;
+    try {
+      const r = await fetch(`${hub}/mcp`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-03-26" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const raw = await r.text();
+      const dataLines = raw.split("\n").filter((l) => l.startsWith("data:"));
+      let env: any = null;
+      try { env = JSON.parse(dataLines.length ? dataLines[dataLines.length - 1].slice(5).trim() : raw); } catch { env = null; }
+      res = env ? parseCommhubToolResult(env) : { ok: false, error: `HTTP ${r.status}`, message: raw.slice(0, 200) };
+    } catch (e: any) {
+      console.error(`[anet] Could not reach the hub: ${hubReachReason(e)}`);
+      return 1;
+    }
+    if (!res || res.ok !== true) { console.error(`[anet] ${explainRemoteHubRefusal(verb, alias, res)}`); return 1; }
+    const ref = res.request_id ?? res.update_id;
+    console.log(`Dispatched (${call.name}${ref ? ` ${ref}` : ""}).`);
+    if (flags.waitSeconds === 0) { console.log(`Not waiting (--wait 0). Check: anet node ls --all`); return 0; }
+    console.log(`Waiting up to ${flags.waitSeconds}s for the hub to show the result …`);
+    const deadline = Date.now() + flags.waitSeconds * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const [n, st, c] = await Promise.all([
+        getJson(`/api/nodes?${netQ}&node_id=${encodeURIComponent(t.node_id)}`),
+        getJson(`/api/status?${netQ}`),
+        cfg ? readConfig() : Promise.resolve(null),
+      ]);
+      if (!n.ok || !st.ok) continue;
+      const row = (n.body.nodes ?? [])[0] ?? null;
+      const sess = (st.body.sessions ?? []).find((x: any) => x?.alias === alias) ?? null;
+      const now: RemoteObservation = {
+        lifecycle_state: row?.lifecycle_state ?? null,
+        session_status: sess?.status ?? null,
+        session_seen: sess?.last_seen_at ?? sess?.updated_at ?? null,
+        config_revision: c && c.ok && typeof c.body?.config_revision === "number" ? c.body.config_revision : null,
+        model: c && c.ok ? (c.body?.model ?? null) : null,
+      };
+      const out = evaluateRemoteOutcome(verb, t, before, now, { model: flags.model, baseRevision });
+      if (out.state === "done") { console.log(`✓ ${out.message}`); return 0; }
+      if (out.state === "failed") { console.error(`[anet] ✗ ${out.message}`); return 1; }
+    }
+    console.error(`[anet] ${remoteTimeoutMessage(verb, alias, flags.waitSeconds)}`);
+    return 1;
+  };
+
+  let code: number;
+  if (flags.yes) {
+    console.log(`\nWill do: ${plan.note}`);
+    code = await dispatch();
+  } else {
+    const io = readlineIO();
+    try {
+      code = await confirmAndRun(io, () => dispatch(), plan, { alias }, false);
+    } finally {
+      io.close();
+    }
+    if (!dispatched && !process.stdin.isTTY) {
+      console.error("[anet] Nothing was done (not confirmed). In scripts pass --yes.");
+      code = 1;
+    }
+  }
+  if (code !== 0) markFailed();
 }
 
 // ── run ──
@@ -18416,6 +18567,11 @@ switch (command) {
   case "server": await serverCommand(); break;
   case "hub": await serverCommand(); break; // anet hub start/dashboard/config
   case "node": // anet node create/start/stop/resume/delete/ls/rename
+    // #562 step 2 — `--remote`: the node lives on another machine; the Hub dispatches to it (src/node-remote.ts).
+    if ((args[1] === "start" || args[1] === "stop" || args[1] === "restart" || args[1] === "edit") && isRemoteInvocation(args)) {
+      await nodeRemoteCommand(args[1], args.slice(2));
+      break;
+    }
     switch (args[1]) {
       case "create": args.splice(0, 1); await createCommand(); break;
       case "start": args.splice(0, 1); await startCommand(); break;

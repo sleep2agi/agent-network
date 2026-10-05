@@ -158,6 +158,8 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | Change an existing node's runtime / model; **takes effect on restart** |
 | `anet node ls` | List local nodes and network state |
 | `anet node ls --all [--network <id\|name>] [--json]` | List **every** node the Hub shows you in the current Network, grouped by machine (hostname); read-only, see below |
+| `anet node <start\|stop\|restart> <alias> --remote` | Start / stop / restart a node **on another machine**: the Hub has that machine's daemon do it (see "Managing nodes remotely" below) |
+| `anet node edit <alias> --model <id> --remote` | Switch the model of a node on another machine |
 | `anet info <name>` | Show node configuration, process, and recent tasks |
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
@@ -187,6 +189,45 @@ Network: team (net_0123456) — 3 node(s) on 2 machine(s)
 - Only your login token (`token` in `~/.anet/config.json`) is used, never `COMMHUB_TOKEN` or a node token.
 - `--json` prints `{ network, daemons_readable, machines: [{ hostname, daemon, daemons, nodes }] }`.
 - Without `--all`, `anet node ls` is unchanged.
+
+### Managing nodes remotely (`--remote`)
+
+From any machine where you ran `anet login`, manage a node that lives on **another machine** (#562):
+
+```bash
+anet node stop    coder-b --remote             # shows where it lives and whether the daemon is online, then asks y/N
+anet node start   coder-b --remote --yes       # --yes skips the question (scripts)
+anet node restart coder-b --remote --wait 90   # wait up to 90 s for the result (default 60, --wait 0 = don't wait)
+anet node edit    coder-b --model m2 --remote  # switch model (the node restarts once to apply it)
+```
+
+```text
+Node coder-b — on machine-b, daemon daemon-b online; hub state: active / idle
+
+Will run 将执行:
+  anet node stop coder-b --remote --network net_271eb4d9e48c --yes
+  (ask the hub to have daemon daemon-b on machine-b stop "coder-b" (its config is kept; start it again with --remote))
+Run it? 执行? [y/N]: y
+Dispatched (stop_node sr_c6dd58d6e565).
+Waiting up to 60s for the hub to show the result …
+✓ "coder-b" is stopped on machine-b
+```
+
+- It uses the Hub's existing lifecycle tools (the same ones the app calls): start / stop are carried out by
+  **that machine's daemon** (`anet daemon`); restart / model change are delivered to the node itself, which exits
+  and is respawned by the `anet node start` wrapper the daemon started.
+- Requirements: the node's machine has an **online daemon**, and the node was **created by that daemon** (the app's
+  "new node" on that machine). Otherwise it refuses before dispatching and says why, e.g.
+  `this machine can't be managed remotely: no daemon online on machine-c`; a node started by hand with
+  `anet node start` is managed on its own machine.
+- Permissions are the Hub's: a viewer gets the Hub's `permission_denied`; a member with restricted agent access
+  sees no daemons and cannot manage nodes, and is refused up front.
+- Only your login token (`token` in `~/.anet/config.json`) is used, never `COMMHUB_TOKEN`; a saved node token is refused.
+- Not in a terminal (script / pipe) and no `--yes`: nothing is done, exit code `1`. On timeout it says honestly that the
+  Hub accepted the request but has not shown the result yet; check with `anet node ls --all`.
+- `--network <id|name>` picks another Network; local-only flags (`--tmux`, `--copresence`, …) are refused with
+  `--remote` (exit code `2`). `stop --force` stops a node that still has tasks in flight (the Hub audits it).
+  Remote delete is out of scope for this step.
 
 `anet node delete <name> --force` first runs the same stop as `anet node stop` (co-presence tmux
 sessions included: codex co-presence by marker + `CODEX_HOME`, others by exact session name, never a prefix), then deletes the local
