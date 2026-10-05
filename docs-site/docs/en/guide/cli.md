@@ -133,6 +133,15 @@ See [Token model](/en/guide/account-system#tokens) for token types, scopes, and 
 
 ## Nodes
 
+### Interactive menu: `anet node`
+
+No commands to memorise: run `anet node` with no arguments in the node's directory. It lists every node in this directory — name, runtime (claude-agent-sdk / claude-code-cli / codex-* / grok-* / opencode-cli), state (running / stopped), model, plus a login column for codex nodes — then you pick a node and an action: start, stop, restart, attach (enter the TUI), show the recent log, change model, delete.
+
+- Before anything runs it prints the **exact equivalent `anet …` command** and runs it only after `y`; delete asks you to type the node name. What runs is the printed command; the menu does no lifecycle work itself.
+- A codex node goes to the codex actions (log in, continue, copy, …), the same as `anet node codex` — see the [Codex node cheat sheet](/en/guide/codex-cheatsheet).
+- Not a terminal (piped, a script, an agent): it prints the node table, a short cheat sheet and the usual usage line, exit 0. No token appears in the output.
+- `anet node --help` / `anet node help` print help exactly as before.
+
 Codex nodes without memorising commands: run `anet node codex` in the node's directory, pick a node and an action; it prints the equivalent command and asks before running it. Cheat sheet: [Codex node cheat sheet](/en/guide/codex-cheatsheet).
 
 | Command | Purpose |

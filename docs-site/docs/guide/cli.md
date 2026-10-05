@@ -133,6 +133,15 @@ Token 类型、作用域与兼容规则见 [Token 体系](/guide/account-system#
 
 ## 节点
 
+### 交互菜单：`anet node`
+
+不想记命令：在节点目录里直接敲 `anet node`（不带参数）。它列出当前目录的所有节点 —— 节点名、runtime（claude-agent-sdk / claude-code-cli / codex-* / grok-* / opencode-cli）、状态（running / stopped）、模型，codex 节点另有登录列 —— 选一个节点再选操作：启动、停止、重启、进入 TUI（attach）、看最近日志、换模型、删除。
+
+- 每个操作执行前都会打印**等价的 `anet …` 命令**，回答 `y` 才执行；删除要输入节点名确认。执行的就是打印出来的那条命令，菜单本身不做任何生命周期动作。
+- codex 节点选中后交给 codex 专属操作（登录、接着聊、复制等），与 `anet node codex` 相同，见 [Codex 节点速查](/guide/codex-cheatsheet)。
+- 不是终端（管道、脚本、agent 调用）时只打印节点表、一份速查和原来的用法行，退出码 0；输出不含任何 token。
+- `anet node --help` / `anet node help` 与以前一样只打印帮助。
+
 codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节点、选操作，执行前会打印等价命令并确认。速查表见 [Codex 节点速查：我想……就敲……](/guide/codex-cheatsheet)。
 
 | 命令 | 作用 |

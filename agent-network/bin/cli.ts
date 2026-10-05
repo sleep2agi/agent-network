@@ -48,6 +48,7 @@ import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credent
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
 import { runCodexRestart, SINGLE_NODE_UNATTESTED_DETAIL, type RestartActions, type GoalState as LifecycleGoalState } from "../src/codex-lifecycle-restart";
 import { runCodexMenu } from "../src/codex-menu";
+import { runNodeMenu } from "../src/node-menu";
 import { decideCodexResume, gatherCodexResumeFacts, parsePickAnswer, resumeConfigShouldRollBack } from "../src/codex-resume";
 import { alreadyRunningMessage, runningNodePid } from "../src/node-running-guard";
 import { assertTmuxSupportsSessionEnv } from "../src/tmux-capability";
@@ -18378,6 +18379,9 @@ switch (command) {
       case "codex": args.splice(0, 1); await codexLifecycleCommand(); break; // #1856 —— Codex TUI 共存节点生命周期控制器
       default: {
         const sub = args[1];
+        const nodeUsage = `Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`;
+        // #561 — bare `anet node`: a menu for every runtime (TTY) / table + cheat sheet + usage (piped). src/node-menu.ts
+        if (!sub) process.exit(await runNodeMenu(listProfileIds().map((id) => { const p = loadProfile(id); return { id, alias: nodeDisplayName(id, p), profile: p as Record<string, any> | null }; }), { nodesDir: nodesDir(), home, usageLine: nodeUsage }));
         if (sub) {
           // 🔴 实测 `anet node state` / `stat` → 建议 `start`(想看状态,被指去启动)。
           const redirect = nodeSubcommandRedirect(sub, args[2]);
@@ -18387,7 +18391,7 @@ switch (command) {
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }
-        console.log(`Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`);
+        console.log(nodeUsage);
         // #515 — an unknown `anet node <sub>` is a usage error; bare `anet node` is a help request.
         if (sub) markUsageError();
         break;

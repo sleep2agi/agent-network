@@ -67,7 +67,7 @@ export interface CollectEnv {
   pidAlive?: (pid: number) => boolean;
 }
 
-function realTmuxSessions(): Set<string> {
+export function realTmuxSessions(): Set<string> {
   try {
     // One name per line; `-u` because outside a UTF-8 locale tmux rewrites every byte of a CJK name to "_" (#533).
     const out = execTmux(tmuxUtf8Args(["list-sessions", "-F", "#{session_name}"]), {
@@ -80,7 +80,7 @@ function realTmuxSessions(): Set<string> {
   }
 }
 
-function realPidAlive(pid: number): boolean {
+export function realPidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
@@ -295,16 +295,16 @@ export interface MenuIO {
 
 export type Runner = (cmd: PlannedCommand) => Promise<number>;
 
-async function pick(io: MenuIO, prompt: string, max: number): Promise<number | "adopt" | null> {
+export async function pick(io: MenuIO, prompt: string, max: number, allowAdopt = true): Promise<number | "adopt" | null> {
   for (;;) {
     const ans = await io.readLine(prompt);
     if (ans === null) return null;
     const t = ans.trim().toLowerCase();
     if (t === "q" || t === "quit" || t === "exit") return null;
-    if (t === ADOPT_KEY) return "adopt";
+    if (allowAdopt && t === ADOPT_KEY) return "adopt";
     const n = Number(t);
     if (Number.isInteger(n) && n >= 1 && n <= max) return n - 1;
-    io.write(`  please type a number 1-${max}, ${ADOPT_KEY} to adopt a codex conversation, or q to quit\n`);
+    io.write(allowAdopt ? `  please type a number 1-${max}, ${ADOPT_KEY} to adopt a codex conversation, or q to quit\n` : `  please type a number 1-${max}, or q to quit\n`);
   }
 }
 
@@ -318,8 +318,11 @@ export async function codexMenu(rows: CodexNodeRow[], io: MenuIO, run: Runner, c
     : await pick(io, `Pick a node 选节点 [1-${rows.length}, ${ADOPT_KEY}=adopt a codex conversation 收编已有对话, q=quit]: `, rows.length);
   if (ni === null) { io.write("Bye — nothing was run.\n"); return 0; }
   if (ni === "adopt") return adoptFromMenu(io, run);
-  const row = rows[ni];
+  return codexNodeActions(rows[ni], io, run, ctx);
+}
 
+/** The action step for one codex node. #561: `anet node` (all runtimes) hands codex nodes off to this. */
+export async function codexNodeActions(row: CodexNodeRow, io: MenuIO, run: Runner, ctx: { cwd: string }): Promise<number> {
   io.write(`\n${row.alias} (${row.kind}, ${row.state}) — what do you want to do? 要做什么?\n`);
   MENU_ACTIONS.forEach((m, i) => io.write(`  ${i + 1}) ${m.label}\n`));
   io.write(`  ${ADOPT_KEY}) adopt a codex conversation as a new node 收编已有 codex 对话\n`);
@@ -330,8 +333,8 @@ export async function codexMenu(rows: CodexNodeRow[], io: MenuIO, run: Runner, c
 
   const input: ActionInput = {};
   if (action === "model") {
-    const m = ((await io.readLine(`New model id 新模型 (now ${row.model}): `)) ?? "").trim();
-    if (!m || /\s/.test(m) || m.startsWith("-")) { io.write("Aborted — no valid model id given; nothing was run.\n"); return 0; }
+    const m = await askModel(io, row.model);
+    if (m === null) return 0;
     input.model = m;
   }
   if (action === "copy") {
@@ -348,11 +351,25 @@ export async function codexMenu(rows: CodexNodeRow[], io: MenuIO, run: Runner, c
     }
   }
 
-  const cmd = planAction(row, action, input);
+  return confirmAndRun(io, run, planAction(row, action, input), row, action === "delete");
+}
+
+/** Ask for a model id; null (and a message) when none / not a plain id. Shared with node-menu.ts (#561). */
+export async function askModel(io: MenuIO, current: string): Promise<string | null> {
+  const m = ((await io.readLine(`New model id 新模型 (now ${current}): `)) ?? "").trim();
+  if (!m || /\s/.test(m) || m.startsWith("-")) { io.write("Aborted — no valid model id given; nothing was run.\n"); return null; }
+  return m;
+}
+
+/**
+ * Print the exact command, then ask: y/N, or (typedName) the node's name. Run it only then.
+ * The one gate both menus go through (#532 codex, #561 every runtime).
+ */
+export async function confirmAndRun(io: MenuIO, run: Runner, cmd: PlannedCommand, row: { alias: string }, typedName: boolean): Promise<number> {
   io.write(`\nWill run 将执行:\n  ${commandLine(cmd)}\n`);
   if (cmd.note) io.write(`  (${cmd.note})\n`);
 
-  if (action === "delete") {
+  if (typedName) {
     const typed = await io.readLine(`Type the node name to delete it 输入节点名确认删除 (${row.alias}): `);
     if ((typed ?? "").trim() !== row.alias) { io.write("Name did not match — aborted, nothing was run. 名字不符,已取消。\n"); return 0; }
   } else {
@@ -382,7 +399,7 @@ async function adoptFromMenu(io: MenuIO, run: Runner): Promise<number> {
 // ── real wiring ───────────────────────────────────────────────────────────
 
 /** A line queue over one readline: scripted input that arrives in one chunk is not lost between prompts. */
-function readlineIO(): MenuIO & { close(): void } {
+export function readlineIO(): MenuIO & { close(): void } {
   const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
   const lines: string[] = [];
   const waiters: ((s: string | null) => void)[] = [];
@@ -401,7 +418,7 @@ function readlineIO(): MenuIO & { close(): void } {
   };
 }
 
-function realRunner(beforeRun: () => void): Runner {
+export function realRunner(beforeRun: () => void): Runner {
   return async (cmd) => {
     beforeRun();
     const env = { ...process.env, ...(cmd.env ?? {}) };
