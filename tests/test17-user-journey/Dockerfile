@@ -4,7 +4,14 @@ FROM oven/bun:1
 ENV npm_config_audit=false npm_config_fund=false
 WORKDIR /app
 RUN apt-get update && apt-get install -y curl python3 nodejs npm && rm -rf /var/lib/apt/lists/*
-RUN npm i -g @sleep2agi/commhub-server@preview @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+# @preview is a MOVING tag: right after a publish its tarball can 404 for ~25–95 s and npm does not
+# retry (#564). The shared helper resolves → waits for the tarball (≤10 min) → installs the exact
+# version, and on failure prints FAIL + the npm log tail into the build log.
+COPY tests/lib/install-published.sh /lib/install-published.sh
+RUN bash -c 'set -euo pipefail; . /lib/install-published.sh; \
+      for p in commhub-server agent-network agent-node; do \
+        install_published "@sleep2agi/$p" preview /tmp/npm-install.log; \
+      done'
 COPY tests/test17-user-journey/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 ARG TEST17_SOURCE_COMMIT=dev

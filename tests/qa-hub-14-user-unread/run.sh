@@ -14,6 +14,7 @@ export HOME=/tmp/anethome
 
 # P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/install-published.sh"
 mkdir -p "$HOME" /tmp/work
 cd /tmp/work
 
@@ -27,7 +28,9 @@ fail() { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 cleanup() { kill "${HUB_PID:-0}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-npm install -g @sleep2agi/agent-network@preview >/tmp/npm-install.log 2>&1
+# @preview is a MOVING tag: right after a publish its tarball can 404 for ~25–95 s and npm does not
+# retry — the bare install died silently here (#564). Resolve → wait for the tarball → install exact.
+install_published @sleep2agi/agent-network preview /tmp/npm-install.log
 anet -v
 
 echo "[0] start hub"

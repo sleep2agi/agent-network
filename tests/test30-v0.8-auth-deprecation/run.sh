@@ -8,7 +8,7 @@ export HOME=/tmp/anethome
 # (default "/tmp/"); refuses + exit 99 on anything else. See
 # tests/lib/safe-rm.sh for the helper definition.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-published.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/install-published.sh"
 mkdir -p "$HOME" /tmp/work
 cd /tmp/work
 
@@ -20,7 +20,7 @@ save_logs() { cp -f /tmp/npm-install.log /tmp/hub.log /tmp/dashboard.log /tmp/re
 trap save_logs EXIT
 
 echo "[0] install selftest: the just-published window (local fake registry)"
-bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/selftest.sh"
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/install-published.test.sh"
 
 # @preview is a MOVING tag that release.yml publishes into. Right after a publish the tag can
 # point at a version whose tarball is not servable yet; a bare `npm install -g …@preview` then
