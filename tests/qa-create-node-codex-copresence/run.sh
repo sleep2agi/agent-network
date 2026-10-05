@@ -109,6 +109,7 @@ cleanup() {
   done
   [[ -n "${DAEMON_PID:-}" ]] && kill "$DAEMON_PID" 2>/dev/null
   [[ -n "${HUB_PID:-}" ]] && kill "$HUB_PID" 2>/dev/null
+  [[ -n "${PAIR_REG_PID:-}" ]] && kill "$PAIR_REG_PID" 2>/dev/null
   return 0
 }
 trap cleanup EXIT
@@ -120,6 +121,20 @@ if command -v tmux >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
   bad "image has tmux/codex — the dependency preflight below would not be a clean witness"; exit 1
 fi
 ok "no tmux / codex in the image (by design)"
+# The headless start resolves agent-node only as the exact release pair via npx, and npx
+# asks the registry for that version BEFORE it accepts the matching global install. On a
+# release PR the pin is not on npm yet → ETARGET → the child dies (see paired-registry.py).
+# Answer that lookup for the @sleep2agi scope from this build.
+PAIR_REG_PORT=9265
+python3 /app/tests/qa-create-node-codex-copresence/paired-registry.py \
+  "$(ls /app/agent-node/sleep2agi-agent-node-*.tgz)" "$PAIR_REG_PORT" >/tmp/pair-registry.log 2>&1 &
+PAIR_REG_PID=$!
+printf '@sleep2agi:registry=http://127.0.0.1:%s/\n' "$PAIR_REG_PORT" > "$HOME/.npmrc"
+for _ in $(seq 1 40); do curl -fsS "http://127.0.0.1:$PAIR_REG_PORT/@sleep2agi%2fagent-node" >/dev/null 2>&1 && break; sleep 0.25; done
+PAIR_VER=$(curl -fsS "http://127.0.0.1:$PAIR_REG_PORT/@sleep2agi%2fagent-node" 2>/dev/null | jq -r '."dist-tags".latest')
+[[ "$PAIR_VER" == "$(jq -r .version /app/agent-node/package.json)" ]] \
+  && ok "local @sleep2agi registry serves this build's agent-node $PAIR_VER" \
+  || { bad "local paired registry not serving ($PAIR_VER)"; cat /tmp/pair-registry.log; exit 1; }
 (cd /app/server && PORT="$HUB_PORT" HOST=127.0.0.1 NODE_ENV=test COMMHUB_DB="$HUB_DB" exec bun run src/index.ts) >/tmp/hub-cncc.log 2>&1 &
 HUB_PID=$!
 for _ in $(seq 1 60); do curl -fsS "$HUB_BASE/health" >/dev/null 2>&1 && break; sleep 0.5; done
@@ -167,6 +182,10 @@ A_HEADLESS=""
 for _ in $(seq 1 20); do A_HEADLESS=$(headless_pids "$A"); [[ -n "$A_HEADLESS" ]] && break; sleep 0.5; done
 if [[ -n "$A_HEADLESS" ]]; then
   ok "daemon's start brought up a headless agent-node (pid $A_HEADLESS): $(tr '\0' ' ' < "/proc/${A_HEADLESS%% *}/cmdline" 2>/dev/null | grep -oE -- '--runtime [^ ]+')"
+  A_ENTRY=$(tr '\0' '\n' < "/proc/${A_HEADLESS%% *}/cmdline" 2>/dev/null | grep -m1 -E '/agent-node/dist/cli\.js$' || true)
+  [[ "$A_ENTRY" == "$(npm root -g)/@sleep2agi/agent-node/dist/cli.js" ]] \
+    && ok "it runs the agent-node built from this commit (global install): $A_ENTRY" \
+    || { bad "headless agent-node is not this build's global install: ${A_ENTRY:-?}"; cat /tmp/pair-registry.log; }
 else
   bad "no headless agent-node for $A — the baseline this suite contrasts against did not happen"
 fi
