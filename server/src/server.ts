@@ -25,12 +25,12 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
-import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
-import { canMessageAgent, isAgentRestricted, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
+import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -1097,13 +1097,38 @@ return Bun.serve({
       }
       const streamDenied = restNodeDenied(req, authCtx, "SSE /events/network/:id", (id) => streamVerdict(id, "network"));
       if (streamDenied) return streamDenied;
-      // 多用户 Agent 权限:受限成员只收到自己是一端的路由事件(自己发的 / 发给自己的),
-      // 看不到网络里别人和各个 Agent 之间的流量。
+      // 多用户 Agent 权限:受限成员收到自己是一端的路由事件,以及授权 Agent 时间线上的事件
+      // (#563:与 /api/tasks 的 addAgentTimelineScope 同一判据 —— 一端是看得见的 Agent,另一端是
+      // 看得见的 Agent 或不是本网络任何 Agent;另一端是看不见的 Agent 的事件不推)。
       if (isAgentRestricted(authCtx.userId, observedNetId)) {
         const me = authCtx.username;
+        const userId = authCtx.userId;
+        const collides = usernameIsAgentAlias(observedNetId, me);
+        // 授权与 Agent 名单每条事件都现查太贵;缓存 5 秒(授权撤销最多晚 5 秒对推送生效)。
+        let cache: { at: number; visible: Set<string>; agents: Set<string> } | null = null;
+        const sets = () => {
+          if (!cache || Date.now() - cache.at > 5_000) {
+            const visible = new Set(visibleAgents(userId, observedNetId).aliases);
+            const agents = new Set(db.all<{ alias: string }>(
+              "SELECT alias FROM sessions WHERE network_id = ?1 AND alias IS NOT NULL UNION SELECT alias FROM nodes WHERE network_id = ?1 AND alias IS NOT NULL",
+              observedNetId,
+            ).map((r) => r.alias));
+            cache = { at: Date.now(), visible, agents };
+          }
+          return cache;
+        };
         return createNetworkObserverStream(observedNetId, {
           subscriberUserId: authCtx.userId,
-          eventFilter: (event) => event.from === me || event.to === me,
+          eventFilter: (event) => {
+            if (event.from === me || event.to === me) return true;
+            if (collides) return false;
+            const { visible, agents } = sets();
+            const from = typeof event.from === "string" ? event.from : null;
+            const to = typeof event.to === "string" ? event.to : null;
+            const vis = (a: string | null) => !!a && visible.has(a);
+            const otherOk = (a: string | null) => vis(a) || (!!a && !agents.has(a));
+            return (vis(to) && otherOk(from)) || (vis(from) && otherOk(to));
+          },
         });
       }
       return createNetworkObserverStream(observedNetId, { subscriberUserId: authCtx.userId });
@@ -2225,7 +2250,7 @@ return Bun.serve({
       if (!viewerRole && !isHubAdminCredential(resolved)) {
         return withCors(req, Response.json({ ok: false, error: "access denied" }, { status: 403 }));
       }
-      // Get network stats —— 受限成员只数得到授权给他的 Agent 与自己的往来。
+      // Get network stats —— 受限成员只数得到授权给他的 Agent 的时间线(#563)。
       const detailScope: RestNetworkScope = resolved.user.role === "admin" || resolved.networkId
         ? { networkId, networkIds: null }
         : resolveRestNetworkScope(networkId, { userId: resolved.user.user_id, networkId: null, username: resolved.user.username }, false);
@@ -2234,7 +2259,7 @@ return Bun.serve({
       const sessionParams: unknown[] = [];
       const sessionCount = db.get<{ cnt: number }>(addAgentNetworkScope("SELECT COUNT(*) as cnt FROM sessions WHERE 1=1", sessionParams, detailScope, { alias: "alias", nodeId: "node_id" }), ...sessionParams);
       const taskParams: unknown[] = [];
-      const taskStats = db.all<any>(addOwnTrafficScope("SELECT status, COUNT(*) as count FROM tasks WHERE 1=1", taskParams, detailScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" }) + " GROUP BY status", ...taskParams);
+      const taskStats = db.all<any>(addAgentTimelineScope("SELECT status, COUNT(*) as count FROM tasks WHERE 1=1", taskParams, detailScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" }) + " GROUP BY status", ...taskParams);
       return withCors(req, Response.json({
         ok: true, network,
         stats: { nodes: nodeCount?.cnt || 0, sessions: sessionCount?.cnt || 0, tasks: taskStats },
@@ -4061,9 +4086,9 @@ return Bun.serve({
       let sql = `SELECT ${TASK_EVENT_REST_SELECT} FROM task_events WHERE 1=1`;
       const params: any[] = [];
       if (restScope.agentRestriction) {
-        // 受限成员:只看得到自己与授权 Agent 往来的那些任务的事件。
+        // 受限成员:只看得到授权 Agent 时间线上那些任务的事件(#563,与 /api/tasks 同一判据)。
         sql += " AND task_id IN (SELECT task_id FROM tasks WHERE 1=1";
-        sql = addOwnTrafficScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" }) + ")";
+        sql = addAgentTimelineScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" }) + ")";
       } else {
         sql = addNetworkScope(sql, params, restScope);
       }
@@ -4656,7 +4681,7 @@ return Bun.serve({
       const taskId = decodeURIComponent(taskPathMatch[1] ?? "");
       const params: any[] = [taskId];
       let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE task_id = ?1`;
-      sql = addOwnTrafficScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+      sql = addAgentTimelineScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       sql += " LIMIT 1";
       const task = db.get(sql, ...params);
       if (!task) {
@@ -4745,7 +4770,7 @@ return Bun.serve({
 
       let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE 1=1`;
       const params: any[] = [];
-      sql = addOwnTrafficScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+      sql = addAgentTimelineScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (toName) { sql += ` AND to_name = ?${params.length + 1}`; params.push(toName); }
@@ -4768,7 +4793,7 @@ return Bun.serve({
       }
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
-      statsSql = addOwnTrafficScope(statsSql, statsParams, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+      statsSql = addAgentTimelineScope(statsSql, statsParams, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       statsSql += " GROUP BY status";
       const stats = db.all<any>(statsSql, ...statsParams);
       return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));

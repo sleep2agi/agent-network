@@ -12,7 +12,7 @@ import { deferOfflineIfAnotherCopyConnected } from "./node-identity-conflict.js"
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
-import { addAgentNetworkScope, addNetworkScope, addOwnTrafficScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
 import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict } from "./node-permissions.js";
@@ -2530,7 +2530,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       const params: any[] = [task_id];
       let sql = "SELECT * FROM tasks WHERE task_id = ?1";
-      sql = addOwnTrafficScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+      sql = addAgentTimelineScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       const task = db.get<any>(sql, ...params);
       return {
         content: [{
@@ -2599,7 +2599,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, thread_id, turn_id, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
-      sql = addOwnTrafficScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+      sql = addAgentTimelineScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
@@ -2615,7 +2615,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Stats
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
-      statsSql = addOwnTrafficScope(statsSql, statsParams, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+      statsSql = addAgentTimelineScope(statsSql, statsParams, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       statsSql += " GROUP BY status";
       const stats = db.all(statsSql, ...statsParams);
 
