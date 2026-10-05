@@ -395,6 +395,8 @@ function validateFlagValue(k: string, v: unknown) {
     case "timeout":  if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 86400) throw 0; break;
   }
 }
+// #605 更正:agent-node 按**毫秒**读 flags.timeout(默认 300000),上面 1..86400 是「秒」的形状 ——
+// 600 原样落到子节点 = 0.6 秒超时。现行实现:毫秒,0(不设上限)或 1000..3_600_000,与 update_node_config 一致。
 
 function buildAnetArgs(spec: NodeSpec): string[] {
   validateName(spec.name);

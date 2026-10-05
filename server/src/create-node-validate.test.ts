@@ -69,6 +69,30 @@ describe("validateFlagValue (§4.2.2)", () => {
     expect(() => validateFlagValue("permissionMode", "plan")).not.toThrow();
     expect(() => validateFlagValue("permissionMode", "anything-else")).toThrow(ValidationError);
   });
+  // #605 —— agent-node 按毫秒读 flags.timeout(默认 300000)。这里曾收 1..86400(秒的形状):
+  // 600 原样到子节点 = 0.6 秒超时;600000(10 分钟)反被拒。现在与 update_node_config 同一把尺子。
+  test("timeout is milliseconds: 0 or 1000..3_600_000 (#605)", () => {
+    for (const v of [0, 1000, 300_000, 600_000, 3_600_000]) {
+      expect(() => validateFlagValue("timeout", v)).not.toThrow();
+    }
+    for (const v of [1, 600, 999, 86_400 * 1000 + 1, 3_600_001, -1, 1500.5, "600000", null]) {
+      expect(() => validateFlagValue("timeout", v)).toThrow(ValidationError);
+    }
+    try { validateFlagValue("timeout", 600); throw new Error("unreachable"); }
+    catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect((e as ValidationError).code).toBe("flag_value_invalid");
+      expect(String((e as ValidationError).detail?.reason)).toContain("milliseconds");
+    }
+  });
+  test("timeout range matches update_node_config's (#605)", async () => {
+    const { validatePatch } = await import("./config-apply-validate.js");
+    for (const v of [0, 1, 600, 999, 1000, 600_000, 3_600_000, 3_600_001, -1, 1.5]) {
+      let createOk = true;
+      try { validateFlagValue("timeout", v); } catch { createOk = false; }
+      expect({ v, ok: createOk }).toEqual({ v, ok: validatePatch(undefined, { timeout: v }) === null });
+    }
+  });
 });
 
 describe("validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases)", () => {

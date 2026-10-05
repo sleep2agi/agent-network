@@ -39,6 +39,17 @@ import { randomBytes } from "node:crypto";
  * restart-intent from a fatal exit. */
 export const RESTART_SENTINEL = 75;
 
+/** #605 —— `flags.timeout` 是**毫秒**(cli.ts currentClaudeTimeoutMs / currentCodexTimeoutMs →
+ *  util/timeout.ts resolveTimeoutMs、runtime/opencode-timeout.ts,默认 300000)。
+ *  0 = 不设上限,否则 1000..3_600_000。1..999 是「按秒填的」形状(600 想要 10 分钟 → 0.6 秒),拒绝。
+ *  hub server/src/create-node-validate.ts isValidTimeoutMs 的副本(两个包之间没有依赖);
+ *  create-node-daemon.ts 的 validateFlagValueDaemon 也用这一份。 */
+export const TIMEOUT_MS_MIN = 1000;
+export const TIMEOUT_MS_MAX = 3_600_000;
+export function isValidTimeoutMs(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && (v === 0 || (v >= TIMEOUT_MS_MIN && v <= TIMEOUT_MS_MAX));
+}
+
 /** Defense-in-depth local validation. Same allowlist as hub but
  * intentionally duplicated — if hub validator drifts loose, the node
  * still refuses anything outside this set.
@@ -159,8 +170,9 @@ export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
         }
         break;
       case "timeout":
-        if (typeof val !== "number" || !Number.isInteger(val) || val < 0 || val > 3_600_000) {
-          return { field: "flags.timeout", reason: "must be int ms in [0, 3_600_000]" };
+        // #605 —— 同 hub:毫秒,0 或 1000..3_600_000(1..999 是按秒填的形状)。
+        if (!isValidTimeoutMs(val)) {
+          return { field: "flags.timeout", reason: "timeout is in milliseconds: 0 (no limit) or an integer 1000..3600000" };
         }
         break;
     }

@@ -88,6 +88,17 @@ describe("validateLocalPatch — defense-in-depth", () => {
     expect(validateLocalPatch({ flags: { timeout: 5_000_000 } })?.field).toBe("flags.timeout");
     expect(validateLocalPatch({ flags: { timeout: -1 } })?.field).toBe("flags.timeout");
   });
+  test("timeout is milliseconds: 0 or 1000..3_600_000; 1..999 rejected (#605)", () => {
+    expect(validateLocalPatch({ flags: { timeout: 0 } })).toBeNull();
+    expect(validateLocalPatch({ flags: { timeout: 1000 } })).toBeNull();
+    expect(validateLocalPatch({ flags: { timeout: 600_000 } })).toBeNull();
+    expect(validateLocalPatch({ flags: { timeout: 3_600_000 } })).toBeNull();
+    for (const v of [1, 600, 999]) {
+      const r = validateLocalPatch({ flags: { timeout: v } });
+      expect(r?.field).toBe("flags.timeout");
+      expect(r?.reason).toContain("milliseconds");
+    }
+  });
   test("empty-string model rejected", () => {
     expect(validateLocalPatch({ model: "" })?.field).toBe("model");
   });

@@ -108,6 +108,23 @@ export function validateModel(s: unknown): asserts s is string | undefined | nul
   }
 }
 
+/**
+ * #605 —— `flags.timeout` 的单位是**毫秒**:agent-node 就是这么读的(cli.ts currentClaudeTimeoutMs /
+ * currentCodexTimeoutMs → util/timeout.ts resolveTimeoutMs、runtime/opencode-timeout.ts,默认 300000)。
+ * 这里曾按「秒」收 1..86400:填 600 想要 10 分钟的人拿到 0.6 秒、每个任务都超时;真正的毫秒值被拒。
+ *
+ * 范围与 update_node_config(config-apply-validate.ts)/ agent-node config-apply 同一把尺子:
+ * 0(不设上限)或 TIMEOUT_MS_MIN..TIMEOUT_MS_MAX。1..999 拒绝 —— 旧客户端按秒发的小值分辨不出意图,
+ * 不偷偷乘 1000,但也不再让任何人悄悄拿到一个亚秒超时。
+ */
+export const TIMEOUT_MS_MIN = 1000;
+export const TIMEOUT_MS_MAX = 3_600_000;
+export const TIMEOUT_MS_REASON =
+  `timeout is in milliseconds: 0 (no limit) or an integer ${TIMEOUT_MS_MIN}..${TIMEOUT_MS_MAX} (e.g. 600000 = 10 min)`;
+export function isValidTimeoutMs(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && (v === 0 || (v >= TIMEOUT_MS_MIN && v <= TIMEOUT_MS_MAX));
+}
+
 export function validateFlagValue(k: string, v: unknown): void {
   switch (k) {
     case "permissionMode":
@@ -129,8 +146,8 @@ export function validateFlagValue(k: string, v: unknown): void {
       }
       return;
     case "timeout":
-      if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 86400) {
-        throw new ValidationError("flag_value_invalid", { field: k, reason: "must be integer 1..86400" });
+      if (!isValidTimeoutMs(v)) {
+        throw new ValidationError("flag_value_invalid", { field: k, reason: TIMEOUT_MS_REASON });
       }
       return;
     case "copresence":

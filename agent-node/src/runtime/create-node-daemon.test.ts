@@ -135,12 +135,21 @@ describe("§4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in de
     expect(() => validateFlagValueDaemon("budget", "free")).toThrow(/flag_value_invalid/);
     expect(() => validateFlagValueDaemon("budget", Infinity)).toThrow(/flag_value_invalid/);
   });
-  test("timeout integer range", () => {
-    expect(() => validateFlagValueDaemon("timeout", 600)).not.toThrow();
-    expect(() => validateFlagValueDaemon("timeout", 1)).not.toThrow();
-    expect(() => validateFlagValueDaemon("timeout", 86400)).not.toThrow();
-    expect(() => validateFlagValueDaemon("timeout", 0)).toThrow(/flag_value_invalid/);
-    expect(() => validateFlagValueDaemon("timeout", 86401)).toThrow(/flag_value_invalid/);
+  // #605 —— agent-node 按毫秒读 flags.timeout;daemon 曾按「秒」收 1..86400,600(想要 10 分钟)
+  // 原样写进子节点 config = 0.6 秒超时,600000 反被拒。现在:毫秒,0 或 1000..3_600_000。
+  test("timeout is milliseconds: 0 or 1000..3_600_000 (#605)", () => {
+    expect(() => validateFlagValueDaemon("timeout", 600_000)).not.toThrow();
+    expect(() => validateFlagValueDaemon("timeout", 300_000)).not.toThrow();
+    expect(() => validateFlagValueDaemon("timeout", 1000)).not.toThrow();
+    expect(() => validateFlagValueDaemon("timeout", 3_600_000)).not.toThrow();
+    expect(() => validateFlagValueDaemon("timeout", 0)).not.toThrow();   // no limit, as update_node_config
+    for (const secondsShaped of [1, 600, 999]) {
+      expect(() => validateFlagValueDaemon("timeout", secondsShaped)).toThrow(/flag_value_invalid:timeout:timeout is in milliseconds/);
+    }
+    expect(() => validateFlagValueDaemon("timeout", 3_600_001)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("timeout", -1)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("timeout", 1500.5)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("timeout", "600000")).toThrow(/flag_value_invalid/);
   });
   test("unknown key rejected", () => {
     expect(() => validateFlagValueDaemon("evilKey", true)).toThrow(/flag_key_unknown/);

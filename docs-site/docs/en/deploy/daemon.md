@@ -210,6 +210,26 @@ missing is reported at start (the request ends as `runtime_capability_check_fail
 - Only valid for `codex-app-server`; the Hub rejects the key on any other runtime (`flag_not_applicable_to_runtime`).
 - An older Hub or daemon that does not know the key rejects the request (`flag_key_unknown`) instead of quietly creating a headless node.
 
+### Task timeout: `flags.timeout` is in milliseconds {#create-node-timeout-ms}
+
+`create_node`'s `node_spec.flags.timeout` is in **milliseconds**: the daemon writes it into the child's config
+as is, and the node reads it as milliseconds (default when absent: 300000 = 5 minutes). The range is the same
+one `update_node_config` uses for timeout changes:
+
+- `0`: no limit;
+- `1000`–`3600000`: 1 second to 1 hour, e.g. `600000` for 10 minutes;
+- `1`–`999`, anything above `3600000`, fractions and strings: rejected by the Hub (`flag_value_invalid`, with a `reason` that says the unit is milliseconds).
+
+```json
+{"name": "long-runner", "runtime": "claude-agent-sdk", "flags": {"timeout": 600000}}
+```
+
+Older Hubs and daemons accepted only `1`–`86400`, as if in seconds: a node created with `600` really got a
+0.6-second timeout, and `600000` was rejected. Newer ones do not multiply small values by 1000 (the intent
+cannot be told apart); they reject them, so nobody silently ends up with a sub-second timeout. Configs of
+existing nodes are not migrated, and the number in them always takes effect as milliseconds; change it with
+`update_node_config` or by editing the config.
+
 ## Keeping a daemon running {#keep-daemon-alive}
 
 `anet daemon start` runs in the foreground. If you started it over SSH, it exits when the session ends.

@@ -197,6 +197,23 @@ daemon 会在子节点 config 里写 `codexCopresence: true`，之后的 `anet n
 - 只对 `codex-app-server` 有效；其他 runtime 带这个键会被 Hub 拒绝（`flag_not_applicable_to_runtime`）。
 - 不认识这个键的旧 Hub / 旧 daemon 会拒绝请求（`flag_key_unknown`），不会悄悄建出无头节点。
 
+### 任务超时 `flags.timeout` 的单位是毫秒 {#create-node-timeout-ms}
+
+`create_node` 的 `node_spec.flags.timeout` 是**毫秒**：daemon 原样写进子节点 config，节点按毫秒读
+（不填时默认 300000 = 5 分钟）。和 `update_node_config` 改超时用的是同一个范围：
+
+- `0`：不设上限；
+- `1000`–`3600000`：1 秒到 1 小时，例如 10 分钟写 `600000`；
+- `1`–`999`、超过 `3600000`、小数、字符串：Hub 拒绝（`flag_value_invalid`，`reason` 里写明单位是毫秒）。
+
+```json
+{"name": "long-runner", "runtime": "claude-agent-sdk", "flags": {"timeout": 600000}}
+```
+
+旧版 Hub / daemon 按「秒」只收 `1`–`86400`：填 `600` 的节点实际拿到 0.6 秒的超时，填 `600000` 反而被拒。
+新版不会把小数值自动乘 1000（分不清原意），而是直接拒绝，避免有人悄悄拿到亚秒级超时。已经建好的节点
+config 不会被迁移，里面的数字一律按毫秒生效；要改用 `update_node_config` 或直接编辑 config。
+
 ## 让 daemon 在后台运行 {#keep-daemon-alive}
 
 `anet daemon start` 是前台进程。如果你是 SSH 上去启动的，会话一断它就退出了。
