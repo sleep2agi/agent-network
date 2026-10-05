@@ -223,8 +223,8 @@ Waiting up to 60s for the hub to show the result …
   `ask "hand-b" on machine-b itself, through the hub, to restart (it's not managed by a daemon)`。
 - 重启 / 换模型的结果以 Hub 为准：节点重新上报（配置版本前进、心跳更新、不是离线）才算成功；超时时如实说明最后看到的状态
   （已离线一直没回来 → 去那台机器上看；仍在 working → 当前回合结束后才会重启）。
-- 权限完全由 Hub 判：viewer 会看到 Hub 的 `permission_denied`；被限制 Agent 访问的成员看不到 daemon，start / stop 在派发前就被拒绝，
-  restart / 换模型由 Hub 拒绝，节点不受影响。
+- 权限完全由 Hub 判：viewer 会看到 Hub 的 `permission_denied`；被限制 Agent 访问的成员看不到 daemon、也读不到节点配置，
+  start / stop / restart / 换模型都在派发前就被拒绝并说明原因，节点不受影响。
 - 只用登录令牌（`~/.anet/config.json` 的 `token`），不用 `COMMHUB_TOKEN`；保存的若是节点令牌则拒绝。
 - 不在终端里（脚本 / 管道）且没带 `--yes`：什么都不做，退出码 `1`。超时会如实说「请求已被 Hub 接受但还没看到结果」，用 `anet node ls --all` 查看。
 - `--network <id|name>` 选别的 Network；本地专用的参数（`--tmux`、`--copresence` 等）和 `--remote` 一起用会被拒绝（退出码 `2`）。

@@ -290,12 +290,14 @@ case_G() {
   sleep 2
   [[ "$(lifecycle)" == active && -n "$(agent_pids "$CHILD")" ]] || { echo "FAIL: G $CHILD was touched (lifecycle=$(lifecycle))"; return 1; }
   # #570: restart no longer needs a visible daemon, so a restricted member gets past the CLI's daemon
-  # check — the Hub's write gate must still refuse it, and nothing may restart.
+  # check. It is still refused before dispatch (the hub hides the node's config from them: 404), and the
+  # refusal must say why; nothing may restart.
   local before; before=$(agent_pids "$CHILD"); rc=0
   out=$(cd "$CLI_CWD" && COMMHUB_TOKEN="$UTOK" HOME="$MEMBER_HOME" bun "$CLI" node restart "$CHILD" --remote --yes --network "$NET" --wait 5 2>&1) || rc=$?
   show "$out"
   [[ $rc -eq 1 ]] || { echo "FAIL: G restart rc=$rc (want 1)"; return 1; }
   has "Dispatched (" "$out" && { echo "FAIL: G restart dispatched for a restricted member"; return 1; }
+  has "restricted agent access can't manage nodes" "$out" || { echo "FAIL: G restart refusal does not say why"; return 1; }
   sleep 3
   [[ "$(agent_pids "$CHILD")" == "$before" ]] || { echo "FAIL: G restart: $CHILD restarted ('$before' → '$(agent_pids "$CHILD")')"; return 1; }
   echo "  PASS G"

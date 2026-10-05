@@ -231,8 +231,8 @@ Waiting up to 60s for the hub to show the result …
   report, not offline). On timeout it says what it saw last (went offline and never came back → look on that machine;
   still working → it restarts after its current turn).
 - Permissions are the Hub's: a viewer gets the Hub's `permission_denied`; a member with restricted agent access
-  sees no daemons, is refused start / stop up front, and is refused restart / model change by the Hub — the node is
-  not touched.
+  sees no daemons and cannot read the node's config, so start / stop / restart / model change are all refused before
+  dispatching, with the reason — the node is not touched.
 - Only your login token (`token` in `~/.anet/config.json`) is used, never `COMMHUB_TOKEN`; a saved node token is refused.
 - Not in a terminal (script / pipe) and no `--yes`: nothing is done, exit code `1`. On timeout it says honestly that the
   Hub accepted the request but has not shown the result yet; check with `anet node ls --all`.

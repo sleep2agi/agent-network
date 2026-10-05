@@ -259,7 +259,7 @@ export function describePlan(verb: RemoteVerb, t: RemoteTarget, model?: string |
   switch (verb) {
     case "start": return `ask the hub to have daemon ${t.daemon?.alias ?? "?"} on ${where} start "${t.alias}"`;
     case "stop": return `ask the hub to have daemon ${t.daemon?.alias ?? "?"} on ${where} stop "${t.alias}" (its config is kept; start it again with --remote)`;
-    case "restart": return `ask "${t.alias}" on ${where} itself, through the hub, to restart${selfNote(t)} (it finishes its current turn, exits and its \`anet node start\` respawns it)`;
+    case "restart": return `ask "${t.alias}" on ${where} itself, through the hub, to restart${selfNote(t)} — it finishes its current turn, exits and its \`anet node start\` respawns it`;
     case "edit": return `ask "${t.alias}" on ${where} itself, through the hub, to switch to model ${model} (was ${t.model ?? "unknown"})${selfNote(t)}; it restarts to apply it`;
   }
 }

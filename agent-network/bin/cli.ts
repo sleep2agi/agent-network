@@ -9300,7 +9300,12 @@ async function nodeRemoteCommand(verb: RemoteVerb, rest: string[]) {
   let cfg: any = null;
   if (verb === "restart" || verb === "edit") {
     const c = await readConfig();
-    if (!c.ok) { console.error(`[anet] Could not read ${alias}'s config revision: ${failText(c)}`); markFailed(); return; }
+    if (!c.ok) {
+      // A member with restricted agent access gets 404 here (the hub hides node config from them) — say so
+      // instead of a bare HTTP code; nothing is dispatched either way.
+      const hint = c.status === 404 ? " — the hub doesn't show you this node's config (members with restricted agent access can't manage nodes; ask a network admin)" : "";
+      console.error(`[anet] Could not read ${alias}'s config revision: ${failText(c)}${hint}`); markFailed(); return;
+    }
     cfg = c.body;
   }
   const pre = precheck(verb, t, cfg);
