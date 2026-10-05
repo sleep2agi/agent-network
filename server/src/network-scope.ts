@@ -177,6 +177,58 @@ export function addOwnTrafficScope(sql: string, params: any[], scope: RestNetwor
   return parts.length ? `${sql} AND (${parts.join(" OR ")})` : `${sql} AND 1=0`;
 }
 
+/**
+ * #563 —— 「不同用户看到同一个节点,消息应该是一样的」。
+ *
+ * tasks 行(聊天窗口的历史 + 回复都在这张表)的作用域:受限网络里,只要成员**看得见** Agent N
+ * (直接授权或经组授权,见 visibleAgents),N 的整条时间线他都看得见 —— 不论是谁发的(包括 owner、
+ * 其他成员),也包括授权之前的历史。时间线 = 一端是看得见的 Agent,另一端是:
+ *   - 另一个看得见的 Agent;或
+ *   - 不是本网络任何 Agent 的名字(人类用户 / scheduler / hub 这类系统发送方)。
+ * 另一端是**看不见**的 Agent 的行一律不放行(不借时间线暴露看不见的节点)。
+ * 没有任何授权的成员什么都看不到(与之前一样);能不能**发**仍由 canMessageAgent 管。
+ * Agent 主动发给某个人的 user_inbox 私信不在这张表里,不受影响。
+ *
+ * 与 addOwnTrafficScope 的区别只在受限网络:那里只放行「自己 ↔ 授权 Agent」。inbox(投递队列)
+ * 仍走 addOwnTrafficScope。用户名与 Agent alias 撞名的网络照旧整网不放行(fail-closed)。
+ */
+export function addAgentTimelineScope(sql: string, params: any[], scope: RestNetworkScope, cols: Required<Pick<TrafficColumns, "from" | "to" | "fromNodeId" | "toNodeId">> & { network?: string }): string {
+  const restriction = scope.agentRestriction;
+  if (!restriction) return addHumanNetworkScope(sql, params, scope, cols.network ?? "network_id");
+  const net = cols.network ?? "network_id";
+  const parts: string[] = [];
+  const allowed = unrestrictedNetworks(scope) ?? [];
+  if (allowed.length) parts.push(`${net} IN (${placeholders(params, allowed)})`);
+  if (restriction.username) {
+    for (const networkId of restriction.networkIds) {
+      if (usernameIsAgentAlias(networkId, restriction.username)) continue;
+      const visible = visibleAgents(restriction.userId, networkId);
+      // 先判空再推参数:推了又不用的绑定参数会让 PG 报错(SQLite 会忽略)。
+      if (visible.aliases.length === 0 && visible.nodeIds.length === 0) continue;
+      const aliasIn = visible.aliases.length ? placeholders(params, visible.aliases) : null;
+      const nodeIn = visible.nodeIds.length ? placeholders(params, visible.nodeIds) : null;
+      const netP = placeholders(params, [networkId]);
+      const isVisible = (aliasCol: string, nodeCol: string): string => {
+        const conds: string[] = [];
+        if (aliasIn) conds.push(`${aliasCol} IN (${aliasIn})`);
+        if (nodeIn) conds.push(`${nodeCol} IN (${nodeIn})`);
+        return `(${conds.join(" OR ")})`;
+      };
+      // 「不是本网络任何 Agent」:没有 node_id,且 alias 不在本网络的 sessions / nodes 里。
+      const notAnAgent = (aliasCol: string, nodeCol: string): string =>
+        `(${nodeCol} IS NULL`
+        + ` AND ${aliasCol} NOT IN (SELECT alias FROM sessions WHERE network_id = ${netP} AND alias IS NOT NULL)`
+        + ` AND ${aliasCol} NOT IN (SELECT alias FROM nodes WHERE network_id = ${netP} AND alias IS NOT NULL))`;
+      const toV = isVisible(cols.to, cols.toNodeId);
+      const fromV = isVisible(cols.from, cols.fromNodeId);
+      const otherFrom = `(${fromV} OR ${notAnAgent(cols.from, cols.fromNodeId)})`;
+      const otherTo = `(${toV} OR ${notAnAgent(cols.to, cols.toNodeId)})`;
+      parts.push(`(${net} = ${netP} AND ((${toV} AND ${otherFrom}) OR (${fromV} AND ${otherTo})))`);
+    }
+  }
+  return parts.length ? `${sql} AND (${parts.join(" OR ")})` : `${sql} AND 1=0`;
+}
+
 export function singleNetworkId(scope: RestNetworkScope): string | null {
   if (scope.networkId) return scope.networkId;
   if (scope.networkIds?.length === 1) return scope.networkIds[0];

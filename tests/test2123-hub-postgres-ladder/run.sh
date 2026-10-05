@@ -186,6 +186,9 @@ run_pg_tests_rc anet_sched_test src/scheduled-tasks-http.test.ts
 run_pg_tests_rc anet_side_thread_test src/side-thread-command-transport.test.ts
 run_pg_tests_rc anet_evidence_test src/task-consumption.test.ts
 run_pg_tests_rc anet_acl_dm_test src/agent-acl-slice3-http.test.ts
+# #563: a granted member sees the whole timeline of a node they can see (addAgentTimelineScope — NOT IN subqueries
+# and reused ?N placeholders) — on real PostgreSQL rows.
+run_pg_tests_rc anet_acl_timeline_test src/agent-acl-http.test.ts
 run_pg_tests_rc anet_skillhub_test src/skillhub-http.test.ts
 # RFC-038 §9: task visibility is a LIKE … ESCAPE clause on JSON text columns — run it on real PostgreSQL rows,
 # including member ids that contain % and _ (task-access-http.test.ts「LIKE 通配符不越权」).

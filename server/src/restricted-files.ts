@@ -3,14 +3,17 @@
 // 也不能把自己看不见的 file_id 塞进发给授权 Agent 的任务(那等于借 Agent 的网络令牌去读)。
 import { existsSync, readFileSync } from "fs";
 import { db } from "./db.js";
-import { addOwnTrafficScope, type RestNetworkScope } from "./network-scope.js";
+import { addAgentTimelineScope, addOwnTrafficScope, type RestNetworkScope } from "./network-scope.js";
 import { FILE_ID_REGEX, indexEntryPath, validateIndexEntry } from "./uploads.js";
 
 /**
  * 受限成员能不能看见这个文件:只认**对方(授权 Agent / 给他发私信的人)放进来**的附件 ——
  *   user_inbox 里发给自己的私信附件;
- *   授权 Agent 发给自己的任务 / inbox 行的 attachments;
- *   自己发给授权 Agent 的任务上,Agent 回复写进的 reply_attachments。
+ *   授权 Agent 时间线上(#563,与 /api/tasks 同一判据 addAgentTimelineScope)**别人**发出的任务的
+ *   attachments —— 时间线上看得见那条消息,就得看得见它带的图;发送方是受限成员时发送路径已校验过
+ *   他看得见这些文件,不受限的发送方本来就看得见全网文件;
+ *   时间线上任务的 reply_attachments(Agent 回复写进的);
+ *   授权 Agent 发给自己的 inbox 行的 attachments。
  * 自己随任务带出去的 attachments **不算**:否则把任意 file_id 塞进自己的任务就能「解锁」别人的文件。
  */
 export function restrictedMemberSeesFile(userId: string, username: string, networkId: string, fileId: string): boolean {
@@ -32,10 +35,10 @@ export function restrictedMemberSeesFile(userId: string, username: string, netwo
   }
   const scope: RestNetworkScope = { networkId, networkIds: null, agentRestriction: { userId, username, networkIds: [networkId] } };
   const taskParams: unknown[] = [needle];
-  const taskSql = addOwnTrafficScope("SELECT from_name, to_name, meta_json FROM tasks WHERE meta_json LIKE ?1 ESCAPE '\\'", taskParams, scope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+  const taskSql = addAgentTimelineScope("SELECT from_name, to_name, meta_json FROM tasks WHERE meta_json LIKE ?1 ESCAPE '\\'", taskParams, scope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
   for (const row of db.all<{ from_name: string; to_name: string; meta_json: string | null }>(taskSql + " LIMIT 50", ...taskParams)) {
-    if (row.to_name === username && listed(row.meta_json, "attachments")) return true;
-    if (row.from_name === username && listed(row.meta_json, "reply_attachments")) return true;
+    if (row.from_name !== username && listed(row.meta_json, "attachments")) return true;
+    if (listed(row.meta_json, "reply_attachments")) return true;
   }
   const inboxParams: unknown[] = [needle];
   const inboxSql = addOwnTrafficScope("SELECT session_name, meta_json FROM inbox WHERE meta_json LIKE ?1 ESCAPE '\\'", inboxParams, scope, { from: "from_session", to: "session_name" });

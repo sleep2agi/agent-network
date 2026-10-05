@@ -321,13 +321,15 @@ describe("granted member sees and messages ONLY what was granted", () => {
     expect((await tool(aliceToken, "send_task", { alias: X.alias, task: "mcp hello X", network_id: NET })).ok).toBe(true);
     expect((await tool(aliceToken, "send_task", { alias: Z.alias, task: "hi", network_id: NET })).error).toBe("agent_not_granted");
   });
-  test("tasks: alice sees her own exchange with X, not admin's", async () => {
+  test("#563 tasks: alice sees X's and Y's whole timeline (incl. admin's history), never Z's", async () => {
     seedTask("t_x_to_alice", X.alias, "acl_alice", "X answers alice");
     const ids = (await get(aliceToken, `/api/tasks?network_id=${NET}`)).body.tasks.map((t: any) => t.content).sort();
-    expect(ids).toEqual(["X answers alice", "hello X", "mcp hello X"].sort());
-    expect((await get(aliceToken, `/api/tasks/t_admin_to_x`)).status).toBe(404);
+    // 与 admin 看同一个节点时看到的一样:admin 发给 X / Y(Y 是只读授权)的历史也在。
+    expect(ids).toEqual(["X answers alice", "hello X", "mcp hello X", "admin secret for X", "admin secret for Y"].sort());
+    expect((await get(aliceToken, `/api/tasks/t_admin_to_x`)).status).toBe(200);
     expect((await get(aliceToken, `/api/tasks/t_x_to_alice`)).status).toBe(200);
-    expect((await tool(aliceToken, "list_tasks", { network_id: NET })).tasks.map((t: any) => t.content)).not.toContain("admin secret for X");
+    expect((await tool(aliceToken, "list_tasks", { network_id: NET })).tasks.map((t: any) => t.content)).toContain("admin secret for X");
+    expect((await tool(aliceToken, "get_task", { task_id: "t_admin_to_x" })).ok).toBe(true);
   });
   test("requirements people now include X and Y nodes but not Z", async () => {
     const nodes = (await get(aliceToken, `/api/requirements/people?network_id=${NET}`)).body.people.filter((p: any) => p.kind === "node").map((p: any) => p.id).sort();
@@ -338,6 +340,142 @@ describe("granted member sees and messages ONLY what was granted", () => {
   });
   test("bob (no grants) still sees nothing", async () => {
     expect((await get(bobToken, `/api/status?network_id=${NET}`)).body.sessions).toEqual([]);
+  });
+});
+
+describe("#563 one node, one timeline: everyone who can see N sees the same history", () => {
+  const contents = async (token: string, q = "") => (await get(token, `/api/tasks?network_id=${NET}${q}`)).body.tasks.map((t: any) => t.content).sort();
+  test("seed: bob's history with X and traffic between X and the invisible Z", () => {
+    seedTask("t563_bob_to_x", "acl_bob", X.alias, "bob asked X earlier");
+    seedTask("t563_z_to_x", Z.alias, X.alias, "Z whispers to X");
+    seedTask("t563_x_to_z", X.alias, Z.alias, "X whispers to Z");
+    seedTask("t563_admin_to_z", "scheduler", Z.alias, "scheduler pokes Z");
+  });
+  test("chat window query (to_name=X): alice sees exactly what admin sees, minus rows from an agent she cannot see", async () => {
+    const adminView = await contents(adminToken, `&to_name=${X.alias}`);
+    const aliceView = await contents(aliceToken, `&to_name=${X.alias}`);
+    expect(adminView).toContain("Z whispers to X");
+    expect(aliceView).toEqual(adminView.filter((c: string) => c !== "Z whispers to X"));
+    expect(aliceView).toContain("admin secret for X");
+    expect(aliceView).toContain("bob asked X earlier");
+  });
+  test("rows between a visible and an invisible agent stay hidden in every direction; Z's timeline stays hidden", async () => {
+    const all = await contents(aliceToken);
+    expect(all).not.toContain("Z whispers to X");
+    expect(all).not.toContain("X whispers to Z");
+    expect(all).not.toContain("scheduler pokes Z");
+    expect((await get(aliceToken, `/api/tasks/t563_z_to_x`)).status).toBe(404);
+    expect((await get(aliceToken, `/api/tasks/t563_x_to_z`)).status).toBe(404);
+    expect((await get(aliceToken, `/api/task_events?task_id=t563_z_to_x`)).body.events).toEqual([]);
+  });
+  test("/api/tasks/:id: another member's task to X is 200 for granted alice, 404 for bob without a grant", async () => {
+    expect((await get(aliceToken, `/api/tasks/t563_bob_to_x`)).status).toBe(200);
+    expect((await get(aliceToken, `/api/tasks/t_admin_to_x`)).body.task.content).toBe("admin secret for X");
+    expect((await get(bobToken, `/api/tasks/t_admin_to_x`)).status).toBe(404);
+    expect((await get(bobToken, `/api/task_events?task_id=t_admin_to_x`)).body.events).toEqual([]);
+    expect(await contents(bobToken)).toEqual([]);
+  });
+  test("network stats count alice's visible timeline", async () => {
+    const r = await get(aliceToken, `/api/networks/${NET}`);
+    const n = r.body.stats.tasks.reduce((sum: number, row: any) => sum + row.count, 0);
+    expect(n).toBe((await contents(aliceToken)).length);
+  });
+  test("group grant: bob granted a group holding Z sees Z's history (incl. the scheduler row), not X's", async () => {
+    const g = await send(adminToken, "POST", `/api/networks/${NET}/agent-groups`, { name: "acl-563-z", node_ids: [Z.node] });
+    expect(g.status).toBe(200);
+    const groupId = g.body.group.group_id;
+    expect((await send(adminToken, "PUT", grantsPath(bobId), { group_grants: [{ group_id: groupId, can_message: false }] })).status).toBe(200);
+    try {
+      const bobView = await contents(bobToken);
+      expect(bobView).toContain("scheduler pokes Z");
+      expect(bobView).not.toContain("admin secret for X");
+      expect(bobView).not.toContain("Z whispers to X");
+      expect((await get(bobToken, `/api/tasks/t563_admin_to_z`)).status).toBe(200);
+    } finally {
+      await send(adminToken, "PUT", grantsPath(bobId), { group_grants: [] });
+      await send(adminToken, "DELETE", `/api/networks/${NET}/agent-groups/${groupId}`);
+    }
+    expect(await contents(bobToken)).toEqual([]);
+  });
+  test("agent_access=all and network admin see every row for X (unchanged); network owner without hub-admin too", async () => {
+    const adminView = await contents(adminToken, `&to_name=${X.alias}`);
+    await send(adminToken, "PUT", grantsPath(bobId), { agent_access: "all" });
+    try {
+      expect(await contents(bobToken, `&to_name=${X.alias}`)).toEqual(adminView);
+    } finally {
+      await send(adminToken, "PUT", grantsPath(bobId), { agent_access: "granted" });
+    }
+    db.run("UPDATE network_members SET role = 'admin' WHERE network_id = ?1 AND user_id = ?2", [NET, bobId]);
+    try {
+      expect(await contents(bobToken, `&to_name=${X.alias}`)).toEqual(adminView);
+    } finally {
+      db.run("UPDATE network_members SET role = 'member' WHERE network_id = ?1 AND user_id = ?2", [NET, bobId]);
+    }
+    db.run("UPDATE users SET role = 'user' WHERE user_id = ?1", [adminId]);
+    try {
+      expect(await contents(adminToken, `&to_name=${X.alias}`)).toEqual(adminView);
+    } finally {
+      db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", [adminId]);
+    }
+    expect(await contents(bobToken)).toEqual([]);
+  });
+  test("files: an attachment on admin's message to X opens for alice; on admin's message to Z it does not", async () => {
+    const upload = async () => {
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array([5, 6, 3])], { type: "image/png" }), "shot.png");
+      const up = await fetch(`${BASE}/api/upload?network_id=${NET}`, { method: "POST", body: form, headers: auth(adminToken) });
+      expect(up.status).toBe(200);
+      return (await up.json()).file_id as string;
+    };
+    const toX = await upload();
+    const toZ = await upload();
+    const adminName = db.get<{ username: string }>("SELECT username FROM users WHERE user_id = ?1", adminId)!.username;
+    seedTask("t563_img_x", adminName, X.alias, "look at this", { attachments: [{ type: "file", file_id: toX }] });
+    seedTask("t563_img_z", adminName, Z.alias, "look at this", { attachments: [{ type: "file", file_id: toZ }] });
+    try {
+      expect((await fetch(`${BASE}/api/files/${toX}`, { headers: auth(aliceToken) })).status).toBe(200);
+      expect((await fetch(`${BASE}/api/files/${toZ}`, { headers: auth(aliceToken) })).status).toBe(404);
+      expect((await fetch(`${BASE}/api/files/${toX}`, { headers: auth(bobToken) })).status).toBe(404);
+    } finally {
+      for (const id of ["t563_img_x", "t563_img_z"]) {
+        db.run("DELETE FROM tasks WHERE task_id = ?1", [id]);
+        db.run("DELETE FROM inbox WHERE task_id = ?1", [id]);
+      }
+    }
+  });
+  test("SSE: admin's new message to X and X's reply to admin wake alice's stream; Z traffic never does", async () => {
+    const { pushNetworkObserverEvent } = await import("./push.js");
+    const adminName = db.get<{ username: string }>("SELECT username FROM users WHERE user_id = ?1", adminId)!.username;
+    const ctrl = new AbortController();
+    const res = await fetch(`${BASE}/events/network/${NET}`, { headers: auth(aliceToken), signal: ctrl.signal });
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let pending: ReturnType<typeof reader.read> | null = null;
+    const readFor = async (ms: number) => {
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        pending ??= reader.read();
+        const chunk = await Promise.race([pending, new Promise<null>(r => setTimeout(() => r(null), until - Date.now()))]);
+        if (!chunk) break;
+        pending = null;
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value);
+      }
+    };
+    await readFor(150);
+    expect((await send(adminToken, "POST", "/api/task", { alias: X.alias, task: "admin live to X", network_id: NET })).status).toBe(200);
+    pushNetworkObserverEvent(NET, { type: "new_reply", task_id: "t_admin_to_x", message_id: "m563", from: X.alias, to: adminName, status: "replied" });
+    pushNetworkObserverEvent(NET, { type: "new_task", task_id: "t563_live_zx", from: Z.alias, to: X.alias, status: "delivered" });
+    pushNetworkObserverEvent(NET, { type: "new_reply", task_id: "t563_live_xz", message_id: "m563z", from: X.alias, to: Z.alias, status: "replied" });
+    pushNetworkObserverEvent(NET, { type: "new_task", task_id: "t563_live_az", from: adminName, to: Z.alias, status: "delivered" });
+    await readFor(400);
+    ctrl.abort();
+    const events = buf.split("\n").filter(l => l.startsWith("data:")).map(l => JSON.parse(l.slice(5)));
+    expect(events.some(e => e.type === "new_task" && e.from === adminName && e.to === X.alias)).toBe(true);
+    expect(events.some(e => e.type === "new_reply" && e.from === X.alias && e.to === adminName)).toBe(true);
+    expect(events.some(e => e.from === Z.alias || e.to === Z.alias)).toBe(false);
   });
 });
 

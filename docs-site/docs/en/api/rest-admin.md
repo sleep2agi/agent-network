@@ -374,15 +374,15 @@ Multi-user accounts: a hub admin (or a network owner / admin) creates accounts, 
 
 - sees only the agents granted to them (`/api/status`, `/api/nodes`, MCP `get_all_status` / `get_session_status`, the requirements people picker);
 - can send tasks / messages only to granted agents with `can_message=true`, always as their own username;
-- sees only tasks, inbox rows and task events **between themselves and a granted agent** — never other people's (including the owner's) conversations with the same agent;
-- cannot subscribe to an agent's SSE channel (even a granted one — that channel carries everyone's tasks to it); the network observer stream only carries routing events they are part of;
+- tasks and task events (`/api/tasks`, `/api/tasks/:id`, `/api/task_events`, MCP `list_tasks` / `get_task`): if they can see an agent (directly or through a group grant), they see its **whole timeline** — whoever sent each message (including the owner and other members), and including history from before the grant — the same view the owner gets for that node (#563). Rows whose other side is an agent they **cannot** see stay hidden. Inbox rows (`/api/messages`, alias branch) are still limited to their own exchange with a granted agent;
+- cannot subscribe to an agent's SSE channel (even a granted one — that channel carries everyone's tasks to it); the network observer stream carries routing events they are part of, plus routing events on a granted agent's timeline (not those whose other side is an agent they cannot see);
 - cannot hold network tokens (`ntok_` / invite tokens): minting is refused, and tokens issued before the restriction stop resolving;
-- can download only files they uploaded or that the other side (a granted agent, a DM sender) attached for them, and cannot forward a `file_id` they cannot see to an agent;
+- can download only files they uploaded, files the other side (a granted agent, a DM sender) attached for them, and attachments other people or the agent put on messages in a granted agent's timeline, and cannot forward a `file_id` they cannot see to an agent;
 - gets **fail-closed** behaviour on every other agent-facing endpoint (node config / logs / files / rules / rename / schedules / node creation / broadcast / stats): nothing is returned for the restricted network and writes are 403; MCP tools outside the allow-list return `agent_access_restricted`.
 
 - **Granted ≠ administer**: even for a granted agent, a restricted member cannot read or write its rules file / skills / project files / run log, change its config, rename, start or stop it — a grant means "can see it and talk to it";
 - a schedule acts on behalf of its creator: once the creator is restricted and not allowed to message the target agent, the schedule stops dispatching (run `error_code=creator_access_revoked`);
-- if a member's username collides with an agent alias registered after they joined, their username channel and "own traffic" in that network are closed, because "sent to them" and "sent to that agent" can no longer be told apart.
+- if a member's username collides with an agent alias registered after they joined, their username channel, "own traffic" and granted agents' timelines in that network are closed, because "sent to them" and "sent to that agent" can no longer be told apart.
 
 Owners / admins and hub admins are unaffected. **Membership rows that existed before the upgrade** default to `agent_access='all'`, so nobody's visibility changes on upgrade; members / viewers added afterwards (admin-created, `POST /members`, invite codes) default to `granted`.
 

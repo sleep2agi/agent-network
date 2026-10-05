@@ -374,15 +374,15 @@ curl -X POST http://localhost:9200/api/networks/join \
 
 - 只看得到授权给他的 Agent(`/api/status`、`/api/nodes`、MCP `get_all_status` / `get_session_status`、需求看板的人员选择器);
 - 只能给 `can_message=true` 的授权 Agent 发任务 / 消息,发件人固定为自己的用户名;
-- 任务、inbox、task_events 只看得到**自己与授权 Agent 之间**的往来,看不到别人(包括 owner)和同一个 Agent 的对话;
-- 不能订阅 Agent 的 SSE 频道(即使已授权——那个频道推的是所有人发给它的任务原文),网络观察流只收到自己是一端的路由事件;
+- 任务与 task_events(`/api/tasks`、`/api/tasks/:id`、`/api/task_events`、MCP `list_tasks` / `get_task`):看得见某个 Agent(直接或经组授权)就看得见它的**整条时间线** —— 谁发的都算(包括 owner 和其他成员),也包括授权之前的历史,和 owner 打开同一个节点看到的一样(#563)。另一端是他**看不见**的 Agent 的行仍然隐藏。inbox(`/api/messages` 的 alias 分支)仍只看自己与授权 Agent 之间的往来;
+- 不能订阅 Agent 的 SSE 频道(即使已授权——那个频道推的是所有人发给它的任务原文),网络观察流收到自己是一端的路由事件,以及授权 Agent 时间线上的路由事件(另一端是看不见的 Agent 的不推);
 - 不能持有网络令牌(`ntok_` / 邀请码令牌):签发被拒,升级前已签发的在他变成受限后解析失败;
-- 文件只能下载自己上传的、或对方(授权 Agent / 私信发件人)发给他的附件;也不能把看不见的 `file_id` 当附件转给 Agent;
+- 文件只能下载自己上传的、对方(授权 Agent / 私信发件人)发给他的附件,以及授权 Agent 时间线上别人发出的附件与 Agent 回复的附件;也不能把看不见的 `file_id` 当附件转给 Agent;
 - 其余面向 Agent 的端点(节点配置 / 日志 / 文件 / 规则 / 改名 / 排程 / 创建节点 / 广播 / 统计)对受限网络 **fail-closed**:整网不返回、写入 403;没列在白名单里的 MCP 工具返回 `agent_access_restricted`。
 
 - **授权 ≠ 管理**:即使授权了某个 Agent,受限成员也不能读写它的规则文件 / 技能 / 项目文件 / 运行日志,不能改配置、改名、启停 —— 授权的含义是「能看见、能对话」;
 - 排程是建它的人的委托:建的人后来变成受限成员且没被授权给目标 Agent 发任务时,排程不再派发(运行记录 `error_code=creator_access_revoked`);
-- 用户名与某个 Agent 的 alias 撞名(Agent 在他入网之后才注册这个 alias)时,他在这个网络里的用户名频道与「自己的往来」一律关闭,因为「发给他」和「发给那个 Agent」无法区分。
+- 用户名与某个 Agent 的 alias 撞名(Agent 在他入网之后才注册这个 alias)时,他在这个网络里的用户名频道、「自己的往来」与授权 Agent 的时间线一律关闭,因为「发给他」和「发给那个 Agent」无法区分。
 
 owner / admin 角色与 Hub 管理员不受影响。**升级前已存在的成员行** `agent_access` 默认为 `all`,可见范围不因升级而变;此后新加入的 member / viewer(管理员建号、`POST /members`、邀请码)默认 `granted`。
 
