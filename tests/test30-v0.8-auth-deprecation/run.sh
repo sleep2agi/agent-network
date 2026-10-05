@@ -8,10 +8,25 @@ export HOME=/tmp/anethome
 # (default "/tmp/"); refuses + exit 99 on anything else. See
 # tests/lib/safe-rm.sh for the helper definition.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-published.sh"
 mkdir -p "$HOME" /tmp/work
 cd /tmp/work
 
-npm install -g @sleep2agi/agent-network@preview >/tmp/npm-install.log 2>&1
+# Every failure path keeps its logs (CI copies $ARTIFACT_DIR out of the container). Before
+# 2026-10-05 nothing was written there, so a red here showed no output and no artifact at all.
+ARTIFACT_DIR=${ARTIFACT_DIR:-/tmp/art}
+mkdir -p "$ARTIFACT_DIR"
+save_logs() { cp -f /tmp/npm-install.log /tmp/hub.log /tmp/dashboard.log /tmp/reset-user.log "$ARTIFACT_DIR/" 2>/dev/null || true; }
+trap save_logs EXIT
+
+echo "[0] install selftest: the just-published window (local fake registry)"
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/selftest.sh"
+
+# @preview is a MOVING tag that release.yml publishes into. Right after a publish the tag can
+# point at a version whose tarball is not servable yet; a bare `npm install -g …@preview` then
+# 404s (npm does not retry 404) — that was both 2026-10-05 reds. Resolve, wait, install exact.
+echo "[0] install @sleep2agi/agent-network@preview"
+install_published @sleep2agi/agent-network preview /tmp/npm-install.log
 anet -v
 
 ADMIN_PW="StrongPassw0rd"
