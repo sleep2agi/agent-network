@@ -204,6 +204,7 @@ on:
       - 'tests/test522-node-delete-locate-stop/**'
       - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
+      - 'tests/test561-node-menu/**'
       - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -391,6 +392,7 @@ on:
       - 'tests/test522-node-delete-locate-stop/**'
       - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
+      - 'tests/test561-node-menu/**'
       - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -1369,6 +1371,24 @@ jobs:
           docker cp "run-anet-test532:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test532/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test532"
           docker rm -f "run-anet-test532" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #561 — bare `anet node`: menu for every runtime (pty via `script`) prints the exact command and runs
+      # it only after y / the typed name; codex nodes go to the #532 codex actions; piped prints table +
+      # cheat sheet + the old usage line; --help / help / node codex unchanged; no token in any output.
+      # 见证红 6 条:去掉 cli.ts 钩子 / 去掉非 TTY 分支 / 去掉共用 y/N / 删除改 y/N / 去掉 codex 交接 / token 进表格。
+      - name: Build + run test561-node-menu
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test561 \
+            -f tests/test561-node-menu/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test561" -e ARTIFACT_DIR=/tmp/art \
+            anet-test561 || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test561"
+          docker cp "run-anet-test561:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test561/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test561"
+          docker rm -f "run-anet-test561" >/dev/null 2>&1 || true
           exit $rc
 
       # #536 — anet resume <codex node> [--thread <id>|--pick]:夹具节点 + 夹具 CODEX_HOME(3 条合成 rollout),无 codex/无登录/无 Hub。
