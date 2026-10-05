@@ -777,7 +777,7 @@
   .fg-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 600px) {
-  .fg-grid { grid-template-columns: 1fr; }
+  .fg-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 .fg-card {
@@ -1002,6 +1002,7 @@
 }
 .download-card {
   position: relative;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 146px;
@@ -1085,6 +1086,7 @@
 }
 .product-path-heading { max-width: 680px; }
 .product-path-card {
+  min-width: 0;
   padding: 30px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 18px;
@@ -1119,10 +1121,18 @@
   .product-path { margin-top: 48px; padding-left: 20px; padding-right: 20px; }
   .desktop-download,
   .mobile-download { margin-left: 16px; margin-right: 16px; padding: 28px 20px; }
+  /* #568: 必须是 minmax(0, 1fr),不能是 1fr。`1fr` 的下限是 auto = 内容的
+     min-content,卡片里一行 nowrap 的 `curl … | sh` 就把整列撑到 ~400px,
+     卡片宽出屏幕、正文从一行中间被 .VPHome 的 overflow 裁掉(微信里实测)。
+     桌面断点本来就是 minmax(0, 1fr),所以桌面上看不到。 */
   .download-grid,
-  .product-path-grid { grid-template-columns: 1fr; }
+  .product-path-grid { grid-template-columns: minmax(0, 1fr); }
   .download-routes { flex-direction: column; }
-  .download-route { padding: 8px 12px; white-space: nowrap; }
+  /* 不再 nowrap:字号放大到 125%(微信/安卓常见)时「线路一（国内 · ModelScope）」
+     在 320px 宽度会宽出卡片。正常字号下它仍是一行。 */
+  .download-route { padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; }
+  /* 安装命令在手机上换行而不是藏进横向滚动条 —— 藏一半的命令看起来和被截断一样。 */
+  .cli-command code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
   /* On a phone the filled colour already marks 线路一 as the recommended one;
      the extra pill only forced the label onto three lines. */
   .download-route-tag { display: none; }
@@ -1143,6 +1153,11 @@
     font-size: 0.95rem !important;
     margin-top: 14px !important;
   }
+  /* #568: 标题/标语/副标题按长度换行而不是按当前文案调字号 —— 文案会改(#567),
+     单个长词(英文、URL)在 320px + 125% 字号下也要能断开,不许宽出 .main。 */
+  .VPHero .name,
+  .VPHero .text,
+  .VPHero .tagline { max-width: 100%; overflow-wrap: break-word; }
   .VPHero .actions {
     gap: 10px !important;
     margin-top: 22px !important;
@@ -1240,7 +1255,7 @@
   /* Trust row — 2×2 grid on small screens, looks more balanced */
   .trust-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 28px 12px;
     padding: 40px 24px 8px;
   }
