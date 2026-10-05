@@ -14,6 +14,7 @@ import {
   type PinnedOpencodeBinaryAttestation,
 } from "../opencode-acp/binary";
 import { OPENCODE_V1_BACKEND, type OpencodeBackend } from "../opencode-backend";
+import { opencodeGenerationRefusal } from "../opencode-versions";
 import { ownershipChainVerdict, unverifiedOwnerError } from "./reply-ownership";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
@@ -302,11 +303,11 @@ function basicAuthorization(password: string): string {
   return `Basic ${Buffer.from(`${USERNAME}:${password}`).toString("base64")}`;
 }
 
-function appendBounded(current: string, chunk: string): string {
+export function appendBounded(current: string, chunk: string): string {
   return `${current}${chunk}`.slice(-OUTPUT_LIMIT);
 }
 
-function normalizeNoticeSender(sender: string | undefined): string | undefined {
+export function normalizeNoticeSender(sender: string | undefined): string | undefined {
   const normalized = sender
     ?.replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
@@ -327,7 +328,7 @@ function launcherWord(token: string): string {
   return /^-{0,2}[a-z][a-z-]*$/.test(token) ? token : shellQuote(token);
 }
 
-async function reserveLoopbackPort(): Promise<number> {
+export async function reserveLoopbackPort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const server = createServer();
     server.unref();
@@ -517,7 +518,7 @@ export function parseMessageReply(message: any): string {
   return "[opencode: assistant returned no reply]";
 }
 
-function parseModelRef(model: string | undefined): { providerID: string; modelID: string } | undefined {
+export function parseModelRef(model: string | undefined): { providerID: string; modelID: string } | undefined {
   if (!model) return undefined;
   const separator = model.indexOf("/");
   if (separator <= 0 || separator === model.length - 1) {
@@ -535,7 +536,7 @@ export function requireOpenCodeCopresenceModel(model: string | undefined): strin
   return normalized;
 }
 
-async function stopProcessGroup(
+export async function stopProcessGroup(
   child: ChildProcessWithoutNullStreams,
   identity: LinuxProcessGroupIdentity,
 ): Promise<void> {
@@ -560,7 +561,7 @@ async function stopProcessGroup(
   }
 }
 
-function writeAttachScript(
+export function writeAttachScript(
   backend: OpencodeBackend,
   path: string,
   binary: string,
@@ -605,6 +606,13 @@ export async function openVettedOpenCodeCopresence(
 ): Promise<OpenCodeCopresenceSession> {
   const requiredModel = requireOpenCodeCopresenceModel(opts.model);
   const backend = opts.backend ?? OPENCODE_V1_BACKEND;
+  // #543 — OpenCode V2 has a different server API (async prompt queue, idle
+  // turn markers, no TUI toast); it gets its own core. V1 continues below,
+  // unchanged.
+  if (backend.generation === "v2") {
+    const { openVettedOpenCodeV2Copresence } = await import("./v2-session");
+    return await openVettedOpenCodeV2Copresence({ ...opts, backend });
+  }
   const log = opts.log ?? (() => {});
   const warn = opts.warn ?? (() => {});
   const port = await reserveLoopbackPort();
@@ -870,6 +878,10 @@ export async function openOpenCodeCopresenceRuntime(
   const workDir = resolve(opts.workDir);
   const projectCwd = resolve(opts.cwd);
   const unsafeTools = opts.unsafeTools === true;
+  // #543 — a generation without an enforced safe preset (V2) is refused
+  // before anything is probed or spawned. V1 is never refused here.
+  const generationRefusal = opencodeGenerationRefusal(backend.generation, { unsafeTools, mode: "copresence" });
+  if (generationRefusal) throw new Error(generationRefusal);
   const forbiddenRoots = [workDir, ...discoverOpencodeForbiddenRoots(projectCwd)];
   const probeEnv = backend.buildChildEnv({
     workDir,
@@ -929,11 +941,17 @@ export async function openOpenCodeCopresenceRuntime(
       if (!opts.commhubMcpUrl || !opts.commhubToken) {
         throw new Error("OpenCode copresence requires both CommHub MCP URL and token");
       }
-      instructions = wireOpenCodeCommhubMcp(childEnv, {
-        url: opts.commhubMcpUrl,
-        token: opts.commhubToken,
-        alias: opts.commhubAlias,
-      });
+      instructions = backend.generation === "v2"
+        ? (await import("./v2-session")).wireOpenCodeV2CommhubMcp(childEnv, {
+          url: opts.commhubMcpUrl,
+          token: opts.commhubToken,
+          alias: opts.commhubAlias,
+        })
+        : wireOpenCodeCommhubMcp(childEnv, {
+          url: opts.commhubMcpUrl,
+          token: opts.commhubToken,
+          alias: opts.commhubAlias,
+        });
     }
     const effectiveCwd = revalidateOpencodeChildLaunch(workDir, childEnv);
     const binary = backend.revalidateBinary(binaryAttestation, {

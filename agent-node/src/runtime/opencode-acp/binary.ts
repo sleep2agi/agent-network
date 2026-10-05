@@ -13,7 +13,13 @@ import {
   statSync,
 } from "fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "path";
-import { OPENCODE_V1_PIN, acceptedOpencodeVersionsFor, isAcceptedOpencodeVersionFor } from "../opencode-versions";
+import {
+  OPENCODE_V1_PIN,
+  acceptedOpencodeVersionsFor,
+  isAcceptedOpencodeVersionFor,
+  opencodeGenerationSupport,
+  type OpencodeGeneration,
+} from "../opencode-versions";
 
 /** V1 release pin — derived from the shared supported-versions table (#542). */
 export const OPENCODE_DEFAULT_PIN = OPENCODE_V1_PIN;
@@ -48,6 +54,21 @@ export function opencodeTransitionNote(version: string): string | null {
   );
 }
 
+/** #543 — exact-version admission for any generation. V1 keeps the exact
+ *  pre-#543 predicate and message; V2 reads its own table row. */
+function isAcceptedVersionForGeneration(generation: OpencodeGeneration, version: string): boolean {
+  return generation === "v1" ? isAcceptedOpencodeVersion(version) : isAcceptedOpencodeVersionFor(generation, version);
+}
+
+function unsupportedVersionForGeneration(generation: OpencodeGeneration, version: string): Error {
+  if (generation === "v1") return unsupportedOpencodeVersion(version);
+  const support = opencodeGenerationSupport(generation);
+  return new Error(
+    `unsupported opencode ${generation} version ${version}; this agent-node accepts only ` +
+    `${support.packageName}@${support.acceptedVersions.join(", ") || "(none)"} (${support.status})`,
+  );
+}
+
 function unsupportedOpencodeVersion(version: string): Error {
   return new Error(
     `unsupported opencode version ${version}; this agent-node is vetted only for ` +
@@ -78,6 +99,9 @@ export interface ResolvePinnedOpencodeBinaryOptions {
   /** Paths that must remain disjoint from the installed opencode-ai package.
    *  Production passes both the node workDir and the configured project cwd. */
   forbiddenRoots?: string[];
+  /** #543 — upstream generation whose package identity is admitted.
+   *  Absent = V1 (`opencode-ai`), exactly the pre-#543 gate. */
+  generation?: OpencodeGeneration;
 }
 
 export interface RevalidatePinnedOpencodeBinaryOptions {
@@ -96,6 +120,9 @@ export interface PinnedOpencodeBinaryAttestation {
   binary: string;
   packageJson: string;
   expectedVersion: string;
+  /** #543 — present only for a non-V1 generation (V1 attestations keep their
+   *  pre-#543 shape). Revalidation re-checks the same package identity. */
+  generation?: OpencodeGeneration;
   binaryFile: FileAttestation;
   packageJsonFile: FileAttestation;
 }
@@ -271,26 +298,39 @@ function assertSafeDirectoryChain(start: string): void {
   }
 }
 
+/** True when `packageRoot` is `<…>/node_modules/<packageName>`, scoped names
+ *  (`@opencode/cli`) included. For `opencode-ai` this is exactly the pre-#543
+ *  two-basename check. */
+function isNodeModulesPackageRoot(packageRoot: string, packageName: string): boolean {
+  let current = packageRoot;
+  for (const segment of packageName.split("/").reverse()) {
+    if (basename(current) !== segment) return false;
+    current = dirname(current);
+  }
+  return basename(current) === "node_modules";
+}
+
 function resolveCanonicalPackageEntrypoint(
   binary: string,
   expectedVersion: string,
   forbiddenRoots: string[],
+  packageName = "opencode-ai",
 ): string {
   const binDir = dirname(binary);
   const packageRoot = dirname(binDir);
-  if (basename(packageRoot) !== "opencode-ai" || basename(dirname(packageRoot)) !== "node_modules") {
-    throw new Error("resolved opencode binary is not inside a node_modules/opencode-ai wrapper");
+  if (!isNodeModulesPackageRoot(packageRoot, packageName)) {
+    throw new Error(`resolved opencode binary is not inside a node_modules/${packageName} wrapper`);
   }
   const expectedBinary = join(packageRoot, "bin", "opencode.exe");
   if (binary !== expectedBinary) {
-    throw new Error("resolved executable is not the canonical opencode-ai bin/opencode.exe entrypoint");
+    throw new Error(`resolved executable is not the canonical ${packageName} bin/opencode.exe entrypoint`);
   }
 
   for (const root of forbiddenRoots) {
     if (!root) continue;
     const forbidden = canonicalPathIfPresent(root);
     if (pathIsWithin(forbidden, packageRoot) || pathIsWithin(packageRoot, forbidden)) {
-      throw new Error(`resolved opencode-ai package overlaps forbidden root: ${forbidden}`);
+      throw new Error(`resolved ${packageName} package overlaps forbidden root: ${forbidden}`);
     }
   }
 
@@ -305,10 +345,10 @@ function resolveCanonicalPackageEntrypoint(
   try {
     canonicalPackageJson = realpathSync(packageJson);
   } catch (error: any) {
-    throw new Error(`resolved opencode-ai package.json is missing: ${error?.message || error}`);
+    throw new Error(`resolved ${packageName} package.json is missing: ${error?.message || error}`);
   }
   if (canonicalPackageJson !== packageJson) {
-    throw new Error("resolved opencode-ai package.json must not be a symlink");
+    throw new Error(`resolved ${packageName} package.json must not be a symlink`);
   }
   assertSafeOwnerAndMode(packageJson, "file", "package.json");
   assertSafeDirectoryChain(binDir);
@@ -317,7 +357,7 @@ function resolveCanonicalPackageEntrypoint(
   try {
     manifest = JSON.parse(readFileSync(packageJson, "utf8"));
   } catch (error: any) {
-    throw new Error(`resolved opencode-ai package.json is invalid: ${error?.message || error}`);
+    throw new Error(`resolved ${packageName} package.json is invalid: ${error?.message || error}`);
   }
   const declaredBin = manifest.bin && typeof manifest.bin === "object"
     ? (manifest.bin as Record<string, unknown>).opencode
@@ -326,12 +366,12 @@ function resolveCanonicalPackageEntrypoint(
     ? declaredBin.replace(/^\.\//, "")
     : declaredBin;
   if (
-    manifest.name !== "opencode-ai"
+    manifest.name !== packageName
     || manifest.version !== expectedVersion
     || normalizedBin !== "bin/opencode.exe"
   ) {
     throw new Error(
-      `resolved executable is not opencode-ai@${expectedVersion} with bin.opencode=bin/opencode.exe`,
+      `resolved executable is not ${packageName}@${expectedVersion} with bin.opencode=bin/opencode.exe`,
     );
   }
 
@@ -363,11 +403,14 @@ function commandFromPath(name: string, searchPath: string): string {
 export function resolvePinnedOpencodeBinaryAttestation(
   opts: ResolvePinnedOpencodeBinaryOptions = {},
 ): PinnedOpencodeBinaryAttestation {
+  const generation = opts.generation ?? "v1";
   if (opts.expectedVersion === undefined) {
     // No launcher-selected version (direct agent-node start): admit the
     // release pin, else a transition version, each through the full gate.
     let firstError: unknown;
-    for (const version of OPENCODE_ACCEPTED_VERSIONS) {
+    const candidates = generation === "v1" ? OPENCODE_ACCEPTED_VERSIONS : acceptedOpencodeVersionsFor(generation);
+    if (candidates.length === 0) throw unsupportedVersionForGeneration(generation, "(none)");
+    for (const version of candidates) {
       try {
         return resolvePinnedOpencodeBinaryAttestation({ ...opts, expectedVersion: version });
       } catch (error) {
@@ -377,7 +420,10 @@ export function resolvePinnedOpencodeBinaryAttestation(
     throw firstError;
   }
   const expectedVersion = opts.expectedVersion;
-  if (!isAcceptedOpencodeVersion(expectedVersion)) throw unsupportedOpencodeVersion(expectedVersion);
+  if (!isAcceptedVersionForGeneration(generation, expectedVersion)) {
+    throw unsupportedVersionForGeneration(generation, expectedVersion);
+  }
+  const packageName = opencodeGenerationSupport(generation).packageName;
 
   let candidate: string;
   if (opts.requestedBinary) {
@@ -390,7 +436,7 @@ export function resolvePinnedOpencodeBinaryAttestation(
   }
 
   const binary = realpathSync(candidate);
-  resolveCanonicalPackageEntrypoint(binary, expectedVersion, opts.forbiddenRoots ?? []);
+  resolveCanonicalPackageEntrypoint(binary, expectedVersion, opts.forbiddenRoots ?? [], packageName);
   const packageJson = join(dirname(dirname(binary)), "package.json");
   const binaryFile = attestRegularFile(binary, "binary");
   const packageJsonFile = attestRegularFile(packageJson, "package.json");
@@ -407,11 +453,14 @@ export function resolvePinnedOpencodeBinaryAttestation(
   } catch (error: any) {
     throw new Error(`opencode version probe failed: ${error?.message || error}`);
   }
+  // V1 prints a bare semver ("1.18.34"); V2 prints "opencode v2.0.22".
   const found = raw.match(/(\d+\.\d+\.\d+)/)?.[1] ?? raw;
   if (found !== expectedVersion) {
-    throw new Error(`expected opencode-ai@${expectedVersion}; resolved binary reports ${found || "no version"}`);
+    throw new Error(`expected ${packageName}@${expectedVersion}; resolved binary reports ${found || "no version"}`);
   }
-  return { binary, packageJson, expectedVersion, binaryFile, packageJsonFile };
+  return generation === "v1"
+    ? { binary, packageJson, expectedVersion, binaryFile, packageJsonFile }
+    : { binary, packageJson, expectedVersion, binaryFile, packageJsonFile, generation };
 }
 
 export function resolvePinnedOpencodeBinary(
@@ -431,7 +480,10 @@ export function revalidatePinnedOpencodeBinary(
   opts: RevalidatePinnedOpencodeBinaryOptions = {},
 ): string {
   const expectedVersion = opts.expectedVersion ?? attestation.expectedVersion;
-  if (!isAcceptedOpencodeVersion(expectedVersion)) throw unsupportedOpencodeVersion(expectedVersion);
+  const generation = attestation.generation ?? "v1";
+  if (!isAcceptedVersionForGeneration(generation, expectedVersion)) {
+    throw unsupportedVersionForGeneration(generation, expectedVersion);
+  }
   if (attestation.expectedVersion !== expectedVersion) {
     throw new Error("resolved opencode attestation version changed after probe");
   }
@@ -442,7 +494,12 @@ export function revalidatePinnedOpencodeBinary(
   if (canonical !== attestation.binary) {
     throw new Error("resolved opencode binary path changed after version probe");
   }
-  resolveCanonicalPackageEntrypoint(canonical, expectedVersion, opts.forbiddenRoots ?? []);
+  resolveCanonicalPackageEntrypoint(
+    canonical,
+    expectedVersion,
+    opts.forbiddenRoots ?? [],
+    opencodeGenerationSupport(generation).packageName,
+  );
   const currentBinary = attestRegularFile(canonical, "binary");
   const currentPackageJson = attestRegularFile(attestation.packageJson, "package.json");
   if (!sameFileAttestation(attestation.binaryFile, currentBinary)

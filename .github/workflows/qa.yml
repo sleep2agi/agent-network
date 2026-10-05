@@ -189,6 +189,7 @@ on:
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
+      - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test185-external-schedules/**'
@@ -374,6 +375,7 @@ on:
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
+      - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test185-external-schedules/**'
@@ -1564,6 +1566,10 @@ jobs:
           - test519-claude-code-peer-reply
           - test750-codex-copresence-onecommand
           - test1225-opencode-copresence-onecommand
+          # #543: OpenCode V2 (@opencode/cli 2.0.22) co-presence preview — real binary,
+          # loopback stub model, private tmux socket. Not L1: the image installs a ~200 MB
+          # native binary and the run drives a real TUI (~40 s).
+          - test543-opencode-v2-copresence
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
           - test-codex-appserver-watchdog

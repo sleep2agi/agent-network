@@ -193,6 +193,12 @@ import {
   writebackOpencodeSession,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN, isAcceptedOpencodeVersion, opencodeTransitionNote } from "./runtime/opencode-acp/binary";
+import {
+  isAcceptedOpencodeVersionFor,
+  opencodeGenerationOfConfig,
+  opencodeGenerationRefusal,
+  opencodeGenerationSupport,
+} from "./runtime/opencode-versions";
 import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
 import { shouldSkipTerminalTask } from "./runtime/terminal-task-guard";
 import {
@@ -670,7 +676,25 @@ if (RUNTIME === "opencode" && !configFilePath) {
   console.error(`[${ALIAS}] opencode-cli requires --config pointing at a private anet node profile.`);
   process.exit(1);
 }
-if (RUNTIME === "opencode" && INITIAL_OPENCODE_VERSION !== undefined
+// #543 — which OpenCode generation this node runs. Absent = V1 (every node
+// before #542); an unrecognised value is refused rather than guessed.
+const OPENCODE_GENERATION = RUNTIME === "opencode" ? opencodeGenerationOfConfig(fileConfig) : undefined;
+if (RUNTIME === "opencode" && OPENCODE_GENERATION === undefined) {
+  console.error(
+    `[${ALIAS}] Refusing opencodeGeneration=${JSON.stringify((fileConfig as any).opencodeGeneration)}; expected "v1" or "v2".`,
+  );
+  process.exit(1);
+}
+if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && INITIAL_OPENCODE_VERSION !== undefined
+  && !isAcceptedOpencodeVersionFor("v2", INITIAL_OPENCODE_VERSION)) {
+  const v2 = opencodeGenerationSupport("v2");
+  console.error(
+    `[${ALIAS}] Refusing ANET_OPENCODE_VERSION=${INITIAL_OPENCODE_VERSION}; ` +
+    `this agent-node accepts OpenCode v2 only as ${v2.packageName}@${v2.acceptedVersions.join(", ")} (${v2.status}).`,
+  );
+  process.exit(1);
+}
+if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v1" && INITIAL_OPENCODE_VERSION !== undefined
   && !isAcceptedOpencodeVersion(INITIAL_OPENCODE_VERSION)) {
   console.error(
     `[${ALIAS}] Refusing ANET_OPENCODE_VERSION=${INITIAL_OPENCODE_VERSION}; ` +
@@ -2224,6 +2248,20 @@ if (RUNTIME === "opencode" && opencodeMode !== "headless" && opencodeMode !== "c
   console.error(`[${ALIAS}] invalid opencodeMode=${JSON.stringify(opencodeMode)}; expected headless or copresence`);
   process.exit(1);
 }
+// #543 — OpenCode V2 is a co-presence-only preview that runs only with
+// flags.opencodeUnsafeTools=true (it ignores the V1 safety env). One line, exit.
+if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2") {
+  const refusal = opencodeGenerationRefusal("v2", {
+    unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+    mode: String(opencodeMode),
+    configFile: configFilePath || undefined,
+  });
+  if (refusal) {
+    console.error(`[${ALIAS}] ${refusal}`);
+    process.exit(1);
+  }
+  console.warn(`[${ALIAS}] ⚠ OpenCode v2 (${opencodeGenerationSupport("v2").packageName}) co-presence PREVIEW with flags.opencodeUnsafeTools=true: every local tool is enabled; trusted tasks only.`);
+}
 // Opencode task deadline (copresence: wall-clock per network task; headless
 // ACP: idle budget between frames). Read per turn so a restart-required
 // Dashboard apply of flags.timeout takes effect after re-spawn, like claude.
@@ -3681,7 +3719,10 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
     }
     const { openOpenCodeCopresenceRuntime } =
       await import("./runtime/opencode-copresence/runtime");
+    const { opencodeBackendFor } = await import("./runtime/opencode-backend");
     const opened = await openOpenCodeCopresenceRuntime({
+      // #543 — V1 nodes pass the V1 backend, i.e. exactly the pre-#543 default.
+      backend: opencodeBackendFor(OPENCODE_GENERATION ?? "v1"),
       cwd: process.cwd(),
       workDir: NODE_DIR,
       model: MODEL,

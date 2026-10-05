@@ -14,8 +14,11 @@
 //   v1 — npm `opencode-ai` 1.x (serve/attach/acp, OPENCODE_* safety env).
 //   v2 — npm `@opencode/cli` 2.x. A different server API and TUI, and it
 //        silently ignores the V1 safety env (OPENCODE_PERMISSION,
-//        OPENCODE_PURE, …), so it is NOT supported until a V2 backend with
-//        its own enforced policy exists (#543).
+//        OPENCODE_PURE, …). #543 ships it as a co-presence-only PREVIEW that
+//        runs only with flags.opencodeUnsafeTools=true: there is no enforced
+//        V2 safe preset yet, so asking for V2 under the default safe preset
+//        is refused (opencodeGenerationRefusal) instead of silently running
+//        with every local tool enabled.
 
 export type OpencodeGeneration = "v1" | "v2";
 
@@ -49,12 +52,15 @@ const OPENCODE_V1_SUPPORT: OpencodeGenerationSupport = Object.freeze({
   status: "supported",
 });
 
+/** The V2 preview pin (#543). Vetted by tests/test543-… against a stub model. */
+export const OPENCODE_V2_PIN = "2.0.22";
+
 const OPENCODE_V2_SUPPORT: OpencodeGenerationSupport = Object.freeze({
   generation: "v2",
   packageName: "@opencode/cli",
-  pin: null,
-  acceptedVersions: Object.freeze([]),
-  status: "unsupported",
+  pin: OPENCODE_V2_PIN,
+  acceptedVersions: Object.freeze([OPENCODE_V2_PIN]),
+  status: "preview",
 });
 
 export const OPENCODE_SUPPORTED_VERSIONS: readonly OpencodeGenerationSupport[] = Object.freeze([
@@ -95,4 +101,29 @@ export function opencodeGenerationOfConfig(
   const value = config?.opencodeGeneration;
   if (value === undefined || value === null) return OPENCODE_DEFAULT_GENERATION;
   return isOpencodeGeneration(value) ? value : undefined;
+}
+
+/** Why `generation` may not run on a node with these settings, as ONE
+ *  actionable line — or null when it may. V1 is never refused here. V2
+ *  (#543 preview) runs only in co-presence mode and only with
+ *  flags.opencodeUnsafeTools=true: it ignores the V1 safety env, so under the
+ *  default safe preset it would run with every local tool enabled. */
+export function opencodeGenerationRefusal(
+  generation: OpencodeGeneration,
+  opts: { unsafeTools: boolean; mode?: "headless" | "copresence" | string; configFile?: string },
+): string | null {
+  if (generation === "v1") return null;
+  const support = opencodeGenerationSupport(generation);
+  if (support.status === "unsupported") {
+    return `OpenCode ${generation} (${support.packageName}) is not supported by this release; recreate the node without --opencode-generation ${generation}.`;
+  }
+  if (opts.mode !== undefined && opts.mode !== "copresence") {
+    return `OpenCode ${generation} (${support.packageName}) is a co-presence-only preview; start it with: anet node start <node> --copresence`;
+  }
+  if (opts.unsafeTools !== true) {
+    const where = opts.configFile ? ` in ${opts.configFile}` : " in the node config.json";
+    return `Refusing OpenCode ${generation} (${support.packageName}) under the default safe preset: it ignores the node safety policy (OPENCODE_PERMISSION etc.), so it would run with every local tool enabled. ` +
+      `Set flags.opencodeUnsafeTools=true${where} to run it for trusted tasks only, or use OpenCode v1.`;
+  }
+  return null;
 }
