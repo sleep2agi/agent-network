@@ -10,8 +10,10 @@ WORKDIR /app
 #     /app/run.sh: line 10: /app/../lib/safe-rm.sh: No such file or directory
 #   本仓 23 个套件的 Dockerfile 用的都是下面这一行，这是补齐它。
 COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
-# run.sh sources install-published.sh and runs selftest.sh (+ fake-registry.ts) from its own dir.
-COPY tests/test30-v0.8-auth-deprecation/ /app/
-RUN chmod +x /app/run.sh /app/selftest.sh
+# run.sh sources the shared tests/lib/install-published.sh and runs its meta-test (+ fake registry)
+# as its install selftest — all resolve to /lib from WORKDIR /app, same as safe-rm.sh.
+COPY tests/lib/install-published.sh tests/lib/install-published.test.sh tests/lib/install-published-fake-registry.mjs /lib/
+COPY tests/test30-v0.8-auth-deprecation/run.sh /app/run.sh
+RUN chmod +x /app/run.sh
 
 CMD ["/app/run.sh"]

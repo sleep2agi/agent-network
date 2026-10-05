@@ -11,6 +11,7 @@ RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx \
 WORKDIR /app
 COPY tests/qa-hub-06b-cross-user-isolation/run.sh /app/run.sh
 COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
+COPY tests/lib/install-published.sh /lib/install-published.sh
 RUN chmod +x /app/run.sh
 
 # SHA 绑定（#1092）。scripts/qa.sh 从这里 grep `^ARG SOURCE_COMMIT` 决定传不传

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# test30 selftest — the "just published" install window, against a local fake registry (no network).
+# tests/lib/install-published.sh 的元测试 — the "just published" install window, against a local
+# fake registry (no network; node only, so it runs in the host `tests/lib 元测试` job and inside
+# test30's container).
 #   R  the OLD install line (`npm install -g <pkg>@preview` while the tarball 404s) fails → witnessed red
 #   W  install_published during a 20 s window waits it out and installs the exact version
 #   N  tarball never appears → install_published fails within its bound and is NOT silent
@@ -7,12 +9,12 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/install-published.sh"
-source "$HERE/../lib/safe-rm.sh"
+source "$HERE/safe-rm.sh"
 
 PKG=@sleep2agi/agent-network
 VER=9.9.9-selftest.1
 PORT=${SELFTEST_PORT:-4873}
-S=$(mktemp -d /tmp/t30self.XXXXXX)
+S=$(mktemp -d /tmp/install-published-meta.XXXXXX)
 PASS=0; FAIL=0
 ok() { echo "  ok   $1"; PASS=$((PASS + 1)); }
 bad() { echo "  FAIL $1"; FAIL=$((FAIL + 1)); }
@@ -23,7 +25,7 @@ printf '#!/usr/bin/env node\nconsole.log("%s")\n' "$VER" > "$S/pkg/package/bin/a
 chmod 0755 "$S/pkg/package/bin/anet.js"
 tar -C "$S/pkg" -czf "$S/pkg.tgz" package
 
-TGZ="$S/pkg.tgz" PKG="$PKG" VER="$VER" PORT="$PORT" bun "$HERE/fake-registry.ts" > "$S/registry.log" 2>&1 &
+TGZ="$S/pkg.tgz" PKG="$PKG" VER="$VER" PORT="$PORT" node "$HERE/install-published-fake-registry.mjs" > "$S/registry.log" 2>&1 &
 REG_PID=$!
 trap 'kill $REG_PID 2>/dev/null || true' EXIT
 for _ in $(seq 1 50); do curl -fsS "http://127.0.0.1:$PORT/__window?ms=0" >/dev/null 2>&1 && break; sleep 0.2; done
@@ -36,9 +38,9 @@ fresh_env() { # isolated npm prefix + cache per case; registry = the fake one
 }
 window() { curl -fsS "http://127.0.0.1:$PORT/__window?ms=$1" >/dev/null; }
 
-echo "[selftest] install window right after a publish (fake registry :$PORT)"
+echo "[install-published meta] install window right after a publish (fake registry :$PORT)"
 
-# R — what run.sh did before: one install of the moving tag, output hidden.
+# R — what the suites did before: one install of the moving tag, output hidden.
 fresh_env "$S/r"; window 600000
 rc=0; npm install -g "$PKG@preview" >"$S/r/npm.log" 2>&1 || rc=$?
 if [ "$rc" != 0 ] && grep -Eq 'E404|404' "$S/r/npm.log"; then ok "R old install line is red inside the window (rc=$rc, $(grep -m1 -o 'E404' "$S/r/npm.log" || echo 404))"
@@ -60,5 +62,5 @@ if [ "$rc" != 0 ] && printf '%s' "$out" | grep -Fq "FAIL: $PKG@preview → $VER"
 else bad "N rc=$rc"; fi
 
 safe_rm_rf "$S"
-echo "selftest PASS=$PASS FAIL=$FAIL"
+echo "install-published meta PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ] && [ "$PASS" = 3 ]
