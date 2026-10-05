@@ -101,6 +101,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
         "test528-codex-adopt",
         "test532-codex-menu",
         "test561-node-menu",
+        "test562-node-ls-all",
         "test536-codex-resume",
     },
 }
