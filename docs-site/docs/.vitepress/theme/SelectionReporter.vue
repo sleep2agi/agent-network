@@ -284,9 +284,9 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.2;
   font-weight: 500;
-  color: #fff;
-  background: var(--vp-c-brand-1, #3451b2);
-  border: 1px solid var(--vp-c-brand-2, #3a5ccc);
+  color: var(--vp-button-brand-text, #fff);
+  background: var(--vp-button-brand-bg, #2563d9);
+  border: 1px solid var(--vp-button-brand-bg, #2563d9);
   border-radius: 999px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   cursor: pointer;
@@ -296,7 +296,7 @@ onBeforeUnmount(() => {
   transition: background 0.15s ease, transform 0.15s ease;
 }
 .selection-reporter-btn:hover {
-  background: var(--vp-c-brand-2, #3a5ccc);
+  background: var(--vp-button-brand-hover-bg, #1554be);
   transform: translateX(-50%) translateY(-1px);
 }
 .selection-reporter-btn:active {
