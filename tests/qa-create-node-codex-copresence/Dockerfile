@@ -39,6 +39,7 @@ RUN anet --version && which anet && which agent-node
 
 # 套件脚本放最后:改 run.sh 只重建这几层。
 COPY tests/qa-create-node-codex-copresence/run.sh /app/tests/qa-create-node-codex-copresence/run.sh
+COPY tests/qa-create-node-codex-copresence/paired-registry.py /app/tests/qa-create-node-codex-copresence/paired-registry.py
 RUN chmod +x /app/tests/qa-create-node-codex-copresence/run.sh
 
 # 镜像 ↔ 提交绑定(run.sh 校验 run.sh 自身的 blob)。
