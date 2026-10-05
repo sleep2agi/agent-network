@@ -682,6 +682,30 @@ jobs:
       - name: Run qa-create-node-workdir
         run: docker run --rm anet-qa-create-node-workdir
 
+  qa-create-node-codex-copresence:
+    # #584 app「Codex（TUI 共存）」经 daemon 建节点:create_node 的 flags.copresence 一路到子节点 config 的
+    # codexCopresence,daemon 起的 `anet node start` 走共存而不是无头;不带标志的老请求仍建无头节点;
+    # 非 codex runtime / 非布尔值在 hub 拒。真 hub + 真 `anet daemon up`;镜像里故意没有 tmux/codex,
+    # 共存路径的依赖预检输出就是「走了共存」的证据。冷构建同 qa-create-node-workdir(~4 分钟)—— 独立 job。
+    name: create-node codex co-presence e2e (Docker, real hub + daemon)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-codex-copresence"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build qa-create-node-codex-copresence
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-create-node-codex-copresence/run.sh)" \
+            -t anet-qa-create-node-codex-copresence \
+            -f tests/qa-create-node-codex-copresence/Dockerfile .
+
+      - name: Run qa-create-node-codex-copresence
+        run: docker run --rm anet-qa-create-node-codex-copresence
+
   test562b-node-remote:
     # #562 step 2 — `anet node <start|stop|restart> <alias> --remote` / `anet node edit <alias> --model <id> --remote`.
     # 真 hub(随机端口、抛弃库)+ 真 `anet daemon up`(容器 hostname=machine-b)+ daemon 建的真子节点;被测 CLI 从源码跑、

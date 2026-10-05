@@ -192,6 +192,24 @@ tail -f ~/daemon-<daemon-name>.log     # or whatever file you redirected to at s
 | nothing at all | The request never reached the daemon; go back to [step 4](#confirm-running) and confirm it is connected |
 :::
 
+### Creating a Codex co-presence node through the daemon {#codex-copresence-via-daemon}
+
+`runtime: "codex-app-server"` on its own creates a headless node. For a Codex TUI shared by a human and
+the agent, put `"copresence": true` in `create_node`'s `node_spec.flags`:
+
+```json
+{"name": "codex-human", "runtime": "codex-app-server", "flags": {"copresence": true}}
+```
+
+The daemon writes `codexCopresence: true` into the child's config, so every `anet node start <name>`
+(including the one the daemon runs itself) takes the co-presence path: app-server, bridge and TUI in
+three tmux sessions. The daemon's machine therefore needs `tmux` and a logged-in `codex`; anything
+missing is reported at start (the request ends as `runtime_capability_check_failed`). Once it is up,
+`tmux attach -t =<name>` on that machine opens the TUI.
+
+- Only valid for `codex-app-server`; the Hub rejects the key on any other runtime (`flag_not_applicable_to_runtime`).
+- An older Hub or daemon that does not know the key rejects the request (`flag_key_unknown`) instead of quietly creating a headless node.
+
 ## Keeping a daemon running {#keep-daemon-alive}
 
 `anet daemon start` runs in the foreground. If you started it over SSH, it exits when the session ends.

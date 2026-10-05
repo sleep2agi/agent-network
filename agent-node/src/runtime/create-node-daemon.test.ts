@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   validateFlagValueDaemon,
   buildAnetArgsDaemon,
+  childConfigFieldsFromSpec,
   minimalEnv,
   loadAndVerifyAnetBin,
   probeAnetBinReadiness,
@@ -1106,5 +1107,37 @@ describe("#1545 probeAnetBinReadiness —— 不抛异常地回答「现在能�
     expect(readyCount).toBe(1);
     expect(blockedCount).toBe(3);
     cleanup();
+  });
+});
+
+// #584 —— daemon 不跑 `anet node create`,直接写子节点 config;`anet node start` 只认 config 顶层的
+// codexCopresence。flags.copresence 必须在这里变成那个字段,否则「Codex（TUI 共存）」起来是无头的。
+describe("#584 flags.copresence → child config codexCopresence", () => {
+  test("codex-app-server + copresence:true → codexCopresence:true, switch removed from flags", () => {
+    expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { permissionMode: "default", copresence: true } }))
+      .toEqual({ flags: { permissionMode: "default" }, codexCopresence: true });
+  });
+  test("copresence:false / absent → no codexCopresence (headless stays creatable; old request shape unchanged)", () => {
+    expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { copresence: false } })).toEqual({ flags: {} });
+    expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { permissionMode: "plan" } }))
+      .toEqual({ flags: { permissionMode: "plan" } });
+    expect(childConfigFieldsFromSpec({ runtime: "codex-app-server" })).toEqual({ flags: {} });
+  });
+  test("does not mutate the request's flags object", () => {
+    const flags = { copresence: true, maxTurns: 3 };
+    childConfigFieldsFromSpec({ runtime: "codex-app-server", flags });
+    expect(flags).toEqual({ copresence: true, maxTurns: 3 });
+  });
+  test("buildAnetArgsDaemon accepts it for codex-app-server, as the CLI's bare --copresence", () => {
+    expect(buildAnetArgsDaemon({ name: "cx", runtime: "codex-app-server", flags: { copresence: true } }))
+      .toEqual(["node", "create", "cx", "--runtime", "codex-app-server", "--copresence"]);
+    expect(buildAnetArgsDaemon({ name: "cx", runtime: "codex-app-server", flags: { copresence: false } }))
+      .toEqual(["node", "create", "cx", "--runtime", "codex-app-server"]);
+  });
+  test("rejected on other runtimes and for non-boolean values", () => {
+    expect(() => buildAnetArgsDaemon({ name: "cx", runtime: "codex-sdk", flags: { copresence: true } }))
+      .toThrow(/flag_not_applicable_to_runtime:copresence:codex-sdk/);
+    expect(() => buildAnetArgsDaemon({ name: "cx", runtime: "codex-app-server", flags: { copresence: "yes" } }))
+      .toThrow(/flag_value_invalid:copresence/);
   });
 });

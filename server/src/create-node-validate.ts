@@ -46,7 +46,16 @@ export const RUNTIMES = [
 ] as const;
 export type Runtime = typeof RUNTIMES[number];
 
-export const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"] as const;
+// #584 —— `copresence` 是**建节点时**的开关,不是 agent 的运行参数:为 true 时 daemon 把它写成子节点
+// config 的 `codexCopresence: true`,之后一条 `anet node start` 就起共享 TUI(app 向导的「Codex（TUI 共存）」)。
+// 🔴 故意放在 flags 里而不是 node_spec 顶层:老 hub 的 zod 会静默丢弃未知顶层字段、老 daemon 也静默忽略
+//    —— 那正是 #584 的形状(用户选了共存,拿到无头节点,没有任何报错)。flags 的未知键在老 hub(这份
+//    FLAG_KEYS)和老 daemon(buildAnetArgsDaemon)都**拒绝**,新 app 撞到老组件得到的是一条报错。
+export const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence"] as const;
+
+/** #584 —— 只有这些 runtime 认 `flags.copresence`。目前只有 codex-app-server 的共存靠 config 字段
+ *  (`codexCopresence`)决定;grok-build-cli / opencode-cli 各有自己的字段,接进来之前一律拒,不静默吞。 */
+export const COPRESENCE_FLAG_RUNTIMES = ["codex-app-server"] as const;
 export type FlagKey = typeof FLAG_KEYS[number];
 
 export const PERMISSION_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"] as const;
@@ -124,8 +133,22 @@ export function validateFlagValue(k: string, v: unknown): void {
         throw new ValidationError("flag_value_invalid", { field: k, reason: "must be integer 1..86400" });
       }
       return;
+    case "copresence":
+      if (typeof v !== "boolean") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be boolean" });
+      return;
     default:
       throw new ValidationError("flag_key_unknown", { field: k });
+  }
+}
+
+/** #584 —— 逐键校验之外的跨字段一条:`copresence` 只对 COPRESENCE_FLAG_RUNTIMES 有意义。
+ *  在别的 runtime 上收下它而什么都不做,就是又一个「选了共存、拿到无头」。 */
+export function validateFlagsForRuntime(runtime: string, flags: Record<string, unknown> | undefined | null): void {
+  if (!flags || !Object.prototype.hasOwnProperty.call(flags, "copresence")) return;
+  if (!(COPRESENCE_FLAG_RUNTIMES as readonly string[]).includes(runtime)) {
+    throw new ValidationError("flag_not_applicable_to_runtime", {
+      field: "copresence", runtime, applicable: [...COPRESENCE_FLAG_RUNTIMES],
+    });
   }
 }
 
@@ -281,8 +304,11 @@ export function buildAnetArgs(spec: NodeSpec): string[] {
         throw new ValidationError("flag_key_unknown", { field: k });
       }
       validateFlagValue(k, v);
+      // `anet node create --copresence` 是布尔开关,不吃值。
+      if (k === "copresence") { if (v === true) args.push("--copresence"); continue; }
       args.push(`--${kebab(k)}`, String(v));
     }
+    validateFlagsForRuntime(spec.runtime, spec.flags);
   }
   return args;
 }

@@ -180,6 +180,23 @@ tail -f ~/daemon-<daemon-name>.log     # 或你启动时重定向到的文件
 | 什么都没有 | 请求没有到达 daemon，回到[第 4 步](#confirm-running)确认它连着 Hub |
 :::
 
+### 经 daemon 创建 Codex 共存节点 {#codex-copresence-via-daemon}
+
+`runtime: "codex-app-server"` 本身建出来的是无头节点。要人和 agent 共用一个 Codex TUI，
+`create_node` 的 `node_spec.flags` 里带 `"copresence": true`：
+
+```json
+{"name": "codex-human", "runtime": "codex-app-server", "flags": {"copresence": true}}
+```
+
+daemon 会在子节点 config 里写 `codexCopresence: true`，之后的 `anet node start <name>`（包括 daemon
+自己起的那一次）走共存：app-server、桥、TUI 三个 tmux 会话。所以 daemon 所在机器要装好 `tmux`
+和已登录的 `codex`，缺了会在启动时报出来（请求状态为 `runtime_capability_check_failed`）。
+起来后在那台机器上 `tmux attach -t =<name>` 进 TUI。
+
+- 只对 `codex-app-server` 有效；其他 runtime 带这个键会被 Hub 拒绝（`flag_not_applicable_to_runtime`）。
+- 不认识这个键的旧 Hub / 旧 daemon 会拒绝请求（`flag_key_unknown`），不会悄悄建出无头节点。
+
 ## 让 daemon 在后台运行 {#keep-daemon-alive}
 
 `anet daemon start` 是前台进程。如果你是 SSH 上去启动的，会话一断它就退出了。

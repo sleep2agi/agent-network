@@ -30,6 +30,7 @@ import {
   validateEnvRefs,
   FLAG_KEYS,
   validateFlagValue,
+  validateFlagsForRuntime,
   ValidationError,
 } from "./create-node-validate.js";
 import {
@@ -4252,6 +4253,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           if (!(FLAG_KEYS as readonly string[]).includes(k)) throw new ValidationError("flag_key_unknown", { field: k });
           validateFlagValue(k, v);
         }
+        validateFlagsForRuntime(node_spec.runtime, node_spec.flags);
       } catch (e) {
         return validationFailReply(e);
       }

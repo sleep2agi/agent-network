@@ -83,6 +83,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "test1755-rules-file-e2e": {"test1755-rules-file-e2e"},
     "qa-node-logs-e2e": {"qa-node-logs-e2e"},
     "qa-create-node-workdir": {"qa-create-node-workdir"},
+    "qa-create-node-codex-copresence": {"qa-create-node-codex-copresence"},
     "test562b-node-remote": {"test562b-node-remote"},
     "test571-lifecycle-safety": {"test571-lifecycle-safety"},
     "recovered-suites": {
