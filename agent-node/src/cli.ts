@@ -56,6 +56,7 @@ import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-t
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
+import { buildClaudeSystemPrompt, claudeAiConnectorsOptIn, claudeSdkChildEnv } from "./claude-sdk-turn-options";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { readExternalSchedulesSnapshot } from "./external-schedules";
@@ -2835,7 +2836,11 @@ async function processWithClaude(
     // keys (ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY / etc.) and FEISHU_APP_ID
     // (public identifier) pass through — claude binary genuinely needs
     // them. See src/secret-mask.ts for the full allowlist + rationale.
-    env: maskedEnv(process.env),
+    // #557 — no background tasks (they die with the turn) and, unless the node
+    // config opts in (flags.claudeAiConnectors), no claude.ai account connectors.
+    env: claudeSdkChildEnv(maskedEnv(process.env), {
+      keepClaudeAiConnectors: claudeAiConnectorsOptIn(fileConfig?.flags),
+    }),
     cwd: process.cwd(),
     stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 300)}`); },
     hooks: {
@@ -2880,7 +2885,9 @@ async function processWithClaude(
   const internToolUseBias = isInternEndpoint
     ? "When a tool is available and applicable to the user request, you MUST respond by emitting a tool_use content block, not by writing text that describes the tool call. Do not show a verbose thinking process. Do not embed tool-call JSON inside text. Use the tool_use content channel directly. If no tool fits, respond normally with text.\n\n"
     : "";
-  const combinedSystemPrompt = internToolUseBias + (SYSTEM_PROMPT || "");
+  // #557 — the turn-end notice sits between the intern bias and the operator's
+  // prompt; the operator's text is appended unchanged.
+  const combinedSystemPrompt = buildClaudeSystemPrompt({ internToolUseBias, operatorPrompt: SYSTEM_PROMPT });
   // #501 — SDK 0.3.289 / CLI 2.1.289 records a bare-string systemPrompt on the
   // session's first request (snapshot: true default) and `resume` replays the
   // record verbatim, so an operator's new systemPrompt was ignored after a
