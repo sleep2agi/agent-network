@@ -2822,7 +2822,12 @@ async function processWithClaude(
     ? "When a tool is available and applicable to the user request, you MUST respond by emitting a tool_use content block, not by writing text that describes the tool call. Do not show a verbose thinking process. Do not embed tool-call JSON inside text. Use the tool_use content channel directly. If no tool fits, respond normally with text.\n\n"
     : "";
   const combinedSystemPrompt = internToolUseBias + (SYSTEM_PROMPT || "");
-  if (combinedSystemPrompt) options.systemPrompt = combinedSystemPrompt;
+  // #501 — SDK 0.3.289 / CLI 2.1.289 records a bare-string systemPrompt on the
+  // session's first request (snapshot: true default) and `resume` replays the
+  // record verbatim, so an operator's new systemPrompt was ignored after a
+  // restart (canary 2026-10-05: prompt A→B + resume still answered A; 0.3.231
+  // answered B). Opt out so the prompt is rendered fresh on every request.
+  if (combinedSystemPrompt) options.systemPrompt = { type: "custom", prompt: combinedSystemPrompt, snapshot: false };
   if (claudeSessionId) options.resume = claudeSessionId;
 
   let result = "";
