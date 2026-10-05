@@ -24,7 +24,13 @@
 //   #524 按网络开关(一个 Hub 上多个团队的网络,只想给自己的网络开):
 //   COMMHUB_DUE_REMINDERS_NETWORKS=<id,id,…>          白名单。COMMHUB_DUE_REMINDERS=0 时也生效:只给这些网络发。
 //   COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS=<id,id,…>  黑名单。功能开着时这些网络不发(白名单里也排除)。
-//   两个新变量都不设 → 行为与之前完全相同。生效范围在 startHub 时打一行日志(只有网络 id)。
+//   #524 按人开关(多个团队共用同一个网络,网络名单分不开时):
+//   COMMHUB_DUE_REMINDERS_OWNERS=<user id,…>         负责人白名单。设了就只扫负责人(owner)在名单里的卡;
+//     这张卡的人提醒(负责人 + 参与人)和负责 Agent 消息照常发,别人负责的卡一条都不发。与网络白名单 / 黑名单是「且」。
+//     和 COMMHUB_DUE_REMINDERS_NETWORKS 一样,COMMHUB_DUE_REMINDERS=0 时也生效(只给名单里的人负责的卡打开)。
+//     开通不补发按「网络 × 负责人」各记一行基线(kind='baseline_owner',due_on = user id):以后把人加进名单,
+//     从加进来那一刻算起,不会补发他过去几天的逾期卡。
+//   这些新变量都不设 → 行为与之前完全相同。生效范围在 startHub 时打一行日志(只有网络 id)。
 //   过滤写在扫描 SQL 的 WHERE 里(基线 INSERT 与候选 SELECT 同一个条件),范围外网络的行根本不会被读出来。
 //   COMMHUB_DUE_REMINDER_NODES=1              给负责 Agent 节点发消息;默认关(人照常提醒)。
 //   开通时不补发:每个网络第一次被扫描到时记一行基线(kind='baseline',sent_at = 那一刻)。只有在基线**之后**才变成逾期的卡
@@ -99,23 +105,39 @@ export function reminderNetworks(): string[] | null {
  */
 export type DueReminderScope =
   | { mode: "off" }
-  | { mode: "all"; exclude: string[] }
-  | { mode: "only"; include: string[]; exclude: string[] };
+  | { mode: "all"; exclude: string[]; owners?: string[] }
+  | { mode: "only"; include: string[]; exclude: string[]; owners?: string[] };
 
+/**
+ * owners(COMMHUB_DUE_REMINDERS_OWNERS)只在设了时出现:只扫负责人在名单里的卡(与网络条件是「且」)。
+ * 与 COMMHUB_DUE_REMINDERS_NETWORKS 同一语义:COMMHUB_DUE_REMINDERS=0 时也能单独把功能打开(只对名单里的人)。
+ */
 export function dueReminderScope(): DueReminderScope {
   const allow = envIdList("COMMHUB_DUE_REMINDERS_NETWORKS");
   const legacy = envIdList("COMMHUB_DUE_REMINDER_NETWORKS");
   const exclude = envIdList("COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS") ?? [];
-  if (process.env.COMMHUB_DUE_REMINDERS === "0" && !allow) return { mode: "off" };
-  if (!allow && !legacy) return { mode: "all", exclude };
+  const owners = envIdList("COMMHUB_DUE_REMINDERS_OWNERS");
+  if (process.env.COMMHUB_DUE_REMINDERS === "0" && !allow && !owners) return { mode: "off" };
+  const withOwners = owners ? { owners } : {};
+  if (!allow && !legacy) return { mode: "all", exclude, ...withOwners };
   const include = [...new Set([...(allow ?? []), ...(legacy ?? [])])].filter((id) => !exclude.includes(id));
-  return { mode: "only", include, exclude };
+  return { mode: "only", include, exclude, ...withOwners };
 }
 
 export function describeDueReminderScope(scope: DueReminderScope = dueReminderScope()): string {
   if (scope.mode === "off") return "off";
-  if (scope.mode === "all") return scope.exclude.length ? `all networks except ${scope.exclude.join(",")}` : "all networks";
-  return scope.include.length ? `only networks ${scope.include.join(",")}` : "no networks (allowlist empty after exclude)";
+  const who = scope.owners ? `; only cards owned by ${scope.owners.join(",")}` : "";
+  if (scope.mode === "all") return (scope.exclude.length ? `all networks except ${scope.exclude.join(",")}` : "all networks") + who;
+  return scope.include.length ? `only networks ${scope.include.join(",")}${who}` : "no networks (allowlist empty after exclude)";
+}
+
+/**
+ * 负责人条件(只拼在 requirements 的候选 SELECT 上;networks 表没有负责人)。没设名单 → "",不 push 任何参数。
+ * 精确匹配存储形状 {"kind":"user","id":…}(与列表 ?owner=user:<id> 筛选同一写法):对不上就不发,宁可少发。
+ */
+export function dueOwnerSql(scope: DueReminderScope, params: unknown[]): string {
+  if (scope.mode === "off" || !scope.owners?.length) return "";
+  return ` AND owner_json IN (${scope.owners.map((id) => `?${params.push(JSON.stringify({ kind: "user", id }))}`).join(", ")})`;
 }
 
 /**
@@ -133,6 +155,7 @@ export function dueScopeSql(scope: DueReminderScope, params: unknown[]): string 
 }
 export function nodeRemindersEnabled(): boolean { return process.env.COMMHUB_DUE_REMINDER_NODES === "1"; }
 export const BASELINE_KIND = "baseline";
+export const OWNER_BASELINE_KIND = "baseline_owner";
 
 export function overdueMaxDays(): number { return Math.floor(envNumber("COMMHUB_DUE_OVERDUE_MAX_DAYS", 7, 0)); }
 
@@ -280,6 +303,23 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
        ON CONFLICT DO NOTHING`,
       bp,
     );
+    // 负责人名单:每个(范围内网络 × 名单里的人)第一次被扫到的那一刻。due_on 列存 user id。
+    if (scope.mode !== "off") for (const owner of scope.owners ?? []) {
+      const op: unknown[] = [OWNER_BASELINE_KIND, sentAt, owner];
+      db.run(
+        `INSERT INTO requirement_due_reminders (requirement_id, kind, due_on, day, network_id, sent_at)
+         SELECT '__baseline__:' || network_id, ?1, ?3, '', network_id, ?2 FROM networks WHERE 1=1${dueScopeSql(scope, op) ?? ""}
+         ON CONFLICT DO NOTHING`,
+        op,
+      );
+    }
+  }
+  const ownerBaselines = new Map<string, number>();
+  if (scope.mode !== "off" && scope.owners?.length) {
+    for (const b of db.all<{ network_id: string; due_on: string; sent_at: string }>("SELECT network_id, due_on, sent_at FROM requirement_due_reminders WHERE kind = ?1", OWNER_BASELINE_KIND)) {
+      const t = parseHubTimestamp(b.sent_at);
+      if (t !== null) ownerBaselines.set(`${b.network_id}\u0000${b.due_on}`, t);
+    }
   }
   const baselines = new Map(
     db.all<{ network_id: string; sent_at: string }>("SELECT network_id, sent_at FROM requirement_due_reminders WHERE kind = ?1", BASELINE_KIND)
@@ -288,10 +328,11 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
   );
   const params: unknown[] = [lo, hi];
   const netFilter = dueScopeSql(scope, params) ?? "";
+  const ownerFilter = dueOwnerSql(scope, params);
   const rows = db.all<DueRow>(
     `SELECT requirement_id, network_id, seq, title, due_on, owner_json, participants_json, agent_owner_json
        FROM requirements
-      WHERE due_on IS NOT NULL AND due_on >= ?1 AND due_on < ?2 AND column_name <> 'done' AND COALESCE(archived, 0) = 0${netFilter}`,
+      WHERE due_on IS NOT NULL AND due_on >= ?1 AND due_on < ?2 AND column_name <> 'done' AND COALESCE(archived, 0) = 0${netFilter}${ownerFilter}`,
     ...params,
   );
   const out: DueReminderSent[] = [];
@@ -300,7 +341,13 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
     if (!r) continue;
     if (r.kind === "overdue") {
       // 基线之前就已经逾期 → 不发(开通时不补发)。没有基线(网络行不存在)= 当作此刻开通。
-      const base = baselines.get(row.network_id) ?? nowMs;
+      let base = baselines.get(row.network_id) ?? nowMs;
+      // 负责人名单:再取「这个人进名单」的基线,两者取晚的(把人加进名单也不补发)。
+      if (scope.mode !== "off" && scope.owners?.length) {
+        const owner = userIdOf(parse(row.owner_json));
+        const ownerBase = owner ? ownerBaselines.get(`${row.network_id}\u0000${owner}`) : undefined;
+        base = Math.max(base, ownerBase ?? nowMs);
+      }
       if (overdueSinceMs(row.due_on, tz) < base) continue;
     }
     try {
@@ -316,7 +363,7 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
     }
   }
   // 去重行保留 RETENTION_DAYS 天(比逾期上限长得多,删掉的行不会再被需要)。
-  try { db.run("DELETE FROM requirement_due_reminders WHERE sent_at < ?1 AND kind <> ?2", [new Date(nowMs - RETENTION_DAYS * DAY_MS).toISOString(), BASELINE_KIND]); } catch {}
+  try { db.run("DELETE FROM requirement_due_reminders WHERE sent_at < ?1 AND kind NOT IN (?2, ?3)", [new Date(nowMs - RETENTION_DAYS * DAY_MS).toISOString(), BASELINE_KIND, OWNER_BASELINE_KIND]); } catch {}
   return out;
 }
 
@@ -354,7 +401,7 @@ function deliver(row: DueRow, r: { kind: DueKind; overdueDays: number; dueDay: s
 }
 
 /**
- * startHub 里调用。COMMHUB_DUE_REMINDERS=0 关掉(除非设了 COMMHUB_DUE_REMINDERS_NETWORKS,见 dueReminderScope);
+ * startHub 里调用。COMMHUB_DUE_REMINDERS=0 关掉(除非设了 COMMHUB_DUE_REMINDERS_NETWORKS / _OWNERS,见 dueReminderScope);
  * bootServer(测试)不调用它。第一次扫描延后一个间隔外的 30 秒,不和启动抢。启动时打一行生效范围(只有网络 id)。
  */
 export function startDueReminderTimer(): ReturnType<typeof setInterval> | null {
