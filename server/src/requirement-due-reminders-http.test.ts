@@ -22,6 +22,7 @@ delete process.env.COMMHUB_DUE_REMINDER_NETWORKS;
 delete process.env.COMMHUB_DUE_REMINDERS;
 delete process.env.COMMHUB_DUE_REMINDERS_NETWORKS;
 delete process.env.COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS;
+delete process.env.COMMHUB_DUE_REMINDERS_OWNERS;
 // 节点提醒默认关;这个文件的大部分用例要看节点那一路,先打开(「默认关」单独一个用例)。
 process.env.COMMHUB_DUE_REMINDER_NODES = "1";
 const PW = "DueRemindPassw0rd!x";
@@ -340,7 +341,7 @@ describe("上线护栏", () => {
   });
 
   // ── #524 按网络开关 ────────────────────────────────────
-  const SCOPE_VARS = ["COMMHUB_DUE_REMINDERS", "COMMHUB_DUE_REMINDERS_NETWORKS", "COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS", "COMMHUB_DUE_REMINDER_NETWORKS"];
+  const SCOPE_VARS = ["COMMHUB_DUE_REMINDERS", "COMMHUB_DUE_REMINDERS_NETWORKS", "COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS", "COMMHUB_DUE_REMINDER_NETWORKS", "COMMHUB_DUE_REMINDERS_OWNERS"];
   async function withEnv<T>(vars: Record<string, string>, fn: () => T | Promise<T>): Promise<T> {
     const saved = Object.fromEntries(SCOPE_VARS.map((k) => [k, process.env[k]]));
     for (const k of SCOPE_VARS) delete process.env[k];
@@ -462,6 +463,107 @@ describe("上线护栏", () => {
       "[due-reminders] scope: only networks net_placeholder_a",
       "[due-reminders] scope: all networks except net_placeholder_x",
     ]);
+  });
+
+  // ── #524 按负责人开关(两个团队共用一个网络,网络名单分不开)────────
+  test("#524 负责人名单:范围解析 / 空白 = 没设 / 只在用到时绑参数", async () => {
+    const S = (vars: Record<string, string>) => withEnv(vars, () => due.dueReminderScope());
+    // =0 + 负责人名单:与网络白名单同一语义 —— 单独就能打开,范围 = 所有网络里名单里的人负责的卡
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_OWNERS: " u_a , u_b,u_a, " })).toEqual({ mode: "all", exclude: [], owners: ["u_a", "u_b"] });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "1", COMMHUB_DUE_REMINDERS_OWNERS: "u_a" })).toEqual({ mode: "all", exclude: [], owners: ["u_a"] });
+    // 与网络白名单 / 黑名单叠加(且)
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: "net_a", COMMHUB_DUE_REMINDERS_OWNERS: "u_a" })).toEqual({ mode: "only", include: ["net_a"], exclude: [], owners: ["u_a"] });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS: "net_x", COMMHUB_DUE_REMINDERS_OWNERS: "u_a" })).toEqual({ mode: "all", exclude: ["net_x"], owners: ["u_a"] });
+    // 空 / 空白 / 只有逗号 = 没设:=0 时仍然关;不设 =0 时与原来完全一样(没有 owners 键)
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_OWNERS: "" })).toEqual({ mode: "off" });
+    expect(await S({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_OWNERS: " , ," })).toEqual({ mode: "off" });
+    expect(await S({ COMMHUB_DUE_REMINDERS_OWNERS: "  " })).toStrictEqual({ mode: "all", exclude: [] });
+    // SQL:没名单不 push;有名单精确匹配存储形状,占位号接在已有参数后面
+    const p0: unknown[] = ["lo", "hi"];
+    expect(due.dueOwnerSql({ mode: "all", exclude: [] }, p0)).toBe("");
+    expect(due.dueOwnerSql({ mode: "off" }, p0)).toBe("");
+    expect(p0).toEqual(["lo", "hi"]);
+    const p1: unknown[] = ["lo", "hi", "net_x"];
+    expect(due.dueOwnerSql({ mode: "all", exclude: ["net_x"], owners: ["u_a", "u_b"] }, p1)).toBe(" AND owner_json IN (?4, ?5)");
+    expect(p1).toEqual(["lo", "hi", "net_x", JSON.stringify(userRef("u_a")), JSON.stringify(userRef("u_b"))]);
+    // 日志
+    expect(due.describeDueReminderScope({ mode: "all", exclude: [], owners: ["u_a"] })).toBe("all networks; only cards owned by u_a");
+    expect(due.describeDueReminderScope({ mode: "only", include: ["net_a"], exclude: [], owners: ["u_a", "u_b"] })).toBe("only networks net_a; only cards owned by u_a,u_b");
+  });
+
+  test("#524 COMMHUB_DUE_REMINDERS=0 + 负责人名单:同一网络里只有名单里的人负责的卡发(人 + 负责 Agent);别人负责的一条不发", async () => {
+    const listed = await card("dr-524-名单内负责人", "2026-10-11");
+    const unlisted = await card("dr-524-名单外负责人", "2026-10-11", { owner: userRef(pia.id), participants: [userRef(pat.id)] });
+    const noOwner = await card("dr-524-没有负责人", "2026-10-11", { owner: null, participants: [userRef(owen.id)] });
+    const out = await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_OWNERS: ` ${owen.id} ,` }, () => due.runDueReminders({ now: T0 }));
+    // 名单里的人负责的卡:恰好一档,收件人 = 负责人 + 参与人,负责 Agent 也收到一条
+    expect(sentFor(out, listed)).toEqual(["due_soon"]);
+    expect(out.find((x) => x.requirement_id === listed)?.users.sort()).toEqual([owen.id, pat.id, pia.id].sort());
+    expect(out.find((x) => x.requirement_id === listed)?.node).toBe(ALIAS);
+    const n = userNotices(listed);
+    expect(Object.keys(n).sort()).toEqual([owen.id, pat.id, pia.id].sort());
+    for (const id of [owen.id, pat.id, pia.id]) expect(n[id].map((x) => x.reminder)).toEqual(["due_soon"]);
+    expect(nodeMessages(listed)).toHaveLength(1);
+    // 名单外的人负责的卡 / 没有负责人的卡:什么都不发,连去重行都不写(以后把人加进来,照样按时发)
+    for (const id of [unlisted, noOwner]) {
+      expect(sentFor(out, id)).toEqual([]);
+      expect(userNotices(id)).toEqual({});
+      expect(nodeMessages(id)).toEqual([]);
+      expect(rowCount(id)).toBe(0);
+    }
+    // 返回值里也只有名单里的人负责的卡
+    for (const x of out) {
+      const row = db.get("SELECT owner_json FROM requirements WHERE requirement_id = ?1", x.requirement_id);
+      expect(JSON.parse(row.owner_json)).toEqual(userRef(owen.id));
+    }
+    // 同一时刻再跑:不重发
+    expect(sentFor(await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_OWNERS: owen.id }, () => due.runDueReminders({ now: T0 })), listed)).toEqual([]);
+    // 与网络白名单是「且」:人在名单里、网络不在 → 不发
+    const other = mkNet("own_and");
+    const c = await card("dr-524-人对网络不对", "2026-10-11");
+    const out2 = await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_NETWORKS: other.net, COMMHUB_DUE_REMINDERS_OWNERS: owen.id }, () => due.runDueReminders({ now: T0 }));
+    expect(sentFor(out2, c)).toEqual([]);
+    expect(rowCount(c)).toBe(0);
+    // 名单撤掉(=1、不设名单)→ 名单外负责人的卡照常发:证明上面是名单挡的,不是卡本身不该发
+    expect(sentFor(await withEnv({ COMMHUB_DUE_REMINDERS: "1" }, () => due.runDueReminders({ now: T0 })), unlisted)).toEqual(["due_soon"]);
+  });
+
+  test("#524 负责人名单不补发:网络早就开着,人后加进名单 —— 他加进来之前就逾期的卡不发,之后才逾期的照发", async () => {
+    const f = mkNet("own_late");
+    // 网络基线很早(T0 - 30 天),人还不在任何名单里
+    await withEnv({ COMMHUB_DUE_REMINDERS_NETWORKS: f.net }, () => due.runDueReminders({ now: T0 - 30 * DAY }));
+    expect(baselineCount(f.net)).toBe(1);
+    const old = await cardIn(f, "dr-524-进名单前逾期", "2026-10-07");
+    const today = await cardIn(f, "dr-524-进名单当天到期", "2026-10-10");
+    const env = { COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_OWNERS: f.id };
+    const first = await withEnv(env, () => due.runDueReminders({ now: T0 }));
+    // 网络基线比逾期早 —— 只看网络基线就会补发;负责人基线挡住
+    expect(sentFor(first, old)).toEqual([]);
+    expect(sentFor(first, today)).toEqual(["due_today"]);
+    const ob = db.all("SELECT network_id, due_on, sent_at FROM requirement_due_reminders WHERE kind = 'baseline_owner' AND network_id = ?1", f.net);
+    expect(ob).toEqual([{ network_id: f.net, due_on: f.id, sent_at: new Date(T0).toISOString() }]);
+    const next = await withEnv(env, () => due.runDueReminders({ now: T0 + DAY }));
+    expect(sentFor(next, old)).toEqual([]);
+    expect(sentFor(next, today)).toEqual(["overdue"]);
+    // 负责人基线不被保留期清掉
+    await withEnv(env, () => due.runDueReminders({ now: T0 + 90 * DAY }));
+    expect(db.get("SELECT COUNT(*) AS n FROM requirement_due_reminders WHERE kind = 'baseline_owner' AND network_id = ?1", f.net).n).toBe(1);
+  });
+
+  test("#524 启动:=0 + 负责人名单起定时器,日志只有 id", async () => {
+    const logs: string[] = [];
+    const g = globalThis as any;
+    const orig = { log: console.log, setTimeout: g.setTimeout, setInterval: g.setInterval };
+    let timers = 0;
+    console.log = (...a: unknown[]) => { logs.push(a.map(String).join(" ")); };
+    g.setTimeout = () => { timers++; return { unref() {} }; };
+    g.setInterval = () => { timers++; return { fake: true }; };
+    try {
+      const on = await withEnv({ COMMHUB_DUE_REMINDERS: "0", COMMHUB_DUE_REMINDERS_OWNERS: "u_placeholder_a" }, () => due.startDueReminderTimer());
+      expect(on).toEqual({ fake: true } as any);
+      expect(timers).toBe(2);
+    } finally { console.log = orig.log; g.setTimeout = orig.setTimeout; g.setInterval = orig.setInterval; }
+    expect(logs.filter((l) => l.startsWith("[due-reminders] scope:"))).toEqual(["[due-reminders] scope: all networks; only cards owned by u_placeholder_a"]);
   });
 });
 

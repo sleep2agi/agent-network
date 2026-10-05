@@ -49,9 +49,10 @@ No backlog: the first time the Hub checks a network, it records that moment as t
 
 Operators can change this with environment variables:
 
-- `COMMHUB_DUE_REMINDERS=0`: turns it off, unless `COMMHUB_DUE_REMINDERS_NETWORKS` below is also set.
+- `COMMHUB_DUE_REMINDERS=0`: turns it off, unless `COMMHUB_DUE_REMINDERS_NETWORKS` or `COMMHUB_DUE_REMINDERS_OWNERS` below is also set.
 - `COMMHUB_DUE_REMINDERS_NETWORKS=<network id,network id>`: only these networks get reminders. Together with `COMMHUB_DUE_REMINDERS=0`, it turns reminders on for these networks only and leaves every other network off. Use it when one Hub hosts several teams and you want to start with your own network.
 - `COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS=<network id,network id>`: while reminders are on, these networks get none. A network on both lists is excluded.
+- `COMMHUB_DUE_REMINDERS_OWNERS=<user id,user id>`: only tasks whose owner is on this list get reminders. For those tasks the owner, the participants and the agent owner are reminded as usual; tasks owned by anyone else, and tasks with no owner, get none. Set together with a network list, a task must match both. Like `COMMHUB_DUE_REMINDERS_NETWORKS`, it also turns reminders on while `COMMHUB_DUE_REMINDERS=0`. Use it when several teams share one network, so a network list cannot separate them. The startup log line gains `; only cards owned by <user id>`. The no-backlog start is tracked per network and owner: a person added to the list later starts from the moment they are added.
 - `COMMHUB_DUE_REMINDER_NETWORKS=<network id,network id>`: the older name. Only these networks get reminders; unset means all networks. It does not turn reminders on when `COMMHUB_DUE_REMINDERS=0`.
 
 For these lists, an empty value, or one with only spaces and commas, counts as unset. Once a list is set, only the listed networks get reminders, also with `COMMHUB_DUE_REMINDERS=1`. With none of them set, nothing changes. At startup the Hub logs the scope in one line, with network ids only, for example `[due-reminders] scope: only networks <network id>`. Tasks in networks outside the scope are never read, and no start time is recorded for them; if you add a network later, its start is the moment you add it.
