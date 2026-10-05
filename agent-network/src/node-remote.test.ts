@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import {
-  evaluateOutcome, explainHubRefusal, isRemoteInvocation, parseRemoteArgs, planRemote, precheck,
-  remoteCommandArgv, resolveRemoteTarget, toolCall, type Observation, type RemoteTarget,
+  describeTarget, evaluateOutcome, explainHubRefusal, isRemoteInvocation, parseRemoteArgs, planRemote, precheck,
+  remoteCommandArgv, resolveRemoteTarget, timeoutMessage, toolCall, type Observation, type RemoteTarget,
 } from "./node-remote";
 
 // Daemon rows have the real /api/host-supervisors shape (`daemon_node_id`, not `node_id`).
@@ -59,46 +59,46 @@ describe("#562 parseRemoteArgs", () => {
 
 describe("#562 resolveRemoteTarget", () => {
   test("daemon-created node on a machine with an online daemon resolves; the session's row wins over a stale duplicate", () => {
-    const r = resolveRemoteTarget("coder-b", nodesFor("coder-b"), sessions, daemons);
+    const r = resolveRemoteTarget("start", "coder-b", nodesFor("coder-b"), sessions, daemons);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.target).toMatchObject({ node_id: "node_cb", hostname: "machine-b", lifecycle_state: "stopped", daemon: { node_id: "node_db", alias: "daemon-b" } });
+    expect(r.target).toMatchObject({ node_id: "node_cb", hostname: "machine-b", lifecycle_state: "stopped", daemon: { node_id: "node_db", alias: "daemon-b", online: true } });
   });
   test("unknown alias", () => {
-    const r = resolveRemoteTarget("nope", [], sessions, daemons);
+    const r = resolveRemoteTarget("start", "nope", [], sessions, daemons);
     expect(r).toMatchObject({ ok: false, code: "not_found" });
   });
   test("machine without an online daemon → can't be managed remotely, naming the host", () => {
-    const r = resolveRemoteTarget("lone-c", nodesFor("lone-c"), sessions, daemons);
+    const r = resolveRemoteTarget("start", "lone-c", nodesFor("lone-c"), sessions, daemons);
     expect(r).toMatchObject({ ok: false, code: "no_daemon_on_host" });
     if (!r.ok) expect(r.message).toContain("this machine can't be managed remotely: no daemon online on machine-c (daemon-c is offline)");
   });
   test("host compare is case-insensitive", () => {
-    const r = resolveRemoteTarget("coder-b", nodesFor("coder-b"), sessions, [{ ...daemons[0], hostname: "Machine-B" }]);
+    const r = resolveRemoteTarget("start", "coder-b", nodesFor("coder-b"), sessions, [{ ...daemons[0], hostname: "Machine-B" }]);
     expect(r.ok).toBe(true);
   });
   test("no daemon visible at all (restricted member) → refusal that says why", () => {
-    const r = resolveRemoteTarget("coder-b", nodesFor("coder-b"), sessions, []);
+    const r = resolveRemoteTarget("start", "coder-b", nodesFor("coder-b"), sessions, []);
     expect(r).toMatchObject({ ok: false, code: "daemons_not_visible" });
     if (!r.ok) expect(r.message).toContain("restricted");
   });
   test("a hand-started node on a daemon machine is not daemon-managed", () => {
-    expect(resolveRemoteTarget("hand-b", nodesFor("hand-b"), sessions, daemons)).toMatchObject({ ok: false, code: "not_daemon_managed" });
+    expect(resolveRemoteTarget("stop", "hand-b", nodesFor("hand-b"), sessions, daemons)).toMatchObject({ ok: false, code: "not_daemon_managed" });
     // the hub's explicit flag wins even if a daemon id is present
     const flagged = [{ ...nodesFor("coder-b")[0], lifecycle_controllable: false }];
-    expect(resolveRemoteTarget("coder-b", flagged, sessions, daemons)).toMatchObject({ ok: false, code: "not_daemon_managed" });
+    expect(resolveRemoteTarget("start", "coder-b", flagged, sessions, daemons)).toMatchObject({ ok: false, code: "not_daemon_managed" });
   });
   test("creator daemon offline even though another daemon on the host is online", () => {
-    expect(resolveRemoteTarget("orphan-b", nodesFor("orphan-b"), sessions, daemons)).toMatchObject({ ok: false, code: "creator_daemon_offline" });
+    expect(resolveRemoteTarget("start", "orphan-b", nodesFor("orphan-b"), sessions, daemons)).toMatchObject({ ok: false, code: "creator_daemon_offline" });
   });
   test("a daemon itself is refused", () => {
-    expect(resolveRemoteTarget("daemon-b", nodesFor("daemon-b"), sessions, daemons)).toMatchObject({ ok: false, code: "is_daemon" });
+    expect(resolveRemoteTarget("restart", "daemon-b", nodesFor("daemon-b"), sessions, daemons)).toMatchObject({ ok: false, code: "is_daemon" });
   });
 });
 
 const T = (over: Partial<RemoteTarget> = {}): RemoteTarget => ({
   node_id: "node_cb", alias: "coder-b", hostname: "machine-b", lifecycle_state: "active", session_status: "idle",
-  session_seen: "2026-10-05 10:00:00", model: "m1", daemon: { node_id: "node_db", alias: "daemon-b" }, ...over,
+  session_seen: "2026-10-05 10:00:00", model: "m1", daemon: { node_id: "node_db", alias: "daemon-b", online: true }, ...over,
 });
 
 describe("#562 precheck", () => {
@@ -112,9 +112,9 @@ describe("#562 precheck", () => {
     expect(precheck("stop", T({ lifecycle_state: "stopped" })).kind).toBe("noop");
     expect(precheck("stop", T({ lifecycle_state: "stopping" })).kind).toBe("refuse");
   });
-  test("restart/edit need the node up; edit needs config_update_capable", () => {
-    expect(precheck("restart", T()).kind).toBe("go");
-    expect(precheck("restart", T({ lifecycle_state: "stopped", session_status: "offline" })).kind).toBe("refuse");
+  test("restart/edit need the node up and config_update_capable", () => {
+    expect(precheck("restart", T(), { config_update_capable: true }).kind).toBe("go");
+    expect(precheck("restart", T({ lifecycle_state: "stopped", session_status: "offline" }), { config_update_capable: true }).kind).toBe("refuse");
     expect(precheck("edit", T(), { config_update_capable: false }).kind).toBe("refuse");
     expect(precheck("edit", T(), { config_update_capable: true }).kind).toBe("go");
   });
@@ -158,10 +158,91 @@ describe("#562 evaluateOutcome", () => {
     expect(evaluateOutcome("stop", T(), O(), O({ lifecycle_state: "stopped" })).state).toBe("done");
     expect(evaluateOutcome("stop", T(), O(), O({ lifecycle_state: "stop_failed" })).state).toBe("failed");
   });
-  test("restart/edit: config revision moves past the base", () => {
+  test("restart/edit: config revision moves past the base AND the node re-reported", () => {
+    const back = { session_seen: "2026-10-05 10:01:00" };
     expect(evaluateOutcome("restart", T(), O(), O(), { baseRevision: 1 }).state).toBe("pending");
-    expect(evaluateOutcome("restart", T(), O(), O({ config_revision: 2 }), { baseRevision: 1 }).state).toBe("done");
-    expect(evaluateOutcome("edit", T(), O(), O({ config_revision: 2, model: "m2" }), { baseRevision: 1, model: "m2" }).state).toBe("done");
-    expect(evaluateOutcome("edit", T(), O(), O({ config_revision: 2, model: "m1" }), { baseRevision: 1, model: "m2" }).state).toBe("failed");
+    expect(evaluateOutcome("restart", T(), O(), O({ config_revision: 2, ...back }), { baseRevision: 1 }).state).toBe("done");
+    expect(evaluateOutcome("edit", T(), O(), O({ config_revision: 2, model: "m2", ...back }), { baseRevision: 1, model: "m2" }).state).toBe("done");
+    expect(evaluateOutcome("edit", T(), O(), O({ config_revision: 2, model: "m1", ...back }), { baseRevision: 1, model: "m2" }).state).toBe("failed");
+  });
+});
+
+// ── #570: restart / edit no longer need a daemon ──────────────────────────
+// Decision table (verb × how the node was started × capability). "self" = hand-started
+// (`anet node start`, no create record), "bare" = an agent-node with no exit-75 supervisor
+// (pm2/systemd), which reports config_update_capable=false.
+describe("#570 restart/edit without a daemon", () => {
+  const capable = { config_update_capable: true };
+  const resolveOk = (verb: "start" | "stop" | "restart" | "edit", alias: string, ds = daemons) => {
+    const r = resolveRemoteTarget(verb, alias, nodesFor(alias), sessions, ds);
+    if (!r.ok) throw new Error(`${verb} ${alias}: ${r.code} ${r.message}`);
+    return r.target;
+  };
+
+  test("hand-started node: restart/edit resolve with no daemon link; start/stop still refuse", () => {
+    for (const v of ["restart", "edit"] as const) {
+      const t = resolveOk(v, "hand-b");
+      expect(t).toMatchObject({ node_id: "n_hand", hostname: "machine-b", daemon: null, session_status: "idle" });
+      expect(precheck(v, t, capable).kind).toBe("go");
+    }
+    for (const v of ["start", "stop"] as const) {
+      expect(resolveRemoteTarget(v, "hand-b", nodesFor("hand-b"), sessions, daemons)).toMatchObject({ ok: false, code: "not_daemon_managed" });
+    }
+  });
+  test("restart/edit need no daemon at all: none visible, none on the host, creator offline", () => {
+    expect(resolveOk("restart", "hand-b", []).daemon).toBeNull();                  // restricted member sees no daemons
+    expect(resolveOk("restart", "lone-c").daemon).toMatchObject({ alias: "daemon-c", online: false }); // machine-c has no online daemon
+    expect(resolveOk("edit", "orphan-b").daemon).toMatchObject({ alias: "daemon-old", online: false });
+    // ...while start/stop on the same nodes still refuse
+    expect(resolveRemoteTarget("stop", "lone-c", nodesFor("lone-c"), sessions, daemons)).toMatchObject({ ok: false, code: "no_daemon_on_host" });
+    expect(resolveRemoteTarget("start", "hand-b", nodesFor("hand-b"), sessions, [])).toMatchObject({ ok: false, code: "daemons_not_visible" });
+  });
+  test("a daemon itself and an unknown alias are still refused for restart/edit", () => {
+    expect(resolveRemoteTarget("edit", "daemon-b", nodesFor("daemon-b"), sessions, daemons)).toMatchObject({ ok: false, code: "is_daemon" });
+    expect(resolveRemoteTarget("restart", "nope", [], sessions, daemons)).toMatchObject({ ok: false, code: "not_found" });
+  });
+  test("not config_update_capable (bare agent-node) → restart AND edit refused up front, daemon-created or not", () => {
+    for (const t of [resolveOk("restart", "hand-b"), resolveOk("restart", "coder-b")]) {
+      for (const cfg of [{ config_update_capable: false }, {}, null, undefined]) {
+        const r = precheck("restart", { ...t, lifecycle_state: "active", session_status: "idle" }, cfg as any);
+        expect(r.kind).toBe("refuse");
+        if (r.kind === "refuse") {
+          expect(r.message).toContain("can't be restarted remotely: it doesn't support config updates (started without `anet node start`?)");
+          expect(r.message).toContain("restart it on its machine");
+        }
+      }
+      const e = precheck("edit", { ...t, lifecycle_state: "active", session_status: "idle" }, { config_update_capable: false });
+      expect(e.kind).toBe("refuse");
+      if (e.kind === "refuse") expect(e.message).toContain("it doesn't support config updates");
+    }
+  });
+  test("not running → refused before the capability question", () => {
+    const t = { ...resolveOk("restart", "hand-b"), session_status: "offline" };
+    const r = precheck("restart", t, capable);
+    expect(r.kind).toBe("refuse");
+    if (r.kind === "refuse") expect(r.message).toContain("is not running");
+  });
+  test("plan + header say how it will be done", () => {
+    const hand = resolveOk("restart", "hand-b");
+    expect(planRemote({ verb: "restart", target: hand, networkId: "n" }).note).toContain(`ask "hand-b" on machine-b itself, through the hub, to restart (it's not managed by a daemon)`);
+    expect(planRemote({ verb: "edit", target: hand, networkId: "n", model: "m9" }).note).toContain("to switch to model m9");
+    expect(planRemote({ verb: "edit", target: hand, networkId: "n", model: "m9" }).note).toContain("(it's not managed by a daemon)");
+    expect(planRemote({ verb: "restart", target: T(), networkId: "n" }).note).not.toContain("not managed by a daemon");
+    expect(describeTarget("restart", hand)).toBe("Node hand-b — on machine-b, not managed by a daemon; hub state: active / idle");
+    expect(describeTarget("edit", resolveOk("edit", "orphan-b"))).toContain("created by daemon daemon-old (offline — not needed for this)");
+    expect(describeTarget("stop", T())).toBe("Node coder-b — on machine-b, daemon daemon-b online; hub state: active / idle");
+    // the hub call is the same restart_node / update_node_config, addressed to the node
+    expect(toolCall("restart", hand, "n")).toEqual({ name: "restart_node", arguments: { node_id: "n_hand", network_id: "n" } });
+  });
+  test("outcome: a revision bump with the session still offline/unchanged is not 'done'", () => {
+    const before = O();
+    expect(evaluateOutcome("restart", T(), before, O({ config_revision: 2, session_status: "offline", session_seen: "2026-10-05 10:01:00" }), { baseRevision: 1 }).state).toBe("pending");
+    expect(evaluateOutcome("restart", T(), before, O({ config_revision: 2 }), { baseRevision: 1 }).state).toBe("pending");
+  });
+  test("timeouts are honest about what was seen last", () => {
+    expect(timeoutMessage("restart", "hand-b", 30, O({ session_status: "offline" }), "machine-b")).toContain("went offline and has not come back");
+    expect(timeoutMessage("edit", "hand-b", 30, O({ session_status: "working" }))).toContain("is still working");
+    expect(timeoutMessage("restart", "hand-b", 30, O())).toContain("has not seen \"hand-b\" restart yet");
+    expect(timeoutMessage("stop", "x", 30, O({ session_status: "offline" }))).toContain("has not seen \"x\" stop yet");
   });
 });

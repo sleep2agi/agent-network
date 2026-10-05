@@ -158,8 +158,8 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | Change an existing node's runtime / model; **takes effect on restart** |
 | `anet node ls` | List local nodes and network state |
 | `anet node ls --all [--network <id\|name>] [--json]` | List **every** node the Hub shows you in the current Network, grouped by machine (hostname); read-only, see below |
-| `anet node <start\|stop\|restart> <alias> --remote` | Start / stop / restart a node **on another machine**: the Hub has that machine's daemon do it (see "Managing nodes remotely" below) |
-| `anet node edit <alias> --model <id> --remote` | Switch the model of a node on another machine |
+| `anet node <start\|stop\|restart> <alias> --remote` | Start / stop / restart a node **on another machine**: start / stop go through that machine's daemon, restart goes to the node itself (see "Managing nodes remotely" below) |
+| `anet node edit <alias> --model <id> --remote` | Switch the model of a node on another machine (no daemon needed) |
 | `anet info <name>` | Show node configuration, process, and recent tasks |
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
@@ -214,14 +214,25 @@ Waiting up to 60s for the hub to show the result …
 ```
 
 - It uses the Hub's existing lifecycle tools (the same ones the app calls): start / stop are carried out by
-  **that machine's daemon** (`anet daemon`); restart / model change are delivered to the node itself, which exits
-  and is respawned by the `anet node start` wrapper the daemon started.
-- Requirements: the node's machine has an **online daemon**, and the node was **created by that daemon** (the app's
-  "new node" on that machine). Otherwise it refuses before dispatching and says why, e.g.
+  **that machine's daemon** (`anet daemon`); restart / model change are sent by the Hub **to the node itself**, which
+  finishes its current turn, exits (code 75) and is respawned by its own `anet node start` wrapper — whether a daemon
+  or a person started that wrapper.
+- **start / stop** require that the node's machine has an **online daemon** and that the node was **created by that
+  daemon** (the app's "new node" on that machine). Otherwise it refuses before dispatching and says why, e.g.
   `this machine can't be managed remotely: no daemon online on machine-c`; a node started by hand with
-  `anet node start` is managed on its own machine.
+  `anet node start` is started / stopped on its own machine.
+- **restart / model change** (#570) need **no daemon**, so they work for hand-started nodes too. They require that the
+  node is running and reports `config_update_capable` (it runs under an `anet node start` wrapper, which respawns it
+  on exit 75). Otherwise it refuses before dispatching:
+  `` "<alias>" can't be restarted remotely: it doesn't support config updates (started without `anet node start`?); restart it on its machine ``
+  — e.g. an `agent-node` run directly by pm2 / systemd, which nothing would bring back. The confirmation says how it
+  will be done, e.g. `ask "hand-b" on machine-b itself, through the hub, to restart (it's not managed by a daemon)`.
+- A restart / model change counts as done only when the Hub shows the node back (config revision advanced, a fresh
+  report, not offline). On timeout it says what it saw last (went offline and never came back → look on that machine;
+  still working → it restarts after its current turn).
 - Permissions are the Hub's: a viewer gets the Hub's `permission_denied`; a member with restricted agent access
-  sees no daemons and cannot manage nodes, and is refused up front.
+  sees no daemons and cannot read the node's config, so start / stop / restart / model change are all refused before
+  dispatching, with the reason — the node is not touched.
 - Only your login token (`token` in `~/.anet/config.json`) is used, never `COMMHUB_TOKEN`; a saved node token is refused.
 - Not in a terminal (script / pipe) and no `--yes`: nothing is done, exit code `1`. On timeout it says honestly that the
   Hub accepted the request but has not shown the result yet; check with `anet node ls --all`.
