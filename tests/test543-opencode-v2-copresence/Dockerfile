@@ -1,7 +1,9 @@
 # #543 — OpenCode V2 (@opencode/cli) co-presence preview, real binary + loopback stub model.
 FROM oven/bun:1.3.1
 
-ARG OPENCODE_V2_VERSION=2.0.22
+# Not an ARG: the qa.yml matrix step passes $GITHUB_SHA into every `^ARG` it finds in a suite Dockerfile,
+# which turned this into `@opencode/cli@<sha>` (npm ETARGET) on CI only.
+ENV OPENCODE_V2_VERSION=2.0.22
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl jq nodejs npm procps python3 tmux && \
     rm -rf /var/lib/apt/lists/* && \
