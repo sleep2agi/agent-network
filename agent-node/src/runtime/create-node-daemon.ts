@@ -354,6 +354,17 @@ export function _resetAnetBinAbsForTest(): void { _anetBinAbs = null; }
 // ── §4.2.6 B1 — minimalEnv (filter + fixed-keys-last + throw-on-collision) ──
 
 const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+/** #603 — Apple Silicon Homebrew prefix. bun/bunx, tmux and codex land in
+ *  /opt/homebrew/bin there, and a daemon running under some other node
+ *  (nvm, pkg) has none of them in its execDir — so a daemon-created codex
+ *  co-presence node failed its bunx/tmux/codex preflight on macOS. Fixed,
+ *  daemon-defined directories (not read from env.PATH), placed before the
+ *  system dirs the way a macOS login shell's `brew shellenv` orders them.
+ *  darwin only: Linux / Windows children keep SAFE_PATH unchanged. */
+const DARWIN_HOMEBREW_PATH = "/opt/homebrew/bin:/opt/homebrew/sbin";
+export function safePathFor(platform: NodeJS.Platform): string {
+  return platform === "darwin" ? `${DARWIN_HOMEBREW_PATH}:${SAFE_PATH}` : SAFE_PATH;
+}
 // #1490 — fixed env keys split by platform. Windows children need
 // USERPROFILE / HOMEDRIVE / HOMEPATH populated to resolve the home
 // directory; POSIX children only need HOME. Both platforms get PATH +
@@ -423,13 +434,17 @@ export function resolveChildHome(env: NodeJS.ProcessEnv, platform: NodeJS.Platfo
  *  ["LD_PRELOAD"] (G7/G8 invariant unchanged) — the only thing we
  *  add is a fixed dir name that the daemon process itself defines.
  */
-function computeChildPath(): string {
-  const execDir = dirname(process.execPath);
-  // Skip prepend if execDir is already an early SAFE_PATH entry
-  // (avoid duplicate path; canonical SAFE_PATH wins).
-  const safeParts = SAFE_PATH.split(":");
-  if (safeParts.includes(execDir)) return SAFE_PATH;
-  return `${execDir}:${SAFE_PATH}`;
+export function computeChildPath(
+  platform: NodeJS.Platform = process.platform,
+  execPath: string = process.execPath,
+): string {
+  const execDir = dirname(execPath);
+  const safe = safePathFor(platform);
+  // Skip prepend if execDir is already a safe-PATH entry
+  // (avoid duplicate path; canonical order wins).
+  const safeParts = safe.split(":");
+  if (safeParts.includes(execDir)) return safe;
+  return `${execDir}:${safe}`;
 }
 
 export function minimalEnv(
@@ -451,7 +466,7 @@ export function minimalEnv(
   const home = resolveChildHome(parentEnv, platform);
   const base: NodeJS.ProcessEnv = {
     ...filtered,
-    PATH: computeChildPath(),
+    PATH: computeChildPath(platform),
     HOME: home,
     LANG: parentEnv.LANG || "C.UTF-8",
   };
