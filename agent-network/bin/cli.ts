@@ -56,6 +56,7 @@ import { classifySessionStatus, summarizeSessions } from "../src/session-status-
 import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../src/offline-age";
 import { oneLineCell } from "../src/one-line-cell";
 import { padDisplayEnd } from "../src/display-width";
+import { formatMachineGroups, groupNodesByMachine, machineGroupsJson, parseNodeLsAllArgs, pickNetwork } from "../src/node-ls-all";
 import { formatHubTime } from "../src/hub-time-display";
 import { formatCliVersion } from "../src/cli-version-display";
 import { describeCopresenceStartupFailure } from "../src/copresence-startup-diagnosis";
@@ -4297,6 +4298,7 @@ Node Management:
   anet node restart <name>      Stop then start a node
   anet node loop <name> ...     Schedule a recurring goal on a node
   anet node ls                  List all nodes
+  anet node ls --all            Every node the Hub shows you, grouped by machine [--network <id|name>] [--json]
   anet node codex <verb> <ref>  Codex TUI co-presence lifecycle: preflight|verify|canary|start|restart|resume|fork|account|rollback
   anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
@@ -9037,6 +9039,9 @@ function showProfiles(cmd: string) {
 // ── ls ──
 
 async function lsCommand() {
+  // #562 — `--all`: every node the Hub shows you in one network, grouped by machine. Without it,
+  // nothing below changes (local directory view).
+  if (args.includes("--all")) return nodeLsAllCommand();
   const ids = listProfileIds();
   // #101 user warning — verbose mode (`anet ls -v` / `--verbose`) prints a
   // second line per node with the resolved toolset + flag set so users can
@@ -9164,6 +9169,62 @@ async function lsCommand() {
     }
     console.log();
   }
+}
+
+// #562 step 1 (read-only) — `anet node ls --all [--network <id|name>] [--json]`.
+// Reads the Hub with the user's own login (gc.token from `anet login`), never COMMHUB_TOKEN /
+// a node token: inside a node's shell COMMHUB_TOKEN is that node's credential, and this view
+// must be exactly what the Hub shows the *user* (restricted members get only their grants).
+async function nodeLsAllCommand() {
+  const flags = parseNodeLsAllArgs(args);
+  if (flags.error) { console.error(`[anet] ${flags.error}`); markUsageError(); return; }
+  const gc = loadGlobal();
+  const hub = (gc.hub || "").replace(/\/+$/, "");
+  const token = gc.token || "";
+  if (!hub || !token) { console.error("[anet] Not logged in. Run: anet login"); markFailed(); return; }
+  if (token.startsWith("ntok_")) {
+    console.error("[anet] The saved login is a node token; `node ls --all` reads as you, not as a node. Run: anet login");
+    markFailed(); return;
+  }
+  const headers = { Authorization: `Bearer ${token}` };
+  const getJson = async (path: string): Promise<{ ok: boolean; status: number; body: any; reason?: string }> => {
+    try {
+      const r = await fetch(`${hub}${path}`, { headers, signal: AbortSignal.timeout(20_000) });
+      const body: any = await r.json().catch(() => null);
+      return { ok: r.ok && !!body, status: r.status, body };
+    } catch (e: any) {
+      return { ok: false, status: 0, body: null, reason: hubReachReason(e) };
+    }
+  };
+  const failText = (r: { status: number; body: any; reason?: string }) =>
+    r.reason ?? `HTTP ${r.status}${r.body ? ` (${hubErrorText(r.body)})` : ""}`;
+
+  const nets = await getJson("/api/networks");
+  if (!nets.ok || !Array.isArray(nets.body?.networks)) {
+    console.error(`[anet] Could not list your networks: ${failText(nets)}`);
+    if (nets.status === 401) console.error("  Next: anet login");
+    markFailed(); return;
+  }
+  const pick = pickNetwork(nets.body.networks, flags.network, gc.network_id);
+  if (!pick.ok) { console.error(`[anet] ${pick.error}`); markFailed(); return; }
+  const netQ = `network_id=${encodeURIComponent(pick.network.network_id)}`;
+
+  const [status, sup] = await Promise.all([
+    getJson(`/api/status?${netQ}`),
+    getJson(`/api/host-supervisors?${netQ}`),
+  ]);
+  if (!status.ok || !Array.isArray(status.body?.sessions)) {
+    console.error(`[anet] Could not read the node list: ${failText(status)}`);
+    markFailed(); return;
+  }
+  const daemons = sup.ok && Array.isArray(sup.body?.daemons) ? sup.body.daemons : null;
+  const daemonsError = daemons === null ? failText(sup) : null;
+  const groups = groupNodesByMachine(status.body.sessions, daemons);
+  if (flags.json) {
+    console.log(JSON.stringify(machineGroupsJson(groups, { network: pick.network, daemonsError }), null, 2));
+    return;
+  }
+  for (const line of formatMachineGroups(groups, { network: pick.network, nowMs: Date.now(), daemonsError })) console.log(line);
 }
 
 // ── run ──

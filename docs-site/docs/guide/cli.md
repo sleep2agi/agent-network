@@ -157,9 +157,33 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet node clone <src> <new>` | 复制节点设置，生成一个**新身份**的节点（见下文「复制节点」） |
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | 改已存在节点的 runtime / 模型；**要重启才生效** |
 | `anet node ls` | 列出本地节点及网络状态 |
+| `anet node ls --all [--network <id\|name>] [--json]` | 列出 Hub 上当前 Network 里你能看到的**全部**节点，按机器（hostname）分组（只读，见下文） |
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
+
+`anet node ls --all` 不看当前目录，而是用你 `anet login` 的身份读 Hub（`/api/status` + `/api/host-supervisors`），
+把当前 Network（或 `--network <id|name>` 指定的那个，按 id、名字或唯一 id 前缀匹配）里的节点按机器分组列出：
+别名、runtime、状态与最后心跳、模型，以及那台机器上有没有在线的 daemon（`anet daemon`，有在线 daemon 的机器以后才能被远程管理）。
+
+```text
+Network: team (net_0123456) — 3 node(s) on 2 machine(s)
+
+  host-alpha   daemon: alpha-daemon online — remote-manageable
+    ALIAS     RUNTIME           STATUS   LAST SEEN  MODEL
+    a-coder   claude-agent-sdk  idle     12s ago    claude-sonnet-4-5
+    a-writer  codex-app-server  working  1m ago     gpt-5
+
+  host-beta   daemon: none visible
+    ALIAS     RUNTIME           STATUS   LAST SEEN  MODEL
+    b-runner  grok-build-cli    offline  3d ago     -
+```
+
+- 权限完全按 Hub 返回的来：被限制了 Agent 访问的成员只看到授权给他的节点；Hub 对这类成员不返回 daemon，
+  所以显示 `daemon: none visible`（「没看到」，不等于「没有」）。
+- 只用登录令牌（`~/.anet/config.json` 的 `token`），不用 `COMMHUB_TOKEN` 或任何节点令牌。
+- `--json` 输出 `{ network, daemons_readable, machines: [{ hostname, daemon, daemons, nodes }] }`。
+- 不加 `--all` 时 `anet node ls` 行为不变。
 
 `anet node delete <name> --force` 先做一遍和 `anet node stop` 相同的停止（共存节点的 tmux 会话也一起停：
 codex 共存按标记 + `CODEX_HOME` 认，其余只认完整会话名、不按前缀），再删本地（`.anet/nodes/<id>/`），最后删 Hub 上这个节点的那一行，

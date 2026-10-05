@@ -205,6 +205,7 @@ on:
       - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
       - 'tests/test561-node-menu/**'
+      - 'tests/test562-node-ls-all/**'
       - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -393,6 +394,7 @@ on:
       - 'tests/test528-codex-adopt/**'
       - 'tests/test532-codex-menu/**'
       - 'tests/test561-node-menu/**'
+      - 'tests/test562-node-ls-all/**'
       - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -1389,6 +1391,24 @@ jobs:
           docker cp "run-anet-test561:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test561/" 2>/dev/null \
             || echo "::warning::no artifacts under /tmp/art in anet-test561"
           docker rm -f "run-anet-test561" >/dev/null 2>&1 || true
+          exit $rc
+
+      # #562 step 1 — `anet node ls --all`: every node the Hub shows the logged-in user in one network,
+      # grouped by machine + daemon state. 真 CLI × 真 Hub(随机端口、HOME=mktemp):两台机器 + 一个 daemon +
+      # 另一个网络 + 受限成员(只授权一个节点)。见证红 4 条:不读 daemon 列表 / COMMHUB_TOKEN(节点令牌)
+      # 压过登录令牌 / /api/status 不带 network_id / daemon 自己的会话当成节点行。
+      - name: Build + run test562-node-ls-all
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test562 \
+            -f tests/test562-node-ls-all/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test562" --network none -e ARTIFACT_DIR=/tmp/art \
+            anet-test562 || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test562"
+          docker cp "run-anet-test562:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test562/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test562"
+          docker rm -f "run-anet-test562" >/dev/null 2>&1 || true
           exit $rc
 
       # #536 — anet resume <codex node> [--thread <id>|--pick]:夹具节点 + 夹具 CODEX_HOME(3 条合成 rollout),无 codex/无登录/无 Hub。

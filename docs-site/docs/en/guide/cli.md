@@ -157,9 +157,36 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet node clone <src> <new>` | Copy a node's settings into a node with a **new identity** (see "Clone a node" below) |
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | Change an existing node's runtime / model; **takes effect on restart** |
 | `anet node ls` | List local nodes and network state |
+| `anet node ls --all [--network <id\|name>] [--json]` | List **every** node the Hub shows you in the current Network, grouped by machine (hostname); read-only, see below |
 | `anet info <name>` | Show node configuration, process, and recent tasks |
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
+
+`anet node ls --all` ignores the current directory. It reads the Hub as you (your `anet login`) via
+`/api/status` + `/api/host-supervisors` and lists the nodes of the current Network (or the one named by
+`--network <id|name>`, matched by id, name, or a unique id prefix) grouped by machine: alias, runtime,
+status with last heartbeat, model, and whether that machine has a live daemon (`anet daemon`; only a
+machine with an online daemon can be managed remotely later).
+
+```text
+Network: team (net_0123456) — 3 node(s) on 2 machine(s)
+
+  host-alpha   daemon: alpha-daemon online — remote-manageable
+    ALIAS     RUNTIME           STATUS   LAST SEEN  MODEL
+    a-coder   claude-agent-sdk  idle     12s ago    claude-sonnet-4-5
+    a-writer  codex-app-server  working  1m ago     gpt-5
+
+  host-beta   daemon: none visible
+    ALIAS     RUNTIME           STATUS   LAST SEEN  MODEL
+    b-runner  grok-build-cli    offline  3d ago     -
+```
+
+- Permissions are exactly what the Hub returns: a member with restricted agent access sees only the
+  nodes granted to them. The Hub returns no daemons to such members, so the line reads
+  `daemon: none visible` ("not visible to you", not "there is none").
+- Only your login token (`token` in `~/.anet/config.json`) is used, never `COMMHUB_TOKEN` or a node token.
+- `--json` prints `{ network, daemons_readable, machines: [{ hostname, daemon, daemons, nodes }] }`.
+- Without `--all`, `anet node ls` is unchanged.
 
 `anet node delete <name> --force` first runs the same stop as `anet node stop` (co-presence tmux
 sessions included: codex co-presence by marker + `CODEX_HOME`, others by exact session name, never a prefix), then deletes the local
