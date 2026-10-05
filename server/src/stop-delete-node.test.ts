@@ -435,6 +435,34 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
     expect((await call(u.stop_node, { child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A })).ok).toBe(true);
   });
 
+  // #571 — 手工起的节点(id `n_…`)没有任何 daemon 链接。改前:authority==null 时
+  // 放行调用方点名的任意同网 daemon → 门铃发过去,那台 daemon 本地无记录,按 alias
+  // 全机 pgrep+SIGTERM,误杀同 alias 的别的 agent-node。改后:不论传没传 daemon 一律拒。
+  test("#571: stop/delete of a hand-started node refuse even with an explicit same-network daemon", async () => {
+    setupAlphaNetwork();
+    const HAND_ID = "n_571abcde";
+    const HAND_ALIAS = "sd-hand-571";
+    seedChild(NET_A, HAND_ID, HAND_ALIAS, USER_A_ID, "tok_sd_hand_571");
+    const u = buildHandlers(USER_A_ID);
+    const s = await call(u.stop_node, { child_node_id: HAND_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A });
+    expect(s.ok).toBe(false);
+    expect(s.error).toBe("not_daemon_managed");
+    expect(String(s.message)).toContain("anet node stop");
+    const d = await call(u.delete_node, { child_node_id: HAND_ID, daemon_node_id: DAEMON_A_ID, confirm_alias: HAND_ALIAS, network_id: NET_A });
+    expect(d.error).toBe("not_daemon_managed");
+    // 没有任何副作用:状态没动、没写 stop 请求行
+    expect(readNode(HAND_ID)?.lifecycle_state).toBe("active");
+    const rows = db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM node_stop_requests WHERE child_node_id = ?1`, HAND_ID);
+    expect(Number(rows?.n ?? 0)).toBe(0);
+    // 回归钉:daemon 建的 child(有 create 记录)照常可停
+    db.run(
+      `INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,network_id,runtime,model,flags_json,env_keys,status,created_at,created_by_token,child_node_id)
+       VALUES(?1,?2,?3,?4,'claude-agent-sdk','x','{}','[]','succeeded',1,'t',?5)`,
+      [`cr_${CHILD_A_ID.slice(5)}`, DAEMON_A_ID, CHILD_A_ALIAS, NET_A, CHILD_A_ID],
+    );
+    expect((await call(u.stop_node, { child_node_id: CHILD_A_ID, network_id: NET_A })).ok).toBe(true);
+  });
+
   // #1448 finding-5 — delete 完成时按派发时定住的 token_id 精确撤 ntok,而非按
   // name='node:<alias>' 广撤。改前:同 alias 在 delete 未收敛窗口内被重建、拿到同名新
   // token,ack 会把新 token 一并误撤(下面 REBUILT_TOK 断言 not revoked 会红)。

@@ -4698,7 +4698,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           ok: false, error: "not_daemon_managed",
           message:
             `node ${child_node_id} was not created by a daemon (it was started by hand with ` +
-            `\`anet node start\` on some machine), so no daemon on the Hub can stop it. ` +
+            `\`anet node start\` on some machine), so no daemon on the Hub can stop it ` +
+            `(naming a daemon_node_id does not change that). ` +
             `Run \`anet node stop <alias>\` on that machine instead. ` +
             `Daemon-created children have ids beginning with \`node_\`; this one does not.`,
         };
@@ -4826,6 +4827,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // authority==null(create 记录被裁剪的旧 child)加拒,避免给它们的 stop/delete 引入
     // 新失败面——handler 的 daemon_node_id??resolveDaemonForChild 已兜住无法解析的情形。
     const authoritativeDaemonId = resolveDaemonForChild(args.child_node_id);
+    // #571 — 手工起的节点(id 不以 `node_` 开头)**没有**任何 daemon 链接。此前
+    // authority==null 时放行调用方点名的任意同网 daemon → 门铃发给那台 daemon,
+    // 它本地没这个 child 的记录,会走「按 alias 全机 pgrep + SIGTERM」的收敛分支,
+    // 杀掉那台机器上所有同 alias 的 agent-node(不分工作目录/HOME/网络)。
+    // 对 hand-started 节点这条路在概念上就不成立(见 explainUnresolvableDaemon ①),
+    // 所以不管调用方传没传 daemon_node_id 一律拒。`node_` 开头但缺 create 记录的
+    // (②,显式传 daemon 是文档化的出路)保持原行为。
+    if (!authoritativeDaemonId && !args.child_node_id.startsWith("node_")) {
+      return explainUnresolvableDaemon(args.child_node_id);
+    }
     if (authoritativeDaemonId && authoritativeDaemonId !== args.daemon_node_id) {
       return { ok: false, error: "daemon_child_mismatch", message: "daemon_node_id is not this child's authoritative creator daemon" };
     }
