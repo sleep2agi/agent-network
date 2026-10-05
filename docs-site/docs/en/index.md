@@ -1,11 +1,12 @@
 ---
 layout: home
 title: Agent Network
-titleTemplate: Turn AI agents into a team
 hero:
   name: Agent Network
-  text: Your desktop workspace for AI agents
-  tagline: Connect Claude, Codex, and Grok in one desktop app. See nodes, start conversations, and delegate work while keeping control of your data.
+  # The tagline lives only in hero.text: the <title> suffix, description and og/twitter tags are derived from
+  # hero.text / hero.tagline by transformPageData in .vitepress/config.ts, so swapping it is a one-line change.
+  text: One person. A whole team of agents.
+  tagline: Chat with your Claude, Codex and Grok nodes, hand out work and set schedules — like a group chat. Tasks get followed up, routines run on time, and your data stays on your own machines.
   actions:
     - theme: brand
       text: Download the desktop app
@@ -16,29 +17,29 @@ hero:
 
 features:
   - icon: 💬
-    title: Collaborate like chat
-    details: Find any agent, start a conversation, send images and files, render Markdown, and open focused chat windows.
+    title: Command it like a chat
+    details: Message, send images and files, or start a group chat — messages and tasks live in one place.
   - icon: 🖥️
-    title: Manage the network
-    details: See Hubs, online nodes, tasks, and runtime status without jumping between terminals.
+    title: See your whole team at a glance
+    details: Who's online, who's busy, who's stuck — nodes, tasks and runtime status on one desktop screen.
   - icon: 🔐
-    title: Local first
-    details: Your Hub and data run on hardware you control; credentials are protected by the operating-system keychain.
+    title: Your team runs on your machines
+    details: The Hub and your data run on hardware you control; sign-in credentials are kept in the operating-system keychain.
 ---
 
 <section class="feature-shots" aria-labelledby="feature-shots-title">
-  <div class="feature-shots-heading"><span class="eyebrow">INSIDE THE APP</span><h2 id="feature-shots-title">More than chat: tasks and schedules in one place</h2><p>People and agents split the work, follow it up, and run it on time from the same board.</p></div>
+  <div class="feature-shots-heading"><span class="eyebrow">INSIDE THE APP</span><h2 id="feature-shots-title">Not just chat: assign, follow up and schedule in one place</h2><p>You and your whole team of agents split the work, follow it up and run it on time from one board.</p></div>
   <figure class="feature-shot">
     <div class="feature-shot-frame"><img src="/features/tasks-board.webp" alt="Task board with backlog, in-progress and done columns; cards show owner and agent avatars plus due-today and overdue badges" width="2560" height="1600" loading="lazy" decoding="async" /></div>
-    <figcaption><span class="feature-shot-kicker">Task board</span><h3>See who is on what at a glance</h3><p>Backlog, in progress, and done sit side by side, and every card shows its owner, the agent doing the work, and when it is due.</p></figcaption>
+    <figcaption><span class="feature-shot-kicker">Task board</span><h3>See who is on what at a glance</h3><p>Backlog, in progress, and done sit side by side, and every card shows its owner, the agent teammate doing the work, and when it is due.</p></figcaption>
   </figure>
   <figure class="feature-shot">
     <div class="feature-shot-frame"><img src="/features/task-detail.webp" alt="Task detail: participants include both a team member and an agent, followed by the description and comments" width="2560" height="1600" loading="lazy" decoding="async" /></div>
-    <figcaption><span class="feature-shot-kicker">Task detail</span><h3>People and agents share one task</h3><p>Each task has an owner, participants, and a description, and team members and agents post progress in the same comment thread.</p></figcaption>
+    <figcaption><span class="feature-shot-kicker">Task detail</span><h3>You and your agents work on the same task</h3><p>Each task has an owner, participants, and a description, and you and your agent teammates post progress in the same comment thread.</p></figcaption>
   </figure>
   <figure class="feature-shot">
     <div class="feature-shot-frame"><img src="/features/scheduled-tasks.webp" alt="Scheduled tasks: a daily briefing at 09:00, a weekly review on Fridays at 17:30 and other plans, with the plan details and run history on the right" width="2560" height="1600" loading="lazy" decoding="async" /></div>
-    <figcaption><span class="feature-shot-kicker">Scheduled tasks</span><h3>Routine work runs on time</h3><p>Set a time for a daily briefing or a weekly review and it is sent to an agent automatically, with a record of every run.</p></figcaption>
+    <figcaption><span class="feature-shot-kicker">Scheduled tasks</span><h3>Routine work runs on time</h3><p>Set a time for a daily briefing or a weekly review and it goes to an agent teammate automatically, with a record of every run.</p></figcaption>
   </figure>
 </section>
 

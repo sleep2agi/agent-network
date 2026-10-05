@@ -5,6 +5,30 @@ export default withMermaid(defineConfig({
   title: 'Agent Network',
   description: '本地优先的多 Agent 协作平台 — Apache 2.0 开源，自部署，纯本机',
   cleanUrls: true,
+  // 首页(zh / en)的标语只写在 frontmatter 的 hero.text 一处(#567):<title> 后缀、meta description
+  // 和 og / twitter 标签都从 hero.text(标语)+ hero.tagline(副标题)派生,换标语只改 index.md 那一行。
+  // 只作用于 layout: home 的页面,其他页面不动。
+  transformPageData(pageData) {
+    const fm = pageData.frontmatter
+    if (fm.layout !== 'home' || !fm.hero?.text) return
+    const slogan = String(fm.hero.text)
+    const sub = fm.hero.tagline ? String(fm.hero.tagline) : ''
+    const name = String(fm.hero.name ?? fm.title ?? 'Agent Network')
+    fm.titleTemplate = slogan
+    ;(pageData as any).titleTemplate = slogan // PageData 自带 titleTemplate 字段(加载时从 frontmatter 拷过来),两处都要写
+    if (sub) pageData.description = sub
+    const ogTitle = `${name} — ${slogan}`
+    fm.head = [
+      ...(fm.head ?? []),
+      ['meta', { property: 'og:type', content: 'website' }],
+      ['meta', { property: 'og:site_name', content: 'Agent Network' }],
+      ['meta', { property: 'og:title', content: ogTitle }],
+      ...(sub ? [['meta', { property: 'og:description', content: sub }]] : []),
+      ['meta', { name: 'twitter:card', content: 'summary' }],
+      ['meta', { name: 'twitter:title', content: ogTitle }],
+      ...(sub ? [['meta', { name: 'twitter:description', content: sub }]] : []),
+    ]
+  },
   markdown: {
     // Inject data-source-line attributes on outermost block-level tokens so
     // SelectionReporter can construct a GitHub permalink to the exact line.
