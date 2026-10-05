@@ -517,6 +517,10 @@ async function sweepOrphansForChild(
 //      d. hub-says-active but no matching pid → log a warn (operator
 //         signal) but don't try to nudge hub state from here. P3 may add
 //         a "report dead child" tool; PR1.1 just surfaces.
+//      e. (#579) identity, not alias: argv must also carry `--config <the
+//         config this daemon wrote for the child>` (same rule as the
+//         #2403 stop sweeps). A same-alias node from another workdir/HOME
+//         is ignored with a warn, never adopted.
 
 interface MyChild { child_node_id: string; alias: string; lifecycle_state: string; }
 
@@ -533,6 +537,12 @@ export interface RebuildDeps {
   // Injectable for tests: returns the /proc/<pid>/stat State char
   // (e.g. "R", "S", "Z"). Null if pid gone.
   readProcStatState?: (pid: number) => string | null;
+  // #579 — daemon 的工作目录(默认 process.cwd()),用来定位它给每个 child 写的
+  // config(childWorkDirFor → <childWorkDir>/.anet/nodes/<alias>/config.json),
+  // 与 handleStopDoorbell 同一套推导。
+  workDir?: string;
+  // 测试用:固定 child config 根目录(同 StopDoorbellDeps.workdirRoot)。
+  workdirRoot?: string;
 }
 
 /** Default pgrep wrapper. Pattern explicitly boundary-anchored so
@@ -634,9 +644,23 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
   result.total_children_from_hub = children.length;
 
   const selfPid = process.pid;
+  const daemonWorkDir = deps.workDir ?? process.cwd();
 
   for (const c of children) {
     if (!c.alias || !c.child_node_id) continue;
+    // #579 — 与 #2403 的清扫同一条身份规则:只认 argv 里 `--alias <alias>` **且**
+    // `--config <本 daemon 给这个 child 写的 config>` 的进程。只看 alias 时,自己的 child
+    // 已死而同机另一个工作目录 / HOME 里有同名节点在跑,重启后会把那个外人收进
+    // childrenMap,之后的 stop 走命中路径向它的进程组发信号。
+    const configPaths = expectedChildConfigPaths(
+      deps.workdirRoot ?? join(childWorkDirFor(daemonWorkDir, c.alias), ".anet", "nodes"),
+      c.alias,
+    );
+    if (configPaths.length === 0) {
+      result.missing.push(c.alias);
+      deps.warn(`[rebuild] alias=${c.alias} skipped: no child config path to match (alias is not a single path segment)`);
+      continue;
+    }
     let pids: number[];
     try {
       pids = await pgrepAlias(c.alias);
@@ -656,6 +680,11 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
       }
       const cmd = readCmdline(pid);
       if (!cmdlineMatchesAlias(cmd, c.alias)) continue;
+      if (!cmdlineMatchesChild(cmd, c.alias, configPaths)) {
+        // 不打印对方的 argv / 路径:那是别人的节点。
+        deps.warn(`[rebuild] ignoring pid=${pid} alias=${c.alias}: --config is not the config this daemon wrote for the child (same-alias node from another workdir/HOME)`);
+        continue;
+      }
       verified.push(pid);
     }
 

@@ -7353,6 +7353,7 @@ if (fileConfig.role === "host_supervisor") {
     import("./runtime/stop-daemon.js").then(({ rebuildChildrenMapOnBoot }) => {
       rebuildChildrenMapOnBoot({
         callCommHub,
+        workDir: process.cwd(),   // #579 — 与 handleStopDoorbell 同一个 daemon 工作目录
         log: (m: string) => log(m),
         warn: (m: string) => warn(m),
       }).catch((e: any) => warn(`rebuildChildrenMapOnBoot failed: ${e?.message || e}`));

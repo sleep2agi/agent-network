@@ -13,6 +13,11 @@
 #       with not_daemon_managed, writes no stop request, the process lives.
 #   S4  `anet project up` with a node running outside tmux (live .pid) → "already running",
 #       pidfile untouched, no second copy; a dead pid's .pid is still cleared.
+#   S5  (#579) daemon restart while its own child is dead and a same-alias agent-node
+#       runs in another workdir/HOME. Boot rebuild must not adopt that process (its
+#       --config is not the one the daemon wrote), so the following stop_node acks
+#       stopped without signalling it. (Before: rebuild matched by --alias alone,
+#       recorded the foreign pid as the child, and stop SIGTERMed its process group.)
 #
 # Never touches anything outside the container: own hub port + DB, HOME per actor,
 # tmux only through ANET_TMUX_SOCKET (a private -S socket); no kill-server.
@@ -242,6 +247,63 @@ SECOND=$(pgrep -f "anet node start live571|--alias live571" | grep -vx "$LIVE" |
 alive "$LIVE" && ok "original live571 still alive" || bad "original live571 died"
 [[ "$(cat "$PROJ/.anet/nodes/stale571/.pid" 2>/dev/null)" != "$DEAD" ]] && ok "stale571 dead-pid .pid cleared (stale cleanup kept)" || bad "stale571 still holds the dead pid"
 printf '%s' "$OUT" | grep -Eq 'stale571 — starting' && ok "stale571 was started" || bad "stale571 was not started"
+
+# ── S5 ────────────────────────────────────────────────────────────
+note "S5. daemon restart: own child dead + same-alias agent-node elsewhere → rebuild must not adopt it"
+CHILD5="dup579"
+RESP=$(tool "$UTOK" create_node "{\"daemon_node_id\":\"$DAEMON_NODE_ID\",\"node_spec\":{\"name\":\"$CHILD5\",\"runtime\":\"claude-agent-sdk\",\"model\":\"claude-opus-t579\"},\"network_id\":\"$NET_ID\"}")
+CR5=$(printf '%s' "$RESP" | jq -r .request_id 2>/dev/null)
+[[ "$CR5" == cr_* ]] && ok "create_node dispatched ($CR5)" || bad "create_node: $RESP"
+CHILD5_NODE_ID="node_${CR5#cr_}"
+CHILD5_CFG="$DAEMON_WD/.anet/nodes/$CHILD5/config.json"
+CHILD5_PID=""
+for _ in $(seq 1 60); do
+  sleep 1
+  CHILD5_PID=$(pgrep -f -- "--config $CHILD5_CFG --alias $CHILD5" | sed -n 1p)
+  [[ -n "$CHILD5_PID" ]] && break
+done
+alive "$CHILD5_PID" && ok "child $CHILD5 pid=$CHILD5_PID" || { bad "child $CHILD5 never came up"; tail -40 /tmp/t571-daemon.log; }
+sleep 3
+
+# stop the daemon (wrapper + its agent-node), then kill the child's whole process group:
+# the hub row stays lifecycle_state=active, which is exactly what list_my_children returns.
+DAEMON_CFG="$DAEMON_WD/.anet/nodes/$DAEMON_NAME/config.json"
+kill "$DAEMON_PID" 2>/dev/null; pkill -f -- "--config $DAEMON_CFG" 2>/dev/null
+for _ in $(seq 1 20); do pgrep -f -- "--config $DAEMON_CFG" >/dev/null || break; sleep 0.5; done
+pgrep -f -- "--config $DAEMON_CFG" >/dev/null && bad "daemon still running after kill" || ok "daemon stopped"
+C5_PGID=$(ps -o pgid= -p "$CHILD5_PID" 2>/dev/null | tr -d ' ')
+[[ -n "$C5_PGID" ]] && kill -KILL -- "-$C5_PGID" 2>/dev/null
+for _ in $(seq 1 20); do alive "$CHILD5_PID" || break; sleep 0.5; done
+alive "$CHILD5_PID" && bad "own child pid=$CHILD5_PID still alive" || ok "own child $CHILD5 is dead (pgid $C5_PGID killed)"
+LS5=$(sqlite3 "$HUB_DB" "SELECT COALESCE(lifecycle_state,'active') FROM nodes WHERE node_id='$CHILD5_NODE_ID';")
+[[ "$LS5" == active ]] && ok "hub still lists $CHILD5 as active" || bad "hub lifecycle_state=$LS5 (rebuild would not see it)"
+
+FOREIGN5=$(start_foreign_agent_node "$ROOT/other5" "$CHILD5" "n_579eeee")
+FAKE_PIDS+=("$FOREIGN5")
+sleep 0.5
+alive "$FOREIGN5" && ok "foreign same-alias agent-node pid=$FOREIGN5 (HOME=$ROOT/other5)" || bad "foreign5 did not start"
+
+( cd "$DAEMON_WD" && HOME="$DAEMON_WD" ANET_BIN_ABS="$ANET_BIN_ABS" ANET_DAEMON_ALLOW_ENV_BIN=1 \
+    exec anet node start "$DAEMON_NAME" ) >/tmp/t571-daemon2.log 2>&1 &
+DAEMON_PID=$!
+REBUILT=""
+for _ in $(seq 1 60); do sleep 1; grep -q '\[rebuild\] done' /tmp/t571-daemon2.log && { REBUILT=1; break; }; done
+[[ -n "$REBUILT" ]] && ok "restarted daemon ran boot rebuild" || { bad "no [rebuild] done in restarted daemon log"; tail -40 /tmp/t571-daemon2.log; }
+grep '\[rebuild\]' /tmp/t571-daemon2.log | sed 's/^/    | /'
+if grep -q "\[rebuild\] recovered alias=$CHILD5 → pid=$FOREIGN5" /tmp/t571-daemon2.log; then
+  bad "rebuild adopted the foreign pid=$FOREIGN5 as child $CHILD5"
+else ok "rebuild did not adopt the foreign pid"; fi
+grep -q "\[rebuild\] ignoring pid=$FOREIGN5 alias=$CHILD5" /tmp/t571-daemon2.log \
+  && ok "rebuild logged why it ignored pid=$FOREIGN5" || bad "no ignore line for pid=$FOREIGN5"
+
+RESP=$(tool "$UTOK" stop_node "{\"child_node_id\":\"$CHILD5_NODE_ID\",\"network_id\":\"$NET_ID\",\"force\":true}")
+SR5=$(printf '%s' "$RESP" | jq -r .request_id 2>/dev/null)
+[[ "$SR5" == sr_* ]] && ok "stop_node dispatched ($SR5)" || bad "stop_node: $RESP"
+ST5=$(wait_stop_request_done "$SR5" 40)
+[[ "$ST5" == stopped ]] && ok "daemon acked stopped (own config on disk → converge)" || { bad "stop request status='$ST5'"; tail -30 /tmp/t571-daemon2.log; }
+sleep 2
+if alive "$FOREIGN5"; then ok "S5 foreign same-alias agent-node survived the daemon restart + stop"
+else bad "S5 foreign same-alias agent-node pid=$FOREIGN5 was KILLED (boot rebuild adopted it by alias)"; fi
 
 printf "\n────────────────────────────────────────────\n"
 printf "test571 lifecycle safety — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
