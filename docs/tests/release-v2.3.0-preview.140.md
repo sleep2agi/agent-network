@@ -10,7 +10,7 @@ Since `.139` (release merge `c9d04c7e`, #2379), `agent-network/` has one change:
 
 ## Behaviour
 
-- `anet` can create and start an opencode co-presence node on the OpenCode V2 CLI (`@opencode/cli` 2.x) when `flags.opencodeUnsafeTools=true`; the V2 binary is resolved from the package and its version checked. Without the flag nothing changes and V1 (`opencode-ai`) remains the default.
+- `anet node create <name> --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools` creates an OpenCode V2 (`@opencode/cli` 2.0.22) co-presence node (records `opencodeGeneration:"v2"`, `opencodeMode:"copresence"`, `flags.opencodeUnsafeTools:true`). Without `--opencode-unsafe-tools`, `create` and `anet node start` refuse with one actionable line, because V2 ignores the V1 safety env and has no enforced safe preset yet. V2 headless is refused. Without `--opencode-generation v2` nothing changes: V1 (`opencode-ai`) remains the default.
 - The paired agent-node `.107` also pins the Claude SDK (0.3.289) and fixes systemPrompt-after-restart for claude-agent-sdk nodes.
 
 ## Install
