@@ -195,6 +195,7 @@ on:
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test185-external-schedules/**'
+      - 'tests/test594-codex-login-health/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -386,6 +387,7 @@ on:
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test185-external-schedules/**'
+      - 'tests/test594-codex-login-health/**'
       - 'tests/test631-private-config-permissions/**'
       - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
@@ -1749,6 +1751,10 @@ jobs:
           # Not L1: cold build measured 104s + run 35s in Docker (bun.sh install + two bun installs)
           # and the serial L1 build budget is already near its limit (L0+L1 job 137-165s of 300s, CLAUDE.md rule 6).
           - test185-external-schedules
+          # #594: real Hub + three real agent-node (codex runtime, fake logins) -> /api/status
+          # health.codex_login (fingerprint + shared_with), with an in-suite witnessed red.
+          # Not L1: two bun installs + three node processes; same budget reasoning as test185.
+          - test594-codex-login-health
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
