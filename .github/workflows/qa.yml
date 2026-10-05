@@ -706,6 +706,30 @@ jobs:
       - name: Run qa-create-node-codex-copresence
         run: docker run --rm anet-qa-create-node-codex-copresence
 
+  qa-daemon-stop-codex-copresence:
+    # #596 daemon 建的 Codex TUI 共存节点,daemon 的 stop_node / delete_node 要真把三段 tmux
+    # (TUI / app-server / 桥)和所有带 ANET_NODE_MARKER 的进程停掉 —— 启动器 pid 的进程组碰不到它们。
+    # 真 hub + 真 `anet daemon up` + 真 tmux + 真 codex 0.147.0(与 test466 同版本);
+    # 另断言建节点请求不被误报为 runtime_capability_check_failed(启动器起完会话正常退出 0)。
+    # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
+    name: daemon stop/delete codex co-presence e2e (Docker, real hub + daemon + tmux)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-daemon-stop-codex-copresence"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build qa-daemon-stop-codex-copresence
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-qa-daemon-stop-codex-copresence \
+            -f tests/qa-daemon-stop-codex-copresence/Dockerfile .
+
+      - name: Run qa-daemon-stop-codex-copresence
+        run: docker run --rm anet-qa-daemon-stop-codex-copresence
+
   test562b-node-remote:
     # #562 step 2 — `anet node <start|stop|restart> <alias> --remote` / `anet node edit <alias> --model <id> --remote`.
     # 真 hub(随机端口、抛弃库)+ 真 `anet daemon up`(容器 hostname=machine-b)+ daemon 建的真子节点;被测 CLI 从源码跑、
