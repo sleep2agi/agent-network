@@ -472,10 +472,11 @@ describe("rebuildChildrenMapOnBoot (RFC-027 PR1.1)", () => {
         return { ok: false };
       },
       log: () => {}, warn: () => {},
+      workdirRoot: "/w/nodes",   // #579 — 只认 --config 是本 daemon 写的那份
       pgrepAlias: async (a) => a === "alpha" ? [1001] : a === "beta" ? [2002] : [],
       readProcCmdline: (pid) =>
-        pid === 1001 ? "agent-node\0--alias\0alpha\0" :
-        pid === 2002 ? "agent-node\0--alias\0beta\0" : null,
+        pid === 1001 ? "agent-node\0--config\0/w/nodes/alpha/config.json\0--alias\0alpha\0" :
+        pid === 2002 ? "agent-node\0--config\0/w/nodes/beta/config.json\0--alias\0beta\0" : null,
       readProcStatState: () => "S",
     });
     expect(r.recovered).toBe(2);
@@ -526,9 +527,10 @@ describe("rebuildChildrenMapOnBoot (RFC-027 PR1.1)", () => {
     const r = await rebuildChildrenMapOnBoot({
       callCommHub: async () => ({ ok: true, children: [{ child_node_id: "node_dup", alias: "dup", lifecycle_state: "active" }] }),
       log: () => {}, warn: () => {},
+      workdirRoot: "/w/nodes",
       pgrepAlias: async () => [5050, 6060],
-      // Both legit cmdlines — likely operator started a duplicate.
-      readProcCmdline: () => "agent-node\0--alias\0dup\0",
+      // Both legit cmdlines (same --config of ours) — likely operator started a duplicate.
+      readProcCmdline: () => "agent-node\0--config\0/w/nodes/dup/config.json\0--alias\0dup\0",
       readProcStatState: () => "S",
     });
     expect(r.recovered).toBe(0);
@@ -644,6 +646,137 @@ describe("rebuildChildrenMapOnBoot — real subprocess primitive (no pgrep mocks
       expect(_internals.cmdlineMatchesAlias(cmdlineWithAgentNode, alias.slice(0, -1))).toBe(false);
     } finally {
       try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
+    }
+  });
+});
+
+// ─── #579 — boot rebuild 也只认身份(--alias 且 --config 是本 daemon 写的那份) ──────────
+//
+// #2403 让 stop 的各次清扫要求 `--alias` 与本 daemon 给该 child 写的 `--config` 同时命中,
+// 但 rebuildChildrenMapOnBoot 仍只凭 `--alias` 把进程记成「我的 child」。自己的 child
+// 已死、同机另一个工作目录 / HOME 里有同名节点在跑时,daemon 重启会把那个外人收进
+// childrenMap,之后的 stop 走命中路径,向**它的进程组**发 SIGTERM/SIGKILL。
+describe("#579 rebuildChildrenMapOnBoot — identity, not alias", () => {
+  const alive = (p: number) => { try { process.kill(p, 0); return true; } catch { return false; } };
+  // `bash -c 'sleep 60; :' <argv0> …` 让 /proc/<pid>/cmdline 带上假的 agent-node argv(同 #2403)。
+  async function startFake(cfg: string, alias: string): Promise<number> {
+    const { spawn } = await import("node:child_process");
+    const c = spawn("bash", ["-c", "sleep 60; :", "/opt/fake/agent-node", "--config", cfg, "--alias", alias],
+      { stdio: "ignore", detached: true });
+    c.unref();
+    return c.pid!;
+  }
+  function seed(alias: string) {
+    const workdirRoot = join(scratch, "daemon", ".anet", "nodes");
+    mkdirSync(join(workdirRoot, alias), { recursive: true });
+    const mineCfg = join(workdirRoot, alias, "config.json");
+    writeFileSync(mineCfg, JSON.stringify({ node_id: `node_${alias}`, alias }));
+    const otherCfg = join(scratch, "other-home", ".anet", "nodes", alias, "config.json");
+    return { workdirRoot, mineCfg, otherCfg };
+  }
+  const hubWith = (alias: string) => async (tool: string) =>
+    tool === "list_my_children"
+      ? { ok: true, children: [{ child_node_id: `node_${alias}`, alias, lifecycle_state: "active" }] }
+      : { ok: false };
+  async function stopVia(workdirRoot: string, alias: string) {
+    const acks: any[] = [];
+    await handleStopDoorbell({ request_id: "sr_579" }, {
+      workdirRoot,
+      callCommHub: async (tool: string, args: any) => {
+        if (tool === "get_stop_request") return {
+          ok: true, request_id: "sr_579", child_node_id: `node_${alias}`, child_alias: alias,
+          action: "stop", delete_config: false, grace_seconds: 2, force: false,
+        };
+        acks.push(args); return { ok: true };
+      },
+      log: () => {}, warn: () => {},
+    });
+    return acks;
+  }
+
+  test("mocked: a same-alias pid whose --config is not ours is ignored, with one warn naming pid + reason", async () => {
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const warns: string[] = [];
+    const root = "/w/daemon/.anet/nodes";
+    const r = await rebuildChildrenMapOnBoot({
+      workdirRoot: root,
+      callCommHub: hubWith("dup"),
+      log: () => {}, warn: (m) => warns.push(m),
+      pgrepAlias: async () => [7001, 7002],
+      readProcCmdline: (pid) => pid === 7001
+        ? ["agent-node", "--config", "/w/other/.anet/nodes/dup/config.json", "--alias", "dup"].join("\0")
+        : ["agent-node", "--config", `${root}/dup/config.json`, "--alias", "dup"].join("\0"),
+      readProcStatState: () => "S",
+    });
+    expect(r.recovered).toBe(1);
+    expect(r.ambiguous.length).toBe(0);
+    expect(getChildrenSnapshot().map(c => c.pid)).toEqual([7002]);
+    const ign = warns.filter(w => w.includes("pid=7001"));
+    expect(ign.length).toBe(1);
+    expect(ign[0]).toContain("--config");
+    expect(ign[0]).not.toContain("/w/other");   // 不把别人的路径/argv 打进日志
+  });
+
+  test("mocked: no --config at all (alias-only argv) is not adopted", async () => {
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const r = await rebuildChildrenMapOnBoot({
+      workdirRoot: "/w/daemon/.anet/nodes",
+      callCommHub: hubWith("bare"),
+      log: () => {}, warn: () => {},
+      pgrepAlias: async () => [7101],
+      readProcCmdline: () => "agent-node\0--alias\0bare\0",
+      readProcStatState: () => "S",
+    });
+    expect(r.recovered).toBe(0);
+    expect(r.missing).toContain("bare");
+    expect(getChildrenSnapshot().length).toBe(0);
+  });
+
+  test("real processes: ours + a foreign same-alias node → map holds only ours; stop leaves the foreign one alive", async () => {
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const alias = "dup579a-" + Math.floor(Math.random() * 1e6);
+    const { workdirRoot, mineCfg, otherCfg } = seed(alias);
+    const minePid = await startFake(mineCfg, alias);
+    const otherPid = await startFake(otherCfg, alias);
+    try {
+      await new Promise(r => setTimeout(r, 300));
+      expect(alive(minePid) && alive(otherPid)).toBe(true);
+      // daemon「重启」:内存 map 为空,真 pgrep + 真 /proc。
+      _resetChildrenMapForTest();
+      const r = await rebuildChildrenMapOnBoot({ workdirRoot, callCommHub: hubWith(alias), log: () => {}, warn: () => {} });
+      expect(getChildrenSnapshot().map(c => c.pid)).toEqual([minePid]);   // 改前:两个都算 → ambiguous,map 空
+      expect(r.recovered).toBe(1);
+      const acks = await stopVia(workdirRoot, alias);
+      for (let i = 0; i < 30 && alive(minePid); i++) await new Promise(r => setTimeout(r, 100));
+      expect(acks.at(-1).status).toBe("stopped");
+      expect(alive(minePid)).toBe(false);
+      expect(alive(otherPid)).toBe(true);
+    } finally {
+      for (const p of [minePid, otherPid]) { try { process.kill(p, "SIGKILL"); } catch { /* gone */ } }
+    }
+  });
+
+  test("real processes: own child dead + foreign same-alias node alive → not adopted; stop does not signal it", async () => {
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const alias = "dup579b-" + Math.floor(Math.random() * 1e6);
+    const { workdirRoot, otherCfg } = seed(alias);   // 本 daemon 的 config 在盘上,但它的进程已死
+    const otherPid = await startFake(otherCfg, alias);
+    try {
+      await new Promise(r => setTimeout(r, 300));
+      expect(alive(otherPid)).toBe(true);
+      _resetChildrenMapForTest();
+      const warns: string[] = [];
+      const r = await rebuildChildrenMapOnBoot({ workdirRoot, callCommHub: hubWith(alias), log: () => {}, warn: (m) => warns.push(m) });
+      expect(getChildrenSnapshot().length).toBe(0);   // 改前:外人被记成 child
+      expect(r.recovered).toBe(0);
+      expect(r.missing).toContain(alias);
+      expect(warns.some(w => w.includes(`pid=${otherPid}`))).toBe(true);
+      const acks = await stopVia(workdirRoot, alias);
+      await new Promise(r => setTimeout(r, 500));
+      expect(acks.at(-1).status).toBe("stopped");    // 本地有记录 → 收敛
+      expect(alive(otherPid)).toBe(true);             // 改前:命中路径向它的进程组发 SIGTERM
+    } finally {
+      try { process.kill(otherPid, "SIGKILL"); } catch { /* gone */ }
     }
   });
 });
