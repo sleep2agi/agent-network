@@ -260,6 +260,7 @@ import {
   migrateCodexPendingThread,
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
+import { decidePendingThreadAtStart, findThreadRollouts } from "../src/codex-pending-thread-restart";
 import { POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
@@ -1625,12 +1626,27 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let authoritativeOldPendingMarker: string | undefined;
   if (prelaunchCfg.codexPendingThread !== undefined) {
     const oldIdentity = readCopresenceMarker(nodesDir(), resolved.id);
-    if (oldIdentity.kind !== "ok" || prelaunchCfg.codexPendingThread?.marker !== oldIdentity.marker.marker) {
+    // #602 — a clean `anet node stop` removes the marker but leaves the candidate; when its thread
+    // never got a rollout there is nothing to carry over, so it is dropped instead of refusing forever.
+    const pendingDecision = decidePendingThreadAtStart(
+      prelaunchCfg.codexPendingThread,
+      oldIdentity.kind === "ok" ? { kind: "ok", marker: oldIdentity.marker.marker }
+        : oldIdentity.cause === "MISSING" ? { kind: "missing" }
+        : { kind: "unreadable", cause: oldIdentity.cause },
+      (tid) => findThreadRollouts(opts.codexHome, tid),
+    );
+    if (pendingDecision.kind === "migrate") {
+      authoritativeOldPendingMarker = pendingDecision.oldMarker;
+    } else if (pendingDecision.kind === "drop-unmaterialized") {
+      delete prelaunchCfg.codexPendingThread;
+      atomicWritePrivateJson(join(nodesDir(), resolved.id, "config.json"), prelaunchCfg);
+      console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
+    } else if (pendingDecision.kind === "refuse") {
       console.error(`[anet] ❌ pending Codex thread is not bound to the exact private previous-generation marker.`);
+      console.error(`[anet]    ${pendingDecision.reason}.`);
       console.error(`[anet]    Fail-closed before reap/start: inspect the private marker and node config; no TUI was started.`);
       process.exit(1);
     }
-    authoritativeOldPendingMarker = oldIdentity.marker.marker;
   }
 
   // #P3fix必修12 — tmux capability preflight. `new-session -e KEY=VALUE`
