@@ -158,8 +158,8 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | 改已存在节点的 runtime / 模型；**要重启才生效** |
 | `anet node ls` | 列出本地节点及网络状态 |
 | `anet node ls --all [--network <id\|name>] [--json]` | 列出 Hub 上当前 Network 里你能看到的**全部**节点，按机器（hostname）分组（只读，见下文） |
-| `anet node <start\|stop\|restart> <alias> --remote` | 启动 / 停止 / 重启**另一台机器上**的节点：Hub 让那台机器的 daemon 去做（见下文「远程管理节点」） |
-| `anet node edit <alias> --model <id> --remote` | 给另一台机器上的节点换模型 |
+| `anet node <start\|stop\|restart> <alias> --remote` | 启动 / 停止 / 重启**另一台机器上**的节点：start / stop 由那台机器的 daemon 去做，restart 直接发给节点自己（见下文「远程管理节点」） |
+| `anet node edit <alias> --model <id> --remote` | 给另一台机器上的节点换模型（不需要 daemon） |
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
@@ -211,11 +211,20 @@ Waiting up to 60s for the hub to show the result …
 ```
 
 - 走的是 Hub 上已有的生命周期工具（和 app 一样）：start / stop 由**那台机器的 daemon**（`anet daemon`）执行；
-  restart / 换模型由节点自己收到后退出、被 daemon 起的 `anet node start` 外壳重新拉起。
-- 能远程管理的前提：节点所在机器上有**在线的 daemon**，且节点是**由这个 daemon 创建的**（app「新建节点」选那台机器）。
+  restart / 换模型由 Hub **直接发给节点自己**，节点处理完当前回合后退出（退出码 75），由它自己的 `anet node start` 外壳重新拉起——
+  不管这个外壳是 daemon 起的还是人手工起的。
+- **start / stop** 的前提：节点所在机器上有**在线的 daemon**，且节点是**由这个 daemon 创建的**（app「新建节点」选那台机器）。
   否则在派发之前就拒绝并说明原因，例如 `this machine can't be managed remotely: no daemon online on machine-c`；
-  手工 `anet node start` 起的节点要在它自己的机器上管。
-- 权限完全由 Hub 判：viewer 会看到 Hub 的 `permission_denied`；被限制 Agent 访问的成员看不到 daemon，也不能管理节点，会被直接拒绝。
+  手工 `anet node start` 起的节点要在它自己的机器上 start / stop。
+- **restart / 换模型**（#570）**不需要 daemon**，手工起的节点也可以。前提是节点正在运行，并且上报了
+  `config_update_capable`（即它跑在 `anet node start` 外壳下，退出 75 会被重新拉起）。不满足就在派发前拒绝：
+  `` "<alias>" can't be restarted remotely: it doesn't support config updates (started without `anet node start`?); restart it on its machine ``
+  ——例如用 pm2 / systemd 直接跑的 `agent-node`，退出后不会有人拉起它。确认时会写明做法，例如
+  `ask "hand-b" on machine-b itself, through the hub, to restart (it's not managed by a daemon)`。
+- 重启 / 换模型的结果以 Hub 为准：节点重新上报（配置版本前进、心跳更新、不是离线）才算成功；超时时如实说明最后看到的状态
+  （已离线一直没回来 → 去那台机器上看；仍在 working → 当前回合结束后才会重启）。
+- 权限完全由 Hub 判：viewer 会看到 Hub 的 `permission_denied`；被限制 Agent 访问的成员看不到 daemon，start / stop 在派发前就被拒绝，
+  restart / 换模型由 Hub 拒绝，节点不受影响。
 - 只用登录令牌（`~/.anet/config.json` 的 `token`），不用 `COMMHUB_TOKEN`；保存的若是节点令牌则拒绝。
 - 不在终端里（脚本 / 管道）且没带 `--yes`：什么都不做，退出码 `1`。超时会如实说「请求已被 Hub 接受但还没看到结果」，用 `anet node ls --all` 查看。
 - `--network <id|name>` 选别的 Network；本地专用的参数（`--tmux`、`--copresence` 等）和 `--remote` 一起用会被拒绝（退出码 `2`）。

@@ -10,13 +10,17 @@
  *   start   → start_node          Hub → that machine's daemon (host_supervisor) spawns the child
  *   stop    → stop_node           Hub → that machine's daemon stops the child
  *   restart → restart_node        Hub → the node itself drains + exits 75; its `anet node start`
- *                                 wrapper (the one the daemon spawned) respawns it
+ *                                 wrapper respawns it (whoever ran that wrapper: a daemon or a person)
  *   edit    → update_node_config  same doorbell; a model change is restart-tier
  * Permission checks are the Hub's (canWrite: member+, not viewer, not agent-restricted); this
  * module never decides who may do what — it only refuses what cannot work, BEFORE dispatching:
+ *   start/stop (need the machine's daemon):
  *   - no online daemon on the node's machine          → "this machine can't be managed remotely"
  *   - the node was not created by a daemon            → the Hub keeps no daemon for it
  *   - the daemon that created it is offline
+ *   restart/edit (#570 — no daemon involved, the Hub pushes to the node itself):
+ *   - the node is not running                         → nothing would receive the doorbell
+ *   - it does not report config_update_capable        → no exit-75 supervisor: it would just die
  *
  * Pure functions here; the HTTP calls live in bin/cli.ts (nodeRemoteCommand).
  */
@@ -122,7 +126,9 @@ export type RemoteTarget = {
   session_status: string | null;
   session_seen: string | null;
   model: string | null;
-  daemon: { node_id: string; alias: string };
+  /** The daemon that created the node (start/stop go through it). null = not daemon-managed: only
+   *  restart/edit resolve without one. `online` is false only for restart/edit (they don't need it). */
+  daemon: { node_id: string; alias: string; online: boolean } | null;
 };
 
 export type ResolveResult =
@@ -137,7 +143,7 @@ const sameHost = (a: string | null, b: string | null) => !!a && !!b && a.toLower
  * @param sessions GET /api/status?network_id=<net>                (sessions)
  * @param daemons  GET /api/host-supervisors?network_id=<net>      (daemons; [] = none visible)
  */
-export function resolveRemoteTarget(alias: string, nodes: HubNodeRow[], sessions: HubSession[], daemons: HubDaemon[]): ResolveResult {
+export function resolveRemoteTarget(verb: RemoteVerb, alias: string, nodes: HubNodeRow[], sessions: HubSession[], daemons: HubDaemon[]): ResolveResult {
   const session = (Array.isArray(sessions) ? sessions : []).find((x) => s(x?.alias) === alias) ?? null;
   const rows = (Array.isArray(nodes) ? nodes : []).filter((n) => n && s(n.alias) === alias && s(n.node_id));
   // One alias can own several rows (re-created nodes); the live one is the row the session points at.
@@ -151,6 +157,27 @@ export function resolveRemoteTarget(alias: string, nodes: HubNodeRow[], sessions
   const hostname = s(session?.host?.hostname) ?? s(session?.hostname) ?? s(node.hostname);
   const hostLabel = hostname ?? "(unknown host)";
   const all = Array.isArray(daemons) ? daemons.filter((d) => d && s(d.daemon_node_id)) : [];
+  const creatorId = node.lifecycle_controllable === true ? s(node.lifecycle_daemon_node_id) : null;
+  const creator = creatorId ? all.find((d) => d.daemon_node_id === creatorId) ?? null : null;
+  const target = (daemon: RemoteTarget["daemon"]): ResolveResult => ({
+    ok: true,
+    target: {
+      node_id: node.node_id,
+      alias,
+      hostname,
+      lifecycle_state: s(node.lifecycle_state) ?? "active",
+      session_status: s(session?.status),
+      session_seen: s(session?.last_seen_at) ?? s(session?.updated_at),
+      model: s(session?.model) ?? s(node.model),
+      daemon,
+    },
+  });
+  // #570 — restart/edit never touch a daemon: the Hub pushes them to the node itself and the node's
+  // own `anet node start` wrapper respawns it (exit 75). Whether that wrapper exists is precheck's
+  // job (config_update_capable), not the daemon's. The creator, if any, is kept only for display.
+  if (verb === "restart" || verb === "edit") {
+    return target(creator ? { node_id: creator.daemon_node_id!, alias: s(creator.alias) ?? creator.daemon_node_id!, online: creator.online === true } : null);
+  }
   if (all.length === 0) {
     return {
       ok: false, code: "daemons_not_visible",
@@ -165,33 +192,19 @@ export function resolveRemoteTarget(alias: string, nodes: HubNodeRow[], sessions
       message: `this machine can't be managed remotely: no daemon online on ${hostLabel}${off.length ? ` (${off.join(", ")} is offline)` : ""}. On that machine: anet daemon start`,
     };
   }
-  const creatorId = s(node.lifecycle_daemon_node_id);
-  if (node.lifecycle_controllable !== true || !creatorId) {
+  if (!creatorId) {
     return {
       ok: false, code: "not_daemon_managed",
       message: `"${alias}" on ${hostLabel} was not created by a daemon, so the hub has no daemon that can start/stop it. Manage it on that machine (anet node … ${alias}), or re-create it through the daemon (app → new node → that machine)`,
     };
   }
-  const creator = all.find((d) => d.daemon_node_id === creatorId) ?? null;
   if (!creator || creator.online !== true) {
     return {
       ok: false, code: "creator_daemon_offline",
       message: `"${alias}" belongs to daemon ${creator?.alias ?? creatorId}, which is ${creator ? "offline" : "not visible to you"}; only that daemon can manage it`,
     };
   }
-  return {
-    ok: true,
-    target: {
-      node_id: node.node_id,
-      alias,
-      hostname,
-      lifecycle_state: s(node.lifecycle_state) ?? "active",
-      session_status: s(session?.status),
-      session_seen: s(session?.last_seen_at) ?? s(session?.updated_at),
-      model: s(session?.model) ?? s(node.model),
-      daemon: { node_id: creator.daemon_node_id!, alias: s(creator.alias) ?? creator.daemon_node_id! },
-    },
-  };
+  return target({ node_id: creator.daemon_node_id!, alias: s(creator.alias) ?? creator.daemon_node_id!, online: true });
 }
 
 // ── per-verb precheck (state the hub already shows) ────────────────────────
@@ -219,8 +232,13 @@ export function precheck(verb: RemoteVerb, t: RemoteTarget, cfg?: { config_updat
   if (!isRunning(t)) {
     return { kind: "refuse", message: `"${t.alias}" is not running (${st}${t.session_status ? `, ${t.session_status}` : ""}); ${verb === "restart" ? "start it instead" : "start it first"}: anet node start ${t.alias} --remote` };
   }
-  if (verb === "edit" && cfg && cfg.config_update_capable === false) {
-    return { kind: "refuse", message: `"${t.alias}" runs an agent-node too old to apply config remotely (config_update_capable=false); upgrade it on ${t.hostname ?? "its machine"}` };
+  // #570 — the node applies both by exiting 75 and relying on its supervisor to respawn it. Only an
+  // `anet node start` wrapper does that, and it says so with config_update_capable=true. Anything
+  // else (a bare agent-node under pm2/systemd, an agent-node too old to report it, no config read)
+  // would simply exit and stay down — so refuse up front, for restart as much as for edit.
+  if (cfg?.config_update_capable !== true) {
+    const what = verb === "restart" ? "restarted remotely" : "switched to another model remotely (that needs a restart)";
+    return { kind: "refuse", message: `"${t.alias}" can't be ${what}: it doesn't support config updates (started without \`anet node start\`?); ${verb === "restart" ? "restart it" : "change it"} on its machine (${t.hostname ?? "unknown host"})` };
   }
   return { kind: "go" };
 }
@@ -239,11 +257,22 @@ export function remoteCommandArgv(a: { verb: RemoteVerb; alias: string; networkI
 export function describePlan(verb: RemoteVerb, t: RemoteTarget, model?: string | null): string {
   const where = t.hostname ?? "(unknown host)";
   switch (verb) {
-    case "start": return `ask the hub to have daemon ${t.daemon.alias} on ${where} start "${t.alias}"`;
-    case "stop": return `ask the hub to have daemon ${t.daemon.alias} on ${where} stop "${t.alias}" (its config is kept; start it again with --remote)`;
-    case "restart": return `ask the hub to restart "${t.alias}" on ${where} (it finishes its current turn, exits and is respawned)`;
-    case "edit": return `ask the hub to switch "${t.alias}" on ${where} to model ${model} (was ${t.model ?? "unknown"}); the node restarts to apply it`;
+    case "start": return `ask the hub to have daemon ${t.daemon?.alias ?? "?"} on ${where} start "${t.alias}"`;
+    case "stop": return `ask the hub to have daemon ${t.daemon?.alias ?? "?"} on ${where} stop "${t.alias}" (its config is kept; start it again with --remote)`;
+    case "restart": return `ask "${t.alias}" on ${where} itself, through the hub, to restart${selfNote(t)} (it finishes its current turn, exits and its \`anet node start\` respawns it)`;
+    case "edit": return `ask "${t.alias}" on ${where} itself, through the hub, to switch to model ${model} (was ${t.model ?? "unknown"})${selfNote(t)}; it restarts to apply it`;
   }
+}
+
+const selfNote = (t: RemoteTarget) => (t.daemon ? "" : " (it's not managed by a daemon)");
+
+/** The one-line "where/what" header printed before the plan. */
+export function describeTarget(verb: RemoteVerb, t: RemoteTarget): string {
+  const where = t.hostname ?? "(unknown host)";
+  const state = `hub state: ${t.lifecycle_state}${t.session_status ? ` / ${t.session_status}` : ""}`;
+  if (verb === "start" || verb === "stop") return `Node ${t.alias} — on ${where}, daemon ${t.daemon?.alias ?? "?"} online; ${state}`;
+  const mgr = t.daemon ? `created by daemon ${t.daemon.alias}${t.daemon.online ? "" : " (offline — not needed for this)"}` : "not managed by a daemon";
+  return `Node ${t.alias} — on ${where}, ${mgr}; ${state}`;
 }
 
 export function planRemote(a: { verb: RemoteVerb; target: RemoteTarget; networkId: string; model?: string | null; force?: boolean }): PlannedCommand {
@@ -320,8 +349,13 @@ export function evaluateOutcome(verb: RemoteVerb, t: RemoteTarget, before: Obser
     if (st === "stop_failed") return { state: "failed", message: `the daemon on ${where} could not stop "${t.alias}" (hub: stop_failed)` };
     return { state: "pending" };
   }
+  // restart / edit: the hub promotes config_revision only when the respawned node reports in again
+  // (finalize-on-report_status), so a revision past the base already means "it came back". Also require
+  // that this report is visible in the session (seen moved, not offline): "done" must mean reachable.
   const base = want.baseRevision ?? before.config_revision ?? 0;
   if (now.config_revision !== null && now.config_revision > base) {
+    const back = !!now.session_seen && now.session_seen !== before.session_seen && classifySessionStatus(now.session_status) !== "offline";
+    if (!back) return { state: "pending" };
     if (verb === "edit" && want.model && now.model !== want.model) {
       return { state: "failed", message: `"${t.alias}" restarted but reports model ${now.model ?? "unknown"}, not ${want.model}` };
     }
@@ -330,6 +364,18 @@ export function evaluateOutcome(verb: RemoteVerb, t: RemoteTarget, before: Obser
   return { state: "pending" };
 }
 
-export function timeoutMessage(verb: RemoteVerb, alias: string, seconds: number): string {
-  return `no result within ${seconds}s — the request was accepted by the hub, but it has not seen "${alias}" ${verb === "stop" ? "stop" : verb === "start" ? "come up" : "restart"} yet. It may still finish; check: anet node ls --all`;
+/**
+ * @param last the last observation before the deadline (null = none could be read). For restart/edit it
+ *             tells "went down and never came back" (the supervisor did not respawn it — a real failure
+ *             worth a different next step) apart from "still finishing its turn".
+ */
+export function timeoutMessage(verb: RemoteVerb, alias: string, seconds: number, last: Observation | null = null, host: string | null = null): string {
+  const generic = `no result within ${seconds}s — the request was accepted by the hub, but it has not seen "${alias}" ${verb === "stop" ? "stop" : verb === "start" ? "come up" : "restart"} yet. It may still finish; check: anet node ls --all`;
+  if ((verb === "restart" || verb === "edit") && last && classifySessionStatus(last.session_status) === "offline") {
+    return `no result within ${seconds}s — "${alias}" went offline and has not come back. Its supervisor may not have respawned it; look at it on ${host ?? "its machine"} (anet node start ${alias} there). Check: anet node ls --all`;
+  }
+  if ((verb === "restart" || verb === "edit") && last && classifySessionStatus(last.session_status) === "working") {
+    return `no result within ${seconds}s — "${alias}" is still working, and it restarts only after its current turn finishes — so it may still apply; check later: anet node ls --all`;
+  }
+  return generic;
 }

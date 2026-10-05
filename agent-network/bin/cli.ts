@@ -57,7 +57,7 @@ import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../s
 import { oneLineCell } from "../src/one-line-cell";
 import { padDisplayEnd } from "../src/display-width";
 import { formatMachineGroups, groupNodesByMachine, machineGroupsJson, parseNodeLsAllArgs, pickNetwork } from "../src/node-ls-all";
-import { evaluateOutcome as evaluateRemoteOutcome, explainHubRefusal as explainRemoteHubRefusal, isRemoteInvocation, parseRemoteArgs, planRemote, precheck, resolveRemoteTarget, timeoutMessage as remoteTimeoutMessage, toolCall as remoteToolCall, type Observation as RemoteObservation, type RemoteVerb } from "../src/node-remote";
+import { describeTarget as describeRemoteTarget, evaluateOutcome as evaluateRemoteOutcome, explainHubRefusal as explainRemoteHubRefusal, isRemoteInvocation, parseRemoteArgs, planRemote, precheck, resolveRemoteTarget, timeoutMessage as remoteTimeoutMessage, toolCall as remoteToolCall, type Observation as RemoteObservation, type RemoteVerb } from "../src/node-remote";
 import { parseCommhubToolResult } from "../src/commhub-response";
 import { formatHubTime } from "../src/hub-time-display";
 import { formatCliVersion } from "../src/cli-version-display";
@@ -9233,7 +9233,8 @@ async function nodeLsAllCommand() {
 
 // #562 step 2 — `anet node <start|stop|restart> <alias> --remote` / `anet node edit <alias> --model <id> --remote`.
 // Acts on a node on ANOTHER machine through the Hub's existing lifecycle tools (the ones the app calls):
-// start/stop go to that machine's daemon (host_supervisor), restart/edit to the node itself.
+// start/stop go to that machine's daemon (host_supervisor), restart/edit to the node itself — so those two
+// work for hand-started nodes too, as long as it runs under `anet node start` (config_update_capable, #570).
 // Auth exactly like `node ls --all`: the token saved by `anet login`, never COMMHUB_TOKEN; a node token is refused.
 // Confirm with the #561 menu's confirm helper (confirmAndRun); --yes skips it. Waits (bounded) for the hub to
 // show the result. Pure logic: src/node-remote.ts.
@@ -9282,10 +9283,16 @@ async function nodeRemoteCommand(verb: RemoteVerb, rest: string[]) {
     return { nodes, status, sup };
   };
   const first = await readState();
-  for (const [what, r] of [["nodes", first.nodes], ["node list", first.status], ["daemons", first.sup]] as const) {
+  // restart/edit don't involve a daemon (#570): the daemon list only labels the header there, so a failed
+  // read of it must not block them.
+  const needsDaemon = verb === "start" || verb === "stop";
+  const mustRead: Array<[string, typeof first.nodes]> = [["nodes", first.nodes], ["node list", first.status]];
+  if (needsDaemon) mustRead.push(["daemons", first.sup]);
+  for (const [what, r] of mustRead) {
     if (!r.ok) { console.error(`[anet] Could not read ${what} from the hub: ${failText(r)}`); markFailed(); return; }
   }
-  const resolved = resolveRemoteTarget(alias, first.nodes.body.nodes, first.status.body.sessions, first.sup.body.daemons);
+  const daemonRows = first.sup.ok && Array.isArray(first.sup.body?.daemons) ? first.sup.body.daemons : [];
+  const resolved = resolveRemoteTarget(verb, alias, first.nodes.body.nodes, first.status.body.sessions, daemonRows);
   if (!resolved.ok) { console.error(`[anet] ${resolved.message}`); markFailed(); return; }
   const t = resolved.target;
 
@@ -9297,7 +9304,7 @@ async function nodeRemoteCommand(verb: RemoteVerb, rest: string[]) {
     cfg = c.body;
   }
   const pre = precheck(verb, t, cfg);
-  console.log(`Node ${alias} — on ${t.hostname ?? "(unknown host)"}, daemon ${t.daemon.alias} online; hub state: ${t.lifecycle_state}${t.session_status ? ` / ${t.session_status}` : ""}`);
+  console.log(describeRemoteTarget(verb, t));
   if (pre.kind === "noop") { console.log(pre.message); return; }
   if (pre.kind === "refuse") { console.error(`[anet] ${pre.message}`); markFailed(); return; }
 
@@ -9334,6 +9341,7 @@ async function nodeRemoteCommand(verb: RemoteVerb, rest: string[]) {
     if (flags.waitSeconds === 0) { console.log(`Not waiting (--wait 0). Check: anet node ls --all`); return 0; }
     console.log(`Waiting up to ${flags.waitSeconds}s for the hub to show the result …`);
     const deadline = Date.now() + flags.waitSeconds * 1000;
+    let last: RemoteObservation | null = null;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1000));
       const [n, st, c] = await Promise.all([
@@ -9351,11 +9359,12 @@ async function nodeRemoteCommand(verb: RemoteVerb, rest: string[]) {
         config_revision: c && c.ok && typeof c.body?.config_revision === "number" ? c.body.config_revision : null,
         model: c && c.ok ? (c.body?.model ?? null) : null,
       };
+      last = now;
       const out = evaluateRemoteOutcome(verb, t, before, now, { model: flags.model, baseRevision });
       if (out.state === "done") { console.log(`✓ ${out.message}`); return 0; }
       if (out.state === "failed") { console.error(`[anet] ✗ ${out.message}`); return 1; }
     }
-    console.error(`[anet] ${remoteTimeoutMessage(verb, alias, flags.waitSeconds)}`);
+    console.error(`[anet] ${remoteTimeoutMessage(verb, alias, flags.waitSeconds, last, t.hostname)}`);
     return 1;
   };
 

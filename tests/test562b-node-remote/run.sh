@@ -18,7 +18,15 @@
 #   G  restricted member         → refused before dispatch, even with an admin token in COMMHUB_TOKEN
 #   H  viewer                    → the hub's permission_denied surfaced, nothing changed
 #   I  unknown alias / local-only flag / saved node token → refused (rc 1 / 2 / 1)
-# M1–M4 are witnessed reds against mutated source; a mutation that does not apply is a failure (MUTATION_NOOP).
+# #570 — restart/edit don't need a daemon. hand-b is started BY HAND on machine-b (`anet node create` +
+# `anet node start` in its own workdir/HOME, id n_…, no create record → no daemon link); bare-b is a
+# node on machine-b that reports config_update_capable=false (what a bare agent-node under pm2 reports):
+#   J  restart hand-b --yes      → its agent-node pid changes, the `anet node start` wrapper pid does not,
+#                                  "not managed by a daemon" in the plan, "✓ … restarted"
+#   K  edit hand-b --model m2    → hub config shows m2, "✓ … now runs model m2"
+#   L  restart / edit bare-b     → refused before dispatch: "doesn't support config updates", rc 1
+#   M  stop / start hand-b       → still refused ("was not created by a daemon"), hand-b untouched
+# M1–M6 are witnessed reds against mutated source; a mutation that does not apply is a failure (MUTATION_NOOP).
 set -uo pipefail
 
 if [[ ! -f /.dockerenv && "${ALLOW_NON_DOCKER:-}" != "1" ]]; then
@@ -48,14 +56,15 @@ PORT=$(free_port)
 HUB="http://127.0.0.1:$PORT"
 WORK=$(mktemp -d)
 HUB_DB="$WORK/hub.db"
-DAEMON_HOME="$WORK/daemon-home"; ADMIN_HOME="$WORK/admin"; MEMBER_HOME="$WORK/member"; VIEWER_HOME="$WORK/viewer"; NTOK_HOME="$WORK/ntok"
+DAEMON_HOME="$WORK/daemon-home"; HAND_HOME="$WORK/hand-home"; HAND_WD="$WORK/hand-wd"; ADMIN_HOME="$WORK/admin"; MEMBER_HOME="$WORK/member"; VIEWER_HOME="$WORK/viewer"; NTOK_HOME="$WORK/ntok"
 CLI_CWD="$WORK/elsewhere"
-mkdir -p "$DAEMON_HOME/.anet" "$DAEMON_HOME/d" "$ADMIN_HOME" "$MEMBER_HOME" "$VIEWER_HOME" "$NTOK_HOME/.anet" "$CLI_CWD"
+mkdir -p "$HAND_HOME" "$HAND_WD" "$DAEMON_HOME/.anet" "$DAEMON_HOME/d" "$ADMIN_HOME" "$MEMBER_HOME" "$VIEWER_HOME" "$NTOK_HOME/.anet" "$CLI_CWD"
 PW='t562b_Password_xyz_Q1'
 CHILD=coder-b
 
 cleanup() {
   local p
+  [[ -n "${HAND_WRAPPER_PID:-}" ]] && kill "$HAND_WRAPPER_PID" 2>/dev/null
   for p in $(pgrep -f "agent-node.*--alias" 2>/dev/null); do kill "$p" 2>/dev/null; done
   [[ -n "${DAEMON_PID:-}" ]] && kill "$DAEMON_PID" 2>/dev/null
   [[ -n "${HUB_PID:-}" ]] && kill "$HUB_PID" 2>/dev/null
@@ -165,6 +174,37 @@ done
 printf '{"hub":"%s","token":"%s","network_id":"%s"}\n' "$HUB" "$HT" "$NET" > "$NTOK_HOME/.anet/config.json"
 [[ ! -d "$ADMIN_HOME/.anet/nodes" && ! -d "$CLI_CWD/.anet" ]] || { echo "FAIL: the CLI side has local nodes; the test would not be remote"; exit 1; }
 
+# hand-b: a node started by hand on machine-b — its own HOME (logged in as the admin) and workdir, the
+# way a person runs it: `anet node create` + `anet node start` in the foreground (here backgrounded).
+(cd "$HAND_WD" && HOME="$HAND_HOME" bun "$CLI" login --hub "$HUB" --username t562badmin --password "$PW") >"$WORK/login-hand.log" 2>&1 \
+  || { cat "$WORK/login-hand.log"; echo "FAIL: login hand"; exit 1; }
+(cd "$HAND_WD" && HOME="$HAND_HOME" anet node create hand-b --runtime claude-agent-sdk --model m1) >"$WORK/hand-create.log" 2>&1 \
+  || { cat "$WORK/hand-create.log"; echo "FAIL: create hand-b"; exit 1; }
+(cd "$HAND_WD" && HOME="$HAND_HOME" exec anet node start hand-b) >"$WORK/hand-node.log" 2>&1 &
+HAND_WRAPPER_PID=$!
+HAND_ID=""
+for _ in $(seq 1 90); do
+  HAND_ID=$(api "/api/status?network_id=$NET" | jq -r '[.sessions[]? | select(.alias=="hand-b" and (.status=="idle" or .status=="working"))][0].node_id // empty')
+  [[ -n "$HAND_ID" && -n "$(agent_pids hand-b)" ]] && [[ "$(api "/api/nodes/$HAND_ID/config" | jq -r .config_update_capable)" == true ]] && break
+  sleep 1
+done
+[[ "$HAND_ID" == n_* && -n "$(agent_pids hand-b)" ]] || { echo "FAIL: hand-b never came up (id='$HAND_ID')"; tail -40 "$WORK/hand-node.log"; exit 1; }
+[[ "$(api "/api/nodes?network_id=$NET&node_id=$HAND_ID" | jq -r '.nodes[0].lifecycle_controllable')" != true ]] \
+  || { echo "FAIL: hand-b is daemon-controllable; the #570 cases would not test a hand-started node"; exit 1; }
+[[ "$(api "/api/nodes/$HAND_ID/config" | jq -r .config_update_capable)" == true ]] || { echo "FAIL: hand-b does not report config_update_capable"; exit 1; }
+sleep 3
+echo "  hand-b up by hand ($HAND_ID) wrapper=$HAND_WRAPPER_PID pids=$(agent_pids hand-b)"
+
+# bare-b: on machine-b, running, but config_update_capable=false (a bare agent-node outside `anet node start`)
+BT=$(curl -sS -X POST "$HUB/api/auth/node-token" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
+  -d "{\"network_id\":\"$NET\",\"node_name\":\"bare-b\",\"node_id\":\"n_t562b_bareb\"}" | jq -r .token)
+[[ "$BT" == ntok_* ]] || { echo "FAIL: bare-b node token"; exit 1; }
+report_bare() {
+  mcp_tool "$BT" report_status "$(jq -cn --arg n "$NET" '{resume_id:"resume_bareb",alias:"bare-b",status:"idle",hostname:"machine-b",agent:"claude-agent-sdk",node_id:"n_t562b_bareb",network_id:$n,config_snapshot:{model:"m1",config_update_capable:false}}')" >/dev/null
+}
+report_bare
+[[ "$(api "/api/nodes/n_t562b_bareb/config" | jq -r .config_update_capable)" == false ]] || { echo "FAIL: bare-b config_update_capable not false"; exit 1; }
+
 # ── cases ──────────────────────────────────────────────────────────────
 case_A() {
   echo "  [A] stop, answer n"
@@ -249,6 +289,15 @@ case_G() {
   has "Dispatched" "$out" && { echo "FAIL: G dispatched"; return 1; }
   sleep 2
   [[ "$(lifecycle)" == active && -n "$(agent_pids "$CHILD")" ]] || { echo "FAIL: G $CHILD was touched (lifecycle=$(lifecycle))"; return 1; }
+  # #570: restart no longer needs a visible daemon, so a restricted member gets past the CLI's daemon
+  # check — the Hub's write gate must still refuse it, and nothing may restart.
+  local before; before=$(agent_pids "$CHILD"); rc=0
+  out=$(cd "$CLI_CWD" && COMMHUB_TOKEN="$UTOK" HOME="$MEMBER_HOME" bun "$CLI" node restart "$CHILD" --remote --yes --network "$NET" --wait 5 2>&1) || rc=$?
+  show "$out"
+  [[ $rc -eq 1 ]] || { echo "FAIL: G restart rc=$rc (want 1)"; return 1; }
+  has "Dispatched (" "$out" && { echo "FAIL: G restart dispatched for a restricted member"; return 1; }
+  sleep 3
+  [[ "$(agent_pids "$CHILD")" == "$before" ]] || { echo "FAIL: G restart: $CHILD restarted ('$before' → '$(agent_pids "$CHILD")')"; return 1; }
   echo "  PASS G"
 }
 case_H() {
@@ -275,7 +324,74 @@ case_I() {
   echo "  PASS I"
 }
 
-run_all() { case_A && case_B && case_C && case_D && case_E && case_F && case_G && case_H && case_I; }
+hand_cfg_model() { api "/api/nodes/$HAND_ID/config" | jq -r '.model // "?"'; }
+hand_up() { # wait until hand-b is back up and reachable (after a restart in a previous case)
+  local i
+  for i in $(seq 1 60); do
+    [[ -n "$(agent_pids hand-b)" && "$(sess_status hand-b)" =~ ^(idle|working)$ ]] && return 0
+    sleep 1
+  done
+  echo "FAIL: hand-b is not up (pids='$(agent_pids hand-b)' status=$(sess_status hand-b))"; return 1
+}
+case_J() {
+  echo "  [J] restart hand-b (hand-started, no daemon link) --yes"
+  hand_up || return 1
+  local before rc=0 out after
+  before=$(agent_pids hand-b)
+  out=$(anet_as "$ADMIN_HOME" node restart hand-b --remote --yes --wait 90 2>&1) || rc=$?
+  show "$out"
+  [[ $rc -eq 0 ]] || { echo "FAIL: J rc=$rc"; return 1; }
+  has "Node hand-b — on machine-b, not managed by a daemon" "$out" || { echo "FAIL: J header"; return 1; }
+  has "(it's not managed by a daemon)" "$out" || { echo "FAIL: J plan does not say how"; return 1; }
+  has "✓ \"hand-b\" restarted on machine-b" "$out" || { echo "FAIL: J outcome line"; return 1; }
+  after=$(agent_pids hand-b)
+  [[ -n "$after" && "$after" != "$before" ]] || { echo "FAIL: J agent-node pid did not change ('$before' → '$after')"; return 1; }
+  kill -0 "$HAND_WRAPPER_PID" 2>/dev/null || { echo "FAIL: J the hand-run anet node start wrapper is gone"; return 1; }
+  echo "  PASS J (pid $before → $after, wrapper $HAND_WRAPPER_PID kept)"
+}
+case_K() {
+  echo "  [K] edit hand-b --model m2 --yes"
+  hand_up || return 1
+  local rc=0 out
+  out=$(anet_as "$ADMIN_HOME" node edit hand-b --model m2 --remote --yes --wait 90 2>&1) || rc=$?
+  show "$out"
+  [[ $rc -eq 0 ]] || { echo "FAIL: K rc=$rc"; return 1; }
+  has "✓ \"hand-b\" on machine-b now runs model m2" "$out" || { echo "FAIL: K outcome line"; return 1; }
+  [[ "$(hand_cfg_model)" == m2 ]] || { echo "FAIL: K hub config model=$(hand_cfg_model)"; return 1; }
+  echo "  PASS K"
+}
+case_L() {
+  echo "  [L] restart / edit bare-b (config_update_capable=false)"
+  report_bare
+  local rc=0 out v
+  for v in restart edit; do
+    rc=0
+    if [[ $v == edit ]]; then out=$(anet_as "$ADMIN_HOME" node edit bare-b --model m2 --remote --yes --wait 0 2>&1) || rc=$?
+    else out=$(anet_as "$ADMIN_HOME" node restart bare-b --remote --yes --wait 0 2>&1) || rc=$?; fi
+    show "$out"
+    [[ $rc -eq 1 ]] || { echo "FAIL: L $v rc=$rc (want 1)"; return 1; }
+    has "it doesn't support config updates (started without \`anet node start\`?)" "$out" || { echo "FAIL: L $v refusal text"; return 1; }
+    has "Dispatched" "$out" && { echo "FAIL: L $v dispatched anyway"; return 1; }
+  done
+  echo "  PASS L"
+}
+case_M() {
+  echo "  [M] stop / start hand-b → still need a daemon-created node"
+  hand_up || return 1
+  local before rc=0 out v
+  before=$(agent_pids hand-b)
+  for v in stop start; do
+    rc=0; out=$(anet_as "$ADMIN_HOME" node "$v" hand-b --remote --yes 2>&1) || rc=$?
+    show "$out"
+    [[ $rc -eq 1 ]] || { echo "FAIL: M $v rc=$rc (want 1)"; return 1; }
+    has "was not created by a daemon" "$out" || { echo "FAIL: M $v refusal text"; return 1; }
+    has "Dispatched" "$out" && { echo "FAIL: M $v dispatched"; return 1; }
+  done
+  [[ "$(agent_pids hand-b)" == "$before" ]] || { echo "FAIL: M hand-b was touched"; return 1; }
+  echo "  PASS M"
+}
+
+run_all() { case_A && case_B && case_C && case_D && case_E && case_F && case_G && case_H && case_I && case_J && case_K && case_L && case_M; }
 
 echo "L0 green: real CLI x real hub x real daemon"
 run_all || { echo "FAIL: L0 not green"; echo "── daemon log (tail)"; tail -60 "$WORK/daemon.log"; exit 1; }
@@ -313,7 +429,15 @@ echo "M4 witnessed-red: report success without waiting for the hub"
 sed -i 's|    if (flags.waitSeconds === 0) {|    if (true) {|' bin/cli.ts
 check_red no-wait bin/cli.ts "$WORK/cli.ts.orig" case_B
 
-echo "L1 restored green (B C F)"
-{ case_B && case_C && case_F; } || { echo "FAIL: restore not green"; exit 1; }
+echo "M5 witnessed-red (#570): restart/edit still require a daemon-created node"
+sed -i 's#  if (verb === "restart" || verb === "edit") {#  if (false) {#' src/node-remote.ts
+check_red restart-needs-daemon src/node-remote.ts "$WORK/node-remote.ts.orig" case_J
+
+echo "M6 witnessed-red (#570): restart dispatched without config_update_capable"
+sed -i 's#  if (cfg?.config_update_capable !== true) {#  if (false) {#' src/node-remote.ts
+check_red no-capability-gate src/node-remote.ts "$WORK/node-remote.ts.orig" case_L
+
+echo "L1 restored green (B C F J L)"
+{ case_B && case_C && case_F && case_J && case_L; } || { echo "FAIL: restore not green"; exit 1; }
 
 echo "RESULT: PASS"
