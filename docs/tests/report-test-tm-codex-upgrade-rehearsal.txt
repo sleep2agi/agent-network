@@ -1,0 +1,227 @@
+# test-tm-codex-upgrade-rehearsal (#593) — run 2026-10-06, image built from branch ops/tm-codex-upgrade-guide-593 (base origin/main e1e8ad2e)
+# lines: progress + selected node log lines (full log is ~316 lines)
+[1s] install anet 2.3.0-preview.115 (paired agent-node 2.5.0-preview.88) and, for the script style, a global agent-node 2.5.0-preview.88
+[31s] ════ tm-script OLD: global agent-node agent-node v2.5.0-preview.88
+[32s] node up in 655ms: hub version=2.5.0-preview.88 status=idle
+[33s] TASK tm-script-old-baseline → replied in 820ms :: [tm-script] FAKE_CODEX_OK pid=115 turn=1
+[33s] PASS tm-script old: baseline task answered by the app-server
+[33s] hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[33s] ── tm-script old [dead]: SIGKILL the app-server (pid 115 )
+[34s] hub row 1s after the kill: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[35s] TASK tm-script-old-dead-1 → failed in 802ms :: [tm-script] codex-app-server 错误: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)
+[35s] TASK tm-script-old-dead-2 → failed in 806ms :: [tm-script] codex-app-server 错误: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)
+[35s] app-server pids: (killed 115 ), 2666ms since the kill; hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[35s] nobody relaunched the bare app-server → relaunch it by hand (what the owner does today)
+[37s] TASK tm-script-old-after-manual-relaunch → replied in 790ms :: [tm-script] FAKE_CODEX_OK pid=305 turn=1
+[37s] recovered 794ms after the manual relaunch; hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[37s] ── tm-script old [hung]: SIGSTOP the app-server (alive, port open, never answers)
+[69s] TASK tm-script-old-hung-1 → failed in 30752ms :: [tm-script] codex-app-server 错误: codex request 'turn/start' (id=5) timed out after 30000ms
+[99s] TASK tm-script-old-hung-2 → failed in 30783ms :: [tm-script] codex-app-server 错误: codex request 'turn/start' (id=6) timed out after 30000ms
+[99s] app-server pids: 305 (hung 305 , state=Tsl), 62556ms since the hang; hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[102s] TASK tm-script-old-after-hung-cleared → replied in 815ms :: [tm-script] FAKE_CODEX_OK pid=1065 turn=1
+[102s] node log (tm-script, old):
+[17:20:34] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:20:37] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:20:37] [ERROR] [tm-script] ✗ Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)
+[17:20:37] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:20:37] [ERROR] [tm-script] ✗ Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)
+[17:20:39] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:21:11] [ERROR] [tm-script] ✗ codex request 'turn/start' (id=5) timed out after 30000ms
+[17:21:41] [ERROR] [tm-script] ✗ codex request 'turn/start' (id=6) timed out after 30000ms
+[17:21:44] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[102s] ════ tm-script UPGRADE: npm i -g @sleep2agi/agent-node@2.5.0-preview.112, restart the agent-node process (app-server left running)
+[114s] installed agent-node v2.5.0-preview.112 in 12697ms
+[116s] node up in 691ms: hub version=2.5.0-preview.112 status=idle
+[116s] PASS tm-script: hub reports agent-node 2.5.0-preview.112 after the restart
+[116s] TASK tm-script-new-baseline → replied in 799ms :: [tm-script] FAKE_CODEX_OK pid=1065 turn=2
+[116s] PASS tm-script new: baseline task answered by the app-server
+[117s] hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":null,"health":{"bridge":"ok","app_server":{"ok":true,"rtt_ms":31,"last_error":null},"model_auth":"ok"}}
+[117s] ── tm-script new [dead]: SIGKILL the app-server (pid 1065 )
+[118s] hub row 1s after the kill: {"status":"idle","version":"2.5.0-preview.112","degraded":[{"layer":"app_server","label":"App Server 断开","reason":"restarting app-server (attempt 1/3): process exited; Received network error or non-101 status code."}],"health":{"bridge":"ok","app_server":{"ok":false,"rtt_ms":null,"last_error":"restarting app-server (attempt 1/3): process exited; Received network error or non-101 status code."},"model_auth":"ok"}}
+[148s] TASK tm-script-new-dead-1 → refused by the Hub for 30s (52×: REJECTED:409:node_degraded)
+[178s] TASK tm-script-new-dead-2 → refused by the Hub for 30s (52×: REJECTED:409:node_degraded)
+[178s] app-server pids: (killed 1065 ), 61731ms since the kill; hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":[{"layer":"app_server","label":"App Server 断开","reason":"app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the"}],"health":{"bridge":"ok","app_server":{"ok":false,"rtt_ms":null,"last_error":"app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the"},"model_auth":"ok"}}
+[178s] nobody relaunched the bare app-server → relaunch it by hand (what the owner does today)
+[181s] TASK tm-script-new-after-manual-relaunch: Hub refused dispatch 3× over 1963ms (REJECTED:409:node_degraded), then accepted
+[182s] TASK tm-script-new-after-manual-relaunch → replied in 2708ms :: [tm-script] FAKE_CODEX_OK pid=2131 turn=1
+[182s] recovered 2715ms after the manual relaunch; hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":null,"health":{"bridge":"ok","app_server":{"ok":true,"rtt_ms":4,"last_error":null},"model_auth":"ok"}}
+[182s] ── tm-script new [hung]: SIGSTOP the app-server (alive, port open, never answers)
+[213s] TASK tm-script-new-hung-1 → failed in 30576ms :: [tm-script] codex-app-server 错误: codex request 'turn/start' (id=5) timed out after 30000ms
+[304s] TASK tm-script-new-hung-2 → refused by the Hub for 90s (150×: REJECTED:409:node_degraded)
+[304s] app-server pids: 2131 (hung 2131 , state=Tsl), 121934ms since the hang; hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":[{"layer":"app_server","label":"App Server 断开","reason":"app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the"}],"health":{"bridge":"ok","app_server":{"ok":false,"rtt_ms":null,"last_error":"app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the"},"model_auth":"ok"}}
+[306s] TASK tm-script-new-after-hung-cleared: Hub refused dispatch 1× over 709ms (REJECTED:409:node_degraded), then accepted
+[307s] TASK tm-script-new-after-hung-cleared → replied in 1420ms :: [tm-script] FAKE_CODEX_OK pid=3783 turn=1
+[307s] PASS tm-script new: hub row carries health.app_server
+[307s] node log (tm-script, new):
+[17:21:58] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:21:59] [INFO ] [tm-script] [health] app_server=ok tui=- model_auth=ok
+[17:22:00] [INFO ] [tm-script] [app-server-watchdog] restarting app-server (attempt 1/3 in 10 min): process exited; Received network error or non-101 status code.
+[17:22:00] [INFO ] [tm-script] [health] app_server=down(restarting app-server (attempt 1/3): process exited; Received network error or non-101 status code.) tui=- model_auth=ok
+[17:22:00] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:22:00] [WARN ] [tm-script] [app-server-watchdog] restart attempt 1/3 failed: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)
+[17:22:01] [INFO ] [tm-script] [health] app_server=down(Received network error or non-101 status code.) tui=- model_auth=ok
+[17:22:03] [INFO ] [tm-script] [app-server-watchdog] restarting app-server (attempt 2/3 in 10 min): Received network error or non-101 status code.
+[17:22:03] [INFO ] [tm-script] [health] app_server=down(restarting app-server (attempt 2/3): Received network error or non-101 status code.) tui=- model_auth=ok
+[17:22:03] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:22:03] [WARN ] [tm-script] [app-server-watchdog] restart attempt 2/3 failed: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)
+[17:22:04] [INFO ] [tm-script] [health] app_server=down(Received network error or non-101 status code.) tui=- model_auth=ok
+[17:22:08] [INFO ] [tm-script] [app-server-watchdog] restarting app-server (attempt 3/3 in 10 min): Received network error or non-101 status code.
+[17:22:08] [INFO ] [tm-script] [health] app_server=down(restarting app-server (attempt 3/3): Received network error or non-101 status code.) tui=- model_auth=ok
+[17:22:08] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:22:08] [WARN ] [tm-script] [app-server-watchdog] restart attempt 3/3 failed: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)
+[17:22:09] [INFO ] [tm-script] [health] app_server=down(Received network error or non-101 status code.) tui=- model_auth=ok
+[17:22:13] [WARN ] [tm-script] [app-server-watchdog] app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the no
+[17:22:13] [INFO ] [tm-script] [health] app_server=down(app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the
+[17:23:03] [INFO ] [tm-script] [app-server-watchdog] app-server is answering again (fixed by hand?) — watching again
+[17:23:03] [INFO ] [tm-script] [health] app_server=ok tui=- model_auth=ok
+[17:23:04] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[17:23:13] [INFO ] [tm-script] [health] app_server=down(no ws handshake within 5000ms) tui=- model_auth=ok
+[17:23:23] [WARN ] [tm-script] [app-server-watchdog] app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the no
+[17:23:23] [INFO ] [tm-script] [health] app_server=down(app-server auto-restart gave up: 3 restarts in 10 min (last: Cannot connect to codex app-server at ws://127.0.0.1:27593 — is it running? (Received network error or non-101 status code.)) — restart the
+[17:23:36] [ERROR] [tm-script] ✗ codex request 'turn/start' (id=5) timed out after 30000ms
+[17:25:08] [INFO ] [tm-script] [app-server-watchdog] app-server is answering again (fixed by hand?) — watching again
+[17:25:08] [INFO ] [tm-script] [health] app_server=ok tui=- model_auth=ok
+[17:25:09] [INFO ] [tm-script] [codex-app-server] attaching to shared server ws://127.0.0.1:27593
+[307s] ════ tm-script OPTION: let the node own its app-server — drop codexAppServerUrl, stop the bare app-server, same agent-node command
+[308s] node up in 634ms: hub version=2.5.0-preview.112 status=idle
+[309s] TASK tm-script-owned-baseline → replied in 812ms :: [tm-script] FAKE_CODEX_OK pid=3922 turn=1
+[311s] TASK tm-script-owned-dead-1: Hub refused dispatch 2× over 1308ms (REJECTED:409:node_degraded), then accepted
+[312s] TASK tm-script-owned-dead-1 → replied in 2009ms :: [tm-script] FAKE_CODEX_OK pid=3955 turn=1
+[313s] TASK tm-script-owned-dead-2 → replied in 790ms :: [tm-script] FAKE_CODEX_OK pid=3955 turn=2
+[313s] app-server pids: 3955 (killed 3922 ); hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":null,"health":{"bridge":"ok","app_server":{"ok":true,"rtt_ms":2,"last_error":null},"model_auth":"ok"}}
+[313s] PASS tm-script (owned, 2.5.0-preview.112): task after an app-server SIGKILL is answered
+[17:25:11] [INFO ] [tm-script] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:27924 (+commhub MCP)
+[17:25:12] [INFO ] [tm-script] [health] app_server=- tui=- model_auth=ok
+[17:25:12] [WARN ] [tm-script] [codex-app-server] app-server exited code=null signal=SIGKILL; next turn will reopen
+[17:25:13] [INFO ] [tm-script] [app-server-watchdog] restarting app-server (attempt 1/3 in 10 min): process exited; Received network error or non-101 status code.
+[17:25:13] [INFO ] [tm-script] [health] app_server=down(restarting app-server (attempt 1/3): process exited; Received network error or non-101 status code.) tui=- model_auth=ok
+[17:25:13] [INFO ] [tm-script] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:24475 (+commhub MCP)
+[17:25:13] [INFO ] [tm-script] [app-server-watchdog] bridge re-attached ws://127.0.0.1:24475 thread=thread_tm_rehearsal
+[17:25:13] [INFO ] [tm-script] [app-server-watchdog] app-server restarted (attempt 1/3); waiting for the probe to confirm
+[17:25:14] [INFO ] [tm-script] [health] app_server=ok tui=- model_auth=ok
+[313s] ════ tm-script ROLLBACK: npm i -g @sleep2agi/agent-node@2.5.0-preview.88, restart
+[327s] installed agent-node v2.5.0-preview.88 in 14199ms
+[328s] node up in 659ms: hub version=2.5.0-preview.88 status=idle
+[328s] PASS tm-script rollback: hub reports 2.5.0-preview.88
+[329s] TASK tm-script-rollback-baseline → replied in 836ms :: [tm-script] FAKE_CODEX_OK pid=4173 turn=1
+[329s] PASS tm-script rollback: a task is answered on 2.5.0-preview.88 with the config the new version ran on
+[332s] ════ tm-anet OLD: anet anet v2.3.0-preview.115; global agent-node is now agent-node v2.5.0-preview.88
+[334s] node up in 2406ms: hub version=2.5.0-preview.88 status=idle
+[334s] PASS tm-anet: anet 2.3.0-preview.115 starts its exact paired agent-node 2.5.0-preview.88, not the newer global one
+[335s] TASK tm-anet-old-baseline → replied in 816ms :: [tm-anet] FAKE_CODEX_OK pid=4410 turn=1
+[335s] PASS tm-anet old: baseline task answered by the app-server
+[335s] hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[335s] ── tm-anet old [dead]: SIGKILL the app-server (pid 4410 )
+[336s] hub row 1s after the kill: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[337s] TASK tm-anet-old-dead-1 → replied in 805ms :: [tm-anet] FAKE_CODEX_OK pid=4468 turn=1
+[338s] TASK tm-anet-old-dead-2 → replied in 849ms :: [tm-anet] FAKE_CODEX_OK pid=4468 turn=2
+[338s] app-server pids: 4468 (killed 4410 ), 2729ms since the kill; hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[338s] ── tm-anet old [hung]: SIGSTOP the app-server (alive, port open, never answers)
+[370s] TASK tm-anet-old-hung-1 → failed in 30529ms :: [tm-anet] codex-app-server 错误: codex request 'turn/start' (id=5) timed out after 30000ms
+[400s] TASK tm-anet-old-hung-2 → failed in 30566ms :: [tm-anet] codex-app-server 错误: codex request 'turn/start' (id=6) timed out after 30000ms
+[400s] app-server pids: 4468 (hung 4468 , state=Tl), 62121ms since the hang; hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[402s] TASK tm-anet-old-after-hung-cleared → replied in 1081ms :: [tm-anet] FAKE_CODEX_OK pid=5234 turn=1
+[402s] ── tm-anet old [crash-loop]: every app-server launch dies at once (flag on), then the cause is fixed (flag off)
+[422s] TASK tm-anet-old-crashloop-1 → failed in 19025ms :: [tm-anet] codex-app-server 错误: codex app-server WS never came up: ws://127.0.0.1:27745
+[441s] TASK tm-anet-old-crashloop-2 → failed in 18702ms :: [tm-anet] codex-app-server 错误: codex app-server WS never came up: ws://127.0.0.1:24566
+[441s] hub row 38738ms into the crash-loop: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[441s] flag removed (cause fixed)
+[442s] TASK tm-anet-old-crashloop-fixed → replied in 806ms :: [tm-anet] FAKE_CODEX_OK pid=5735 turn=1
+[442s] hub row: {"status":"idle","version":"2.5.0-preview.88","degraded":null,"health":null}
+[442s] node log (tm-anet, old):
+[17:25:37] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:25569 (+commhub MCP)
+[17:25:38] [WARN ] [tm-anet] [codex-app-server] app-server exited code=null signal=SIGKILL; next turn will reopen
+[17:25:39] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:25609 (+commhub MCP)
+[17:26:12] [ERROR] [tm-anet] ✗ codex request 'turn/start' (id=5) timed out after 30000ms
+[17:26:43] [ERROR] [tm-anet] ✗ codex request 'turn/start' (id=6) timed out after 30000ms
+[17:26:43] [WARN ] [tm-anet] [codex-app-server] app-server exited code=null signal=SIGKILL; next turn will reopen
+[17:26:44] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:25942 (+commhub MCP)
+[17:26:45] [WARN ] [tm-anet] [codex-app-server] app-server exited code=null signal=SIGKILL; next turn will reopen
+[17:26:46] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:27745 (+commhub MCP)
+[17:26:46] [WARN ] [tm-anet] [codex-app-server] app-server exited code=1 signal=null; next turn will reopen
+[17:27:04] [WARN ] [tm-anet] [codex-app-server] startup failed, killed owned child pid=5278
+[17:27:04] [ERROR] [tm-anet] ✗ codex app-server WS never came up: ws://127.0.0.1:27745
+[17:27:05] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:24566 (+commhub MCP)
+[17:27:05] [WARN ] [tm-anet] [codex-app-server] app-server exited code=1 signal=null; next turn will reopen
+[17:27:23] [WARN ] [tm-anet] [codex-app-server] startup failed, killed owned child pid=5502
+[17:27:23] [ERROR] [tm-anet] ✗ codex app-server WS never came up: ws://127.0.0.1:24566
+[17:27:24] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:24137 (+commhub MCP)
+[442s] ════ tm-anet UPGRADE: npm i -g @sleep2agi/agent-network@2.3.0-preview.145, then anet node stop/start
+[450s] installed anet v2.3.0-preview.145 in 8212ms
+[463s] node up in 12220ms: hub version=2.5.0-preview.112 status=idle
+[463s] PASS tm-anet: hub reports agent-node 2.5.0-preview.112 after the restart
+[464s] TASK tm-anet-new-baseline → replied in 812ms :: [tm-anet] FAKE_CODEX_OK pid=6129 turn=1
+[464s] PASS tm-anet new: baseline task answered by the app-server
+[464s] hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":null,"health":{"bridge":"ok","model_auth":"ok"}}
+[464s] ── tm-anet new [dead]: SIGKILL the app-server (pid 6129 )
+[465s] hub row 1s after the kill: {"status":"idle","version":"2.5.0-preview.112","degraded":[{"layer":"app_server","label":"App Server 断开","reason":"restarting app-server (attempt 1/3): process exited; Received network error or non-101 status code."}],"health":{"bridge":"ok","app_server":{"ok":false,"rtt_ms":null,"last_error":"restarting app-server (attempt 1/3): process exited; Received network error or non-101 status code."},"model_auth":"ok"}}
+[466s] TASK tm-anet-new-dead-1: Hub refused dispatch 2× over 1270ms (REJECTED:409:node_degraded), then accepted
+[467s] TASK tm-anet-new-dead-1 → replied in 1965ms :: [tm-anet] FAKE_CODEX_OK pid=6179 turn=1
+[468s] TASK tm-anet-new-dead-2 → replied in 781ms :: [tm-anet] FAKE_CODEX_OK pid=6179 turn=2
+[468s] app-server pids: 6179 (killed 6129 ), 3819ms since the kill; hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":null,"health":{"bridge":"ok","app_server":{"ok":true,"rtt_ms":3,"last_error":null},"model_auth":"ok"}}
+[468s] ── tm-anet new [hung]: SIGSTOP the app-server (alive, port open, never answers)
+[499s] TASK tm-anet-new-hung-1 → failed in 30470ms :: [tm-anet] codex-app-server 错误: codex request 'turn/start' (id=5) timed out after 30000ms
+[500s] TASK tm-anet-new-hung-2 → replied in 812ms :: [tm-anet] FAKE_CODEX_OK pid=6482 turn=1
+[500s] app-server pids: 6179 6482 (hung 6179 , state=Tl), 32303ms since the hang; hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":null,"health":{"bridge":"ok","app_server":{"ok":true,"rtt_ms":2,"last_error":null},"model_auth":"ok"}}
+[502s] TASK tm-anet-new-after-hung-cleared → replied in 789ms :: [tm-anet] FAKE_CODEX_OK pid=6482 turn=2
+[502s] ── tm-anet new [crash-loop]: every app-server launch dies at once (flag on), then the cause is fixed (flag off)
+[533s] TASK tm-anet-new-crashloop-1 → refused by the Hub for 30s (52×: REJECTED:409:node_degraded)
+[563s] TASK tm-anet-new-crashloop-2 → refused by the Hub for 30s (52×: REJECTED:409:node_degraded)
+[563s] hub row 61092ms into the crash-loop: {"status":"idle","version":"2.5.0-preview.112","degraded":[{"layer":"app_server","label":"App Server 断开","reason":"app-server auto-restart gave up: 3 restarts in 10 min (last: codex app-server WS never came up: ws://127.0.0.1:24630) — restart the node by hand (anet node restart)"}],"health":{"bridge":"ok","app_server":{"ok":false,"rtt_ms":null,"last_error":"app-server auto-restart gave up: 3 restarts in 10 min (last: codex app-server WS never came up: ws://127.0.0.1:24630) — restart the node by hand (anet node restart)"},"model_auth":"ok"}}
+[563s] flag removed (cause fixed)
+[624s] TASK tm-anet-new-crashloop-fixed → refused by the Hub for 60s (104×: REJECTED:409:node_degraded)
+[624s] hub row: {"status":"idle","version":"2.5.0-preview.112","degraded":[{"layer":"app_server","label":"App Server 断开","reason":"app-server auto-restart gave up: 3 restarts in 10 min (last: codex app-server WS never came up: ws://127.0.0.1:24630) — restart the node by hand (anet node restart)"}],"health":{"bridge":"ok","app_server":{"ok":false,"rtt_ms":null,"last_error":"app-server auto-restart gave up: 3 restarts in 10 min (last: codex app-server WS never came up: ws://127.0.0.1:24630) — restart the node by hand (anet node restart)"},"model_auth":"ok"}}
+[624s] PASS tm-anet new: hub row carries health.app_server
+[624s] node log (tm-anet, new):
+[17:27:46] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:27784 (+commhub MCP)
+[17:27:46] [INFO ] [tm-anet] [health] app_server=- tui=- model_auth=ok
+[17:27:47] [WARN ] [tm-anet] [codex-app-server] app-server exited code=null signal=SIGKILL; next turn will reopen
+[17:27:48] [INFO ] [tm-anet] [app-server-watchdog] restarting app-server (attempt 1/3 in 10 min): process exited; Received network error or non-101 status code.
+[17:27:48] [INFO ] [tm-anet] [health] app_server=down(restarting app-server (attempt 1/3): process exited; Received network error or non-101 status code.) tui=- model_auth=ok
+[17:27:48] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:27690 (+commhub MCP)
+[17:27:48] [INFO ] [tm-anet] [app-server-watchdog] bridge re-attached ws://127.0.0.1:27690 thread=thread_tm_rehearsal
+[17:27:48] [INFO ] [tm-anet] [app-server-watchdog] app-server restarted (attempt 1/3); waiting for the probe to confirm
+[17:27:49] [INFO ] [tm-anet] [health] app_server=ok tui=- model_auth=ok
+[17:28:00] [INFO ] [tm-anet] [health] app_server=down(no ws handshake within 5000ms) tui=- model_auth=ok
+[17:28:10] [INFO ] [tm-anet] [app-server-watchdog] restarting app-server (attempt 2/3 in 10 min): no ws handshake within 5000ms
+[17:28:10] [INFO ] [tm-anet] [health] app_server=down(restarting app-server (attempt 2/3): no ws handshake within 5000ms) tui=- model_auth=ok
+[17:28:10] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:24488 (+commhub MCP)
+[17:28:11] [INFO ] [tm-anet] [app-server-watchdog] bridge re-attached ws://127.0.0.1:24488 thread=thread_tm_rehearsal
+[17:28:11] [INFO ] [tm-anet] [app-server-watchdog] app-server restarted (attempt 2/3); waiting for the probe to confirm
+[17:28:11] [INFO ] [tm-anet] [health] app_server=ok tui=- model_auth=ok
+[17:28:22] [ERROR] [tm-anet] ✗ codex request 'turn/start' (id=5) timed out after 30000ms
+[17:28:23] [WARN ] [tm-anet] [codex-app-server] app-server exited code=null signal=SIGKILL; next turn will reopen
+[17:28:25] [WARN ] [tm-anet] [codex-app-server] app-server exited code=null signal=SIGKILL; next turn will reopen
+[17:28:25] [INFO ] [tm-anet] [app-server-watchdog] restarting app-server (attempt 3/3 in 10 min): process exited; Received network error or non-101 status code.
+[17:28:25] [INFO ] [tm-anet] [health] app_server=down(restarting app-server (attempt 3/3): process exited; Received network error or non-101 status code.) tui=- model_auth=ok
+[17:28:25] [INFO ] [tm-anet] [codex-app-server] spawning codex app-server -c mcp_servers.commhub.url="http://127.0.0.1:19593/mcp" -c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN" --listen ws://127.0.0.1:24630 (+commhub MCP)
+[17:28:25] [WARN ] [tm-anet] [codex-app-server] app-server exited code=1 signal=null; next turn will reopen
+[17:28:43] [WARN ] [tm-anet] [codex-app-server] startup failed, killed owned child pid=6702
+[17:28:43] [WARN ] [tm-anet] [app-server-watchdog] restart attempt 3/3 failed: codex app-server WS never came up: ws://127.0.0.1:24630
+[17:28:44] [INFO ] [tm-anet] [health] app_server=down(Received network error or non-101 status code.) tui=- model_auth=ok
+[17:28:45] [WARN ] [tm-anet] [app-server-watchdog] app-server auto-restart gave up: 3 restarts in 10 min (last: codex app-server WS never came up: ws://127.0.0.1:24630) — restart the node by hand (anet node restart); staying degraded
+[17:28:45] [INFO ] [tm-anet] [health] app_server=down(app-server auto-restart gave up: 3 restarts in 10 min (last: codex app-server WS never came up: ws://127.0.0.1:24630) — restart the node by hand (anet node restart)) tui=- model_auth=ok
+[624s] ════ tm-anet after 'gave up': only a restart reopens it (anet node stop + start)
+[627s] node up in 2316ms: hub version=2.5.0-preview.112 status=idle
+[628s] TASK tm-anet-after-restart → replied in 817ms :: [tm-anet] FAKE_CODEX_OK pid=8554 turn=1
+[628s] PASS tm-anet: after a node restart the task is answered again
+[628s] ════ anet node ls --all
+    ALIAS      RUNTIME           STATUS   LAST SEEN  MODEL
+    tm-anet    codex-app-server  idle     1s ago     gpt-5.6-sol
+    tm-script  codex-app-server  offline  5m ago     gpt-5.6-sol
+[628s] ════ tm-anet ROLLBACK: npm i -g @sleep2agi/agent-network@2.3.0-preview.115, then anet node stop/start
+[635s] installed anet v2.3.0-preview.115 in 6967ms
+[638s] node up in 2283ms: hub version=2.5.0-preview.88 status=idle
+[638s] PASS tm-anet rollback: hub reports 2.5.0-preview.88
+[639s] TASK tm-anet-rollback-baseline → replied in 797ms :: [tm-anet] FAKE_CODEX_OK pid=8818 turn=1
+[639s] PASS tm-anet rollback: a task is answered on 2.5.0-preview.88
+[639s] ════ (end) anet node ls --all
+  tm-anet              codex-app-server idle     ○    -
+[639s] ════ SUMMARY
+[639s] script old 2.5.0-preview.88: dead=failed,failed after-manual-relaunch=replied hung=failed,failed after-hung-cleared=replied
+[639s] script new 2.5.0-preview.112: dead=refused,refused after-manual-relaunch=replied hung=failed,refused after-hung-cleared=replied
+[639s] script→owned 2.5.0-preview.112: baseline=replied dead=replied,replied
+[639s] anet   old 2.5.0-preview.88: dead=replied,replied hung=failed,failed after-hung-cleared=replied crashloop=failed,failed after-fix=replied
+[639s] anet   new 2.5.0-preview.112: dead=replied,replied hung=failed,replied after-hung-cleared=replied crashloop=refused,refused after-fix=refused
+FAILS=0
+rc=0
