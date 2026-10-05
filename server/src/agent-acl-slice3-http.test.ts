@@ -1,7 +1,7 @@
 // 多用户账号与 Agent 权限 —— slice 3:剩下的面向 Agent 的路径。
 //
 // slice 1(agent-acl-http.test.ts)把默认作用域做成 fail-closed,并对核心路径逐条放行。
-// 这里补:授权后 task_events / messages 的「只看自己往来」、改名广播不外泄 alias、
+// 这里补:授权后 task_events 跟随授权 Agent 的时间线(#563)、messages 的「只看自己往来」、改名广播不外泄 alias、
 // 排程在建的人被收权后不再代派、用户名与后注册的 Agent alias 撞名、以及
 // rules / skills / files / logs 对受限成员(即使授权了)仍然拒绝 —— 这是一个明确的产品决定:
 // 授权 = 能看见、能对话;不等于能管理这个 Agent。
@@ -104,14 +104,14 @@ afterAll(() => {
   try { rmSync(DIR, { recursive: true, force: true }); } catch {}
 });
 
-describe("granted member: task_events and messages are limited to own traffic", () => {
-  test("task_events: own exchange with X visible, admin's task to X not", async () => {
+describe("granted member: task_events follow X's timeline (#563); messages stay own traffic", () => {
+  test("task_events: every task on granted X's timeline is visible, including admin's (#563)", async () => {
     const mine = await get(carolToken, `/api/task_events?task_id=t3_carol_x`);
     expect(mine.body.events.length).toBe(1);
     expect((await get(carolToken, `/api/task_events?task_id=t3_x_carol`)).body.events.length).toBe(1);
-    expect((await get(carolToken, `/api/task_events?task_id=t3_admin_x`)).body.events).toEqual([]);
+    expect((await get(carolToken, `/api/task_events?task_id=t3_admin_x`)).body.events.length).toBe(1);
     const all = await get(carolToken, `/api/task_events?network_id=${NET}`);
-    expect(all.body.events.map((e: any) => e.task_id).sort()).toEqual(["t3_carol_x", "t3_x_carol"]);
+    expect(all.body.events.map((e: any) => e.task_id).sort()).toEqual(["t3_admin_x", "t3_carol_x", "t3_x_carol"]);
   });
   test("messages (alias branch): own inbox rows with X only; admin's never", async () => {
     const r = await get(carolToken, `/api/messages?network_id=${NET}&since=2000-01-01`);
