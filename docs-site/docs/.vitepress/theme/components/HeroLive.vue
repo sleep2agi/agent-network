@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// 英雄区右侧:一张真实的桌面端截图(0.2.84,深色主题,聊天界面),套一层最简 macOS 窗口边框。
+// 英雄区右侧:一张真实的桌面端截图(0.2.209 晴蓝主题,深色,聊天界面),套一层最简 macOS 窗口边框。
 // 2026-09-23 v3(Vincent:「这个地方实在太丑了」):去掉之前编造的「commhub」终端流水和
 // 「120+ 在线节点 / 4 种模型运行时 / 3 端」这类站不住的数字 —— 首页只放真东西。
-// 截图来源:agent-network-app 0.2.84 web 导出 + 一次性 hub 上的示例会话(见 docs/tests 记录),
+// 截图来源(2026-10-05 #565):agent-network-app 0.2.209 web 导出 + 仓内 layout-sweep 页内桩(无 hub),
+// 示例数据全是通用占位别名(research-agent / code-reviewer / ops-bot …),1120×720 @2x,
 // 窗口边框用 CSS 画在 <img> 外面,不烙进 PNG,换主题/换图不用重做。
 import { withBase } from 'vitepress'
 const props = defineProps<{ lang?: 'zh' | 'en' }>()

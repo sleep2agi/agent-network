@@ -10,18 +10,24 @@
   --vp-c-bg-mute: #eef1f5;
   --vp-c-bg-alt: #f8f9fb;
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(135deg, #b45309 0%, #f59e0b 55%, #ea580c 100%);
-  --vp-c-brand-1: #b45309;
-  --vp-c-brand-2: #d97706;
-  --vp-c-brand-3: #f59e0b;
-  --vp-c-brand-soft: rgba(245, 158, 11, 0.10);
+  /* 品牌色 = 客户端「晴蓝」(agent-network-app #707 src/theme.ts,#565)。
+     对比度(WCAG):brand-1 #1b65db 在 bg #fafbfc 上 5.16、在 #fff 上 5.34;
+     brand-2 #1554be(悬停)6.66;按钮 brand-3 #2563d9 配白字 5.43。 */
+  --vp-home-hero-name-background: linear-gradient(135deg, #1554be 0%, #1b65db 50%, #3b7be6 100%);
+  --vp-c-brand-1: #1b65db;
+  --vp-c-brand-2: #1554be;
+  --vp-c-brand-3: #2563d9;
+  --vp-c-brand-soft: rgba(27, 101, 219, 0.08);
+  /* tip 块里的行内代码:默认是 brand-soft 叠在 brand-soft 上,#1b65db 只剩 4.16:1;
+     改成在块底色上提亮一层,回到 ≥4.9:1 */
+  --vp-custom-block-tip-code-bg: rgba(255, 255, 255, 0.6);
   --vp-c-text-1: #0f1419;
   --vp-c-text-2: #525a66;
   --vp-c-divider: #e8e8ec;
 
-  --anet-glow-cyan: rgba(250, 204, 21, 0.50);
-  --anet-glow-blue: rgba(245, 158, 11, 0.40);
-  --anet-glow-purple: rgba(249, 115, 22, 0.30);
+  --anet-glow-cyan: rgba(94, 155, 255, 0.45);
+  --anet-glow-blue: rgba(37, 99, 217, 0.35);
+  --anet-glow-purple: rgba(79, 110, 247, 0.25);
 }
 
 .dark {
@@ -30,18 +36,26 @@
   --vp-c-bg-mute: #11141c;
   --vp-c-bg-alt: #0a0c12;
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(135deg, #fbbf24 0%, #facc15 50%, #fb923c 100%);
-  --vp-c-brand-1: #fbbf24;
-  --vp-c-brand-2: #facc15;
-  --vp-c-brand-3: #fb923c;
-  --vp-c-brand-soft: rgba(251, 191, 36, 0.14);
+  /* 深色:brand-1 #5e9bff 在 bg #06070b 上 7.30;brand-2 #7cb0ff 9.12;
+     实心按钮用 #2563d9 + 白字 5.43(和 app 深色「我发出的」气泡同色),
+     悬停/按下更深 —— VitePress 默认拿 brand-2/brand-1 当按钮悬停底色,
+     那两个是浅蓝,配白字只有 2.2–2.8,所以这里显式覆盖。 */
+  --vp-home-hero-name-background: linear-gradient(135deg, #5e9bff 0%, #8ab8ff 50%, #3b7be6 100%);
+  --vp-c-brand-1: #5e9bff;
+  --vp-c-brand-2: #7cb0ff;
+  --vp-c-brand-3: #2563d9;
+  --vp-c-brand-soft: rgba(94, 155, 255, 0.16);
+  --vp-custom-block-tip-code-bg: var(--vp-c-tip-soft); /* 深色用默认叠层即可:4.58:1 */
+  --vp-button-brand-bg: #2563d9;
+  --vp-button-brand-hover-bg: #1f56c0;
+  --vp-button-brand-active-bg: #1a4aa8;
   --vp-c-text-1: #e8eaed;
   --vp-c-text-2: #8a94a3;
   --vp-c-divider: #1a1d26;
 
-  --anet-glow-cyan: rgba(250, 204, 21, 0.55);
-  --anet-glow-blue: rgba(251, 146, 60, 0.45);
-  --anet-glow-purple: rgba(245, 158, 11, 0.40);
+  --anet-glow-cyan: rgba(94, 155, 255, 0.50);
+  --anet-glow-blue: rgba(56, 132, 255, 0.40);
+  --anet-glow-purple: rgba(79, 110, 247, 0.35);
 }
 
 /* ---------- VPHome canvas ---------- */
@@ -88,7 +102,7 @@
   right: 0;
   height: 760px;
   background:
-    linear-gradient(180deg, #ffffff 0%, #f4f9f8 40%, #fafbfc 100%);
+    linear-gradient(180deg, #ffffff 0%, #f2f6fd 40%, #fafbfc 100%);
   z-index: -2;
   pointer-events: none;
 }
@@ -138,7 +152,7 @@
   transform: translateX(-50%);
   width: 1px;
   height: 760px;
-  background: linear-gradient(180deg, transparent, rgba(251, 191, 36, 0.5), transparent);
+  background: linear-gradient(180deg, transparent, rgba(94, 155, 255, 0.5), transparent);
   opacity: 0.4;
 }
 
@@ -217,14 +231,14 @@
 .VPHero .VPButton.brand {
   background: linear-gradient(135deg, var(--vp-c-brand-1), var(--vp-c-brand-2)) !important;
   border: 0 !important;
-  box-shadow: 0 8px 28px -8px rgba(180, 83, 9, 0.55), 0 0 0 1px rgba(251, 191, 36, 0.25) inset;
+  box-shadow: 0 8px 28px -8px rgba(27, 101, 219, 0.55), 0 0 0 1px rgba(94, 155, 255, 0.25) inset;
 }
 .dark .VPHero .VPButton.brand {
-  color: #1a1206 !important; /* 黄底配深字:白字在 #fbbf24 上只有 ~1.6:1 */
+  color: #0b0b0d !important; /* 浅蓝底配深字:白字在 #5e9bff 上只有 2.76:1,#0b0b0d 是 7.12:1(同 app onAccent) */
 }
 .VPHero .VPButton.brand:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 36px -10px rgba(180, 83, 9, 0.7), 0 0 0 1px rgba(251, 191, 36, 0.35) inset;
+  box-shadow: 0 14px 36px -10px rgba(27, 101, 219, 0.7), 0 0 0 1px rgba(94, 155, 255, 0.35) inset;
 }
 .VPHero .VPButton.alt {
   background: rgba(120, 130, 145, 0.06) !important;
@@ -247,8 +261,8 @@
   padding: 6px 12px 6px 6px;
   margin-bottom: 24px;
   border-radius: 999px;
-  background: rgba(251, 191, 36, 0.08);
-  border: 1px solid rgba(251, 191, 36, 0.28);
+  background: rgba(94, 155, 255, 0.08);
+  border: 1px solid rgba(94, 155, 255, 0.28);
   font-size: 0.78rem;
   line-height: 1.5;
   color: var(--vp-c-text-1);
@@ -260,12 +274,12 @@
   animation: anetFadeInUp 0.6s cubic-bezier(0.21, 1.02, 0.73, 1) backwards;
 }
 .dark .hero-notice {
-  background: rgba(251, 191, 36, 0.06);
-  border-color: rgba(251, 191, 36, 0.22);
+  background: rgba(94, 155, 255, 0.06);
+  border-color: rgba(94, 155, 255, 0.22);
 }
 .hero-notice:hover {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(94, 155, 255, 0.14);
+  border-color: rgba(94, 155, 255, 0.45);
   transform: translateY(-1px);
 }
 .hero-notice-pill {
@@ -274,8 +288,8 @@
   gap: 6px;
   padding: 3px 10px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #f59e0b, #fbbf24);
-  color: #1f2937;
+  background: linear-gradient(135deg, #1b65db, #2563d9);
+  color: #ffffff;
   font-weight: 700;
   font-size: 0.7rem;
   letter-spacing: 0.05em;
@@ -285,7 +299,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #1f2937;
+  background: #ffffff;
   position: relative;
   flex-shrink: 0;
 }
@@ -294,7 +308,7 @@
   position: absolute;
   inset: -2px;
   border-radius: 50%;
-  background: rgba(31, 41, 55, 0.4);
+  background: rgba(255, 255, 255, 0.5);
   animation: noticePulse 2s ease-out infinite;
 }
 @keyframes noticePulse {
@@ -314,13 +328,13 @@
   font-size: 0.74rem;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(251, 191, 36, 0.15);
-  border: 1px solid rgba(251, 191, 36, 0.25);
-  color: #b45309;
+  background: rgba(94, 155, 255, 0.15);
+  border: 1px solid rgba(94, 155, 255, 0.25);
+  color: #1b65db;
 }
 .dark .hero-notice-code {
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.12);
+  color: #5e9bff;
+  background: rgba(94, 155, 255, 0.12);
 }
 .hero-notice-arrow {
   font-size: 0.85rem;
@@ -330,7 +344,7 @@
 }
 .hero-notice:hover .hero-notice-arrow {
   transform: translate(2px, -2px);
-  color: #f59e0b;
+  color: var(--vp-c-brand-1);
 }
 @media (max-width: 720px) {
   .hero-notice {
@@ -352,7 +366,7 @@
   overflow: hidden;
   box-shadow:
     0 14px 32px -16px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(251, 191, 36, 0.08) inset;
+    0 0 0 1px rgba(94, 155, 255, 0.08) inset;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   animation: anetFadeInUp 0.6s cubic-bezier(0.21, 1.02, 0.73, 1) 0.2s backwards;
 }
@@ -400,7 +414,7 @@
   opacity: 0.55;
 }
 .install-cmd-prompt {
-  color: #fbbf24;
+  color: #5e9bff;
   font-weight: 700;
   user-select: none;
 }
@@ -414,30 +428,30 @@
   font-family: inherit;
   background: transparent;
 }
-.install-cmd-text .ic-cmd { color: #f5d76e; }
+.install-cmd-text .ic-cmd { color: #8ab8ff; }
 .install-cmd-text .ic-arg { color: #e3e7ee; }
 .install-cmd-text .ic-flag { color: #c084fc; }
 .install-cmd-text .ic-pkg { color: #67e8f9; }
 .install-cmd-text .ic-url { color: #67e8f9; text-decoration: underline; text-decoration-color: rgba(103, 232, 249, 0.4); }
-.install-cmd-text .ic-pipe { color: #f97316; }
+.install-cmd-text .ic-pipe { color: #a5b4fc; }
 .install-cmd-text .ic-cmt { color: #6b7280; font-style: italic; }
 .install-cmd-text .ic-todo {
-  color: #fbbf24;
+  color: #5e9bff;
   font-style: normal;
   font-size: 0.72rem;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(251, 191, 36, 0.12);
-  border: 1px solid rgba(251, 191, 36, 0.25);
+  background: rgba(94, 155, 255, 0.12);
+  border: 1px solid rgba(94, 155, 255, 0.25);
   letter-spacing: 0.04em;
 }
 .install-cmd-copy {
   flex-shrink: 0;
   padding: 5px 12px;
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  border: 1px solid rgba(94, 155, 255, 0.3);
   border-radius: 6px;
-  background: rgba(251, 191, 36, 0.08);
-  color: #fbbf24;
+  background: rgba(94, 155, 255, 0.08);
+  color: #5e9bff;
   font-size: 0.74rem;
   font-weight: 600;
   cursor: pointer;
@@ -445,13 +459,13 @@
   font-family: inherit;
 }
 .install-cmd-copy:hover {
-  background: rgba(251, 191, 36, 0.18);
-  border-color: rgba(251, 191, 36, 0.55);
+  background: rgba(94, 155, 255, 0.18);
+  border-color: rgba(94, 155, 255, 0.55);
 }
 .install-cmd-copy.is-copied {
-  background: rgba(251, 191, 36, 0.25);
+  background: rgba(94, 155, 255, 0.25);
   color: var(--vp-c-text-1);
-  border-color: rgba(251, 191, 36, 0.7);
+  border-color: rgba(94, 155, 255, 0.7);
 }
 
 /* ---------- Hero badges (Runtime + LLM rows) ---------- */
@@ -565,7 +579,7 @@
 .hero-video-glow {
   position: absolute;
   inset: -30px;
-  background: radial-gradient(closest-side, rgba(251, 191, 36, 0.28), transparent 70%);
+  background: radial-gradient(closest-side, rgba(94, 155, 255, 0.28), transparent 70%);
   filter: blur(30px);
   z-index: 0;
   pointer-events: none;
@@ -577,9 +591,9 @@
   overflow: hidden;
   aspect-ratio: 16 / 10;
   background: linear-gradient(135deg, #0a0c12, #11141c);
-  border: 1px solid rgba(251, 191, 36, 0.18);
+  border: 1px solid rgba(94, 155, 255, 0.18);
   box-shadow:
-    0 32px 80px -32px rgba(251, 191, 36, 0.5),
+    0 32px 80px -32px rgba(94, 155, 255, 0.5),
     0 12px 32px -12px rgba(0, 0, 0, 0.4);
 }
 .hero-video-frame video {
@@ -604,7 +618,7 @@
   width: 76px;
   height: 76px;
   border-radius: 50%;
-  background: rgba(251, 191, 36, 0.85);
+  background: rgba(94, 155, 255, 0.85);
   border: 0;
   cursor: pointer;
   color: #06070b;
@@ -618,13 +632,13 @@
 }
 .hero-video-play:hover {
   transform: translate(-50%, -50%) scale(1.08);
-  background: rgba(251, 191, 36, 1);
+  background: rgba(94, 155, 255, 1);
 }
 .hero-video-play-ring {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 2px solid rgba(251, 191, 36, 0.5);
+  border: 2px solid rgba(94, 155, 255, 0.5);
   animation: ringPulse 2s ease-out infinite;
 }
 .hero-video-play-icon {
@@ -700,7 +714,7 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(94, 155, 255, 0.4), transparent);
   opacity: 0;
   transition: opacity 0.2s ease;
 }
@@ -708,21 +722,21 @@
   transform: translateY(-4px);
   border-color: var(--vp-c-brand-1) !important;
   box-shadow:
-    0 24px 48px -24px rgba(180, 83, 9, 0.35),
-    0 0 0 1px rgba(251, 191, 36, 0.15) inset;
+    0 24px 48px -24px rgba(27, 101, 219, 0.35),
+    0 0 0 1px rgba(94, 155, 255, 0.15) inset;
   background: rgba(255, 255, 255, 0.7) !important;
 }
 .dark .VPFeature:hover {
   background: rgba(17, 20, 28, 0.75) !important;
   box-shadow:
-    0 24px 48px -24px rgba(251, 191, 36, 0.5),
-    0 0 0 1px rgba(251, 191, 36, 0.2) inset;
+    0 24px 48px -24px rgba(94, 155, 255, 0.5),
+    0 0 0 1px rgba(94, 155, 255, 0.2) inset;
 }
 .VPFeature:hover::before { opacity: 1; }
 .VPFeature .icon {
   font-size: 1.7rem !important;
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.16), rgba(59, 130, 246, 0.12)) !important;
-  border: 1px solid rgba(251, 191, 36, 0.18) !important;
+  background: linear-gradient(135deg, rgba(94, 155, 255, 0.16), rgba(59, 130, 246, 0.12)) !important;
+  border: 1px solid rgba(94, 155, 255, 0.18) !important;
   border-radius: 12px !important;
   width: 52px !important;
   height: 52px !important;
@@ -914,14 +928,14 @@
 .cta-primary {
   color: #fff !important;
   background: linear-gradient(135deg, var(--vp-c-brand-1), var(--vp-c-brand-2));
-  box-shadow: 0 8px 28px -8px rgba(180, 83, 9, 0.55);
+  box-shadow: 0 8px 28px -8px rgba(27, 101, 219, 0.55);
 }
 .dark .cta-primary {
-  color: #1a1206 !important;
+  color: #0b0b0d !important; /* 同上:浅蓝渐变底配深字 */
 }
 .cta-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 36px -10px rgba(180, 83, 9, 0.7);
+  box-shadow: 0 14px 36px -10px rgba(27, 101, 219, 0.7);
 }
 .cta-ghost {
   color: var(--vp-c-text-1) !important;
@@ -1002,10 +1016,10 @@
 .download-card:hover {
   transform: translateY(-2px);
   border-color: var(--vp-c-brand-1);
-  box-shadow: 0 18px 42px -28px rgba(180, 83, 9, 0.8);
+  box-shadow: 0 18px 42px -28px rgba(27, 101, 219, 0.8);
 }
 .download-card-primary {
-  background: linear-gradient(145deg, rgba(180, 83, 9, 0.12), var(--vp-c-bg));
+  background: linear-gradient(145deg, rgba(27, 101, 219, 0.12), var(--vp-c-bg));
 }
 /* The iOS card is deliberately not a link: TestFlight has no public invite URL
    yet, and a card that looks clickable but goes nowhere is worse than one that
@@ -1085,7 +1099,7 @@
 .VPHome .VPFeatures { padding-top: 54px; }
 .VPNavBarMenuLink[href*="desktop-download-title"] { color: var(--vp-c-brand-1); font-weight: 700; }
 .dark .desktop-download,
-.dark .mobile-download { box-shadow: 0 28px 90px -55px rgba(251, 191, 36, 0.55); }
+.dark .mobile-download { box-shadow: 0 28px 90px -55px rgba(94, 155, 255, 0.55); }
 
 /* ---------- Sidebar / doc tweaks (kept) ---------- */
 .VPSidebarItem.is-active > .item > .link > .text {
@@ -1330,16 +1344,16 @@
   background: #0b0d12;
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    0 40px 90px -36px rgba(245, 158, 11, 0.38),
+    0 40px 90px -36px rgba(37, 99, 217, 0.38),
     0 24px 48px -24px rgba(0, 0, 0, 0.7),
     0 1px 0 rgba(255, 255, 255, 0.04) inset;
   animation: hero-shot-in 0.3s ease-out both;
   position: relative;
 }
 .hero-shot::before {
-  /* 一点点琥珀色的辉光,和标题渐变同色系;只在框外,不盖住截图 */
+  /* 一点点蓝色的辉光,和标题渐变同色系;只在框外,不盖住截图 */
   content: ""; position: absolute; inset: -14% -8% auto -8%; height: 60%; z-index: -1; pointer-events: none;
-  background: radial-gradient(60% 70% at 70% 30%, rgba(251, 191, 36, 0.16), transparent 70%);
+  background: radial-gradient(60% 70% at 70% 30%, rgba(94, 155, 255, 0.16), transparent 70%);
   filter: blur(18px);
 }
 @keyframes hero-shot-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
