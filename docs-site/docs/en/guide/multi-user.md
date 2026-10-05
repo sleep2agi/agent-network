@@ -8,7 +8,7 @@ User management, registration, and direct messages are in the app starting with 
 
 A member or viewer added from this version on has `agent_access` `granted` by default: until Agents are granted one by one, they see none in that network. Members who were already in the network before the upgrade stay on `all`, so the upgrade does not change what they can see. Owners, admins, and Hub admins are not limited by this rule.
 
-The network owner or admin, or a Hub admin, replaces the grant list through the API. A grant means the person can see that Agent and talk to it. It does not let them change its config, rules, or logs. The rule and the fields are in [Users & Agent Access Endpoints](/en/api/rest-admin#users-agent-access-endpoints).
+The network owner or admin, or a Hub admin, replaces the grant list through the API. A grant means the person can see that Agent and talk to it. It does not let them change its config, rules, or logs. Anyone who can see an Agent sees its full chat history: different people opening the same node see the same messages, including messages the owner and other members sent it and history from before the grant. The rule and the fields are in [Users & Agent Access Endpoints](/en/api/rest-admin#users-agent-access-endpoints).
 
 ## Human-to-human messages
 

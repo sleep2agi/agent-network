@@ -63,8 +63,8 @@ curl "$HUB/api/networks/<net>/members/<user_id>/agent-grants" -H "Authorization:
 | 档 | 数据 | 能做什么 |
 |---|---|---|
 | 不可见 | 没有授权行 | 列表里没有这个节点;按 alias 派活返回的 403 和「节点不存在」**逐字节相同**(不能拿它探测 alias) |
-| 只读(view) | 授权行 `can_message=0` | 能在名册里看见状态,不能派活 / 发消息 |
-| 可对话(talk) | 授权行 `can_message=1` | 能看见、能派活 / 发消息;任务与消息**只看自己和它之间的往来** |
+| 只读(view) | 授权行 `can_message=0` | 能在名册里看见状态、看见它的**整条任务时间线**(谁发的都算,含授权前的历史,#563);不能派活 / 发消息 |
+| 可对话(talk) | 授权行 `can_message=1` | 能看见、能派活 / 发消息;任务时间线与「只读」档相同(见 §2 #5,#563) |
 
 「管理节点」(规则文件、技能、工作目录文件、运行日志、配置、启停)**对受限成员一律拒绝,不管有没有授权**。#2086 把这一条作为明确决定写进了代码和测试:「能和 X 聊」不等于「能管 X」。
 
@@ -84,9 +84,10 @@ curl "$HUB/api/networks/<net>/members/<user_id>/agent-grants" -H "Authorization:
 | 2 | 名册 `GET /api/status`、`GET /api/nodes`、MCP `get_all_status` / `get_session_status` | 只返回授权的节点;没有授权时返回 0 行 | `network-scope.ts` 的 `addAgentNetworkScope()` |
 | 3 | 派活 `POST /api/task` | 只能发给 `can_message` 的节点,其余一律 403 `agent_not_granted`;`from` 固定为本人用户名;附件只能用自己看得见的文件 | `server.ts` 的 `/api/task` 分支,用到 `canMessageAgent()`、`restrictedMemberAttachmentsDenied()` |
 | 4 | MCP `send_task` / `send_message` | 同 #3;不在 `RESTRICTED_MEMBER_TOOLS` 白名单里的工具,在受限网络里一律 `agent_access_restricted` | `tools.ts`(`canMessageAgent` + 白名单判断),白名单在 `agent-access.ts` |
-| 5 | 任务、消息、事件 `GET /api/tasks`、`/api/messages`(alias 分支)、`/api/task_events` | 只看自己和授权节点之间的往来,**看不到** owner 发给同一节点的任务 | `network-scope.ts` 的 `addOwnTrafficScope()` |
-| 6 | SSE | 即使有授权,`/events/<节点 alias>` 也返回 403(这条流里有所有人发给该节点的任务);网络观察流只推 `from`/`to` 是自己的事件;`/events/users/me` 照常 | `server.ts` 的 SSE 鉴权(`isAgentRestricted()`) |
-| 7 | 文件 | 只能下载自己上传的文件,以及对方发给自己的文件;不能转发看不见的 file id | `server/src/restricted-files.ts` |
+| 5 | 任务与事件 `GET /api/tasks`、`/api/tasks/:id`、`/api/task_events`、MCP `list_tasks` / `get_task`、网络详情的任务计数 | **#563 起**:看得见节点 N(直接或经组授权)就看得见 N 的整条时间线 —— 谁发的都算(包括 owner、其他成员),也包括授权之前的历史;与 owner 打开同一个节点看到的一样。时间线另一端是**看不见的** Agent 的行仍隐藏(不借此暴露看不见的节点)。没有授权的成员仍什么都看不到 | `network-scope.ts` 的 `addAgentTimelineScope()` |
+| 5b | 投递队列 `/api/messages`(alias 分支) | 仍只看自己和授权节点之间的往来(inbox 是投递队列,不是聊天历史) | `network-scope.ts` 的 `addOwnTrafficScope()` |
+| 6 | SSE | 即使有授权,`/events/<节点 alias>` 也返回 403(这条流里有所有人发给该节点的任务);网络观察流推 `from`/`to` 是自己的事件,以及授权节点时间线上的事件(#563,判据同 #5:另一端是看不见的 Agent 的不推);`/events/users/me` 照常 | `server.ts` 的 SSE 鉴权(`isAgentRestricted()`) |
+| 7 | 文件 | 只能下载自己上传的文件、对方发给自己的文件,以及授权节点时间线上**别人**发出的附件和节点回复的附件(#563,否则共享历史里的图打不开);不能转发看不见的 file id | `server/src/restricted-files.ts` |
 | 8 | 计划任务 | 列表为空、不能新建;受限之前建的计划任务,到点派发时按创建者重新判定,失败记 `creator_access_revoked` | `server/src/scheduled-tasks.ts` |
 | 9 | 需求看板 | 可以用;没授权给他的节点在 `agent_owner` / 参与人里被隐去,也不能被他改动(`agent_owner_not_granted`) | `server/src/requirements.ts` |
 | 10 | 凭据与人 | 在受限网络里不能持有网络令牌(ntok),`resolveToken()` 解析时就拒绝;可以通过 `/api/dm` 给网络里任何人发私信 | `auth.ts` 的 `resolveToken()`、`server/src/human-dm.ts` |
@@ -252,7 +253,7 @@ CREATE TABLE network_member_group_grants (  -- 成员 × 组
 
 - **动态**:往组里加一个节点,下一次请求这个节点就可见了。hub 现在就是每次请求现算、不做缓存,所以这一点天然成立。
 - **并集**:可见 = 直接授权 ∪ 组授权。可对话 = 任一来源给了 `can_message` 就算。
-- **执行点不变**:§2 里列的所有路径都经过 `canSeeAgent`、`canMessageAgent`、`addAgentNetworkScope` 和 `addOwnTrafficScope`,改了 `visibleAgents()` 就全部覆盖了。
+- **执行点不变**:§2 里列的所有路径都经过 `canSeeAgent`、`canMessageAgent`、`addAgentNetworkScope`、`addAgentTimelineScope`(#563)和 `addOwnTrafficScope`,改了 `visibleAgents()` 就全部覆盖了。
 - **打开着的实时流**:组成员增删、组授权变化、删除组的时候,对受影响的成员调用 `closeUserStreamsInNetwork()`,让他们按新权限重连。已有的授权变更走的就是这条路。
 - **受限判据不变**:`isAgentRestricted()` 照旧;`agent_access='all'` 的成员不看组。
 
