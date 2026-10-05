@@ -151,6 +151,7 @@ import {
   formatClassificationForLog,
 } from "./runtime/classify-result";
 import { formatAttemptOutcome } from "./runtime/attempt-log-outcome";
+import { createClaudeResultTracker, formatClaudeTurnCost, modelInUseNotice } from "./runtime/claude-turn-log";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
 import { superviseChild } from "./util/supervise-child";
 import { buildNodeSseHeaders, formatSupersededError, generateInstanceId, parseSupersededFrame, SupersedeBackoff } from "./util/sse-node-identity";
@@ -333,7 +334,7 @@ for (let i = 0; i < argv.length; i++) {
   --alias <name>      Agent 别名 / CommHub alias (必需)
   --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
                       (claude-code-cli is NOT here: it runs via \`anet node start\`, not by passing --runtime to agent-node — see the Runtime section)
-  --model <name>      AI 模型 (codex 默认: ${DEFAULT_CODEX_MODEL}, claude-agent-sdk 默认: claude-sonnet-4-6)
+  --model <name>      AI 模型 (codex 默认: ${DEFAULT_CODEX_MODEL}, claude-agent-sdk 默认: 账号默认模型)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
   --max-turns <n>     每任务最大轮次 (default: 50)
@@ -2198,6 +2199,26 @@ async function runGoalSchedulerTick() {
 // Claude Runtime
 // ══════════════════════════════════════
 let claudeSessionId: string | undefined = RUNTIME === "claude" ? (SESSION_ID || undefined) : undefined;
+// #557 ① — session for which `[claude] model in use: X` was already logged.
+let claudeModelLoggedSession: string | undefined;
+// #557 ③ — `total_cost_usd` is cumulative per session (also across resume),
+// so the per-turn figure is a delta from the last total seen. Persisted next
+// to `session` in config.json so a restart + resume still logs a delta.
+const claudeSessionCostTotals = new Map<string, number>();
+{
+  const c = fileConfig.claudeSessionCost;
+  if (c && typeof c.session === "string" && typeof c.totalUsd === "number") claudeSessionCostTotals.set(c.session, c.totalUsd);
+}
+function writebackClaudeSessionCost(sessionId: string, totalUsd: number) {
+  if (!configFilePath || !sessionId || RUNTIME !== "claude") return;
+  try {
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    cfg.claudeSessionCost = { session: sessionId, totalUsd };
+    atomicWriteJson(configFilePath, cfg);
+  } catch (e: any) {
+    debug(`writebackClaudeSessionCost failed: ${e.message}`);
+  }
+}
 let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
 // #1958 — model the ACP session actually ran with (readback from the agent),
 // and where that knowledge came from. Reported to the hub as `model` so the
@@ -2881,13 +2902,19 @@ async function processWithClaude(
         signal.addEventListener("abort", forward, { once: true });
         try {
           const messages = query({ prompt, options });
+          const resultTracker = createClaudeResultTracker<{ m: any; cls: NonNullable<ReturnType<typeof classifyRuntimeResult>> }>();
           evidence?.submitted();
           for await (const message of messages) {
             evidence?.consumed();
             const m = message as any;
             if (m.type === "system" && m.subtype === "init") {
               claudeSessionId = m.session_id;
-              log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "default"} attempt=${attempt + 1}`);
+              log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "(account default)"} attempt=${attempt + 1}`);
+              const modelNotice = modelInUseNotice(m, claudeModelLoggedSession);
+              if (modelNotice) {
+                log(modelNotice);
+                claudeModelLoggedSession = m.session_id;
+              }
               writebackSession(m.session_id);
             }
             if (m.type === "result") {
@@ -2914,102 +2941,127 @@ async function processWithClaude(
                       { baseUrl: process.env.ANTHROPIC_BASE_URL },
                     )
                   : null;
-              log(`[claude] ${formatAttemptOutcome(m.subtype, cls)} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
+              // #557 ③ — total_cost_usd is the cumulative session total; print
+              // this turn's delta and label the total as the session's.
+              const costSession = m.session_id || claudeSessionId;
+              const costLabel = formatClaudeTurnCost(
+                m.total_cost_usd,
+                costSession ? claudeSessionCostTotals.get(costSession) : undefined,
+                !!options.resume,
+              );
+              if (costSession && typeof m.total_cost_usd === "number") {
+                claudeSessionCostTotals.set(costSession, m.total_cost_usd);
+                writebackClaudeSessionCost(costSession, m.total_cost_usd);
+              }
+              log(`[claude] ${formatAttemptOutcome(m.subtype, cls)} | ${dt}ms | ${costLabel} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
+              const isEmptyResult = m.subtype === "success" && !!cls && cls.kind !== "success";
+              if (resultTracker.push({ m, cls: cls! }, isEmptyResult)) {
+                debug(`[claude] #557 ignored an intermediate empty result — a later result in the same query superseded it`);
+              }
               if (m.subtype === "success" && cls) {
                 if (cls.kind === "success") {
                   inner = m.result;
-                } else {
-                  // #383 — thinking-only terminal turn rescue (fix ①).
-                  //
-                  // Thinking-capable models (Kimi K2, MiniMax-M3, Anthropic
-                  // extended-thinking) sometimes end a tool-heavy turn on a
-                  // `thinking` block only — no `text` block — so the SDK
-                  // aggregates `m.result === ""`. Pre-fix we shipped a
-                  // developer diagnostic ("执行出错: claude-agent-sdk 返回空
-                  // 响应 (in=… out=…). 可能原因: (a) (b) (c). → 检查 <hard-
-                  // coded single vendor console URL>") straight to the IM
-                  // user, which was BOTH confusing AND misleading (the URL
-                  // was one vendor's dashboard even after the runtime moved
-                  // to another vendor).
-                  //
-                  // Rescue precedence (per 通信龙 review):
-                  //   (a) If the terminal turn genuinely has text → SDK's
-                  //       `m.result` already carries it; already handled.
-                  //   (b) `m.result === ""` AND we have an established
-                  //       session AND at least one turn ran → re-prompt
-                  //       ONCE for a plain-text final (session resume,
-                  //       short new prompt). This is the REAL fix — it
-                  //       coaxes the model into writing its final answer
-                  //       out loud.
-                  //   (c) Re-prompt also empty → short vendor-agnostic
-                  //       apology. Do NOT reach back to text blocks from
-                  //       earlier turns (would show the model's "let me
-                  //       check that" mid-thought as the final answer).
-                  //
-                  // Gated to `soft-fail-empty` classifier with the
-                  // "empty vendor result despite success signal" reason —
-                  // the other soft-fail-empty flavor (in=0 out=0 cost=0
-                  // silent reject) means the vendor is broken, not the
-                  // model choosing thinking-only; re-prompt would burn
-                  // tokens for nothing.
-                  const isThinkingOnlyShape = cls.kind === "soft-fail-empty"
-                    && cls.reason === "empty vendor result despite success signal"
-                    && !!claudeSessionId
-                    && (m.num_turns ?? 0) >= 1
-                    && process.env.ANET_DISABLE_383_REPROMPT !== "1";
-
-                  // Operator log (full diagnostic incl. vendor URL hint) —
-                  // regardless of whether we rescue or not.
-                  log(`[claude] ✗ ${cls.reason || cls.kind} (in=${u.input_tokens || 0}, out=${u.output_tokens || 0}, cost=${m.total_cost_usd ?? "?"})`);
-                  log(`[claude] ${formatClassificationForLog(cls, { runtime: "claude-agent-sdk", usage: m.usage })}`);
-
-                  if (isThinkingOnlyShape) {
-                    log(`[claude] #383 re-prompting for plain-text final (session=${claudeSessionId?.slice(0, 8)})`);
-                    let rescuedText = "";
-                    try {
-                      const rescueOptions = {
-                        ...options,
-                        resume: claudeSessionId,
-                        abortController: ac,
-                        // A shallow follow-up shouldn't loop back into
-                        // tool-use again; capping turns prevents a
-                        // pathological re-thinking loop from burning
-                        // tokens. If the model *still* only thinks in
-                        // one turn, we fall through to the apology.
-                        maxTurns: 1,
-                      } as any;
-                      const rescuePrompt =
-                        "请用一句面向用户的纯文本给出最终答复（不要用工具，不要 thinking，直接写答案）。";
-                      for await (const rmsg of query({
-                        prompt: rescuePrompt,
-                        options: rescueOptions,
-                      })) {
-                        const rm = rmsg as any;
-                        if (rm.type === "result" && rm.subtype === "success") {
-                          const rusage = rm.usage || {};
-                          log(`[claude] #383 re-prompt result | in=${rusage.input_tokens || 0} out=${rusage.output_tokens || 0} | got=${(rm.result || "").length}ch`);
-                          rescuedText = rm.result || "";
-                          break;
-                        }
-                      }
-                    } catch (e: any) {
-                      log(`[claude] #383 re-prompt failed: ${e?.message || e}`);
-                    }
-                    if (rescuedText && rescuedText.trim()) {
-                      inner = rescuedText;
-                    } else {
-                      inner = formatClassificationForUser(cls, { runtime: "claude-agent-sdk", usage: m.usage });
-                    }
-                  } else {
-                    // Non-thinking-only path (in=0 out=0 cost=0 silent
-                    // reject, or session-less first-turn empty): skip
-                    // re-prompt, show the short user-safe message.
-                    inner = formatClassificationForUser(cls, { runtime: "claude-agent-sdk", usage: m.usage });
-                  }
                 }
               } else {
                 inner = `执行出错: ${m.error || m.result || "未知错误"}`;
               }
+            }
+          }
+          // #557 ② — the empty-result verdict is taken AFTER the stream, from
+          // the LAST result only. On SDK 0.3.289 a query that follows a turn
+          // which left a background task running yields an extra empty result
+          // before the real one; acting on it as it arrived logged a false
+          // 「返回空响应」 for a turn that succeeded.
+          const pendingEmpty = resultTracker.pendingEmpty();
+          if (pendingEmpty) {
+            const { m, cls } = pendingEmpty;
+            const u = m.usage || {};
+            // #383 — thinking-only terminal turn rescue (fix ①).
+            //
+            // Thinking-capable models (Kimi K2, MiniMax-M3, Anthropic
+            // extended-thinking) sometimes end a tool-heavy turn on a
+            // `thinking` block only — no `text` block — so the SDK
+            // aggregates `m.result === ""`. Pre-fix we shipped a
+            // developer diagnostic ("执行出错: claude-agent-sdk 返回空
+            // 响应 (in=… out=…). 可能原因: (a) (b) (c). → 检查 <hard-
+            // coded single vendor console URL>") straight to the IM
+            // user, which was BOTH confusing AND misleading (the URL
+            // was one vendor's dashboard even after the runtime moved
+            // to another vendor).
+            //
+            // Rescue precedence (per 通信龙 review):
+            //   (a) If the terminal turn genuinely has text → SDK's
+            //       `m.result` already carries it; already handled.
+            //   (b) `m.result === ""` AND we have an established
+            //       session AND at least one turn ran → re-prompt
+            //       ONCE for a plain-text final (session resume,
+            //       short new prompt). This is the REAL fix — it
+            //       coaxes the model into writing its final answer
+            //       out loud.
+            //   (c) Re-prompt also empty → short vendor-agnostic
+            //       apology. Do NOT reach back to text blocks from
+            //       earlier turns (would show the model's "let me
+            //       check that" mid-thought as the final answer).
+            //
+            // Gated to `soft-fail-empty` classifier with the
+            // "empty vendor result despite success signal" reason —
+            // the other soft-fail-empty flavor (in=0 out=0 cost=0
+            // silent reject) means the vendor is broken, not the
+            // model choosing thinking-only; re-prompt would burn
+            // tokens for nothing.
+            const isThinkingOnlyShape = cls.kind === "soft-fail-empty"
+              && cls.reason === "empty vendor result despite success signal"
+              && !!claudeSessionId
+              && (m.num_turns ?? 0) >= 1
+              && process.env.ANET_DISABLE_383_REPROMPT !== "1";
+
+            // Operator log (full diagnostic incl. vendor URL hint) —
+            // regardless of whether we rescue or not.
+            log(`[claude] ✗ ${cls.reason || cls.kind} (in=${u.input_tokens || 0}, out=${u.output_tokens || 0}, cost=${m.total_cost_usd ?? "?"})`);
+            log(`[claude] ${formatClassificationForLog(cls, { runtime: "claude-agent-sdk", usage: m.usage })}`);
+
+            if (isThinkingOnlyShape) {
+              log(`[claude] #383 re-prompting for plain-text final (session=${claudeSessionId?.slice(0, 8)})`);
+              let rescuedText = "";
+              try {
+                const rescueOptions = {
+                  ...options,
+                  resume: claudeSessionId,
+                  abortController: ac,
+                  // A shallow follow-up shouldn't loop back into
+                  // tool-use again; capping turns prevents a
+                  // pathological re-thinking loop from burning
+                  // tokens. If the model *still* only thinks in
+                  // one turn, we fall through to the apology.
+                  maxTurns: 1,
+                } as any;
+                const rescuePrompt =
+                  "请用一句面向用户的纯文本给出最终答复（不要用工具，不要 thinking，直接写答案）。";
+                for await (const rmsg of query({
+                  prompt: rescuePrompt,
+                  options: rescueOptions,
+                })) {
+                  const rm = rmsg as any;
+                  if (rm.type === "result" && rm.subtype === "success") {
+                    const rusage = rm.usage || {};
+                    log(`[claude] #383 re-prompt result | in=${rusage.input_tokens || 0} out=${rusage.output_tokens || 0} | got=${(rm.result || "").length}ch`);
+                    rescuedText = rm.result || "";
+                    break;
+                  }
+                }
+              } catch (e: any) {
+                log(`[claude] #383 re-prompt failed: ${e?.message || e}`);
+              }
+              if (rescuedText && rescuedText.trim()) {
+                inner = rescuedText;
+              } else {
+                inner = formatClassificationForUser(cls, { runtime: "claude-agent-sdk", usage: m.usage });
+              }
+            } else {
+              // Non-thinking-only path (in=0 out=0 cost=0 silent
+              // reject, or session-less first-turn empty): skip
+              // re-prompt, show the short user-safe message.
+              inner = formatClassificationForUser(cls, { runtime: "claude-agent-sdk", usage: m.usage });
             }
           }
           return inner;
@@ -6884,8 +6936,12 @@ const STARTUP_MODEL_LABEL = MODEL
     ? "configured by Grok CLI"
     : RUNTIME === "codex" || RUNTIME === "codex-app-server"
       ? DEFAULT_CODEX_MODEL
-      : "claude-sonnet-4-6");
-log(`  model:   ${STARTUP_MODEL_LABEL} ${MODEL || RUNTIME === "grok" ? "" : "(default)"}`);
+      // #557 — no model configured: the claude CLI uses the ACCOUNT default,
+      // whose name the node cannot know at boot (canary: claude-opus-5-5 while
+      // this line said claude-sonnet-4-6). The SDK init message names it;
+      // processWithClaude logs `[claude] model in use: X` once per session.
+      : "(account default)");
+log(`  model:   ${STARTUP_MODEL_LABEL} ${!MODEL && (RUNTIME === "codex" || RUNTIME === "codex-app-server") ? "(default)" : ""}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 log(`  instance: ${INSTANCE_ID}`);
 // #214 维度 5 A6 — surface the grok ACP idle-timeout resolution so the

@@ -145,3 +145,17 @@ describe("#553 Grok startup banner reports model ownership truthfully", () => {
     expect(bannerModelLine(r.stdout)).toBe("grok-4.5");
   }, 30_000);
 });
+
+describe("#557 claude-agent-sdk banner does not invent a default model name", () => {
+  test("unset model → '(account default)', not a hardcoded model id", async () => {
+    const r = await runCli(["--alias", "p557-node", "--runtime", "claude-agent-sdk"]);
+    const line = bannerModelLine(r.stdout);
+    expect(line).toBe("(account default)");
+    expect(line).not.toContain("claude-");
+  }, 30_000);
+
+  test("an explicit claude model is still reported exactly", async () => {
+    const r = await runCli(["--alias", "p557-node", "--runtime", "claude-agent-sdk", "--model", "claude-opus-5-5"]);
+    expect(bannerModelLine(r.stdout)).toBe("claude-opus-5-5");
+  }, 30_000);
+});
