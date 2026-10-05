@@ -158,6 +158,8 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet node edit <ref> [--runtime <id>] [--model <id>]` | 改已存在节点的 runtime / 模型；**要重启才生效** |
 | `anet node ls` | 列出本地节点及网络状态 |
 | `anet node ls --all [--network <id\|name>] [--json]` | 列出 Hub 上当前 Network 里你能看到的**全部**节点，按机器（hostname）分组（只读，见下文） |
+| `anet node <start\|stop\|restart> <alias> --remote` | 启动 / 停止 / 重启**另一台机器上**的节点：Hub 让那台机器的 daemon 去做（见下文「远程管理节点」） |
+| `anet node edit <alias> --model <id> --remote` | 给另一台机器上的节点换模型 |
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
@@ -184,6 +186,40 @@ Network: team (net_0123456) — 3 node(s) on 2 machine(s)
 - 只用登录令牌（`~/.anet/config.json` 的 `token`），不用 `COMMHUB_TOKEN` 或任何节点令牌。
 - `--json` 输出 `{ network, daemons_readable, machines: [{ hostname, daemon, daemons, nodes }] }`。
 - 不加 `--all` 时 `anet node ls` 行为不变。
+
+### 远程管理节点（`--remote`）
+
+在任何一台登录了 `anet login` 的机器上，管理住在**另一台机器**上的节点（#562）：
+
+```bash
+anet node stop    coder-b --remote             # 先显示节点在哪台机器、daemon 是否在线，再问 y/N
+anet node start   coder-b --remote --yes       # 脚本里用 --yes 跳过确认
+anet node restart coder-b --remote --wait 90   # 等结果最多 90 秒（默认 60，--wait 0 不等）
+anet node edit    coder-b --model m2 --remote  # 换模型（节点会重启一次来生效）
+```
+
+```text
+Node coder-b — on machine-b, daemon daemon-b online; hub state: active / idle
+
+Will run 将执行:
+  anet node stop coder-b --remote --network net_271eb4d9e48c --yes
+  (ask the hub to have daemon daemon-b on machine-b stop "coder-b" (its config is kept; start it again with --remote))
+Run it? 执行? [y/N]: y
+Dispatched (stop_node sr_c6dd58d6e565).
+Waiting up to 60s for the hub to show the result …
+✓ "coder-b" is stopped on machine-b
+```
+
+- 走的是 Hub 上已有的生命周期工具（和 app 一样）：start / stop 由**那台机器的 daemon**（`anet daemon`）执行；
+  restart / 换模型由节点自己收到后退出、被 daemon 起的 `anet node start` 外壳重新拉起。
+- 能远程管理的前提：节点所在机器上有**在线的 daemon**，且节点是**由这个 daemon 创建的**（app「新建节点」选那台机器）。
+  否则在派发之前就拒绝并说明原因，例如 `this machine can't be managed remotely: no daemon online on machine-c`；
+  手工 `anet node start` 起的节点要在它自己的机器上管。
+- 权限完全由 Hub 判：viewer 会看到 Hub 的 `permission_denied`；被限制 Agent 访问的成员看不到 daemon，也不能管理节点，会被直接拒绝。
+- 只用登录令牌（`~/.anet/config.json` 的 `token`），不用 `COMMHUB_TOKEN`；保存的若是节点令牌则拒绝。
+- 不在终端里（脚本 / 管道）且没带 `--yes`：什么都不做，退出码 `1`。超时会如实说「请求已被 Hub 接受但还没看到结果」，用 `anet node ls --all` 查看。
+- `--network <id|name>` 选别的 Network；本地专用的参数（`--tmux`、`--copresence` 等）和 `--remote` 一起用会被拒绝（退出码 `2`）。
+  `stop --force` 用于节点还有进行中的任务时强停（Hub 记审计）。远程删除不在这一步的范围内。
 
 `anet node delete <name> --force` 先做一遍和 `anet node stop` 相同的停止（共存节点的 tmux 会话也一起停：
 codex 共存按标记 + `CODEX_HOME` 认，其余只认完整会话名、不按前缀），再删本地（`.anet/nodes/<id>/`），最后删 Hub 上这个节点的那一行，

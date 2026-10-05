@@ -206,6 +206,7 @@ on:
       - 'tests/test532-codex-menu/**'
       - 'tests/test561-node-menu/**'
       - 'tests/test562-node-ls-all/**'
+      - 'tests/test562b-node-remote/**'
       - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -395,6 +396,7 @@ on:
       - 'tests/test532-codex-menu/**'
       - 'tests/test561-node-menu/**'
       - 'tests/test562-node-ls-all/**'
+      - 'tests/test562b-node-remote/**'
       - 'tests/test536-codex-resume/**'
       - 'tests/test623-feishu-scrub-health/**'
       - 'tests/test30-v0.8-auth-deprecation/**'
@@ -677,6 +679,35 @@ jobs:
 
       - name: Run qa-create-node-workdir
         run: docker run --rm anet-qa-create-node-workdir
+
+  test562b-node-remote:
+    # #562 step 2 — `anet node <start|stop|restart> <alias> --remote` / `anet node edit <alias> --model <id> --remote`.
+    # 真 hub(随机端口、抛弃库)+ 真 `anet daemon up`(容器 hostname=machine-b)+ daemon 建的真子节点;被测 CLI 从源码跑、
+    # 自己的 HOME、空 cwd —— 节点对它不是本地的,一切经 Hub。远程 stop(答 n 不派发 / 答 y 停掉)→ start → restart → 换模型;
+    # 没 daemon 的机器拒绝、受限成员拒绝(COMMHUB_TOKEN 放 admin 令牌也不用)、viewer 显示 Hub 的 permission_denied。
+    # 见证红 4 条:去掉在线 daemon 检查 / 不确认就派发 / 改用 getToken()(COMMHUB_TOKEN 压过登录)/ 不等结果就报成功。
+    # 冷构建含三次 bun install + 两次 npm pack(同 qa-create-node-workdir 的形状),进不了 L1 —— 独立 job。
+    name: node --remote e2e (Docker, real hub + daemon)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test562b-node-remote"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build + run test562b-node-remote
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test562b \
+            -f tests/test562b-node-remote/Dockerfile .
+          # #1324: 不用 `docker run --rm` 一行式 —— 先把退出码收进 rc,取完 artifact 再原样退出。
+          rc=0
+          docker run --name "run-anet-test562b" --hostname machine-b -e ARTIFACT_DIR=/tmp/art \
+            anet-test562b || rc=$?
+          mkdir -p "$RUNNER_TEMP/suite-artifacts/anet-test562b"
+          docker cp "run-anet-test562b:/tmp/art/." "$RUNNER_TEMP/suite-artifacts/anet-test562b/" 2>/dev/null \
+            || echo "::warning::no artifacts under /tmp/art in anet-test562b"
+          docker rm -f "run-anet-test562b" >/dev/null 2>&1 || true
+          exit $rc
 
   test-lib-meta:
     # tests/lib/ 下的共享 helper 各自带一份元测试。它们此前**一个都没被 CI 跑过** ——

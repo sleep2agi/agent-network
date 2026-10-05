@@ -78,10 +78,18 @@ Example:
   anet node create my-agent --runtime claude-agent-sdk`,
   "node stop": `Usage: anet node stop ${NODE_REF}
 
-Stop a running agent node and tell the Hub it is offline.`,
+Stop a running agent node and tell the Hub it is offline.
+
+On another machine (#562): add --remote — the Hub asks that machine's daemon to do it.
+  anet node <start|stop|restart> <alias> --remote [--network <id|name>] [--yes] [--wait <s>]
+  anet node edit <alias> --model <id> --remote [--network <id|name>] [--yes] [--wait <s>]`,
   "node restart": `Usage: anet node restart ${NODE_REF} [start options]
 
-Stop the node, then start it again (same options as anet node start).`,
+Stop the node, then start it again (same options as anet node start).
+
+On another machine (#562): add --remote — the Hub asks that machine's daemon to do it.
+  anet node <start|stop|restart> <alias> --remote [--network <id|name>] [--yes] [--wait <s>]
+  anet node edit <alias> --model <id> --remote [--network <id|name>] [--yes] [--wait <s>]`,
   "node resume": `Usage: anet node resume ${NODE_REF} [--session <session-id>]
 
 Resume the node's interrupted session (or a specific one with --session).`,
@@ -93,7 +101,11 @@ restarted under the new name so it re-registers on the Hub.`,
   "node edit": `Usage: anet node edit ${NODE_REF} [--runtime <id>] [--model <id>] [--workdir <dir>]
 
 Change a node's runtime, model or co-presence working directory (at least one flag).
-Restart the node for the change to take effect.`,
+Restart the node for the change to take effect.
+
+On another machine (#562): add --remote — the Hub asks that machine's daemon to do it.
+  anet node <start|stop|restart> <alias> --remote [--network <id|name>] [--yes] [--wait <s>]
+  anet node edit <alias> --model <id> --remote [--network <id|name>] [--yes] [--wait <s>]`,
   "node ls": `Usage: anet node ls [--verbose]
        anet node list
 
