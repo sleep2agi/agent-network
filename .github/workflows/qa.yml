@@ -107,6 +107,7 @@ on:
       - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-create-node-workdir/**'
+      - 'tests/test571-lifecycle-safety/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
@@ -298,6 +299,7 @@ on:
       - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-create-node-workdir/**'
+      - 'tests/test571-lifecycle-safety/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
@@ -710,6 +712,29 @@ jobs:
             || echo "::warning::no artifacts under /tmp/art in anet-test562b"
           docker rm -f "run-anet-test562b" >/dev/null 2>&1 || true
           exit $rc
+  test571-lifecycle-safety:
+    # #571 生命周期安全三处:daemon stop 不再按 alias 全机 SIGTERM(同机别的工作目录/HOME 里
+    # 同名的 agent-node 必须活着)、hub 对手工起的节点拒绝点名 daemon 的 stop/delete、
+    # `anet project up` 不删活节点的 .pid 起第二份。真 hub + 真 host_supervisor daemon + 真进程。
+    # 冷构建与 qa-create-node-workdir 同形(三次 bun install + 两次 npm pack,本地实测 ~3m47s),
+    # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
+    name: lifecycle safety e2e (Docker, real hub + daemon)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test571-lifecycle-safety"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test571-lifecycle-safety
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test571-lifecycle-safety \
+            -f tests/test571-lifecycle-safety/Dockerfile .
+
+      - name: Run test571-lifecycle-safety
+        run: docker run --rm anet-test571-lifecycle-safety
 
   test-lib-meta:
     # tests/lib/ 下的共享 helper 各自带一份元测试。它们此前**一个都没被 CI 跑过** ——
