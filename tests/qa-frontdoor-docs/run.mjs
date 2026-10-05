@@ -199,12 +199,12 @@ for (const [language, html] of renderedHomepages) {
   );
 }
 
-check(renderedHomepages[0][1].includes("你的 AI Agent 桌面工作台"), "Chinese rendered homepage lost the desktop hero");
-check(renderedHomepages[1][1].includes("Your desktop workspace for AI agents"), "English rendered homepage lost the desktop hero");
-for (const marker of ["像聊天一样协作", "管理整个网络", "本地优先"]) {
+check(renderedHomepages[0][1].includes("一个人，一支 Agent 军团"), "Chinese rendered homepage lost the hero tagline");
+check(renderedHomepages[1][1].includes("One person. A whole team of agents."), "English rendered homepage lost the hero tagline");
+for (const marker of ["像微信一样指挥", "一眼看清整支军团", "军团在你自己的机器上"]) {
   check(renderedHomepages[0][1].includes(marker), `Chinese rendered homepage lost feature card: ${marker}`);
 }
-for (const marker of ["Collaborate like chat", "Manage the network", "Local first"]) {
+for (const marker of ["Command it like a chat", "See your whole team at a glance", "Your team runs on your machines"]) {
   check(renderedHomepages[1][1].includes(marker), `English rendered homepage lost feature card: ${marker}`);
 }
 
