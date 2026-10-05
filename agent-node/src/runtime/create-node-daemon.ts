@@ -715,6 +715,21 @@ interface GetCreateRequestResult {
   env_blob?: Record<string, string>;
 }
 
+/** #596 — a codex co-presence launcher (`anet node start` on a codexCopresence
+ *  config) that has already ended at the +5 s check: did it START the node?
+ *  Yes only when it exited 0 AND its identity marker is on disk (the marker is
+ *  written before any tmux session exists, and every session carries it).
+ *  Anything else — non-zero (e.g. 3 = needs codex login), a signal, an exit we
+ *  never observed, or a 0 without a marker — is a failed start. */
+export function copresenceLauncherVerdict(
+  exit: { code: number | null; signal: NodeJS.Signals | null } | null,
+  markerOnDisk: boolean,
+): { started: true } | { started: false; how: string } {
+  if (exit && exit.code === 0 && !exit.signal && markerOnDisk) return { started: true };
+  const how = !exit ? "exit not observed" : exit.signal ? `signal ${exit.signal}` : `exit code ${exit.code}`;
+  return { started: false, how: markerOnDisk ? how : `${how}, no identity marker written` };
+}
+
 export async function handleCreateNodeDoorbell(
   event: { request_id: string },
   deps: CreateNodeDeps,
@@ -879,6 +894,13 @@ export async function handleCreateNodeDoorbell(
   //     symptom if the real cause is insta-crash on first vendor call /
   //     missing API key / config issue)
   let childPid = -1;
+  // #596 — how the launcher ended, if it did. A codex co-presence launcher
+  // (`anet node start` on a codexCopresence config) brings the three tmux
+  // sessions up and then EXITS 0 by design; without this, the +5 s check below
+  // read that exit as "runtime missing" and acked runtime_capability_check_failed
+  // for a node that was up.
+  let launcherExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+  const childNodeIdForMap = `node_${request_id.replace(/^cr_/, "")}`;
   try {
     const child = spawn(anetBin, ["node", "start", req.node_spec.name], {
       cwd: childWorkDir,
@@ -887,6 +909,18 @@ export async function handleCreateNodeDoorbell(
       detached: true,
     });
     childPid = child.pid || -1;
+    const spawnedPid = childPid;
+    child.once("exit", (code, signal) => {
+      launcherExit = { code, signal };
+      // A co-presence launcher's pid is dead weight once it exits: keeping it in
+      // the children map would let a later stop signal whoever reuses the number.
+      // Stop/delete reach the generation through its identity marker instead.
+      if (codexCopresence) {
+        import("./stop-daemon.js")
+          .then(({ forgetSpawnedChildIfPid }) => { forgetSpawnedChildIfPid(childNodeIdForMap, spawnedPid); })
+          .catch(() => { /* best-effort */ });
+      }
+    });
     try { child.stdin?.destroy(); } catch { /* ok */ }
     try { child.stdout?.destroy(); } catch { /* ok */ }
     try { child.stderr?.destroy(); } catch { /* ok */ }
@@ -974,6 +1008,31 @@ export async function handleCreateNodeDoorbell(
       stillAlive = true;
       deps.log(`[create-node] +${FAIL_FAST_MS}ms capability check OK: pid=${childPid} still alive`);
     } catch (kerr: any) {
+      // #596 — a co-presence launcher that exited 0 after writing its identity
+      // marker finished its job; that is a start, not a capability failure.
+      if (codexCopresence) {
+        for (let i = 0; i < 10 && !launcherExit; i++) await new Promise(r => setTimeout(r, 50));
+        const ex = launcherExit as { code: number | null; signal: NodeJS.Signals | null } | null;
+        const markerOnDisk = (() => { try { statSync(join(childDir, "copresence-identity.json")); return true; } catch { return false; } })();
+        try {
+          const { forgetSpawnedChildIfPid } = await import("./stop-daemon.js");
+          forgetSpawnedChildIfPid(childNodeIdForMap, childPid);
+        } catch { /* best-effort */ }
+        const verdict = copresenceLauncherVerdict(ex, markerOnDisk);
+        if (verdict.started) {
+          deps.log(`[create-node] +${FAIL_FAST_MS}ms: co-presence launcher pid=${childPid} exited 0 with its identity marker on disk — tmux sessions own the node now`);
+          await deps.callCommHub("ack_create_request", {
+            request_id, status: "started", child_pid: childPid,
+          }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
+          return;
+        }
+        const msg = `codex co-presence launcher ended within ${FAIL_FAST_MS}ms (${verdict.how}) — run \`anet node start ${req.node_spec.name}\` in ${childWorkDir} to see why`;
+        deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
+        await deps.callCommHub("ack_create_request", {
+          request_id, status: "runtime_capability_check_failed", error: msg.slice(0, 800), runtime: req.node_spec.runtime,
+        }).catch(() => {});
+        return;
+      }
       const msg = `child died within ${FAIL_FAST_MS}ms post-spawn (likely missing runtime binary or auth for runtime='${req.node_spec.runtime}'): ${kerr?.message || kerr}`;
       deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
       // #1293:记录已经提前到 spawn 之后,这条失败路径必须把它撤掉,

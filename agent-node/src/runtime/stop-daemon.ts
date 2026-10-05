@@ -10,7 +10,13 @@
 // Key invariants (§2.4):
 //   - We never fork/exec a binary in this path — only `process.kill`
 //     a PID that we previously stored via `recordSpawnedChild` (RFC-026
-//     §4.2 attack-surface seal).
+//     §4.2 attack-surface seal). ONE exception (#596): a Codex TUI
+//     co-presence child whose own identity marker is on disk is torn down
+//     by the product's `anet node stop <alias>`, run with the SAME pinned,
+//     hash-verified anet binary and minimalEnv() that create/start already
+//     fork, fixed argv, no shell, cwd = the child's workdir. That command
+//     only reaps processes carrying the node's ANET_NODE_MARKER; see
+//     copresenceTeardownFor below for why pid signals cannot reach them.
 //   - backup_path naming = `<Date.now()>-<alias>` so the same alias can
 //     be deleted-and-recreated without collision (scenario K).
 //   - chmod 700 immediately after rename, even if source dir was looser
@@ -21,7 +27,7 @@
 
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { childWorkDirFor, forgetChildWorkdir } from "./child-workdir.js";
 
@@ -60,6 +66,17 @@ export function forgetSpawnedChild(child_node_id: string): boolean {
   return childrenMap.delete(child_node_id);
 }
 
+/** #596 — drop the entry only if it still records `pid`. A co-presence
+ *  launcher (`anet node start` for a codexCopresence child) brings up its
+ *  tmux sessions and then EXITS by design; keeping its dead pid in the map
+ *  would let a later stop signal whatever process reuses that number. The
+ *  pid check keeps a newer generation's entry (start_node re-record) intact. */
+export function forgetSpawnedChildIfPid(child_node_id: string, pid: number): boolean {
+  const cur = childrenMap.get(child_node_id);
+  if (!cur || cur.pid !== pid) return false;
+  return childrenMap.delete(child_node_id);
+}
+
 /** Test-only helper — clears the map so test suites can isolate. NOT
  *  exposed via cli; daemon runtime never wants to drop its tracking
  *  state mid-flight. */
@@ -95,7 +112,13 @@ export interface StopDoorbellDeps {
   renameDir?: (src: string, dst: string) => void;
   ensureDir?: (path: string, mode: number) => void;
   chmod?: (path: string, mode: number) => void;
+  // #596 — run the product's co-presence teardown (`anet node stop <alias>`
+  // in the child's workdir). Injectable for tests; default forks the pinned
+  // anet binary (see the header exception).
+  stopCopresenceNode?: (alias: string, childWorkDir: string) => Promise<CopresenceTeardownResult>;
 }
+
+export interface CopresenceTeardownResult { ok: boolean; detail: string }
 
 interface GetStopRequestResult {
   ok: boolean;
@@ -206,6 +229,80 @@ function hasLocalChildRecord(workdirRoot: string, alias: string, child_node_id: 
   return true;
 }
 
+/** #596 — 这个 child 是不是一个**正在占着身份标记**的 Codex TUI 共存节点。
+ *
+ *  共存节点的 `anet node start` 只是启动器:它把 app-server / 桥 / TUI 起在三个 tmux
+ *  会话里(`<alias>-appsrv` / `<alias>-桥` / `<alias>`),写下
+ *  `<node>/copresence-identity.json`(ANET_NODE_MARKER),然后**自己退出**。tmux 服务器
+ *  是自己 daemonize 的,那三段既不在启动器的进程组里、argv 里也没有 `--config <本 config>`
+ *  —— 所以下面的进程组信号和身份清扫一个都碰不到,stop/delete 之后它们照跑(#596 实测)。
+ *
+ *  判据全部来自本 daemon 自己写的那份 config:普通文件、node_id 等于请求里的、
+ *  `codexCopresence: true`,并且标记文件在。
+ *  🔴 标记文件不在就**不**交给 `anet node stop`:那条命令在没有标记时会退回按 tmux 会话名
+ *     清扫(legacy 路径)—— 那正是「只凭 alias 杀进程」。标记在启动器起任何会话**之前**就落盘
+ *     (agent-network/bin/cli.ts「marker file is written now」),所以没有标记 = 没有本节点的会话。 */
+export function copresenceTeardownFor(workdirRoot: string, alias: string, child_node_id: string): boolean {
+  const [cfgPath] = expectedChildConfigPaths(workdirRoot, alias);
+  if (!cfgPath) return false;
+  try {
+    if (!lstatSync(cfgPath).isFile()) return false;
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    if (cfg?.codexCopresence !== true) return false;
+    if (cfg?.node_id !== child_node_id) return false;
+  } catch { return false; }
+  try { lstatSync(join(workdirRoot, alias, "copresence-identity.json")); }
+  catch { return false; }
+  return true;
+}
+
+function tailText(s: unknown, n = 600): string {
+  const t = String(s ?? "").trim();
+  return t.length > n ? `…${t.slice(-n)}` : t;
+}
+
+async function defaultStopCopresenceNode(alias: string, childWorkDir: string): Promise<CopresenceTeardownResult> {
+  const { getAnetBinAbs, minimalEnv } = await import("./create-node-daemon.js");
+  let bin: string;
+  try { bin = getAnetBinAbs(); }
+  catch (e: any) { return { ok: false, detail: `anet binary unavailable: ${e?.message || e}` }; }
+  try {
+    const { stdout } = await execFileP(bin, ["node", "stop", alias], {
+      cwd: childWorkDir, env: minimalEnv(), timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
+    });
+    return { ok: true, detail: tailText(stdout) };
+  } catch (e: any) {
+    const rc = e?.code ?? e?.signal ?? "?";
+    return { ok: false, detail: `anet node stop exit=${rc}: ${tailText(e?.stderr || e?.stdout || e?.message)}` };
+  }
+}
+
+/** Runs the co-presence teardown when it applies. Returns null when it does
+ *  not apply or succeeded; an error string when it applied and failed (caller
+ *  must ack stop_failed and keep the node dir — the marker is the only handle
+ *  on the still-running generation). */
+async function teardownCopresenceIfAny(
+  alias: string | undefined,
+  child_node_id: string,
+  workdirRoot: string,
+  deps: StopDoorbellDeps,
+): Promise<string | null> {
+  if (!alias || !copresenceTeardownFor(workdirRoot, alias, child_node_id)) return null;
+  // workdirRoot = <childWorkDir>/.anet/nodes —— `anet node stop` 按 cwd 解析 .anet/nodes。
+  const childWorkDir = dirname(dirname(workdirRoot));
+  deps.log(`[stop-daemon] codex co-presence child ${alias}: identity marker present → \`anet node stop ${alias}\` in ${childWorkDir}`);
+  const run = deps.stopCopresenceNode ?? defaultStopCopresenceNode;
+  let r: CopresenceTeardownResult;
+  try { r = await run(alias, childWorkDir); }
+  catch (e: any) { r = { ok: false, detail: String(e?.message || e) }; }
+  if (r.ok) {
+    deps.log(`[stop-daemon] co-presence teardown OK alias=${alias}: ${r.detail.split("\n").slice(-1)[0] || ""}`);
+    return null;
+  }
+  deps.warn(`[stop-daemon] co-presence teardown FAILED alias=${alias}: ${r.detail}`);
+  return `copresence_teardown_failed: ${r.detail}`.slice(0, 1000);
+}
+
 export async function handleStopDoorbell(
   event: { request_id: string },
   deps: StopDoorbellDeps,
@@ -275,6 +372,15 @@ export async function handleStopDoorbell(
         `refusing to signal processes by alias. If this node was started by hand, stop it on its machine with \`anet node stop <alias>\`.`;
       deps.warn(`[stop-daemon] ${why}`);
       await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: why.slice(0, 1000) })
+        .catch((e: any) => { deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`); });
+      return;
+    }
+    // #596 — a co-presence child's starter has exited by design, so landing here
+    // with a live TUI/app-server/bridge is the NORMAL case for it. Tear it down
+    // by identity before the sweep / the trash move (the marker lives in the dir).
+    const cpErrMiss = await teardownCopresenceIfAny(child_alias, child_node_id, workdirRoot, deps);
+    if (cpErrMiss) {
+      await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: cpErrMiss })
         .catch((e: any) => { deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`); });
       return;
     }
@@ -387,6 +493,17 @@ export async function handleStopDoorbell(
       }).catch(() => {});
       return;
     }
+  }
+
+  // #596 — the recorded pid is the co-presence launcher; its process group
+  // never contained the tmux sessions. Signal first (a launcher still mid-start
+  // stops creating sessions), then reap the generation by its identity marker.
+  const cpErrHit = await teardownCopresenceIfAny(child_alias ?? entry.alias, child_node_id, workdirRoot, deps);
+  if (cpErrHit) {
+    await deps.callCommHub("ack_stop_request", {
+      request_id, status: "stop_failed", exit_signal, error: cpErrHit,
+    }).catch((e: any) => { deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`); });
+    return;
   }
 
   // §2.4 / §4.4 — for delete branch with delete_config=true, move the
