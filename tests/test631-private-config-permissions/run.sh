@@ -29,7 +29,10 @@ grep -q 'atomicWritePrivateFile(dotenvPath, body)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateFile(anetEnvPath, envContent)' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(p);' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(path);' agent-network/bin/cli.ts
-test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 6
+test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 7
+# #557 — the 7th writer: claude session cost total, same private atomic writer.
+grep -A8 'function writebackClaudeSessionCost' agent-node/src/cli.ts \
+  | grep -q 'atomicWriteJson(configFilePath, cfg)'
 # #1615 grok binary pin adds one config write (grokBinary + grokBinaryVersion). Same
 # private atomic choke point; the count alone would not prove the sixth write is the
 # pin, so bind it to the function the same way the Codex pending record is bound below.
