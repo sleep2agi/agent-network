@@ -22,10 +22,13 @@
 // the slot only when the holder is actually stuck (the lease expired, or its
 // pid and start time do not match). Takeover is atomic and admits one; the
 // log says 「接管卡死租约」. A live matching holder stays one-at-a-time.
-// The directory lock records pid and start time too. A live pid whose start
-// time does not match is reclaimed at once. A live pid that still matches,
-// but whose lock file is older than 60s, is an orphan: the critical section
-// is synchronous and cannot last that long.
+// The directory lock records pid, start time, and a random token. A live pid
+// whose start time does not match is reclaimed at once. A live pid that still
+// matches is an orphan only when the monotonic timestamp inside the lock is
+// older than 60s. A wall-clock step does not age a stamped lock. Before a
+// lease is written, the token is read again: a stolen lock writes nothing
+// and the waiter retries. Re-entering a lease cancels this process's pending
+// release of that same key and refreshes the expiry.
 // ANET_START_MEM_GATE=0 disables the gate entirely. --force does not.
 // Never throws.
 
@@ -66,8 +69,10 @@ export const START_GATE_LEASE_TTL_MS = 10 * 60 * 1000;
 /** An empty or unreadable lock younger than this is still being published, not dead. */
 export const START_GATE_LOCK_STALE_MS = 30_000;
 /**
- * A lock older than this, whose pid is still that same process, is an orphan.
- * The critical section only renames and writes a few files.
+ * A live matching lock is an orphan when the monotonic timestamp stored in
+ * the lock is older than this. Legacy locks with no stamp still use wall
+ * mtime, which a clock step can age out. The critical section only renames
+ * and writes a few files, so a live holder past this window is stuck.
  */
 export const START_GATE_LOCK_ORPHAN_MS = 60_000;
 
@@ -115,6 +120,11 @@ export interface StartGateDeps {
   lockStaleMs?: number;
   /** A live matching lock older than this is an orphan. Default 60s. */
   lockOrphanMs?: number;
+  /**
+   * Monotonic milliseconds shared by every process on this host.
+   * Default reads /proc/uptime. null means unknown: a stamped lock is kept.
+   */
+  monotonicNow?: () => number | null;
 }
 
 export type StartGateOutcome = "disabled" | "unsupported" | "ok" | "waited" | "single-lane";
@@ -148,10 +158,20 @@ interface HolderRecord {
   start: string | null;
   /** null when the file has no expiry (legacy). A number is an absolute ms timestamp. */
   expiresAt: number | null;
+  /** Lock attempts only. Distinguishes two publishes by the same pid and start. */
+  token: string | null;
+  /** Monotonic ms from the lock body. null on leases and on legacy locks. */
+  monoMs: number | null;
+}
+
+interface PendingDrop {
+  cancelled: boolean;
+  timer?: ReturnType<typeof setInterval>;
+  run: () => boolean;
 }
 
 const slotQueues = new Map<string, Promise<unknown>>();
-const pendingDrops = new Set<() => boolean>();
+const pendingDrops = new Map<string, PendingDrop>();
 let exitHooked = false;
 let anonSeq = 0;
 
@@ -358,25 +378,35 @@ export function cgroupLimitMb(maxText: string, memTotalMb: number): number | nul
   return limit === null ? null : limit / (1024 * 1024);
 }
 
+function emptyRecord(): HolderRecord {
+  return { pid: null, start: null, expiresAt: null, token: null, monoMs: null };
+}
+
 function parseRecord(text: string): HolderRecord {
   const parts = text.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0 || !/^[0-9]+$/.test(parts[0])) return { pid: null, start: null, expiresAt: null };
+  if (parts.length === 0 || !/^[0-9]+$/.test(parts[0])) return emptyRecord();
   const pid = Number(parts[0]);
-  if (!Number.isInteger(pid) || pid <= 0) return { pid: null, start: null, expiresAt: null };
+  if (!Number.isInteger(pid) || pid <= 0) return emptyRecord();
   const start = parts.length >= 2 && parts[1] !== "-" ? parts[1] : null;
   let expiresAt: number | null = null;
-  if (parts.length >= 3 && /^[0-9]+$/.test(parts[2])) {
-    const n = Number(parts[2]);
-    if (Number.isFinite(n)) expiresAt = n;
+  let token: string | null = null;
+  let monoMs: number | null = null;
+  for (const part of parts.slice(2)) {
+    if (part.startsWith("t:")) token = part.slice(2);
+    else if (part.startsWith("m:") && /^[0-9]+$/.test(part.slice(2))) monoMs = Number(part.slice(2));
+    else if (expiresAt === null && /^[0-9]+$/.test(part)) {
+      const n = Number(part);
+      if (Number.isFinite(n)) expiresAt = n;
+    }
   }
-  return { pid, start, expiresAt };
+  return { pid, start, expiresAt, token, monoMs };
 }
 
 function readRecord(path: string): HolderRecord {
   try {
     return parseRecord(readFileSync(path, "utf8"));
   } catch {
-    return { pid: null, start: null, expiresAt: null };
+    return emptyRecord();
   }
 }
 
@@ -420,8 +450,46 @@ function enqueueSlot<T>(dir: string, fn: () => T): Promise<T> {
   return run;
 }
 
-function publishLock(dir: string, lockPath: string, holderPid: number, selfStart: string | null): boolean {
-  const payload = `${holderPid} ${selfStart ?? "-"}\n`;
+function randomToken(): string {
+  return `${process.pid.toString(16)}${Date.now().toString(16)}${Math.floor(Math.random() * 0xffffffff).toString(16)}`;
+}
+
+/** Shared across processes. Wall-clock steps do not move /proc/uptime. */
+function defaultMonotonicNow(): number | null {
+  try {
+    const first = readFileSync("/proc/uptime", "utf8").trim().split(/\s+/)[0];
+    const sec = Number(first);
+    if (!Number.isFinite(sec) || sec < 0) return null;
+    return Math.floor(sec * 1000);
+  } catch {
+    return null;
+  }
+}
+
+function dropId(dir: string, key: string): string {
+  return `${dir}\0${key}`;
+}
+
+function cancelPendingDrop(dir: string, key: string): boolean {
+  const entry = pendingDrops.get(dropId(dir, key));
+  if (!entry) return false;
+  entry.cancelled = true;
+  if (entry.timer) clearInterval(entry.timer);
+  pendingDrops.delete(dropId(dir, key));
+  return true;
+}
+
+function publishLock(
+  dir: string,
+  lockPath: string,
+  holderPid: number,
+  selfStart: string | null,
+  monotonicNow: () => number | null,
+): string | null {
+  const token = randomToken();
+  const mono = monotonicNow();
+  const stamp = mono === null || !Number.isFinite(mono) ? "" : ` m:${Math.max(0, Math.floor(mono))}`;
+  const payload = `${holderPid} ${selfStart ?? "-"} t:${token}${stamp}\n`;
   if (!LOCK_PUBLISH_ATOMIC) {
     // Dead path, kept so a one-token mutation reproduces the empty-file race.
     // The file is visible empty before the pid is written. No pause.
@@ -429,11 +497,11 @@ function publishLock(dir: string, lockPath: string, holderPid: number, selfStart
     try {
       fd = openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
     } catch {
-      return false;
+      return null;
     }
     try { writeSync(fd, payload); } finally { closeSync(fd); }
     try { chmodSync(lockPath, 0o600); } catch { /* best effort */ }
-    return true;
+    return token;
   }
   const tmp = join(dir, `.lock.tmp.${holderPid}.${Date.now()}.${Math.floor(Math.random() * 1e9)}`);
   try {
@@ -441,12 +509,12 @@ function publishLock(dir: string, lockPath: string, holderPid: number, selfStart
     try {
       linkSync(tmp, lockPath);
     } catch {
-      return false;
+      return null;
     }
     try { chmodSync(lockPath, 0o600); } catch { /* best effort */ }
-    return true;
+    return token;
   } catch {
-    return false;
+    return null;
   } finally {
     try { unlinkSync(tmp); } catch { /* the lock, if linked, keeps the inode */ }
   }
@@ -460,6 +528,7 @@ function classifyLock(
   isPidAlive: (pid: number) => boolean,
   readStart: (pid: number) => string | null,
   now: () => number,
+  monotonicNow: () => number | null,
   staleMs: number,
   orphanMs: number,
 ): LockKind {
@@ -476,6 +545,12 @@ function classifyLock(
   // critical section is synchronous). Always reclaim it.
   if (rec.pid === selfPid) return "reclaim";
   if (!holderAlive(rec, isPidAlive, readStart)) return "reclaim";
+  if (rec.monoMs !== null) {
+    const mono = monotonicNow();
+    // Unknown monotonic clock: do not orphan a live holder because the wall clock jumped.
+    if (mono === null || !Number.isFinite(mono)) return "held";
+    return mono - rec.monoMs >= orphanMs ? "orphan" : "held";
+  }
   const age = now() - st.mtimeMs;
   if (age >= orphanMs) return "orphan";
   return "held";
@@ -511,43 +586,49 @@ function takeFileLock(
   isPidAlive: (pid: number) => boolean,
   readStart: (pid: number) => string | null,
   now: () => number,
+  monotonicNow: () => number | null,
   staleMs: number,
   orphanMs: number,
   warn: (m: string) => void,
-): boolean {
+): string | null {
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     try { chmodSync(dir, 0o700); } catch { /* umask already applied; best effort */ }
   } catch {
-    return false;
+    return null;
   }
   const lockPath = join(dir, ".lock");
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (publishLock(dir, lockPath, holderPid, selfStart)) return true;
+    const token = publishLock(dir, lockPath, holderPid, selfStart, monotonicNow);
+    if (token !== null) return token;
     if (!LOCK_PUBLISH_ATOMIC && readRecord(lockPath).pid === null) {
-      if (!stealEmptyLock(lockPath)) return false;
+      if (!stealEmptyLock(lockPath)) return null;
       continue;
     }
-    const kind = classifyLock(lockPath, holderPid, isPidAlive, readStart, now, staleMs, orphanMs);
-    if (kind === "held") return false;
+    const kind = classifyLock(lockPath, holderPid, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs);
+    if (kind === "held") return null;
     // The lock vanished between the failed publish and this check. Do not
     // reclaim whatever appears next — that file belongs to someone else.
     if (kind !== "reclaim" && kind !== "orphan") continue;
     const orphan = kind === "orphan" ? readRecord(lockPath) : null;
-    if (!reclaimLock(lockPath)) return false;
+    if (!reclaimLock(lockPath)) return null;
     if (orphan && orphan.pid !== null) {
       warn(`[start-gate] 回收被活进程占住的孤儿锁 pid=${orphan.pid} start=${orphan.start ?? "-"}`);
     }
   }
-  return false;
+  return null;
 }
 
-function releaseFileLock(dir: string, holderPid: number, selfStart: string | null): void {
-  const lockPath = join(dir, ".lock");
-  const rec = readRecord(lockPath);
-  if (rec.pid !== holderPid) return;
-  if (rec.start !== null && selfStart !== null && rec.start !== selfStart) return;
-  try { unlinkSync(lockPath); } catch { /* the next acquire steals a dead lock */ }
+function lockStillOurs(dir: string, holderPid: number, selfStart: string | null, token: string): boolean {
+  const rec = readRecord(join(dir, ".lock"));
+  if (rec.pid !== holderPid || rec.token !== token) return false;
+  if (rec.start !== null && selfStart !== null && rec.start !== selfStart) return false;
+  return true;
+}
+
+function releaseFileLock(dir: string, holderPid: number, selfStart: string | null, token: string): void {
+  if (!lockStillOurs(dir, holderPid, selfStart, token)) return;
+  try { unlinkSync(join(dir, ".lock")); } catch { /* the next acquire steals a dead lock */ }
 }
 
 function reapSlots(
@@ -556,20 +637,24 @@ function reapSlots(
   isPidAlive: (pid: number) => boolean,
   readStart: (pid: number) => string | null,
   warn: (m: string) => void,
+  stillOwns: () => boolean,
 ): string[] {
   const taken: string[] = [];
   let names: string[] = [];
   try { names = readdirSync(dir); } catch { return taken; }
   for (const name of names) {
+    if (!stillOwns()) return taken;
     if (name === ".lock" || name.startsWith(".")) continue;
     const path = join(dir, name);
     const rec = readRecord(path);
     if (rec.pid === null) {
+      if (!stillOwns()) return taken;
       try { unlinkSync(path); } catch { /* next pass */ }
       continue;
     }
     const expired = rec.expiresAt !== null && now() >= rec.expiresAt;
     if (!expired && holderAlive(rec, isPidAlive, readStart)) continue;
+    if (!stillOwns()) return taken;
     try { unlinkSync(path); } catch { continue; }
     taken.push(name);
     if (expired) warn(`[start-gate] reaped expired start lease ${name}`);
@@ -607,30 +692,61 @@ function acquireLease(
   readStart: (pid: number) => string | null,
   staleMs: number,
   orphanMs: number,
+  monotonicNow: () => number | null,
   warn: (m: string) => void,
 ): AcquireKind {
-  if (!takeFileLock(dir, holderPid, selfStart, isPidAlive, readStart, now, staleMs, orphanMs, warn)) return "no";
+  const token = takeFileLock(
+    dir, holderPid, selfStart, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs, warn,
+  );
+  if (token === null) return "no";
+  const still = () => lockStillOurs(dir, holderPid, selfStart, token);
   try {
-    const taken = reapSlots(dir, now, isPidAlive, readStart, warn);
+    if (!still()) return "no";
+    const taken = reapSlots(dir, now, isPidAlive, readStart, warn, still);
+    if (!still()) return "no";
     const mine = join(dir, key);
     const existing = readRecord(mine);
     if (
       existing.pid === holderPid
       && holderAlive(existing, isPidAlive, readStart)
       && (existing.expiresAt === null || now() < existing.expiresAt)
-    ) return "reentrant";
+    ) {
+      // The previous start of this same key is still trying to delete the lease.
+      // Cancel that retry and keep the lease for this start.
+      if (cancelPendingDrop(dir, key)) {
+        if (!still()) return "no";
+        const exp = now() + ttlMs;
+        writeFileSync(mine, `${holderPid} ${selfStart ?? "-"} ${exp}\n`, { mode: 0o600 });
+        try { chmodSync(mine, 0o600); } catch { /* best effort */ }
+        if (!still()) {
+          try { unlinkSync(mine); } catch { /* the next admit reaps a lease whose lock we lost */ }
+          return "no";
+        }
+        if (taken.length > 0) warn(`[start-gate] ${START_GATE_TAKEOVER_STATUS} ${taken.join(",")}`);
+        return "acquired";
+      }
+      return "reentrant";
+    }
     if (leaseIsLive(existing, now, isPidAlive, readStart)) return "no";
     if (existing.pid !== null) {
+      if (!still()) return "no";
       try { unlinkSync(mine); } catch { return "no"; }
     }
+    if (!still()) return "no";
     if (countLiveSlots(dir, now, isPidAlive, readStart) >= cap) return "no";
+    // The count may have stalled long enough for someone else to reclaim this lock.
+    if (!still()) return "no";
     const exp = now() + ttlMs;
     writeFileSync(mine, `${holderPid} ${selfStart ?? "-"} ${exp}\n`, { mode: 0o600 });
     try { chmodSync(mine, 0o600); } catch { /* best effort */ }
+    if (!still()) {
+      try { unlinkSync(mine); } catch { /* the next admit reaps a lease whose lock we lost */ }
+      return "no";
+    }
     if (taken.length > 0) warn(`[start-gate] ${START_GATE_TAKEOVER_STATUS} ${taken.join(",")}`);
     return "acquired";
   } finally {
-    releaseFileLock(dir, holderPid, selfStart);
+    releaseFileLock(dir, holderPid, selfStart, token);
   }
 }
 
@@ -644,15 +760,26 @@ function tryDropLease(
   readStart: (pid: number) => string | null,
   staleMs: number,
   orphanMs: number,
+  monotonicNow: () => number | null,
   warn: (m: string) => void,
+  abandoned: () => boolean,
 ): boolean {
-  if (!takeFileLock(dir, holderPid, selfStart, isPidAlive, readStart, now, staleMs, orphanMs, warn)) return false;
+  const token = takeFileLock(
+    dir, holderPid, selfStart, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs, warn,
+  );
+  if (token === null) return false;
+  const still = () => lockStillOurs(dir, holderPid, selfStart, token);
   let ok = true;
   try {
+    // Checked again under the lock: a re-entry may have cancelled this retry
+    // while we were waiting to publish.
+    if (abandoned()) return true;
+    if (!still()) return false;
     const path = join(dir, key);
     const rec = readRecord(path);
     const ours = rec.pid === holderPid && (rec.start === null || selfStart === null || rec.start === selfStart);
     if (!ours) return true;
+    if (!still()) return false;
     try { unlinkSync(path); }
     catch (e: any) {
       if (e?.code !== "ENOENT") {
@@ -662,7 +789,7 @@ function tryDropLease(
     }
     return ok;
   } finally {
-    releaseFileLock(dir, holderPid, selfStart);
+    releaseFileLock(dir, holderPid, selfStart, token);
   }
 }
 
@@ -670,8 +797,9 @@ function ensureExitHook(): void {
   if (exitHooked) return;
   exitHooked = true;
   process.on("exit", () => {
-    for (const fn of [...pendingDrops]) {
-      try { fn(); } catch { /* the process is already leaving */ }
+    for (const entry of [...pendingDrops.values()]) {
+      if (entry.cancelled) continue;
+      try { entry.run(); } catch { /* the process is already leaving */ }
     }
   });
 }
@@ -687,9 +815,15 @@ function scheduleDrop(
   readStart: (pid: number) => string | null,
   staleMs: number,
   orphanMs: number,
+  monotonicNow: () => number | null,
   warn: (m: string) => void,
 ): void {
-  const once = () => tryDropLease(dir, key, holderPid, selfStart, now, isPidAlive, readStart, staleMs, orphanMs, warn);
+  const entry: PendingDrop = { cancelled: false, run: () => false };
+  const once = () => tryDropLease(
+    dir, key, holderPid, selfStart, now, isPidAlive, readStart, staleMs, orphanMs, monotonicNow, warn,
+    () => entry.cancelled,
+  );
+  entry.run = once;
   if (once()) return;
   // The critical section is synchronous. A few millisecond retries avoid parking
   // every contested release on the 250ms timer.
@@ -700,24 +834,32 @@ function scheduleDrop(
   }
   warn(`[start-gate] could not release start slot ${key}: lock busy; retrying`);
   ensureExitHook();
+  const id = dropId(dir, key);
+  const prev = pendingDrops.get(id);
+  if (prev) {
+    prev.cancelled = true;
+    if (prev.timer) clearInterval(prev.timer);
+  }
+  pendingDrops.set(id, entry);
   const startedAt = Date.now();
-  const attempt = (): boolean => {
-    if (!once()) return false;
-    pendingDrops.delete(attempt);
-    return true;
-  };
-  pendingDrops.add(attempt);
   const timer = setInterval(() => {
-    if (attempt()) {
+    if (entry.cancelled) {
       clearInterval(timer);
+      if (pendingDrops.get(id) === entry) pendingDrops.delete(id);
+      return;
+    }
+    if (once()) {
+      clearInterval(timer);
+      if (pendingDrops.get(id) === entry) pendingDrops.delete(id);
       return;
     }
     if (Date.now() - startedAt >= ttlMs) {
       clearInterval(timer);
-      pendingDrops.delete(attempt);
+      if (pendingDrops.get(id) === entry) pendingDrops.delete(id);
       warn(`[start-gate] could not release start slot ${key}: still locked after ${Math.round(ttlMs / 1000)}s`);
     }
   }, 250);
+  entry.timer = timer;
   timer.unref();
 }
 
@@ -775,6 +917,7 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   const leaseTtlMs = deps.leaseTtlMs ?? positiveNumberEnv(env, "ANET_START_LEASE_TTL_SEC", START_GATE_LEASE_TTL_MS / 1000, warn) * 1000;
   const lockStaleMs = deps.lockStaleMs ?? START_GATE_LOCK_STALE_MS;
   const lockOrphanMs = deps.lockOrphanMs ?? START_GATE_LOCK_ORPHAN_MS;
+  const monotonicNow = deps.monotonicNow ?? defaultMonotonicNow;
   const slotsDir = deps.slotsDir?.trim()
     || env.ANET_START_SLOTS_DIR?.trim()
     || join(homedir(), ".anet", "run", "start-slots");
@@ -825,7 +968,7 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   };
   const ownLease = () => {
     releaseImpl = () => scheduleDrop(
-      slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, warn,
+      slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, monotonicNow, warn,
     );
   };
 
@@ -833,7 +976,7 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
     enqueueSlot(slotsDir, () => {
       try {
         return acquireLease(
-          slotsDir, key, cap, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, warn,
+          slotsDir, key, cap, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, monotonicNow, warn,
         );
       } catch (e) {
         warn(`[start-gate] lease error: ${e instanceof Error ? e.message : String(e)}`);

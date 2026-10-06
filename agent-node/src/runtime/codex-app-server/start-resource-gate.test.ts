@@ -2,9 +2,11 @@
 // All host readings are injected; nothing here reads the real /proc.
 // slotsDir is a temp directory: an admit must not write ~/.anet.
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   START_GATE_SINGLE_LANE_STATUS,
@@ -552,6 +554,139 @@ describe("#612 waitForStartResources", () => {
     expect(slotNames(stale.slotsDir)).toEqual([]);
   });
 
+  test("a wall-clock jump does not orphan a lock stamped with a fresh monotonic time", async () => {
+    const h = fakeHost([HEALTHY], {
+      now: () => Date.now(),
+      isPidAlive: () => true,
+      readProcessStartTicks: () => "111",
+      nodeId: "n-jump",
+      sleep: async () => { throw new Error("still-held"); },
+      ...({ monotonicNow: () => 5_000 } as object),
+    });
+    const lockPath = join(h.slotsDir, ".lock");
+    writeFileSync(lockPath, "88888 111 t:abc m:5000\n", { mode: 0o600 });
+    const old = (Date.now() - 120_000) / 1000;
+    utimesSync(lockPath, old, old);
+    await expect(waitForStartResources("x", h.deps)).rejects.toThrow("still-held");
+    expect(readFileSync(lockPath, "utf8")).toBe("88888 111 t:abc m:5000\n");
+    expect(h.warns.join("\n")).not.toContain("孤儿锁");
+  });
+
+  test("a stall inside the slot count does not leave two holders after the lock is reclaimed", async () => {
+    const slotsDir = mkdtempSync(join(tmpdir(), "anet-612-orphan-"));
+    const sideDir = mkdtempSync(join(tmpdir(), "anet-612-orphan-side-"));
+    roots.push(slotsDir, sideDir);
+    const yPid = 99999;
+    writeFileSync(join(slotsDir, "nodeY"), `${yPid} - ${Date.now() + 600_000}\n`, { mode: 0o600 });
+    const releaseFlag = join(sideDir, "release-b");
+    const holdingFlag = join(sideDir, "b-holding");
+    const gateHref = pathToFileURL(join(import.meta.dir, "start-resource-gate.ts")).href;
+    const scriptPath = join(sideDir, "racer.mjs");
+    writeFileSync(scriptPath, `
+      import { waitForStartResources } from ${JSON.stringify(gateHref)};
+      import { existsSync, writeFileSync } from "fs";
+      import { join } from "path";
+      const slots = process.argv[2];
+      const releaseFlag = process.argv[3];
+      const holdingFlag = process.argv[4];
+      const deadline = Date.now() + 8000;
+      while (!existsSync(join(slots, ".lock"))) {
+        if (Date.now() > deadline) { console.error("NO_LOCK"); process.exit(2); }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+      const mem = "MemTotal:       65642000 kB\\nMemAvailable:   20971520 kB\\n";
+      const r = await waitForStartResources("b", {
+        env: { ANET_START_MAX_CONCURRENT: "1", ANET_START_GATE_MAX_WAIT_SEC: "8" },
+        platform: "linux",
+        cpuCount: () => 16,
+        readFile: (p) => p === "/proc/meminfo" ? mem : p === "/proc/loadavg" ? "1.00 1.00 1.00 1/1 1\\n" : null,
+        sleep: (ms) => new Promise((res) => setTimeout(res, ms)),
+        now: () => Date.now(),
+        random: () => 0,
+        slotsDir: slots,
+        nodeId: "nodeB",
+        holderPid: 4343,
+        isPidAlive: (pid) => pid === 4242 || pid === 4343,
+        readProcessStartTicks: () => null,
+        lockOrphanMs: 300,
+        recheckMs: 50,
+        jitterMs: 0,
+        log: () => {},
+        warn: (m) => console.error(m),
+      });
+      writeFileSync(holdingFlag, "1");
+      const end = Date.now() + 8000;
+      while (!existsSync(releaseFlag)) {
+        if (Date.now() > end) break;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+      r.release();
+      console.log("B_DONE");
+    `);
+    const childErr: string[] = [];
+    const child = spawn(process.execPath, [scriptPath, slotsDir, releaseFlag, holdingFlag], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stderr.on("data", (buf) => childErr.push(String(buf)));
+    child.stdout.on("data", () => {});
+    let checks = 0;
+    let gateResult: Awaited<ReturnType<typeof waitForStartResources>> | null = null;
+    const started = Date.now();
+    const gateP = waitForStartResources("a", fakeHost([HEALTHY], {
+      slotsDir,
+      nodeId: "nodeA",
+      holderPid: HOLDER,
+      now: () => Date.now(),
+      readProcessStartTicks: () => null,
+      recheckMs: 30,
+      jitterMs: 0,
+      sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+      env: { ANET_START_MAX_CONCURRENT: "1", ANET_START_GATE_MAX_WAIT_SEC: "8" },
+      isPidAlive: (pid) => {
+        if (pid === yPid) {
+          checks++;
+          if (checks === 1) return true;
+          if (checks === 2) {
+            const until = Date.now() + 2500;
+            while (Date.now() < until) { /* countLiveSlots is inside the lock */ }
+            return false;
+          }
+          return false;
+        }
+        return pid === HOLDER || pid === 4343;
+      },
+    }).deps).then((r) => {
+      gateResult = r;
+      return r;
+    });
+    try {
+      const deadline = started + 7000;
+      while (Date.now() - started < 3200 || !existsSync(holdingFlag)) {
+        if (Date.now() > deadline) break;
+        await new Promise((res) => setTimeout(res, 30));
+      }
+      const names = slotNames(slotsDir);
+      expect(existsSync(holdingFlag), `child did not admit; stderr=${childErr.join("")}`).toBe(true);
+      expect(names, `leases=${names.join(",")}`).not.toContain("nodeA");
+      expect(names).toContain("nodeB");
+      writeFileSync(releaseFlag, "1");
+      const admitted = await gateP;
+      expect(admitted.outcome === "ok" || admitted.outcome === "waited").toBe(true);
+      expect(slotNames(slotsDir)).toEqual(["nodeA"]);
+      admitted.release();
+    } finally {
+      try { writeFileSync(releaseFlag, "1"); } catch { /* already gone */ }
+      if (!gateResult) {
+        await Promise.race([
+          gateP.then((r) => { gateResult = r; }),
+          new Promise((res) => setTimeout(res, 3000)),
+        ]);
+      }
+      gateResult?.release();
+      child.kill("SIGKILL");
+    }
+  }, 20_000);
+
   test("a live pid whose start time does not match does not keep the lock", async () => {
     const h = fakeHost([HEALTHY], {
       now: () => Date.now(),
@@ -615,6 +750,67 @@ describe("#612 waitForStartResources", () => {
     await new Promise((res) => setTimeout(res, 1500));
     expect(slotNames(h.slotsDir)).toEqual([]);
   }, 10_000);
+
+  test("same node released onto a busy lock, then started again, still excludes a third party", async () => {
+    const slotsDir = mkdtempSync(join(tmpdir(), "anet-612-reentry-"));
+    roots.push(slotsDir);
+    const warns: string[] = [];
+    const common = {
+      slotsDir,
+      now: () => Date.now(),
+      readProcessStartTicks: () => null as string | null,
+      recheckMs: 40,
+      jitterMs: 0,
+      sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+      warn: (m: string) => warns.push(m),
+      log: () => {},
+      env: { ANET_START_MAX_CONCURRENT: "1", ANET_START_GATE_MAX_WAIT_SEC: "30" },
+    };
+    const a1 = fakeHost([HEALTHY], {
+      ...common,
+      nodeId: "nodeA",
+      holderPid: HOLDER,
+      isPidAlive: (pid) => pid === HOLDER || pid === 88888 || pid === 4343,
+    });
+    const first = await waitForStartResources("a", a1.deps);
+    expect(slotNames(slotsDir)).toEqual(["nodeA"]);
+    const lockPath = join(slotsDir, ".lock");
+    writeFileSync(lockPath, "88888 111\n", { mode: 0o600 });
+    first.release();
+    expect(slotNames(slotsDir)).toEqual(["nodeA"]);
+    expect(warns.join("\n")).toContain("lock busy; retrying");
+    unlinkSync(lockPath);
+    const a2 = fakeHost([HEALTHY], {
+      ...common,
+      nodeId: "nodeA",
+      holderPid: HOLDER,
+      isPidAlive: (pid) => pid === HOLDER || pid === 88888 || pid === 4343,
+    });
+    const second = await waitForStartResources("a", a2.deps);
+    expect(second.outcome).toBe("ok");
+    expect(a2.sleeps).toEqual([]);
+    expect(slotNames(slotsDir)).toEqual(["nodeA"]);
+    let third: Awaited<ReturnType<typeof waitForStartResources>> | null = null;
+    const b = fakeHost([HEALTHY], {
+      ...common,
+      nodeId: "nodeB",
+      holderPid: 4343,
+      isPidAlive: (pid) => pid === HOLDER || pid === 4343,
+    });
+    const thirdTask = waitForStartResources("b", b.deps).then((r) => {
+      third = r;
+      return r;
+    });
+    await new Promise((res) => setTimeout(res, 700));
+    expect(slotNames(slotsDir)).toEqual(["nodeA"]);
+    expect(third).toBeNull();
+    second.release();
+    const admitted = await thirdTask;
+    expect(admitted.outcome === "ok" || admitted.outcome === "waited").toBe(true);
+    expect(slotNames(slotsDir)).toEqual(["nodeB"]);
+    admitted.release();
+    expect(slotNames(slotsDir)).toEqual([]);
+  }, 15_000);
 
   test("a 512 MiB cgroup on a large host is admitted when the container itself has headroom", async () => {
     const MiB = 1024 * 1024;
