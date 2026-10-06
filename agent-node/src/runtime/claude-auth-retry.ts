@@ -61,9 +61,20 @@ export function claudeAuthRetryDecision(message: ClaudeApiRetryLike): ClaudeAuth
   return { action: "continue" };
 }
 
+/**
+ * SDK 0.3.289 throws `Claude Code returned an error result: ${result}`.
+ * That prefix is 38 characters. With `Failed to authenticate. API Error: 403 `
+ * it fills an 80-character slice, so the user saw `403 Req` / `403 You` and
+ * not the reason. Drop the prefix, then keep the vendor sentence.
+ */
+const CLAUDE_CODE_ERROR_RESULT_PREFIX = "Claude Code returned an error result: ";
+
 /** Same shape cli.ts used before #672. The raw vendor text stays in the reply. */
 export function claudeVendorAuthUserText(message: string): string {
-  return `执行出错: vendor API auth failed (${message.slice(0, 80)}) — refresh API key and re-export ENV var; see agent-node log for vendor-specific URL`;
+  const detail = message.startsWith(CLAUDE_CODE_ERROR_RESULT_PREFIX)
+    ? message.slice(CLAUDE_CODE_ERROR_RESULT_PREFIX.length)
+    : message;
+  return `执行出错: vendor API auth failed (${detail.slice(0, 200)}) — refresh API key and re-export ENV var; see agent-node log for vendor-specific URL`;
 }
 
 /** Thrown CLI text, not an api_retry. Kept in one place so the catch branch is testable. */

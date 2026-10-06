@@ -29,6 +29,14 @@ ATTEMPT_REPL='  if (attempt >= 1) {'
 # a region 403 thrown while aborting replace the login result.
 GUARD_ANCHOR='  if (authAbortedThisAttempt) {'
 GUARD_REPL='  if (false && authAbortedThisAttempt) {'
+# cli.ts is not executed. These three anchors are a static guard: the same
+# mutations the re-review applied, which used to leave the suite green.
+CLI_FLAG_ANCHOR='              authAbortedThisAttempt = true;'
+CLI_FLAG_REPL='              authAbortedThisAttempt = false;'
+CLI_ABORT_ANCHOR='            if (authDecision.action === "abort") {'
+CLI_ABORT_REPL='            if (false && authDecision.action === "abort") {'
+CLI_CATCH_ANCHOR='      if (thrown.action === "stop") {'
+CLI_CATCH_REPL='      if (false && thrown.action === "stop") {'
 
 need_count() {
   local n
@@ -47,6 +55,9 @@ need_count "$GUARD_ANCHOR" "$HELPER" 1
 need_count 'aborting the attempt' "$CLI" 1
 need_count 'claudeAuthRetryDecision(m)' "$CLI" 1
 need_count 'claudeThrownErrorDisposition(msg, authAbortedThisAttempt)' "$CLI" 1
+need_count "$CLI_FLAG_ANCHOR" "$CLI" 1
+need_count "$CLI_ABORT_ANCHOR" "$CLI" 1
+need_count "$CLI_CATCH_ANCHOR" "$CLI" 1
 need_count 'claudeAuthStatusReport({' "$CLI" 1
 need_count 'markClaudeLoginDead();' "$CLI" 2
 if grep -F -q 'CLAUDE_CODE_MAX_RETRIES' "$CLI" || grep -F -q 'CLAUDE_CODE_MAX_RETRIES' "$HELPER"; then
@@ -131,5 +142,21 @@ echo '== red: an aborted attempt is reclassified as the thrown 403 =='
 apply_mutation "$HELPER" "$GUARD_ANCHOR" "$GUARD_REPL"
 expect_red 'abort short-circuit' pure 'FAIL: aborted attempt must not be reclassified'
 cp /tmp/helper.bak "$HELPER"
+
+echo '== red: static guard, cli.ts does not set authAbortedThisAttempt (M6) =='
+cp "$CLI" /tmp/cli.bak
+apply_mutation "$CLI" "$CLI_FLAG_ANCHOR" "$CLI_FLAG_REPL"
+expect_red 'cli abort flag' wiring 'FAIL: authAbortedThisAttempt is not set on abort'
+cp /tmp/cli.bak "$CLI"
+
+echo '== red: static guard, cli.ts catch branch is off (M7) =='
+apply_mutation "$CLI" "$CLI_CATCH_ANCHOR" "$CLI_CATCH_REPL"
+expect_red 'cli catch branch' wiring 'FAIL: cli catch branch was removed'
+cp /tmp/cli.bak "$CLI"
+
+echo '== red: static guard, cli.ts abort branch is off (M8) =='
+apply_mutation "$CLI" "$CLI_ABORT_ANCHOR" "$CLI_ABORT_REPL"
+expect_red 'cli abort branch' wiring 'FAIL: cli abort branch was removed'
+cp /tmp/cli.bak "$CLI"
 
 echo 'TEST672_OK'

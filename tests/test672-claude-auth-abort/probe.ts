@@ -87,13 +87,18 @@ function pure(): void {
   });
   assert(fresh.status === "idle" && fresh.task === undefined, "a live login does not rewrite idle");
 
-  const region = "Failed to authenticate. API Error: 403 Request not allowed";
-  const permission = "Failed to authenticate. API Error: 403 Your API key does not have permission to perform this action";
-  const revoked = "Failed to authenticate. API Error: 403 OAuth token has been revoked";
-  const invalidKey = "Failed to authenticate. API Error: 401 invalid x-api-key";
+  // SDK 0.3.289: Error(`Claude Code returned an error result: ${result}`).
+  // The prefix is long enough to eat an 80-character slice. These are the
+  // strings the CLI actually throws, not the short result text underneath.
+  const sdkError = (result: string) => `Claude Code returned an error result: ${result}`;
+  const region = sdkError("Failed to authenticate. API Error: 403 Request not allowed");
+  const permission = sdkError("Failed to authenticate. API Error: 403 Your API key does not have permission to perform this action");
+  const revoked = sdkError("Failed to authenticate. API Error: 403 OAuth token has been revoked");
+  const invalidKey = sdkError("Failed to authenticate. API Error: 401 invalid x-api-key");
   const dead = claudeThrownErrorDisposition(invalidKey, false);
   assert(dead.action === "stop" && dead.markLoginDead === true, "a thrown 401 marks the login dead");
   assert(dead.action === "stop" && dead.userText.includes("401") && dead.userText.includes("invalid x-api-key"), "a thrown 401 keeps the vendor text");
+  assert(dead.action === "stop" && !dead.userText.includes("Claude Code returned an error result"), "a thrown 401 drops the SDK prefix");
   assert(dead.action === "stop" && dead.userText !== CLAUDE_AUTH_USER_TEXT, "a thrown 401 is not replaced with only the login sentence");
   const revokedThrow = claudeThrownErrorDisposition(revoked, false);
   assert(revokedThrow.action === "stop" && revokedThrow.markLoginDead === true, "a thrown revoked 403 marks the login dead");
@@ -101,9 +106,11 @@ function pure(): void {
   const regionThrow = claudeThrownErrorDisposition(region, false);
   assert(regionThrow.action === "stop" && regionThrow.markLoginDead === false, "a region 403 must not mark the login dead");
   assert(regionThrow.action === "stop" && regionThrow.userText.includes("Request not allowed") && !regionThrow.userText.includes("请重新登录"), "a region 403 keeps its own reason");
+  assert(regionThrow.action === "stop" && !regionThrow.userText.includes("403 Req)"), "a region 403 must not be sliced down to 403 Req");
   const permissionThrow = claudeThrownErrorDisposition(permission, false);
   assert(permissionThrow.action === "stop" && permissionThrow.markLoginDead === false, "a permission 403 must not mark the login dead");
-  assert(permissionThrow.action === "stop" && permissionThrow.userText.includes("permission"), "a permission 403 keeps its own reason");
+  assert(permissionThrow.action === "stop" && permissionThrow.userText.includes("does not have permission"), "a permission 403 keeps its own reason");
+  assert(permissionThrow.action === "stop" && !permissionThrow.userText.includes("403 You)"), "a permission 403 must not be sliced down to 403 You");
   const aborted = claudeThrownErrorDisposition(region, true);
   assert(aborted.action === "stop" && aborted.userText === CLAUDE_AUTH_USER_TEXT, "aborted attempt must not be reclassified");
   assert(claudeThrownErrorDisposition("model output was empty", false).action === "fallthrough", "a non-auth error falls through");
@@ -111,13 +118,39 @@ function pure(): void {
 }
 
 function wiring(): void {
+  // Static guard only. This does not execute processWithClaude. The two
+  // branches below are pinned as contiguous source so deleting the abort,
+  // skipping the catch, or not setting authAbortedThisAttempt goes red.
   const cli = readFileSync("/src/cli.ts", "utf8");
   assert(cli.includes("const authDecision = claudeAuthRetryDecision(m);"), "cli wiring missing");
-  assert(cli.includes("claudeThrownErrorDisposition(msg, authAbortedThisAttempt)"), "catch wiring missing");
   assert(cli.includes("claudeAuthStatusReport({"), "status wiring missing");
   assert(!cli.includes("CLAUDE_CODE_MAX_RETRIES"), "cli must not set CLAUDE_CODE_MAX_RETRIES");
   const marks = cli.split("markClaudeLoginDead();").length - 1;
   assert(marks === 2, `markClaudeLoginDead count ${marks}, expected 2`);
+  if (!cli.includes("authAbortedThisAttempt = true;")) {
+    fail("authAbortedThisAttempt is not set on abort");
+  }
+  const abortBranch = [
+    'if (authDecision.action === "abort") {',
+    "              authAbortedThisAttempt = true;",
+    '              log(`[claude] ✗ auth api_retry attempt=${m.attempt ?? "none"} status=${m.error_status ?? "none"} error=${m.error ?? "none"}; aborting the attempt`);',
+    "              markClaudeLoginDead();",
+    "              ac.abort();",
+    "              return authDecision.userText;",
+  ].join("\n");
+  assert(cli.includes(abortBranch), "cli abort branch was removed");
+  const catchBranch = [
+    "const thrown = claudeThrownErrorDisposition(msg, authAbortedThisAttempt);",
+    '      if (thrown.action === "stop") {',
+    "        if (!authAbortedThisAttempt) {",
+    "          log(`[claude] ✗ FATAL: vendor API auth failed (${msg.slice(0, 150)})`);",
+    "          log(`[anet] FATAL: Vendor API auth failed — ${msg.slice(0, 100)}`);",
+    "          log(`[anet]        ${remediationHint(msg)}`);",
+    "        }",
+    "        if (thrown.markLoginDead) markClaudeLoginDead();",
+    "        return thrown.userText;",
+  ].join("\n");
+  assert(cli.includes(catchBranch), "cli catch branch was removed");
   console.log("WIRING_OK");
 }
 
