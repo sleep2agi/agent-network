@@ -86,3 +86,16 @@ Review fix — real callCommHub application-level rejection (2026-10-06)
 - Rebuilt current agent-node inside anet-board626-e2e (read-only source mount),
   ran existing real CLI/Hub/daemon/manual-node E2E: 12 checks, rc=0. CLI artifact
   unchanged for this daemon-only fix. Full suite not rerun.
+
+Requested catch-rollback mutation gate
+- test626 run.sh now removes only catch's application-refusal rollback, preserving
+  the rethrow and ok:false branch. Race test fails toBeNull with a stale adopted
+  entry: rc=1. Source restored; protocol 9/9, 25 assertions, rc=0.
+- Returning ok:false also rolls back and reports adopt_ack_rejected upward; it
+  no longer silently resolves. Production appLevel refusal is rethrown unchanged.
+- Whole Docker harness rc=0: identity 6/6, protocol 9/9, CLI 3/3; both allowlist
+  and missing-catch-rollback mutations witnessed red rc=1, then green restoration.
+- Network/transport errors are NOT treated as definite Hub refusal: retain local
+  evidence on unknown outcomes (covered). Only matching request_id is removed.
+- launch_mode without process evidence and node-locate dropping adopted objects
+  recorded as explicit board #627 inputs (task timeline); no lifecycle expansion.

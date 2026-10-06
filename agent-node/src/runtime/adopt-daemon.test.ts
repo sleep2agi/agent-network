@@ -41,7 +41,7 @@ test("authenticated request persists before ack; ordinary registry writes preser
 test("Hub rejected ack rolls back only this request", async () => {
   const f = fixture();
   f.deps.callCommHub = async tool => tool === "get_adopt_request" ? f.req : { ok: false };
-  await handleAdoptDoorbell(f.req, f.deps);
+  await expect(handleAdoptDoorbell(f.req, f.deps)).rejects.toThrow("adopt_ack_rejected");
   expect(Object.keys(readWorkdirRegistry(f.deps.workDir))).toHaveLength(0);
 });
 test("revocation before registration then real app-level ack rejection rolls back", async () => {

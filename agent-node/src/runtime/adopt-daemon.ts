@@ -88,7 +88,10 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
     // lifecycle commands still require a current Hub binding before any action.
     try {
       const ack = await deps.callCommHub("ack_adopt_request", { request_id: requestId, status: "adopted" });
-      if (!ack?.ok) forgetAdoptedChild(deps.workDir, alias, requestId);
+      if (!ack?.ok) {
+        forgetAdoptedChild(deps.workDir, alias, requestId);
+        throw new Error("adopt_ack_rejected");
+      }
     } catch (error) {
       // callCommHub throws structured application refusals rather than returning
       // ok:false. Revoke's doorbell may already have run before our local write.
