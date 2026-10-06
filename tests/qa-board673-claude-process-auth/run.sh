@@ -4,22 +4,38 @@
 # Real CommHub (isolated DB, not port 9200) plus the real cli.ts loop.
 # The SDK query is a scripted upstream (sdk-stub-preload.ts), so no Claude
 # binary and no vendor network are required. The reply is read back from
-# the hub, not from a source grep.
+# the hub, not from a source grep. The capture file counts SDK query()
+# calls and upstream HTTP attempts. /api/status is read after the node
+# is idle again.
 #
-# The #672 static guard still matches after each mutation below. That is
-# the point: continue-before-abort, continue-before-catch, and a /* */
-# around the abort branch leave the pinned text in place and still change
-# what the user is told.
+# continue-before-abort, continue-before-catch, and a /* */ around the
+# abort branch leave the pinned text in place. m8 gates that if with
+# false. abort-first moves the attempt threshold in claude-auth-retry.ts.
+# All five still change what the user is told.
 set -uo pipefail
+
+# Mutations rewrite cli.ts in the tree. A killed host run would leave
+# that edit behind. Containers discard the writable layer.
+if [[ ! -f /.dockerenv ]]; then
+  echo "REFUSE: this suite edits cli.ts and must run in Docker" >&2
+  exit 1
+fi
 
 REPO="${REPO:-/app}"
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRELOAD="$TEST_DIR/sdk-stub-preload.ts"
 CLI="$REPO/agent-node/src/cli.ts"
+HELPER="$REPO/agent-node/src/runtime/claude-auth-retry.ts"
 source "$REPO/tests/lib/safe-rm.sh"
 
+# Decimal, so 09200 is the production port and not a different string.
 HUB_PORT="${HUB_PORT:-9730}"
-if [[ "$HUB_PORT" == "9200" ]]; then
+if [[ ! "$HUB_PORT" =~ ^[0-9]+$ ]]; then
+  echo "REFUSE: HUB_PORT must be a decimal port, got: $HUB_PORT" >&2
+  exit 1
+fi
+HUB_PORT=$((10#$HUB_PORT))
+if [[ "$HUB_PORT" -eq 9200 ]]; then
   echo "REFUSE: port 9200 is the production hub" >&2
   exit 1
 fi
@@ -36,6 +52,7 @@ ALIAS="board673-agent"
 ADMIN_USER="board673admin"
 ADMIN_PW="Board673_TestPass_1234"
 LOGIN_TEXT="执行出错: Claude 登录或 key 失效，请重新登录"
+LOGIN_HINT="Claude 登录已失效"
 
 export BOARD673_CAPTURE_FILE="$CAPTURE"
 
@@ -53,6 +70,12 @@ printf "source_commit=%s\n" "${QA_BOARD673_SOURCE_COMMIT:-unknown}"
 safe_rm_rf "$WORK"
 mkdir -p "$HOME" "$HUB_UPLOADS"
 cp "$CLI" "$WORK/cli.ts.orig"
+cp "$HELPER" "$WORK/retry.ts.orig"
+
+restore_product() {
+  [[ -f "$WORK/cli.ts.orig" ]] && cp "$WORK/cli.ts.orig" "$CLI"
+  [[ -f "$WORK/retry.ts.orig" ]] && cp "$WORK/retry.ts.orig" "$HELPER"
+}
 
 HUB_PID=""; NODE_PID=""
 stop_group() {
@@ -85,7 +108,7 @@ cleanup() {
   HUB_PID=""
   stop_group "$hub_pid" || true
   [[ -n "$hub_pid" ]] && wait "$hub_pid" 2>/dev/null || true
-  if [[ -f "$WORK/cli.ts.orig" ]]; then cp "$WORK/cli.ts.orig" "$CLI"; fi
+  restore_product
 }
 trap cleanup EXIT
 
@@ -122,7 +145,6 @@ start_node() {
   ( cd "$WORK" && exec setsid env \
       COMMHUB_URL="$HUB_BASE" COMMHUB_TOKEN="$NTOK" ANET_NETWORK_ID="$NET_ID" \
       MODEL="claude-sonnet-4-6" ANTHROPIC_API_KEY="sk-ant-test-invalid" \
-      CLAUDE_MAX_RETRIES=0 \
       BOARD673_SCENARIO="$scenario" BOARD673_CAPTURE_FILE="$CAPTURE" \
       REPO="$REPO" HOME="$HOME" \
       bun --preload "$PRELOAD" "$CLI" \
@@ -152,9 +174,11 @@ send_task() {
 }
 
 # Prints the task result. Empty and rc 1 on timeout.
+# The poll outlives the 20s assertion so a late reply is judged by the
+# clock, not reported as "no reply".
 wait_result() {
   local tid="$1" row status result
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 46); do
     row=$(curl -fsS "$HUB_BASE/api/tasks?task_id=$tid&network_id=$NET_ID" -H "Authorization: Bearer $UTOK" 2>/dev/null || true)
     status=$(echo "$row" | jq -r '.tasks[0].status // empty' 2>/dev/null || true)
     result=$(echo "$row" | jq -r '.tasks[0].result // empty' 2>/dev/null || true)
@@ -167,28 +191,136 @@ wait_result() {
   return 1
 }
 
-# Writes the hub reply to $WORK/reply.txt. Returns 0, 10 (no register),
-# 11 (task send failed), or 12 (no terminal reply).
+capture_count() {
+  local kind="$1"
+  if [[ ! -s "$CAPTURE" ]]; then
+    echo 0
+    return
+  fi
+  jq -s --arg k "$kind" '[.[] | select(.kind == $k)] | length' "$CAPTURE"
+}
+
+write_session() {
+  local body
+  body=$(curl -fsS "$HUB_BASE/api/status?network_id=$NET_ID&alias=$ALIAS" \
+    -H "Authorization: Bearer $UTOK" 2>/dev/null || true)
+  if [[ -z "$body" ]]; then
+    echo '{}' > "$WORK/status.json"
+    return
+  fi
+  echo "$body" | jq -c --arg a "$ALIAS" '[.sessions[]? | select(.alias==$a)] | .[0] // {}' \
+    > "$WORK/status.json" || echo '{}' > "$WORK/status.json"
+}
+
+# Auth must reach the idle report that publishes the hint. Other
+# scenarios just have to leave "working". 40 * 0.25s.
+wait_settled() {
+  local scenario="$1" status task
+  echo '{}' > "$WORK/status.json"
+  for _ in $(seq 1 40); do
+    write_session
+    status=$(jq -r '.status // empty' "$WORK/status.json")
+    task=$(jq -r '.task // empty' "$WORK/status.json")
+    if [[ "$scenario" == "auth" ]]; then
+      if [[ "$status" == "error" && "$task" == *"$LOGIN_HINT"* ]]; then
+        return 0
+      fi
+    elif [[ -n "$status" && "$status" != "working" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+# Writes the hub reply to $WORK/reply.txt. The third arg is 1 to wait for
+# the idle status (green scenarios) or 0 to stop as soon as the reply
+# arrives (red witnesses). Returns 0, 10 (no register), 11 (task send
+# failed), or 12 (no terminal reply).
 run_turn() {
-  local scenario="$1" text="$2"
-  rm -f "$WORK/reply.txt"
+  local scenario="$1" text="$2" settle="${3:-1}"
+  rm -f "$WORK/reply.txt" "$WORK/elapsed.ms" "$WORK/status.json"
   if ! start_node "$scenario"; then
     tail -40 "$NODE_LOG" >&2 || true
     stop_node || true
     return 10
   fi
-  local tid result
+  local tid result start_ns
+  start_ns=$(date +%s%N)
   if ! tid=$(send_task "$text"); then
     stop_node || true
     return 11
   fi
   if result=$(wait_result "$tid"); then
     printf '%s' "$result" > "$WORK/reply.txt"
+    printf '%s' $(( ($(date +%s%N) - start_ns) / 1000000 )) > "$WORK/elapsed.ms"
+    if [[ "$settle" == "1" ]]; then
+      wait_settled "$scenario" || true
+    fi
     stop_node || true
     return 0
   fi
+  printf '%s' $(( ($(date +%s%N) - start_ns) / 1000000 )) > "$WORK/elapsed.ms"
   stop_node || true
   return 12
+}
+
+assert_fast() {
+  local label="$1" ms
+  ms=$(cat "$WORK/elapsed.ms" 2>/dev/null || echo 0)
+  if [[ "$ms" -gt 0 && "$ms" -lt 20000 ]]; then
+    ok "$label reply in ${ms}ms"
+  else
+    bad "$label reply took ${ms}ms (want < 20000)"
+  fi
+}
+
+assert_query_once() {
+  local label="$1" n
+  n=$(capture_count query)
+  n=${n:-0}
+  if [[ "$n" == "1" ]]; then
+    ok "$label SDK query calls=1"
+  else
+    bad "$label SDK query calls=$n want 1"
+    cat "$CAPTURE" >&2 || true
+  fi
+}
+
+assert_upstream_cap() {
+  local label="$1" n
+  n=$(capture_count upstream)
+  n=${n:-0}
+  if [[ "$n" -le 3 ]]; then
+    ok "$label upstream requests=$n"
+  else
+    bad "$label upstream requests=$n want <= 3"
+    cat "$CAPTURE" >&2 || true
+  fi
+}
+
+assert_login_dead() {
+  local status task raw
+  raw=$(cat "$WORK/status.json" 2>/dev/null || echo '{}')
+  status=$(printf '%s' "$raw" | jq -r '.status // empty')
+  task=$(printf '%s' "$raw" | jq -r '.task // empty')
+  if [[ "$status" == "error" && "$task" == *"$LOGIN_HINT"* ]]; then
+    ok "auth idle status is login-dead"
+  else
+    bad "auth status missing login-dead hint: $raw"
+  fi
+}
+
+assert_not_login_dead() {
+  local label="$1" status task raw
+  raw=$(cat "$WORK/status.json" 2>/dev/null || echo '{}')
+  status=$(printf '%s' "$raw" | jq -r '.status // empty')
+  task=$(printf '%s' "$raw" | jq -r '.task // empty')
+  if [[ "$status" == "idle" && "$task" != *"$LOGIN_HINT"* && "$raw" != *"$LOGIN_HINT"* ]]; then
+    ok "$label status is idle, not login-dead"
+  else
+    bad "$label status looked login-dead: $raw"
+  fi
 }
 
 anchors_still_present() {
@@ -207,6 +339,7 @@ if run_turn recover "board673 recover $(date +%s%N)"; then
   else
     bad "recover reply was: ${RECOVER:-<none>}"
   fi
+  assert_fast recover
 else
   bad "recover turn failed rc=$?"
   tail -30 "$NODE_LOG" >&2 || true
@@ -221,6 +354,10 @@ if run_turn auth "board673 auth $(date +%s%N)"; then
     bad "auth reply was: ${AUTH:-<none>}"
     tail -40 "$NODE_LOG" >&2 || true
   fi
+  assert_query_once auth
+  assert_upstream_cap auth
+  assert_fast auth
+  assert_login_dead
 else
   bad "auth turn failed rc=$?"
   tail -40 "$NODE_LOG" >&2 || true
@@ -244,6 +381,9 @@ if run_turn region "board673 region $(date +%s%N)"; then
     bad "region reply was: ${REGION:-<none>}"
     tail -40 "$NODE_LOG" >&2 || true
   fi
+  assert_query_once region
+  assert_fast region
+  assert_not_login_dead region
 else
   bad "region turn failed rc=$?"
   tail -40 "$NODE_LOG" >&2 || true
@@ -262,27 +402,49 @@ if run_turn permission "board673 permission $(date +%s%N)"; then
     bad "permission reply was: ${PERM:-<none>}"
     tail -40 "$NODE_LOG" >&2 || true
   fi
+  assert_query_once permission
+  assert_fast permission
+  assert_not_login_dead permission
 else
   bad "permission turn failed rc=$?"
   tail -40 "$NODE_LOG" >&2 || true
 fi
 
+anchors_for() {
+  local mode="$1"
+  case "$mode" in
+    m8)
+      grep -F 'if (false && authDecision.action === "abort") {' "$CLI" >/dev/null \
+        && grep -F 'authAbortedThisAttempt = true;' "$CLI" >/dev/null \
+        && grep -F 'if (thrown.action === "stop") {' "$CLI" >/dev/null
+      ;;
+    abort-first)
+      grep -F 'if (attempt >= 1) {' "$HELPER" >/dev/null \
+        && ! grep -F 'if (attempt >= 2) {' "$HELPER" >/dev/null \
+        && anchors_still_present
+      ;;
+    *)
+      anchors_still_present
+      ;;
+  esac
+}
+
 witness_red() {
-  local mode="$1" scenario="$2" label="$3" rc=0 got
+  local mode="$1" file="$2" scenario="$3" label="$4" rc=0 got
   note "RED $mode"
-  cp "$WORK/cli.ts.orig" "$CLI"
-  if ! bun "$TEST_DIR/mutate.mjs" "$CLI" "$mode"; then
+  restore_product
+  if ! bun "$TEST_DIR/mutate.mjs" "$file" "$mode"; then
     bad "$mode did not apply"
-    cp "$WORK/cli.ts.orig" "$CLI"
+    restore_product
     return
   fi
-  if ! anchors_still_present; then
+  if ! anchors_for "$mode"; then
     bad "$mode deleted the pinned text; this is not the bypass under test"
-    cp "$WORK/cli.ts.orig" "$CLI"
+    restore_product
     return
   fi
-  ok "$mode left the static anchors in place"
-  run_turn "$scenario" "board673 $mode $(date +%s%N)" || rc=$?
+  ok "$mode left the pinned decision in place"
+  run_turn "$scenario" "board673 $mode $(date +%s%N)" 0 || rc=$?
   got=$(read_reply)
   if [[ "$rc" -eq 10 || "$rc" -eq 11 ]]; then
     bad "$mode node never took the task (rc=$rc) — not a behavior miss"
@@ -293,6 +455,12 @@ witness_red() {
     else
       bad "$mode stayed green: $got"
     fi
+  elif [[ "$label" == "recover" ]]; then
+    if [[ "$rc" -ne 0 || "$got" != *BOARD673_RECOVERED_OK* || "$got" == *"$LOGIN_TEXT"* ]]; then
+      ok "witnessed red — $mode aborted the refresh retry (rc=$rc)"
+    else
+      bad "$mode stayed green: $got"
+    fi
   else
     if [[ "$rc" -ne 0 || "$got" != *"vendor API auth failed"* || "$got" == *"Claude Code returned an error result"* || "$got" == *BOARD673_LEAKED* ]]; then
       ok "witnessed red — $mode did not deliver the vendor sentence (rc=$rc)"
@@ -300,18 +468,20 @@ witness_red() {
       bad "$mode stayed green: $got"
     fi
   fi
-  cp "$WORK/cli.ts.orig" "$CLI"
+  restore_product
 }
 
-witness_red continue-abort auth auth
-witness_red continue-catch region region
-witness_red comment-abort auth auth
+witness_red continue-abort "$CLI" auth auth
+witness_red continue-catch "$CLI" region region
+witness_red comment-abort "$CLI" auth auth
+witness_red m8 "$CLI" auth auth
+witness_red abort-first "$HELPER" recover recover
 
-if ! cmp -s "$WORK/cli.ts.orig" "$CLI"; then
-  bad "cli.ts was not restored"
-  cp "$WORK/cli.ts.orig" "$CLI"
+if ! cmp -s "$WORK/cli.ts.orig" "$CLI" || ! cmp -s "$WORK/retry.ts.orig" "$HELPER"; then
+  bad "product sources were not restored"
+  restore_product
 else
-  ok "cli.ts restored"
+  ok "cli.ts and claude-auth-retry.ts restored"
 fi
 
 printf "\n────────────────────────────────────────────\n"

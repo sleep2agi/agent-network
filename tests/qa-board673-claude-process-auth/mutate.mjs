@@ -63,6 +63,35 @@ if (mode === "continue-abort") {
   );
 } else if (mode === "comment-abort") {
   next = commentAbort(text);
+} else if (mode === "m8") {
+  // Gate the abort with false. The words stay; the branch never runs.
+  next = once(
+    text,
+    'if (authDecision.action === "abort") {',
+    'if (false && authDecision.action === "abort") {',
+    mode,
+  );
+} else if (mode === "abort-first") {
+  // Attempt 1 is the CLI's refresh chance. Aborting there drops a 401
+  // that would have been followed by 200.
+  next = once(text, "if (attempt >= 2) {", "if (attempt >= 1) {", mode);
+} else if (mode === "retry-first") {
+  // Review mutation: auth stop waits for the outer retry budget first.
+  // Not a default witness. The green call-count assertions are what go red.
+  next = once(
+    text,
+    'if (thrown.action === "stop") {',
+    'if (thrown.action === "stop" && attempt >= CLAUDE_MAX_RETRIES) {',
+    mode,
+  );
+} else if (mode === "drop-login-dead") {
+  // Review mutation: the abort branch no longer sticks the idle hint.
+  next = once(
+    text,
+    "aborting the attempt`);\n              markClaudeLoginDead();\n",
+    "aborting the attempt`);\n",
+    mode,
+  );
 } else {
   console.error(`mutate: unknown mode ${mode}`);
   process.exit(2);
