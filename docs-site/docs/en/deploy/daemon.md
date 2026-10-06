@@ -424,6 +424,41 @@ Ports, proxies and credential sources are unchanged. Follow the upgrade/rollback
 before rollback, verify the target daemon retains adopted-node refusal guards rather than assuming every older version is safe.
 Do not delete stop markers to bypass refusal.
 
+## Client adoption reads (planned for Hub .110) {#adoption-read-api}
+
+These additive fields and endpoint require a user token and the existing node
+visibility/network permissions. Daemon/network tokens gain no new read access;
+existing fields remain unchanged. This is not candidate discovery.
+
+- `GET /api/nodes` adds `managed: "created" | "adopted" | "none"`, based on real
+  creation records (precedence), active bindings, or neither—not ID prefixes or
+  hostnames. `adoption` is the latest binding's
+  `{request_id,daemon_node_id,status,error}` or null. States remain
+  `pending / active / refused / revoked`; pending is not success.
+- `GET /api/host-supervisors` adds `adopt_capable` for visible daemons only when
+  they reported an actual boolean. Absence means unknown, not supported.
+- `GET /api/node-lifecycle-requests?kind=adopt&request_id=...` requires kind
+  `adopt / start / stop` and exactly one of `request_id` or `node_id`. Optional
+  `network_id` follows existing scope rules. Node lookup returns the latest
+  request (created_at descending, request_id descending as tie-breaker), or
+  `{ok:true,request:null}` if none exists. Missing/invisible nodes or requests
+  return 404; an explicitly forbidden network or non-user credential returns
+  403; invalid selectors return 400.
+
+Response: `{ok:true,request:{kind,request_id,node_id,network_id,daemon_node_id,status,error,created_at,...}}`.
+Adoption also returns updated_at; start/stop return delivered_at and acked_at.
+Times are UTC milliseconds or null. Start states are
+`pending / delivered / started / start_failed`; stop states are
+`pending / delivered / stopped / stop_failed / noop_not_my_child`.
+HTTP 200 and pending are not operation success. Error codes include
+`adopt_explicit_private_socket_required`, `adopt_start_evidence_missing`, and
+`adopt_active_binding_required`; present actionable guidance rather than hiding
+the refusal. Delete requests, tokens, workdirs, PIDs and snapshots are excluded.
+
+No new service, port, configuration or database migration. Use the existing
+upgrade/rollback procedures. Binding/request history comes from Hub database
+backups, not Git. No production deployment or new recovery drill is claimed.
+
 ## Related {#related}
 
 - [Keeping the Hub running (pm2 / systemd)](/en/deploy/keep-alive)
