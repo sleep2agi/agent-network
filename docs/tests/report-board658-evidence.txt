@@ -1,0 +1,71 @@
+Board #658 — first local slice, NOT lifecycle acceptance
+
+Docker: tests/test658-codex-adopt-stop/Dockerfile
+Command: sg docker -c 'docker build -f tests/test658-codex-adopt-stop/Dockerfile -t anet-test658-evidence . && docker run --rm --network none anet-test658-evidence'
+Non-root bun, no host mounts/network/tmux.
+Baseline: 5 pass, 0 fail, 11 expect calls, rc=0.
+Mutation: remove ANET_NODE_MARKER comparison only, rebuild separate image.
+Result: 3 pass, 2 fail (missing/wrong marker; foreign child), rc=1.
+Comparison restored after mutation.
+
+Scope: pure candidate evidence gate; exact CJK names select candidates, default
+socket is allowed, all supplied tree members require marker/home/UID/cwd.
+Unrelated extra pane in a target session forbids session-wide action.
+This does NOT collect real tmux facts, validate config/marker files, signal
+processes, wire adoption or test Hub/daemon E2E. Those are still pending.
+The default-socket decoy here is data only, not the required real Docker tmux
+decoy acceptance. No live node or host tmux action performed.
+
+Increment 2: real read-only tmux collection
+Docker rebuilt with tmux; non-root, --network none, no mounts.
+6 pass / 0 fail / 15 expect, rc=0.
+Container default socket: three CJK sessions plus unrelated live decoy.
+Collector uses shared tmux-format helper and explicit -S via execTmux, list-panes
+only; captures fresh /proc trees, rechecks generation/topology, rejects wrong
+marker. All four sessions survive collection. No lifecycle wiring yet.
+
+Increment 3: daemon handler wiring (Hub transport is a stub, NOT real-Hub E2E)
+Real non-root tmux default socket, fake three stages, actual /proc + signals.
+get_adopt_request -> persisted codex_v2 receipt -> active binding -> ordered
+stop -> .hub-stopped -> stopped ack; unrelated decoy still present.
+Final suite 6/6, 22 expects, rc=0. Prior 21-assert version repeated in ten
+fresh containers: all ten rc=0. Startup remains explicitly unavailable (#659).
+Fixed observed dying-process race: environ may be EACCES after TERM before Z;
+SIGCONT of the already-verified frozen generation only needs the birth guard.
+Live unreadable identity is still refused. Dead is not PID reuse.
+Existing adopt-daemon/local-identity/process-tree: 17/17, 46 expects, rc=0
+with docker run --init (without init, existing self-proc test runs as PID 1
+and correctly hits the PID <=1 guard; fixture execution corrected).
+No production/host tmux operations. Real Hub HTTP, full daemon process,
+bootsweep, remaining negative/race matrix and decoy mutation still pending.
+
+Increment 4 mutation: inserted socket-wide kill-pane enumeration after the
+three-stage stop (never kill-server). Container-only mutant image.
+Result rc=1, 5 pass/1 fail; specifically decoy assertion expected true, got false.
+Mutation removed from source. This proves the real tmux fixture catches
+collateral damage, not merely a source-string guard.
+
+Increment 5: real Hub HTTP + independently running built daemon, non-root.
+Dockerfile.e2e, docker run --rm --init --network none anet-test658-http.
+Fresh isolated HOME, port allocated via port 0, real human/node tokens, real
+request_adopt_node and stop_node HTTP calls, real SSE and authenticated ack.
+Only fake target node metadata is seeded in the isolated database; its three
+tmux stages are sleep processes, not real Codex. No external/model calls.
+Three fresh containers passed consecutively (rc=0 each): registration, daemon
+token, v2 evidence persisted, successful stop with marker, exactly the original
+decoy pane remains, decoy birth unchanged, all three target processes gone.
+Fixture corrections: wait for a non-null config snapshot; set busy_timeout on
+the fixture's database connection to avoid racing daemon snapshot writes.
+Built product unchanged for these fixture corrections.
+Related unit + lifecycle + tmux format ratchet: 35/35, 96 expects, rc=0.
+Latest handler fixture also verifies actual TERM order and successful replay:
+6/6, 24 expects, rc=0.
+Not claimed: full package unit suite, real model/TUI behavior, v2 start (#659),
+partial-stop recovery, all security/race matrix items on #661, or production.
+
+Final base refresh: rebased without conflicts onto main 70e88ff1.
+Rebuilt Dockerfile.e2e from that tree: real HTTP flow rc=0.
+Combined seven-file related suite: 36 pass / 0 fail / 109 expects, rc=0.
+Corrected handler fixture HOME from the container user's home to its own mkdtemp directory so
+the same fixture works under both bun and node non-root container users.
+Product changes were unchanged by the rebase; only fixture portability changed.
