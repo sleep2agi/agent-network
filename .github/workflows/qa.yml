@@ -110,6 +110,7 @@ on:
       - 'tests/qa-runtime-readiness/**'
       - 'tests/test571-lifecycle-safety/**'
       - 'tests/test626-daemon-adoption/**'
+      - 'tests/test627-adopted-lifecycle/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
@@ -306,6 +307,7 @@ on:
       - 'tests/qa-runtime-readiness/**'
       - 'tests/test571-lifecycle-safety/**'
       - 'tests/test626-daemon-adoption/**'
+      - 'tests/test627-adopted-lifecycle/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
@@ -852,6 +854,15 @@ jobs:
         run: |
           docker build -t anet-test626-e2e -f tests/test626-daemon-adoption/Dockerfile.e2e .
           docker run --rm --init --network none anet-test626-e2e
+
+  test627-adopted-lifecycle:
+    name: adopted lifecycle (Docker, real Hub + private tmux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t anet-test627 -f tests/test627-adopted-lifecycle/Dockerfile .
+      - run: docker run --rm --init --network none anet-test627
 
   test571-lifecycle-safety:
     # #571 生命周期安全三处:daemon stop 不再按 alias 全机 SIGTERM(同机别的工作目录/HOME 里

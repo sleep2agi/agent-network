@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { writeAdoptedChild } from "./adopt-registry.js";
+import { writeAdoptedChild, adoptedChild, forgetAdoptedChild, refreshAdoptedChild } from "./adopt-registry.js";
 import { handleAdoptedLifecycle } from "./adopt-lifecycle.js";
 import { privateSocket } from "./adopt-launch-evidence.js";
 const roots: string[] = [];
@@ -30,4 +30,13 @@ test("inferred tmux launch_mode without live evidence cannot start", async () =>
 });
 test("default tmux socket is refused before any command", () => {
   expect(() => privateSocket(`/tmp/tmux-${process.getuid!()}/default`, process.getuid!())).toThrow("adopt_explicit_private_socket_required");
+});
+test("late startup evidence cannot resurrect revocation or replace a new request", () => {
+  const f = fixture(), old = adoptedChild(f.deps.workDir, "fixture")!;
+  forgetAdoptedChild(f.deps.workDir, "fixture", old.request_id);
+  expect(() => refreshAdoptedChild(f.deps.workDir, "fixture", old)).toThrow("adopt_binding_revoked_during_start");
+  expect(adoptedChild(f.deps.workDir, "fixture")).toBeNull();
+  writeAdoptedChild(f.deps.workDir, "fixture", { ...old, request_id: "replacement" });
+  expect(() => refreshAdoptedChild(f.deps.workDir, "fixture", old)).toThrow("adopt_binding_revoked_during_start");
+  expect(adoptedChild(f.deps.workDir, "fixture")?.request_id).toBe("replacement");
 });

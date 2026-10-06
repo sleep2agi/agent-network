@@ -5,7 +5,7 @@ import { execTmux } from "../tmux.js";
 import { atomicWriteJson } from "./config-apply.js";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { reproducibleEnvironment, type AdoptDaemonDeps } from "./adopt-daemon.js";
-import { adoptedChild, writeAdoptedChild, type AdoptedChild } from "./adopt-registry.js";
+import { adoptedChild, writeAdoptedChild, refreshAdoptedChild, type AdoptedChild } from "./adopt-registry.js";
 import { verifyAdoptionLocalIdentity, verifyAdoptionProcess } from "./adopt-local-identity.js";
 import { readAdoptionPid, readAdoptionProc } from "./adopt-proc.js";
 import { processStamp, stopVerifiedTree } from "./adopt-process-tree.js";
@@ -108,13 +108,16 @@ async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: Ad
       const started = verify();
       if (!started) continue;
       const actual = captureLaunchEvidence(identity, started);
-      if (actual.mode !== evidence.mode || (actual.mode === "tmux" && actual.socket !== evidence.socket)) throw Error("adopt_launch_mode_mismatch");
-      writeAdoptedChild(deps.workDir, req.child_alias, { ...entry, launch_evidence: actual });
+      if (actual.mode !== evidence.mode || (actual.mode === "tmux" && (actual.socket !== evidence.socket || actual.session !== evidence.session))) throw Error("adopt_launch_mode_mismatch");
+      // A revoke doorbell may have removed this entry while startup awaited.
+      // Do not recreate it (or overwrite a new adoption of the same alias).
+      refreshAdoptedChild(deps.workDir, req.child_alias, { ...entry, launch_evidence: actual });
       return { status: "started", child_pid: started.pid };
     }
     throw Error("adopt_start_timeout");
   } catch (e) {
-    atomicWriteJson(marker, { node_id: entry.node_id, start_failed: true });
+    if (adoptedChild(deps.workDir, req.child_alias)?.request_id === entry.request_id)
+      atomicWriteJson(marker, { node_id: entry.node_id, start_failed: true });
     throw e;
   }
 }

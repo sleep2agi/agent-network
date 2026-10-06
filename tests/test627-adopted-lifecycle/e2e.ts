@@ -29,7 +29,7 @@ async function until(fn: () => Promise<any> | any, message: string) {
   throw Error(`timeout: ${message}`);
 }
 try {
-  start(["/root/.bun/bin/bun", "run", "src/index.ts"], "/app/server", { ...process.env, PORT: String(port), HOST: "127.0.0.1", NODE_ENV: "test", COMMHUB_DB: dbPath }, "hub");
+  start(["/root/.bun/bin/bun", "run", "src/index.ts"], "/app/server", { ...process.env, HOME: home, PORT: String(port), HOST: "127.0.0.1", NODE_ENV: "test", COMMHUB_DB: dbPath }, "hub");
   await until(async () => (await fetch(`${hub}/health`)).ok, "Hub health");
   const reg: any = await (await fetch(`${hub}/api/auth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "adoptfixture", password: "Fixture_Only_123456!", email: "fixture@example.test" }) })).json();
   check(reg.token?.startsWith("utok_"), "human registration");
@@ -86,31 +86,67 @@ try {
   check(entry.adopted && entry.node_id === "n_manual_fixture" && entry.launch_mode === (tmuxMode ? "tmux" : "bare"), "registry holds exact verified identity");
   check(manual.proc.exitCode === null && readFileSync(join(manual.dir, ".pid"), "utf8") === String(manual.proc.pid), "adopt keeps original PID alive and unchanged");
   check(await cli(["adopted"], daemonDir) === 0, "CLI adopted list");
-  const tool = async (name: string, args: object) => {
+  const tool = async (name: string, args: object, allowRefusal = false) => {
     const response = await fetch(`${hub}/mcp`, { method: "POST", headers: { ...headers, Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-03-26" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { ...args, network_id: network } } }) });
     const raw = await response.text(), lines = raw.split("\n").filter(l => l.startsWith("data:"));
     const envelope = JSON.parse(lines.length ? lines.at(-1)!.slice(5) : raw);
     const result = JSON.parse(envelope.result.content[0].text);
-    if (!result.ok) throw Error(`${name}: ${result.error}`);
+    if (!result.ok && !allowRefusal) throw Error(`${name}: ${result.error}`);
     return result;
   };
+  const refusedRestart = await tool("restart_node", { node_id: "n_manual_fixture" }, true);
+  check(refusedRestart.ok === false && refusedRestart.error === "adopted_restart_requires_daemon", "adopted restart refused without exit-75 supervisor proof");
+  check((db.query("SELECT count(*) AS n FROM node_config_updates WHERE node_id='n_manual_fixture'").get() as any).n === 0 && manual.proc.exitCode === null,
+    "restart refusal writes no update and leaves manual process alive");
+  // Seed only isolated test rows; invoke the production route over real HTTP.
+  const seed = new Database(dbPath);
+  for (const [id, alias] of [["n_ordinary_fixture", "ordinary-fixture"], ["node_createdfixture", "created-fixture"]]) {
+    seed.query("INSERT INTO nodes(node_id,node_name,alias,network_id,lifecycle_state) VALUES(?,?,?,?,'active')").run(id, alias, alias, network);
+  }
+  seed.query("INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,network_id,runtime,flags_json,env_keys,status,created_at,created_by_token,child_node_id) VALUES('cr_createdfixture','n_supervisor_fixture','created-fixture',?,'claude-agent-sdk','{}','[]','created',?,'fixture','node_createdfixture')").run(network, Date.now());
+  seed.close();
+  for (const id of ["n_ordinary_fixture", "node_createdfixture"]) {
+    const restart = await tool("restart_node", { node_id: id });
+    check(restart.ok && restart.apply_mode === "restart_only" && typeof restart.update_id === "string", `legacy restart accepted: ${id}`);
+    check((db.query("SELECT status FROM node_config_updates WHERE update_id=?").get(restart.update_id) as any)?.status === "pending", `legacy restart queued: ${id}`);
+  }
   const stopped = await tool("stop_node", { child_node_id: "n_manual_fixture", force: true });
   await until(() => (db.query("SELECT status FROM node_stop_requests WHERE request_id=?").get(stopped.request_id) as any)?.status === "stopped", "remote stop");
   await manual.proc.exited;
   check(existsSync(join(manual.dir, ".hub-stopped")), "stop writes hub-stopped marker");
   check(manual.proc.exitCode !== null, "original manual process exited");
+  if (tmuxMode) {
+    execTmux(["has-session", "-t", "=fixture-keeper"], { env: { ...process.env, ANET_TMUX_SOCKET: socket, TMUX: undefined, TMUX_PANE: undefined } });
+    check(true, "unrelated private tmux session survives stop");
+  }
   const beforePid = readFileSync(join(manual.dir, ".pid"), "utf8");
   const scan = Bun.spawn(["/usr/local/bin/node", "/app/agent-network/dist/bin/cli.js", "project", "up"], { cwd: workdir,
     env: { ...minimalEnv({}, "linux", { HOME: home }), PATH: computeChildPath("linux", "/usr/local/bin/node") }, stdout: "pipe", stderr: "pipe" });
   console.log(await new Response(scan.stdout).text());
   await scan.exited;
   check(readFileSync(join(manual.dir, ".pid"), "utf8") === beforePid && existsSync(join(manual.dir, ".hub-stopped")), "boot project scan preserves stopped PID and marker");
+  const bootBin = join(root, "boot-bin"); mkdirSync(bootBin, { mode: 0o700 });
+  writeFileSync(join(bootBin, "tmux"), '#!/bin/sh\nunset TMUX TMUX_PANE\nexec /usr/bin/tmux -S "$TEST627_SOCKET" "$@"\n', { mode: 0o700 });
+  writeFileSync(join(bootBin, "anet"), '#!/bin/sh\nexec /usr/local/bin/node /app/agent-network/dist/bin/cli.js "$@"\n', { mode: 0o700 });
+  const boot = Bun.spawn(["bash", "/app/deploy/fleet/anet-nodes-boot.sh"], { cwd: workdir,
+    env: { ...process.env, HOME: home, PATH: `${bootBin}:${process.env.PATH}`, HUB_PORT: String(port), TEST627_SOCKET: socket,
+      TMUX: undefined, TMUX_PANE: undefined, STAGGER: "0", LATE_GREEN_GRACE: "0", MAX_ROUNDS: "1" }, stdout: "pipe", stderr: "pipe" });
+  const bootOutput = await new Response(boot.stdout).text();
+  const bootError = await new Response(boot.stderr).text();
+  const bootCode = await boot.exited;
+  if (bootCode) console.error(bootOutput, bootError);
+  check(bootCode === 0 && bootOutput.includes("hub-stopped") && readFileSync(join(manual.dir, ".pid"), "utf8") === beforePid && !processStamp(manual.proc.pid),
+    "real boot sweep honors Hub stop without clearing PID or restarting");
   const started = await tool("start_node", { child_node_id: "n_manual_fixture" });
   await until(() => (db.query("SELECT status FROM node_start_requests WHERE request_id=?").get(started.request_id) as any)?.status === "started", "remote start");
   check(!existsSync(join(manual.dir, ".hub-stopped")), "start removes marker");
   const newPid = Number(readFileSync(join(manual.dir, ".pid"), "utf8"));
   check(newPid !== manual.proc.pid && existsSync(`/proc/${newPid}`), "new generation is alive");
+  if (tmuxMode) {
+    const proof = JSON.parse(readFileSync(join(daemonDir, ".anet/child-workdirs.json"), "utf8"))["手工演示"].launch_evidence;
+    check(proof.mode === "tmux" && proof.socket === socket && proof.session === "fixture-manual", "start restored exact private socket and original session");
+  }
   await until(() => {
     const row: any = db.query("SELECT status FROM sessions WHERE alias=?").get("手工演示");
     return row?.status === "idle";

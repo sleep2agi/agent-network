@@ -3879,6 +3879,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!sec1Ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
       }
+      // board #627: a binding proves stop/start authority, not an exit-75
+      // supervisor. No verified adopted-wrapper capability exists in this
+      // protocol; a self-reported config_update_capable flag is not proof.
+      // Created authority retains its existing restart behavior unchanged.
+      if (!createdDaemon(nodeId) && activeBinding(nodeId)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false,
+          error: "adopted_restart_requires_daemon", message: "Use Stop, then Start for this adopted node." }) }] };
+      }
       // F-B reaper: same stale-supersede semantics as update_node_config,
       // with same acked_at-anchored liveness clock (see update_node_config
       // for the 通信龙 polish reasoning).

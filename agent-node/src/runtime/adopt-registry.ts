@@ -45,3 +45,8 @@ export function forgetAdoptedChild(root: string, alias: string, requestId: strin
   delete entries[alias];
   atomicWriteJson(join(root, ".anet", "child-workdirs.json"), entries);
 }
+/** Update evidence only for a still-current adoption; never resurrect a revoke. */
+export function refreshAdoptedChild(root: string, alias: string, entry: AdoptedChild): void {
+  if (adoptedChild(root, alias)?.request_id !== entry.request_id) throw Error("adopt_binding_revoked_during_start");
+  writeAdoptedChild(root, alias, entry);
+}
