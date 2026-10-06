@@ -111,7 +111,11 @@ Git source alone does not recover that data.
 
 ## Acceptance scope
 
-Tests use only container-owned fake Codex stages and a real default-socket
+Tests use only container-owned fake Codex stages. The Bun tmux suites require
+both Docker detection and explicit image opt-in, otherwise they skip before
+fixture setup. Each test uses a random private socket and cleanup tracks only
+pane IDs returned by its own creation calls, never a census of all panes.
+The standalone Docker HTTP regression retains its container-owned default-socket
 decoy. No real Codex model, host tmux or production node is used. See
 `docs/tests/report-test658-review-fixes.txt` for current measured results and
 `docs/tests/report-board658-evidence.txt` for the earlier implementation record.

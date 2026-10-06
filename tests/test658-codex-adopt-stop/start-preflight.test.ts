@@ -1,7 +1,7 @@
-import { test, expect } from "bun:test";
+import { expect } from "bun:test";
+import { containerTest as test, fixtureTmux } from "./fixture-tmux.js";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { execTmux } from "../../agent-node/src/tmux.js";
 import { codexTmuxEnv, listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
 import { handleAdoptDoorbell } from "../../agent-node/src/runtime/adopt-daemon.js";
 import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifecycle.js";
@@ -18,12 +18,12 @@ for (const layout of ["native","external-appserver"] as const)
 test(`start preflight: ${layout} real stages, receipt/decoy unchanged, no launch`,async()=>{
   const workdir=mkdtempSync("/tmp/preflight-"),uid=process.getuid!(),nodeDir=`${workdir}/.anet/nodes/fixture`,daemon=`${workdir}/daemon`;
   mkdirSync(`${nodeDir}/codex-home`,{recursive:true,mode:0o700});mkdirSync(daemon,{mode:0o700});
-  const scope={layout,alias:"启动样例",socket:`/tmp/tmux-${uid}/default`,marker:"22222222-2222-4222-8222-222222222222",
+  const scope={layout,alias:"启动样例",socket:`${workdir}/socket`,marker:"22222222-2222-4222-8222-222222222222",
     codexHome:`${nodeDir}/codex-home`,workdir,uid};
-  mkdirSync(`/tmp/tmux-${uid}`,{recursive:true,mode:0o700});
+  const fixture=fixtureTmux(scope.socket),execTmux=fixture.exec;
   const port=await listener();await port.close();
   const config={node_id:"n_fixture",alias:scope.alias,network_id:"net_fixture",hub:"http://127.0.0.1:9999",runtime:"codex-app-server",
-    codexCopresence:true,codexThreadId:"33333333-3333-4333-8333-333333333333",codexAppServerUrl:`ws://127.0.0.1:${port.port}`,
+    codexCopresence:true,env:{ANET_TMUX_SOCKET:scope.socket},codexThreadId:"33333333-3333-4333-8333-333333333333",codexAppServerUrl:`ws://127.0.0.1:${port.port}`,
     ...(layout==="external-appserver"?{codexLaunchLayout:layout}:{})};
   writeFileSync(`${nodeDir}/config.json`,JSON.stringify(config),{mode:0o600});
   writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker:scope.marker,owner_uid:uid,
@@ -73,6 +73,6 @@ test(`start preflight: ${layout} real stages, receipt/decoy unchanged, no launch
     for(let i=0;i<40 && listCodexPanes(scope).find(r=>r[2]===target[2])?.[4]!=="1";i++)await new Promise(r=>setTimeout(r,25));
     await expect(preflightCodexStart(entry,identity,scope,req.request_id,()=>true)).rejects.toThrow("adopt_codex_session_conflict");
   } finally {
-    for(const row of listCodexPanes(scope,true))execTmux(["kill-pane","-t",row[2]],{env});
+    fixture.cleanup();
   }
 });

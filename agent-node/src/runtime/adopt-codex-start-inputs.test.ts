@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, chmodSync, lstatSync } from "node:fs";
 import { codexStartInputs, optionalCodexStartInputs, verifyCodexStartInputs } from "./adopt-codex-start-inputs.js";
 
 const thread = "11111111-1111-4111-8111-111111111111";
@@ -52,6 +52,18 @@ test("start inputs: project/home must match verified canonical scope", () => {
   expect(codexStartInputs(identity,scope,"adopt_one").project_dir).toBe(identity.config.codexProjectDir);
   identity.config.env={CODEX_HOME:"/other"};
   expect(()=>codexStartInputs(identity,scope,"adopt_one")).toThrow("adopt_codex_home_unproven");
+});
+test("start inputs: world-writable project and different owner refuse independently", () => {
+  const {identity,scope}=fixture();
+  const project=`${identity.workdir}/project`;
+  mkdirSync(project,{mode:0o700});identity.config.codexProjectDir=project;
+  expect(codexStartInputs(identity,scope,"adopt_one").project_dir).toBe(project);
+  chmodSync(project,0o777); // explicit: mkdir's mode alone is masked by umask
+  expect(lstatSync(project).mode & 0o777).toBe(0o777);
+  expect(()=>codexStartInputs(identity,scope,"adopt_one")).toThrow("adopt_codex_project_unproven");
+  chmodSync(project,0o700);
+  // Exercise the real stat UID without needing root/chown in the non-root suite.
+  expect(()=>codexStartInputs(identity,{...scope,uid:scope.uid+1},"adopt_one")).toThrow("adopt_codex_project_unproven");
 });
 test("start inputs: receipt is tied to every identity/config field and binding generation", () => {
   const {identity,scope} = fixture();

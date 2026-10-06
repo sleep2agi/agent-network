@@ -48,3 +48,20 @@ Static CI gates in Dockerfile.gates, --init --cpus=2 --network none: rc=0.
 Suite registration, test-file coverage, home-path baseline, L1 SHA binding,
 mutation-pin selftest (69/69) and scan all green; no baseline/exemption changes.
 Gate snapshot contains commit 761b3478. Subsequent change only appends this report.
+
+Independent-review fixes (supersedes the earlier Bun default-socket fixture)
+- collect.test.ts and start-preflight.test.ts now skip unless /.dockerenv exists
+  AND TEST658_CONTAINER=1 (set only in the suite Dockerfile).
+- All their tmux operations use a fresh random private socket. Creation captures
+  pane IDs; cleanup only targets captured IDs, never every pane/session in a list.
+- Added cleanup non-interference test and child runner with opt-in disabled:
+  safety 2/2, 5 assertions; child reports 12 skip, 0 pass, rc=0.
+- Added real chmod 0777 rejection (not masked by umask) and a separate real stat
+  UID vs expected UID mismatch; non-root test does not chown host files.
+- Input/preflight tests now 8/8, 80 assertions; stop/evidence remains 15/15, 76.
+- Added permission-removal and owner-removal mutations: each rc=1 at assertions.
+  All 11 mutations red as intended, drivers and complete suite rc=0.
+- Docker runs --init --cpus=2 --network none, no source mounts.
+- This first review-fix run used working-tree changes based on 1a4b7233.
+- Runtime product code unchanged. Binary/version evidence and diagnostic logs /
+  port-probe race followups tracked on board #674, not implemented here.

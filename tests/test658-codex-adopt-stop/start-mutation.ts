@@ -14,3 +14,5 @@ async function runMutation(label: string, file: string, from: string, to: string
 await runMutation("binding generation", "agent-node/src/runtime/adopt-codex-start-preflight.ts", "  if (authorityRequestId !== entry.request_id) throw Error(\"adopt_codex_binding_generation_unproven\");", "  // mutation: authority check removed");
 await runMutation("receipt tampering", "agent-node/src/runtime/adopt-codex-start-inputs.ts", "  if (!isDeepStrictEqual(saved, current)) throw Error(\"adopt_codex_start_evidence_changed\");", "  // mutation: saved inputs ignored");
 await runMutation("no live stages", "agent-node/src/runtime/adopt-codex-start-preflight.ts", "  assertCodexStopped(scope);", "  // mutation: liveness check removed");
+await runMutation("project permission", "agent-node/src/runtime/adopt-codex-start-inputs.ts", " || (st.mode & 0o022)", "");
+await runMutation("project owner", "agent-node/src/runtime/adopt-codex-start-inputs.ts", " || st.uid !== scope.uid", "");
