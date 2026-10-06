@@ -107,6 +107,7 @@ OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可�
 正式套件：`tests/test227-opencode-tui-copresence/`。
 并发/生命周期窄套件：`tests/test228-opencode-inbox-concurrency/`。
 发送者可见性窄套件：`tests/test230-opencode-sender-label/`。
+回复超时中止窄套件：`tests/test651-opencode-timeout-abort/`。
 
 ```bash
 sg docker -c 'docker build -t anet-test227:dev \

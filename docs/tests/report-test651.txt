@@ -1,0 +1,48 @@
+# Test 651 — OpenCode copresence timeout aborts the session
+
+date: 2026-10-06T10:22:26+00:00
+bun: 1.3.1
+
+## green — failed reply aborts the session; no late reply; abort failure is logged; a busy admission does not abort
+bun test v1.3.1 (89fa0f34)
+
+src/runtime/opencode-copresence/runtime.test.ts:
+[SKIP-LOUD] undici headersTimeout regression (#2026) cannot run: `node` on PATH is Bun posing as Node v24.3.0. It runs in test725 (real Node); set ANET_TEST_REQUIRE_REAL_NODE=1 to make this a failure.
+(pass) OpenCode copresence task deadline > board651 reply deadline aborts the session and does not emit a late reply [3048.13ms]
+(pass) OpenCode copresence task deadline > board651 reply deadline logs abort failure and does not claim the turn stopped [1042.04ms]
+(pass) OpenCode copresence task deadline > admission timeout on a busy human session says the task was not submitted [430.02ms]
+
+ 3 pass
+ 28 filtered out
+ 0 fail
+ 37 expect() calls
+Ran 3 tests across 1 file. [4.60s]
+
+## mutation — delete the abort call; the same timeout assertion must go red
+bun test v1.3.1 (89fa0f34)
+
+src/runtime/opencode-copresence/runtime.test.ts:
+[SKIP-LOUD] undici headersTimeout regression (#2026) cannot run: `node` on PATH is Bun posing as Node v24.3.0. It runs in test725 (real Node); set ANET_TEST_REQUIRE_REAL_NODE=1 to make this a failure.
+707 |       // The bridge stopped waiting while the turn was still running. This
+708 |       // used to be `elapsed < 2_000` against a 2_500 ms fake turn, a
+709 |       // wall-clock margin an overloaded runner can eat (#517); the fake's own
+710 |       // trace orders the two events causally instead.
+711 |       expect(traceAtThrow).toContain("POST /session/ses_test123/message");
+712 |       expect(traceAtThrow).toContain("ABORT ses_test123");
+                                 ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "ABORT ses_test123"
+Received: "GET /global/health\nGET /global/health\nPOST /session\nGET /session/status\nGET /session/ses_test123\nPOST /session/ses_test123/message\nGET /session/ses_test123/message\n"
+
+      at <anonymous> (/agent-node-src/src/runtime/opencode-copresence/runtime.test.ts:712:28)
+(fail) OpenCode copresence task deadline > board651 reply deadline aborts the session and does not emit a late reply [546.02ms]
+
+ 0 pass
+ 30 filtered out
+ 1 fail
+ 6 expect() calls
+Ran 1 test across 1 file. [629.00ms]
+MUTATION_RED rc=1
+
+OVERALL: PASS

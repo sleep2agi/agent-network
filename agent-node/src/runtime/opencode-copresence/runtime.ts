@@ -43,33 +43,49 @@ export function formatOpenCodeTimeout(ms: number): string {
 }
 
 /**
- * The bridge stopped waiting for a network task. OpenCode 1.18.1 does not
+ * The bridge stopped waiting for a network task. OpenCode 1.18.x does not
  * cancel a session turn when the HTTP client of `POST /session/:id/message`
- * disconnects (verified against the pinned binary: the session stays
- * `busy` and the provider stream stays open after the client aborts), and
- * this runtime deliberately never calls `/session/:id/abort` because the
- * session is shared with the human TUI. So a `phase: "reply"` timeout means
- * the task is STILL RUNNING in the TUI; `phase: "admission"` means the task
- * was never submitted. `userReplyText` is the truthful CommHub reply.
+ * disconnects (the session stays `busy` and the provider stream stays open),
+ * so a reply-phase timeout must `POST /session/:id/abort` before the failed
+ * CommHub reply. Otherwise the turn keeps calling tools and its result shows
+ * up later as a new message. Admission timeouts are different: our task never
+ * landed, and the busy session may be a human turn — those are not aborted.
+ * `outcome: "running"` is the truthful "still going, not aborted" wording
+ * (OpenCode 2 still uses it). `userReplyText` is the CommHub reply.
  */
 export class OpenCodeCopresenceTimeoutError extends Error {
   readonly code = "opencode_copresence_timeout";
   readonly phase: "admission" | "reply";
   readonly timeoutMs: number;
+  readonly aborted: boolean;
   readonly userReplyText: string;
-  constructor(phase: "admission" | "reply", timeoutMs: number) {
+  constructor(
+    phase: "admission" | "reply",
+    timeoutMs: number,
+    outcome: "running" | "aborted" | "abort_failed" = "running",
+  ) {
     const budget = formatOpenCodeTimeout(timeoutMs);
     const knob = "可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调整（单位 ms，0 = 不设上限）";
-    const userReplyText = phase === "reply"
-      ? `⏳ opencode 任务仍在节点的 TUI 会话里运行，没有被中止；bridge 等待回复已达 ${budget} 上限，停止等待。` +
-        `这一轮的最终结果不会再自动回传到这里，请到节点 TUI 查看进度和结果。${knob}。`
-      : `opencode 任务未提交：共享会话在 ${budget} 内一直处于忙碌状态（可能有人正在 TUI 里跑一轮），本任务没有发出，可稍后重发。${knob}。`;
-    super(phase === "reply"
-      ? `OpenCode reply wait exceeded ${timeoutMs}ms; the turn keeps running in the shared session (not aborted)`
-      : `OpenCode session remained busy for ${timeoutMs}ms; task was not submitted`);
+    const stopped = phase === "reply" ? outcome : "running";
+    const userReplyText = stopped === "aborted"
+      ? `⏳ opencode 任务等待回复已达 ${budget} 上限，桥接层已中止该会话。这一轮已停止，迟到的输出不会再作为新消息发回。${knob}。`
+      : stopped === "abort_failed"
+        ? `⏳ opencode 任务等待回复已达 ${budget} 上限。桥接层尝试中止会话失败，会话可能仍在运行，迟到的结果仍可能作为新消息出现；详见节点日志。${knob}。`
+        : phase === "reply"
+          ? `⏳ opencode 任务仍在节点的 TUI 会话里运行，没有被中止；bridge 等待回复已达 ${budget} 上限，停止等待。` +
+            `这一轮的最终结果不会再自动回传到这里，请到节点 TUI 查看进度和结果。${knob}。`
+          : `opencode 任务未提交：共享会话在 ${budget} 内一直处于忙碌状态（可能有人正在 TUI 里跑一轮），本任务没有发出，可稍后重发。${knob}。`;
+    super(stopped === "aborted"
+      ? `OpenCode reply wait exceeded ${timeoutMs}ms; the shared session was aborted`
+      : stopped === "abort_failed"
+        ? `OpenCode reply wait exceeded ${timeoutMs}ms; session abort failed and the turn may still be running`
+        : phase === "reply"
+          ? `OpenCode reply wait exceeded ${timeoutMs}ms; the turn keeps running in the shared session (not aborted)`
+          : `OpenCode session remained busy for ${timeoutMs}ms; task was not submitted`);
     this.name = "OpenCodeCopresenceTimeoutError";
     this.phase = phase;
     this.timeoutMs = timeoutMs;
+    this.aborted = stopped === "aborted";
     this.userReplyText = userReplyText;
   }
 }
@@ -412,6 +428,29 @@ export async function fetchOpenCodeJson(
   return text ? JSON.parse(text) : null;
 }
 const fetchJson = fetchOpenCodeJson;
+
+/** Cancel a shared-session turn the bridge has already given up on.
+ * Client disconnect is not enough on OpenCode 1.18.x; this is
+ * `POST /session/:id/abort`. A failed abort is logged and reported as
+ * `abort_failed` — the timeout reply still goes out, and must not claim
+ * the turn stopped. */
+export async function abortOpenCodeSession(
+  url: string,
+  password: string,
+  sessionId: string,
+  warn: (message: string) => void,
+): Promise<boolean> {
+  try {
+    await fetchOpenCodeJson(url, password, `/session/${sessionId}/abort`, {
+      method: "POST",
+      body: "{}",
+    }, 5_000);
+    return true;
+  } catch (error: any) {
+    warn(`[opencode-copresence] session abort failed: ${error?.message ?? error}`);
+    return false;
+  }
+}
 
 async function waitForHealth(
   child: ChildProcessWithoutNullStreams,
@@ -768,19 +807,25 @@ export async function openVettedOpenCodeCopresence(
               ...(turnSignal ? { signal: turnSignal } : {}),
             }, 0, turnDispatcher);
           } catch (error: any) {
-            // Only the bridge's own deadline becomes the "still running"
-            // reply; any other POST failure keeps its real message.
+            // Only the bridge's own deadline becomes a timeout reply; any
+            // other POST failure keeps its real message. A landed turn is
+            // aborted before that reply goes out.
             if (turnSignal?.aborted
               && (error?.name === "TimeoutError" || error?.name === "AbortError")) {
-              // Say "still running" only when the submission provably landed
-              // in the shared session; a POST that never arrived is "not
-              // submitted". An unreadable history keeps the reply wording
-              // (the bridge never aborts the session either way).
+              // Abort only a submission that provably landed (or whose history
+              // cannot be read: we did POST and hit our own deadline). A POST
+              // that never arrived must not cancel whoever is already using
+              // the shared session.
               const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, 5_000).catch(() => null);
               const landed = !Array.isArray(history)
                 || history.some((m: any) => m?.info?.id === messageId);
-              warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission ${landed ? "landed — turn continues in the TUI session" : "did not land"}`);
-              throw new OpenCodeCopresenceTimeoutError(landed ? "reply" : "admission", budgetMs);
+              if (!landed) {
+                warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission did not land`);
+                throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+              }
+              const aborted = await abortOpenCodeSession(url, password, created.id, warn);
+              warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission landed — session ${aborted ? "aborted" : "abort failed"}`);
+              throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed");
             }
             throw error;
           } finally {
