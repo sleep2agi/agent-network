@@ -1,0 +1,90 @@
+Board #659 A — startup inputs and refusal gates (not a start implementation)
+Base: a3b20d74 (merged #2461). Tested source initially an uncommitted worktree.
+
+Scope
+- Config-derived, versioned, secret-free input snapshot after live adoption proof.
+- Missing inputs preserve stop-only adoption and legacy v1 behavior.
+- Exact thread UUID, literal loopback URL, canonical project/home, full receipt equality.
+- Fresh Hub binding generation required; current Hub omits that projection.
+  A refuses rather than substituting local evidence. The fixture's additional
+  binding_request_id is a proposed boundary, NOT a shipped HTTP capability.
+- No start execution, no receipt deletion, no runtime/version/deployment changes.
+
+Docker command (repository root; sg docker -c)
+docker build --build-arg SOURCE_COMMIT=a3b20d74 -t anet-board659-a -f tests/test658-codex-adopt-stop/Dockerfile .
+docker run --rm --init --cpus=2 --network none anet-board659-a
+rc=0
+- Existing evidence + real stop fixtures: 15 pass, 0 fail, 76 assertions.
+- Startup inputs + real tmux preflight: 7 pass, 0 fail, 76 assertions.
+- Native/external layouts, CJK names, real container default socket plus decoy.
+- Real three stages adopted then stopped; valid preflight still fails start.
+- Old Hub / different binding rejects; after-probe revoke rejects.
+- Occupied port, live stages, dead role pane refuse. Receipt, registry and decoy unchanged.
+- New mutations: binding generation / receipt equality / live-stage check removal:
+  each rc=1 at assertions; mutation driver rc=0. No source mount.
+- Original six stop mutations remain assertion-red; driver rc=0.
+
+Related Docker regressions (same image, --init --cpus=2 --network none)
+bun test agent-node/src/runtime/adopt-daemon.test.ts agent-node/src/runtime/adopt-lifecycle.test.ts agent-node/src/runtime/adopt-local-identity.test.ts agent-node/src/runtime/adopt-process-tree.test.ts agent-node/src/tmux-format.test.ts
+rc=0: 30 pass, 0 fail, 85 assertions.
+
+Not claimed: real Codex launch, production Hub request-generation support,
+model calls, cross-boot recovery, any host tmux/node changes, full server suite.
+
+Committed-source revalidation
+SOURCE_COMMIT=761b34788d708e88186cf01fdc7f8c1bcc6ae2e7
+Rebuilt the unit/fixture image and repeated its complete run.sh: rc=0.
+15/15 existing + 7/7 new; all 9 mutations assertion-red, both drivers rc=0.
+
+Real temporary Hub + built daemon + fake stages regression
+docker build -t anet-board659-http -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
+docker run --rm --init --cpus=2 --network none anet-board659-http
+rc=0: 7/7 checks (registration, daemon token, v2 registration, receipt-before-ack,
+only decoy remains, decoy generation unchanged, all three original processes gone).
+Agent-node production CLI bundle also built successfully inside that image.
+This is a STOP/adoption regression, not an end-to-end START acceptance claim.
+
+Static CI gates in Dockerfile.gates, --init --cpus=2 --network none: rc=0.
+Suite registration, test-file coverage, home-path baseline, L1 SHA binding,
+mutation-pin selftest (69/69) and scan all green; no baseline/exemption changes.
+Gate snapshot contains commit 761b3478. Subsequent change only appends this report.
+
+Independent-review fixes (supersedes the earlier Bun default-socket fixture)
+- collect.test.ts and start-preflight.test.ts now skip unless /.dockerenv exists
+  AND TEST658_CONTAINER=1 (set only in the suite Dockerfile).
+- All their tmux operations use a fresh random private socket. Creation captures
+  pane IDs; cleanup only targets captured IDs, never every pane/session in a list.
+- Added cleanup non-interference test and child runner with opt-in disabled:
+  safety 2/2, 5 assertions; child reports 12 skip, 0 pass, rc=0.
+- Added real chmod 0777 rejection (not masked by umask) and a separate real stat
+  UID vs expected UID mismatch; non-root test does not chown host files.
+- Input/preflight tests now 8/8, 80 assertions; stop/evidence remains 15/15, 76.
+- Added permission-removal and owner-removal mutations: each rc=1 at assertions.
+  All 11 mutations red as intended, drivers and complete suite rc=0.
+- Docker runs --init --cpus=2 --network none, no source mounts.
+- This first review-fix run used working-tree changes based on 1a4b7233.
+- Runtime product code unchanged. Binary/version evidence and diagnostic logs /
+  port-probe race followups tracked on board #674, not implemented here.
+
+CI last-pane server-exit race repair (supersedes runtime-unchanged statement above)
+- CI job 112512243461: remain-on-exit failed with server exited unexpectedly.
+- Baseline immutable image at 6513741a: 20 + 100 natural repetitions, 120 pass,
+  0 fail. The intermittent CI window did NOT reproduce naturally locally.
+- allowStopped now retries this exact exit-1 diagnostic at most twice (25 ms
+  between attempts), revalidating the socket and performing a real list each
+  time. The diagnostic alone never proves absence. Live rows remain visible;
+  persistent crashes, permission failures, timeouts and malformed output reject.
+  Strict collection is unchanged; final marker/process census is retained.
+- Deterministic private-socket fixture injects the client diagnostic while the
+  real owned pane exits, plus live/persistent/permission/timeout/malformed/strict
+  cases: 7/7, 15 assertions. No host or default tmux server is accessed.
+- Removing the new diagnostic recognition: rc=1 with the named gone regression
+  failing; mutation driver rc=0. This is deterministic regression evidence, not
+  a claim that natural failure frequency improved from a measured nonzero rate.
+- Fixed natural remain-on-exit loop: 20 pass, 0 fail (0/20).
+- Full run.sh: rc=0; fixture safety 2/2, listing 7/7, stop/evidence 15/15,
+  inputs/preflight 8/8; all 12 mutations red as intended, drivers rc=0.
+- Static Docker gates rc=0: registration, file coverage, home-path baseline,
+  SHA binding and mutation pins (69/69 selftest, 567 anchors / 103 scripts).
+- All executions used --init --cpus=2 --network none, no source mounts.
+  These precommit runs used the repair worktree based on 6513741a.

@@ -1,6 +1,6 @@
-import { test, expect } from "bun:test";
+import { expect } from "bun:test";
+import { containerTest as test, fixtureTmux } from "./fixture-tmux.js";
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { execTmux } from "../../agent-node/src/tmux.js";
 import { collectCodexPanes, codexTmuxEnv, listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
 import { handleAdoptDoorbell } from "../../agent-node/src/runtime/adopt-daemon.js";
 import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifecycle.js";
@@ -22,6 +22,7 @@ test(`signal boundary: ${scenario}`,async()=>{
   const workdir=mkdtempSync("/tmp/codex-boundary-"),uid=process.getuid!();
   const scope={layout:"native" as const,alias:"边界样例",socket:`${workdir}/socket`,codexHome:`${workdir}/codex-home`,workdir,uid,marker:"55555555-5555-4555-8555-555555555555"};
   mkdirSync(scope.codexHome,{mode:0o700});
+  const fixture=fixtureTmux(scope.socket),execTmux=fixture.exec;
   const env=codexTmuxEnv(scope.socket),kill=process.kill;
   let escaped:ReturnType<typeof Bun.spawn>|undefined,foreignPid:number|undefined;
   try {
@@ -55,7 +56,7 @@ test(`signal boundary: ${scenario}`,async()=>{
     process.kill=kill;
     if(escaped){escaped.kill();await escaped.exited;}
     if(foreignPid && processStamp(foreignPid))kill(foreignPid,"SIGKILL");
-    for(const row of listCodexPanes(scope,true))execTmux(["kill-pane","-t",row[2]],{env});
+    fixture.cleanup();
   }
 });
 
@@ -65,6 +66,7 @@ test("mixed layout and unknown layout reject before any signal", async () => {
   mkdirSync(codexHome, {mode:0o700});
   const scope = {layout:"native" as const,alias:"布局样例",socket,codexHome,workdir,uid,marker:"22222222-2222-4222-8222-222222222222"};
   const env = codexTmuxEnv(socket);
+  const fixture=fixtureTmux(socket),execTmux=fixture.exec;
   const spawn = (name:string) => execTmux(["new-session","-d","-s",name,"-c",workdir,
     `exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${codexHome} sleep 300`],{env});
   try {
@@ -82,8 +84,7 @@ test("mixed layout and unknown layout reject before any signal", async () => {
       expect(listCodexPanes(scope)).toEqual(before);
     } finally {process.kill=kill;}
   } finally {
-    for(const id of new Set(listCodexPanes(scope,true).map(r=>r[1])))
-      if(/^\$\d+$/.test(id)) execTmux(["kill-session","-t",id],{env});
+    fixture.cleanup();
   }
 });
 
@@ -92,6 +93,7 @@ test(`partial stop recovery: ${scenario}`,async()=>{
   const workdir=mkdtempSync("/tmp/codex-recovery-"), uid=process.getuid!();
   const scope={layout:"native" as const,alias:"恢复样例",socket:`${workdir}/socket`,codexHome:`${workdir}/codex-home`,workdir,uid,marker:"44444444-4444-4444-8444-444444444444"};
   mkdirSync(scope.codexHome,{mode:0o700});mkdirSync(`${workdir}/child`);
+  const fixture=fixtureTmux(scope.socket),execTmux=fixture.exec;
   const env=codexTmuxEnv(scope.socket);let escaped:ReturnType<typeof Bun.spawn>|undefined;
   try {
     for(const name of [`${scope.alias}-桥`,scope.alias,`${scope.alias}-appsrv`]) {
@@ -120,14 +122,14 @@ test(`partial stop recovery: ${scenario}`,async()=>{
     await stopCodexStages(scope); // repeated stop / daemon replay remains safe
   }finally{
     if(escaped){escaped.kill();await escaped.exited;}
-    for(const row of listCodexPanes(scope,true))execTmux(["kill-pane","-t",row[2]],{env});
+    fixture.cleanup();
   }
 });
 
-for (const layout of ["native","external-appserver"] as const) test(`real default socket: ${layout}, adopt, stop, re-adopt, replay; decoy remains`, async () => {
+for (const layout of ["native","external-appserver"] as const) test(`private fixture socket: ${layout}, adopt, stop, re-adopt, replay; decoy remains`, async () => {
   const workdir = mkdtempSync("/tmp/codex-evidence-"), uid = process.getuid!();
-  const socket = `/tmp/tmux-${uid}/default`, codexHome = `${workdir}/codex-home`;
-  mkdirSync(`/tmp/tmux-${uid}`, {recursive:true, mode:0o700});
+  const socket = `${workdir}/socket`, codexHome = `${workdir}/codex-home`;
+  const fixture=fixtureTmux(socket),execTmux=fixture.exec;
   mkdirSync(codexHome, {mode:0o700});
   const scope = { layout, alias: "测试节点", socket, codexHome, workdir, uid, marker: "11111111-1111-4111-8111-111111111111" };
   const env = codexTmuxEnv(socket);
@@ -153,7 +155,7 @@ for (const layout of ["native","external-appserver"] as const) test(`real defaul
     for (const name of names.slice(0,3)) execTmux(["new-session","-d","-s",name,"-c",workdir,
       `exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${realHome} sleep 300`],{env});
     writeFileSync(`${nodeDir}/config.json`, JSON.stringify({node_id:"n_fixture",alias:scope.alias,network_id:"net_fixture",
-      hub:"http://127.0.0.1:9999",runtime:"codex-app-server",codexCopresence:true,...(layout==="external-appserver"?{codexLaunchLayout:layout}:{})}),{mode:0o600});
+      hub:"http://127.0.0.1:9999",runtime:"codex-app-server",codexCopresence:true,env:{ANET_TMUX_SOCKET:socket},...(layout==="external-appserver"?{codexLaunchLayout:layout}:{})}),{mode:0o600});
     writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker:scope.marker,owner_uid:uid,
       boot_id:readFileSync("/proc/sys/kernel/random/boot_id","utf8").trim()}),{mode:0o600});
     const daemon = `${workdir}/daemon`; mkdirSync(daemon,{mode:0o700});
@@ -202,8 +204,6 @@ for (const layout of ["native","external-appserver"] as const) test(`real defaul
     expect(JSON.parse(readFileSync(`${nodeDir}/.hub-stopped`,"utf8"))).toMatchObject({marker:marker2,binding_request_id:req.request_id});
   } finally {
     bad.kill();await bad.exited;
-    // Container-only cleanup by enumerated opaque IDs, never names/kill-server.
-    const ids = [...new Set(listCodexPanes(scope,true).map(r=>r[1]))];
-    for (const id of ids) if (/^\$\d+$/.test(id)) execTmux(["kill-session", "-t", id], {env});
+    fixture.cleanup();
   }
 });
