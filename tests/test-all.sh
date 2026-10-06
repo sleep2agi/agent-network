@@ -10,6 +10,12 @@ TOTAL_PASS=0
 TOTAL_FAIL=0
 SUITES=()
 
+# 每个套件的完整输出都落到这个目录（#670）。CI 把它挂出容器并作为 artifact
+# 上传；以前 OUTPUT 被 $(…) 捕获后除了「0 ran」分支就丢了，失败的 run 里
+# 连是哪条用例红的都拿不到。
+SUITE_LOG_DIR=${SUITE_LOG_DIR:-/tmp/suite-logs}
+mkdir -p "$SUITE_LOG_DIR" 2>/dev/null || true
+
 run_suite() {
   local NAME="$1"
   local CMD="$2"
@@ -25,6 +31,8 @@ run_suite() {
   #      127   command not found
   #      >128  被信号打死（128+N，如 137=SIGKILL、143=SIGTERM）
   SUITE_RC=$?
+  SUITE_SLUG=$(printf '%s' "$NAME" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-*//; s/-*$//')
+  printf '%s\n' "$OUTPUT" > "$SUITE_LOG_DIR/${SUITE_SLUG}.log" 2>/dev/null || true
   PASS=$(echo "$OUTPUT" | grep -oP '\d+(?= passed)' | tail -1)
   FAIL=$(echo "$OUTPUT" | grep -oP '\d+(?= failed)' | tail -1)
   PASS=${PASS:-0}; FAIL=${FAIL:-0}
@@ -69,6 +77,16 @@ run_suite() {
   [ "$FAIL" -gt 0 ] && STATUS="❌"
   SUITES+=("$STATUS $NAME: $PASS pass, $FAIL fail")
   echo "  $STATUS $PASS passed, $FAIL failed"
+  # 🔴 有失败时把失败用例和它后面的上下文（多为 agent 日志尾部）打出来（#670）。
+  #    以前这里只打汇总，job 日志里看不到是哪条用例、报的什么。
+  #    只在 FAIL>0 时打印：绿的时候不多一行。
+  #    TOTAL: / SKIPPED/CRASHED 两个词会被 e2e-hard-gate.sh 在整份日志里 grep，
+  #    转储里改写掉，避免套件输出冒充 runner 的结构化行。
+  if [ "$FAIL" -gt 0 ]; then
+    echo "  ── 失败用例及上下文（❌ 后 25 行，最多 80 行；全文见 artifact ${SUITE_SLUG}.log）──"
+    printf '%s\n' "$OUTPUT" | grep -n -A25 '❌' | awk 'NR<=80' \
+      | sed 's/TOTAL: /TOTAL(suite) /g; s#SKIPPED/CRASHED#SKIPPED-CRASHED#g; s/^/  | /'
+  fi
   echo ""
 }
 

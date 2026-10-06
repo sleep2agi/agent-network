@@ -70,11 +70,16 @@ jobs:
       - name: Run full regression (hard-gated)
         # id 供下面的 verdict 区分「跑了但没产出退出码」与「压根没轮到它跑」。
         id: run
+        # 每个套件的完整输出写到挂出来的目录，供下面的 upload-artifact 上传（#670）。
         run: |
+          mkdir -p "$RUNNER_TEMP/e2e-suite-logs"
           bash tests/lib/run-piped-command.sh \
             /tmp/e2e-output.log \
             /tmp/e2e-exit-code \
-            docker run --rm anet-e2e /app/test-all.sh
+            docker run --rm \
+              -e SUITE_LOG_DIR=/suite-logs \
+              -v "$RUNNER_TEMP/e2e-suite-logs:/suite-logs" \
+              anet-e2e /app/test-all.sh
         # The now-restored Loop suites intentionally include real 60-second
         # scheduler windows plus cooldown checks. Five minutes killed a valid
         # complete run before it could emit the Final Report.
@@ -116,6 +121,24 @@ jobs:
           bash tests/lib/e2e-hard-gate.sh \
             /tmp/e2e-output.log \
             "$(cat /tmp/e2e-exit-code)"
+
+      # #670：此前失败的 run 产物数为 0，拿不到用例名和 agent 日志。
+      # if: always() —— 恰恰是红的时候最需要它。
+      - name: Collect E2E logs
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2e-suite-logs"
+          cp /tmp/e2e-output.log "$RUNNER_TEMP/e2e-suite-logs/test-all.log" 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/e2e-suite-logs"
+
+      - name: Upload per-suite E2E logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-suite-logs-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-suite-logs/
+          if-no-files-found: warn
+          retention-days: 14
 
   rename-ghost-gate:
     # #180 regression gate — standalone HARD FAIL for a focused signal.
