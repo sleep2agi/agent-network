@@ -2458,8 +2458,9 @@ return Bun.serve({
 
     // #629: only actual user credentials gain lifecycle read metadata. Legacy
     // master/dev-open and network/daemon credentials keep their old surface.
-    const lifecycleUser = !!restAuth?.userId && !restAuth.networkId
-      && !requestToken(req).startsWith("ntok_");
+    const lifecycleAuth = resolveRequestAuth(req, { allowQueryToken: false });
+    const lifecycleUser = !!lifecycleAuth?.userId && !lifecycleAuth.networkId
+      && !requestToken(req, { allowQueryToken: false }).startsWith("ntok_");
     if (url.pathname === "/api/node-lifecycle-requests" && req.method === "GET") {
       if (!lifecycleUser) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
       return withCors(req, lifecycleRequestResponse(url, restScope));

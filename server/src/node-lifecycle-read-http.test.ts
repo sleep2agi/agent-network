@@ -114,6 +114,8 @@ test("daemon and legacy master do not gain the new user read surface", async () 
     expect(nodes.every((n: any) => !("managed" in n) && !("adoption" in n))).toBe(true);
   }
   expect((await get(query("adopt", "request_id=adopt_read_active"), "invalid")).status).toBe(401);
+  const queryOnly = await fetch(base + query("adopt", `request_id=adopt_read_active&token=${encodeURIComponent(a.token)}`));
+  expect([401, 403]).toContain(queryOnly.status);
 });
 test("host-supervisors capability respects user token and node visibility; absent stays absent", async () => {
   const path = `/api/host-supervisors?network_id=${a.network_id}`;
