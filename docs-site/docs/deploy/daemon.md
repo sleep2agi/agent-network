@@ -388,6 +388,35 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 升级与回滚仍按上节及生产部署流程执行；回滚前须确认目标 daemon 保留收编节点的拒绝保护，
 不能假定所有旧版安全，也不能删除标记强行放行。
 
+## 客户端收编状态查询（计划 Hub .110） {#adoption-read-api}
+
+以下新增字段和接口只向请求头携带的用户 token 开放（不接受 URL token），并沿用节点列表的网络及节点可见性授权；
+不会给 daemon / 网络 token 新增读权限，也不改变旧字段。不是候选发现接口。
+
+- `GET /api/nodes` 新增 `managed: "created" | "adopted" | "none"`：分别由真实创建记录、
+  active 收编绑定或均无记录决定。创建记录优先，不凭 ID 前缀或主机名猜测。
+  `adoption` 为最近绑定的 `{request_id, daemon_node_id, status, error}`，无记录为 `null`；
+  状态保留 `pending / active / refused / revoked`，pending 不能当作收编成功。
+- `GET /api/host-supervisors` 对可见的 daemon 投影 `adopt_capable`。只在 daemon 确实
+  上报布尔值时出现；缺字段表示未知，不能当成支持。
+- `GET /api/node-lifecycle-requests?kind=adopt&request_id=...`：`kind` 必填，允许
+  `adopt / start / stop`；`request_id` 与 `node_id` 必须且只能选一个。可带 `network_id`。
+  按节点查最近一次请求（`created_at` 倒序、同毫秒以 request_id 降序确定），没有请求返回
+  `{ok:true,request:null}`；按请求查不存在/不可见记录返回 404。无节点读权限也返回 404，
+  显式点名无权访问的网络返回 403，非用户凭据返回 403，参数错误返回 400。
+
+成功响应是 `{ok:true,request:{kind,request_id,node_id,network_id,daemon_node_id,status,error,created_at,...}}`。
+收编另有 `updated_at`；停启另有 `delivered_at / acked_at`，时间为 UTC 毫秒或 null。
+收编状态如上；启动保留 `pending / delivered / started / start_failed`，停止保留
+`pending / delivered / stopped / stop_failed / noop_not_my_child`。失败看 `error`，不把
+HTTP 200 或 pending 当成操作成功。返回 daemon 原因码，例如
+`adopt_explicit_private_socket_required`（需要私有 tmux socket）、
+`adopt_start_evidence_missing`（缺少真实启动证据）、`adopt_active_binding_required`（有效绑定缺失）。
+本接口不查询 delete，也不返回 token、工作目录、PID 或配置快照。
+
+无需新配置、端口、服务或数据库迁移；升级/回滚遵循上述部署流程。绑定和请求历史仍来自
+Hub 数据库备份，Git 只恢复软件；本次未做生产升级或新的灾难恢复演练。
+
 ## 相关 {#related}
 
 - [让 Hub 常驻（pm2 / systemd）](/deploy/keep-alive)

@@ -27,6 +27,7 @@ import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
@@ -2455,6 +2456,16 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
 
+    // #629: only actual user credentials gain lifecycle read metadata. Legacy
+    // master/dev-open and network/daemon credentials keep their old surface.
+    const lifecycleAuth = resolveRequestAuth(req, { allowQueryToken: false });
+    const lifecycleUser = !!lifecycleAuth?.userId && !lifecycleAuth.networkId
+      && !requestToken(req, { allowQueryToken: false }).startsWith("ntok_");
+    if (url.pathname === "/api/node-lifecycle-requests" && req.method === "GET") {
+      if (!lifecycleUser) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      return withCors(req, lifecycleRequestResponse(url, restScope));
+    }
+
     const sideActor = resolveSideThreadActor(req, resolveRequestAuth(req, { allowQueryToken: false }), isAdmin);
     const nodeCommandActor = sideActor?.kind === "node" && sideActor.boundNodeId && sideActor.boundNetworkId
       ? { tokenId: sideActor.tokenId, networkId: sideActor.boundNetworkId, nodeId: sideActor.boundNodeId }
@@ -4468,6 +4479,7 @@ return Bun.serve({
           // would silently start dimming every daemon that hasn't
           // upgraded past preview.55.
           let snapCanCreate: boolean | undefined;
+          let snapAdoptCapable: boolean | undefined;
           let snapBlockedReason: string | undefined;
           // #1545 —— 见 report_status schema 里 create_capability_observed_ms_ago 的注释:
           // 上报侧**故意收得宽**(无 int/min/max,免得一个诊断字段能让整份 report 被拒),
@@ -4481,6 +4493,7 @@ return Bun.serve({
               const parsed = typeof r.config_snapshot === "string" ? JSON.parse(r.config_snapshot) : r.config_snapshot;
               snapRole = typeof parsed?.role === "string" ? parsed.role : null;
               const caps = parsed?.daemon_capabilities;
+              if (typeof caps?.adopt_capable === "boolean") snapAdoptCapable = caps.adopt_capable;
               if (caps && typeof caps.can_create_nodes === "boolean") {
                 snapCanCreate = caps.can_create_nodes;
               }
@@ -4498,10 +4511,10 @@ return Bun.serve({
             } catch { /* malformed */ }
           }
           return { row: r, role: snapRole, canCreate: snapCanCreate, blockedReason: snapBlockedReason,
-            observedMsAgo: snapObservedMsAgo, readiness: snapReadiness };
+            observedMsAgo: snapObservedMsAgo, readiness: snapReadiness, adoptCapable: snapAdoptCapable };
         })
         .filter(({ role }) => role === "host_supervisor")
-        .map(({ row: r, canCreate, blockedReason, observedMsAgo, readiness }) => {
+        .map(({ row: r, canCreate, blockedReason, observedMsAgo, readiness, adoptCapable }) => {
           let online = false;
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
@@ -4541,6 +4554,12 @@ return Bun.serve({
             allowed_secret_keys: secrets,
             host_telemetry: telemetry,
           };
+          if (lifecycleUser && typeof adoptCapable === "boolean") {
+            // Do not reveal even the new capability for a node the user cannot read.
+            const visibleParams: any[] = [r.node_id];
+            const visibleSql = addAgentNetworkScope("SELECT node_id FROM nodes WHERE node_id=?1", visibleParams, restScope, { alias: "alias", nodeId: "node_id" });
+            if (db.get(visibleSql, ...visibleParams)) out.adopt_capable = adoptCapable;
+          }
           // #1353 Fix ② — only emit the two capability keys when the
           // daemon actually reported them. Undefined vs. false is a
           // real distinction here (see Fix ② comment above).
@@ -4657,6 +4676,7 @@ return Bun.serve({
         const role = netRoles.get(r.network_id);
         return role === "owner" || role === "admin";
       };
+      const management = lifecycleUser ? lifecycleProjections(restScope) : null;
       const rows = rawRows.map(r => {
         let role: string | null = null;
         const snap = r.config_snapshot;
@@ -4680,6 +4700,7 @@ return Bun.serve({
           role,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
+          ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
           viewer_can: { permission_mode: canSetPermissionMode(r) },
         };
       });
