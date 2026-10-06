@@ -74,3 +74,36 @@ That advice is precisely what board #625 removes. Commit 5c2e0066 now asserts th
 Docker rerun of node-id-alias: 28 pass, 0 fail, 42 assertions; rc=0.
 The aggregate did not run its later mutation stage after this L0 failure. No final-head aggregate-green claim is made here;
 the registered CI aggregate must run on the final PR head before merge.
+
+CI follow-up (run 37411498109, merge tree 1cff2162c84a3081a7e7f6f90bda99fc614ab15d)
+- Job 112103578988: test571 S2 still expected explicit-daemon dispatch without
+  creation/binding authority. Hub correctly returned daemon_not_resolvable;
+  the subsequent wait for a nonexistent stop request caused two more failures.
+  This fixture expectation was made obsolete by board #625, not a baseline failure.
+- S2 now first asserts Hub refusal, zero stop requests, unchanged lifecycle and
+  surviving foreign process. It then seeds only Hub creation authority (no local
+  daemon record) and retains the daemon stop_failed/not_my_child safety assertions.
+  No product authorization guard was relaxed or changed.
+- Job 112103578788: L0 passed; the sole L1 failing suite was test626, 96/97.
+  runtime.test.ts:2482 expected runtime.isRunning=true, received false in
+  'jointly drains chat and events until both recovery cursors are stable'.
+  This was an assertion failure, not a timeout. Agent sources and test626 have
+  zero diff between base 4a49a497, head 41c289c9, and the CI merge tree above.
+- Docker rerun of unchanged test626/run.sh (Bun 1.3.14, Node 22.23.3): mutation
+  fails on incompatible-agent assertion, restored targeted test passes, full
+  related suite 97 pass / 0 fail / 612 assertions, rc=0 (80.02s).
+  Dependencies reused from the test571 image; current agent-node and agent-network
+  source copied into a writable disposable /workspace; network disabled.
+  An initial incomplete copy omitted agent-network and failed imports; discarded,
+  not counted as a valid witnessed-red or test result.
+  Evidence indicates an intermittent baseline-path failure, not a #625 change;
+  its timing root cause is not established. No Grok changes or timeout relaxation.
+- Final test571 rebuilt using its unchanged Dockerfile from current source;
+  tested code/test tree: 11b30f292f181e035fb9901b10091b160240a886.
+  Image anet-board625-lifecycle-fix, config sha256:c833cb5d2e3d7680ab027dddb00d6a777bb0328d0545c170566929474b1069f5.
+  docker run --rm --network none -e T571_SOURCE_COMMIT=11b30f292f181e035fb9901b10091b160240a886 anet-board625-lifecycle-fix
+  S1-S5: PASS=49 FAIL=0, rc=0. Build rc=0. Real Hub, daemon and CLI rebuilt;
+  foreign same-alias processes survived both Hub and daemon rejection paths.
+  Build began before the test-only commit (build arg still 41c289c9); run label
+  points to the identical committed code/test tree above, not the later report commit.
+  Earlier reused-image diagnostic also passed 49/49, but final evidence is this rebuild.
