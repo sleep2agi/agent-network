@@ -5,7 +5,7 @@ GET /api/node-lifecycle-requests?kind=adopt|start|stop with exactly one of
 request_id or node_id (latest request), user-only adopt_capable projection on
 /api/host-supervisors. Use existing node read permissions and network scope.
 Never expose tokens, process environment, workdir or configuration snapshots.
-Candidate discovery is separate child board #655; app PR #733 waits for this.
+Candidate discovery is separate child board #654; app PR #733 waits for this.
 
 Validation (2026-10-06; product 999f2e3b350e22ce9bf00093723303f06e4b0e3d):
 - Independent tests/test629-lifecycle-read/Dockerfile, no source mounts and
