@@ -188,6 +188,9 @@ L1_TESTS=(
   # characters, letting the idle heartbeat win, or letting a later dispatch
   # replace the text each turn the suite red.
   "test668-grok-working-status"
+  # Board #672. A fake Claude key must abort on 401 before the CLI's own
+  # retry loop, and must not abort a 429. docker-run.args sets --cpus=2.
+  "test672-claude-auth-abort"
   # Board #612. Docker --memory, via tests/$t/docker-run.args, so the real
   # gate reads the cgroup. Putting the timeout cap back to the normal
   # concurrency limit must turn the suite red.
