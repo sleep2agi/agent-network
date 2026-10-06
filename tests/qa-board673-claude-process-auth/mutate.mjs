@@ -76,8 +76,8 @@ if (mode === "continue-abort") {
   // that would have been followed by 200.
   next = once(text, "if (attempt >= 2) {", "if (attempt >= 1) {", mode);
 } else if (mode === "retry-first") {
-  // Review mutation: auth stop waits for the outer retry budget first.
-  // Not a default witness. The green call-count assertions are what go red.
+  // Auth stop waits for the outer retry budget. Region then calls query()
+  // again and the stub's third call leaks. Default witness.
   next = once(
     text,
     'if (thrown.action === "stop") {',
@@ -85,7 +85,8 @@ if (mode === "continue-abort") {
     mode,
   );
 } else if (mode === "drop-login-dead") {
-  // Review mutation: the abort branch no longer sticks the idle hint.
+  // The abort branch no longer sticks the idle hint. The login sentence
+  // still returns. Default witness.
   next = once(
     text,
     "aborting the attempt`);\n              markClaudeLoginDead();\n",
