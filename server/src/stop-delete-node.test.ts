@@ -184,6 +184,12 @@ function setupAlphaNetwork() {
   seedMembership(USER_A_ID, NET_A, "admin");
   seedDaemon(NET_A, DAEMON_A_ID, DAEMON_A_ALIAS, USER_A_ID, DAEMON_A_TOK);
   seedChild(NET_A, CHILD_A_ID, CHILD_A_ALIAS, USER_A_ID, CHILD_TOK_A_ID);
+  // Board #625: happy paths must carry actual creation authority, not merely a node_ id.
+  db.run(
+    `INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,network_id,runtime,model,flags_json,env_keys,status,created_at,created_by_token,child_node_id)
+     VALUES(?1,?2,?3,?4,'claude-agent-sdk','x','{}','[]','succeeded',1,'t',?5)`,
+    [`cr_${CHILD_A_ID.slice(5)}`, DAEMON_A_ID, CHILD_A_ALIAS, NET_A, CHILD_A_ID],
+  );
 }
 
 // ── stop_node ──────────────────────────────────────────────────────
@@ -418,12 +424,7 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
   // f3 合入后错 daemon 会 sweep 空 + ack stopped → hub 假收敛 stopped 而 child 仍在跑。
   test("#1448 finding-4: stop/delete reject a wrong same-network daemon_node_id (daemon_child_mismatch)", async () => {
     setupAlphaNetwork();
-    // authority: CHILD_A 由 DAEMON_A 创建(resolveDaemonForChild 读 node_create_requests)
-    db.run(
-      `INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,network_id,runtime,model,flags_json,env_keys,status,created_at,created_by_token,child_node_id)
-       VALUES(?1,?2,?3,?4,'claude-agent-sdk','x','{}','[]','succeeded',1,'t',?5)`,
-      [`cr_${CHILD_A_ID.slice(5)}`, DAEMON_A_ID, CHILD_A_ALIAS, NET_A, CHILD_A_ID],
-    );
+    // setupAlphaNetwork carries the creation authority.
     // 一个同网、存在、但没创建 CHILD_A 的 daemon
     const DAEMON_B = "node_sd_daemon_b";
     seedDaemon(NET_A, DAEMON_B, "sd-daemon-b", USER_A_ID, "tok_sd_daemon_b");
@@ -454,12 +455,7 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
     expect(readNode(HAND_ID)?.lifecycle_state).toBe("active");
     const rows = db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM node_stop_requests WHERE child_node_id = ?1`, HAND_ID);
     expect(Number(rows?.n ?? 0)).toBe(0);
-    // 回归钉:daemon 建的 child(有 create 记录)照常可停
-    db.run(
-      `INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,network_id,runtime,model,flags_json,env_keys,status,created_at,created_by_token,child_node_id)
-       VALUES(?1,?2,?3,?4,'claude-agent-sdk','x','{}','[]','succeeded',1,'t',?5)`,
-      [`cr_${CHILD_A_ID.slice(5)}`, DAEMON_A_ID, CHILD_A_ALIAS, NET_A, CHILD_A_ID],
-    );
+    // 回归钉:setupAlphaNetwork 中有 create 记录的 child 照常可停。
     expect((await call(u.stop_node, { child_node_id: CHILD_A_ID, network_id: NET_A })).ok).toBe(true);
   });
 

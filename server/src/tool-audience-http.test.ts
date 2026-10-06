@@ -182,7 +182,9 @@ describe("what each caller sees", () => {
 describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // 全部工具(= 改动前每个调用者拿到的)71–72 KB;改动后按角色。改数字时在 PR 里写为什么。
   // 量出来(#478 合入时):全部 74 个工具 71,559 B;节点 52 个 57,632 B(−19%);人 56 个 54,780 B(−23%)。留 ~1.5 KB 余量。
-  const CEILINGS = { node: 59_000, user: 56_500, all: 72_500 } as const;
+  // Board #625 adds 2 human tools + 2 hidden daemon protocol tools. Measured:
+  // all 78 / 73,969 B; user 58 / 56,615 B; node remains 52 / 58,320 B.
+  const CEILINGS = { node: 59_000, user: 57_500, all: 75_000 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);

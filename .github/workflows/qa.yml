@@ -1751,6 +1751,7 @@ jobs:
           - test671-task-runtime-evidence-hub
           - test688-owner-gated-schedule-hub
           - test629-mcp-schema-policy
+          - test625-node-adoption
           - test1280-desktop-user-push
           - qa-anet-daemon-cmd
           - qa-hub-16-rest-task-api

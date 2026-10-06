@@ -1,0 +1,133 @@
+Board #625 — Hub daemon adoption authority (PR-B)
+
+Product scope
+- node_daemon_bindings: SQLite/PG common DDL; one pending/active reservation per node.
+- Human node owner or network owner/admin with write permission requests/revokes.
+- Same-network, same-hostname, live adopt_capable daemon; daemon-token-bound pull/ack.
+- Pending is not authority; only acknowledged active binding resolves stop/start.
+- No creation record and no active binding refuses stop even with explicit daemon id.
+- Adopted children join controllable/list_my_children; adopted-only delete refused.
+- Revoked pending requests cannot reactivate; owner/write permission rechecked at ack.
+- Unadopt refuses during pending/delivered stop/start, preventing mid-operation reassignment.
+- No process signals or host-local adoption implementation in this PR. PR-C is still required.
+
+Source provenance
+- Base b87cb86f5489a3fa24d5295a0569526f47564694, rebased to 4a49a497 (main #2426).
+- Four commits 79a9698b -> 1a85ce6a: range-diff all '=', entire server/ unchanged.
+- Final implementation cea29379935efda4d7a25250a156093962b26620 additionally handles a JSON null capability snapshot.
+- All commands below ran inside disposable Docker containers via sg docker -c.
+- No production Hub, node, tmux, global package, merge, or release was touched.
+
+Focused suite: tests/test625-node-adoption/Dockerfile + run.sh
+  bun test src/node-daemon-bindings.test.ts src/node-lifecycle-controllable.test.ts src/start-node.test.ts
+  22 pass, 0 fail, 93 expect() calls; rc=0.
+  Mutation restores only the old node_ authority exception in tools.ts.
+  Same unbound-node assertion then sees ok:true/lifecycle_state:stopping instead of refusal.
+  0 pass, 1 fail; red rc=1. run.sh validates assertion failure, not import failure; suite rc=0.
+
+Existing compatibility checks, Docker, one file per invocation
+  stop-delete-node.test.ts: 48 pass, 0 fail; rc=0.
+  tool-audience-http.test.ts: 12 pass, 0 fail; rc=0.
+  node-permissions-http.test.ts: 15 pass, 0 fail; rc=0.
+  mcp-context-cost-http.test.ts: 5 pass, 0 fail; rc=0.
+  Lifecycle happy-path fixtures now seed real creation records; prior behavior assertions retained.
+  Measured tools/list: all 78 / 73969 B; user 58 / 56615 B; node 52 / 58320 B.
+  Four additive tools required explicit user/all budget increases; node ceiling unchanged.
+
+PostgreSQL: tests/test2123-hub-postgres-ladder/Dockerfile + run.sh
+  Full run with experimental PG enabled: RESULT PASS (level 6, floor 6), rc=0.
+  Adoption file: 9 pass, 0 fail, rc=0 (before the final JSON-null defensive assertion).
+  Adapter transactions/types, schema, HTTP auth, messaging, board reads all passed.
+  Migration refused open source / production-shaped source / nonempty destination.
+  Dry-run verified every table without committing; tampered-copy red gate failed and rolled back.
+  Subsequent clean migration committed, migrated Hub reached L6 and recorded new terminal events.
+  First local attempt used a read-only source mount and failed at the migration mutation's copy step.
+  Rerun copied source into the disposable container first; full migration then passed.
+  The first attempt also caught old MCP byte ceilings; the explicit budgets above fixed them.
+
+Documentation / schema checks, Docker
+  test831 with CI SOURCE_COMMIT + RUNSH_BLOB inputs: L0-L8, RESULT PASS, rc=0.
+  check-doc-symbol-pins.py . --doc-root docs-site: 18 pins, 16 judged, 2 skipped, 0 missing refs, 0 drift; rc=0.
+  check-doc-symbol-pins.py .: 15 pins, 7 judged, 8 skipped, 0 missing refs, 0 drift; rc=0.
+  Skips are the checker's stated blind spots, not independent passing evidence.
+  tools.ts import shifted docs/message-lifecycle.md's send_reply line pin; replaced with file + registration search.
+  MCP tool index: Chinese and English each cover all 78 registrations, no ghost entries; rc=0.
+  Tool section anchors: 73 checked, 0 mismatches; rc=0.
+  test629 real SDK probe: 78 registrations inventoried, SDK 1.32.0, unknown-key behavior unchanged; rc=0.
+
+CI registration
+- Focused suite is in qa.yml hub-orphan-gates matrix.
+- server test file is picked up by test798 discovery.
+- PG file is explicitly registered in the existing PG ladder.
+
+Reproduction from this branch (test artifacts only)
+  docker build -t adoption-test -f tests/test625-node-adoption/Dockerfile .
+  docker run --rm --network none adoption-test
+  docker build -t adoption-pg -f tests/test2123-hub-postgres-ladder/Dockerfile .
+  docker run --rm --network none adoption-pg
+
+An initial reused-image attempt retained another branch's extra test file; that container was stopped.
+The clean rerun replaces src directories completely, verifies the dependency lockfile, and uses the exact repository test798 script.
+Clean aggregate at 1a85ce6a: executed_files=195, discovered_files=195, failed_files=1; rc=1.
+The only failure was node-id-alias's old assertion recommending an explicit daemon id when authority is absent.
+That advice is precisely what board #625 removes. Commit 5c2e0066 now asserts the old advice is absent and adoption is recommended.
+Docker rerun of node-id-alias: 28 pass, 0 fail, 42 assertions; rc=0.
+The aggregate did not run its later mutation stage after this L0 failure. No final-head aggregate-green claim is made here;
+the registered CI aggregate must run on the final PR head before merge.
+
+CI follow-up (run 37411498109, merge tree 1cff2162c84a3081a7e7f6f90bda99fc614ab15d)
+- Job 112103578988: test571 S2 still expected explicit-daemon dispatch without
+  creation/binding authority. Hub correctly returned daemon_not_resolvable;
+  the subsequent wait for a nonexistent stop request caused two more failures.
+  This fixture expectation was made obsolete by board #625, not a baseline failure.
+- S2 now first asserts Hub refusal, zero stop requests, unchanged lifecycle and
+  surviving foreign process. It then seeds only Hub creation authority (no local
+  daemon record) and retains the daemon stop_failed/not_my_child safety assertions.
+  No product authorization guard was relaxed or changed.
+- Job 112103578788: L0 passed; the sole L1 failing suite was test626, 96/97.
+  runtime.test.ts:2482 expected runtime.isRunning=true, received false in
+  'jointly drains chat and events until both recovery cursors are stable'.
+  This was an assertion failure, not a timeout. Agent sources and test626 have
+  zero diff between base 4a49a497, head 41c289c9, and the CI merge tree above.
+- Docker rerun of unchanged test626/run.sh (Bun 1.3.14, Node 22.23.3): mutation
+  fails on incompatible-agent assertion, restored targeted test passes, full
+  related suite 97 pass / 0 fail / 612 assertions, rc=0 (80.02s).
+  Dependencies reused from the test571 image; current agent-node and agent-network
+  source copied into a writable disposable /workspace; network disabled.
+  An initial incomplete copy omitted agent-network and failed imports; discarded,
+  not counted as a valid witnessed-red or test result.
+  Evidence indicates an intermittent baseline-path failure, not a #625 change;
+  its timing root cause is not established. No Grok changes or timeout relaxation.
+- Final test571 rebuilt using its unchanged Dockerfile from current source;
+  tested code/test tree: 11b30f292f181e035fb9901b10091b160240a886.
+  Image anet-board625-lifecycle-fix, config sha256:c833cb5d2e3d7680ab027dddb00d6a777bb0328d0545c170566929474b1069f5.
+  docker run --rm --network none -e T571_SOURCE_COMMIT=11b30f292f181e035fb9901b10091b160240a886 anet-board625-lifecycle-fix
+  S1-S5: PASS=49 FAIL=0, rc=0. Build rc=0. Real Hub, daemon and CLI rebuilt;
+  foreign same-alias processes survived both Hub and daemon rejection paths.
+  Build began before the test-only commit (build arg still 41c289c9); run label
+  points to the identical committed code/test tree above, not the later report commit.
+  Earlier reused-image diagnostic also passed 49/49, but final evidence is this rebuild.
+
+Main integration after #2429 (new isolated worktree)
+- Merge commit 11476840a43b4d85bcd4be1b870d7699bcae08e1 integrates main
+  4c409cb353eaf708b095e5e9f97c7e1269bd8f18 without whole-file conflict selection.
+- tools.ts import conflict retains both adoption handlers and runtimeReadinessSchema.
+  The merged schema contains both adopt_capable and runtime_readiness; REST readiness
+  changes remain identical to main. runtime-readiness.ts and its test are unchanged.
+- send_reply registration starts at tools.ts:2426 (name at 2427); send_ack starts
+  at 2440 (name at 2441). Documentation label and URL anchors use these real lines.
+- Docker test625: 22 pass, 93 assertions; reverted authority gate yields the same
+  unbound-node assertion failure, red rc=1, suite rc=0.
+- Docker api-host-supervisors-runtime-readiness.test.ts: 9 pass, 38 assertions, rc=0.
+  First invocation used a nonexistent short test filename after test625 succeeded;
+  corrected invocation above reran both successfully. No missing-test green claim.
+- Docker python3 scripts/check-doc-symbol-pins.py .: rc=0; 17 pins, 9 judged,
+  8 documented skips, 0 unresolved refs, 0 drift. Initial lightweight image had no
+  git; final invocation uses the server test image, read-only Git metadata and
+  explicit safe.directory=/src to check historical references too.
+- Docker server aggregate at merge 11476840: executed_files=196,
+  discovered_files=196, failed_files=0; password-floor mutation red rc=1;
+  RESULT: PASS, overall rc=0. Original test798 script blob
+  d4a01d27d1ca0f98ba3c1f46a134edb940cae7cc, non-root per-file isolated DBs.
+  Reused dependency image only after lockfile comparison; completely replaced both
+  server/src and agent-node/src, copied current script and scheduled-task fixtures.

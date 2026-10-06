@@ -183,6 +183,7 @@ run_pg_tests_rc() {
   [ "$rc" -eq 0 ] || features_rc=1
 }
 run_pg_tests_rc anet_sched_test src/scheduled-tasks-http.test.ts
+run_pg_tests_rc anet_node_adoption_test src/node-daemon-bindings.test.ts
 run_pg_tests_rc anet_side_thread_test src/side-thread-command-transport.test.ts
 run_pg_tests_rc anet_evidence_test src/task-consumption.test.ts
 run_pg_tests_rc anet_acl_dm_test src/agent-acl-slice3-http.test.ts

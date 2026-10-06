@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
@@ -807,6 +808,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         //    应当 hub 先合)。同一份 schema 里 side_thread_capability / external_schedules
         //    是 `.strict()` 的,后果不同 —— 见 `host:` 上方那段方框注释。
         daemon_capabilities: z.object({
+          adopt_capable: z.boolean().optional(),
           runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
           allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),
           max_concurrent_children: z.number().int().min(1).max(1000).optional(),
@@ -4658,55 +4660,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     delete_config: boolean;
     confirm_alias?: string;
   };
-  // RFC-027 PR2 prereq — auto-resolve daemon_node_id from child_node_id.
-  // The dashboard (and most callers of stop_node / delete_node) shouldn't
-  // need to track the daemon→child mapping themselves; the hub has it on
-  // node_create_requests at child creation time. Returns null when no
-  // creation record exists (orphan node row OR pre-RFC-026 node) — caller
-  // must then pass daemon_node_id explicitly. node_id derivation:
-  // `node_${request_id.replace(/^cr_/,"")}` (see create-node-daemon.ts
-  // and PR1 BLOCKER-1 fix), so we reverse it: `cr_${node_id.slice(5)}`.
+  // Board #625: creation authority first, then an acknowledged adoption binding.
+  // Supplying a daemon id explicitly is routing, never proof of authority.
   const resolveDaemonForChild = (child_node_id: string): string | null => {
-    if (!child_node_id.startsWith("node_")) return null;
-    const requestId = `cr_${child_node_id.slice(5)}`;
-    const row = db.get<{ daemon_node_id: string }>(
-      `SELECT daemon_node_id FROM node_create_requests WHERE request_id = ?1`,
-      requestId,
-    );
-    return row?.daemon_node_id ?? null;
+    return resolveManagedDaemon(child_node_id);
   };
 
-  /**
-   * 为什么这里要分两种「解析不到 daemon」(#196 / app 仓)。
-   *
-   * `resolveDaemonForChild` 对两件完全不同的事都返回 `null`:
-   *   ① id 不以 `node_` 开头 —— 这个节点**根本不是 daemon 创建的**,
-   *      是有人在某台机器上直接 `anet node start` 起来的。hub 上没有任何
-   *      daemon 可以代它执行停止,**这条路径对它在概念上就不成立**。
-   *   ② id 以 `node_` 开头,但 `node_create_requests` 里查不到那一行 ——
-   *      它可能确实是 daemon 建的,只是记录缺失,这时「显式传 daemon_node_id」
-   *      是一条真的走得通的路。
-   *
-   * 🔴 原先两种情况打印同一句 `pass daemon_node_id explicitly`。对 ① 来说
-   *    **这句建议的前提是假的** —— 没有 daemon 可传,用户按它做只会走进死路。
-   *    2026-08-28 对生产 hub 实测:218 个节点里 **207 个**是 ① 这种。
-   *
-   * 信息在源头就存在(那个 `startsWith("node_")` 判断),只是被丢在了返回值里。
-   */
+  // Preserve old error codes for clients; both now require real managed authority.
   const explainUnresolvableDaemon = (child_node_id: string) =>
     child_node_id.startsWith("node_")
       ? {
           ok: false, error: "daemon_not_resolvable",
-          message: "no node_create_requests row found for this child_node_id; pass daemon_node_id explicitly",
+          message: "no creation authority or active adoption binding; adopt this node before remote stop/start",
         }
       : {
           ok: false, error: "not_daemon_managed",
-          message:
-            `node ${child_node_id} was not created by a daemon (it was started by hand with ` +
-            `\`anet node start\` on some machine), so no daemon on the Hub can stop it ` +
-            `(naming a daemon_node_id does not change that). ` +
-            `Run \`anet node stop <alias>\` on that machine instead. ` +
-            `Daemon-created children have ids beginning with \`node_\`; this one does not.`,
+          message: "node has no creation authority or active adoption binding; adopt it or run `anet node stop <alias>` on its host",
         };
 
   const dispatchStopOrDelete = (args: DispatchArgs, clientNetId?: string | null) => {
@@ -4821,26 +4790,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       return { ok: false, error: "daemon_cross_tenant", message: "daemon and child are in different networks" };
     }
 
-    // #1448 finding-4 — daemon 必须是该 child 的**权威创建者**,镜像 start_node 的
-    // daemon_child_mismatch。此前 stop/delete 接受调用方传入的 daemon_node_id,只校验
-    // 它存在 + 同网,不验它真的创建了这个 child。同网调用方传错 daemon_node_id → 门铃
-    // 路由到错 daemon。🔴 f3(#1453) 合入后更糟:错 daemon 无该 child 的 map entry → 走
-    // 收敛分支 sweep(错机器 pgrep 空) + ack stopped → hub 假收敛 stopped、child 仍在
-    // 正确机器上跑(旧 noop 至少留下可见的卡死态)。网络 scope 只挡跨租户,网内是 footgun。
-    //
-    // 用「确定性不匹配」判据:authority 已知(child 有 create 记录)且不等 → 拒。不对
-    // authority==null(create 记录被裁剪的旧 child)加拒,避免给它们的 stop/delete 引入
-    // 新失败面——handler 的 daemon_node_id??resolveDaemonForChild 已兜住无法解析的情形。
+    // Board #625 closes the missing-create-record exception, regardless of id prefix.
     const authoritativeDaemonId = resolveDaemonForChild(args.child_node_id);
-    // #571 — 手工起的节点(id 不以 `node_` 开头)**没有**任何 daemon 链接。此前
-    // authority==null 时放行调用方点名的任意同网 daemon → 门铃发给那台 daemon,
-    // 它本地没这个 child 的记录,会走「按 alias 全机 pgrep + SIGTERM」的收敛分支,
-    // 杀掉那台机器上所有同 alias 的 agent-node(不分工作目录/HOME/网络)。
-    // 对 hand-started 节点这条路在概念上就不成立(见 explainUnresolvableDaemon ①),
-    // 所以不管调用方传没传 daemon_node_id 一律拒。`node_` 开头但缺 create 记录的
-    // (②,显式传 daemon 是文档化的出路)保持原行为。
-    if (!authoritativeDaemonId && !args.child_node_id.startsWith("node_")) {
+    if (!authoritativeDaemonId) {
       return explainUnresolvableDaemon(args.child_node_id);
+    }
+    if (args.action === "delete" && !createdDaemon(args.child_node_id) && activeBinding(args.child_node_id)) {
+      return { ok: false, error: "adopted_node_delete_unsupported" };
     }
     if (authoritativeDaemonId && authoritativeDaemonId !== args.daemon_node_id) {
       return { ok: false, error: "daemon_child_mismatch", message: "daemon_node_id is not this child's authoritative creator daemon" };
@@ -5465,13 +5421,47 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             AND COALESCE(n.lifecycle_state, 'active') NOT IN ('stopped', 'stop_failed')`,
         callerDaemon.daemonNodeId, callerDaemon.networkId,
       );
-      const children = rows.map(r => ({
+      const children: Array<{ child_node_id: string; alias: string; lifecycle_state: string; managed?: "adopted" }> = rows.map(r => ({
         child_node_id: r.child_node_id,
         alias: r.child_name,
         lifecycle_state: r.lifecycle_state ?? "active",
       }));
+      const adopted = db.all<{ node_id: string; alias: string; lifecycle_state: string | null }>(
+        `SELECT n.node_id,n.alias,n.lifecycle_state FROM node_daemon_bindings b
+         JOIN nodes n ON n.node_id=b.node_id AND n.network_id=b.network_id
+         WHERE b.daemon_node_id=?1 AND b.network_id=?2 AND b.status='active'`,
+        callerDaemon.daemonNodeId, callerDaemon.networkId,
+      );
+      for (const n of adopted) children.push({ child_node_id: n.node_id, alias: n.alias, lifecycle_state: n.lifecycle_state ?? "active", managed: "adopted" });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, count: children.length, children }) }] };
     },
+  );
+
+  const adoptionHuman = () => ({ userId: enforceUserId, networkId: enforceNetworkId, isNode: callerTokenIsNetwork, canWrite });
+  const adoptionReply = (result: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(result) }] });
+  server.tool(
+    "request_adopt_node",
+    "Human owner/admin requests adoption. Only the target capable daemon may activate the binding after local verification; no process is signalled.",
+    { node_id: z.string().min(1).max(200), daemon_node_id: z.string().min(1).max(200), workdir: z.string().min(1).max(4096) },
+    async args => adoptionReply(requestAdopt(adoptionHuman(), args)),
+  );
+  server.tool(
+    "get_adopt_request",
+    "Target daemon pulls a pending adoption request for local verification.",
+    { request_id: z.string().min(1).max(200) },
+    async ({ request_id }) => adoptionReply(getAdopt(resolveCallerDaemonTokenBound(), request_id)),
+  );
+  server.tool(
+    "ack_adopt_request",
+    "Target daemon confirms local registration or refuses adoption. Revoked requests cannot reactivate.",
+    { request_id: z.string().min(1).max(200), status: z.enum(["adopted", "refused"]), error: z.string().max(1000).optional() },
+    async args => adoptionReply(ackAdopt(resolveCallerDaemonTokenBound(), args)),
+  );
+  server.tool(
+    "unadopt_node",
+    "Human owner/admin revokes a pending or active binding without stopping the node.",
+    { node_id: z.string().min(1).max(200) },
+    async ({ node_id }) => adoptionReply(unadopt(adoptionHuman(), node_id)),
   );
 
   // ── RFC-028 P1 — Provider & Model Registry + connectivity probe ──

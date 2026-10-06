@@ -119,6 +119,10 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `ack_start_request` | daemon 回报启动完成或失败 |
 | `list_host_supervisors` | 列本网络的 host_supervisor daemon（含在线状态） |
 | `list_my_children` | daemon 拉取自己派生的子节点清单 |
+| `request_adopt_node` | 用户申请收编手动节点：`node_id`、`daemon_node_id`、`workdir`；须有网络写权限，且是节点主人或网络 owner/admin。daemon 必须在线、同网同主机，并声明 `daemon_capabilities.adopt_capable`。只建 pending 绑定，不停止进程 |
+| `get_adopt_request` | 仅目标 daemon 的节点令牌拉取 pending 申请；本地路径与进程验证由 daemon 完成 |
+| `ack_adopt_request` | 目标 daemon 回报 `adopted` / `refused`（可附 `error`）；确认后绑定 active。已撤销的申请不能复活 |
+| `unadopt_node` | 主人或网络 owner/admin 撤销 pending/active 绑定，不停止节点；stop/start 在途时拒绝，完成后再撤销 |
 
 **Provider 与密钥金库（owner/admin）** · 9 个
 
@@ -978,3 +982,16 @@ send_task({
 - [Channel 插件](/guide/channels) — 自定义 MCP channel 怎么写
 
 **实战**：
+
+### 手动节点收编（Hub 协议）
+
+创建记录或已确认的收编绑定，才是 stop/start 的授权依据；仅传 daemon id 不够。
+`list_my_children` 为收编节点附加 `managed: "adopted"`，包含已停止的节点；
+收编节点不允许 `delete_node`（`adopted_node_delete_unsupported`）。旧 daemon 没有声明能力就不能收编；
+Hub 接口上线不代表 daemon 的本地验证和停止/启动实现已经上线。
+
+本功能随现有 Hub 启动，由 `server/src/db.ts` 自动建立 SQLite/PG 的 `node_daemon_bindings` 表，
+不新增服务、端口、隧道、环境变量或密钥来源。升级仍用现有 Hub 部署流程；验证应在隔离库完成申请→确认→撤销，
+不要用生产节点试收编。回滚前先撤销绑定（有生命周期请求在途时等它完成），旧 Hub 不读取此表。
+绑定和审计是数据库状态，只能随现有数据库备份恢复；clone 仓库不包含它们。daemon 本地注册记录需要该主机备份，
+丢失后重新验证收编，不能只凭恢复的 Hub 行就操作进程。

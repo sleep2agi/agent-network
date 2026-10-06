@@ -2104,3 +2104,23 @@ export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus
 if (db.dialect === "postgres") {
   for (const table of ["nodes", "user_inbox"]) db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS rowid BIGSERIAL`);
 }
+
+// Board #625: common SQLite/PostgreSQL DDL. Adoption records authority, not processes.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS node_daemon_bindings (
+    request_id TEXT PRIMARY KEY,
+    network_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    daemon_node_id TEXT NOT NULL,
+    workdir TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending','active','refused','revoked')),
+    error TEXT,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_ndb_live_node
+    ON node_daemon_bindings(node_id) WHERE status IN ('pending','active');
+  CREATE INDEX IF NOT EXISTS idx_ndb_daemon_network
+    ON node_daemon_bindings(daemon_node_id,network_id,status);
+`);

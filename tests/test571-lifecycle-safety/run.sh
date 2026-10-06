@@ -5,9 +5,9 @@
 #       another workdir and HOME. stop_node(child) must reap the child and leave the
 #       other one alive. (Before: the daemon's post-pgid residual sweep SIGTERMed every
 #       `agent-node --alias dup571` on the machine.)
-#   S2  hub routes a stop for a `node_…` id this daemon never created (explicit
-#       daemon_node_id, no create record) while a same-alias agent-node runs elsewhere.
-#       The daemon must refuse (stop_failed / not_my_child) and signal nothing.
+#   S2  no creation/binding authority: Hub refuses even an explicit daemon.
+#       Then seed Hub creation authority only (no daemon local record): the daemon
+#       must independently refuse (stop_failed / not_my_child) and signal nothing.
 #       (Before: map miss → machine-wide pgrep-by-alias SIGTERM + ack stopped.)
 #   S3  hand-started node (`n_…` id) + explicit same-network daemon_node_id → hub refuses
 #       with not_daemon_managed, writes no stop request, the process lives.
@@ -182,7 +182,7 @@ if alive "$FOREIGN1"; then ok "S1 foreign same-alias agent-node in another HOME 
 else bad "S1 foreign same-alias agent-node pid=$FOREIGN1 was KILLED by the child's stop (sweep by alias)"; fi
 
 # ── S2 ────────────────────────────────────────────────────────────
-note "S2. stop routed to the daemon for a node it never created (no local record)"
+note "S2. no authority refuses at Hub; Hub-only authority still refuses at daemon"
 GHOST_ID="node_ghost571"; GHOST_ALIAS="ghost571"
 insert_node_row "$GHOST_ID" "$GHOST_ALIAS" && ok "hub row $GHOST_ID (no create record)" || bad "insert ghost row"
 FOREIGN2=$(start_foreign_agent_node "$ROOT/other2" "$GHOST_ALIAS" "n_571bbbb")
@@ -190,8 +190,17 @@ FAKE_PIDS+=("$FOREIGN2")
 sleep 0.5
 alive "$FOREIGN2" && ok "same-alias agent-node pid=$FOREIGN2 (HOME=$ROOT/other2)" || bad "foreign2 did not start"
 RESP=$(tool "$UTOK" stop_node "{\"child_node_id\":\"$GHOST_ID\",\"daemon_node_id\":\"$DAEMON_NODE_ID\",\"network_id\":\"$NET_ID\"}")
+[[ "$(printf '%s' "$RESP" | jq -r .error)" == daemon_not_resolvable ]] && ok "unbound node_ rejected despite explicit daemon" || bad "unbound stop: $RESP"
+[[ "$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM node_stop_requests WHERE child_node_id='$GHOST_ID';")" == 0 ]] && ok "unbound stop wrote no request" || bad "unbound stop wrote a request"
+[[ "$(sqlite3 "$HUB_DB" "SELECT lifecycle_state FROM nodes WHERE node_id='$GHOST_ID';")" == active ]] && ok "unbound lifecycle untouched" || bad "unbound lifecycle changed"
+alive "$FOREIGN2" && ok "unbound same-alias process survived" || bad "unbound process killed"
+# Hub authority is not a daemon-local ownership record. Preserve the independent
+# daemon safety regression instead of weakening the new Hub authorization gate.
+sqlite3 "$HUB_DB" "INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,network_id,runtime,model,flags_json,env_keys,status,created_at,created_by_token,child_node_id)
+  VALUES('cr_ghost571','$DAEMON_NODE_ID','$GHOST_ALIAS','$NET_ID','claude-agent-sdk','x','{}','[]','succeeded',1,'test571','$GHOST_ID');" || { bad "seed Hub-only authority"; exit 1; }
+RESP=$(tool "$UTOK" stop_node "{\"child_node_id\":\"$GHOST_ID\",\"daemon_node_id\":\"$DAEMON_NODE_ID\",\"network_id\":\"$NET_ID\"}")
 SR2=$(printf '%s' "$RESP" | jq -r .request_id 2>/dev/null)
-[[ "$SR2" == sr_* ]] && ok "hub dispatched (node_ id without record keeps the explicit-daemon path)" || bad "dispatch: $RESP"
+[[ "$SR2" == sr_* ]] && ok "Hub-only creation authority dispatched to daemon" || bad "dispatch: $RESP"
 ST2=$(wait_stop_request_done "$SR2" 40)
 ERR2=$(sqlite3 "$HUB_DB" "SELECT COALESCE(error,'') FROM node_stop_requests WHERE request_id='$SR2';")
 [[ "$ST2" == stop_failed ]] && ok "daemon refused: status=stop_failed" || bad "daemon ack status='$ST2' (expected stop_failed)"
