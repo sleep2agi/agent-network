@@ -1,0 +1,32 @@
+Board #659 A — startup inputs and refusal gates (not a start implementation)
+Base: a3b20d74 (merged #2461). Tested source initially an uncommitted worktree.
+
+Scope
+- Config-derived, versioned, secret-free input snapshot after live adoption proof.
+- Missing inputs preserve stop-only adoption and legacy v1 behavior.
+- Exact thread UUID, literal loopback URL, canonical project/home, full receipt equality.
+- Fresh Hub binding generation required; current Hub omits that projection.
+  A refuses rather than substituting local evidence. The fixture's additional
+  binding_request_id is a proposed boundary, NOT a shipped HTTP capability.
+- No start execution, no receipt deletion, no runtime/version/deployment changes.
+
+Docker command (repository root; sg docker -c)
+docker build --build-arg SOURCE_COMMIT=a3b20d74 -t anet-board659-a -f tests/test658-codex-adopt-stop/Dockerfile .
+docker run --rm --init --cpus=2 --network none anet-board659-a
+rc=0
+- Existing evidence + real stop fixtures: 15 pass, 0 fail, 76 assertions.
+- Startup inputs + real tmux preflight: 7 pass, 0 fail, 76 assertions.
+- Native/external layouts, CJK names, real container default socket plus decoy.
+- Real three stages adopted then stopped; valid preflight still fails start.
+- Old Hub / different binding rejects; after-probe revoke rejects.
+- Occupied port, live stages, dead role pane refuse. Receipt, registry and decoy unchanged.
+- New mutations: binding generation / receipt equality / live-stage check removal:
+  each rc=1 at assertions; mutation driver rc=0. No source mount.
+- Original six stop mutations remain assertion-red; driver rc=0.
+
+Related Docker regressions (same image, --init --cpus=2 --network none)
+bun test agent-node/src/runtime/adopt-daemon.test.ts agent-node/src/runtime/adopt-lifecycle.test.ts agent-node/src/runtime/adopt-local-identity.test.ts agent-node/src/runtime/adopt-process-tree.test.ts agent-node/src/tmux-format.test.ts
+rc=0: 30 pass, 0 fail, 85 assertions.
+
+Not claimed: real Codex launch, production Hub request-generation support,
+model calls, cross-boot recovery, any host tmux/node changes, full server suite.
