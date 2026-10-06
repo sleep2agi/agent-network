@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteJson } from "./config-apply.js";
+import type { CodexStartInputs } from "./adopt-codex-start-inputs.js";
 
 export interface AdoptedChild {
   adopted: true;
@@ -9,7 +10,7 @@ export interface AdoptedChild {
   workdir: string;
   nodeDir: string;
   launch_mode: "bare" | "tmux";
-  codex_v2?: { version: 1; layout: "native" | "external-appserver"; socket: string; marker: string; config_hash: string };
+  codex_v2?: { version: 1; layout: "native" | "external-appserver"; socket: string; marker: string; config_hash: string; start_inputs?: CodexStartInputs };
   launch_evidence?: { mode: "bare" | "tmux"; config_hash: string; socket?: string; session?: string; pane?: string };
 }
 export function readWorkdirRegistry(root: string): Record<string, unknown> {

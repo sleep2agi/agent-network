@@ -1,9 +1,49 @@
-# Codex three-stage adoption (board #657 / #658)
+# Codex three-stage adoption (board #657 / #658 / #659 A)
 
 This increment adds **adoption and stop**, not start. Three-stage start is
 board #659; `adopt_codex_start_not_available` is an intentional refusal until
 that implementation is available. Do not present this increment as a complete
 stop/start release. No production service or deployment is changed here.
+
+## Start inputs and preflight (board #659 A)
+
+After live three-stage identity verification, adoption may add `start_inputs`
+to the existing version-1 local receipt. These are **config-derived inputs**,
+not captured argv or proof of a working launcher: full UUID thread ID, explicit
+literal-loopback WebSocket endpoint, canonical owned project directory inside
+the workspace, verified layout/socket/marker/home/UID, node ID, adoption request
+ID and config hash. No token value, environment snapshot or shell command is
+copied. Configured CODEX_HOME overrides must agree with the verified home.
+Missing or invalid startup metadata leaves the node stop-only; adoption and
+safe stop do not require it. Existing receipts are not silently upgraded.
+
+Start preflight compares the complete saved input record with freshly read
+identity/config/scope, requires the same active binding generation, checks for
+live stages/escaped marker processes and occupied role names (including dead
+panes), and probes the explicit port. It checks the local binding again after
+the asynchronous probe. The probe briefly binds and closes a listening socket;
+it does not reserve the port for later startup. No signal, tmux mutation,
+registry write or `.hub-stopped` deletion occurs. A passing preflight still
+returns `adopt_codex_start_not_available`: stage execution belongs to #659 B.
+
+**Unresolved prerequisite before B can enable startup:** today's daemon-scoped
+`list_my_children` projects active node/alias, but not binding `request_id`.
+`get_adopt_request` reads pending requests only. Neither proves that a local
+receipt belongs to the current active generation. The preflight expects a
+fresh token-bound `binding_request_id` projection; absent/different values
+return `adopt_codex_binding_generation_unproven`. This PR does not invent that
+Hub field, expand Hub permissions, or claim its test stub is a real Hub contract.
+The exact additive Hub contract and HTTP isolation/revocation tests must land
+before execution is enabled. Local receipt IDs must never fill that omission.
+
+B must also verify the executable, exact thread/rollout and readiness/port
+ownership, repeat identity/authority checks at each action boundary, and handle
+marker rotation. Preflight is not a reusable authorization token. C adds
+bounded cleanup and restoration. #671's stale manual-restart receipt and
+cross-boot recovery remain separate. No launcher, deployment, port mapping,
+secret source or backup source changes in A; the recovery rules below still
+apply. The extended `test658-codex-adopt-stop` Docker suite (already registered
+in qa.yml and scripts/qa.sh) includes preflight fixtures and mutation checks.
 
 ## Authority and evidence
 
@@ -71,7 +111,11 @@ Git source alone does not recover that data.
 
 ## Acceptance scope
 
-Tests use only container-owned fake Codex stages and a real default-socket
+Tests use only container-owned fake Codex stages. The Bun tmux suites require
+both Docker detection and explicit image opt-in, otherwise they skip before
+fixture setup. Each test uses a random private socket and cleanup tracks only
+pane IDs returned by its own creation calls, never a census of all panes.
+The standalone Docker HTTP regression retains its container-owned default-socket
 decoy. No real Codex model, host tmux or production node is used. See
 `docs/tests/report-test658-review-fixes.txt` for current measured results and
 `docs/tests/report-board658-evidence.txt` for the earlier implementation record.

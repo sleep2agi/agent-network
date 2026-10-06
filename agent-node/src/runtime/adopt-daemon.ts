@@ -10,6 +10,7 @@ import { adoptedChild, forgetAdoptedChild, readWorkdirRegistry, writeAdoptedChil
 import { readCodexScope } from "./adopt-codex-scope.js";
 import { collectCodexPanes } from "./adopt-codex-tmux.js";
 import { configHash } from "./adopt-launch-evidence.js";
+import { optionalCodexStartInputs } from "./adopt-codex-start-inputs.js";
 
 export interface AdoptDaemonDeps extends AdoptionIdentityOptions {
   workDir: string;
@@ -77,7 +78,8 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
       }
       writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, node_id: identity.nodeId,
         nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: "tmux",
-        codex_v2: { version: 1, layout:scope.layout, socket: scope.socket, marker: scope.marker, config_hash: configHash(identity) } });
+        codex_v2: { version: 1, layout:scope.layout, socket: scope.socket, marker: scope.marker, config_hash: configHash(identity),
+          start_inputs: optionalCodexStartInputs(identity, scope, requestId) } });
     } else {
     const readProc = deps.readProc ?? readAdoptionProc;
     const pid = readAdoptionPid(identity.nodeDir);

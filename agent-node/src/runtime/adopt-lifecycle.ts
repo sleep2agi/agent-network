@@ -13,6 +13,7 @@ import { processStamp, stopVerifiedTree } from "./adopt-process-tree.js";
 import { captureLaunchEvidence, configHash, privateSocket } from "./adopt-launch-evidence.js";
 import { readCodexScope } from "./adopt-codex-scope.js";
 import { assertCodexStopped, stopCodexStages } from "./adopt-codex-stop.js";
+import { preflightCodexStart } from "./adopt-codex-start-preflight.js";
 
 export interface AdoptLifecycleRequest { request_id: string; child_node_id: string; child_alias: string; action: "start" | "stop" | "delete"; }
 const queues = new Map<string, Promise<unknown>>();
@@ -35,7 +36,8 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
   try {
     if (!entry || !bound || entry.node_id !== req.child_node_id) throw Error("adopt_active_binding_required");
     if (req.action === "delete") throw Error("adopted_node_delete_unsupported");
-    result = await operate(req, entry, deps);
+    const bindingRequestId = live.children.find((c: any) => c.managed === "adopted" && c.child_node_id === req.child_node_id && c.alias === req.child_alias)?.binding_request_id;
+    result = await operate(req, entry, deps, bindingRequestId);
   } catch (e: any) {
     result = { status: req.action === "start" ? "start_failed" : "stop_failed",
       error: /^adopt_[a-z_]+$/.test(e?.message ?? "") ? e.message : "adopt_lifecycle_verification_failed" };
@@ -45,16 +47,21 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
   await deps.callCommHub(req.action === "start" ? "ack_start_request" : "ack_stop_request", { request_id: req.request_id, ...result });
   return true;
 }
-async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: AdoptDaemonDeps): Promise<Record<string, unknown>> {
+async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: AdoptDaemonDeps, bindingRequestId: unknown): Promise<Record<string, unknown>> {
   const identity = verifyAdoptionLocalIdentity({ node_id: entry.node_id, alias: req.child_alias, network_id: deps.networkId, workdir: entry.workdir }, {...deps, allowCodexV2: !!entry.codex_v2});
   if (identity.nodeDir !== entry.nodeDir) throw Error("adopt_registry_identity_mismatch");
   if (entry.codex_v2) {
     if (!identity.config.codexCopresence || entry.codex_v2.version !== 1 || configHash(identity) !== entry.codex_v2.config_hash)
       throw Error("adopt_codex_binding_changed");
-    if (req.action !== "stop") throw Error("adopt_codex_start_not_available");
     const scope = readCodexScope(identity, deps.uid);
     if (scope.marker !== entry.codex_v2.marker) throw Error("adopt_codex_readopt_required");
     if (scope.socket !== entry.codex_v2.socket || scope.layout !== entry.codex_v2.layout) throw Error("adopt_codex_binding_changed");
+    if (req.action === "start") {
+      await preflightCodexStart(entry, identity, scope, bindingRequestId,
+        () => adoptedChild(deps.workDir, req.child_alias)?.request_id === entry.request_id);
+      // Board #659 A only. A successful preflight is NOT a successful start.
+      throw Error("adopt_codex_start_not_available");
+    }
     const stoppedMarker = join(identity.nodeDir, ".hub-stopped");
     if (existsSync(stoppedMarker)) {
       const st=lstatSync(stoppedMarker);

@@ -18,6 +18,7 @@ export function codexTmuxEnv(socket: string) {
 }
 /** Only list-*; explicit socket via the shared wrapper. Never display/target by name. */
 export function listCodexPanes(scope: CodexAdoptionScope, allowStopped = false) {
+  for (let attempt = 0; ; attempt++) {
   try { codexSocket(scope.socket, scope.uid); }
   catch (e: any) { if (allowStopped && e.code === "ENOENT") return []; throw e; }
   let output: string;
@@ -28,11 +29,20 @@ export function listCodexPanes(scope: CodexAdoptionScope, allowStopped = false) 
     const stderr = String(e.stderr ?? "");
     if (allowStopped && e.status === 1 && (/^no server running on /m.test(stderr) ||
         /^error connecting to .* \(No such file or directory\)$/m.test(stderr))) return [];
+    // The last pane can disappear between socket validation and list-panes.
+    // This diagnostic is NOT proof of absence: repeat the secure socket check
+    // and real list operation. A replacement/live server must remain visible;
+    // persistent crashes, permission errors and timeouts still fail closed.
+    if (allowStopped && e.status === 1 && stderr.trim() === "server exited unexpectedly" && attempt < 2) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      continue;
+    }
     throw Error("adopt_tmux_listing_failed");
   }
   const rows = parseTmuxRows(output, 5);
   if (rows.length !== output.split(/\r?\n/).filter(Boolean).length) throw Error("adopt_tmux_listing_invalid");
   return rows;
+  }
 }
 function tree(root: number) {
   const stamps = readdirSync("/proc").filter(x => /^\d+$/.test(x) && Number(x) > 1)

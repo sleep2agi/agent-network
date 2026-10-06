@@ -5,5 +5,6 @@ COPY --chown=bun:bun agent-node/src ./agent-node/src
 COPY --chown=bun:bun tests/test658-codex-adopt-stop ./tests/test658-codex-adopt-stop
 ARG SOURCE_COMMIT=local
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
+ENV TEST658_CONTAINER=1
 USER bun
 CMD ["sh", "tests/test658-codex-adopt-stop/run.sh"]

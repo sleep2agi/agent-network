@@ -46,7 +46,7 @@ fi
 PORT_A=27101
 PORT_TUICLASH=27102
 PORT_BUSY=27103
-PORT_MEM=27104
+PORT_MEM=27104  # unbound; L0 still counts it so this block cannot shrink quietly
 PORT_NATIVE=27105
 PORT_NEVER=27106
 PORT_M1=27107
@@ -154,9 +154,6 @@ mknode() { # mknode <alias> <port> <projectDir> [extra json]
 JSON
   chmod 600 "$WORK/.anet/nodes/$a/config.json"
 }
-MEM_OK=/tmp/meminfo-ok; printf 'MemTotal: 65000000 kB\nMemAvailable: 8388608 kB\n' >"$MEM_OK"
-MEM_LOW=/tmp/meminfo-low; printf 'MemTotal: 65000000 kB\nMemAvailable: 2097152 kB\n' >"$MEM_LOW"
-export ANET_MEMINFO_PATH="$MEM_OK"
 CLI() { bun "$ROOT/agent-network/bin/cli.ts" "$@"; }
 FAKE=/tmp/fake-codex
 reset_fake() { safe_rm_rf "$FAKE"; mkdir -p "$FAKE"; }
@@ -270,16 +267,13 @@ cat "$WORK/busy.out" >>"$REPORT"
 [ "$RC" != 0 ] && grep -qF 'already in use' "$WORK/busy.out" || fail "busy port not refused (rc=$RC)"
 has_session demo-node-busy-appsrv && fail "busy-port refusal still created a session"
 
-mknode demo-node-mem "$PORT_MEM" "$WORK"
-set +e; ANET_MEMINFO_PATH="$MEM_LOW" CLI node start demo-node-mem --external-appserver >"$WORK/mem.out" 2>&1; RC=$?; set -e
-cat "$WORK/mem.out" >>"$REPORT"
-[ "$RC" != 0 ] && grep -qF 'below 4.0 GiB' "$WORK/mem.out" && grep -qF -- '--force' "$WORK/mem.out" || fail "low memory not refused (rc=$RC)"
-has_session demo-node-mem-appsrv && fail "memory refusal still created a session"
-set +e; ANET_MEMINFO_PATH="$MEM_LOW" CLI node start demo-node-mem --force --verify-timeout 10 >"$WORK/memforce.out" 2>&1; RC=$?; set -e
-cat "$WORK/memforce.out" >>"$REPORT"
-[ "$RC" = 0 ] && grep -qF 'continuing because of --force' "$WORK/memforce.out" || fail "--force did not override the memory check (rc=$RC)"
-CLI node stop demo-node-mem >>"$REPORT" 2>&1
-pass "refused: existing session (exact CJK name), existing <alias>-tui, busy port, MemAvailable < 4 GiB; --force overrides memory"
+set +e; CLI node restart -h >"$WORK/restart-help.out" 2>&1; RC=$?; set -e
+cat "$WORK/restart-help.out" >>"$REPORT"
+[ "$RC" = 0 ] || fail "node restart -h rc=$RC"
+grep -qF 'ANET_START_MEM_GATE=0' "$WORK/restart-help.out" || fail "restart -h does not mention ANET_START_MEM_GATE=0"
+if grep -qF 'MemAvailable < 4 GiB' "$WORK/restart-help.out"; then fail "restart -h still says MemAvailable < 4 GiB"; fi
+if grep -qF 'Start even when MemAvailable' "$WORK/restart-help.out"; then fail "restart -h still says --force skips the memory check"; fi
+pass "refused: existing session (exact CJK name), existing <alias>-tui, busy port; --force does not skip the start gate (ANET_START_MEM_GATE=0)"
 
 log "[L4] restart --bridge-only keeps app-server and TUI"
 APPSRV_PANE=$(pane_pid "$A-appsrv"); TUI_PANE=$(pane_pid "$A-tui"); BR_PANE=$(pane_pid "$A")

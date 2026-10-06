@@ -191,6 +191,10 @@ L1_TESTS=(
   # Board #672. A fake Claude key must abort on 401 before the CLI's own
   # retry loop, and must not abort a 429. docker-run.args sets --cpus=2.
   "test672-claude-auth-abort"
+  # Board #612. Docker --memory, via tests/$t/docker-run.args, so the real
+  # gate reads the cgroup. Putting the timeout cap back to the normal
+  # concurrency limit must turn the suite red.
+  "test612-start-admission"
   # 2026-08-19 补注册。它此前是孤儿**且在 main 上是红的**，而红因有三层，
   # 全部是「产品前进、套件写在它之前」，一条回归都没有：
   #   ① #203 身份守卫（server/src/tools.ts 的 alias_identity_mismatch）——
