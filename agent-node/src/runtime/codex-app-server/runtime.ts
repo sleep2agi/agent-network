@@ -20,6 +20,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { CodexAppServerClient, resolveWebSocketCtor } from "../codex-app-server-client";
 import { CodexAppServerBridge } from "../codex-app-server-bridge";
+import { waitForStartResources, type StartGateDeps } from "./start-resource-gate";
 import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
 import { describeRolloutSize, resolveResumeTimeoutMs } from "./resume-timeout";
 import { resolveTimeoutEnvMs } from "./timeout-env";
@@ -169,6 +170,12 @@ export async function openCodexAppServerRuntime(opts: {
   /** Test seam for the /proc check. */
   procReader?: ProcReader;
   procPlatform?: string;
+  /**
+   * #612 — test seam for the memory/load gate that runs before an OWNED
+   * app-server is spawned (see start-resource-gate.ts). Not consulted when
+   * attaching to a shared server.
+   */
+  startGate?: StartGateDeps;
   onThread?: (threadId: string, created: boolean) => void | Promise<void>;
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   /** #1930 — see CodexAppServerBridgeOptions.shouldStartQueued. */
@@ -190,6 +197,9 @@ export async function openCodexAppServerRuntime(opts: {
   try {
     if (!url) {
       // Owned-server topology: spawn `codex app-server --listen ws://…`.
+      // #612 — wait for memory/CPU headroom before spawning; a burst of
+      // simultaneous app-server starts once froze a whole host.
+      await waitForStartResources("codex app-server", { log, warn, ...opts.startGate });
       const port = randomPort();
       url = `ws://127.0.0.1:${port}`;
       const binary = opts.binary ?? "codex";
