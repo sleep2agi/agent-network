@@ -7,6 +7,7 @@ import { handleAdoptDoorbell } from "../../agent-node/src/runtime/adopt-daemon.j
 import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifecycle.js";
 import { adoptedChild } from "../../agent-node/src/runtime/adopt-registry.js";
 import { preflightCodexStart } from "../../agent-node/src/runtime/adopt-codex-start-preflight.js";
+import { readAdoptionProc } from "../../agent-node/src/runtime/adopt-proc.js";
 
 async function listener() {
   const server=createServer();
@@ -35,10 +36,31 @@ test(`start preflight: ${layout} real stages, receipt/decoy unchanged, no launch
   const deps={home:mkdtempSync("/tmp/preflight-home-"),workDir:daemon,hubUrl:config.hub,networkId:config.network_id,adoptRoots:[workdir],uid,daemonEnv:{},warn:()=>{},
     callCommHub:async(tool:string,args:any)=>{calls.push({tool,args});return tool==="get_adopt_request"?req:tool==="list_my_children"?
       {ok:true,children:[{managed:"adopted",child_node_id:config.node_id,alias:scope.alias,binding_request_id:authority}]}:{ok:true};}};
+  const release = `${workdir}/fixture-release`;
+  const fixturePanes = new Set<string>();
+  async function waitForFixtureStages() {
+    // new-session returns before its shell has exec'd the identity-bearing
+    // process. Only synchronize the fixture; never retry a production refusal.
+    writeFileSync(release, "ready", {mode:0o600});
+    const deadline=Date.now()+2000;
+    while (Date.now()<deadline) {
+      const rows=listCodexPanes(scope).filter(r=>fixturePanes.has(r[2]));
+      if(rows.length===4 && rows.every(row=>{
+        const proc=readAdoptionProc(Number(row[3]));
+        return proc?.argv.join(" ")==="sleep 300" && proc.uid===uid && proc.cwd===workdir &&
+          proc.env.CODEX_HOME===scope.codexHome &&
+          proc.env.ANET_NODE_MARKER===(row[0]==="preflight-decoy"?"foreign":scope.marker);
+      })) return;
+      await new Promise(r=>setTimeout(r,10));
+    }
+    throw Error("fixture identity-bearing stages not ready");
+  }
   try {
-    for(const name of [...names,"preflight-decoy"])execTmux(["new-session","-d","-s",name,"-c",workdir,
-      `exec env ANET_NODE_MARKER=${name==="preflight-decoy"?"foreign":scope.marker} CODEX_HOME=${scope.codexHome} sleep 300`],{env});
+    for(const name of [...names,"preflight-decoy"])fixturePanes.add(execTmux(["new-session","-d","-s",name,"-c",workdir,
+      `while [ ! -f '${release}' ]; do sleep 0.01; done; exec env ANET_NODE_MARKER=${name==="preflight-decoy"?"foreign":scope.marker} CODEX_HOME=${scope.codexHome} sleep 300`],{env}).trim());
+    await waitForFixtureStages();
     await handleAdoptDoorbell(req,deps);
+    console.log("preflight adoption ack", layout, JSON.stringify(calls.at(-1)?.args));
     expect(calls.at(-1).args.status).toBe("adopted");
     const entry=adoptedChild(daemon,scope.alias)!;
     expect(entry.codex_v2?.start_inputs?.thread_id).toBe(config.codexThreadId);
