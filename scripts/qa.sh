@@ -182,6 +182,10 @@ L1_TESTS=(
   # not. Forcing the mismatch check to succeed turns the node-directory case
   # red. Copies two source files, no install.
   "test667-project-dir-warn"
+  # Board #612. Docker --memory, via tests/$t/docker-run.args, so the real
+  # gate reads the cgroup. Putting the timeout cap back to the normal
+  # concurrency limit must turn the suite red.
+  "test612-start-admission"
   # 2026-08-19 补注册。它此前是孤儿**且在 main 上是红的**，而红因有三层，
   # 全部是「产品前进、套件写在它之前」，一条回归都没有：
   #   ① #203 身份守卫（server/src/tools.ts 的 alias_identity_mismatch）——
@@ -561,7 +565,24 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       #    「唯一需要这条时间线的场合,正是它打不出来的场合」——
       #    那条讲的是整个 job 被 30 分钟天花板 kill,而**每一次单套件失败也是**。
       _rc=0
-      dockerrun "docker run --rm anet-$t" >/tmp/qa-l1-$t-run.log 2>&1 || _rc=$?
+      # A suite may ship tests/$t/docker-run.args (one flag per line) when the
+      # container itself is the fixture. Allowed flags are resource limits only,
+      # so a suite cannot mount the host or raise privileges. test612 uses this
+      # for --memory: without it, /proc/meminfo is the host and the cgroup is unlimited.
+      _run_flags=(--rm)
+      if [[ -f "tests/$t/docker-run.args" ]]; then
+        while IFS= read -r _flag || [[ -n "${_flag:-}" ]]; do
+          [[ -z "${_flag:-}" || "$_flag" == \#* ]] && continue
+          case "$_flag" in
+            --memory=[0-9]*|--memory-swap=[0-9]*|--cpus=[0-9]*) _run_flags+=("$_flag") ;;
+            *) printf 'bad docker-run.args flag for %s: %s\n' "$t" "$_flag" >&2; exit 1 ;;
+          esac
+        done < "tests/$t/docker-run.args"
+      fi
+      _run_cmd="docker run"
+      for _f in "${_run_flags[@]}"; do _run_cmd+=" ${_f}"; done
+      _run_cmd+=" anet-$t"
+      dockerrun "$_run_cmd" >/tmp/qa-l1-$t-run.log 2>&1 || _rc=$?
       _e=$(( $(date +%s) - START ))
       printf '%s\t%s\t%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv
       # 🔴 **完成即打印**,不要只留给结尾的汇总。

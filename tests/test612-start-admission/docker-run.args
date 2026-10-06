@@ -1,0 +1,5 @@
+# qa.sh appends these to `docker run` for this suite only.
+# 512 MiB is far under the 4 GiB floor, and /proc/meminfo inside the
+# container still reports the host, so the gate has to read the cgroup.
+--memory=512m
+--memory-swap=512m
