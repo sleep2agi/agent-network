@@ -67,3 +67,23 @@ focused runtime suite, real daemon build and real HTTP paths are listed above.
 No merge/release/deploy. Fleet script and CLI must be upgraded together; older
 scanners conservatively retain the stop. Restored-file identity mismatch also
 retains stop. No remote three-stage start implementation (board #659 B).
+
+Latest-main integration (2026-10-07):
+- PR was already published as draft; merged b56f8dd0 without rewriting history.
+- Merge commit: 63cdd08a19eb48cf58b0761674bae26a583e06ac.
+- range-diff of the four original commits is all '='. This does not examine
+  merge resolutions: separately checked unchanged recovery product blobs and
+  identical CLI added/removed lines. Main's start-admission wiring is retained.
+- Only conflict was architecture.md CLI pins. Checker reported definitions at
+  10312 and 2976; updated those two anchors, no whole-file conflict replacement.
+- Against origin/main, qa.yml and scripts/qa.sh have no delta.
+- Docker --cpus=2, network none, full merge SHA: test658 rc=0; recovery 4/4,
+  63 assertions; remain-on-exit 20/20; all 17 mutation checks assertion-red.
+- test745 rc=0: 1936 pass, 9 platform skips, 0 fail; 5922 assertions across
+  189 src files; tests directory 19/19; help mutation rc=1. First launch had
+  rejected a short SOURCE_COMMIT before tests; rerun used the full merge SHA.
+- Docker static gates rc=0, mutation pins 588 checked, 4 unchanged baseline
+  exceptions. Root and docs-site symbol checks rc=0, no missing refs or drift;
+  respectively 8 and 2 explicitly skipped pins are not counted as passes.
+- Real Hub HTTP and test571 results above were not rerun for this merge.
+  Only document pins and this report changed after the tested product snapshot.
