@@ -1,4 +1,5 @@
-import { projectDirMismatchWarning, statusTaskForReport } from "/src/project-dir-mismatch.ts";
+import { readFileSync } from "node:fs";
+import { projectDirMismatchWarning, reportedTask, statusTaskForReport } from "/src/project-dir-mismatch.ts";
 import {
   appserverShellCommand,
   bridgeShellCommand,
@@ -16,6 +17,22 @@ function fail(msg) {
   process.exit(1);
 }
 
+function assertCliWiring() {
+  const cli = readFileSync("/src/cli.ts", "utf8");
+  const lines = [
+    "function projectDirTask(status: string, task?: string): string | undefined {",
+    "return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });",
+    "const projectDirMismatchHint = projectDirTask(\"idle\");",
+    "if (projectDirMismatchHint) console.warn(projectDirMismatchHint);",
+    "task: projectDirTask(\"idle\"),",
+    "const hintedTask = projectDirTask(rawStatus, rawTask);",
+    "lastReportedStatus = { status: rawStatus, task: rawTask };",
+  ];
+  for (const line of lines) {
+    if (!cli.includes(line)) fail(`cli wiring missing: ${line}`);
+  }
+}
+
 function assertFold(hint) {
   if (statusTaskForReport("idle", undefined, hint) !== hint) fail("idle empty task dropped the hint");
   if (statusTaskForReport("idle", "", hint) !== hint) fail("idle blank task dropped the hint");
@@ -29,9 +46,25 @@ function assertFold(hint) {
   if (statusTaskForReport("working", "正在做事", hint, 1) !== "正在做事") fail("working task was replaced while in flight");
   if (statusTaskForReport("offline", undefined, hint) !== undefined) fail("offline status gained the hint");
   if (statusTaskForReport("offline", undefined, hint, 1) !== undefined) fail("offline in-flight status gained the hint");
-  if (statusTaskForReport("idle", undefined, null) !== undefined) fail("missing hint invented a task");
-  if (statusTaskForReport("idle", undefined, null, 1) !== undefined) fail("missing hint invented a task while in flight");
+  if (statusTaskForReport("idle", undefined, null) !== "") fail("idle with no hint did not clear");
+  if (statusTaskForReport("idle", "", null) !== "") fail("idle blank task with no hint did not clear");
+  if (statusTaskForReport("idle", undefined, null, 1) !== undefined) fail("in-flight idle report cleared the running task");
 }
+
+function assertReported(hint) {
+  const wrong = { configPath: CONFIG, cwd: NODE, inFlight: 0, status: "idle" };
+  const right = { configPath: CONFIG, cwd: ROOT, inFlight: 0, status: "idle" };
+  if (reportedTask(wrong) !== hint) fail("node directory did not report the warning");
+  if (reportedTask(right) !== "") fail("fixed directory did not clear the task");
+  if (reportedTask({ ...wrong, inFlight: 1 }) !== undefined) fail("in-flight idle report covered the running task");
+  if (reportedTask({ ...right, inFlight: 1 }) !== undefined) fail("in-flight idle report cleared the running task");
+  if (reportedTask({ ...wrong, task: "正在做事" }) !== "正在做事") fail("caller task was replaced by the warning");
+  if (reportedTask({ ...right, task: "正在做事" }) !== "正在做事") fail("caller task was cleared");
+  if (reportedTask({ ...wrong, status: "working" }) !== undefined) fail("working status gained the hint");
+  if (reportedTask({ configPath: null, cwd: NODE, inFlight: 0, status: "idle" }) !== "") fail("missing config invented a warning");
+}
+
+assertCliWiring();
 
 const mode = process.argv[2];
 const started = process.cwd();
@@ -59,7 +92,7 @@ if (mode === "root") {
   // Home-registry supervisor: config is <home>/.anet/nodes/<name>/config.json
   // and the process was started in <home>. That matches. Starting inside the
   // node directory still warns — do not whitelist that layout.
-  const home = "/home/demo";
+  const home = "/home/user";
   const daemonConfig = `${home}/.anet/nodes/demo-daemon/config.json`;
   const daemonAtHome = projectDirMismatchWarning({ configPath: daemonConfig, cwd: home });
   if (daemonAtHome) fail(`home-registry supervisor warned: ${daemonAtHome}`);
@@ -99,6 +132,7 @@ if (mode === "root") {
   const tuiCmd = tuiShellCommand(planned.plan);
   if (!tuiCmd.includes(`-C '${ROOT}/project'`)) fail(`tui does not pin -C: ${tuiCmd}`);
   assertFold("hint-for-fold");
+  assertReported(hand);
   console.log(`project_dir=${started}`);
   console.log("warning=");
   console.log("ROOT_OK");
@@ -118,8 +152,8 @@ if (mode === "node") {
   for (const piece of [NODE, `"${ROOT}"`, "anet node start", "cd 到工作区根"]) {
     if (!warning.includes(piece)) fail(`warning missing ${piece}: ${warning}`);
   }
-  if (statusTaskForReport("idle", undefined, warning) !== warning) fail("hub idle task is not the warning");
-  if (statusTaskForReport("working", "正在做事", warning) !== "正在做事") fail("working task was replaced");
+  if (reportedTask({ configPath: CONFIG, cwd: started, inFlight: 0, status: "idle" }) !== warning) fail("hub idle task is not the warning");
+  if (reportedTask({ configPath: CONFIG, cwd: started, inFlight: 0, status: "working", task: "正在做事" }) !== "正在做事") fail("working task was replaced");
   console.log(`project_dir=${reported}`);
   console.log(`warning=${warning}`);
   console.log("NODE_OK");

@@ -40,14 +40,14 @@ export function projectDirMismatchWarning(input: {
 }
 
 /**
- * Idle reports with no task of their own keep the mismatch text, so a later
- * idle heartbeat does not drop it. A caller-supplied task, and any non-idle
- * status, are left alone.
+ * What `report_status.task` should be.
  *
- * While a task is still in flight, an empty idle report must not replace the
- * running description. Returning undefined omits `task`, and the hub's
- * COALESCE keeps the current text. The idle report after the task ends
- * (in-flight back to 0) writes the hint back.
+ * A caller-supplied task is sent as-is. While something is still in flight,
+ * an empty report omits `task` (undefined): the hub's COALESCE keeps the
+ * running description. Idle, nothing in flight, and a mismatch: send the
+ * warning. Idle, nothing in flight, and no mismatch: send "" so a restart
+ * from the right directory clears a warning the previous process left on
+ * the same resume_id. Omitting the field would keep that warning.
  *
  * cwd == the node directory is not whitelisted. The product-started external
  * bridge is given the workspace root as its tmux cwd, so it does not warn.
@@ -59,9 +59,24 @@ export function statusTaskForReport(
   hint: string | null,
   inFlight = 0,
 ): string | undefined {
-  if (status === "idle" && hint && (task == null || task === "")) {
-    if (inFlight > 0) return undefined;
-    return hint;
-  }
-  return task;
+  if (task != null && task !== "") return task;
+  if (inFlight > 0) return undefined;
+  if (status !== "idle") return task;
+  if (hint) return hint;
+  return "";
+}
+
+/** cli.ts passes configPath, cwd, inFlight, and whether the caller has a task. */
+export function reportedTask(input: {
+  configPath?: string | null;
+  cwd: string;
+  inFlight: number;
+  status: string;
+  task?: string;
+}): string | undefined {
+  const hint = projectDirMismatchWarning({
+    configPath: input.configPath,
+    cwd: input.cwd,
+  });
+  return statusTaskForReport(input.status, input.task, hint, input.inFlight);
 }

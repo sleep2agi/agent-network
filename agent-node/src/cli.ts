@@ -35,7 +35,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
-import { projectDirMismatchWarning, statusTaskForReport } from "./project-dir-mismatch.js";
+import { reportedTask } from "./project-dir-mismatch.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
@@ -996,14 +996,14 @@ const NODE_STATE_DIR = configFilePath && basename(dirname(dirname(configFilePath
   && basename(dirname(dirname(dirname(configFilePath)))) === ".anet"
   ? dirname(configFilePath)
   : join(process.cwd(), ".anet", "nodes", ALIAS);
-// #667 — project_dir stays the real cwd. Codex's work directory follows it,
-// so this process does not chdir. When that cwd is not the workspace root
-// implied by `<root>/.anet/nodes/<dir>/config.json`, say so once here and
-// keep the same text on idle report_status via the existing `task` field.
-const projectDirMismatchHint = projectDirMismatchWarning({
-  configPath: configFilePath,
-  cwd: process.cwd(),
-});
+// #667 — project_dir stays the real cwd. This process does not chdir.
+// reportedTask is the only decision: warning, "" to clear one, or undefined
+// while a task is in flight. Replays pass the caller's raw task back in,
+// so a stored warning cannot look like a caller-supplied task.
+function projectDirTask(status: string, task?: string): string | undefined {
+  return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });
+}
+const projectDirMismatchHint = projectDirTask("idle");
 if (projectDirMismatchHint) console.warn(projectDirMismatchHint);
 const LOG_DIR = opts["log-dir"] || join(NODE_STATE_DIR, "logs");
 // RFC-036 B4 — immutable for this process lifetime. Runtime/model turns never
@@ -1645,7 +1645,7 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
-    ...(projectDirMismatchHint ? { task: projectDirMismatchHint } : {}),
+    task: projectDirTask("idle"),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
@@ -1703,13 +1703,13 @@ const register = async () => {
   return result;
 };
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
-  // #667 — an empty idle report keeps the mismatch hint only when nothing is
-  // in flight. While a task is running, omit task so the hub COALESCE keeps
-  // the running description; the idle report after the task ends (in-flight
-  // already decremented) writes the hint back. A real task still wins, and a
-  // login error from the gate below replaces this text.
-  const hintedTask = statusTaskForReport(rawStatus, rawTask, projectDirMismatchHint, getInFlightCount());
-  lastReportedStatus = { status: rawStatus, task: hintedTask };
+  // #667 — idle with nothing running writes the warning, or "" so a restart
+  // from the right directory clears it. In flight, omit task. Store the
+  // caller's raw task: the three replays below pass it back through here,
+  // and a stored warning must not skip the in-flight check. A login error
+  // from the gate below still replaces this text.
+  const hintedTask = projectDirTask(rawStatus, rawTask);
+  lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();
   const health = currentNodeHealth();
   // #448 —— 登录态 revoked/expired 的节点不能接活:idle 报成 error 并写明「本节点 CODEX_HOME 要重新登录」。

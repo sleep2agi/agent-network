@@ -30,13 +30,15 @@ need_count() {
 }
 
 need_count 'project_dir: process.cwd()' "$CLI" 1
-need_count 'projectDirMismatchWarning(' "$CLI" 1
-need_count 'statusTaskForReport(' "$CLI" 1
-need_count 'task: projectDirMismatchHint' "$CLI" 1
-need_count 'lastReportedStatus = { status: rawStatus, task: hintedTask };' "$CLI" 1
+need_count 'return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });' "$CLI" 1
+need_count 'if (projectDirMismatchHint) console.warn(projectDirMismatchHint);' "$CLI" 1
+need_count 'task: projectDirTask("idle"),' "$CLI" 1
+need_count 'const hintedTask = projectDirTask(rawStatus, rawTask);' "$CLI" 1
+need_count 'lastReportedStatus = { status: rawStatus, task: rawTask };' "$CLI" 1
 need_count 'gateStatusOnModelAuth(rawStatus, hintedTask, health.model_auth, NODE_CODEX_HOME)' "$CLI" 1
-need_count '{ status: rawStatus, task: hintedTask }' "$CLI" 2
 need_count "$ANCHOR" "$HELPER" 1
+need_count 'return statusTaskForReport(input.status, input.task, hint, input.inFlight);' "$HELPER" 1
+need_count 'return "";' "$HELPER" 1
 need_count 'externalAppserverBridgeCwd(plan)' "$ANET_CLI" 1
 need_count '"-c", plan.nodeDir' "$ANET_CLI" 2
 need_count "$CWD_ANCHOR" "$GATE" 1
@@ -58,9 +60,90 @@ run_probe() {
   ( cd "$dir" && bun /test667/probe.mjs "$mode" )
 }
 
+apply_mutation() {
+  bun -e '
+    const fs = require("fs");
+    const path = process.argv[1];
+    const anchor = process.argv[2];
+    const repl = process.argv[3];
+    const text = fs.readFileSync(path, "utf8");
+    const n = text.split(anchor).length - 1;
+    if (n !== 1) {
+      console.error("MUTATION_NOT_APPLIED: anchor count=" + n);
+      process.exit(1);
+    }
+    fs.writeFileSync(path, text.replace(anchor, repl));
+  ' "$1" "$2" "$3"
+}
+
+expect_red() {
+  local label="$1" mode="$2" dir="$3" needle="$4"
+  rm -rf /root/.bun/install/cache /tmp/bun-* "${HOME:-/root}/.bun/install/cache" 2>/dev/null || true
+  set +e
+  run_probe "$mode" "$dir" > /tmp/test667-red.txt 2>&1
+  local rc=$?
+  set -e
+  cat /tmp/test667-red.txt
+  if [[ "$rc" -eq 0 ]]; then
+    echo "FAIL: $label stayed green"
+    exit 1
+  fi
+  if ! grep -F -q "$needle" /tmp/test667-red.txt; then
+    echo "FAIL: $label died for a reason other than: $needle"
+    exit 1
+  fi
+  echo "$label red as required"
+}
+
 echo '== green: workspace root, then node directory =='
 run_probe root /work
 run_probe node /work/.anet/nodes/demo-node
+
+echo '== red: cli passes a constant in-flight count =='
+cp "$CLI" /tmp/cli.bak
+apply_mutation "$CLI" \
+  'return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });' \
+  'return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: 0, status, task });'
+expect_red 'cli in-flight wiring' root /work 'cli wiring missing'
+cp /tmp/cli.bak "$CLI"
+
+echo '== red: cli nulls the config path =='
+apply_mutation "$CLI" \
+  'return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });' \
+  'return reportedTask({ configPath: null, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });'
+expect_red 'cli config wiring' root /work 'cli wiring missing'
+cp /tmp/cli.bak "$CLI"
+
+echo '== red: cli stops using the process cwd =='
+apply_mutation "$CLI" \
+  'return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });' \
+  'return reportedTask({ configPath: configFilePath, cwd: "/tmp", inFlight: getInFlightCount(), status, task });'
+expect_red 'cli cwd wiring' root /work 'cli wiring missing'
+cp /tmp/cli.bak "$CLI"
+
+echo '== red: cli drops the startup warning =='
+apply_mutation "$CLI" 'if (projectDirMismatchHint) console.warn(projectDirMismatchHint);' 'if (projectDirMismatchHint) { /* dropped */ }'
+expect_red 'cli warn wiring' root /work 'cli wiring missing'
+cp /tmp/cli.bak "$CLI"
+if ! cmp -s /tmp/cli.bak "$CLI"; then
+  echo 'FAIL: cli source was not restored'
+  exit 1
+fi
+
+echo '== red: in-flight protection is gone =='
+cp "$HELPER" /tmp/helper.inflight.bak
+apply_mutation "$HELPER" 'return statusTaskForReport(input.status, input.task, hint, input.inFlight);' 'return statusTaskForReport(input.status, input.task, hint, 0);'
+expect_red 'in-flight protection' root /work 'in-flight idle report covered the running task'
+cp /tmp/helper.inflight.bak "$HELPER"
+
+echo '== red: a fixed directory no longer clears the warning =='
+apply_mutation "$HELPER" 'return "";' 'return undefined;'
+expect_red 'clear stale warning' root /work 'idle with no hint did not clear'
+cp /tmp/helper.inflight.bak "$HELPER"
+if ! cmp -s /tmp/helper.inflight.bak "$HELPER"; then
+  echo 'FAIL: helper source was not restored after the clear mutation'
+  exit 1
+fi
 
 echo '== red: product bridge cwd falls back to the node directory =='
 cp "$GATE" /tmp/gate.bak
