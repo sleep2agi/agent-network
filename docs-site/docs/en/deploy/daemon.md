@@ -400,9 +400,10 @@ If `anet daemon list` says the daemon is missing some runtimes, run
 `anet daemon init <daemon-name> --force` to backfill them. It keeps the `node_id` but issues a new token,
 so restart the daemon afterwards.
 
-## Adopted-node lifecycle (not yet released) {#adopted-lifecycle}
+## Adopted-node lifecycle {#adopted-lifecycle}
 
-This requires the matching new daemon. The Hub restart refusal targets `.109`, not `.108`.
+Stop / Start for adopted nodes is available from agent-node ≥ `2.5.0-preview.118` and agent-network (`anet`) ≥ `2.3.0-preview.151`.
+From commhub-server ≥ `0.9.0-preview.109`, the Hub answers a restart of an adopted node with `adopted_restart_requires_daemon`, asking you to Stop and then Start (`.108` and earlier have no such refusal).
 From the original workspace, run `anet daemon adopt <alias> --daemon <daemon-id>` to inspect the plan.
 `--yes` only requests adoption; wait for independent daemon verification and an active Hub binding.
 The daemon's `adopt_roots` defaults to empty (deny). Co-presence nodes are not supported.
