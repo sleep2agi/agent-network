@@ -18,7 +18,8 @@
 #      这是**保留**的行为:headless codex-app-server 依旧可经 daemon 建。
 #   B  带 flags.copresence=true → config 写 codexCopresence:true、flags 里不残留 copresence;
 #      daemon 起的 `anet node start` 走共存(从不出现无头 agent-node);
-#      前台 `anet node start` 打印共存依赖预检(镜像里故意没有 tmux/codex)。
+#      前台 `anet node start` 打印共存依赖预检(镜像 PATH 上故意没有 tmux/codex;
+#      #648 的 stub 放在固定 PATH 之外,只通过 daemonExtraPath 让建节点通过)。
 #   C  非 codex-app-server 带 copresence → hub 拒绝,不落请求行
 #   D  copresence 不是布尔 → hub 拒绝
 #
@@ -91,6 +92,37 @@ headless_pids() {
 }
 req_status() { sqlite3 "$HUB_DB" "SELECT status FROM node_create_requests WHERE request_id='$1';" 2>/dev/null; }
 req_error()  { sqlite3 "$HUB_DB" "SELECT COALESCE(error,'') FROM node_create_requests WHERE request_id='$1';" 2>/dev/null; }
+# Stub codex for the #648 create gate. The image PATH must still not
+# resolve `codex`: the foreground `anet node start` preflight is the
+# witness that co-presence was taken. The stub is outside the fixed
+# child PATH; the daemon config's daemonExtraPath is what makes create
+# succeed. Do not weaken the missing_cli refusal.
+plant_codex_off_fixed_path() {
+  CODEX_STUB_DIR=/opt/qa-codex/bin
+  mkdir -p "$CODEX_STUB_DIR"
+  cat > "$CODEX_STUB_DIR/codex" <<'EOF'
+#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' "codex-cli 0.0.0"
+  exit 0
+fi
+exec sleep 3600
+EOF
+  chmod 0755 "$CODEX_STUB_DIR/codex"
+  if command -v codex >/dev/null 2>&1; then
+    echo "FAIL: codex is on the image PATH ($CODEX_STUB_DIR must stay off it)" >&2
+    exit 1
+  fi
+  local d node_dir
+  node_dir=$(dirname "$(command -v node)")
+  for d in "$node_dir" /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do
+    if [[ -e "$d/codex" ]]; then
+      echo "FAIL: codex is inside the fixed child PATH ($d)" >&2
+      exit 1
+    fi
+  done
+  "$CODEX_STUB_DIR/codex" --version >/dev/null
+}
 # wait until the daemon has acted on the request (config written or a terminal status)
 wait_req_settled() {
   local s="" i
@@ -115,7 +147,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ── 0. hub + daemon ───────────────────────────────────────────────────
-note "0. isolated hub :$HUB_PORT + \`anet daemon up\` (HOME=$HOME)"
+note "0. isolated hub :$HUB_PORT + daemon init, daemonExtraPath, start (HOME=$HOME)"
 [[ "$HUB_PORT" != 9200 ]] && ok "hub port is not 9200" || { bad "refusing to use 9200"; exit 1; }
 if command -v tmux >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
   bad "image has tmux/codex — the dependency preflight below would not be a clean witness"; exit 1
@@ -151,7 +183,20 @@ mkdir -p "$HOME/.anet" "$DAEMON_DIR"
 printf '{"hub":"%s","token":"%s","network_id":"%s"}\n' "$HUB_BASE" "$UTOK" "$NET_ID" > "$HOME/.anet/config.json"
 export ANET_BIN_ABS=$(realpath -e "$(command -v anet)")
 export ANET_DAEMON_ALLOW_ENV_BIN=1
-(cd "$DAEMON_DIR" && exec anet daemon up "$DAEMON_NAME") >/tmp/daemon-cncc.log 2>&1 &
+plant_codex_off_fixed_path
+ok "codex stub is off PATH at $CODEX_STUB_DIR"
+(cd "$DAEMON_DIR" && anet daemon init "$DAEMON_NAME") >/tmp/daemon-cncc-init.log 2>&1
+[[ $? -eq 0 ]] && ok "daemon init wrote config before start" || { bad "daemon init failed"; tail -40 /tmp/daemon-cncc-init.log; exit 1; }
+DAEMON_CFG="$DAEMON_DIR/.anet/nodes/$DAEMON_NAME/config.json"
+[[ -f "$DAEMON_CFG" ]] || { bad "daemon config missing at $DAEMON_CFG"; exit 1; }
+_cfg_tmp=$(mktemp)
+jq --arg d "$CODEX_STUB_DIR" '.daemonExtraPath = [$d]' "$DAEMON_CFG" > "$_cfg_tmp"
+mv "$_cfg_tmp" "$DAEMON_CFG"
+chmod 600 "$DAEMON_CFG"
+jq -e --arg d "$CODEX_STUB_DIR" '.daemonExtraPath == [$d] and (.token|type=="string") and (.token|length>0)' "$DAEMON_CFG" >/dev/null \
+  && ok "daemon config.json daemonExtraPath=[$CODEX_STUB_DIR]" \
+  || { bad "daemonExtraPath was not written"; exit 1; }
+(cd "$DAEMON_DIR" && exec anet daemon start "$DAEMON_NAME") >/tmp/daemon-cncc.log 2>&1 &
 DAEMON_PID=$!
 
 DAEMON_NODE_ID=""

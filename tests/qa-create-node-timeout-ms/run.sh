@@ -81,6 +81,37 @@ rows_for() { sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM node_create_requests WHERE 
 # What agent-node does with the child config's flags.timeout: the codex lanes call
 # resolveTimeoutMs({flagValue: flags.timeout}) (cli.ts currentCodexTimeoutMs); claude's
 # currentClaudeTimeoutMs uses the number as-is. Both are milliseconds.
+# Stub codex for the #648 create gate. Must stay off the image PATH and off
+# the fixed child PATH (dirname(node) + system dirs). `--version` is what
+# the gate runs; anything else just stays up so a later exec does not
+# instantly look like a missing binary.
+plant_codex_off_fixed_path() {
+  CODEX_STUB_DIR=/opt/qa-codex/bin
+  mkdir -p "$CODEX_STUB_DIR"
+  cat > "$CODEX_STUB_DIR/codex" <<'EOF'
+#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' "codex-cli 0.0.0"
+  exit 0
+fi
+exec sleep 3600
+EOF
+  chmod 0755 "$CODEX_STUB_DIR/codex"
+  if command -v codex >/dev/null 2>&1; then
+    echo "FAIL: codex is on the image PATH ($CODEX_STUB_DIR must stay off it)" >&2
+    exit 1
+  fi
+  local d node_dir
+  node_dir=$(dirname "$(command -v node)")
+  for d in "$node_dir" /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do
+    if [[ -e "$d/codex" ]]; then
+      echo "FAIL: codex is inside the fixed child PATH ($d)" >&2
+      exit 1
+    fi
+  done
+  "$CODEX_STUB_DIR/codex" --version >/dev/null
+}
+
 agent_node_resolves() {   # cfg path → "<valueMs> <source>"
   (cd /app/agent-node && bun -e '
     import { resolveTimeoutMs } from "./src/util/timeout.ts";
@@ -101,7 +132,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ── 0. hub + daemon ───────────────────────────────────────────────────
-note "0. isolated hub :$HUB_PORT + \`anet daemon up\` (HOME=$HOME)"
+note "0. isolated hub :$HUB_PORT + daemon init, daemonExtraPath, start (HOME=$HOME)"
 [[ "$HUB_PORT" != 9200 ]] && ok "hub port is not 9200" || { bad "refusing to use 9200"; exit 1; }
 # Same reason as qa-create-node-codex-copresence: the daemon's headless start resolves
 # agent-node as the exact release pair via npx; serve this build's tarball for @sleep2agi.
@@ -127,7 +158,25 @@ mkdir -p "$HOME/.anet" "$DAEMON_DIR"
 printf '{"hub":"%s","token":"%s","network_id":"%s"}\n' "$HUB_BASE" "$UTOK" "$NET_ID" > "$HOME/.anet/config.json"
 export ANET_BIN_ABS=$(realpath -e "$(command -v anet)")
 export ANET_DAEMON_ALLOW_ENV_BIN=1
-(cd "$DAEMON_DIR" && exec anet daemon up "$DAEMON_NAME") >/tmp/daemon-cntm.log 2>&1 &
+# #648 — this image never installed codex (it copied the co-presence image,
+# which omits it on purpose). The create gate now refuses codex-app-server
+# before spawn when the CLI is missing. Plant a stub outside the fixed
+# child PATH and name that directory in the daemon config. Do not put the
+# stub on PATH, and do not weaken the refusal.
+plant_codex_off_fixed_path
+ok "codex stub is off PATH at $CODEX_STUB_DIR"
+(cd "$DAEMON_DIR" && anet daemon init "$DAEMON_NAME") >/tmp/daemon-cntm-init.log 2>&1
+[[ $? -eq 0 ]] && ok "daemon init wrote config before start" || { bad "daemon init failed"; tail -40 /tmp/daemon-cntm-init.log; exit 1; }
+DAEMON_CFG="$DAEMON_DIR/.anet/nodes/$DAEMON_NAME/config.json"
+[[ -f "$DAEMON_CFG" ]] || { bad "daemon config missing at $DAEMON_CFG"; exit 1; }
+_cfg_tmp=$(mktemp)
+jq --arg d "$CODEX_STUB_DIR" '.daemonExtraPath = [$d]' "$DAEMON_CFG" > "$_cfg_tmp"
+mv "$_cfg_tmp" "$DAEMON_CFG"
+chmod 600 "$DAEMON_CFG"
+jq -e --arg d "$CODEX_STUB_DIR" '.daemonExtraPath == [$d] and (.token|type=="string") and (.token|length>0)' "$DAEMON_CFG" >/dev/null \
+  && ok "daemon config.json daemonExtraPath=[$CODEX_STUB_DIR]" \
+  || { bad "daemonExtraPath was not written"; exit 1; }
+(cd "$DAEMON_DIR" && exec anet daemon start "$DAEMON_NAME") >/tmp/daemon-cntm.log 2>&1 &
 DAEMON_PID=$!
 
 DAEMON_NODE_ID=""
