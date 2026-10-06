@@ -39,7 +39,9 @@ export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Res
   const kind = url.searchParams.get("kind");
   const requestId = url.searchParams.get("request_id"), nodeId = url.searchParams.get("node_id");
   const fail = (error: string, status: number) => Response.json({ ok: false, error }, { status });
-  if (!["adopt", "start", "stop"].includes(kind ?? "") || Boolean(requestId) === Boolean(nodeId)
+  if (!["adopt", "start", "stop"].includes(kind ?? "")
+      || url.searchParams.has("request_id") === url.searchParams.has("node_id")
+      || !(requestId ?? nodeId ?? "").trim()
       || ["kind", "request_id", "node_id"].some(k => url.searchParams.getAll(k).length > 1)
       || (requestId ?? nodeId ?? "").length > 200) return fail("invalid_lifecycle_query", 400);
   // The table and column names below come only from this closed enum.

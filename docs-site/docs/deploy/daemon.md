@@ -390,7 +390,7 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 
 ## 客户端收编状态查询（计划 Hub .110） {#adoption-read-api}
 
-以下新增字段和接口只向用户 token 开放，并沿用节点列表的网络及节点可见性授权；
+以下新增字段和接口只向请求头携带的用户 token 开放（不接受 URL token），并沿用节点列表的网络及节点可见性授权；
 不会给 daemon / 网络 token 新增读权限，也不改变旧字段。不是候选发现接口。
 
 - `GET /api/nodes` 新增 `managed: "created" | "adopted" | "none"`：分别由真实创建记录、

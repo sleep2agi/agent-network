@@ -426,7 +426,7 @@ Do not delete stop markers to bypass refusal.
 
 ## Client adoption reads (planned for Hub .110) {#adoption-read-api}
 
-These additive fields and endpoint require a user token and the existing node
+These additive fields and endpoint require a header user token (not a URL token) and the existing node
 visibility/network permissions. Daemon/network tokens gain no new read access;
 existing fields remain unchanged. This is not candidate discovery.
 

@@ -130,7 +130,7 @@ test("host-supervisors capability respects user token and node visibility; absen
   expect((await get(path)).body.daemons[0].adopt_capable).toBeUndefined();
 });
 test("invalid selectors rejected rather than listing every lifecycle request", async () => {
-  for (const suffix of ["", "kind=adopt", "kind=other&node_id=x", "kind=start&request_id=x&node_id=y", "kind=stop&node_id=x&node_id=y"])
+  for (const suffix of ["", "kind=adopt", "kind=other&node_id=x", "kind=start&request_id=x&node_id=y", "kind=stop&node_id=x&node_id=y", "kind=start&request_id=x&node_id=", "kind=adopt&node_id=%20"])
     expect((await get(`/api/node-lifecycle-requests?${suffix}`)).status).toBe(400);
 });
 test("request state refresh exposes pending, completion and binding-missing failure without caching", async () => {
