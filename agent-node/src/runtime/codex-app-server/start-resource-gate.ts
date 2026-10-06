@@ -25,10 +25,11 @@
 // The directory lock records pid, start time, and a random token. A live pid
 // whose start time does not match is reclaimed at once. A live pid that still
 // matches is an orphan only when the monotonic timestamp inside the lock is
-// older than 60s. A wall-clock step does not age a stamped lock. Before a
-// lease is written, the token is read again: a stolen lock writes nothing
-// and the waiter retries. Re-entering a lease cancels this process's pending
-// release of that same key and refreshes the expiry.
+// older than 60s. A wall-clock step does not age a stamped lock. Atomic
+// publish reads the token again before the lease is written: a stolen lock
+// writes nothing and the waiter retries. The non-atomic mutation does not,
+// so an empty file can still admit two. Re-entering a lease cancels this
+// process's pending release of that same key and refreshes the expiry.
 // ANET_START_MEM_GATE=0 disables the gate entirely. --force does not.
 // Never throws.
 
@@ -699,7 +700,10 @@ function acquireLease(
     dir, holderPid, selfStart, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs, warn,
   );
   if (token === null) return "no";
-  const still = () => lockStillOurs(dir, holderPid, selfStart, token);
+  // Non-atomic publish writes the pid into an inode the stealer already
+  // unlinked, then returns a token. Rechecking the lock would refuse the
+  // lease and hide that race. Atomic publish still rechecks.
+  const still = () => !LOCK_PUBLISH_ATOMIC || lockStillOurs(dir, holderPid, selfStart, token);
   try {
     if (!still()) return "no";
     const taken = reapSlots(dir, now, isPidAlive, readStart, warn, still);
