@@ -107,3 +107,27 @@ CI follow-up (run 37411498109, merge tree 1cff2162c84a3081a7e7f6f90bda99fc614ab1
   Build began before the test-only commit (build arg still 41c289c9); run label
   points to the identical committed code/test tree above, not the later report commit.
   Earlier reused-image diagnostic also passed 49/49, but final evidence is this rebuild.
+
+Main integration after #2429 (new isolated worktree)
+- Merge commit 11476840a43b4d85bcd4be1b870d7699bcae08e1 integrates main
+  4c409cb353eaf708b095e5e9f97c7e1269bd8f18 without whole-file conflict selection.
+- tools.ts import conflict retains both adoption handlers and runtimeReadinessSchema.
+  The merged schema contains both adopt_capable and runtime_readiness; REST readiness
+  changes remain identical to main. runtime-readiness.ts and its test are unchanged.
+- send_reply registration starts at tools.ts:2426 (name at 2427); send_ack starts
+  at 2440 (name at 2441). Documentation label and URL anchors use these real lines.
+- Docker test625: 22 pass, 93 assertions; reverted authority gate yields the same
+  unbound-node assertion failure, red rc=1, suite rc=0.
+- Docker api-host-supervisors-runtime-readiness.test.ts: 9 pass, 38 assertions, rc=0.
+  First invocation used a nonexistent short test filename after test625 succeeded;
+  corrected invocation above reran both successfully. No missing-test green claim.
+- Docker python3 scripts/check-doc-symbol-pins.py .: rc=0; 17 pins, 9 judged,
+  8 documented skips, 0 unresolved refs, 0 drift. Initial lightweight image had no
+  git; final invocation uses the server test image, read-only Git metadata and
+  explicit safe.directory=/src to check historical references too.
+- Docker server aggregate at merge 11476840: executed_files=196,
+  discovered_files=196, failed_files=0; password-floor mutation red rc=1;
+  RESULT: PASS, overall rc=0. Original test798 script blob
+  d4a01d27d1ca0f98ba3c1f46a134edb940cae7cc, non-root per-file isolated DBs.
+  Reused dependency image only after lockfile comparison; completely replaced both
+  server/src and agent-node/src, copied current script and scheduled-task fixtures.
