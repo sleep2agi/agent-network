@@ -114,3 +114,27 @@ Independent-review fixes (2026-10-07), based on published head 543e9534:
   review installed drift, deploy CLI and boot script from merged release inputs
   together, verify version/hash and isolated behavior, roll back both together.
   No installed script, real node, production service or deployment was touched.
+
+CI preflight investigation (2026-10-07):
+- Read job 112549571794 of run 37545143746 via the job-log API. Original CI
+  only printed expected adopted / received refused; no reason code was saved.
+  Its exact cause cannot retrospectively be proven from that log.
+- The failure is handleAdoptDoorbell -> collectCodexPanes, before preflight;
+  this path does not call holdAppServerStart or the CLI external startup path.
+  No memory-gate hook was injected and no false gate-coverage claim is made.
+- Added full fixture ack logging. Original fixture plus logging, Docker
+  --cpus=2 --memory=512m: 20 iterations, both layouts pass (0/40 failures).
+- Controlled reproducer: delaying shell exec by 200ms before the marker/home
+  environment was installed gave refused/adopt_codex_identity_unproven in
+  both layouts (2/2 failures, rc=1). This proves a fixture-readiness race,
+  not that CI's unrecorded refusal must have had the same reason.
+- Fix is test-only: gate fake processes until released, then bounded polling
+  verifies captured pane IDs have final sleep argv, marker, CODEX_HOME, UID
+  and cwd. Only then call adoption once. No production refusals are retried.
+- Tested commit 40eca2d7c22feae95804082b72d18f1149ba2d1b: Docker --init
+  --cpus=2 --memory=512m --network none: 20/20 iterations, both layouts green;
+  then complete test658 rc=0, all 20 mutation checks assertion-red, including
+  removal of fixture readiness. Existing remain-on-exit repeat also 20/20.
+- Static Docker gates rc=0 (591 anchors, 4 existing unchecked exceptions).
+  No product/Hub/CLI/fleet code changed in this increment; broad suites and
+  real HTTP E2E were not rerun. Only this record follows the tested commit.
