@@ -44,3 +44,21 @@ three-stage stop (never kill-server). Container-only mutant image.
 Result rc=1, 5 pass/1 fail; specifically decoy assertion expected true, got false.
 Mutation removed from source. This proves the real tmux fixture catches
 collateral damage, not merely a source-string guard.
+
+Increment 5: real Hub HTTP + independently running built daemon, non-root.
+Dockerfile.e2e, docker run --rm --init --network none anet-test658-http.
+Fresh isolated HOME, port allocated via port 0, real human/node tokens, real
+request_adopt_node and stop_node HTTP calls, real SSE and authenticated ack.
+Only fake target node metadata is seeded in the isolated database; its three
+tmux stages are sleep processes, not real Codex. No external/model calls.
+Three fresh containers passed consecutively (rc=0 each): registration, daemon
+token, v2 evidence persisted, successful stop with marker, exactly the original
+decoy pane remains, decoy birth unchanged, all three target processes gone.
+Fixture corrections: wait for a non-null config snapshot; set busy_timeout on
+the fixture's database connection to avoid racing daemon snapshot writes.
+Built product unchanged for these fixture corrections.
+Related unit + lifecycle + tmux format ratchet: 35/35, 96 expects, rc=0.
+Latest handler fixture also verifies actual TERM order and successful replay:
+6/6, 24 expects, rc=0.
+Not claimed: full package unit suite, real model/TUI behavior, v2 start (#659),
+partial-stop recovery, all security/race matrix items on #661, or production.
