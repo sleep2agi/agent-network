@@ -60,7 +60,7 @@ import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { buildClaudeSystemPrompt, claudeAiConnectorsOptIn, claudeSdkChildEnv } from "./claude-sdk-turn-options";
 import { getHostTelemetry } from "./host-telemetry";
-import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
+import { getProcessTelemetry, getInFlightCount, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { readExternalSchedulesSnapshot } from "./external-schedules";
 import { createOwnerScheduleConsumer, type OwnerScheduleConsumer } from "./owner-schedule-consumer";
 import { parseGoalCommand } from "./goals/parser";
@@ -1703,9 +1703,12 @@ const register = async () => {
   return result;
 };
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
-  // #667 — an empty idle report must not wipe the mismatch hint. A real task
-  // still wins, and a login error from the gate below replaces this text.
-  const hintedTask = statusTaskForReport(rawStatus, rawTask, projectDirMismatchHint);
+  // #667 — an empty idle report keeps the mismatch hint only when nothing is
+  // in flight. While a task is running, omit task so the hub COALESCE keeps
+  // the running description; the idle report after the task ends (in-flight
+  // already decremented) writes the hint back. A real task still wins, and a
+  // login error from the gate below replaces this text.
+  const hintedTask = statusTaskForReport(rawStatus, rawTask, projectDirMismatchHint, getInFlightCount());
   lastReportedStatus = { status: rawStatus, task: hintedTask };
   const alias = await liveAlias();
   const health = currentNodeHealth();

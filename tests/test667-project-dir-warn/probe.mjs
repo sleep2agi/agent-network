@@ -12,10 +12,18 @@ function fail(msg) {
 function assertFold(hint) {
   if (statusTaskForReport("idle", undefined, hint) !== hint) fail("idle empty task dropped the hint");
   if (statusTaskForReport("idle", "", hint) !== hint) fail("idle blank task dropped the hint");
+  if (statusTaskForReport("idle", undefined, hint, 0) !== hint) fail("idle with nothing running dropped the hint");
+  if (statusTaskForReport("idle", "", hint, 0) !== hint) fail("idle blank task with nothing running dropped the hint");
+  if (statusTaskForReport("idle", undefined, hint, 1) !== undefined) fail("in-flight idle report covered the running task");
+  if (statusTaskForReport("idle", "", hint, 2) !== undefined) fail("in-flight blank idle report covered the running task");
   if (statusTaskForReport("idle", "正在做事", hint) !== "正在做事") fail("idle real task was replaced");
+  if (statusTaskForReport("idle", "正在做事", hint, 1) !== "正在做事") fail("in-flight caller task was replaced");
   if (statusTaskForReport("working", undefined, hint) !== undefined) fail("working status gained the hint");
+  if (statusTaskForReport("working", "正在做事", hint, 1) !== "正在做事") fail("working task was replaced while in flight");
   if (statusTaskForReport("offline", undefined, hint) !== undefined) fail("offline status gained the hint");
+  if (statusTaskForReport("offline", undefined, hint, 1) !== undefined) fail("offline in-flight status gained the hint");
   if (statusTaskForReport("idle", undefined, null) !== undefined) fail("missing hint invented a task");
+  if (statusTaskForReport("idle", undefined, null, 1) !== undefined) fail("missing hint invented a task while in flight");
 }
 
 const mode = process.argv[2];
@@ -40,6 +48,20 @@ if (mode === "root") {
   const elsewhere = projectDirMismatchWarning({ configPath: CONFIG, cwd: `${ROOT}/elsewhere` });
   if (!elsewhere || !elsewhere.includes(`${ROOT}/elsewhere`) || !elsewhere.includes(`"${ROOT}"`)) {
     fail(`other directory did not warn: ${elsewhere}`);
+  }
+  // Home-registry supervisor: config is <home>/.anet/nodes/<name>/config.json
+  // and the process was started in <home>. That matches. Starting inside the
+  // node directory still warns — do not whitelist that layout.
+  const home = "/home/demo";
+  const daemonConfig = `${home}/.anet/nodes/demo-daemon/config.json`;
+  const daemonAtHome = projectDirMismatchWarning({ configPath: daemonConfig, cwd: home });
+  if (daemonAtHome) fail(`home-registry supervisor warned: ${daemonAtHome}`);
+  const daemonInNodeDir = projectDirMismatchWarning({
+    configPath: daemonConfig,
+    cwd: `${home}/.anet/nodes/demo-daemon`,
+  });
+  if (!daemonInNodeDir || !daemonInNodeDir.includes(`"${home}"`)) {
+    fail(`node-directory start of a home-registry config stayed quiet: ${daemonInNodeDir}`);
   }
   assertFold("hint-for-fold");
   console.log(`project_dir=${started}`);

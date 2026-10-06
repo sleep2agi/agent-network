@@ -43,12 +43,25 @@ export function projectDirMismatchWarning(input: {
  * Idle reports with no task of their own keep the mismatch text, so a later
  * idle heartbeat does not drop it. A caller-supplied task, and any non-idle
  * status, are left alone.
+ *
+ * While a task is still in flight, an empty idle report must not replace the
+ * running description. Returning undefined omits `task`, and the hub's
+ * COALESCE keeps the current text. The idle report after the task ends
+ * (in-flight back to 0) writes the hint back.
+ *
+ * cwd == the node directory is not whitelisted. That layout is the mismatch
+ * this warning exists for, including an external app-server bridge whose
+ * tmux session starts in the node directory.
  */
 export function statusTaskForReport(
   status: string,
   task: string | undefined,
   hint: string | null,
+  inFlight = 0,
 ): string | undefined {
-  if (status === "idle" && hint && (task == null || task === "")) return hint;
+  if (status === "idle" && hint && (task == null || task === "")) {
+    if (inFlight > 0) return undefined;
+    return hint;
+  }
   return task;
 }
