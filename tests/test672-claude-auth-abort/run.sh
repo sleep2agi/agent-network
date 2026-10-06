@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Board #672. Fake key against a local upstream. A 401 api_retry must abort
-# the CLI child and return a readable error in seconds, with no further
-# request. A 429 must still reach the upstream a second time. Mutations of
-# those two decisions, and of the idle status hint, must go red.
+# Board #672. Fake key against a local upstream. The first 401 is the CLI's
+# token refresh and must be allowed to succeed (401 then 200 returns ok).
+# A 401 that is still a 401 on the next attempt aborts, and the real
+# no-retry-after shape must not keep requesting afterwards. A 429 must still
+# reach the upstream a second time. Mutations of those decisions, of the
+# abort-vs-403 short-circuit, and of the idle status hint, must go red.
 set -euo pipefail
 
 [[ "${TEST672_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
@@ -19,6 +21,14 @@ CAPACITY_ANCHOR='  if (capacity) return false;'
 CAPACITY_REPL='  if (capacity) return true;'
 HINT_ANCHOR='  return { status: "error", task: CLAUDE_LOGIN_STATUS_HINT };'
 HINT_REPL='  return { status: input.status, task: input.task };'
+# Aborting on attempt 1 drops the refresh retry. The recover mock (401 then
+# 200) is the case that must go red; the persistent-401 case can still pass.
+ATTEMPT_ANCHOR='  if (attempt >= 2) {'
+ATTEMPT_REPL='  if (attempt >= 1) {'
+# The short-circuit lives in the helper the catch calls. Turning it off lets
+# a region 403 thrown while aborting replace the login result.
+GUARD_ANCHOR='  if (authAbortedThisAttempt) {'
+GUARD_REPL='  if (false && authAbortedThisAttempt) {'
 
 need_count() {
   local n
@@ -32,7 +42,11 @@ need_count() {
 need_count "$AUTH_ANCHOR" "$HELPER" 1
 need_count "$CAPACITY_ANCHOR" "$HELPER" 1
 need_count "$HINT_ANCHOR" "$HELPER" 1
+need_count "$ATTEMPT_ANCHOR" "$HELPER" 1
+need_count "$GUARD_ANCHOR" "$HELPER" 1
 need_count 'aborting the attempt' "$CLI" 1
+need_count 'claudeAuthRetryDecision(m)' "$CLI" 1
+need_count 'claudeThrownErrorDisposition(msg, authAbortedThisAttempt)' "$CLI" 1
 need_count 'claudeAuthStatusReport({' "$CLI" 1
 need_count 'markClaudeLoginDead();' "$CLI" 2
 if grep -F -q 'CLAUDE_CODE_MAX_RETRIES' "$CLI" || grep -F -q 'CLAUDE_CODE_MAX_RETRIES' "$HELPER"; then
@@ -83,7 +97,10 @@ echo '== green: pure rules, cli wiring =='
 run_probe pure
 run_probe wiring
 
-echo '== green: 401 aborts, one request only =='
+echo '== green: 401 then 200 recovers =='
+run_probe recover
+
+echo '== green: a 401 that is still a 401 aborts, real shape, no retry-after =='
 run_probe auth
 
 echo '== green: 429 is not aborted =='
@@ -103,6 +120,16 @@ cp /tmp/helper.bak "$HELPER"
 echo '== red: idle report no longer publishes the hint =='
 apply_mutation "$HELPER" "$HINT_ANCHOR" "$HINT_REPL"
 expect_red 'status hint' pure 'FAIL: idle report must publish the login hint'
+cp /tmp/helper.bak "$HELPER"
+
+echo '== red: attempt 1 is aborted, so 401 then 200 cannot recover =='
+apply_mutation "$HELPER" "$ATTEMPT_ANCHOR" "$ATTEMPT_REPL"
+expect_red 'attempt threshold' recover 'FAIL: a 401 then 200 was treated as a dead login'
+cp /tmp/helper.bak "$HELPER"
+
+echo '== red: an aborted attempt is reclassified as the thrown 403 =='
+apply_mutation "$HELPER" "$GUARD_ANCHOR" "$GUARD_REPL"
+expect_red 'abort short-circuit' pure 'FAIL: aborted attempt must not be reclassified'
 cp /tmp/helper.bak "$HELPER"
 
 echo 'TEST672_OK'

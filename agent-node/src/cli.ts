@@ -112,9 +112,9 @@ import {
   pauseForCapacityRetry,
 } from "./runtime/capacity-retry";
 import {
-  CLAUDE_AUTH_USER_TEXT,
-  claudeApiRetryIsAuthFailure,
+  claudeAuthRetryDecision,
   claudeAuthStatusReport,
+  claudeThrownErrorDisposition,
 } from "./runtime/claude-auth-retry";
 import {
   CommHubError,
@@ -3024,10 +3024,6 @@ async function processWithClaude(
   // just wastes the backoff window; the operator needs a clear remediation
   // hint immediately. Heuristic covers Anthropic standard + intern A02xx +
   // common shapes from MiniMax / 小米 / generic OpenAI-compat 401s.
-  const isAuthError = (msg: string): boolean => {
-    if (!msg) return false;
-    return /(401|403)\b|invalid[_\s]?api[_\s]?key|authentication[_\s]?error|expired[_\s]?token|unauthor(iz|is)ed|A02\d{2}|user[_\s]?token[_\s]?expired/i.test(msg);
-  };
   const remediationHint = (msg: string): string => {
     const base = (process.env.ANTHROPIC_BASE_URL || "").toLowerCase();
     if (base.includes("intern-ai.org.cn")) return "→ Refresh INTERN_S1_API_KEY at https://chat.intern-ai.org.cn and re-export it";
@@ -3076,15 +3072,19 @@ async function processWithClaude(
             evidence?.consumed();
             const m = message as any;
             if (claudeMessageShowsExecutedTool(m)) toolsRanThisAttempt = true;
-            // #672 — the CLI retries 401/403 on its own (~10 × 180s) before
-            // this loop would see a thrown error. Abort the child. Do not
-            // break and leave it retrying. 429/5xx are not this branch.
-            if (claudeApiRetryIsAuthFailure(m)) {
+            // #672 — a dead static key retries inside the CLI (~10 times)
+            // before this loop sees a thrown error. Attempt 1 is emitted
+            // before the CLI refreshes OAuth, apiKeyHelper, or a host token,
+            // so that one retry is left alone. Returning from this iterator
+            // closes the child after the SDK's ~2s SIGTERM grace; abort is
+            // the same signal, made explicit. 429/5xx are not this branch.
+            const authDecision = claudeAuthRetryDecision(m);
+            if (authDecision.action === "abort") {
               authAbortedThisAttempt = true;
-              log(`[claude] ✗ auth api_retry status=${m.error_status ?? "none"} error=${m.error ?? "none"}; aborting the attempt`);
+              log(`[claude] ✗ auth api_retry attempt=${m.attempt ?? "none"} status=${m.error_status ?? "none"} error=${m.error ?? "none"}; aborting the attempt`);
               markClaudeLoginDead();
               ac.abort();
-              return CLAUDE_AUTH_USER_TEXT;
+              return authDecision.userText;
             }
             if (m.type === "system" && m.subtype === "init") {
               claudeSessionId = m.session_id;
@@ -3257,19 +3257,18 @@ async function processWithClaude(
         : String(err?.message || err).slice(0, 300);
       const attemptDt = Date.now() - attemptStart;
 
-      // Abort rejects the SDK stream. That rejection is not a capacity error
-      // and must not start another CLI. The user text is the same either way.
-      if (authAbortedThisAttempt) {
-        return CLAUDE_AUTH_USER_TEXT;
-      }
-
-      // Fast-fail on auth errors — no point retrying with the same bad key.
-      if (isAuthError(msg)) {
-        log(`[claude] ✗ FATAL: vendor API auth failed (${msg.slice(0, 150)})`);
-        log(`[anet] FATAL: Vendor API auth failed — ${msg.slice(0, 100)}`);
-        log(`[anet]        ${remediationHint(msg)}`);
-        markClaudeLoginDead();
-        return CLAUDE_AUTH_USER_TEXT;
+      // Abort rejects the SDK stream. That rejection is not a capacity
+      // error and must not start another CLI. A non-login 403 (region,
+      // permission) keeps the vendor sentence and does not stick the node.
+      const thrown = claudeThrownErrorDisposition(msg, authAbortedThisAttempt);
+      if (thrown.action === "stop") {
+        if (!authAbortedThisAttempt) {
+          log(`[claude] ✗ FATAL: vendor API auth failed (${msg.slice(0, 150)})`);
+          log(`[anet] FATAL: Vendor API auth failed — ${msg.slice(0, 100)}`);
+          log(`[anet]        ${remediationHint(msg)}`);
+        }
+        if (thrown.markLoginDead) markClaudeLoginDead();
+        return thrown.userText;
       }
 
       // Board #656 — temporary capacity / 429 / 5xx retries on 30s/60s/120s.
