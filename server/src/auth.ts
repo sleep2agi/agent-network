@@ -196,6 +196,20 @@ export function login(username: string, password: string, client: SessionClientI
     }
   }
 
+  // #649: a successful login whose plaintext fails the same strength rule as
+  // register/changePassword (too short, or in WEAK_PASSWORDS) flags the account.
+  // Catches accounts created before #261 added must_change_password (they sit at
+  // 0 with the bootstrap default). changePassword clears it. Never log the password.
+  let mustChangePassword = user.must_change_password === 1;
+  if (!mustChangePassword && validatePasswordStrength(password) !== null) {
+    mustChangePassword = true;
+    try {
+      db.run("UPDATE users SET must_change_password = 1 WHERE user_id = ?1", [user.user_id]);
+    } catch (e: any) {
+      console.log(`[commhub auth] weak-password flag write failed for user ${user.user_id}: ${e?.message ?? e}`);
+    }
+  }
+
   // Issue a NEW user token — do NOT rotate/invalidate existing ones. Each
   // login (cli, dashboard, second machine) gets its own row so they don't
   // kick each other out of session. Tokens can be revoked via /api/auth/tokens.
@@ -223,7 +237,7 @@ export function login(username: string, password: string, client: SessionClientI
     network_id: networkId,
     // #261 P0-2 — only include field when truthy (back-compat; old clients
     // don't see this field at all unless their account is flagged).
-    ...(user.must_change_password === 1 ? { must_change_password: true } : {}),
+    ...(mustChangePassword ? { must_change_password: true } : {}),
   };
 }
 
