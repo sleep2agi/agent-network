@@ -292,14 +292,26 @@ describe("#1918 a neighbour's recorded expiry is parsed strictly, never guessed"
 
 describe("#1918 agent-node actually calls it (source contract)", () => {
   const src = readFileSync(new URL("./cli.ts", import.meta.url), "utf8").replace(/\r\n?/g, "\n");
+  // #594 — the call moved behind createCodexLoginHealth (which also feeds
+  // health.codex_login); the check itself must still run from that module.
+  const health = readFileSync(new URL("./codex-login-health.ts", import.meta.url), "utf8").replace(/\r\n?/g, "\n");
 
   test("the startup path runs the check for codex runtimes", () => {
-    expect(src).toContain("checkCodexCredentialSharing({");
+    expect(src).toContain("createCodexLoginHealth({");
+    expect(src).toContain("codexLoginHealth.refresh();");
     expect(src).toContain('RUNTIME === "codex" || RUNTIME === "codex-app-server"');
+    expect(health).toContain("checkCodexCredentialSharing({");
   });
 
   test("🔴 it warns and never exits — a shared login must not take the host down", () => {
-    const block = src.slice(src.indexOf("checkCodexCredentialSharing({") - 900, src.indexOf("checkCodexCredentialSharing({") + 600);
+    const at = src.indexOf("createCodexLoginHealth({");
+    const block = src.slice(at - 900, at + 600);
     expect(block).not.toContain("process.exit");
+    expect(health).not.toContain("process.exit");
+  });
+
+  test("#594 — the check runs before the first register(), so the first report carries codex_login", () => {
+    expect(src.indexOf("codexLoginHealth.refresh();")).toBeGreaterThan(0);
+    expect(src.indexOf("codexLoginHealth.refresh();")).toBeLessThan(src.indexOf("await register();"));
   });
 });
