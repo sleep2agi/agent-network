@@ -435,6 +435,7 @@ existing fields remain unchanged. This is not candidate discovery.
   hostnames. `adoption` is the latest binding's
   `{request_id,daemon_node_id,status,error}` or null. States remain
   `pending / active / refused / revoked`; pending is not success.
+  Creation records prefer `child_node_id`; only legacy null values fall back to `cr_X → node_X`.
 - `GET /api/host-supervisors` adds `adopt_capable` for visible daemons only when
   they reported an actual boolean. Absence means unknown, not supported.
 - `GET /api/node-lifecycle-requests?kind=adopt&request_id=...` requires kind
@@ -454,6 +455,9 @@ HTTP 200 and pending are not operation success. Error codes include
 `adopt_explicit_private_socket_required`, `adopt_start_evidence_missing`, and
 `adopt_active_binding_required`; present actionable guidance rather than hiding
 the refusal. Delete requests, tokens, workdirs, PIDs and snapshots are excluded.
+Every new read projection only exposes exact allowlisted error codes. Unknown codes,
+diagnostic text and empty strings become `lifecycle_error`; null remains null.
+Raw errors stay in the database, without leaking paths or host details to node readers.
 
 No new service, port, configuration or database migration. Use the existing
 upgrade/rollback procedures. Binding/request history comes from Hub database
