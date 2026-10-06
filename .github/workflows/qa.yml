@@ -871,7 +871,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t anet-test658 -f tests/test658-codex-adopt-stop/Dockerfile .
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test658 -f tests/test658-codex-adopt-stop/Dockerfile .
       - run: docker run --rm --init --cpus=2 --network none anet-test658
       - run: docker build -t anet-test658-http -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
       - run: docker run --rm --init --cpus=2 --network none anet-test658-http

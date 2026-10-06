@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { execTmux } from "../tmux.js";
 import { parseTmuxRows, tmuxListArgs } from "../tmux-format.js";
 import { processStamp, sameProcess } from "./adopt-process-tree.js";
-import { readAdoptionProc } from "./adopt-proc.js";
+import { hasAdoptionMarker, readAdoptionProc } from "./adopt-proc.js";
 import { CODEX_STOP_ORDER, codexRoleNames, verifyCodexPanes, type CodexRole, type CodexAdoptionScope, type CodexPaneSnapshot } from "./adopt-codex-evidence.js";
 
 export function codexSocket(socket: string, uid: number): void {
@@ -56,6 +56,7 @@ export function assertNoEscapedCodexProcesses(scope: CodexAdoptionScope, panes: 
     if (!/^\d+$/.test(item) || Number(item)<=1) continue;
     const pid=Number(item), stamp=processStamp(pid);
     if (!stamp || stamp.uid!==scope.uid) continue;
+    if (!hasAdoptionMarker(pid, scope.marker)) continue;
     let proc;
     try {proc=readAdoptionProc(pid);} catch(e) {if(!processStamp(pid))continue;throw e;}
     if(proc?.env.ANET_NODE_MARKER===scope.marker && owned.get(pid)!==proc.birth)

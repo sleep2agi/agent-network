@@ -8,6 +8,56 @@ import { adoptedChild, forgetAdoptedChild } from "../../agent-node/src/runtime/a
 import { verifyCodexPanes } from "../../agent-node/src/runtime/adopt-codex-evidence.js";
 import { stopCodexStages } from "../../agent-node/src/runtime/adopt-codex-stop.js";
 import { processStamp } from "../../agent-node/src/runtime/adopt-process-tree.js";
+import { hasAdoptionMarker, readAdoptionProc } from "../../agent-node/src/runtime/adopt-proc.js";
+
+function barrier(ready:()=>boolean) {
+  const deadline=Date.now()+3000;
+  while(!ready()) {
+    if(Date.now()>deadline)throw Error("fixture barrier timed out");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5);
+  }
+}
+for(const scenario of ["late-escape","late-foreign-child"] as const)
+test(`signal boundary: ${scenario}`,async()=>{
+  const workdir=mkdtempSync("/tmp/codex-boundary-"),uid=process.getuid!();
+  const scope={layout:"native" as const,alias:"边界样例",socket:`${workdir}/socket`,codexHome:`${workdir}/codex-home`,workdir,uid,marker:"55555555-5555-4555-8555-555555555555"};
+  mkdirSync(scope.codexHome,{mode:0o700});
+  const env=codexTmuxEnv(scope.socket),kill=process.kill;
+  let escaped:ReturnType<typeof Bun.spawn>|undefined,foreignPid:number|undefined;
+  try {
+    for(const name of [`${scope.alias}-桥`,scope.alias,`${scope.alias}-appsrv`]){
+      const command=scenario==="late-foreign-child" && name.endsWith("-桥")
+        ? `bun /test/tests/test658-codex-adopt-stop/late-child.ts ${workdir}` : "sleep 300";
+      execTmux(["new-session","-d","-s",name,"-c",workdir,`exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${scope.codexHome} ${command}`],{env});
+    }
+    if(scenario==="late-foreign-child")barrier(()=>existsSync(`${workdir}/ready`));
+    const target=listCodexPanes(scope).find(r=>r[0]===`${scope.alias}-${scenario==="late-escape"?"appsrv":"桥"}`)!;
+    let injected=false;
+    process.kill=((pid:number,signal:any)=>{
+      if(pid===Number(target[3]) && signal==="SIGSTOP" && !injected){
+        injected=true;
+        if(scenario==="late-escape") {
+          escaped=Bun.spawn(["sleep","300"],{cwd:workdir,env:{...process.env,ANET_NODE_MARKER:scope.marker,CODEX_HOME:scope.codexHome},stdout:"ignore",stderr:"ignore"});
+          barrier(()=>hasAdoptionMarker(escaped!.pid,scope.marker));
+        }else{
+          writeFileSync(`${workdir}/trigger`,"go");
+          barrier(()=>existsSync(`${workdir}/child-pid`));
+          foreignPid=Number(readFileSync(`${workdir}/child-pid`,"utf8"));
+        }
+      }
+      return kill(pid,signal);
+    }) as typeof process.kill;
+    await expect(stopCodexStages(scope)).rejects.toThrow(scenario==="late-escape"?"adopt_codex_stage_still_running":"adopt_codex_identity_unproven");
+    expect(injected).toBe(true);
+    expect(processStamp(scenario==="late-escape"?escaped!.pid:foreignPid!)).not.toBeNull();
+    if(scenario==="late-escape")expect(processStamp(Number(target[3]))).toBeNull();
+  }finally{
+    process.kill=kill;
+    if(escaped){escaped.kill();await escaped.exited;}
+    if(foreignPid && processStamp(foreignPid))kill(foreignPid,"SIGKILL");
+    for(const row of listCodexPanes(scope,true))execTmux(["kill-pane","-t",row[2]],{env});
+  }
+});
 
 test("mixed layout and unknown layout reject before any signal", async () => {
   const workdir = mkdtempSync("/tmp/codex-layout-"), uid = process.getuid!();
@@ -82,7 +132,10 @@ for (const layout of ["native","external-appserver"] as const) test(`real defaul
   const scope = { layout, alias: "测试节点", socket, codexHome, workdir, uid, marker: "11111111-1111-4111-8111-111111111111" };
   const env = codexTmuxEnv(socket);
   const names = layout==="native" ? [scope.alias, `${scope.alias}-桥`, `${scope.alias}-appsrv`, "unrelated-decoy"] : [`${scope.alias}-tui`,scope.alias,`${scope.alias}-appsrv`,"unrelated-decoy"];
+  const bad=Bun.spawn(["bash","-c","exec env $'BAD=\\xff\\xfe' sleep 300"],{stdout:"ignore",stderr:"ignore"});
   try {
+    barrier(()=>{try{readAdoptionProc(bad.pid);return false;}catch(e:any){return e.message==="adopt_proc_invalid";}});
+    expect(processStamp(bad.pid)).not.toBeNull();
     for (const name of names) execTmux(["new-session", "-d", "-s", name, "-c", workdir,
       `exec env ANET_NODE_MARKER=${name === "unrelated-decoy" ? "foreign" : scope.marker} CODEX_HOME=${codexHome} sleep 300`], {env});
     const panes = collectCodexPanes(scope);
@@ -148,6 +201,7 @@ for (const layout of ["native","external-appserver"] as const) test(`real defaul
     expect(calls.at(-1).args.status).toBe("stopped");
     expect(JSON.parse(readFileSync(`${nodeDir}/.hub-stopped`,"utf8"))).toMatchObject({marker:marker2,binding_request_id:req.request_id});
   } finally {
+    bad.kill();await bad.exited;
     // Container-only cleanup by enumerated opaque IDs, never names/kill-server.
     const ids = [...new Set(listCodexPanes(scope,true).map(r=>r[1]))];
     for (const id of ids) if (/^\$\d+$/.test(id)) execTmux(["kill-session", "-t", id], {env});

@@ -4,6 +4,17 @@ import type { AdoptionProcessEvidence } from "./adopt-local-identity.js";
 import { decodeProcNulBlock, hasLoneSurrogate } from "../codex-home-enforce.js";
 
 export interface AdoptionProc extends AdoptionProcessEvidence { pid: number; birth: string; }
+/** Census prefilter only, never signal authority. Match a full raw ASCII entry;
+ * unrelated/unreadable processes must not undergo strict environment decoding. */
+export function hasAdoptionMarker(pid: number, marker: string): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 1 || !/^[A-Za-z0-9-]+$/.test(marker)) return false;
+  let raw: Buffer;
+  try {raw=readFileSync(`/proc/${pid}/environ`);} catch {return false;}
+  const entry=Buffer.from(`ANET_NODE_MARKER=${marker}\0`,"ascii");
+  for(let at=raw.indexOf(entry);at>=0;at=raw.indexOf(entry,at+1))
+    if(at===0 || raw[at-1]===0)return true;
+  return false;
+}
 export function readAdoptionProc(pid: number): AdoptionProc | null {
   if (!Number.isSafeInteger(pid) || pid <= 1) throw Error("adopt_pid_invalid");
   const root = `/proc/${pid}`;

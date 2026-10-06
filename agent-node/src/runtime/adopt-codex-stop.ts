@@ -3,7 +3,7 @@ import { execTmux } from "../tmux.js";
 import { CODEX_STOP_ORDER, codexCwdAllowed, codexRoleNames, type CodexAdoptionScope } from "./adopt-codex-evidence.js";
 import { collectCodexPanes, codexTmuxEnv, listCodexPanes } from "./adopt-codex-tmux.js";
 import { processStamp, sameProcess, stopVerifiedTree, type ProcessStamp } from "./adopt-process-tree.js";
-import { readAdoptionProc } from "./adopt-proc.js";
+import { hasAdoptionMarker, readAdoptionProc } from "./adopt-proc.js";
 
 const pids = () => readdirSync("/proc").filter(x => /^\d+$/.test(x) && Number(x)>1).map(Number);
 export async function stopCodexStages(scope: CodexAdoptionScope): Promise<void> {
@@ -63,6 +63,7 @@ export function assertCodexStopped(scope: CodexAdoptionScope): void {
   // A child that escaped its original tree must not permit a false stopped ack.
   for (const pid of pids()) {
     const stamp = processStamp(pid); if (!stamp || stamp.uid !== scope.uid) continue;
+    if (!hasAdoptionMarker(pid, scope.marker)) continue;
     let proc;
     try { proc = readAdoptionProc(pid); } catch { if (!processStamp(pid)) continue; throw Error("adopt_proc_unreadable"); }
     if (proc?.env.ANET_NODE_MARKER === scope.marker) throw Error("adopt_codex_stage_still_running");
