@@ -64,6 +64,7 @@ L0_TESTS=(
   #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
 L1_TESTS=(
+  "test658-codex-adopt-stop"
   # #1253 —— grok 换模型 hot→restart 回退路径。纯本地:跑 agent-node 源码的
   # bun 测试,不需要 grok 二进制、不需要网络、不碰任何凭据。
   "test626-grok-model-switch-fallback"
@@ -579,9 +580,11 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
           esac
         done < "tests/$t/docker-run.args"
       fi
+      _qa_run_flags=""
+      if [[ "$t" == "test658-codex-adopt-stop" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       _run_cmd="docker run"
       for _f in "${_run_flags[@]}"; do _run_cmd+=" ${_f}"; done
-      _run_cmd+=" anet-$t"
+      _run_cmd+=" ${_qa_run_flags} anet-$t"
       dockerrun "$_run_cmd" >/tmp/qa-l1-$t-run.log 2>&1 || _rc=$?
       _e=$(( $(date +%s) - START ))
       printf '%s\t%s\t%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv

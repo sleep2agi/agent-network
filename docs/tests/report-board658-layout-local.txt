@@ -1,0 +1,25 @@
+#2461 local layout characterization (not a fix)
+Base HEAD: 422cd336a4115ac096613f3489724ae58acfd577
+Historical characterization: at that time product code was unchanged and the
+probe was local only. Superseded by report-test658-review-fixes.txt.
+
+Command (Docker via sg docker):
+docker build -t anet-test658-layout-local -f tests/test658-codex-adopt-stop/Dockerfile .
+docker run --rm --init --network none anet-test658-layout-local
+Result: rc=0; 7 pass, 0 fail, 29 expect calls (2 files).
+Non-root container; fake sleep processes; isolated tmux sockets; no real nodes.
+
+Pure external layout: alias-appsrv / alias-tui / alias.
+stopCodexStages rejects adopt_codex_stage_ambiguous before any signal.
+Fresh pane listing equals the pre-call listing.
+
+Mixed layout: add alias-bridge (Chinese bridge suffix used by native layout),
+with the same marker, CODEX_HOME, UID and cwd.
+The evidence gate accepts it, misclassifies alias (external bridge) as TUI,
+and omits alias-tui from selected stages. Mixed-layout stop was NOT executed.
+This passing characterization reproduces a flaw; it is NOT a safety acceptance.
+
+Source evidence: readCodexScope does not inspect codexLaunchLayout;
+verifyCodexPanes hardcodes native role names. Same-node identity does not prove
+stage role. Existing final leftover detection cannot undo earlier signals.
+Fix required in #2461 after independent review; do not defer to #659.
