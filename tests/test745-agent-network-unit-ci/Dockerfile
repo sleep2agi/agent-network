@@ -32,6 +32,8 @@ COPY agent-network ./agent-network
 # 没有这行时容器里不存在 channel/,那两条断言红的理由是「文件读不到」,
 # 而输出长得像「副本不一致」—— 修的是取集层,不是判据。(#1149 首航红因)
 COPY channel ./channel
+# #620 daemon-inherited-env.test.ts 逐名比对 hub-daemon.sh 的 _scrub_node_identity_env 名单。
+COPY deploy/hub/hub-daemon.sh ./deploy/hub/hub-daemon.sh
 COPY tests/test745-agent-network-unit-ci/run.sh ./tests/test745-agent-network-unit-ci/run.sh
 
 ARG SOURCE_COMMIT

@@ -130,6 +130,16 @@ hub_lifecycle_is()      { [[ "$(curl -sS "$HUB_BASE/api/nodes?node_id=$CHILD_NOD
 child_pids()            { pgrep -af "agent-node.*--alias $CHILD" 2>/dev/null | grep -v grep | awk '{print $1}'; }
 child_proc_count()      { child_pids | wc -l; }
 child_proc_alive()      { [[ "$(child_proc_count)" -ge 1 ]]; }
+# #620 — names (never values) of the session-identity vars present in a pid's environ.
+environ_session_names() {
+  local pid="$1" n out=""
+  for n in $SESSION_ID_ENV_NAMES; do
+    tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q "^$n=" && out="$out $n"
+  done
+  printf '%s' "${out# }"
+}
+environ_has_no_session_names() { [[ -z "$(environ_session_names "$1")" ]]; }
+daemon_agent_pid() { pgrep -f "agent-node.*--alias $DAEMON_NAME" 2>/dev/null | head -1 || true; }
 
 # NOTE: this suite contains NO `pkill -f` / `killall` anywhere (network
 # rule — a subagent's pattern kill took down a live hub once). We resolve
@@ -184,7 +194,15 @@ cd "$WORK"
 export ANET_BIN_ABS=$(realpath -e "$(which anet)")
 # 本套件绕过 `anet daemon`(用 `anet node start`),CLI 的自动声明到不了这里 —— 见 #1299
 export ANET_DAEMON_ALLOW_ENV_BIN=1
-nohup anet daemon up "$DAEMON_NAME" >/tmp/daemon-dlife.log 2>&1 &
+# #620 — launch the daemon the way it was launched on a real machine: from
+# inside another agent's session, so the launching env carries that session's
+# identity. Fake placeholder values only. COMMHUB_URL/COMMHUB_TOKEN are left
+# out on purpose (anet resolves its hub from them; that is a separate path).
+SESSION_ID_ENV_NAMES="CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_MESSAGING_TOKEN ANET_NODE_MARKER COMMHUB_RESUME_ID CODEX_HOME GROK_HOME TMUX TMUX_PANE"
+nohup env CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=qa620-fake-session CLAUDE_CODE_MESSAGING_TOKEN=qa620-fake-token \
+  ANET_NODE_MARKER=qa620-fake-marker COMMHUB_RESUME_ID=qa620-fake-resume CODEX_HOME=/nonexistent/qa620-codex \
+  GROK_HOME=/nonexistent/qa620-grok TMUX=/nonexistent/qa620-tmux,1,0 TMUX_PANE=%620 \
+  anet daemon up "$DAEMON_NAME" >/tmp/daemon-dlife.log 2>&1 &
 DAEMON_PID=$!
 
 # readiness = hub says the node is there with role=host_supervisor.
@@ -266,6 +284,31 @@ for i in $(seq 1 60); do
 done
 [[ -n "$REGISTERED" ]] && ok "child registered with hub (node_id=$CHILD_NODE_ID)" \
   || bad "child never registered — later hub-side assertions will be vacuous"
+
+# ── A.env  #620 session-identity env does not reach daemon or child ────
+note "A.env #620 inherited session identity: launcher has it, daemon + child must not"
+# RED GATE — the same predicate on the LAUNCHER (the `anet` process that was
+# handed the polluted env) must be red; otherwise the pollution never
+# happened and the two greens below would be vacuous.
+expect_red "anet launcher environ free of session-identity names" environ_has_no_session_names "$DAEMON_PID"
+printf "  · launcher carries: %s\n" "$(environ_session_names "$DAEMON_PID")"
+DPID=$(daemon_agent_pid)
+if [[ -n "$DPID" ]]; then
+  environ_has_no_session_names "$DPID" && ok "daemon agent-node (pid $DPID) environ has none of: $SESSION_ID_ENV_NAMES" \
+    || bad "daemon agent-node environ still carries: $(environ_session_names "$DPID")"
+else
+  bad "could not find the daemon's agent-node process"
+fi
+CPID=$(child_pids | head -1)
+if [[ -n "$CPID" ]]; then
+  environ_has_no_session_names "$CPID" && ok "daemon-created child (pid $CPID) environ has none of them" \
+    || bad "child environ carries: $(environ_session_names "$CPID")"
+else
+  bad "could not find the child's agent-node process"
+fi
+grep -q '#620 daemon: dropped inherited session-identity env' /tmp/daemon-dlife.log \
+  && ok "daemon launch logged the dropped names" || bad "no #620 scrub line in daemon log"
+grep -q 'qa620-fake' /tmp/daemon-dlife.log && bad "a fake VALUE reached the daemon log" || ok "no values in the daemon log"
 
 # ── B. update_node_config — THE UNCOVERED SQUARE ──────────────────────
 note "B. update_node_config → does the CHILD's real on-disk config change?"

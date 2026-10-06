@@ -12,6 +12,7 @@
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
+import { formatScrubbedEnvLine, scrubInheritedSessionIdentityEnv } from "../src/daemon-inherited-env.js";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir, hostname, tmpdir } from "os";
@@ -6988,8 +6989,17 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // COMMHUB_ALIAS today; once PR-4 lands, the getter prefers NODE_ID.
     const launcherPath = process.env.PATH;
     const launcherOpencodeSafeBase = process.env.ANET_OPENCODE_SAFE_BASE;
+    // #620 — a host_supervisor daemon must not carry the launching session's
+    // identity (Claude Code session tokens, another node's COMMHUB_*/marker,
+    // CODEX_*/GROK_*, TMUX) in its environ. Same list as hub-daemon.sh (#558).
+    let inheritedEnv: NodeJS.ProcessEnv = process.env;
+    if (profile.role === "host_supervisor") {
+      const scrubbed = scrubInheritedSessionIdentityEnv(process.env);
+      inheritedEnv = scrubbed.env;
+      console.log(formatScrubbedEnvLine(scrubbed.removed));
+    }
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...inheritedEnv,
       COMMHUB_ALIAS: displayName,
       ...(profile.node_id ? { COMMHUB_NODE_ID: profile.node_id } : {}),
       ...(runtime === "grok-build-cli"
