@@ -204,45 +204,57 @@ export async function openCodexAppServerRuntime(opts: {
   try {
     if (!url) {
       // Owned-server topology: spawn `codex app-server --listen ws://…`.
-      // #612 — wait for memory/CPU headroom before spawning; a burst of
-      // simultaneous app-server starts once froze a whole host.
-      await waitForStartResources("codex app-server", { log, warn, ...opts.startGate });
-      const port = randomPort();
-      url = `ws://127.0.0.1:${port}`;
-      const binary = opts.binary ?? "codex";
-      const wireCommhub = !!(opts.commhubMcpUrl && opts.commhubToken);
-      const spawnArgs = buildOwnedAppServerArgs(url, {
-        approvalPolicy: opts.approvalPolicy,
-        sandboxMode: opts.sandboxMode,
-        commhubMcpUrl: wireCommhub ? opts.commhubMcpUrl : undefined,
-      });
-      // Token via env only (never in argv/config) so it can't leak through a
-      // process list or on-disk config.
-      const childEnv: NodeJS.ProcessEnv = wireCommhub
-        ? { ...process.env, [COMMHUB_MCP_TOKEN_ENV]: opts.commhubToken }
-        : { ...process.env };
-      if (opts.codexHome) childEnv.CODEX_HOME = opts.codexHome;
-      log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}${wireCommhub ? " (+commhub MCP)" : ""}`);
-      proc = spawn(binary, spawnArgs, {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: childEnv,
-      });
-      proc.stderr?.on("data", (d) =>
-        log(`[codex-app-server stderr] ${String(d).trim().slice(0, 300)}`),
-      );
-      if (opts.onExit) proc.on("exit", (code, signal) => opts.onExit!({ code, signal }));
-      await waitWs(url);
-      if (opts.codexHome && proc.pid) {
-        const verdict = verifyProcessTreeCodexHome({
-          rootPid: proc.pid, expected: opts.codexHome, label: "owned app-server",
-          reader: opts.procReader, platform: opts.procPlatform,
+      // #612 — admit before spawning. The lease covers spawn + readiness
+      // only; it is dropped before the bridge so the next start can proceed.
+      const gate = await waitForStartResources("codex app-server", { log, warn, ...opts.startGate });
+      let releasedGate = false;
+      const releaseGate = () => {
+        if (releasedGate) return;
+        releasedGate = true;
+        try { gate.release(); } catch { /* a dead holder pid is reaped by the next admit */ }
+      };
+      try {
+        const port = randomPort();
+        url = `ws://127.0.0.1:${port}`;
+        const binary = opts.binary ?? "codex";
+        const wireCommhub = !!(opts.commhubMcpUrl && opts.commhubToken);
+        const spawnArgs = buildOwnedAppServerArgs(url, {
+          approvalPolicy: opts.approvalPolicy,
+          sandboxMode: opts.sandboxMode,
+          commhubMcpUrl: wireCommhub ? opts.commhubMcpUrl : undefined,
         });
-        if (!verdict.ok) {
-          throw new Error(`refusing to use the owned app-server: ${verdict.message} (#448 fail-closed)`);
+        // Token via env only (never in argv/config) so it can't leak through a
+        // process list or on-disk config.
+        const childEnv: NodeJS.ProcessEnv = wireCommhub
+          ? { ...process.env, [COMMHUB_MCP_TOKEN_ENV]: opts.commhubToken }
+          : { ...process.env };
+        if (opts.codexHome) childEnv.CODEX_HOME = opts.codexHome;
+        log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}${wireCommhub ? " (+commhub MCP)" : ""}`);
+        proc = spawn(binary, spawnArgs, {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: childEnv,
+        });
+        proc.stderr?.on("data", (d) =>
+          log(`[codex-app-server stderr] ${String(d).trim().slice(0, 300)}`),
+        );
+        if (opts.onExit) proc.on("exit", (code, signal) => opts.onExit!({ code, signal }));
+        await waitWs(url);
+        if (opts.codexHome && proc.pid) {
+          const verdict = verifyProcessTreeCodexHome({
+            rootPid: proc.pid, expected: opts.codexHome, label: "owned app-server",
+            reader: opts.procReader, platform: opts.procPlatform,
+          });
+          if (!verdict.ok) {
+            throw new Error(`refusing to use the owned app-server: ${verdict.message} (#448 fail-closed)`);
+          }
+          if (verdict.skipped) log(`[codex-app-server] CODEX_HOME check skipped: ${verdict.skipped}`);
+          else log(`[codex-app-server] CODEX_HOME verified on ${verdict.checked.length} process(es)`);
         }
-        if (verdict.skipped) log(`[codex-app-server] CODEX_HOME check skipped: ${verdict.skipped}`);
-        else log(`[codex-app-server] CODEX_HOME verified on ${verdict.checked.length} process(es)`);
+      } catch (err) {
+        releaseGate();
+        throw err;
       }
+      releaseGate();
     } else {
       log(`[codex-app-server] attaching to shared server ${url}`);
     }

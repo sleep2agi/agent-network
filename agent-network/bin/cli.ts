@@ -238,8 +238,6 @@ import {
   exactSessionRows,
   externalAppserverRequested,
   externalAppserverStopOrder,
-  memoryVerdict,
-  parseMemAvailableBytes,
   planExternalAppserverNode,
   portBusy,
   resumedThreadVerdict,
@@ -248,6 +246,7 @@ import {
   waitForReadyz,
   type ExternalAppserverPlan,
 } from "../src/codex-external-appserver";
+import { waitForStartResources } from "../src/start-resource-gate-bridge.js";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretLoadCommand,
@@ -1056,6 +1055,17 @@ function reportResumedCodexModel(model: string, resumedModel: string | undefined
   else console.error(`[anet] ⚠ resumed thread reports model ${resumedModel}, not the configured ${model}`);
 }
 
+// #612 — same gate as agent-node's owned spawn. Copresence has no Hub session
+// yet (the bridge is what would report), so the phrases go to stdout.
+async function holdAppServerStart(nodeId: string): Promise<{ release: () => void }> {
+  return waitForStartResources("codex app-server", {
+    nodeId,
+    log: (m) => console.log(m),
+    warn: (m) => console.warn(m),
+    report: (text) => console.log(`[anet] [start-gate] blocked ${text}`),
+  });
+}
+
 async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
@@ -1105,8 +1115,10 @@ async function startWindowsCodexCopresence(
     ANET_NODE_MARKER: marker,
     ANET_CODEX_COMMHUB_TOKEN: opts.token,
   };
+  const admission = await holdAppServerStart(resolved.id);
   const managed: WindowsManagedProcess[] = [];
   try {
+    try {
     managed.push(await windowsManagedProcess("appsrv", opts.codexBin, [
       "app-server",
       "-c", `approval_policy=${posture.approvalPolicy}`,
@@ -1130,6 +1142,9 @@ async function startWindowsCodexCopresence(
       try { appLogTail = readFileSync(appLog, "utf-8").slice(-8_000); } catch { /* no log yet */ }
       for (const line of describeCodexRefreshFailure(appLogTail)?.lines ?? []) console.error(line);
       throw new Error(`app-server did not bind ${wsUrl} within 25s; log=${appLog}`);
+    }
+    } finally {
+      admission.release();
     }
     const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId, model);
     reportResumedCodexModel(model, thread.resumedModel);
@@ -1775,6 +1790,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       + ` -c ${shellQuote(bearerTomlLiteral)}`
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
+  // #612 — admit before the heavy app-server. Release once it binds or the
+  // start fails; bridge and TUI are not part of the lease.
+  const admission = await holdAppServerStart(nodeId);
+  try {
   try {
     execTmux([
       "new-session", "-d", "-s", appsrvSession, "-c", process.cwd(),
@@ -1787,6 +1806,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   } catch (e: any) {
     console.error(`[anet] ❌ tmux new-session ${appsrvSession} failed: ${e?.message || e}`);
     try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
+    admission.release();
     process.exit(1);
   }
   console.log(`[anet] ① app-server tmux=${appsrvSession} listening ${wsUrl} (sandbox=${sandboxMode})…`);
@@ -1808,9 +1828,13 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // the happy path, but if the bash chain crashed before reaching `rm -f`
     // (e.g. the `.` failed) the token file could linger. Defense-in-depth.
     try { rmSync(envFilePath, { force: true }); } catch { /* best-effort */ }
+    admission.release();
     process.exit(1);
   }
   console.log(`[anet] ① app-server READY on ${wsUrl}`);
+  } finally {
+    admission.release();
+  }
   assertCopresenceSessionsCodexHome([appsrvSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
 
   // #P3fix必修5 — the marker file itself was already written before the
@@ -7872,12 +7896,8 @@ async function startExternalAppserverNode(
     return 1;
   }
   const plan = externalAppserverPlanOrExit(resolved);
-  const meminfoPath = process.env.ANET_MEMINFO_PATH || "/proc/meminfo";  // ANET_MEMINFO_PATH: test seam only
-  let meminfo = "";
-  try { meminfo = readFileSync(meminfoPath, "utf-8"); } catch { /* non-Linux */ }
-  const mem = memoryVerdict(parseMemAvailableBytes(meminfo), opts.force === "true");
-  if (!mem.ok) { console.error(`[anet] ❌ ${mem.message}`); return 1; }
-  console.log(`[anet] ${mem.message}`);
+  // #612 — the shared start gate replaces the hard 4 GiB exit, so a low-memory
+  // host can still come up one process at a time.
 
   if (!existsSync(plan.codexHome)) {
     console.error(`[anet] ❌ CODEX_HOME ${plan.codexHome} does not exist — this node's codex login and sessions live there.`);
@@ -7905,26 +7925,31 @@ async function startExternalAppserverNode(
   const logOffset = fileSize(bridgeLogPath(plan));
 
   const codexEnv = ["-e", `CODEX_HOME=${plan.codexHome}`, "-e", `LANG=${process.env.LANG || "C.UTF-8"}`];
+  const admission = await holdAppServerStart(resolved.id);
   try {
-    execTmux([
-      "new-session", "-d", "-s", plan.sessions.appsrv, "-c", plan.nodeDir, ...codexEnv,
-      "bash", "-c", appserverShellCommand(plan, process.execPath),
-    ], { stdio: "pipe" });
-  } catch (e: any) {
-    console.error(`[anet] ❌ tmux new-session ${plan.sessions.appsrv} failed: ${e?.message || e}`);
-    return 1;
+    try {
+      execTmux([
+        "new-session", "-d", "-s", plan.sessions.appsrv, "-c", plan.nodeDir, ...codexEnv,
+        "bash", "-c", appserverShellCommand(plan, process.execPath),
+      ], { stdio: "pipe" });
+    } catch (e: any) {
+      console.error(`[anet] ❌ tmux new-session ${plan.sessions.appsrv} failed: ${e?.message || e}`);
+      return 1;
+    }
+    console.log(`[anet] ① app-server tmux=${plan.sessions.appsrv} --listen ${plan.url} (CODEX_HOME=${plan.codexHome}); waiting for ${plan.readyzUrl}…`);
+    const ready = await waitForReadyz(plan.readyzUrl, READYZ_TIMEOUT_MS); // MUTATION-ANCHOR:readyz-wait
+    if (!ready.ok) {
+      console.error(`[anet] ❌ app-server did not answer 200 on ${plan.readyzUrl} within ${READYZ_TIMEOUT_MS / 1000}s (last status: ${ready.status || "no answer"}).`);
+      const tail = (capturePane(plan.sessions.appsrv, 40) ?? "").trimEnd().split("\n").slice(-15);
+      for (const line of tail) console.error(`[anet]    | ${line}`);
+      killExternalAppserverSessions([plan.sessions.appsrv]);
+      console.error(`[anet]    Nothing else was started. Log: ${join(plan.nodeDir, "logs", "tmux-appserver.log")}`);
+      return 1;
+    }
+    console.log(`[anet] ① app-server readyz=200 after ${(ready.waitedMs / 1000).toFixed(1)}s`);
+  } finally {
+    admission.release();
   }
-  console.log(`[anet] ① app-server tmux=${plan.sessions.appsrv} --listen ${plan.url} (CODEX_HOME=${plan.codexHome}); waiting for ${plan.readyzUrl}…`);
-  const ready = await waitForReadyz(plan.readyzUrl, READYZ_TIMEOUT_MS); // MUTATION-ANCHOR:readyz-wait
-  if (!ready.ok) {
-    console.error(`[anet] ❌ app-server did not answer 200 on ${plan.readyzUrl} within ${READYZ_TIMEOUT_MS / 1000}s (last status: ${ready.status || "no answer"}).`);
-    const tail = (capturePane(plan.sessions.appsrv, 40) ?? "").trimEnd().split("\n").slice(-15);
-    for (const line of tail) console.error(`[anet]    | ${line}`);
-    killExternalAppserverSessions([plan.sessions.appsrv]);
-    console.error(`[anet]    Nothing else was started. Log: ${join(plan.nodeDir, "logs", "tmux-appserver.log")}`);
-    return 1;
-  }
-  console.log(`[anet] ① app-server readyz=200 after ${(ready.waitedMs / 1000).toFixed(1)}s`);
 
   if (plan.tui) {
     try {
