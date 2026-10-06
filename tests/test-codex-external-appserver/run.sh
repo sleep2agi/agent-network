@@ -18,6 +18,8 @@ set -euo pipefail
 # token read is removed. Sources are restored from a copied backup and cmp'd.
 
 ROOT=/workspace
+# shellcheck source=../lib/safe-rm.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
 REPORT="${REPORT:-$ARTIFACT_DIR/report-test-codex-external-appserver.txt}"
 mkdir -p "$ARTIFACT_DIR"
@@ -112,7 +114,7 @@ MEM_LOW=/tmp/meminfo-low; printf 'MemTotal: 65000000 kB\nMemAvailable: 2097152 k
 export ANET_MEMINFO_PATH="$MEM_OK"
 CLI() { bun "$ROOT/agent-network/bin/cli.ts" "$@"; }
 FAKE=/tmp/fake-codex
-reset_fake() { rm -rf "$FAKE"; mkdir -p "$FAKE"; }
+reset_fake() { safe_rm_rf "$FAKE"; mkdir -p "$FAKE"; }
 sessions() { T list-sessions -F '#{session_name}' 2>/dev/null || true; }
 has_session() { sessions | grep -qxF -e "$1"; }
 pane_pid() { T list-panes -a -F '#{session_name}|#{pane_pid}' | awk -F'|' -v n="$1" '$1==n{print $2}'; }
@@ -319,7 +321,7 @@ restore() { cp "$BK/cli.ts" "$CLI_SRC"; cp "$BK/mod.ts" "$MOD_SRC"; cmp -s "$BK/
 
 # M1: drop the readyz wait.
 grep -c 'MUTATION-ANCHOR:readyz-wait' "$CLI_SRC" | grep -qx 1 || fail "readyz anchor missing or duplicated"
-sed -i 's|^\(\s*\)const ready = await waitForReadyz(.*// MUTATION-ANCHOR:readyz-wait$|\1const ready = { ok: true, status: 200, waitedMs: 0 };|' "$CLI_SRC"
+sed -i 's|^\( *\)const ready = await waitForReadyz(.*// MUTATION-ANCHOR:readyz-wait$|\1const ready = { ok: true, status: 200, waitedMs: 0 };|' "$CLI_SRC"
 cmp -s "$BK/cli.ts" "$CLI_SRC" && fail "MUTATION_NOOP: readyz mutation changed nothing"
 never_ready_run demo-node-m1 47107
 cat "$WORK/never-demo-node-m1.out" >>"$REPORT"
@@ -330,7 +332,7 @@ log "M1 (no readyz wait) → caught: rc=$NR_RC, sessions started on a never-read
 
 # M2: put the token into the session command line instead of reading it inside the session.
 grep -c 'MUTATION-ANCHOR:token-in-session' "$MOD_SRC" | grep -qx 1 || fail "token anchor missing or duplicated"
-sed -i 's|^\(\s*\)const tokenExport = tokenInSessionSnippet(.*// MUTATION-ANCHOR:token-in-session$|\1const tokenExport = "export ANET_CODEX_COMMHUB_TOKEN=" + q(JSON.parse(require("fs").readFileSync(plan.configPath, "utf8")).token);|' "$MOD_SRC"
+sed -i 's|^\( *\)const tokenExport = tokenInSessionSnippet(.*// MUTATION-ANCHOR:token-in-session$|\1const tokenExport = "export ANET_CODEX_COMMHUB_TOKEN=" + q(JSON.parse(require("fs").readFileSync(plan.configPath, "utf8")).token);|' "$MOD_SRC"
 cmp -s "$BK/mod.ts" "$MOD_SRC" && fail "MUTATION_NOOP: token mutation changed nothing"
 mknode demo-node-m2 47108 "$WORK"
 set +e; CLI node start demo-node-m2 --external-appserver --verify-timeout 10 >"$WORK/m2.out" 2>&1; set -e
