@@ -25,3 +25,16 @@ explicit missing child, cross-network child rejection.
 Full server suite not rerun in this follow-up; remote CI remains authoritative.
 No production Hub, node, tmux, merge or release operations.
 Candidate discovery remains separate board #654.
+
+Review addendum: stop-daemon not_my_child errors embed the entire node config
+path; start-daemon bin errors embed raw exceptions. Added both concrete fixture
+shapes to every request/projection redaction check. Added start timeout to the
+state-refresh HTTP assertion and bilingual contract (superseded stale request).
+Clarified field omission versus error-value sanitization in source/docs/PR.
+Reran standalone Docker suite: 13 tests / 194 assertions / 0 failures, rc=0;
+all three named mutations rc=1; restoration green.
+
+Deferred follow-up: existing /api/node-create-requests also exposes raw daemon
+errors. This PR intentionally changes only the new #2447 read surface; it does
+not claim to sanitize the older creation endpoint. Review its consumer/error
+compatibility and add separate HTTP redaction tests before changing that API.

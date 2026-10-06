@@ -67,7 +67,8 @@ export function lifecycleProjections(scope: RestNetworkScope): Map<string, Lifec
 
 /** Read-only, selector-bound lookup. Join the live node in the SAME network,
  * then apply its current visibility (including restricted member grants).
- * Explicit result allowlist excludes tokens, paths, PID and config data. */
+ * Result fields exclude credentials, PID and config; error values separately
+ * use the exact public-code allowlist (daemon text may contain workdir paths). */
 export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Response {
   const kind = url.searchParams.get("kind");
   const requestId = url.searchParams.get("request_id"), nodeId = url.searchParams.get("node_id");

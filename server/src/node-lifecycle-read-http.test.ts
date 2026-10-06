@@ -54,7 +54,12 @@ afterAll(() => hub?.stop(true));
 test("public errors redact free text for granted viewers on every projection", async () => {
   db.run("INSERT INTO network_member_agent_grants(network_id,user_id,node_id,can_message) VALUES(?1,?2,?3,0)", [a.network_id, limited.user.user_id, ids.active]);
   try {
-    for (const error of ["/private/fixture/secret on fixture-host", "adopt_unknown_secret", "adopt_start_timeout: /private/fixture", "", "adopt_start_timeout", null]) {
+    for (const error of [
+      "/private/fixture/secret on fixture-host",
+      "not_my_child: daemon has no local record of fixture-node (fixture-id) — no children-map entry and no config at /private/fixture/fixture-node/config.json; refusing to signal processes by alias.",
+      "bin: ENOENT: /private/fixture/bin/anet on fixture-host",
+      "adopt_unknown_secret", "adopt_start_timeout: /private/fixture", "", "adopt_start_timeout", null,
+    ]) {
       const expected = error === null || error === "adopt_start_timeout" ? error : "lifecycle_error";
       for (const [kind, table, request] of [
         ["adopt", "node_daemon_bindings", "adopt_read_active"],
@@ -180,7 +185,7 @@ test("invalid selectors rejected rather than listing every lifecycle request", a
     expect((await get(`/api/node-lifecycle-requests?${suffix}`)).status).toBe(400);
 });
 test("request state refresh exposes pending, completion and binding-missing failure without caching", async () => {
-  for (const [kind, statuses] of [["start", ["pending", "delivered", "started", "start_failed"]], ["stop", ["pending", "delivered", "stopped", "stop_failed", "noop_not_my_child"]]] as const) {
+  for (const [kind, statuses] of [["start", ["pending", "delivered", "started", "start_failed", "timeout"]], ["stop", ["pending", "delivered", "stopped", "stop_failed", "noop_not_my_child"]]] as const) {
     for (const status of statuses) {
       const error = status.endsWith("failed") ? "adopt_active_binding_required" : null;
       db.run(`UPDATE node_${kind}_requests SET status=?1,error=?2 WHERE request_id=?3`, [status, error, `${kind}_read_failed`]);

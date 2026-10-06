@@ -449,12 +449,14 @@ existing fields remain unchanged. This is not candidate discovery.
 Response: `{ok:true,request:{kind,request_id,node_id,network_id,daemon_node_id,status,error,created_at,...}}`.
 Adoption also returns updated_at; start/stop return delivered_at and acked_at.
 Times are UTC milliseconds or null. Start states are
-`pending / delivered / started / start_failed`; stop states are
+`pending / delivered / started / start_failed / timeout`; stop states are
 `pending / delivered / stopped / stop_failed / noop_not_my_child`.
 HTTP 200 and pending are not operation success. Error codes include
 `adopt_explicit_private_socket_required`, `adopt_start_evidence_missing`, and
 `adopt_active_binding_required`; present actionable guidance rather than hiding
-the refusal. Delete requests, tokens, workdirs, PIDs and snapshots are excluded.
+the refusal. A newer start request may supersede a stale one as `timeout`; this is not success.
+Delete requests are excluded. Result fields omit tokens, workdirs, PIDs and snapshots;
+error values are separately sanitized as follows.
 Every new read projection only exposes exact allowlisted error codes. Unknown codes,
 diagnostic text and empty strings become `lifecycle_error`; null remains null.
 Raw errors stay in the database, without leaking paths or host details to node readers.
