@@ -16,23 +16,17 @@ export type ReadinessState = typeof READINESS_STATES[number];
 const MAX_RUNTIMES = 16;
 const MAX_REASON = 600;
 
-const entrySchema = z.object({
-  ok: z.boolean().catch(false),
-  // 未来 daemon 可能报新状态:收成字符串,读取侧把不认识的映射成 unknown。
-  state: z.string().max(32).catch("unknown"),
-  reason: z.string().max(MAX_REASON).catch(""),
-  version: z.string().max(64).optional().catch(undefined),
-  checked_at: z.string().max(40).optional().catch(undefined),
-  cli: z.string().max(16).optional().catch(undefined),
-  auth: z.string().max(16).optional().catch(undefined),
-  network: z.string().max(16).optional().catch(undefined),
-  shared_login_count: z.number().int().min(0).max(100_000).optional().catch(undefined),
-});
+const MAX_JSON_BYTES = 16 * 1024;
 
-/** report_status 里 `daemon_capabilities.runtime_readiness` 的 schema。永不拒整份 report。 */
+/** report_status 里 `daemon_capabilities.runtime_readiness` 的 schema。永不拒整份 report。
+ *
+ *  🔴 故意只验外形(对象、键数、总字节),逐格消毒放在读取侧 `sanitizeRuntimeReadiness`:
+ *     这份 schema 会进每个节点的 `tools/list`(#476 按角色的字节天花板),逐字段声明
+ *     一遍要多花 ~500 B;而读取侧本来就必须再消毒一次(库里可能存着任何旧形状)。
+ *     总字节上限挡住一个异常 daemon 往库里塞大对象。 */
 export const runtimeReadinessSchema = z
-  .record(z.string().max(64), entrySchema)
-  .refine((r) => Object.keys(r).length <= MAX_RUNTIMES)
+  .record(z.string().max(64), z.record(z.string(), z.unknown()))
+  .refine((r) => Object.keys(r).length <= MAX_RUNTIMES && JSON.stringify(r).length <= MAX_JSON_BYTES)
   .optional()
   .catch(undefined);
 

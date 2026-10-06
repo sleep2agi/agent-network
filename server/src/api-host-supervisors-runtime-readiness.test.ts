@@ -62,15 +62,24 @@ describe("#622 report_status schema —— runtime_readiness", () => {
     }
   });
 
-  test("单个字段坏:就地兜底,不拒整份", () => {
+  test("单个字段坏:schema 不拒整份;读取侧消毒把它兜成 unknown", () => {
     const parsed = snapSchema().parse({ ...base, daemon_capabilities: {
+      can_create_nodes: true,
       runtime_readiness: { a: { ok: "yes", state: 7, reason: "x".repeat(5000), shared_login_count: -3 } },
     } });
-    const a = parsed.daemon_capabilities.runtime_readiness.a;
+    expect(parsed.daemon_capabilities.can_create_nodes).toBe(true);
+    const a = sanitizeRuntimeReadiness(parsed.daemon_capabilities.runtime_readiness)!.a;
     expect(a.ok).toBe(false);
     expect(a.state).toBe("unknown");
-    expect(a.reason).toBe("");
+    expect(a.reason.length).toBe(600);
     expect(a.shared_login_count).toBeUndefined();
+  });
+
+  test("总字节超 16 KB:整格丢掉(异常 daemon 不能往库里塞大对象)", () => {
+    const big = { a: { ...READY, reason: "x".repeat(20_000) } };
+    const parsed = snapSchema().parse({ ...base, daemon_capabilities: { can_create_nodes: true, runtime_readiness: big } });
+    expect(parsed.daemon_capabilities.runtime_readiness).toBeUndefined();
+    expect(parsed.daemon_capabilities.can_create_nodes).toBe(true);
   });
 });
 
