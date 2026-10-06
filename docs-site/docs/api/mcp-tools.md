@@ -778,7 +778,8 @@ send_task({
 
 🔴 **实测(2026-08-18)**:一个节点连续 75 分钟显示 `status=idle` / `progress=100` / 心跳每次都 <2.5 分钟,而它自己回执说那段时间一直在跑一条长同步线 —— **落在 ③**。
 
-**`task` 更容易误读:它可能是发送方自己写上去的。** `send_task` 在自己的事务里就把任务前 200 字盖到目标 session 上([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `send_task` 段搜 `UPDATE sessions SET task = ?1`);`report_status` 也能写同一列(`COALESCE`,不传就保留旧值)。
+**`task` 更容易误读:它可能是发送方自己写上去的。** 目标 session 不在 `working` 时,`send_task` 在自己的事务里就把任务前 200 字盖到目标 session 上;目标已经是 `working` 时不覆盖,保留正在跑的那条([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `send_task` 段搜 `sessionTaskOnDispatch("?1")`,条件写在 [`session-task-on-dispatch.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/session-task-on-dispatch.ts) 搜 `CASE WHEN status = 'working' THEN task ELSE`)。
+`report_status` 也写同一列(`COALESCE`,不传就保留旧值):agent-node 开始处理一条任务时上报整段正文,hub 拿整段和 `tasks.content` 逐字比对,对上就把那行标成 `running` 并写 `started_at`;但写进 `task` 的同样只是前 200 字([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_status` 段搜 `sessionTaskPreview(task); // board668-session-preview`)。所以 `task` 最多 200 字,完整正文只在任务行上 —— `task` 能被 `get_all_status` 和全量 `/api/status` 读到,范围比任务行宽。
 
 ⇒ **在 `task` 里看到你刚发的内容,只证明 hub 记下了你发过,不证明节点读到了。那是你自己动作的回声。**
 

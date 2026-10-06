@@ -183,6 +183,11 @@ L1_TESTS=(
   # not. Forcing the mismatch check to succeed turns the node-directory case
   # red. Copies two source files, no install.
   "test667-project-dir-warn"
+  # Board #668. A fake grok runtime holds one turn. The hub must show
+  # working plus that task, and mark the row running. Reporting only 200
+  # characters, letting the idle heartbeat win, or letting a later dispatch
+  # replace the text each turn the suite red.
+  "test668-grok-working-status"
   # Board #612. Docker --memory, via tests/$t/docker-run.args, so the real
   # gate reads the cgroup. Putting the timeout cap back to the normal
   # concurrency limit must turn the suite red.

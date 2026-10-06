@@ -63,6 +63,7 @@ import { buildClaudeSystemPrompt, claudeAiConnectorsOptIn, claudeSdkChildEnv } f
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, getInFlightCount, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { readExternalSchedulesSnapshot } from "./external-schedules";
+import { TASK_CONTENT_MAX } from "./shared/task-content-limit";
 import { createOwnerScheduleConsumer, type OwnerScheduleConsumer } from "./owner-schedule-consumer";
 import { parseGoalCommand } from "./goals/parser";
 import {
@@ -1368,6 +1369,16 @@ function wakeCodexWatchdog(): void {
   setTimeout(() => { void codexHealthMonitor?.tick(); }, 1_000).unref?.();
 }
 let lastReportedStatus: { status: string; task?: string } = { status: "idle" };
+// #668 — 本进程正在跑的那条任务。三分钟心跳和后来新到的消息都不能让 hub
+// 在回合结束前改显示成 idle，或改成「最新收到的那条」。
+let activeTurnTask: string | null = null;
+let activeTurnDepth = 0;
+// report_status.task 与 send_task.task 共用 TASK_CONTENT_MAX(shared/task-content-limit.ts,
+// 与 hub 逐字节一致)。hub 已收下的正文整段放得下；200 字预览和 tasks.content 对不上，
+// started_at 就一直是空的。hub 只拿整段去匹配，sessions.task 里仍只存 200 字预览。
+function hubStatusTask(task: string): string {
+  return task.length > TASK_CONTENT_MAX ? task.slice(0, TASK_CONTENT_MAX) : task;
+}
 function currentNodeHealth(): NodeHealthReport | undefined {
   return codexHealthMonitor?.snapshot();
 }
@@ -4792,6 +4803,8 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
       onSession: (sessionId) => writebackGrokSession(sessionId),
       onHumanPrompt: handleGrokCopresenceHumanPrompt,
       onTuiReady: () => {
+        // #668 — 回合已经开始之后，TUI ready 不能把 working 盖成 idle。
+        if (activeTurnTask) return;
         void reportStatus("idle").catch((error: any) => {
           warn(`[grok-copresence] ready-idle report failed: ${error?.message || error}`);
         });
@@ -5478,7 +5491,11 @@ async function processTask(
     ? ` (${runtimeTask.length} chars; content withheld)`
     : `: ${runtimeTask.slice(0, 80)}`;
   log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}${taskLogSuffix}`);
-  await reportStatus("working", runtimeTask.slice(0, 200)).catch(() => {});
+  // #668 — 上报的正文必须和 tasks.content 全字相等，hub 才会把这行标成 running
+  // 并写 started_at。200 字预览对不上长任务。
+  activeTurnDepth++;
+  activeTurnTask = hubStatusTask(runtimeTask); // board668-inflight-task
+  await reportStatus("working", activeTurnTask).catch(() => {});
 
   // RFC-025 M1c P0b — context injection.
   // Prepend a self-loop block so the agent knows what it's currently
@@ -5564,7 +5581,13 @@ async function processTask(
     error(`✗ ${err.message}`);
     }
   } finally {
-    await reportStatus("idle").catch(() => {});
+    activeTurnDepth = Math.max(0, activeTurnDepth - 1);
+    if (activeTurnDepth === 0) {
+      activeTurnTask = null;
+      await reportStatus("idle").catch(() => {});
+    } else if (activeTurnTask) {
+      await reportStatus("working", activeTurnTask).catch(() => {});
+    }
   }
   if (skipped) return { text: "", failed: false, skipped: true };
   // Detect API-error markers from think(). These return text (so the SDK
@@ -7510,16 +7533,26 @@ commhubCompensation?.trigger("startup");
 // register report, dashboard would see `restarting` for up to 3min
 // after a restart instead of ✓ within a few seconds.
 reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.message || e}`));
-// Board #656 — 30s+60s+120s can outlast this tick. A capacity-retry line
-// stays working; every other heartbeat still reports idle, as before.
+// #656 — 30s+60s+120s 可能跨过这次心跳。满载重试那一行继续报 working。
+// #668 — 回合还在跑时继续报 working，正文是正在处理的那条，不是后来新到的消息。
+// 未设置或超出范围时保持 3 分钟。ANET_STATUS_HEARTBEAT_MS 只给测试把间隔缩短。
+const STATUS_HEARTBEAT_MS = (() => {
+  const raw = Number(process.env.ANET_STATUS_HEARTBEAT_MS);
+  if (Number.isFinite(raw) && raw >= 200 && raw <= 3 * 60 * 1000) return raw;
+  return 3 * 60 * 1000;
+})();
 setInterval(() => {
   const live = lastReportedStatus;
   if (live.status === "working" && typeof live.task === "string" && live.task.startsWith("模型满载，")) {
     void reportStatus("working", live.task).catch(() => {});
     return;
   }
+  if (activeTurnTask) { // board668-keep-working
+    void reportStatus("working", activeTurnTask).catch(() => {});
+    return;
+  }
   reportStatus("idle").catch(() => {});
-}, 3 * 60 * 1000);
+}, STATUS_HEARTBEAT_MS);
 
 // RFC-027 §2.5 / §4.4 D7 — 30d backup sweeper, host_supervisor only.
 // Runs once at boot (catches accumulated junk from long down-periods),

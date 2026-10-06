@@ -3,6 +3,8 @@ import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
 import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
+import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
+import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
@@ -793,7 +795,7 @@ function withNetworkNameAlias<T extends { network_name?: unknown }>(row: T): T &
 // ── REST input schema ───────────────────────────────
 const TaskSchema = z.object({
   alias: z.string().min(1).max(200),
-  task: z.string().min(1).max(10000),
+  task: z.string().min(1).max(TASK_CONTENT_MAX),
   priority: z.enum(["high", "normal", "low"]).default("normal"),
   from: z.string().max(200).optional(),
   network_id: z.string().max(200).optional(),
@@ -3688,8 +3690,8 @@ return Bun.serve({
         // immediately, without waiting for the agent's report_status to
         // arrive. Updating both `task` and `updated_at` is enough — we
         // leave `status` to the agent (idle → working → idle).
-        const touchParams: any[] = [body.task.slice(0, 200), targetAlias];
-        let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
+        const touchParams: any[] = [sessionTaskPreview(body.task), targetAlias];
+        let touchSql = `UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE alias = ?2`;
         if (taskNetId) { touchSql += " AND network_id = ?3"; touchParams.push(taskNetId); }
         db.run(touchSql, touchParams);
       });
