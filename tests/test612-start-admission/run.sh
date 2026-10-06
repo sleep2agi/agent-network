@@ -65,3 +65,54 @@ if ! grep -F -q 'FAIL: maxStarting=' /tmp/test612-mut.txt; then
   exit 1
 fi
 echo 'mutation red as required'
+
+echo '== green: four processes contend for one slot =='
+timeout 90 bun /test612/race.mjs
+
+LOCK_ANCHOR='const LOCK_PUBLISH_ATOMIC = true;'
+LOCK_REPL='const LOCK_PUBLISH_ATOMIC = false;'
+lock_count=$(grep -F -c "$LOCK_ANCHOR" "$GATE" || true)
+if [[ "$lock_count" != "1" ]]; then
+  echo "FAIL: lock mutation anchor count=$lock_count"
+  exit 1
+fi
+cp "$GATE" /tmp/gate.lock.bak
+bun -e '
+  const fs = require("fs");
+  const path = process.argv[1];
+  const anchor = process.argv[2];
+  const repl = process.argv[3];
+  const text = fs.readFileSync(path, "utf8");
+  const n = text.split(anchor).length - 1;
+  if (n !== 1) {
+    console.error("MUTATION_NOT_APPLIED: anchor count=" + n);
+    process.exit(1);
+  }
+  fs.writeFileSync(path, text.replace(anchor, repl));
+' "$GATE" "$LOCK_ANCHOR" "$LOCK_REPL"
+if grep -F -q "$LOCK_ANCHOR" "$GATE"; then
+  echo 'FAIL: lock mutation anchor still present'
+  exit 1
+fi
+rm -rf /root/.bun/install/cache /tmp/bun-* "${HOME:-/root}/.bun/install/cache" 2>/dev/null || true
+
+echo '== red: empty lock can be stolen =='
+set +e
+timeout 90 bun /test612/race.mjs > /tmp/test612-race.txt 2>&1
+rc=$?
+set -e
+cat /tmp/test612-race.txt
+cp /tmp/gate.lock.bak "$GATE"
+if ! cmp -s /tmp/gate.lock.bak "$GATE"; then
+  echo 'FAIL: gate source was not restored after the lock mutation'
+  exit 1
+fi
+if [[ "$rc" -eq 0 ]]; then
+  echo 'FAIL: lock mutation stayed green'
+  exit 1
+fi
+if ! grep -E -q 'OVERLAPS=[1-9]' /tmp/test612-race.txt; then
+  echo 'FAIL: lock mutation died without an overlap'
+  exit 1
+fi
+echo 'lock mutation red as required'

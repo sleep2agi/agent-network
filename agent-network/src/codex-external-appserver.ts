@@ -20,8 +20,6 @@ import { request } from "node:http";
 import { join } from "node:path";
 
 export const EXTERNAL_APPSERVER_LAYOUT = "external-appserver";
-/** Each node (app-server + TUI) measured at 1.5–2 GB; refuse below two nodes' worth. */
-export const MIN_MEM_AVAILABLE_BYTES = 4 * 1024 ** 3;
 export const READYZ_TIMEOUT_MS = 30_000;
 
 export interface ExternalAppserverProfile {
@@ -153,30 +151,6 @@ export function exactSessionRows(
   const out: { id: string; name: string }[] = [];
   for (const name of names) for (const row of rows) if (row.name === name) out.push(row);
   return out;
-}
-
-export function parseMemAvailableBytes(meminfo: string): number | null {
-  const m = /^MemAvailable:\s+(\d+)\s*kB\s*$/m.exec(meminfo);
-  return m ? Number(m[1]) * 1024 : null;
-}
-
-export function memoryVerdict(availableBytes: number | null, force: boolean): { ok: boolean; message: string } {
-  const gib = (n: number) => (n / 1024 ** 3).toFixed(1);
-  if (availableBytes === null) {
-    return { ok: true, message: "memory pre-check skipped: /proc/meminfo has no MemAvailable (not Linux?)" };
-  }
-  if (availableBytes >= MIN_MEM_AVAILABLE_BYTES) {
-    return { ok: true, message: `memory pre-check: MemAvailable ${gib(availableBytes)} GiB (need ≥ ${gib(MIN_MEM_AVAILABLE_BYTES)} GiB)` };
-  }
-  if (force) {
-    return { ok: true, message: `memory pre-check: MemAvailable ${gib(availableBytes)} GiB < ${gib(MIN_MEM_AVAILABLE_BYTES)} GiB — continuing because of --force` };
-  }
-  return {
-    ok: false,
-    message: `MemAvailable is ${gib(availableBytes)} GiB, below ${gib(MIN_MEM_AVAILABLE_BYTES)} GiB. ` +
-      `Each codex node (app-server + TUI) takes about 2 GB; starting another one risks pushing the machine into OOM. ` +
-      `Stop a node first, or pass --force to start anyway.`,
-  };
 }
 
 function q(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }

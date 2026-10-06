@@ -2,16 +2,20 @@
 // All host readings are injected; nothing here reads the real /proc.
 // slotsDir is a temp directory: an admit must not write ~/.anet.
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  START_GATE_BYPASS_STATUS,
   START_GATE_SINGLE_LANE_STATUS,
   START_GATE_WAITING_STATUS,
+  cgroupFreeMb,
+  cgroupLimitMb,
   defaultStartMinMemMb,
   parseLoad1,
   parseMemAvailableMb,
+  parseProcStartTicks,
   waitForStartResources,
   withHeavyStartAdmission,
   type StartGateDeps,
@@ -91,6 +95,32 @@ describe("#612 parsers", () => {
     expect(small).toBeLessThan(4096);
     expect(small).toBeGreaterThan(1000);
     expect(small).toBeLessThan(2000);
+    const capped = defaultStartMinMemMb(64 * 1024, 512);
+    expect(capped).toBeLessThan(100);
+    expect(capped).toBe(Math.min(4096, 512 * 0.15));
+    expect(cgroupLimitMb(String(512 * 1024 * 1024), 64 * 1024)).toBe(512);
+  });
+
+  test("cgroup free subtracts inactive_file; v1 prefers total_inactive_file", () => {
+    const MiB = 1024 * 1024;
+    const free = cgroupFreeMb(String(512 * MiB), String(373 * MiB), 64 * 1024, `inactive_file ${350 * MiB}\n`, false);
+    expect(free).not.toBeNull();
+    expect(Math.round(free!)).toBe(489);
+    const v1 = cgroupFreeMb(
+      String(512 * MiB),
+      String(373 * MiB),
+      64 * 1024,
+      `inactive_file 0\ntotal_inactive_file ${350 * MiB}\n`,
+      true,
+    );
+    expect(Math.round(v1!)).toBe(489);
+    expect(Math.round(cgroupFreeMb(String(512 * MiB), String(373 * MiB), 64 * 1024)!)).toBe(139);
+  });
+
+  test("proc start ticks are field 22, after a comm that contains spaces", () => {
+    const line = "123 (my proc) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 22222\n";
+    expect(parseProcStartTicks(line)).toBe("22222");
+    expect(parseProcStartTicks("no-paren")).toBeNull();
   });
 });
 
@@ -281,6 +311,7 @@ describe("#612 waitForStartResources", () => {
     expect(r.outcome).toBe("waited");
     expect(h.logs[0]).toContain("100 MiB");
     expect(h.logs[0]).toContain("cgroup");
+    expect(h.logs[0]).not.toContain("4096");
     expect(h.reports).toEqual([START_GATE_WAITING_STATUS]);
     r.release();
   });
@@ -425,6 +456,124 @@ describe("#612 waitForStartResources", () => {
     expect(reports.filter((text) => text === START_GATE_WAITING_STATUS)).toHaveLength(14);
     expect(slotNames(slotsDir)).toEqual([]);
   }, 20_000);
+
+  test("a fresh empty lock is not stolen; the single-lane cap lets this start through", async () => {
+    const h = fakeHost([HEALTHY], {
+      env: { ANET_START_GATE_MAX_WAIT_SEC: "0.02" },
+      recheckMs: 5,
+      jitterMs: 0,
+      singleLaneMaxWaitMs: 20,
+    });
+    writeFileSync(join(h.slotsDir, ".lock"), "", { mode: 0o600 });
+    const r = await waitForStartResources("x", h.deps);
+    expect(r.outcome).toBe("single-lane");
+    expect(readFileSync(join(h.slotsDir, ".lock"), "utf8")).toBe("");
+    expect(h.warns.join("\n")).toContain(START_GATE_BYPASS_STATUS);
+    expect(slotNames(h.slotsDir)).toEqual([]);
+    r.release();
+    expect(slotNames(h.slotsDir)).toEqual([]);
+  });
+
+  test("an expired lease is reaped even while its pid is still alive", async () => {
+    const h = fakeHost([HEALTHY], {
+      env: { ANET_START_MAX_CONCURRENT: "1" },
+      nodeId: "n-new",
+      now: () => 10_000,
+      isPidAlive: () => true,
+    });
+    writeFileSync(join(h.slotsDir, "n-old"), "77777 - 1\n", { mode: 0o600 });
+    const r = await waitForStartResources("x", h.deps);
+    expect(r.outcome).toBe("ok");
+    expect(existsSync(join(h.slotsDir, "n-old"))).toBe(false);
+    expect(h.warns.join("\n")).toContain("reaped expired start lease n-old");
+    expect(slotNames(h.slotsDir)).toEqual(["n-new"]);
+    r.release();
+  });
+
+  test("a reused pid with a different start time does not keep the slot", async () => {
+    const h = fakeHost([HEALTHY], {
+      env: { ANET_START_MAX_CONCURRENT: "1" },
+      nodeId: "n-new",
+      now: () => 10_000,
+      isPidAlive: () => true,
+      readProcessStartTicks: () => "222",
+    });
+    writeFileSync(join(h.slotsDir, "n-old"), "77777 111 1000000000\n", { mode: 0o600 });
+    const r = await waitForStartResources("x", h.deps);
+    expect(r.outcome).toBe("ok");
+    expect(existsSync(join(h.slotsDir, "n-old"))).toBe(false);
+    expect(h.warns.join("\n")).not.toContain("reaped expired");
+    r.release();
+  });
+
+  test("a busy lock retries the release instead of leaking the lease", async () => {
+    const h = fakeHost([HEALTHY], {
+      nodeId: "n-test",
+      isPidAlive: (pid) => pid === HOLDER || pid === 88888,
+      readProcessStartTicks: () => null,
+    });
+    const r = await waitForStartResources("x", h.deps);
+    expect(slotNames(h.slotsDir)).toEqual(["n-test"]);
+    writeFileSync(join(h.slotsDir, ".lock"), "88888 111\n", { mode: 0o600 });
+    r.release();
+    expect(slotNames(h.slotsDir)).toEqual(["n-test"]);
+    expect(h.warns.join("\n")).toContain("lock busy; retrying");
+    unlinkSync(join(h.slotsDir, ".lock"));
+    await new Promise((res) => setTimeout(res, 1500));
+    expect(slotNames(h.slotsDir)).toEqual([]);
+  }, 10_000);
+
+  test("a 512 MiB cgroup on a large host is admitted when the container itself has headroom", async () => {
+    const MiB = 1024 * 1024;
+    const h = fakeHost([HEALTHY], {
+      readFile: (p) => {
+        if (p === "/proc/meminfo") return meminfo(20 * GiB_KB);
+        if (p === "/proc/loadavg") return loadavg(1);
+        if (p === "/proc/self/cgroup") return "0::/docker/abc\n";
+        if (p === "/sys/fs/cgroup/docker/abc/memory.max") return String(512 * MiB);
+        if (p === "/sys/fs/cgroup/docker/abc/memory.current") return String(20 * MiB);
+        return null;
+      },
+    });
+    const r = await waitForStartResources("x", h.deps);
+    expect(r.outcome).toBe("ok");
+    expect(h.sleeps).toEqual([]);
+    r.release();
+  });
+
+  test("inactive_file is not counted as cgroup usage", async () => {
+    const MiB = 1024 * 1024;
+    const h = fakeHost([HEALTHY], {
+      env: { ANET_START_MIN_MEM_MB: "300" },
+      readFile: (p) => {
+        if (p === "/proc/meminfo") return meminfo(20 * GiB_KB);
+        if (p === "/proc/loadavg") return loadavg(0.2);
+        if (p === "/proc/self/cgroup") return "0::/docker/abc\n";
+        if (p === "/sys/fs/cgroup/docker/abc/memory.max") return String(512 * MiB);
+        if (p === "/sys/fs/cgroup/docker/abc/memory.current") return String(373 * MiB);
+        if (p === "/sys/fs/cgroup/docker/abc/memory.stat") return `inactive_file ${350 * MiB}\n`;
+        return null;
+      },
+    });
+    const r = await waitForStartResources("x", h.deps);
+    expect(r.outcome).toBe("ok");
+    expect(h.sleeps).toEqual([]);
+    r.release();
+  });
+
+  test("copresence watchdog relaunch of -appsrv goes through the start gate", () => {
+    const cli = readFileSync(new URL("../../cli.ts", import.meta.url), "utf8");
+    const call = "appsrvSnapshot = await relaunchAppServer(";
+    const at = cli.indexOf(call);
+    expect(at).toBeGreaterThan(0);
+    expect(cli.indexOf(call, at + call.length)).toBe(-1);
+    const before = cli.slice(Math.max(0, at - 700), at);
+    const after = cli.slice(at, at + 500);
+    expect(before).toContain('waitForStartResources("codex app-server relaunch"');
+    expect(before).toContain("try {");
+    expect(after).toContain("finally");
+    expect(after).toContain("gate.release()");
+  });
 });
 
 // Wiring: the gate must run BEFORE the owned app-server is spawned.

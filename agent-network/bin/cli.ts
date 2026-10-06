@@ -4429,7 +4429,7 @@ External app-server codex nodes (#630; fixed codexAppServerUrl in config.json):
       then check the bridge log resumed codexThreadId. Recorded in config.json,
       so later just: anet node start|stop|restart <name>.
   anet node restart <name> --bridge-only   Restart only the bridge (upgrade path)
-  --force                Start even when MemAvailable < 4 GiB
+  --force                Does not skip the start gate; set ANET_START_MEM_GATE=0 to disable it
   --verify-timeout <s>   Wait for "resumed thread" in the bridge log (default 60)
 
 Grok (default = headless ACP, recommended):
@@ -7761,7 +7761,7 @@ External app-server codex nodes (#630) — three tmux sessions per node:
   anet node restart <name> --bridge-only        Restart only the bridge (the agent-node upgrade path);
                                                 the app-server and TUI keep running
 
-  --force                 Start even when MemAvailable < 4 GiB (each node takes ~2 GB)
+  --force                 Does not skip the start gate. Set ANET_START_MEM_GATE=0 to disable it
   --verify-timeout <s>    How long to wait for "resumed thread <codexThreadId>" in the bridge log (default 60)
 
   CODEX_HOME = config env.CODEX_HOME, else codexHome, else <node dir>/codex-home.

@@ -1,7 +1,14 @@
 // Real start gate under a Docker --memory limit. No injected meminfo,
 // platform, or clock. recheckMs only shortens the sleep between tries.
+//
+// Phase A: default floor. A 512 MiB cgroup must be admitted (the floor is
+// 15% of that limit, not 4 GiB of the host). Phase B: an absurd floor forces
+// the wait, and after the timeout only one start may be in flight.
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import {
+  cgroupLimitMb,
+  defaultStartMinMemMb,
+  parseMemTotalMb,
   waitForStartResources,
   START_GATE_SINGLE_LANE_STATUS,
   START_GATE_WAITING_STATUS,
@@ -54,6 +61,17 @@ if (!Number.isFinite(maxBytes) || maxBytes <= 0 || maxBytes > 1024 * 1024 * 1024
   fail(`memory.max is not a small limit (got ${JSON.stringify(maxText)}). The container must be started with --memory.`);
 }
 
+const totalMb = parseMemTotalMb(readFileSync("/proc/meminfo", "utf8"));
+if (totalMb === null) fail("no MemTotal");
+const limitMb = cgroupLimitMb(maxText, totalMb);
+if (limitMb === null) fail(`cgroup limit not recognized from ${JSON.stringify(maxText)}`);
+const floor = defaultStartMinMemMb(totalMb, limitMb);
+console.log(`floor_mib=${floor} cgroup_limit_mib=${limitMb} mem_total_mib=${Math.round(totalMb)}`);
+if (!(floor < 4096)) fail(`floor ${floor} is not below 4096; it is still the host floor`);
+if (!(Math.abs(floor - Math.min(4096, limitMb * 0.15)) < 0.05)) {
+  fail(`floor ${floor} is not 15% of the cgroup limit ${limitMb}`);
+}
+
 delete process.env.ANET_START_MEM_GATE;
 delete process.env.ANET_START_MIN_MEM_MB;
 process.env.ANET_START_SLOTS_DIR = SLOTS;
@@ -64,6 +82,27 @@ rmSync(SLOTS, { recursive: true, force: true });
 
 const logs = [];
 const reports = [];
+
+const phaseA = await waitForStartResources("codex app-server", {
+  nodeId: "phase-a",
+  recheckMs: 25,
+  jitterMs: 0,
+  log: (m) => logs.push(m),
+  warn: (m) => logs.push(m),
+  report: (text) => reports.push(text),
+});
+console.log(`phaseA=${phaseA.outcome}`);
+phaseA.release();
+if (phaseA.outcome !== "ok") {
+  for (const line of logs) console.log(line);
+  fail(`phase A outcome ${phaseA.outcome} (floor ${floor} MiB). A 512 MiB cgroup with headroom must be admitted.`);
+}
+
+process.env.ANET_START_MIN_MEM_MB = "999999";
+logs.length = 0;
+reports.length = 0;
+rmSync(SLOTS, { recursive: true, force: true });
+
 let starting = 0;
 let maxStarting = 0;
 
@@ -124,6 +163,6 @@ if (reports.filter((t) => t === START_GATE_SINGLE_LANE_STATUS).length !== N) {
 }
 if (!outcomes.every((o) => o === "single-lane")) fail(`outcomes were not all single-lane: ${outcomes.join(",")}`);
 if (maxStarting !== 1) fail(`maxStarting=${maxStarting} expected 1`);
-const left = readdirSync(SLOTS).filter((name) => name !== ".lock");
+const left = readdirSync(SLOTS).filter((name) => name !== ".lock" && !name.startsWith("."));
 if (left.length) fail(`leases still held: ${left.join(",")}`);
 console.log("OK maxStarting=1");

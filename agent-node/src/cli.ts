@@ -55,7 +55,7 @@ function agentNodeModuleDir(): string {
   return packageRoot ? packageRoot.replace(/\/+$/, "") + "/dist" : __dirname;
 }
 import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
-import { START_GATE_SINGLE_LANE_STATUS, START_GATE_WAITING_STATUS } from "./runtime/codex-app-server/start-resource-gate";
+import { START_GATE_SINGLE_LANE_STATUS, START_GATE_WAITING_STATUS, waitForStartResources } from "./runtime/codex-app-server/start-resource-gate";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
@@ -7379,7 +7379,12 @@ if (RUNTIME === "codex-app-server") {
         log(`[app-server-watchdog] hung app-server stopped (${how}); relaunching on the original session`);
       }
       if (copresenceAppServer && appsrvSnapshot && NODE_CODEX_HOME) {
-        appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, token: AUTH_TOKEN, log }));
+        const gate = await waitForStartResources("codex app-server relaunch", { nodeId: NODE_ID || undefined, log, warn });
+        try {
+          appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, token: AUTH_TOKEN, log }));
+        } finally {
+          gate.release();
+        }
       }
       // 丢掉断了的会话,按原 thread 重新接上(自有拓扑这一步就是重新 spawn)。
       codexAppServerSessionManager.invalidate(codexAppServerSessionManager.current());

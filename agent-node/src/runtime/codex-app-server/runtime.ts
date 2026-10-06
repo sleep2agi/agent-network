@@ -211,7 +211,7 @@ export async function openCodexAppServerRuntime(opts: {
       const releaseGate = () => {
         if (releasedGate) return;
         releasedGate = true;
-        try { gate.release(); } catch { /* a dead holder pid is reaped by the next admit */ }
+        try { gate.release(); } catch { /* a dead pid, an expired lease, or a reused pid is reaped by the next admit */ }
       };
       try {
         const port = randomPort();

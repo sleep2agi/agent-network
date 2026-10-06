@@ -1,4 +1,4 @@
-/** Types for the runtime re-export in start-resource-gate-bridge.js. The implementation stays in agent-node. */
+/** Types for the runtime re-export in start-resource-gate-bridge.js. The implementation is the byte copy start-resource-gate.ts in this package. */
 export function waitForStartResources(
   label: string,
   deps?: {

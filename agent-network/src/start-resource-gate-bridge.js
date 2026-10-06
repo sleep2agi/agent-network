@@ -1,5 +1,6 @@
-// .js on purpose. A .ts re-export of the agent-node gate would become part of
-// this package's program, tsc would infer rootDir as the repo root, and
-// dist/src/*.d.ts would move under dist/agent-network/. bun build still
-// follows this re-export and inlines the real gate into dist/bin/cli.js.
-export { waitForStartResources } from "../../agent-node/src/runtime/codex-app-server/start-resource-gate.js";
+// .js on purpose. The implementation is the byte copy start-resource-gate.ts
+// in this package (kept identical to agent-node's file by
+// start-resource-gate-sync.test.ts). Importing ../../agent-node breaks every
+// Docker image that copies only agent-network/. bun build follows this
+// re-export and inlines the gate into dist/bin/cli.js.
+export { waitForStartResources } from "./start-resource-gate.js";
