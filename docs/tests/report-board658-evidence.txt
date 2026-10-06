@@ -15,3 +15,11 @@ This does NOT collect real tmux facts, validate config/marker files, signal
 processes, wire adoption or test Hub/daemon E2E. Those are still pending.
 The default-socket decoy here is data only, not the required real Docker tmux
 decoy acceptance. No live node or host tmux action performed.
+
+Increment 2: real read-only tmux collection
+Docker rebuilt with tmux; non-root, --network none, no mounts.
+6 pass / 0 fail / 15 expect, rc=0.
+Container default socket: three CJK sessions plus unrelated live decoy.
+Collector uses shared tmux-format helper and explicit -S via execTmux, list-panes
+only; captures fresh /proc trees, rechecks generation/topology, rejects wrong
+marker. All four sessions survive collection. No lifecycle wiring yet.
