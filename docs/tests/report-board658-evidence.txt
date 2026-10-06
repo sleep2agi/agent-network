@@ -38,3 +38,9 @@ with docker run --init (without init, existing self-proc test runs as PID 1
 and correctly hits the PID <=1 guard; fixture execution corrected).
 No production/host tmux operations. Real Hub HTTP, full daemon process,
 bootsweep, remaining negative/race matrix and decoy mutation still pending.
+
+Increment 4 mutation: inserted socket-wide kill-pane enumeration after the
+three-stage stop (never kill-server). Container-only mutant image.
+Result rc=1, 5 pass/1 fail; specifically decoy assertion expected true, got false.
+Mutation removed from source. This proves the real tmux fixture catches
+collateral damage, not merely a source-string guard.
