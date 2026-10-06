@@ -6,7 +6,7 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join, resolve, sep } from "node:path";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
-import { getChildrenSnapshot, recordSpawnedChild } from "./stop-daemon.js";
+import { forgetSpawnedChildIfPid, getChildrenSnapshot, recordSpawnedChild } from "./stop-daemon.js";
 import { childWorkDirFor } from "./child-workdir.js";
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
@@ -96,8 +96,10 @@ export async function handleStartDoorbell(
   // 建的时候带了工作目录的子节点不在 daemon cwd 里,按登记找回它的 .anet 根(child-workdir.ts)。
   const childWorkDir = childWorkDirFor(deps.workDir, req.child_alias);
   const nodesRoot = deps.nodesRoot ?? join(childWorkDir, ".anet", "nodes");
+  let codexCopresence = false;
   try {
-    verifyStoppedChildConfig(nodesRoot, req.child_node_id, req.child_alias);
+    const cfgPath = verifyStoppedChildConfig(nodesRoot, req.child_node_id, req.child_alias);
+    try { codexCopresence = JSON.parse(readFileSync(cfgPath, "utf8"))?.codexCopresence === true; } catch { /* verified above */ }
   } catch (e: any) {
     const error = `local_identity: ${e?.message || e}`;
     deps.warn(`[start-daemon] ${error}`);
@@ -166,6 +168,13 @@ export async function handleStartDoorbell(
     });
     const pid = child.pid ?? -1;
     if (pid <= 0) throw new Error("spawn_returned_no_pid");
+    // #596 — a codex co-presence launcher exits 0 once its tmux sessions are up.
+    // Its pid must not outlive it in the children map (a later stop would signal
+    // whoever reuses the number); stop reaches the generation by identity marker.
+    if (codexCopresence && typeof (child as any).once === "function") {
+      const childNodeId = req.child_node_id;
+      child.once("exit", () => { forgetSpawnedChildIfPid(childNodeId, pid); });
+    }
     child.unref();
     (deps.signalProcess ?? ((p, s) => process.kill(p, s)))(pid, 0);
     recordSpawnedChild(req.child_node_id, req.child_alias, pid);

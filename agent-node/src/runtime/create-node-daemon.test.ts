@@ -4,6 +4,7 @@ import {
   buildAnetArgsDaemon,
   childConfigFieldsFromSpec,
   minimalEnv,
+  computeChildPath,
   loadAndVerifyAnetBin,
   probeAnetBinReadiness,
   ensureGlobalAnetConfig,
@@ -653,12 +654,16 @@ describe("minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable)",
       require("node:path").join(__dirname, "create-node-daemon.ts"), "utf-8",
     );
     // Extract computeChildPath function body
-    const m = src.match(/function computeChildPath\(\)[\s\S]+?\n\}/);
+    const m = src.match(/function computeChildPath\([\s\S]+?\n\}/);
     expect(m).toBeTruthy();
     if (m) {
       expect(m[0]).toContain("process.execPath");
       expect(m[0]).not.toMatch(/process\.env\.PATH/);   // explicit anti-C1 invariant
     }
+    // #603 — the darwin Homebrew dirs are fixed literals, not env.PATH.
+    const sp = src.match(/function safePathFor\([\s\S]+?\n\}/);
+    expect(sp).toBeTruthy();
+    if (sp) expect(sp[0]).not.toMatch(/env\.PATH|env\[/);
   });
 });
 
@@ -1139,5 +1144,38 @@ describe("#584 flags.copresence → child config codexCopresence", () => {
       .toThrow(/flag_not_applicable_to_runtime:copresence:codex-sdk/);
     expect(() => buildAnetArgsDaemon({ name: "cx", runtime: "codex-app-server", flags: { copresence: "yes" } }))
       .toThrow(/flag_value_invalid:copresence/);
+  });
+});
+
+// #603 — Apple Silicon Homebrew installs bun/bunx, tmux and codex into
+// /opt/homebrew/bin, which SAFE_PATH lacks; a daemon-created codex
+// co-presence node then failed its bunx/tmux/codex preflight on macOS.
+// Platform + execPath are injected so every branch runs on the Linux runner.
+describe("#603 computeChildPath — per-platform child PATH", () => {
+  const SAFE = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+  const BREW = "/opt/homebrew/bin:/opt/homebrew/sbin";
+  test("🔴 witnessed-red: darwin → execDir, then Homebrew, then system dirs", () => {
+    expect(computeChildPath("darwin", "/Users/a/.nvm/versions/node/v24/bin/node"))
+      .toBe(`/Users/a/.nvm/versions/node/v24/bin:${BREW}:${SAFE}`);
+  });
+  test("🔴 witnessed-red: darwin, node from Homebrew → no duplicate execDir, Homebrew still first", () => {
+    expect(computeChildPath("darwin", "/opt/homebrew/bin/node")).toBe(`${BREW}:${SAFE}`);
+  });
+  test("🔴 witnessed-red: minimalEnv(…, 'darwin') children see /opt/homebrew/bin before /usr/bin", () => {
+    const parts = minimalEnv({}, "darwin", { HOME: "/Users/a" }).PATH!.split(":");
+    expect(parts).toContain("/opt/homebrew/bin");
+    expect(parts).toContain("/opt/homebrew/sbin");
+    expect(parts.indexOf("/opt/homebrew/bin")).toBeLessThan(parts.indexOf("/usr/local/bin"));
+    expect(parts.indexOf("/opt/homebrew/bin")).toBeLessThan(parts.indexOf("/usr/bin"));
+  });
+  test("linux unchanged: execDir + SAFE_PATH, no Homebrew", () => {
+    expect(computeChildPath("linux", "/home/a/.nvm/versions/node/v24/bin/node"))
+      .toBe(`/home/a/.nvm/versions/node/v24/bin:${SAFE}`);
+    expect(computeChildPath("linux", "/usr/bin/node")).toBe(SAFE);
+    expect(minimalEnv({}, "linux", { HOME: "/home/a" }).PATH).not.toContain("homebrew");
+  });
+  test("win32 unchanged: no Homebrew dirs", () => {
+    expect(computeChildPath("win32", "/opt/node/bin/node")).toBe(`/opt/node/bin:${SAFE}`);
+    expect(minimalEnv({}, "win32", { USERPROFILE: "C:\\Users\\a" }).PATH).not.toContain("homebrew");
   });
 });

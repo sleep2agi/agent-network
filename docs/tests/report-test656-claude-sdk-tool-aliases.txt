@@ -92,3 +92,17 @@ Witnessed-red artifacts:
 
 No production endpoint, agent, global package, or credential was used. The vendor
 and Hub boundaries were local deterministic fixtures inside Docker.
+
+Correction (2026-10-06):
+
+- The "0.2.141 still passed the alias at runtime" observation above was false.
+  harness.ts ran in place from /repo/tests/..., which has no node_modules above
+  it, so its bare SDK import went through Bun auto-install and loaded the latest
+  SDK, not agent-node's (downgraded) copy. run.sh now copies the harness into
+  agent-node/ and asserts it resolves the SDK from agent-node/node_modules.
+- With the real 0.2.141 loaded, the alias does not execute (mcpCalls=0), so the
+  downgrade step is now a witnessed red (`sdk-0.2-runtime`).
+- The same auto-install fallback is why the suite went red in CI on PR #2419:
+  with the cache left by the image build, auto-install fails with
+  `ENOENT while resolving package '@anthropic-ai/claude-agent-sdk'`, after the
+  "bundle builds" line and with the output only in /artifacts.
