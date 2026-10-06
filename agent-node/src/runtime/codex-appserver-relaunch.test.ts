@@ -12,6 +12,7 @@ import {
   relaunchAppServer,
   relaunchBlocker,
   terminateHungAppServer,
+  linuxProcView,
   writeAppServerTokenFile,
   type ProcView,
   type RelaunchDeps,
@@ -276,5 +277,28 @@ describe("hung app-server: strict identity check + terminate (#465)", () => {
     w.deps.proc = fakeProc({ 100: { ...ours(), env: { ANET_NODE_MARKER: "other", CODEX_HOME: HOME } } });
     await expect(terminateHungAppServer(snap, w.deps)).rejects.toThrow("not killing the hung app-server: pid 100 carries another identity marker");
     expect(w.signals).toEqual([]);
+  });
+});
+
+// #448 回归:linuxProcView 曾按 latin1 读 cmdline/environ —— 非 ASCII 的 CODEX_HOME 让看门狗永远拒绝杀卡死的
+// app-server,快照里的非 ASCII argv 重放时也会变成乱码。
+describe.skipIf(process.platform !== "linux")("#448 linuxProcView decodes /proc as UTF-8 (real child)", () => {
+  test("Chinese CODEX_HOME and argv round-trip exactly", async () => {
+    const { spawn } = await import("node:child_process");
+    const dir = mkdtempSync(join(tmpdir(), "relaunch-utf8-"));
+    const home = join(dir, ".anet", "nodes", "测试节点", "codex-home");
+    const c = spawn("sleep", ["30"], { env: { ...process.env, CODEX_HOME: home }, stdio: "ignore", argv0: "sleep" });
+    try {
+      let env: string | null = null;
+      for (let i = 0; i < 50; i++) { env = linuxProcView.environ(c.pid!); if (env && env.includes("CODEX_HOME=")) break; await new Promise((r) => setTimeout(r, 20)); }
+      expect(env).not.toBeNull();
+      expect(env!.split("\0").find((kv) => kv.startsWith("CODEX_HOME="))).toBe(`CODEX_HOME=${home}`);
+      const c2 = spawn("sh", ["-c", "sleep 30; :", "测试节点"], { stdio: "ignore" });
+      try {
+        let argv: string[] = [];
+        for (let i = 0; i < 50; i++) { argv = (linuxProcView.cmdline(c2.pid!) ?? "").split("\0"); if (argv.includes("测试节点")) break; await new Promise((r) => setTimeout(r, 20)); }
+        expect(argv).toContain("测试节点");
+      } finally { c2.kill("SIGKILL"); }
+    } finally { c.kill("SIGKILL"); }
   });
 });

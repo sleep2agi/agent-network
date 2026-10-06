@@ -18,7 +18,7 @@ import { execTmux } from "../tmux";
 import { chmodSync, existsSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
-import { envVarFromEnviron, verifyProcessTreeCodexHome, type ProcReader } from "../codex-home-enforce";
+import { envVarFromEnviron, hasLoneSurrogate, readProcNulBlock, verifyProcessTreeCodexHome, type ProcReader } from "../codex-home-enforce";
 import { parseTmuxPanes, TMUX_PANE_LIST_ARGS } from "./codex-health";
 import { parseTmuxRows, tmuxListArgs } from "../tmux-format";
 
@@ -40,9 +40,11 @@ export interface ProcView {
 }
 
 export const linuxProcView: ProcView = {
-  cmdline: (pid) => { try { return readFileSync(`/proc/${pid}/cmdline`, "latin1"); } catch { return null; } },
+  // #448 回归:按字节读、逐条 UTF-8 解码(不是 latin1)—— 否则非 ASCII 的 CODEX_HOME / argv 路径永远对不上,
+  // 重放的 argv 也会变成乱码。
+  cmdline: (pid) => readProcNulBlock(pid, "cmdline"),
   cwd: (pid) => { try { return readlinkSync(`/proc/${pid}/cwd`); } catch { return null; } },
-  environ: (pid) => { try { return readFileSync(`/proc/${pid}/environ`, "latin1"); } catch { return null; } },
+  environ: (pid) => readProcNulBlock(pid, "environ"),
   alive: (pid) => { try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; } },
 };
 
@@ -97,6 +99,8 @@ export function captureAppServerLaunch(input: {
     const argv = raw.split("\0").filter((a, i, all) => a !== "" || i < all.length - 1);
     const at = argv.indexOf("--listen");
     if (!argv.includes("app-server") || at < 0 || argv[at + 1] !== input.url) continue;
+    // 某个参数不是合法 UTF-8:重放时无法逐字节还原,宁可不拍快照(不重启)也不拿乱码去 exec。
+    if (argv.some(hasLoneSurrogate)) return { ok: false, reason: `pid ${row.pid} argv is not valid UTF-8; cannot replay it` };
     const marker = envVarFromEnviron(input.proc.environ(row.pid), "ANET_NODE_MARKER");
     if (input.marker && marker !== input.marker) {
       return { ok: false, reason: `pane pid ${row.pid} carries another identity marker` };
@@ -234,7 +238,7 @@ export function hungKillVeto(snapshot: AppServerLaunchSnapshot | null, deps: Pic
   if (environ === null) return `cannot read the environment of pid ${snapshot.pid}`;
   if (envVarFromEnviron(environ, "ANET_NODE_MARKER") !== deps.marker) return `pid ${snapshot.pid} carries another identity marker`;
   const home = envVarFromEnviron(environ, "CODEX_HOME");
-  if (!home || !samePath(home, deps.codexHome)) return `pid ${snapshot.pid} runs with another CODEX_HOME`;
+  if (!home || hasLoneSurrogate(home) || !samePath(home, deps.codexHome)) return `pid ${snapshot.pid} runs with another CODEX_HOME`;
   return null;
 }
 
