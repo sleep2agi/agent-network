@@ -1,6 +1,6 @@
 Board #626 — daemon adoption, implementation in progress
 
-Status: draft; no implementation or acceptance claimed yet.
+Status: draft; first read-only validator increment, not integrated or accepted yet.
 Base: d174f894 (main). Depends on merged Hub board #625 protocol.
 
 Scope
@@ -16,4 +16,16 @@ Verification planned (Docker only)
 - Hub/daemon contract and witnessed-red for a missing safety check.
 - Integration with a disposable Hub and fixture nodes; adoption preserves pid.
 
-No tests run yet. No merge, release, production upgrade or live-node operation.
+First increment
+- adopt-local-identity.ts checks allowlisted canonical workdir, config ownership and
+  permissions, exact alias/id/network/Hub, and refuses v1 co-presence.
+- Injected process evidence checks exact config+alias argv, uid/cwd/HOME/default
+  tmux socket and reproducible environment values (errors contain key names only).
+- Docker tests/test626-daemon-adoption: 6 pass, 17 assertions, rc=0.
+  Mutation disables allowlist containment: same assertion fails because an outside
+  directory is accepted (red rc=1). Harness overall rc=0. Network disabled.
+- Not yet implemented: trusted /proc capture and recheck, registry persistence,
+  protocol consumer, CLI, capability advertisement and integration E2E.
+- Module is not wired to running daemon behavior; adopt_capable remains off.
+
+No merge, release, production upgrade or live-node operation.
