@@ -1464,6 +1464,11 @@ const { value: NODE_ID } = resolveNodeIdSource({
 });
 const NODE_NAME = fileConfig.node_name || "";
 const NETWORK_ID = fileConfig.network_id || process.env.ANET_NETWORK_ID || globalConfig.network_id || "";
+function adoptionDeps() {
+  return { callCommHub, workDir: process.cwd(), home: process.env.HOME || "", hubUrl: COMMHUB_URL,
+    networkId: NETWORK_ID, uid: process.getuid?.() ?? -1, daemonEnv: process.env,
+    adoptRoots: Array.isArray(fileConfig.adopt_roots) ? fileConfig.adopt_roots : [], warn: (m: string) => warn(m) };
+}
 const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`;
 
 // #146 PR-4 — single resolver instance backing every sender-side commhub
@@ -6839,12 +6844,14 @@ async function connectSSE() {
                     recentlyHandledStopRequestIds,
                     recentlyHandledStartRequestIds,
                     handleStopDoorbell: (event: { request_id: string }) => handleStopDoorbell(event, {
+                      adoption: adoptionDeps(),
                       callCommHub,
                       workDir: process.cwd(),
                       log: (m: string) => log(m),
                       warn: (m: string) => warn(m),
                     }),
                     handleStartDoorbell: (event: { request_id: string }) => handleStartDoorbell(event, {
+                      adoption: adoptionDeps(),
                       callCommHub,
                       workDir: process.cwd(),
                       log: (m: string) => log(m),
@@ -6968,6 +6975,7 @@ async function connectSSE() {
                 import("./runtime/stop-daemon.js").then(({ handleStopDoorbell }) => handleStopDoorbell(
                   { request_id: stopReqId },
                   {
+                    adoption: adoptionDeps(),
                     callCommHub,
                     workDir: process.cwd(),
                     log: (m: string) => log(m),
@@ -6987,6 +6995,7 @@ async function connectSSE() {
                 import("./runtime/start-daemon.js").then(({ handleStartDoorbell }) => handleStartDoorbell(
                   { request_id: startReqId },
                   {
+                    adoption: adoptionDeps(),
                     callCommHub,
                     workDir: process.cwd(),
                     log: (m: string) => log(m),

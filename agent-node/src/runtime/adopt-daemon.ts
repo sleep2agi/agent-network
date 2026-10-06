@@ -14,7 +14,7 @@ export interface AdoptDaemonDeps extends AdoptionIdentityOptions {
   readProc?: (pid: number) => AdoptionProc | null;
   warn: (message: string) => void;
 }
-function reproducibleEnvironment(identity: AdoptionLocalIdentity, deps: AdoptDaemonDeps): NodeJS.ProcessEnv {
+export function reproducibleEnvironment(identity: AdoptionLocalIdentity, deps: AdoptDaemonDeps): NodeJS.ProcessEnv {
   const cfg = identity.config;
   const env = minimalEnv({}, "linux", { HOME: deps.home, LANG: deps.daemonEnv.LANG });
   const local: Record<string, string> = {};
@@ -65,7 +65,7 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
     const before = pid ? readProc(pid) : null;
     const expectedEnv = reproducibleEnvironment(identity, deps);
     const procOpts = { uid: deps.uid, home: deps.home,
-      defaultTmuxSocket: `/tmp/tmux-${deps.uid}/default`, reproducibleEnv: expectedEnv };
+      defaultTmuxSocket: expectedEnv.ANET_TMUX_SOCKET || `/tmp/tmux-${deps.uid}/default`, reproducibleEnv: expectedEnv };
     const mode = before ? verifyAdoptionProcess(identity, before, procOpts) : "tmux";
     // No await between final verification and atomic registry persistence.
     const checked = verifyAdoptionLocalIdentity(req, deps);

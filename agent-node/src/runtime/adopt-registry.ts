@@ -9,6 +9,7 @@ export interface AdoptedChild {
   workdir: string;
   nodeDir: string;
   launch_mode: "bare" | "tmux";
+  launch_evidence?: { mode: "bare" | "tmux"; config_hash: string; socket?: string; session?: string; pane?: string };
 }
 export function readWorkdirRegistry(root: string): Record<string, unknown> {
   const path = join(root, ".anet", "child-workdirs.json");

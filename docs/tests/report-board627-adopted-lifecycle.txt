@@ -21,3 +21,22 @@ First implementation increment (not wired to lifecycle handlers yet):
 - Still pending: active binding gates, evidence persistence/reverification,
   pinned startup, explicit private tmux socket, marker integration, real Hub E2E.
 No merge/release/version reservation.
+
+Second implementation checkpoint (2026-10-06, still draft):
+- Live stop/start and reconnect reconciliation now call the adopted lifecycle
+  handler; current Hub list_my_children authority is mandatory. No adopted
+  operation falls through to legacy process-group cleanup.
+- Actual launch evidence is saved before stop and checked before start. Merely
+  having an inferred launch_mode is insufficient. Default tmux socket refused;
+  verified private socket/session and /proc ancestry required.
+- Docker related runtime suites: 51 pass / 181 assertions, rc=0.
+- New fail-closed tests: 3 pass / 4 assertions, rc=0.
+- Real isolated Hub + daemon + manual bare node: adoption, remote stop,
+  .hub-stopped, project up skipping with unchanged PID file, remote start,
+  marker removal, new PID and same alias online, revoke without stop: rc=0.
+- Same end-to-end sequence with explicit private tmux socket: rc=0 (source
+  mounted into test container and rebuilt). No default server commands.
+- Independent Dockerfile/run.sh added; full runner and mutation gate are being
+  finalized. First runner reached all bare assertions but exited 1 because its
+  restoration trap used a relative path after cd; trap corrected to absolute.
+- Pending: no-wrapper restart refusal, full final-image validation and review.
