@@ -71,6 +71,7 @@ on:
       - 'tests/test651-opencode-timeout-abort/**'
       - 'tests/test656-capacity-retry/**'
       - 'tests/test667-project-dir-warn/**'
+      - 'tests/test668-grok-working-status/**'
       - 'tests/test672-claude-auth-abort/**'
       - 'tests/test198-from-alias/**'
       - 'tests/test8-runtime/**'
@@ -115,6 +116,7 @@ on:
       - 'tests/test571-lifecycle-safety/**'
       - 'tests/test626-daemon-adoption/**'
       - 'tests/test627-adopted-lifecycle/**'
+      - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -273,6 +275,7 @@ on:
       - 'tests/test651-opencode-timeout-abort/**'
       - 'tests/test656-capacity-retry/**'
       - 'tests/test667-project-dir-warn/**'
+      - 'tests/test668-grok-working-status/**'
       - 'tests/test672-claude-auth-abort/**'
       - 'tests/test198-from-alias/**'
       - 'tests/test8-runtime/**'
@@ -317,6 +320,7 @@ on:
       - 'tests/test571-lifecycle-safety/**'
       - 'tests/test626-daemon-adoption/**'
       - 'tests/test627-adopted-lifecycle/**'
+      - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -864,6 +868,17 @@ jobs:
         run: |
           docker build -t anet-test626-e2e -f tests/test626-daemon-adoption/Dockerfile.e2e .
           docker run --rm --init --network none anet-test626-e2e
+
+  test658-codex-adopt-stop:
+    name: Codex adoption and stop (Docker, two layouts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test658 -f tests/test658-codex-adopt-stop/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test658
+      - run: docker build -t anet-test658-http -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
+      - run: docker run --rm --init --cpus=2 --network none anet-test658-http
 
   test627-adopted-lifecycle:
     name: adopted lifecycle (Docker, real Hub + private tmux)
