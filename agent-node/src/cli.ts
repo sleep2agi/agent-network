@@ -104,6 +104,12 @@ import {
   VENDOR_RETRY_PROFILE,
 } from "./vendor-error";
 import {
+  CAPACITY_RETRY_EXHAUSTED_TEXT,
+  capacityRetryDecision,
+  capacityRetryProgress,
+  pauseForCapacityRetry,
+} from "./runtime/capacity-retry";
+import {
   CommHubError,
   classifyCommHubResponse,
   PendingReplyQueue,
@@ -2993,7 +2999,8 @@ async function processWithClaude(
   //   🔴 必须声明在重试循环**之外** —— 循环内声明的话,下面那个 return 读不到
   //   (同一个错我在这个文件的 codex 分支上刚犯过一次,typecheck 棘轮门抓的)。
   const claudeAttempts: { ms: number; timedOut: boolean }[] = [];
-  for (let attempt = 0; attempt <= CLAUDE_MAX_RETRIES; attempt++) {
+  let capacityRetries = 0;
+  for (let attempt = 0; ; attempt++) {
     let timedOut = false;
     const attemptStart = Date.now();
     try {
@@ -3188,14 +3195,29 @@ async function processWithClaude(
         return `执行出错: vendor API auth failed (${msg.slice(0, 80)}) — refresh API key and re-export ENV var; see agent-node log for vendor-specific URL`;
       }
 
-      // #261 P1-① — fast-fail on vendor rate-limit / quota / overload.
-      // Pre-fix these would burn the full retry chain (4s + 8s backoff
-      // each, 3 attempts × per-attempt timeout — up to ~15min of futile
-      // retries before returning the generic "claude-agent-sdk 调用超时"
-      // string). The operator action (raise quota / lower concurrency /
-      // wait for window reset) is unblocked only by an explicit
-      // classifier message; spending 15min on backoff doesn't help.
-      // Mirror the auth-error fast-fail pattern.
+      // Board #656 — temporary capacity / 429 / 5xx retries on 30s/60s/120s.
+      // The wait is outside withTimeout, so it does not burn the attempt
+      // deadline. Quota exhaustion still fast-fails below.
+      const capacityDecision = capacityRetryDecision(capacityRetries, msg);
+      if (capacityDecision.action === "retry") {
+        capacityRetries += 1;
+        log(`[claude] model at capacity; retry ${capacityDecision.attempt} in ${capacityDecision.waitMs}ms; same model`);
+        await reportStatus("working", capacityDecision.progress).catch(() => {});
+        await pauseForCapacityRetry(capacityDecision);
+        continue;
+      }
+      if (capacityDecision.action === "exhaust") {
+        log(`[claude] ✗ model at capacity after automatic retries`);
+        return `执行出错: ${CAPACITY_RETRY_EXHAUSTED_TEXT}`;
+      }
+
+      // #261 P1-① — fast-fail on vendor quota exhaustion (not temporary
+      // capacity; that was handled above). Pre-fix these would burn the
+      // full retry chain (4s + 8s backoff each, 3 attempts × per-attempt
+      // timeout — up to ~15min of futile retries before returning the
+      // generic "claude-agent-sdk 调用超时" string). The operator action
+      // (raise quota / lower concurrency / wait for window reset) is
+      // unblocked only by an explicit classifier message.
       if (isRateLimitOrQuotaError(msg)) {
         const hint = quotaRemediationHint(process.env.ANTHROPIC_BASE_URL);
         log(`[claude] ✗ vendor rate-limit/quota: ${msg.slice(0, 150)}`);
@@ -3218,6 +3240,7 @@ async function processWithClaude(
       }
       // Exhausted retries — return error.
       log(`[claude] ✗ all ${CLAUDE_MAX_RETRIES + 1} attempts failed; last: ${reason}`);
+      break;
     }
   }
   if (timedOutFinal) {
@@ -3733,6 +3756,12 @@ function sanitizeGrokCommhubLeak(text: string): string {
 // Stable string marker for release tarball inspection. Bun minifies function
 // identifiers, so keep an independently reachable literal in the bundle.
 const OPENCODE_PROCESS_BUNDLE_MARKER = "processWithOpencode";
+
+/** Board #656. Non-terminal: node stays working, task text names the retry. */
+function reportCapacityRetry(attempt: number): Promise<void> {
+  return reportStatus("working", capacityRetryProgress(attempt)).catch(() => {});
+}
+
 async function processWithOpencode(
   task: string,
   _from: string,
@@ -3745,6 +3774,7 @@ async function processWithOpencode(
     const outcome = await runtime.submit(task, currentOpencodeTimeout().valueMs, _from, {
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
+      onCapacityRetry: reportCapacityRetry,
     });
     log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
     return outcome.replyText || "（无回复）";
@@ -3809,6 +3839,7 @@ async function processWithOpencode(
     warn,
     onSubmitted: evidence?.submitted,
     onConsumed: evidence?.consumed,
+    onCapacityRetry: reportCapacityRetry,
   }).catch((error: unknown) => { throw withOpenCodeFreeTierHint(error); });
 
   const u = outcome.state.usage;
@@ -3950,6 +3981,7 @@ async function processWithCodexAppServer(
       threadId: session.bridge.getThreadId(),
       turnId: event.turnId,
     }),
+    onCapacityRetry: reportCapacityRetry,
   });
 
   // Throw failed outcomes into processTask's existing failure path so the Hub
@@ -4190,6 +4222,7 @@ async function processWithGrok(
       },
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
+      onCapacityRetry: reportCapacityRetry,
       // #204 preview.4 — surface Grok stderr (carries MCP subprocess
       // handshake / spawn errors). Lines tagged so `anet logs` filtering
       // is obvious. Severity routing: #1917 ② replaced the blanket keyword
@@ -7411,7 +7444,16 @@ commhubCompensation?.trigger("startup");
 // register report, dashboard would see `restarting` for up to 3min
 // after a restart instead of ✓ within a few seconds.
 reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.message || e}`));
-setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
+// Board #656 — 30s+60s+120s can outlast this tick. A capacity-retry line
+// stays working; every other heartbeat still reports idle, as before.
+setInterval(() => {
+  const live = lastReportedStatus;
+  if (live.status === "working" && typeof live.task === "string" && live.task.startsWith("模型满载，")) {
+    void reportStatus("working", live.task).catch(() => {});
+    return;
+  }
+  reportStatus("idle").catch(() => {});
+}, 3 * 60 * 1000);
 
 // RFC-027 §2.5 / §4.4 D7 — 30d backup sweeper, host_supervisor only.
 // Runs once at boot (catches accumulated junk from long down-periods),

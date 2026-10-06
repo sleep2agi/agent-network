@@ -171,6 +171,12 @@ L1_TESTS=(
   # Admission on a still-busy session is not aborted. Cheap: one bun test
   # file, no real opencode binary.
   "test651-opencode-timeout-abort"
+  # Board #656. A fake codex app-server that returns "at capacity" must
+  # retry the same body and, on a later success, emit one reply. Replacing
+  # the retry decision with give_up turns that assertion red (1:0:fail).
+  # The OpenCode case checks the wait extends the #651 reply deadline
+  # instead of aborting the shared session. Cheap: bun tests, no real binary.
+  "test656-capacity-retry"
   # 2026-08-19 补注册。它此前是孤儿**且在 main 上是红的**，而红因有三层，
   # 全部是「产品前进、套件写在它之前」，一条回归都没有：
   #   ① #203 身份守卫（server/src/tools.ts 的 alias_identity_mismatch）——

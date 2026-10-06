@@ -54,6 +54,12 @@ import {
 } from "./runtime";
 import { unverifiedOwnerError } from "./reply-ownership";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
+import {
+  CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_LIMIT,
+  capacityRetryDecision,
+  pauseForCapacityRetry,
+} from "../capacity-retry";
 import { readLinuxProcessGroupIdentity } from "./process-group";
 import { relaunchPreviousAttach, stopRecordedAttach } from "./attach-tui";
 import { resolve } from "path";
@@ -345,11 +351,16 @@ export async function openVettedOpenCodeV2Copresence(
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
           const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
-          const deadline = budgetMs > 0 ? Date.now() + budgetMs : Number.POSITIVE_INFINITY;
+          // Capacity backoff adds its wait back onto this deadline. The sleep
+          // sits outside the poll, so it is not a #651-style reply timeout
+          // and does not cancel the shared session.
+          let deadline = budgetMs > 0 ? Date.now() + budgetMs : Number.POSITIVE_INFINITY;
+          let capacityRetries = 0;
           const visibleSender = normalizeNoticeSender(sender);
           const visiblePrompt = visibleSender ? `[来自 ${visibleSender}] ${prompt}` : prompt;
           // "queue", never the default "steer": a human turn in progress
           // finishes first and our prompt starts its own segment.
+          capacityAttempts: for (;;) {
           const accepted = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/prompt`, {
             method: "POST",
             body: JSON.stringify({ text: visiblePrompt, delivery: "queue" }),
@@ -382,7 +393,27 @@ export async function openVettedOpenCodeV2Copresence(
                   return { replyText: outcome.replyText, stdout: JSON.stringify(after) };
                 } catch (error: any) {
                   if (error instanceof OpenCodeProviderError) {
+                    const decision = capacityRetryDecision(
+                      capacityRetries,
+                      `${error.upstreamName}: ${error.upstreamMessage}`,
+                    );
+                    if (decision.action === "retry") {
+                      capacityRetries += 1;
+                      if (Number.isFinite(deadline)) deadline += decision.waitMs;
+                      warn(`[opencode-copresence] model at capacity; retry ${decision.attempt}/${CAPACITY_RETRY_LIMIT} in ${decision.waitMs}ms; same model, reply deadline extended`);
+                      await pauseForCapacityRetry(decision, {
+                        sleep: evidence?.capacityRetrySleep,
+                        onRetry: evidence?.onCapacityRetry,
+                      });
+                      continue capacityAttempts;
+                    }
                     warn(`[opencode-copresence] provider error for this turn: ${error.upstreamName}: ${error.upstreamMessage}`);
+                    if (decision.action === "exhaust") {
+                      throw new OpenCodeProviderError(
+                        { name: error.upstreamName, message: CAPACITY_RETRY_EXHAUSTED_TEXT },
+                        error.partialReplyText,
+                      );
+                    }
                   } else if (error?.ownershipReason) {
                     warn(`[opencode-copresence] reply ownership refused: ${error.ownershipReason}`);
                   }
@@ -418,6 +449,7 @@ export async function openVettedOpenCodeV2Copresence(
           }
           warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; the turn continues in the TUI session`);
           throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
+          }
         });
         queue = operation.then(() => undefined, () => undefined);
         return operation;

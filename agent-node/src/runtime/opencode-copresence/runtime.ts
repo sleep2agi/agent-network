@@ -18,6 +18,12 @@ import { opencodeGenerationRefusal } from "../opencode-versions";
 import { ownershipChainVerdict, timedOutTurnAbortDecision, unverifiedOwnerError } from "./reply-ownership";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
+  CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_LIMIT,
+  capacityRetryDecision,
+  pauseForCapacityRetry,
+} from "../capacity-retry";
+import {
   linuxProcessGroupIsGone,
   readLinuxProcessGroupIdentity,
   signalExactLinuxProcessGroup,
@@ -134,7 +140,14 @@ export interface OpenCodeCopresenceSession {
     prompt: string,
     timeoutMs?: number,
     sender?: string,
-    evidence?: { onSubmitted?: () => void; onConsumed?: () => void },
+    evidence?: {
+      onSubmitted?: () => void;
+      onConsumed?: () => void;
+      /** Board #656. Non-terminal. Node status stays working. */
+      onCapacityRetry?: (attempt: number) => void | Promise<void>;
+      /** Test seam for the 30s / 60s / 120s capacity backoff. */
+      capacityRetrySleep?: (ms: number) => Promise<void>;
+    },
   ): Promise<OpenCodeCopresenceSubmitResult>;
   /** `restart: true` keeps the human TUI's tmux pane alive with a placeholder for the next generation (#1957). */
   close(mode?: { restart?: boolean }): Promise<void>;
@@ -748,14 +761,22 @@ export async function openVettedOpenCodeCopresence(
         prompt: string,
         timeoutMs = OPENCODE_DEFAULT_TASK_TIMEOUT_MS,
         sender?: string,
-        evidence?: { onSubmitted?: () => void; onConsumed?: () => void },
+        evidence?: {
+          onSubmitted?: () => void;
+          onConsumed?: () => void;
+          onCapacityRetry?: (attempt: number) => void | Promise<void>;
+          capacityRetrySleep?: (ms: number) => Promise<void>;
+        },
       ) {
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
           // One wall-clock budget for the whole task: idle admission and the
           // reply wait share it (previously each phase got the full value).
+          // Capacity backoffs add their own wait back onto this deadline so
+          // the sleep is not counted as #651 reply time (see the retry site).
           const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
-          const deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
+          let deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
+          let capacityRetries = 0;
           await waitUntilSessionIdle(url, password, created.id, budgetMs);
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
@@ -781,6 +802,7 @@ export async function openVettedOpenCodeCopresence(
           // custom suffix sorts after OpenCode's timestamp prefix and can make
           // a later user turn appear already answered. Generate the exact
           // ascending ID shape used by OpenCode 1.18.1 instead.
+          for (;;) {
           const messageId = createOpenCodeAscendingMessageId();
           if (deadline > 0 && Date.now() >= deadline) {
             throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
@@ -869,11 +891,32 @@ export async function openVettedOpenCodeCopresence(
           // replying "[opencode: assistant returned no reply]".
           const turnError = openCodeTurnError(message);
           if (turnError) {
-            warn(`[opencode-copresence] provider error for this turn: ${turnError.name}: ${turnError.message}`);
+            const raw = `${turnError.name}: ${turnError.message}`;
+            const decision = capacityRetryDecision(capacityRetries, raw);
+            if (decision.action === "retry") {
+              capacityRetries += 1;
+              // #656 × #651: the POST already returned, so its AbortSignal is
+              // gone and this sleep cannot POST /session/:id/abort. Push the
+              // shared budget forward by the backoff first; otherwise a short
+              // remaining deadline would treat the wait as a reply timeout.
+              if (deadline > 0) deadline += decision.waitMs;
+              warn(`[opencode-copresence] model at capacity; retry ${decision.attempt}/${CAPACITY_RETRY_LIMIT} in ${decision.waitMs}ms; same model, reply deadline extended`);
+              await pauseForCapacityRetry(decision, {
+                sleep: evidence?.capacityRetrySleep,
+                onRetry: evidence?.onCapacityRetry,
+              });
+              continue;
+            }
+            warn(`[opencode-copresence] provider error for this turn: ${raw}`);
             const partial = (message?.parts ?? []).some((p: any) => p?.type === "text" && typeof p.text === "string" && p.text.trim())
               ? parseMessageReply(message)
               : "";
-            throw new OpenCodeProviderError(turnError, partial);
+            throw new OpenCodeProviderError(
+              decision.action === "exhaust"
+                ? { name: turnError.name, message: CAPACITY_RETRY_EXHAUSTED_TEXT }
+                : turnError,
+              partial,
+            );
           }
           // parseMessageReply now always returns a non-empty string (either
           // the joined text or a marker naming the non-text part types the
@@ -885,6 +928,7 @@ export async function openVettedOpenCodeCopresence(
             replyText,
             stdout: JSON.stringify(message),
           };
+          }
         });
         queue = operation.then(() => undefined, () => undefined);
         return operation;
