@@ -13,6 +13,10 @@
 #       with not_daemon_managed, writes no stop request, the process lives.
 #   S4  `anet project up` with a node running outside tmux (live .pid) → "already running",
 #       pidfile untouched, no second copy; a dead pid's .pid is still cleared.
+#   S6  Board #628: a node dir with `.hub-stopped` stays down. `project up` does not
+#       delete its .pid or start it. The boot sweep (`anet-nodes-boot.sh`) does not
+#       pass that alias to `project up`, and post-flight does not count it missing.
+#       A sibling without the marker is still started. Stubs only; HOME is a fixture.
 #   S5  (#579) daemon restart while its own child is dead and a same-alias agent-node
 #       runs in another workdir/HOME. Boot rebuild must not adopt that process (its
 #       --config is not the one the daemon wrote), so the following stop_node acks
@@ -49,7 +53,7 @@ HUB_PID=""; DAEMON_PID=""
 cleanup() {
   for p in "${FAKE_PIDS[@]}" "$DAEMON_PID" "$HUB_PID"; do [[ -n "$p" ]] && kill "$p" 2>/dev/null; done
   # private socket only; kill the sessions this suite may have created, never the server
-  for s in live571 stale571; do ANET_TMUX_SOCKET="$TMUX_SOCK" tmux -S "$TMUX_SOCK" kill-session -t "=$s" 2>/dev/null; done
+  for s in live571 stale571 demo-stopped demo-keep; do ANET_TMUX_SOCKET="$TMUX_SOCK" tmux -S "$TMUX_SOCK" kill-session -t "=$s" 2>/dev/null; done
   return 0
 }
 trap cleanup EXIT
@@ -313,6 +317,95 @@ ST5=$(wait_stop_request_done "$SR5" 40)
 sleep 2
 if alive "$FOREIGN5"; then ok "S5 foreign same-alias agent-node survived the daemon restart + stop"
 else bad "S5 foreign same-alias agent-node pid=$FOREIGN5 was KILLED (boot rebuild adopted it by alias)"; fi
+
+# ── S6 ────────────────────────────────────────────────────────────
+note "S6. .hub-stopped stays down (project up + boot sweep)"
+PROJ6="$ROOT/proj628"
+STOPPED_DIR="$PROJ6/.anet/nodes/demo-stopped"
+mkdir -p "$STOPPED_DIR"
+cat > "$STOPPED_DIR/config.json" <<'EOF'
+{"node_id":"n_demo_stopped","node_name":"demo-stopped","alias":"demo-stopped","runtime":"claude-agent-sdk","model":"x","hub":"http://127.0.0.1:9","token":"ntok_demo_placeholder"}
+EOF
+chmod 600 "$STOPPED_DIR/config.json"
+DEADP=424242
+while alive "$DEADP"; do DEADP=$((DEADP+1)); done
+ok "demo-stopped .pid will hold dead pid $DEADP"
+printf '%s\n' "$DEADP" > "$STOPPED_DIR/.pid"
+: > "$STOPPED_DIR/.hub-stopped"
+OUT6=$(cd "$PROJ6" && HOME="$PROJ6" ANET_TMUX_SOCKET="$TMUX_SOCK" timeout 90 anet project up --stagger 0 --only demo-stopped 2>&1); RC6=$?
+printf '%s\n' "$OUT6" | sed 's/^/    | /'
+echo "    (project up rc=$RC6)"
+[[ "$RC6" -eq 0 ]] && ok "project up exits 0 when the only node is hub-stopped" || bad "project up rc=$RC6"
+printf '%s' "$OUT6" | grep -Eq 'demo-stopped — hub-stopped, leaving it down' && ok "project up left demo-stopped down" || bad "project up did not report hub-stopped"
+[[ "$(cat "$STOPPED_DIR/.pid" 2>/dev/null)" == "$DEADP" ]] && ok "hub-stopped .pid not deleted" || bad "hub-stopped .pid changed: '$(cat "$STOPPED_DIR/.pid" 2>/dev/null)'"
+[[ -f "$STOPPED_DIR/.hub-stopped" ]] && ok "hub-stopped marker kept" || bad "hub-stopped marker removed"
+if tmux -S "$TMUX_SOCK" list-sessions -F '#{session_name}' 2>/dev/null | grep -qx demo-stopped; then
+  bad "tmux session demo-stopped was started"
+else ok "no tmux session for demo-stopped"; fi
+
+# Boot sweep. Never the operator's HOME: fixture only, and anet/tmux/curl are stubs
+# so this cannot start a real node or talk to a hub.
+note "S6b. boot sweep does not pass a .hub-stopped alias to project up"
+BOOT_HOME="$ROOT/boot-home"
+BOOT_STUBS="$ROOT/boot-stubs"
+BOOT_UP="$ROOT/boot-up"
+BOOT_LOG="$ROOT/boot-anet.log"
+safe_rm_rf "$BOOT_HOME" "$BOOT_STUBS" "$BOOT_UP"
+mkdir -p "$BOOT_HOME/fleet-demo/.anet/nodes/demo-keep" \
+         "$BOOT_HOME/fleet-demo/.anet/nodes/demo-stopped" \
+         "$BOOT_STUBS" "$BOOT_UP"
+for al in demo-keep demo-stopped; do
+  cat > "$BOOT_HOME/fleet-demo/.anet/nodes/$al/config.json" <<EOF
+{"node_id":"n_${al}","node_name":"${al}","alias":"${al}","runtime":"claude-agent-sdk","model":"x","hub":"http://127.0.0.1:9","token":"ntok_demo_placeholder"}
+EOF
+done
+: > "$BOOT_HOME/fleet-demo/.anet/nodes/demo-stopped/.hub-stopped"
+cat > "$BOOT_STUBS/curl" <<'EOF'
+#!/bin/bash
+printf '%s\n' '{"ok":true}'
+EOF
+cat > "$BOOT_STUBS/tmux" <<EOF
+#!/bin/bash
+if [[ "\${1:-}" == "has-session" ]]; then
+  target="\${3:-}"
+  target="\${target#=}"
+  [[ -n "\$target" && -f "$BOOT_UP/\$target" ]] && exit 0
+  exit 1
+fi
+exit 0
+EOF
+cat > "$BOOT_STUBS/anet" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> "$BOOT_LOG"
+only=""
+prev=""
+for a in "\$@"; do
+  if [[ "\$prev" == "--only" ]]; then only="\$a"; fi
+  prev="\$a"
+done
+IFS=',' read -ra names <<< "\$only"
+mkdir -p "$BOOT_UP"
+for n in "\${names[@]}"; do
+  [[ -n "\$n" ]] && touch "$BOOT_UP/\$n"
+done
+exit 0
+EOF
+chmod 755 "$BOOT_STUBS/curl" "$BOOT_STUBS/tmux" "$BOOT_STUBS/anet"
+: > "$BOOT_LOG"
+BOOT_SCRIPT=/app/deploy/fleet/anet-nodes-boot.sh
+[[ -f "$BOOT_SCRIPT" ]] && ok "boot script is in the image" || { bad "boot script missing at $BOOT_SCRIPT"; }
+BOOT_OUT=$(HOME="$BOOT_HOME" PATH="$BOOT_STUBS:$PATH" STAGGER=0 MAX_ROUNDS=1 LATE_GREEN_GRACE=0 \
+  bash "$BOOT_SCRIPT" 2>&1); BOOT_RC=$?
+printf '%s\n' "$BOOT_OUT" | sed 's/^/    | /'
+echo "    (boot rc=$BOOT_RC)"
+echo "    (anet invocations: $(cat "$BOOT_LOG" 2>/dev/null))"
+[[ "$BOOT_RC" -eq 0 ]] && ok "boot sweep exits 0 with a hub-stopped node left down" || bad "boot sweep rc=$BOOT_RC"
+INV=$(cat "$BOOT_LOG" 2>/dev/null || true)
+[[ "$INV" == "project up --stagger 0 --only demo-keep" ]] && ok "project up --only is demo-keep and not the hub-stopped alias" || bad "anet invocations: '$INV'"
+printf '%s' "$BOOT_OUT" | grep -q 'hub_stopped=1' && ok "post-flight counted the hub-stopped node separately" || bad "post-flight did not report hub_stopped=1"
+[[ -f "$BOOT_HOME/fleet-demo/.anet/nodes/demo-stopped/.hub-stopped" ]] && ok "boot left the marker in place" || bad "boot removed .hub-stopped"
+[[ ! -f "$BOOT_UP/demo-stopped" ]] && ok "stub anet was not asked to start demo-stopped" || bad "stub anet started demo-stopped"
+[[ -f "$BOOT_UP/demo-keep" ]] && ok "sibling without the marker was still started" || bad "demo-keep was not started"
 
 printf "\n────────────────────────────────────────────\n"
 printf "test571 lifecycle safety — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"

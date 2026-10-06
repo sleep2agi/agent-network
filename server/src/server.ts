@@ -1,4 +1,5 @@
 import { buildServeErrorResponse } from "./serve-error.js";
+import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
 import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
@@ -4474,6 +4475,7 @@ return Bun.serve({
           // 🔴 不是 clamp 成边界值:clamp 会把一个坏值变成一个**看起来正常的年龄**,
           //    而这一格存在的全部意义就是让人分辨新鲜和陈旧。
           let snapObservedMsAgo: number | undefined;
+          let snapReadiness: ReturnType<typeof sanitizeRuntimeReadiness>;
           if (r.config_snapshot) {
             try {
               const parsed = typeof r.config_snapshot === "string" ? JSON.parse(r.config_snapshot) : r.config_snapshot;
@@ -4491,13 +4493,15 @@ return Bun.serve({
                   && rawAge >= 0 && rawAge <= 365 * 24 * 60 * 60 * 1000) {
                 snapObservedMsAgo = rawAge;
               }
+              // #622 —— 逐 runtime 就绪度;旧 daemon 不报 ⇒ undefined ⇒ 响应里没有这个键。
+              snapReadiness = sanitizeRuntimeReadiness(caps?.runtime_readiness);
             } catch { /* malformed */ }
           }
           return { row: r, role: snapRole, canCreate: snapCanCreate, blockedReason: snapBlockedReason,
-            observedMsAgo: snapObservedMsAgo };
+            observedMsAgo: snapObservedMsAgo, readiness: snapReadiness };
         })
         .filter(({ role }) => role === "host_supervisor")
-        .map(({ row: r, canCreate, blockedReason, observedMsAgo }) => {
+        .map(({ row: r, canCreate, blockedReason, observedMsAgo, readiness }) => {
           let online = false;
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
@@ -4562,6 +4566,10 @@ return Bun.serve({
               out.create_capability_observed_ms_ago = observedMsAgo;
             }
           }
+          // #622 —— 逐 runtime 实测就绪度(CLI / 登录存在性 / 网络 / codex 共享登录数)。
+          // 只在 daemon 真的报了时出现;**不影响** can_create_nodes(旧 app 依赖它的语义)。
+          // 内容不含路径与凭据(上报侧只发存在性 + 版本号 + 通用修法),所以不按角色脱敏。
+          if (readiness) out.runtime_readiness = readiness;
           // app「新建节点」确认页的默认工作目录根。出现即表示该 daemon 认 node_spec.workdir;
           // 缺席(老 daemon / 老 hub 的 zod 剥掉了它)时 app 藏起那一行、不发 workdir。
           // 🔴 它是那台机器的家目录路径 —— 与 ip_internal 同级,只给 admin/owner。

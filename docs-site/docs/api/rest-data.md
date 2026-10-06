@@ -269,6 +269,8 @@ curl "http://localhost:9200/api/host-supervisors" \
 🔴 **`can_create_nodes` / `create_nodes_blocked_reason`（daemon 建节点能力）**：daemon 通过 `report_status.host.daemon_capabilities` 上报，hub 原样镜像进这里 —— Dashboard「建节点向导」据此决定某台服务器能不能选、不能选时给出原因（`create_nodes_blocked_reason` 仅在 `can_create_nodes===false` 时出现）。
 🔴 **只有 daemon 真的上报了才带这两个键**：agent-node 版本较旧、尚未上报 `daemon_capabilities` 的 daemon，响应里这两个键**整个缺席**（不是 `false`）。消费方必须把「键缺席」当作「未知、按可建处理」，**不能**把缺席当成 blocked 而误灰掉一台健康的老 daemon（`undefined ≠ false`）。
 
+🔴 **`runtime_readiness`（逐 runtime 实测能否建节点，#622）**：daemon 开机自检一次、之后每 10 分钟（±10% 抖动）在后台自检，结果按 runtime 名给出，例如 `{"claude-code-cli": {"ok": true, "state": "ready", "reason": "可以创建", "version": "2.1.290", "checked_at": "2026-10-06T03:00:00.000Z", "cli": "found", "auth": "present", "network": "reachable"}}`。`state` ∈ `ready` / `missing_cli` / `not_logged_in` / `no_network` / `unknown`；`reason` 是面向用户的中文说明并带修法；`checked_at` 是 daemon 本机时钟。可选格：`version`、`cli`（`found`/`missing`/`bundled`/`unknown`）、`auth`（`present`/`absent`/`not_required`/`unknown`）、`network`（`reachable`/`unreachable`/`skipped`）、`shared_login_count`（仅 codex：本机已有多少别的节点共用同一条 codex 登录）。CLI 按 **daemon 建出的子节点实际拿到的 PATH** 解析；登录只看文件/变量名**是否存在**，从不读取或上报内容。**旧 daemon 不报时整个键缺席**；它**不改变** `can_create_nodes` 的语义。
+
 🔴 **`online` 的窗口是 5 分钟**，不是心跳周期本身。agent-node 的 `report_status` 每 **3 分钟**一次，窗口必须大于它 —— 否则每次心跳之后的 60~180 秒必然抖成 `offline`。
 
 **只列"还有活 token"的 daemon**：SQL 里的 `EXISTS` 子查询要求存在未吊销的 `node:<alias>` token。吊销过（或行已被删）的不会出现；同一个 daemon 轮换过 token 也只出现一次。
