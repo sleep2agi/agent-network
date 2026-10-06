@@ -87,3 +87,30 @@ Latest-main integration (2026-10-07):
   respectively 8 and 2 explicitly skipped pins are not counted as passes.
 - Real Hub HTTP and test571 results above were not rerun for this merge.
   Only document pins and this report changed after the tested product snapshot.
+
+Independent-review fixes (2026-10-07), based on published head 543e9534:
+- Tested product commit 2af308897c165a35c3f2160f1b423894382af440.
+- B1: both layouts now remove the saved .pid while a new-marker process uses
+  the same CODEX_HOME. Stop refuses with adopt_codex_readopt_required, emits
+  zero signals and leaves that pane alive. The inserted missing-PID early
+  return mutant is assertion-red (rc=1), not merely a compile failure.
+- B2: boot probe releases only with reserved exit 42; all other outcomes hold.
+  Test executes the actual shell function with a top-level throw and syntax
+  error; both hold a valid stop. A valid resume still releases. A mutant that
+  also treats exit 1 as release is assertion-red (rc=1).
+- CLI and fleet fingerprint both omit dev and retain inode/ctime/content hash.
+  An exact fingerprint assertion pins this format; identical-JSON replacement,
+  late certificate and same-inode rewrite tests continue to hold newer stops.
+  Older device-bearing certificates fail closed until explicit manual start.
+- Docker --init --cpus=2 --network none: complete test658 rc=0: safety 2/2,
+  recovery 5/5 (76 assertions), listing 7/7, stop/evidence 15/15, preflight 8/8,
+  repeated exit-race 20/20; all 19 mutation checks red, suite rc=0.
+- Rebuilt real Hub + daemon Docker E2E: 13/13, rc=0, including new exit-42
+  reader parity, manual resume, new-generation refusal and newer stop priority.
+- Docker static gates rc=0, 590 mutation anchors, unchanged 4 exceptions;
+  both symbol-pin scopes rc=0 with no missing refs/drift (existing skips remain).
+- Broad CLI, server and test571 suites not rerun in this review-fix increment.
+- Bilingual operator deployment instructions added: record installed entrypoint,
+  review installed drift, deploy CLI and boot script from merged release inputs
+  together, verify version/hash and isolated behavior, roll back both together.
+  No installed script, real node, production service or deployment was touched.
