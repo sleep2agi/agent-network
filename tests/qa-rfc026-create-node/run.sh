@@ -229,6 +229,34 @@ NONASCII=$(find "$WORK/.anet/nodes" -mindepth 1 -maxdepth 1 -print | LC_ALL=C gr
 CN_STATUS=$(sqlite3 "$HUB_DB" "SELECT status FROM node_create_requests WHERE request_id='$CN_REQ';" 2>/dev/null)
 [[ "$CN_STATUS" == "succeeded" ]] && ok "Chinese-name request status = succeeded" || bad "Chinese-name request status='$CN_STATUS'"
 
+# ── A.cn2 — #652: the folder the app wizard shows is the folder created on disk ──
+# The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`
+# (agent-network-app create-node-workdir.ts; its drive test asserts the request carries it).
+note "A.cn2 #652 — wizard folder (workdir ~/ceshi) == folder on disk"
+SHOWN_FOLDER="ceshi"
+CN2_NAME="测试"
+CN2_ROOT=$(curl -sS "$HUB_BASE/api/host-supervisors?network_id=$NET_ID" -H "Authorization: Bearer $UTOK" \
+  | jq -r --arg d "$DAEMON_NODE_ID" '.daemons[]? | select(.daemon_node_id == $d) | .default_workdir_root // empty' 2>/dev/null)
+[[ -n "$CN2_ROOT" && "$CN2_ROOT" == /* ]] && ok "daemon reports default_workdir_root=$CN2_ROOT" || bad "daemon did not report default_workdir_root ('$CN2_ROOT')"
+BODY=$(build_create_node_body "$DAEMON_NODE_ID" "$CN2_NAME" "claude-agent-sdk" "claude-opus-rfc026-cn2" "$NET_ID" ",\"workdir\":\"$CN2_ROOT/$SHOWN_FOLDER\"")
+RESP=$(mcp_call "$UTOK" "$BODY")
+CN2_REQ=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+[[ "$CN2_REQ" == cr_* ]] && ok "dispatched $CN2_NAME with workdir $CN2_ROOT/$SHOWN_FOLDER" || bad "dispatch failed: $RESP"
+CN2_ROW=""
+for i in $(seq 1 60); do
+  sleep 1
+  CN2_ROW=$(curl -sS "$HUB_BASE/api/nodes" -H "Authorization: Bearer $UTOK" \
+    | jq -r --arg a "$CN2_NAME" '.nodes[] | select(.alias == $a) | .node_id' 2>/dev/null | head -1)
+  [[ -n "$CN2_ROW" && "$CN2_ROW" != "null" ]] && break
+done
+[[ -n "$CN2_ROW" && "$CN2_ROW" != "null" ]] && ok "child registered with alias $CN2_NAME" || { bad "$CN2_NAME never registered"; tail -30 /tmp/daemon.log; }
+CN2_CFG="$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes/$SHOWN_FOLDER/config.json"
+[[ -f "$CN2_CFG" ]] && ok "on disk: $SHOWN_FOLDER/.anet/nodes/$SHOWN_FOLDER/config.json (== wizard folder)" || bad "no config at $CN2_CFG; nodes dir has: $(ls "$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes" 2>&1)"
+[[ "$(ls "$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes" 2>/dev/null)" == "$SHOWN_FOLDER" ]] && ok "the only node dir in the workdir is $SHOWN_FOLDER" || bad "node dirs in workdir: $(ls "$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes" 2>&1)"
+[[ "$(jq -r .alias "$CN2_CFG" 2>/dev/null)" == "$CN2_NAME" ]] && ok "config alias = $CN2_NAME" || bad "config alias = $(jq -r .alias "$CN2_CFG" 2>/dev/null)"
+NONASCII2=$(find "$CN2_ROOT/$SHOWN_FOLDER" -print | LC_ALL=C grep -c '[^ -~]' || true)
+[[ "$NONASCII2" == "0" ]] && ok "every path under $CN2_ROOT/$SHOWN_FOLDER is ASCII" || bad "$NONASCII2 non-ASCII path(s) under the workdir"
+
 # nvm-sim scenario runs at end (after K) — see "A.nvm" block below.
 
 # ── B. role gate ──────────────────────────────────────────────────
