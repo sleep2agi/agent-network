@@ -69,12 +69,30 @@ export function claudeAuthRetryDecision(message: ClaudeApiRetryLike): ClaudeAuth
  */
 const CLAUDE_CODE_ERROR_RESULT_PREFIX = "Claude Code returned an error result: ";
 
+const CLAUDE_VENDOR_KEY_SUFFIX =
+  "refresh API key and re-export ENV var; see agent-node log for vendor-specific URL";
+
+/**
+ * A region block or a permission denial is not a dead key. The vendor
+ * sentence already says which. Telling the operator to refresh the key
+ * sends them at the wrong fix. A revoked credential still uses the key suffix.
+ */
+function claudeVendorAuthSuffix(detail: string): string {
+  const region = /request not allowed/i.test(detail);
+  const permission = /does not have permission/i.test(detail);
+  if ((region || permission) && !/revoked/i.test(detail)) {
+    return "see agent-node log for the vendor reason";
+  }
+  return CLAUDE_VENDOR_KEY_SUFFIX;
+}
+
 /** Same shape cli.ts used before #672. The raw vendor text stays in the reply. */
 export function claudeVendorAuthUserText(message: string): string {
   const detail = message.startsWith(CLAUDE_CODE_ERROR_RESULT_PREFIX)
     ? message.slice(CLAUDE_CODE_ERROR_RESULT_PREFIX.length)
     : message;
-  return `执行出错: vendor API auth failed (${detail.slice(0, 200)}) — refresh API key and re-export ENV var; see agent-node log for vendor-specific URL`;
+  const shown = detail.slice(0, 200);
+  return `执行出错: vendor API auth failed (${shown}) — ${claudeVendorAuthSuffix(shown)}`;
 }
 
 /** Thrown CLI text, not an api_retry. Kept in one place so the catch branch is testable. */

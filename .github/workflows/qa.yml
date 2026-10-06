@@ -72,6 +72,7 @@ on:
       - 'tests/test656-capacity-retry/**'
       - 'tests/test667-project-dir-warn/**'
       - 'tests/test672-claude-auth-abort/**'
+      - 'tests/qa-board673-claude-process-auth/**'
       - 'tests/test198-from-alias/**'
       - 'tests/test8-runtime/**'
       - 'tests/test17-user-journey/**'
@@ -274,6 +275,7 @@ on:
       - 'tests/test656-capacity-retry/**'
       - 'tests/test667-project-dir-warn/**'
       - 'tests/test672-claude-auth-abort/**'
+      - 'tests/qa-board673-claude-process-auth/**'
       - 'tests/test198-from-alias/**'
       - 'tests/test8-runtime/**'
       - 'tests/test17-user-journey/**'
@@ -677,6 +679,28 @@ jobs:
 
       - name: Run claude-code node_id e2e
         run: docker run --rm anet-qa-claude-code-node-id
+
+  qa-board673-claude-process-auth:
+    # Board #673. Real hub + real processWithClaude. The SDK query is a
+    # scripted upstream. Cold build is two bun installs, so it stays out of
+    # the 5-minute L1 job. Docs-only PRs skip it.
+    name: claude processWithClaude auth (Docker, real hub)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-board673-claude-process-auth"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build board673 processWithClaude auth image
+        run: |
+          docker build \
+            --build-arg QA_BOARD673_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-qa-board673-claude-process-auth \
+            -f tests/qa-board673-claude-process-auth/Dockerfile .
+
+      - name: Run board673 processWithClaude auth
+        run: docker run --rm anet-qa-board673-claude-process-auth
 
   qa-create-node-workdir:
     # app「新建节点」工作目录端到端:真 hub + 真 `anet daemon up` + create_node(默认 <root>/<name>、
