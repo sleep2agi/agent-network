@@ -113,3 +113,18 @@ test("old daemon, hostname mismatch, stale heartbeat and cross-network daemon re
   expect((await request()).error).toBe("daemon_offline");
   expect((await call(handlers().request_adopt_node, { node_id: CHILD, daemon_node_id: "other_network_daemon", workdir: "/workspace/project" })).error).toBe("daemon_not_found");
 });
+test("network boundaries apply to both human request and daemon pull/ack", async () => {
+  const r = await request(); expect(r.ok).toBe(true);
+  db.run("UPDATE node_daemon_bindings SET network_id='net_other_adoption_test' WHERE request_id=?1", [r.request_id]);
+  try {
+    const d = handlers("daemon");
+    expect((await call(d.get_adopt_request, { request_id: r.request_id })).error).toBe("request_not_found");
+    expect((await call(d.ack_adopt_request, { request_id: r.request_id, status: "adopted" })).error).toBe("request_not_found");
+  } finally { db.run("UPDATE node_daemon_bindings SET network_id=?1 WHERE request_id=?2", [NET, r.request_id]); }
+  db.run("UPDATE nodes SET network_id='net_other_adoption_test' WHERE node_id=?1", [DAEMON]);
+  try { expect((await request()).error).toBe("daemon_not_found"); }
+  finally { db.run("UPDATE nodes SET network_id=?1 WHERE node_id=?2", [NET, DAEMON]); }
+  db.run("UPDATE nodes SET network_id='net_other_adoption_test' WHERE node_id=?1", [CHILD]);
+  try { expect((await request()).error).toBe("adopt_forbidden"); }
+  finally { db.run("UPDATE nodes SET network_id=?1 WHERE node_id=?2", [NET, CHILD]); }
+});
