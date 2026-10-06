@@ -14,8 +14,11 @@ REPORT="${REPORT:-/report/report-test656.txt}"
 mkdir -p "$(dirname "$REPORT")"
 
 SRC=src/runtime/codex-app-server/runtime.ts
-ANCHOR='const capacityDecision = capacityRetryDecision(capacityRetries, raw);'
+ANCHOR='const capacityDecision = capacityRetryDecision(capacityRetries, raw, toolsRan);'
 REPL='const capacityDecision = ({ action: "give_up" as const });'
+SIDE_SRC=src/runtime/capacity-retry.ts
+SIDE_ANCHOR='if (toolsRan) return { action: "side_effect" };'
+SIDE_REPL='if (false) return { action: "side_effect" };'
 
 # Cooperation with #651: the capacity sleep pauses the codex response-idle
 # timer (it is not model-idle time) and, on the OpenCode lane, adds the
@@ -34,18 +37,23 @@ run_mutation_case() {
   bun test src/runtime/codex-app-server/capacity-retry.test.ts -t 'board656 capacity then one reply'
 }
 
+run_side_effect_case() {
+  bun test src/runtime/codex-app-server/capacity-retry.test.ts -t 'board656 tool then capacity does not retry'
+}
+
 received_trace() {
   grep -F 'Received:' "$1" | head -n 1 | tr -d '\033'
 }
 
 apply_mutation() {
+  local file="$1" anchor="$2" repl="$3" bak="$4"
   local count
-  count=$(grep -F -c "$ANCHOR" "$SRC" || true)
+  count=$(grep -F -c "$anchor" "$file" || true)
   if [ "$count" != "1" ]; then
     echo "MUTATION_NOT_APPLIED: anchor count=$count"
     exit 1
   fi
-  cp "$SRC" /tmp/mutation656.bak
+  cp "$file" "$bak"
   bun -e '
     const fs = require("fs");
     const path = process.argv[1];
@@ -58,15 +66,15 @@ apply_mutation() {
       process.exit(1);
     }
     fs.writeFileSync(path, text.replace(anchor, repl));
-  ' "$SRC" "$ANCHOR" "$REPL"
-  if grep -F -q "$ANCHOR" "$SRC"; then
+  ' "$file" "$anchor" "$repl"
+  if grep -F -q "$anchor" "$file"; then
     echo "MUTATION_NOT_APPLIED: anchor still present"
     exit 1
   fi
 }
 
 restore_mutation() {
-  cp /tmp/mutation656.bak "$SRC"
+  cp "$2" "$1"
 }
 
 {
@@ -79,12 +87,12 @@ restore_mutation() {
   run_green
   echo
   echo "## mutation — drop the retry decision; the success case must come back 1:0:fail"
-  apply_mutation
+  apply_mutation "$SRC" "$ANCHOR" "$REPL" /tmp/mutation656.bak
   set +e
   run_mutation_case >/tmp/mutation656.log 2>&1
   rc=$?
   set -e
-  restore_mutation
+  restore_mutation "$SRC" /tmp/mutation656.bak
   cat /tmp/mutation656.log
   if [ "$rc" -eq 0 ]; then
     echo "MUTATION_FALSE_GREEN"
@@ -97,6 +105,25 @@ restore_mutation() {
   esac
   case "$line" in
     *'2:1:ok'*) echo "MUTATION_RED_FOR_THE_WRONG_REASON: received trace still retried"; exit 1 ;;
+  esac
+  echo "MUTATION_RED rc=$rc"
+  echo
+  echo "## mutation — drop the tools-already-ran guard; a tool then at capacity must retry"
+  apply_mutation "$SIDE_SRC" "$SIDE_ANCHOR" "$SIDE_REPL" /tmp/mutation656-side.bak
+  set +e
+  run_side_effect_case >/tmp/mutation656-side.log 2>&1
+  rc=$?
+  set -e
+  restore_mutation "$SIDE_SRC" /tmp/mutation656-side.bak
+  cat /tmp/mutation656-side.log
+  if [ "$rc" -eq 0 ]; then
+    echo "MUTATION_FALSE_GREEN"
+    exit 1
+  fi
+  line=$(received_trace /tmp/mutation656-side.log)
+  case "$line" in
+    *'a:2:1:ok'*) ;;
+    *) echo "MUTATION_RED_FOR_THE_WRONG_REASON: tool-then-capacity did not become a:2:1:ok"; exit 1 ;;
   esac
   echo "MUTATION_RED rc=$rc"
   echo

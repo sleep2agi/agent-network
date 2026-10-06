@@ -28,6 +28,7 @@ import { verifyProcessTreeCodexHome, type ProcReader } from "../../codex-home-en
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
   CAPACITY_RETRY_LIMIT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
   capacityRetryDecision,
   pauseForCapacityRetry,
 } from "../capacity-retry";
@@ -408,6 +409,9 @@ export function codexAppServerThink(
     let reconciliationTimer: ReturnType<typeof setTimeout> | undefined;
     let capacityRetries = 0;
     let capacityRetrying = false;
+    let attemptTurnId: string | undefined;
+    let toolsRan = false;
+    const sideEffectTurns = new Set<string>();
     const finish = (r: CodexAppServerThinkResult) => {
       if (settled) return;
       settled = true;
@@ -417,6 +421,7 @@ export function codexAppServerThink(
       bridge.off("task_runtime_submitted", onSubmitted);
       bridge.off("task_started", onStarted);
       bridge.off("task_activity", onActivity);
+      bridge.off("task_side_effect", onSideEffect);
       bridge.off("drain_deferred", onRequeued);
       bridge.off("steer_deferred", onRequeued);
       if (timer) clearTimeout(timer);
@@ -481,7 +486,7 @@ export function codexAppServerThink(
       log(`[codex-app-server] task_error ${opts.taskId}: ${raw}`);
       // Mutation anchor: a fake app-server test goes red if this call stops
       // deciding to retry (board #656).
-      const capacityDecision = capacityRetryDecision(capacityRetries, raw);
+      const capacityDecision = capacityRetryDecision(capacityRetries, raw, toolsRan);
       if (capacityDecision.action === "retry") {
         capacityRetrying = true;
         capacityRetries += 1;
@@ -513,7 +518,9 @@ export function codexAppServerThink(
       }
       const replyText = capacityDecision.action === "exhaust"
         ? `codex-app-server 错误: ${CAPACITY_RETRY_EXHAUSTED_TEXT}`
-        : `codex-app-server 错误: ${raw}`;
+        : capacityDecision.action === "side_effect"
+          ? `codex-app-server 错误: ${CAPACITY_RETRY_SIDE_EFFECT_TEXT}`
+          : `codex-app-server 错误: ${raw}`;
       finish({ replyText, failed: true, queued });
     };
     const onError = (ev: { taskId: string; error: string }) => {
@@ -563,8 +570,17 @@ export function codexAppServerThink(
         log(`[codex-app-server] runtime-submitted callback failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     };
+    const onSideEffect = (ev: { taskId: string; turnId: string }) => {
+      if (ev.taskId !== opts.taskId || typeof ev.turnId !== "string") return;
+      sideEffectTurns.add(ev.turnId);
+      if (ev.turnId === attemptTurnId) toolsRan = true;
+    };
     const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {
       if (ev.taskId !== opts.taskId) return;
+      if (ev.turnId !== attemptTurnId) {
+        attemptTurnId = ev.turnId;
+        toolsRan = sideEffectTurns.has(ev.turnId);
+      }
       log(`[codex-app-server] task_started ${ev.taskId} turn=${ev.turnId}${ev.steered ? " (steered)" : ""}`);
       if (!consumedReported) {
         consumedReported = true;
@@ -620,6 +636,7 @@ export function codexAppServerThink(
     bridge.on("task_runtime_submitted", onSubmitted);
     bridge.on("task_started", onStarted);
     bridge.on("task_activity", onActivity);
+    bridge.on("task_side_effect", onSideEffect);
     bridge.on("drain_deferred", onRequeued);
     bridge.on("steer_deferred", onRequeued);
     scheduleReconciliation();

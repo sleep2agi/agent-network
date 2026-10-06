@@ -20,7 +20,9 @@ import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-e
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
   CAPACITY_RETRY_LIMIT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
   capacityRetryDecision,
+  isOpencodeSideEffectPart,
   pauseForCapacityRetry,
 } from "../capacity-retry";
 import {
@@ -892,7 +894,8 @@ export async function openVettedOpenCodeCopresence(
           const turnError = openCodeTurnError(message);
           if (turnError) {
             const raw = `${turnError.name}: ${turnError.message}`;
-            const decision = capacityRetryDecision(capacityRetries, raw);
+            const toolsRan = (message?.parts ?? []).some((part: { type?: string }) => isOpencodeSideEffectPart(part?.type));
+            const decision = capacityRetryDecision(capacityRetries, raw, toolsRan);
             if (decision.action === "retry") {
               capacityRetries += 1;
               // #656 × #651: the POST already returned, so its AbortSignal is
@@ -914,7 +917,9 @@ export async function openVettedOpenCodeCopresence(
             throw new OpenCodeProviderError(
               decision.action === "exhaust"
                 ? { name: turnError.name, message: CAPACITY_RETRY_EXHAUSTED_TEXT }
-                : turnError,
+                : decision.action === "side_effect"
+                  ? { name: turnError.name, message: CAPACITY_RETRY_SIDE_EFFECT_TEXT }
+                  : turnError,
               partial,
             );
           }

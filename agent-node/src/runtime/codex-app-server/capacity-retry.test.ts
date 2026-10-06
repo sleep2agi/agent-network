@@ -2,10 +2,13 @@
 // The runtime resubmits the same turn body (no model field), keeps one
 // result, and does not let the backoff trip the response-idle timer.
 //
-// Mutation anchor in runtime.ts:
-//   capacityRetryDecision(capacityRetries, raw)
-// Replacing that call with give_up turns "board656 capacity then one reply" red
-// (prompts:replies:outcome becomes 1:0:fail instead of 2:1:ok).
+// Mutation anchors:
+//   runtime.ts: capacityRetryDecision(capacityRetries, raw, toolsRan)
+//     Replacing that call with give_up turns "board656 capacity then one reply"
+//     red (prompts:replies:outcome becomes 1:0:fail instead of 2:1:ok).
+//   capacity-retry.ts: if (toolsRan) return { action: "side_effect" };
+//     Removing that guard turns "board656 tool then capacity does not retry"
+//     red (a:1:0:fail becomes a:2:1:ok).
 
 import { describe, expect, test } from "bun:test";
 import { CodexAppServerClient } from "../codex-app-server-client";
@@ -15,14 +18,14 @@ import {
   codexAppServerThink,
   type CodexAppServerRuntimeSession,
 } from "./runtime";
-import { CAPACITY_RETRY_EXHAUSTED_TEXT } from "../capacity-retry";
+import { CAPACITY_RETRY_EXHAUSTED_TEXT, CAPACITY_RETRY_SIDE_EFFECT_TEXT } from "../capacity-retry";
 
 const THREAD = "thread_board656";
 const TASK = "task_board656";
 const AT_CAPACITY = "Selected model is at capacity. Please try a different model.";
 
 type Step =
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; toolFirst?: boolean }
   | { kind: "success"; text: string };
 
 interface TurnParams {
@@ -84,6 +87,17 @@ async function startScriptedApp(steps: Step[]): Promise<ScriptedApp> {
         const step = steps[turns - 1] ?? steps[steps.length - 1];
         respond({ turn: { id: turnId } });
         setTimeout(() => {
+          if (step?.kind === "error" && step.toolFirst) {
+            broadcast({
+              jsonrpc: "2.0",
+              method: "item/started",
+              params: {
+                threadId: THREAD,
+                turnId,
+                item: { id: `cmd_${turns}`, type: "commandExecution" },
+              },
+            });
+          }
           broadcast({
             jsonrpc: "2.0",
             method: "item/completed",
@@ -193,6 +207,26 @@ function assertSamePrompt(params: TurnParams[]) {
 }
 
 describe("codex app-server capacity retry", () => {
+  test("board656 tool then capacity does not retry", async () => {
+    const result = await runThink([
+      { kind: "error", message: AT_CAPACITY, toolFirst: true },
+      { kind: "success", text: "should-not-run" },
+    ]);
+    const outcome = result.outcome.failed ? "fail" : "ok";
+    expect(`a:${result.prompts.length}:${result.replies.length}:${outcome}`).toBe("a:1:0:fail");
+    expect(result.progress).toEqual([]);
+    expect(result.sleeps).toEqual([]);
+    expect(result.outcome.replyText).not.toContain("at capacity");
+    expect(result.outcome.replyText).not.toContain(CAPACITY_RETRY_EXHAUSTED_TEXT);
+    let thrown = "";
+    try {
+      codexAppServerReplyOrThrow(result.outcome);
+    } catch (error) {
+      thrown = error instanceof Error ? error.message : String(error);
+    }
+    expect(thrown).toBe(CAPACITY_RETRY_SIDE_EFFECT_TEXT);
+  });
+
   test("board656 capacity then one reply", async () => {
     const result = await runThink([
       { kind: "error", message: AT_CAPACITY },

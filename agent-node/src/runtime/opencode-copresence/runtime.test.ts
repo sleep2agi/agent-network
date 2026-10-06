@@ -156,6 +156,7 @@ if (command === "serve") {
           info:{role:"assistant",parentID,error:{name:"APIError",data:{message:env.FAKE_PROVIDER_ERROR,statusCode:401,isRetryable:false}}},
           parts:[{type:"step-start"}],
         };
+        if (env.FAKE_PROVIDER_TOOL === "1") lastResponse.parts.push({ type: "tool", tool: "bash" });
       } else if (env.FAKE_EMPTY_TURN === "1") {
         lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"step-start"},{type:"step-finish"}] };
       }
@@ -995,6 +996,31 @@ describe("OpenCode copresence task deadline", () => {
       rmSync(log, { force: true });
     }
   }, 20_000);
+
+  test("board656 a tool part then capacity does not resubmit", async () => {
+    const { f, runtime } = await open({
+      FAKE_PROVIDER_ERROR: "Selected model is at capacity. Please try a different model.",
+      FAKE_PROVIDER_TOOL: "1",
+      FAKE_USER_FIRST: "1",
+    });
+    try {
+      let thrown: unknown;
+      try {
+        await runtime.submit("capacity-after-tool", 5_000, undefined, {
+          onCapacityRetry: () => { throw new Error("should not retry"); },
+          capacityRetrySleep: async () => { throw new Error("should not sleep"); },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(OpenCodeProviderError);
+      expect((thrown as Error).message).toContain("模型在执行中途出错，未自动重试，以免重复执行");
+      expect((thrown as Error).message).not.toContain("已自动重试");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  });
 });
 
 // #2008 follow-up: on 2.5.0-preview.89 a 30-minute deadline still died at

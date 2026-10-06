@@ -59,6 +59,16 @@ async function run(sid: string) {
       s.entries.push({ id: id("msg"), type: "idle", outcome: "failed" });
       continue;
     }
+    if (/STUB_TOOL_CAPACITY/.test(text)) {
+      s.entries.push({
+        id: id("msg"), type: "assistant",
+        content: [{ type: "tool", name: "bash" }],
+        finish: "error",
+        error: { type: "APIError", message: "Selected model is at capacity. Please try a different model.", status: 503 },
+      });
+      s.entries.push({ id: id("msg"), type: "idle", outcome: "failed" });
+      continue;
+    }
     const reply = /Reply with exactly (\S+)/.exec(text)?.[1] ?? "STUB_OK";
     s.entries.push({ id: id("msg"), type: "assistant", content: [{ type: "reasoning", text: "…" }, { type: "text", text: reply }], finish: "stop" });
     // A queued prompt is delivered at the end of the execution WITHOUT an

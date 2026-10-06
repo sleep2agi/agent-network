@@ -105,6 +105,7 @@ import {
 } from "./vendor-error";
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
   capacityRetryDecision,
   capacityRetryProgress,
   pauseForCapacityRetry,
@@ -2862,6 +2863,14 @@ async function processWithClaude(
   // runs ABOVE the bridge so legacy `dangerouslySkipPermissions: true`
   // configs don't trap a root user back into the broken path. Non-root
   // users see the pre-fix resolution exactly — zero regression.
+  // This attempt only. A clean resubmit clears it. Set when a tool is about
+  // to run (PreToolUse allow) or a tool_result already came back.
+  let toolsRanThisAttempt = false;
+  const claudeMessageShowsExecutedTool = (message: any): boolean => {
+    const blocks = message?.message?.content ?? message?.content;
+    if (!Array.isArray(blocks)) return false;
+    return blocks.some((block: any) => block?.type === "tool_result");
+  };
   const isRootSdk = typeof process.getuid === "function" && process.getuid() === 0;
   const resolvedPermissionMode: string = isRootSdk
     ? "auto"
@@ -2930,6 +2939,7 @@ async function processWithClaude(
             return { continue: false, stopReason: decision.reason };
           }
         }
+        toolsRanThisAttempt = true;
         return { continue: true };
       }] }],
     },
@@ -3001,6 +3011,7 @@ async function processWithClaude(
   const claudeAttempts: { ms: number; timedOut: boolean }[] = [];
   let capacityRetries = 0;
   for (let attempt = 0; ; attempt++) {
+    toolsRanThisAttempt = false;
     let timedOut = false;
     const attemptStart = Date.now();
     try {
@@ -3017,6 +3028,7 @@ async function processWithClaude(
           for await (const message of messages) {
             evidence?.consumed();
             const m = message as any;
+            if (claudeMessageShowsExecutedTool(m)) toolsRanThisAttempt = true;
             if (m.type === "system" && m.subtype === "init") {
               claudeSessionId = m.session_id;
               log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "(account default)"} attempt=${attempt + 1}`);
@@ -3198,13 +3210,17 @@ async function processWithClaude(
       // Board #656 — temporary capacity / 429 / 5xx retries on 30s/60s/120s.
       // The wait is outside withTimeout, so it does not burn the attempt
       // deadline. Quota exhaustion still fast-fails below.
-      const capacityDecision = capacityRetryDecision(capacityRetries, msg);
+      const capacityDecision = capacityRetryDecision(capacityRetries, msg, toolsRanThisAttempt);
       if (capacityDecision.action === "retry") {
         capacityRetries += 1;
         log(`[claude] model at capacity; retry ${capacityDecision.attempt} in ${capacityDecision.waitMs}ms; same model`);
         await reportStatus("working", capacityDecision.progress).catch(() => {});
         await pauseForCapacityRetry(capacityDecision);
         continue;
+      }
+      if (capacityDecision.action === "side_effect") {
+        log(`[claude] ✗ model failed after a tool ran; not retrying`);
+        return `执行出错: ${CAPACITY_RETRY_SIDE_EFFECT_TEXT}`;
       }
       if (capacityDecision.action === "exhaust") {
         log(`[claude] ✗ model at capacity after automatic retries`);

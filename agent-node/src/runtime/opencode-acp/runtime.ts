@@ -38,6 +38,7 @@ import { resolve } from "path";
 import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
   capacityRetryDecision,
   pauseForCapacityRetry,
 } from "../capacity-retry";
@@ -372,6 +373,7 @@ export async function opencodeThink(
   // the child for that class: the next attempt reuses this session and prompt.
   try {
     for (;;) {
+      const toolsAtStart = state.toolCalls;
       try {
         const request = runtime.client.requestWithIdleTimeout("session/prompt", {
           sessionId: runtime.sessionId,
@@ -382,7 +384,11 @@ export async function opencodeThink(
         opts.onConsumed?.();
         break;
       } catch (error: any) {
-        const decision = capacityRetryDecision(capacityRetries, String(error?.message ?? error));
+        const decision = capacityRetryDecision(
+          capacityRetries,
+          String(error?.message ?? error),
+          state.toolCalls > toolsAtStart,
+        );
         if (decision.action === "retry") {
           capacityRetries += 1;
           await pauseForCapacityRetry(decision, {
@@ -394,6 +400,9 @@ export async function opencodeThink(
         await killFailedTurnChild("session/prompt failure");
         if (decision.action === "exhaust") {
           throw new Error(CAPACITY_RETRY_EXHAUSTED_TEXT);
+        }
+        if (decision.action === "side_effect") {
+          throw new Error(CAPACITY_RETRY_SIDE_EFFECT_TEXT);
         }
         // Headless has no human TUI: the child that ran the turn is killed
         // above, so the turn IS aborted. Say so instead of the client's

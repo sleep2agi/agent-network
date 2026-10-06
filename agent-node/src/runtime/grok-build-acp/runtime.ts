@@ -3,6 +3,7 @@ import { newGrokTurnState, reduceGrokAcpNotification } from "./events";
 import type { GrokAcpNotification, GrokTurnState } from "./events";
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
   capacityRetryDecision,
   pauseForCapacityRetry,
 } from "../capacity-retry";
@@ -321,6 +322,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     let promptResponse: unknown;
     let capacityRetries = 0;
     for (;;) {
+      const toolsAtStart = state.toolCalls;
       try {
         const promptRequest = client.requestWithIdleTimeout("session/prompt", {
           sessionId,
@@ -332,10 +334,13 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
         break;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const decision = capacityRetryDecision(capacityRetries, message);
+        const decision = capacityRetryDecision(capacityRetries, message, state.toolCalls > toolsAtStart);
         if (decision.action !== "retry") {
           if (decision.action === "exhaust") {
             throw new Error(CAPACITY_RETRY_EXHAUSTED_TEXT);
+          }
+          if (decision.action === "side_effect") {
+            throw new Error(CAPACITY_RETRY_SIDE_EFFECT_TEXT);
           }
           throw error;
         }

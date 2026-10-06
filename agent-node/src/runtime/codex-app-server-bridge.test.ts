@@ -365,6 +365,43 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     ]);
   });
 
+  test("a command before the identity echo is still a side effect; text is not", async () => {
+    const turnId = await bridge.startTaskTurn({ taskId: "task_side_effect", text: "work" });
+    const effects: Array<{ taskId: string; turnId: string }> = [];
+    bridge.on("task_side_effect", (event) => effects.push(event as never));
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { threadId: THREAD, turnId, item: { id: "cmd", type: "commandExecution" } },
+    });
+    await tick(10);
+    expect(effects).toEqual([]);
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: { threadId: THREAD, turnId, item: { type: "userMessage", clientId: "anet:task_side_effect" } },
+    });
+    await tick(10);
+    expect(effects).toEqual([{ taskId: "task_side_effect", turnId }]);
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { threadId: THREAD, turnId, item: { id: "think", type: "reasoning" } },
+    });
+    await tick(10);
+    expect(effects).toHaveLength(1);
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: { threadId: THREAD, turnId, item: { id: "edit", type: "fileChange" } },
+    });
+    await tick(10);
+    expect(effects).toEqual([
+      { taskId: "task_side_effect", turnId },
+      { taskId: "task_side_effect", turnId },
+    ]);
+  });
+
   test("authenticated Dashboard native /goal text reaches the shared thread unchanged and replies", async () => {
     const exactPayload = "/goal 更新一下文档";
     const turnId = await bridge.startTaskTurn({

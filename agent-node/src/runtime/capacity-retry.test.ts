@@ -3,8 +3,11 @@ import {
   CAPACITY_RETRY_BACKOFF_MS,
   CAPACITY_RETRY_EXHAUSTED_TEXT,
   CAPACITY_RETRY_LIMIT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
   capacityRetryDecision,
   capacityRetryProgress,
+  isCodexSideEffectItem,
+  isOpencodeSideEffectPart,
   isRetryableCapacityError,
 } from "./capacity-retry";
 
@@ -28,6 +31,10 @@ describe("capacity retry classifier", () => {
       "bad gateway",
       "service unavailable",
       "gateway timeout",
+      "503 Service",
+      "HTTP/1.1 503",
+      "status code 500",
+      "status: 502",
     ];
     for (const text of retryable) {
       expect(isRetryableCapacityError(text)).toBe(true);
@@ -57,6 +64,11 @@ describe("capacity retry classifier", () => {
       "waited 503 ms",
       "5000",
       "error 5000",
+      "503",
+      "line 503",
+      "port 500",
+      "error 503",
+      "http://127.0.0.1:500",
     ];
     for (const text of permanent) {
       expect(isRetryableCapacityError(text)).toBe(false);
@@ -82,5 +94,27 @@ describe("capacity retry classifier", () => {
     expect(capacityRetryDecision(3, raw)).toEqual({ action: "exhaust" });
     expect(CAPACITY_RETRY_EXHAUSTED_TEXT).toBe("模型满载，已自动重试 3 次");
     expect(capacityRetryDecision(0, "401 unauthorized")).toEqual({ action: "give_up" });
+  });
+
+  test("a round that already ran a tool is not resubmitted", () => {
+    const raw = "Selected model is at capacity. Please try a different model.";
+    expect(capacityRetryDecision(0, raw, true)).toEqual({ action: "side_effect" });
+    expect(capacityRetryDecision(2, raw, true)).toEqual({ action: "side_effect" });
+    expect(capacityRetryDecision(0, raw, false).action).toBe("retry");
+    expect(capacityRetryDecision(0, raw).action).toBe("retry");
+    expect(capacityRetryDecision(0, "401 unauthorized", true)).toEqual({ action: "give_up" });
+    expect(CAPACITY_RETRY_SIDE_EFFECT_TEXT).toBe("模型在执行中途出错，未自动重试，以免重复执行");
+    expect(isCodexSideEffectItem("commandExecution")).toBe(true);
+    expect(isCodexSideEffectItem("fileChange")).toBe(true);
+    expect(isCodexSideEffectItem("mcpToolCall")).toBe(true);
+    expect(isCodexSideEffectItem("unknownItem")).toBe(true);
+    expect(isCodexSideEffectItem("userMessage")).toBe(false);
+    expect(isCodexSideEffectItem("agentMessage")).toBe(false);
+    expect(isCodexSideEffectItem("reasoning")).toBe(false);
+    expect(isOpencodeSideEffectPart("tool")).toBe(true);
+    expect(isOpencodeSideEffectPart("patch")).toBe(true);
+    expect(isOpencodeSideEffectPart("text")).toBe(false);
+    expect(isOpencodeSideEffectPart("step-start")).toBe(false);
+    expect(isOpencodeSideEffectPart("reasoning")).toBe(false);
   });
 });

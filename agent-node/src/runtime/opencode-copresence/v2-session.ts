@@ -57,7 +57,9 @@ import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-e
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
   CAPACITY_RETRY_LIMIT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
   capacityRetryDecision,
+  isOpencodeSideEffectPart,
   pauseForCapacityRetry,
 } from "../capacity-retry";
 import { readLinuxProcessGroupIdentity } from "./process-group";
@@ -393,9 +395,13 @@ export async function openVettedOpenCodeV2Copresence(
                   return { replyText: outcome.replyText, stdout: JSON.stringify(after) };
                 } catch (error: any) {
                   if (error instanceof OpenCodeProviderError) {
+                    const toolsRan = verdict.assistants.some((entry) =>
+                      (entry.content ?? []).some((part) => isOpencodeSideEffectPart(part?.type)),
+                    );
                     const decision = capacityRetryDecision(
                       capacityRetries,
                       `${error.upstreamName}: ${error.upstreamMessage}`,
+                      toolsRan,
                     );
                     if (decision.action === "retry") {
                       capacityRetries += 1;
@@ -408,9 +414,14 @@ export async function openVettedOpenCodeV2Copresence(
                       continue capacityAttempts;
                     }
                     warn(`[opencode-copresence] provider error for this turn: ${error.upstreamName}: ${error.upstreamMessage}`);
-                    if (decision.action === "exhaust") {
+                    if (decision.action === "exhaust" || decision.action === "side_effect") {
                       throw new OpenCodeProviderError(
-                        { name: error.upstreamName, message: CAPACITY_RETRY_EXHAUSTED_TEXT },
+                        {
+                          name: error.upstreamName,
+                          message: decision.action === "exhaust"
+                            ? CAPACITY_RETRY_EXHAUSTED_TEXT
+                            : CAPACITY_RETRY_SIDE_EFFECT_TEXT,
+                        },
                         error.partialReplyText,
                       );
                     }
