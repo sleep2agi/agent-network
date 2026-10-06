@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { execTmux } from "../tmux.js";
+import { parseTmuxRows, tmuxListArgs } from "../tmux-format.js";
 import { atomicWriteJson } from "./config-apply.js";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { reproducibleEnvironment, type AdoptDaemonDeps } from "./adopt-daemon.js";
@@ -87,7 +88,8 @@ async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: Ad
     launchEnv.ANET_TMUX_SOCKET = evidence.socket;
     // Existing session is ambiguous (possibly another node/user's shell): do not
     // inject keys or kill its pane. A stopped session may be recreated by name.
-    const sessions = execTmux(["list-sessions", "-F", "#{session_name}"], { encoding: "utf8", timeout: 5000, env: launchEnv }).trim().split("\n");
+    const sessions = parseTmuxRows(execTmux(tmuxListArgs(["list-sessions"], ["#{session_name}"]),
+      { encoding: "utf8", timeout: 5000, env: launchEnv }), 1).map(row => row[0]);
     if (sessions.includes(evidence.session)) throw Error("adopt_tmux_session_still_exists");
   }
   if (existsSync(marker)) unlinkSync(marker); // Remove BEFORE launch, as boot/start contract requires.

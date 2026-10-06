@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { execTmux } from "../tmux.js";
+import { parseTmuxRows, tmuxFormat, tmuxUtf8Args } from "../tmux-format.js";
 import { processStamp } from "./adopt-process-tree.js";
 import type { AdoptionLocalIdentity } from "./adopt-local-identity.js";
 import type { AdoptionProc } from "./adopt-proc.js";
@@ -20,8 +21,11 @@ export function privateSocket(socket: string, uid: number): void {
 export function paneEvidence(socket: string, pane: string, uid: number) {
   privateSocket(socket, uid);
   if (!/^%\d+$/.test(pane)) throw Error("adopt_pane_invalid");
-  const result = execTmux(["display-message", "-p", "-t", pane, "#{pane_pid}\t#{session_name}\t#{pane_dead}"],
-    { encoding: "utf8", timeout: 5000, env: { ...process.env, ANET_TMUX_SOCKET: socket, TMUX: undefined, TMUX_PANE: undefined } }).trim().split("\t");
+  const output = execTmux(tmuxUtf8Args(["display-message", "-p", "-t", pane, tmuxFormat(["#{pane_pid}", "#{session_name}", "#{pane_dead}"])]),
+    { encoding: "utf8", timeout: 5000, env: { ...process.env, ANET_TMUX_SOCKET: socket, TMUX: undefined, TMUX_PANE: undefined } });
+  const rows = parseTmuxRows(output, 3);
+  if (rows.length !== 1) throw Error("adopt_pane_unverified");
+  const result = rows[0];
   const pid = Number(result[0]);
   if (!Number.isSafeInteger(pid) || pid <= 1 || !result[1] || /[\r\n\0]/.test(result[1])) throw Error("adopt_pane_unverified");
   return { pid, session: result[1], dead: result[2] === "1" };
