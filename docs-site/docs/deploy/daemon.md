@@ -365,6 +365,29 @@ daemon 没有自己的 stop / delete / status 子命令，直接用节点命令�
 `anet daemon list` 提示 daemon 缺少某些 runtime 时，执行 `anet daemon init <daemon-name> --force` 补齐。
 它保留 `node_id`，但会重新签发 token，之后要重启 daemon。
 
+## 收编节点的停启（待发布） {#adopted-lifecycle}
+
+此能力需要配套的新版 daemon；Hub 的收编节点重启拒绝门计划进入 `.109`，不是 `.108`。
+在节点原工作目录执行 `anet daemon adopt <alias> --daemon <daemon-id>` 先看计划，
+加 `--yes` 仅请求收编，必须等 daemon 独立核验、Hub 绑定成为 active 才生效。
+daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂不支持。
+
+- 停止前重新核验节点配置、UID 和 `/proc` 起始时间，只停止已核验的进程树。
+- 停止成功写入 `<nodeDir>/.hub-stopped`；`anet project up` 和仓库开机扫描会保留停止状态及 PID 文件。
+- 启动前删除标记，按停止时保存的真实启动证据，用 daemon 的受信任 anet 入口启动。
+  只有推断的 `launch_mode`、配置变化或证据缺失时拒绝启动，不猜测启动方式。
+- tmux 必须是明确的私有 socket，重新核验原会话及进程归属；默认 socket、不可用的私有服务、
+  仍占用的原会话都拒绝操作。不会向默认 tmux 服务发命令。
+- 收编绑定本身不能证明存在 exit-75 自动拉起外层。Hub 返回
+  `adopted_restart_requires_daemon` 时，请在客户端先「停止」再「启动」。普通节点和 daemon 创建的节点不变。
+
+恢复时，Hub 数据库里的绑定与 daemon 工作区的 `.anet/child-workdirs.json` 必须对应。
+这些登记、节点配置、凭据和停止标记属于需要安全备份的本地/数据库状态，clone 仓库不会恢复它们。
+缺少对应证据时先撤销绑定、重新收编，不手填 PID 或启动证据。启动器仍是仓库的 CLI/daemon，
+开机脚本权威副本仍为 `deploy/fleet/anet-nodes-boot.sh`；本功能不改端口、反代或密钥来源。
+升级与回滚仍按上节及生产部署流程执行；回滚前须确认目标 daemon 保留收编节点的拒绝保护，
+不能假定所有旧版安全，也不能删除标记强行放行。
+
 ## 相关 {#related}
 
 - [让 Hub 常驻（pm2 / systemd）](/deploy/keep-alive)

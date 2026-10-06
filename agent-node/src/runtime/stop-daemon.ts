@@ -31,6 +31,8 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { childWorkDirFor, forgetChildWorkdir } from "./child-workdir.js";
 import { adoptedChild } from "./adopt-registry.js";
+import { handleAdoptedLifecycle } from "./adopt-lifecycle.js";
+import type { AdoptDaemonDeps } from "./adopt-daemon.js";
 
 const execFileP = promisify(execFile);
 
@@ -89,6 +91,7 @@ export function getChildrenSnapshot(): ChildEntry[] {
 }
 
 export interface StopDoorbellDeps {
+  adoption?: AdoptDaemonDeps;
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
@@ -329,6 +332,7 @@ export async function handleStopDoorbell(
     return;
   }
   const { child_node_id, child_alias, action, delete_config = true, grace_seconds = 10 } = req;
+  if (deps.adoption && child_alias && await handleAdoptedLifecycle({ request_id, child_node_id, child_alias, action }, deps.adoption)) return;
   // 建的时候带了工作目录的子节点,config 在 <workdir>/.anet/nodes 下;回收站也放在同一棵树里
   // (同一文件系统,rename 不会 EXDEV)。没登记 = 老布局 = daemon cwd,与改动前逐字相同。
   const childWorkDir = child_alias ? childWorkDirFor(daemonWorkDir, child_alias) : daemonWorkDir;

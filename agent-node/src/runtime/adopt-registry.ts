@@ -9,6 +9,7 @@ export interface AdoptedChild {
   workdir: string;
   nodeDir: string;
   launch_mode: "bare" | "tmux";
+  launch_evidence?: { mode: "bare" | "tmux"; config_hash: string; socket?: string; session?: string; pane?: string };
 }
 export function readWorkdirRegistry(root: string): Record<string, unknown> {
   const path = join(root, ".anet", "child-workdirs.json");
@@ -43,4 +44,9 @@ export function forgetAdoptedChild(root: string, alias: string, requestId: strin
   if (entry?.adopted !== true || entry.request_id !== requestId) return;
   delete entries[alias];
   atomicWriteJson(join(root, ".anet", "child-workdirs.json"), entries);
+}
+/** Update evidence only for a still-current adoption; never resurrect a revoke. */
+export function refreshAdoptedChild(root: string, alias: string, entry: AdoptedChild): void {
+  if (adoptedChild(root, alias)?.request_id !== entry.request_id) throw Error("adopt_binding_revoked_during_start");
+  writeAdoptedChild(root, alias, entry);
 }

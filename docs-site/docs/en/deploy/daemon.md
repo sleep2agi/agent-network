@@ -400,6 +400,30 @@ If `anet daemon list` says the daemon is missing some runtimes, run
 `anet daemon init <daemon-name> --force` to backfill them. It keeps the `node_id` but issues a new token,
 so restart the daemon afterwards.
 
+## Adopted-node lifecycle (not yet released) {#adopted-lifecycle}
+
+This requires the matching new daemon. The Hub restart refusal targets `.109`, not `.108`.
+From the original workspace, run `anet daemon adopt <alias> --daemon <daemon-id>` to inspect the plan.
+`--yes` only requests adoption; wait for independent daemon verification and an active Hub binding.
+The daemon's `adopt_roots` defaults to empty (deny). Co-presence nodes are not supported.
+
+- Stop rechecks configuration, UID and `/proc` birth identity and signals only the verified process tree.
+- Successful stop writes `<nodeDir>/.hub-stopped`. `anet project up` and the repository boot sweep keep the node down without clearing its PID file.
+- Start removes the marker and uses the trusted anet entrypoint with evidence captured before stop.
+  Inferred launch modes, changed configuration or missing evidence fail closed.
+- tmux requires an explicit private socket and verified original session/process ownership.
+  Default sockets, unavailable private servers and still-occupied original sessions are refused.
+- A binding does not prove an exit-75 supervisor exists. If Hub returns
+  `adopted_restart_requires_daemon`, use Stop followed by Start. Ordinary and daemon-created nodes keep their previous restart behavior.
+
+Recovery requires matching Hub database bindings and the daemon workspace's `.anet/child-workdirs.json`.
+Registries, node configuration, credentials and stop markers require secure state backups; cloning the repository does not restore them.
+With missing evidence, revoke and adopt again rather than inventing PIDs or launch evidence.
+The CLI/daemon remains the launcher and `deploy/fleet/anet-nodes-boot.sh` remains the authoritative boot script.
+Ports, proxies and credential sources are unchanged. Follow the upgrade/rollback and production deployment procedures;
+before rollback, verify the target daemon retains adopted-node refusal guards rather than assuming every older version is safe.
+Do not delete stop markers to bypass refusal.
+
 ## Related {#related}
 
 - [Keeping the Hub running (pm2 / systemd)](/en/deploy/keep-alive)

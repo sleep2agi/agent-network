@@ -53,7 +53,15 @@ export function readChildWorkdirs(root: string): Record<string, string> {
  */
 export function recordChildWorkdir(root: string, alias: string, workdir: string, aliasTakenHere: boolean): boolean {
   if (aliasTakenHere || resolve(workdir) === resolve(root)) return false;
-  const cur = readChildWorkdirs(root);
+  // Preserve daemon-owned adopted objects; the string-only lookup view is not
+  // a serialization format. Never overwrite a binding with a clone index.
+  let cur: Record<string, unknown> = Object.create(null);
+  try {
+    const raw = JSON.parse(readFileSync(childWorkdirsPath(root), "utf-8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    cur = Object.assign(Object.create(null), raw);
+  } catch (e: any) { if (e.code !== "ENOENT") return false; }
+  if (cur[alias] && typeof cur[alias] === "object") return false;
   cur[alias] = resolve(workdir);
   atomicWritePrivateJson(childWorkdirsPath(root), cur);
   return true;

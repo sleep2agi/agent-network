@@ -9,6 +9,8 @@ import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { forgetSpawnedChildIfPid, getChildrenSnapshot, recordSpawnedChild } from "./stop-daemon.js";
 import { childWorkDirFor } from "./child-workdir.js";
 import { adoptedChild } from "./adopt-registry.js";
+import { handleAdoptedLifecycle } from "./adopt-lifecycle.js";
+import type { AdoptDaemonDeps } from "./adopt-daemon.js";
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
@@ -21,6 +23,7 @@ interface StartRequest {
 }
 
 export interface StartDoorbellDeps {
+  adoption?: AdoptDaemonDeps;
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   workDir: string;
   log: (msg: string) => void;
@@ -90,7 +93,9 @@ export async function handleStartDoorbell(
     deps.warn(`[start-daemon] request rejected: ${req?.error || "invalid_envelope"}`);
     return;
   }
-  // Board #627 will delegate these to anet. Never use the created-child path.
+  if (deps.adoption && await handleAdoptedLifecycle({ request_id: event.request_id, child_node_id: req.child_node_id,
+    child_alias: req.child_alias, action: "start" }, deps.adoption)) return;
+  // Missing adoption context is fail-closed; never use the created-child path.
   if (adoptedChild(deps.workDir, req.child_alias)) {
     await deps.callCommHub("ack_start_request", { request_id: event.request_id,
       status: "start_failed", error: "adopted_lifecycle_not_available" });
