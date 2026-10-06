@@ -76,7 +76,7 @@ settle() {
     pid=${pid#/proc/}
     cmdline=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)
     case "$cmdline" in
-      *'/workspace/server/src/index.ts'*|*'agent-node/src/cli.ts'*|*' /opt/fake-grok/grok'*|*'/opt/fake-grok/grok '*)
+      *'/workspace/server/src/index.ts'*|*'agent-node/src/cli.ts'*|*' /opt/fake-grok/grok'*|*'/opt/fake-grok/grok '*|*' /opt/fake-claude/claude'*|*'/opt/fake-claude/claude '*)
         kill -9 "$pid" >/dev/null 2>&1 || true
         ;;
     esac
@@ -84,7 +84,7 @@ settle() {
   sleep 0.2
 }
 
-echo "## green — held turn is working, task is running, later text does not replace it"
+echo "## green — grok and claude both report the full task while the turn is in flight"
 settle
 bun /workspace/tests/test668-grok-working-status/scenario.ts
 
@@ -107,6 +107,13 @@ ANCHOR="CASE WHEN status = 'working' THEN task ELSE" \
 REPL="CASE WHEN status = 'no-such-status' THEN task ELSE" \
   mutate server/src/session-task-on-dispatch.ts
 expect_red 'FAIL: later message'
+restore
+
+echo "## mutation — only grok reports the full task; claude is sliced to 200"
+ANCHOR='activeTurnTask = hubStatusTask(runtimeTask); // board668-inflight-task' \
+REPL='activeTurnTask = (RUNTIME === "grok" ? hubStatusTask(runtimeTask) : runtimeTask.slice(0, 200)); // board668-inflight-task' \
+  mutate agent-node/src/cli.ts
+expect_red 'FAIL: claude-started'
 restore
 
 echo "OVERALL: PASS"

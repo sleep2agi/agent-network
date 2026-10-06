@@ -8,9 +8,10 @@ RUN cd /workspace/agent-node && bun install --frozen-lockfile --ignore-scripts \
 COPY agent-node/src /workspace/agent-node/src
 COPY server/src /workspace/server/src
 COPY tests/test668-grok-working-status /workspace/tests/test668-grok-working-status
-RUN mkdir -p /opt/fake-grok \
+RUN mkdir -p /opt/fake-grok /opt/fake-claude \
  && cp /workspace/tests/test668-grok-working-status/fake-grok.ts /opt/fake-grok/grok \
- && chmod 0755 /opt/fake-grok/grok /workspace/tests/test668-grok-working-status/run.sh
+ && cp /workspace/tests/test668-grok-working-status/fake-claude.ts /opt/fake-claude/claude \
+ && chmod 0755 /opt/fake-grok/grok /opt/fake-claude/claude /workspace/tests/test668-grok-working-status/run.sh
 
 ARG TEST668_SOURCE_COMMIT
 ENV TEST668_SOURCE_COMMIT=$TEST668_SOURCE_COMMIT

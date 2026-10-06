@@ -1,10 +1,18 @@
-// One held grok turn against a private hub on 127.0.0.1:9299.
-// While the fake runtime is inside session/prompt, the session must stay
-// working on that task and the tasks row must be running with started_at set.
+// Held turns against a private hub on 127.0.0.1:9299.
+// processTask reports the full task before think(), for every runtime.
+// Grok is held inside the fake ACP prompt. Claude is a second node whose
+// `claude` binary is the fake in /opt/fake-claude. The SDK's bundled
+// linux binary is replaced with that same fake: overlayfs refuses to
+// rename the package directory (EXDEV), and require.resolve would
+// otherwise prefer the real binary over PATH.
+// While each fake is held, that session must stay working on that task
+// and the tasks row must be running with started_at set.
 import { spawn, type ChildProcess } from "node:child_process";
 import { Database } from "bun:sqlite";
 import {
   existsSync,
+  chmodSync,
+  copyFileSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -16,12 +24,16 @@ import {
 const HUB = "http://127.0.0.1:9299";
 const DB = "/tmp/hub668.db";
 const HOLD = "/tmp/grok-fake-hold";
+const CLAUDE_HOLD = "/tmp/claude-fake-hold";
 const TAIL = "BOARD668-TAIL-MARKER";
 const LATER = "BOARD668-LATER-MARKER";
 const ALIAS = "demo-node";
+const CLAUDE_ALIAS = "demo-claude";
+const CLAUDE_TAIL = "BOARD668-CLAUDE-TAIL";
 
 let hub: ChildProcess | null = null;
 let node: ChildProcess | null = null;
+let claudeNode: ChildProcess | null = null;
 let stopped = false;
 let cleaned = false;
 
@@ -39,8 +51,7 @@ function tailFile(path: string): void {
   }
 }
 
-function nodeLogText(): string {
-  const dir = "/tmp/node668-logs";
+function dirLogText(dir: string): string {
   if (!existsSync(dir)) return "";
   return readdirSync(dir)
     .filter((name) => name.endsWith(".log"))
@@ -48,41 +59,79 @@ function nodeLogText(): string {
     .join("\n");
 }
 
+function nodeLogText(): string {
+  return dirLogText("/tmp/node668-logs");
+}
+
 function cleanup(): void {
   if (cleaned) return;
   cleaned = true;
-  if (node?.pid) {
-    try { process.kill(node.pid, "SIGCONT"); } catch { /* already gone */ }
-    try { process.kill(node.pid, "SIGKILL"); } catch { /* already gone */ }
-  }
-  killFakeGrok();
+  stopChild(node);
+  stopChild(claudeNode);
+  killByCmdline("/opt/fake-grok/grok");
+  killByCmdline("/opt/fake-claude/claude");
   if (hub?.pid) {
     try { process.kill(hub.pid, "SIGKILL"); } catch { /* already gone */ }
   }
 }
 
-function killFakeGrok(): void {
+function stopChild(child: ChildProcess | null): void {
+  if (!child?.pid) return;
+  try { process.kill(child.pid, "SIGCONT"); } catch { /* already gone */ }
+  try { process.kill(child.pid, "SIGKILL"); } catch { /* already gone */ }
+}
+
+function killByCmdline(fragment: string): void {
   let names: string[] = [];
   try { names = readdirSync("/proc"); } catch { return; }
   for (const name of names) {
     if (!/^\d+$/.test(name)) continue;
     let cmdline = "";
     try { cmdline = readFileSync(`/proc/${name}/cmdline`, "utf8"); } catch { continue; }
-    if (!cmdline.includes("/opt/fake-grok/grok")) continue;
+    if (!cmdline.includes(fragment)) continue;
     const pid = Number(name);
     if (pid === process.pid) continue;
     try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
   }
 }
 
+function installFakeClaudeBinary(): void {
+  const fake = "/opt/fake-claude/claude";
+  const names = [
+    "@anthropic-ai/claude-agent-sdk-linux-x64",
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl",
+  ];
+  const parents = [
+    "/workspace/agent-node/node_modules",
+    "/workspace/agent-node/node_modules/@anthropic-ai/claude-agent-sdk/node_modules",
+  ];
+  let replaced = 0;
+  for (const parent of parents) {
+    for (const name of names) {
+      const bin = `${parent}/${name}/claude`;
+      if (!existsSync(bin)) continue;
+      copyFileSync(fake, bin);
+      chmodSync(bin, 0o755);
+      replaced++;
+    }
+  }
+  if (replaced === 0 && !existsSync(fake)) fail("FAIL: claude-binary");
+}
+
 function fail(message: string): never {
   console.error(message);
   tailFile("/tmp/hub668.log");
   tailFile("/tmp/node668.log");
+  tailFile("/tmp/node668-claude.log");
   const logged = nodeLogText();
   if (logged) {
     console.error("--- node file log (last 60) ---");
     console.error(logged.split("\n").slice(-60).join("\n"));
+  }
+  const claudeLogged = dirLogText("/tmp/node668-claude-logs");
+  if (claudeLogged) {
+    console.error("--- claude node file log (last 80) ---");
+    console.error(claudeLogged.split("\n").slice(-80).join("\n"));
   }
   cleanup();
   process.exit(1);
@@ -95,17 +144,17 @@ type State = {
   startedAt: string | null;
 };
 
-function readState(): State {
+function readState(alias = ALIAS, tail = TAIL): State {
   let last = "busy";
   for (let i = 0; i < 8; i++) {
     try {
       const db = new Database(DB);
       try {
-        const session = db.query("SELECT status, task FROM sessions WHERE alias = ?").get(ALIAS) as
+        const session = db.query("SELECT status, task FROM sessions WHERE alias = ?").get(alias) as
           { status?: string; task?: string } | null;
         const row = db.query(
           "SELECT status, started_at FROM tasks WHERE to_name = ? AND instr(content, ?) > 0",
-        ).get(ALIAS, TAIL) as { status?: string; started_at?: string | null } | null;
+        ).get(alias, tail) as { status?: string; started_at?: string | null } | null;
         return {
           status: session?.status ?? null,
           task: session?.task ?? null,
@@ -137,7 +186,7 @@ async function jsonPost(path: string, body: unknown, token?: string): Promise<an
   return payload;
 }
 
-async function sendTask(token: string, networkId: string, task: string): Promise<void> {
+async function sendTask(token: string, networkId: string, task: string, alias = ALIAS): Promise<void> {
   const res = await fetch(`${HUB}/mcp`, {
     method: "POST",
     headers: {
@@ -150,7 +199,7 @@ async function sendTask(token: string, networkId: string, task: string): Promise
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "send_task", arguments: { alias: ALIAS, task, network_id: networkId } },
+      params: { name: "send_task", arguments: { alias, task, network_id: networkId } },
     }),
   });
   const raw = await res.text();
@@ -183,8 +232,11 @@ async function waitHealth(): Promise<void> {
 async function main(): Promise<void> {
   for (const extra of ["", "-wal", "-shm"]) rmSync(DB + extra, { force: true });
   rmSync(HOLD, { recursive: true, force: true });
+  rmSync(CLAUDE_HOLD, { recursive: true, force: true });
   rmSync("/tmp/node668-logs", { recursive: true, force: true });
+  rmSync("/tmp/node668-claude-logs", { recursive: true, force: true });
   rmSync("/tmp/node668.log", { force: true });
+  rmSync("/tmp/node668-claude.log", { force: true });
   rmSync("/tmp/hub668.log", { force: true });
   mkdirSync(HOLD, { recursive: true });
   mkdirSync("/tmp/demo-workspace", { recursive: true });
@@ -304,8 +356,109 @@ async function main(): Promise<void> {
   if (!after.task?.includes(TAIL) || after.task.includes(LATER)) fail("FAIL: in-flight text");
   if (after.rowStatus !== "running" || !after.startedAt) fail("FAIL: started");
 
-  console.log("PASS: working task stayed in flight");
+  await runClaude(userToken, networkId);
+  console.log("PASS: grok and claude kept the in-flight task");
   cleanup();
+}
+
+async function runClaude(userToken: string, networkId: string): Promise<void> {
+  stopChild(node);
+  node = null;
+  stopped = false;
+  killByCmdline("/opt/fake-grok/grok");
+  installFakeClaudeBinary();
+
+  rmSync(CLAUDE_HOLD, { recursive: true, force: true });
+  rmSync("/tmp/node668-claude-logs", { recursive: true, force: true });
+  rmSync("/tmp/node668-claude.log", { force: true });
+  mkdirSync(CLAUDE_HOLD, { recursive: true });
+  mkdirSync("/tmp/demo-claude-home/.anet/nodes/demo-claude", { recursive: true });
+  mkdirSync("/tmp/node668-claude-logs", { recursive: true });
+
+  const minted = await jsonPost("/api/auth/node-token", {
+    network_id: networkId,
+    node_name: CLAUDE_ALIAS,
+    node_id: "nodedemo668c",
+  }, userToken);
+  const nodeToken = minted.token as string;
+  if (!nodeToken) fail("FAIL: claude-token");
+
+  writeFileSync("/tmp/demo-claude-home/.anet/nodes/demo-claude/config.json", JSON.stringify({
+    node_id: "nodedemo668c",
+    node_name: CLAUDE_ALIAS,
+    alias: CLAUDE_ALIAS,
+    runtime: "claude-agent-sdk",
+    hub: HUB,
+    token: nodeToken,
+    network_id: networkId,
+  }));
+
+  const nodeLog = openSync("/tmp/node668-claude.log", "a");
+  const nodeEnv: NodeJS.ProcessEnv = { ...process.env };
+  delete nodeEnv.DATABASE_URL;
+  delete nodeEnv.COMMHUB_DB;
+  delete nodeEnv.COMMHUB_TOKEN;
+  delete nodeEnv.NODE_ENV;
+  delete nodeEnv.ANET_NETWORK_ID;
+  delete nodeEnv.GROK_FAKE_HOLD_DIR;
+  nodeEnv.HOME = "/tmp/demo-claude-home";
+  nodeEnv.PATH = `/opt/fake-claude:${process.env.PATH || ""}`;
+  nodeEnv.ANET_STATUS_HEARTBEAT_MS = "500";
+  nodeEnv.CLAUDE_FAKE_HOLD_DIR = CLAUDE_HOLD;
+  nodeEnv.CLAUDE_MAX_RETRIES = "0";
+  claudeNode = spawn("bun", [
+    "/workspace/agent-node/src/cli.ts",
+    "--config", "/tmp/demo-claude-home/.anet/nodes/demo-claude/config.json",
+    "--alias", CLAUDE_ALIAS,
+    "--runtime", "claude-agent-sdk",
+    "--hub", HUB,
+    "--log-dir", "/tmp/node668-claude-logs",
+  ], {
+    cwd: "/tmp/demo-workspace",
+    env: nodeEnv,
+    stdio: ["ignore", nodeLog, nodeLog],
+  });
+
+  const boot = Date.now();
+  while (Date.now() - boot < 45000) {
+    const logged = `${readText("/tmp/node668-claude.log")}\n${dirLogText("/tmp/node668-claude-logs")}`;
+    if (logged.includes("SSE connected")) break;
+    if (claudeNode.exitCode !== null) fail("FAIL: claude-register");
+    await sleep(100);
+  }
+  const booted = `${readText("/tmp/node668-claude.log")}\n${dirLogText("/tmp/node668-claude-logs")}`;
+  if (!booted.includes("SSE connected")) fail("FAIL: claude-register");
+
+  const task = `${"c".repeat(220)} ${CLAUDE_TAIL}`;
+  if (task.indexOf(CLAUDE_TAIL) < 200) fail("FAIL: claude-tail-position");
+  await sendTask(userToken, networkId, task, CLAUDE_ALIAS);
+
+  const holdStarted = Date.now();
+  while (!existsSync(`${CLAUDE_HOLD}/holding`) && Date.now() - holdStarted < 45000) {
+    if (claudeNode.exitCode !== null) break;
+    await sleep(100);
+  }
+  if (!existsSync(`${CLAUDE_HOLD}/holding`)) fail("FAIL: claude-entered");
+
+  const logged = `${readText("/tmp/node668-claude.log")}\n${dirLogText("/tmp/node668-claude-logs")}`;
+  if (!logged.includes("processing [claude]")) fail("FAIL: claude-runtime");
+  const usedFake = logged.includes("using global binary: /opt/fake-claude/claude")
+    || logged.includes("using glibc binary:");
+  if (!usedFake) fail("FAIL: claude-binary");
+
+  const started = readState(CLAUDE_ALIAS, CLAUDE_TAIL);
+  if (started.rowStatus !== "running" || !started.startedAt) fail("FAIL: claude-started");
+  if (started.status !== "working" || !started.task?.includes(CLAUDE_TAIL)) fail("FAIL: claude-text");
+
+  await sleep(1500);
+  const after = readState(CLAUDE_ALIAS, CLAUDE_TAIL);
+  if (after.status !== "working" || !after.task?.includes(CLAUDE_TAIL) || !after.startedAt) {
+    fail("FAIL: claude-heartbeat");
+  }
+}
+
+function readText(path: string): string {
+  try { return readFileSync(path, "utf8"); } catch { return ""; }
 }
 
 process.on("exit", () => {
