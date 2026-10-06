@@ -16,6 +16,7 @@ export interface AdoptionIdentityOptions {
   adoptRoots: readonly string[];
   uid: number;
   daemonEnv: NodeJS.ProcessEnv;
+  allowCodexV2?: boolean;
 }
 export interface AdoptionLocalIdentity {
   workdir: string;
@@ -78,7 +79,8 @@ export function verifyAdoptionLocalIdentity(req: AdoptionIdentityRequest, opts: 
     if (config.role === "host_supervisor") refuse("cannot_adopt_daemon");
     if (config.network_id !== req.network_id) refuse("adopt_config_network_mismatch");
     if (canonicalHub(config.hub) !== canonicalHub(opts.hubUrl)) refuse("adopt_hub_mismatch");
-    if (config.codexCopresence || config.grokCopresence || config.grokCopresenceAuto || config.opencodeMode === "copresence") refuse("copresence_adopt_v2");
+    if (config.grokCopresence || config.grokCopresenceAuto || config.opencodeMode === "copresence" ||
+        (config.codexCopresence && !(opts.allowCodexV2 && config.runtime === "codex-app-server"))) refuse("copresence_adopt_v2");
     matches.push({ workdir, nodeDir, configPath, nodeId: req.node_id, alias: req.alias, config });
   }
   if (matches.length !== 1) refuse(matches.length ? "adopt_identity_ambiguous" : "adopt_identity_not_found");

@@ -11,6 +11,8 @@ import { verifyAdoptionLocalIdentity, verifyAdoptionProcess } from "./adopt-loca
 import { readAdoptionPid, readAdoptionProc } from "./adopt-proc.js";
 import { processStamp, stopVerifiedTree } from "./adopt-process-tree.js";
 import { captureLaunchEvidence, configHash, privateSocket } from "./adopt-launch-evidence.js";
+import { readCodexScope } from "./adopt-codex-scope.js";
+import { stopCodexStages } from "./adopt-codex-stop.js";
 
 export interface AdoptLifecycleRequest { request_id: string; child_node_id: string; child_alias: string; action: "start" | "stop" | "delete"; }
 const queues = new Map<string, Promise<unknown>>();
@@ -44,8 +46,19 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
   return true;
 }
 async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: AdoptDaemonDeps): Promise<Record<string, unknown>> {
-  const identity = verifyAdoptionLocalIdentity({ node_id: entry.node_id, alias: req.child_alias, network_id: deps.networkId, workdir: entry.workdir }, deps);
+  const identity = verifyAdoptionLocalIdentity({ node_id: entry.node_id, alias: req.child_alias, network_id: deps.networkId, workdir: entry.workdir }, {...deps, allowCodexV2: !!entry.codex_v2});
   if (identity.nodeDir !== entry.nodeDir) throw Error("adopt_registry_identity_mismatch");
+  if (entry.codex_v2) {
+    if (!identity.config.codexCopresence || entry.codex_v2.version !== 1 || configHash(identity) !== entry.codex_v2.config_hash)
+      throw Error("adopt_codex_binding_changed");
+    if (req.action !== "stop") throw Error("adopt_codex_start_not_available");
+    const scope = readCodexScope(identity, deps.uid);
+    if (scope.socket !== entry.codex_v2.socket || scope.marker !== entry.codex_v2.marker) throw Error("adopt_codex_binding_changed");
+    await stopCodexStages(scope);
+    if (adoptedChild(deps.workDir, req.child_alias)?.request_id !== entry.request_id) throw Error("adopt_binding_revoked_during_stop");
+    atomicWriteJson(join(identity.nodeDir, ".hub-stopped"), {request_id:req.request_id, node_id:entry.node_id, stopped:true});
+    return {status:"stopped"};
+  }
   const env = reproducibleEnvironment(identity, deps);
   const verify = () => {
     const pid = readAdoptionPid(identity.nodeDir), proc = pid ? readAdoptionProc(pid) : null;

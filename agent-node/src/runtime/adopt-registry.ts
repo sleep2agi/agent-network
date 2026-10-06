@@ -9,6 +9,7 @@ export interface AdoptedChild {
   workdir: string;
   nodeDir: string;
   launch_mode: "bare" | "tmux";
+  codex_v2?: { version: 1; socket: string; marker: string; config_hash: string };
   launch_evidence?: { mode: "bare" | "tmux"; config_hash: string; socket?: string; session?: string; pane?: string };
 }
 export function readWorkdirRegistry(root: string): Record<string, unknown> {

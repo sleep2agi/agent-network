@@ -8,6 +8,7 @@ export interface CodexPaneSnapshot {
   session: string;
   pane: string;
   sessionName: string;
+  rootPid?: number;
   // A fresh, complete live tree, not PIDs copied from the identity file.
   processes: readonly AdoptionProc[];
 }
@@ -25,14 +26,14 @@ export interface CodexAdoptionScope {
  * Names select candidates only; matching a name never authorizes a signal.
  * No stored PID, default-socket ban, or fallback to name-based tmux targeting.
  */
-export function verifyCodexPanes(scope: CodexAdoptionScope, panes: readonly CodexPaneSnapshot[]): Record<CodexRole, CodexPaneSnapshot> {
+export function verifyCodexPanes(scope: CodexAdoptionScope, panes: readonly CodexPaneSnapshot[], roles: readonly CodexRole[] = CODEX_STOP_ORDER): Record<CodexRole, CodexPaneSnapshot> {
   if (!scope.alias || !scope.marker || !isAbsolute(scope.socket) ||
       !isAbsolute(scope.codexHome) || !isAbsolute(scope.workdir) || !Number.isSafeInteger(scope.uid) || scope.uid < 0)
     throw Error("adopt_codex_scope_invalid");
   const names = { bridge: `${scope.alias}-桥`, tui: scope.alias, appsrv: `${scope.alias}-appsrv` };
   const result = {} as Record<CodexRole, CodexPaneSnapshot>;
   const sessions = new Set<string>(), ids = new Set<string>();
-  for (const role of CODEX_STOP_ORDER) {
+  for (const role of roles) {
     const matches = panes.filter(p => p.socket === scope.socket && p.sessionName === names[role]);
     // Multi-pane sessions need an explicit future contract, never collateral kill.
     if (matches.length !== 1) throw Error("adopt_codex_stage_ambiguous");

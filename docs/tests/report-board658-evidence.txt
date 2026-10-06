@@ -23,3 +23,18 @@ Container default socket: three CJK sessions plus unrelated live decoy.
 Collector uses shared tmux-format helper and explicit -S via execTmux, list-panes
 only; captures fresh /proc trees, rechecks generation/topology, rejects wrong
 marker. All four sessions survive collection. No lifecycle wiring yet.
+
+Increment 3: daemon handler wiring (Hub transport is a stub, NOT real-Hub E2E)
+Real non-root tmux default socket, fake three stages, actual /proc + signals.
+get_adopt_request -> persisted codex_v2 receipt -> active binding -> ordered
+stop -> .hub-stopped -> stopped ack; unrelated decoy still present.
+Final suite 6/6, 22 expects, rc=0. Prior 21-assert version repeated in ten
+fresh containers: all ten rc=0. Startup remains explicitly unavailable (#659).
+Fixed observed dying-process race: environ may be EACCES after TERM before Z;
+SIGCONT of the already-verified frozen generation only needs the birth guard.
+Live unreadable identity is still refused. Dead is not PID reuse.
+Existing adopt-daemon/local-identity/process-tree: 17/17, 46 expects, rc=0
+with docker run --init (without init, existing self-proc test runs as PID 1
+and correctly hits the PID <=1 guard; fixture execution corrected).
+No production/host tmux operations. Real Hub HTTP, full daemon process,
+bootsweep, remaining negative/race matrix and decoy mutation still pending.

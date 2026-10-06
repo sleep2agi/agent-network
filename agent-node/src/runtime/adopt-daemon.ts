@@ -7,6 +7,9 @@ import { CommHubError } from "../reply-reliability.js";
 import { verifyAdoptionLocalIdentity, verifyAdoptionProcess, type AdoptionIdentityOptions, type AdoptionLocalIdentity } from "./adopt-local-identity.js";
 import { readAdoptionPid, readAdoptionProc, type AdoptionProc } from "./adopt-proc.js";
 import { adoptedChild, forgetAdoptedChild, readWorkdirRegistry, writeAdoptedChild } from "./adopt-registry.js";
+import { readCodexScope } from "./adopt-codex-scope.js";
+import { collectCodexPanes } from "./adopt-codex-tmux.js";
+import { configHash } from "./adopt-launch-evidence.js";
 
 export interface AdoptDaemonDeps extends AdoptionIdentityOptions {
   workDir: string;
@@ -58,8 +61,17 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
   try {
     if (process.platform !== "linux") throw Error("adopt_platform_unsupported");
     if (req.request_id !== requestId) throw Error("adopt_request_mismatch");
-    const identity = verifyAdoptionLocalIdentity(req, deps);
+    const identity = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true });
     alias = identity.alias;
+    if (identity.config.codexCopresence) {
+      const scope = readCodexScope(identity, deps.uid);
+      collectCodexPanes(scope);
+      const checked = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true });
+      if (!isDeepStrictEqual(identity, checked) || !isDeepStrictEqual(scope, readCodexScope(checked, deps.uid))) throw Error("adopt_identity_changed");
+      writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, node_id: identity.nodeId,
+        nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: "tmux",
+        codex_v2: { version: 1, socket: scope.socket, marker: scope.marker, config_hash: configHash(identity) } });
+    } else {
     const readProc = deps.readProc ?? readAdoptionProc;
     const pid = readAdoptionPid(identity.nodeDir);
     const before = pid ? readProc(pid) : null;
@@ -75,6 +87,7 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
     if (!isDeepStrictEqual(before, after)) throw Error("adopt_process_changed");
     writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId,
       node_id: identity.nodeId, nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: mode });
+    }
     registered = true;
   } catch (e: any) {
     // Do not expose filesystem paths or secrets from parser/OS error messages.

@@ -5,7 +5,7 @@ import { execTmux } from "../tmux.js";
 import { parseTmuxRows, tmuxListArgs } from "../tmux-format.js";
 import { processStamp, sameProcess } from "./adopt-process-tree.js";
 import { readAdoptionProc } from "./adopt-proc.js";
-import { verifyCodexPanes, type CodexAdoptionScope, type CodexPaneSnapshot } from "./adopt-codex-evidence.js";
+import { CODEX_STOP_ORDER, verifyCodexPanes, type CodexRole, type CodexAdoptionScope, type CodexPaneSnapshot } from "./adopt-codex-evidence.js";
 
 export function codexSocket(socket: string, uid: number): void {
   if (!isAbsolute(socket) || /[\0\r\n]/.test(socket)) throw Error("adopt_socket_unsafe");
@@ -17,11 +17,19 @@ export function codexTmuxEnv(socket: string) {
   return { ...process.env, ANET_TMUX_SOCKET: socket, TMUX: undefined, TMUX_PANE: undefined };
 }
 /** Only list-*; explicit socket via the shared wrapper. Never display/target by name. */
-export function listCodexPanes(scope: CodexAdoptionScope) {
-  codexSocket(scope.socket, scope.uid);
-  const output = execTmux(tmuxListArgs(["list-panes", "-a"],
+export function listCodexPanes(scope: CodexAdoptionScope, allowStopped = false) {
+  try { codexSocket(scope.socket, scope.uid); }
+  catch (e: any) { if (allowStopped && e.code === "ENOENT") return []; throw e; }
+  let output: string;
+  try { output = execTmux(tmuxListArgs(["list-panes", "-a"],
     ["#{session_name}", "#{session_id}", "#{pane_id}", "#{pane_pid}", "#{pane_dead}"]),
-    { encoding: "utf8", timeout: 5000, env: codexTmuxEnv(scope.socket) });
+    { encoding: "utf8", timeout: 5000, env: codexTmuxEnv(scope.socket) }); }
+  catch (e: any) {
+    const stderr = String(e.stderr ?? "");
+    if (allowStopped && e.status === 1 && (/^no server running on /m.test(stderr) ||
+        /^error connecting to .* \(No such file or directory\)$/m.test(stderr))) return [];
+    throw Error("adopt_tmux_listing_failed");
+  }
   const rows = parseTmuxRows(output, 5);
   if (rows.length !== output.split(/\r?\n/).filter(Boolean).length) throw Error("adopt_tmux_listing_invalid");
   return rows;
@@ -42,15 +50,16 @@ function tree(root: number) {
     return proc;
   });
 }
-export function collectCodexPanes(scope: CodexAdoptionScope): CodexPaneSnapshot[] {
+export function collectCodexPanes(scope: CodexAdoptionScope, roles: readonly CodexRole[] = CODEX_STOP_ORDER): CodexPaneSnapshot[] {
   const rows = listCodexPanes(scope);
-  const names = new Set([scope.alias, `${scope.alias}-桥`, `${scope.alias}-appsrv`]);
+  const byRole = {tui:scope.alias, bridge:`${scope.alias}-桥`, appsrv:`${scope.alias}-appsrv`};
+  const names = new Set(roles.map(role => byRole[role]));
   const targets = new Set(rows.filter(r => names.has(r[0])).map(r => r[1]));
   const result = rows.filter(r => targets.has(r[1])).map(r => {
     if (r[4] !== "0" || !/^\d+$/.test(r[3])) throw Error("adopt_codex_stage_missing");
-    return { socket: scope.socket, sessionName: r[0], session: r[1], pane: r[2], processes: tree(Number(r[3])) };
+    return { socket: scope.socket, sessionName: r[0], session: r[1], pane: r[2], rootPid: Number(r[3]), processes: tree(Number(r[3])) };
   });
-  verifyCodexPanes(scope, result);
+  verifyCodexPanes(scope, result, roles);
   // No await: reject a changed topology or process generation before returning.
   if (!isDeepStrictEqual(rows, listCodexPanes(scope))) throw Error("adopt_codex_topology_changed");
   for (const pane of result) {
