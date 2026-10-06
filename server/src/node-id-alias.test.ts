@@ -168,7 +168,9 @@ describe("app#196 —— 「解析不到 daemon」的两种情况必须给不同
     const r = await call("stop_node", { node_id: DAEMON_CHILD });
     expect(r.ok).toBe(false);
     expect(r.error).toBe("daemon_not_resolvable");
-    expect(r.message).toContain("pass daemon_node_id explicitly");
+    // Board #625: an explicit daemon id no longer substitutes for authority.
+    expect(r.message).not.toContain("pass daemon_node_id explicitly");
+    expect(r.message).toContain("adopt this node");
   });
 
   test("delete_node 走同一条判别(两个调用点不能只改一个)", async () => {
