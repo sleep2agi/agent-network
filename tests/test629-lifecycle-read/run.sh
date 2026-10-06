@@ -16,4 +16,21 @@ grep -q '(fail) same-network restricted viewer' /tmp/test629-red.log
 echo "WITNESSED_RED lifecycle read scope removed rc=$rc"
 cp /tmp/lifecycle-read-green.ts src/node-lifecycle-read.ts
 run_http
+# Removing redaction must fail on the public viewer response, not startup.
+bun -e 'const p="src/node-lifecycle-read.ts"; const s=await Bun.file(p).text(); const n=s.replaceAll("publicLifecycleError(b.error)","b.error").replaceAll("publicLifecycleError(row.error)","row.error"); if(n===s)throw Error("mutation drift"); await Bun.write(p,n);'
+rc=0
+run_http >/tmp/test629-error-red.log 2>&1 || rc=$?
+test "$rc" -ne 0
+grep -q '(fail) public errors redact free text' /tmp/test629-error-red.log
+echo "WITNESSED_RED public error redaction removed rc=$rc"
+cp /tmp/lifecycle-read-green.ts src/node-lifecycle-read.ts
+# Reverting to the historical naming-only join must lose the actual child.
+bun -e 'const p="src/node-lifecycle-read.ts"; const s=await Bun.file(p).text(); const n=s.replace("COALESCE(c.child_node_id, CASE", "COALESCE(NULL, CASE"); if(n===s)throw Error("mutation drift"); await Bun.write(p,n);'
+rc=0
+run_http >/tmp/test629-child-red.log 2>&1 || rc=$?
+test "$rc" -ne 0
+grep -q '(fail) created projection prefers recorded child id' /tmp/test629-child-red.log
+echo "WITNESSED_RED recorded child ignored rc=$rc"
+cp /tmp/lifecycle-read-green.ts src/node-lifecycle-read.ts
+run_http
 echo "RESULT: PASS test629 user lifecycle read HTTP"

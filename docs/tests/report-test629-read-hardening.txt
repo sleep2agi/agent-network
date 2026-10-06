@@ -1,0 +1,40 @@
+board #629 / follow-up to Hub #2447 — lifecycle read hardening
+
+Scope: exact public error allowlist on both nodes.adoption and lifecycle request
+reads. Unknown/free-text/empty errors -> lifecycle_error; null stays null.
+No database error rewrite, auth expansion, write-route change or version bump.
+Creation projection prefers stored child_node_id; only null legacy records use
+cr_X -> node_X. An explicit missing child or different network never falls back.
+
+Docker: sg docker -c 'docker build -f tests/test629-lifecycle-read/Dockerfile
+  -t anet-lifecycle-redaction-test . && docker run --rm --network none
+  anet-lifecycle-redaction-test'
+No source mount. Real HTTP Hub at port 0, independent temporary HOME and DB.
+13 tests / 167 assertions / 0 failures; suite exit 0.
+Shared scope removal: named cross-network/restricted-viewer tests red, rc=1.
+Error redaction removal: named granted-viewer HTTP test red, rc=1.
+Recorded child ignored: named child projection HTTP test red, rc=1.
+Restored source: 13 tests / 167 assertions green; RESULT PASS.
+
+Coverage: all three request kinds, both request_id and node_id selectors,
+nodes.adoption projection, exact known code, unknown code, code plus path,
+free text with fixture hostname/path, empty string, null. Read-only viewer grant.
+Creation tests: null historical mapping, noncanonical recorded child override,
+explicit missing child, cross-network child rejection.
+
+Full server suite not rerun in this follow-up; remote CI remains authoritative.
+No production Hub, node, tmux, merge or release operations.
+Candidate discovery remains separate board #654.
+
+Review addendum: stop-daemon not_my_child errors embed the entire node config
+path; start-daemon bin errors embed raw exceptions. Added both concrete fixture
+shapes to every request/projection redaction check. Added start timeout to the
+state-refresh HTTP assertion and bilingual contract (superseded stale request).
+Clarified field omission versus error-value sanitization in source/docs/PR.
+Reran standalone Docker suite: 13 tests / 194 assertions / 0 failures, rc=0;
+all three named mutations rc=1; restoration green.
+
+Deferred follow-up: existing /api/node-create-requests also exposes raw daemon
+errors. This PR intentionally changes only the new #2447 read surface; it does
+not claim to sanitize the older creation endpoint. Review its consumer/error
+compatibility and add separate HTTP redaction tests before changing that API.

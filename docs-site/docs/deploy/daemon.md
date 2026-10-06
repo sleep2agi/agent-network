@@ -395,6 +395,7 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 
 - `GET /api/nodes` 新增 `managed: "created" | "adopted" | "none"`：分别由真实创建记录、
   active 收编绑定或均无记录决定。创建记录优先，不凭 ID 前缀或主机名猜测。
+  创建记录优先使用 `child_node_id`；仅旧记录该列为 null 时按 `cr_X → node_X` 回退。
   `adoption` 为最近绑定的 `{request_id, daemon_node_id, status, error}`，无记录为 `null`；
   状态保留 `pending / active / refused / revoked`，pending 不能当作收编成功。
 - `GET /api/host-supervisors` 对可见的 daemon 投影 `adopt_capable`。只在 daemon 确实
@@ -407,12 +408,15 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 
 成功响应是 `{ok:true,request:{kind,request_id,node_id,network_id,daemon_node_id,status,error,created_at,...}}`。
 收编另有 `updated_at`；停启另有 `delivered_at / acked_at`，时间为 UTC 毫秒或 null。
-收编状态如上；启动保留 `pending / delivered / started / start_failed`，停止保留
+收编状态如上；启动保留 `pending / delivered / started / start_failed / timeout`，停止保留
 `pending / delivered / stopped / stop_failed / noop_not_my_child`。失败看 `error`，不把
 HTTP 200 或 pending 当成操作成功。返回 daemon 原因码，例如
 `adopt_explicit_private_socket_required`（需要私有 tmux socket）、
 `adopt_start_evidence_missing`（缺少真实启动证据）、`adopt_active_binding_required`（有效绑定缺失）。
-本接口不查询 delete，也不返回 token、工作目录、PID 或配置快照。
+新启动请求取代陈旧启动请求时，旧请求可变成 `timeout`；它不是启动成功。
+本接口不查询 delete，结果字段不包含 token、工作目录、PID 或配置快照；错误值另行脱敏如下。
+所有新增读投影的 `error` 只透传明确白名单内的完整错误码；未知码、附带诊断文本或空字符串
+统一返回 `lifecycle_error`，null 保留。原始错误仍保留在数据库，不向节点读者泄露路径或主机信息。
 
 无需新配置、端口、服务或数据库迁移；升级/回滚遵循上述部署流程。绑定和请求历史仍来自
 Hub 数据库备份，Git 只恢复软件；本次未做生产升级或新的灾难恢复演练。
