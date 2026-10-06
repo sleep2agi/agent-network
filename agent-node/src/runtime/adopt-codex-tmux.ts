@@ -5,7 +5,7 @@ import { execTmux } from "../tmux.js";
 import { parseTmuxRows, tmuxListArgs } from "../tmux-format.js";
 import { processStamp, sameProcess } from "./adopt-process-tree.js";
 import { readAdoptionProc } from "./adopt-proc.js";
-import { CODEX_STOP_ORDER, verifyCodexPanes, type CodexRole, type CodexAdoptionScope, type CodexPaneSnapshot } from "./adopt-codex-evidence.js";
+import { CODEX_STOP_ORDER, codexRoleNames, verifyCodexPanes, type CodexRole, type CodexAdoptionScope, type CodexPaneSnapshot } from "./adopt-codex-evidence.js";
 
 export function codexSocket(socket: string, uid: number): void {
   if (!isAbsolute(socket) || /[\0\r\n]/.test(socket)) throw Error("adopt_socket_unsafe");
@@ -50,18 +50,36 @@ function tree(root: number) {
     return proc;
   });
 }
-export function collectCodexPanes(scope: CodexAdoptionScope, roles: readonly CodexRole[] = CODEX_STOP_ORDER): CodexPaneSnapshot[] {
-  const rows = listCodexPanes(scope);
-  const byRole = {tui:scope.alias, bridge:`${scope.alias}-桥`, appsrv:`${scope.alias}-appsrv`};
+export function assertNoEscapedCodexProcesses(scope: CodexAdoptionScope, panes: readonly CodexPaneSnapshot[]): void {
+  const owned = new Map(panes.flatMap(p=>p.processes).map(p=>[p.pid,p.birth]));
+  for (const item of readdirSync("/proc")) {
+    if (!/^\d+$/.test(item) || Number(item)<=1) continue;
+    const pid=Number(item), stamp=processStamp(pid);
+    if (!stamp || stamp.uid!==scope.uid) continue;
+    let proc;
+    try {proc=readAdoptionProc(pid);} catch(e) {if(!processStamp(pid))continue;throw e;}
+    if(proc?.env.ANET_NODE_MARKER===scope.marker && owned.get(pid)!==proc.birth)
+      throw Error("adopt_codex_untracked_process");
+  }
+}
+export function collectCodexPanes(scope: CodexAdoptionScope, roles: readonly CodexRole[] = CODEX_STOP_ORDER, allowMissing = false): CodexPaneSnapshot[] {
+  const byRole = codexRoleNames(scope);
+  const rows = listCodexPanes(scope,allowMissing);
   const names = new Set(roles.map(role => byRole[role]));
   const targets = new Set(rows.filter(r => names.has(r[0])).map(r => r[1]));
-  const result = rows.filter(r => targets.has(r[1])).map(r => {
+  const result = rows.filter(r => targets.has(r[1]) && !(allowMissing && r[4]==="1")).map(r => {
     if (r[4] !== "0" || !/^\d+$/.test(r[3])) throw Error("adopt_codex_stage_missing");
     return { socket: scope.socket, sessionName: r[0], session: r[1], pane: r[2], rootPid: Number(r[3]), processes: tree(Number(r[3])) };
   });
-  verifyCodexPanes(scope, result, roles);
+  // Missing stages are allowed only for continuation, after a global marker
+  // census proves no detached/extra stage is omitted from the verified trees.
+  const liveRoles = allowMissing ? roles.filter(role=>result.some(p=>p.sessionName===byRole[role])) : roles;
+  verifyCodexPanes(scope, result, liveRoles);
+  // Even a dead extra pane makes the session topology ambiguous.
+  for(const pane of result) if(rows.filter(r=>r[1]===pane.session).length!==1) throw Error("adopt_codex_target_ambiguous");
+  assertNoEscapedCodexProcesses(scope,result);
   // No await: reject a changed topology or process generation before returning.
-  if (!isDeepStrictEqual(rows, listCodexPanes(scope))) throw Error("adopt_codex_topology_changed");
+  if (!isDeepStrictEqual(rows, listCodexPanes(scope,allowMissing))) throw Error("adopt_codex_topology_changed");
   for (const pane of result) {
     const row = rows.find(r => r[2] === pane.pane)!;
     if (!isDeepStrictEqual(pane.processes, tree(Number(row[3])))) throw Error("adopt_process_generation_changed");

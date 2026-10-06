@@ -53,20 +53,18 @@ async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: Ad
       throw Error("adopt_codex_binding_changed");
     if (req.action !== "stop") throw Error("adopt_codex_start_not_available");
     const scope = readCodexScope(identity, deps.uid);
-    if (scope.socket !== entry.codex_v2.socket || scope.marker !== entry.codex_v2.marker) throw Error("adopt_codex_binding_changed");
+    if (scope.marker !== entry.codex_v2.marker) throw Error("adopt_codex_readopt_required");
+    if (scope.socket !== entry.codex_v2.socket || scope.layout !== entry.codex_v2.layout) throw Error("adopt_codex_binding_changed");
     const stoppedMarker = join(identity.nodeDir, ".hub-stopped");
     if (existsSync(stoppedMarker)) {
       const st=lstatSync(stoppedMarker);
       if (!st.isFile() || st.isSymbolicLink() || st.uid!==deps.uid || (st.mode&0o022)) throw Error("adopt_codex_marker_unsafe");
-      const receipt=JSON.parse(readFileSync(stoppedMarker,"utf8"));
-      if (receipt.node_id===entry.node_id && receipt.stopped===true) {
-        assertCodexStopped(scope);
-        return {status:"stopped"};
-      }
+      // A receipt is never process authority. Revalidate live/missing stages on
+      // every replay, including a manual restart under the same marker.
     }
     await stopCodexStages(scope);
     if (adoptedChild(deps.workDir, req.child_alias)?.request_id !== entry.request_id) throw Error("adopt_binding_revoked_during_stop");
-    atomicWriteJson(join(identity.nodeDir, ".hub-stopped"), {request_id:req.request_id, node_id:entry.node_id, stopped:true});
+    atomicWriteJson(join(identity.nodeDir, ".hub-stopped"), {request_id:req.request_id, binding_request_id:entry.request_id, marker:scope.marker, node_id:entry.node_id, stopped:true});
     return {status:"stopped"};
   }
   const env = reproducibleEnvironment(identity, deps);

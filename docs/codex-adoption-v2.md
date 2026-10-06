@@ -25,10 +25,18 @@ comparison, and then opaque session/pane IDs. No `-t =name`, prefix targeting or
 marker and CODEX_HOME and agree on UID/cwd. Unproven older layouts refuse; users
 must refresh their TUI launch before retrying rather than bypassing identity.
 Multi-pane target sessions are currently refused, even if one pane looks valid.
+Absent `codexLaunchLayout` means native (TUI=alias, bridge=alias-桥);
+`external-appserver` means TUI=alias-tui, bridge=alias. Both use alias-appsrv.
+Unknown layouts refuse. The selected layout is persisted and checked against
+the binding. This does not bypass missing marker/identity evidence in older
+external launchers: refresh that evidence before adoption. Extra same-marker
+processes outside the selected trees, including mixed-layout residue, refuse
+before any signal. Pane roots must have the workspace cwd; verified descendants
+may also use subdirectories of that workspace, never sibling/prefix lookalikes.
 
 ## Stop and recovery boundary
 
-Stop validates all stages before any signal, then revalidates each remaining
+Stop validates all live stages before any signal, then revalidates each remaining
 stage in bridge → TUI → app-server order. The verified tree stop helper checks
 PID generation before signals. Marker/home checks guard destructive signals;
 SIGCONT only resumes the already-verified frozen generation (a terminating
@@ -36,11 +44,20 @@ process may no longer expose environ). Retained dead panes are removed only by
 their previously verified opaque pane ID. Other sessions on the shared/default
 socket must survive.
 
-Only after all three sessions and remaining marker processes are absent is
+Only after all three live stages and remaining marker processes are absent is
 `.hub-stopped` written and success acknowledged. A completed stop can be retried
-using that receipt plus fresh absence checks. Partial failure does not claim
-success; it currently requires operator reconciliation rather than guessing
-which remaining stage may be killed. Existing boot scanning honors the marker.
+using fresh absence checks, not trusting the receipt alone. Missing stages are
+permitted only after a global marker census excludes processes outside the
+remaining verified trees. A replay can stop surviving or SIGSTOP-frozen stages.
+Detached marker processes still refuse without signals: the operator must
+reconcile those processes explicitly; retry then resumes the remaining stages.
+Dead remain-on-exit panes from an earlier daemon are not live processes.
+Existing boot scanning honors the marker. Receipts include marker and binding
+request ID; successful re-adoption removes an old receipt. A manual restart
+that rotates the marker returns `adopt_codex_readopt_required`: revoke the old
+binding and re-adopt after refreshing the three-stage evidence. No automatic
+transfer of authority to a new generation is performed. A stale receipt never
+prevents normal verified stop of a live same-generation node.
 
 The local registry records a versioned receipt, socket, marker and config hash,
 not process environments or credentials. Revocation must never resurrect it.
@@ -56,4 +73,5 @@ Git source alone does not recover that data.
 
 Tests use only container-owned fake Codex stages and a real default-socket
 decoy. No real Codex model, host tmux or production node is used. See
-`docs/tests/report-board658-evidence.txt` for measured results and gaps.
+`docs/tests/report-test658-review-fixes.txt` for current measured results and
+`docs/tests/report-board658-evidence.txt` for the earlier implementation record.

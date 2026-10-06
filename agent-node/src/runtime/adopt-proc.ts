@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { AdoptionProcessEvidence } from "./adopt-local-identity.js";
+import { decodeProcNulBlock, hasLoneSurrogate } from "../codex-home-enforce.js";
 
 export interface AdoptionProc extends AdoptionProcessEvidence { pid: number; birth: string; }
 export function readAdoptionProc(pid: number): AdoptionProc | null {
@@ -14,8 +15,14 @@ export function readAdoptionProc(pid: number): AdoptionProc | null {
   const birth = fields[19];
   if (!birth || !/^\d+$/.test(birth)) throw Error("adopt_proc_invalid");
   const env: Record<string, string> = Object.create(null);
-  for (const pair of readFileSync(join(root, "environ"), "utf8").split("\0")) {
-    const at = pair.indexOf("="); if (at > 0) env[pair.slice(0, at)] = pair.slice(at + 1);
+  for (const pair of decodeProcNulBlock(readFileSync(join(root, "environ"))).split("\0")) {
+    if (hasLoneSurrogate(pair)) throw Error("adopt_proc_invalid");
+    const at = pair.indexOf("=");
+    if (at > 0) {
+      const key=pair.slice(0,at);
+      if (Object.hasOwn(env,key)) throw Error("adopt_proc_invalid");
+      env[key]=pair.slice(at+1);
+    }
   }
   const evidence = { pid, birth, uid: lstatSync(root).uid, env,
     cwd: realpathSync(join(root, "cwd")), argv: readFileSync(join(root, "cmdline"), "utf8").split("\0").filter(Boolean) };

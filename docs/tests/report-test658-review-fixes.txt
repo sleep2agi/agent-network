@@ -1,0 +1,59 @@
+PR #2461 / board #658: independent review B1/B2/B3 fixes
+All execution: Docker, --init --cpus=2 --network none. No host mounts,
+real Codex credentials, production Hub, host tmux, or real nodes.
+
+B1: layout is explicit in scope and adoption receipt. Native and external
+role mappings each pass real-tmux adopt/stop/re-adopt. Unknown layout refuses.
+Mixed same-marker residue is rejected by a global marker census before signals.
+B2: receipts no longer short-circuit live verification. Stop receipts record
+marker + binding request ID. Successful re-adoption clears only the old file
+observed before ack (inode/mtime checked), not a new stop receipt written while
+ack was in flight. Rotated marker requires explicit revoke/re-adopt; authority
+is not silently transferred. Existing markerless external launchers still fail
+identity validation; the layout fix does not synthesize identity evidence.
+B3: continuation accepts missing stages only when all marker processes belong
+to the remaining verified pane trees. Escaped processes refuse with zero
+signals; removing the isolated escaped fixture permits retry. Frozen trees,
+workspace-descendant cwd, and remain-on-exit have dedicated cases. Roots still
+require exact workspace cwd. Retained live pane state gets a bounded 1s wait.
+Dead panes from a prior daemon are not proof of a live process and are not
+destructively removed without this invocation's live identity evidence.
+
+Commands (build from repository root):
+docker build -t anet-test658-fixes -f tests/test658-codex-adopt-stop/Dockerfile .
+docker run --rm --init --cpus=2 --network none anet-test658-fixes
+  baseline: 13 pass / 67 expects / rc=0.
+  three mutations, each rc=1 with assertion failure:
+    remove extra-stage marker census;
+    require complete stages again at stop entry;
+    restore stale-receipt short circuit.
+  mutation runner restores source in finally; wrapper rc=0.
+
+docker run --rm --init --cpus=2 --network none anet-test658-fixes bun test
+  agent-node/src/runtime/adopt-daemon.test.ts
+  agent-node/src/runtime/adopt-lifecycle.test.ts
+  agent-node/src/runtime/adopt-local-identity.test.ts
+  agent-node/src/runtime/adopt-process-tree.test.ts
+  agent-node/src/tmux-format.test.ts
+  Result: 30 pass / 85 expects / rc=0 (includes #556 ratchet).
+
+docker build -t anet-test658-http-fixes -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
+docker run --rm --init --cpus=2 --network none anet-test658-http-fixes
+  Result: rc=0, seven PASS checks: registration, daemon token, real daemon
+  receipt, stopped marker, only original decoy remains, unchanged decoy birth,
+  all three original processes gone. Built daemon CLI, real temporary Hub;
+  fake model stages. HTTP E2E uses native layout; external layout is covered
+  by real-tmux handler tests, not a second HTTP E2E claim.
+
+docker build -t anet-test658-gates -f tests/test658-codex-adopt-stop/Dockerfile.gates .
+docker run --rm --init --cpus=2 --network none anet-test658-gates
+  registration selftest 10/10; new unregistered suites=0;
+  test file coverage 613 files, 0 uncovered;
+  home-path baseline no file above baseline; rc=0.
+  Gates use an indexed, isolated copy of the source snapshot, not host tests.
+
+CI: qa.yml runs unit/integration/mutations then HTTP E2E; both path filters
+include this suite. scripts/qa.sh registers it with --init --cpus=2 --network none.
+run.sh makes collect.test.ts a real suite-owned test. Proc environ uses #2422
+decodeProcNulBlock and rejects malformed UTF-8 and duplicate keys.
+Not claimed: whole repository tests, real models, v2 start (#659), production.

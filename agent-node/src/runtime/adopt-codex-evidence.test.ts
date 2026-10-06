@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { CODEX_STOP_ORDER, verifyCodexPanes, type CodexPaneSnapshot } from "./adopt-codex-evidence.js";
 
-const scope = { alias: "示例", socket: "/tmp/tmux-1000/default", marker: "node-marker", codexHome: "/work/.anet/nodes/demo/codex-home", workdir: "/work", uid: 1000 };
+const scope = { layout:"native" as const, alias: "示例", socket: "/tmp/tmux-1000/default", marker: "node-marker", codexHome: "/work/.anet/nodes/demo/codex-home", workdir: "/work", uid: 1000 };
 function fixture(): CodexPaneSnapshot[] {
   return ["示例-桥", "示例", "示例-appsrv", "示例-other"].map((sessionName, i) => ({
     socket: scope.socket, session: `$${i}`, pane: `%${i}`, sessionName,

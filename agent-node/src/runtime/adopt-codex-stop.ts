@@ -1,18 +1,19 @@
 import { readdirSync } from "node:fs";
 import { execTmux } from "../tmux.js";
-import { CODEX_STOP_ORDER, verifyCodexPanes, type CodexAdoptionScope } from "./adopt-codex-evidence.js";
+import { CODEX_STOP_ORDER, codexCwdAllowed, codexRoleNames, type CodexAdoptionScope } from "./adopt-codex-evidence.js";
 import { collectCodexPanes, codexTmuxEnv, listCodexPanes } from "./adopt-codex-tmux.js";
 import { processStamp, sameProcess, stopVerifiedTree, type ProcessStamp } from "./adopt-process-tree.js";
 import { readAdoptionProc } from "./adopt-proc.js";
 
 const pids = () => readdirSync("/proc").filter(x => /^\d+$/.test(x) && Number(x)>1).map(Number);
 export async function stopCodexStages(scope: CodexAdoptionScope): Promise<void> {
-  // Validate all three before touching the first. A partial previous failure
-  // needs operator reconciliation, never guessed authorization for leftovers.
-  collectCodexPanes(scope);
+  // Verify every live stage and reject detached/extra marker processes before
+  // the first signal. Missing stages may be the result of an interrupted stop.
+  collectCodexPanes(scope,CODEX_STOP_ORDER,true);
   for (let i=0; i<CODEX_STOP_ORDER.length; i++) {
-    const roles = CODEX_STOP_ORDER.slice(i);
-    const pane = verifyCodexPanes(scope, collectCodexPanes(scope, roles), roles)[roles[0]];
+    const panes = collectCodexPanes(scope,CODEX_STOP_ORDER,true);
+    const pane = panes.find(p=>p.sessionName===codexRoleNames(scope)[CODEX_STOP_ORDER[i]]);
+    if (!pane) continue;
     const root = processStamp(pane.rootPid!);
     const before = pane.processes.find(p => p.pid === pane.rootPid);
     if (!root || root.birth !== before?.birth || root.uid !== scope.uid || root.pid === process.pid)
@@ -31,7 +32,7 @@ export async function stopCodexStages(scope: CodexAdoptionScope): Promise<void> 
         try { proc = readAdoptionProc(pid); }
         catch (e) { if (!processStamp(pid)) return; throw e; }
         if (!proc) return;
-        if (proc.birth !== stamp.birth || pid === process.pid || proc.uid !== scope.uid || proc.cwd !== scope.workdir ||
+        if (proc.birth !== stamp.birth || pid === process.pid || proc.uid !== scope.uid || !codexCwdAllowed(scope,proc.cwd,pid===root.pid) ||
             proc.env.ANET_NODE_MARKER !== scope.marker || proc.env.CODEX_HOME !== scope.codexHome)
           throw Error("adopt_codex_identity_unproven");
         const final=processStamp(pid); if(!final)return;
@@ -41,8 +42,11 @@ export async function stopCodexStages(scope: CodexAdoptionScope): Promise<void> 
     });
     // remain-on-exit may retain a dead pane. Only remove that same verified ID,
     // never its name, a replacement pane, or the whole shared server.
-    const rows = listCodexPanes(scope, i === CODEX_STOP_ORDER.length - 1);
-    const retained = rows.find(r => r[2] === pane.pane);
+    let retained = listCodexPanes(scope,true).find(r => r[2] === pane.pane);
+    for(let retry=0;retained?.[4]==="0" && retry<20;retry++) {
+      await new Promise(resolve=>setTimeout(resolve,50));
+      retained=listCodexPanes(scope,true).find(r=>r[2]===pane.pane);
+    }
     if (retained) {
       if (retained[1] !== pane.session || retained[4] !== "1" || Number(retained[3]) !== pane.rootPid)
         throw Error("adopt_codex_topology_changed");
@@ -53,8 +57,9 @@ export async function stopCodexStages(scope: CodexAdoptionScope): Promise<void> 
 }
 
 export function assertCodexStopped(scope: CodexAdoptionScope): void {
-  const names = new Set([scope.alias, `${scope.alias}-桥`, `${scope.alias}-appsrv`]);
-  if (listCodexPanes(scope, true).some(r => names.has(r[0]))) throw Error("adopt_codex_stage_still_running");
+  const names = new Set(Object.values(codexRoleNames(scope)));
+  // A dead remain-on-exit pane from a prior daemon is not a running stage.
+  if (listCodexPanes(scope, true).some(r => names.has(r[0]) && r[4]!=="1")) throw Error("adopt_codex_stage_still_running");
   // A child that escaped its original tree must not permit a false stopped ack.
   for (const pid of pids()) {
     const stamp = processStamp(pid); if (!stamp || stamp.uid !== scope.uid) continue;

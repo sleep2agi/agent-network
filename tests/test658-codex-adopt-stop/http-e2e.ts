@@ -10,7 +10,7 @@ const root=mkdtempSync("/tmp/codex-http-"), home=`${root}/home`, workdir=`${home
 const uid=process.getuid!(), socket=`/tmp/tmux-${uid}/default`, alias="三段演示", nodeDir=`${workdir}/.anet/nodes/n_manual_fixture`;
 const marker="22222222-2222-4222-8222-222222222222", codexHome=`${nodeDir}/codex-home`;
 for(const dir of [home,workdir,daemonDir,nodeDir,codexHome,`/tmp/tmux-${uid}`])mkdirSync(dir,{recursive:true,mode:0o700});
-const scope={alias,socket,workdir,codexHome,marker,uid}, env=codexTmuxEnv(socket);
+const scope={layout:"native" as const,alias,socket,workdir,codexHome,marker,uid}, env=codexTmuxEnv(socket);
 const reserve=Bun.serve({hostname:"127.0.0.1",port:0,fetch:()=>new Response()});
 const port=reserve.port;reserve.stop(true);
 const hub=`http://127.0.0.1:${port}`, dbPath=`${root}/hub.db`;

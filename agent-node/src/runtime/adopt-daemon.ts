@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { minimalEnv } from "./create-node-daemon.js";
@@ -58,6 +58,7 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
   if (!req?.ok) return;
   let registered = false;
   let alias = "";
+  let staleStopped: {path:string; ino:number; mtimeMs:number} | undefined;
   try {
     if (process.platform !== "linux") throw Error("adopt_platform_unsupported");
     if (req.request_id !== requestId) throw Error("adopt_request_mismatch");
@@ -68,9 +69,15 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
       collectCodexPanes(scope);
       const checked = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true });
       if (!isDeepStrictEqual(identity, checked) || !isDeepStrictEqual(scope, readCodexScope(checked, deps.uid))) throw Error("adopt_identity_changed");
+      const receipt=join(identity.nodeDir,".hub-stopped");
+      if(existsSync(receipt)) {
+        const st=lstatSync(receipt);
+        if(!st.isFile() || st.isSymbolicLink() || st.uid!==deps.uid || (st.mode&0o022)) throw Error("adopt_codex_marker_unsafe");
+        staleStopped={path:receipt,ino:st.ino,mtimeMs:st.mtimeMs};
+      }
       writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, node_id: identity.nodeId,
         nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: "tmux",
-        codex_v2: { version: 1, socket: scope.socket, marker: scope.marker, config_hash: configHash(identity) } });
+        codex_v2: { version: 1, layout:scope.layout, socket: scope.socket, marker: scope.marker, config_hash: configHash(identity) } });
     } else {
     const readProc = deps.readProc ?? readAdoptionProc;
     const pid = readAdoptionPid(identity.nodeDir);
@@ -104,6 +111,17 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
       if (!ack?.ok) {
         forgetAdoptedChild(deps.workDir, alias, requestId);
         throw new Error("adopt_ack_rejected");
+      }
+      const current=adoptedChild(deps.workDir,alias);
+      if(current?.request_id===requestId && current.codex_v2 && staleStopped) {
+        const marker=staleStopped.path;
+        if(existsSync(marker)) {
+          const st=lstatSync(marker);
+          if(!st.isFile() || st.isSymbolicLink() || st.uid!==deps.uid || (st.mode&0o022)) throw Error("adopt_codex_marker_unsafe");
+          // A stop may have completed while the adoption ack was in flight.
+          // Never unlink its newly written receipt, only the pre-ack old file.
+          if(st.ino===staleStopped.ino && st.mtimeMs===staleStopped.mtimeMs) unlinkSync(marker);
+        }
       }
     } catch (error) {
       // callCommHub throws structured application refusals rather than returning

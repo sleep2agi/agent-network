@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+WORKDIR /repo
+COPY . .
+# Worktree .git points outside the build context; index this isolated snapshot.
+RUN rm -f /repo/.git && git init && git add .
+CMD ["sh", "-c", "python3 .github/scripts/check-test-suite-registration.py --selftest && python3 .github/scripts/check-test-suite-registration.py && python3 .github/scripts/check-test-file-coverage.py && python3 .github/scripts/check-home-path-baseline.py"]
