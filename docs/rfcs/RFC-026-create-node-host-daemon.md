@@ -762,7 +762,7 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 | `runtime_not_in_local_allowlist` | daemon | 「该服务器未启用 runtime: codex-sdk」 |
 | `secret_not_found` | hub | 「该 network 未配置 secret: ANTHROPIC_API_KEY，请先在 secret vault 添加」 |
 | `node_name_conflict` | hub | 「节点名 demo-bot 已存在，请换名」 |
-| `node_name_invalid` | hub | 「节点名只能用小写字母 / 数字 / `_` / `-`」 |
+| `node_name_invalid` | hub | 「节点名只能用小写字母 / 数字 / `_` / `-`」(#652 起放宽：允许中文等 Unicode 字母/数字、大写、`_`、`-`，1–64 字符；回包带 `reason` / `char` / `message`。规则见 `server/src/shared/node-name.ts`) |
 | `child_register_timeout` | hub | 「子进程已起但 30s 内未注册回 hub，请到服务器查日志」 |
 | `cross_network_node` | hub | 「无权限：该服务器不在你的 network」 |
 | `daemon_internal` | daemon | 「daemon 执行失败：<redacted>」（详情仅写 audit log） |

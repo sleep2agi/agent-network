@@ -13,6 +13,8 @@ import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { isReservedEnvKey } from "../shared/reserved-env.js";
+import { checkNodeName } from "../shared/node-name.js";
+import { childDirNameForCreate } from "./child-dir-name.js";
 import {
   atomicWriteJson,
   atomicWritePrivateText,
@@ -580,7 +582,8 @@ export function minimalEnv(
 // We duplicate the structural validation here so an attacker who
 // compromises hub still can't smuggle a bad spec past the daemon.
 
-const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+// Board #652 — the name rule is shared with the hub: ../shared/node-name.ts (byte-identical
+// copy of server/src/shared/node-name.ts, drift-tested). It used to be /^[a-z][a-z0-9_-]{0,63}$/.
 // 与 server/src/create-node-validate.ts 同镜像:允许恰好一个 `/` 分隔的 provider/model(OpenCode 共存,
 // 桌面向导 0.2.61 起发 `opencode/mimo-v2.5-free`),每段仍是原字符集且不能是纯点段。
 const MODEL_SEGMENT = "[a-zA-Z0-9._:\\-]+";
@@ -685,7 +688,13 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
 }
 
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
-  if (!spec.name || !NAME_RE.test(spec.name)) throw new Error("node_name_invalid");
+  {
+    // #652 — same rule as the hub. The hub forwards the trimmed name, so anything that
+    // is not already in its normalized form here did not come through a current hub.
+    const r = checkNodeName(spec.name);
+    if (!r.ok) throw new Error(`node_name_invalid:${r.error}:${r.message}`);
+    if (r.name !== spec.name) throw new Error("node_name_invalid:not_normalized");
+  }
   if (!VALID_RUNTIMES.has(spec.runtime)) throw new Error("runtime_invalid");
   if (spec.model !== undefined && spec.model !== null &&
       (spec.model.length === 0 || spec.model.length > 100 || !MODEL_RE.test(spec.model) || MODEL_DOT_ONLY_SEGMENT.test(spec.model))) throw new Error("model_invalid");
@@ -926,16 +935,24 @@ export async function handleCreateNodeDoorbell(
   // Ensure WORK_DIR exists
   try { mkdirSync(deps.workDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
 
+  // #652 — the alias may be Chinese / Unicode; the directory under .anet/nodes/ is ASCII.
+  // Names the old rule accepted keep their old directory (= the name), so nothing moves.
+  // With a workdir (the app sends `<root>/<folder>`), a non-legacy name's dir is that folder
+  // name, so what the wizard showed is what lands on disk (child-dir-name.ts).
+  let childDirName = childDirNameForCreate(req.node_spec.name, req.node_spec.workdir);
+
   // 这个子节点的 .anet 根 = spawn cwd。请求带了 workdir 就用它(校验 + 0700 创建 +
   // 「里面不能住着别的节点」),否则沿用 daemon cwd —— 与改动前逐字相同。
   let childWorkDir = deps.workDir;
   const rawWorkdir = req.node_spec.workdir;
   if (rawWorkdir !== undefined && rawWorkdir !== null) {
     try {
-      childWorkDir = prepareChildWorkdir(rawWorkdir, req.node_spec.name, {
+      childWorkDir = prepareChildWorkdir(rawWorkdir, childDirName, {
         home: resolveChildHome(process.env, process.platform),
         platform: process.platform,
       });
+      // Lookups later go by the registered (realpath) workdir; derive from the same string.
+      childDirName = childDirNameForCreate(req.node_spec.name, childWorkDir);
       deps.log(`[create-node] child workdir: ${childWorkDir}`);
     } catch (e: any) {
       const msg = e instanceof WorkdirError ? e.message : `workdir_invalid:${e?.message || e}`;
@@ -967,7 +984,25 @@ export async function handleCreateNodeDoorbell(
   // of truth for runtime/model/flags — we map it back to config keys.
   // F2 security: args were already structurally validated; this map
   // is a JSON write, no shell.
-  const childDir = join(childWorkDir, ".anet", "nodes", req.node_spec.name);
+  const childDir = join(childWorkDir, ".anet", "nodes", childDirName);
+  // #652 — two different aliases can map to the same derived directory (hash collision,
+  // or `MyBot` / `mybot`). Re-creating the SAME alias (retry) overwrites as before; a
+  // directory holding ANOTHER alias is refused instead of having its config replaced.
+  {
+    let existingAlias: unknown;
+    try {
+      const prev = JSON.parse(readFileSync(join(childDir, "config.json"), "utf-8"));
+      existingAlias = prev?.alias ?? prev?.node_name;
+    } catch { /* no config yet */ }
+    if (existingAlias !== undefined && existingAlias !== req.node_spec.name) {
+      const msg = `node_dir_taken: ${join(".anet", "nodes", childDirName)} in ${childWorkDir} already holds node "${String(existingAlias).slice(0, 80)}"`;
+      deps.warn(`[create-node] ${msg}`);
+      await deps.callCommHub("ack_create_request", {
+        request_id, status: "rejected", error: `validate: ${msg}`.slice(0, 800),
+      }).catch(() => {});
+      return;
+    }
+  }
   try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
@@ -1010,7 +1045,7 @@ export async function handleCreateNodeDoorbell(
   }
   if (req.env_blob && Object.keys(req.env_blob).length > 0) {
     try {
-      writeChildSecretsEnv(childWorkDir, req.node_spec.name, req.env_blob, deps.serializeEnvLocal);
+      writeChildSecretsEnv(childWorkDir, childDirName, req.env_blob, deps.serializeEnvLocal);
     } catch (e: any) {
       deps.warn(`[create-node] secrets.env write failed: ${e?.message || e}`);
       // not fatal — proceed to start; hub will see status=succeeded but
@@ -1053,7 +1088,8 @@ export async function handleCreateNodeDoorbell(
         stdio: ["ignore", "ignore", "ignore"],
         detached: true,
       }));
-    const child = launch(anetBin, ["node", "start", req.node_spec.name], {
+    // #652 — start by directory name: exact within this .anet root, and always ASCII.
+    const child = launch(anetBin, ["node", "start", childDirName], {
       cwd: childWorkDir,
       env: minimalEnv(),
     });
@@ -1175,7 +1211,7 @@ export async function handleCreateNodeDoorbell(
           }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
           return;
         }
-        const msg = `codex co-presence launcher ended within ${FAIL_FAST_MS}ms (${verdict.how}) — run \`anet node start ${req.node_spec.name}\` in ${childWorkDir} to see why`;
+        const msg = `codex co-presence launcher ended within ${FAIL_FAST_MS}ms (${verdict.how}) — run \`anet node start ${childDirName}\` in ${childWorkDir} to see why`;
         deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
         await deps.callCommHub("ack_create_request", {
           request_id, status: "runtime_capability_check_failed", error: msg.slice(0, 800), runtime: req.node_spec.runtime,

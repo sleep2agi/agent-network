@@ -202,6 +202,61 @@ if [[ -n "$SUCCEEDED" ]]; then
   fi
 fi
 
+# ── A.cn — board #652: a Chinese name creates; every directory stays ASCII ──
+note "A.cn #652 — Chinese alias creates end-to-end, node dir is ASCII"
+CN_NAME="测试节点"
+# daemon dir = shared nodeFolderSlug(name) — computed by the module under test, not re-derived here
+CN_DIR=$(cd /app/agent-node && bun -e 'import { nodeDirNameFor } from "./src/shared/node-name.ts"; console.log(nodeDirNameFor(process.argv[1]))' "$CN_NAME")
+[[ "$CN_DIR" =~ ^node-[0-9a-f]{6}$ ]] && ok "derived node dir for $CN_NAME = $CN_DIR" || bad "derived dir unexpected: '$CN_DIR'"
+BODY=$(build_create_node_body "$DAEMON_NODE_ID" "$CN_NAME" "claude-agent-sdk" "claude-opus-rfc026-cn" "$NET_ID")
+RESP=$(mcp_call "$UTOK" "$BODY")
+CN_REQ=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+[[ "$CN_REQ" == cr_* ]] && ok "hub accepted Chinese name (request_id=$CN_REQ)" || bad "hub refused Chinese name: $RESP"
+CN_ROW=""
+for i in $(seq 1 60); do
+  sleep 1
+  CN_ROW=$(curl -sS "$HUB_BASE/api/nodes" -H "Authorization: Bearer $UTOK" \
+    | jq -r --arg a "$CN_NAME" '.nodes[] | select(.alias == $a) | .node_id' 2>/dev/null | head -1)
+  [[ -n "$CN_ROW" && "$CN_ROW" != "null" ]] && break
+done
+[[ -n "$CN_ROW" && "$CN_ROW" != "null" ]] && ok "child registered with alias $CN_NAME ($CN_ROW)" || { bad "Chinese-named child never registered"; tail -30 /tmp/daemon.log; }
+CN_CFG="$WORK/.anet/nodes/$CN_DIR/config.json"
+[[ -f "$CN_CFG" ]] && ok "config at .anet/nodes/$CN_DIR/config.json" || bad "no config at $CN_CFG"
+[[ "$(jq -r .alias "$CN_CFG" 2>/dev/null)" == "$CN_NAME" ]] && ok "config alias = $CN_NAME" || bad "config alias = $(jq -r .alias "$CN_CFG" 2>/dev/null)"
+[[ ! -e "$WORK/.anet/nodes/$CN_NAME" ]] && ok "no directory named after the Chinese alias" || bad "a Chinese-named directory exists under .anet/nodes"
+NONASCII=$(find "$WORK/.anet/nodes" -mindepth 1 -maxdepth 1 -print | LC_ALL=C grep -c '[^ -~]' || true)
+[[ "$NONASCII" == "0" ]] && ok "every entry under .anet/nodes is ASCII" || bad "$NONASCII non-ASCII entr(y/ies) under .anet/nodes"
+CN_STATUS=$(sqlite3 "$HUB_DB" "SELECT status FROM node_create_requests WHERE request_id='$CN_REQ';" 2>/dev/null)
+[[ "$CN_STATUS" == "succeeded" ]] && ok "Chinese-name request status = succeeded" || bad "Chinese-name request status='$CN_STATUS'"
+
+# ── A.cn2 — #652: the folder the app wizard shows is the folder created on disk ──
+# The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`
+# (agent-network-app create-node-workdir.ts; its drive test asserts the request carries it).
+note "A.cn2 #652 — wizard folder (workdir ~/ceshi) == folder on disk"
+SHOWN_FOLDER="ceshi"
+CN2_NAME="测试"
+CN2_ROOT=$(curl -sS "$HUB_BASE/api/host-supervisors?network_id=$NET_ID" -H "Authorization: Bearer $UTOK" \
+  | jq -r --arg d "$DAEMON_NODE_ID" '.daemons[]? | select(.daemon_node_id == $d) | .default_workdir_root // empty' 2>/dev/null)
+[[ -n "$CN2_ROOT" && "$CN2_ROOT" == /* ]] && ok "daemon reports default_workdir_root=$CN2_ROOT" || bad "daemon did not report default_workdir_root ('$CN2_ROOT')"
+BODY=$(build_create_node_body "$DAEMON_NODE_ID" "$CN2_NAME" "claude-agent-sdk" "claude-opus-rfc026-cn2" "$NET_ID" ",\"workdir\":\"$CN2_ROOT/$SHOWN_FOLDER\"")
+RESP=$(mcp_call "$UTOK" "$BODY")
+CN2_REQ=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+[[ "$CN2_REQ" == cr_* ]] && ok "dispatched $CN2_NAME with workdir $CN2_ROOT/$SHOWN_FOLDER" || bad "dispatch failed: $RESP"
+CN2_ROW=""
+for i in $(seq 1 60); do
+  sleep 1
+  CN2_ROW=$(curl -sS "$HUB_BASE/api/nodes" -H "Authorization: Bearer $UTOK" \
+    | jq -r --arg a "$CN2_NAME" '.nodes[] | select(.alias == $a) | .node_id' 2>/dev/null | head -1)
+  [[ -n "$CN2_ROW" && "$CN2_ROW" != "null" ]] && break
+done
+[[ -n "$CN2_ROW" && "$CN2_ROW" != "null" ]] && ok "child registered with alias $CN2_NAME" || { bad "$CN2_NAME never registered"; tail -30 /tmp/daemon.log; }
+CN2_CFG="$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes/$SHOWN_FOLDER/config.json"
+[[ -f "$CN2_CFG" ]] && ok "on disk: $SHOWN_FOLDER/.anet/nodes/$SHOWN_FOLDER/config.json (== wizard folder)" || bad "no config at $CN2_CFG; nodes dir has: $(ls "$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes" 2>&1)"
+[[ "$(ls "$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes" 2>/dev/null)" == "$SHOWN_FOLDER" ]] && ok "the only node dir in the workdir is $SHOWN_FOLDER" || bad "node dirs in workdir: $(ls "$CN2_ROOT/$SHOWN_FOLDER/.anet/nodes" 2>&1)"
+[[ "$(jq -r .alias "$CN2_CFG" 2>/dev/null)" == "$CN2_NAME" ]] && ok "config alias = $CN2_NAME" || bad "config alias = $(jq -r .alias "$CN2_CFG" 2>/dev/null)"
+NONASCII2=$(find "$CN2_ROOT/$SHOWN_FOLDER" -print | LC_ALL=C grep -c '[^ -~]' || true)
+[[ "$NONASCII2" == "0" ]] && ok "every path under $CN2_ROOT/$SHOWN_FOLDER is ASCII" || bad "$NONASCII2 non-ASCII path(s) under the workdir"
+
 # nvm-sim scenario runs at end (after K) — see "A.nvm" block below.
 
 # ── B. role gate ──────────────────────────────────────────────────
@@ -263,6 +318,13 @@ JSON
 RESP=$(mcp_call "$UTOK" "$BODY")
 ERR=$(echo "$RESP" | jq -r .error 2>/dev/null)
 [[ "$ERR" == "node_name_invalid" || "$ERR" == "validation_failed" ]] && ok "E1 bad name rejected: $ERR" || bad "E1 NOT rejected: $RESP"
+# E1b — #652: path characters are refused with a reason, before any row is written
+BODY=$(build_create_node_body "$DAEMON_NODE_ID" "a/b" "claude-agent-sdk" "x" "$NET_ID")
+RESP=$(mcp_call "$UTOK" "$BODY")
+[[ "$(echo "$RESP" | jq -r .error 2>/dev/null)" == "node_name_invalid" && "$(echo "$RESP" | jq -r .reason 2>/dev/null)" == "forbidden_char" ]] \
+  && ok "E1b 'a/b' rejected: node_name_invalid/forbidden_char ($(echo "$RESP" | jq -r .message))" || bad "E1b NOT rejected with reason: $RESP"
+ROWS=$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM node_create_requests WHERE child_name='a/b';" 2>/dev/null)
+[[ "$ROWS" == "0" ]] && ok "E1b no row for the refused name" || bad "E1b row count = $ROWS"
 # E2 — bad runtime
 BODY=$(build_create_node_body "$DAEMON_NODE_ID" "e2-child" "bash" "claude-opus-x" "$NET_ID")
 RESP=$(mcp_call "$UTOK" "$BODY")

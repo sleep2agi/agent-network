@@ -8,6 +8,7 @@
 // payload (RFC §4.6).
 
 import { isReservedEnvKey } from "./shared/reserved-env.js";
+import { checkNodeName } from "./shared/node-name.js";
 
 export class ValidationError extends Error {
   constructor(public code: string, public detail?: Record<string, unknown>) {
@@ -66,17 +67,26 @@ export const MAX_ENV_VALUE_BYTES = 16 * 1024;
 const ENV_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 // §4.2.2 name + model.
-const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+// Board #652 — the name rule lives in ./shared/node-name.ts (byte-identical copy in
+// agent-node/src/shared/, drift-tested). It used to be /^[a-z][a-z0-9_-]{0,63}$/ here.
 // OpenCode 共存的模型带 provider 前缀(`opencode/mimo-v2.5-free`,agent-node parseModelRef 按第一个 `/` 切),
 // 桌面向导 0.2.61 起就发这种形状 —— 允许**恰好一个**斜杠分隔的两段;每段仍是原字符集,且不能是纯点(`..`/`.`)。
 const MODEL_SEGMENT = "[a-zA-Z0-9._:\\-]+";
 const MODEL_RE = new RegExp(`^${MODEL_SEGMENT}(?:/${MODEL_SEGMENT})?$`);
 const MODEL_DOT_ONLY_SEGMENT = /(^|\/)\.+(\/|$)/;
 
-export function validateName(s: unknown): asserts s is string {
-  if (typeof s !== "string" || !NAME_RE.test(s)) {
-    throw new ValidationError("node_name_invalid", { value: typeof s === "string" ? s.slice(0, 80) : typeof s });
+/** Board #652 — returns the normalized (trimmed) name the caller must store and forward. */
+export function validateName(s: unknown): string {
+  const r = checkNodeName(s);
+  if (!r.ok) {
+    throw new ValidationError("node_name_invalid", {
+      value: typeof s === "string" ? s.slice(0, 80) : typeof s,
+      reason: r.error,
+      ...(r.char !== undefined ? { char: r.char } : {}),
+      message: r.message,
+    });
   }
+  return r.name;
 }
 
 export function validateRuntime(s: unknown): asserts s is Runtime {
