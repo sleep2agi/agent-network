@@ -8,6 +8,7 @@ import { join, resolve, sep } from "node:path";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { forgetSpawnedChildIfPid, getChildrenSnapshot, recordSpawnedChild } from "./stop-daemon.js";
 import { childWorkDirFor } from "./child-workdir.js";
+import { adoptedChild } from "./adopt-registry.js";
 
 const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
@@ -87,6 +88,12 @@ export async function handleStartDoorbell(
   }
   if (!req?.ok || !req.child_node_id || !req.child_alias) {
     deps.warn(`[start-daemon] request rejected: ${req?.error || "invalid_envelope"}`);
+    return;
+  }
+  // Board #627 will delegate these to anet. Never use the created-child path.
+  if (adoptedChild(deps.workDir, req.child_alias)) {
+    await deps.callCommHub("ack_start_request", { request_id: event.request_id,
+      status: "start_failed", error: "adopted_lifecycle_not_available" });
     return;
   }
 

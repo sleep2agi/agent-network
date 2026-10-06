@@ -29,3 +29,13 @@ First increment
 - Module is not wired to running daemon behavior; adopt_capable remains off.
 
 No merge, release, production upgrade or live-node operation.
+Increment 2 (not final acceptance): daemon get/ack and unadopt handlers,
+atomic adopted registry preserving created-child records, Linux proc birth
+and identity recheck, SSE wiring, opt-in capability. Adopted lifecycle fails
+closed pending board #627 (does not fall through to created-child signals).
+Docker anet-board625-lifecycle-fix --init --network none: adoption identity,
+protocol/proc and existing child-workdir suites: 48 pass, 134 assertions, rc=0.
+Standalone test626 Docker: identity 6/6 and protocol 6/6 passed; allowlist
+bypass mutation is witnessed red rc=1, harness rc=0. --init avoids testing
+PID 1, which is intentionally not an adoptable node PID.
+CLI integration and real Hub + daemon + manual-node E2E remain in progress.
