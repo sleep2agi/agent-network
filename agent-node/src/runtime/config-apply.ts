@@ -16,6 +16,7 @@
 // exit(75) is gated behind an injected `exit` hook so tests can verify
 // the path without terminating the test runner.
 
+import type { RuntimeReadiness } from "./runtime-readiness.js";
 import {
   closeSync,
   constants,
@@ -447,6 +448,20 @@ export interface DaemonCapabilities {
    *  app 据此藏起那一行、hub 据此拒掉带 workdir 的请求(否则老 daemon 会静默忽略它)。
    *  见 child-workdir.ts。 */
   default_workdir_root?: string;
+  /** #622 —— 每个声明的 runtime **实测**能不能建出节点(CLI / 登录存在性 / 网络 / codex 共享登录数)。
+   *  后台每 10 分钟自检一次,心跳只读缓存。首轮自检完成前不出现。
+   *  🔴 不改变 `can_create_nodes` 的语义(旧 app 依赖它);这是**新增**的一格。 */
+  runtime_readiness?: Record<string, RuntimeReadiness>;
+}
+
+/** #622 —— 把后台自检的最新结果挂到快照的 daemon_capabilities 上。
+ *  `readiness` 为 undefined(非 daemon / 首轮未完成)时快照逐字不变。 */
+export function attachRuntimeReadiness<T extends { daemon_capabilities?: DaemonCapabilities }>(
+  snapshot: T,
+  readiness: Record<string, RuntimeReadiness> | undefined,
+): T {
+  if (!readiness || Object.keys(readiness).length === 0) return snapshot;
+  return { ...snapshot, daemon_capabilities: { ...(snapshot.daemon_capabilities ?? {}), runtime_readiness: readiness } };
 }
 
 /** #1353 —— `can_create_nodes === false` 时的原因代码。

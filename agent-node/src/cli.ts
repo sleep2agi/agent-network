@@ -165,6 +165,7 @@ import {
   loadConfigWithSelfHeal,
   mergePatch,
   buildConfigSnapshot,
+  attachRuntimeReadiness,
   RESTART_SENTINEL,
   type ConfigUpdate,
   type ConfigPatch,
@@ -1320,6 +1321,8 @@ function currentNodeHealth(): NodeHealthReport | undefined {
 // #594 —— 本节点的 codex 登录指纹 + 「本机另有 N 台节点共用同一份登录」,作为 health.codex_login 上报。
 // 只给 codex / codex-app-server 开(下面启动段创建);旧 Hub 的 health schema 不 strict,丢弃该键。
 let codexLoginHealth: ReturnType<typeof createCodexLoginHealth> | null = null;
+// #622 —— host_supervisor 的逐 runtime 自检(见 runtime/runtime-readiness.ts)。非 daemon 恒为 null。
+let runtimeReadinessMonitor: { current(): Record<string, import("./runtime/runtime-readiness.js").RuntimeReadiness> | undefined } | null = null;
 /** What goes on the wire as `health`: the #448 layers plus the additive #594 `codex_login`.
  *  Kept separate from `currentNodeHealth()` so the model_auth gate still only sees the monitor's report. */
 function reportedNodeHealth(): (Partial<NodeHealthReport> & { codex_login?: CodexLoginHealth }) | undefined {
@@ -1710,7 +1713,11 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
-      ...buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
+      // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
+      ...attachRuntimeReadiness(
+        buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
+        runtimeReadinessMonitor?.current(),
+      ),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
       // #1958 — informational; the hub's RFC-024 content-match reads
       // snapshot.model (still the configured value) field-by-field, so extra
@@ -7356,6 +7363,29 @@ setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
 // exit. Logs only the top-level <ts>-<alias> dir name on purge — never
 // any file inside, per D7 nit ("不 log 文件名, 避免 secret 名字漏进 log").
 if (fileConfig.role === "host_supervisor") {
+  // #622 —— 逐 runtime 自检:开机跑一轮,之后每 10 分钟(±10% 抖动)一轮,全在后台。
+  // 用**子进程真正拿到的**环境(minimalEnv)判断 PATH 与 key 变量名;结果变化就补报一次心跳。
+  Promise.all([import("./runtime/runtime-readiness.js"), import("./runtime/create-node-daemon.js")])
+    .then(([rr, cnd]) => {
+      const mon = rr.createRuntimeReadinessMonitor({
+        runtimes: () => {
+          const raw = fileConfig?.runtimes_supported;
+          return Array.isArray(raw) ? raw.filter((x: unknown): x is string => typeof x === "string") : [];
+        },
+        deps: () => rr.realReadinessDeps({ childEnv: cnd.minimalEnv() as Record<string, string | undefined> }),
+        intervalMs: rr.readinessIntervalFromEnv(process.env),
+        warn: (m: string) => warn(m),
+        onChange: (r) => {
+          const summary = Object.entries(r).map(([k, v]) => `${k}=${v.state}`).join(" ");
+          log(`[runtime-readiness] ${summary}`);
+          void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
+        },
+      });
+      runtimeReadinessMonitor = mon;
+      mon.start();
+    })
+    .catch((e: any) => warn(`[runtime-readiness] init failed: ${e?.message || e}`));
+
   import("./runtime/deleted-sweeper.js").then(({ startDeletedSweeper }) => {
     startDeletedSweeper({
       log: (m: string) => log(m),

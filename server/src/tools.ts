@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { nodeHealthSchema, normalizeNodeHealth, recordNodeHealth } from "./node-health-store.js";
@@ -880,6 +881,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // `.catch(undefined)`:同上一格的立场 —— 一个诊断/展示字段不许拒掉整份 report。
           // 读取侧再按形状消毒(create-node-validate.ts daemonDefaultWorkdirRoot)。
           default_workdir_root: z.string().max(1024).optional().catch(undefined),
+          // #622 —— 逐 runtime 实测就绪度。收得宽、坏了只丢这一格(见 runtime-readiness.ts)。
+          runtime_readiness: runtimeReadinessSchema,
         }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
       // app#225 follow-up — the reporting process answers the `rules_file`
