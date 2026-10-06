@@ -17,6 +17,9 @@ import {
   atomicWriteJson,
   atomicWritePrivateText,
   repairPrivateConfigPermissions,
+  isValidTimeoutMs,
+  TIMEOUT_MS_MIN,
+  TIMEOUT_MS_MAX,
 } from "./config-apply.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 
@@ -555,8 +558,9 @@ export function validateFlagValueDaemon(k: string, v: unknown): void {
       }
       return;
     case "timeout":
-      if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 86400) {
-        throw new Error(`flag_value_invalid:${k}:must be integer 1..86400`);
+      // #605 —— 毫秒(agent-node 就是按毫秒读的),同 hub isValidTimeoutMs:0 或 1000..3_600_000。
+      if (!isValidTimeoutMs(v)) {
+        throw new Error(`flag_value_invalid:${k}:timeout is in milliseconds: 0 (no limit) or an integer ${TIMEOUT_MS_MIN}..${TIMEOUT_MS_MAX}`);
       }
       return;
     case "copresence":

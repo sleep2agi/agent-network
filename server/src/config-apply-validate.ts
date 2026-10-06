@@ -5,6 +5,8 @@
 // tools.ts wrap these with auth checks (SEC-1 network scope, ntok_/utok_
 // caller identity, role gates).
 
+import { isValidTimeoutMs, TIMEOUT_MS_REASON } from "./create-node-validate.js";
+
 /**
  * Fields the dashboard may change. Anything not in this list is rejected
  * by hub-side validation regardless of role — the UI cannot smuggle
@@ -239,8 +241,10 @@ export function validatePatch(
         }
         break;
       case "timeout":
-        if (typeof val !== "number" || !Number.isInteger(val) || val < 0 || val > 3_600_000) {
-          return { field: "flags.timeout", reason: "must be an integer ms in [0, 3_600_000]" };
+        // #605 —— 与 create_node 同一把尺子(create-node-validate.ts isValidTimeoutMs):
+        // 毫秒,0 或 1000..3_600_000;1..999 是「按秒填了」的形状,拒绝而不是给一个亚秒超时。
+        if (!isValidTimeoutMs(val)) {
+          return { field: "flags.timeout", reason: TIMEOUT_MS_REASON };
         }
         break;
     }

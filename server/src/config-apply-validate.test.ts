@@ -249,6 +249,15 @@ describe("validatePatch — per-flag enum / range", () => {
     expect(validatePatch(undefined, { timeout: 3_600_001 })?.field).toBe("flags.timeout");
     expect(validatePatch(undefined, { timeout: 60.5 })?.field).toBe("flags.timeout");
   });
+  test("timeout: 0 = no limit; 1..999 is seconds-shaped and rejected (#605)", () => {
+    expect(validatePatch(undefined, { timeout: 0 })).toBeNull();
+    expect(validatePatch(undefined, { timeout: 1000 })).toBeNull();
+    for (const v of [1, 600, 999]) {
+      const r = validatePatch(undefined, { timeout: v });
+      expect(r?.field).toBe("flags.timeout");
+      expect(r?.reason).toContain("milliseconds");
+    }
+  });
 });
 
 describe("validatePatch — combinations", () => {

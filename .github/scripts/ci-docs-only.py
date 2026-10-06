@@ -84,6 +84,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "qa-node-logs-e2e": {"qa-node-logs-e2e"},
     "qa-create-node-workdir": {"qa-create-node-workdir"},
     "qa-create-node-codex-copresence": {"qa-create-node-codex-copresence"},
+    "qa-create-node-timeout-ms": {"qa-create-node-timeout-ms"},
     "qa-codex-copresence-stop-start": {"qa-codex-copresence-stop-start"},
     "test562b-node-remote": {"test562b-node-remote"},
     "test571-lifecycle-safety": {"test571-lifecycle-safety"},

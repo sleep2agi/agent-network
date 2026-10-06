@@ -755,6 +755,29 @@ jobs:
       - name: Run qa-daemon-stop-codex-copresence
         run: docker run --rm anet-qa-daemon-stop-codex-copresence
 
+  qa-create-node-timeout-ms:
+    # #605 create_node 的 flags.timeout 单位:agent-node 按毫秒读,hub/daemon 曾按「秒」收 1..86400。
+    # 真 hub + 真 `anet daemon up` + 真 create_node:600 被拒(原因写明毫秒)、600000 落进子节点 config
+    # 并被 agent-node 的解析器读成 600000ms、0 收、3600001 拒。冷构建同 qa-create-node-codex-copresence —— 独立 job。
+    name: create-node timeout unit e2e (Docker, real hub + daemon)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-timeout-ms"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build qa-create-node-timeout-ms
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-create-node-timeout-ms/run.sh)" \
+            -t anet-qa-create-node-timeout-ms \
+            -f tests/qa-create-node-timeout-ms/Dockerfile .
+
+      - name: Run qa-create-node-timeout-ms
+        run: docker run --rm anet-qa-create-node-timeout-ms
+
   test562b-node-remote:
     # #562 step 2 — `anet node <start|stop|restart> <alias> --remote` / `anet node edit <alias> --model <id> --remote`.
     # 真 hub(随机端口、抛弃库)+ 真 `anet daemon up`(容器 hostname=machine-b)+ daemon 建的真子节点;被测 CLI 从源码跑、
