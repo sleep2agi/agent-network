@@ -1,0 +1,14 @@
+Board #627 — adopted node lifecycle, queued behind board #626
+
+Draft tracking only. No lifecycle implementation or tests claimed yet.
+Dependency: board #626 local verification and adoption registry (PR #2436).
+
+Scope
+- Stop/start adopted nodes only through pinned anet and verified workdir/identity.
+- Never fall through to daemon process-group or alias-sweep handling.
+- Successful Hub stop writes nodeDir/.hub-stopped; remove before Hub start.
+- Require current Hub binding, preserve existing running pid instead of double start.
+- Docker E2E: stop -> boot scan skips -> start -> marker absent.
+- Default-socket production tmux and live nodes must never be touched by tests.
+
+Implementation begins after #626. No merge/release/version reservation.
