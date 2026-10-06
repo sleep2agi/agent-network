@@ -177,6 +177,7 @@ import {
   type DaemonCreateCapability,
 } from "./runtime/daemon-create-capability";
 import { daemonHome, resolveDefaultWorkdirRoot } from "./runtime/child-workdir";
+import { applyDaemonExtraPath } from "./runtime/create-node-daemon.js";
 import { DEFAULT_CODEX_MODEL, resolveCodexModel } from "./codex-model-default";
 import {
   buildCodexSdkThreadOptions,
@@ -520,6 +521,9 @@ if (!opts.config && !Object.keys(fileConfig).length) {
   const legacy = loadJson(join(process.cwd(), ".agent-node.json"));
   if (legacy) { fileConfig = legacy; console.log(`[agent-node] 配置: .agent-node.json`); }
 }
+
+// #648 — 子节点 PATH 的额外绝对目录。只在这个 daemon 进程里生效,不写进子节点 config。
+applyDaemonExtraPath(fileConfig.daemonExtraPath);
 
 // Board #637 — load `<node dir>/secrets.env` before config.json `env`.
 // Precedence (highest wins): process env already set, including an empty
@@ -6638,6 +6642,7 @@ async function processConfigUpdate(): Promise<void> {
       // (currentMaxTurns / currentMaxBudget / currentClaudeTimeoutMs /
       // currentCodexTimeoutMs) read this new value on the next call.
       fileConfig = merged;
+      applyDaemonExtraPath(fileConfig.daemonExtraPath);
       currentConfigRevision += 1;
       await callCommHub("ack_config_update", {
         update_id: updateId,

@@ -98,7 +98,7 @@ interface RuntimeSpec {
 const CLAUDE_LOGIN_HINT = "在这台机器上运行 `claude` 并执行 /login(会生成 ~/.claude/.credentials.json),然后等下一轮自检(约 10 分钟)";
 const CODEX_LOGIN_HINT = "在这台机器上运行 `codex login --device-auth`(会生成 ~/.codex/auth.json)";
 const GROK_LOGIN_HINT = "在这台机器上运行 `grok login`(会生成 ~/.grok/auth.json)";
-const ON_CHILD_PATH = "并确保它位于 /usr/local/bin(或与 node 同一目录)—— daemon 创建的节点只拿到固定的系统 PATH,看不到你 shell 里的 PATH";
+const ON_CHILD_PATH = "并确保它位于 /usr/local/bin(或与 node 同一目录),或写进这个 daemon 节点 config.json 的 daemonExtraPath(绝对路径组成的字符串数组,追加在固定 PATH 之后)—— daemon 创建的节点看不到你 shell 里的 PATH";
 
 const SPECS: Record<string, RuntimeSpec> = {
   "claude-agent-sdk": {
@@ -182,6 +182,27 @@ function withDeadline<T>(p: Promise<T>, ms: number): Promise<T | typeof DEADLINE
   });
 }
 
+/** 某个 runtime 的必选 CLI 在子进程 PATH 上的结论。没有必选 CLI 时是 `not_required`。
+ *  `missing` 与就绪状态 `missing_cli` 是同一条判据(找不到,或 `--version` 失败)。
+ *  `--version` 超时是 `unknown`,不是 missing。建节点拒绝与自检必须走这里,避免两套结论。 */
+export async function requiredCliStatus(
+  runtime: string,
+  pathValue: string,
+  childEnv: Record<string, string | undefined>,
+  io: Pick<ReadinessDeps, "resolveOnPath" | "execVersion">,
+  stepTimeoutMs: number,
+): Promise<{ cli: "found" | "missing" | "unknown" | "not_required"; command?: string; version?: string }> {
+  const spec = SPECS[runtime];
+  if (!spec?.cli) return { cli: "not_required" };
+  const command = spec.cli;
+  const abs = io.resolveOnPath(command, pathValue);
+  if (!abs) return { cli: "missing", command };
+  const r = await io.execVersion(abs, childEnv, stepTimeoutMs);
+  if (r.kind === "ok") return { cli: "found", command, version: extractVersion(r.stdout) };
+  if (r.kind === "error") return { cli: "missing", command };
+  return { cli: "unknown", command };
+}
+
 async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: number): Promise<RuntimeReadiness> {
   const checked_at = new Date(deps.now()).toISOString();
   const spec = SPECS[runtime];
@@ -194,22 +215,16 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
   // ── 1. CLI ──
   let cliUnknown = false;
   if (spec.cli) {
-    const abs = deps.resolveOnPath(spec.cli, pathValue);
-    if (!abs) {
+    const st = await requiredCliStatus(runtime, pathValue, deps.childEnv, deps, stepTimeoutMs);
+    if (st.cli === "found") {
+      out.cli = "found";
+      if (st.version) out.version = st.version;
+    } else if (st.cli === "missing") {
+      // 文件在但跑不起来(#619:Mac 上 codex 的 vendor 二进制 ENOENT)也走这里。
       out.cli = "missing";
     } else {
-      const r = await deps.execVersion(abs, deps.childEnv, stepTimeoutMs);
-      if (r.kind === "ok") {
-        out.cli = "found";
-        const v = extractVersion(r.stdout);
-        if (v) out.version = v;
-      } else if (r.kind === "error") {
-        // 文件在但跑不起来(#619:Mac 上 codex 的 vendor 二进制 ENOENT)—— 对建节点来说就是没有。
-        out.cli = "missing";
-      } else {
-        out.cli = "unknown";
-        cliUnknown = true;
-      }
+      out.cli = "unknown";
+      cliUnknown = true;
     }
   } else {
     out.cli = "bundled";
