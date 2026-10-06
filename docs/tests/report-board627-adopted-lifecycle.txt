@@ -86,3 +86,39 @@ Main rebase after #2436 merged (2026-10-06):
   CLIs, reran full test627 harness: rc=0, 52 E2E PASS checks; both identity and
   restart refusal mutations rc=1. This rebase check used source mounts/copies,
   unlike the preceding standalone-image run. No production actions.
+
+CI follow-up: tmux format helper and failure triage (2026-10-06):
+- Product candidate 831c472cdea8422a508362b68296cdcadc0bf175. CI run
+  37447597137 / job 112217552917 correctly rejected two raw format calls:
+  adopt-launch-evidence.ts display-message and adopt-lifecycle.ts list-sessions.
+  Both now use tmux-format helpers (UTF-8 arguments, format construction and
+  parseTmuxRows); pane evidence requires exactly one parsed row. No ratchet
+  baseline, exemption, process-identity check or lifecycle authority changed.
+- Witnessed red using the same test725 image as non-root: restore only those
+  two files from adee8c8c, run src/tmux-format.test.ts. Result 8 pass / 1 fail,
+  rc=1 at the named "no parsed tmux listing" assertion, identifying both files.
+  This ran in a separate disposable container, not the green full-suite image.
+- Actual failed CI domain is test725 (agent-node), not test745 (agent-network).
+  Built test725-agent-node-unit-ci/Dockerfile with SOURCE_COMMIT above; ran its
+  unmodified entrypoint without source mounts: RESULT PASS, rc=0. Non-root src
+  suite: 2488 pass, 1 existing skip, 0 fail, 8496 assertions, 190/190 files,
+  222.07 seconds. Additional tests/ files: 6/6 executed, 0 failed; built-in
+  readable-attachment disconnection mutation witnessed red rc=1. The existing
+  skipped attach-TUI case is not claimed as tested.
+- Full test627 harness in isolated Docker with copied current sources and
+  rebuilt CLIs: rc=0; runtime 55 pass / 189 assertions, node-locate 13 pass /
+  27 assertions, 52 real HTTP / bare and private-tmux lifecycle PASS checks.
+  Identity-check removal and Hub restart-guard removal both witnessed red rc=1.
+- test225: built its own Dockerfile with SOURCE_COMMIT above, then ran image
+  anet-board627-stop225 without source mounts; rc=0, Summary PASS, 13 PASS
+  checks. Container invocation wall time 97 seconds, excluding build time.
+  CI's 300-second wait timeout did not reproduce. Its run.sh and CLI bin/cli.ts
+  are byte-identical to origin/main df7a06b7. This one local run does not establish
+  a timing distribution or prove the cause of the intermittent CI hang; the
+  reported 77-second run on another machine is not a controlled benchmark.
+- Dashboard failure is expected mutation output, not a baseline product red.
+  Job 112217553073 test236 log says "PASS: witnessed-red notice/filter ordering
+  mutation rc=1", then order-restored-green: 17 pass, 0 fail, Summary PASS.
+  Independently extracted origin/main df7a06b7 goals sources with git archive
+  into an isolated Docker container: routing.test.ts 17 pass / 86 assertions,
+  rc=0. goals sources and test236 have no PR diff. No Dashboard change needed.
