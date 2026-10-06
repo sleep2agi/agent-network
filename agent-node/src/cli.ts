@@ -979,8 +979,16 @@ function reloadNodeToken(): boolean {
   warn(`reloaded node token from ${configFilePath}`);
   return true;
 }
-const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
 const NODE_DIR = configFilePath ? dirname(configFilePath) : join(process.cwd(), ".anet", "nodes", ALIAS);
+// #652 — the per-node state directory. A node's directory under .anet/nodes/ is not always
+// its alias (daemon-created nodes with a Chinese alias live in an ASCII `node-<hash>` dir;
+// clones too), and `anet node logs` reads `<nodes>/<dir>/logs`. When the config IS
+// `<…>/.anet/nodes/<dir>/config.json`, state goes next to it; otherwise the old alias path.
+const NODE_STATE_DIR = configFilePath && basename(dirname(dirname(configFilePath))) === "nodes"
+  && basename(dirname(dirname(dirname(configFilePath)))) === ".anet"
+  ? dirname(configFilePath)
+  : join(process.cwd(), ".anet", "nodes", ALIAS);
+const LOG_DIR = opts["log-dir"] || join(NODE_STATE_DIR, "logs");
 // RFC-036 B4 — immutable for this process lifetime. Runtime/model turns never
 // get to enable this capability; the launcher must opt the node in before boot.
 const OWNER_SCHEDULE_CONTROL_ENABLED = fileConfig.flags?.ownerScheduleControl === true;
@@ -1143,7 +1151,7 @@ function loadEnvFile(path: string) {
 }
 
 function defaultChannelDir(type: string) {
-  return join(process.cwd(), ".anet", "nodes", ALIAS, "channels", type);
+  return join(NODE_STATE_DIR, "channels", type);
 }
 
 interface TelegramChannel {

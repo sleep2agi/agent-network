@@ -9,15 +9,29 @@ import {
 const okSecret = (k: string, _net: string, key: string) => k === key ? `value-of-${k}` : undefined;
 const allow = (k: string) => new Set<string>([k, "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
 
-describe("validateName (§4.2.2)", () => {
-  test("good names", () => {
-    for (const n of ["a", "demo-bot", "node_1", "z2", "abc-def-ghi"]) {
+describe("validateName (§4.2.2, #652 Unicode names)", () => {
+  test("good names — incl. Chinese, upper case, digits first", () => {
+    for (const n of ["a", "demo-bot", "node_1", "z2", "abc-def-ghi", "测试", "研发助手A", "Demo", "1demo", "测".repeat(64)]) {
       expect(() => validateName(n)).not.toThrow();
     }
   });
-  test("rejects shell-injection-like names", () => {
-    for (const n of [";rm -rf /", "demo bot", "Demo", "1demo", "-demo", "demo;rm", "demo$INJECT", "x".repeat(65)]) {
+  test("returns the trimmed name", () => {
+    expect(validateName("  测试 ")).toBe("测试");
+  });
+  test("rejects shell-injection-like and path-like names with a reason", () => {
+    for (const n of [";rm -rf /", "demo bot", "-demo", "demo;rm", "demo$INJECT", "x".repeat(65), "测".repeat(65),
+      "a/b", "a\\b", "a:b", ".hidden", "..", "a\u0000b", "a`id`", "", "   "]) {
       expect(() => validateName(n)).toThrow(ValidationError);
+    }
+  });
+  test("error carries reason + offending char + a readable message", () => {
+    try { validateName("a/b"); throw new Error("no throw"); }
+    catch (e: any) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect(e.code).toBe("node_name_invalid");
+      expect(e.detail.reason).toBe("forbidden_char");
+      expect(e.detail.char).toBe("/");
+      expect(String(e.detail.message)).toContain("/");
     }
   });
 });

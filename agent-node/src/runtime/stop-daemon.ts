@@ -33,6 +33,7 @@ import { childWorkDirFor, forgetChildWorkdir } from "./child-workdir.js";
 import { adoptedChild } from "./adopt-registry.js";
 import { handleAdoptedLifecycle } from "./adopt-lifecycle.js";
 import type { AdoptDaemonDeps } from "./adopt-daemon.js";
+import { resolveChildDirName } from "./child-dir-name.js";
 
 const execFileP = promisify(execFile);
 
@@ -286,6 +287,7 @@ async function defaultStopCopresenceNode(alias: string, childWorkDir: string): P
  *  must ack stop_failed and keep the node dir — the marker is the only handle
  *  on the still-running generation). */
 async function teardownCopresenceIfAny(
+  /** #652 — the node's directory name under workdirRoot (= the alias for pre-#652 nodes). */
   alias: string | undefined,
   child_node_id: string,
   workdirRoot: string,
@@ -345,6 +347,11 @@ export async function handleStopDoorbell(
   }
   const workdirRoot = deps.workdirRoot ?? join(childWorkDir, ".anet", "nodes");
   const deletedRoot = deps.deletedRoot ?? join(childWorkDir, ".anet", "deleted");
+  // #652 — the alias may be Chinese; its directory under .anet/nodes/ is ASCII
+  // (nodeDirNameFor). Paths use the directory, process identity keeps the alias
+  // (`--alias <alias>` + `--config <dir>/config.json`). Pre-#652 nodes resolve to the alias itself.
+  const dirOf = (alias: string): string => resolveChildDirName(workdirRoot, alias) ?? alias;
+  const childDirName = child_alias ? dirOf(child_alias) : undefined;
   const forgetIfDeleted = (backup: string | null) => {
     if (!backup || !child_alias) return;
     try { forgetChildWorkdir(daemonWorkDir, child_alias); }
@@ -378,9 +385,9 @@ export async function handleStopDoorbell(
     //      child 写的那份 config(sweepOrphansForChild)。
     // delete 在「map 无 + 盘上无 config」时仍收敛(#1286:配置已不在 = delete 的终态已成立),
     // 但同样只做身份清扫。
-    if (action === "stop" && !(child_alias && hasLocalChildRecord(workdirRoot, child_alias, child_node_id))) {
+    if (action === "stop" && !(childDirName && hasLocalChildRecord(workdirRoot, childDirName, child_node_id))) {
       const why = `not_my_child: daemon has no local record of ${child_alias || "(no alias)"} (${child_node_id}) — ` +
-        `no children-map entry and no config at ${child_alias ? join(workdirRoot, child_alias, "config.json") : workdirRoot}; ` +
+        `no children-map entry and no config at ${childDirName ? join(workdirRoot, childDirName, "config.json") : workdirRoot}; ` +
         `refusing to signal processes by alias. If this node was started by hand, stop it on its machine with \`anet node stop <alias>\`.`;
       deps.warn(`[stop-daemon] ${why}`);
       await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: why.slice(0, 1000) })
@@ -390,17 +397,17 @@ export async function handleStopDoorbell(
     // #596 — a co-presence child's starter has exited by design, so landing here
     // with a live TUI/app-server/bridge is the NORMAL case for it. Tear it down
     // by identity before the sweep / the trash move (the marker lives in the dir).
-    const cpErrMiss = await teardownCopresenceIfAny(child_alias, child_node_id, workdirRoot, deps);
+    const cpErrMiss = await teardownCopresenceIfAny(childDirName, child_node_id, workdirRoot, deps);
     if (cpErrMiss) {
       await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: cpErrMiss })
         .catch((e: any) => { deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`); });
       return;
     }
     if (child_alias) {
-      await sweepOrphansForChild(child_alias, expectedChildConfigPaths(workdirRoot, child_alias), signalProcess, deps, `${action} without map entry`);
+      await sweepOrphansForChild(child_alias, expectedChildConfigPaths(workdirRoot, childDirName!), signalProcess, deps, `${action} without map entry`);
     }
-    const backup = (action === "delete" && delete_config && child_alias)
-      ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
+    const backup = (action === "delete" && delete_config && childDirName)
+      ? moveWorkdirToTrash(childDirName, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
       : null;
     forgetIfDeleted(backup);
     // Ack `stopped` either way: the child is not running (swept) and — for
@@ -419,7 +426,8 @@ export async function handleStopDoorbell(
   }
 
   // #571 — 身份清扫要用的 config 路径;delete 会在清扫前把目录搬走,所以先算好。
-  const childConfigPaths = expectedChildConfigPaths(workdirRoot, entry.alias);
+  const entryDirName = childDirName ?? dirOf(entry.alias);
+  const childConfigPaths = expectedChildConfigPaths(workdirRoot, entryDirName);
 
   // SIGTERM → grace → SIGKILL
   //
@@ -510,7 +518,7 @@ export async function handleStopDoorbell(
   // #596 — the recorded pid is the co-presence launcher; its process group
   // never contained the tmux sessions. Signal first (a launcher still mid-start
   // stops creating sessions), then reap the generation by its identity marker.
-  const cpErrHit = await teardownCopresenceIfAny(child_alias ?? entry.alias, child_node_id, workdirRoot, deps);
+  const cpErrHit = await teardownCopresenceIfAny(entryDirName, child_node_id, workdirRoot, deps);
   if (cpErrHit) {
     await deps.callCommHub("ack_stop_request", {
       request_id, status: "stop_failed", exit_signal, error: cpErrHit,
@@ -523,8 +531,8 @@ export async function handleStopDoorbell(
   // (~/.anet/deleted) and the moved dir so secrets don't leak.
   // Shared with the no-map-entry delete branch above so the two paths cannot
   // drift on "what happens when the move fails".
-  const backup_path: string | null = (action === "delete" && delete_config && child_alias)
-    ? moveWorkdirToTrash(child_alias, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
+  const backup_path: string | null = (action === "delete" && delete_config && childDirName)
+    ? moveWorkdirToTrash(childDirName, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
     : null;
   forgetIfDeleted(backup_path);
 
@@ -782,10 +790,10 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
     // `--config <本 daemon 给这个 child 写的 config>` 的进程。只看 alias 时,自己的 child
     // 已死而同机另一个工作目录 / HOME 里有同名节点在跑,重启后会把那个外人收进
     // childrenMap,之后的 stop 走命中路径向它的进程组发信号。
-    const configPaths = expectedChildConfigPaths(
-      deps.workdirRoot ?? join(childWorkDirFor(daemonWorkDir, c.alias), ".anet", "nodes"),
-      c.alias,
-    );
+    // #652 — the config lives in the child's directory, which is ASCII (not the alias) for
+    // nodes created with a non-legacy name; pre-#652 nodes resolve to the alias itself.
+    const rebuildRoot = deps.workdirRoot ?? join(childWorkDirFor(daemonWorkDir, c.alias), ".anet", "nodes");
+    const configPaths = expectedChildConfigPaths(rebuildRoot, resolveChildDirName(rebuildRoot, c.alias) ?? c.alias);
     if (configPaths.length === 0) {
       result.missing.push(c.alias);
       deps.warn(`[rebuild] alias=${c.alias} skipped: no child config path to match (alias is not a single path segment)`);

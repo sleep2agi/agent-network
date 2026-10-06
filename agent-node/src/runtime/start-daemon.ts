@@ -4,15 +4,15 @@
 
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { forgetSpawnedChildIfPid, getChildrenSnapshot, recordSpawnedChild } from "./stop-daemon.js";
 import { childWorkDirFor } from "./child-workdir.js";
 import { adoptedChild } from "./adopt-registry.js";
 import { handleAdoptedLifecycle } from "./adopt-lifecycle.js";
 import type { AdoptDaemonDeps } from "./adopt-daemon.js";
+import { resolveChildDirName } from "./child-dir-name.js";
 
-const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
 interface StartRequest {
   ok: boolean;
@@ -57,11 +57,14 @@ export function verifyStoppedChildConfig(
   childNodeId: string,
   alias: string,
 ): string {
-  if (!NAME_RE.test(alias)) throw new Error("child_alias_invalid");
+  // #652 — the alias follows the shared node-name rule (may be Chinese); the directory is
+  // resolved separately (alias dir for pre-#652 nodes, else the ASCII nodeDirNameFor).
+  const dirName = resolveChildDirName(nodesRoot, alias);
+  if (!dirName) throw new Error("child_alias_invalid");
   if (!/^node_[a-z0-9_-]+$/.test(childNodeId)) throw new Error("child_node_id_invalid");
   const root = realpathSync(nodesRoot);
-  const childDir = realpathSync(join(root, alias));
-  if (childDir !== join(root, alias) || !childDir.startsWith(root + sep)) {
+  const childDir = realpathSync(join(root, dirName));
+  if (childDir !== join(root, dirName) || !childDir.startsWith(root + sep)) {
     throw new Error("child_config_path_escape");
   }
   const configPath = resolve(childDir, "config.json");
@@ -109,8 +112,10 @@ export async function handleStartDoorbell(
   const childWorkDir = childWorkDirFor(deps.workDir, req.child_alias);
   const nodesRoot = deps.nodesRoot ?? join(childWorkDir, ".anet", "nodes");
   let codexCopresence = false;
+  let childDirName = req.child_alias;
   try {
     const cfgPath = verifyStoppedChildConfig(nodesRoot, req.child_node_id, req.child_alias);
+    childDirName = basename(dirname(cfgPath));
     try { codexCopresence = JSON.parse(readFileSync(cfgPath, "utf8"))?.codexCopresence === true; } catch { /* verified above */ }
   } catch (e: any) {
     const error = `local_identity: ${e?.message || e}`;
@@ -172,7 +177,8 @@ export async function handleStartDoorbell(
 
   try {
     const spawnChild = deps.spawnChild ?? spawn;
-    const child = spawnChild(anetBin, ["node", "start", req.child_alias], {
+    // #652 — by directory name: exact within this root and ASCII (the alias may be Chinese).
+    const child = spawnChild(anetBin, ["node", "start", childDirName], {
       cwd: childWorkDir,
       env: minimalEnv(),
       stdio: ["ignore", "ignore", "ignore"],

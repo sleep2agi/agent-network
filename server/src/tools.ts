@@ -4108,7 +4108,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       daemon_node_id: z.string().min(1).max(200),
       node_spec: z.object({
-        name: z.string().min(1).max(64),
+        // #652 — 64 *code points* after trim is enforced by validateChildName (shared/node-name.ts);
+        // zod's max counts UTF-16 units and surrounding whitespace, so it is only a coarse bound here.
+        name: z.string().min(1).max(256),
         runtime: z.string().min(1).max(64),
         model: z.string().min(1).max(100).optional().nullable(),
         flags: z.record(z.string(), z.unknown()).optional(),
@@ -4257,7 +4259,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // flag injection at the hub edge). Daemon repeats this; double
       // layer per RFC §4.2.2.
       try {
-        validateChildName(node_spec.name);
+        // #652 — store/forward the trimmed name the validator returns.
+        node_spec.name = validateChildName(node_spec.name);
         validateRuntime(node_spec.runtime);
         validateModel(node_spec.model);
         validateChannelsP1((node_spec as any).channels);
