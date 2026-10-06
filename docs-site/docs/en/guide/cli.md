@@ -441,6 +441,35 @@ it is still there, **send it a task** — `anet status` answers "what it last sa
 about itself", not "whether it is still running".
 
 
+## Adopt manually started nodes (preview source, board #626)
+
+On Linux, configure the daemon's `adopt_roots` with absolute allowed workdirs;
+the empty default refuses adoption. Load configuration through the existing
+operator-managed daemon startup procedure. A node workdir must not be HOME or a system directory.
+Use your human `anet login` account from the manual node's workdir:
+
+```bash
+anet daemon adopt demo --daemon <daemon-node-id>
+anet daemon adopt demo --daemon <daemon-node-id> --yes
+anet daemon adopt --all --daemon <daemon-node-id> --yes
+anet daemon unadopt demo --yes
+```
+
+Without `--yes`, commands only show a plan. `--all` enumerates this workdir's
+`.anet/nodes`, not the whole machine. An accepted request is pending, not a
+successful adoption. The daemon checks UID, paths, configuration identity,
+`/proc`, HOME and reproducible environment before atomically recording and acknowledging it.
+Adoption and revocation never restart or signal the node. Only bare/default-socket tmux
+is supported; co-presence or unreproducible environments are refused (key names, never values).
+Run `anet daemon adopted` from the daemon workdir to list local records with active Hub authority.
+
+This increment binds nodes only; remote stop/start for adopted nodes requires
+board #627. Until then it fails explicitly instead of entering legacy child-process cleanup.
+Registry: `<daemon-workdir>/.anet/child-workdirs.json`. Original node configurations
+and secrets stay in place. Disaster recovery requires those private files and
+the Hub data backup; cloning source does not restore bindings, accounts or secrets.
+Revoking a binding does not delete the workdir.
+
 ## Preview-only features
 
 The following commands exist in the current preview and must not be presented as stable features:

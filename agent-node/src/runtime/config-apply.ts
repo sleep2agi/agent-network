@@ -452,6 +452,7 @@ export interface DaemonCapabilities {
    *  后台每 10 分钟自检一次,心跳只读缓存。首轮自检完成前不出现。
    *  🔴 不改变 `can_create_nodes` 的语义(旧 app 依赖它);这是**新增**的一格。 */
   runtime_readiness?: Record<string, RuntimeReadiness>;
+  adopt_capable?: boolean;
 }
 
 /** #622 —— 把后台自检的最新结果挂到快照的 daemon_capabilities 上。
@@ -577,6 +578,12 @@ export function buildConfigSnapshot(
   // when valid (typeof + Array.isArray narrow per
   // per team rule: any typed scalar extracted from untrusted JSON must be typeof-narrowed at the boundary; don't trust user JSON).
   const caps: DaemonCapabilities = {};
+  // Default deny. Local configuration is required; no roots means no adoption.
+  if (fileConfig?.role === "host_supervisor" && process.platform === "linux" &&
+      process.env.ANET_NODE_MARKER === undefined && Array.isArray(fileConfig.adopt_roots) &&
+      fileConfig.adopt_roots.length > 0 && fileConfig.adopt_roots.every((p: unknown) => typeof p === "string" && p.startsWith("/"))) {
+    caps.adopt_capable = true;
+  }
   const rt = fileConfig?.runtimes_supported;
   if (Array.isArray(rt) && rt.every((s: unknown) => typeof s === "string")) {
     caps.runtimes_supported = rt;

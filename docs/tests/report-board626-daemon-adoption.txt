@@ -1,0 +1,112 @@
+Board #626 — daemon adoption, integrated candidate
+
+Status: CLI + daemon integrated and Docker E2E passed; awaiting review and CI.
+Earlier increment notes below are historical, not current implementation status.
+Base: d174f894 (main). Depends on merged Hub board #625 protocol.
+
+Scope
+- Local two-phase adoption: user-token request, daemon-token pull and acknowledgement.
+- Default-deny adopt_roots; exact config identity, trusted paths, process/environment
+  verification; bare/tmux only, co-presence refused in v1.
+- Persist local registration before acknowledgement; adoption never signals a node.
+- CLI dry-run by default, explicit confirmation for the binding request.
+- Board #627 separately adds delegated stop/start and .hub-stopped lifecycle.
+
+Verification planned (Docker only)
+- Local validators with injected process evidence; no production process inspection.
+- Hub/daemon contract and witnessed-red for a missing safety check.
+- Integration with a disposable Hub and fixture nodes; adoption preserves pid.
+
+First increment
+- adopt-local-identity.ts checks allowlisted canonical workdir, config ownership and
+  permissions, exact alias/id/network/Hub, and refuses v1 co-presence.
+- Injected process evidence checks exact config+alias argv, uid/cwd/HOME/default
+  tmux socket and reproducible environment values (errors contain key names only).
+- Docker tests/test626-daemon-adoption: 6 pass, 17 assertions, rc=0.
+  Mutation disables allowlist containment: same assertion fails because an outside
+  directory is accepted (red rc=1). Harness overall rc=0. Network disabled.
+- Not yet implemented: trusted /proc capture and recheck, registry persistence,
+  protocol consumer, CLI, capability advertisement and integration E2E.
+- Module is not wired to running daemon behavior; adopt_capable remains off.
+
+No merge, release, production upgrade or live-node operation.
+Increment 2 (not final acceptance): daemon get/ack and unadopt handlers,
+atomic adopted registry preserving created-child records, Linux proc birth
+and identity recheck, SSE wiring, opt-in capability. Adopted lifecycle fails
+closed pending board #627 (does not fall through to created-child signals).
+Docker anet-board625-lifecycle-fix --init --network none: adoption identity,
+protocol/proc and existing child-workdir suites: 48 pass, 134 assertions, rc=0.
+Standalone test626 Docker: identity 6/6 and protocol 6/6 passed; allowlist
+bypass mutation is witnessed red rc=1, harness rc=0. --init avoids testing
+PID 1, which is intentionally not an adoptable node PID.
+CLI integration and real Hub + daemon + manual-node E2E remain in progress.
+
+Increment 3 — integrated candidate (supersedes the incomplete notes above)
+- CLI daemon adopt/unadopt/adopted wired to the actual command dispatcher.
+  Human saved login only; default plan has no write. --yes submits Hub request,
+  --all is restricted to current workdir; pending is not reported as adopted.
+- Real CLI subprocess + real Hub + real daemon + manually launched agent-node
+  with CJK alias: dry plan has zero bindings; request activates binding; local
+  registry records exact node/workdir; original live PID is unchanged; adopted
+  list shows it; unadopt removes registration without stopping the manual node.
+  12 PASS checks, rc=0. No fake daemon, no model call, no production resources.
+- Reproducible E2E Dockerfile added; cold build and --network none run passed.
+  Final source rerun uses that image with read-only source mounts and rebuilds
+  both test artifacts inside the container: rc=0, same 12 checks.
+- Final related daemon regressions: 195 pass, 497 assertions, rc=0 (six suites:
+  start-daemon, stop-daemon, config-apply, child-workdir, adopt-daemon,
+  adopt-local-identity). Focused CLI/protocol: 10 pass, 30 assertions, rc=0.
+- Standalone identity/CLI/protocol Docker gate passed; allowlist bypass mutation
+  still intentionally fails rc=1, harness rc=0. Both Docker gates added to qa.yml.
+- Docker symbol-pin scan rc=0: 8 judged, 8 skipped, 1 unavailable historical ref,
+  0 drift. The unavailable ref is NOT claimed verified (worktree .git outside mount).
+
+Reproduce (use sg docker -c around these on hosts requiring the docker group):
+docker build -t anet-test626-unit -f tests/test626-daemon-adoption/Dockerfile .
+docker run --rm --init --network none anet-test626-unit
+docker build -t anet-test626-e2e -f tests/test626-daemon-adoption/Dockerfile.e2e .
+docker run --rm --init --network none anet-test626-e2e
+
+Boundaries: Linux only; real E2E is bare mode (default tmux socket validated by
+unit evidence only). Future pinned anet version is not exposed by Hub; CLI says
+unknown rather than presenting this CLI's version as the daemon's. #627 remains
+separate; adopted stop/start explicitly fails closed in this candidate. No claim
+that the complete daemon test inventory, remote CI, or release gates have passed.
+
+Review fix — real callCommHub application-level rejection (2026-10-06)
+- Confirmed cli.ts throws CommHubError(appLevel=true) for Hub ok:false. Previous
+  return-value-only rollback did not handle that production shape.
+- Added revoke-before-write race test using the actual CommHubError class. Before
+  fix: 8 pass / 1 fail, rc=1; stale adopted entry observed by toBeNull assertion.
+- Definite application refusal now removes only the matching request's registry
+  entry and rethrows. Unknown transport outcome retains evidence. No broad catch
+  rollback, no signaling, no changes to stop/start or process launch mode.
+- Same Docker test after fix: 9 pass, 24 assertions, rc=0; includes successful
+  fresh request for the same alias after rollback and unknown-outcome retention.
+- Rebuilt current agent-node inside anet-board626-e2e (read-only source mount),
+  ran existing real CLI/Hub/daemon/manual-node E2E: 12 checks, rc=0. CLI artifact
+  unchanged for this daemon-only fix. Full suite not rerun.
+
+Requested catch-rollback mutation gate
+- test626 run.sh now removes only catch's application-refusal rollback, preserving
+  the rethrow and ok:false branch. Race test fails toBeNull with a stale adopted
+  entry: rc=1. Source restored; protocol 9/9, 25 assertions, rc=0.
+- Returning ok:false also rolls back and reports adopt_ack_rejected upward; it
+  no longer silently resolves. Production appLevel refusal is rethrown unchanged.
+- Whole Docker harness rc=0: identity 6/6, protocol 9/9, CLI 3/3; both allowlist
+  and missing-catch-rollback mutations witnessed red rc=1, then green restoration.
+- Network/transport errors are NOT treated as definite Hub refusal: retain local
+  evidence on unknown outcomes (covered). Only matching request_id is removed.
+- launch_mode without process evidence and node-locate dropping adopted objects
+  recorded as explicit board #627 inputs (task timeline); no lifecycle expansion.
+
+CLI help CI follow-up (2026-10-06):
+- Read job 112182786837 logs: all six failures were missing dedicated usage for
+  daemon adopt / unadopt / adopted with --help and -h, not lifecycle failures.
+- Added three entries to the existing pre-dispatch help table; help performs no
+  login, filesystem or network actions. No adoption protocol changes.
+- Exact CI Dockerfile tests/test745-agent-network-unit-ci/Dockerfile, source
+  c34aa5b6141d0712c2a16870b82f3025ddee9003, non-root unit domain: rc=0.
+  src: 1929 pass, 9 skip, 0 fail, 5891 assertions, 188/188 files.
+  tests directory: 19/19 executed, 0 failures. Help coverage passed for every
+  discovered command; stale-config-help mutation rc=1, final RESULT: PASS.

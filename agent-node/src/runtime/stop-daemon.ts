@@ -30,6 +30,7 @@ import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { childWorkDirFor, forgetChildWorkdir } from "./child-workdir.js";
+import { adoptedChild } from "./adopt-registry.js";
 
 const execFileP = promisify(execFile);
 
@@ -331,6 +332,13 @@ export async function handleStopDoorbell(
   // 建的时候带了工作目录的子节点,config 在 <workdir>/.anet/nodes 下;回收站也放在同一棵树里
   // (同一文件系统,rename 不会 EXDEV)。没登记 = 老布局 = daemon cwd,与改动前逐字相同。
   const childWorkDir = child_alias ? childWorkDirFor(daemonWorkDir, child_alias) : daemonWorkDir;
+  // Adoption is record-only in #626. Until #627 delegates stop, fail closed;
+  // an adopted process must never enter the created-child pgid/sweep machinery.
+  if (child_alias && adoptedChild(daemonWorkDir, child_alias)) {
+    await deps.callCommHub("ack_stop_request", { request_id: event.request_id,
+      status: "stop_failed", error: "adopted_lifecycle_not_available" });
+    return;
+  }
   const workdirRoot = deps.workdirRoot ?? join(childWorkDir, ".anet", "nodes");
   const deletedRoot = deps.deletedRoot ?? join(childWorkDir, ".anet", "deleted");
   const forgetIfDeleted = (backup: string | null) => {
@@ -639,7 +647,7 @@ async function sweepOrphansForChild(
 //         #2403 stop sweeps). A same-alias node from another workdir/HOME
 //         is ignored with a warn, never adopted.
 
-interface MyChild { child_node_id: string; alias: string; lifecycle_state: string; }
+interface MyChild { child_node_id: string; alias: string; lifecycle_state: string; managed?: string; }
 
 export interface RebuildDeps {
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
@@ -765,6 +773,7 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
 
   for (const c of children) {
     if (!c.alias || !c.child_node_id) continue;
+    if (c.managed === "adopted" || adoptedChild(daemonWorkDir, c.alias)) continue;
     // #579 — 与 #2403 的清扫同一条身份规则:只认 argv 里 `--alias <alias>` **且**
     // `--config <本 daemon 给这个 child 写的 config>` 的进程。只看 alias 时,自己的 child
     // 已死而同机另一个工作目录 / HOME 里有同名节点在跑,重启后会把那个外人收进

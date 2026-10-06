@@ -6908,6 +6908,19 @@ async function connectSSE() {
             }
             // RFC-026 P1 — daemon-only doorbell. host_supervisor nodes
             // process this; non-daemons silently ignore (config gate).
+            if ((ev.type === "adopt_node" || ev.type === "unadopt_node") && fileConfig.role === "host_supervisor") {
+              const requestId = typeof ev.request_id === "string" ? ev.request_id : "";
+              if (!requestId) continue;
+              const deps = { callCommHub, workDir: process.cwd(), home: process.env.HOME || "",
+                hubUrl: COMMHUB_URL, networkId: NETWORK_ID, uid: process.getuid?.() ?? -1,
+                daemonEnv: process.env,
+                adoptRoots: Array.isArray(fileConfig.adopt_roots) ? fileConfig.adopt_roots : [],
+                warn: (m: string) => warn(m) };
+              import("./runtime/adopt-daemon.js").then(async ({ handleAdoptDoorbell, handleUnadoptDoorbell }) => {
+                if (ev.type === "adopt_node") await handleAdoptDoorbell({ request_id: requestId }, deps);
+                else if (typeof ev.node_id === "string") await handleUnadoptDoorbell({ request_id: requestId, node_id: ev.node_id }, deps);
+              }).catch(() => warn("[adopt-daemon] protocol operation failed; no process action taken"));
+            }
             if (ev.type === "create_node" && fileConfig.role === "host_supervisor") {
               const requestId = typeof ev.request_id === "string" ? ev.request_id : "";
               if (!requestId || recentlyHandledCreateRequestIds.has(requestId)) continue;

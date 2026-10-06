@@ -20,6 +20,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import { homedir } from "node:os";
 import { isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { atomicWriteJson } from "./config-apply.js";
+import { readWorkdirRegistry } from "./adopt-registry.js";
 
 export const MAX_WORKDIR_LEN = 1024;
 
@@ -214,7 +215,8 @@ export function readChildWorkdirs(daemonWorkDir: string): Record<string, string>
 }
 
 export function recordChildWorkdir(daemonWorkDir: string, alias: string, workdir: string): void {
-  const cur = readChildWorkdirs(daemonWorkDir);
+  const cur = readWorkdirRegistry(daemonWorkDir);
+  if (cur[alias] && typeof cur[alias] !== "string") throw new Error("adopt_registry_conflict");
   if (resolve(workdir) === resolve(daemonWorkDir)) {
     if (!(alias in cur)) return;
     delete cur[alias];
@@ -226,7 +228,8 @@ export function recordChildWorkdir(daemonWorkDir: string, alias: string, workdir
 }
 
 export function forgetChildWorkdir(daemonWorkDir: string, alias: string): void {
-  const cur = readChildWorkdirs(daemonWorkDir);
+  const cur = readWorkdirRegistry(daemonWorkDir);
+  if (cur[alias] && typeof cur[alias] !== "string") throw new Error("adopt_registry_conflict");
   if (!(alias in cur)) return;
   delete cur[alias];
   atomicWriteJson(registryPath(daemonWorkDir), cur);

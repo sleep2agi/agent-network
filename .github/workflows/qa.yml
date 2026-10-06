@@ -109,6 +109,7 @@ on:
       - 'tests/qa-create-node-workdir/**'
       - 'tests/qa-runtime-readiness/**'
       - 'tests/test571-lifecycle-safety/**'
+      - 'tests/test626-daemon-adoption/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
@@ -304,6 +305,7 @@ on:
       - 'tests/qa-create-node-workdir/**'
       - 'tests/qa-runtime-readiness/**'
       - 'tests/test571-lifecycle-safety/**'
+      - 'tests/test626-daemon-adoption/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
@@ -836,6 +838,21 @@ jobs:
             || echo "::warning::no artifacts under /tmp/art in anet-test562b"
           docker rm -f "run-anet-test562b" >/dev/null 2>&1 || true
           exit $rc
+  test626-daemon-adoption:
+    name: daemon adoption (Docker, real Hub + manual node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Local identity, protocol and CLI red-green gates
+        run: |
+          docker build -t anet-test626-unit -f tests/test626-daemon-adoption/Dockerfile .
+          docker run --rm --init --network none anet-test626-unit
+      - name: Real Hub, daemon and manual node
+        run: |
+          docker build -t anet-test626-e2e -f tests/test626-daemon-adoption/Dockerfile.e2e .
+          docker run --rm --init --network none anet-test626-e2e
+
   test571-lifecycle-safety:
     # #571 生命周期安全三处:daemon stop 不再按 alias 全机 SIGTERM(同机别的工作目录/HOME 里
     # 同名的 agent-node 必须活着)、hub 对手工起的节点拒绝点名 daemon 的 stop/delete、

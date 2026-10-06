@@ -12,6 +12,7 @@
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
+import { runDaemonAdopt } from "../src/daemon-adopt.js";
 import { formatScrubbedEnvLine, scrubInheritedSessionIdentityEnv } from "../src/daemon-inherited-env.js";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -10644,6 +10645,9 @@ Subcommands:
   restart <name>       stop then start (daemon 是长驻进程,换包/改配置都要重启才生效)
   up [<name>]          init + start one-shot (default name: "${DAEMON_DEFAULT_NAME}")
   list                 List locally-configured daemon nodes
+  adopt <alias>        Plan adoption from this workdir (--yes to request; --all supported)
+  unadopt <alias>      Plan binding revocation (--yes to apply, never stops node)
+  adopted             List active adopted nodes (run from the daemon workdir)
 
 Options:
   --force              init only。两种用法:
@@ -10665,6 +10669,11 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
     return;
   }
   switch (sub) {
+    case "adopt": case "unadopt": case "adopted": {
+      const code = await runDaemonAdopt(sub, args.slice(2), { cwd: process.cwd(), home: homedir(), login: loadGlobal(), fetch, print: console.log });
+      if (code === 2) markUsageError(); else if (code) markFailed();
+      break;
+    }
     case "init":  args.splice(0, 1); prepareDaemonAnetBin(); await daemonInitCommand(); break;
     case "start": args.splice(0, 1); prepareDaemonAnetBin(); await daemonStartCommand(); break;
     case "up":    args.splice(0, 1); prepareDaemonAnetBin(); await daemonUpCommand(); break;
