@@ -38,7 +38,7 @@ test("real default socket: collect, daemon adopt, ordered stop; unrelated decoy 
     const daemon = `${workdir}/daemon`; mkdirSync(daemon,{mode:0o700});
     const req = {ok:true,request_id:"adopt_fixture",node_id:"n_fixture",alias:scope.alias,network_id:"net_fixture",workdir};
     const calls: any[]=[];
-    const deps={home:"/home/bun",workDir:daemon,hubUrl:"http://127.0.0.1:9999",networkId:"net_fixture",adoptRoots:[workdir],uid,daemonEnv:{},warn:()=>{},
+    const deps={home:mkdtempSync("/tmp/codex-daemon-home-"),workDir:daemon,hubUrl:"http://127.0.0.1:9999",networkId:"net_fixture",adoptRoots:[workdir],uid,daemonEnv:{},warn:()=>{},
       callCommHub:async(tool:string,args:any)=>{calls.push({tool,args});return tool==="get_adopt_request"?req:tool==="list_my_children"?
         {ok:true,children:[{managed:"adopted",child_node_id:"n_fixture",alias:scope.alias}]}:{ok:true};}};
     await handleAdoptDoorbell(req,deps);

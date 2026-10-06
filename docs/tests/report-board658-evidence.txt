@@ -62,3 +62,10 @@ Latest handler fixture also verifies actual TERM order and successful replay:
 6/6, 24 expects, rc=0.
 Not claimed: full package unit suite, real model/TUI behavior, v2 start (#659),
 partial-stop recovery, all security/race matrix items on #661, or production.
+
+Final base refresh: rebased without conflicts onto main 70e88ff1.
+Rebuilt Dockerfile.e2e from that tree: real HTTP flow rc=0.
+Combined seven-file related suite: 36 pass / 0 fail / 109 expects, rc=0.
+Corrected handler fixture HOME from /home/bun to its own mkdtemp directory so
+the same fixture works under both bun and node non-root container users.
+Product changes were unchanged by the rebase; only fixture portability changed.
