@@ -27,7 +27,14 @@
 
 ## 检查
 
-- **`tests/hub-release-compat`**：见 PR 说明（候选为 main `b455e19a` + 本版本号，基线 npm 上的 `0.9.0-preview.109`，App desktop-v0.2.214 / .215 / .216 / .217）。
+- **`tests/hub-release-compat`**：候选为 main `b455e19a` + 本版本号（`7a4e9a29`，`server/` 只多了版本号两处，dirty_files=0），基线 npm 上的 `0.9.0-preview.109`，App desktop-v0.2.214 / .215 / .216 / .217，`SCHED_BASELINE=counted CHECK_BYTES=1 EXPECT_BACKFILL=0 OLD_LABEL=.109 NEW_LABEL=.110`。日志：发版机上的 `/tmp/claude-1000/compat110.log`（明细 `/tmp/claude-1000/compat110-logs/`）。
+  - A1、A2：steps=62，check_failures=0，候选无 5xx；工具自检（`tools-selftest`）PASS。新增字段：`/api/nodes` 的 `managed`、`adoption`（#2447）。
+  - A1、A2 各报 `unexpected=2`，两条是**同一处改动**（#2449）：
+    1. `mcp.tools_list`：`create_node.node_spec` 被判「retyped」；
+    2. `mcp.schema.create_node`：`properties.node_spec.properties.name.maxLength` 64 → 256。
+    逐字段比对 `.109` 与 `.110` 的 `node_spec` schema，唯一差异就是 `name.maxLength` 64 → 256。判定为兼容：这是输入上限放宽，旧客户端能发的名字新 Hub 全部接受（真正的 64 字符上限由 `checkNodeName` 按码点执行）；`required`、其它参数、返回值形状都没变。比较器对任何 schema 变化都报 unexpected，`.107` 有同类先例（嵌套可选字段新增）。
+  - B 升级 → 回滚 → 再升级（.109 → .110 → .109 → .110，同一数据库）：upgrade_check_failures=0。
+- **旧 App × 新 Hub（#2449）**：用各 App 版本自己的 `buildCreateNodeSpec` / `workdirSlug` / `defaultWorkdir` 组请求，发给模拟的 host_supervisor daemon：`.110` 上 App 0.2.216 英文名、0.2.217 英文名、0.2.217 「测试中文」都成功，daemon 收到同名、工作目录 `…/ceshizhongwen`；对照组 `.109` 上中文名回 `node_name_invalid`、英文名照常成功。
 - #2447 / #2450：`server/src/node-lifecycle-read-http.test.ts`，Docker 套件 `tests/test629-lifecycle-read`；记录在 `docs/tests/report-board629-lifecycle-read-api.txt`、`docs/tests/report-test629-read-hardening.txt`。
 - #2449：`server/src/create-node-unicode-name.test.ts`、`server/src/shared/node-name.test.ts`，`tests/qa-rfc026-create-node` 场景 A.cn / A.cn2 / E1b。
 
