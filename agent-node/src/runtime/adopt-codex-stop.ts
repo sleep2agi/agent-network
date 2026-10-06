@@ -49,6 +49,10 @@ export async function stopCodexStages(scope: CodexAdoptionScope): Promise<void> 
       execTmux(["kill-pane", "-t", pane.pane], {env:codexTmuxEnv(scope.socket), timeout:5000});
     }
   }
+  assertCodexStopped(scope);
+}
+
+export function assertCodexStopped(scope: CodexAdoptionScope): void {
   const names = new Set([scope.alias, `${scope.alias}-桥`, `${scope.alias}-appsrv`]);
   if (listCodexPanes(scope, true).some(r => names.has(r[0]))) throw Error("adopt_codex_stage_still_running");
   // A child that escaped its original tree must not permit a false stopped ack.

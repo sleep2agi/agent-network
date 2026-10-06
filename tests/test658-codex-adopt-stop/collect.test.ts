@@ -44,13 +44,24 @@ test("real default socket: collect, daemon adopt, ordered stop; unrelated decoy 
     await handleAdoptDoorbell(req,deps);
     expect(calls.at(-1).args.status).toBe("adopted");
     expect(adoptedChild(daemon,scope.alias)?.codex_v2?.version).toBe(1);
-    await handleAdoptedLifecycle({request_id:"stop_fixture",child_node_id:"n_fixture",child_alias:scope.alias,action:"stop"},deps);
+    const live=collectCodexPanes({...scope,codexHome:realHome});
+    const order:string[]=[], kill=process.kill;
+    process.kill=((pid:number,signal:any)=>{
+      const pane=live.find(p=>p.rootPid===pid);
+      if(pane&&signal==="SIGTERM")order.push(pane.sessionName);
+      return kill(pid,signal);
+    }) as typeof process.kill;
+    try {await handleAdoptedLifecycle({request_id:"stop_fixture",child_node_id:"n_fixture",child_alias:scope.alias,action:"stop"},deps);}
+    finally {process.kill=kill;}
     expect(listCodexPanes(scope,true).some(r=>r[0]==="unrelated-decoy")).toBe(true);
     expect(calls.at(-1).args).toMatchObject({status:"stopped"});
     expect(existsSync(`${nodeDir}/.hub-stopped`)).toBe(true);
     const remaining=execTmux(["list-sessions"],{env,encoding:"utf8"});
     expect(remaining).toContain("unrelated-decoy");
     expect(remaining).not.toContain(scope.alias);
+    expect(order).toEqual([`${scope.alias}-桥`,scope.alias,`${scope.alias}-appsrv`]);
+    await handleAdoptedLifecycle({request_id:"stop_retry",child_node_id:"n_fixture",child_alias:scope.alias,action:"stop"},deps);
+    expect(calls.at(-1).args).toMatchObject({status:"stopped"});
   } finally {
     // Container-only cleanup by enumerated opaque IDs, never names/kill-server.
     const ids = [...new Set(listCodexPanes(scope,true).map(r=>r[1]))];
