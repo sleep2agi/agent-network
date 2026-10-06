@@ -227,6 +227,25 @@ import { describeUmaskRisk, judgeUmask, rejectedPayloads } from "../src/package-
 import { exactSession, PANE_LIST_ARGS, paneTargetFor } from "../src/tmux-exact-target";
 import { parseTmuxRows, tmuxListArgs, tmuxUtf8Args } from "../src/tmux-format";
 import { execTmux, spawnSyncTmux, spawnTmux } from "../src/tmux";
+import {
+  EXTERNAL_APPSERVER_LAYOUT,
+  READYZ_TIMEOUT_MS,
+  appserverShellCommand,
+  bridgeLogPath,
+  bridgeShellCommand,
+  exactSessionRows,
+  externalAppserverRequested,
+  externalAppserverStopOrder,
+  memoryVerdict,
+  parseMemAvailableBytes,
+  planExternalAppserverNode,
+  portBusy,
+  resumedThreadVerdict,
+  sessionsAlreadyPresent,
+  tuiShellCommand,
+  waitForReadyz,
+  type ExternalAppserverPlan,
+} from "../src/codex-external-appserver";
 import { diagnoseLocale, formatLocaleSource } from "../src/locale-diagnostic";
 import {
   formatSecretLoadCommand,
@@ -2537,6 +2556,8 @@ interface Profile {
   // A full-access grant that was made explicitly once. Never inferred from
   // flags.sandboxMode — see src/codex-copresence-profile.ts.
   codexCopresenceFullAccess?: boolean;
+  /** #630 — "external-appserver": three tmux sessions <alias>-appsrv / <alias>-tui / <alias> on the fixed codexAppServerUrl. */
+  codexLaunchLayout?: string;
   /** #1856 — 共存节点的工作目录(= 含 .anet 的目录;fork --workdir 写入;lifecycle 命令核对四处一致)。 */
   codexProjectDir?: string;
   /** #1969 — codex-sdk runtime: explicit codex binary (agent-node passes it as codexPathOverride). */
@@ -4374,6 +4395,16 @@ Co-presence (human TUI + network agent share one thread):
       pass --yes-danger-full-access to confirm — the second explicit flag
       prevents \`printf 'yes\\n' |\` from bypassing the prompt.
       Optional: --codex-bin <path> --codex-home <dir> --model <id> --port <p>
+
+External app-server codex nodes (#630; fixed codexAppServerUrl in config.json):
+  anet node start <name> --external-appserver
+      Start <name>-appsrv (codex app-server) → wait for /readyz → <name>-tui
+      (resume codexThreadId, if codexCopresence) → <name> (agent-node bridge),
+      then check the bridge log resumed codexThreadId. Recorded in config.json,
+      so later just: anet node start|stop|restart <name>.
+  anet node restart <name> --bridge-only   Restart only the bridge (upgrade path)
+  --force                Start even when MemAvailable < 4 GiB
+  --verify-timeout <s>   Wait for "resumed thread" in the bridge log (default 60)
 
 Grok (default = headless ACP, recommended):
   anet node create <name> --runtime grok
@@ -7687,6 +7718,317 @@ async function spawnOwnedNodeChild<T extends ReturnType<typeof spawn>>(nodeId: s
   }, "spawn", generation);
 }
 
+// ── #630 external app-server layout: <alias>-appsrv / <alias>-tui / <alias> ──
+// Pure decisions live in src/codex-external-appserver.ts (why this is opt-in,
+// not inferred from codexAppServerUrl, is written at the top of that file).
+
+const EXTERNAL_APPSERVER_USAGE = `
+External app-server codex nodes (#630) — three tmux sessions per node:
+  <name>-appsrv   codex app-server --listen <codexAppServerUrl from config.json>
+  <name>-tui      codex resume <codexThreadId> --remote <url>   (only when codexCopresence + codexThreadId)
+  <name>          agent-node bridge (the version paired with this anet)
+
+  anet node start <name> --external-appserver   First start: records codexLaunchLayout in config.json
+  anet node start <name>                        Later starts (layout already recorded)
+  anet node stop <name>                         Stop the three sessions by session id, bridge first
+  anet node restart <name>                      stop + start
+  anet node restart <name> --bridge-only        Restart only the bridge (the agent-node upgrade path);
+                                                the app-server and TUI keep running
+
+  --force                 Start even when MemAvailable < 4 GiB (each node takes ~2 GB)
+  --verify-timeout <s>    How long to wait for "resumed thread <codexThreadId>" in the bridge log (default 60)
+
+  CODEX_HOME = config env.CODEX_HOME, else codexHome, else <node dir>/codex-home.
+  The workspace .env is loaded inside each session; the node token is read from
+  config.json inside the app-server session and never appears in any argv.
+  Exit codes: 0 resumed the configured thread · 3 bridge resumed a DIFFERENT or NEW thread ·
+              4 no "resumed thread" line within --verify-timeout (sessions are left running).
+`;
+
+function tmuxSessionRows(): { id: string; name: string }[] {
+  try {
+    const out = execTmux(tmuxListArgs(["list-sessions"], ["#{session_id}", "#{session_name}"]), {
+      encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
+    }).toString();
+    return parseTmuxRows(out, 2).map(([id, name]) => ({ id, name }));
+  } catch { return []; }  // no server ⇒ no sessions
+}
+
+/** Kill by `$<id>` — never by name: `-t name` is a prefix match and `=name` is unreliable for CJK. */
+function killExternalAppserverSessions(names: readonly string[]): string[] {
+  const killed: string[] = [];
+  for (const row of exactSessionRows(tmuxSessionRows(), names)) {
+    try { execTmux(["kill-session", "-t", row.id], { stdio: "pipe" }); } catch { /* checked below */ }
+    if (!tmuxSessionRows().some((r) => r.id === row.id)) {
+      killed.push(row.name);
+      console.log(`[anet] stopped tmux ${row.name} (${row.id})`);
+    } else {
+      console.error(`[anet] ❌ tmux ${row.name} (${row.id}) is still running after kill-session`);
+    }
+  }
+  return killed;
+}
+
+/** Write `codexLaunchLayout` into config.json in place, leaving every other byte-level field as the owner wrote it. */
+function recordExternalAppserverLayout(nodeId: string): void {
+  const p = join(nodesDir(), nodeId, "config.json");
+  const raw = JSON.parse(readFileSync(p, "utf-8"));
+  if (raw.codexLaunchLayout === EXTERNAL_APPSERVER_LAYOUT) return;
+  raw.codexLaunchLayout = EXTERNAL_APPSERVER_LAYOUT;
+  const mode = statSync(p).mode & 0o777;
+  const tmp = `${p}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(raw, null, 2) + "\n", { mode });
+  renameSync(tmp, p);
+}
+
+function externalAppserverPlanOrExit(resolved: { id: string; profile: Profile }): ExternalAppserverPlan {
+  const result = planExternalAppserverNode({
+    alias: nodeDisplayName(resolved.id, resolved.profile),
+    nodeDir: join(nodesDir(), resolved.id),
+    workspaceDir: process.cwd(),
+    profile: resolved.profile as any,
+  });
+  if (!result.ok) {
+    console.error(`[anet] ❌ ${result.error}`);
+    process.exit(1);
+  }
+  return result.plan;
+}
+
+function fileSize(p: string): number { try { return statSync(p).size; } catch { return 0; } }
+
+/** Read the bridge log from `offset` until a resumed/created-thread line shows up or the timeout passes. */
+async function verifyExternalAppserverResume(plan: ExternalAppserverPlan, offset: number, timeoutSec: number): Promise<number> {
+  if (!plan.threadId) {
+    console.log(`[anet] ⚠ config.json has no codexThreadId — nothing to verify the bridge's thread against.`);
+    return 0;
+  }
+  const logPath = bridgeLogPath(plan);
+  const deadline = Date.now() + timeoutSec * 1000;
+  let verdict = resumedThreadVerdict("", plan.threadId);
+  for (;;) {
+    let text = "";
+    try { text = readFileSync(logPath).subarray(offset).toString("utf-8"); } catch { /* not written yet */ }
+    verdict = resumedThreadVerdict(text, plan.threadId);
+    if (verdict.state !== "not-seen" || Date.now() >= deadline) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const want = plan.threadId;
+  switch (verdict.state) {
+    case "match":
+      console.log(`[anet] ✅ verify: bridge resumed thread ${verdict.seen} = config codexThreadId ${want}`);
+      return 0;
+    case "mismatch":
+      console.error(`[anet] ❌ verify: bridge resumed thread ${verdict.seen}, but config codexThreadId is ${want}.`);
+      console.error(`[anet]    The node is on a different conversation. Sessions are left running; inspect ${logPath}.`);
+      return 3;
+    case "new-thread":
+      console.error(`[anet] ❌ verify: bridge CREATED a new thread ${verdict.seen} instead of resuming ${want}.`);
+      console.error(`[anet]    A silent new session — the node lost its history. Sessions are left running; inspect ${logPath}.`);
+      return 3;
+    default:
+      console.error(`[anet] ⚠ verify: no "resumed thread" line in ${logPath} within ${timeoutSec}s (want ${want}).`);
+      console.error(`[anet]    Registration alone does not prove which thread the node is on. Re-check with: grep 'resumed thread' ${shellQuote(logPath)}`);
+      return 4;
+  }
+}
+
+function startExternalAppserverBridge(plan: ExternalAppserverPlan, launch: AgentNodeLaunchPlan): void {
+  const env = ["-e", `LANG=${process.env.LANG || "C.UTF-8"}`];
+  // tmux gives a new session's first process the SERVER's env, not ours: pass what the bridge needs explicitly.
+  if (process.env.ANET_QUEUE_TIMEOUT_MS) env.push("-e", `ANET_QUEUE_TIMEOUT_MS=${process.env.ANET_QUEUE_TIMEOUT_MS}`);
+  execTmux([
+    "new-session", "-d", "-s", plan.sessions.bridge, "-c", plan.nodeDir, ...env,
+    "bash", "-c", bridgeShellCommand(plan, launch),
+  ], { stdio: "pipe" });
+  console.log(`[anet] ③ bridge tmux=${plan.sessions.bridge} (${launch.argsPrefix[0] ?? launch.command})`);
+}
+
+function resolveExternalAppserverBridgeOrExit(): AgentNodeLaunchPlan {
+  try {
+    const launch = resolveCodexAgentNodeLaunchPlan();
+    console.log(`[anet] agent-node for the bridge: ${launch.argsPrefix[0]} (${launch.source})`);
+    return launch;
+  } catch (error: any) {
+    console.error(`[anet] ❌ agent-node for the bridge could not be resolved — nothing was started.`);
+    for (const line of String(error?.message || error).split(/\r?\n/)) console.error(`[anet]    ${line}`);
+    process.exit(1);
+  }
+}
+
+function verifyTimeoutSec(opts: Record<string, string>): number {
+  const n = Number(opts["verify-timeout"] ?? 60);
+  return Number.isFinite(n) && n >= 0 ? n : 60;
+}
+
+async function startExternalAppserverNode(
+  resolved: { id: string; profile: Profile },
+  opts: Record<string, string>,
+): Promise<number> {
+  if (!tmuxAvailable()) {
+    console.error(`[anet] ❌ this node runs as three tmux sessions, and tmux is not installed.`);
+    return 1;
+  }
+  const plan = externalAppserverPlanOrExit(resolved);
+  const meminfoPath = process.env.ANET_MEMINFO_PATH || "/proc/meminfo";  // ANET_MEMINFO_PATH: test seam only
+  let meminfo = "";
+  try { meminfo = readFileSync(meminfoPath, "utf-8"); } catch { /* non-Linux */ }
+  const mem = memoryVerdict(parseMemAvailableBytes(meminfo), opts.force === "true");
+  if (!mem.ok) { console.error(`[anet] ❌ ${mem.message}`); return 1; }
+  console.log(`[anet] ${mem.message}`);
+
+  if (!existsSync(plan.codexHome)) {
+    console.error(`[anet] ❌ CODEX_HOME ${plan.codexHome} does not exist — this node's codex login and sessions live there.`);
+    return 1;
+  }
+  if (!existsSync(plan.projectDir)) {
+    console.error(`[anet] ❌ project dir ${plan.projectDir} does not exist.`);
+    return 1;
+  }
+  if (plan.projectDirFromWorkspace) {
+    console.log(`[anet] codexProjectDir is empty in config.json — using the workspace ${plan.projectDir}`);
+  }
+  const wanted = [plan.sessions.appsrv, plan.sessions.tui, plan.sessions.bridge];
+  const present = sessionsAlreadyPresent(tmuxSessionRows().map((r) => r.name), wanted);
+  if (present.length > 0) {
+    console.error(`[anet] ❌ tmux session(s) already exist: ${present.join(", ")} — refusing to start a second copy.`);
+    console.error(`[anet]    Stop it first: anet node stop ${shellQuote(plan.alias)}   (or restart: anet node restart ${shellQuote(plan.alias)})`);
+    return 1;
+  }
+  if (await portBusy(plan.host, plan.port)) {
+    console.error(`[anet] ❌ port ${plan.port} (codexAppServerUrl ${plan.url}) is already in use — another app-server, or another node with the same URL?`);
+    return 1;
+  }
+  const launch = resolveExternalAppserverBridgeOrExit();
+  const logOffset = fileSize(bridgeLogPath(plan));
+
+  const codexEnv = ["-e", `CODEX_HOME=${plan.codexHome}`, "-e", `LANG=${process.env.LANG || "C.UTF-8"}`];
+  try {
+    execTmux([
+      "new-session", "-d", "-s", plan.sessions.appsrv, "-c", plan.nodeDir, ...codexEnv,
+      "bash", "-c", appserverShellCommand(plan, process.execPath),
+    ], { stdio: "pipe" });
+  } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${plan.sessions.appsrv} failed: ${e?.message || e}`);
+    return 1;
+  }
+  console.log(`[anet] ① app-server tmux=${plan.sessions.appsrv} --listen ${plan.url} (CODEX_HOME=${plan.codexHome}); waiting for ${plan.readyzUrl}…`);
+  const ready = await waitForReadyz(plan.readyzUrl, READYZ_TIMEOUT_MS); // MUTATION-ANCHOR:readyz-wait
+  if (!ready.ok) {
+    console.error(`[anet] ❌ app-server did not answer 200 on ${plan.readyzUrl} within ${READYZ_TIMEOUT_MS / 1000}s (last status: ${ready.status || "no answer"}).`);
+    const tail = (capturePane(plan.sessions.appsrv, 40) ?? "").trimEnd().split("\n").slice(-15);
+    for (const line of tail) console.error(`[anet]    | ${line}`);
+    killExternalAppserverSessions([plan.sessions.appsrv]);
+    console.error(`[anet]    Nothing else was started. Log: ${join(plan.nodeDir, "logs", "tmux-appserver.log")}`);
+    return 1;
+  }
+  console.log(`[anet] ① app-server readyz=200 after ${(ready.waitedMs / 1000).toFixed(1)}s`);
+
+  if (plan.tui) {
+    try {
+      execTmux([
+        "new-session", "-d", "-s", plan.sessions.tui, "-c", plan.nodeDir, ...codexEnv,
+        "bash", "-c", tuiShellCommand(plan),
+      ], { stdio: "pipe" });
+    } catch (e: any) {
+      console.error(`[anet] ❌ tmux new-session ${plan.sessions.tui} failed: ${e?.message || e}`);
+      killExternalAppserverSessions([plan.sessions.appsrv]);
+      return 1;
+    }
+    console.log(`[anet] ② TUI tmux=${plan.sessions.tui} resuming thread ${plan.threadId}`);
+  } else {
+    console.log(`[anet] ② TUI skipped (${plan.threadId ? "codexCopresence is not set" : "no codexThreadId in config.json"})`);
+  }
+
+  try { startExternalAppserverBridge(plan, launch); } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${plan.sessions.bridge} failed: ${e?.message || e}`);
+    killExternalAppserverSessions([plan.sessions.tui, plan.sessions.appsrv]);
+    return 1;
+  }
+  const rc = await verifyExternalAppserverResume(plan, logOffset, verifyTimeoutSec(opts));
+  console.log(`[anet] sessions: ${wanted.filter((n) => plan.tui || n !== plan.sessions.tui).join(", ")}   (attach: tmux attach -t ${shellQuote(plan.sessions.tui)})`);
+  return rc;
+}
+
+function stopExternalAppserverNode(resolved: { id: string; profile: Profile }): number {
+  const alias = nodeDisplayName(resolved.id, resolved.profile);
+  const order = externalAppserverStopOrder(alias);
+  const rows = exactSessionRows(tmuxSessionRows(), order);
+  if (rows.length === 0) {
+    console.log(`[anet] ${alias}: none of ${order.join(", ")} is running.`);
+    return 0;
+  }
+  const killed = killExternalAppserverSessions(order);
+  return killed.length === rows.length ? 0 : 1;
+}
+
+async function restartExternalAppserverBridge(
+  resolved: { id: string; profile: Profile },
+  opts: Record<string, string>,
+): Promise<number> {
+  const plan = externalAppserverPlanOrExit(resolved);
+  const names = tmuxSessionRows().map((r) => r.name);
+  if (!names.includes(plan.sessions.appsrv)) {
+    console.error(`[anet] ❌ ${plan.sessions.appsrv} is not running — --bridge-only needs the app-server up. Use: anet node restart ${shellQuote(plan.alias)}`);
+    return 1;
+  }
+  const ready = await waitForReadyz(plan.readyzUrl, 5_000);
+  if (!ready.ok) {
+    console.error(`[anet] ❌ ${plan.readyzUrl} does not answer 200 (status ${ready.status || "no answer"}) — not restarting the bridge onto a dead app-server.`);
+    return 1;
+  }
+  const launch = resolveExternalAppserverBridgeOrExit();
+  if (names.includes(plan.sessions.bridge)) {
+    if (killExternalAppserverSessions([plan.sessions.bridge]).length !== 1) return 1;
+  } else {
+    console.log(`[anet] bridge session ${plan.sessions.bridge} was not running; starting it.`);
+  }
+  const logOffset = fileSize(bridgeLogPath(plan));
+  try { startExternalAppserverBridge(plan, launch); } catch (e: any) {
+    console.error(`[anet] ❌ tmux new-session ${plan.sessions.bridge} failed: ${e?.message || e}`);
+    return 1;
+  }
+  return verifyExternalAppserverResume(plan, logOffset, verifyTimeoutSec(opts));
+}
+
+/** Entry from `anet node start|stop|restart`. Returns null when this node is not in the #630 lane. */
+async function maybeExternalAppserverLifecycle(verb: "start" | "stop" | "restart"): Promise<number | null> {
+  const ref = positionalArgs(args.slice(1))[0];
+  if (!ref) return null;
+  const opts = parseOpts();
+  const flag = opts["external-appserver"] === "true";
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) {
+    if (flag) { console.error(nodeNotFound(ref)); return 1; }
+    return null;
+  }
+  const runtime = normalizeRuntime(resolved.profile);
+  if (!externalAppserverRequested(flag, resolved.profile as any, runtime)) {
+    if (flag) {
+      console.error(`[anet] ❌ --external-appserver needs runtime=codex-app-server and codexAppServerUrl in config.json (got runtime=${runtime}, url=${resolved.profile.codexAppServerUrl || "none"}).`);
+      return 1;
+    }
+    if (opts["bridge-only"] === "true") {
+      console.error(`[anet] ❌ --bridge-only applies to external app-server codex nodes only (see: anet node restart --help).`);
+      return 1;
+    }
+    return null;
+  }
+  if (flag && resolved.profile.codexLaunchLayout !== EXTERNAL_APPSERVER_LAYOUT) {
+    recordExternalAppserverLayout(resolved.id);
+    console.log(`[anet] recorded codexLaunchLayout=${EXTERNAL_APPSERVER_LAYOUT} — next time \`anet node ${verb} ${shellQuote(nodeDisplayName(resolved.id, resolved.profile))}\` is enough.`);
+  }
+  if (verb === "stop") return stopExternalAppserverNode(resolved);
+  if (verb === "start") return startExternalAppserverNode(resolved, opts);
+  if (opts["bridge-only"] === "true") return restartExternalAppserverBridge(resolved, opts);
+  const stopRc = stopExternalAppserverNode(resolved);
+  if (stopRc !== 0) return stopRc;
+  // kill-session hangs up the app-server; give it a moment to release the port before the busy check.
+  const plan = externalAppserverPlanOrExit(resolved);
+  for (let i = 0; i < 40 && await portBusy(plan.host, plan.port); i++) await new Promise((r) => setTimeout(r, 250));
+  return startExternalAppserverNode(resolved, opts);
+}
+
 // ── start (new session) ──
 
 async function startCommand() {
@@ -7731,6 +8073,11 @@ async function startCommand() {
   // #1353 —— daemon 被 `node start` / `project up`(开机 sweep)/ `node restart` 拉起时,
   //         pin 与 `anet daemon start` 同源同规则,不再在这些起法下丢失。
   if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
+  // #630 — external app-server codex node (three tmux sessions on the URL in config.json).
+  {
+    const rc = await maybeExternalAppserverLifecycle("start");
+    if (rc !== null) process.exit(rc);
+  }
   let startGeneration: string | undefined;
   if (copresenceFlagPassed && !resolvedForCopresence) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
@@ -11925,6 +12272,11 @@ Stop a running agent node.
     return;
   }
 
+  // #630 — external app-server codex node: stop its three sessions by id, bridge first.
+  {
+    const rc = await maybeExternalAppserverLifecycle("stop");
+    if (rc !== null) process.exit(rc);
+  }
   const resolved = resolveNodeRef(ref);
   if (!resolved) {
     console.error(nodeNotFound(ref));
@@ -18645,6 +18997,16 @@ switch (command) {
         // with `anet project restart` and `anet batch restart`. We splice off
         // the "restart" verb so stopCommand/startCommand see args[1] as alias.
         args.splice(0, 1);
+        const restartRef = String(args[1] ?? "");  // args[1] was narrowed to "restart" by the switch above
+        if (!restartRef || restartRef === "--help" || restartRef === "-h") {
+          console.log(`anet node restart <name> [--bridge-only]\n\nStop + start a node.${EXTERNAL_APPSERVER_USAGE}`);
+          break;
+        }
+        // #630 — external app-server codex nodes: full restart, or --bridge-only (the upgrade path).
+        {
+          const rc = await maybeExternalAppserverLifecycle("restart");
+          if (rc !== null) process.exit(rc);
+        }
         await stopCommand();
         await startCommand();
         break;

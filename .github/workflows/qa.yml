@@ -191,6 +191,7 @@ on:
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -384,6 +385,7 @@ on:
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -1805,6 +1807,11 @@ jobs:
           - test698-atomic-peer-reply
           - test519-claude-code-peer-reply
           - test750-codex-copresence-onecommand
+          # #630 (board): codex nodes on a fixed codexAppServerUrl as three tmux sessions
+          # (<alias>-appsrv / <alias>-tui / <alias>). Fake codex + fake paired agent-node on a
+          # private tmux socket; in-suite mutations M1 (readyz wait) / M2 (token in argv).
+          # Not L1: the run includes a deliberate 30 s readyz timeout twice (~65 s total).
+          - test-codex-external-appserver
           - test1225-opencode-copresence-onecommand
           # #543: OpenCode V2 (@opencode/cli 2.0.22) co-presence preview — real binary,
           # loopback stub model, private tmux socket. Not L1: the image installs a ~200 MB
