@@ -39,6 +39,7 @@ COPY agent-network ./agent-network
 COPY tests/test725-agent-node-unit-ci/run.sh ./tests/test725-agent-node-unit-ci/run.sh
 RUN chmod 0755 ./tests/test725-agent-node-unit-ci/run.sh \
   && install -d -o node -g node -m 0700 "/run/user/$(id -u node)" \
+  && install -d -o node -g node -m 0755 /opt/x/bin \
   && chown -R node:node /workspace
 
 ENTRYPOINT ["bash", "tests/test725-agent-node-unit-ci/run.sh"]

@@ -23,6 +23,12 @@ import {
 } from "./config-apply.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
+import {
+  execVersionReal,
+  requiredCliStatus,
+  resolveOnPathReal,
+  STEP_TIMEOUT_MS,
+} from "./runtime-readiness.js";
 
 // ── §4.2.6 B2 — ANET_BIN install-time pin + boot 4-check ──────────
 //
@@ -451,6 +457,76 @@ export function computeChildPath(
   return `${execDir}:${safe}`;
 }
 
+/** #648 — daemon 节点 config.json 的字段名。只接受绝对路径数组,不读 PATH,不猜目录。 */
+export const DAEMON_EXTRA_PATH_FIELD = "daemonExtraPath";
+
+/** 子进程 PATH 与 computeChildPath 一样用 `:`,含 win32。额外目录接在整段固定 PATH 之后。 */
+let daemonExtraPathDirs: readonly string[] = [];
+
+function canonicalExtraDir(raw: string, platform: NodeJS.Platform): string | null {
+  const s = raw.trim();
+  if (!s || /[\0\r\n]/.test(s)) return null;
+  if (platform === "win32") {
+    if (s.includes(";")) return null;
+    if (!win32.isAbsolute(s)) return null;
+    const stripped = s.replace(/[\\/]+$/, "");
+    return stripped || s;
+  }
+  if (!s.startsWith("/") || s.includes(":")) return null;
+  return s.length > 1 ? s.replace(/\/+$/, "") : s;
+}
+
+/** 只接受字符串数组。相对路径、`~`、含分隔符的条目丢掉。顺序保留,自身去重。 */
+export function parseDaemonExtraPath(raw: unknown, platform: NodeJS.Platform = process.platform): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const dir = canonicalExtraDir(item, platform);
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    out.push(dir);
+  }
+  return out;
+}
+
+export function applyDaemonExtraPath(raw: unknown, platform: NodeJS.Platform = process.platform): readonly string[] {
+  daemonExtraPathDirs = parseDaemonExtraPath(raw, platform);
+  return daemonExtraPathDirs;
+}
+
+export function _resetDaemonExtraPathForTest(): void {
+  daemonExtraPathDirs = [];
+}
+
+/** 追加到固定 PATH 之后,并去掉已经在固定 PATH 里的目录。 */
+export function appendExtraPath(
+  base: string,
+  extras: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const have = new Set(base.split(":").filter(Boolean));
+  const add: string[] = [];
+  for (const raw of extras) {
+    const dir = canonicalExtraDir(raw, platform);
+    if (!dir || have.has(dir)) continue;
+    have.add(dir);
+    add.push(dir);
+  }
+  if (add.length === 0) return base;
+  return `${base}:${add.join(":")}`;
+}
+
+export function missingCliCreateError(command: string): string {
+  return (
+    `missing_cli: 新节点的 PATH 上找不到可用的 ${command} 命令` +
+    `(或 \`${command} --version\` 运行失败)。` +
+    `把该命令所在目录的绝对路径写进这个 daemon 节点 config.json 的 ${DAEMON_EXTRA_PATH_FIELD}` +
+    `(字符串数组),然后重启 daemon。`
+  );
+}
+
 export function minimalEnv(
   extra: Record<string, string> = {},
   platform: NodeJS.Platform = process.platform,
@@ -470,7 +546,9 @@ export function minimalEnv(
   const home = resolveChildHome(parentEnv, platform);
   const base: NodeJS.ProcessEnv = {
     ...filtered,
-    PATH: computeChildPath(platform),
+    // #648 — fixed prefix (computeChildPath, historically aS()) first, then
+    // daemonExtraPath. Not process.env.PATH, and not guessed user dirs.
+    PATH: appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform),
     HOME: home,
     LANG: parentEnv.LANG || "C.UTF-8",
   };
@@ -677,6 +755,21 @@ export interface CreateNodeDeps {
   // daemon still refuses runtimes the host operator hasn't whitelisted.
   // null/empty = accept any in the global enum (P1 default).
   allowedRuntimes?: ReadonlyArray<string> | null;
+  /** 测试用。缺省就是真的 spawn(stdio ignore + detached)。 */
+  spawnChild?: (
+    bin: string,
+    args: string[],
+    opts: { cwd: string; env: NodeJS.ProcessEnv },
+  ) => {
+    pid?: number;
+    stdin?: { destroy(): void } | null;
+    stdout?: { destroy(): void } | null;
+    stderr?: { destroy(): void } | null;
+    once(event: "exit", cb: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+    unref(): void;
+  };
+  /** 测试用。缺省 5000,与生产的能力检查等待相同。 */
+  capabilityCheckMs?: number;
 }
 
 interface PendingCreateRequest {
@@ -795,6 +888,25 @@ export async function handleCreateNodeDoorbell(
     deps.warn(`[create-node] spec rejected by daemon-side validate: ${e?.message || e}`);
     await deps.callCommHub("ack_create_request", {
       request_id, status: "rejected", error: `validate: ${e?.message || e}`,
+    }).catch(() => {});
+    return;
+  }
+
+  // #648 — missing_cli 在写 config 和 spawn 之前拒绝。判据与就绪自检同一函数,
+  // PATH 与下面的 spawn 都来自 minimalEnv()。超时(unknown)不在这里拒绝。
+  const childEnvForCli = minimalEnv() as Record<string, string | undefined>;
+  const cliStatus = await requiredCliStatus(
+    req.node_spec.runtime,
+    childEnvForCli.PATH ?? "",
+    childEnvForCli,
+    { resolveOnPath: resolveOnPathReal, execVersion: execVersionReal },
+    STEP_TIMEOUT_MS,
+  );
+  if (cliStatus.cli === "missing" && cliStatus.command) {
+    const error = missingCliCreateError(cliStatus.command);
+    deps.warn(`[create-node] ${error}`);
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "rejected", error: error.slice(0, 800),
     }).catch(() => {});
     return;
   }
@@ -934,11 +1046,16 @@ export async function handleCreateNodeDoorbell(
   let launcherExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
   const childNodeIdForMap = `node_${request_id.replace(/^cr_/, "")}`;
   try {
-    const child = spawn(anetBin, ["node", "start", req.node_spec.name], {
+    const launch = deps.spawnChild ?? ((bin: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) =>
+      spawn(bin, args, {
+        cwd: opts.cwd,
+        env: opts.env,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      }));
+    const child = launch(anetBin, ["node", "start", req.node_spec.name], {
       cwd: childWorkDir,
       env: minimalEnv(),
-      stdio: ["ignore", "ignore", "ignore"],
-      detached: true,
     });
     childPid = child.pid || -1;
     const spawnedPid = childPid;
@@ -1031,7 +1148,7 @@ export async function handleCreateNodeDoorbell(
   // If dead → ack `runtime_capability_check_failed` so hub marks the
   // request failed with the right reason (audit_log "daemon_capability_lied"
   // surfaces the gap between declaration and reality).
-  const FAIL_FAST_MS = 5_000;
+  const FAIL_FAST_MS = deps.capabilityCheckMs ?? 5_000;
   await new Promise<void>(resolve => setTimeout(resolve, FAIL_FAST_MS));
   let stillAlive = false;
   if (childPid > 0) {

@@ -46,3 +46,9 @@ npm i -g @sleep2agi/agent-network@2.3.0-preview.149 @sleep2agi/agent-node@2.5.0-
 ## promote 时的 must_contain
 
 `"version": "2.5.0-preview.116"`
+
+## 下一次 agent-node 发布必须保留的升级须知（看板 #648）
+
+已发布的 `.116` 包**没有**这条行为。下一次 agent-node 发版的 release notes 要把下面这句原样带走。
+
+- 🔴 **升级前先配 `daemonExtraPath`。** 如果这台机器上的 `codex` / `grok` / `claude` 不在运行 daemon 的 node 同一目录，也不在系统目录，要先把这些命令所在目录的绝对路径写进该 daemon 节点 `config.json` 的 `daemonExtraPath`（字符串数组），然后重启 daemon。否则从 app 建这几种节点会被直接拒绝，不会先 spawn 再失败。报错里会写缺哪个命令，以及去哪里配。
