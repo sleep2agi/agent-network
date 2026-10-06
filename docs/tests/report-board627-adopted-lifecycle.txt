@@ -40,3 +40,39 @@ Second implementation checkpoint (2026-10-06, still draft):
   finalized. First runner reached all bare assertions but exited 1 because its
   restoration trap used a relative path after cd; trap corrected to absolute.
 - Pending: no-wrapper restart refusal, full final-image validation and review.
+
+Verified implementation candidate c93fbdf44af470ae9575f0841c7863baf2f7ce91
+(2026-10-06; stacked on #626 0732ea6f; no merge or release):
+- Standalone Dockerfile built successfully. Ran the image without source mounts:
+  sg docker -c 'docker run --rm --init --network none anet-board627-c93fbdf4'
+  Overall rc=0. Runtime suites: 55 pass / 189 assertions; node-locate: 13 pass /
+  27 assertions. Identity mutation: remove only pre-signal birth/UID comparison,
+  same PID-reuse assertion fails rc=1; restore: 2 pass / 4 assertions.
+- 52 real end-to-end PASS assertions across bare + private tmux: independent
+  HOME, random loopback Hub port, real HTTP/MCP, real daemon and manual node.
+  Adopt -> stop -> marker and dead original PID -> project up preserves marker
+  and PID file -> actual deploy/fleet/anet-nodes-boot.sh skips -> start -> marker
+  absent, new PID, same alias online -> revoke leaves restarted process alive.
+  Private socket original session restored; unrelated keeper session survives.
+  Boot-script tmux commands use a container-only shim with explicit -S; never
+  the host/default service. No production ports, credentials or live nodes used.
+- Hub-only authorized increment (planned .109, not .108): restart_node refuses
+  active adopted targets with adopted_restart_requires_daemon before queueing
+  or sending a doorbell. The protocol has no verified supervisor-proof field;
+  config_update_capable alone is not proof. Message says Stop then Start.
+  Ordinary and created-node real HTTP calls retain restart_only + pending row.
+  Removing exactly this guard makes the same HTTP assertion red, rc=1.
+- Late startup evidence cannot recreate revoked registration or overwrite a
+  newer adoption request; local guard covered by the runtime suite.
+- Related server suites: 22 pass / 93 assertions, rc=0 (binding, start, lifecycle).
+- Symbol pins in Docker with full git object access: docs 17 scanned / 9 judged /
+  8 skipped, docs-site 18 scanned / 16 judged / 2 skipped; unavailable refs 0,
+  drift 0, both rc=0. Skipped pins are not claimed as verified.
+- test831 built with CI SOURCE_COMMIT and RUNSH_BLOB arguments: RESULT PASS,
+  rc=0. Base-image, suite-registration, QA paths symmetry and trigger coverage
+  checks also rc=0 in Docker; no new unregistered suites.
+- Whole-project tsc is NOT green: rc=2. Compared identical compiler/settings
+  against #626 dependency source; diagnostics match after stripping only line
+  coordinates. No new diagnostic in this increment; not a full typecheck pass.
+- Remote CI and independent review remain pending. Keep draft until reviewed;
+  rebase onto main after #2436 merges. No version numbers changed.
