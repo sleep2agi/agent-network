@@ -247,7 +247,7 @@ anet node start my-agent      # 启动
 
 | 配额项 | v0.8 实际 |
 |--------|-----------|
-| **创建网络数** | ✅ **仍 enforced**（[`auth.ts:421 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L421)），non-admin 默认 free=2，仅 `users.role='admin'` 豁免 |
+| **创建网络数** | ✅ **仍 enforced**（[`auth.ts:435 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L435)），non-admin 默认 free=2，仅 `users.role='admin'` 豁免 |
 | 加入网络数 | ❌ hub 没在 join path 调 quota check |
 | 每网络 Agent 数 | ❌ 不生效 |
 | 每天任务数 | ❌ 不生效 |
