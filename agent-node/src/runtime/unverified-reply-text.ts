@@ -9,8 +9,8 @@ export const UNVERIFIED_OWNER_MARKER = "[unverified-owner]";
 export function runtimeErrorReplyText(runtime: string, err: unknown): string {
   const e = err as { message?: unknown; unverifiedReplyText?: unknown; ownershipReason?: unknown; userReplyText?: unknown } | null;
   // A runtime that knows the precise, truthful user-facing wording for its
-  // failure (e.g. opencode copresence: the session was aborted, or the abort
-  // itself failed) supplies it verbatim; prefixing it with "<runtime> 错误:"
+  // failure (e.g. opencode copresence: the session was aborted, the abort
+  // itself failed, or the turn was left running) supplies it verbatim; prefixing it with "<runtime> 错误:"
   // would misstate what happened.
   if (typeof e?.userReplyText === "string" && e.userReplyText.trim()) return e.userReplyText;
   const message = typeof e?.message === "string" ? e.message : String(err);

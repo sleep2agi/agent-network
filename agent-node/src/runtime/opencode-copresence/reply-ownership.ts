@@ -29,14 +29,25 @@ export type OwnershipVerdict =
 
 const MAX_HOPS = 64;
 
+function isSummaryMessage(message: OwnershipMessage): boolean {
+  if (message?.info?.summary === true) return true;
+  const parts = Array.isArray(message?.parts) ? message.parts : [];
+  return parts.some((part) => part?.type === "compaction" || part?.type === "summary");
+}
+
 export function isHumanUserMessage(message: OwnershipMessage, submittedId: string): boolean {
   const info = message?.info;
   if (!info || info.role !== "user") return false;
   if (info.id === submittedId) return false;
-  if (info.summary === true) return false;
+  if (isSummaryMessage(message)) return false;
   const parts = Array.isArray(message.parts) ? message.parts : [];
-  if (parts.some((p) => p?.type === "compaction" || p?.type === "summary")) return false;
   return parts.some((p) => p?.type === "text" && typeof p.text === "string" && p.text.trim() !== "");
+}
+
+function queuedUserId(message: OwnershipMessage): string | undefined {
+  if (!message?.info || message.info.role !== "user" || isSummaryMessage(message)) return undefined;
+  const id = message.info.id;
+  return typeof id === "string" && id ? id : undefined;
 }
 
 /**
@@ -79,6 +90,56 @@ export interface UnverifiedReplyError extends Error {
   unverifiedParentId: string | undefined;
   submittedMessageId: string;
   ownershipReason: string;
+}
+
+function assistantReachesUser(history: OwnershipMessage[], userId: string): boolean {
+  for (const message of history) {
+    if (message?.info?.role !== "assistant") continue;
+    if (ownershipChainVerdict(history, userId, message.info.parentID).accepted) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a reply-phase timeout may POST /session/:id/abort.
+ *
+ * OpenCode runs one turn at a time, FIFO. The live turn is the earliest user
+ * message that does not yet have an assistant reply (a compaction summary is
+ * not a turn). Abort only when that message is the one we submitted and no
+ * later human user message is queued after it: abort is session-scoped and
+ * would cancel that queued line too.
+ *
+ * That is the head of the unanswered queue, not the tail. A human message
+ * still unanswered ahead of ours leaves our id in history, but the runner is
+ * on the human turn — seeing our id only proves we submitted. Taking the tail
+ * ("the last unanswered user message is ours") would abort in that case.
+ *
+ * Unreadable history and a queue we cannot classify are "leave_running":
+ * do not abort. A readable history that does not contain our id is
+ * "not_submitted" (the POST never landed).
+ */
+export type TimedOutTurnDecision = "abort" | "not_submitted" | "leave_running";
+
+export function timedOutTurnAbortDecision(
+  history: OwnershipMessage[] | null | undefined,
+  submittedId: string,
+): TimedOutTurnDecision {
+  if (!Array.isArray(history)) return "leave_running";
+  if (!submittedId) return "leave_running";
+  const oursIndex = history.findIndex((message) => message?.info?.id === submittedId);
+  if (oursIndex < 0) return "not_submitted";
+  const ours = history[oursIndex];
+  if (!ours || queuedUserId(ours) !== submittedId) return "leave_running";
+  const unanswered: string[] = [];
+  for (const message of history) {
+    const id = queuedUserId(message);
+    if (!id || assistantReachesUser(history, id)) continue;
+    unanswered.push(id);
+  }
+  const liveId = unanswered[0];
+  if (liveId !== submittedId) return "leave_running";
+  if (history.slice(oursIndex + 1).some((message) => isHumanUserMessage(message, submittedId))) return "leave_running";
+  return "abort";
 }
 
 export function unverifiedOwnerError(

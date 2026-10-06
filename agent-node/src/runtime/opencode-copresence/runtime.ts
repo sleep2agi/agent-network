@@ -15,7 +15,7 @@ import {
 } from "../opencode-acp/binary";
 import { OPENCODE_V1_BACKEND, type OpencodeBackend } from "../opencode-backend";
 import { opencodeGenerationRefusal } from "../opencode-versions";
-import { ownershipChainVerdict, unverifiedOwnerError } from "./reply-ownership";
+import { ownershipChainVerdict, timedOutTurnAbortDecision, unverifiedOwnerError } from "./reply-ownership";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
   linuxProcessGroupIsGone,
@@ -46,10 +46,12 @@ export function formatOpenCodeTimeout(ms: number): string {
  * The bridge stopped waiting for a network task. OpenCode 1.18.x does not
  * cancel a session turn when the HTTP client of `POST /session/:id/message`
  * disconnects (the session stays `busy` and the provider stream stays open),
- * so a reply-phase timeout must `POST /session/:id/abort` before the failed
- * CommHub reply. Otherwise the turn keeps calling tools and its result shows
- * up later as a new message. Admission timeouts are different: our task never
- * landed, and the busy session may be a human turn — those are not aborted.
+ * so a reply-phase timeout aborts the session only when the live turn is
+ * provably ours (`timedOutTurnAbortDecision`). Otherwise the turn keeps
+ * calling tools and its result shows up later as a new message. Do not abort
+ * when history cannot be read, when this submission never landed, or when the
+ * unanswered turn is not ours: abort is session-scoped and would kill a human
+ * turn sharing the TUI. Admission timeouts are the not-landed case.
  * `outcome: "running"` is the truthful "still going, not aborted" wording
  * (OpenCode 2 still uses it). `userReplyText` is the CommHub reply.
  */
@@ -812,16 +814,20 @@ export async function openVettedOpenCodeCopresence(
             // aborted before that reply goes out.
             if (turnSignal?.aborted
               && (error?.name === "TimeoutError" || error?.name === "AbortError")) {
-              // Abort only a submission that provably landed (or whose history
-              // cannot be read: we did POST and hit our own deadline). A POST
-              // that never arrived must not cancel whoever is already using
-              // the shared session.
+              // Abort only when the live turn is provably ours. Unreadable
+              // history (this GET's own failure is often the same stall) and
+              // an undecidable queue must not cancel whoever is using the
+              // shared session. A readable history without our id means the
+              // POST never landed.
               const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, 5_000).catch(() => null);
-              const landed = !Array.isArray(history)
-                || history.some((m: any) => m?.info?.id === messageId);
-              if (!landed) {
+              const decision = timedOutTurnAbortDecision(history, messageId);
+              if (decision === "not_submitted") {
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission did not land`);
                 throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+              }
+              if (decision !== "abort") {
+                warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; leaving the session running (history unread or the live turn is not ours)`);
+                throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
               }
               const aborted = await abortOpenCodeSession(url, password, created.id, warn);
               warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission landed — session ${aborted ? "aborted" : "abort failed"}`);
