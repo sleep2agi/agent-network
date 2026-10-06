@@ -107,6 +107,7 @@ on:
       - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-create-node-workdir/**'
+      - 'tests/qa-runtime-readiness/**'
       - 'tests/test571-lifecycle-safety/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -300,6 +301,7 @@ on:
       - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-create-node-workdir/**'
+      - 'tests/qa-runtime-readiness/**'
       - 'tests/test571-lifecycle-safety/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -777,6 +779,30 @@ jobs:
 
       - name: Run qa-create-node-timeout-ms
         run: docker run --rm anet-qa-create-node-timeout-ms
+
+  qa-runtime-readiness:
+    # #622 daemon 逐 runtime 自检(runtime_readiness):真 hub + 真 `anet daemon up`,容器故意缺 grok CLI、
+    # 缺 codex 登录、opencode.ai 被容器内假代理拒绝 —— 断言 /api/host-supervisors 逐 runtime 报
+    # ready/missing_cli/not_logged_in/no_network,埋点假 key 不出现在 hub 响应与 daemon 日志。
+    # --network none:网络探测只经容器内假 CONNECT 代理。冷构建同 qa-create-node-workdir —— 独立 job。
+    name: daemon runtime readiness e2e (Docker, real hub + daemon)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-runtime-readiness"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build qa-runtime-readiness
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-runtime-readiness/run.sh)" \
+            -t anet-qa-runtime-readiness \
+            -f tests/qa-runtime-readiness/Dockerfile .
+
+      - name: Run qa-runtime-readiness
+        run: docker run --rm --network none anet-qa-runtime-readiness
 
   test562b-node-remote:
     # #562 step 2 — `anet node <start|stop|restart> <alias> --remote` / `anet node edit <alias> --model <id> --remote`.
