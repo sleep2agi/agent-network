@@ -1,0 +1,13 @@
+board #629 — user-readable lifecycle contract, planned for Hub .110
+
+Draft scope: additive user-only managed/adoption projection on GET /api/nodes,
+GET /api/node-lifecycle-requests?kind=adopt|start|stop with exactly one of
+request_id or node_id (latest request), user-only adopt_capable projection on
+/api/host-supervisors. Use existing node read permissions and network scope.
+Never expose tokens, process environment, workdir or configuration snapshots.
+Candidate discovery is separate child board #655; app PR #733 waits for this.
+
+Validation pending: isolated Docker, real HTTP Hub bound to port 0 with private
+HOME/database, forbidden cross-network and restricted-member reads, no new
+daemon-token privileges, additive old-client compatibility, mutation red.
+No release/version bump, production access, or merge.
