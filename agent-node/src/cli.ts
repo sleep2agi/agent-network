@@ -997,9 +997,11 @@ const NODE_STATE_DIR = configFilePath && basename(dirname(dirname(configFilePath
   ? dirname(configFilePath)
   : join(process.cwd(), ".anet", "nodes", ALIAS);
 // #667 — project_dir stays the real cwd. This process does not chdir.
-// reportedTask is the only decision: warning, "" to clear one, or undefined
-// while a task is in flight. Replays pass the caller's raw task back in,
-// so a stored warning cannot look like a caller-supplied task.
+// reportedTask is the only decision: the warning, or undefined when there
+// is nothing new to say. Register is the one place that turns "nothing"
+// into "" so a restart from the right directory clears a leftover warning.
+// Replays pass the caller's raw task back in, so a stored warning cannot
+// look like a caller-supplied task.
 function projectDirTask(status: string, task?: string): string | undefined {
   return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });
 }
@@ -1645,7 +1647,6 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
-    task: projectDirTask("idle"),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
@@ -1657,6 +1658,9 @@ const register = async () => {
     // /api/nodes lies about the node's actual state. Codex catch on
     // PR #411.
     channels: JSON.stringify(channelSpecs),
+    // #667 — "" only on this startup report. Later idle reports omit task,
+    // so the last description stays. A mismatch still sends the warning.
+    task: projectDirTask("idle") ?? "",
     // #1958 — grok: prefer the agent's readback once a turn has run.
     model: (RUNTIME === "grok" ? grokEffectiveModel : undefined) || MODEL || undefined,
     network_id: NETWORK_ID || undefined,
@@ -1703,11 +1707,12 @@ const register = async () => {
   return result;
 };
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
-  // #667 — idle with nothing running writes the warning, or "" so a restart
-  // from the right directory clears it. In flight, omit task. Store the
-  // caller's raw task: the three replays below pass it back through here,
-  // and a stored warning must not skip the in-flight check. A login error
-  // from the gate below still replaces this text.
+  // #667 — idle with nothing running writes the warning, or omits task.
+  // Register, not this path, sends "" once to clear a leftover warning.
+  // In flight, omit task. Store the caller's raw task: the three replays
+  // below pass it back through here, and a stored warning must not skip
+  // the in-flight check. A login error from the gate below still replaces
+  // this text.
   const hintedTask = projectDirTask(rawStatus, rawTask);
   lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();

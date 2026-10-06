@@ -1,8 +1,9 @@
 // #667 — a restart from the right directory must clear the cwd warning the
 // previous process left on the same resume_id. Hub stores
 // `task = COALESCE(?11, sessions.task)`, so omitting task keeps the warning.
-// The node sends task: "" when idle, nothing is in flight, and there is no
-// warning. This boots a throwaway hub on port 0 (never 9200).
+// Register sends task: "" once. Later idle reports omit task, so the
+// description of a finished task stays. This boots a throwaway hub on
+// port 0 (never 9200).
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -88,12 +89,44 @@ describe("#667 restart from the workspace root clears the cwd warning", () => {
     expect(kept.ok).toBe(true);
     expect(sessionTask()).toBe(wrong);
 
-    const cleared = reportedTask({ configPath: CONFIG, cwd: ROOT, inFlight: 0, status: "idle" });
+    const idle = reportedTask({ configPath: CONFIG, cwd: ROOT, inFlight: 0, status: "idle" });
+    expect(idle).toBeUndefined();
+    const cleared = idle ?? "";
     expect(cleared).toBe("");
     const fixed = await tool(node.token, "report_status", {
       resume_id: resume, alias: node.alias, status: "idle", node_id: node.nodeId, network_id: NET, task: cleared,
     });
     expect(fixed.ok).toBe(true);
     expect(sessionTask()).toBe("");
+  });
+
+  test("after startup, a finished task's description stays on the hub", async () => {
+    const resume = `sdk-${node.nodeId}`;
+    const description = "BOARD667-FINISHED-TASK";
+    const startup = reportedTask({ configPath: CONFIG, cwd: ROOT, inFlight: 0, status: "idle" }) ?? "";
+    expect(startup).toBe("");
+    const registered = await tool(node.token, "report_status", {
+      resume_id: resume, alias: node.alias, status: "idle", node_id: node.nodeId, network_id: NET, task: startup,
+    });
+    expect(registered.ok).toBe(true);
+    expect(sessionTask()).toBe("");
+
+    const working = reportedTask({
+      configPath: CONFIG, cwd: ROOT, inFlight: 1, status: "working", task: description,
+    });
+    expect(working).toBe(description);
+    const ran = await tool(node.token, "report_status", {
+      resume_id: resume, alias: node.alias, status: "working", node_id: node.nodeId, network_id: NET, task: working,
+    });
+    expect(ran.ok).toBe(true);
+    expect(sessionTask()).toBe(description);
+
+    const finished = reportedTask({ configPath: CONFIG, cwd: ROOT, inFlight: 0, status: "idle" });
+    expect(finished).toBeUndefined();
+    const done = await tool(node.token, "report_status", {
+      resume_id: resume, alias: node.alias, status: "idle", node_id: node.nodeId, network_id: NET,
+    });
+    expect(done.ok).toBe(true);
+    expect(sessionTask()).toBe(description);
   });
 });

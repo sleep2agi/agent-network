@@ -44,10 +44,11 @@ export function projectDirMismatchWarning(input: {
  *
  * A caller-supplied task is sent as-is. While something is still in flight,
  * an empty report omits `task` (undefined): the hub's COALESCE keeps the
- * running description. Idle, nothing in flight, and a mismatch: send the
- * warning. Idle, nothing in flight, and no mismatch: send "" so a restart
- * from the right directory clears a warning the previous process left on
- * the same resume_id. Omitting the field would keep that warning.
+ * running description. Idle with a mismatch sends the warning. Idle with
+ * no mismatch also omits `task`, so the description of the last finished
+ * task stays. Only register sends "" (once per process) to clear a warning
+ * the previous process left on the same resume_id. Omitting the field there
+ * would keep that warning.
  *
  * cwd == the node directory is not whitelisted. The product-started external
  * bridge is given the workspace root as its tmux cwd, so it does not warn.
@@ -63,7 +64,7 @@ export function statusTaskForReport(
   if (inFlight > 0) return undefined;
   if (status !== "idle") return task;
   if (hint) return hint;
-  return "";
+  return undefined; // board667-idle-keeps-last-task
 }
 
 /** cli.ts passes configPath, cwd, inFlight, and whether the caller has a task. */

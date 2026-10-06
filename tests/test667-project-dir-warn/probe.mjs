@@ -24,9 +24,10 @@ function assertCliWiring() {
     "return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });",
     "const projectDirMismatchHint = projectDirTask(\"idle\");",
     "if (projectDirMismatchHint) console.warn(projectDirMismatchHint);",
-    "task: projectDirTask(\"idle\"),",
+    "task: projectDirTask(\"idle\") ?? \"\",",
     "const hintedTask = projectDirTask(rawStatus, rawTask);",
     "lastReportedStatus = { status: rawStatus, task: rawTask };",
+    "{ status: rawStatus, task: hintedTask }",
   ];
   for (const line of lines) {
     if (!cli.includes(line)) fail(`cli wiring missing: ${line}`);
@@ -46,8 +47,8 @@ function assertFold(hint) {
   if (statusTaskForReport("working", "正在做事", hint, 1) !== "正在做事") fail("working task was replaced while in flight");
   if (statusTaskForReport("offline", undefined, hint) !== undefined) fail("offline status gained the hint");
   if (statusTaskForReport("offline", undefined, hint, 1) !== undefined) fail("offline in-flight status gained the hint");
-  if (statusTaskForReport("idle", undefined, null) !== "") fail("idle with no hint did not clear");
-  if (statusTaskForReport("idle", "", null) !== "") fail("idle blank task with no hint did not clear");
+  if (statusTaskForReport("idle", undefined, null) !== undefined) fail("idle with no hint cleared the last task");
+  if (statusTaskForReport("idle", "", null) !== undefined) fail("idle blank task with no hint cleared the last task");
   if (statusTaskForReport("idle", undefined, null, 1) !== undefined) fail("in-flight idle report cleared the running task");
 }
 
@@ -55,13 +56,14 @@ function assertReported(hint) {
   const wrong = { configPath: CONFIG, cwd: NODE, inFlight: 0, status: "idle" };
   const right = { configPath: CONFIG, cwd: ROOT, inFlight: 0, status: "idle" };
   if (reportedTask(wrong) !== hint) fail("node directory did not report the warning");
-  if (reportedTask(right) !== "") fail("fixed directory did not clear the task");
+  if (reportedTask(right) !== undefined) fail("fixed directory cleared the last task");
+  if ((reportedTask(right) ?? "") !== "") fail("register would not clear a leftover warning");
   if (reportedTask({ ...wrong, inFlight: 1 }) !== undefined) fail("in-flight idle report covered the running task");
   if (reportedTask({ ...right, inFlight: 1 }) !== undefined) fail("in-flight idle report cleared the running task");
   if (reportedTask({ ...wrong, task: "正在做事" }) !== "正在做事") fail("caller task was replaced by the warning");
   if (reportedTask({ ...right, task: "正在做事" }) !== "正在做事") fail("caller task was cleared");
   if (reportedTask({ ...wrong, status: "working" }) !== undefined) fail("working status gained the hint");
-  if (reportedTask({ configPath: null, cwd: NODE, inFlight: 0, status: "idle" }) !== "") fail("missing config invented a warning");
+  if (reportedTask({ configPath: null, cwd: NODE, inFlight: 0, status: "idle" }) !== undefined) fail("missing config cleared the last task");
 }
 
 assertCliWiring();

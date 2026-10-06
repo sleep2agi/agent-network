@@ -32,13 +32,14 @@ need_count() {
 need_count 'project_dir: process.cwd()' "$CLI" 1
 need_count 'return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });' "$CLI" 1
 need_count 'if (projectDirMismatchHint) console.warn(projectDirMismatchHint);' "$CLI" 1
-need_count 'task: projectDirTask("idle"),' "$CLI" 1
+need_count 'task: projectDirTask("idle") ?? "",' "$CLI" 1
 need_count 'const hintedTask = projectDirTask(rawStatus, rawTask);' "$CLI" 1
 need_count 'lastReportedStatus = { status: rawStatus, task: rawTask };' "$CLI" 1
+need_count '{ status: rawStatus, task: hintedTask }' "$CLI" 1
 need_count 'gateStatusOnModelAuth(rawStatus, hintedTask, health.model_auth, NODE_CODEX_HOME)' "$CLI" 1
 need_count "$ANCHOR" "$HELPER" 1
 need_count 'return statusTaskForReport(input.status, input.task, hint, input.inFlight);' "$HELPER" 1
-need_count 'return "";' "$HELPER" 1
+need_count 'return undefined; // board667-idle-keeps-last-task' "$HELPER" 1
 need_count 'externalAppserverBridgeCwd(plan)' "$ANET_CLI" 1
 need_count '"-c", plan.nodeDir' "$ANET_CLI" 2
 need_count "$CWD_ANCHOR" "$GATE" 1
@@ -125,6 +126,13 @@ echo '== red: cli drops the startup warning =='
 apply_mutation "$CLI" 'if (projectDirMismatchHint) console.warn(projectDirMismatchHint);' 'if (projectDirMismatchHint) { /* dropped */ }'
 expect_red 'cli warn wiring' root /work 'cli wiring missing'
 cp /tmp/cli.bak "$CLI"
+
+echo '== red: runtimes without health report the raw task =='
+apply_mutation "$CLI" \
+  '{ status: rawStatus, task: hintedTask }' \
+  '{ status: rawStatus, task: rawTask }'
+expect_red 'hinted task wiring' root /work 'cli wiring missing'
+cp /tmp/cli.bak "$CLI"
 if ! cmp -s /tmp/cli.bak "$CLI"; then
   echo 'FAIL: cli source was not restored'
   exit 1
@@ -136,9 +144,11 @@ apply_mutation "$HELPER" 'return statusTaskForReport(input.status, input.task, h
 expect_red 'in-flight protection' root /work 'in-flight idle report covered the running task'
 cp /tmp/helper.inflight.bak "$HELPER"
 
-echo '== red: a fixed directory no longer clears the warning =='
-apply_mutation "$HELPER" 'return "";' 'return undefined;'
-expect_red 'clear stale warning' root /work 'idle with no hint did not clear'
+echo '== red: idle with no warning clears the last task =='
+apply_mutation "$HELPER" \
+  'return undefined; // board667-idle-keeps-last-task' \
+  'return ""; // board667-idle-keeps-last-task'
+expect_red 'idle clears last task' root /work 'idle with no hint cleared the last task'
 cp /tmp/helper.inflight.bak "$HELPER"
 if ! cmp -s /tmp/helper.inflight.bak "$HELPER"; then
   echo 'FAIL: helper source was not restored after the clear mutation'
