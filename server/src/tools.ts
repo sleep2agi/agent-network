@@ -9,6 +9,7 @@ import { noteModelAuthHealth } from "./model-auth-notify.js";
 import { numberedAliasInClause, parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
+import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
 import { deferOfflineIfAnotherCopyConnected } from "./node-identity-conflict.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
@@ -1931,7 +1932,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           [id, fromNodeId, from_session, targetNodeId, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson]
         );
         const touchParams: any[] = [task.slice(0, 200), targetAlias];
-        let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
+        let touchSql = `UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE alias = ?2`;
         touchSql = addScope(touchSql, touchParams, effectiveNetId);
         db.run(touchSql, touchParams);
         // #1548 —— 能派活的发送方不可能真的 blocked;此处出 blocked → idle。

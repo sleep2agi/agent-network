@@ -1,4 +1,5 @@
 import { db, logTaskEvent } from "./db.js";
+import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
@@ -366,7 +367,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     // Dispatch is not completion. Keep the run open until the exact bound
     // task reaches replied/failed/cancelled/expired; db.ts owns that mirror.
     db.run("UPDATE scheduled_task_runs SET task_id = ?1, status = ?2, completed_at = NULL WHERE run_id = ?3", [taskId, deliveryState, runId]);
-    db.run("UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3", [row.task_content.slice(0, 200), node.node_id, row.network_id]);
+    db.run(`UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3`, [row.task_content.slice(0, 200), node.node_id, row.network_id]);
     db.run("UPDATE scheduled_tasks SET target_alias = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3", [node.alias, scheduledFor, row.schedule_id]);
     if (advanceSchedule) advance({ ...row, target_alias: node.alias }, scheduledFor, advanceAfter);
     createdTaskId = taskId;

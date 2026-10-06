@@ -3,6 +3,7 @@ import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
 import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip";
 import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
+import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
@@ -3689,7 +3690,7 @@ return Bun.serve({
         // arrive. Updating both `task` and `updated_at` is enough — we
         // leave `status` to the agent (idle → working → idle).
         const touchParams: any[] = [body.task.slice(0, 200), targetAlias];
-        let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
+        let touchSql = `UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE alias = ?2`;
         if (taskNetId) { touchSql += " AND network_id = ?3"; touchParams.push(taskNetId); }
         db.run(touchSql, touchParams);
       });
