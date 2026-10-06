@@ -571,10 +571,8 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       #    「唯一需要这条时间线的场合,正是它打不出来的场合」——
       #    那条讲的是整个 job 被 30 分钟天花板 kill,而**每一次单套件失败也是**。
       _rc=0
-      # A suite may ship tests/$t/docker-run.args (one flag per line) when the
-      # container itself is the fixture. Allowed flags are resource limits only,
-      # so a suite cannot mount the host or raise privileges. test612 uses this
-      # for --memory: without it, /proc/meminfo is the host and the cgroup is unlimited.
+      # Resource limits only. A suite may ship tests/$t/docker-run.args
+      # (one flag per line). Mounts, network mode, and privileged stay rejected.
       _run_flags=(--rm)
       if [[ -f "tests/$t/docker-run.args" ]]; then
         while IFS= read -r _flag || [[ -n "${_flag:-}" ]]; do
