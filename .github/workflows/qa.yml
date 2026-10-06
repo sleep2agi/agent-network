@@ -682,6 +682,29 @@ jobs:
       - name: Run qa-create-node-workdir
         run: docker run --rm anet-qa-create-node-workdir
 
+  qa-codex-copresence-stop-start:
+    # #602 Codex TUI 共存节点手工 `anet node stop` → `anet node start`:线程从没对话过时,stop 删掉了
+    # 候选 codexPendingThread 绑定的标记,start 曾因此永久 fail-closed。真 hub + 真 anet/agent-node(npm pack
+    # 全局装)+ 真 tmux(私有 socket)+ 真 codex 0.147.0;对照组(有过对话)+ 伪造标记仍拒(有 rollout)。
+    # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
+    name: codex co-presence stop → start e2e (Docker, real hub + tmux + codex)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-codex-copresence-stop-start"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build qa-codex-copresence-stop-start
+        run: |
+          docker build \
+            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-qa-codex-copresence-stop-start \
+            -f tests/qa-codex-copresence-stop-start/Dockerfile .
+
+      - name: Run qa-codex-copresence-stop-start
+        run: docker run --rm --network none anet-qa-codex-copresence-stop-start
+
   qa-create-node-codex-copresence:
     # #584 app「Codex（TUI 共存）」经 daemon 建节点:create_node 的 flags.copresence 一路到子节点 config 的
     # codexCopresence,daemon 起的 `anet node start` 走共存而不是无头;不带标志的老请求仍建无头节点;
