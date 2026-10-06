@@ -5889,7 +5889,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         vendor: blob.vendor,
         base_url: blob.base_url,
         model_name: blob.model_name,
-        api_key: blob.api_key,        // ephemeral; daemon writes to .env.local or in-memory only
+        api_key: blob.api_key,        // ephemeral; daemon writes to secrets.env or in-memory only
       }) }] };
     },
   );

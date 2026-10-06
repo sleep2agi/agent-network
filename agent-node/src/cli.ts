@@ -36,7 +36,8 @@ import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-ch
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
-import { dirname, join, isAbsolute, resolve } from "path";
+import { basename, dirname, join, isAbsolute, resolve } from "path";
+import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
@@ -520,6 +521,23 @@ if (!opts.config && !Object.keys(fileConfig).length) {
   if (legacy) { fileConfig = legacy; console.log(`[agent-node] 配置: .agent-node.json`); }
 }
 
+// Board #637 — load `<node dir>/secrets.env` before config.json `env`.
+// Precedence (highest wins): process env already set, including an empty
+// string; then keys named in config.json `env`; then the file, fill-only.
+// Mode other than 0600 refuses the start. The log line names keys only.
+const nodeSecretsDir = configFilePath && basename(configFilePath) === "config.json"
+  ? dirname(configFilePath)
+  : "";
+try {
+  loadNodeSecrets(nodeSecretsDir, process.env, {
+    explicitConfigKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
+    log: (line) => console.log(line),
+  });
+} catch (e: any) {
+  console.error(`[agent-node] ${e?.message || e}`);
+  process.exit(1);
+}
+
 // Inject config.json `env` block into process.env, regardless of which load
 // path resolved fileConfig. Previously this only ran for the `--alias` path;
 // `anet node start` spawns agent-node with BOTH `--config` and `--alias`, so
@@ -571,6 +589,9 @@ if (fileConfig.env && typeof fileConfig.env === "object") {
     console.warn(`[anet]      anet doctor`);
   }
 }
+
+const secretProbeCode = runNodeSecretProbeIfRequested();
+if (secretProbeCode !== null) process.exit(secretProbeCode);
 
 if (!ALIAS) {
   console.error("错误: 必须指定 --alias\n用法: npx @sleep2agi/agent-node --alias \"我的Agent\"");
