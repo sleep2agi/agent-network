@@ -37,7 +37,52 @@ if [ -n "${EXPECTED_SOURCE_COMMIT:-}" ] && [ "${TEST_EXTAPP_SOURCE_COMMIT:-}" !=
   fail "source provenance mismatch image=${TEST_EXTAPP_SOURCE_COMMIT:-unset} expected=$EXPECTED_SOURCE_COMMIT"
 fi
 
+# Every fixed TCP port this suite configures or binds — defined HERE and only here
+# (L0 rejects any other port literal in this file). They must sit BELOW the kernel's
+# ephemeral range (ip_local_port_range, Linux default 32768–60999): board #664 —
+# with 47101–47108 an earlier layer's /readyz poll left a client-side TIME_WAIT on
+# local port 47106, so [L8]'s pre-start port check refused with "already in use".
+# connect() never auto-assigns a port outside that range, so 271xx cannot collide.
+PORT_A=27101
+PORT_TUICLASH=27102
+PORT_BUSY=27103
+PORT_MEM=27104
+PORT_NATIVE=27105
+PORT_NEVER=27106
+PORT_M1=27107
+PORT_M2=27108
+PORT_DEAD_HUB=9   # the config's hub URL; nothing listens there
+
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"  # absolute: the suite cd's away before L9
+suite_ports() { # suite_ports <script> → every PORT_*=N defined in that script, one per line
+  sed -nE 's/^PORT_[A-Z0-9_]+=([0-9]+).*$/\1/p' "$1"
+}
+stray_port_literals() { # stray_port_literals <script> → lines that use a port literal instead of $PORT_*
+  grep -nE "127\.0\.0\.1:[0-9]|127\.0\.0\.1'?,[[:space:]]*[0-9]|^[[:space:]]*(mknode|never_ready_run)[[:space:]]+[^[:space:]]+[[:space:]]+[0-9]" "$1" \
+    | grep -vE '^[0-9]+:[[:space:]]*#' || true
+}
+ports_in_ephemeral_range() { # ports_in_ephemeral_range <range-file> <port>... → offending ports; rc 1 if any
+  local lo hi p bad=""
+  read -r lo hi <"$1" || return 2
+  case "$lo$hi" in ''|*[!0-9]*) return 2 ;; esac
+  for p in "${@:2}"; do
+    if [ "$p" -ge "$lo" ] && [ "$p" -le "$hi" ]; then bad="$bad $p"; fi
+  done
+  [ -z "$bad" ] || { printf '%s\n' "${bad# }"; return 1; }
+}
+
 log "[L0] isolated environment"
+PORT_RANGE_FILE=/proc/sys/net/ipv4/ip_local_port_range
+[ -r "$PORT_RANGE_FILE" ] || fail "cannot read $PORT_RANGE_FILE"
+read -r EPH_LO EPH_HI <"$PORT_RANGE_FILE"
+mapfile -t SUITE_PORTS < <(suite_ports "$SELF")
+[ "${#SUITE_PORTS[@]}" -ge 9 ] || fail "collected only ${#SUITE_PORTS[@]} suite ports from $SELF — did the PORT_* block move?"
+STRAY=$(stray_port_literals "$SELF")
+[ -z "$STRAY" ] || fail "port literal outside the PORT_* block (L0 cannot range-check it):"$'\n'"$STRAY"
+set +e; BAD_PORTS=$(ports_in_ephemeral_range "$PORT_RANGE_FILE" "${SUITE_PORTS[@]}"); RC=$?; set -e
+[ "$RC" != 2 ] || fail "cannot parse $PORT_RANGE_FILE: '$EPH_LO $EPH_HI'"
+[ "$RC" = 0 ] || fail "suite port(s) $BAD_PORTS inside ip_local_port_range $EPH_LO–$EPH_HI — environment collision (a client-side TIME_WAIT can hold them; see #664). Move PORT_* below $EPH_LO."
+pass "suite ports ${SUITE_PORTS[*]} all outside ip_local_port_range $EPH_LO–$EPH_HI"
 [ ! -e "$ROOT/.git" ] || fail "image contains host .git"
 [ ! -e "$ROOT/.anet" ] || fail "image contains host .anet"
 command -v tmux >/dev/null 2>&1 || fail "tmux missing"
@@ -103,7 +148,7 @@ mknode() { # mknode <alias> <port> <projectDir> [extra json]
   local a="$1" port="$2" proj="$3" extra="${4:-}"
   mkdir -p "$WORK/.anet/nodes/$a/codex-home" "$WORK/.anet/nodes/$a/logs"
   cat >"$WORK/.anet/nodes/$a/config.json" <<JSON
-{"node_name":"$a","alias":"$a","runtime":"codex-app-server","hub":"http://127.0.0.1:9","token":"$TOKEN_PLANT",
+{"node_name":"$a","alias":"$a","runtime":"codex-app-server","hub":"http://127.0.0.1:$PORT_DEAD_HUB","token":"$TOKEN_PLANT",
  "codexAppServerUrl":"ws://127.0.0.1:$port","codexThreadId":"$THREAD","codexProjectDir":"$proj",
  "codexCopresence":true,"model":"gpt-demo","channels":[],"env":{},"flags":{}$extra}
 JSON
@@ -135,7 +180,7 @@ token_in_start_commands() {
 
 log "[L2] start a CJK-named node (empty codexProjectDir) next to prefix-colliding decoys"
 A="示例节点"
-mknode "$A" 47101 ""
+mknode "$A" "$PORT_A" ""
 T new-session -d -s "示例节点2" "sleep 100000"
 T new-session -d -s "示例节点2-appsrv" "sleep 100000"
 T new-session -d -s "示例节点-appsrv-old" "sleep 100000"
@@ -171,9 +216,9 @@ log "t(appserver)=$T_APP t(readyz 200)=$READY_AT t(tui record)=$T_TUI t(bridge r
 [ $((READY_AT - T_APP)) -ge 1400 ] || fail "readyz answered 200 before the configured 1.5s delay?"
 pass "order: app-server → /readyz 200 (after the 1.5s delay) → TUI → bridge"
 
-[ "$(jf "$APP" "' '.join(d['argv'])")" = "-C $WORK app-server --listen ws://127.0.0.1:47101" ] \
+[ "$(jf "$APP" "' '.join(d['argv'])")" = "-C $WORK app-server --listen ws://127.0.0.1:$PORT_A" ] \
   || fail "app-server argv: $(jf "$APP" "d['argv']")"
-[ "$(jf "$TUI" "' '.join(d['argv'])")" = "-C $WORK resume $THREAD --remote ws://127.0.0.1:47101 -m gpt-demo --no-alt-screen" ] \
+[ "$(jf "$TUI" "' '.join(d['argv'])")" = "-C $WORK resume $THREAD --remote ws://127.0.0.1:$PORT_A -m gpt-demo --no-alt-screen" ] \
   || fail "TUI argv: $(jf "$TUI" "d['argv']")"
 pass "argv: empty codexProjectDir → -C <workspace> (never -C ''); TUI resumes $THREAD on the configured URL"
 
@@ -208,7 +253,7 @@ set -e
 cat "$WORK/again.out" >>"$REPORT"
 [ "$RC" != 0 ] && grep -qF 'already exist' "$WORK/again.out" || fail "second start not refused (rc=$RC)"
 
-mknode demo-node-tuiclash 47102 "$WORK"
+mknode demo-node-tuiclash "$PORT_TUICLASH" "$WORK"
 T new-session -d -s "demo-node-tuiclash-tui" "sleep 100000"
 set +e; CLI node start demo-node-tuiclash --external-appserver >"$WORK/clash.out" 2>&1; RC=$?; set -e
 cat "$WORK/clash.out" >>"$REPORT"
@@ -216,8 +261,8 @@ cat "$WORK/clash.out" >>"$REPORT"
 has_session demo-node-tuiclash-appsrv && fail "refused start still created an app-server session"
 T kill-session -t "demo-node-tuiclash-tui"
 
-mknode demo-node-busy 47103 "$WORK"
-python3 -c "import socket,time;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('127.0.0.1',47103));s.listen();time.sleep(600)" & BUSY=$!
+mknode demo-node-busy "$PORT_BUSY" "$WORK"
+python3 -c "import socket,sys,time;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('127.0.0.1',int(sys.argv[1])));s.listen();time.sleep(600)" "$PORT_BUSY" & BUSY=$!
 sleep 0.5
 set +e; CLI node start demo-node-busy --external-appserver >"$WORK/busy.out" 2>&1; RC=$?; set -e
 kill "$BUSY" 2>/dev/null || true; wait "$BUSY" 2>/dev/null || true
@@ -225,7 +270,7 @@ cat "$WORK/busy.out" >>"$REPORT"
 [ "$RC" != 0 ] && grep -qF 'already in use' "$WORK/busy.out" || fail "busy port not refused (rc=$RC)"
 has_session demo-node-busy-appsrv && fail "busy-port refusal still created a session"
 
-mknode demo-node-mem 47104 "$WORK"
+mknode demo-node-mem "$PORT_MEM" "$WORK"
 set +e; ANET_MEMINFO_PATH="$MEM_LOW" CLI node start demo-node-mem --external-appserver >"$WORK/mem.out" 2>&1; RC=$?; set -e
 cat "$WORK/mem.out" >>"$REPORT"
 [ "$RC" != 0 ] && grep -qF 'below 4.0 GiB' "$WORK/mem.out" && grep -qF -- '--force' "$WORK/mem.out" || fail "low memory not refused (rc=$RC)"
@@ -286,7 +331,7 @@ CLI node stop "$A" >>"$REPORT" 2>&1
 pass "plain start + full restart (new app-server pid)"
 
 log "[L8] not opted in → not this lane; /readyz never 200 → nothing else starts"
-mknode demo-node-native 47105 "$WORK"
+mknode demo-node-native "$PORT_NATIVE" "$WORK"
 set +e; timeout 60 bun "$ROOT/agent-network/bin/cli.ts" node start demo-node-native >"$WORK/native.out" 2>&1; set -e
 cat "$WORK/native.out" >>"$REPORT"
 if grep -qF -e '/readyz' -e 'codexLaunchLayout' "$WORK/native.out"; then fail "a node without the recorded layout took the #630 lane"; fi
@@ -295,21 +340,39 @@ for s in $(sessions | grep -F demo-node-native || true); do T kill-session -t "$
 
 never_ready_run() { # never_ready_run <alias> <port> → leaves output in $WORK/never-<alias>.out, rc in NR_RC
   mknode "$1" "$2" "$WORK"
+  NR_PORT="$2"
   touch "$FAKE/never-ready"
   set +e; CLI node start "$1" --external-appserver --verify-timeout 3 >"$WORK/never-$1.out" 2>&1; NR_RC=$?; set -e
   rm -f "$FAKE/never-ready"
 }
-check_never_ready() { # check_never_ready <alias>  → 0 when the guard held
-  [ "$NR_RC" != 0 ] || return 1
-  grep -qF 'did not answer 200' "$WORK/never-$1.out" || return 1
-  has_session "$1-tui" && return 1
-  has_session "$1" && return 1
-  has_session "$1-appsrv" && return 1
+ENV_PORT_CONFLICT="环境端口冲突 (environment port conflict)"
+check_never_ready() { # check_never_ready <alias>  → 0 when the guard held; else NR_WHY names the condition that failed
+  local out="$WORK/never-$1.out"
+  NR_WHY=""
+  # The pre-start port check refusing is NOT the readyz-cleanup path under test: the
+  # port was taken before anet started anything (e.g. a TIME_WAIT, #664). Name it apart.
+  if grep -qF 'already in use' "$out"; then
+    NR_WHY="$ENV_PORT_CONFLICT: port $NR_PORT was taken before start (TIME_WAIT / ephemeral-port collision?) — the readyz wait never ran; not a readyz-cleanup failure"
+    return 1
+  fi
+  [ "$NR_RC" != 0 ] || { NR_WHY="start exited 0 (want non-zero)"; return 1; }
+  grep -qF 'did not answer 200' "$out" || { NR_WHY="output lacks 'did not answer 200' (rc=$NR_RC)"; return 1; }
+  if has_session "$1-tui"; then NR_WHY="session $1-tui exists (TUI started)"; return 1; fi
+  if has_session "$1"; then NR_WHY="session $1 exists (bridge started)"; return 1; fi
+  if has_session "$1-appsrv"; then NR_WHY="session $1-appsrv still exists (app-server not removed)"; return 1; fi
   return 0
 }
-never_ready_run demo-node-never 47106
+show_never_out() { # show_never_out <alias> → the start output to stdout too (it used to reach only the report artifact)
+  log "--- never-$1.out ---"
+  log "$(cat "$WORK/never-$1.out")"
+  log "--- end never-$1.out ---"
+}
+never_ready_run demo-node-never "$PORT_NEVER"
 cat "$WORK/never-demo-node-never.out" >>"$REPORT"
-check_never_ready demo-node-never || fail "readyz timeout did not stop the start cleanly (rc=$NR_RC)"
+if ! check_never_ready demo-node-never; then
+  show_never_out demo-node-never
+  fail "readyz timeout did not stop the start cleanly (rc=$NR_RC): $NR_WHY"
+fi
 pass "no recorded layout → other lane; readyz never 200 → clear error after 30s, no TUI/bridge, app-server session removed"
 
 log "[L9] mutations: each guard must turn this suite red when removed"
@@ -323,18 +386,19 @@ restore() { cp "$BK/cli.ts" "$CLI_SRC"; cp "$BK/mod.ts" "$MOD_SRC"; cmp -s "$BK/
 grep -c 'MUTATION-ANCHOR:readyz-wait' "$CLI_SRC" | grep -qx 1 || fail "readyz anchor missing or duplicated"
 sed -i 's|^\( *\)const ready = await waitForReadyz(.*// MUTATION-ANCHOR:readyz-wait$|\1const ready = { ok: true, status: 200, waitedMs: 0 };|' "$CLI_SRC"
 cmp -s "$BK/cli.ts" "$CLI_SRC" && fail "MUTATION_NOOP: readyz mutation changed nothing"
-never_ready_run demo-node-m1 47107
+never_ready_run demo-node-m1 "$PORT_M1"
 cat "$WORK/never-demo-node-m1.out" >>"$REPORT"
 if check_never_ready demo-node-m1; then restore; fail "M1 survived: removing the readyz wait left the suite green"; fi
+case "$NR_WHY" in "$ENV_PORT_CONFLICT"*) restore; show_never_out demo-node-m1; fail "M1 inconclusive: $NR_WHY" ;; esac
 CLI node stop demo-node-m1 >>"$REPORT" 2>&1 || true
 restore || fail "restore after M1"
-log "M1 (no readyz wait) → caught: rc=$NR_RC, sessions started on a never-ready app-server"
+log "M1 (no readyz wait) → caught: rc=$NR_RC, $NR_WHY"
 
 # M2: put the token into the session command line instead of reading it inside the session.
 grep -c 'MUTATION-ANCHOR:token-in-session' "$MOD_SRC" | grep -qx 1 || fail "token anchor missing or duplicated"
 sed -i 's|^\( *\)const tokenExport = tokenInSessionSnippet(.*// MUTATION-ANCHOR:token-in-session$|\1const tokenExport = "export ANET_CODEX_COMMHUB_TOKEN=" + q(JSON.parse(require("fs").readFileSync(plan.configPath, "utf8")).token);|' "$MOD_SRC"
 cmp -s "$BK/mod.ts" "$MOD_SRC" && fail "MUTATION_NOOP: token mutation changed nothing"
-mknode demo-node-m2 47108 "$WORK"
+mknode demo-node-m2 "$PORT_M2" "$WORK"
 set +e; CLI node start demo-node-m2 --external-appserver --verify-timeout 10 >"$WORK/m2.out" 2>&1; set -e
 cat "$WORK/m2.out" >>"$REPORT"
 M2_CMD=$(token_in_cmdlines); M2_START=$(token_in_start_commands)
@@ -342,6 +406,25 @@ CLI node stop demo-node-m2 >>"$REPORT" 2>&1 || true
 restore || fail "restore after M2"
 [ "$M2_CMD" != 0 ] || [ "$M2_START" != 0 ] || fail "M2 survived: token in argv went unseen (cmdline=$M2_CMD start_command=$M2_START)"
 log "M2 (token interpolated into the command) → caught: cmdline=$M2_CMD pane_start_command=$M2_START"
-pass "mutations M1 (readyz) and M2 (token in argv) both turn the suite red; sources restored byte-identical"
+# M3: move one suite port back into the ephemeral range (the #664 layout) → the L0 range
+# assertion must go red. Writes a mutated COPY of this script with a stream sed (bash
+# reads a running script lazily, so the original is never edited) and judges it against
+# the Linux default range, so the verdict does not depend on this container's sysctl.
+M3_SRC=/tmp/m3-run.sh
+sed 's|^PORT_NEVER=27106$|PORT_NEVER=47106|' "$SELF" >"$M3_SRC"
+cmp -s "$SELF" "$M3_SRC" && fail "MUTATION_NOOP: port mutation changed nothing"
+M3_RANGE=/tmp/m3-ip_local_port_range; printf '32768\t60999\n' >"$M3_RANGE"
+mapfile -t M3_PORTS < <(suite_ports "$M3_SRC")
+set +e; M3_BAD=$(ports_in_ephemeral_range "$M3_RANGE" "${M3_PORTS[@]}"); M3_RC=$?; set -e
+[ "$M3_RC" = 1 ] && [ "$M3_BAD" = 47106 ] || fail "M3 survived: PORT_NEVER=47106 passed the range assertion (rc=$M3_RC bad='$M3_BAD')"
+# control: the unmutated port set passes the same judge on the same range
+ports_in_ephemeral_range "$M3_RANGE" "${SUITE_PORTS[@]}" >/dev/null || fail "M3 control: unmutated ports flagged against 32768–60999"
+# collection half: a port written as a literal (bypassing PORT_*) must be reported
+sed 's|^mknode demo-node-busy "\$PORT_BUSY" "\$WORK"$|mknode demo-node-busy 47103 "$WORK"|' "$SELF" >"$M3_SRC"
+cmp -s "$SELF" "$M3_SRC" && fail "MUTATION_NOOP: literal-port mutation changed nothing"
+[ -n "$(stray_port_literals "$M3_SRC")" ] || fail "M3 survived: a literal port in mknode went unseen by the L0 collector"
+rm -f "$M3_SRC" "$M3_RANGE"
+log "M3 (PORT_NEVER back to 47106 / a literal mknode port) → caught: out-of-range ports '$M3_BAD', stray literal reported"
+pass "mutations M1 (readyz), M2 (token in argv), M3 (port in ephemeral range) all turn the suite red; sources restored byte-identical"
 
 log "RESULT: PASS ($PASSES layers)"
