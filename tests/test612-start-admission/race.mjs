@@ -8,8 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const WORKERS = 16;
-// The empty-file window is one write, not a sleep. 16×60 overlapped only a handful of times.
-const ROUNDS = 120;
+// Green stress only. A new id each round and the same id each round are separate runs.
+const ROUNDS = Number(process.env.RACE_ROUNDS || 120);
+const SAME_NODE = process.env.RACE_SAME_NODE === "1";
 const HOLD_MS = 5;
 const GATE = process.env.RACE_GATE || "/agent-node-src/src/runtime/codex-app-server/start-resource-gate.ts";
 
@@ -24,7 +25,7 @@ async function workerMain(id) {
   let overlaps = 0;
   for (let round = 0; round < ROUNDS; round++) {
     const gate = await waitForStartResources("race", {
-      nodeId: `w${id}r${round}`,
+      nodeId: SAME_NODE ? `w${id}` : `w${id}r${round}`,
       slotsDir: slots,
       recheckMs: 5,
       jitterMs: 0,
@@ -89,7 +90,7 @@ if (workerFlag >= 0) {
       if (r.code !== 0 || !m) bad++;
       else total += Number(m[1]);
     }
-    console.log(`OVERLAPS=${total}`);
+    console.log(`MODE=${SAME_NODE ? "same-node" : "new-id"} OVERLAPS=${total}`);
     code = bad ? 2 : (total === 0 ? 0 : 1);
   } finally {
     rmSync(slots, { recursive: true, force: true });

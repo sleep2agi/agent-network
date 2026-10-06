@@ -25,29 +25,25 @@
 // The directory lock records pid, start time, and a random token. A live pid
 // whose start time does not match is reclaimed at once. A live pid that still
 // matches is an orphan only when the monotonic timestamp inside the lock is
-// older than 60s. A wall-clock step does not age a stamped lock. Atomic
-// publish reads the token again before the lease is written: a stolen lock
-// writes nothing and the waiter retries. The non-atomic mutation does not,
-// so an empty file can still admit two. Re-entering a lease cancels this
-// process's pending release of that same key and refreshes the expiry.
+// older than 60s. A wall-clock step does not age a stamped lock. The lock is
+// published by linking a file that already has its payload. Before a lease
+// is written, the token is read again: a stolen lock writes nothing and the
+// waiter retries. Re-entering a lease cancels this process's pending release
+// of that same key and refreshes the expiry.
 // ANET_START_MEM_GATE=0 disables the gate entirely. --force does not.
 // Never throws.
 
 import {
   chmodSync,
-  closeSync,
-  constants,
   existsSync,
   linkSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
 } from "fs";
 import { cpus, homedir } from "os";
 import { dirname, join } from "path";
@@ -76,14 +72,6 @@ export const START_GATE_LOCK_STALE_MS = 30_000;
  * and writes a few files, so a live holder past this window is stuck.
  */
 export const START_GATE_LOCK_ORPHAN_MS = 60_000;
-
-/**
- * Mutation anchor for tests/test612-start-admission. true publishes the lock
- * by linking a file that already has its payload. false is the old race:
- * O_EXCL creates an empty file, the pid is written afterwards with no pause,
- * and an empty file is unlinked as a dead holder.
- */
-const LOCK_PUBLISH_ATOMIC = true;
 
 /** Above this, a cgroup "limit" is the v1 unlimited sentinel (or similar), not a real cap. */
 const CGROUP_UNLIMITED_BYTES = 2 ** 50;
@@ -491,19 +479,6 @@ function publishLock(
   const mono = monotonicNow();
   const stamp = mono === null || !Number.isFinite(mono) ? "" : ` m:${Math.max(0, Math.floor(mono))}`;
   const payload = `${holderPid} ${selfStart ?? "-"} t:${token}${stamp}\n`;
-  if (!LOCK_PUBLISH_ATOMIC) {
-    // Dead path, kept so a one-token mutation reproduces the empty-file race.
-    // The file is visible empty before the pid is written. No pause.
-    let fd: number;
-    try {
-      fd = openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    } catch {
-      return null;
-    }
-    try { writeSync(fd, payload); } finally { closeSync(fd); }
-    try { chmodSync(lockPath, 0o600); } catch { /* best effort */ }
-    return token;
-  }
   const tmp = join(dir, `.lock.tmp.${holderPid}.${Date.now()}.${Math.floor(Math.random() * 1e9)}`);
   try {
     writeFileSync(tmp, payload, { mode: 0o600 });
@@ -538,7 +513,6 @@ function classifyLock(
   const rec = readRecord(lockPath);
   if (rec.pid === null) {
     // Empty, junk, or unreadable. A just-created lock is not a dead holder.
-    // The non-atomic mutation unlinks this case before classifyLock.
     const age = now() - st.mtimeMs;
     return age >= staleMs ? "reclaim" : "held";
   }
@@ -555,11 +529,6 @@ function classifyLock(
   const age = now() - st.mtimeMs;
   if (age >= orphanMs) return "orphan";
   return "held";
-}
-
-/** The pre-fix steal: drop an empty lock without comparing bytes, so a publisher still writing the pid loses it. */
-function stealEmptyLock(lockPath: string): boolean {
-  try { unlinkSync(lockPath); return true; } catch { return false; }
 }
 
 /** Rename the lock aside, and only then drop it if the bytes are still the ones we decided were dead. */
@@ -602,10 +571,6 @@ function takeFileLock(
   for (let attempt = 0; attempt < 2; attempt++) {
     const token = publishLock(dir, lockPath, holderPid, selfStart, monotonicNow);
     if (token !== null) return token;
-    if (!LOCK_PUBLISH_ATOMIC && readRecord(lockPath).pid === null) {
-      if (!stealEmptyLock(lockPath)) return null;
-      continue;
-    }
     const kind = classifyLock(lockPath, holderPid, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs);
     if (kind === "held") return null;
     // The lock vanished between the failed publish and this check. Do not
@@ -700,10 +665,7 @@ function acquireLease(
     dir, holderPid, selfStart, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs, warn,
   );
   if (token === null) return "no";
-  // Non-atomic publish writes the pid into an inode the stealer already
-  // unlinked, then returns a token. Rechecking the lock would refuse the
-  // lease and hide that race. Atomic publish still rechecks.
-  const still = () => !LOCK_PUBLISH_ATOMIC || lockStillOurs(dir, holderPid, selfStart, token);
+  const still = () => lockStillOurs(dir, holderPid, selfStart, token); // before the lease is written
   try {
     if (!still()) return "no";
     const taken = reapSlots(dir, now, isPidAlive, readStart, warn, still);

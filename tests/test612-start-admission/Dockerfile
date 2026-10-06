@@ -5,6 +5,8 @@ WORKDIR /work
 COPY agent-node/src/runtime/codex-app-server/start-resource-gate.ts /agent-node-src/src/runtime/codex-app-server/start-resource-gate.ts
 COPY tests/test612-start-admission/probe.mjs /test612/probe.mjs
 COPY tests/test612-start-admission/race.mjs /test612/race.mjs
+COPY tests/test612-start-admission/recheck.mjs /test612/recheck.mjs
+COPY tests/test612-start-admission/reentry.mjs /test612/reentry.mjs
 COPY tests/test612-start-admission/run.sh /test612/run.sh
 RUN chmod +x /test612/run.sh
 
