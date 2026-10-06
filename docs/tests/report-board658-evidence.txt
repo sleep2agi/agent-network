@@ -1,0 +1,17 @@
+Board #658 — first local slice, NOT lifecycle acceptance
+
+Docker: tests/test658-codex-adopt-stop/Dockerfile
+Command: sg docker -c 'docker build -f tests/test658-codex-adopt-stop/Dockerfile -t anet-test658-evidence . && docker run --rm --network none anet-test658-evidence'
+Non-root bun, no host mounts/network/tmux.
+Baseline: 5 pass, 0 fail, 11 expect calls, rc=0.
+Mutation: remove ANET_NODE_MARKER comparison only, rebuild separate image.
+Result: 3 pass, 2 fail (missing/wrong marker; foreign child), rc=1.
+Comparison restored after mutation.
+
+Scope: pure candidate evidence gate; exact CJK names select candidates, default
+socket is allowed, all supplied tree members require marker/home/UID/cwd.
+Unrelated extra pane in a target session forbids session-wide action.
+This does NOT collect real tmux facts, validate config/marker files, signal
+processes, wire adoption or test Hub/daemon E2E. Those are still pending.
+The default-socket decoy here is data only, not the required real Docker tmux
+decoy acceptance. No live node or host tmux action performed.
