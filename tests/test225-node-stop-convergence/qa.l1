@@ -1,0 +1,2 @@
+#1027: deterministic reproduction of the historical test225 foreground
+start/stop race plus ownership, socket-residue and KILL escalation gates.

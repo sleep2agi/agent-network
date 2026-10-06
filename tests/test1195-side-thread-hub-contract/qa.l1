@@ -1,0 +1,2 @@
+#175 PR2: Hub contract, authenticated HTTP/SSE security, and lifecycle
+races are separate Docker layers. Each has its own witnessed-red mutation.

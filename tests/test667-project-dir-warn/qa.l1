@@ -1,0 +1,4 @@
+Board #667. cwd is still reported as project_dir. Starting in the node
+directory must warn with both paths; starting at the workspace root must
+not. Forcing the mismatch check to succeed turns the node-directory case
+red. Copies two source files, no install.

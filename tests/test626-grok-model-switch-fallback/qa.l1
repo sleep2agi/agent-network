@@ -1,0 +1,2 @@
+#1253 —— grok 换模型 hot→restart 回退路径。纯本地:跑 agent-node 源码的
+bun 测试,不需要 grok 二进制、不需要网络、不碰任何凭据。

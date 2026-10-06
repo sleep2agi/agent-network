@@ -72,10 +72,14 @@ def main() -> int:
         return 2
 
     qa_sh = QA_SH.read_text(encoding="utf-8", errors="replace")
-    # L1 entries name the directory bare (no `tests/` prefix); L0 entries name
-    # source files, so only the ones that resolve to a real test dir count.
-    executed = {e for e in bash_array(qa_sh, "L1_TESTS") + bash_array(qa_sh, "L0_TESTS")
-                if e in test_dirs}
+    # L1 is tests/<suite>/qa.l1, including names that do not start with test.
+    # L0 entries name source files, so only the ones that resolve to a real
+    # test dir count.
+    executed = {
+        p.name for p in TESTS_DIR.iterdir()
+        if p.is_dir() and (p / "qa.l1").is_file()
+    }
+    executed |= {e for e in bash_array(qa_sh, "L0_TESTS") if e in test_dirs}
 
     # Anything a workflow references by path is executed too.
     for wf in sorted(list(WORKFLOWS.glob("*.yml")) + list(WORKFLOWS.glob("*.yaml"))):
@@ -90,7 +94,13 @@ def main() -> int:
               "stopped matching qa.sh or the workflows; refusing to pass")
         return 2
 
-    covered = set(re.findall(r"tests/(test[\w.\-]+)/\*\*", QA_YML.read_text(encoding="utf-8")))
+    qa_text = QA_YML.read_text(encoding="utf-8")
+    # #675: one blanket entry covers every suite. Per-suite globs are the old
+    # shape and still count if someone has not collapsed them yet.
+    blanket = "- 'tests/**'" in qa_text
+    covered = set(re.findall(r"tests/([\w.\-]+)/\*\*", qa_text))
+    if blanket:
+        covered |= executed
     gap = sorted(executed - covered)
 
     print(f"tests/ directories: {len(test_dirs)} · CI-executed: {len(executed)} · "
@@ -100,7 +110,8 @@ def main() -> int:
         for d in gap:
             print(f"::error file={QA_YML}::tests/{d} is executed by CI but missing from the "
                   f"qa.yml path filter — editing it will not re-run its own gate.\n"
-                  f"    Add:  - 'tests/{d}/**'")
+                  f"    Put `- 'tests/**'` on both pull_request and push. "
+                  f"Do not add another per-suite line.")
         print(f"\n{len(gap)} executed test directory/ies outside the trigger filter.")
         return 1
 

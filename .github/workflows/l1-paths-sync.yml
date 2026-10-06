@@ -1,7 +1,7 @@
-# scripts/qa.sh decides WHICH L1 suites run; qa.yml's `paths:` decides WHEN the
-# workflow that runs them fires. Nothing keeps those two lists in sync, and the
-# drift is silent: a suite added to L1_TESTS without a matching `paths:` entry is
-# never triggered by edits to itself, while the gate keeps reporting green.
+# tests/<suite>/qa.l1 decides WHICH L1 suites run; qa.yml's `paths:` decides WHEN
+# the workflow that runs them fires. The path list is one `tests/**`, not a line
+# per suite. Drift is silent: delete that blanket entry and a suite is never
+# triggered by edits to itself, while a gate that does not look would stay green.
 #
 # That already happened once (#860 — test686 / test765 / test766).
 #
@@ -30,3 +30,8 @@ jobs:
       # still print a count and exit 0 on an empty denominator.
       - run: python3 .github/scripts/check-l1-paths-sync.py --selftest
       - run: python3 .github/scripts/check-l1-paths-sync.py
+      # Same job, still with no paths filter: adding or deleting a qa.l1
+      # without updating the layer inventory must fail here, not only on a
+      # PR that happens to touch the inventory.
+      - run: python3 .github/scripts/check-l1-layer-parity.py --selftest
+      - run: python3 .github/scripts/check-l1-layer-parity.py

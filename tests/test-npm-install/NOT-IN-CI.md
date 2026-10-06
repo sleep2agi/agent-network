@@ -3,7 +3,7 @@
 Verified: 2026-08-19
 Revisit-when: Dockerfile 第 6 行不再是 `npm i -g @sleep2agi/*@preview`——
               即被测对象从「已发布的 npm preview」变成「本仓构建产物」时，
-              它就该进 qa.sh 的 L1_TESTS，并删掉本文件。
+              它就该在套件目录放 qa.l1，并删掉本文件。
 
 ## 理由：被测对象是**混合**的，其中一半不是这次提交
 

@@ -1,0 +1,2 @@
+RFC-036 PR1: credential-free SideThread state machine + Codex adapter
+contract. Exact-version fail-closed has a witnessed-red mutation.

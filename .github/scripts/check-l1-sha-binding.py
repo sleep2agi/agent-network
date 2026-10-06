@@ -41,7 +41,6 @@ import re
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-QA_SH = REPO / "scripts" / "qa.sh"
 TESTS = REPO / "tests"
 BASELINE = REPO / "docs" / "l1-sha-binding-baseline.txt"
 
@@ -56,12 +55,18 @@ VISIBLE_RE = re.compile(r"source_commit", re.I)
 DECLARE_RE = re.compile(r"^\s*(ARG|ENV|LABEL)\b.*SOURCE_COMMIT.*$", re.M | re.I)
 
 
-def l1_suites(qa_sh_text: str) -> list[str]:
-    """从 qa.sh 里取 L1_TESTS。可注入，selftest 用它验取集层本身。"""
-    m = re.search(r"L1_TESTS=\((.*?)\n\)", qa_sh_text, re.S)
-    if not m:
+def l1_suites(tests_dir: pathlib.Path) -> list[str]:
+    """L1 是 tests/<套件>/qa.l1。可注入目录，selftest 用它验取集层本身。
+
+    #675 之前这里正则抓 qa.sh 的 L1_TESTS 数组。数组没了，抓空会被当成
+    「没有未绑定套件」而放行，所以取集改看标记文件，空目录仍然返回 []，
+    main 据此退 2。
+    """
+    if not tests_dir.is_dir():
         return []
-    return re.findall(r'^\s*"([^"]+)"', m.group(1), re.M)
+    return sorted(
+        p.name for p in tests_dir.iterdir() if p.is_dir() and (p / "qa.l1").is_file()
+    )
 
 
 def suite_texts(suite_dir: pathlib.Path) -> str:
@@ -117,13 +122,13 @@ def read_baseline() -> set[str] | None:
 
 
 def main() -> int:
-    if not QA_SH.exists():
-        print("::error::scripts/qa.sh 不存在 —— 取集塌了，拒绝通过")
+    if not TESTS.is_dir():
+        print("::error::tests/ 不存在 —— 取集塌了，拒绝通过")
         return 2
-    names = l1_suites(QA_SH.read_text(encoding="utf-8"))
+    names = l1_suites(TESTS)
     if not names:
-        # 🔴 取不到 L1_TESTS 绝不当成通过：那是「没跑」不是「没问题」。
-        print("::error::L1_TESTS 解析为空 —— 取集塌了，拒绝通过")
+        # 🔴 取不到 qa.l1 绝不当成通过：那是「没跑」不是「没问题」。
+        print("::error::tests/*/qa.l1 取集为空 —— 取集塌了，拒绝通过")
         return 2
     base = read_baseline()
     if base is None:
@@ -212,12 +217,23 @@ def selftest() -> int:
             ("哑绑定要被抓到", res["invisible"] == ["suite-silent"]),
         ]
 
-    # 取集层：L1_TESTS 解析
+    # 取集层：qa.l1，不是已经删掉的 L1_TESTS 数组。
     # 🔴 存量清零那天，这道门必须安静通过，而不是 rc=2。
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        marker_root = pathlib.Path(td)
+        (marker_root / "a").mkdir()
+        (marker_root / "a" / "qa.l1").write_text("\n", encoding="utf-8")
+        (marker_root / "b").mkdir()
+        (marker_root / "b" / "qa.l1").write_text("# 注释\n", encoding="utf-8")
+        (marker_root / "c").mkdir()
+        (marker_root / "c" / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        found = l1_suites(marker_root)
     cases += [
         ("基线文件不存在 → None（main 据此退 2）", read_baseline.__doc__ is not None),
-        ("解析出 L1_TESTS", l1_suites('L1_TESTS=(\n  "a"\n  # 注释\n  "b"\n)\n') == ["a", "b"]),
-        ("没有 L1_TESTS 时返回空（main 会据此退 2）", l1_suites("nothing here") == []),
+        ("qa.l1 取集含 a,b", found == ["a", "b"]),
+        ("没有标记的目录不进 L1", "c" not in found),
+        ("没有目录时返回空（main 会据此退 2）", l1_suites(pathlib.Path(td) / "missing") == []),
     ]
 
     bad = [n for n, ok in cases if not ok]
