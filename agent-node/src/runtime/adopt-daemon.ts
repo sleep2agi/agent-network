@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { minimalEnv } from "./create-node-daemon.js";
 import { loadNodeSecrets, parseSecretsEnv } from "../node-secrets.js";
+import { CommHubError } from "../reply-reliability.js";
 import { verifyAdoptionLocalIdentity, verifyAdoptionProcess, type AdoptionIdentityOptions, type AdoptionLocalIdentity } from "./adopt-local-identity.js";
 import { readAdoptionPid, readAdoptionProc, type AdoptionProc } from "./adopt-proc.js";
 import { adoptedChild, forgetAdoptedChild, readWorkdirRegistry, writeAdoptedChild } from "./adopt-registry.js";
@@ -85,8 +86,16 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
   if (registered) {
     // Unknown transport outcome keeps the local evidence. It grants no authority:
     // lifecycle commands still require a current Hub binding before any action.
-    const ack = await deps.callCommHub("ack_adopt_request", { request_id: requestId, status: "adopted" });
-    if (!ack?.ok) forgetAdoptedChild(deps.workDir, alias, requestId);
+    try {
+      const ack = await deps.callCommHub("ack_adopt_request", { request_id: requestId, status: "adopted" });
+      if (!ack?.ok) forgetAdoptedChild(deps.workDir, alias, requestId);
+    } catch (error) {
+      // callCommHub throws structured application refusals rather than returning
+      // ok:false. Revoke's doorbell may already have run before our local write.
+      // Only definite refusal rolls back; transport failure has unknown outcome.
+      if (error instanceof CommHubError && error.appLevel) forgetAdoptedChild(deps.workDir, alias, requestId);
+      throw error;
+    }
   }
 }
 export async function handleUnadoptDoorbell(event: { request_id: string; node_id: string }, deps: AdoptDaemonDeps): Promise<void> {

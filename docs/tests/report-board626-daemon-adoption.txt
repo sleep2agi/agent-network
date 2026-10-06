@@ -72,3 +72,17 @@ unit evidence only). Future pinned anet version is not exposed by Hub; CLI says
 unknown rather than presenting this CLI's version as the daemon's. #627 remains
 separate; adopted stop/start explicitly fails closed in this candidate. No claim
 that the complete daemon test inventory, remote CI, or release gates have passed.
+
+Review fix — real callCommHub application-level rejection (2026-10-06)
+- Confirmed cli.ts throws CommHubError(appLevel=true) for Hub ok:false. Previous
+  return-value-only rollback did not handle that production shape.
+- Added revoke-before-write race test using the actual CommHubError class. Before
+  fix: 8 pass / 1 fail, rc=1; stale adopted entry observed by toBeNull assertion.
+- Definite application refusal now removes only the matching request's registry
+  entry and rethrows. Unknown transport outcome retains evidence. No broad catch
+  rollback, no signaling, no changes to stop/start or process launch mode.
+- Same Docker test after fix: 9 pass, 24 assertions, rc=0; includes successful
+  fresh request for the same alias after rollback and unknown-outcome retention.
+- Rebuilt current agent-node inside anet-board626-e2e (read-only source mount),
+  ran existing real CLI/Hub/daemon/manual-node E2E: 12 checks, rc=0. CLI artifact
+  unchanged for this daemon-only fix. Full suite not rerun.

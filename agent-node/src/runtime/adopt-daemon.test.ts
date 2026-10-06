@@ -8,6 +8,7 @@ import { recordChildWorkdir, forgetChildWorkdir } from "./child-workdir.js";
 import { readAdoptionProc } from "./adopt-proc.js";
 import { handleStopDoorbell } from "./stop-daemon.js";
 import { handleStartDoorbell } from "./start-daemon.js";
+import { CommHubError } from "../reply-reliability.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -42,6 +43,37 @@ test("Hub rejected ack rolls back only this request", async () => {
   f.deps.callCommHub = async tool => tool === "get_adopt_request" ? f.req : { ok: false };
   await handleAdoptDoorbell(f.req, f.deps);
   expect(Object.keys(readWorkdirRegistry(f.deps.workDir))).toHaveLength(0);
+});
+test("revocation before registration then real app-level ack rejection rolls back", async () => {
+  const f = fixture();
+  f.deps.callCommHub = async (tool, args) => {
+    if (tool === "get_adopt_request") {
+      // get returned a pending snapshot while revoke's doorbell ran before write.
+      await handleUnadoptDoorbell(f.req, f.deps);
+      return f.req;
+    }
+    if (tool === "list_my_children") return { ok: true, children: [] };
+    if (tool === "ack_adopt_request") {
+      expect(adoptedChild(f.deps.workDir, "fixture")).not.toBeNull();
+      throw new CommHubError("request_not_pending", { code: "request_not_pending", appLevel: true });
+    }
+    throw Error(`unexpected tool ${tool}`);
+  };
+  await expect(handleAdoptDoorbell(f.req, f.deps)).rejects.toThrow("request_not_pending");
+  expect(adoptedChild(f.deps.workDir, "fixture")).toBeNull();
+  const next = { ...f.req, request_id: "next_request" };
+  f.deps.callCommHub = async tool => tool === "get_adopt_request" ? next : { ok: true };
+  await handleAdoptDoorbell(next, f.deps);
+  expect(adoptedChild(f.deps.workDir, "fixture")?.request_id).toBe(next.request_id);
+});
+test("unknown ack transport outcome keeps evidence, not guessed rollback", async () => {
+  const f = fixture();
+  f.deps.callCommHub = async tool => {
+    if (tool === "get_adopt_request") return f.req;
+    throw new CommHubError("connection lost", { appLevel: false });
+  };
+  await expect(handleAdoptDoorbell(f.req, f.deps)).rejects.toThrow("connection lost");
+  expect(adoptedChild(f.deps.workDir, "fixture")?.request_id).toBe(f.req.request_id);
 });
 test("unauthenticated doorbell cannot write; empty roots refuses", async () => {
   const f = fixture();
