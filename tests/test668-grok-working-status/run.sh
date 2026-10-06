@@ -125,11 +125,18 @@ REPL='const sessionTask = task ?? null; // board668-session-preview' \
 expect_red 'FAIL: session-preview'
 restore
 
-echo "## mutation — parent inference ignores a running task"
-ANCHOR="status IN ('delivered','acked','running')\";" \
-REPL="status IN ('delivered','started')\";" \
+echo "## mutation — parent inference takes an acked/running task again"
+ANCHOR="status IN ('delivered')\"; // board668-parent-delivered-only" \
+REPL="status IN ('delivered','acked','running')\"; // board668-parent-delivered-only" \
   mutate server/src/tools.ts
-expect_red 'FAIL: parent-inferred'
+expect_red 'FAIL: parent-running'
+restore
+
+echo "## mutation — parent inference no longer takes a delivered task"
+ANCHOR="status IN ('delivered')\"; // board668-parent-delivered-only" \
+REPL="status IN ('no-such-status')\"; // board668-parent-delivered-only" \
+  mutate server/src/tools.ts
+expect_red 'FAIL: parent-delivered'
 restore
 
 echo "OVERALL: PASS"

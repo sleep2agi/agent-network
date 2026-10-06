@@ -11,8 +11,10 @@
 // sessions.task only ever keeps the 200-char dispatch preview: that column
 // is readable by get_all_status, the full /api/status and members who see
 // the agent but not its conversations.
-// A task the node is still running must also be found as the parent when
-// that node dispatches without parent_task_id.
+// Parent inference stays conservative: when the node dispatches without
+// parent_task_id, a task it is already running is NOT taken as the parent
+// (an unrelated child's reply would close it early and the node's own reply
+// would be refused as reply_task_terminal). A delivered one still is.
 import { spawn, type ChildProcess } from "node:child_process";
 import { Database } from "bun:sqlite";
 import {
@@ -40,6 +42,8 @@ const HEAD = "BOARD668-HEAD-MARKER";
 const CLAUDE_HEAD = "BOARD668-CLAUDE-HEAD";
 const PREVIEW_MAX = 200;
 const PARENT_PROBE = "BOARD668-PARENT-PROBE";
+const PARENT_PROBE_DELIVERED = "BOARD668-PARENT-PROBE-DELIVERED";
+const DELIVERED_PARENT = "BOARD668-DELIVERED-PARENT";
 
 let hub: ChildProcess | null = null;
 let node: ChildProcess | null = null;
@@ -472,14 +476,41 @@ async function runClaude(userToken: string, networkId: string): Promise<void> {
     fail("FAIL: claude-heartbeat");
   }
 
-  // The claude node dispatches while its own turn is running and forgets
-  // parent_task_id. The hub must pick the running task as the parent.
+  // The claude node dispatches an unrelated task while its own turn is
+  // running and passes no parent_task_id. The running task must not become
+  // the parent.
   const running = taskIdByContent(CLAUDE_ALIAS, task);
   if (!running) fail("FAIL: claude-started");
   await sendTask(nodeToken, networkId, `${PARENT_PROBE} dispatched from inside the running turn`, ALIAS);
   const probe = parentOf(PARENT_PROBE);
   if (probe.from !== CLAUDE_ALIAS) fail(`FAIL: parent-probe-from (${probe.from ?? "none"})`);
-  if (probe.parent !== running) fail("FAIL: parent-inferred");
+  if (probe.parent !== null) fail("FAIL: parent-running");
+
+  // A delivered task (not yet picked up: the node is frozen) is still
+  // inferred as the parent, as before.
+  if (!claudeNode?.pid) fail("FAIL: claude-register");
+  process.kill(claudeNode.pid, "SIGSTOP");
+  try {
+    await sendTask(userToken, networkId, `${DELIVERED_PARENT} queued behind the running turn`, CLAUDE_ALIAS);
+    const queued = statusOf(DELIVERED_PARENT);
+    if (queued.status !== "delivered") fail(`FAIL: delivered-parent-status (${queued.status ?? "none"})`);
+    await sendTask(nodeToken, networkId, `${PARENT_PROBE_DELIVERED} dispatched with a delivered task waiting`, ALIAS);
+    const probe2 = parentOf(PARENT_PROBE_DELIVERED);
+    if (probe2.parent !== queued.id) fail("FAIL: parent-delivered");
+  } finally {
+    try { process.kill(claudeNode.pid, "SIGCONT"); } catch { /* already gone */ }
+  }
+}
+
+function statusOf(marker: string): { id: string | null; status: string | null } {
+  const db = new Database(DB);
+  try {
+    const row = db.query("SELECT task_id, status FROM tasks WHERE instr(content, ?) > 0")
+      .get(marker) as { task_id?: string; status?: string } | null;
+    return { id: row?.task_id ?? null, status: row?.status ?? null };
+  } finally {
+    db.close();
+  }
 }
 
 function taskIdByContent(alias: string, content: string): string | null {

@@ -1778,8 +1778,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       // Resolve parent_task_id: explicit > inferred (caller's most recent
-      // delivered/started inbox task that's still open). Inference is the
-      // safety net for when the LLM forgets to pass parent_task_id.
+      // delivered inbox task). Inference is the safety net for when the LLM
+      // forgets to pass parent_task_id.
+      //
+      // #668 — only 'delivered'. 'started' was never a tasks status. A task
+      // the caller has acked or is running is NOT inferred: an unrelated
+      // dispatch without parent_task_id would hang under it, the child's
+      // reply would close it early (chainReplyToParent), and the node's own
+      // reply would then be refused as reply_task_terminal.
       //
       // round5 F1 fix: the inference SELECT MUST be network-scoped. Without
       // it, a caller in network B can pick up the parent_task_id of a
@@ -1789,7 +1795,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
         try {
           const recentParams: any[] = [from_session];
-          let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered','acked','running')";
+          let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered')"; // board668-parent-delivered-only
           recentSql = addScope(recentSql, recentParams, effectiveNetId);
           recentSql += " ORDER BY created_at DESC LIMIT 1";
           const recent = db.get<{ task_id: string }>(recentSql, ...recentParams);
