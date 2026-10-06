@@ -76,3 +76,13 @@ Verified implementation candidate c93fbdf44af470ae9575f0841c7863baf2f7ce91
   coordinates. No new diagnostic in this increment; not a full typecheck pass.
 - Remote CI and independent review remain pending. Keep draft until reviewed;
   rebase onto main after #2436 merges. No version numbers changed.
+
+Main rebase after #2436 merged (2026-10-06):
+- Base df7a06b7f89646f99d312f1ac19bb040bddf7a03; replayed only the five
+  #627 commits. No conflicts; all five range-diff entries are '='. Dependency
+  commits are no longer in the PR delta. Product implementation unchanged.
+- Rebased candidate f7fe8645d0c4826165ae3288f790a8c9eacf1e3f: copied current
+  server/runtime/CLI sources into the isolated Docker test image, rebuilt both
+  CLIs, reran full test627 harness: rc=0, 52 E2E PASS checks; both identity and
+  restart refusal mutations rc=1. This rebase check used source mounts/copies,
+  unlike the preceding standalone-image run. No production actions.
