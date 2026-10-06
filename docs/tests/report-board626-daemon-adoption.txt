@@ -1,0 +1,19 @@
+Board #626 — daemon adoption, implementation in progress
+
+Status: draft; no implementation or acceptance claimed yet.
+Base: d174f894 (main). Depends on merged Hub board #625 protocol.
+
+Scope
+- Local two-phase adoption: user-token request, daemon-token pull and acknowledgement.
+- Default-deny adopt_roots; exact config identity, trusted paths, process/environment
+  verification; bare/tmux only, co-presence refused in v1.
+- Persist local registration before acknowledgement; adoption never signals a node.
+- CLI dry-run by default, explicit confirmation for the binding request.
+- Board #627 separately adds delegated stop/start and .hub-stopped lifecycle.
+
+Verification planned (Docker only)
+- Local validators with injected process evidence; no production process inspection.
+- Hub/daemon contract and witnessed-red for a missing safety check.
+- Integration with a disposable Hub and fixture nodes; adoption preserves pid.
+
+No tests run yet. No merge, release, production upgrade or live-node operation.
