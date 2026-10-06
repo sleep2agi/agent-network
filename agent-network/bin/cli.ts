@@ -12649,6 +12649,13 @@ async function projectUp(invokedAs = "anet project up") {
   const spawned: ProjectNode[] = [];
   for (let i = 0; i < startable.length; i++) {
     const n = startable[i];
+    // Board #628 — Hub stop writes <nodeDir>/.hub-stopped. Do not start the
+    // node and do not delete .pid. A live pid is still preserved below: deleting
+    // it is what let `project up` start the second copy (#1332 / #1130).
+    if (existsSync(join(nodesDir(), n.id, ".hub-stopped"))) {
+      console.log(`  ⏭  ${n.alias} — hub-stopped, leaving it down`);
+      continue;
+    }
     if (tmuxSessionRunning(n.alias)) {
       console.log(`  ⏭  ${n.alias} — already running`);
       alreadyUp++;

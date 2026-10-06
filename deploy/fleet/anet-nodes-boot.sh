@@ -89,6 +89,15 @@ node_state() {
   return 2
 }
 
+# Hub 上停掉的节点会在自己的目录留下 .hub-stopped。重启后它没有进程、
+# 也没有 tmux，旧逻辑会把它当成「缺」再拉起来。有这个标记就保持停止，
+# 事后清点也不把它算进 still_missing（否则这道门永远红）。
+hub_stopped_dir() {
+  local cfg="${1:-}"
+  [ -n "$cfg" ] || return 1
+  [ -f "$(dirname "$cfg")/.hub-stopped" ]
+}
+
 # 一层依赖：hub /health 语义级检查（端口 listen 不代表能用）
 HEALTH_RAW=$(curl -fsS --max-time 5 "http://127.0.0.1:$HUB_PORT/health" 2>&1) || {
   log "🔴 hub /health 请求失败：$(echo "$HEALTH_RAW" | head -c 200)"
@@ -197,6 +206,7 @@ fi
 # --- sweep 循环（含整轮重试）---
 still_missing=0
 fail_projects=0
+hub_held=0
 
 for ((round=1; round<=MAX_ROUNDS; round++)); do
   log "=== round $round/$MAX_ROUNDS ==="
@@ -246,21 +256,35 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
 
     missing=()
     outside=()
+    held=()
     for al in "${aliases[@]}"; do
       _p="${ALIAS_PATHS[$al]:-}"; _cfg=""
       [ -n "$_p" ] && _cfg="${_p%%|*}/config.json"
       node_state "$al" "$_cfg"; case $? in
         0) : ;;                      # 在 tmux
         1) outside+=("$al") ;;       # 进程在跑但不在 tmux —— 不算缺，别去 start
-        2) missing+=("$al") ;;
+        2)
+          if hub_stopped_dir "$_cfg"; then
+            held+=("$al")            # Hub 上已停 —— 不算缺，别去 start
+          else
+            missing+=("$al")
+          fi
+          ;;
       esac
     done
     if [ "${#outside[@]}" -gt 0 ] && [ "$round" -eq 1 ]; then
       log "  ⚠ $proj_name: ${#outside[@]} 个节点进程在跑但不在 tmux（不算缺、不重启）: ${outside[*]:0:5}"
     fi
+    if [ "${#held[@]}" -gt 0 ] && [ "$round" -eq 1 ]; then
+      log "  ⏭ $proj_name: ${#held[@]} 个节点带 .hub-stopped（Hub 上已停，不算缺、不拉起）: ${held[*]:0:5}"
+    fi
 
     if [ "${#missing[@]}" -eq 0 ]; then
-      log "  $proj_name: ${#aliases[@]} 节点全部在跑 → skip"
+      if [ "${#held[@]}" -eq 0 ]; then
+        log "  $proj_name: ${#aliases[@]} 节点全部在跑 → skip"
+      else
+        log "  $proj_name: 缺 0/${#aliases[@]}（${#held[@]} 个 .hub-stopped 保持停止）→ skip"
+      fi
       round_skip=$((round_skip+1)); continue
     fi
 
@@ -288,15 +312,18 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
 
   log "round $round 结果：up=$round_up skip=$round_skip fail=$round_fail"
 
-  # --- v2.4 late-green grace: project up 完成后 sleep 30s 让 dev-channels 45s 自动应答窗口有机会关闭 ---
-  log "round $round: 30s late-green grace（覆盖 auto-confirm 45s 窗口，防止提前采样成假红）"
-  sleep 30
+  # --- v2.4 late-green grace: project up 完成后 sleep，让 dev-channels 45s 自动应答窗口有机会关闭 ---
+  # LATE_GREEN_GRACE 默认 30。不设这个变量时和原来一样；测试里才把它收成 0。
+  LATE_GREEN_GRACE="${LATE_GREEN_GRACE:-30}"
+  log "round $round: ${LATE_GREEN_GRACE}s late-green grace（覆盖 auto-confirm 45s 窗口，防止提前采样成假红）"
+  sleep "$LATE_GREEN_GRACE"
 
   # --- post-flight 用独立 find 枚举（MUST-FIX 2：不复用 sweep 的 glob）---
   still_missing=0
   missing_examples=()
   running_outside=0
   outside_examples=()
+  hub_held=0
   while IFS= read -r cfg; do
     nd="$(dirname "$cfg")"
     al="$(basename "$nd")"
@@ -307,7 +334,13 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     [ -n "${CONFLICT_ALIASES[$al]:-}" ] && continue
     # v2.5 3 条件未过的节点从分母排除（不算缺）
     [ -n "${SKIP_NODES_MAP[$al]:-}" ] && continue
-    node_state "$al" "$cfg"; case $? in
+    node_state "$al" "$cfg"; st=$?
+    # .hub-stopped 且进程不在：人在 Hub 上停的，不是漏拉。算进 still_missing 会让开机扫描永远 exit 1。
+    if [ "$st" -eq 2 ] && hub_stopped_dir "$cfg"; then
+      hub_held=$((hub_held+1))
+      continue
+    fi
+    case "$st" in
       0) : ;;
       1) running_outside=$((running_outside+1))
          [ "${#outside_examples[@]}" -lt 8 ] && outside_examples+=("$al") ;;
@@ -316,7 +349,7 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     esac
   done < <(find $HOME -maxdepth 5 -path '*/.anet/nodes/*/config.json' -type f 2>/dev/null)
 
-  log "round $round post-flight（独立 find 枚举）：still_missing=$still_missing running_outside=$running_outside"
+  log "round $round post-flight（独立 find 枚举）：still_missing=$still_missing running_outside=$running_outside hub_stopped=$hub_held"
   [ "$still_missing" -gt 0 ] && log "  🔴 真缺（进程也不在，前 8）：${missing_examples[*]}"
   [ "$running_outside" -gt 0 ] && log "  ⚠ 进程在跑但不在 tmux（不算缺，前 8）：${outside_examples[*]}"
 
@@ -335,5 +368,5 @@ if [ "$still_missing" -gt 0 ] || [ "$fail_projects" -gt 0 ] || [ "$conflict_coun
   log "🔴 sweep 未达成：still_missing=$still_missing fail_projects=$fail_projects conflict=$conflict_count → exit 1"
   exit 1
 fi
-log "✅ sweep 达成（$MAX_ROUNDS 轮内全部节点在 tmux，无重名冲突）"
+log "✅ sweep 达成（$MAX_ROUNDS 轮内该拉起的都在，hub-stopped=$hub_held 保持停止，无重名冲突）"
 exit 0

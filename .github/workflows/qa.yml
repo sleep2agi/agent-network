@@ -837,7 +837,8 @@ jobs:
   test571-lifecycle-safety:
     # #571 生命周期安全三处:daemon stop 不再按 alias 全机 SIGTERM(同机别的工作目录/HOME 里
     # 同名的 agent-node 必须活着)、hub 对手工起的节点拒绝点名 daemon 的 stop/delete、
-    # `anet project up` 不删活节点的 .pid 起第二份。真 hub + 真 host_supervisor daemon + 真进程。
+    # `anet project up` 不删活节点的 .pid 起第二份。S6：`.hub-stopped` 的节点开机扫描
+    # 和 project up 都不拉起来（board #628）。真 hub + 真 host_supervisor daemon + 真进程。
     # 冷构建与 qa-create-node-workdir 同形(三次 bun install + 两次 npm pack,本地实测 ~3m47s),
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: lifecycle safety e2e (Docker, real hub + daemon)
