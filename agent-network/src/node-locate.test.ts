@@ -62,6 +62,15 @@ describe("matchNodesInRoot", () => {
 });
 
 describe("registry", () => {
+  test("clone index preserves adopted objects and cannot replace their alias", () => {
+    const root = mkRoot(tmp(), "daemon");
+    const adopted = { adopted: true, node_id: "n_fixture", request_id: "adopt_fixture", workdir: "/fixture/manual", launch_mode: "bare" };
+    writeFileSync(childWorkdirsPath(root), JSON.stringify({ manual: adopted, old: "/fixture/old" }));
+    expect(recordChildWorkdir(root, "copy", "/fixture/copy", false)).toBe(true);
+    expect(JSON.parse(readFileSync(childWorkdirsPath(root), "utf8"))).toEqual({ manual: adopted, old: "/fixture/old", copy: "/fixture/copy" });
+    expect(recordChildWorkdir(root, "manual", "/fixture/replacement", false)).toBe(false);
+    expect(JSON.parse(readFileSync(childWorkdirsPath(root), "utf8")).manual).toEqual(adopted);
+  });
   test("records only a different workdir for a name not taken here; 0600; agent-node format", () => {
     const base = tmp();
     const root = mkRoot(base, "src");

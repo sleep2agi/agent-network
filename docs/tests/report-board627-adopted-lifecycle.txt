@@ -1,6 +1,6 @@
-Board #627 — adopted node lifecycle, queued behind board #626
+Board #627 — adopted node lifecycle, implementation in progress
 
-Draft tracking only. No lifecycle implementation or tests claimed yet.
+Draft, stacked on #626 bc56ee07 while its merge gate runs.
 Dependency: board #626 local verification and adoption registry (PR #2436).
 
 Scope
@@ -11,4 +11,13 @@ Scope
 - Docker E2E: stop -> boot scan skips -> start -> marker absent.
 - Default-socket production tmux and live nodes must never be touched by tests.
 
-Implementation begins after #626. No merge/release/version reservation.
+First implementation increment (not wired to lifecycle handlers yet):
+- node-locate registry writes preserve adopted objects and refuse alias overwrite.
+  Docker node-locate.test.ts: 13 pass, 27 assertions, rc=0.
+- Linux process-tree stop primitive discovers only descendants by PPID, checks
+  UID/starttime before each signal, freezes discovery roots, and never uses names
+  or process-group sweeps. PID reuse refusal and unrelated-tree tests: 2 pass,
+  4 assertions, rc=0. Docker only. No real node inspected or signalled.
+- Still pending: active binding gates, evidence persistence/reverification,
+  pinned startup, explicit private tmux socket, marker integration, real Hub E2E.
+No merge/release/version reservation.
