@@ -35,6 +35,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
+import { projectDirMismatchWarning, statusTaskForReport } from "./project-dir-mismatch.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
@@ -995,6 +996,15 @@ const NODE_STATE_DIR = configFilePath && basename(dirname(dirname(configFilePath
   && basename(dirname(dirname(dirname(configFilePath)))) === ".anet"
   ? dirname(configFilePath)
   : join(process.cwd(), ".anet", "nodes", ALIAS);
+// #667 — project_dir stays the real cwd. Codex's work directory follows it,
+// so this process does not chdir. When that cwd is not the workspace root
+// implied by `<root>/.anet/nodes/<dir>/config.json`, say so once here and
+// keep the same text on idle report_status via the existing `task` field.
+const projectDirMismatchHint = projectDirMismatchWarning({
+  configPath: configFilePath,
+  cwd: process.cwd(),
+});
+if (projectDirMismatchHint) console.warn(projectDirMismatchHint);
 const LOG_DIR = opts["log-dir"] || join(NODE_STATE_DIR, "logs");
 // RFC-036 B4 — immutable for this process lifetime. Runtime/model turns never
 // get to enable this capability; the launcher must opt the node in before boot.
@@ -1635,6 +1645,7 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
+    ...(projectDirMismatchHint ? { task: projectDirMismatchHint } : {}),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
@@ -1692,13 +1703,16 @@ const register = async () => {
   return result;
 };
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
-  lastReportedStatus = { status: rawStatus, task: rawTask };
+  // #667 — an empty idle report must not wipe the mismatch hint. A real task
+  // still wins, and a login error from the gate below replaces this text.
+  const hintedTask = statusTaskForReport(rawStatus, rawTask, projectDirMismatchHint);
+  lastReportedStatus = { status: rawStatus, task: hintedTask };
   const alias = await liveAlias();
   const health = currentNodeHealth();
   // #448 —— 登录态 revoked/expired 的节点不能接活:idle 报成 error 并写明「本节点 CODEX_HOME 要重新登录」。
   const { status, task } = health
-    ? gateStatusOnModelAuth(rawStatus, rawTask, health.model_auth, NODE_CODEX_HOME)
-    : { status: rawStatus, task: rawTask };
+    ? gateStatusOnModelAuth(rawStatus, hintedTask, health.model_auth, NODE_CODEX_HOME)
+    : { status: rawStatus, task: hintedTask };
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
     : RUNTIME === "claude"

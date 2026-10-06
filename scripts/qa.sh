@@ -177,6 +177,11 @@ L1_TESTS=(
   # The OpenCode case checks the wait extends the #651 reply deadline
   # instead of aborting the shared session. Cheap: bun tests, no real binary.
   "test656-capacity-retry"
+  # Board #667. cwd is still reported as project_dir. Starting in the node
+  # directory must warn with both paths; starting at the workspace root must
+  # not. Forcing the mismatch check to succeed turns the node-directory case
+  # red. Copies two source files, no install.
+  "test667-project-dir-warn"
   # 2026-08-19 补注册。它此前是孤儿**且在 main 上是红的**，而红因有三层，
   # 全部是「产品前进、套件写在它之前」，一条回归都没有：
   #   ① #203 身份守卫（server/src/tools.ts 的 alias_identity_mismatch）——
