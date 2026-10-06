@@ -220,6 +220,8 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   get_create_request: "always", ack_create_request: "always", get_stop_request: "always", ack_stop_request: "always",
   get_start_request: "always", ack_start_request: "always", get_probe_request: "always", ack_probe_request: "always",
   list_my_pending_create_requests: "always", list_my_pending_lifecycle_requests: "always", list_my_children: "always",
+  request_adopt_node: "human_only", unadopt_node: "human_only",
+  get_adopt_request: "always", ack_adopt_request: "always",
   send_desktop_message: "always", // 发给人的私信,不是派活
   // 读
   get_all_status: "read", get_session_status: "read", get_task: "read", list_tasks: "read", get_completions: "read",

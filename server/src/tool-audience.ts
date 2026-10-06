@@ -23,6 +23,8 @@ import { NODE_TOOL_CLASS, nodeIdentity, nodePermissionsFlag, broadcastVerdict, h
 export type ToolAudience = "both" | "node" | "protocol" | "user";
 
 export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
+  request_adopt_node: "user", unadopt_node: "user",
+  get_adopt_request: "protocol", ack_adopt_request: "protocol",
   // ── 节点:用户令牌一律 network_token_required ──
   report_status: "node",
   // ── 协议:用户令牌一律 network_token_required / node_token_required / caller_not_a_daemon ──

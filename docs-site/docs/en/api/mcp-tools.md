@@ -122,6 +122,22 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `ack_start_request` | Daemon reports start completion or failure |
 | `list_host_supervisors` | List host_supervisor daemons in this network, with online status |
 | `list_my_children` | Daemon pulls the list of children it spawned |
+| `request_adopt_node` | Human requests adoption with `node_id`, `daemon_node_id`, `workdir`. Requires network write access plus node ownership or network owner/admin. Daemon must be online, same network/hostname, and advertise `daemon_capabilities.adopt_capable`. Creates a pending binding, without signalling processes |
+| `get_adopt_request` | Only the target daemon's node token may pull the pending request; the daemon performs local path/process verification |
+| `ack_adopt_request` | Target daemon reports `adopted` / `refused`, optionally `error`. Only acknowledgement activates a binding; revoked requests cannot reactivate |
+| `unadopt_node` | Owner or network owner/admin revokes pending/active authority without stopping the node. Refused while stop/start is in flight; retry after completion |
+
+Adopted children appear in `list_my_children` with `managed: "adopted"`, including stopped children.
+They cannot be deleted (`adopted_node_delete_unsupported`). Stop/start require a creation record or active binding;
+an explicit daemon id alone is not authority. Old daemons without the capability cannot adopt; this Hub protocol
+does not itself implement daemon-local verification or process control.
+
+The existing Hub startup creates `node_daemon_bindings` via `server/src/db.ts` on SQLite/PG. No new service,
+port, tunnel, environment variable, or credential source is introduced. Use the existing Hub deployment process;
+verify request→ack→revoke against an isolated database, not production nodes. Revoke bindings before rollback
+(wait for any in-flight lifecycle operation); older Hubs ignore this table. Bindings and audit rows require database
+backups, not just a clone. Daemon-local registry state requires the host backup, or fresh local adoption verification
+before controlling a process; a restored Hub row alone is insufficient.
 
 **Providers & secret vault — owner/admin** · 9
 

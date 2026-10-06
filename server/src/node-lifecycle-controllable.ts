@@ -24,8 +24,10 @@ export function childNodeIdForCreateRequest(requestId: unknown): string | null {
 /** 由创建记录建出「child node_id → daemon node_id」的映射。 */
 export function buildControllableMap(
   createRequests: Array<{ request_id?: unknown; daemon_node_id?: unknown }>,
+  bindings: Array<{ node_id: string; daemon_node_id: string }> = [],
 ): Map<string, string> {
   const m = new Map<string, string>();
+  for (const binding of bindings) m.set(binding.node_id, binding.daemon_node_id);
   for (const cr of createRequests) {
     const child = childNodeIdForCreateRequest(cr?.request_id);
     if (!child) continue;

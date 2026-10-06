@@ -4628,7 +4628,10 @@ return Bun.serve({
           const crParams: any[] = [];
           let crSql = "SELECT request_id, daemon_node_id FROM node_create_requests WHERE 1=1";
           crSql = addNetworkScope(crSql, crParams, restScope);
-          return buildControllableMap(db.all<Record<string, any>>(crSql, ...crParams));
+          const bindingParams: any[] = [];
+          const bindingSql = addNetworkScope("SELECT node_id,daemon_node_id FROM node_daemon_bindings WHERE status='active'", bindingParams, restScope);
+          return buildControllableMap(db.all<Record<string, any>>(crSql, ...crParams),
+            db.all<{ node_id: string; daemon_node_id: string }>(bindingSql, ...bindingParams));
         } catch {
           // 表不存在/查询失败 ⇒ 全部按不可控处理,不让这一格拖垮整个列表
           return new Map<string, string>();
