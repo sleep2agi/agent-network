@@ -7,6 +7,12 @@
 // otherwise prefer the real binary over PATH.
 // While each fake is held, that session must stay working on that task
 // and the tasks row must be running with started_at set.
+// The hub matches the whole reported text against tasks.content, but
+// sessions.task only ever keeps the 200-char dispatch preview: that column
+// is readable by get_all_status, the full /api/status and members who see
+// the agent but not its conversations.
+// A task the node is still running must also be found as the parent when
+// that node dispatches without parent_task_id.
 import { spawn, type ChildProcess } from "node:child_process";
 import { Database } from "bun:sqlite";
 import {
@@ -30,6 +36,10 @@ const LATER = "BOARD668-LATER-MARKER";
 const ALIAS = "demo-node";
 const CLAUDE_ALIAS = "demo-claude";
 const CLAUDE_TAIL = "BOARD668-CLAUDE-TAIL";
+const HEAD = "BOARD668-HEAD-MARKER";
+const CLAUDE_HEAD = "BOARD668-CLAUDE-HEAD";
+const PREVIEW_MAX = 200;
+const PARENT_PROBE = "BOARD668-PARENT-PROBE";
 
 let hub: ChildProcess | null = null;
 let node: ChildProcess | null = null;
@@ -317,8 +327,9 @@ async function main(): Promise<void> {
   }
   if (!nodeLogText().includes("SSE connected")) fail("FAIL: node did not register");
 
-  const task = `${"p".repeat(220)} ${TAIL}`;
-  if (task.indexOf(TAIL) < 200) fail("FAIL: tail is inside the 200-char preview");
+  const task = `${HEAD} ${"p".repeat(220)} ${TAIL}`;
+  if (task.indexOf(TAIL) < PREVIEW_MAX) fail("FAIL: tail is inside the 200-char preview");
+  const preview = task.slice(0, PREVIEW_MAX);
   await sendTask(userToken, networkId, task);
 
   const holdStarted = Date.now();
@@ -330,7 +341,8 @@ async function main(): Promise<void> {
 
   const started = readState();
   if (started.rowStatus !== "running" || !started.startedAt) fail("FAIL: started");
-  if (started.status !== "working" || !started.task?.includes(TAIL) || started.task.includes(LATER)) {
+  if ((started.task?.length ?? 0) > PREVIEW_MAX) fail("FAIL: session-preview");
+  if (started.status !== "working" || started.task !== preview || started.task.includes(LATER)) {
     if (started.status !== "working" && existsSync(`${HOLD}/holding`)) fail("FAIL: heartbeat-idle");
     fail("FAIL: in-flight text");
   }
@@ -344,7 +356,7 @@ async function main(): Promise<void> {
 
   await sendTask(userToken, networkId, `${LATER} this arrived while the first turn was still running`);
   const during = readState();
-  if (!during.task?.includes(TAIL) || during.task.includes(LATER)) fail("FAIL: later message");
+  if (during.task !== preview || during.task.includes(LATER)) fail("FAIL: later message");
 
   process.kill(node.pid, "SIGCONT");
   stopped = false;
@@ -353,7 +365,8 @@ async function main(): Promise<void> {
   const after = readState();
   if (after.status !== "working") fail("FAIL: heartbeat-idle");
   if (workingReports() < 2) fail("FAIL: heartbeat-quiet");
-  if (!after.task?.includes(TAIL) || after.task.includes(LATER)) fail("FAIL: in-flight text");
+  if ((after.task?.length ?? 0) > PREVIEW_MAX) fail("FAIL: session-preview");
+  if (after.task !== preview || after.task.includes(LATER)) fail("FAIL: in-flight text");
   if (after.rowStatus !== "running" || !after.startedAt) fail("FAIL: started");
 
   await runClaude(userToken, networkId);
@@ -429,8 +442,9 @@ async function runClaude(userToken: string, networkId: string): Promise<void> {
   const booted = `${readText("/tmp/node668-claude.log")}\n${dirLogText("/tmp/node668-claude-logs")}`;
   if (!booted.includes("SSE connected")) fail("FAIL: claude-register");
 
-  const task = `${"c".repeat(220)} ${CLAUDE_TAIL}`;
-  if (task.indexOf(CLAUDE_TAIL) < 200) fail("FAIL: claude-tail-position");
+  const task = `${CLAUDE_HEAD} ${"c".repeat(220)} ${CLAUDE_TAIL}`;
+  if (task.indexOf(CLAUDE_TAIL) < PREVIEW_MAX) fail("FAIL: claude-tail-position");
+  const preview = task.slice(0, PREVIEW_MAX);
   await sendTask(userToken, networkId, task, CLAUDE_ALIAS);
 
   const holdStarted = Date.now();
@@ -448,12 +462,45 @@ async function runClaude(userToken: string, networkId: string): Promise<void> {
 
   const started = readState(CLAUDE_ALIAS, CLAUDE_TAIL);
   if (started.rowStatus !== "running" || !started.startedAt) fail("FAIL: claude-started");
-  if (started.status !== "working" || !started.task?.includes(CLAUDE_TAIL)) fail("FAIL: claude-text");
+  if ((started.task?.length ?? 0) > PREVIEW_MAX) fail("FAIL: session-preview");
+  if (started.status !== "working" || started.task !== preview) fail("FAIL: claude-text");
 
   await sleep(1500);
   const after = readState(CLAUDE_ALIAS, CLAUDE_TAIL);
-  if (after.status !== "working" || !after.task?.includes(CLAUDE_TAIL) || !after.startedAt) {
+  if ((after.task?.length ?? 0) > PREVIEW_MAX) fail("FAIL: session-preview");
+  if (after.status !== "working" || after.task !== preview || !after.startedAt) {
     fail("FAIL: claude-heartbeat");
+  }
+
+  // The claude node dispatches while its own turn is running and forgets
+  // parent_task_id. The hub must pick the running task as the parent.
+  const running = taskIdByContent(CLAUDE_ALIAS, task);
+  if (!running) fail("FAIL: claude-started");
+  await sendTask(nodeToken, networkId, `${PARENT_PROBE} dispatched from inside the running turn`, ALIAS);
+  const probe = parentOf(PARENT_PROBE);
+  if (probe.from !== CLAUDE_ALIAS) fail(`FAIL: parent-probe-from (${probe.from ?? "none"})`);
+  if (probe.parent !== running) fail("FAIL: parent-inferred");
+}
+
+function taskIdByContent(alias: string, content: string): string | null {
+  const db = new Database(DB);
+  try {
+    const row = db.query("SELECT task_id FROM tasks WHERE to_name = ? AND content = ? AND status = 'running'")
+      .get(alias, content) as { task_id?: string } | null;
+    return row?.task_id ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+function parentOf(marker: string): { from: string | null; parent: string | null } {
+  const db = new Database(DB);
+  try {
+    const row = db.query("SELECT from_name, parent_task_id FROM tasks WHERE instr(content, ?) > 0")
+      .get(marker) as { from_name?: string; parent_task_id?: string | null } | null;
+    return { from: row?.from_name ?? null, parent: row?.parent_task_id ?? null };
+  } finally {
+    db.close();
   }
 }
 

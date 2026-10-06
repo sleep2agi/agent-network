@@ -12,10 +12,12 @@ printf 'source_commit=%s\n' "$TEST668_SOURCE_COMMIT"
 cd /workspace
 cp agent-node/src/cli.ts /tmp/cli.orig
 cp server/src/session-task-on-dispatch.ts /tmp/dispatch.orig
+cp server/src/tools.ts /tmp/tools.orig
 
 restore() {
   cp /tmp/cli.orig agent-node/src/cli.ts
   cp /tmp/dispatch.orig server/src/session-task-on-dispatch.ts
+  cp /tmp/tools.orig server/src/tools.ts
 }
 trap restore EXIT
 
@@ -114,6 +116,20 @@ ANCHOR='activeTurnTask = hubStatusTask(runtimeTask); // board668-inflight-task' 
 REPL='activeTurnTask = (RUNTIME === "grok" ? hubStatusTask(runtimeTask) : runtimeTask.slice(0, 200)); // board668-inflight-task' \
   mutate agent-node/src/cli.ts
 expect_red 'FAIL: claude-started'
+restore
+
+echo "## mutation — report_status stores the whole task on the session row"
+ANCHOR='const sessionTask = task == null ? null : sessionTaskPreview(task); // board668-session-preview' \
+REPL='const sessionTask = task ?? null; // board668-session-preview' \
+  mutate server/src/tools.ts
+expect_red 'FAIL: session-preview'
+restore
+
+echo "## mutation — parent inference ignores a running task"
+ANCHOR="status IN ('delivered','acked','running')\";" \
+REPL="status IN ('delivered','started')\";" \
+  mutate server/src/tools.ts
+expect_red 'FAIL: parent-inferred'
 restore
 
 echo "OVERALL: PASS"

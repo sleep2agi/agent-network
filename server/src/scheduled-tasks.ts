@@ -1,5 +1,6 @@
 import { db, logTaskEvent } from "./db.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
+import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
@@ -367,7 +368,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     // Dispatch is not completion. Keep the run open until the exact bound
     // task reaches replied/failed/cancelled/expired; db.ts owns that mirror.
     db.run("UPDATE scheduled_task_runs SET task_id = ?1, status = ?2, completed_at = NULL WHERE run_id = ?3", [taskId, deliveryState, runId]);
-    db.run(`UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3`, [row.task_content.slice(0, 200), node.node_id, row.network_id]);
+    db.run(`UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3`, [sessionTaskPreview(row.task_content), node.node_id, row.network_id]);
     db.run("UPDATE scheduled_tasks SET target_alias = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3", [node.alias, scheduledFor, row.schedule_id]);
     if (advanceSchedule) advance({ ...row, target_alias: node.alias }, scheduledFor, advanceAfter);
     createdTaskId = taskId;
@@ -518,7 +519,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const content = typeof body.task === "string" ? body.task.trim() : "";
       if (!name || name.length > 120) throw new Error("invalid_name");
-      if (!content || content.length > 10_000) throw new Error("invalid_task");
+      if (!content || content.length > TASK_CONTENT_MAX) throw new Error("invalid_task");
       const priority = typeof body.priority === "string" ? body.priority : "normal";
       if (!PRIORITIES.has(priority)) throw new Error("invalid_priority");
       const misfirePolicy = parseMisfirePolicy(body.misfire_policy);
@@ -605,7 +606,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
       const content = body.task === undefined ? row.task_content : String(body.task).trim();
       const priority = body.priority === undefined ? row.priority : String(body.priority);
       if (!name || name.length > 120) throw new Error("invalid_name");
-      if (!content || content.length > 10_000) throw new Error("invalid_task");
+      if (!content || content.length > TASK_CONTENT_MAX) throw new Error("invalid_task");
       if (!PRIORITIES.has(priority)) throw new Error("invalid_priority");
       const target = body.target_node_id === undefined ? { node_id: row.target_node_id, alias: row.target_alias } : validateTarget(row.network_id, body.target_node_id);
       const parsed = body.schedule === undefined

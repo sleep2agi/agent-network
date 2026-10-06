@@ -62,6 +62,7 @@ import { buildClaudeSystemPrompt, claudeAiConnectorsOptIn, claudeSdkChildEnv } f
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, getInFlightCount, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { readExternalSchedulesSnapshot } from "./external-schedules";
+import { TASK_CONTENT_MAX } from "./shared/task-content-limit";
 import { createOwnerScheduleConsumer, type OwnerScheduleConsumer } from "./owner-schedule-consumer";
 import { parseGoalCommand } from "./goals/parser";
 import {
@@ -1371,11 +1372,11 @@ let lastReportedStatus: { status: string; task?: string } = { status: "idle" };
 // 在回合结束前改显示成 idle，或改成「最新收到的那条」。
 let activeTurnTask: string | null = null;
 let activeTurnDepth = 0;
-// report_status.task 与 send_task.task 的上限都是 10000。hub 已收下的正文
-// 整段放得下；200 字预览和 tasks.content 对不上，started_at 就一直是空的。
-const HUB_STATUS_TASK_MAX = 10_000;
+// report_status.task 与 send_task.task 共用 TASK_CONTENT_MAX(shared/task-content-limit.ts,
+// 与 hub 逐字节一致)。hub 已收下的正文整段放得下；200 字预览和 tasks.content 对不上，
+// started_at 就一直是空的。hub 只拿整段去匹配，sessions.task 里仍只存 200 字预览。
 function hubStatusTask(task: string): string {
-  return task.length > HUB_STATUS_TASK_MAX ? task.slice(0, HUB_STATUS_TASK_MAX) : task;
+  return task.length > TASK_CONTENT_MAX ? task.slice(0, TASK_CONTENT_MAX) : task;
 }
 function currentNodeHealth(): NodeHealthReport | undefined {
   return codexHealthMonitor?.snapshot();

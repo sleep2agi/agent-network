@@ -10,6 +10,7 @@ import { numberedAliasInClause, parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
+import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetworkObserverEvent, pushUserEvent } from "./push.js";
 import { deferOfflineIfAnotherCopyConnected } from "./node-identity-conflict.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
@@ -681,7 +682,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       resume_id: z.string().min(1).max(200).describe("Claude Code session UUID (unique per session)"),
       alias: z.string().min(1).max(200).describe("Human-readable session name for dispatching (e.g. 指挥室/知识哥)"),
       status: z.enum(["working", "idle", "blocked", "error", "waiting_input", "offline"]),
-      task: z.string().max(10000).optional().describe("Current task description"),
+      task: z.string().max(TASK_CONTENT_MAX).optional().describe("Current task description (the hub stores only the first 200 chars on the session row; the full text is matched against tasks.content)"),
       output: z.string().max(50000).optional().describe("Recent output (max 4000 chars stored)"),
       score: z.number().min(0).max(10).optional().describe("Self-score 1-10"),
       progress: z.number().min(0).max(100).optional().describe("Progress 0-100"),
@@ -1049,6 +1050,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         ) ?? null;
         const keep = <T,>(fresh: T | null | undefined, column: string): T | null =>
           (fresh ?? (handover?.[column] as T | null | undefined) ?? null);
+        // #668 — the node reports the whole task so the tasks UPDATE below can match
+        // tasks.content. sessions.task is readable far wider than the task row
+        // (get_all_status, full /api/status, members who see the agent but not its
+        // conversations), so only the dispatch-sized preview is stored here.
+        const sessionTask = task == null ? null : sessionTaskPreview(task); // board668-session-preview
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
           `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, last_seen_at, updated_at)
@@ -1080,7 +1086,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              external_schedules = COALESCE(?34, sessions.external_schedules),
              peer_reply_inbox_capable = ?35,
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, storedStatus, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
+          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, storedStatus, sessionTask, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
         );
         if (handover) {
           // 换 resume_id 那条路径上 ON CONFLICT 不会触发;INSERT 完再把没上报(仍为 NULL)的
@@ -1740,7 +1746,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Dispatch a task to a session's inbox (by alias). The reply carries queue_ahead (open tasks already on the target), target_busy, est_wait_minutes (rough, null = no history) and, when the queue is long, a warning: queued, never refused — consider an idle node.",
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
-      task: z.string().min(1).max(10000).describe("Task content"),
+      task: z.string().min(1).max(TASK_CONTENT_MAX).describe("Task content"),
       priority: z.enum(["high", "normal", "low"]).optional().default("normal"),
       context: z.string().max(10000).optional(),
       from_session: z.string().max(200).optional(),
@@ -1783,7 +1789,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
         try {
           const recentParams: any[] = [from_session];
-          let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered','started')";
+          let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered','acked','running')";
           recentSql = addScope(recentSql, recentParams, effectiveNetId);
           recentSql += " ORDER BY created_at DESC LIMIT 1";
           const recent = db.get<{ task_id: string }>(recentSql, ...recentParams);
@@ -1931,7 +1937,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11)`,
           [id, fromNodeId, from_session, targetNodeId, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson]
         );
-        const touchParams: any[] = [task.slice(0, 200), targetAlias];
+        const touchParams: any[] = [sessionTaskPreview(task), targetAlias];
         let touchSql = `UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE alias = ?2`;
         touchSql = addScope(touchSql, touchParams, effectiveNetId);
         db.run(touchSql, touchParams);
