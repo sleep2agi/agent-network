@@ -115,9 +115,55 @@ export interface ProcReader {
   parents(): Array<[number, number]>;
 }
 
+/**
+ * 一个 /proc 里的 NUL 分隔块(environ / cmdline)的**原始字节** → JS 字符串,逐条按 UTF-8 解码。
+ *
+ * 🔴 #448 回归:曾经是 `readFileSync(…, "latin1")`,每个字节变成一个 U+00xx。期望值是 JS 字符串
+ *    (UTF-8 路径解码来的),于是**任何非 ASCII 路径**(如 `.anet/nodes/测试节点/codex-home`)
+ *    读出来都是 `æµè¯…` 这种乱码、永远不相等 → fail closed → 该节点每个任务都被拒。
+ *
+ * 某一条不是合法 UTF-8 时,不做有损替换(U+FFFD 可能碰巧和期望值里的 U+FFFD 相等):
+ * 把 `=` 之后的部分换成 INVALID_UTF8_MARK + 原字节的 latin1 —— 以一个孤立代理项开头,
+ * 而合法 UTF-8 解码出来的字符串绝不含孤立代理项,所以它**不可能**等于任何真实路径(fail closed)。
+ */
+export const INVALID_UTF8_MARK = "\uDFFF";
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
+
+export function decodeProcNulBlock(bytes: Uint8Array): string {
+  const out: string[] = [];
+  let start = 0;
+  for (let i = 0; i <= bytes.length; i++) {
+    if (i < bytes.length && bytes[i] !== 0) continue;
+    if (i === bytes.length && start === i) break;
+    const entry = bytes.subarray(start, i);
+    let text: string;
+    try {
+      text = STRICT_UTF8.decode(entry);
+    } catch {
+      const raw = Buffer.from(entry).toString("latin1");
+      const eq = raw.indexOf("=");
+      text = eq >= 0 ? raw.slice(0, eq + 1) + INVALID_UTF8_MARK + raw.slice(eq + 1) : INVALID_UTF8_MARK + raw;
+    }
+    out.push(text);
+    start = i + 1;
+  }
+  // 与 latin1 读法同形:每条后面都跟一个 NUL(内核写的块以 NUL 结尾)。
+  return out.length === 0 ? "" : out.join("\0") + (bytes[bytes.length - 1] === 0 ? "\0" : "");
+}
+
+/** 合法 UTF-8 解码不出孤立代理项;含孤立代理项的值(INVALID_UTF8_MARK)不能拿来和任何东西比相等。 */
+export function hasLoneSurrogate(s: string): boolean {
+  return /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(s);
+}
+
+/** 读 /proc/<pid>/<file>(environ / cmdline)并逐条按 UTF-8 解码;读不到返回 null。 */
+export function readProcNulBlock(pid: number, file: "environ" | "cmdline"): string | null {
+  try { return decodeProcNulBlock(readFileSync(`/proc/${pid}/${file}`)); } catch { return null; }
+}
+
 export const linuxProcReader: ProcReader = {
   environ(pid) {
-    try { return readFileSync(`/proc/${pid}/environ`, "latin1"); } catch { return null; }
+    return readProcNulBlock(pid, "environ");
   },
   parents() {
     const out: Array<[number, number]> = [];
@@ -184,6 +230,13 @@ export function verifyProcessTreeCodexHome(opts: {
 }): CodexHomeVerdict {
   const platform = opts.platform ?? process.platform;
   if (platform !== "linux") return { ok: true, checked: [], skipped: `not linux (${platform}); /proc environ check unavailable` };
+  // 期望值本身含孤立代理项 → 编码成字节时已经不是它自己了,任何进程都不可能真的带着它:直接拒。
+  if (hasLoneSurrogate(opts.expected)) {
+    return {
+      ok: false, pid: opts.rootPid, actual: null, expected: opts.expected,
+      message: `${opts.label} expected CODEX_HOME is not a well-formed string; refusing`,
+    };
+  }
   const reader = opts.reader ?? linuxProcReader;
   const rootValue = envVarFromEnviron(reader.environ(opts.rootPid), "CODEX_HOME");
   if (rootValue === undefined) return { ok: true, checked: [], skipped: `pid ${opts.rootPid} environ unreadable` };
