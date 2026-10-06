@@ -1,0 +1,7 @@
+# qa.sh appends these to `docker run` for this suite only.
+# 512 MiB cgroup. /proc/meminfo inside still reports the host. The floor
+# must follow this limit (15% of 512 MiB, not 4 GiB), so one start with
+# the default thresholds is admitted. The probe then raises
+# ANET_START_MIN_MEM_MB to force the single-lane cap.
+--memory=512m
+--memory-swap=512m

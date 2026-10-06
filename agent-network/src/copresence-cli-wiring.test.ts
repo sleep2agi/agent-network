@@ -78,6 +78,59 @@ describe("cli.ts copresence start ordering (structural gate)", () => {
   });
 });
 
+function topLevelBody(signature: string): string {
+  const start = CLI.indexOf(signature);
+  expect(start).toBeGreaterThan(-1);
+  const rest = CLI.slice(start + 1);
+  const end = rest.search(/\n(?:export )?(?:async )?function /);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+describe("#612 start gate is in front of the heavy app-server exec", () => {
+  test("copresence admits before the appsrv tmux session and releases before the bridge", () => {
+    const body = topLevelBody("async function startCopresenceOrchestration(");
+    const gate = body.indexOf("holdAppServerStart(");
+    const exec = body.indexOf('"new-session"');
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(exec);
+    const release = body.indexOf("admission.release()", exec);
+    const bridge = body.indexOf('"new-session"', exec + 1);
+    expect(release).toBeGreaterThan(exec);
+    expect(release).toBeLessThan(bridge);
+  });
+
+  test("external appsrv admits before its tmux session and no longer hard-exits on memoryVerdict", () => {
+    const body = topLevelBody("async function startExternalAppserverNode(");
+    expect(body).not.toContain("memoryVerdict(");
+    const gate = body.indexOf("holdAppServerStart(");
+    const exec = body.indexOf('"new-session"');
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(exec);
+    const release = body.indexOf("admission.release()", exec);
+    const tui = body.indexOf('"new-session"', exec + 1);
+    expect(release).toBeGreaterThan(exec);
+    expect(release).toBeLessThan(tui);
+  });
+
+  test("Windows copresence admits before the appsrv process and releases before the thread", () => {
+    const body = topLevelBody("async function startWindowsCodexCopresence(");
+    const gate = body.indexOf("holdAppServerStart(");
+    const exec = body.indexOf('windowsManagedProcess("appsrv"');
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(exec);
+    const release = body.indexOf("admission.release()", exec);
+    const thread = body.indexOf("createCodexCopresenceThread(", exec);
+    expect(release).toBeGreaterThan(exec);
+    expect(release).toBeLessThan(thread);
+  });
+
+  test("holdAppServerStart calls the shared gate and prints the blocked phrase", () => {
+    const body = topLevelBody("async function holdAppServerStart(");
+    expect(body).toContain("waitForStartResources(");
+    expect(body).toContain("[anet] [start-gate] blocked");
+  });
+});
+
 describe("cli.ts copresence stop wiring (structural gate)", () => {
   test("Blockers 1+2: the stop-time reap is given the marker's recorded pids as scope anchors", () => {
     // Without anchors, a marker-carrying process we cannot READ (non-dumpable)

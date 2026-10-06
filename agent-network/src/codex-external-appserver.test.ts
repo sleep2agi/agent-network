@@ -3,15 +3,12 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import {
   EXTERNAL_APPSERVER_LAYOUT,
-  MIN_MEM_AVAILABLE_BYTES,
   appserverShellCommand,
   bridgeShellCommand,
   exactSessionRows,
   externalAppserverRequested,
   externalAppserverSessions,
   externalAppserverStopOrder,
-  memoryVerdict,
-  parseMemAvailableBytes,
   externalAppserverBridgeCwd,
   planExternalAppserverNode,
   portBusy,
@@ -122,13 +119,12 @@ describe("#630 commands", () => {
 });
 
 describe("#630 memory", () => {
-  test("parse and decide", () => {
-    expect(parseMemAvailableBytes("MemTotal: 100 kB\nMemAvailable:    2048 kB\n")).toBe(2048 * 1024);
-    expect(parseMemAvailableBytes("nothing")).toBeNull();
-    expect(memoryVerdict(MIN_MEM_AVAILABLE_BYTES - 1, false).ok).toBe(false);
-    expect(memoryVerdict(MIN_MEM_AVAILABLE_BYTES - 1, true).ok).toBe(true);
-    expect(memoryVerdict(MIN_MEM_AVAILABLE_BYTES, false).ok).toBe(true);
-    expect(memoryVerdict(null, false).ok).toBe(true);
+  test("the 4 GiB hard reject is not this module's job", () => {
+    const src = readFileSync(new URL("./codex-external-appserver.ts", import.meta.url), "utf8");
+    expect(src).not.toContain("export function memoryVerdict");
+    expect(src).not.toContain("MIN_MEM_AVAILABLE_BYTES");
+    expect(src).not.toContain("parseMemAvailableBytes");
+    expect(src).not.toContain("MemAvailable < 4");
   });
 });
 
