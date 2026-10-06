@@ -124,6 +124,33 @@ cd <ws> && anet node stop <别名> && anet node start <别名>   # 原来用 --t
 同 5.2 升 anet,然后在 `<ws>` 里 `anet node stop <别名>` 再 `anet node start <别名>`(共存是记在 config 里的,不用再带 `--copresence`)。
 **不要**在节点自己的 TUI 窗格里执行重启。
 
+### 5.4 批量重启:分批做,中间看内存和负载(#612)
+
+2026-10-06 有一次实测事故:一台 16 核 / 62.6 GB 的主机上,7 分钟内先后重启了 14 个 codex-app-server 节点,
+1 分钟负载冲到 146–325、可用内存只剩 0.2–0.5 GB,整机卡死,34 个节点掉线。每个 app-server 启动都是一次内存和 CPU 的突发,叠在一起就会压垮主机。
+
+**分批建议**(三种启动方式都适用):
+
+- 每批 **≤3 个节点**;
+- 每批之间在 `<主机>` 上跑 `free -g; uptime`;
+- 只有 **available ≥ 10 GB 且 1 分钟负载 < CPU 核数**(`nproc`)时才继续下一批,否则等。
+
+**启动前资源闸**(agent-node 内置,#612 第 1 步;首个包含它的版本以发版说明为准,.112 **没有**):
+节点自己 spawn app-server 之前(即 **anet 式**,自有拓扑)先读 `/proc/meminfo` 的 `MemAvailable` 和 `/proc/loadavg` 的 1 分钟负载。
+不满足条件就打一行日志(`[start-gate] codex app-server: waiting before start: …`,带实测值和原因),每约 15 秒(加随机抖动)重查一次;
+等满上限仍不满足,就打一行警告照常启动 —— 节点不会因为这道闸一直起不来。
+
+| 环境变量 | 默认 | 含义 |
+|---|---|---|
+| `ANET_START_MEM_GATE` | 开 | 设为 `0` 关闭 |
+| `ANET_START_MIN_MEM_MB` | `4096` | `MemAvailable` 低于这个值(MiB)就等 |
+| `ANET_START_MAX_LOAD_PER_CPU` | `2` | 1 分钟负载高于 `这个值 × CPU 核数` 就等 |
+| `ANET_START_GATE_MAX_WAIT_SEC` | `600` | 最多等这么久,之后带警告照常启动 |
+
+🔴 这道闸**只管节点自己 spawn 的 app-server**。**脚本式**(裸 `codex app-server` 由你们的脚本起、config 里有 `codexAppServerUrl`)
+和**共存式**(app-server 在 `<别名>-appsrv` 会话里由 anet 起)的 app-server 不经过它 —— 这两种只能靠上面的分批做法。
+非 Linux(没有 `/proc`)上这道闸不生效。
+
 ## 6. 升级不解决的:共用登录(#1918)和 OpenAI 侧拒绝
 
 **共用登录**。codex 的 refresh token 是一次性的:N 个节点拿同一份 `auth.json`,谁先刷新谁活,其余节点几天后报
