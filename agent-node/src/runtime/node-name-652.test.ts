@@ -143,21 +143,64 @@ function walk(root: string): string[] {
 const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
-  test("「测试」 with the app's ~/<folder> workdir: started, config under node-<hash>, alias kept", async () => {
+  test("「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels", async () => {
+    // The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`
+    // (sleep2agi/agent-network-app create-node-workdir.ts). That folder must be what lands on disk.
+    const shownFolder = "ceshi";
     const { acks, spawned } = await runCreate(
-      { name: CN, runtime: "claude-agent-sdk", workdir: `~/${CN_DIR}` }, "cr_t652cnwd");
+      { name: CN, runtime: "claude-agent-sdk", workdir: `~/${shownFolder}` }, "cr_t652cnwd");
     expect(acks.map(a => a.status)).toEqual(["started"]);
-    const cfgPath = join(home, CN_DIR, ".anet", "nodes", CN_DIR, "config.json");
+    const cfgPath = join(home, shownFolder, ".anet", "nodes", shownFolder, "config.json");
     const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
     expect(cfg.alias).toBe(CN);
     expect(cfg.node_name).toBe(CN);
+    expect(readdirSync(join(home, shownFolder, ".anet", "nodes"))).toEqual([shownFolder]);
     expect(spawned).toHaveLength(1);
-    expect(spawned[0]!.args).toEqual(["node", "start", CN_DIR]);
-    expect(isAscii(spawned[0]!.cwd)).toBe(true);
+    expect(spawned[0]!.args).toEqual(["node", "start", shownFolder]);
+    expect(spawned[0]!.cwd).toBe(join(home, shownFolder));
     const created = walk(home);
     expect(created.length).toBeGreaterThan(0);
     expect(created.filter(p => !isAscii(p))).toEqual([]);
+    expect(created.some(p => p.includes(CN_DIR))).toBe(false);   // no hidden second folder
+
+    // …and delete finds it again by alias, via the daemon's workdir registry (map-miss path;
+    // the fake child's pid is not ours to signal).
+    _resetChildrenMapForTest();
+    const delAcks: any[] = [];
+    await handleStopDoorbell({ request_id: "sr_t652cnwd" }, {
+      workDir,
+      callCommHub: async (tool: string, args: any) => {
+        if (tool === "get_stop_request") {
+          return { ok: true, request_id: "sr_t652cnwd", child_node_id: cfg.node_id, child_alias: CN, action: "delete", delete_config: true, grace_seconds: 1, force: false };
+        }
+        delAcks.push(args); return { ok: true };
+      },
+      signalProcess: () => {}, log: () => {}, warn: () => {},
+    } as any);
+    expect(delAcks.at(-1)!.status).toBe("stopped");
+    expect(existsSync(cfgPath)).toBe(false);
   }, 15_000);
+
+  test("full-path edit to a non-folder-shaped last segment falls back to node-<hash>", async () => {
+    const { acks, spawned } = await runCreate(
+      { name: CN, runtime: "claude-agent-sdk", workdir: "~/My_Proj" }, "cr_t652cnwd2");
+    expect(acks.map(a => a.status)).toEqual(["started"]);
+    expect(existsSync(join(home, "My_Proj", ".anet", "nodes", CN_DIR, "config.json"))).toBe(true);
+    expect(spawned[0]!.args).toEqual(["node", "start", CN_DIR]);
+  }, 15_000);
+
+  test("folder already holding ANOTHER node → refused (workdir_has_other_node), nothing written", async () => {
+    const other = join(home, "ceshi", ".anet", "nodes", "ceshi");
+    mkdirSync(other, { recursive: true });
+    const prior = JSON.stringify({ node_id: "node_prior", alias: "别的节点" });
+    writeFileSync(join(other, "config.json"), prior, { mode: 0o600 });
+    const { acks, spawned } = await runCreate(
+      { name: CN, runtime: "claude-agent-sdk", workdir: "~/ceshi" }, "cr_t652cnwd3");
+    expect(acks.map(a => a.status)).toEqual(["rejected"]);
+    expect(String(acks[0]!.error)).toMatch(/workdir_has_other_node|node_dir_taken/);
+    expect(spawned).toHaveLength(0);
+    expect(readFileSync(join(other, "config.json"), "utf-8")).toBe(prior);
+  });
 
   test("「测试」 without a workdir (daemon cwd): node dir is ASCII too", async () => {
     const { acks, spawned } = await runCreate({ name: CN, runtime: "claude-agent-sdk" }, "cr_t652cncwd");
@@ -204,6 +247,15 @@ describe("#652 start / stop / delete find the ASCII directory from the alias", (
     chmodSync(join(dir, "config.json"), 0o600);
     return dir;
   }
+
+  test("resolveChildDirName never lands on a directory whose config names another alias", () => {
+    const root = join(workDir, ".anet", "nodes");
+    // <root>'s own folder is "daemon"; a node dir of that name belonging to someone else
+    seed("daemon", "别的节点", "node_x");
+    expect(resolveChildDirName(root, CN)).toBe(CN_DIR);
+    seed("daemon", CN, "node_y");
+    expect(resolveChildDirName(root, CN)).toBe("daemon");
+  });
 
   test("resolveChildDirName: legacy alias dir first, else derived; invalid alias → null", () => {
     const root = join(workDir, ".anet", "nodes");

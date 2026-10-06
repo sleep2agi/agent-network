@@ -13,7 +13,8 @@ import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { isReservedEnvKey } from "../shared/reserved-env.js";
-import { checkNodeName, nodeDirNameFor } from "../shared/node-name.js";
+import { checkNodeName } from "../shared/node-name.js";
+import { childDirNameForCreate } from "./child-dir-name.js";
 import {
   atomicWriteJson,
   atomicWritePrivateText,
@@ -936,7 +937,9 @@ export async function handleCreateNodeDoorbell(
 
   // #652 — the alias may be Chinese / Unicode; the directory under .anet/nodes/ is ASCII.
   // Names the old rule accepted keep their old directory (= the name), so nothing moves.
-  const childDirName = nodeDirNameFor(req.node_spec.name);
+  // With a workdir (the app sends `<root>/<folder>`), a non-legacy name's dir is that folder
+  // name, so what the wizard showed is what lands on disk (child-dir-name.ts).
+  let childDirName = childDirNameForCreate(req.node_spec.name, req.node_spec.workdir);
 
   // 这个子节点的 .anet 根 = spawn cwd。请求带了 workdir 就用它(校验 + 0700 创建 +
   // 「里面不能住着别的节点」),否则沿用 daemon cwd —— 与改动前逐字相同。
@@ -948,6 +951,8 @@ export async function handleCreateNodeDoorbell(
         home: resolveChildHome(process.env, process.platform),
         platform: process.platform,
       });
+      // Lookups later go by the registered (realpath) workdir; derive from the same string.
+      childDirName = childDirNameForCreate(req.node_spec.name, childWorkDir);
       deps.log(`[create-node] child workdir: ${childWorkDir}`);
     } catch (e: any) {
       const msg = e instanceof WorkdirError ? e.message : `workdir_invalid:${e?.message || e}`;
