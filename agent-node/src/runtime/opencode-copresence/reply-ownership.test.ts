@@ -70,6 +70,14 @@ describe("timedOutTurnAbortDecision (board #651)", () => {
     const history = [user("msg_sub"), user("msg_human", "msg_sub", "queued human")];
     expect(timedOutTurnAbortDecision(history, "msg_sub")).toBe("leave_running");
   });
+  test("a textless user message queued after ours is not aborted", () => {
+    const blank = { info: { id: "msg_blank", role: "user" }, parts: [{ type: "text", text: "   " }] };
+    expect(isHumanUserMessage(blank, "msg_sub")).toBe(false);
+    expect(timedOutTurnAbortDecision([user("msg_sub"), blank], "msg_sub")).toBe("leave_running");
+  });
+  test("an earlier unanswered message of ours blocks abort of the later timeout", () => {
+    expect(timedOutTurnAbortDecision([user("msg_a"), user("msg_b")], "msg_b")).toBe("leave_running");
+  });
   test("a compaction summary after ours does not block the abort", () => {
     const history = [user("msg_sub"), summary("msg_sum", "msg_sub")];
     expect(timedOutTurnAbortDecision(history, "msg_sub")).toBe("abort");

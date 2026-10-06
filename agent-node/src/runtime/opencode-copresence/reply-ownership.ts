@@ -106,8 +106,10 @@ function assistantReachesUser(history: OwnershipMessage[], userId: string): bool
  * OpenCode runs one turn at a time, FIFO. The live turn is the earliest user
  * message that does not yet have an assistant reply (a compaction summary is
  * not a turn). Abort only when that message is the one we submitted and no
- * later human user message is queued after it: abort is session-scoped and
- * would cancel that queued line too.
+ * later queued user message follows it. Both checks use `queuedUserId`
+ * (role user, not a summary, id present — text is not required), so a
+ * textless user message after ours is not skipped. Abort is session-scoped
+ * and would cancel that queued line too.
  *
  * That is the head of the unanswered queue, not the tail. A human message
  * still unanswered ahead of ours leaves our id in history, but the runner is
@@ -138,7 +140,11 @@ export function timedOutTurnAbortDecision(
   }
   const liveId = unanswered[0];
   if (liveId !== submittedId) return "leave_running";
-  if (history.slice(oursIndex + 1).some((message) => isHumanUserMessage(message, submittedId))) return "leave_running";
+  const queuedAfter = history.slice(oursIndex + 1).some((message) => {
+    const id = queuedUserId(message);
+    return id !== undefined && id !== submittedId;
+  });
+  if (queuedAfter) return "leave_running";
   return "abort";
 }
 
