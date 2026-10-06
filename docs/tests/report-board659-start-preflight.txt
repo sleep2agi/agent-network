@@ -30,3 +30,21 @@ rc=0: 30 pass, 0 fail, 85 assertions.
 
 Not claimed: real Codex launch, production Hub request-generation support,
 model calls, cross-boot recovery, any host tmux/node changes, full server suite.
+
+Committed-source revalidation
+SOURCE_COMMIT=761b34788d708e88186cf01fdc7f8c1bcc6ae2e7
+Rebuilt the unit/fixture image and repeated its complete run.sh: rc=0.
+15/15 existing + 7/7 new; all 9 mutations assertion-red, both drivers rc=0.
+
+Real temporary Hub + built daemon + fake stages regression
+docker build -t anet-board659-http -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
+docker run --rm --init --cpus=2 --network none anet-board659-http
+rc=0: 7/7 checks (registration, daemon token, v2 registration, receipt-before-ack,
+only decoy remains, decoy generation unchanged, all three original processes gone).
+Agent-node production CLI bundle also built successfully inside that image.
+This is a STOP/adoption regression, not an end-to-end START acceptance claim.
+
+Static CI gates in Dockerfile.gates, --init --cpus=2 --network none: rc=0.
+Suite registration, test-file coverage, home-path baseline, L1 SHA binding,
+mutation-pin selftest (69/69) and scan all green; no baseline/exemption changes.
+Gate snapshot contains commit 761b3478. Subsequent change only appends this report.
