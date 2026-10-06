@@ -365,9 +365,10 @@ daemon 没有自己的 stop / delete / status 子命令，直接用节点命令�
 `anet daemon list` 提示 daemon 缺少某些 runtime 时，执行 `anet daemon init <daemon-name> --force` 补齐。
 它保留 `node_id`，但会重新签发 token，之后要重启 daemon。
 
-## 收编节点的停启（待发布） {#adopted-lifecycle}
+## 收编节点的停启 {#adopted-lifecycle}
 
-此能力需要配套的新版 daemon；Hub 的收编节点重启拒绝门计划进入 `.109`，不是 `.108`。
+收编节点的停止 / 启动从 agent-node ≥ `2.5.0-preview.118`、agent-network（`anet`）≥ `2.3.0-preview.151` 起提供；
+Hub 从 commhub-server ≥ `0.9.0-preview.109` 起对收编节点的重启返回 `adopted_restart_requires_daemon`，提示先停止再启动（`.108` 及更早没有这道拒绝门）。
 在节点原工作目录执行 `anet daemon adopt <alias> --daemon <daemon-id>` 先看计划，
 加 `--yes` 仅请求收编，必须等 daemon 独立核验、Hub 绑定成为 active 才生效。
 daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂不支持。
