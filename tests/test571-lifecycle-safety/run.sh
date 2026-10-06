@@ -341,7 +341,7 @@ BOOT_HOME="$ROOT/boot-home"
 BOOT_STUBS="$ROOT/boot-stubs"
 BOOT_UP="$ROOT/boot-up"
 BOOT_LOG="$ROOT/boot-anet.log"
-rm -rf "$BOOT_HOME" "$BOOT_STUBS" "$BOOT_UP"
+safe_rm_rf "$BOOT_HOME" "$BOOT_STUBS" "$BOOT_UP"
 mkdir -p "$BOOT_HOME/fleet-demo/.anet/nodes/demo-keep" \
          "$BOOT_HOME/fleet-demo/.anet/nodes/demo-stopped" \
          "$BOOT_STUBS" "$BOOT_UP"
