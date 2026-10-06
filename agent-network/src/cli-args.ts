@@ -11,10 +11,12 @@ export const BOOLEAN_FLAGS = new Set([
   "--accept-dev-channels",
   "--allow-shared-codex-login",  // #514
   "--all",
+  "--bridge-only",               // #630 (node restart <codex external-appserver node> --bridge-only)
   "--copresence",
   "--dangerously-allow-full-access",
   "--dev-open",
   "--dry-run",
+  "--external-appserver",        // #630
   "--f",
   "--follow",
   // 🔴 #1736 —— 这两个以前**没登记**,于是 `--force <token>` / `--yes <token>`
