@@ -419,6 +419,30 @@ Channel 配置不会热加载，修改后需要重启节点。`anet channel add 
 `anet status` 回答的是「它上次说自己怎么样」,不是「它现在还在不在」。
 
 
+## 手工节点收编（预览源码，board #626）
+
+Linux daemon 配置 `adopt_roots` 为允许收编的工作目录绝对路径列表，默认空列表拒绝收编。
+配置修改后由操作员按既有 daemon 启动流程加载；不要把根目录或整个 HOME 当作节点工作目录。
+使用自己的 `anet login` 人类账号，在手工节点的工作目录运行：
+
+```bash
+anet daemon adopt demo --daemon <daemon-node-id>
+anet daemon adopt demo --daemon <daemon-node-id> --yes
+anet daemon adopt --all --daemon <daemon-node-id> --yes
+anet daemon unadopt demo --yes
+```
+
+不带 `--yes` 只展示计划。`--all` 仅枚举当前目录 `.anet/nodes`，不扫描机器其它目录。
+请求成功只代表 pending，不代表收编成功；daemon 独立检查 UID、路径、配置身份、
+`/proc`、HOME 和可重建环境，再原子登记并确认。收编及撤销都不重启、不发进程信号。
+仅支持 bare / 默认 tmux socket；co-presence 或无法重建的环境会拒绝，错误只列环境键名。
+从 daemon 工作目录运行 `anet daemon adopted`，列出同时具有本机登记和 Hub 有效绑定的节点。
+
+此增量只完成收编协议，收编节点的远程停启需后续 board #627；当前会明确拒绝，
+不会落入旧 daemon 子进程清理路径。登记文件是 daemon 工作目录下
+`.anet/child-workdirs.json`，节点配置及密钥仍在原目录。空机恢复需恢复这些私有文件和
+Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销绑定不删除工作目录。
+
 ## Preview 专属能力
 
 以下能力存在于当前 preview，不应写成 stable 已支持：

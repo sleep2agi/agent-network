@@ -6,6 +6,8 @@ import { handleAdoptDoorbell, handleUnadoptDoorbell } from "./adopt-daemon.js";
 import { adoptedChild, readWorkdirRegistry } from "./adopt-registry.js";
 import { recordChildWorkdir, forgetChildWorkdir } from "./child-workdir.js";
 import { readAdoptionProc } from "./adopt-proc.js";
+import { handleStopDoorbell } from "./stop-daemon.js";
+import { handleStartDoorbell } from "./start-daemon.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -78,4 +80,17 @@ test("real proc evidence reads current isolated test process", () => {
   expect(proc?.pid).toBe(process.pid);
   expect(proc?.uid).toBe(process.getuid!());
   expect(proc?.birth).toMatch(/^\d+$/);
+});
+test("adopted registry never falls through created-child stop/start", async () => {
+  const f = fixture(); await handleAdoptDoorbell(f.req, f.deps);
+  const calls: any[] = [];
+  const callCommHub = async (tool: string, args: any) => {
+    calls.push({ tool, args });
+    return { ok: true, child_node_id: f.req.node_id, child_alias: f.req.alias, action: "stop" };
+  };
+  await handleStopDoorbell({ request_id: "stop_fixture" }, { workDir: f.deps.workDir, callCommHub, log: () => {}, warn: () => {},
+    signalProcess: () => { throw Error("must not signal adopted process"); } });
+  expect(calls.at(-1).args).toMatchObject({ status: "stop_failed", error: "adopted_lifecycle_not_available" });
+  await handleStartDoorbell({ request_id: "start_fixture" }, { workDir: f.deps.workDir, callCommHub, log: () => {}, warn: () => {} });
+  expect(calls.at(-1).args).toMatchObject({ status: "start_failed", error: "adopted_lifecycle_not_available" });
 });

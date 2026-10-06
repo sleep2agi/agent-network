@@ -3,6 +3,7 @@ set -euo pipefail
 cd /work
 bun test ./src/runtime/adopt-local-identity.test.ts
 bun test ./src/runtime/adopt-daemon.test.ts
+bun test ./cli-src/daemon-adopt.test.ts
 cp src/runtime/adopt-local-identity.ts /tmp/adopt-local-green.ts
 trap 'cp /tmp/adopt-local-green.ts src/runtime/adopt-local-identity.ts' EXIT
 bun -e 'const p="src/runtime/adopt-local-identity.ts"; const s=await Bun.file(p).text(); const needle="if (!opts.adoptRoots.some(root => isAbsolute(root) && under(workdir, realpathSync(root))))"; if (s.split(needle).length!==2) throw Error("mutation target drift"); await Bun.write(p,s.replace(needle,"if (false)"));'

@@ -1,6 +1,7 @@
-Board #626 — daemon adoption, implementation in progress
+Board #626 — daemon adoption, integrated candidate
 
-Status: draft; first read-only validator increment, not integrated or accepted yet.
+Status: CLI + daemon integrated and Docker E2E passed; awaiting review and CI.
+Earlier increment notes below are historical, not current implementation status.
 Base: d174f894 (main). Depends on merged Hub board #625 protocol.
 
 Scope
@@ -39,3 +40,35 @@ Standalone test626 Docker: identity 6/6 and protocol 6/6 passed; allowlist
 bypass mutation is witnessed red rc=1, harness rc=0. --init avoids testing
 PID 1, which is intentionally not an adoptable node PID.
 CLI integration and real Hub + daemon + manual-node E2E remain in progress.
+
+Increment 3 — integrated candidate (supersedes the incomplete notes above)
+- CLI daemon adopt/unadopt/adopted wired to the actual command dispatcher.
+  Human saved login only; default plan has no write. --yes submits Hub request,
+  --all is restricted to current workdir; pending is not reported as adopted.
+- Real CLI subprocess + real Hub + real daemon + manually launched agent-node
+  with CJK alias: dry plan has zero bindings; request activates binding; local
+  registry records exact node/workdir; original live PID is unchanged; adopted
+  list shows it; unadopt removes registration without stopping the manual node.
+  12 PASS checks, rc=0. No fake daemon, no model call, no production resources.
+- Reproducible E2E Dockerfile added; cold build and --network none run passed.
+  Final source rerun uses that image with read-only source mounts and rebuilds
+  both test artifacts inside the container: rc=0, same 12 checks.
+- Final related daemon regressions: 195 pass, 497 assertions, rc=0 (six suites:
+  start-daemon, stop-daemon, config-apply, child-workdir, adopt-daemon,
+  adopt-local-identity). Focused CLI/protocol: 10 pass, 30 assertions, rc=0.
+- Standalone identity/CLI/protocol Docker gate passed; allowlist bypass mutation
+  still intentionally fails rc=1, harness rc=0. Both Docker gates added to qa.yml.
+- Docker symbol-pin scan rc=0: 8 judged, 8 skipped, 1 unavailable historical ref,
+  0 drift. The unavailable ref is NOT claimed verified (worktree .git outside mount).
+
+Reproduce (use sg docker -c around these on hosts requiring the docker group):
+docker build -t anet-test626-unit -f tests/test626-daemon-adoption/Dockerfile .
+docker run --rm --init --network none anet-test626-unit
+docker build -t anet-test626-e2e -f tests/test626-daemon-adoption/Dockerfile.e2e .
+docker run --rm --init --network none anet-test626-e2e
+
+Boundaries: Linux only; real E2E is bare mode (default tmux socket validated by
+unit evidence only). Future pinned anet version is not exposed by Hub; CLI says
+unknown rather than presenting this CLI's version as the daemon's. #627 remains
+separate; adopted stop/start explicitly fails closed in this candidate. No claim
+that the complete daemon test inventory, remote CI, or release gates have passed.

@@ -68,7 +68,8 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
     const mode = before ? verifyAdoptionProcess(identity, before, procOpts) : "tmux";
     // No await between final verification and atomic registry persistence.
     const checked = verifyAdoptionLocalIdentity(req, deps);
-    if (!isDeepStrictEqual(identity, checked) || readAdoptionPid(identity.nodeDir) !== pid) throw Error("adopt_identity_changed");
+    if (!isDeepStrictEqual(identity, checked) || readAdoptionPid(identity.nodeDir) !== pid ||
+        !isDeepStrictEqual(expectedEnv, reproducibleEnvironment(checked, deps))) throw Error("adopt_identity_changed");
     const after = pid ? readProc(pid) : null;
     if (!isDeepStrictEqual(before, after)) throw Error("adopt_process_changed");
     writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId,
