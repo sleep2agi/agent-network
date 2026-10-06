@@ -20,6 +20,13 @@
 #   - That the LLM SDK call inside processTask succeeds (needs vendor
 #     auth + network; would re-introduce flakiness the test should
 #     avoid). The wake log fires BEFORE the SDK call.
+#
+# Every claude-agent-sdk launch sets CLAUDE_CODE_MAX_RETRIES=0 (board
+# #670): from 2026-10-06 the pinned Claude Code CLI retries the bogus-key
+# 401 ten times (~180s) before returning, so a wake never finished inside
+# 6d's 130s window and the second wake was never scheduled. With 0
+# retries the CLI fails in ~1s, so wake duration no longer depends on the
+# vendor's retry policy.
 
 set -e
 
@@ -134,7 +141,7 @@ create_loop_agent_config "$ALIAS_CLAUDE" claude-agent-sdk claude-sonnet-4-6 "$WO
 cd "$WORKDIR_CLAUDE"
 # Bogus key — SDK call inside wake will fail at LLM layer; the wake
 # log fires BEFORE that, which is what we assert.
-ANTHROPIC_API_KEY="test-no-real-call" \
+CLAUDE_CODE_MAX_RETRIES=0 ANTHROPIC_API_KEY="test-no-real-call" \
   timeout 60 agent-node \
   --alias "$ALIAS_CLAUDE" \
   --config "$WORKDIR_CLAUDE/.anet/nodes/$ALIAS_CLAUDE/config.json" \
@@ -228,7 +235,7 @@ PY
 
 # Restart and watch for wake fire
 > /tmp/claude-agent2.log
-ANTHROPIC_API_KEY="test-no-real-call" \
+CLAUDE_CODE_MAX_RETRIES=0 ANTHROPIC_API_KEY="test-no-real-call" \
   timeout 30 agent-node \
   --alias "$ALIAS_CLAUDE" \
   --config "$WORKDIR_CLAUDE/.anet/nodes/$ALIAS_CLAUDE/config.json" \
@@ -354,7 +361,7 @@ create_loop_agent_config "$ALIAS_CH" claude-agent-sdk claude-sonnet-4-6 "$WORKDI
   '{"dangerouslySkipPermissions":true,"teammateMode":true,"goalTickMs":"5000"}'
 
 cd "$WORKDIR_CH"
-ANTHROPIC_API_KEY="test-no-real-call" \
+CLAUDE_CODE_MAX_RETRIES=0 ANTHROPIC_API_KEY="test-no-real-call" \
   timeout 30 agent-node \
   --alias "$ALIAS_CH" \
   --config "$WORKDIR_CH/.anet/nodes/$ALIAS_CH/config.json" \
@@ -622,7 +629,7 @@ cat > "$WORKDIR_CMULTI/.anet/nodes/$ALIAS_CMULTI/goals.json" <<EOF
 EOF
 
 cd "$WORKDIR_CMULTI"
-ANTHROPIC_API_KEY="test-no-real-call" \
+CLAUDE_CODE_MAX_RETRIES=0 ANTHROPIC_API_KEY="test-no-real-call" \
   timeout 140 agent-node \
   --alias "$ALIAS_CMULTI" \
   --config "$WORKDIR_CMULTI/.anet/nodes/$ALIAS_CMULTI/config.json" \
