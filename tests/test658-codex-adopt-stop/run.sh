@@ -2,6 +2,8 @@
 set -eu
 printf 'source_commit=%s\n' "$SOURCE_COMMIT"
 bun test ./tests/test658-codex-adopt-stop/fixture-safety.test.ts
+bun test ./tests/test658-codex-adopt-stop/recovery.test.ts
+bun run tests/test658-codex-adopt-stop/recovery-mutation.ts
 bun test ./tests/test658-codex-adopt-stop/listing-race.test.ts
 bun run tests/test658-codex-adopt-stop/listing-mutation.ts
 bun test ./agent-node/src/runtime/adopt-codex-evidence.test.ts ./tests/test658-codex-adopt-stop/collect.test.ts

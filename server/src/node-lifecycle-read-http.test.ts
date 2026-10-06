@@ -59,8 +59,9 @@ test("public errors redact free text for granted viewers on every projection", a
       "not_my_child: daemon has no local record of fixture-node (fixture-id) — no children-map entry and no config at /private/fixture/fixture-node/config.json; refusing to signal processes by alias.",
       "bin: ENOENT: /private/fixture/bin/anet on fixture-host",
       "adopt_unknown_secret", "adopt_start_timeout: /private/fixture", "", "adopt_start_timeout", null,
+      "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",
     ]) {
-      const expected = error === null || error === "adopt_start_timeout" ? error : "lifecycle_error";
+      const expected = error === null || ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed"].includes(error) ? error : "lifecycle_error";
       for (const [kind, table, request] of [
         ["adopt", "node_daemon_bindings", "adopt_read_active"],
         ["start", "node_start_requests", "start_read_failed"],

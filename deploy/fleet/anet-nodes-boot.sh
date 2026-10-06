@@ -95,7 +95,27 @@ node_state() {
 hub_stopped_dir() {
   local cfg="${1:-}"
   [ -n "$cfg" ] || return 1
-  [ -f "$(dirname "$cfg")/.hub-stopped" ]
+  # A successful manual start supersedes one exact receipt; never delete a
+  # possibly concurrent stop. Wire format matches src/stopped-receipt.ts.
+  local rc=0
+  node - "$cfg" <<'HUB_STOPPED_PROBE' || rc=$?
+const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+const cfg = process.argv[2], dir = path.dirname(cfg), stop = path.join(dir, '.hub-stopped');
+try { fs.lstatSync(stop); } catch(e) { process.exit(e.code === 'ENOENT' ? 1 : 0); }
+try {
+  const id = JSON.parse(fs.readFileSync(cfg, 'utf8')).node_id;
+  const st = fs.lstatSync(stop, {bigint:true}), raw = fs.readFileSync(stop, 'utf8'), data = JSON.parse(raw);
+  if (!st.isFile() || st.isSymbolicLink() || st.uid !== BigInt(process.getuid()) || (st.mode & 0o022n) ||
+      typeof id !== 'string' || !id || data.node_id !== id || data.stopped !== true) process.exit(0);
+  const resumed = path.join(dir, '.hub-resumed'), rs = fs.lstatSync(resumed);
+  if (!rs.isFile() || rs.isSymbolicLink() || rs.uid !== process.getuid() || (rs.mode & 0o022)) process.exit(0);
+  const cert = JSON.parse(fs.readFileSync(resumed, 'utf8'));
+  const fingerprint = `${st.dev}:${st.ino}:${st.ctimeNs}:${crypto.createHash('sha256').update(raw).digest('hex')}`;
+  process.exit(cert.version === 1 && cert.node_id === id && cert.receipt_fingerprint === fingerprint ? 1 : 0);
+} catch { process.exit(0); }
+HUB_STOPPED_PROBE
+  # Probe missing/broken => fail closed; only rc=1 explicitly permits start.
+  [ "$rc" -ne 1 ]
 }
 
 # 一层依赖：hub /health 语义级检查（端口 listen 不代表能用）

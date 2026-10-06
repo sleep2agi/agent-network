@@ -3,6 +3,7 @@ import { addAgentNetworkScope, type RestNetworkScope } from "./network-scope.js"
 
 // Exact public codes only; daemon exception text must never reach node viewers.
 const publicLifecycleErrors = new Set([
+  "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",
   "adopt_active_binding_required", "adopt_binding_unavailable",
   "adopt_binding_revoked_during_start", "adopt_explicit_private_socket_required",
   "adopt_start_evidence_missing", "adopt_stop_evidence_missing",
