@@ -112,6 +112,11 @@ import {
   pauseForCapacityRetry,
 } from "./runtime/capacity-retry";
 import {
+  CLAUDE_AUTH_USER_TEXT,
+  claudeApiRetryIsAuthFailure,
+  claudeAuthStatusReport,
+} from "./runtime/claude-auth-retry";
+import {
   CommHubError,
   classifyCommHubResponse,
   PendingReplyQueue,
@@ -1706,6 +1711,9 @@ const register = async () => {
   }
   return result;
 };
+// #672 — sticky for this process. Idle reports publish the sentence.
+// In-flight reports must not: sessions.task is the running description.
+let claudeLoginDead = false;
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
   // #667 — idle with nothing running writes the warning, or omits task.
   // Register, not this path, sends "" once to clear a leftover warning.
@@ -1718,9 +1726,18 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
   const alias = await liveAlias();
   const health = currentNodeHealth();
   // #448 —— 登录态 revoked/expired 的节点不能接活:idle 报成 error 并写明「本节点 CODEX_HOME 要重新登录」。
-  const { status, task } = health
+  const gated = health
     ? gateStatusOnModelAuth(rawStatus, hintedTask, health.model_auth, NODE_CODEX_HOME)
     : { status: rawStatus, task: hintedTask };
+  // #672 — caller text and in-flight reports keep sessions.task. The hint
+  // is published only once the task is no longer running (idle, no caller text).
+  const { status, task } = claudeAuthStatusReport({
+    status: gated.status,
+    task: gated.task,
+    callerTask: rawTask,
+    inFlight: getInFlightCount(),
+    loginDead: claudeLoginDead,
+  });
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
     : RUNTIME === "claude"
@@ -1793,6 +1810,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     },
   });
 };
+// #672 — flip the dot now, without a task string. The sentence is written
+// by the idle report after this turn, when nothing is in flight.
+function markClaudeLoginDead(): void {
+  claudeLoginDead = true;
+  void reportStatus("error").catch(() => {});
+}
 const getInbox = async () => {
   const alias = await liveAlias();
   return (await callCommHub("get_inbox", { alias, limit: 20 }))?.messages || [];
@@ -3032,8 +3055,10 @@ async function processWithClaude(
   //   (同一个错我在这个文件的 codex 分支上刚犯过一次,typecheck 棘轮门抓的)。
   const claudeAttempts: { ms: number; timedOut: boolean }[] = [];
   let capacityRetries = 0;
+  let authAbortedThisAttempt = false;
   for (let attempt = 0; ; attempt++) {
     toolsRanThisAttempt = false;
+    authAbortedThisAttempt = false;
     let timedOut = false;
     const attemptStart = Date.now();
     try {
@@ -3051,6 +3076,16 @@ async function processWithClaude(
             evidence?.consumed();
             const m = message as any;
             if (claudeMessageShowsExecutedTool(m)) toolsRanThisAttempt = true;
+            // #672 — the CLI retries 401/403 on its own (~10 × 180s) before
+            // this loop would see a thrown error. Abort the child. Do not
+            // break and leave it retrying. 429/5xx are not this branch.
+            if (claudeApiRetryIsAuthFailure(m)) {
+              authAbortedThisAttempt = true;
+              log(`[claude] ✗ auth api_retry status=${m.error_status ?? "none"} error=${m.error ?? "none"}; aborting the attempt`);
+              markClaudeLoginDead();
+              ac.abort();
+              return CLAUDE_AUTH_USER_TEXT;
+            }
             if (m.type === "system" && m.subtype === "init") {
               claudeSessionId = m.session_id;
               log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "(account default)"} attempt=${attempt + 1}`);
@@ -3213,6 +3248,7 @@ async function processWithClaude(
           signal.removeEventListener("abort", forward);
         }
       }, CLAUDE_TIMEOUT_MS, `claude-attempt-${attempt + 1}/${CLAUDE_MAX_RETRIES + 1}`);
+      if (!result.startsWith("执行出错:")) claudeLoginDead = false;
       return result;
     } catch (err: any) {
       timedOut = err instanceof TimeoutError;
@@ -3221,12 +3257,19 @@ async function processWithClaude(
         : String(err?.message || err).slice(0, 300);
       const attemptDt = Date.now() - attemptStart;
 
+      // Abort rejects the SDK stream. That rejection is not a capacity error
+      // and must not start another CLI. The user text is the same either way.
+      if (authAbortedThisAttempt) {
+        return CLAUDE_AUTH_USER_TEXT;
+      }
+
       // Fast-fail on auth errors — no point retrying with the same bad key.
       if (isAuthError(msg)) {
         log(`[claude] ✗ FATAL: vendor API auth failed (${msg.slice(0, 150)})`);
         log(`[anet] FATAL: Vendor API auth failed — ${msg.slice(0, 100)}`);
         log(`[anet]        ${remediationHint(msg)}`);
-        return `执行出错: vendor API auth failed (${msg.slice(0, 80)}) — refresh API key and re-export ENV var; see agent-node log for vendor-specific URL`;
+        markClaudeLoginDead();
+        return CLAUDE_AUTH_USER_TEXT;
       }
 
       // Board #656 — temporary capacity / 429 / 5xx retries on 30s/60s/120s.

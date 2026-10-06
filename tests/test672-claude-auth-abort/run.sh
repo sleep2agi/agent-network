@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Board #672. Fake key against a local upstream. A 401 api_retry must abort
+# the CLI child and return a readable error in seconds, with no further
+# request. A 429 must still reach the upstream a second time. Mutations of
+# those two decisions, and of the idle status hint, must go red.
+set -euo pipefail
+
+[[ "${TEST672_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: TEST672_SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+printf 'source_commit=%s\n' "$TEST672_SOURCE_COMMIT"
+
+HELPER=/src/claude-auth-retry.ts
+CLI=/src/cli.ts
+AUTH_ANCHOR='  if (error === "authentication_failed" || status === 401 || status === 403) return true;'
+AUTH_REPL='  if (false && (error === "authentication_failed" || status === 401 || status === 403)) return true;'
+CAPACITY_ANCHOR='  if (capacity) return false;'
+CAPACITY_REPL='  if (capacity) return true;'
+HINT_ANCHOR='  return { status: "error", task: CLAUDE_LOGIN_STATUS_HINT };'
+HINT_REPL='  return { status: input.status, task: input.task };'
+
+need_count() {
+  local n
+  n=$(grep -F -c "$1" "$2" || true)
+  if [[ "$n" != "$3" ]]; then
+    echo "FAIL: count of [$1] in $2 is $n, expected $3"
+    exit 1
+  fi
+}
+
+need_count "$AUTH_ANCHOR" "$HELPER" 1
+need_count "$CAPACITY_ANCHOR" "$HELPER" 1
+need_count "$HINT_ANCHOR" "$HELPER" 1
+need_count 'aborting the attempt' "$CLI" 1
+need_count 'claudeAuthStatusReport({' "$CLI" 1
+need_count 'markClaudeLoginDead();' "$CLI" 2
+if grep -F -q 'CLAUDE_CODE_MAX_RETRIES' "$CLI" || grep -F -q 'CLAUDE_CODE_MAX_RETRIES' "$HELPER"; then
+  echo 'FAIL: product sets CLAUDE_CODE_MAX_RETRIES'
+  exit 1
+fi
+
+run_probe() {
+  ( cd /opt/sdk && bun /test672/probe.ts "$1" )
+}
+
+apply_mutation() {
+  bun -e '
+    const fs = require("fs");
+    const path = process.argv[1];
+    const anchor = process.argv[2];
+    const repl = process.argv[3];
+    const text = fs.readFileSync(path, "utf8");
+    const n = text.split(anchor).length - 1;
+    if (n !== 1) {
+      console.error("MUTATION_NOT_APPLIED: anchor count=" + n);
+      process.exit(1);
+    }
+    fs.writeFileSync(path, text.replace(anchor, repl));
+  ' "$1" "$2" "$3"
+}
+
+expect_red() {
+  local label="$1" mode="$2" needle="$3"
+  rm -rf /root/.bun/install/cache /tmp/bun-* "${HOME:-/root}/.bun/install/cache" 2>/dev/null || true
+  set +e
+  run_probe "$mode" > /tmp/test672-red.txt 2>&1
+  local rc=$?
+  set -e
+  cat /tmp/test672-red.txt
+  if [[ "$rc" -eq 0 ]]; then
+    echo "FAIL: $label stayed green"
+    exit 1
+  fi
+  if ! grep -F -q "$needle" /tmp/test672-red.txt; then
+    echo "FAIL: $label died for a reason other than: $needle"
+    exit 1
+  fi
+  echo "$label red as required"
+}
+
+echo '== green: pure rules, cli wiring =='
+run_probe pure
+run_probe wiring
+
+echo '== green: 401 aborts, one request only =='
+run_probe auth
+
+echo '== green: 429 is not aborted =='
+run_probe capacity
+
+echo '== red: 401 is no longer an auth failure =='
+cp "$HELPER" /tmp/helper.bak
+apply_mutation "$HELPER" "$AUTH_ANCHOR" "$AUTH_REPL"
+expect_red 'auth predicate' auth 'FAIL: auth retry was not stopped'
+cp /tmp/helper.bak "$HELPER"
+
+echo '== red: capacity api_retry is treated as auth =='
+apply_mutation "$HELPER" "$CAPACITY_ANCHOR" "$CAPACITY_REPL"
+expect_red 'capacity predicate' capacity 'FAIL: capacity retry was aborted'
+cp /tmp/helper.bak "$HELPER"
+
+echo '== red: idle report no longer publishes the hint =='
+apply_mutation "$HELPER" "$HINT_ANCHOR" "$HINT_REPL"
+expect_red 'status hint' pure 'FAIL: idle report must publish the login hint'
+cp /tmp/helper.bak "$HELPER"
+
+echo 'TEST672_OK'
