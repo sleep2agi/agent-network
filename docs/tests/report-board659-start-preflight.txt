@@ -65,3 +65,26 @@ Independent-review fixes (supersedes the earlier Bun default-socket fixture)
 - This first review-fix run used working-tree changes based on 1a4b7233.
 - Runtime product code unchanged. Binary/version evidence and diagnostic logs /
   port-probe race followups tracked on board #674, not implemented here.
+
+CI last-pane server-exit race repair (supersedes runtime-unchanged statement above)
+- CI job 112512243461: remain-on-exit failed with server exited unexpectedly.
+- Baseline immutable image at 6513741a: 20 + 100 natural repetitions, 120 pass,
+  0 fail. The intermittent CI window did NOT reproduce naturally locally.
+- allowStopped now retries this exact exit-1 diagnostic at most twice (25 ms
+  between attempts), revalidating the socket and performing a real list each
+  time. The diagnostic alone never proves absence. Live rows remain visible;
+  persistent crashes, permission failures, timeouts and malformed output reject.
+  Strict collection is unchanged; final marker/process census is retained.
+- Deterministic private-socket fixture injects the client diagnostic while the
+  real owned pane exits, plus live/persistent/permission/timeout/malformed/strict
+  cases: 7/7, 15 assertions. No host or default tmux server is accessed.
+- Removing the new diagnostic recognition: rc=1 with the named gone regression
+  failing; mutation driver rc=0. This is deterministic regression evidence, not
+  a claim that natural failure frequency improved from a measured nonzero rate.
+- Fixed natural remain-on-exit loop: 20 pass, 0 fail (0/20).
+- Full run.sh: rc=0; fixture safety 2/2, listing 7/7, stop/evidence 15/15,
+  inputs/preflight 8/8; all 12 mutations red as intended, drivers rc=0.
+- Static Docker gates rc=0: registration, file coverage, home-path baseline,
+  SHA binding and mutation pins (69/69 selftest, 567 anchors / 103 scripts).
+- All executions used --init --cpus=2 --network none, no source mounts.
+  These precommit runs used the repair worktree based on 6513741a.
