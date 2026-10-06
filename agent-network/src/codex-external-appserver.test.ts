@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import {
   EXTERNAL_APPSERVER_LAYOUT,
@@ -11,6 +12,7 @@ import {
   externalAppserverStopOrder,
   memoryVerdict,
   parseMemAvailableBytes,
+  externalAppserverBridgeCwd,
   planExternalAppserverNode,
   portBusy,
   resumedThreadVerdict,
@@ -102,6 +104,20 @@ describe("#630 commands", () => {
   test("bridge argv", () => {
     const cmd = bridgeShellCommand(p, { command: "/usr/bin/node", argsPrefix: ["/pkg/dist/cli.js"] });
     expect(cmd).toContain("'/usr/bin/node' '/pkg/dist/cli.js' '--config' '/work/demo/.anet/nodes/示例节点/config.json' '--alias' '示例节点' '--runtime' 'codex-app-server' '--model' 'gpt-demo' '--log-dir'");
+  });
+  test("product bridge cwd is the workspace, not the node directory", () => {
+    const p = plan();
+    expect(externalAppserverBridgeCwd(p)).toBe("/work/demo");
+    expect(externalAppserverBridgeCwd(p)).not.toBe(p.nodeDir);
+    const cmd = bridgeShellCommand(p, { command: "/usr/bin/node", argsPrefix: ["/pkg/dist/cli.js"] });
+    expect(cmd).toContain("'--config' '/work/demo/.anet/nodes/示例节点/config.json'");
+    expect(cmd).toContain("'--log-dir' '/work/demo/.anet/nodes/示例节点/logs'");
+    expect(appserverShellCommand(p, "/usr/bin/node")).toContain("-C '/work/demo/project'");
+    expect(appserverShellCommand(p, "/usr/bin/node")).toContain("export CODEX_HOME='/work/demo/.anet/nodes/示例节点/codex-home'");
+    expect(tuiShellCommand(p)).toContain("-C '/work/demo/project'");
+    const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+    expect(cli.split("externalAppserverBridgeCwd(plan)").length - 1).toBe(1);
+    expect(cli.split('"-c", plan.nodeDir').length - 1).toBe(2);
   });
 });
 

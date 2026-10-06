@@ -35,6 +35,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
+import { reportedTask } from "./project-dir-mismatch.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
@@ -59,7 +60,7 @@ import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { buildClaudeSystemPrompt, claudeAiConnectorsOptIn, claudeSdkChildEnv } from "./claude-sdk-turn-options";
 import { getHostTelemetry } from "./host-telemetry";
-import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
+import { getProcessTelemetry, getInFlightCount, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { readExternalSchedulesSnapshot } from "./external-schedules";
 import { createOwnerScheduleConsumer, type OwnerScheduleConsumer } from "./owner-schedule-consumer";
 import { parseGoalCommand } from "./goals/parser";
@@ -995,6 +996,17 @@ const NODE_STATE_DIR = configFilePath && basename(dirname(dirname(configFilePath
   && basename(dirname(dirname(dirname(configFilePath)))) === ".anet"
   ? dirname(configFilePath)
   : join(process.cwd(), ".anet", "nodes", ALIAS);
+// #667 — project_dir stays the real cwd. This process does not chdir.
+// reportedTask is the only decision: the warning, or undefined when there
+// is nothing new to say. Register is the one place that turns "nothing"
+// into "" so a restart from the right directory clears a leftover warning.
+// Replays pass the caller's raw task back in, so a stored warning cannot
+// look like a caller-supplied task.
+function projectDirTask(status: string, task?: string): string | undefined {
+  return reportedTask({ configPath: configFilePath, cwd: process.cwd(), inFlight: getInFlightCount(), status, task });
+}
+const projectDirMismatchHint = projectDirTask("idle");
+if (projectDirMismatchHint) console.warn(projectDirMismatchHint);
 const LOG_DIR = opts["log-dir"] || join(NODE_STATE_DIR, "logs");
 // RFC-036 B4 — immutable for this process lifetime. Runtime/model turns never
 // get to enable this capability; the launcher must opt the node in before boot.
@@ -1646,6 +1658,9 @@ const register = async () => {
     // /api/nodes lies about the node's actual state. Codex catch on
     // PR #411.
     channels: JSON.stringify(channelSpecs),
+    // #667 — "" only on this startup report. Later idle reports omit task,
+    // so the last description stays. A mismatch still sends the warning.
+    task: projectDirTask("idle") ?? "",
     // #1958 — grok: prefer the agent's readback once a turn has run.
     model: (RUNTIME === "grok" ? grokEffectiveModel : undefined) || MODEL || undefined,
     network_id: NETWORK_ID || undefined,
@@ -1692,13 +1707,20 @@ const register = async () => {
   return result;
 };
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
+  // #667 — idle with nothing running writes the warning, or omits task.
+  // Register, not this path, sends "" once to clear a leftover warning.
+  // In flight, omit task. Store the caller's raw task: the three replays
+  // below pass it back through here, and a stored warning must not skip
+  // the in-flight check. A login error from the gate below still replaces
+  // this text.
+  const hintedTask = projectDirTask(rawStatus, rawTask);
   lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();
   const health = currentNodeHealth();
   // #448 —— 登录态 revoked/expired 的节点不能接活:idle 报成 error 并写明「本节点 CODEX_HOME 要重新登录」。
   const { status, task } = health
-    ? gateStatusOnModelAuth(rawStatus, rawTask, health.model_auth, NODE_CODEX_HOME)
-    : { status: rawStatus, task: rawTask };
+    ? gateStatusOnModelAuth(rawStatus, hintedTask, health.model_auth, NODE_CODEX_HOME)
+    : { status: rawStatus, task: hintedTask };
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
     : RUNTIME === "claude"
