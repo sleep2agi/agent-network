@@ -4,7 +4,7 @@
 // Phase A: default floor. A 512 MiB cgroup must be admitted (the floor is
 // 15% of that limit, not 4 GiB of the host). Phase B: an absurd floor forces
 // the wait, and after the timeout only one start may be in flight.
-import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
   cgroupLimitMb,
   defaultStartMinMemMb,
@@ -76,6 +76,8 @@ delete process.env.ANET_START_MEM_GATE;
 delete process.env.ANET_START_MIN_MEM_MB;
 process.env.ANET_START_SLOTS_DIR = SLOTS;
 process.env.ANET_START_GATE_MAX_WAIT_SEC = "0.4";
+// Used to let every waiter through together once its own clock hit the cap.
+process.env.ANET_START_SINGLE_LANE_MAX_WAIT_SEC = "0.05";
 process.env.ANET_START_MAX_CONCURRENT = String(N);
 process.env.ANET_START_MAX_LOAD_PER_CPU = "1000000";
 rmSync(SLOTS, { recursive: true, force: true });
@@ -163,6 +165,37 @@ if (reports.filter((t) => t === START_GATE_SINGLE_LANE_STATUS).length !== N) {
 }
 if (!outcomes.every((o) => o === "single-lane")) fail(`outcomes were not all single-lane: ${outcomes.join(",")}`);
 if (maxStarting !== 1) fail(`maxStarting=${maxStarting} expected 1`);
+if (logs.some((line) => line.includes("放行本次启动"))) fail("single-lane wait bypassed the lease");
 const left = readdirSync(SLOTS).filter((name) => name !== ".lock" && !name.startsWith("."));
 if (left.length) fail(`leases still held: ${left.join(",")}`);
 console.log("OK maxStarting=1");
+
+console.log("== stuck lease is taken over ==");
+rmSync(SLOTS, { recursive: true, force: true });
+mkdirSync(SLOTS, { recursive: true, mode: 0o700 });
+writeFileSync(`${SLOTS}/stuck-node`, "2147483646 1 1\n", { mode: 0o600 });
+const takeoverLogs = [];
+let takeover;
+try {
+  takeover = await Promise.race([
+    waitForStartResources("codex app-server", {
+      nodeId: "takeover",
+      recheckMs: 25,
+      jitterMs: 0,
+      log: (m) => takeoverLogs.push(m),
+      warn: (m) => takeoverLogs.push(m),
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("stuck lease was not taken over within 10s")), 10_000)),
+  ]);
+} catch (e) {
+  fail(e instanceof Error ? e.message : String(e));
+}
+console.log(`takeover=${takeover.outcome}`);
+takeover.release();
+if (takeover.outcome !== "single-lane") fail(`takeover outcome ${takeover.outcome}`);
+if (!takeoverLogs.some((line) => line.includes("接管卡死租约"))) {
+  for (const line of takeoverLogs) console.log(line);
+  fail("stuck lease was not logged as 接管卡死租约");
+}
+if (readdirSync(SLOTS).includes("stuck-node")) fail("stuck lease still present");
+console.log("OK takeover");

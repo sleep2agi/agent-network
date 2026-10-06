@@ -139,7 +139,7 @@ cd <ws> && anet node stop <别名> && anet node start <别名>   # 原来用 --t
 即将 exec 重进程之前,同时读 cgroup 内存和 `/proc/meminfo`,取较小的可用值(容器里 `/proc/meminfo` 仍是宿主机的数)。没有 cgroup 上限时只看 `MemAvailable`。门槛和可用量用同一个口径:有 cgroup 上限时,门槛是 `min(4 GiB, min(MemTotal, cgroup 上限) 的 15%)`,不是宿主机 MemTotal 的 15%。cgroup 用量要减掉可回收页缓存(`memory.stat` 的 `inactive_file`;cgroup v1 优先 `total_inactive_file`,没有再退回 `inactive_file`)。1 分钟负载高于 `2 × CPU 核数` 也等。
 不够就等,大约每 15 秒重查一次(带抖动)。自有拓扑在 Hub 上把状态报成 `blocked`,正文固定「等待内存」。anet 拉 `-appsrv` 时桥还没起来,没有 Hub 会话,同一句打在 stdout。
 主机上同时处于启动中的重进程默认最多 2 个。租约在 `~/.anet/run/start-slots/`,按 node_id。租约和锁都记 pid,加上 `/proc/<pid>/stat` 第 22 列的进程启动时间,避免 pid 被复用后误判成还活着。租约默认 10 分钟过期,过期就删。释放时如果锁被占,会重试,进程退出时再试一次。
-等满上限后**不**整批放行:先降为单路,强制并发 = 1,日志和状态写「已超时，按单路放行」。单路如果仍拿不到租约,最多再等 120 秒,然后记一条「放行本次启动，避免整机一直卡住」并放行这一次,不拆别人的锁。
+等满上限后**不**整批放行:先降为单路,强制并发 = 1,日志和状态写「已超时，按单路放行」。单路**不会**因为再等满一段时间就绕过租约。只有当前持有者确实卡死(租约过期,或者 pid 与启动时间对不上)时,才由一个等待者接管,接管是原子的,一次只放一个,日志写「接管卡死租约」。正常推进的单路就是一个接一个。目录锁里同样记着 pid 和启动时间:pid 还活着但启动时间对不上,立刻回收;pid 还活着、启动时间也对得上、但锁文件已经超过 60 秒,按孤儿锁回收(临界区是同步的,不该占这么久)。
 `ANET_START_MEM_GATE=0` 整道关掉。非 Linux 不生效。`--force` 不跳过这道闸。
 
 | 环境变量 | 默认 | 含义 |
@@ -150,7 +150,6 @@ cd <ws> && anet node stop <别名> && anet node start <别名>   # 原来用 --t
 | `ANET_START_GATE_MAX_WAIT_SEC` | `600` | 等满之后改为单路放行,不再整批启动 |
 | `ANET_START_MAX_CONCURRENT` | `2` | 没超时时同时启动的上限;超时后强制为 1 |
 | `ANET_START_LEASE_TTL_SEC` | `600` | 启动租约最长存活秒数,过期视为无效 |
-| `ANET_START_SINGLE_LANE_MAX_WAIT_SEC` | `120` | 单路仍拿不到租约时,再等这么久就放行这一次 |
 
 经过这道闸:agent-node 自己 spawn 的 app-server;anet 拉起的共存 / 外置 / Windows `-appsrv`;共存看门狗重拉 `-appsrv`。
 不经过:脚本自己起的裸 app-server; `ANET_CODEX_STDIO_DIRECT=1` 的 stdio app-server;默认每个任务一次的 `codex exec`。不是所有启动路径都经过。

@@ -2,13 +2,13 @@
 // All host readings are injected; nothing here reads the real /proc.
 // slotsDir is a temp directory: an admit must not write ~/.anet.
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  START_GATE_BYPASS_STATUS,
   START_GATE_SINGLE_LANE_STATUS,
+  START_GATE_TAKEOVER_STATUS,
   START_GATE_WAITING_STATUS,
   cgroupFreeMb,
   cgroupLimitMb,
@@ -423,6 +423,7 @@ describe("#612 waitForStartResources", () => {
     let starting = 0;
     let maxStarting = 0;
     const reports: string[] = [];
+    const warns: string[] = [];
     const one = async (i: number) => {
       const h = fakeHost([FROZEN], {
         slotsDir,
@@ -433,7 +434,9 @@ describe("#612 waitForStartResources", () => {
         now: () => Date.now(),
         random: () => 0,
         report: (text) => reports.push(text),
-        env: { ANET_START_GATE_MAX_WAIT_SEC: "0.03" },
+        warn: (m) => warns.push(m),
+        // This used to bypass the lease. A short cap must still keep the lane at one.
+        env: { ANET_START_GATE_MAX_WAIT_SEC: "0.03", ANET_START_SINGLE_LANE_MAX_WAIT_SEC: "0.001" },
       });
       const r = await waitForStartResources("codex app-server", h.deps);
       starting++;
@@ -454,24 +457,114 @@ describe("#612 waitForStartResources", () => {
     for (const r of results) expect(r.outcome).toBe("single-lane");
     expect(reports.filter((text) => text === START_GATE_SINGLE_LANE_STATUS)).toHaveLength(14);
     expect(reports.filter((text) => text === START_GATE_WAITING_STATUS)).toHaveLength(14);
+    expect(warns.join("\n")).not.toContain("放行本次启动");
+    expect(warns.join("\n")).not.toContain(START_GATE_TAKEOVER_STATUS);
     expect(slotNames(slotsDir)).toEqual([]);
   }, 20_000);
 
-  test("a fresh empty lock is not stolen; the single-lane cap lets this start through", async () => {
+  test("a fresh empty lock is not stolen, and waiting does not skip the lease", async () => {
     const h = fakeHost([HEALTHY], {
-      env: { ANET_START_GATE_MAX_WAIT_SEC: "0.02" },
+      env: { ANET_START_GATE_MAX_WAIT_SEC: "0.02", ANET_START_SINGLE_LANE_MAX_WAIT_SEC: "0.001" },
       recheckMs: 5,
       jitterMs: 0,
-      singleLaneMaxWaitMs: 20,
+      sleep: async () => { throw new Error("still-held"); },
     });
     writeFileSync(join(h.slotsDir, ".lock"), "", { mode: 0o600 });
-    const r = await waitForStartResources("x", h.deps);
-    expect(r.outcome).toBe("single-lane");
+    await expect(waitForStartResources("x", h.deps)).rejects.toThrow("still-held");
     expect(readFileSync(join(h.slotsDir, ".lock"), "utf8")).toBe("");
-    expect(h.warns.join("\n")).toContain(START_GATE_BYPASS_STATUS);
+    expect(h.warns.join("\n")).not.toContain("放行本次启动");
     expect(slotNames(h.slotsDir)).toEqual([]);
+  });
+
+  test("a stuck lease is taken over by one waiter and does not wedge the lane", async () => {
+    const slotsDir = mkdtempSync(join(tmpdir(), "anet-612-takeover-"));
+    roots.push(slotsDir);
+    writeFileSync(join(slotsDir, "stuck"), "77777 111 9999999999999\n", { mode: 0o600 });
+    let starting = 0;
+    let maxStarting = 0;
+    const warns: string[] = [];
+    const one = async (nodeId: string) => {
+      const h = fakeHost([FROZEN], {
+        slotsDir,
+        nodeId,
+        recheckMs: 5,
+        jitterMs: 0,
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        now: () => Date.now(),
+        random: () => 0,
+        warn: (m) => warns.push(m),
+        isPidAlive: () => true,
+        readProcessStartTicks: () => "222",
+        env: {
+          ANET_START_GATE_MAX_WAIT_SEC: "0.03",
+          ANET_START_MAX_CONCURRENT: "2",
+          ANET_START_SINGLE_LANE_MAX_WAIT_SEC: "0.001",
+        },
+      });
+      const r = await waitForStartResources("x", h.deps);
+      starting++;
+      maxStarting = Math.max(maxStarting, starting);
+      try {
+        await new Promise((res) => setTimeout(res, 20));
+        return r;
+      } finally {
+        starting--;
+        r.release();
+      }
+    };
+    const results = await Promise.all([one("n-a"), one("n-b")]);
+    expect(maxStarting).toBe(1);
+    expect(results.map((r) => r.outcome)).toEqual(["single-lane", "single-lane"]);
+    expect(existsSync(join(slotsDir, "stuck"))).toBe(false);
+    expect(warns.join("\n")).toContain(START_GATE_TAKEOVER_STATUS);
+    expect(warns.join("\n")).not.toContain("放行本次启动");
+    expect(slotNames(slotsDir)).toEqual([]);
+  }, 15_000);
+
+  test("a live matching pid keeps a fresh lock; an old one is reclaimed as an orphan", async () => {
+    const fresh = fakeHost([HEALTHY], {
+      now: () => Date.now(),
+      isPidAlive: () => true,
+      readProcessStartTicks: () => "111",
+      nodeId: "n-fresh",
+      sleep: async () => { throw new Error("still-held"); },
+    });
+    const freshLock = join(fresh.slotsDir, ".lock");
+    writeFileSync(freshLock, "88888 111\n", { mode: 0o600 });
+    await expect(waitForStartResources("x", fresh.deps)).rejects.toThrow("still-held");
+    expect(readFileSync(freshLock, "utf8")).toBe("88888 111\n");
+    expect(fresh.warns.join("\n")).not.toContain("孤儿锁");
+
+    const stale = fakeHost([HEALTHY], {
+      now: () => Date.now(),
+      isPidAlive: () => true,
+      readProcessStartTicks: () => "111",
+      nodeId: "n-stale",
+    });
+    const staleLock = join(stale.slotsDir, ".lock");
+    writeFileSync(staleLock, "88888 111\n", { mode: 0o600 });
+    const old = (Date.now() - 120_000) / 1000;
+    utimesSync(staleLock, old, old);
+    const r = await waitForStartResources("x", stale.deps);
+    expect(r.outcome).toBe("ok");
+    expect(stale.warns.join("\n")).toContain("回收被活进程占住的孤儿锁 pid=88888 start=111");
     r.release();
-    expect(slotNames(h.slotsDir)).toEqual([]);
+    expect(slotNames(stale.slotsDir)).toEqual([]);
+  });
+
+  test("a live pid whose start time does not match does not keep the lock", async () => {
+    const h = fakeHost([HEALTHY], {
+      now: () => Date.now(),
+      isPidAlive: () => true,
+      readProcessStartTicks: () => "222",
+      nodeId: "n-new",
+    });
+    writeFileSync(join(h.slotsDir, ".lock"), "88888 111\n", { mode: 0o600 });
+    const r = await waitForStartResources("x", h.deps);
+    expect(r.outcome).toBe("ok");
+    expect(h.warns.join("\n")).not.toContain("孤儿锁");
+    expect(slotNames(h.slotsDir)).toEqual(["n-new"]);
+    r.release();
   });
 
   test("an expired lease is reaped even while its pid is still alive", async () => {

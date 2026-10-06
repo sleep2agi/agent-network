@@ -66,8 +66,8 @@ if ! grep -F -q 'FAIL: maxStarting=' /tmp/test612-mut.txt; then
 fi
 echo 'mutation red as required'
 
-echo '== green: four processes contend for one slot =='
-timeout 90 bun /test612/race.mjs
+echo '== green: sixteen processes contend for one slot =='
+timeout 150 bun /test612/race.mjs
 
 LOCK_ANCHOR='const LOCK_PUBLISH_ATOMIC = true;'
 LOCK_REPL='const LOCK_PUBLISH_ATOMIC = false;'
@@ -98,7 +98,7 @@ rm -rf /root/.bun/install/cache /tmp/bun-* "${HOME:-/root}/.bun/install/cache" 2
 
 echo '== red: empty lock can be stolen =='
 set +e
-timeout 90 bun /test612/race.mjs > /tmp/test612-race.txt 2>&1
+timeout 150 bun /test612/race.mjs > /tmp/test612-race.txt 2>&1
 rc=$?
 set -e
 cat /tmp/test612-race.txt

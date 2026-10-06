@@ -87,6 +87,8 @@ On another machine (#562): add --remote — the Hub asks that machine's daemon t
 
 Stop the node, then start it again (same options as anet node start).
 
+--force does not skip the start gate. Set ANET_START_MEM_GATE=0 to disable it.
+
 On another machine (#562): add --remote — the Hub asks that machine's daemon to do it.
   anet node <start|stop|restart> <alias> --remote [--network <id|name>] [--yes] [--wait <s>]
   anet node edit <alias> --model <id> --remote [--network <id|name>] [--yes] [--wait <s>]`,

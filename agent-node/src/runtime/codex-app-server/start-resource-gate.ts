@@ -18,8 +18,14 @@
 // ~/.anet/run/start-slots/ keyed by node id. A lease records pid plus the
 // process start time from /proc/<pid>/stat field 22, and it expires.
 // After the max wait, concurrency drops to 1 and the log/status say
-// 「已超时，按单路放行」. If that single slot stays busy past a second cap,
-// this start is let through and the stuck lease is left for the reaper.
+// 「已超时，按单路放行」. That wait never skips the lease. One waiter takes
+// the slot only when the holder is actually stuck (the lease expired, or its
+// pid and start time do not match). Takeover is atomic and admits one; the
+// log says 「接管卡死租约」. A live matching holder stays one-at-a-time.
+// The directory lock records pid and start time too. A live pid whose start
+// time does not match is reclaimed at once. A live pid that still matches,
+// but whose lock file is older than 60s, is an orphan: the critical section
+// is synchronous and cannot last that long.
 // ANET_START_MEM_GATE=0 disables the gate entirely. --force does not.
 // Never throws.
 
@@ -53,20 +59,23 @@ export const START_GATE_RECHECK_MS = 15_000;
 export const START_GATE_RECHECK_JITTER_MS = 5_000;
 export const START_GATE_WAITING_STATUS = "等待内存";
 export const START_GATE_SINGLE_LANE_STATUS = "已超时，按单路放行";
-/** Logged when the single-lane wait itself gives up, so one stuck lease cannot wedge the host. */
-export const START_GATE_BYPASS_STATUS = "放行本次启动，避免整机一直卡住";
+/** Logged when one waiter atomically replaces a stuck lease. The wait cap must not admit without this. */
+export const START_GATE_TAKEOVER_STATUS = "接管卡死租约";
 /** Startup leases older than this are not live. ANET_START_LEASE_TTL_SEC overrides it. */
 export const START_GATE_LEASE_TTL_MS = 10 * 60 * 1000;
 /** An empty or unreadable lock younger than this is still being published, not dead. */
 export const START_GATE_LOCK_STALE_MS = 30_000;
-/** How long a single-lane waiter keeps retrying before it is let through. */
-export const START_GATE_SINGLE_LANE_MAX_WAIT_MS = 120_000;
+/**
+ * A lock older than this, whose pid is still that same process, is an orphan.
+ * The critical section only renames and writes a few files.
+ */
+export const START_GATE_LOCK_ORPHAN_MS = 60_000;
 
 /**
  * Mutation anchor for tests/test612-start-admission. true publishes the lock
  * by linking a file that already has its payload. false is the old race:
- * O_EXCL creates an empty file, then the pid is written after a pause, and an
- * empty file is treated as a dead holder.
+ * O_EXCL creates an empty file, the pid is written afterwards with no pause,
+ * and an empty file is unlinked as a dead holder.
  */
 const LOCK_PUBLISH_ATOMIC = true;
 
@@ -102,10 +111,10 @@ export interface StartGateDeps {
   jitterMs?: number;
   /** Lease lifetime. Default 10 minutes, or ANET_START_LEASE_TTL_SEC. */
   leaseTtlMs?: number;
-  /** After single-lane begins, wait at most this long, then let this start through. */
-  singleLaneMaxWaitMs?: number;
   /** Empty/unreadable locks younger than this are held, not dead. */
   lockStaleMs?: number;
+  /** A live matching lock older than this is an orphan. Default 60s. */
+  lockOrphanMs?: number;
 }
 
 export type StartGateOutcome = "disabled" | "unsupported" | "ok" | "waited" | "single-lane";
@@ -415,14 +424,13 @@ function publishLock(dir: string, lockPath: string, holderPid: number, selfStart
   const payload = `${holderPid} ${selfStart ?? "-"}\n`;
   if (!LOCK_PUBLISH_ATOMIC) {
     // Dead path, kept so a one-token mutation reproduces the empty-file race.
+    // The file is visible empty before the pid is written. No pause.
     let fd: number;
     try {
       fd = openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
     } catch {
       return false;
     }
-    const until = Date.now() + 15;
-    while (Date.now() < until) { /* empty lock is visible to other processes */ }
     try { writeSync(fd, payload); } finally { closeSync(fd); }
     try { chmodSync(lockPath, 0o600); } catch { /* best effort */ }
     return true;
@@ -444,7 +452,7 @@ function publishLock(dir: string, lockPath: string, holderPid: number, selfStart
   }
 }
 
-type LockKind = "free" | "held" | "reclaim";
+type LockKind = "free" | "held" | "reclaim" | "orphan";
 
 function classifyLock(
   lockPath: string,
@@ -453,13 +461,14 @@ function classifyLock(
   readStart: (pid: number) => string | null,
   now: () => number,
   staleMs: number,
+  orphanMs: number,
 ): LockKind {
   let st: { mtimeMs: number };
   try { st = statSync(lockPath); } catch { return "free"; }
   const rec = readRecord(lockPath);
   if (rec.pid === null) {
     // Empty, junk, or unreadable. A just-created lock is not a dead holder.
-    if (!LOCK_PUBLISH_ATOMIC) return "reclaim";
+    // The non-atomic mutation unlinks this case before classifyLock.
     const age = now() - st.mtimeMs;
     return age >= staleMs ? "reclaim" : "held";
   }
@@ -467,7 +476,14 @@ function classifyLock(
   // critical section is synchronous). Always reclaim it.
   if (rec.pid === selfPid) return "reclaim";
   if (!holderAlive(rec, isPidAlive, readStart)) return "reclaim";
+  const age = now() - st.mtimeMs;
+  if (age >= orphanMs) return "orphan";
   return "held";
+}
+
+/** The pre-fix steal: drop an empty lock without comparing bytes, so a publisher still writing the pid loses it. */
+function stealEmptyLock(lockPath: string): boolean {
+  try { unlinkSync(lockPath); return true; } catch { return false; }
 }
 
 /** Rename the lock aside, and only then drop it if the bytes are still the ones we decided were dead. */
@@ -496,6 +512,8 @@ function takeFileLock(
   readStart: (pid: number) => string | null,
   now: () => number,
   staleMs: number,
+  orphanMs: number,
+  warn: (m: string) => void,
 ): boolean {
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -506,9 +524,20 @@ function takeFileLock(
   const lockPath = join(dir, ".lock");
   for (let attempt = 0; attempt < 2; attempt++) {
     if (publishLock(dir, lockPath, holderPid, selfStart)) return true;
-    const kind = classifyLock(lockPath, holderPid, isPidAlive, readStart, now, staleMs);
+    if (!LOCK_PUBLISH_ATOMIC && readRecord(lockPath).pid === null) {
+      if (!stealEmptyLock(lockPath)) return false;
+      continue;
+    }
+    const kind = classifyLock(lockPath, holderPid, isPidAlive, readStart, now, staleMs, orphanMs);
     if (kind === "held") return false;
-    if (kind === "reclaim" && !reclaimLock(lockPath)) return false;
+    // The lock vanished between the failed publish and this check. Do not
+    // reclaim whatever appears next — that file belongs to someone else.
+    if (kind !== "reclaim" && kind !== "orphan") continue;
+    const orphan = kind === "orphan" ? readRecord(lockPath) : null;
+    if (!reclaimLock(lockPath)) return false;
+    if (orphan && orphan.pid !== null) {
+      warn(`[start-gate] 回收被活进程占住的孤儿锁 pid=${orphan.pid} start=${orphan.start ?? "-"}`);
+    }
   }
   return false;
 }
@@ -527,9 +556,10 @@ function reapSlots(
   isPidAlive: (pid: number) => boolean,
   readStart: (pid: number) => string | null,
   warn: (m: string) => void,
-): void {
+): string[] {
+  const taken: string[] = [];
   let names: string[] = [];
-  try { names = readdirSync(dir); } catch { return; }
+  try { names = readdirSync(dir); } catch { return taken; }
   for (const name of names) {
     if (name === ".lock" || name.startsWith(".")) continue;
     const path = join(dir, name);
@@ -541,8 +571,10 @@ function reapSlots(
     const expired = rec.expiresAt !== null && now() >= rec.expiresAt;
     if (!expired && holderAlive(rec, isPidAlive, readStart)) continue;
     try { unlinkSync(path); } catch { continue; }
+    taken.push(name);
     if (expired) warn(`[start-gate] reaped expired start lease ${name}`);
   }
+  return taken;
 }
 
 function countLiveSlots(
@@ -574,11 +606,12 @@ function acquireLease(
   isPidAlive: (pid: number) => boolean,
   readStart: (pid: number) => string | null,
   staleMs: number,
+  orphanMs: number,
   warn: (m: string) => void,
 ): AcquireKind {
-  if (!takeFileLock(dir, holderPid, selfStart, isPidAlive, readStart, now, staleMs)) return "no";
+  if (!takeFileLock(dir, holderPid, selfStart, isPidAlive, readStart, now, staleMs, orphanMs, warn)) return "no";
   try {
-    reapSlots(dir, now, isPidAlive, readStart, warn);
+    const taken = reapSlots(dir, now, isPidAlive, readStart, warn);
     const mine = join(dir, key);
     const existing = readRecord(mine);
     if (
@@ -594,6 +627,7 @@ function acquireLease(
     const exp = now() + ttlMs;
     writeFileSync(mine, `${holderPid} ${selfStart ?? "-"} ${exp}\n`, { mode: 0o600 });
     try { chmodSync(mine, 0o600); } catch { /* best effort */ }
+    if (taken.length > 0) warn(`[start-gate] ${START_GATE_TAKEOVER_STATUS} ${taken.join(",")}`);
     return "acquired";
   } finally {
     releaseFileLock(dir, holderPid, selfStart);
@@ -609,9 +643,10 @@ function tryDropLease(
   isPidAlive: (pid: number) => boolean,
   readStart: (pid: number) => string | null,
   staleMs: number,
+  orphanMs: number,
   warn: (m: string) => void,
 ): boolean {
-  if (!takeFileLock(dir, holderPid, selfStart, isPidAlive, readStart, now, staleMs)) return false;
+  if (!takeFileLock(dir, holderPid, selfStart, isPidAlive, readStart, now, staleMs, orphanMs, warn)) return false;
   let ok = true;
   try {
     const path = join(dir, key);
@@ -651,10 +686,18 @@ function scheduleDrop(
   isPidAlive: (pid: number) => boolean,
   readStart: (pid: number) => string | null,
   staleMs: number,
+  orphanMs: number,
   warn: (m: string) => void,
 ): void {
-  const once = () => tryDropLease(dir, key, holderPid, selfStart, now, isPidAlive, readStart, staleMs, warn);
+  const once = () => tryDropLease(dir, key, holderPid, selfStart, now, isPidAlive, readStart, staleMs, orphanMs, warn);
   if (once()) return;
+  // The critical section is synchronous. A few millisecond retries avoid parking
+  // every contested release on the 250ms timer.
+  for (let i = 0; i < 8; i++) {
+    const until = Date.now() + 2;
+    while (Date.now() < until) { /* the other process is still in the critical section */ }
+    if (once()) return;
+  }
   warn(`[start-gate] could not release start slot ${key}: lock busy; retrying`);
   ensureExitHook();
   const startedAt = Date.now();
@@ -730,9 +773,8 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   const recheckMs = deps.recheckMs ?? START_GATE_RECHECK_MS;
   const jitterSpan = deps.jitterMs ?? START_GATE_RECHECK_JITTER_MS;
   const leaseTtlMs = deps.leaseTtlMs ?? positiveNumberEnv(env, "ANET_START_LEASE_TTL_SEC", START_GATE_LEASE_TTL_MS / 1000, warn) * 1000;
-  const singleLaneMaxMs = deps.singleLaneMaxWaitMs
-    ?? positiveNumberEnv(env, "ANET_START_SINGLE_LANE_MAX_WAIT_SEC", START_GATE_SINGLE_LANE_MAX_WAIT_MS / 1000, warn) * 1000;
   const lockStaleMs = deps.lockStaleMs ?? START_GATE_LOCK_STALE_MS;
+  const lockOrphanMs = deps.lockOrphanMs ?? START_GATE_LOCK_ORPHAN_MS;
   const slotsDir = deps.slotsDir?.trim()
     || env.ANET_START_SLOTS_DIR?.trim()
     || join(homedir(), ".anet", "run", "start-slots");
@@ -783,7 +825,7 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   };
   const ownLease = () => {
     releaseImpl = () => scheduleDrop(
-      slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, warn,
+      slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, warn,
     );
   };
 
@@ -791,7 +833,7 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
     enqueueSlot(slotsDir, () => {
       try {
         return acquireLease(
-          slotsDir, key, cap, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, warn,
+          slotsDir, key, cap, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, warn,
         );
       } catch (e) {
         warn(`[start-gate] lease error: ${e instanceof Error ? e.message : String(e)}`);
@@ -805,7 +847,6 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   let lastSlotLogAt = -Infinity;
   let reportedWaiting = false;
   let announcedSingleLane = false;
-  let singleLaneSince: number | null = null;
 
   const slotSleepMs = (waitedMs: number, capToMaxWait: boolean): number => {
     const jitter = jitterSpan > 0 ? Math.floor(random() * jitterSpan) : 0;
@@ -822,8 +863,6 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
       const timedOut = waitedMs >= maxWaitMs;
       const reasons = s ? startGateReasons(s, minMemFor(s), maxLoadPerCpu) : ["/proc unreadable"];
       const shortage = reasons.length > 0;
-
-      if (timedOut && singleLaneSince === null) singleLaneSince = now();
 
       if (timedOut && !announcedSingleLane) {
         announcedSingleLane = true;
@@ -864,17 +903,6 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
           return finish("waited", waitedMs, checks, release);
         }
         return finish("ok", 0, checks, release);
-      }
-
-      if (
-        timedOut
-        && singleLaneSince !== null
-        && now() - singleLaneSince >= singleLaneMaxMs
-      ) {
-        warn(
-          `[start-gate] ${label}: ${START_GATE_BYPASS_STATUS} after ${Math.round((now() - singleLaneSince) / 1000)}s still waiting for the single start slot (ANET_START_SINGLE_LANE_MAX_WAIT_SEC=${singleLaneMaxMs / 1000})`,
-        );
-        return finish("single-lane", now() - started, checks, release);
       }
 
       if (checks === 1 || waitedMs - lastSlotLogAt >= 60_000) {

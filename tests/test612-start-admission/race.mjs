@@ -7,8 +7,9 @@ import { closeSync, constants, mkdtempSync, openSync, rmSync, unlinkSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const WORKERS = 4;
-const ROUNDS = 50;
+const WORKERS = 16;
+// The empty-file window is one write, not a sleep. 16×60 overlapped only a handful of times.
+const ROUNDS = 120;
 const HOLD_MS = 5;
 const GATE = process.env.RACE_GATE || "/agent-node-src/src/runtime/codex-app-server/start-resource-gate.ts";
 
