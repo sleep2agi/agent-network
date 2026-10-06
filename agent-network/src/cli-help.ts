@@ -384,6 +384,19 @@ Stop every node in this directory and tell the Hub they are offline.`,
 List the nodes in this directory with their run state.`,
 
   // ── daemon ──
+  "daemon adopt": `Usage: anet daemon adopt <alias> [--daemon <id-or-alias>] [--yes]
+       anet daemon adopt --all [--daemon <id-or-alias>] [--yes]
+
+Plan adoption from the current workdir. --yes requests a binding; the daemon
+must independently verify it. Does not stop or restart the node. Human login required.`,
+  "daemon unadopt": `Usage: anet daemon unadopt <alias> [--yes]
+
+Plan binding revocation. --yes applies it; the running node is never stopped.
+Human login required.`,
+  "daemon adopted": `Usage: anet daemon adopted [--daemon <id>]
+
+List local adopted entries with an active Hub binding. Run from the daemon
+workdir with a human login. Does not modify nodes or bindings.`,
   "daemon init": `Usage: anet daemon init <name> [--force] [--allow-secret KEY]...
 
 Create a host_supervisor daemon node config. --force overwrites a non-daemon
