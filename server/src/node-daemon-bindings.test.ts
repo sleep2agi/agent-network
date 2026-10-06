@@ -104,6 +104,8 @@ test("wrong daemon cannot pull/ack; refusal releases reservation; in-flight unad
   expect((await call(handlers().unadopt_node, { node_id: CHILD })).error).toBe("node_lifecycle_in_flight");
 });
 test("old daemon, hostname mismatch, stale heartbeat and cross-network daemon rejected", async () => {
+  db.run("UPDATE nodes SET config_snapshot='null' WHERE node_id=?1", [DAEMON]);
+  expect((await request()).error).toBe("daemon_not_adopt_capable");
   db.run("UPDATE nodes SET config_snapshot='{}' WHERE node_id=?1", [DAEMON]);
   expect((await request()).error).toBe("daemon_not_adopt_capable");
   db.run("UPDATE nodes SET config_snapshot=?1,hostname='different' WHERE node_id=?2", [JSON.stringify({ role: "host_supervisor", daemon_capabilities: { adopt_capable: true } }), DAEMON]);

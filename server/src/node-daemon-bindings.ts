@@ -9,7 +9,10 @@ type Binding = { request_id: string; network_id: string; node_id: string; daemon
 type Human = { userId?: string | null; networkId?: string | null; isNode: boolean; canWrite: (networkId: string) => boolean };
 type Daemon = { ok: true; daemonNodeId: string; networkId: string } | { ok: false; error: string };
 const fail = (error: string) => ({ ok: false as const, error });
-const snapshot = (node: Node) => { try { return JSON.parse(node.config_snapshot || "{}"); } catch { return {}; } };
+const snapshot = (node: Node) => {
+  try { const value = JSON.parse(node.config_snapshot || "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }
+  catch { return {}; }
+};
 
 export function createdDaemon(nodeId: string): string | null {
   if (!nodeId.startsWith("node_")) return null;
