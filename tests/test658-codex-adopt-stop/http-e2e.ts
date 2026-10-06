@@ -83,7 +83,7 @@ try{
  const bootScript=readFileSync("deploy/fleet/anet-nodes-boot.sh","utf8");
  const probe=bootScript.split("<<'HUB_STOPPED_PROBE' || rc=$?\n")[1].split("\nHUB_STOPPED_PROBE")[0];
  let bootRc=0;try{execFileSync("node",["-",`${nodeDir}/config.json`],{input:probe});}catch(e:any){bootRc=e.status;}
- check(bootRc===1&&!isHubStopped(nodeDir,"n_manual_fixture"),"after simulated reboot both boot readers permit recovery");
+ check(bootRc===42&&!isHubStopped(nodeDir,"n_manual_fixture"),"after simulated reboot both boot readers permit recovery");
  writeFileSync(`${nodeDir}/.hub-stopped`,JSON.stringify({node_id:"n_manual_fixture",stopped:true,request_id:"stop_new_intent"}),{mode:0o600});
  check(isHubStopped(nodeDir,"n_manual_fixture"),"new stop intent overrides earlier manual-resume certificate");
  db.close();

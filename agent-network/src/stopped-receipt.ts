@@ -8,7 +8,9 @@ function snapshot(path: string, nodeId: unknown): string | null {
       if (!st.isFile() || st.isSymbolicLink() || st.uid !== BigInt(process.getuid?.() ?? -1) || (st.mode & 0o022n)) return null;
       const raw = readFileSync(path, "utf8"), data = JSON.parse(raw);
       if (typeof nodeId !== "string" || !nodeId || data?.node_id !== nodeId || data.stopped !== true) return null;
-      return `${st.dev}:${st.ino}:${st.ctimeNs}:${createHash("sha256").update(raw).digest("hex")}`;
+      // Device numbers can change across boot; inode/ctime/content stay bound
+      // to the receipt in this node directory, not the host's device mapping.
+      return `${st.ino}:${st.ctimeNs}:${createHash("sha256").update(raw).digest("hex")}`;
     } catch (e: any) { if (e.code === "ENOENT" || e instanceof SyntaxError) return null; throw e; }
 }
 

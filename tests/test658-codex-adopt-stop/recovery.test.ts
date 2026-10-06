@@ -1,8 +1,9 @@
 import { expect } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, renameSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, renameSync, symlinkSync, unlinkSync, lstatSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { containerTest as test, fixtureTmux } from "./fixture-tmux.js";
 import { stoppedReceiptAtStart, isHubStopped } from "../../agent-network/src/stopped-receipt.js";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { handleAdoptDoorbell } from "../../agent-node/src/runtime/adopt-daemon.js";
 import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifecycle.js";
 import { listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
@@ -13,7 +14,7 @@ test("manual start supersedes only its captured stopped receipt; fleet parity", 
   const probe = bootScript.split("<<'HUB_STOPPED_PROBE' || rc=$?\n")[1].split("\nHUB_STOPPED_PROBE")[0];
   const fleetStopped = (dir:string) => {
     try { execFileSync("node", ["-",`${dir}/config.json`],{input:probe});return true; }
-    catch (e:any) { if(e.status===1)return false;throw e; }
+    catch (e:any) { if(e.status===42)return false;throw e; }
   };
   for (const change of ["none", "replace", "rewrite", "missing", "foreign", "symlink", "failed"] as const) {
     const dir = mkdtempSync("/tmp/codex-receipt-"), file = `${dir}/.hub-stopped`;
@@ -33,6 +34,8 @@ test("manual start supersedes only its captured stopped receipt; fleet parity", 
     expect(fleetStopped(dir)).toBe(change !== "none");
     if (change === "none") {
       const cert = readFileSync(`${dir}/.hub-resumed`,"utf8");
+      const st = lstatSync(file, {bigint:true});
+      expect(JSON.parse(cert).receipt_fingerprint).toBe(`${st.ino}:${st.ctimeNs}:${createHash("sha256").update(old).digest("hex")}`);
       // A new stop with identical JSON must not inherit an old resume grant.
       writeFileSync(`${file}.next`,old,{mode:0o600});renameSync(`${file}.next`,file);
       writeFileSync(`${dir}/.hub-resumed`,cert); // Simulate a late old-start certificate.
@@ -40,6 +43,23 @@ test("manual start supersedes only its captured stopped receipt; fleet parity", 
       expect(fleetStopped(dir)).toBe(true);
     }
   }
+});
+
+test("fleet shell keeps stopped on probe exception or syntax failure", () => {
+  const source = readFileSync("deploy/fleet/anet-nodes-boot.sh", "utf8");
+  const fn = source.slice(source.indexOf("hub_stopped_dir() {"), source.indexOf("\n# 一层依赖"));
+  const dir = mkdtempSync("/tmp/codex-probe-crash-");
+  writeFileSync(`${dir}/config.json`, JSON.stringify({node_id:"n_fixture"}));
+  writeFileSync(`${dir}/.hub-stopped`, JSON.stringify({node_id:"n_fixture",stopped:true}), {mode:0o600});
+  const held = (body:string) => spawnSync("bash", ["-c", `${body}\nif hub_stopped_dir "$1"; then exit 0; else exit 1; fi`, "fixture", `${dir}/config.json`], {encoding:"utf8"});
+  expect(held(fn).status).toBe(0);
+  for (const injection of ['throw Error("fixture probe crash");', 'const = ;']) {
+    const result = held(fn.replace("const fs = require", `${injection}\nconst fs = require`));
+    expect(result.stderr.length).toBeGreaterThan(0);
+    expect(result.status).toBe(0); // Actual shell predicate, not a reimplementation.
+  }
+  stoppedReceiptAtStart(dir,"n_fixture")();
+  expect(held(fn).status).toBe(1); // Reserved exit 42 is a real release, not always held.
 });
 
 test("both CLI layouts capture before launch and clear only on successful start", () => {
@@ -113,6 +133,12 @@ test(`recovery ${layout}: old boot never signals; receipt and delete refusals`, 
     // Different marker + escaped/renamed session but same home is NOT absent.
     const current = create("new-generation-escaped","new-marker");
     await action("stop","stop_current_generation");
+    expect(calls.at(-1).args).toMatchObject({status:"stop_failed",error:"adopt_codex_readopt_required"});
+    expect(signals).toBe(0);
+    expect(listCodexPanes(scope).some(r=>r[2]===current)).toBe(true);
+    // Lost PID evidence must not hide a live new generation with the same home.
+    unlinkSync(`${nodeDir}/.pid`);
+    await action("stop","stop_missing_pid_current_generation");
     expect(calls.at(-1).args).toMatchObject({status:"stop_failed",error:"adopt_codex_readopt_required"});
     expect(signals).toBe(0);
     expect(listCodexPanes(scope).some(r=>r[2]===current)).toBe(true);

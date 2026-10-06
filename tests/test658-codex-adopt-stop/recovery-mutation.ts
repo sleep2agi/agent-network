@@ -16,3 +16,5 @@ await runMutation("reboot no-signal gate", "agent-node/src/runtime/adopt-lifecyc
 await runMutation("concurrent stop receipt", "agent-node/src/runtime/adopt-lifecycle.ts", 'if (stoppedReceipt(stoppedMarker, deps.uid) !== receiptBefore) throw Error("adopt_stop_receipt_changed");', '');
 await runMutation("exact resume certificate", "agent-network/src/stopped-receipt.ts", 'data.receipt_fingerprint === fingerprint', 'true');
 await runMutation("manual start supersession", "agent-network/src/stopped-receipt.ts", 'renameSync(tmp, file);', '');
+await runMutation("missing saved PID shortcut", "agent-node/src/runtime/adopt-codex-reboot.ts", 'export function assertCodexAbsentAfterReboot(scope: CodexAdoptionScope): void {', 'export function assertCodexAbsentAfterReboot(scope: CodexAdoptionScope): void { try { if (!processStamp(Number(readFileSync(`${scope.codexHome}/../.pid`, "utf8")))) return; } catch { return; }');
+await runMutation("probe crash must stay stopped", "deploy/fleet/anet-nodes-boot.sh", '[ "$rc" -ne 42 ]', '[ "$rc" -ne 42 ] && [ "$rc" -ne 1 ]');
