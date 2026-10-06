@@ -1,4 +1,11 @@
 import { projectDirMismatchWarning, statusTaskForReport } from "/src/project-dir-mismatch.ts";
+import {
+  appserverShellCommand,
+  bridgeShellCommand,
+  externalAppserverBridgeCwd,
+  planExternalAppserverNode,
+  tuiShellCommand,
+} from "/anet/codex-external-appserver.ts";
 
 const ROOT = "/work";
 const NODE = "/work/.anet/nodes/demo-node";
@@ -63,6 +70,34 @@ if (mode === "root") {
   if (!daemonInNodeDir || !daemonInNodeDir.includes(`"${home}"`)) {
     fail(`node-directory start of a home-registry config stayed quiet: ${daemonInNodeDir}`);
   }
+  // Product external bridge: tmux cwd is the workspace. Hand start in the
+  // node directory still warns. Codex pins -C and CODEX_HOME itself.
+  const planned = planExternalAppserverNode({
+    alias: "demo-node",
+    nodeDir: NODE,
+    workspaceDir: ROOT,
+    profile: {
+      runtime: "codex-app-server",
+      codexAppServerUrl: "ws://127.0.0.1:9",
+      codexThreadId: "0199aaaa-bbbb-cccc-dddd-eeeeffff0001",
+      codexProjectDir: `${ROOT}/project`,
+      codexCopresence: true,
+    },
+  });
+  if (!planned.ok) fail(planned.error);
+  const bridgeCwd = externalAppserverBridgeCwd(planned.plan);
+  const productWarning = projectDirMismatchWarning({ configPath: CONFIG, cwd: bridgeCwd });
+  if (productWarning) fail(`product external bridge warned: ${productWarning}`);
+  const hand = projectDirMismatchWarning({ configPath: CONFIG, cwd: NODE });
+  if (!hand) fail("hand start in the node directory stayed quiet");
+  const bridgeCmd = bridgeShellCommand(planned.plan, { command: "bun", argsPrefix: ["cli.js"] });
+  if (!bridgeCmd.includes(`'--config' '${CONFIG}'`)) fail(`bridge config is not absolute: ${bridgeCmd}`);
+  if (!bridgeCmd.includes(`'--log-dir' '${NODE}/logs'`)) fail(`bridge log-dir is not absolute: ${bridgeCmd}`);
+  const appCmd = appserverShellCommand(planned.plan, "bun");
+  if (!appCmd.includes(`-C '${ROOT}/project'`)) fail(`app-server does not pin -C: ${appCmd}`);
+  if (!appCmd.includes(`CODEX_HOME='${NODE}/codex-home'`)) fail(`app-server does not pin CODEX_HOME: ${appCmd}`);
+  const tuiCmd = tuiShellCommand(planned.plan);
+  if (!tuiCmd.includes(`-C '${ROOT}/project'`)) fail(`tui does not pin -C: ${tuiCmd}`);
   assertFold("hint-for-fold");
   console.log(`project_dir=${started}`);
   console.log("warning=");

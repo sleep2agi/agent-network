@@ -234,6 +234,7 @@ import {
   appserverShellCommand,
   bridgeLogPath,
   bridgeShellCommand,
+  externalAppserverBridgeCwd,
   exactSessionRows,
   externalAppserverRequested,
   externalAppserverStopOrder,
@@ -7839,7 +7840,7 @@ function startExternalAppserverBridge(plan: ExternalAppserverPlan, launch: Agent
   // tmux gives a new session's first process the SERVER's env, not ours: pass what the bridge needs explicitly.
   if (process.env.ANET_QUEUE_TIMEOUT_MS) env.push("-e", `ANET_QUEUE_TIMEOUT_MS=${process.env.ANET_QUEUE_TIMEOUT_MS}`);
   execTmux([
-    "new-session", "-d", "-s", plan.sessions.bridge, "-c", plan.nodeDir, ...env,
+    "new-session", "-d", "-s", plan.sessions.bridge, "-c", externalAppserverBridgeCwd(plan), ...env,
     "bash", "-c", bridgeShellCommand(plan, launch),
   ], { stdio: "pipe" });
   console.log(`[anet] ③ bridge tmux=${plan.sessions.bridge} (${launch.argsPrefix[0] ?? launch.command})`);

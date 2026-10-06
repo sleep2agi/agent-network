@@ -49,9 +49,9 @@ export function projectDirMismatchWarning(input: {
  * COALESCE keeps the current text. The idle report after the task ends
  * (in-flight back to 0) writes the hint back.
  *
- * cwd == the node directory is not whitelisted. That layout is the mismatch
- * this warning exists for, including an external app-server bridge whose
- * tmux session starts in the node directory.
+ * cwd == the node directory is not whitelisted. The product-started external
+ * bridge is given the workspace root as its tmux cwd, so it does not warn.
+ * A process actually started in the node directory still warns.
  */
 export function statusTaskForReport(
   status: string,

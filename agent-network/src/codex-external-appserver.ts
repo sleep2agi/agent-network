@@ -245,6 +245,21 @@ export function bridgeLogPath(plan: { nodeDir: string }): string {
   return join(plan.nodeDir, "logs", "tmux-bridge.log");
 }
 
+/**
+ * tmux `-c` for the product-started bridge (`anet node start` and
+ * `restart --bridge-only`). The node directory arrives as `--config` and
+ * `--log-dir`; agent-node derives NODE_DIR from that absolute config.
+ * Codex's app-server and TUI are separate sessions and pin the project
+ * with `-C` plus `CODEX_HOME`, so this directory is not their project.
+ * A hand-started agent-node never calls this and keeps the person's cwd.
+ */
+export function externalAppserverBridgeCwd(
+  plan: Pick<ExternalAppserverPlan, "workspaceDir" | "nodeDir">,
+): string {
+  // nodeDir stays on the argument so a test can point this return at it.
+  return plan.workspaceDir; // external bridge cwd
+}
+
 export type ResumedVerdict =
   | { state: "match"; seen: string }
   | { state: "mismatch"; seen: string }
