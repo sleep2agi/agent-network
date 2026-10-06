@@ -171,6 +171,19 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     expect(b.replyText).toBe("BBB");
   });
 
+  test("board656 a tool then at capacity does not resubmit the turn", async () => {
+    const { session } = await open();
+    const sleeps: number[] = [];
+    const error: any = await session.submit("STUB_TOOL_CAPACITY please", 10_000, undefined, {
+      capacityRetrySleep: async (ms) => { sleeps.push(ms); },
+      onCapacityRetry: () => { sleeps.push(-1); },
+    }).then(() => null, (e) => e);
+    expect(error).toBeInstanceOf(OpenCodeProviderError);
+    expect(error.message).toContain("模型在执行中途出错，未自动重试，以免重复执行");
+    expect(error.message).not.toContain("已自动重试");
+    expect(sleeps).toEqual([]);
+  });
+
   test("provider error fails the task with the upstream text instead of a false 'replied'", async () => {
     const { session } = await open();
     await expect(session.submit("STUB_FAIL please", 10_000)).rejects.toBeInstanceOf(OpenCodeProviderError);

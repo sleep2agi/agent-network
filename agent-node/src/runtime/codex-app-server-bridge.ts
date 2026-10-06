@@ -22,6 +22,7 @@
 import { EventEmitter } from "events";
 import { CodexAppServerClient } from "./codex-app-server-client";
 import { DEFAULT_RESUME_ATTEMPTS, DEFAULT_RESUME_TIMEOUT_MS } from "./codex-app-server/resume-timeout";
+import { isCodexSideEffectItem } from "./capacity-retry";
 
 /** Newest turns read when recovering or reconciling a turn from history. */
 const RECENT_TURNS_PAGE_SIZE = 10;
@@ -98,6 +99,8 @@ export interface PendingTurn {
   competingTurnObserved?: boolean;
   /** Terminal raced turn/start response or identity confirmation. */
   deferredTerminal?: { turnId: string; status?: string; error?: string };
+  /** A tool item landed on this turn. Kept across the identity echo. */
+  sideEffectObserved?: boolean;
   agentTextChunks: string[];
   finalText?: string;
 }
@@ -108,6 +111,7 @@ interface SteeredTurn {
   agentTextChunks: string[];
   finalText?: string;
   terminal?: { status?: string; error?: string };
+  sideEffectObserved?: boolean;
 }
 
 export interface WaitingApproval {
@@ -149,6 +153,7 @@ export class CodexBridgeNotReadyError extends Error {
  *   - "approval_resolved" → { reverseRequestId } — from serverRequest/resolved
  *   - "task_started"      → { taskId, turnId, steered } — model budget starts
  *   - "task_activity"     → CodexAppServerTaskActivity — exact owned turn made progress
+ *   - "task_side_effect"  → { taskId, turnId } — this round already ran a tool
  *   - "task_turn_rebound" → { taskId, fromTurnId, toTurnId } — client-id repair
  *   - "task_reply"        → { taskId, text }  — final agent message
  *   - "task_error"        → { taskId, error }
@@ -211,6 +216,8 @@ export class CodexAppServerBridge extends EventEmitter {
    */
   private turnClaimed = false;
   private pendingTurns = new Map<string, PendingTurn>();
+  /** Turn ids that already showed a tool item, even before identity is confirmed. */
+  private sideEffectTurnIds = new Set<string>();
   /** Stable task identity across turn-id replacement races. */
   private pendingByClientUserMessageId = new Map<string, PendingTurn>();
   /** Reverse-request ids we've observed but not resolved (bridge policy). */
@@ -513,8 +520,12 @@ export class CodexAppServerBridge extends EventEmitter {
       this.pendingTurns.delete(previousTurnId);
     }
     pending.turnId = turnId;
+    if (this.sideEffectTurnIds.has(turnId)) pending.sideEffectObserved = true;
     if (identityConfirmed) pending.identityConfirmed = true;
     this.pendingTurns.set(turnId, pending);
+    if (pending.identityConfirmed && pending.sideEffectObserved) {
+      this.emit("task_side_effect", { taskId: pending.taskId, turnId });
+    }
     this.activeTurnId = turnId;
     if (this.externalActiveTurnId === turnId) {
       this.externalActiveTurnId = null;
@@ -628,6 +639,9 @@ export class CodexAppServerBridge extends EventEmitter {
         );
       }
       state.acceptedTaskIds.add(input.taskId);
+      if (state.sideEffectObserved) {
+        this.emit("task_side_effect", { taskId: input.taskId, turnId: expectedTurnId });
+      }
       this.emit("task_started", {
         taskId: input.taskId,
         turnId: expectedTurnId,
@@ -922,8 +936,9 @@ export class CodexAppServerBridge extends EventEmitter {
   }
 
   private onItemStarted(params: unknown): void {
-    const p = params as { threadId?: string; turnId?: string };
+    const p = params as { threadId?: string; turnId?: string; item?: { type?: string } };
     if (!p || p.threadId !== this.threadId || typeof p.turnId !== "string") return;
+    this.noteOwnedSideEffect(p.turnId, p.item?.type);
     this.emitTaskActivity(p.turnId, "item_started");
   }
 
@@ -959,6 +974,7 @@ export class CodexAppServerBridge extends EventEmitter {
     };
     if (!p || p.threadId !== this.threadId) return;
     if (typeof p.turnId !== "string") return;
+    this.noteOwnedSideEffect(p.turnId, p.item?.type);
 
     // Codex can accept turn/start with response id A, then let an automatic
     // goal successor win the same idle boundary and persist our user message
@@ -1000,6 +1016,25 @@ export class CodexAppServerBridge extends EventEmitter {
       pending.finalText = p.item.text;
     }
     this.emitTaskActivity(p.turnId, "item_completed");
+  }
+
+  private noteOwnedSideEffect(turnId: string, itemType: string | undefined): void {
+    if (!isCodexSideEffectItem(itemType)) return;
+    this.sideEffectTurnIds.add(turnId);
+    const pending = this.pendingTurns.get(turnId);
+    if (pending) {
+      pending.sideEffectObserved = true;
+      if (pending.identityConfirmed) {
+        this.emit("task_side_effect", { taskId: pending.taskId, turnId });
+      }
+      return;
+    }
+    const steered = this.steeredTurns.get(turnId);
+    if (!steered) return;
+    steered.sideEffectObserved = true;
+    for (const taskId of steered.acceptedTaskIds) {
+      this.emit("task_side_effect", { taskId, turnId });
+    }
   }
 
   private emitTaskActivity(

@@ -1,6 +1,12 @@
 import { GrokAcpClient } from "./client";
 import { newGrokTurnState, reduceGrokAcpNotification } from "./events";
 import type { GrokAcpNotification, GrokTurnState } from "./events";
+import {
+  CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
+  capacityRetryDecision,
+  pauseForCapacityRetry,
+} from "../capacity-retry";
 
 // #204 — ACP `session/new` / `session/load` accepts an mcpServers list. Empty
 // list lets Grok CLI fall back to reading `<cwd>/.mcp.json`, which is the
@@ -92,6 +98,10 @@ export interface GrokAcpTurnOptions {
   onSubmitted?: () => void;
   /** Exact session/prompt response completed. Session-wide notifications alone are insufficient. */
   onConsumed?: () => void;
+  /** Board #656. Non-terminal progress while the same session and model are retried. */
+  onCapacityRetry?: (attempt: number) => void | Promise<void>;
+  /** Test seam for the 30s / 60s / 120s capacity backoff. */
+  capacityRetrySleep?: (ms: number) => Promise<void>;
   /**
    * #204 preview.4 — Grok agent's stderr stream (handshake errors, MCP
    * subprocess crash logs, etc.). Caller routes this to agent-node's
@@ -306,13 +316,41 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     // turns no longer get falsely killed mid-flight, but a genuinely
     // stuck agent (no frames for `timeoutMs`) still surfaces an error
     // with a hint that the work may still be running in the background.
-    const promptRequest = client.requestWithIdleTimeout("session/prompt", {
-      sessionId,
-      prompt: [{ type: "text", text: opts.prompt }],
-    }, timeoutMs);
-    opts.onSubmitted?.();
-    const promptResponse = await promptRequest;
-    opts.onConsumed?.();
+    // Board #656. The idle timer belongs to one prompt request. A capacity
+    // rejection settles that request (timer cleared) before the backoff, so
+    // the wait is not an idle timeout. Same session, same prompt, no model change.
+    let promptResponse: unknown;
+    let capacityRetries = 0;
+    for (;;) {
+      const toolsAtStart = state.toolCalls;
+      try {
+        const promptRequest = client.requestWithIdleTimeout("session/prompt", {
+          sessionId,
+          prompt: [{ type: "text", text: opts.prompt }],
+        }, timeoutMs);
+        opts.onSubmitted?.();
+        promptResponse = await promptRequest;
+        opts.onConsumed?.();
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const decision = capacityRetryDecision(capacityRetries, message, state.toolCalls > toolsAtStart);
+        if (decision.action !== "retry") {
+          if (decision.action === "exhaust") {
+            throw new Error(CAPACITY_RETRY_EXHAUSTED_TEXT);
+          }
+          if (decision.action === "side_effect") {
+            throw new Error(CAPACITY_RETRY_SIDE_EFFECT_TEXT);
+          }
+          throw error;
+        }
+        capacityRetries += 1;
+        await pauseForCapacityRetry(decision, {
+          sleep: opts.capacityRetrySleep,
+          onRetry: opts.onCapacityRetry,
+        });
+      }
+    }
     await waitForPromptDrain(state, drainMs);
 
     return {

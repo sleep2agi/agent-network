@@ -37,6 +37,12 @@ import {
 import { resolve } from "path";
 import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
 import {
+  CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
+  capacityRetryDecision,
+  pauseForCapacityRetry,
+} from "../capacity-retry";
+import {
   cleanupOpencodeChildEnv,
   discardUnspawnedOpencodeChildEnv,
   readOpencodeProcessIdentity,
@@ -86,6 +92,10 @@ export interface OpencodeThinkOptions {
   onConsumed?: () => void;
   /** #383 rescue toggle. Falls through to the process env if unset. */
   disableThinkingOnlyRescue?: boolean;
+  /** Board #656. Non-terminal progress. Same session and prompt are retried. */
+  onCapacityRetry?: (attempt: number) => void | Promise<void>;
+  /** Test seam for the 30s / 60s / 120s capacity backoff. */
+  capacityRetrySleep?: (ms: number) => Promise<void>;
 }
 
 export interface OpencodeThinkResult {
@@ -357,26 +367,55 @@ export async function opencodeThink(
   runtime.client.on("notification", onNotification);
 
   let response: any;
+  let capacityRetries = 0;
+  // Board #656. A capacity rejection settles the prompt request before the
+  // backoff, so the idle timer is not running during the wait. Do not kill
+  // the child for that class: the next attempt reuses this session and prompt.
   try {
-    const request = runtime.client.requestWithIdleTimeout("session/prompt", {
-      sessionId: runtime.sessionId,
-      prompt: [{ type: "text", text: opts.prompt }],
-    }, idleTimeoutMs);
-    opts.onSubmitted?.();
-    response = await request;
-    opts.onConsumed?.();
-  } catch (error: any) {
-    await killFailedTurnChild("session/prompt failure");
-    // Headless has no human TUI: the child that ran the turn is killed
-    // above, so the turn IS aborted. Say so instead of the client's
-    // generic "background work may still be running".
-    if (idleTimeoutMs > 0 && /idle for \d+ms \(threshold/.test(String(error?.message ?? ""))) {
-      throw Object.assign(new Error(
-        `opencode 本轮在 ${Math.round(idleTimeoutMs / 1000)} 秒内没有任何进展输出，已终止该轮（opencode 子进程已结束，下个任务会重开会话）。` +
-        `可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调大（单位 ms，0 = 不设上限）。`,
-      ), { cause: error });
+    for (;;) {
+      const toolsAtStart = state.toolCalls;
+      try {
+        const request = runtime.client.requestWithIdleTimeout("session/prompt", {
+          sessionId: runtime.sessionId,
+          prompt: [{ type: "text", text: opts.prompt }],
+        }, idleTimeoutMs);
+        opts.onSubmitted?.();
+        response = await request;
+        opts.onConsumed?.();
+        break;
+      } catch (error: any) {
+        const decision = capacityRetryDecision(
+          capacityRetries,
+          String(error?.message ?? error),
+          state.toolCalls > toolsAtStart,
+        );
+        if (decision.action === "retry") {
+          capacityRetries += 1;
+          await pauseForCapacityRetry(decision, {
+            sleep: opts.capacityRetrySleep,
+            onRetry: opts.onCapacityRetry,
+          });
+          continue;
+        }
+        await killFailedTurnChild("session/prompt failure");
+        if (decision.action === "exhaust") {
+          throw new Error(CAPACITY_RETRY_EXHAUSTED_TEXT);
+        }
+        if (decision.action === "side_effect") {
+          throw new Error(CAPACITY_RETRY_SIDE_EFFECT_TEXT);
+        }
+        // Headless has no human TUI: the child that ran the turn is killed
+        // above, so the turn IS aborted. Say so instead of the client's
+        // generic "background work may still be running".
+        if (idleTimeoutMs > 0 && /idle for \d+ms \(threshold/.test(String(error?.message ?? ""))) {
+          throw Object.assign(new Error(
+            `opencode 本轮在 ${Math.round(idleTimeoutMs / 1000)} 秒内没有任何进展输出，已终止该轮（opencode 子进程已结束，下个任务会重开会话）。` +
+            `可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调大（单位 ms，0 = 不设上限）。`,
+          ), { cause: error });
+        }
+        throw error;
+      }
     }
-    throw error;
   } finally {
     runtime.client.off("notification", onNotification);
   }

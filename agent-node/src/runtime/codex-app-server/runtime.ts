@@ -25,6 +25,13 @@ import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
 import { describeRolloutSize, resolveResumeTimeoutMs } from "./resume-timeout";
 import { resolveTimeoutEnvMs } from "./timeout-env";
 import { verifyProcessTreeCodexHome, type ProcReader } from "../../codex-home-enforce";
+import {
+  CAPACITY_RETRY_EXHAUSTED_TEXT,
+  CAPACITY_RETRY_LIMIT,
+  CAPACITY_RETRY_SIDE_EFFECT_TEXT,
+  capacityRetryDecision,
+  pauseForCapacityRetry,
+} from "../capacity-retry";
 
 export interface CodexAppServerRuntimeSession {
   client: CodexAppServerClient;
@@ -374,6 +381,13 @@ export function codexAppServerThink(
     onSubmitted?: (event: { taskId: string; turnId?: string; steered?: boolean }) => void;
     /** Exact task_started identity proof; queue admission alone is not enough. */
     onConsumed?: (event: { taskId: string; turnId: string; steered?: boolean }) => void;
+    /**
+     * Board #656. Fired once per capacity backoff while the node stays on this
+     * same turn. Callers relay it as a non-terminal working status.
+     */
+    onCapacityRetry?: (attempt: number) => void | Promise<void>;
+    /** Test seam. Production sleeps the real 30s / 60s / 120s backoff. */
+    capacityRetrySleep?: (ms: number) => Promise<void>;
   },
 ): Promise<CodexAppServerThinkResult> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
@@ -393,6 +407,11 @@ export function codexAppServerThink(
     let lastResponseActivityAt = 0;
     let queueTimer: ReturnType<typeof setTimeout> | undefined;
     let reconciliationTimer: ReturnType<typeof setTimeout> | undefined;
+    let capacityRetries = 0;
+    let capacityRetrying = false;
+    let attemptTurnId: string | undefined;
+    let toolsRan = false;
+    const sideEffectTurns = new Set<string>();
     const finish = (r: CodexAppServerThinkResult) => {
       if (settled) return;
       settled = true;
@@ -402,6 +421,7 @@ export function codexAppServerThink(
       bridge.off("task_runtime_submitted", onSubmitted);
       bridge.off("task_started", onStarted);
       bridge.off("task_activity", onActivity);
+      bridge.off("task_side_effect", onSideEffect);
       bridge.off("drain_deferred", onRequeued);
       bridge.off("steer_deferred", onRequeued);
       if (timer) clearTimeout(timer);
@@ -446,10 +466,66 @@ export function codexAppServerThink(
       log(`[codex-app-server] task ${ev.taskId} skipped before its turn (${ev.reason}); no turn started`);
       finish({ replyText: "", failed: false, queued: false, skipped: true });
     };
+    const pauseDeadlinesForCapacityWait = () => {
+      // #656 × #651: this backoff is not model-idle time and not an OpenCode
+      // reply deadline. Drop both timers for the wait. They are re-armed only
+      // after the same body is submitted again, so the sleep cannot fail the
+      // task or be mistaken for the timeout that aborts a shared session.
+      lastResponseActivityAt = Date.now();
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      if (queueTimer) {
+        clearTimeout(queueTimer);
+        queueTimer = undefined;
+      }
+    };
+    const failCapacityOrFinish = (raw: string, queued = false) => {
+      if (settled || capacityRetrying) return;
+      log(`[codex-app-server] task_error ${opts.taskId}: ${raw}`);
+      // Mutation anchor: a fake app-server test goes red if this call stops
+      // deciding to retry (board #656).
+      const capacityDecision = capacityRetryDecision(capacityRetries, raw, toolsRan);
+      if (capacityDecision.action === "retry") {
+        capacityRetrying = true;
+        capacityRetries += 1;
+        pauseDeadlinesForCapacityWait();
+        log(`[codex-app-server] model at capacity; retry ${capacityDecision.attempt}/${CAPACITY_RETRY_LIMIT} in ${capacityDecision.waitMs}ms; same model, deadlines paused`);
+        void pauseForCapacityRetry(capacityDecision, {
+          sleep: opts.capacityRetrySleep,
+          onRetry: opts.onCapacityRetry,
+        }).then(async () => {
+          if (settled) return;
+          capacityRetrying = false;
+          try {
+            const submitted = await bridge.submitTask({
+              taskId: opts.taskId,
+              text: opts.text,
+              from: opts.from,
+              steerIfExternalTurn: opts.steerIfExternalTurn,
+            });
+            if (settled) return;
+            if (submitted.started) armResponseIdleTimer();
+            else armQueueTimer();
+          } catch (error) {
+            if (settled) return;
+            const message = error instanceof Error ? error.message : String(error);
+            failCapacityOrFinish(message, queued);
+          }
+        });
+        return;
+      }
+      const replyText = capacityDecision.action === "exhaust"
+        ? `codex-app-server 错误: ${CAPACITY_RETRY_EXHAUSTED_TEXT}`
+        : capacityDecision.action === "side_effect"
+          ? `codex-app-server 错误: ${CAPACITY_RETRY_SIDE_EFFECT_TEXT}`
+          : `codex-app-server 错误: ${raw}`;
+      finish({ replyText, failed: true, queued });
+    };
     const onError = (ev: { taskId: string; error: string }) => {
       if (ev.taskId !== opts.taskId) return;
-      log(`[codex-app-server] task_error ${ev.taskId}: ${ev.error}`);
-      finish({ replyText: `codex-app-server 错误: ${ev.error}`, failed: true, queued: false });
+      failCapacityOrFinish(ev.error);
     };
     const armResponseIdleTimer = () => {
       if (settled || timer) return;
@@ -494,8 +570,17 @@ export function codexAppServerThink(
         log(`[codex-app-server] runtime-submitted callback failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     };
+    const onSideEffect = (ev: { taskId: string; turnId: string }) => {
+      if (ev.taskId !== opts.taskId || typeof ev.turnId !== "string") return;
+      sideEffectTurns.add(ev.turnId);
+      if (ev.turnId === attemptTurnId) toolsRan = true;
+    };
     const onStarted = (ev: { taskId: string; turnId: string; steered?: boolean }) => {
       if (ev.taskId !== opts.taskId) return;
+      if (ev.turnId !== attemptTurnId) {
+        attemptTurnId = ev.turnId;
+        toolsRan = sideEffectTurns.has(ev.turnId);
+      }
       log(`[codex-app-server] task_started ${ev.taskId} turn=${ev.turnId}${ev.steered ? " (steered)" : ""}`);
       if (!consumedReported) {
         consumedReported = true;
@@ -551,28 +636,33 @@ export function codexAppServerThink(
     bridge.on("task_runtime_submitted", onSubmitted);
     bridge.on("task_started", onStarted);
     bridge.on("task_activity", onActivity);
+    bridge.on("task_side_effect", onSideEffect);
     bridge.on("drain_deferred", onRequeued);
     bridge.on("steer_deferred", onRequeued);
     scheduleReconciliation();
 
-    queueTimer = setTimeout(() => {
-      // A task still present in FIFO must be removed before we report a queue
-      // timeout; otherwise it could execute later after its Hub row is already
-      // terminal. If it already left FIFO (start RPC in flight or a lost
-      // task_started event), switch to the normal response timer so the task
-      // remains finite without falsely cancelling a running turn.
-      queueDeadlineElapsed = true;
-      if (!bridge.cancelQueuedTask(opts.taskId)) {
-        // This is also the finite bound for a turn/start RPC that never
-        // resolves and therefore cannot emit task_started: it has left FIFO,
-        // so convert the elapsed admission deadline into the normal bounded
-        // model-response wait instead of silently hanging forever.
-        log(`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for ${opts.taskId}`);
-        armResponseIdleTimer();
-        return;
-      }
-      finishQueueTimeout();
-    }, queueTimeoutMs);
+    const armQueueTimer = () => {
+      if (settled || queueTimer) return;
+      queueTimer = setTimeout(() => {
+        // A task still present in FIFO must be removed before we report a queue
+        // timeout; otherwise it could execute later after its Hub row is already
+        // terminal. If it already left FIFO (start RPC in flight or a lost
+        // task_started event), switch to the normal response timer so the task
+        // remains finite without falsely cancelling a running turn.
+        queueDeadlineElapsed = true;
+        if (!bridge.cancelQueuedTask(opts.taskId)) {
+          // This is also the finite bound for a turn/start RPC that never
+          // resolves and therefore cannot emit task_started: it has left FIFO,
+          // so convert the elapsed admission deadline into the normal bounded
+          // model-response wait instead of silently hanging forever.
+          log(`[codex-app-server] queue deadline reached after task left FIFO; arming response timeout for ${opts.taskId}`);
+          armResponseIdleTimer();
+          return;
+        }
+        finishQueueTimeout();
+      }, queueTimeoutMs);
+    };
+    armQueueTimer();
 
     bridge
       .submitTask({
@@ -589,6 +679,6 @@ export function codexAppServerThink(
         if (!r.started) log(`[codex-app-server] task ${opts.taskId} queued (a turn is in flight)`);
         else if (r.steered) log(`[codex-app-server] task ${opts.taskId} steered into human turn ${r.turnId}`);
       })
-      .catch((e) => finish({ replyText: `codex-app-server 错误: ${e?.message ?? e}`, failed: true, queued: false }));
+      .catch((e) => failCapacityOrFinish(String(e?.message ?? e)));
   });
 }

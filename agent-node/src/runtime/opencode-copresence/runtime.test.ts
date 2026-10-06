@@ -156,6 +156,7 @@ if (command === "serve") {
           info:{role:"assistant",parentID,error:{name:"APIError",data:{message:env.FAKE_PROVIDER_ERROR,statusCode:401,isRetryable:false}}},
           parts:[{type:"step-start"}],
         };
+        if (env.FAKE_PROVIDER_TOOL === "1") lastResponse.parts.push({ type: "tool", tool: "bash" });
       } else if (env.FAKE_EMPTY_TURN === "1") {
         lastResponse = { info:{role:"assistant",parentID}, parts:[{type:"step-start"},{type:"step-finish"}] };
       }
@@ -951,6 +952,75 @@ describe("OpenCode copresence task deadline", () => {
       f.close();
     }
   }, 20_000);
+
+  // #656 × #651. The capacity sleep sits outside AbortSignal.timeout. Before
+  // sleeping, the reply deadline is pushed forward by the backoff, so a short
+  // remaining budget cannot treat the wait as a timeout and abort the shared
+  // session. Removing `deadline += decision.waitMs` makes this red: the second
+  // POST's signal fires (ABORT) or the loop dies as an admission timeout
+  // instead of the exhausted-capacity sentence.
+  test("board656 capacity wait extends the reply deadline and does not abort", async () => {
+    const log = join(tmpdir(), `opencode-capacity-${process.pid}-${Date.now()}.log`);
+    const { f, runtime } = await open({
+      FAKE_PROVIDER_ERROR: "Selected model is at capacity. Please try a different model.",
+      FAKE_TURN_MS: "80",
+      FAKE_USER_FIRST: "1",
+      FAKE_LOG: log,
+    });
+    const progress: number[] = [];
+    const sleeps: number[] = [];
+    try {
+      let thrown: unknown;
+      try {
+        await runtime.submit("capacity-budget", 500, undefined, {
+          onCapacityRetry: (attempt) => { progress.push(attempt); },
+          capacityRetrySleep: async (ms) => {
+            sleeps.push(ms);
+            await new Promise((resolve) => setTimeout(resolve, 400));
+          },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      const trace = readFileSync(log, "utf8");
+      const posts = trace.split("\n").filter((line) => line === "POST /session/ses_test123/message");
+      expect(posts).toHaveLength(4);
+      expect(trace).not.toContain("ABORT");
+      expect(thrown).toBeInstanceOf(OpenCodeProviderError);
+      expect((thrown as Error).message).toContain("模型满载，已自动重试 3 次");
+      expect(progress).toEqual([1, 2, 3]);
+      expect(sleeps).toEqual([30_000, 60_000, 120_000]);
+    } finally {
+      await runtime.close();
+      f.close();
+      rmSync(log, { force: true });
+    }
+  }, 20_000);
+
+  test("board656 a tool part then capacity does not resubmit", async () => {
+    const { f, runtime } = await open({
+      FAKE_PROVIDER_ERROR: "Selected model is at capacity. Please try a different model.",
+      FAKE_PROVIDER_TOOL: "1",
+      FAKE_USER_FIRST: "1",
+    });
+    try {
+      let thrown: unknown;
+      try {
+        await runtime.submit("capacity-after-tool", 5_000, undefined, {
+          onCapacityRetry: () => { throw new Error("should not retry"); },
+          capacityRetrySleep: async () => { throw new Error("should not sleep"); },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(OpenCodeProviderError);
+      expect((thrown as Error).message).toContain("模型在执行中途出错，未自动重试，以免重复执行");
+      expect((thrown as Error).message).not.toContain("已自动重试");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  });
 });
 
 // #2008 follow-up: on 2.5.0-preview.89 a 30-minute deadline still died at
