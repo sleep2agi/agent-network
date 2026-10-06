@@ -6,8 +6,10 @@ import { join } from "node:path";
 
 import {
   applyNodeCodexHome,
+  decodeProcNulBlock,
   descendantPids,
   envVarFromEnviron,
+  linuxProcReader,
   looksLikeAnetNodeCodexHome,
   resolveNodeCodexHome,
   verifyProcessTreeCodexHome,
@@ -175,5 +177,78 @@ describe.skipIf(process.platform !== "linux")("#448 real child: env carries a WR
     const v = verifyProcessTreeCodexHome({ rootPid: child.pid!, expected: join(nodeDir, "codex-home"), label: "child" });
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.actual).toBe(wrong);
+  });
+});
+
+// #448 回归:/proc environ 曾按 latin1 读,非 ASCII 的 CODEX_HOME(节点别名是中文时 nodes/<别名>/codex-home)
+// 读出来是 `æµè¯…` 乱码,永远 ≠ 期望值 → fail closed → 该节点每个任务都被拒。
+describe("#448 non-ASCII CODEX_HOME: /proc environ is compared byte-correctly", () => {
+  const CN_HOME = "/w/.anet/nodes/测试节点/codex-home";
+  const OTHER_CN_HOME = "/w/.anet/nodes/另一节点/codex-home";
+  const environBytes = (...entries: Array<string | Uint8Array>): Uint8Array => {
+    const parts: Uint8Array[] = [];
+    for (const e of entries) { parts.push(typeof e === "string" ? Buffer.from(e, "utf8") : e); parts.push(Uint8Array.of(0)); }
+    return Buffer.concat(parts);
+  };
+  // 假的 /proc:给的是**原始字节**,经过和 linuxProcReader 同一个解码器。
+  const byteReader = (envs: Record<number, Uint8Array>, parents: Array<[number, number]> = []): ProcReader => ({
+    environ: (pid) => envs[pid] ? decodeProcNulBlock(envs[pid]) : null,
+    parents: () => parents,
+  });
+
+  test("UTF-8 bytes of a Chinese path → ok (root + child)", () => {
+    const v = verifyProcessTreeCodexHome({
+      rootPid: 10, expected: CN_HOME, label: "owned app-server", platform: "linux",
+      reader: byteReader({ 10: environBytes("PATH=/bin", `CODEX_HOME=${CN_HOME}`), 11: environBytes(`CODEX_HOME=${CN_HOME}`) }, [[11, 10]]),
+    });
+    expect(v).toEqual({ ok: true, checked: [10, 11] });
+  });
+  test("a different Chinese path → still refused", () => {
+    const v = verifyProcessTreeCodexHome({
+      rootPid: 10, expected: CN_HOME, label: "owned app-server", platform: "linux",
+      reader: byteReader({ 10: environBytes(`CODEX_HOME=${OTHER_CN_HOME}`) }),
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) { expect(v.actual).toBe(OTHER_CN_HOME); expect(v.message).toContain(`CODEX_HOME=${OTHER_CN_HOME}, expected ${CN_HOME}`); }
+  });
+  test("invalid UTF-8 in CODEX_HOME → refused (fail closed), even against an expected value holding U+FFFD", () => {
+    const bad = Buffer.concat([Buffer.from("CODEX_HOME=/w/.anet/nodes/", "utf8"), Uint8Array.of(0xff, 0xfe), Buffer.from("/codex-home", "utf8")]);
+    for (const expected of [CN_HOME, "/w/.anet/nodes/\uFFFD\uFFFD/codex-home", "/w/.anet/nodes/\u00ff\u00fe/codex-home"]) {
+      const v = verifyProcessTreeCodexHome({ rootPid: 10, expected, label: "t", platform: "linux", reader: byteReader({ 10: environBytes("PATH=/bin", bad) }) });
+      expect(v.ok).toBe(false);
+    }
+    // 其余合法条目照常可读。
+    expect(envVarFromEnviron(decodeProcNulBlock(environBytes("PATH=/bin", bad)), "PATH")).toBe("/bin");
+  });
+  test("an expected value that is not a well-formed string is refused outright", () => {
+    const v = verifyProcessTreeCodexHome({ rootPid: 10, expected: "/w/\uDFFF", label: "t", platform: "linux", reader: byteReader({ 10: environBytes("CODEX_HOME=/w/") }) });
+    expect(v.ok).toBe(false);
+  });
+  test("the old latin1 decode is exactly the production failure shape", () => {
+    const bytes = environBytes(`CODEX_HOME=${CN_HOME}`);
+    expect(envVarFromEnviron(Buffer.from(bytes).toString("latin1"), "CODEX_HOME")).not.toBe(CN_HOME);
+    expect(envVarFromEnviron(decodeProcNulBlock(bytes), "CODEX_HOME")).toBe(CN_HOME);
+  });
+  test("decodeProcNulBlock keeps the NUL layout", () => {
+    expect(decodeProcNulBlock(new Uint8Array())).toBe("");
+    expect(decodeProcNulBlock(environBytes("A=1", "B=中"))).toBe("A=1\0B=中\0");
+    expect(decodeProcNulBlock(Buffer.from("A=1\0B=2", "utf8"))).toBe("A=1\0B=2");
+    expect(decodeProcNulBlock(Buffer.from("A=1\0\0B=2\0", "utf8"))).toBe("A=1\0\0B=2\0");
+  });
+});
+
+describe.skipIf(process.platform !== "linux")("#448 real child with a Chinese CODEX_HOME (real /proc)", () => {
+  test("linuxProcReader + verifyProcessTreeCodexHome → ok for the node's own non-ASCII home", async () => {
+    const root = tmpRoot();
+    const home = join(root, ".anet", "nodes", "测试节点", "codex-home");
+    mkdirSync(home, { recursive: true });
+    const c = spawn("sh", ["-c", "sleep 30 & wait"], { env: { ...process.env, CODEX_HOME: home }, stdio: "ignore" });
+    children.push(c);
+    for (let i = 0; i < 50 && descendantPids(c.pid!, linuxProcReader.parents()).length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    const v = verifyProcessTreeCodexHome({ rootPid: c.pid!, expected: home, label: "child" });
+    expect(v).toEqual({ ok: true, checked: expect.any(Array) });
+    if (v.ok) expect(v.checked.length).toBe(2);
+    const other = verifyProcessTreeCodexHome({ rootPid: c.pid!, expected: join(root, ".anet", "nodes", "另一节点", "codex-home"), label: "child" });
+    expect(other.ok).toBe(false);
   });
 });

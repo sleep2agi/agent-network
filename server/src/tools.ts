@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
-import { nodeHealthSchema, recordNodeHealth } from "./node-health-store.js";
+import { nodeHealthSchema, normalizeNodeHealth, recordNodeHealth } from "./node-health-store.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
 import { noteModelAuthHealth } from "./model-auth-notify.js";
 import { numberedAliasInClause, parseAliasFilter } from "./alias-filter.js";
@@ -1153,7 +1153,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // #448 — only the node token bound to this alias may speak for its health
       // (same rule as the *_capable flags above).
       const acceptedHealth = nodeHealth && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias
-        ? nodeHealth
+        ? normalizeNodeHealth(nodeHealth) // #594 — strict codex_login shape (the wire schema is loose on purpose)
         : undefined;
       if (acceptedHealth) {
         recordNodeHealth(sessionNetId, effectiveAlias, acceptedHealth);

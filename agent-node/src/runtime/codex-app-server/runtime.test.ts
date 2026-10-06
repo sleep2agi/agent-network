@@ -600,7 +600,7 @@ describe("#1449 finding 2 — 启动失败时不留孤儿子进程", () => {
 
     let threw = false;
     try {
-      await openCodexAppServerRuntime({ binary: fake, log: () => {}, warn: () => {}, onExit: () => {} });
+      await openCodexAppServerRuntime({ binary: fake, startGate: { env: { ANET_START_MEM_GATE: "0" } }, log: () => {}, warn: () => {}, onExit: () => {} });
     } catch { threw = true; }
     expect(threw).toBe(true);
 

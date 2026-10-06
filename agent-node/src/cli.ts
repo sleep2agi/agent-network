@@ -34,7 +34,7 @@ import {
 import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copresence/active-network-task-marker.js";
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
-import { checkCodexCredentialSharing } from "./codex-auth-fingerprint.js";
+import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import { dirname, join, isAbsolute, resolve } from "path";
 import { hostname as osHostname, homedir } from "os";
@@ -1317,6 +1317,18 @@ let lastReportedStatus: { status: string; task?: string } = { status: "idle" };
 function currentNodeHealth(): NodeHealthReport | undefined {
   return codexHealthMonitor?.snapshot();
 }
+// #594 —— 本节点的 codex 登录指纹 + 「本机另有 N 台节点共用同一份登录」,作为 health.codex_login 上报。
+// 只给 codex / codex-app-server 开(下面启动段创建);旧 Hub 的 health schema 不 strict,丢弃该键。
+let codexLoginHealth: ReturnType<typeof createCodexLoginHealth> | null = null;
+/** What goes on the wire as `health`: the #448 layers plus the additive #594 `codex_login`.
+ *  Kept separate from `currentNodeHealth()` so the model_auth gate still only sees the monitor's report. */
+function reportedNodeHealth(): (Partial<NodeHealthReport> & { codex_login?: CodexLoginHealth }) | undefined {
+  const base = currentNodeHealth();
+  let login: CodexLoginHealth | null = null;
+  try { login = codexLoginHealth?.current() ?? null; } catch { login = null; }
+  if (!login) return base;
+  return { ...(base ?? {}), codex_login: login };
+}
 const taskTraceLog = (line: string) => {
   if (process.env.ANET_TASK_TRACE_FORMAT !== "json") return log(line);
   console.log(line);
@@ -1604,8 +1616,8 @@ const register = async () => {
     files_capable: true,
     // 同一门铃也答 logs_tail(node-logs.ts,本节点运行日志只读查看,返回前脱敏)。
     logs_capable: true,
-    // #448 —— 分层健康;旧 Hub 静默丢弃该键。
-    ...(currentNodeHealth() ? { health: currentNodeHealth() } : {}),
+    // #448 —— 分层健康;旧 Hub 静默丢弃该键。#594 —— 含 codex_login(若有)。
+    ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
   };
   // 🔴 启动注册是 `await register()`（本文件底部、顶层、**无 catch**），所以这里
   //    抛出什么都会让整个进程退出。#1225 实测到的那次就是这样：hub 的
@@ -1695,7 +1707,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // schema already accepts `model`; on a hub that ignores it nothing breaks.
     ...(RUNTIME === "grok" && grokEffectiveModel ? { model: grokEffectiveModel } : {}),
     // #448 —— 分层健康(codex-app-server);旧 Hub 静默丢弃该键,不会拒整份上报。
-    ...(health ? { health } : {}),
+    // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
+    ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       ...buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
@@ -7104,9 +7117,6 @@ if (GROK_COPRESENCE) {
   // Failure is terminal by design: co-presence never degrades to `grok -p`.
   await ensureGrokCopresenceRuntime();
 }
-await register();
-log("已注册到 CommHub");
-
 // #1918 —— 共用同一份 codex 登录态的节点,谁先刷新谁活,其余在几天后报
 // "refresh token was already used"。第一版这道检查只做在 `anet node start`
 // 里,而实测某 35 台机群只有 4 台走那条路:其余 31 台(正是共用一个账号的
@@ -7115,23 +7125,38 @@ log("已注册到 CommHub");
 // 只告警、不拦;读邻居**已公布的 8 位指纹文件**,不读任何别的节点的凭据。
 // 比较面是**整台主机**(~/.anet 下的索引),不是本 workspace:同一机群那 35
 // 台分散在 27 个 workspace,只比同根只看得见 8 台共链节点里的 2 台。
+// #594 —— 同一检查改由 createCodexLoginHealth 驱动,并在**注册之前**跑:第一次 report_status 就带上
+// health.codex_login;之后随心跳(≤ 每 60s)重算,这样先起的那台也能在后起的那台出现后报出 shared_with。
 if (RUNTIME === "codex" || RUNTIME === "codex-app-server") {
-  const codexHomeForCheck = process.env.CODEX_HOME && process.env.CODEX_HOME.trim()
-    ? process.env.CODEX_HOME.trim()
-    : join(homedir(), ".codex");
+  const codexHomeForCheck = NODE_CODEX_HOME
+    || (process.env.CODEX_HOME && process.env.CODEX_HOME.trim()
+      ? process.env.CODEX_HOME.trim()
+      : join(homedir(), ".codex"));
   try {
-    checkCodexCredentialSharing({
+    const codexLoginInterval = codexLoginCheckIntervalFromEnv(process.env);
+    codexLoginHealth = createCodexLoginHealth({
       nodeDir: NODE_DIR,
       alias: ALIAS,
       codexHome: codexHomeForCheck,
       nodeId: NODE_ID || null,
       say: warn,
+      minIntervalMs: codexLoginInterval,
     });
+    codexLoginHealth.refresh();
+    // 另一台节点后起、或本节点重新登录后,不等 3 分钟心跳:值一变就补报一次。
+    setInterval(() => {
+      try {
+        if (codexLoginHealth?.tick()) void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
+      } catch { /* observability only */ }
+    }, codexLoginInterval).unref?.();
   } catch (e: any) {
     // Observability must never be the reason a node will not start.
     warn(`[codex] shared-login check skipped: ${e?.message || e}`);
   }
 }
+await register();
+log("已注册到 CommHub");
+
 // Subscribe before the human TUI starts. Lazy-on-first-task attachment can
 // miss the TUI's turn/started notification; relying on thread/read to recover
 // that in-progress turn is not portable across Windows Codex builds.

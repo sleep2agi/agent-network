@@ -27,9 +27,35 @@ export const nodeHealthSchema = z.object({
     reason: z.string().max(40),
   }).optional().catch(undefined),
   model_auth: z.enum(["ok", "revoked", "expired", "unknown"]).optional().catch(undefined),
+  // #594 —— codex 节点的登录指纹 + 本机另有几台节点持有同一份登录(见下方 codexLoginSchema)。
+  // 🔴 线上 schema 故意是 unknown:report_status 的 JSON schema 每个节点每次 tools/list 都要下发,
+  //    #476 给它定了字节上限(tool-audience-http.test.ts)。严格校验在 recordNodeHealth 里做,效果相同:
+  //    不合规 → 这一格当没报,整份 report 照收。
+  codex_login: z.unknown().optional(),
 }).optional().catch(undefined);
 
-export type NodeHealth = NonNullable<z.infer<typeof nodeHealthSchema>>;
+// #594 —— health.codex_login 的严格形状。纯展示/提示,**不是** degraded 层:共用登录今天还能跑,
+// 只是迟早互相顶掉(#1918);派发不因它拒绝。fingerprint 必须是 8 位小写 hex(sha256(refresh_token)
+// 截断,不是凭据)—— 节点误把 token 塞进来也存不下;计数是小的非负整数;codex_home 是节点自己的路径
+// (给客户端拼 `CODEX_HOME=<codex_home> codex login --device-auth`),拒控制字符。
+// 可选格各自降级;必需格(fingerprint / shared_with)不合规 → 整格丢弃。
+export const codexLoginSchema = z.object({
+  fingerprint: z.string().regex(/^[0-9a-f]{8}$/),
+  shared_with: z.number().int().min(0).max(100_000),
+  shared_home_with: z.number().int().min(0).max(100_000).optional().catch(undefined),
+  codex_home: z.string().max(1024).regex(/^[^\u0000-\u001f\u007f]*$/).optional().catch(undefined),
+});
+export type CodexLoginHealth = z.infer<typeof codexLoginSchema>;
+
+export type NodeHealth = Omit<NonNullable<z.infer<typeof nodeHealthSchema>>, "codex_login"> & { codex_login?: CodexLoginHealth };
+
+/** 线上收到的 health → 存的那份:codex_login 按严格形状过一遍,不合规就去掉这一格。 */
+export function normalizeNodeHealth(raw: NonNullable<z.infer<typeof nodeHealthSchema>>): NodeHealth {
+  const { codex_login: rawLogin, ...rest } = raw;
+  if (rawLogin === undefined) return rest;
+  const parsed = codexLoginSchema.safeParse(rawLogin);
+  return parsed.success ? { ...rest, codex_login: parsed.data } : rest;
+}
 
 const store = new Map<string, { health: NodeHealth; at: number }>();
 const keyOf = (networkId: string | null | undefined, alias: string) => `${networkId ?? "default"}\0${alias}`;
@@ -48,9 +74,12 @@ export function nodeHealthNextExpiryAt(now = Date.now()): number {
   return next;
 }
 
-export function recordNodeHealth(networkId: string | null | undefined, alias: string, health: NodeHealth, now = Date.now()): void {
+export function recordNodeHealth(
+  networkId: string | null | undefined, alias: string,
+  health: NodeHealth | NonNullable<z.infer<typeof nodeHealthSchema>>, now = Date.now(),
+): void {
   version++;
-  store.set(keyOf(networkId, alias), { health, at: now });
+  store.set(keyOf(networkId, alias), { health: normalizeNodeHealth(health), at: now });
   // 有界:按 TTL 顺手清掉过期的,别让改过名/删掉的节点在内存里攒着。
   if (store.size > 256) {
     for (const [k, v] of store) if (now - v.at > NODE_HEALTH_TTL_MS) store.delete(k);

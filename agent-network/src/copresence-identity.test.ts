@@ -897,6 +897,101 @@ describe("Blocker 2: verifyGroupHomogeneity zombie discrimination + EMPTY_GROUP"
     if (result.ok) expect(result.members).toEqual([100]);
   });
 
+  // #602 — as ROOT a zombie's environ reads as "" (no EACCES). CI and the Docker stress loop hit
+  // this on the post-SIGTERM re-verify: native codex child = zombie, node wrapper still alive →
+  // FOREIGN_MEMBER → SIGKILL skipped → `anet node stop` rc=1 with the wrapper left behind.
+  test("#602 root: a zombie member read as an empty environ is not foreign", () => {
+    const enumer = new MockEnumer();
+    enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { state: "S" });
+    enumer.add(101, "", 500, 0, 100, { state: "Z" });
+    const result = verifyGroupHomogeneity(enumer, 500, "u1");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.members).toEqual([100]);
+  });
+
+  test("#602 root: post-SIGTERM wrapper + zombie child escalates to SIGKILL and succeeds", async () => {
+    const enumer = new MockEnumer();
+    enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { state: "S" });
+    enumer.add(101, "ANET_NODE_MARKER=u1\0", 500, 0, 100, { state: "S" });
+    const killer = new MockKiller();
+    killer.aliveMap.set(500, true);
+    const kill = killer.killPgroup.bind(killer);
+    killer.killPgroup = (pgid, signal) => {
+      kill(pgid, signal);
+      if (signal === "KILL") { for (const [pid, p] of [...enumer.procs]) if (p.stat.pgid === pgid) enumer.procs.delete(pid); killer.aliveMap.set(pgid, false); }
+    };
+    const result = await reapMarkerGroups(enumer, killer, "u1", {
+      graceMs: 0, logger: () => {},
+      sleep: async () => {
+        // during the grace: the native child exits (zombie, empty environ as root); the wrapper lingers
+        enumer.add(101, "", 500, 0, 100, { state: "Z" });
+      },
+    } as any);
+    expect(killer.signals).toEqual([{ pgid: 500, signal: "TERM" }, { pgid: 500, signal: "KILL" }]);
+    expect(result.kind).toBe("success");
+  });
+
+  test("#602 a SIGKILLed pid that leaves /proc a moment later is not a residual", async () => {
+    const enumer = new MockEnumer();
+    enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { state: "S" });
+    const killer = new MockKiller();
+    killer.aliveMap.set(500, true);
+    let killedAt = -1, sleeps = 0;
+    const kill = killer.killPgroup.bind(killer);
+    killer.killPgroup = (pgid, signal) => { kill(pgid, signal); if (signal === "KILL") killedAt = sleeps; };
+    const result = await reapMarkerGroups(enumer, killer, "u1", {
+      graceMs: 0, logger: () => {},
+      // the KILLed process needs two scheduler ticks to exit (CI / --cpus 1)
+      sleep: async () => { sleeps++; if (killedAt >= 0 && sleeps - killedAt >= 2) enumer.procs.delete(100); },
+    });
+    expect(killer.signals.map((x) => x.signal)).toEqual(["TERM", "KILL"]);
+    expect(result.kind).toBe("success");
+  });
+
+  test("#602 safety: a pid that survives SIGKILL past the bounded settle window still fails closed", async () => {
+    const enumer = new MockEnumer();
+    enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { state: "S" });
+    const killer = new MockKiller();
+    killer.aliveMap.set(500, true);
+    let sleeps = 0;
+    const result = await reapMarkerGroups(enumer, killer, "u1", {
+      graceMs: 0, logger: () => {}, postKillSettlePolls: 5, sleep: async () => { sleeps++; },
+    });
+    expect(result.kind).toBe("failed");
+    if (result.kind === "failed") expect(result.residualPids).toEqual([100]);
+    expect(sleeps).toBe(1 + 5); // grace + exactly the bounded polls
+  });
+
+  test("#602 no SIGKILL sent → no settle polling", async () => {
+    const enumer = new MockEnumer();
+    enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { state: "S" });
+    enumer.add(101, "OTHER=1\0", 500, 0, 1, { state: "S" }); // foreign member → escalation skipped
+    const killer = new MockKiller();
+    killer.aliveMap.set(500, true);
+    let sleeps = 0;
+    const result = await reapMarkerGroups(enumer, killer, "u1", { graceMs: 0, logger: () => {}, sleep: async () => { sleeps++; } });
+    expect(result.kind).toBe("failed");
+    expect(sleeps).toBe(0); // first-pass homogeneity refused: nothing signalled, nothing awaited
+  });
+
+  test("#602 safety: a LIVE member with an empty environ is still foreign", () => {
+    const enumer = new MockEnumer();
+    enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { state: "S" });
+    enumer.add(101, "", 500, 0, 1, { state: "S" });
+    const result = verifyGroupHomogeneity(enumer, 500, "u1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) { expect(result.cause).toBe("FOREIGN_MEMBER"); expect(result.foreignPids).toEqual([101]); }
+  });
+
+  test("#602 safety: a zombie whose environ is non-empty and marker-less is still foreign", () => {
+    const enumer = new MockEnumer();
+    enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { state: "S" });
+    enumer.add(101, "PATH=/bin\0", 500, 0, 1, { state: "Z" });
+    const result = verifyGroupHomogeneity(enumer, 500, "u1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.cause).toBe("FOREIGN_MEMBER");
+  });
+
   test("group containing an other-user EACCES member still verifies OK for our members", () => {
     const enumer = new MockEnumer();
     enumer.add(100, "ANET_NODE_MARKER=u1\0", 500, 0, 1, { ownerUid: process.getuid?.() ?? -1 });

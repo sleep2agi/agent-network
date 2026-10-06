@@ -875,9 +875,25 @@ export function verifyGroupHomogeneity(
       continue;
     }
     if (env == null) continue; // pid gone between stat and environ, normal race
-    liveMembers.push(pid);
     const parts = env.split("\0");
-    if (parts.indexOf(needle) < 0) foreign.push(pid);
+    if (parts.indexOf(needle) < 0) {
+      // #602 — a zombie's mm is gone: for a non-root owner its environ read is
+      // EACCES (handled above), but for ROOT it is an empty read. Measured in
+      // Docker as root: `State: Z`, environ 0 bytes. The post-SIGTERM re-verify
+      // is exactly when the native codex child sits as a zombie until its node
+      // wrapper reaps it, so that empty read was judged FOREIGN_MEMBER, SIGKILL
+      // was skipped, and stop failed with the wrapper still alive. Only an
+      // EMPTY environ on a Z/X process is discounted: it is already dead and
+      // can neither be harmed nor carry anyone's marker. A live process with
+      // an empty or marker-less environ is still foreign.
+      if (env === "") {
+        let state: string | null = null;
+        try { state = enumer.readState(pid); } catch { state = null; }
+        if (state === "Z" || state === "X") continue;
+      }
+      foreign.push(pid);
+    }
+    liveMembers.push(pid);
   }
   if (unreadable.length > 0) {
     return { ok: false, cause: "ENUM_ERROR", foreignPids: foreign, unreadablePids: unreadable, detail: `${unreadable.length} member(s) unreadable — cannot prove homogeneity` };
@@ -971,6 +987,16 @@ export interface ReapOptions {
    * widen scope, so a stale/recycled pid cannot.
    */
   anchors?: ScanAnchors;
+  /**
+   * #602 — after a SIGKILL, how many 100 ms polls the post-KILL rescan may wait
+   * for the killed pids to actually leave /proc before calling them residual.
+   * SIGKILL is not synchronous: under CPU contention (CI runners, `--cpus 1`)
+   * the rescan used to run while the KILLed codex app-server wrapper was still
+   * exiting, and stop failed with "1 marker-carrying pid(s) still alive after
+   * grace+KILL" although the next stop found 0. Default 30 (= 3 s). Only waits
+   * when a SIGKILL was actually sent; it never signals anything new.
+   */
+  postKillSettlePolls?: number;
 }
 
 /**
@@ -1079,6 +1105,7 @@ export async function reapMarkerGroups(
   await sleep(opts.graceMs);
 
   // Step 6-7: re-verify then SIGKILL as needed
+  let sentKill = false;
   for (const pgid of verifiedGroups) {
     if (!killer.pgroupAlive(pgid)) {
       killedPgids.push(pgid);
@@ -1094,14 +1121,23 @@ export async function reapMarkerGroups(
       continue;
     }
     opts.logger(`[identity] pgid=${pgid} still alive after grace; sending SIGKILL`);
-    try { killer.killPgroup(pgid, "KILL"); killedPgids.push(pgid); } catch (err: any) {
+    try { killer.killPgroup(pgid, "KILL"); killedPgids.push(pgid); sentKill = true; } catch (err: any) {
       opts.logger(`[identity] SIGKILL pgid=${pgid} failed: ${err?.message || err}`);
     }
   }
 
-  // Step 8: post-rescan
-  const rescan = scanEnvironForMarkerFull(enumer, markerUuid, opts.anchors);
-  const repart = partitionMarkerHitsByTree(enumer, rescan.hits, opts.anchors, opts.nodeHome);
+  // Step 8: post-rescan. #602 — a SIGKILLed pid needs a moment to leave /proc;
+  // poll (bounded) before judging residuals, but only if we sent a SIGKILL.
+  let rescan = scanEnvironForMarkerFull(enumer, markerUuid, opts.anchors);
+  let repart = partitionMarkerHitsByTree(enumer, rescan.hits, opts.anchors, opts.nodeHome);
+  if (sentKill) {
+    const polls = opts.postKillSettlePolls ?? 30;
+    for (let i = 0; i < polls && (repart.members.length > 0 || rescan.unreadableOwnUid.length > 0); i++) {
+      await sleep(100);
+      rescan = scanEnvironForMarkerFull(enumer, markerUuid, opts.anchors);
+      repart = partitionMarkerHitsByTree(enumer, rescan.hits, opts.anchors, opts.nodeHome);
+    }
+  }
   const residual = repart.members;
   if (residual.length > 0 || rescan.unreadableOwnUid.length > 0) {
     return {

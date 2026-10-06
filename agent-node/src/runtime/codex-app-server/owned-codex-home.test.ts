@@ -7,6 +7,9 @@ import { join } from "node:path";
 
 import { openCodexAppServerRuntime } from "./runtime";
 
+// #612 — keep these tests independent of how busy the test host is.
+const NO_GATE = { env: { ANET_START_MEM_GATE: "0" } };
+
 const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
 
@@ -50,6 +53,7 @@ describe.skipIf(process.platform !== "linux")("#448 owned app-server gets this n
       await openCodexAppServerRuntime({
         binary: fakeCodex(),
         codexHome: "/w/.anet/nodes/mine/codex-home",
+        startGate: NO_GATE,
         log: (m) => logs.push(m),
         warn: (m) => logs.push(m),
       }).then((s) => { try { s.proc?.kill(); } catch {} }, () => { /* the fake cannot speak JSON-RPC; failing after the check is expected */ });
@@ -67,6 +71,7 @@ describe.skipIf(process.platform !== "linux")("#448 owned app-server gets this n
       await openCodexAppServerRuntime({
         binary: fakeCodex("/w/.anet/nodes/neighbour/codex-home"),
         codexHome: "/w/.anet/nodes/mine/codex-home",
+        startGate: NO_GATE,
         log: (m) => logs.push(m),
         warn: (m) => logs.push(m),
       });
