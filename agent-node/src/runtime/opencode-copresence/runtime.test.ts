@@ -35,6 +35,7 @@ if (command === "serve") {
   const port = Number(value("--port"));
   const statuses = {};
   const messages = {};
+  const aborted = {};
   let lastResponse = null;
   const trace = (line) => { if (env.FAKE_LOG) require("fs").appendFileSync(env.FAKE_LOG, line + "\\n"); };
   const server = http.createServer(async (req, res) => {
@@ -74,8 +75,22 @@ if (command === "serve") {
       }
       return send(res, true);
     }
+    const abortMatch = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)\\/abort$/);
+    if (abortMatch && req.method === "POST") {
+      if (env.FAKE_ABORT_STATUS) {
+        res.writeHead(Number(env.FAKE_ABORT_STATUS));
+        return res.end("abort refused");
+      }
+      aborted[abortMatch[1]] = true;
+      delete statuses[abortMatch[1]];
+      trace("ABORT " + abortMatch[1]);
+      return send(res, true);
+    }
     const match = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)\\/message$/);
-    if (match && req.method === "GET") return send(res, messages[match[1]] || []);
+    if (match && req.method === "GET") {
+      if (env.FAKE_HISTORY_FAIL === "1") { res.writeHead(500); return res.end("history unavailable"); }
+      return send(res, messages[match[1]] || []);
+    }
     if (match && req.method === "POST") {
       const id = match[1];
       if ((json.parts?.[0]?.text || "").startsWith("notice:") || json.noReply === true) {
@@ -93,10 +108,31 @@ if (command === "serve") {
       // Real OpenCode records the user message before the runner starts; the
       // legacy fake records it at the end. FAKE_USER_FIRST opts into the real
       // order (the timeout path reads history to see whether it landed).
-      if (env.FAKE_USER_FIRST === "1") messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
+      if (env.FAKE_USER_FIRST === "1") {
+        if (env.FAKE_HUMAN_AHEAD === "1") {
+          messages[id].push({ info:{role:"user",id:"msg_human_live"}, parts:[{type:"text",text:"human is typing"}] });
+        }
+        messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
+      }
       // Like OpenCode 1.18.34, a client disconnect does not stop the turn.
-      await new Promise(r => setTimeout(r, Number(env.FAKE_TURN_MS || 25)));
+      // Only POST /session/:id/abort does. Without it the turn finishes and
+      // emits LATE_REPLY, the stand-in for a later commhub_send_message.
       const prompt = json.parts?.[0]?.text || "";
+      const turnMs = Number(env.FAKE_TURN_MS || 25);
+      const turnStarted = Date.now();
+      while (Date.now() - turnStarted < turnMs) {
+        if (aborted[id]) {
+          trace("TURN_CANCELLED " + prompt);
+          try { if (!res.writableEnded) { res.writeHead(499); res.end("aborted"); } } catch (e) {}
+          return;
+        }
+        await new Promise(r => setTimeout(r, 20));
+      }
+      if (aborted[id]) {
+        trace("TURN_CANCELLED " + prompt);
+        try { if (!res.writableEnded) { res.writeHead(499); res.end("aborted"); } } catch (e) {}
+        return;
+      }
       const reply = "FAKE_REPLY:" + prompt;
       let parentID = json.messageID;
       if (env.FAKE_USER_FIRST !== "1") messages[id].push({ info:{role:"user",id:json.messageID}, parts:json.parts || [] });
@@ -125,6 +161,7 @@ if (command === "serve") {
       }
       messages[id].push(lastResponse);
       delete statuses[id];
+      if (env.FAKE_LATE_REPLY === "1") trace("LATE_REPLY " + prompt);
       trace("TURN_DONE " + prompt);
       return send(res, lastResponse);
     }
@@ -644,13 +681,30 @@ describe("OpenCode copresence task deadline", () => {
     return { f, runtime };
   }
 
-  test("honours the configured deadline, says the turn is still running, and never aborts the session", async () => {
+  test("board651 reply deadline aborts the session and does not emit a late reply", async () => {
     const log = join(tmpdir(), `opencode-deadline-${process.pid}-${Date.now()}.log`);
-    const { f, runtime } = await open({ FAKE_TURN_MS: "2500", FAKE_USER_FIRST: "1", FAKE_LOG: log });
+    const warnings: string[] = [];
+    const f = fixture({ FAKE_TURN_MS: "2500", FAKE_USER_FIRST: "1", FAKE_LATE_REPLY: "1", FAKE_LOG: log });
+    const runtime = await openVettedOpenCodeCopresence({
+      binary: f.binary,
+      env: f.env,
+      cwd: f.root,
+      workDir: f.root,
+      model: "opencode/fake",
+      startupTimeoutMs: 5_000,
+      warn: (line) => warnings.push(line),
+    });
+    const replies: string[] = [];
     try {
       const started = Date.now();
       let thrown: any;
-      try { await runtime.submit("long build", 400); } catch (error) { thrown = error; }
+      try {
+        const result = await runtime.submit("long build", 400);
+        replies.push(result.replyText);
+      } catch (error) {
+        thrown = error;
+        replies.push(runtimeErrorReplyText("opencode", error));
+      }
       const elapsed = Date.now() - started;
       const traceAtThrow = readFileSync(log, "utf8");
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
@@ -663,24 +717,157 @@ describe("OpenCode copresence task deadline", () => {
       // wall-clock margin an overloaded runner can eat (#517); the fake's own
       // trace orders the two events causally instead.
       expect(traceAtThrow).toContain("POST /session/ses_test123/message");
+      expect(traceAtThrow).toContain("ABORT ses_test123");
+      expect(thrown.aborted).toBe(true);
       expect(traceAtThrow).not.toContain("TURN_DONE");
-      // The CommHub reply is the truthful wording, not "opencode 错误: ...aborted".
+      expect(traceAtThrow).not.toContain("LATE_REPLY");
+      // One failed reply, not "opencode 错误: ...".
+      expect(replies).toHaveLength(1);
+      expect(replies[0]).toBe(thrown.userReplyText);
+      expect(replies[0]).toContain("已中止该会话");
+      expect(replies[0]).toContain("不会再作为新消息发回");
+      expect(replies[0]).toContain("OPENCODE_TIMEOUT_MS");
+      expect(replies[0]).not.toContain("没有被中止");
+      expect(replies[0]).not.toContain("错误");
+      // The turn's own clock would have emitted LATE_REPLY by now if abort
+      // had not cancelled it. That late line is the new message the session
+      // must not send after the failed reply.
+      await new Promise((r) => setTimeout(r, 2_500));
+      const trace = readFileSync(log, "utf8");
+      expect(trace).toContain("TURN_CANCELLED long build");
+      expect(trace).not.toContain("LATE_REPLY");
+      expect(trace).not.toContain("TURN_DONE");
+      expect(replies).toHaveLength(1);
+      expect(warnings.some((line) => line.includes("session aborted"))).toBe(true);
+      expect(warnings.some((line) => line.includes("session abort failed"))).toBe(false);
+    } finally {
+      await runtime.close();
+      f.close();
+      rmSync(log, { force: true });
+    }
+  }, 20_000);
+
+  test("board651 reply deadline logs abort failure and does not claim the turn stopped", async () => {
+    const log = join(tmpdir(), `opencode-abort-fail-${process.pid}-${Date.now()}.log`);
+    const warnings: string[] = [];
+    const f = fixture({
+      FAKE_TURN_MS: "900",
+      FAKE_USER_FIRST: "1",
+      FAKE_LATE_REPLY: "1",
+      FAKE_ABORT_STATUS: "500",
+      FAKE_LOG: log,
+    });
+    const runtime = await openVettedOpenCodeCopresence({
+      binary: f.binary,
+      env: f.env,
+      cwd: f.root,
+      workDir: f.root,
+      model: "opencode/fake",
+      startupTimeoutMs: 5_000,
+      warn: (line) => warnings.push(line),
+    });
+    try {
+      let thrown: any;
+      try { await runtime.submit("still going", 300); } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("reply");
+      expect(thrown.aborted).toBe(false);
       const reply = runtimeErrorReplyText("opencode", thrown);
-      expect(reply).toBe(thrown.userReplyText);
-      expect(reply).toContain("仍在节点的 TUI 会话里运行");
-      expect(reply).toContain("没有被中止");
-      expect(reply).toContain("OPENCODE_TIMEOUT_MS");
-      expect(reply).not.toContain("错误");
-      expect(reply).not.toContain("aborted");
-      // The bridge only stopped waiting: no abort call, and the turn finishes
-      // in the shared session afterwards.
+      expect(reply).toContain("尝试中止会话失败");
+      expect(reply).not.toContain("已中止该会话");
+      expect(warnings.some((line) => line.includes("session abort failed"))).toBe(true);
       const deadline = Date.now() + 5_000;
-      while (Date.now() < deadline && !readFileSync(log, "utf8").includes("TURN_DONE")) {
-        await new Promise((r) => setTimeout(r, 50));
+      while (Date.now() < deadline && !readFileSync(log, "utf8").includes("LATE_REPLY")) {
+        await new Promise((r) => setTimeout(r, 30));
+      }
+      expect(readFileSync(log, "utf8")).toContain("LATE_REPLY still going");
+    } finally {
+      await runtime.close();
+      f.close();
+      rmSync(log, { force: true });
+    }
+  }, 20_000);
+
+  test("board651 history read failure does not abort", async () => {
+    // HTTP 500 collapses to the same null history as the 5s GET timeout
+    // (.catch(() => null)). Unreadable history must not abort.
+    const log = join(tmpdir(), `opencode-history-fail-${process.pid}-${Date.now()}.log`);
+    const f = fixture({
+      FAKE_TURN_MS: "1200",
+      FAKE_USER_FIRST: "1",
+      FAKE_LATE_REPLY: "1",
+      FAKE_HISTORY_FAIL: "1",
+      FAKE_LOG: log,
+    });
+    const runtime = await openVettedOpenCodeCopresence({
+      binary: f.binary,
+      env: f.env,
+      cwd: f.root,
+      workDir: f.root,
+      model: "opencode/fake",
+      startupTimeoutMs: 5_000,
+    });
+    try {
+      let thrown: any;
+      try { await runtime.submit("history unread", 300); } catch (error) { thrown = error; }
+      const traceAtThrow = readFileSync(log, "utf8");
+      expect(traceAtThrow).not.toContain("ABORT ses_test123");
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("reply");
+      expect(thrown.aborted).toBe(false);
+      expect(thrown.userReplyText).toContain("仍在节点的 TUI 会话里运行");
+      expect(thrown.userReplyText).toContain("没有被中止");
+      expect(thrown.userReplyText).not.toContain("已中止");
+      expect(thrown.userReplyText).not.toContain("本任务没有发出");
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && !readFileSync(log, "utf8").includes("LATE_REPLY")) {
+        await new Promise((r) => setTimeout(r, 30));
+      }
+      expect(readFileSync(log, "utf8")).toContain("LATE_REPLY history unread");
+    } finally {
+      await runtime.close();
+      f.close();
+      rmSync(log, { force: true });
+    }
+  }, 20_000);
+
+  test("board651 human turn ahead of ours does not abort", async () => {
+    // Our id is in history, but the human message before it is still the
+    // unanswered head, so the runner is on the human turn.
+    const log = join(tmpdir(), `opencode-human-ahead-${process.pid}-${Date.now()}.log`);
+    const f = fixture({
+      FAKE_TURN_MS: "1200",
+      FAKE_USER_FIRST: "1",
+      FAKE_HUMAN_AHEAD: "1",
+      FAKE_LATE_REPLY: "1",
+      FAKE_LOG: log,
+    });
+    const runtime = await openVettedOpenCodeCopresence({
+      binary: f.binary,
+      env: f.env,
+      cwd: f.root,
+      workDir: f.root,
+      model: "opencode/fake",
+      startupTimeoutMs: 5_000,
+    });
+    try {
+      let thrown: any;
+      try { await runtime.submit("human is ahead", 300); } catch (error) { thrown = error; }
+      const traceAtThrow = readFileSync(log, "utf8");
+      expect(traceAtThrow).not.toContain("ABORT ses_test123");
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("reply");
+      expect(thrown.aborted).toBe(false);
+      expect(thrown.userReplyText).toContain("仍在节点的 TUI 会话里运行");
+      expect(thrown.userReplyText).toContain("没有被中止");
+      expect(thrown.userReplyText).not.toContain("已中止");
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && !readFileSync(log, "utf8").includes("LATE_REPLY")) {
+        await new Promise((r) => setTimeout(r, 30));
       }
       const trace = readFileSync(log, "utf8");
-      expect(trace).toContain("TURN_DONE long build");
-      expect(trace).not.toMatch(/\/abort/);
+      expect(trace).toContain("LATE_REPLY human is ahead");
+      expect(trace).not.toContain("ABORT ses_test123");
     } finally {
       await runtime.close();
       f.close();
@@ -731,18 +918,26 @@ describe("OpenCode copresence task deadline", () => {
   }, 20_000);
 
   test("admission timeout on a busy human session says the task was not submitted", async () => {
-    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000" });
+    const log = join(tmpdir(), `opencode-admission-${process.pid}-${Date.now()}.log`);
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000", FAKE_LOG: log });
     try {
       let thrown: any;
       try { await runtime.submit("queued", 300); } catch (error) { thrown = error; }
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
       expect(thrown.phase).toBe("admission");
+      expect(thrown.aborted).toBe(false);
       expect(thrown.message).toContain("remained busy");
       expect(thrown.userReplyText).toContain("本任务没有发出");
       expect(thrown.userReplyText).not.toContain("仍在节点的 TUI 会话里运行");
+      // The busy session is not ours. Aborting it would stop whoever is
+      // already using the shared TUI.
+      const trace = readFileSync(log, "utf8");
+      expect(trace).not.toContain("ABORT");
+      expect(trace).not.toMatch(/\/abort/);
     } finally {
       await runtime.close();
       f.close();
+      rmSync(log, { force: true });
     }
   }, 20_000);
 

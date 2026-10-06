@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isHumanUserMessage, ownershipChainVerdict, unverifiedOwnerError } from "./reply-ownership";
+import { isHumanUserMessage, ownershipChainVerdict, timedOutTurnAbortDecision, unverifiedOwnerError } from "./reply-ownership";
 import { runtimeErrorReplyText, UNVERIFIED_OWNER_MARKER } from "../unverified-reply-text";
 
 const user = (id: string, parentID?: string, text = "hi") => ({ info: { id, role: "user", parentID }, parts: [{ type: "text", text }] });
@@ -46,6 +46,45 @@ describe("ownershipChainVerdict (#1910)", () => {
     expect(isHumanUserMessage(summary("s", "sub"), "sub")).toBe(false);
     expect(isHumanUserMessage({ info: { id: "u", role: "user" }, parts: [{ type: "text", text: "   " }] }, "sub")).toBe(false);
     expect(isHumanUserMessage(assistant("a", "sub"), "sub")).toBe(false);
+  });
+});
+
+describe("timedOutTurnAbortDecision (board #651)", () => {
+  test("the only unanswered user message is ours", () => {
+    expect(timedOutTurnAbortDecision([user("msg_sub")], "msg_sub")).toBe("abort");
+  });
+  test("unreadable history does not abort", () => {
+    expect(timedOutTurnAbortDecision(null, "msg_sub")).toBe("leave_running");
+    expect(timedOutTurnAbortDecision(undefined, "msg_sub")).toBe("leave_running");
+    expect(timedOutTurnAbortDecision({} as never, "msg_sub")).toBe("leave_running");
+  });
+  test("a readable history without our id was not submitted", () => {
+    expect(timedOutTurnAbortDecision([], "msg_sub")).toBe("not_submitted");
+    expect(timedOutTurnAbortDecision([user("msg_other")], "msg_sub")).toBe("not_submitted");
+  });
+  test("a human message ahead of ours, both unanswered, is the live turn", () => {
+    const history = [user("msg_human", undefined, "human is typing"), user("msg_sub")];
+    expect(timedOutTurnAbortDecision(history, "msg_sub")).toBe("leave_running");
+  });
+  test("a human message queued after ours is not aborted", () => {
+    const history = [user("msg_sub"), user("msg_human", "msg_sub", "queued human")];
+    expect(timedOutTurnAbortDecision(history, "msg_sub")).toBe("leave_running");
+  });
+  test("a textless user message queued after ours is not aborted", () => {
+    const blank = { info: { id: "msg_blank", role: "user" }, parts: [{ type: "text", text: "   " }] };
+    expect(isHumanUserMessage(blank, "msg_sub")).toBe(false);
+    expect(timedOutTurnAbortDecision([user("msg_sub"), blank], "msg_sub")).toBe("leave_running");
+  });
+  test("an earlier unanswered message of ours blocks abort of the later timeout", () => {
+    expect(timedOutTurnAbortDecision([user("msg_a"), user("msg_b")], "msg_b")).toBe("leave_running");
+  });
+  test("a compaction summary after ours does not block the abort", () => {
+    const history = [user("msg_sub"), summary("msg_sum", "msg_sub")];
+    expect(timedOutTurnAbortDecision(history, "msg_sub")).toBe("abort");
+  });
+  test("an already-answered human turn then our unanswered turn aborts", () => {
+    const history = [user("msg_human", undefined, "earlier"), assistant("msg_a", "msg_human"), user("msg_sub")];
+    expect(timedOutTurnAbortDecision(history, "msg_sub")).toBe("abort");
   });
 });
 
