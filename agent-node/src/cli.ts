@@ -55,6 +55,7 @@ function agentNodeModuleDir(): string {
   return packageRoot ? packageRoot.replace(/\/+$/, "") + "/dist" : __dirname;
 }
 import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
+import { START_GATE_SINGLE_LANE_STATUS, START_GATE_WAITING_STATUS, waitForStartResources } from "./runtime/codex-app-server/start-resource-gate";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
@@ -2450,6 +2451,22 @@ if (rawCodexPending !== undefined) {
 const codexAppServerSessionManager = createCodexSessionManager<
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
 >();
+function ownedSpawnStartGate(): { nodeId?: string; report: (text: string) => void } {
+  return {
+    nodeId: NODE_ID || undefined,
+    report: (text: string) => {
+      void reportStatus("blocked", text).catch((e: any) => warn(`[start-gate] status report failed: ${e?.message || e}`));
+    },
+  };
+}
+
+function restoreStatusAfterStartGate(prev: { status: string; task?: string }): void {
+  const live = lastReportedStatus;
+  if (live.status === "blocked" && (live.task === START_GATE_WAITING_STATUS || live.task === START_GATE_SINGLE_LANE_STATUS)) {
+    void reportStatus(prev.status, prev.task).catch(() => {});
+  }
+}
+
 async function ensureCodexAppServerSession(): Promise<
   import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession
 > {
@@ -2460,6 +2477,7 @@ async function ensureCodexAppServerSession(): Promise<
   }
   const session = await codexAppServerSessionManager.getOrOpen(async () => {
     let openedRef: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
+    const prevStatus = { ...lastReportedStatus };
     const opened = await openCodexAppServerRuntime({
       serverUrl: codexAppServerUrl,
       threadId: codexAppServerThreadId,
@@ -2478,9 +2496,10 @@ async function ensureCodexAppServerSession(): Promise<
         if (openedRef) codexAppServerSessionManager.invalidate(openedRef);
         wakeCodexWatchdog();
       },
+      startGate: ownedSpawnStartGate(),
       log,
       warn,
-    });
+    }).finally(() => restoreStatusAfterStartGate(prevStatus));
     openedRef = opened;
     lastCodexAppServerUrl = opened.url;
     codexAppServerEverOpened = true;
@@ -7425,7 +7444,12 @@ if (RUNTIME === "codex-app-server") {
         log(`[app-server-watchdog] hung app-server stopped (${how}); relaunching on the original session`);
       }
       if (copresenceAppServer && appsrvSnapshot && NODE_CODEX_HOME) {
-        appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, token: AUTH_TOKEN, log }));
+        const gate = await waitForStartResources("codex app-server relaunch", { nodeId: NODE_ID || undefined, log, warn });
+        try {
+          appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, token: AUTH_TOKEN, log }));
+        } finally {
+          gate.release();
+        }
       }
       // 丢掉断了的会话,按原 thread 重新接上(自有拓扑这一步就是重新 spawn)。
       codexAppServerSessionManager.invalidate(codexAppServerSessionManager.current());
@@ -7473,6 +7497,7 @@ if (sideThreadsEnabled) {
     };
     warn("[side-thread] enable requested but codex-app-server, stable node_id, or dedicated CODEX_HOME is unavailable");
   } else {
+    const prevStatus = { ...lastReportedStatus };
     try {
       const sharedSession = await ensureCodexAppServerSession();
       const { openCodexAppServerRuntime } = await import("./runtime/codex-app-server/runtime");
@@ -7490,6 +7515,7 @@ if (sideThreadsEnabled) {
         commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
         commhubToken: AUTH_TOKEN || undefined,
         codexHome: NODE_CODEX_HOME,
+        startGate: ownedSpawnStartGate(),
         log: (message) => log(`[side-thread-owned] ${message}`),
         warn: (message) => warn(`[side-thread-owned] ${message}`),
       }));
@@ -7518,6 +7544,8 @@ if (sideThreadsEnabled) {
         evidenceRevision: "test1190-wire-v2", reason: "runtime",
       };
       warn(`[side-thread] startup failed closed: ${startupError?.message || startupError}`);
+    } finally {
+      restoreStatusAfterStartGate(prevStatus);
     }
   }
 }
