@@ -231,7 +231,7 @@ export function validateEnvRefs(
   return out;
 }
 
-// §4.4.7 — safe serializer for .env.local. Dotenv-quoted with escape
+// §4.4.7 — safe serializer for the node secrets.env file. Dotenv-quoted with escape
 // for backslash / double-quote / newline / carriage-return so that a
 // value containing `\n"evil=KEY2"` cannot pollute the next line.
 export function serializeEnvLocal(env: Record<string, string>): string {

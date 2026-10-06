@@ -22,6 +22,7 @@ import {
   TIMEOUT_MS_MAX,
 } from "./config-apply.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
+import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 
 // ── §4.2.6 B2 — ANET_BIN install-time pin + boot 4-check ──────────
 //
@@ -634,6 +635,8 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
 }
 
 // §4.4.7 — duplicate of hub serializeEnvLocal (same escape rules).
+// Board #638 — the text is written to `<node dir>/secrets.env`, the file
+// agent-node loads at start. The old unread dotenv name is not used.
 export function serializeEnvLocalDaemon(env: Record<string, string>): string {
   return Object.entries(env).map(([k, v]) => {
     const esc = String(v)
@@ -643,6 +646,17 @@ export function serializeEnvLocalDaemon(env: Record<string, string>): string {
       .replace(/\r/g, "\\r");
     return `${k}="${esc}"`;
   }).join("\n") + "\n";
+}
+
+/** Board #638 — write the create-time env blob to the file agent-node loads. 0600 via atomicWritePrivateText. */
+export function writeChildSecretsEnv(
+  childWorkDir: string,
+  nodeName: string,
+  blob: Record<string, string>,
+  serialize: (env: Record<string, string>) => string,
+): void {
+  const envFile = join(childWorkDir, ".anet", "nodes", nodeName, NODE_SECRETS_FILE_NAME);
+  atomicWritePrivateText(envFile, serialize(blob));
 }
 
 // ── §2.5 step 3 — handle SSE doorbell ──────────────────────────────
@@ -883,11 +897,10 @@ export async function handleCreateNodeDoorbell(
     return;
   }
   if (req.env_blob && Object.keys(req.env_blob).length > 0) {
-    const envFile = join(childWorkDir, ".anet", "nodes", req.node_spec.name, ".env.local");
     try {
-      atomicWritePrivateText(envFile, deps.serializeEnvLocal(req.env_blob));
+      writeChildSecretsEnv(childWorkDir, req.node_spec.name, req.env_blob, deps.serializeEnvLocal);
     } catch (e: any) {
-      deps.warn(`[create-node] env.local write failed: ${e?.message || e}`);
+      deps.warn(`[create-node] secrets.env write failed: ${e?.message || e}`);
       // not fatal — proceed to start; hub will see status=succeeded but
       // child might fail on first vendor call. Acceptable for P1.
     }
