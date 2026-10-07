@@ -36,7 +36,7 @@ RUN cd server && npm ci --ignore-scripts \
 RUN for v in 0.133.0 0.159.2; do \
       printf '%s\n' '#!/bin/sh' \
         "if [ \"\$1\" = \"--version\" ]; then echo 'codex-cli $v'; exit 0; fi" \
-        'if [ "$1" = "app-server" ]; then echo "$*" >> /tmp/t734-appserver-argv.log; fi' \
+        "if [ \"\$1\" = \"app-server\" ]; then echo \"$v \$*\" >> /tmp/t734-appserver-argv.log; fi" \
         'exec sleep 3600' > /usr/local/bin/codex-stub-$v && chmod 0755 /usr/local/bin/codex-stub-$v; \
     done \
  && ln -s /usr/local/bin/codex-stub-0.159.2 /usr/local/bin/codex

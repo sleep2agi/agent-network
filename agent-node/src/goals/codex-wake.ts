@@ -52,6 +52,10 @@ export interface CodexWakeDeps {
   buildOpts: () => unknown;
   log?: (msg: string) => void;
   warn?: (msg: string) => void;
+  /** Board #734 — called before resuming a recorded thread. A string = refuse:
+   * the wake fails with that text, keeps the thread id and does NOT rebuild a
+   * fresh thread (that would silently drop the history). null = proceed. */
+  guardResume?: (threadId: string) => string | null;
 }
 
 export interface CodexWakeResult {
@@ -94,6 +98,11 @@ export async function runCodexWakeForGoal(
 
   // 1. Try resume first if the goal already owns a thread.
   if (goal.codex_thread_id) {
+    const refusal = deps.guardResume?.(goal.codex_thread_id) ?? null;
+    if (refusal) {
+      warn(`[goal-codex] ${idShort} resume of ${goal.codex_thread_id} refused (board #734)`);
+      return { text: refusal, failed: true, threadId: goal.codex_thread_id, threadRebuilt: false };
+    }
     try {
       const codex = await deps.newCodex();
       thread = codex.resumeThread(goal.codex_thread_id, deps.buildOpts());

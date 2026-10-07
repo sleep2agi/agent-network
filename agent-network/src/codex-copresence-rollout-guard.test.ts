@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { copresenceRolloutGuard } from "./codex-copresence-rollout-guard";
+import { copresenceRolloutGuard, resolveLaunchCodexBin } from "./codex-copresence-rollout-guard";
 
 const THREAD = "01a11846-d796-72f1-af68-8d9215a65dc8";
 const meta = (historyMode?: string) =>
@@ -58,4 +58,24 @@ describe("board #734 co-presence pre-start guard", () => {
       expect(probes).toBe(0);
     } finally { rmSync(h, { recursive: true, force: true }); }
   });
+  test("legacy in sessions/ + paginated copy in archived_sessions/: allowed, same answer as agent-node", () => {
+    const h = home(meta());
+    try {
+      const dir = join(h, "archived_sessions", "2026", "10", "07");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `rollout-2026-10-07T23-00-00-${THREAD}.jsonl`), `${meta("paginated")}\n`);
+      expect(copresenceRolloutGuard({ codexHome: h, threadIds: [THREAD], codexBin: "codex", displayName: "n1", probeVersion: () => "0.133.0" }).block).toBeNull();
+    } finally { rmSync(h, { recursive: true, force: true }); }
+  });
+
+  test("resolveLaunchCodexBin: paths unchanged; bare names resolved through the given shell mode", () => {
+    expect(resolveLaunchCodexBin("/opt/x/codex", { loginShell: true })).toEqual({ bin: "/opt/x/codex" });
+    const calls: string[][] = [];
+    const run = ((cmd: string, args: string[]) => { calls.push([cmd, ...args]); return { status: 0, stdout: "/login/bin/codex\n" }; }) as any;
+    expect(resolveLaunchCodexBin("codex", { loginShell: true, run })).toEqual({ bin: "/login/bin/codex", resolvedFrom: "codex" });
+    expect(calls[0].slice(0, 2)).toEqual(["bash", "-lc"]);
+    const fail = (() => ({ status: 1, stdout: "" })) as any;
+    expect(resolveLaunchCodexBin("codex", { loginShell: false, run: fail })).toEqual({ bin: "codex" });
+  });
 });
+

@@ -1,7 +1,8 @@
 // Board #734 — agent-node's own codex launches (codex-sdk, owned app-server):
 // refuse to resume a paginated rollout with codex < 0.145. See codex-rollout-history-guard.ts.
-import { codexSessionsRoot, findCodexRolloutFile } from "./codex-thread-size-check";
-import { checkRolloutCodexCompat, type FirstLineRead } from "./codex-rollout-history-guard";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { checkRolloutCodexCompat, resolveCodexResumeRollout, type FirstLineRead } from "./codex-rollout-history-guard";
 
 export interface NodeRolloutGuardInput {
   threadId: string;
@@ -15,7 +16,9 @@ export interface NodeRolloutGuardInput {
 }
 
 export function nodeRolloutGuard(input: NodeRolloutGuardInput): { block: string[] | null; warnings: string[] } {
-  const rolloutPath = findCodexRolloutFile(codexSessionsRoot(input.env), input.threadId);
+  const codexHome = input.env.CODEX_HOME && input.env.CODEX_HOME.trim() ? input.env.CODEX_HOME.trim() : join(homedir(), ".codex");
+  // Same resolver (codex's own lookup order) as the anet co-presence launchers.
+  const rolloutPath = resolveCodexResumeRollout(codexHome, input.threadId);
   const v = checkRolloutCodexCompat({
     threadId: input.threadId,
     rolloutPath,

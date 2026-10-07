@@ -7,8 +7,10 @@ import {
   compareVersions,
   describeMissingOrdinalFailure,
   FIRST_LINE_CHUNK_BYTES,
+  parseCodexVersionOutput,
   parseRolloutHistoryMode,
   readRolloutFirstLine,
+  resolveCodexResumeRollout,
 } from "./codex-rollout-history-guard.js";
 import { nodeRolloutGuard } from "./codex-rollout-guard-node.js";
 
@@ -125,6 +127,48 @@ describe("board #734 rollout history guard", () => {
       const missing = nodeRolloutGuard({ threadId: "00000000-0000-0000-0000-000000000000", env: { CODEX_HOME: home }, codexBin: "c", codexVersion: () => "0.133.0", pointAtNewerCodex: POINT });
       expect(missing.block).toBeNull();
       expect(missing.warnings.join("\n")).toContain("not found");
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+
+  test("version parse only trusts a codex-identifying token", () => {
+    expect(parseCodexVersionOutput("codex-cli 0.159.2")).toBe("0.159.2");
+    expect(parseCodexVersionOutput("nvm 0.39.7\ncodex-cli 0.133.0")).toBe("0.133.0");
+    expect(parseCodexVersionOutput("nvm 0.39.7\nNow using node v20.20.0")).toBeNull();
+    expect(parseCodexVersionOutput("Codex v0.145.0")).toBe("0.145.0");
+    expect(parseCodexVersionOutput("")).toBeNull();
+  });
+
+  test("resolver follows codex: sessions/ newest first, archived_sessions/ only as fallback", () => {
+    const home = tmpHome();
+    try {
+      const put = (sub: string, stamp: string, line: string) => {
+        const dir = join(home, sub, "2026", "10", "07");
+        mkdirSync(dir, { recursive: true });
+        const p = join(dir, `rollout-${stamp}-${THREAD}.jsonl`);
+        writeFileSync(p, `${line}\n`);
+        return p;
+      };
+      expect(resolveCodexResumeRollout(home, THREAD)).toBeNull();
+      const archived = put("archived_sessions", "2026-10-07T23-00-00", meta("paginated"));
+      expect(resolveCodexResumeRollout(home, THREAD)).toBe(archived);
+      const older = put("sessions", "2026-10-07T20-00-00", meta("paginated"));
+      expect(resolveCodexResumeRollout(home, THREAD)).toBe(older);
+      const newer = put("sessions", "2026-10-07T21-00-00", meta());
+      expect(resolveCodexResumeRollout(home, THREAD)).toBe(newer);
+      expect(resolveCodexResumeRollout(home, "../x")).toBeNull();
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+
+  test("legacy in sessions/ + paginated copy in archived_sessions/: agent-node allows 0.133 (codex resumes the sessions/ one)", () => {
+    const home = tmpHome();
+    try {
+      writeRollout(home, meta());
+      const dir = join(home, "archived_sessions", "2026", "10", "07");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `rollout-2026-10-07T23-00-00-${THREAD}.jsonl`), `${meta("paginated")}\n`);
+      const r = nodeRolloutGuard({ threadId: THREAD, env: { CODEX_HOME: home }, codexBin: "c", codexVersion: () => "0.133.0", pointAtNewerCodex: POINT });
+      expect(r.block).toBeNull();
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 

@@ -1,9 +1,10 @@
-test734 — board #734 codex paginated-rollout guard. Docker --cpus=2, 2026-10-08 05:56 CST, image built from this branch (codex 0.133.0 + 0.159.2 real binaries).
-agent-node typecheck: 81 errors (= baseline 81, origin/main also 81). agent-network bun tsc --noEmit: 0.
+test734 — board #734 codex paginated-rollout guard (review round 1). Docker --cpus=2, 2026-10-08 06:16 CST, image built from this branch (codex 0.133.0 + 0.159.2 real binaries).
+agent-node typecheck: 81 errors (= baseline 81). agent-network bun tsc --noEmit: rc=0. check-mutation-pins rc=0, check-doc-symbol-pins rc=0 (both doc roots).
 
 T734 source=local
 ── L1 unit
 src/runtime/codex-rollout-history-guard.test.ts:
+src/goals/codex-wake.test.ts:
 src/codex-copresence-rollout-guard.test.ts:
 PASS L1 unit
 ── L2 guard × real codex --version
@@ -11,6 +12,8 @@ PASS L2 0.133 on paginated → blocked
 PASS L2 0.159.2 on paginated → allowed
 PASS L2 0.133 on legacy → allowed
 PASS L2 0.133, rollout missing → allowed
+PASS L2 wrapper 'nvm 0.39.7' + real 0.159.2 on paginated → allowed
+PASS L2 wrapper with no codex version line on paginated (unknown → warn, allow) → allowed
 PASS L2 block message explains the consequence
 ── L3 bounded first-line read on a 300 MB rollout
    size=314573800 bytes
@@ -32,15 +35,25 @@ PASS L5 mixed rollout untouched
    [anet] [codex] ❌ thread 01a11846-d796-72f1-af68-8d9215a65dc8 cannot be resumed: its rollout mixes codex versions (board #734).
    [anet] [codex]    Cause: the thread was written by codex >= 0.145.0 ("paginated" history, every line has an ordinal),
    [anet] [codex]    then an older codex (< 0.145.0) appended lines without one. codex >= 0.145.0 rejects that file.
-   [anet] [codex]    The original file is untouched: /root/t734-work.KnhpsW/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl
+   [anet] [codex]    The original file is untouched: /root/t734-work.C258rK/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl
    [anet] [codex]    Safe options: wait for fork recovery (board #734), or — after a human decides the history may be left behind —
    [anet] [codex]    start a fresh thread (anet node start <node> --new-session). Do not edit or delete the rollout.
-   [anet] [codex]    Read-only check: head -n 1 '/root/t734-work.KnhpsW/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl' | grep -o '"history_mode":"[a-z]*"'; tail -n 1 '/root/t734-work.KnhpsW/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl' | grep -c '"ordinal"'
+   [anet] [codex]    Read-only check: head -n 1 '/root/t734-work.C258rK/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl' | grep -o '"history_mode":"[a-z]*"'; tail -n 1 '/root/t734-work.C258rK/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl' | grep -c '"ordinal"'
    [anet] [codex]      (paginated + last line count 0 = this failure)
+PASS L5 anet PATH=0.133, login PATH=0.159.2: probes and launches 0.159.2
+PASS L5 anet PATH=0.159.2, login PATH=0.133: refused (0.133 is what would launch)
+PASS L5 --new-session: codex 0.133 starts (guard bypassed)
+PASS L5 --new-session on the mixed rollout: fresh thread, old thread not resumed
+PASS L5 --new-session left the rollout untouched
 ── mutations of the shipped source (each must go red)
 PASS mutation M1-drop-version-compare → red (l2-block)
-   {"ok":true,"reportedBytes":412,"kernelReadBytes":629147699,"ms":519,"verdict":"block"}
+   {"ok":true,"reportedBytes":412,"kernelReadBytes":629147699,"ms":894,"verdict":"block"}
 PASS mutation M2-read-whole-file → red (l3)
 PASS mutation M3-launcher-guard-not-wired → red (l5-block)
 PASS mutation M4-launcher-ignores-block → red (l5-block)
-T734 PASS=21 FAIL=0
+PASS mutation M5-launcher-ignores-new-session → red (l5-newsession)
+PASS mutation M6-first-semver-wins → red (l2-wrapper)
+PASS mutation M7-probe-anet-path-not-login-path → red (l5-twopath)
+PASS mutation M8-archived-before-sessions → red (unit-node)
+PASS mutation M9-goal-wake-unguarded → red (unit-node)
+T734 PASS=33 FAIL=0

@@ -21,7 +21,8 @@
 // Nothing here ever writes to the rollout.
 
 import { spawnSync } from "node:child_process";
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 /** First codex release that writes paginated rollouts with per-line ordinals. */
 export const PAGINATED_ROLLOUT_MIN_CODEX = "0.145.0";
@@ -115,6 +116,17 @@ export function compareVersions(a: string, b: string): number | null {
   return 0;
 }
 
+/**
+ * Version from `codex --version` output. Only a codex-identifying token counts
+ * (`codex-cli 0.159.2`, `codex 0.145.0`): a wrapper that prints its own version
+ * first (`nvm 0.39.7`) must not be read as the codex version. No match = unknown.
+ */
+export function parseCodexVersionOutput(text: string | undefined | null): string | null {
+  if (!text) return null;
+  const m = /\bcodex(?:-cli)?\s+v?(\d+\.\d+\.\d+)/i.exec(text);
+  return m ? m[1] : null;
+}
+
 const versionCache = new Map<string, string | null>();
 
 /** `<bin> --version` → `x.y.z`, cached per binary for the life of the process. */
@@ -131,15 +143,53 @@ export function probeCodexVersionCached(bin: string, timeoutMs = 5_000): string 
       shell: process.platform === "win32",
       windowsHide: true,
     });
-    if (!r.error && r.status === 0) {
-      const v = parseVersion(`${r.stdout ?? ""}\n${r.stderr ?? ""}`);
-      version = v ? v.join(".") : null;
-    }
+    if (!r.error && r.status === 0) version = parseCodexVersionOutput(`${r.stdout ?? ""}\n${r.stderr ?? ""}`);
   } catch {
     version = null;
   }
   versionCache.set(bin, version);
   return version;
+}
+
+const ROLLOUT_NAME_RE = /^rollout-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))?\.jsonl$/i;
+const MAX_ROLLOUT_DEPTH = 6;
+
+/** Newest `rollout-<ts>-<thread>[_<rollout-id>].jsonl` under `root` (recursive), by timestamp then rollout id. */
+function newestRolloutUnder(root: string, threadId: string): string | null {
+  const want = threadId.toLowerCase();
+  let best: { key: string; path: string } | null = null;
+  const walk = (dir: string, depth: number) => {
+    if (depth > MAX_ROLLOUT_DEPTH) return;
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      const full = join(dir, name);
+      const m = ROLLOUT_NAME_RE.exec(name);
+      if (m) {
+        if (m[2].toLowerCase() !== want) continue;
+        try { if (!statSync(full).isFile()) continue; } catch { continue; }
+        const key = `${m[1]} ${(m[3] ?? m[2]).toLowerCase()}`;
+        if (!best || key > best.key) best = { key, path: full };
+        continue;
+      }
+      try { if (statSync(full).isDirectory()) walk(full, depth + 1); } catch { /* ignore */ }
+    }
+  };
+  walk(root, 0);
+  return best ? (best as { path: string }).path : null;
+}
+
+/**
+ * The rollout codex would resume for `threadId`, following codex's own filesystem
+ * order (codex-rs thread-store thread_rollout_resolver): `sessions/` first, newest
+ * matching file wins; `archived_sessions/` only when nothing is in `sessions/`.
+ * (codex consults its SQLite index before the filesystem; that index is not read here.)
+ * The ONE resolver every anet guard uses (co-presence launchers and agent-node).
+ */
+export function resolveCodexResumeRollout(codexHome: string, threadId: string): string | null {
+  if (!threadId || /[\\/\0]/.test(threadId)) return null;
+  return newestRolloutUnder(join(codexHome, "sessions"), threadId)
+    ?? newestRolloutUnder(join(codexHome, "archived_sessions"), threadId);
 }
 
 export interface RolloutCompatInput {
