@@ -7,7 +7,7 @@ mkdir -p "$(dirname "$REPORT")"
   echo
   echo "Layer 1: pure recovery + existing thread lifecycle"
   cd /repo/agent-network
-  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-resume-timeout.test.ts src/codex-copresence-rpc.test.ts src/codex-copresence-thread.test.ts src/codex-pending-thread-restart.test.ts src/opencode-agent-node-pair.test.ts
+  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-resume-timeout.test.ts src/codex-copresence-env.test.ts src/codex-copresence-rpc.test.ts src/codex-copresence-thread.test.ts src/codex-pending-thread-restart.test.ts src/opencode-agent-node-pair.test.ts
   cd /repo/agent-node
   bun test src/runtime/codex-app-server-bridge.test.ts src/runtime/codex-app-server/resume-timeout.test.ts
   cd /repo/agent-network
@@ -53,6 +53,7 @@ mkdir -p "$(dirname "$REPORT")"
   echo "Mutation proven by slow fake app-server: reducing the derived thread/resume deadline below its response delay fails closed."
   echo "Mutation proven by acknowledged-without-rollout fake: a deferred candidate cannot become codexThreadId until its exact rollout exists; the materialization retry shares ANET_CODEX_RESUME_TIMEOUT_MS."
   echo "Mutation proven by --new-session selector: restoring the recorded thread id makes the co-presence test fail; both native platform lanes also discard pending candidates."
+  echo "Real private-tmux E2E (test535): a fake config.env provider key is present in app-server, bridge, and TUI /proc environments; deleting the merge is witnessed red. Values never enter argv and the 0600 source file is gone after launch."
   echo "Identity boundary: config-recovery.json is redacted non-credential metadata only. The original config.json and CODEX_HOME remain in place and are never replaced or cleared."
   echo
   echo "Release gate (report-only; this Draft does not publish or bump versions)"

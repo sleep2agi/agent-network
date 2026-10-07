@@ -1,0 +1,33 @@
+Test 535 — Codex co-presence config.env propagation
+Date: 2026-10-07 (Asia/Shanghai)
+Candidate: PR #2480 follow-up (not merged or published)
+
+Environment
+-----------
+- Docker only, limited with --cpus=2.
+- Throwaway Hub on a non-production port and isolated HOME.
+- Private tmux server; cleanup targets only fixture sessions.
+- Fake provider key and fake credentials only. No value is printed.
+
+Command
+-------
+sg docker -c 'docker build --cpuset-cpus=0-1 ... \
+  -f tests/test-codex-copresence-first-start/Dockerfile . && \
+  docker run --rm --cpus=2 anet-test535:config-env3'
+
+Result
+------
+- 59 unit tests passed, 0 failed.
+- Real `anet node start` reached ready through app-server, bridge, and TUI.
+- `/proc/<pane-pid>/environ` for all three roles contained the fake config.env key.
+- `.anet-copresence.env` was absent after launch (source-then-delete).
+- Existing single-node verify passed.
+- Five mutations were witnessed red, including removal of the config.env merge.
+- Final result: T535 PASS.
+
+Security boundary
+-----------------
+- Values are written to a mode-0600 file under the mode-0700 CODEX_HOME.
+- Values do not enter tmux argv or pane_start_command.
+- Launcher-owned identity variables override config.env values.
+- Invalid shell variable names and NUL values fail before a tmux session starts.

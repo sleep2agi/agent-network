@@ -87,7 +87,7 @@ echo "L5 logged out: needs-login, exit 3, nothing started"
 run_e2e logged-out out 0
 
 echo "L6 witnessed red (P1-1): the bridge resolves agent-node itself again (slow npx inside the 25 s wait)"
-bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts '...(pairedAgentNodeEntrypoint ? ["-e", `ANET_CODEX_PAIRED_AGENT_NODE=${pairedAgentNodeEntrypoint}`] : []),' ''
+bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts '      ...(pairedAgentNodeEntrypoint ? { ANET_CODEX_PAIRED_AGENT_NODE: pairedAgentNodeEntrypoint } : {}),' ''
 expect_red bridge-resolves 'did not reach ready' run_e2e slow-fetch red-slow "$DELAY"
 restore_cli
 
@@ -106,7 +106,15 @@ bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts 
 expect_red verify-unknown 'single-node verify exited 2' run_e2e slow-fetch red-verify 0
 restore_cli
 
+echo "L10 witnessed red: config.env must reach all three co-presence processes"
+ENV_HELPER=agent-network/src/codex-copresence-env.ts
+cp "$ENV_HELPER" /tmp/t535-env-helper.ts
+bun tests/test-codex-copresence-first-start/mutate.mjs "$ENV_HELPER" '  return out;' '  return Object.fromEntries(Object.entries(required));'
+expect_red missing-config-env 'app-server pane pid=' run_e2e slow-fetch red-env 0
+cp /tmp/t535-env-helper.ts "$ENV_HELPER"
+
 cmp -s /tmp/t535-cli.ts "$CLI" || { echo "FAIL: cli.ts not restored"; exit 1; }
+cmp -s /tmp/t535-env-helper.ts "$ENV_HELPER" || { echo "FAIL: codex-copresence-env.ts not restored"; exit 1; }
 leftover=$(pgrep -f 't535-codex app-server' || true)
 [ -z "$leftover" ] || { echo "FAIL: app-server left running: $leftover"; exit 1; }
 echo "T535 PASS"

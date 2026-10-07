@@ -292,6 +292,7 @@ import {
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
 import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
+import { codexCopresenceEnvFileText, codexCopresenceStageEnv } from "../src/codex-copresence-env";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -607,13 +608,14 @@ function assertSafeHubUrl(hub: string): void {
   }
 }
 
-// #P2fix必修1 — token must NOT appear in argv or tmux pane_start_command.
-// Writes ANET_CODEX_COMMHUB_TOKEN to a 0600 file inside <codexHome> (0700);
-// the tmux child sources then removes it before exec'ing codex, so the
-// value never reaches /proc/*/cmdline nor tmux's pane_start_command.
+// #P2fix必修1 — secrets must NOT appear in argv or tmux pane_start_command.
+// Writes the stage's resolved config.env plus its required launcher values to
+// one 0600 file inside <codexHome> (0700); each tmux child sources then removes
+// it before exec. The fixed name is safely reused only after the previous stage
+// has proved ready (and therefore has already sourced + removed its copy).
 // Do NOT use `tmux new-session -e KEY=VAL` (env pairs are argv) or
 // `tmux send-keys` (writes into pane history).
-function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
+function writeCodexCopresenceEnvFile(codexHome: string, env: Readonly<Record<string, string>>): string {
   const envPath = join(codexHome, ".anet-copresence.env");
   // #P2fix复审必修 — TOCTOU + symlink-follow attack surface.
   // Without pre-unlink, a pre-existing symlink at envPath would be followed
@@ -622,7 +624,7 @@ function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
   // the file at umask default (typically 0644) and the chmod-to-0600 race is
   // observable to any world-readable scan.
   try { unlinkSync(envPath); } catch (err: any) { if (err?.code !== "ENOENT") throw err; }
-  writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`, { mode: 0o600, flag: "wx" });
+  writeFileSync(envPath, codexCopresenceEnvFileText(env), { mode: 0o600, flag: "wx" });
   chmodIfPosix(envPath, 0o600);  // belt-and-suspenders in case older node ignores mode option
   return envPath;
 }
@@ -644,6 +646,8 @@ interface CopresenceOptions {
   allowSharedCodexLogin?: boolean;
   /** Explicit fresh conversation: do not resume codexThreadId or a pending candidate. */
   newSession?: boolean;
+  /** Resolved config.env values. Each native stage receives the same set. */
+  configEnv: Record<string, string>;
 }
 
 /** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
@@ -1008,9 +1012,11 @@ async function startWindowsCodexCopresence(
   const bearerTomlLiteral = `mcp_servers.commhub.bearer_token_env_var=ANET_CODEX_COMMHUB_TOKEN`;
   const appEnv = {
     ...process.env,
-    CODEX_HOME: opts.codexHome,
-    ANET_NODE_MARKER: marker,
-    ANET_CODEX_COMMHUB_TOKEN: opts.token,
+    ...codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: marker,
+      ANET_CODEX_COMMHUB_TOKEN: opts.token,
+    }),
   };
   const admission = await holdAppServerStart(resolved.id);
   const managed: WindowsManagedProcess[] = [];
@@ -1075,10 +1081,12 @@ async function startWindowsCodexCopresence(
 
     const bridgeEnv: NodeJS.ProcessEnv = {
       ...process.env,
-      CODEX_HOME: opts.codexHome,
-      ANET_NODE_MARKER: marker,
-      ANET_COPRESENCE_BRIDGE: "1",
-      ANET_CODEX_RESUME_TIMEOUT_MS: String(resumeBudget.timeoutMs),
+      ...codexCopresenceStageEnv(opts.configEnv, {
+        CODEX_HOME: opts.codexHome,
+        ANET_NODE_MARKER: marker,
+        ANET_COPRESENCE_BRIDGE: "1",
+        ANET_CODEX_RESUME_TIMEOUT_MS: String(resumeBudget.timeoutMs),
+      }),
     };
     delete bridgeEnv.COMMHUB_TOKEN;
     delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
@@ -1106,7 +1114,8 @@ async function startWindowsCodexCopresence(
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
     const tuiArgs = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
     const tui = spawn(opts.codexBin, tuiArgs, {
-      cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
+      cwd: process.cwd(),
+      env: { ...process.env, ...codexCopresenceStageEnv(opts.configEnv, { CODEX_HOME: opts.codexHome, ANET_NODE_MARKER: marker }) },
       stdio: "inherit", windowsHide: false, shell: true,
     });
     await new Promise<void>((resolve, reject) => {
@@ -1675,7 +1684,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
   // #P2fix必修1 — token to 0600 file, sourced-then-removed inside the tmux
   // child. Never appears in argv / /proc/*/cmdline / tmux pane_start_command.
-  const envFilePath = writeCodexCopresenceEnvFile(opts.codexHome, opts.token);
+  const envFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+    CODEX_HOME: opts.codexHome,
+    ANET_NODE_MARKER: identityMarker,
+    ANET_CODEX_COMMHUB_TOKEN: opts.token,
+  }));
   // #P2fix必修2 — shellQuote every `-c` TOML fragment (including the hub
   // URL fragment). assertSafeHubUrl was called above; shellQuote guards
   // even in the face of a validator regression.
@@ -1858,8 +1871,17 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // <node>/codex-bridge.log (0600, truncated each start, capped), and a failure prints the tail.
     const bridgeLog = join(nodesDir(), resolved.id, CODEX_BRIDGE_LOG_NAME);
     try { writeFileSync(bridgeLog, "", { mode: 0o600 }); chmodIfPosix(bridgeLog, 0o600); } catch { /* best-effort: the tee still creates it */ }
+    const bridgeEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: identityMarker,
+      ANET_COPRESENCE_BRIDGE: "1",
+      ANET_CODEX_RESUME_TIMEOUT_MS: String(recoveryTimeoutMs),
+      ANET_CODEX_TUI_SESSION: tuiSession,
+      ...(pairedAgentNodeEntrypoint ? { ANET_CODEX_PAIRED_AGENT_NODE: pairedAgentNodeEntrypoint } : {}),
+    }));
     const bridgeCmd = [
-      `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+      `. ${shellQuote(bridgeEnvFilePath)}`,
+      `rm -f ${shellQuote(bridgeEnvFilePath)}`,
       `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN`,
       codexBridgeTeeCommand(shellQuote(bridgeLog)),
       `exec ${selfInvoke} node start ${shellQuote(displayName)}`,
@@ -1870,15 +1892,13 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         "-e", `ANET_NODE_MARKER=${identityMarker}`,
         "-e", "ANET_COPRESENCE_BRIDGE=1",
         "-e", `CODEX_HOME=${opts.codexHome}`,
-        "-e", `ANET_CODEX_RESUME_TIMEOUT_MS=${recoveryTimeoutMs}`,
         // #448 — health.tui probes this exact session name.
         "-e", `ANET_CODEX_TUI_SESSION=${tuiSession}`,
-        // #535 — the entrypoint ⓪ already resolved and validated; the bridge re-validates it, no npx.
-        ...(pairedAgentNodeEntrypoint ? ["-e", `ANET_CODEX_PAIRED_AGENT_NODE=${pairedAgentNodeEntrypoint}`] : []),
         "bash", "-lc", bridgeCmd,
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${bridgeSession} failed: ${e?.message || e}`);
+      try { rmSync(bridgeEnvFilePath, { force: true }); } catch { /* best-effort */ }
       console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
       process.exit(1);
     }
@@ -1924,8 +1944,13 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
     const tuiArgv = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
     const tuiInvocation = `exec ${shellQuote(opts.codexBin)} ${tuiArgv.map(shellQuote).join(" ")}`;
+    const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: identityMarker,
+    }));
     const tuiCmd = [
-      `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+      `. ${shellQuote(tuiEnvFilePath)}`,
+      `rm -f ${shellQuote(tuiEnvFilePath)}`,
       tuiInvocation,
     ].join(" ; ");
     try {
@@ -1937,6 +1962,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${tuiSession} failed: ${e?.message || e}`);
+      try { rmSync(tuiEnvFilePath, { force: true }); } catch { /* best-effort */ }
       console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
       process.exit(1);
     }
@@ -8090,6 +8116,7 @@ async function startCommand() {
       tuiFirst: opts["tui-first"] === "true",
       allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",
       newSession: forceNewSession,
+      configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id)),
     });
     return;
   }
