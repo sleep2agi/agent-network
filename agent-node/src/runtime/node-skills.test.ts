@@ -402,6 +402,43 @@ describe("team skills", () => {
     expect((await listSkills("claude", ctx)).map((s) => s.name)).not.toContain("evil");
   });
 
+  test("~/.anet itself a symlink: second start recognises its own links and a deleted skill's dangling link is cleaned", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const disk = await tmp("skills-disk-");
+    await fs.mkdir(path.join(disk, "anet"), { recursive: true });
+    await fs.symlink(path.join(disk, "anet"), path.join(home, ".anet"));
+    const ctx = { workDir: work, home };
+    const team = teamSkillsDir(ctx);
+    await skill(team, "team-a", md("a"));
+    await skill(team, "team-b", md("b"));
+    const user = path.join(home, ".claude", "skills");
+    const first = say();
+    await installTeamSkills("claude", ctx, first);
+    expect(await fs.readlink(path.join(user, "team-a"))).toBe(path.join(disk, "anet", "skills", "team-a"));
+    expect(first.warns).toEqual([]);
+    expect(await isOurTeamEntry(path.join(user, "team-a"), team)).toBe(true);
+    const second = say();
+    await installTeamSkills("claude", ctx, second);
+    expect(second.logs).toEqual([]);
+    expect(second.warns).toEqual([]);
+    expect((await skillView("claude", ctx)).warnings).toEqual([]);
+    await fs.rm(path.join(team, "team-b"), { recursive: true });
+    const third = say();
+    await installTeamSkills("claude", ctx, third);
+    await expect(fs.lstat(path.join(user, "team-b"))).rejects.toThrow();
+    expect(third.logs).toEqual(["[skills] 已移除失效的团队链接 ~/.claude/skills/team-b"]);
+    expect(third.warns).toEqual([]);
+    expect(await fs.readlink(path.join(user, "team-a"))).toBe(path.join(disk, "anet", "skills", "team-a"));
+    // 旧版本按字面路径建的链接（经过 ~/.anet 软链接）同样认作我们的。
+    await fs.unlink(path.join(user, "team-a"));
+    await fs.symlink(path.join(team, "team-a"), path.join(user, "team-a"));
+    const fourth = say();
+    await installTeamSkills("claude", ctx, fourth);
+    expect(fourth.warns).toEqual([]);
+    expect(fourth.logs).toEqual([]);
+  });
+
   test("a normal user skill omits origin", async () => {
     const work = await tmp("skills-w-");
     const home = await tmp("skills-h-");

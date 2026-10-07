@@ -191,36 +191,59 @@ async function hasTeamCopyMarker(dir: string): Promise<boolean> {
   }
 }
 
-/** 是不是我们建的：链接目标在团队目录下，或者目录里有复制标记。不看名字。 */
-export async function isOurTeamEntry(dest: string, teamDir: string): Promise<boolean> {
-  if (await hasTeamCopyMarker(dest)) return true;
+/** 团队目录的两种写法：字面路径和真实路径。~/.anet 本身可能是指向数据盘的软链接，
+ *  而我们建的链接指向的是真实路径，所以两种都要认。 */
+async function teamDirForms(teamDir: string): Promise<string[]> {
+  const forms = [path.resolve(teamDir)];
+  const real = await realpathOrNull(teamDir);
+  if (real && real !== forms[0]) forms.push(real);
+  return forms;
+}
+
+/** p 是否落在团队目录下。存在就按 realpath 判（必须在团队目录的真实路径里）；
+ *  不存在（源已被删的悬空链接）才按字面路径对两种写法判。 */
+async function resolvesUnderTeam(p: string, teamDir: string): Promise<string | null> {
+  const resolved = path.resolve(p);
+  const real = await realpathOrNull(resolved);
+  if (real) {
+    const teamReal = await realpathOrNull(teamDir);
+    return teamReal && pathIsUnder(real, teamReal) ? real : null;
+  }
+  for (const form of await teamDirForms(teamDir)) if (pathIsUnder(resolved, form)) return resolved;
+  return null;
+}
+
+async function markerSource(dir: string): Promise<string | null> {
+  try {
+    const text = await fs.readFile(path.join(dir, TEAM_COPY_MARKER), "utf8");
+    if (!text.startsWith(`${TEAM_MARKER_TOKEN}\n`)) return null;
+    const line = text.split(/\r?\n/).find((l) => l.startsWith("source="));
+    const src = line?.slice("source=".length).trim();
+    return src ? src : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 我们建的项指向的团队源（链接目标或复制标记里的 source），必须落在团队目录里；不是我们的返回 null。 */
+async function ourEntrySource(dest: string, teamDir: string): Promise<string | null> {
+  if (await hasTeamCopyMarker(dest)) {
+    const src = await markerSource(dest);
+    return src ? resolvesUnderTeam(src, teamDir) : null;
+  }
   let link: string;
   try {
     link = await fs.readlink(dest);
   } catch {
-    return false;
-  }
-  return pathIsUnder(path.resolve(path.dirname(dest), link), teamDir);
-}
-
-async function ourEntrySource(dest: string, teamDir: string): Promise<string | null> {
-  if (await hasTeamCopyMarker(dest)) {
-    try {
-      const text = await fs.readFile(path.join(dest, TEAM_COPY_MARKER), "utf8");
-      const line = text.split(/\r?\n/).find((l) => l.startsWith("source="));
-      const src = line?.slice("source=".length).trim();
-      return src && pathIsUnder(src, teamDir) ? path.resolve(src) : null;
-    } catch {
-      return null;
-    }
-  }
-  try {
-    const link = await fs.readlink(dest);
-    const resolved = path.resolve(path.dirname(dest), link);
-    return pathIsUnder(resolved, teamDir) ? resolved : null;
-  } catch {
     return null;
   }
+  return resolvesUnderTeam(path.resolve(path.dirname(dest), link), teamDir);
+}
+
+/** 是不是我们建的：链接目标在团队目录下，或者目录里有复制标记。不看名字。 */
+export async function isOurTeamEntry(dest: string, teamDir: string): Promise<boolean> {
+  if (await hasTeamCopyMarker(dest)) return true;
+  return (await ourEntrySource(dest, teamDir)) !== null;
 }
 
 async function skillOrigin(skillDir: string, fileReal: string, teamDir: string): Promise<"team" | undefined> {
