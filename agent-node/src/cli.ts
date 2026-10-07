@@ -1322,7 +1322,11 @@ if (GROK_EXECUTION_MODE !== "cli") {
 }
 const processSurvivalLog = installProcessSurvivalLog({
   logDir: LOG_DIR,
+  alias: ALIAS,
   redact: (text) => persistenceRedactor.redactText(text).text,
+  appendLine: GROK_EXECUTION_MODE === "cli"
+    ? (date, line) => appendPrivateLogLine(PRIVATE_LOG_DIR, `${date}.log`, line + "\n", persistenceRedactorHandle)
+    : undefined,
 });
 
 function _log(level: string, levelNum: number, msg: string) {

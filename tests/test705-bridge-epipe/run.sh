@@ -48,15 +48,27 @@ expect_red() {
 
   bun /repo/mutation.mjs /repo/agent-node/src/process-survival-log.ts \
     '  process.on("uncaughtException", (cause) => fatal("uncaughtException", cause));' ''
-  expect_red no-uncaught-diagnostic "uncaught exception exits 1 with a synchronous reason" \
-    bash -lc 'cd /repo/agent-node && bun test src/process-survival-log.test.ts -t "uncaught exception exits 1"'
+  expect_red no-uncaught-diagnostic "uncaught exception preserves its stack" \
+    bash -lc 'cd /repo/agent-node && bun test src/process-survival-log.test.ts -t "uncaught exception preserves its stack"'
+  cp /tmp/process-survival-log.ts /repo/agent-node/src/process-survival-log.ts
+
+  bun /repo/mutation.mjs /repo/agent-node/src/process-survival-log.ts \
+    '        writeSync(2, `${detail}\n`);' '        // mutation: swallowed the fatal stack instead of preserving stderr'
+  expect_red no-fatal-stderr-stack "uncaught exception preserves its stack" \
+    bash -lc 'cd /repo/agent-node && bun test src/process-survival-log.test.ts -t "uncaught exception preserves its stack"'
   cp /tmp/process-survival-log.ts /repo/agent-node/src/process-survival-log.ts
 
   cp /repo/agent-network/src/codex-copresence-bridge-log.ts /tmp/codex-copresence-bridge-log.ts
   bun /repo/mutation.mjs /repo/agent-network/src/codex-copresence-bridge-log.ts \
-    'return `exec > >(tee -p >(${sink})) 2>&1`;' 'return `exec > >(tee >(${sink})) 2>&1`;'
+    'then tee_arg=-p; fi;' 'then tee_arg=; fi;'
   expect_red tee-without-p "tee keeps the writer alive" \
     bash -lc 'cd /repo/agent-network && bun test src/codex-copresence-bridge-log.test.ts -t "tee keeps the writer alive"'
+  cp /tmp/codex-copresence-bridge-log.ts /repo/agent-network/src/codex-copresence-bridge-log.ts
+
+  bun /repo/mutation.mjs /repo/agent-network/src/codex-copresence-bridge-log.ts \
+    'tee_arg=; if tee -p </dev/null >/dev/null 2>&1;' 'tee_arg=-p; if false;'
+  expect_red tee-without-portable-fallback "a non-GNU tee falls back" \
+    bash -lc 'cd /repo/agent-network && bun test src/codex-copresence-bridge-log.test.ts -t "a non-GNU tee falls back"'
   cp /tmp/codex-copresence-bridge-log.ts /repo/agent-network/src/codex-copresence-bridge-log.ts
 
   echo

@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 
@@ -9,6 +9,8 @@ export interface ProcessSurvivalLogOptions {
   readonly now?: () => Date;
   readonly redact?: (text: string) => string;
   readonly exit?: (code: number) => never;
+  readonly alias?: string;
+  readonly appendLine?: (date: string, line: string) => void;
 }
 
 export interface ProcessSurvivalLog {
@@ -20,11 +22,16 @@ function oneLineReason(value: unknown): string {
   return String(value).replace(/[\r\n]+/g, " ");
 }
 
+function fullReason(value: unknown): string {
+  if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
+  return String(value);
+}
+
 /**
- * Last-resort diagnostics that never use stdout/stderr themselves. A broken
- * co-presence tee closes the bridge's stdout pipe; EPIPE is survivable and
- * subsequent normal logger output goes only to the dated file. Truly fatal
- * process events keep exit=1 but leave one synchronous reason in that file.
+ * Last-resort diagnostics for a broken co-presence output pipe. EPIPE is
+ * survivable and subsequent normal logger output goes only to the dated file.
+ * Truly fatal events retain Node's stderr stack while stderr is healthy, and
+ * always leave the full stack synchronously in the dated file before exit 1.
  */
 export function installProcessSurvivalLog(options: ProcessSurvivalLogOptions): ProcessSurvivalLog {
   const stdout = options.stdout ?? process.stdout;
@@ -32,15 +39,27 @@ export function installProcessSurvivalLog(options: ProcessSurvivalLogOptions): P
   const now = options.now ?? (() => new Date());
   const redact = options.redact ?? ((text: string) => text);
   const exit = options.exit ?? ((code: number): never => process.exit(code));
-  let broken = false;
+  const alias = options.alias ?? "agent-node";
+  let stdoutBroken = false;
+  let stderrBroken = false;
+  let epipeRecorded = false;
   let exitReason = "normal";
   let exiting = false;
 
+  const decorated = (level: "INFO" | "WARN" | "ERROR", event: "stream" | "fatal" | "exit", message: string) => {
+    const stamp = now().toISOString();
+    return `[${stamp.slice(11, 19)}] [${level.padEnd(5)}] [${alias}] [${event}] ${message}`;
+  };
+
   const append = (line: string) => {
     try {
-      mkdirSync(options.logDir, { recursive: true, mode: 0o700 });
       const date = now().toISOString().slice(0, 10);
-      appendFileSync(join(options.logDir, `${date}.log`), redact(line) + "\n", { mode: 0o600 });
+      const safe = redact(line);
+      if (options.appendLine) options.appendLine(date, safe);
+      else {
+        mkdirSync(options.logDir, { recursive: true, mode: 0o700 });
+        appendFileSync(join(options.logDir, `${date}.log`), safe + "\n", { mode: 0o600 });
+      }
     } catch {
       // Last-resort logging must never turn a survivable EPIPE into an exit.
     }
@@ -48,8 +67,12 @@ export function installProcessSurvivalLog(options: ProcessSurvivalLogOptions): P
 
   const streamError = (name: "stdout" | "stderr") => (cause: NodeJS.ErrnoException) => {
     if (cause?.code === "EPIPE") {
-      broken = true;
-      append(`[stream] ${name} EPIPE; terminal output disabled, file logging continues`);
+      if (name === "stdout") stdoutBroken = true;
+      else stderrBroken = true;
+      if (!epipeRecorded) {
+        epipeRecorded = true;
+        append(decorated("WARN", "stream", `${name} EPIPE; terminal output disabled, file logging continues`));
+      }
       return;
     }
     exitReason = `${name} error: ${oneLineReason(cause)}`;
@@ -66,11 +89,21 @@ export function installProcessSurvivalLog(options: ProcessSurvivalLogOptions): P
     if (exiting) return;
     exiting = true;
     exitReason = `${kind}: ${oneLineReason(cause)}`;
+    const detail = fullReason(cause);
+    append(decorated("ERROR", "fatal", `${kind}: ${detail}`));
+    if (!stderrBroken) {
+      try {
+        writeSync(2, `${detail}\n`);
+      } catch (writeError) {
+        const code = (writeError as NodeJS.ErrnoException)?.code;
+        if (code === "EPIPE") stderrBroken = true;
+      }
+    }
     exit(1);
   };
   process.on("uncaughtException", (cause) => fatal("uncaughtException", cause));
   process.on("unhandledRejection", (cause) => fatal("unhandledRejection", cause));
-  process.on("exit", (code) => append(`[exit] code=${code} reason=${exitReason}`));
+  process.on("exit", (code) => append(decorated(code === 0 ? "INFO" : "ERROR", "exit", `code=${code} reason=${exitReason}`)));
 
-  return { outputBroken: () => broken };
+  return { outputBroken: () => stdoutBroken || stderrBroken };
 }

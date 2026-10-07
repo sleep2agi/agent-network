@@ -15,6 +15,12 @@ if (mode === "epipe") {
   setTimeout(() => { throw new Error("deliberate uncaught probe"); }, 20);
 } else if (mode === "rejection") {
   setTimeout(() => { void Promise.reject(new Error("deliberate rejection probe")); }, 20);
+} else if (mode === "repeat-epipe") {
+  const epipe = Object.assign(new Error("closed pipe"), { code: "EPIPE" });
+  process.stdout.emit("error", epipe);
+  process.stdout.emit("error", epipe);
+  process.stderr.emit("error", epipe);
+  setTimeout(() => process.exit(0), 20);
 } else {
   throw new Error(`unknown fixture mode ${mode}`);
 }

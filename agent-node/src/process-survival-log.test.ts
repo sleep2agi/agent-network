@@ -52,15 +52,35 @@ describe("agent-node process survival log", () => {
     expect(log).toContain("[exit] code=0 reason=normal");
   });
 
-  test("uncaught exception exits 1 with a synchronous reason", async () => {
+  test("repeated broken-stream notifications record EPIPE only once", async () => {
+    const { child, dir } = start("repeat-epipe");
+    expect(await ended(child)).toBe(0);
+    const matches = datedLog(dir).match(/\[stream\].*EPIPE/g) ?? [];
+    expect(matches).toHaveLength(1);
+  });
+
+  test("uncaught exception preserves its stack on stderr and in the synchronous log", async () => {
     const { child, dir } = start("uncaught");
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
     expect(await ended(child)).toBe(1);
-    expect(datedLog(dir)).toContain("[exit] code=1 reason=uncaughtException: Error: deliberate uncaught probe");
+    expect(stderr).toContain("Error: deliberate uncaught probe");
+    expect(stderr).toContain("process-survival-log.fixture.ts");
+    const log = datedLog(dir);
+    expect(log).toMatch(/\[\d\d:\d\d:\d\d\] \[ERROR\] \[agent-node\] \[fatal\] uncaughtException:/);
+    expect(log).toContain("process-survival-log.fixture.ts");
+    expect(log).toContain("[exit] code=1 reason=uncaughtException: Error: deliberate uncaught probe");
   });
 
   test("unhandled rejection exits 1 with a synchronous reason", async () => {
     const { child, dir } = start("rejection");
     expect(await ended(child)).toBe(1);
     expect(datedLog(dir)).toContain("[exit] code=1 reason=unhandledRejection: Error: deliberate rejection probe");
+  });
+
+  test("Grok CLI survival diagnostics use the hardened private-log writer", () => {
+    const source = readFileSync(join(import.meta.dir, "cli.ts"), "utf8");
+    expect(source).toContain('appendLine: GROK_EXECUTION_MODE === "cli"');
+    expect(source).toContain("appendPrivateLogLine(PRIVATE_LOG_DIR");
   });
 });
