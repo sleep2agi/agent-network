@@ -167,6 +167,32 @@ never + read-only 下 0.133.0 仍弹，0.159.2 直接静默拒绝这次调用。
 tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 ```
 
+### 一条线程只用一个 codex 版本（#734） {#one-codex-version-per-thread}
+
+codex ≥ 0.145 把会话写成「分页」格式：rollout 第一行的 `payload.history_mode` 是 `"paginated"`，之后每一行都带 `ordinal`。
+如果之后让 **0.145 之前**的 codex（例如 `npx` 拉到的 0.133）接着这条线程干活，它追加的行没有 `ordinal`；
+从此新版 codex 恢复这条线程会直接报错，而且是永久的：
+
+```
+final paginated rollout record at <path> is missing an ordinal
+```
+
+所以 **永远不要在同一条线程上混用 codex 版本**。anet 现在会在启动前检查（共存启动器 POSIX / Windows、外部 app-server 节点、agent-node 自己起的 app-server 和 codex-sdk）：
+
+- 按 codex 自己的顺序找 rollout（`sessions/` 里最新的那个，没有才看 `archived_sessions/`），只读它的**第一行**（有上限，几百 MB 的文件也只读几十 KB）。
+- 取 `codex --version`，只认 `codex-cli x.y.z` 这种行（包装脚本先打印的其它版本号不算，认不出就当未知）。版本探测走和启动完全相同的 shell 前缀（共存节点是 `bash -lc` 登录 shell；外部 app-server 节点先 source 工作区 `.env`），所以查的就是将要启动的那个 codex；启动命令本身不变。
+- 线程是分页格式、而 codex < 0.145：**拒绝启动**，什么都不起、不碰 rollout，并提示怎么把节点指向新版 codex：
+  `anet node start <节点> --codex-bin /path/to/codex`（共存节点），或 config.json 的 `codexBin` / 环境变量 `ANET_CODEX_BIN`（codex-sdk 节点），或让 PATH 上第一个 codex ≥ 0.145。
+- 找不到 rollout、第一行读不出来、版本拿不到：只警告，照旧启动。
+
+已经混用过的线程：恢复时 anet 会说明原因、说明原文件没动，然后照旧 fail-closed（不会偷偷开新线程）。
+安全的出路只有两条：等 #734 的 fork 恢复，或由人决定放弃这段历史后 `anet node start <节点> --new-session`。不要手改或删除 rollout。只读自查：
+
+```bash
+head -n 1 <rollout> | grep -o '"history_mode":"[a-z]*"'   # paginated = 新版写的
+tail -n 1 <rollout> | grep -c '"ordinal"'                   # 0 = 末尾被旧版追加过
+```
+
 ## 健康分层、降级拒收与自愈 {#health}
 
 「在线」只说明 bridge 进程还活着。`codex-app-server` 运行时的节点（共存和普通的都算）从 agent-node `2.5.0-preview.94` 起，会把另外几层分开报给 Hub。报告随 `report_status` 走，字段名是 `health`：

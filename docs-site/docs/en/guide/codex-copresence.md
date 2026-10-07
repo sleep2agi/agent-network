@@ -168,6 +168,32 @@ Nodes started by an older anet can still stall here. To check:
 tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 ```
 
+### One codex version per thread (#734) {#one-codex-version-per-thread}
+
+codex ≥ 0.145 writes sessions in "paginated" form: the first rollout line has `payload.history_mode` = `"paginated"`, and every line carries an `ordinal`.
+If a codex **older than 0.145** (for example 0.133 pulled by `npx`) later continues that thread, the lines it appends have no `ordinal`,
+and from then on newer codex refuses to resume the thread, permanently:
+
+```
+final paginated rollout record at <path> is missing an ordinal
+```
+
+So **never mix codex versions on one thread**. anet now checks before starting (co-presence launchers on POSIX and Windows, external app-server nodes, agent-node's own app-server and codex-sdk):
+
+- It finds the rollout the way codex does (newest in `sessions/`, `archived_sessions/` only if none) and reads only its **first line** (bounded: a file of hundreds of MB costs tens of KB).
+- It runs `codex --version` and trusts only a `codex-cli x.y.z` line (a wrapper's own version line does not count; no match = unknown). The version probe runs through the exact shell preamble of the launch (`bash -lc` login shell for co-presence; the workspace `.env` sourced first for external app-server nodes), so the binary checked is the binary started. The launch command itself is unchanged.
+- Paginated thread + codex < 0.145: **refuse to start**. Nothing is started, the rollout is not touched, and the message says how to point the node at a newer codex:
+  `anet node start <node> --codex-bin /path/to/codex` (co-presence nodes), or `codexBin` in config.json / `ANET_CODEX_BIN` (codex-sdk nodes), or make the first `codex` on PATH ≥ 0.145.
+- Rollout not found, first line unreadable, version unknown: warn only, start as before.
+
+A thread that is already mixed: on resume anet explains the cause, says the original file is untouched, and stays fail-closed (no silent fresh thread).
+There are only two safe ways out: wait for fork recovery (#734), or, after a human decides the history can be left behind, `anet node start <node> --new-session`. Do not edit or delete the rollout. Read-only check:
+
+```bash
+head -n 1 <rollout> | grep -o '"history_mode":"[a-z]*"'   # paginated = written by codex >= 0.145
+tail -n 1 <rollout> | grep -c '"ordinal"'                   # 0 = an older codex appended to it
+```
+
 ## Layered health, degraded refusal and self-healing {#health}
 
 "Online" only means the bridge process is alive. From agent-node `2.5.0-preview.94`, nodes on the `codex-app-server` runtime (co-presence and ordinary alike) report the other layers to the Hub separately. The report travels with `report_status` as `health`:

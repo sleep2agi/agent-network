@@ -34,6 +34,8 @@ import {
 import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copresence/active-network-task-marker.js";
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
+import { nodeRolloutGuard, SDK_POINT_AT_NEWER_CODEX } from "./runtime/codex-rollout-guard-node.js";
+import { describeMissingOrdinalFailure, probeCodexVersionCached } from "./runtime/codex-rollout-history-guard.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
 import { reportedTask } from "./project-dir-mismatch.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
@@ -2297,8 +2299,29 @@ function getCodexBinResolution(): CodexBinResolution {
   return r;
 }
 
+// Board #734 — codex-sdk resumes (normal turns and goal wakes) go through one guard:
+// a paginated rollout must never be resumed by codex < 0.145. Returns the task-facing
+// refusal text (and logs the explanation), or null to proceed.
+function codexSdkResumeRefusal(threadId: string): string | null {
+  const binRes = getCodexBinResolution();
+  const rolloutGuard = nodeRolloutGuard({
+    threadId,
+    env: process.env,
+    codexBin: binRes.path ?? "(bundled @openai/codex)",
+    // An explicit binary is probed with the strict codex-only parser (a wrapper's own
+    // version line must not count); the bundled one's version comes from its package.json.
+    codexVersion: () => (binRes.path ? probeCodexVersionCached(binRes.path) : binRes.version),
+    pointAtNewerCodex: SDK_POINT_AT_NEWER_CODEX,
+  });
+  for (const line of rolloutGuard.warnings) warn(line);
+  if (!rolloutGuard.block) return null;
+  for (const line of rolloutGuard.block) warn(line);
+  return `执行出错: 这条线程由 codex >= 0.145 写成,而本节点的 codex 更旧,继续会让线程永久无法恢复;已拒绝启动、未改动 rollout。请把节点指向 codex >= 0.145(见节点日志 [codex] 行,board #734)。`;
+}
+
 function buildCodexWakeDeps(): CodexWakeDeps {
   return {
+    guardResume: codexSdkResumeRefusal,
     newCodex: async () => {
       const sdkMod = await loadCodexSdkModule();
       return createCodex(sdkMod.Codex, CODEX_CONFIG, getCodexBinResolution());
@@ -3597,6 +3620,11 @@ async function processWithCodex(
       // #1645 —— 线程有多大在 resume 前就写在 codex 的 rollout 文件里;太大的线程 resume 时
       // 上游 compaction 常失败、表现为 300s 超时。这里先说一句,不拦。
       for (const line of describeLargeCodexThreadBeforeResume(SESSION_ID)) warn(line);
+      // Board #734 — a paginated rollout (written by codex >= 0.145) must never be
+      // resumed by an older codex: its lines would lack ordinals and the thread would
+      // become permanently unresumable. Refuse the turn; never touch the rollout.
+      const refusal = codexSdkResumeRefusal(SESSION_ID);
+      if (refusal) return refusal;
       codexThread = codex.resumeThread(SESSION_ID, codexOpts);
       log(`codex resumed thread: ${SESSION_ID}`);
     } else {
@@ -3710,6 +3738,14 @@ async function processWithCodex(
       const hint = quotaRemediationHint(process.env.OPENAI_BASE_URL);
       log(`[codex] ✗ vendor rate-limit/quota: ${msg0.slice(0, 150)}`);
       return `执行出错: codex 限流/配额耗尽 (${msg0.slice(0, 80)}) — ${hint}`;
+    }
+    // Board #734 — a mixed-version rollout: do NOT rebuild a fresh thread behind the
+    // operator's back (that silently drops the history). Fail closed and explain.
+    const ordinalLines = describeMissingOrdinalFailure(String(e?.message || e), { threadId: SESSION_ID || codexThread?.id });
+    if (ordinalLines.length > 0) {
+      for (const line of ordinalLines) warn(line);
+      codexThread = null;
+      return `执行出错: 线程 rollout 混用了 codex 版本(缺 ordinal),无法恢复;原文件未改动。见节点日志 [codex] 行与 board #734。`;
     }
     log(`codex thread error: ${e.message}, 重建`);
     const codex = createCodex(Codex, CODEX_CONFIG, getCodexBinResolution());

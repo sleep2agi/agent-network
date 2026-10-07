@@ -188,6 +188,20 @@ export function appserverShellCommand(plan: ExternalAppserverPlan, jsRuntime: st
   ].join("; ");
 }
 
+/**
+ * Board #734 — `codex --version` with the app-server pane's exact preamble (workspace
+ * .env sourced the same way, same CODEX_HOME), run with `bash -c` like the pane, so the
+ * version probe sees the binary appserverShellCommand will run.
+ */
+export function versionProbeShellCommand(plan: ExternalAppserverPlan): string {
+  return [
+    dotenvSnippet(plan.workspaceDir), // MUTATION-ANCHOR:probe-sources-dotenv
+    NO_PROXY_SNIPPET,
+    `export CODEX_HOME=${q(plan.codexHome)}`,
+    `exec ${q(plan.codexBin)} --version`,
+  ].join("; ");
+}
+
 export function tuiShellCommand(plan: ExternalAppserverPlan): string {
   const model = plan.model ? ` -m ${q(plan.model)}` : "";
   return [
