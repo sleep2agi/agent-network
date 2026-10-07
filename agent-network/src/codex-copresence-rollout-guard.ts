@@ -57,6 +57,13 @@ export function probeCodexVersionViaShell(
 }
 const shellProbeCache = new Map<string, string | null>();
 
+function shq(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+
+/** The co-presence app-server pane's preamble (CODEX_HOME, then exec the binary), ending in `--version`. */
+export function copresenceVersionProbeScript(codexHome: string, codexBin: string): string {
+  return `export CODEX_HOME=${shq(codexHome)} ; exec ${shq(codexBin)} --version`;
+}
+
 export function copresenceRolloutGuard(input: CopresenceRolloutGuardInput): CopresenceRolloutGuardResult {
   const warnings: string[] = [];
   const ids = [...new Set(input.threadIds.filter((t): t is string => typeof t === "string" && t.length > 0))];

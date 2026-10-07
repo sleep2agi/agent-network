@@ -286,7 +286,7 @@ import {
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
 import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
-import { copresenceRolloutGuard, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
+import { copresenceRolloutGuard, copresenceVersionProbeScript, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
 import { describeMissingOrdinalFailure } from "../src/codex-rollout-history-guard";
 import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
@@ -1587,7 +1587,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       // launch command is not touched. (config.env cannot set PATH: it is a reserved key.)
       probeVersion: process.platform === "win32"
         ? undefined
-        : (bin) => probeCodexVersionViaShell(`export CODEX_HOME=${shellQuote(opts.codexHome)} ; exec ${shellQuote(bin)} --version`, { loginShell: true }),
+        : (bin) => probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true }),
     });
     for (const line of guard.warnings) console.warn(`[anet] ${line}`);
     if (guard.block) {
