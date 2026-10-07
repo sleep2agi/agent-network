@@ -456,6 +456,17 @@ Do not delete stop markers to bypass refusal.
 
 ## Client adoption reads (planned for Hub .110) {#adoption-read-api}
 
+The daemon-only MCP tool `list_my_children` additionally returns `binding_request_id` on active
+adopted items. This is the opaque binding generation. The caller must use the bound daemon's valid
+node token, scoped to both daemon and network; human credentials and other daemons cannot read
+that binding. `get_adopt_request` remains pending-only. Re-adoption after revocation creates a new
+request ID; the old generation never revives. Old Hubs omit the field and the daemon preflight still
+refuses: never fill missing authority from local state. **The projection is a read-time snapshot, not
+a lease.** Executors must recheck the generation at action boundaries and honor in-flight lifecycle
+revocation protection. This interface does not start processes. Old clients receive only an additional
+field; existing fields and created items are unchanged. Old daemons may ignore it. This is not a claim
+that released-client compatibility replay has already passed.
+
 These additive fields and endpoint require a header user token (not a URL token) and the existing node
 visibility/network permissions. Daemon/network tokens gain no new read access;
 existing fields remain unchanged. This is not candidate discovery.

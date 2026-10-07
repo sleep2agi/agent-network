@@ -48,7 +48,7 @@ test("two-phase binding, daemon-bound pull, controllable map, adopted delete ref
   expect(await call(handlers("daemon").get_adopt_request, { request_id: r.request_id })).toMatchObject({ ok: true, node_id: CHILD, alias: "adoption-child", workdir: "/workspace/project" });
   expect(await call(handlers().get_adopt_request, { request_id: r.request_id })).toMatchObject({ ok: false });
   expect(await call(handlers("daemon").ack_adopt_request, { request_id: r.request_id, status: "adopted" })).toMatchObject({ ok: true });
-  expect((await call(handlers("daemon").list_my_children)).children).toContainEqual({ child_node_id: CHILD, alias: "adoption-child", lifecycle_state: "active", managed: "adopted" });
+  expect((await call(handlers("daemon").list_my_children)).children).toContainEqual({ child_node_id: CHILD, alias: "adoption-child", lifecycle_state: "active", managed: "adopted", binding_request_id: r.request_id });
   expect(buildControllableMap([], [{ node_id: CHILD, daemon_node_id: DAEMON }]).get(CHILD)).toBe(DAEMON);
   expect(await call(handlers().delete_node, { child_node_id: CHILD, confirm_alias: "adoption-child", network_id: NET })).toMatchObject({ ok: false, error: "adopted_node_delete_unsupported" });
   expect(db.get<any>("SELECT lifecycle_state FROM nodes WHERE node_id=?1", CHILD).lifecycle_state).toBe("active");

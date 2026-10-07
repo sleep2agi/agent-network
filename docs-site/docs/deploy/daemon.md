@@ -416,6 +416,15 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 
 ## 客户端收编状态查询（计划 Hub .110） {#adoption-read-api}
 
+daemon 专用 MCP `list_my_children` 对当前 active 的 adopted 子项额外返回
+`binding_request_id`，它就是不透明的绑定代际。只接受绑定目标 daemon 的有效节点令牌，
+按 daemon 与网络共同限定；人类用户、其他 daemon 或跨网络令牌不能读取该绑定。
+`get_adopt_request` 仍只查询 pending，不开放 active 查询。撤销后再收编会生成新 request_id，
+旧代际不会复活；旧 Hub 缺字段时，daemon 启动前置门继续拒绝，不得用本地值补齐。
+**投影只是一次读取时的快照，不是租约。** 启动执行方须在动作边界重新确认同代绑定，
+并遵守在途生命周期的撤销保护。这个接口不执行启动。对旧客户端只新增一个字段，
+不改变已有字段或 created 子项；旧 daemon 可忽略此字段。此处不宣称实际版本兼容回放已通过。
+
 以下新增字段和接口只向请求头携带的用户 token 开放（不接受 URL token），并沿用节点列表的网络及节点可见性授权；
 不会给 daemon / 网络 token 新增读权限，也不改变旧字段。不是候选发现接口。
 
