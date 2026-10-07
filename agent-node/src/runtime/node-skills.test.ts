@@ -6,11 +6,17 @@ import os from "node:os";
 import path from "node:path";
 import {
   SKILL_FILE_MAX_BYTES,
+  installTeamSkills,
+  isOurTeamEntry,
   isValidSkillName,
   listSkills,
   parseSkillDescription,
   readSkill,
   skillRootsForRuntime,
+  skillView,
+  teamSkillDest,
+  teamSkillsDir,
+  TEAM_COPY_MARKER,
 } from "./node-skills";
 import { processRulesFileRequests } from "./rules-file";
 
@@ -157,9 +163,364 @@ describe("doorbell ops skills_list / skill_read", () => {
       warn: () => {},
     });
     expect(acks.map((a) => [a.request_id, a.status])).toEqual([["r1", "done"], ["r2", "done"], ["r3", "failed"]]);
-    expect(JSON.parse(acks[0].content).skills.map((s: any) => s.name)).toEqual(["deploy"]);
+    const listed = JSON.parse(acks[0].content);
+    expect(listed.skills.map((s: any) => s.name)).toEqual(["deploy"]);
+    expect(listed.roots).toEqual([".claude/skills", "~/.claude/skills"]);
+    expect(listed.warnings).toEqual([]);
     expect(JSON.parse(acks[1].content).content).toContain("project deploy");
     expect(acks[2].error).toContain("skill not found: missing");
     expect(acks[2].file_name).toBe("skills");
+  });
+});
+
+describe("team skills", () => {
+  function say() {
+    const logs: string[] = [];
+    const warns: string[] = [];
+    return { logs, warns, log: (m: string) => logs.push(m), warn: (m: string) => warns.push(m) };
+  }
+  function noHome(lines: string[], home: string) {
+    for (const line of lines) expect(line.includes(home)).toBe(false);
+  }
+
+  test("claude links into ~/.claude/skills, bytes match, log says machine-wide", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const ctx = { workDir: work, home };
+    const team = teamSkillsDir(ctx);
+    const body = md("echo", "team-echo-ok\n");
+    await skill(team, "team-echo", body);
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    const dest = path.join(home, ".claude", "skills", "team-echo");
+    expect(await fs.readlink(dest)).toBe(path.join(team, "team-echo"));
+    expect(await fs.readFile(path.join(dest, "SKILL.md"), "utf8")).toBe(body);
+    expect(io.logs).toEqual(["[skills] 团队技能 team-echo 已链到 ~/.claude/skills（全机生效，本机所有 claude 节点）"]);
+    noHome([...io.logs, ...io.warns], home);
+    const listed = await listSkills("claude", ctx);
+    expect(listed).toEqual([{ name: "team-echo", scope: "user", path_rel: "~/.claude/skills/team-echo/SKILL.md", description: "echo", origin: "team" }]);
+    const read = await readSkill("claude", ctx, "team-echo");
+    expect(read.content).toBe(body);
+    expect(read.origin).toBe("team");
+    const view = await skillView("claude", ctx);
+    expect(view.roots).toEqual([".claude/skills", "~/.claude/skills"]);
+    expect(view.warnings).toEqual([]);
+    const again = say();
+    await installTeamSkills("claude", ctx, again);
+    expect(again.logs).toEqual([]);
+    expect(again.warns).toEqual([]);
+  });
+
+  test("a pre-existing dest that is not ours is left in place", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const ctx = { workDir: work, home };
+    await skill(teamSkillsDir(ctx), "team-echo", md("team", "TEAM\n"));
+    const dest = path.join(home, ".claude", "skills", "team-echo");
+    await skill(path.join(home, ".claude/skills"), "team-echo", "LOCAL\n");
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    expect((await fs.lstat(dest)).isSymbolicLink()).toBe(false);
+    expect(await fs.readFile(path.join(dest, "SKILL.md"), "utf8")).toBe("LOCAL\n");
+    expect(io.logs).toEqual([]);
+    expect(io.warns).toEqual(["[skills] 团队技能 team-echo 未覆盖 ~/.claude/skills/team-echo：目标已存在，且不是指向团队目录的链接"]);
+    noHome(io.warns, home);
+    expect((await skillView("claude", ctx)).warnings).toEqual(["团队技能 team-echo 未覆盖 ~/.claude/skills/team-echo：目标已存在，且不是指向团队目录的链接"]);
+  });
+
+  test("ownership is the link target, not the directory name", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const outside = await tmp("skills-out-");
+    const ctx = { workDir: work, home };
+    const team = teamSkillsDir(ctx);
+    await skill(team, "team-echo", md("echo"));
+    await skill(outside, "foreign", md("foreign"));
+    const user = path.join(home, ".claude", "skills");
+    await fs.mkdir(user, { recursive: true });
+    await fs.symlink(path.join(outside, "foreign"), path.join(user, "team-echo"));
+    await fs.symlink(path.join(team, "team-echo"), path.join(user, "custom-name"));
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    expect(await fs.readlink(path.join(user, "team-echo"))).toBe(path.join(outside, "foreign"));
+    expect(await fs.readlink(path.join(user, "custom-name"))).toBe(path.join(team, "team-echo"));
+    expect(io.warns.some((l) => l.includes("未覆盖") && l.includes("team-echo"))).toBe(true);
+    await fs.rm(path.join(team, "team-echo"), { recursive: true });
+    const io2 = say();
+    await installTeamSkills("claude", ctx, io2);
+    expect(await fs.readlink(path.join(user, "team-echo"))).toBe(path.join(outside, "foreign"));
+    await expect(fs.lstat(path.join(user, "custom-name"))).rejects.toThrow();
+    expect(io2.logs).toEqual(["[skills] 已移除失效的团队链接 ~/.claude/skills/custom-name"]);
+    noHome([...io.logs, ...io.warns, ...io2.logs, ...io2.warns], home);
+  });
+
+  test("a marked copy is refreshed by the marker, and a different name is removed only after its source is gone", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const ctx = { workDir: work, home };
+    const team = teamSkillsDir(ctx);
+    const body = md("echo", "NEW\n");
+    await skill(team, "team-echo", body);
+    const user = path.join(home, ".claude", "skills");
+    const copied = path.join(user, "team-echo");
+    const alias = path.join(user, "custom-copy");
+    await fs.mkdir(copied, { recursive: true });
+    await fs.writeFile(path.join(copied, "SKILL.md"), "OLD\n");
+    await fs.writeFile(path.join(copied, TEAM_COPY_MARKER), `anet-team-skill\nsource=${path.join(team, "team-echo")}\n`);
+    await fs.mkdir(alias, { recursive: true });
+    await fs.writeFile(path.join(alias, "SKILL.md"), "OLD\n");
+    await fs.writeFile(path.join(alias, TEAM_COPY_MARKER), `anet-team-skill\nsource=${path.join(team, "team-echo")}\n`);
+    await skill(user, "keep-local", "KEEP\n");
+    expect(await isOurTeamEntry(copied, team)).toBe(true);
+    expect(await isOurTeamEntry(path.join(user, "keep-local"), team)).toBe(false);
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    expect((await fs.lstat(copied)).isSymbolicLink()).toBe(true);
+    expect(await fs.readFile(path.join(copied, "SKILL.md"), "utf8")).toBe(body);
+    expect(await fs.readFile(path.join(alias, "SKILL.md"), "utf8")).toBe("OLD\n");
+    expect(await fs.readFile(path.join(user, "keep-local", "SKILL.md"), "utf8")).toBe("KEEP\n");
+    await fs.rm(path.join(team, "team-echo"), { recursive: true });
+    const io2 = say();
+    await installTeamSkills("claude", ctx, io2);
+    await expect(fs.lstat(copied)).rejects.toThrow();
+    await expect(fs.lstat(alias)).rejects.toThrow();
+    expect(await fs.readFile(path.join(user, "keep-local", "SKILL.md"), "utf8")).toBe("KEEP\n");
+    expect(io2.logs.slice().sort()).toEqual([
+      "[skills] 已移除失效的团队链接 ~/.claude/skills/custom-copy",
+      "[skills] 已移除失效的团队链接 ~/.claude/skills/team-echo",
+    ]);
+  });
+
+  test("two codex homes each get their own link; shared ~/.codex is not used", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const a = path.join(home, "codex-a");
+    const b = path.join(home, "codex-b");
+    const ctxA = { workDir: work, home, codexHome: a };
+    await skill(teamSkillsDir(ctxA), "team-echo", md("echo"));
+    const ioA = say();
+    const ioB = say();
+    await installTeamSkills("codex", ctxA, ioA);
+    await installTeamSkills("codex-app-server", { workDir: work, home, codexHome: b }, ioB);
+    expect(await fs.readlink(path.join(a, "skills", "team-echo"))).toBe(path.join(teamSkillsDir(ctxA), "team-echo"));
+    expect(await fs.readlink(path.join(b, "skills", "team-echo"))).toBe(path.join(teamSkillsDir(ctxA), "team-echo"));
+    await expect(fs.lstat(path.join(home, ".codex", "skills", "team-echo"))).rejects.toThrow();
+    for (const line of [...ioA.logs, ...ioB.logs]) {
+      expect(line).toContain("$CODEX_HOME/skills（仅本节点）");
+      expect(line.includes("全机生效")).toBe(false);
+      expect(line.includes(home)).toBe(false);
+    }
+    const shared = say();
+    await installTeamSkills("codex", { workDir: work, home, codexHome: path.join(home, ".codex") }, shared);
+    expect(shared.logs[0]).toContain("~/.codex/skills（全机生效，本机所有 codex 节点）");
+  });
+
+  test("a same-named project skill still gets a user link and stays first in the list", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const ctx = { workDir: work, home };
+    await skill(teamSkillsDir(ctx), "team-echo", md("team", "TEAM\n"));
+    await skill(path.join(work, ".claude/skills"), "team-echo", md("proj", "PROJ\n"));
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    expect(await fs.readFile(path.join(home, ".claude", "skills", "team-echo", "SKILL.md"), "utf8")).toContain("TEAM");
+    const hit = (await listSkills("claude", ctx)).find((s) => s.name === "team-echo");
+    expect(hit).toMatchObject({ scope: "project", path_rel: ".claude/skills/team-echo/SKILL.md" });
+    expect(hit && "origin" in hit).toBe(false);
+    expect(io.warns).toEqual(["[skills] 团队技能 team-echo 被 .claude/skills/team-echo 挡住"]);
+    expect((await skillView("claude", ctx)).warnings).toEqual(["团队技能 team-echo 被 .claude/skills/team-echo 挡住"]);
+  });
+
+  test("a same-named .system skill does not warn", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const codexHome = path.join(home, "codex-home");
+    const ctx = { workDir: work, home, codexHome };
+    await skill(teamSkillsDir(ctx), "builtin", md("team"));
+    await skill(path.join(codexHome, "skills", ".system"), "builtin", md("system"));
+    const io = say();
+    await installTeamSkills("codex", ctx, io);
+    expect(io.warns).toEqual([]);
+    expect(await fs.readlink(path.join(codexHome, "skills", "builtin"))).toContain(`${path.sep}.anet${path.sep}skills${path.sep}builtin`);
+    const listed = await listSkills("codex", ctx);
+    expect(listed.find((s) => s.name === "builtin")).toMatchObject({ scope: "user", origin: "team" });
+  });
+
+  test("missing team dir is a no-op, and an empty dir still sweeps only our links", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const ctx = { workDir: work, home };
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    expect(io.logs).toEqual([]);
+    expect(io.warns).toEqual([]);
+    await expect(fs.lstat(path.join(home, ".claude"))).rejects.toThrow();
+    const outside = await tmp("skills-out-");
+    const user = path.join(home, ".claude", "skills");
+    await fs.mkdir(user, { recursive: true });
+    await fs.symlink(outside, path.join(user, "keep-mine"));
+    await installTeamSkills("claude", ctx, io);
+    expect(await fs.readlink(path.join(user, "keep-mine"))).toBe(outside);
+    expect(io.logs).toEqual([]);
+  });
+
+  test("grok and opencode link only their one user dir", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const ctx = { workDir: work, home };
+    await skill(teamSkillsDir(ctx), "team-echo", md("echo"));
+    expect(teamSkillDest("grok", ctx)).toMatchObject({ label: "~/.grok/skills", machineWide: true });
+    expect(teamSkillDest("opencode", ctx)).toMatchObject({ label: "~/.config/opencode/skills", machineWide: true });
+    expect(teamSkillDest("nope", ctx)).toBeNull();
+    const grok = say();
+    await installTeamSkills("grok", ctx, grok);
+    expect(grok.logs[0]).toContain("~/.grok/skills（全机生效，本机所有 grok 节点）");
+    expect(await fs.readlink(path.join(home, ".grok", "skills", "team-echo"))).toContain("team-echo");
+    await expect(fs.lstat(path.join(home, ".agents", "skills", "team-echo"))).rejects.toThrow();
+    await expect(fs.lstat(path.join(home, ".claude", "skills", "team-echo"))).rejects.toThrow();
+    const open = say();
+    await installTeamSkills("opencode", ctx, open);
+    expect(open.logs[0]).toContain("~/.config/opencode/skills（全机生效，本机所有 opencode 节点）");
+    expect(await fs.readlink(path.join(home, ".config", "opencode", "skills", "team-echo"))).toContain("team-echo");
+    await expect(fs.lstat(path.join(home, ".config", "opencode", "skill", "team-echo"))).rejects.toThrow();
+  });
+
+  test("a team SKILL.md that points outside ~/.anet/skills is not installed or readable", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const ctx = { workDir: work, home };
+    const evil = path.join(teamSkillsDir(ctx), "evil");
+    await fs.mkdir(evil, { recursive: true });
+    await fs.symlink("/etc/hostname", path.join(evil, "SKILL.md"));
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    expect(io.logs).toEqual([]);
+    await expect(fs.lstat(path.join(home, ".claude", "skills", "evil"))).rejects.toThrow();
+    await fs.mkdir(path.join(home, ".claude", "skills"), { recursive: true });
+    await fs.symlink(evil, path.join(home, ".claude", "skills", "evil"));
+    await expect(readSkill("claude", ctx, "evil")).rejects.toThrow("outside its skills directory");
+    expect((await listSkills("claude", ctx)).map((s) => s.name)).not.toContain("evil");
+  });
+
+  test("~/.anet itself a symlink: second start recognises its own links and a deleted skill's dangling link is cleaned", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const disk = await tmp("skills-disk-");
+    await fs.mkdir(path.join(disk, "anet"), { recursive: true });
+    await fs.symlink(path.join(disk, "anet"), path.join(home, ".anet"));
+    const ctx = { workDir: work, home };
+    const team = teamSkillsDir(ctx);
+    await skill(team, "team-a", md("a"));
+    await skill(team, "team-b", md("b"));
+    const user = path.join(home, ".claude", "skills");
+    const first = say();
+    await installTeamSkills("claude", ctx, first);
+    expect(await fs.readlink(path.join(user, "team-a"))).toBe(path.join(disk, "anet", "skills", "team-a"));
+    expect(first.warns).toEqual([]);
+    expect(await isOurTeamEntry(path.join(user, "team-a"), team)).toBe(true);
+    const second = say();
+    await installTeamSkills("claude", ctx, second);
+    expect(second.logs).toEqual([]);
+    expect(second.warns).toEqual([]);
+    expect((await skillView("claude", ctx)).warnings).toEqual([]);
+    await fs.rm(path.join(team, "team-b"), { recursive: true });
+    const third = say();
+    await installTeamSkills("claude", ctx, third);
+    await expect(fs.lstat(path.join(user, "team-b"))).rejects.toThrow();
+    expect(third.logs).toEqual(["[skills] 已移除失效的团队链接 ~/.claude/skills/team-b"]);
+    expect(third.warns).toEqual([]);
+    expect(await fs.readlink(path.join(user, "team-a"))).toBe(path.join(disk, "anet", "skills", "team-a"));
+    // 旧版本按字面路径建的链接（经过 ~/.anet 软链接）同样认作我们的。
+    await fs.unlink(path.join(user, "team-a"));
+    await fs.symlink(path.join(team, "team-a"), path.join(user, "team-a"));
+    const fourth = say();
+    await installTeamSkills("claude", ctx, fourth);
+    expect(fourth.warns).toEqual([]);
+    expect(fourth.logs).toEqual([]);
+  });
+
+  test("a .anet-team-copy marker counts only when its source resolves inside the team dir", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const outside = await tmp("skills-out-");
+    const ctx = { workDir: work, home };
+    const team = teamSkillsDir(ctx);
+    await skill(team, "team-echo", md("echo"));
+    await skill(outside, "elsewhere", md("elsewhere"));
+    // 团队目录里一个指向外面的软链接：字面路径在团队目录下，真实路径不在。
+    await fs.symlink(path.join(outside, "elsewhere"), path.join(team, "sneaky"));
+    const user = path.join(home, ".claude", "skills");
+    const marked = async (name: string, source: string) => {
+      await fs.mkdir(path.join(user, name), { recursive: true });
+      await fs.writeFile(path.join(user, name, "SKILL.md"), "USER EDIT\n");
+      await fs.writeFile(path.join(user, name, TEAM_COPY_MARKER), `anet-team-skill\nsource=${source}\n`);
+    };
+    await marked("team-echo", path.join(outside, "elsewhere"));
+    await marked("my-fork", path.join(outside, "elsewhere"));
+    await marked("via-link", path.join(team, "sneaky"));
+    await marked("dotdot", `${team}/../../etc`);
+    await marked("gone", path.join(team, "deleted-skill"));
+    for (const name of ["team-echo", "my-fork", "via-link", "dotdot"]) {
+      expect(await isOurTeamEntry(path.join(user, name), team)).toBe(false);
+    }
+    expect(await isOurTeamEntry(path.join(user, "gone"), team)).toBe(true);
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    for (const name of ["team-echo", "my-fork", "via-link", "dotdot"]) {
+      expect((await fs.lstat(path.join(user, name))).isSymbolicLink()).toBe(false);
+      expect(await fs.readFile(path.join(user, name, "SKILL.md"), "utf8")).toBe("USER EDIT\n");
+    }
+    await expect(fs.lstat(path.join(user, "gone"))).rejects.toThrow();
+    expect(io.warns).toEqual(["[skills] 团队技能 team-echo 未覆盖 ~/.claude/skills/team-echo：目标已存在，且不是指向团队目录的链接"]);
+    expect(io.logs).toEqual(["[skills] 已移除失效的团队链接 ~/.claude/skills/gone"]);
+  });
+
+  test("3 nodes installing at once, several rounds: no aborted install, final links correct", async () => {
+    const user = (home: string) => path.join(home, ".claude", "skills");
+    const linked = async (home: string) => {
+      const out: Record<string, string> = {};
+      for (const name of (await fs.readdir(user(home))).sort()) out[name] = await fs.readlink(path.join(user(home), name)).catch(() => "<dir>");
+      return out;
+    };
+    for (let round = 0; round < 8; round++) {
+      const work = await tmp("skills-w-");
+      const home = await tmp("skills-h-");
+      const ctx = { workDir: work, home };
+      const team = teamSkillsDir(ctx);
+      for (const n of ["a", "b", "c", "d", "e"]) await skill(team, `team-${n}`, md(n));
+      await skill(user(home), "mine", md("mine"));
+      const ios = [say(), say(), say()];
+      const first = await Promise.allSettled(ios.map((io) => installTeamSkills("claude", ctx, io)));
+      expect(first.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason))).toEqual([]);
+      for (const io of ios) expect(io.warns).toEqual([]);
+      // 被别的节点抢先建好、指向同一个源的，算成功，不是「跳过」。
+      for (const io of ios) expect(io.logs.filter((l) => l.includes("本次跳过"))).toEqual([]);
+      const expected: Record<string, string> = {};
+      for (const n of ["a", "b", "c", "d", "e"]) expected[`team-${n}`] = path.join(team, `team-${n}`);
+      const { mine: _mine, ...links } = await linked(home);
+      expect(links).toEqual(expected);
+      // 删两个、加一个，再同时启动三次：失效的被清掉，新的被链上，用户自己的不动。
+      await fs.rm(path.join(team, "team-b"), { recursive: true });
+      await fs.rm(path.join(team, "team-d"), { recursive: true });
+      await skill(team, "team-f", md("f"));
+      const ios2 = [say(), say(), say()];
+      const second = await Promise.allSettled(ios2.map((io) => installTeamSkills("claude", ctx, io)));
+      expect(second.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason))).toEqual([]);
+      for (const io of ios2) expect(io.warns).toEqual([]);
+      for (const io of ios2) expect(io.logs.filter((l) => l.includes("本次跳过"))).toEqual([]);
+      const after = await linked(home);
+      expect(Object.keys(after)).toEqual(["mine", "team-a", "team-c", "team-e", "team-f"]);
+      expect(after["team-f"]).toBe(path.join(team, "team-f"));
+      expect(await fs.readFile(path.join(user(home), "mine", "SKILL.md"), "utf8")).toBe(md("mine"));
+      expect((await skillView("claude", ctx)).warnings).toEqual([]);
+    }
+  });
+
+  test("a normal user skill omits origin", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    await skill(path.join(home, ".claude/skills"), "notes", md("user notes"));
+    const hit = (await listSkills("claude", { workDir: work, home })).find((s) => s.name === "notes");
+    expect(hit && "origin" in hit).toBe(false);
   });
 });

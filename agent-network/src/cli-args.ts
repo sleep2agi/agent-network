@@ -41,6 +41,7 @@ export const BOOLEAN_FLAGS = new Set([
   "--opencode-unsafe-tools",     // #543 (node create --opencode-generation v2)
   "--pick",                      // #536 (anet resume <codex node> --pick)
   "--resume-latest",
+  "--revoke-cli-tokens",         // #711 (anet passwd --revoke-cli-tokens)
   "--self",
   "--tmux",
   "--yes",

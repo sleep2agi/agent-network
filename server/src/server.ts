@@ -39,7 +39,7 @@ import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MO
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
-import { register, login, resolveToken, tokenRejection, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, adminDeleteEmptyNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, tokenRejection, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, adminDeleteEmptyNetwork, renameNetwork, changePassword, issueUserToken, getUserTokenMeta, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
@@ -1376,7 +1376,7 @@ return Bun.serve({
       }
       try {
         const body = await req.json() as any;
-        const result = register(body.username, body.password, body.email, body.display_name, { client: { label: body.client_label, userAgent: req.headers.get("user-agent") } });
+        const result = register(body.username, body.password, body.email, body.display_name, { client: { label: body.client_label, userAgent: req.headers.get("user-agent"), kind: body.client_kind } });
         if (result.ok) logAudit(result.user!.user_id, body.username, "register", "user", result.user!.user_id);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       } catch (e: any) {
@@ -1404,7 +1404,7 @@ return Bun.serve({
             { status: 429, headers: { "Retry-After": String(Math.ceil((lock.retryAfterMs ?? 1000) / 1000)) } }
           ));
         }
-        const result = login(body.username, body.password, { label: body.client_label, userAgent: req.headers.get("user-agent") });
+        const result = login(body.username, body.password, { label: body.client_label, userAgent: req.headers.get("user-agent"), kind: body.client_kind });
         if (result.ok) {
           sharedLoginFailureLockout.recordSuccess(body.username);
           logAudit(result.user!.user_id, body.username, "login", "user", result.user!.user_id);
@@ -1473,9 +1473,13 @@ return Bun.serve({
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
-        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password, resolved.tokenId);
+        // #711 不带 keep_cli_tokens 的请求(旧 app、dashboard 代理)= 改密码前的行为:撤销全部不绑网络的令牌。
+        // keep_cli_tokens 必须是布尔 true 才保留命令行 / 脚本令牌。
+        const meta = resolved.tokenId ? getUserTokenMeta(resolved.user.user_id, resolved.tokenId) : null;
+        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password, resolved.tokenId, { keepCliTokens: body.keep_cli_tokens === true });
         if (result.ok) {
-          const issued = issueUserToken(resolved.user.user_id, "password-change");
+          // 换发的新令牌沿用当前这条的种类和设备标识:anet passwd 换完仍是命令行令牌。
+          const issued = issueUserToken(resolved.user.user_id, "password-change", { kind: meta?.kind, clientLabel: meta?.client_label, userAgent: meta?.user_agent });
           if (resolved.tokenId) revokeToken(resolved.user.user_id, resolved.tokenId);
           logAudit(resolved.user.user_id, resolved.user.username, "password_changed", "user", resolved.user.user_id);
           return withCors(req, Response.json({ ...result, token: issued.token, token_id: issued.token_id }));

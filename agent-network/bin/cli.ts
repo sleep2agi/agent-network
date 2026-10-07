@@ -139,6 +139,7 @@ import {
 } from "../src/opencode-runtime-binding";
 import { connectGrokAttach } from "../src/grok-attach-client";
 import { ambientTypeScriptTranspiler, nodeServerPayloadFor } from "../src/node-server-payload";
+import { installTeamSkills } from "../src/node-skills";
 import { applyNodeServerPayload } from "../src/node-server-version";
 import {
   agentNodeHelpSupportsGrokCopresence,
@@ -4447,7 +4448,7 @@ Other:
   anet login                  Login (username + password)
   anet login --token <tok>    Login with API token
   anet logout                 Revoke this login on the Hub, then remove the saved token
-  anet passwd                 Change password
+  anet passwd                 Change password (keeps your CLI/script tokens; --revoke-cli-tokens revokes them too)
   anet whoami                 Show current user + networks
   anet network ls             List my networks
   anet network create <name>  Create a network
@@ -7475,6 +7476,14 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // forgiving and the bug usually only manifests as a missing session
     // banner. Fix: await child exit so parent stays alive while child holds
     // the TTY; main() unwinds naturally only after claude actually exits.
+    try {
+      await installTeamSkills("claude", { workDir: process.cwd() }, {
+        log: (message) => console.log(`[anet] ${message}`),
+        warn: (message) => console.warn(`[anet] ${message}`),
+      });
+    } catch (err: any) {
+      console.warn(`[anet] 团队技能安装失败：${err?.message || err}`);
+    }
     await new Promise<void>(async (resolve) => {
       let child: ReturnType<typeof spawn>;
       try {
@@ -10071,7 +10080,7 @@ async function serverCommand() {
         const reg = await fetch(`${hubUrl}/api/auth/register`, {
           method: "POST",
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
-          body: JSON.stringify({ username: defaultUser, password: defaultPass, client_label: loginClientLabel("hub start") }),
+          body: JSON.stringify({ username: defaultUser, password: defaultPass, client_label: loginClientLabel("hub start"), client_kind: "cli" }),
         }).then(r => r.json() as any);
         if (reg.ok) {
           defaultAccountReady = true;
@@ -15293,7 +15302,7 @@ async function registerCommand() {
     const res = await fetch(`${hub}/api/auth/register`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register") }),
+      body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register"), client_kind: "cli" }),
     }).then(r => r.json() as any);
 
     if (!res.ok) { console.error(`Registration failed: ${hubErrorText(res)}`); process.exit(1); }
@@ -15358,7 +15367,7 @@ async function loginCommand() {
     res = await fetch(`${hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, client_label: loginClientLabel("login") }),
+      body: JSON.stringify({ username, password, client_label: loginClientLabel("login"), client_kind: "cli" }),
     }).then(r => r.json() as any);
   } catch (e: any) {
     // Network / DNS / connection error — show the friendly hint, not the
@@ -15854,6 +15863,7 @@ async function passwdCommand() {
   if (!hub || !token) { console.error("Not logged in. Run: anet login"); markFailed(); return; }
 
   const opts = parseOpts();
+  const revokeCli = opts["revoke-cli-tokens"] === "true";
   const oldPw = opts["old-password"] || opts.old || await ask("Current password");
   const scriptedNew = opts["new-password"] || opts["new"];
   const newPw = scriptedNew || await ask("New password (min 8)");
@@ -15873,7 +15883,9 @@ async function passwdCommand() {
     const res = await fetch(`${hub}/api/auth/password`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+      // #711 用户是在自己机器上跑 anet:默认请求 keep_cli_tokens,其他机器的 anet 登录、具名脚本令牌保留;
+      // --revoke-cli-tokens 不带这个字段 = Hub 的默认(撤销全部)。旧 Hub 不认这个字段,也是撤销全部。
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw, ...(revokeCli ? {} : { keep_cli_tokens: true }) }),
     }).then(r => r.json() as any);
 
     if (res.ok) {
@@ -15883,6 +15895,17 @@ async function passwdCommand() {
       }
       console.log("[anet] Password changed successfully.");
       if (res.token) console.log("[anet] Login token rotated and saved.");
+      if (typeof res.revoked_login === "number") {
+        console.log(`[anet] Signed out ${res.revoked_login} other login session(s); revoked ${res.revoked_cli ?? 0} CLI/script token(s).`);
+      }
+      if (Array.isArray(res.kept_cli_tokens)) {
+        const kept = res.kept_cli_tokens as Array<{ token_id: string; name: string; client_label?: string | null; last_used_at?: string | null }>;
+        console.log(`[anet] Kept ${kept.length} CLI/script token(s):`);
+        for (const t of kept) console.log(`  ${t.token_id}  ${t.client_label || t.name}  last used: ${t.last_used_at || "never"}`);
+        if (kept.length > 0) console.log("[anet] Revoke one with: anet token revoke <token_id>  (or pass --revoke-cli-tokens next time)");
+      } else if (!revokeCli) {
+        console.log("[anet] This Hub does not support keeping CLI tokens; all other tokens were revoked.");
+      }
     } else {
       console.error(`[anet] Failed: ${hubErrorText(res)}`); markFailed();
     }
@@ -17376,7 +17399,7 @@ async function demoSciTeamCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team") }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team"), client_kind: "cli" }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);
@@ -17953,7 +17976,7 @@ async function createBatchWizardCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch") }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch"), client_kind: "cli" }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);
