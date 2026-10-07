@@ -116,7 +116,7 @@ test("legacy owner and exact bound identity remain supported", async () => {
   const denied = await fetch(`${base}/mcp`, { method: "POST", headers: { Authorization: `Bearer ${revoked}` } });
   expect(denied.status).toBe(401);
   expect(await call(legacy, "ack_adopt_request", { request_id: requestId, status: "adopted" })).toMatchObject({ ok: true, status: "active" });
-  expect((await call(legacy, "list_my_children")).children).toContainEqual({ child_node_id: child, alias: child, lifecycle_state: "active", managed: "adopted" });
+  expect((await call(legacy, "list_my_children")).children).toContainEqual({ child_node_id: child, alias: child, lifecycle_state: "active", managed: "adopted", binding_request_id: requestId });
   const stop = await call(owner.token, "stop_node", { node_id: child, network_id: owner.network_id });
   expect(stop.ok).toBe(true);
   expect((await call(legacy, "get_stop_request", { request_id: stop.request_id })).ok).toBe(true);
