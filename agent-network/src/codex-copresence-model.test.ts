@@ -53,7 +53,7 @@ describe("#512 thread/resume carries the resolved model", () => {
       calls.push({ method, params });
       return method === "thread/resume" ? { model: "gpt-cfg" } : history;
     }, "gpt-cfg");
-    expect(calls[0]).toEqual({ method: "thread/resume", params: { threadId: "thread_old", model: "gpt-cfg" } });
+    expect(calls[0]).toEqual({ method: "thread/resume", params: { threadId: "thread_old", model: "gpt-cfg", excludeTurns: true } });
     expect(out.resumedModel).toBe("gpt-cfg");
   });
 
@@ -63,7 +63,7 @@ describe("#512 thread/resume carries the resolved model", () => {
       calls.push(params);
       return method === "thread/resume" ? {} : history;
     });
-    expect(calls[0]).toEqual({ threadId: "thread_old" });
+    expect(calls[0]).toEqual({ threadId: "thread_old", excludeTurns: true });
   });
 });
 

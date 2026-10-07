@@ -59,13 +59,20 @@ describe("Codex co-presence launch readiness", () => {
     const posixStart = cli.indexOf("async function startCopresenceOrchestration(");
     const posixEnd = cli.indexOf("async function startOpencodeCopresenceOrchestration(", posixStart);
     const posix = cli.slice(posixStart, posixEnd);
-    expect(posix.match(/export CODEX_HOME=\$\{shellQuote\(opts\.codexHome\)\}/g)).toHaveLength(3);
+    // app-server keeps the direct export; bridge/TUI receive the same export
+    // from their private source-then-delete env files.
+    expect(posix.match(/export CODEX_HOME=\$\{shellQuote\(opts\.codexHome\)\}/g)).toHaveLength(1);
+    expect(posix.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(3);
+    expect(posix).toContain([
+      "const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {",
+      "      CODEX_HOME: opts.codexHome,",
+    ].join("\n"));
 
     const windowsStart = cli.indexOf("async function startWindowsCodexCopresence(");
     const windowsEnd = cli.indexOf("async function startCopresenceOrchestration(", windowsStart);
     const windows = cli.slice(windowsStart, windowsEnd);
     expect(windows).toContain("CODEX_HOME: opts.codexHome");
-    expect(windows).toContain("env: { ...process.env, CODEX_HOME: opts.codexHome }");
+    expect(windows.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(3);
   });
 
   test("each POSIX role receives the node marker exactly once", () => {

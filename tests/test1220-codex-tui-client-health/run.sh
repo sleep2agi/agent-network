@@ -41,11 +41,12 @@ expect_red wrapped-receipt bun test agent-network/src/codex-copresence-launch-re
 cp /tmp/test1220-cli.ts agent-network/bin/cli.ts
 
 echo "L2f witnessed-red: fresh launcher cannot create a thread"
-bun /mutate.ts agent-network/bin/cli.ts \
-  'return { threadId: "", freshDeferred: true };' \
-  'await request("thread/start", {}, 15_000); return { threadId: "", freshDeferred: true };'
-expect_red fresh-thread-create bun test agent-network/src/codex-copresence-launch-readiness.test.ts
-cp /tmp/test1220-cli.ts agent-network/bin/cli.ts
+cp agent-network/src/codex-copresence-rpc.ts /tmp/test1220-rpc.ts
+bun /mutate.ts agent-network/src/codex-copresence-rpc.ts \
+  'if (plan.method !== "thread/resume") return { threadId: "", freshDeferred: true };' \
+  'if (plan.method !== "thread/resume") { await request("thread/start", {}, 15_000); return { threadId: "", freshDeferred: true }; }'
+expect_red fresh-thread-create bun test agent-network/src/codex-copresence-rpc.test.ts
+cp /tmp/test1220-rpc.ts agent-network/src/codex-copresence-rpc.ts
 
 echo "L2g witnessed-red: pre-bind tasks cannot start a turn"
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/test1220-bridge.ts
@@ -143,8 +144,8 @@ cp /tmp/test1220-windows.ts agent-network/src/windows-codex-copresence.ts
 
 echo "L2e witnessed-red: wrong TUI CODEX_HOME cannot pass source health contract"
 bun /mutate.ts agent-network/bin/cli.ts \
-  $'const tuiCmd = [\n      `export CODEX_HOME=${shellQuote(opts.codexHome)}`,' \
-  $'const tuiCmd = [\n      `export CODEX_HOME=/tmp/test1220-wrong-home`,'
+  $'const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {\n      CODEX_HOME: opts.codexHome,' \
+  $'const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {\n      CODEX_HOME: "/tmp/test1220-wrong-home",'
 expect_red wrong-home bun test agent-network/src/codex-copresence-launch-readiness.test.ts
 cp /tmp/test1220-cli.ts agent-network/bin/cli.ts
 

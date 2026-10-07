@@ -3,7 +3,7 @@ import { createCodexCopresenceThread } from "./codex-copresence-rpc";
 
 const THREAD = "01999999-1111-7222-8333-444444444444";
 
-function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0) {
+function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0, calls?: string[]) {
   return class FakeAppServerSocket extends EventTarget {
     constructor(_url: string) {
       super();
@@ -11,6 +11,7 @@ function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0) {
     }
     send(raw: string) {
       const request = JSON.parse(raw);
+      if (typeof request.method === "string") calls?.push(request.method);
       if (typeof request.id !== "number") return;
       const result = request.method === "thread/read"
         ? { thread: { id: THREAD, turns: [{ id: "turn-1", status: "completed" }] } }
@@ -25,6 +26,15 @@ function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0) {
 }
 
 describe("co-presence RPC recovery deadline", () => {
+  test("a fresh launch is deferred to the TUI and never creates a thread over RPC", async () => {
+    const calls: string[] = [];
+    const result = await createCodexCopresenceThread("ws://fake", 250, undefined, "gpt-test", {
+      webSocketCtor: slowFakeAppServer(0, 0, calls),
+    });
+    expect(result).toEqual({ threadId: "", freshDeferred: true });
+    expect(calls).not.toContain("thread/start");
+  });
+
   test("a slow fake app-server can finish thread/resume inside the configured deadline", async () => {
     const started = Date.now();
     const result = await createCodexCopresenceThread("ws://fake", 250, THREAD, "gpt-test", { webSocketCtor: slowFakeAppServer(90), rolloutBytes: 780 * 1024 ** 2 });

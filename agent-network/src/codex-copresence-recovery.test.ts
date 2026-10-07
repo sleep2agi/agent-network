@@ -119,7 +119,7 @@ describe("Codex co-presence recovery", () => {
 
   test("launcher is fail-closed unless the operator explicitly skips recovery backup", () => {
     const cli = readFileSync(join(import.meta.dir, "../bin/cli.ts"), "utf8");
-    expect(cli).toContain("persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true)");
+    expect(cli.match(/persistCodexRecoveryPoint\(resolved, opts\.codexHome, opts\.skipRecoveryBackup === true\)/g)).toHaveLength(2);
     expect(cli).toContain("--skip-recovery-backup: STARTING WITHOUT A CODEX RECOVERY POINT");
     expect(cli).toContain(`skipRecoveryBackup: opts["skip-recovery-backup"] === "true"`);
   });

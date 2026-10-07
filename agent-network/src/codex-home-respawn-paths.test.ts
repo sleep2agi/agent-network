@@ -27,7 +27,11 @@ describe("#448 co-presence tmux sessions: CODEX_HOME set on the pane's FIRST pro
   });
 
   test("the inner export stays too (bash -l profiles may reset it)", () => {
-    expect(posix.split("`export CODEX_HOME=${shellQuote(opts.codexHome)}`").length - 1).toBe(3);
+    expect(posix.split("`export CODEX_HOME=${shellQuote(opts.codexHome)}`").length - 1).toBe(1);
+    // Each role sources a private file after bash -l has read profiles; that
+    // file exports the launcher-owned CODEX_HOME again.
+    expect(posix.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(3);
+    expect(posix.match(/\. \$\{shellQuote\([^)]*[Ee]nvFilePath\)\}/g)).toHaveLength(3);
   });
 
   test("appsrv is verified right after READY, all three before success is printed", () => {

@@ -107,14 +107,13 @@ expect_red verify-unknown 'single-node verify exited 2' run_e2e slow-fetch red-v
 restore_cli
 
 echo "L10 witnessed red: config.env must reach all three co-presence processes"
-ENV_HELPER=agent-network/src/codex-copresence-env.ts
-cp "$ENV_HELPER" /tmp/t535-env-helper.ts
-bun tests/test-codex-copresence-first-start/mutate.mjs "$ENV_HELPER" '  return out;' '  return Object.fromEntries(Object.entries(required));'
+cp agent-network/src/codex-copresence-env.ts /tmp/t535-env-helper.ts
+bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/src/codex-copresence-env.ts '  return out;' '  return Object.fromEntries(Object.entries(required));'
 expect_red missing-config-env 'app-server pane pid=' run_e2e slow-fetch red-env 0
-cp /tmp/t535-env-helper.ts "$ENV_HELPER"
+cp /tmp/t535-env-helper.ts agent-network/src/codex-copresence-env.ts
 
 cmp -s /tmp/t535-cli.ts "$CLI" || { echo "FAIL: cli.ts not restored"; exit 1; }
-cmp -s /tmp/t535-env-helper.ts "$ENV_HELPER" || { echo "FAIL: codex-copresence-env.ts not restored"; exit 1; }
+cmp -s /tmp/t535-env-helper.ts agent-network/src/codex-copresence-env.ts || { echo "FAIL: codex-copresence-env.ts not restored"; exit 1; }
 leftover=$(pgrep -f 't535-codex app-server' || true)
 [ -z "$leftover" ] || { echo "FAIL: app-server left running: $leftover"; exit 1; }
 echo "T535 PASS"
