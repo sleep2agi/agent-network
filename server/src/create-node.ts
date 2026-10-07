@@ -237,6 +237,30 @@ export type NodeCallerResolution =
   | { ok: true; kind: "unregistered"; alias: string; networkId: string }
   | { ok: false; reason: "not_a_node_token" | "bound_node_missing" | "ambiguous" | "not_owner" };
 
+type NodeCallerRow = { node_id: string; alias: string; network_id: string; owner_user_id: string | null };
+
+// nodes has no unique (network, alias). An unbound token that hits several
+// rows is not rejected outright: the row owned by the token's issuer wins;
+// if that is still not unique, the node_id on the latest session for the
+// alias wins. Still not unique, then refuse.
+function disambiguateUnboundAlias(
+  rows: NodeCallerRow[],
+  userId: string | null,
+  alias: string,
+  networkId: string,
+): NodeCallerRow | undefined {
+  const owned = userId ? rows.filter((row) => row.owner_user_id === userId) : [];
+  if (owned.length === 1) return owned[0]; // board679-unbound-dup
+  const pool = owned.length > 1 ? owned : rows;
+  const recent = db.get<{ node_id: string | null }>(
+    `SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND node_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1`,
+    alias,
+    networkId,
+  );
+  const hit = recent?.node_id ? pool.filter((row) => row.node_id === recent.node_id) : [];
+  return hit.length === 1 ? hit[0] : undefined;
+}
+
 // One lookup for every caller-identity entry. The token name is a hint.
 // bound_node_id is the row: if that row is gone, refuse — do not look up by name.
 // An unbound token with no row in its network stays the token name. First
@@ -256,7 +280,11 @@ export function resolveNodeCaller(tokenId: string | null | undefined): NodeCalle
   const rows = tokRow.bound_node_id
     ? db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE node_id = ?1 AND network_id = ?2`, tokRow.bound_node_id, tokRow.network_id)
     : db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE alias = ?1 AND network_id = ?2`, tokenAlias, tokRow.network_id);
-  const nodeRow = rows.length === 1 ? rows[0] : undefined;
+  const nodeRow = rows.length === 1
+    ? rows[0]
+    : (!tokRow.bound_node_id && rows.length > 1
+      ? disambiguateUnboundAlias(rows, tokRow.user_id, tokenAlias, tokRow.network_id)
+      : undefined);
   // board679-bound-row-missing: a bound token with no row is refused. Do not look up by name.
   if (tokRow.bound_node_id && !nodeRow) return { ok: false, reason: "bound_node_missing" };
   if (!nodeRow && rows.length === 0) {

@@ -40,12 +40,22 @@ function redact(text: string): string {
   return text.replace(/ntok_[A-Za-z0-9_-]+/g, "ntok_redacted").replace(/utok_[A-Za-z0-9_-]+/g, "utok_redacted");
 }
 let hub: { stop: (closeActiveConnections?: boolean) => void } | null = null;
+function lastLines(text: string, count: number): string {
+  const starts: number[] = [0];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 10) starts.push(i + 1);
+  }
+  const from = starts.length > count ? starts[starts.length - count] : 0;
+  let out = "";
+  for (let i = from; i < text.length; i += 1) out += text.charAt(i);
+  return out;
+}
 function fail(message: string): never {
   console.error(redact(message));
   try {
     for (const name of readdirSync("/tmp/compat679")) {
       if (!name.endsWith(".log")) continue;
-      const tail = readFileSync(`/tmp/compat679/${name}`, "utf8").split("\n").slice(-40).join("\n");
+      const tail = lastLines(readFileSync(`/tmp/compat679/${name}`, "utf8"), 40);
       console.error(`--- ${name} ---\n${redact(tail)}`);
     }
   } catch { /* no logs yet */ }

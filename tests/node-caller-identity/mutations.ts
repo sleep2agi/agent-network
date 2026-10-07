@@ -52,3 +52,10 @@ await runMutation(
   }`,
   "bound row missing does not fall back to the name",
 );
+await runMutation(
+  "unbounddup",
+  "src/create-node.ts",
+  "if (owned.length === 1) return owned[0]; // board679-unbound-dup",
+  "if (owned.length === 1) return undefined; // board679-unbound-dup",
+  "duplicate alias unbound token keeps the owning node online",
+);

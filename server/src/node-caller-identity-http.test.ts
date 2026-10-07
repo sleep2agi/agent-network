@@ -7,11 +7,15 @@
 //
 // An unbound token with zero rows keeps the name in the token. First
 // registration still depends on that. A bound token whose row is gone is
-// refused and must not fall back to the name. The mutation harness deletes
-// the shared owner check and expects every "caller identity boundary:"
-// test to go assertion-red together (12). A second mutation restores a
-// name lookup for a missing bound row and expects
-// "bound row missing does not fall back to the name" to go red.
+// refused and must not fall back to the name. Several rows with one alias
+// are not refused outright for an unbound token: the issuer's own row wins,
+// then the node_id on the latest session. Still not unique, then refuse.
+// The mutation harness deletes the shared owner check and expects every
+// "caller identity boundary:" test to go assertion-red together (12). A
+// second mutation restores a name lookup for a missing bound row and expects
+// "bound row missing does not fall back to the name" to go red. A third
+// drops the single-owner shortcut and expects the duplicate-alias heartbeat
+// to go red. New tests must not use the "caller identity boundary:" prefix.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -450,23 +454,29 @@ test("unbound token with no row keeps its name and first report_status binds it"
   expect(after.body.credential.node_alias).toBe(freshAlias);
 });
 
-test("refused report_status leaves the session and the token name unchanged", async () => {
-  const before = sessionSnap(victimAlias, NET);
+test("a copied node_id does not relabel the row and a squatter still cannot heartbeat", async () => {
   const boundName = tokenName(victimTok.tokenId);
   const unboundName = tokenName(p10Owner.tokenId);
-  expect(before).toBeTruthy();
+  const claimId = `n_idv_claim_${stamp}`;
+  expect(sessionSnap(victimAlias, NET)).toBeTruthy();
+  // Legitimate owner, unbound token, a node_id that is not the row. The
+  // heartbeat succeeds and the row stays; the session must not keep the claim.
   const mismatch = await tool(p10Owner.token, "report_status", {
     resume_id: `sdk-${victimAlias}`,
     alias: victimAlias,
     status: "working",
     output: "mutated-output",
-    node_id: `n_idv_claim_${stamp}`,
+    node_id: claimId,
     network_id: NET,
   });
-  expect(mismatch.ok).toBe(false);
-  expect(mismatch.error).toBe("alias_identity_mismatch");
-  expect(sessionSnap(victimAlias, NET)).toEqual(before);
+  expect(mismatch.ok).toBe(true);
+  expect(db.get("SELECT node_id FROM nodes WHERE node_id = ?1", claimId)).toBeNull();
+  expect(db.get<{ alias: string }>("SELECT alias FROM nodes WHERE node_id = ?1", victimId)?.alias).toBe(victimAlias);
+  const cleared = sessionSnap(victimAlias, NET) as { node_id: string | null } | null;
+  expect(cleared).toBeTruthy();
+  expect(cleared?.node_id ?? null).toBeNull();
   expect(tokenName(p10Owner.tokenId)).toBe(unboundName);
+  // Bound token reporting another node's id: row stays, heartbeat still ok.
   const wrongNode = await tool(victimTok.token, "report_status", {
     resume_id: `sdk-${victimAlias}`,
     alias: victimAlias,
@@ -475,10 +485,11 @@ test("refused report_status leaves the session and the token name unchanged", as
     node_id: otherId,
     network_id: NET,
   });
-  expect(wrongNode.ok).toBe(false);
-  expect(wrongNode.error).toBe("alias_identity_mismatch");
-  expect(sessionSnap(victimAlias, NET)).toEqual(before);
+  expect(wrongNode.ok).toBe(true);
+  expect(db.get<{ alias: string }>("SELECT alias FROM nodes WHERE node_id = ?1", otherId)?.alias).toBe(otherAlias);
+  expect(db.get<{ alias: string }>("SELECT alias FROM nodes WHERE node_id = ?1", victimId)?.alias).toBe(victimAlias);
   expect(tokenName(victimTok.tokenId)).toBe(boundName);
+  const afterCollision = sessionSnap(victimAlias, NET);
   const squat = await tool(squatter.token, "report_status", {
     resume_id: `sdk-squat-${stamp}`,
     alias: victimAlias,
@@ -489,8 +500,71 @@ test("refused report_status leaves the session and the token name unchanged", as
   });
   expect(squat.ok).toBe(false);
   expect(squat.error).toBe("alias_identity_mismatch");
-  expect(sessionSnap(victimAlias, NET)).toEqual(before);
+  expect(sessionSnap(victimAlias, NET)).toEqual(afterCollision);
   expect(db.get("SELECT resume_id FROM sessions WHERE resume_id = ?1", `sdk-squat-${stamp}`)).toBeNull();
+});
+
+test("duplicate alias unbound token keeps the owning node online", async () => {
+  // Epoch 0 is the old unbound shape. Epoch 2 would still trip first-binding
+  // and clear the session node_id; that is a heartbeat success, not this case.
+  const alias = `idvlive${stamp}`;
+  const mine = `n_idv_live_${stamp}`;
+  const other = `n_idv_liveo_${stamp}`;
+  db.run(
+    `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
+     VALUES (?1, ?2, ?2, ?3, ?4, datetime('now'))`,
+    [mine, alias, NET, ownerId],
+  );
+  db.run(
+    `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
+     VALUES (?1, ?2, ?2, ?3, ?4, datetime('now'))`,
+    [other, alias, NET, outsiderId],
+  );
+  const tok = mint(ownerId, NET, alias, 0, null);
+  const reported = await report(tok, alias, mine, NET, { hostname: "idv-live-host" });
+  expect(reported.ok).toBe(true);
+  expect(db.get<{ alias: string; hostname: string | null }>(
+    "SELECT alias, hostname FROM nodes WHERE node_id = ?1", mine,
+  )).toEqual({ alias, hostname: "idv-live-host" });
+  expect(db.get<{ alias: string; hostname: string | null }>(
+    "SELECT alias, hostname FROM nodes WHERE node_id = ?1", other,
+  )).toEqual({ alias, hostname: null });
+  expect(db.get<{ node_id: string | null }>(
+    "SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", alias, NET,
+  )?.node_id).toBe(mine);
+  const task = `dup live ${stamp}`;
+  const sent = await tool(tok.token, "send_task", { alias: sinkAlias, task, network_id: NET });
+  expect(sent.ok).toBe(true);
+  expect(db.get<{ from_name: string }>("SELECT from_name FROM tasks WHERE content = ?1", task)?.from_name).toBe(alias);
+});
+
+test("duplicate alias unbound token follows the latest session node", async () => {
+  const alias = `idvsess${stamp}`;
+  const rowA = `n_idv_sesa_${stamp}`;
+  const rowB = `n_idv_sesb_${stamp}`;
+  const requestId = `cr_idv_ses_${stamp}`;
+  for (const id of [rowA, rowB]) {
+    db.run(
+      `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
+       VALUES (?1, ?2, ?2, ?3, ?4, datetime('now'))`,
+      [id, alias, NET, ownerId],
+    );
+  }
+  db.run(
+    `INSERT INTO sessions (resume_id, alias, node_id, network_id, status, updated_at)
+     VALUES (?1, ?2, ?3, ?4, 'idle', datetime('now'))`,
+    [`sdk-${alias}`, alias, rowB, NET],
+  );
+  db.run(
+    `INSERT INTO node_create_requests (request_id, daemon_node_id, child_name, network_id, runtime, flags_json, env_keys, status, created_at, created_by_token)
+     VALUES (?1, ?2, ?3, ?4, 'fixture', '{}', '[]', 'pending', ?5, 'fixture')`,
+    [requestId, rowB, `child-${stamp}`, NET, Date.now()],
+  );
+  const tok = mint(ownerId, NET, alias, 0, null);
+  const listed = await tool(tok.token, "list_my_pending_create_requests", {});
+  expect(listed.ok).toBe(true);
+  expect(listed.count).toBe(1);
+  expect(listed.requests[0].request_id).toBe(requestId);
 });
 
 test("home network of a shared alias still accepts its own token", async () => {

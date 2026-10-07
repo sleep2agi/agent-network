@@ -21,6 +21,10 @@ await runMutation("ownerless", "src/create-node.ts", 'const legacyOwnerless = no
 await runMutation("epoch", "src/create-node.ts", 'const legacyOwnerless = nodeRow.owner_user_id === null && tokRow.node_identity_epoch === 0;', 'const legacyOwnerless = nodeRow.owner_user_id === null;', 'daemon identity boundary:');
 await runMutation("refresh", "src/node-token-ownership.ts", 'export function legacyNodeHolder(user: string, network: string, alias: string, nodeId: string): boolean {', 'export function legacyNodeHolder(user: string, network: string, alias: string, nodeId: string): boolean { return false;', 'ownerless legacy daemon remains supported without rewriting its owner');
 await runMutation("freshid", "src/auth.ts", 'nodeId = checkNodeTokenClaim(userId, networkId, nodeName, nodeId);', 'nodeId = nodeId ?? checkNodeTokenClaim(userId, networkId, nodeName);', 'fresh ID cannot mint another node alias');
-await runMutation("boundlookup", "src/create-node.ts", 'const rows = tokRow.bound_node_id', 'const rows = false', 'duplicate legacy aliases use bound IDs and unbound ambiguity fails closed');
-await runMutation("ambiguous", "src/create-node.ts", 'const nodeRow = rows.length === 1 ? rows[0] : undefined;', 'const nodeRow = rows[0];', 'duplicate legacy aliases use bound IDs and unbound ambiguity fails closed');
+await runMutation("boundlookup", "src/create-node.ts", 'const rows = tokRow.bound_node_id', 'const rows = false', 'duplicate legacy aliases use bound IDs and an unbound token follows its owner');
+await runMutation("ambiguous", "src/create-node.ts", `  const nodeRow = rows.length === 1
+    ? rows[0]
+    : (!tokRow.bound_node_id && rows.length > 1
+      ? disambiguateUnboundAlias(rows, tokRow.user_id, tokenAlias, tokRow.network_id)
+      : undefined);`, 'const nodeRow = rows[0];', 'duplicate legacy aliases use bound IDs and an unbound token follows its owner');
 await runMutation("registration", "src/tools.ts", 'WHERE token_id=?2 AND node_identity_epoch=2 AND bound_node_id IS NULL', 'WHERE token_id=?2 AND node_identity_epoch=999 AND bound_node_id IS NULL', 'new name-only registration binds once and its holder can refresh with either shape');

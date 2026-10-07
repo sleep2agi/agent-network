@@ -1055,7 +1055,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         in_flight_count: processInFlightCount,
       } : null;
 
-      try {
       db.transaction(() => {
         // Only delete same-alias sessions within the same network
         // 同一 alias 可以有两个上报者轮流说话(agent-node 自己 `sdk-<node>` +
@@ -1190,61 +1189,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             [uuidv4(), sessionNetId, resume_id, effectiveAlias, hostHostname, hostIp, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount]
           );
         }
-        // Node-row refusal rolls the session write back with it. A refused
-        // claim must not leave a changed session or a rewritten token name,
-        // and must not report ok.
-        if (node_id) {
-          let refused = false;
-          try {
-            const nodeRuntime = ag?.includes(":") ? ag.split(":")[1] + "-sdk" : ag ?? null;
-            const upserted = upsertNodeWithSec1Guard({
-              node_id,
-              callerNetworkId: effectiveNetId ?? null,
-              callerUserId: enforceUserId ?? null,
-              callerTokenId: callerTokenId ?? null,
-              node_name: nn || effectiveAlias,
-              alias: effectiveAlias,
-              runtime: nodeRuntime,
-              model: mdl ?? null,
-              config_path: config_path ?? null,
-              channels: channels ?? null,
-              server: srv ?? null,
-              hostname: hn ?? null,
-              config_snapshot: cfgSnap ?? null,
-            });
-            if (upserted.result === "refused") refused = true;
-          } catch (err) {
-            if (refused) throw err;
-          }
-          if (refused) {
-            const err = new Error("node_upsert_refused");
-            (err as { code?: string }).code = "node_upsert_refused";
-            throw err;
-          }
-        }
         if (callerTokenIsNetwork && callerTokenId) {
           try {
             db.run("UPDATE api_tokens SET name = ?1 WHERE token_id = ?2", [`node:${effectiveAlias}`, callerTokenId]);
           } catch {}
         }
       });
-      } catch (e: any) {
-        if (e?.code === "node_upsert_refused") {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: false,
-                error: "alias_identity_mismatch",
-                message: "report_status alias does not match the token-bound node alias; use anet node rename to change identity",
-                token_alias: callerAlias ?? "",
-                reported_alias: effectiveAlias,
-              }),
-            }],
-          };
-        }
-        throw e;
-      }
       // #448 — only the node token bound to this alias may speak for its health
       // (same rule as the *_capable flags above).
       const acceptedHealth = nodeHealth && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias
@@ -1282,6 +1232,33 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             findSql += " ORDER BY started_at DESC LIMIT 1";
             const t = db.get<{ task_id: string }>(findSql, ...findParams);
             if (t) logTaskEvent(t.task_id, null, "running", effectiveAlias);
+          }
+        } catch {}
+      }
+
+      // A copied node_id must not relabel the row. The heartbeat itself still
+      // succeeds: only a token rejected as impersonation fails the whole call.
+      // identity_mismatch must not leave this session pointing at the other row.
+      if (node_id) {
+        try {
+          const nodeRuntime = ag?.includes(":") ? ag.split(":")[1] + "-sdk" : ag ?? null;
+          const upserted = upsertNodeWithSec1Guard({
+            node_id,
+            callerNetworkId: effectiveNetId ?? null,
+            callerUserId: enforceUserId ?? null,
+            callerTokenId: callerTokenId ?? null,
+            node_name: nn || effectiveAlias,
+            alias: effectiveAlias,
+            runtime: nodeRuntime,
+            model: mdl ?? null,
+            config_path: config_path ?? null,
+            channels: channels ?? null,
+            server: srv ?? null,
+            hostname: hn ?? null,
+            config_snapshot: cfgSnap ?? null,
+          });
+          if (upserted.result === "refused" && upserted.reason === "identity_mismatch") {
+            db.run("UPDATE sessions SET node_id = NULL WHERE resume_id = ?1 AND node_id = ?2", [resume_id, node_id]);
           }
         } catch {}
       }
