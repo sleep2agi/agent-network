@@ -89,8 +89,8 @@ expect_mutation_red \
 expect_mutation_red \
   codex-runtime-context \
   src/cli.ts \
-  'threadId: session.bridge.getThreadId(),' \
-  'threadId: "",' \
+  'const threadId = session.bridge.getThreadId();' \
+  'const threadId = "";' \
   src/task-runtime-evidence.test.ts \
   'codex app-server reports its exact thread'
 
