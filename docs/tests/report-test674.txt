@@ -23,6 +23,12 @@ PostgreSQL: 7 pass, 0 fail, 51 assertions, all 10 independent mutations witnesse
 Combined suite rc=0. The new child mutant removes only the daemon predicate,
 retaining both SQL placeholders: red in the named empty-list assertion on
 both engines, not a bind-count/setup error. All previous 9 mutants also rerun.
+Additional mutation in this post-#678 run (not present in the historical table):
+name        SQLite     PostgreSQL   assertion that goes red
+child       rc=1       rc=1         child token sees an empty list, not parent binding
+Identity-layer ownership mutations are test678's responsibility. test674 only
+tests projection and its scope, including that it calls the identity resolver;
+its resolver-bypass mutant does not prove the resolver's ownership checks.
 SQLite adoption/lifecycle/start regression: 22 pass, 93 assertions, rc=0.
 Docker registration/coverage/home-path/L1-SHA/mutation-pin gates rc=0;
 607 anchors checked, 4 unchanged baseline exceptions.
