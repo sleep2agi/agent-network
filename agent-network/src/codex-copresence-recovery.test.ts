@@ -11,6 +11,7 @@ describe("Codex co-presence recovery", () => {
     expect(v.historyTurnCount).toBe(1);
     expect(() => verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_new", turns: [{ id: "x" }] } })).toThrow("identity mismatch");
     expect(() => verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_old", turns: [] } })).toThrow("no persisted history");
+    expect(verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_old" } }).historyTurnCount).toBe(0);
   });
 
   test("stub resume failure is fail-closed and never calls thread/start", async () => {
@@ -22,6 +23,18 @@ describe("Codex co-presence recovery", () => {
     })).rejects.toThrow("no persisted history");
     expect(calls).toEqual(["thread/resume", "thread/read"]);
     expect(calls).not.toContain("thread/start");
+  });
+
+  test("resume and verification never hydrate the full thread history", async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    await resumeAndVerifyCodexThread("thread_old", async (method, params) => {
+      calls.push({ method, params });
+      return method === "thread/resume" ? { model: "gpt-test" } : { thread: { id: "thread_old" } };
+    }, "gpt-test");
+    expect(calls).toEqual([
+      { method: "thread/resume", params: { threadId: "thread_old", excludeTurns: true, model: "gpt-test" } },
+      { method: "thread/read", params: { threadId: "thread_old", includeTurns: false } },
+    ]);
   });
 
   test("backup preserves config and session state but excludes credentials", () => {

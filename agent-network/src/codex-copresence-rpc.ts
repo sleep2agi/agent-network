@@ -81,7 +81,7 @@ export async function createCodexCopresenceThread(
     if (!SAFE_CODEX_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
     const { resumedModel, ...verification } = await resumeAndVerifyCodexThread(
       plan.params.threadId,
-      (method, params) => request(method, params, method === "thread/resume" ? Math.max(1, deadline - Date.now()) : 15_000),
+      (method, params) => request(method, params, Math.max(1, deadline - Date.now())),
       model,
     );
     return { threadId: plan.params.threadId, verification, freshDeferred: false, resumedModel };

@@ -3,7 +3,7 @@ import { createCodexCopresenceThread } from "./codex-copresence-rpc";
 
 const THREAD = "01999999-1111-7222-8333-444444444444";
 
-function slowFakeAppServer(resumeDelayMs: number) {
+function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0) {
   return class FakeAppServerSocket extends EventTarget {
     constructor(_url: string) {
       super();
@@ -15,7 +15,7 @@ function slowFakeAppServer(resumeDelayMs: number) {
       const result = request.method === "thread/read"
         ? { thread: { id: THREAD, turns: [{ id: "turn-1", status: "completed" }] } }
         : request.method === "thread/resume" ? { model: "gpt-test" } : {};
-      const delay = request.method === "thread/resume" ? resumeDelayMs : 0;
+      const delay = request.method === "thread/resume" ? resumeDelayMs : request.method === "thread/read" ? readDelayMs : 0;
       setTimeout(() => this.dispatchEvent(new MessageEvent("message", {
         data: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }),
       })), delay);
@@ -37,5 +37,12 @@ describe("co-presence RPC recovery deadline", () => {
     const error = await createCodexCopresenceThread("ws://fake", 30, THREAD, "gpt-test", { webSocketCtor: slowFakeAppServer(90), rolloutBytes: 780 * 1024 ** 2 })
       .then(() => null, (caught) => caught as Error);
     expect(error?.message).toMatch(/^request thread\/resume timeout after \d+ms \(rollout 780\.0 MiB\)$/);
+  });
+
+  test("metadata verification shares the recovery deadline instead of a fixed 15 second timeout", async () => {
+    const started = Date.now();
+    const result = await createCodexCopresenceThread("ws://fake", 250, THREAD, "gpt-test", { webSocketCtor: slowFakeAppServer(20, 90), rolloutBytes: 1024 ** 3 });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(90);
+    expect(result.verification).toMatchObject({ threadId: THREAD, historyTurnCount: 1 });
   });
 });

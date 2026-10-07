@@ -109,8 +109,9 @@ export function verifyCodexThreadHistory(
   if (!thread || thread.id !== expectedThreadId) {
     throw new Error(`thread/read identity mismatch: expected ${expectedThreadId}`);
   }
+  const hasTurns = Object.prototype.hasOwnProperty.call(thread, "turns");
   const turns = Array.isArray(thread.turns) ? thread.turns : [];
-  if (turns.length === 0) {
+  if (hasTurns && turns.length === 0) {
     throw new Error(`thread/read returned no persisted history for ${expectedThreadId}`);
   }
   return {
@@ -118,7 +119,9 @@ export function verifyCodexThreadHistory(
     threadId: expectedThreadId,
     verifiedAt: now.toISOString(),
     historyTurnCount: turns.length,
-    historyFingerprint: hashJson(turns.map((turn: any) => ({ id: turn?.id ?? null, status: turn?.status ?? null }))),
+    historyFingerprint: hasTurns
+      ? hashJson(turns.map((turn: any) => ({ id: turn?.id ?? null, status: turn?.status ?? null })))
+      : hashJson({ threadId: expectedThreadId, metadataOnly: true }),
   };
 }
 
@@ -140,10 +143,19 @@ export async function resumeAndVerifyCodexThread(
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   model?: string,
 ): Promise<CodexRecoveryVerification & { resumedModel?: string }> {
-  const params: Record<string, unknown> = { threadId };
+  const params: Record<string, unknown> = { threadId, excludeTurns: true };
   if (typeof model === "string" && model.trim()) params.model = model.trim();
-  const resumed = await request("thread/resume", params);
-  const read = await request("thread/read", { threadId, includeTurns: true });
+  let resumed: unknown;
+  try {
+    resumed = await request("thread/resume", params);
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    const message = String((error as { message?: unknown })?.message ?? error);
+    if (code !== -32602 && !/excludeTurns.*(?:unknown|unsupported|invalid)|(?:unknown|unsupported).*excludeTurns/i.test(message)) throw error;
+    delete params.excludeTurns;
+    resumed = await request("thread/resume", params);
+  }
+  const read = await request("thread/read", { threadId, includeTurns: false });
   const verification = verifyCodexThreadHistory("thread/resume", threadId, read);
   const resumedModel = (resumed as { model?: unknown } | null)?.model;
   return typeof resumedModel === "string" ? { ...verification, resumedModel } : verification;
