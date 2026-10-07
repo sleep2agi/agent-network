@@ -36,6 +36,8 @@ COPY contracts/side-thread/v1 ./contracts/side-thread/v1
 # 用 inbox-dispatch)。带整个 src,不带它的依赖 —— 这些是纯源码 import。
 COPY agent-node/package.json ./agent-node/package.json
 COPY agent-node/src ./agent-node/src
+COPY agent-network/src ./agent-network/src
+COPY agent-network/bin ./agent-network/bin
 # scheduled-tasks-http.test.ts 起两个真 Hub 进程抢同一个 occurrence,
 # worker 脚本在 tests/test601-hub-scheduled-tasks 下,按仓根相对路径 import。
 COPY tests/test601-hub-scheduled-tasks ./tests/test601-hub-scheduled-tasks

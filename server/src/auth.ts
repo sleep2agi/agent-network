@@ -3,6 +3,7 @@
  */
 import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork, groupTx, removeMemberFromChatGroups } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
 import { WEAK_PASSWORDS } from "./password-dict.js";
+import { checkNodeTokenClaim, legacyNodeHolder } from "./node-token-ownership.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
 import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, NEW_MEMBER_TASK_ACCESS, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
 
@@ -136,7 +137,7 @@ export function register(username: string, password: string, email?: string, dis
   const userToken = generateUserToken();
   const userTokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
     [userTokenId, hashToken(userToken), userId, null, "user-login", "user", cleanClientField(opts.client?.label, 64), cleanClientField(opts.client?.userAgent, 256)]
   );
 
@@ -144,7 +145,7 @@ export function register(username: string, password: string, email?: string, dis
   const networkToken = generateNetworkToken();
   const networkTokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
     [networkTokenId, hashToken(networkToken), userId, networkId, "default-network", "network"]
   );
 
@@ -216,7 +217,7 @@ export function login(username: string, password: string, client: SessionClientI
   const userToken = generateUserToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
     [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user", cleanClientField(client.label, 64), cleanClientField(client.userAgent, 256)]
   );
 
@@ -246,8 +247,9 @@ export function login(username: string, password: string, client: SessionClientI
  *
  * RFC-036: callers that provide nodeId atomically establish the immutable
  * node-owner binding before the plaintext token is returned. The 3-argument
- * legacy form remains available for old clients, but its token has no bound
- * node id and therefore cannot consume external-schedule edit intents.
+ * name-only form remains available: new identities bind on first registration,
+ * and a verified same-holder refresh binds to the existing unique node. This
+ * does not fill NULL row owners or grant external-schedule ownership.
  */
 export function createNetworkTokenForNode(userId: string, networkId: string, nodeName: string, nodeId?: string): { ok: boolean; token?: string; token_id?: string; node_id?: string; error?: string } {
   // Verify user is a member of this network with write access
@@ -262,16 +264,18 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
   const tokenId = generateId("tok");
   try {
     db.transaction(() => {
+      nodeId = checkNodeTokenClaim(userId, networkId, nodeName, nodeId);
       if (nodeId) {
-        const existing = db.get<{ network_id: string | null; owner_user_id: string | null }>(
-          "SELECT network_id, owner_user_id FROM nodes WHERE node_id = ?1",
+        const existing = db.get<{ network_id: string | null; owner_user_id: string | null; alias: string | null }>(
+          "SELECT network_id, owner_user_id, alias FROM nodes WHERE node_id = ?1",
           nodeId,
         );
         if (existing?.network_id && existing.network_id !== networkId) throw new Error("cross_network_node");
+        if (existing?.alias && existing.alias !== nodeName) throw new Error("node_owner_mismatch");
         // Existing pre-RFC-036 rows have no trustworthy owner anchor. A token
         // refresh must not turn knowledge of a legacy node_id into ownership.
-        // They remain read-only until a separately authorized migration.
-        if (existing && !existing.owner_user_id) throw new Error("node_owner_unclaimed");
+        // A same-holder refresh binds the token, without filling the row owner.
+        if (existing && !existing.owner_user_id && !legacyNodeHolder(userId, networkId, nodeName, nodeId)) throw new Error("node_owner_unclaimed");
         if (existing?.owner_user_id && existing.owner_user_id !== userId) throw new Error("node_owner_mismatch");
         db.run(
           `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
@@ -280,7 +284,7 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
              node_name = COALESCE(nodes.node_name, ?2),
              alias = COALESCE(nodes.alias, ?2),
              network_id = COALESCE(nodes.network_id, ?3),
-             owner_user_id = COALESCE(nodes.owner_user_id, ?4),
+             owner_user_id = nodes.owner_user_id,
              updated_at = datetime('now')`,
           [nodeId, nodeName, networkId, userId],
         );
@@ -293,7 +297,7 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
         }
       }
       db.run(
-        "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, bound_node_id) VALUES (?1, ?2, ?3, ?4, ?5, 'network', ?6)",
+        "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, bound_node_id, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, 'network', ?6, 2)",
         [tokenId, hashToken(token), userId, networkId, `node:${nodeName}`, nodeId ?? null],
       );
     });
@@ -505,7 +509,7 @@ export function createToken(userId: string, name: string, networkId?: string): {
   const token = generateToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
     [tokenId, hashToken(token), userId, networkId || null, name, "full"]
   );
   return { ok: true, token, token_id: tokenId };
@@ -520,7 +524,7 @@ export function issueUserToken(userId: string, name = "user-login"): { token: st
   const token = generateUserToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, NULL, ?4, 'user')",
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, NULL, ?4, 'user', 1)",
     [tokenId, hashToken(token), userId, name]
   );
   return { token, token_id: tokenId };
@@ -748,7 +752,7 @@ export function joinByInvite(inviteCode: string, userId: string): { ok: boolean;
   // Auto-create a token for this network
   const token = generateToken();
   const tokenId = generateId("tok");
-  db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
     [tokenId, hashToken(token), userId, invite.network_id, "auto-join", "full"]);
   return { ok: true, network_id: invite.network_id, role: invite.role };
 }
