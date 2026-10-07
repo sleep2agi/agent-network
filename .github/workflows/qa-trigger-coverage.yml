@@ -13,8 +13,8 @@
 #
 # 🔴 This workflow deliberately has NO `paths:` filter. It is the guard for a
 #    path filter; gating it on paths would let a change to qa.yml's filter or to
-#    scripts/qa.sh L1_TESTS slip past the very check that watches them, and it
-#    would be the same class of blind spot the guard exists to catch.
+#    a tests/<suite>/qa.l1 marker slip past the very check that watches them, and
+#    it would be the same class of blind spot the guard exists to catch.
 #
 # Python rather than an in-yml bash loop, per the team's CI-guard pattern
 # (same reasoning as public-script-safety.yml and no-memory-slugs.yml).
@@ -36,4 +36,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: python3 .github/scripts/check-qa-trigger-coverage.py --selftest
       - run: python3 .github/scripts/check-qa-trigger-coverage.py

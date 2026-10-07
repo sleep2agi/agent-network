@@ -44,6 +44,8 @@ import subprocess
 import re
 import sys
 
+from l1_markers import is_l1_marker
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 TESTS = REPO / "tests"
 BASELINE = REPO / "docs" / "test-suite-orphan-baseline.txt"
@@ -134,10 +136,15 @@ def classify(names: list[str], blob: str, tests_dir: pathlib.Path,
     selftest 里再写一遍判据只能证明「我写的两遍一样」，对真代码做变异不会红。
     这一点今晚踩过：自造判据四次，四次都比真判据松。
     """
-    registered = [s for s in names if s in blob]
+    def wired(s: str) -> bool:
+        # qa.l1 是 L1 的登记。只认普通文件，目录名不以点开头，和 qa.sh 一致。
+        # 名字在 qa.sh 或 workflow 正文里仍然算（独立 job 不必有 qa.l1）。
+        return s in blob or is_l1_marker(tests_dir / s)
+
+    registered = [s for s in names if wired(s)]
     exempt = [s for s in names if (tests_dir / s / EXEMPT_MARKER).exists()]
     orphans = [s for s in names
-               if s not in blob and not (tests_dir / s / EXEMPT_MARKER).exists()]
+               if not wired(s) and not (tests_dir / s / EXEMPT_MARKER).exists()]
     return {
         "registered": registered,
         "exempt": exempt,
@@ -226,9 +233,11 @@ def main() -> int:
 
     for s in new_orphans:
         print(f"::error file=tests/{s}/run.sh::新增的测试套件 `{s}` 不会被任何 CI 跑到。"
-              f"二选一：(a) 接进 CI —— 加进 scripts/qa.sh 的 L1_TESTS **并且**把 "
-              f"tests/{s}/** 加进对应 workflow 的 paths（漏掉后一步 check-l1-paths-sync 会红）；"
-              f"(b) 在 tests/{s}/{EXEMPT_MARKER} 里写明为什么它不进 CI（一次性验证／事故复现件／"
+              f"三选一：(a) 进 L1 —— 放 tests/{s}/qa.l1（普通文件，目录名不以点开头），并把它的层写进 "
+              f".github/scripts/l1-layer-inventory.txt（不要往 qa.yml 的 paths 再加一行）；"
+              f"(b) 放进某个 workflow job，让目录名出现在 .github/workflows 里，并在清单里加一行 "
+              f"`job:<job 名>`（只加 job、不加这一行，层比对门会红）；"
+              f"(c) 在 tests/{s}/{EXEMPT_MARKER} 里写明为什么它不进 CI（一次性验证／事故复现件／"
               f"已被后续套件取代）。")
     print(f"\n{len(new_orphans)} 个新增套件没有回答「谁会跑它」。")
     return 1
@@ -266,6 +275,34 @@ def selftest() -> int:
             if got != want:
                 bad += 1
                 print(f"SELFTEST 失配: {name} got={got} want={want}")
+        # 只有 qa.l1、名字不在注册表正文里：仍算已登记，不是新孤儿。
+        marker = pathlib.Path(td) / "test905-marker"
+        marker.mkdir()
+        (marker / "run.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+        (marker / "qa.l1").write_text("\n", encoding="utf-8")
+        got = "test905-marker" in classify(["test905-marker"], "", pathlib.Path(td), set())["new"]
+        if got:
+            bad += 1
+            print("SELFTEST 失配: test905-marker 有 qa.l1 却被判成新孤儿")
+        cases.append(("test905-marker", False, False, False, False))
+        # 隐藏目录里的 qa.l1 不是 L1 登记。qa.sh 不跑它，不能算已接线。
+        hidden = pathlib.Path(td) / ".hidden"
+        hidden.mkdir()
+        (hidden / "run.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+        (hidden / "qa.l1").write_text("\n", encoding="utf-8")
+        if ".hidden" not in classify([".hidden"], "", pathlib.Path(td), set())["new"]:
+            bad += 1
+            print("SELFTEST 失配: 隐藏目录的 qa.l1 被当成了 L1 登记")
+        cases.append((".hidden", False, False, False, True))
+        # qa.l1 是目录：不是普通文件，不算登记。
+        dirmark = pathlib.Path(td) / "test906-dirmark"
+        dirmark.mkdir()
+        (dirmark / "run.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+        (dirmark / "qa.l1").mkdir()
+        if "test906-dirmark" not in classify(["test906-dirmark"], "", pathlib.Path(td), set())["new"]:
+            bad += 1
+            print("SELFTEST 失配: 目录型 qa.l1 被当成了 L1 登记")
+        cases.append(("test906-dirmark", False, False, False, True))
     # ── 取集自检：夹具走 suites()，不直接喂名字 ──────────────────
     # 每条只放一种入口文件，钉住「哪些形状算套件」。
     collect_cases = [

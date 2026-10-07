@@ -164,6 +164,8 @@ comm -23 /tmp/b /tmp/d      # build 了但没 done 的 —— 就是它
    - L0：`<module>/src/<file>.test.ts` 旁边
    - L1+：`tests/qa-<id>-<topic>/{Dockerfile,run.sh,README.md}`
 3. 实跑通过：本地 `bun test` 或 `sg docker -c 'docker build ... && docker run ...'`
-4. 把新测试加进 [scripts/qa.sh](../../scripts/qa.sh) 的 `L0_TESTS` / `L1_TESTS` 数组
+4. L0 仍加进 [scripts/qa.sh](../../scripts/qa.sh) 的 `L0_TESTS`。L1 不要再改那份数组，也不要往 `qa.yml` 的 `paths` 加一行：在套件目录放 `qa.l1`（普通文件，目录名不以点开头），并把这一层写进 `.github/scripts/l1-layer-inventory.txt`。漏改清单，层比对门会红。单独做成 qa.yml 里一个 job 的套件也要在清单里加一行（`名字<TAB>job:<job 名>`）。只加 job、不加这一行，层比对门会红。
 5. 写 [docs/tests/report-<id>.txt](../tests/)：步骤 + 结果 + 抠出的契约
 6. 矩阵 🟡 → ✅，commit + push
+
+`qa.yml` 的 pull_request 和 push 各用一条 `tests/**` 触发。只改孤儿套件，或只改写了 `NOT-IN-CI.md` 的套件，也会把整份 qa workflow 拉起来。那些套件自己仍然不跑。这是用一次全量 CI，换掉每个新套件都去改同一行路径名单。
