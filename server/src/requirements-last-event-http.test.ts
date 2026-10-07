@@ -92,10 +92,15 @@ beforeAll(async () => {
   // 看全部任务,但一个 Agent 都没授权:所有节点对他隐去
   db.run("UPDATE network_members SET task_access = 'all', agent_access = 'granted' WHERE network_id = ?1 AND user_id = ?2", [NET, restricted.id]);
   NODE = `n_le_${stamp}`;
-  db.run("INSERT INTO nodes (node_id, node_name, alias, network_id) VALUES (?1, ?2, ?3, ?4)", [NODE, "le-node", "le-node", NET]);
   const ntok = createNetworkTokenForNode(admin.id, NET, "le-node");
   expect(ntok.ok).toBe(true);
   nodeToken = ntok.token!;
+  // Real legacy-client order, with no owner backfill or administrator claim.
+  expect((await mcp(nodeToken, "report_status", {
+    resume_id: `le-session-${stamp}`, alias: "le-node", status: "idle", node_id: NODE,
+  })).data.ok).toBe(true);
+  expect(db.get("SELECT owner_user_id FROM nodes WHERE node_id=?1", NODE).owner_user_id).toBeNull();
+  expect(db.get("SELECT bound_node_id FROM api_tokens WHERE token_id=?1", ntok.token_id).bound_node_id).toBe(NODE);
 }, 30_000);
 
 afterAll(() => {

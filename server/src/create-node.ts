@@ -243,8 +243,8 @@ export function resolveCallerDaemonTokenBound(opts: {
   if (!opts.enforceNetworkId) {
     return { ok: false, error: "caller_not_a_daemon" };
   }
-  const tokRow = db.get<{ name: string; network_id: string | null }>(
-    `SELECT name, network_id FROM api_tokens WHERE token_id = ?1 AND revoked_at IS NULL`,
+  const tokRow = db.get<{ name: string; network_id: string | null; user_id: string | null; bound_node_id: string | null; node_identity_epoch: number }>(
+    `SELECT name, network_id, user_id, bound_node_id, node_identity_epoch FROM api_tokens WHERE token_id = ?1 AND revoked_at IS NULL`,
     opts.callerTokenId,
   );
   if (!tokRow || !tokRow.name || !tokRow.name.startsWith("node:")) {
@@ -254,13 +254,20 @@ export function resolveCallerDaemonTokenBound(opts: {
     return { ok: false, error: "caller_not_a_daemon" };
   }
   const tokenAlias = tokRow.name.slice(5);
-  const nodeRow = db.get<{ node_id: string; alias: string; network_id: string }>(
-    `SELECT node_id, alias, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
-    tokenAlias, tokRow.network_id,
-  );
+  type DaemonRow = { node_id: string; alias: string; network_id: string; owner_user_id: string | null };
+  const rows = tokRow.bound_node_id
+    ? db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE node_id = ?1 AND network_id = ?2`, tokRow.bound_node_id, tokRow.network_id)
+    : db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE alias = ?1 AND network_id = ?2`, tokenAlias, tokRow.network_id);
+  const nodeRow = rows.length === 1 ? rows[0] : undefined;
   if (!nodeRow) {
     return { ok: false, error: "caller_not_a_daemon" };
   }
+  // Legacy daemon tokens have no bound_node_id: retain their owner's authority.
+  // A token name is a lookup hint, never proof of authority over that node.
+  const ownsNode = !!tokRow.user_id && tokRow.user_id === nodeRow.owner_user_id;
+  const boundToNode = tokRow.bound_node_id === nodeRow.node_id;
+  const legacyOwnerless = nodeRow.owner_user_id === null && tokRow.node_identity_epoch === 0;
+  if (!ownsNode && !boundToNode && !legacyOwnerless) return { ok: false, error: "caller_not_a_daemon" };
   return {
     ok: true,
     daemonNodeId: nodeRow.node_id,

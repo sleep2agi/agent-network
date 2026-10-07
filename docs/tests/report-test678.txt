@@ -1,0 +1,183 @@
+Daemon 身份按令牌属主校验 — board #678
+Independent security re-review passed at 262a18b1; final requested CLI follow-up
+is recorded below. No merge, release, production access or live-node action.
+
+Verified source
+- Implementation head: e8a34bdb0c1817df85a2c56362a02f7328cef9d4.
+- Docker inputs advertised a06b5e46f84b1fd40416d4c3122148c6aefef9bc before the
+  requested author-metadata correction. Both commits have EXACTLY the same tree:
+  2b209f1ef0268e5927d4445014c484e23e71610d. No product/test bytes changed.
+- Base: c06975127bed2d1d4dbbe56b7c800b7dfc2ed7f9.
+- Earlier handoff commits changed only this report and API documentation;
+  the final follow-up below additionally covers CLI issuance and doctor guidance.
+- Earlier c459 / intermediate NOT READY results are superseded by this record.
+
+Scope and compatibility
+- B1(b): api_tokens.node_identity_epoch is persistent, not a timestamp cutoff.
+  Pre-upgrade rows retain 0; all nine production mint statements explicitly
+  write 1 (general credentials) or 2 (ownership-checked node credentials).
+  A recursive source guard covers server/src, agent-node/src and both
+  agent-network/src and agent-network/bin, including admin-reset's explicit 1.
+- Bound credentials resolve by node_id AND network. Unbound credentials need
+  exactly one alias match, never LIMIT 1. Authority is matching owner or exact
+  binding; ownerless legacy rows additionally accept epoch-0 credentials.
+- Both node-token issuance shapes check alias conflicts. Existing ownerless
+  nodes need the same holder's live legacy/exact-bound credential to refresh.
+  Refresh binds the token; it NEVER fills the node's NULL owner.
+- New name-only node credentials bind once at successful registration.
+  General credentials renamed during heartbeat are not promoted to epoch 2.
+- PG serializes alias/ID issuance and registration with transaction-scoped locks.
+  SQLite uses the existing synchronous transaction path.
+- No implicit administrator claim, capability widening, version bump, daemon
+  runtime or app change. Existing atok credentials are not mass-revoked.
+- Six daemon/lifecycle fixture files exactly match base. The two task-event
+  fixtures use mint -> real HTTP report_status; they assert NULL owner and exact
+  token binding. No fixture patches an owner just to satisfy the new guard.
+- PR fixture rationale, individually:
+  * server/src/requirement-events-http.test.ts tests requirement event recording
+    and visibility, not identity issuance. Its direct ownerless INSERT preceded
+    token mint only as a shortcut. It now mints first, calls real HTTP report_status,
+    and verifies NULL owner plus exact token binding; event assertions stay intact.
+  * server/src/requirements-last-event-http.test.ts tests last_event projection,
+    actor visibility and caching. The same shortcut is replaced by its existing
+    MCP helper calling report_status after mint. NULL owner and exact binding are
+    asserted; projection, filtering and caching assertions stay intact.
+- Intentional behavior change for the PR: an ownerless legacy node without any
+  historical node credential cannot be claimed by an administrator who merely
+  knows its alias. No implicit admin exception is added. An explicit, audited
+  claim flow is tracked in pool card #682 (parent #678, infrastructure project)
+  and is not implemented here.
+- Explicit-ID unknown-owner refusal retains node_owner_unclaimed. test688's
+  source mutation was repointed to this guard, without weakening its assertion.
+
+Boundary inventory (13 independent real HTTP negatives)
+All use server/src/create-node.ts resolveCallerDaemonTokenBound, directly or
+through tools.ts's wrapper; adoption consumes that same resolved identity.
+1. list_my_pending_create_requests
+2. list_my_pending_lifecycle_requests
+3. get_create_request
+4. ack_create_request
+5. get_stop_request
+6. ack_stop_request
+7. get_start_request
+8. ack_start_request
+9. list_my_children
+10. get_adopt_request
+11. ack_adopt_request
+12. get_probe_request
+13. ack_probe_request
+
+Docker verification
+All runs used sg docker, --rm --init --cpus=2 --network none, no host source
+mounts in runtime tests, temporary HOME/database, real HTTP on loopback port 0.
+PG ran inside its container with an ordinary authenticated test role.
+- test678 SQLite: 20 pass, 339 assertions, rc=0.
+- test678 PostgreSQL: 20 pass, 339 assertions, rc=0.
+- Each backend independently ran 11 mutations; EVERY case was assertion-red,
+  rc=1, not a setup error. Both harnesses completed rc=0:
+  resolver, mint, legacy, bound, ownerless, epoch, refresh, freshid,
+  boundlookup, ambiguous, registration.
+  Resolver removal was required to fail all 13 endpoint assertions.
+- Task event HTTP fixtures: SQLite AND PG, 11 pass/78 assertions and
+  16 pass/135 assertions, rc=0. Tested during fixture integration; final full
+  server run includes the same fixture bytes.
+- External schedule HTTP: SQLite AND PG, 10 pass/77 assertions, rc=0.
+- test798 full server non-root: 203 discovered / 203 executed files, 0 failed,
+  rc=0; independent weakened-password-floor mutation was red, rc=1.
+- test627 existing Docker suite: rc=0, including runtime/locate unit tests,
+  real Hub + daemon adoption/stop/start for detached and private-tmux nodes,
+  actual boot sweep, and both existing witnessed-red mutations.
+- test658 existing real Hub/daemon E2E: rc=0, all 13 checks including adoption,
+  three-stage stop, untouched decoy, rotated-marker refusal and boot recovery.
+- test688 full L0-L13: rc=0; compatibility tests and all 12 witnessed-red
+  mutations passed, then restored-green HTTP contract passed.
+- test831 L0-L8: rc=0, denominator 123 docs / 6 unique pins / 18 occurrences.
+- Symbol pins: docs 9 checked/8 skipped; docs-site 16 checked/2 skipped;
+  zero drift. Skipped pins are not claimed as semantically verified.
+- Registration, test coverage, home-path, SHA binding and mutation-pin static
+  gates passed without new exemptions or baseline increases.
+
+Risk / review handoff
+- Before rollout, production was audited read-only; the results are retained
+  privately by the maintainers. This agent did not repeat that audit.
+- Historical alias ambiguity fails closed; exact-bound credentials still resolve
+  their own row even when an earlier same-alias row belongs to someone else.
+- Message attribution and SSE identity are tracked separately in P0 board #679
+  (the coordinator merged duplicate #681 into #679).
+  This change does NOT claim all impersonation paths are resolved.
+- Owner demotion to viewer policy remains unchanged, pending decision (#680).
+- Real deployed app / old daemon binary replay has NOT been done here.
+
+Deployment and recovery boundary (not executed)
+- Existing authoritative launcher and process definition remain deploy/hub/
+  hub-daemon.sh and ecosystem.config.cjs; use deploy/hub/README.md.
+- Proxy/tunnel/port configuration and secret sources are unchanged. Existing
+  encrypted DB/key backups remain required; Git is not a data backup.
+- Deploy only a reviewed exact merged-main SHA through the existing release
+  process, then verify legacy ownerless, owner-held and exact-bound paths.
+- Upgrade ALL token issuers together. An old writer omits the new column and
+  could misclassify a new credential as legacy: no mixed-version issuance.
+- Preserve the epoch column in DB backups. Do not roll back to an old Hub or
+  issuer; recover using a version containing this fix. Do not silently drop
+  this security state. Direct-DB CLI issuers must be upgraded together too.
+- No fleet rebuild, real-client replay or production recovery claim is made.
+
+Final coordinator-requested follow-up
+- Local tested source: 7caafa318515f36b92987c59339d6720fc711b4e. Subsequent
+  publication cleanup changes documentation only; product/test/Docker bytes
+  remain identical. Unpublished history is squashed before the first push so
+  private audit material is absent from public Git history, not just the tip.
+- CLI admin-reset writes epoch 1 explicitly; issuer guard recursively scans
+  all three packages' production source roots and locks nine INSERT statements.
+- Doctor maps ownership refusal to administrator-claim guidance (#682), without
+  retrying a claim or replacing the profile token. node_owner_mismatch can also
+  mean another owner, so its ownership explanation is conditional.
+- test678 rerun: SQLite 21/21, 347 assertions, rc=0; PostgreSQL 21/21,
+  347 assertions, rc=0. Eleven independent mutants per backend all fail at
+  assertions (rc=1); the harness returns rc=0 for both backends.
+- test627 rerun: complete runtime/locate, detached/private-tmux real HTTP
+  lifecycle, real boot sweep and two witnessed-red mutations, rc=0.
+- test658 rerun: complete unit/recovery/preflight suite, repeated remain-on-exit
+  runs and mutations rc=0; separate real Hub/daemon HTTP E2E 13/13, rc=0.
+- test798 rerun: discovered 203 / executed 203 / failed 0, rc=0; password-floor
+  mutant independently assertion-red rc=1.
+- Docker runs use --cpus=2, no production connection or host runtime changes.
+- Static registration, test-file coverage, home-path, SHA binding and mutation
+  pin gates rc=0. Symbol checks with read-only Git objects: docs 9 checked,
+  8 skipped; docs-site 16 checked, 2 skipped; no missing refs or drift. Skipped
+  pins are not claimed verified.
+
+CI follow-up on PR #2473 (ordinary follow-up commits, no rebase)
+- node_id E2E: the new first-registration identity_mismatch refusal returned
+  before the older branch's warning. This was a missing product diagnostic,
+  not an obsolete test. Restore the same reason-code warning without tokens,
+  paths or alias contents. Keep the original E2E assertions unchanged.
+- test638: its isolated per-file runner failed at import, not because of shared
+  database/process state. Its Dockerfile lacked agent-network/src/cli-errors
+  and the bin sources required by the recursive issuer guard. Add those inputs
+  exactly as in test798; do not skip tests or narrow the guard.
+- recovered-suites: the failing suite was qa-rfc027-stop-delete, specifically
+  its daemon-B cross-network positive control (not the expected mutation reds).
+  The fixture minted a new token then directly INSERTed an ownerless node,
+  bypassing registration. Replace only that INSERT with real HTTP report_status
+  and additionally assert precise token binding with NULL owner. Keep both the
+  other-network empty result and own-network nonempty result assertions.
+- Local Docker red runs at e9b807a1: node_id E2E rc=1 specifically for missing
+  identity_mismatch log; test638 full L1 203 files, sole failed file has the
+  missing CLI module import (rc=1), reproduced also via its --file runner;
+  qa-rfc027-stop-delete 70 pass / 1 fail / 0 skip, CN daemon-B only (rc=1).
+- Fixed node_id E2E: 23/23, rc=0, original assertions unchanged.
+- Fixed qa-rfc027-stop-delete: 72 pass / 0 fail / 0 skip, rc=0.
+- test678 after the logging fix: SQLite and PG each 21/21 with 347 assertions,
+  rc=0; all 11 independent mutants per backend remain assertion-red.
+- Static registration, coverage, home-path, SHA-binding and mutation-pin gates
+  rc=0; symbol pins 9 checked/8 skipped in docs, 16/2 in docs-site, no missing
+  refs or drift. Read-only Git objects supplied solely to resolve immutable pins.
+- Fixed test638 full L1-L6 rc=0: normal, concurrent normal and reverse orders
+  agree on 203 files / 2304 pass / 0 fail / 0 skip / 13368 assertions.
+  Database scoping, standalone fail-closed, nonzero/timeout/signal/missing-summary/
+  spawn-failure handling, slug collision and per-file DB isolation mutations
+  all meet their original assertions. Aggregate image source is 90764a11;
+  subsequent changes touch only the separate RFC-027 fixture and this report.
+- test831 L0-L8 rc=0 on 1a7ff13f. Security regression and RFC-027 green images
+  also use that product tree. Final report commit changes no tested code.

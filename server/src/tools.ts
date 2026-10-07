@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
+import { lockNodeAlias } from "./node-token-ownership.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { nodeHealthSchema, normalizeNodeHealth, recordNodeHealth } from "./node-health-store.js";
@@ -4366,7 +4367,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "auth_required" }) }] };
       }
       db.run(
-        `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, role, request_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, role, request_id, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 2)`,
         [childTokenId, hashToken(childToken), enforceUserId, networkIdForChild, `node:${node_spec.name}`, "network", "child", requestId]
       );
 
@@ -6282,6 +6283,13 @@ export function trustedConfigSnapshotForNode(
 }
 
 export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): UpsertNodeOutcome {
+  return db.transaction(() => {
+    if (input.callerNetworkId && input.alias) lockNodeAlias(input.callerNetworkId, input.alias, input.node_id ?? undefined);
+    return upsertNodeIdentity(input);
+  });
+}
+
+function upsertNodeIdentity(input: UpsertNodeWithSec1GuardInput): UpsertNodeOutcome {
   if (!input.node_id) return { result: "skipped", reason: "missing_node_id" };
   const existing = db.get<{ network_id: string | null; owner_user_id: string | null; alias: string | null; config_path: string | null }>(
     "SELECT network_id, owner_user_id, alias, config_path FROM nodes WHERE node_id = ?1",
@@ -6293,8 +6301,8 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
   // report only that exact node. Legacy unbound ntok rows remain compatible,
   // but they can never consume owner-gated schedule intents.
   if (input.callerTokenId) {
-    const token = db.get<{ bound_node_id: string | null; user_id: string; network_id: string | null }>(
-      "SELECT bound_node_id, user_id, network_id FROM api_tokens WHERE token_id = ?1",
+    const token = db.get<{ bound_node_id: string | null; user_id: string; network_id: string | null; node_identity_epoch: number; name: string }>(
+      "SELECT bound_node_id, user_id, network_id, node_identity_epoch, name FROM api_tokens WHERE token_id = ?1",
       input.callerTokenId,
     );
     if (token?.bound_node_id && token.bound_node_id !== input.node_id) {
@@ -6302,6 +6310,16 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
     }
     if (token?.network_id && _norm(token.network_id) !== _norm(callerNet)) {
       return { result: "refused", reason: "cross_network", existingNet: existing?.network_id ?? null, callerNet };
+    }
+    // New name-only node tokens bind once, at their first registration. General
+    // tokens renamed by report_status are deliberately NOT upgraded to epoch 2.
+    if (token?.node_identity_epoch === 2 && !token.bound_node_id) {
+      const conflict = db.get("SELECT node_id FROM nodes WHERE network_id=?1 AND alias=?2 AND node_id<>?3 LIMIT 1",
+        callerNet, input.alias ?? "", input.node_id);
+      if (conflict || token.name !== `node:${input.alias}` || token.user_id !== input.callerUserId || existing) {
+        console.warn(`[commhub] 🚫 report_status node upsert refused (identity_mismatch): node_id=${input.node_id} first-binding conflict`);
+        return { result: "refused", reason: "identity_mismatch", existingNet: existing?.network_id ?? null, callerNet };
+      }
     }
   }
   if (existing?.owner_user_id && input.callerUserId !== existing.owner_user_id) {
@@ -6367,6 +6385,8 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
       callerNet ?? null,
     ],
   );
+  if (input.callerTokenId) db.run(`UPDATE api_tokens SET bound_node_id=?1
+    WHERE token_id=?2 AND node_identity_epoch=2 AND bound_node_id IS NULL`, [input.node_id, input.callerTokenId]);
   const trustedSnapshot = trustedConfigSnapshotForNode(
     input.config_snapshot,
     input.callerTokenId,

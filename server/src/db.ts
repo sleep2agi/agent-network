@@ -640,6 +640,9 @@ for (const ddl of [
   "ALTER TABLE api_tokens ADD COLUMN revoked_at TEXT",
   "ALTER TABLE api_tokens ADD COLUMN role TEXT",
   "ALTER TABLE api_tokens ADD COLUMN bound_node_id TEXT",
+  // Existing tokens retain epoch 0. Every production issuer writes 1 (general)
+  // or 2 (ownership-checked node token); 0 is a rollout boundary, not a clock.
+  "ALTER TABLE api_tokens ADD COLUMN node_identity_epoch INTEGER NOT NULL DEFAULT 0",
   // 登录会话的设备标识(GET /api/auth/sessions 显示用):客户端自报的 client_label + 登录请求的 User-Agent。
   "ALTER TABLE api_tokens ADD COLUMN client_label TEXT",
   "ALTER TABLE api_tokens ADD COLUMN user_agent TEXT",

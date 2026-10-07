@@ -33,11 +33,21 @@ The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub forc
 
 **Common 4xx errors** (verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 
+Node identity uses exact bindings. Both name-only and explicit `node_id` issuance check same-network alias conflicts. A new name-only credential binds on its first successful registration. Refreshing an existing identity requires its owner or the same holder's existing valid node credential, and returns an exactly bound credential. Refresh does not backfill a legacy node's owner.
+
+**Intentional behavior change:** when a legacy node has neither an owner nor any historical node credential, an administrator can no longer mint a token merely by knowing its alias. Network administration is not proof of node ownership. This change provides no implicit claim; an explicit, audited administrator-claim workflow is separate future work and is not currently available.
+
+Legacy unbound daemon credentials remain compatible only with a unique network alias. Ownerless legacy nodes accept only pre-upgrade credentials. Duplicate aliases are never resolved by database row order; use an existing exactly bound credential.
+
+The upgrade persists token issuance epochs. Upgrade all token issuers together, including the CLI that writes directly to the database. Do not mix old Hub versions or issuers with new ones, and do not roll back to an old issuer: newly issued credentials could be mistaken for legacy ones. Preserve this field in database backups and recover using a version containing this fix. This compatibility layer is not an end-to-end certification of message attribution or SSE identity.
+
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `network_id and node_name required` | Body is missing `network_id` or `node_name` |
 | 400 | `not a member of this network` | Caller is not in `network_id` (must `join` first to mint an `ntok_`) |
 | 400 | `no write access to this network` | Caller is `viewer` (viewers cannot create full-access network tokens) |
+| 400 | `node_owner_mismatch` | Alias conflict, ambiguous identity, or unauthorized holder |
+| 400 | `node_owner_unclaimed` | Explicit ownerless legacy node has no same-holder credential evidence; no implicit claim |
 | 401 | `auth required` / `invalid token` | Missing / invalid utok_ |
 
 ### POST /api/auth/tokens
@@ -114,7 +124,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L462) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
+The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L466) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
 
@@ -137,7 +147,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L514) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L518) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
 
 Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 

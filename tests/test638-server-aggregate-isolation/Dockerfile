@@ -9,6 +9,10 @@ WORKDIR /work
 COPY server/ server/
 COPY contracts/side-thread/v1/ contracts/side-thread/v1/
 COPY agent-node/src/ agent-node/src/
+# The daemon credential tests import CLI error guidance and recursively inspect
+# production token issuers. Keep the same cross-package inputs as test798.
+COPY agent-network/src/ agent-network/src/
+COPY agent-network/bin/ agent-network/bin/
 COPY tests/test601-hub-scheduled-tasks/ tests/test601-hub-scheduled-tasks/
 RUN cd server && bun install
 

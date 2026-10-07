@@ -2642,7 +2642,7 @@ import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCu
 import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
 import { describeHubRemoval, removeNodeFromHub } from "../src/node-delete-hub";
 import { COMMAND_HELP, NODE_DELETE_USAGE, lookupCommandHelp } from "../src/cli-help";
-import { errorText, formatTopLevelError, hubErrorText, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
+import { errorText, formatTopLevelError, hubErrorText, nodeTokenReissueError, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
 import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
 export { normalizeRuntime, type RuntimeName };
 
@@ -10268,7 +10268,7 @@ async function serverCommand() {
       const tokenId = id("tok");
       db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(password), user.user_id]);
       const revoked = db.run("DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL", [user.user_id]).changes;
-      db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, NULL, 'admin-reset', 'user')", [tokenId, hashToken(token), user.user_id]);
+      db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, NULL, 'admin-reset', 'user', 1)", [tokenId, hashToken(token), user.user_id]);
       db.run("INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail) VALUES (?1, ?2, 'password_reset_by_admin', 'user', ?3, 'local cli reset-user')", [user.user_id, user.username, user.user_id]);
       console.log(JSON.stringify({ ok: true, username: user.username, user_id: user.user_id, password, token, token_id: tokenId, revoked }));
     `;
@@ -18787,7 +18787,7 @@ async function doctorCommand() {
             console.log(`     ✅ ${id}: ntok_ re-issued (${maskSecret(body.token)}), session/channels/role preserved`);
             ok++;
           } else {
-            console.log(`     ❌ ${id}: re-issue failed: ${body ? hubErrorText(body) : r.status}`);
+            console.log(`     ❌ ${id}: re-issue failed: ${body ? nodeTokenReissueError(body) : r.status}`);
             fail++;
           }
         } catch (e: any) {
