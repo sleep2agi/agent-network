@@ -1,0 +1,39 @@
+test-req-abandoned-column — 任务状态「废弃」(abandoned)
+source_commit=a0d0632389b27a7aa86e2615d70aef51ed695b48 (实现提交;本报告随后单独提交)
+date=2026-10-07 (Asia/Shanghai), docker --cpus=2, 一次一个作业
+
+旧 App 怎么处理不认识的 column(clone sleep2agi/agent-network-app desktop-v0.2.219 / desktop-v0.2.220;0.2.221 tag 不存在):
+  src/requirements-hub.ts requirementFromHub:REQ_COLUMNS.includes(r.column) ? r.column : 'pool'
+  → 不崩,但把废弃的卡摆回「需求池」,dueSettled 为 false → 还会标逾期。两个 tag 这两个文件逐字相同。
+  实测(bun 直接调两个 tag 的 requirementFromHub):abandoned → pool,done → done。
+  所以 Hub 对没声明的调用者投影 abandoned → done。
+
+L1 + L3 (tests/test-req-abandoned-column, SQLite) suite_rc=0
+  requirements-abandoned-http 5/0, priority-lowest 2/0, requirements-http 21/0, stats-http 14/0,
+  due-reminders-http 29/0, list-slim-http 13/0, events-http 11/0, tool-audience-http 12/0
+  MUTATION_RED: abandoned-counted-open   (overdueSql 退回 column_name <> 'done')
+  MUTATION_RED: projection-removed       (projectColumn 直接 return column)
+  复原后 requirements-abandoned-http 5/0
+
+PostgreSQL 16(sidecar,COMMHUB_TEST_PG_URL + COMMHUB_PG_EXPERIMENTAL=1):
+  requirements-abandoned-http 5/0 rc=0;requirements-stats-http rc=0
+  (已登记进 test2123-hub-postgres-ladder:anet_req_abandoned_test)
+  备注:本机 sidecar 经 socat 转发较慢,requirements-list-slim-http 在 PG 上有 5s 超时失败 ——
+  origin/main 未改动的同一文件在同一环境下也失败 2 条(超时),与本改动无关;以 CI 阶梯为准。
+
+hub-release-compat(BASE_VERSION=0.9.0-preview.112,APP_TAGS=desktop-v0.2.219,desktop-v0.2.220,
+  CHECK_ABANDONED=1 SCHED_BASELINE=counted EXPECT_BACKFILL=0 OLD_LABEL=.112 NEW_LABEL=candidate)
+  A1 rc=0 steps=62 unexpected=0 check_failures=0
+  A2 rc=0 steps=62 unexpected=0 check_failures=0
+  B  rc=0 upgrade_check_failures=0
+  ADDITIVE mcp.tools_list: 78 → 78 tools, new params [... status/column enum+[abandoned] ×7]
+  ADDITIVE requirements.stats: + totals.abandoned
+  PASS app desktop-v0.2.219 / desktop-v0.2.220 files the projected card under done
+  INFO 两个 tag 对未投影的 abandoned 都会归到 pool(投影存在的理由)
+  首轮(未带 SCHED_BASELINE / EXPECT_BACKFILL,且 tools-compat 把 enum 加值判为 retyped)rc=1;
+  加上文档里写明的 ≥.74 基线开关、并让 tools-compat 把「只加值的 enum」判为 additive 后全绿
+  (自检新增两条必须红的对照:删 enum 值、加值同时改 type)。
+
+仓库门(本地,git add 之后):test-suite-registration / qa-paths-symmetry / l1-paths-sync / qa-trigger-coverage /
+  test-file-coverage / mutation-pins(两条锚点已收进 checked)/ workflow-structure / docs-integrity /
+  docs-locale-parity / doc-symbol-pins ×2 / 其余 ratchet 门 全部 rc=0
