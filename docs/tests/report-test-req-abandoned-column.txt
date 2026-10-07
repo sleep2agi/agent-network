@@ -37,3 +37,11 @@ hub-release-compat(BASE_VERSION=0.9.0-preview.112,APP_TAGS=desktop-v0.2.219,desk
 仓库门(本地,git add 之后):test-suite-registration / qa-paths-symmetry / l1-paths-sync / qa-trigger-coverage /
   test-file-coverage / mutation-pins(两条锚点已收进 checked)/ workflow-structure / docs-integrity /
   docs-locale-parity / doc-symbol-pins ×2 / 其余 ratchet 门 全部 rc=0
+
+── 评审跟进(实现提交 0667c24e86363c9cf313538b391f5a2a77ce0404)──
+1 动态 / last_event 对没声明的调用者投影(done ↔ abandoned 的那条不回);2 PG 约束只在需要时、一条 ALTER 原子替换、失败抛出;
+3 勾子任务响应投影有测试;4 children:没声明 = 废弃子需求算进总数且算完成,声明 = 不算进度。
+suite(SQLite)suite_rc=0:requirements-abandoned-http 7/0,其余 7 个文件同前全绿;
+  MUTATION_RED ×4:abandoned-counted-open / projection-removed / checklist-projection-removed / events-projection-removed
+PG 16 sidecar:requirements-abandoned-http 7/0 rc=0(含「加约束失败 → 抛出且旧约束原样」)
+hub-release-compat(同上参数):A1 rc=0 unexpected=0 / A2 rc=0 unexpected=0 / B rc=0
