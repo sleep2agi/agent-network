@@ -980,15 +980,27 @@ async function startWindowsCodexCopresence(
   if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(model)) {
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
-  const recoveryCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  const recoveryCfgPath = join(nodesDir(), resolved.id, "config.json");
+  const recoveryCfg = JSON.parse(readFileSync(recoveryCfgPath, "utf-8"));
   const priorWindowsRecord = readWindowsCopresenceRecord(nodesDir(), resolved.id);
   let authoritativeOldPendingMarker: string | undefined;
   if (!opts.newSession && recoveryCfg.codexPendingThread !== undefined) {
-    if (priorWindowsRecord?.version !== 2 || !priorWindowsRecord.marker
-      || recoveryCfg.codexPendingThread?.marker !== priorWindowsRecord.marker) {
-      throw new Error("pending Codex thread is not bound to the exact private previous-generation Windows record");
+    const pendingDecision = decidePendingThreadAtStart(
+      recoveryCfg.codexPendingThread,
+      priorWindowsRecord?.version === 2 && priorWindowsRecord.marker
+        ? { kind: "ok", marker: priorWindowsRecord.marker }
+        : { kind: "missing" },
+      (tid) => findThreadRollouts(opts.codexHome, tid),
+    );
+    if (pendingDecision.kind === "migrate") {
+      authoritativeOldPendingMarker = pendingDecision.oldMarker;
+    } else if (pendingDecision.kind === "drop-unmaterialized") {
+      delete recoveryCfg.codexPendingThread;
+      atomicWritePrivateJson(recoveryCfgPath, recoveryCfg);
+      console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped Windows generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
+    } else if (pendingDecision.kind === "refuse") {
+      throw new Error(`pending Codex thread is not bound to the exact private previous-generation Windows record: ${pendingDecision.reason}`);
     }
-    authoritativeOldPendingMarker = priorWindowsRecord.marker;
   }
   // Authoritative snapshot only after all prior writers have been reaped.
   // Failure aborts before any replacement app-server can start.

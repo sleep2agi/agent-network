@@ -126,4 +126,15 @@ describe("#602 wiring in anet node start", () => {
     expect(refuse).toBeGreaterThan(0);
     expect(block.indexOf("process.exit(1)", refuse)).toBeGreaterThan(refuse);
   });
+
+  test("Windows uses the same pending-thread decision and persists a dropped unmaterialized candidate", () => {
+    const windowsStart = cli.indexOf("async function startWindowsCodexCopresence(");
+    const snapshot = cli.indexOf("await quiesceThenSnapshot(", windowsStart);
+    const block = cli.slice(windowsStart, snapshot);
+    expect(block).toContain("const pendingDecision = decidePendingThreadAtStart(");
+    expect(block).toContain("findThreadRollouts(opts.codexHome, tid)");
+    expect(block).toContain(`pendingDecision.kind === "drop-unmaterialized"`);
+    expect(block).toContain("delete recoveryCfg.codexPendingThread;");
+    expect(block).toContain("atomicWritePrivateJson(recoveryCfgPath, recoveryCfg);");
+  });
 });
