@@ -129,6 +129,15 @@ describe("account and network management need a user token", () => {
     expect(mine.body.ok).toBe(true);
     expect((await call(ntok, "POST", "/api/node-rename/abort", { txn_id: mine.body.txn_id })).body.ok).toBe(true);
   });
+  test("rename rejects line breaks, tabs and other control characters before reserving an alias", async () => {
+    for (const newAlias of ["hidden\nnode", "hidden\tnode", "hidden\u001fnode", "hidden\u007fnode", "hidden\u2028node", "hidden\u2029node"]) {
+      const r = await call(ntok, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "ntok-node", new_alias: newAlias });
+      expect(r.status).toBe(400);
+      expect(r.body).toMatchObject({ ok: false, error: "node_alias_invalid", code: "node_alias_invalid", reason: "control_character" });
+      expect(r.body.message).toContain("control character U+");
+    }
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM rename_txn WHERE network_id = ?1 AND status = 'prepared'", NET)?.n).toBe(0);
+  });
 });
 
 describe("/api/auth/me says what the credential is", () => {
