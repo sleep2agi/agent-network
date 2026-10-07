@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { parsePeopleQuery, peopleDirectory, resolvePersonName } from "./requirements-people.js";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
+import { resolveNodeCaller } from "./create-node.js";
 import { markGzipReusable } from "./http-gzip.js";
 import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from "./requirement-tags.js";
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
@@ -795,13 +796,8 @@ function actorOf(ctx: RequirementsRequestContext): Actor | null {
   if (!ctx.auth) return null;
   if (!ctx.isNodeToken) return { kind: "user", id: ctx.auth.userId };
   const tokenId = ctx.auth.tokenId ?? null;
-  const bound = tokenId ? db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", tokenId)?.bound_node_id : null;
-  if (bound) return { kind: "node", id: bound };
-  const alias = ctx.auth.tokenName?.startsWith("node:") ? ctx.auth.tokenName.slice(5) : null;
-  if (alias && ctx.auth.networkId) {
-    const node = db.get<{ node_id: string }>("SELECT node_id FROM nodes WHERE network_id = ?1 AND alias = ?2", ctx.auth.networkId, alias);
-    if (node) return { kind: "node", id: node.node_id };
-  }
+  const resolved = tokenId ? resolveNodeCaller(tokenId) : null;
+  if (resolved?.ok && resolved.kind === "node") return { kind: "node", id: resolved.nodeId };
   return { kind: "node", id: `token:${tokenId ?? "unknown"}` };
 }
 

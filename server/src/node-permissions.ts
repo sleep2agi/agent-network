@@ -16,6 +16,7 @@
 
 import { db } from "./db.js";
 import { canMessageAgent, type AgentRef } from "./agent-access.js";
+import { resolveNodeCaller } from "./create-node.js";
 
 export type NodePermissionMode = "normal" | "readonly" | "restricted";
 export const NODE_PERMISSION_MODES: readonly NodePermissionMode[] = ["normal", "readonly", "restricted"];
@@ -71,23 +72,55 @@ function normalizeMode(raw: unknown): NodePermissionMode {
 /** 节点令牌 → 节点身份(一次带索引的查询)。不是节点令牌 / 查不到 → null。 */
 export function nodeIdentity(tokenId: string | null | undefined, networkId: string | null | undefined): NodeIdentity | null {
   if (!tokenId || !networkId) return null;
-  const row = db.get<{ user_id: string | null; bound_node_id: string | null; name: string | null; owner_user_id: string | null; permission_mode: string | null; alias: string | null }>(
-    `SELECT t.user_id, t.bound_node_id, t.name, n.owner_user_id, n.permission_mode, n.alias
-       FROM api_tokens t LEFT JOIN nodes n ON n.node_id = t.bound_node_id
-      WHERE t.token_id = ?1 AND t.network_id = ?2`,
+  const row = db.get<{ user_id: string | null; name: string | null }>(
+    `SELECT user_id, name FROM api_tokens WHERE token_id = ?1 AND network_id = ?2`,
     tokenId, networkId,
   );
   if (!row) return null;
-  const aliases = new Set<string>();
-  if (row.alias) aliases.add(row.alias);
-  if (row.name?.startsWith("node:")) aliases.add(row.name.slice(5));
+  const resolved = resolveNodeCaller(tokenId);
+  // Revoked or not node-shaped: this lookup is not a second revocation gate.
+  if (!resolved.ok && resolved.reason === "not_a_node_token") {
+    const aliases = row.name?.startsWith("node:") ? [row.name.slice(5)] : [];
+    return {
+      networkId,
+      nodeId: null,
+      logKey: `token:${tokenId}`,
+      aliases,
+      ownerUserId: row.user_id,
+      mode: "normal",
+    };
+  }
+  if (!resolved.ok || resolved.networkId !== networkId) {
+    return {
+      networkId,
+      nodeId: null,
+      logKey: `token:${tokenId}`,
+      aliases: [],
+      ownerUserId: row.user_id,
+      mode: "normal",
+    };
+  }
+  if (resolved.kind === "unregistered") {
+    return {
+      networkId,
+      nodeId: null,
+      logKey: `token:${tokenId}`,
+      aliases: resolved.alias ? [resolved.alias] : [],
+      ownerUserId: row.user_id,
+      mode: "normal",
+    };
+  }
+  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null }>(
+    `SELECT owner_user_id, permission_mode FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
+    resolved.nodeId, networkId,
+  );
   return {
     networkId,
-    nodeId: row.bound_node_id,
-    logKey: row.bound_node_id ?? `token:${tokenId}`,
-    aliases: [...aliases],
-    ownerUserId: row.owner_user_id || row.user_id || null,
-    mode: normalizeMode(row.permission_mode),
+    nodeId: resolved.nodeId,
+    logKey: resolved.nodeId,
+    aliases: [resolved.alias],
+    ownerUserId: node?.owner_user_id || row.user_id || null,
+    mode: normalizeMode(node?.permission_mode),
   };
 }
 

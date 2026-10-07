@@ -122,6 +122,7 @@ on:
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
       - 'tests/test678-daemon-token-owner/**'
+      - 'tests/node-caller-identity/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -331,6 +332,7 @@ on:
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
       - 'tests/test678-daemon-token-owner/**'
+      - 'tests/node-caller-identity/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -940,6 +942,24 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test678 -f tests/test678-daemon-token-owner/Dockerfile .
       - run: docker run --rm --init --cpus=2 --network none anet-test678
+
+  node-caller-identity:
+    name: Node caller identity (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-node-caller-identity -f tests/node-caller-identity/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity
+
+  node-caller-identity-compat:
+    name: Node caller identity compat (Docker, agent-node .110 and .121)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-node-caller-identity-compat -f tests/node-caller-identity/Dockerfile.compat .
+      - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity-compat
 
   test658-codex-adopt-stop:
     name: Codex adoption and stop (Docker, two layouts)

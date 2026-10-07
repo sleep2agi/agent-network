@@ -169,9 +169,10 @@ test("fresh ID cannot mint another node alias", async () => {
   expect((await call(legacy, "list_my_children")).ok).toBe(true);
 });
 
-test("duplicate legacy aliases use bound IDs and unbound ambiguity fails closed", async () => {
+test("duplicate legacy aliases use bound IDs and an unbound token follows its owner", async () => {
   // Historical duplicate rows: the member's row was inserted first. Neither
-  // lookup order nor alias can redirect the later owner's exact-bound token.
+  // lookup order nor alias can redirect an exact-bound token. An unbound
+  // token resolves to the row its issuer owns.
   const { hashToken, generateNetworkToken } = await import("./db.js");
   const tokens: string[] = [];
   for (const [id, user] of [["n_duplicate_first", member.user.user_id], ["n_duplicate_owner", owner.user.user_id]]) {
@@ -188,9 +189,13 @@ test("duplicate legacy aliases use bound IDs and unbound ambiguity fails closed"
     expect((await call(tokens[i], "get_adopt_request", { request_id: i === 0 ? "n_duplicate_owner" : "n_duplicate_first" })).ok).toBe(false);
   }
   db.run("UPDATE api_tokens SET bound_node_id=NULL WHERE token_id='n_duplicate_owner'");
-  expect(await call(tokens[1], "list_my_children")).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
+  expect((await call(tokens[1], "list_my_children")).ok).toBe(true);
+  expect((await call(tokens[1], "get_adopt_request", { request_id: "n_duplicate_owner" })).ok).toBe(true);
+  expect((await call(tokens[1], "get_adopt_request", { request_id: "n_duplicate_first" })).ok).toBe(false);
   db.run("UPDATE api_tokens SET bound_node_id=NULL WHERE token_id='n_duplicate_first'");
-  expect(await call(tokens[0], "list_my_children")).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
+  expect((await call(tokens[0], "list_my_children")).ok).toBe(true);
+  expect((await call(tokens[0], "get_adopt_request", { request_id: "n_duplicate_first" })).ok).toBe(true);
+  expect((await call(tokens[0], "get_adopt_request", { request_id: "n_duplicate_owner" })).ok).toBe(false);
   expect((await mint(owner.token, owner.network_id, "duplicate_fixture", "n_third_duplicate")).status).toBe(400);
 });
 
