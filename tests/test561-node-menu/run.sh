@@ -14,6 +14,9 @@
 #   F  no node token and no auth.json content on any path
 # M1–M6 are witnessed reds, one per rule; a mutation that does not apply fails (MUTATION_NOOP).
 set -euo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 
 ARTIFACT_DIR=${ARTIFACT_DIR:-/artifacts}

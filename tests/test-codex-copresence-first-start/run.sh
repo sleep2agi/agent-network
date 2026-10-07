@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 # test-codex-copresence-first-start — #535 (codex CLI audit: P1-1 first start, P1-2 bridge
 # failure output, P1-3 needs-login, P2-9 single-node verify). Real Hub on a throwaway port,
