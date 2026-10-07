@@ -120,6 +120,9 @@ writeFileSync(`${codexHome}/config.toml`, [
   "request_max_retries = 0",
   "stream_max_retries = 0",
   "",
+  // T720_EXTRA_TOML: what a user may already have in their own config.toml
+  (process.env.T720_EXTRA_TOML || "").replaceAll("@MCP_PORT@", String(mcpPort)),
+  "",
 ].join("\n"));
 
 // `@HUB@` in the extra args is replaced with the fake hub base URL, so the caller

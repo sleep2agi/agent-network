@@ -1,4 +1,4 @@
-test720 — #720 codex commhub MCP tool pre-approval. Docker --cpus=2, 2026-10-07 22:55 CST, image built from this branch.
+test720 — #720 codex commhub MCP tool pre-approval. Docker --cpus=2, 2026-10-07 23:22 CST, image built from this branch (review round 2: real-launcher argv layer L4, precedence L2b, M6 = review mutation B, M7).
 Config key probe (bogus value) in the same image:
   0.133.0: unknown variant `bogus`, expected one of `auto`, `prompt`, `approve` in `mcp_servers.x.default_tools_approval_mode`
   0.159.2: unknown variant `bogus`, expected one of `auto`, `prompt`, `writes`, `approve` in `mcp_servers.x.default_tools_approval_mode`
@@ -7,73 +7,55 @@ Config key probe (bogus value) in the same image:
 PASS L1 unit
 ── L2 real codex 0.133.0
 codex-cli 0.133.0
-   {'prompted': True, 'promptMessage': 'Allow the commhub MCP server to run tool "ping"?', 'toolRan': False, 'outputBack': False, 'turnDone': False, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [on-request/read-only] control: setting removed → commhub tool blocked (prompt)
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [on-request/read-only] POSIX launcher: fresh node, first commhub call runs, no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': True, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [on-request/read-only] POSIX launcher: restart (same CODEX_HOME, thread resumed) → still no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [on-request/read-only] Windows launcher (bare TOML values): no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [on-request/read-only] agent-node owned app-server: no prompt
-   {'prompted': True, 'promptMessage': 'Allow the commhub MCP server to run tool "ping"?', 'toolRan': False, 'outputBack': False, 'turnDone': False, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/read-only] control: setting removed → commhub tool blocked (prompt)
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/read-only] POSIX launcher: fresh node, first commhub call runs, no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': True, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/read-only] POSIX launcher: restart (same CODEX_HOME, thread resumed) → still no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/read-only] Windows launcher (bare TOML values): no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/read-only] agent-node owned app-server: no prompt
 INFO 0.133.0 [never/danger-full-access] control (setting removed): ran
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/danger-full-access] POSIX launcher: fresh node, first commhub call runs, no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': True, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/danger-full-access] POSIX launcher: restart (same CODEX_HOME, thread resumed) → still no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/danger-full-access] Windows launcher (bare TOML values): no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.133.0 [never/danger-full-access] agent-node owned app-server: no prompt
 ── L2 real codex 0.159.2
 codex-cli 0.159.2
-   {'prompted': True, 'promptMessage': 'Allow the commhub MCP server to run tool "ping"?', 'toolRan': False, 'outputBack': False, 'turnDone': False, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [on-request/read-only] control: setting removed → commhub tool blocked (prompt)
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [on-request/read-only] POSIX launcher: fresh node, first commhub call runs, no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': True, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [on-request/read-only] POSIX launcher: restart (same CODEX_HOME, thread resumed) → still no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [on-request/read-only] Windows launcher (bare TOML values): no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [on-request/read-only] agent-node owned app-server: no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': False, 'outputBack': False, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': '[{"type":"input_text","text":"Wall time: 0.0035 seconds\\nOutput:"},{"type":"input_text","text":"MCP tool call requires approval, but approval policy is never"}]', 'errors': []}
 PASS 0.159.2 [never/read-only] control: setting removed → commhub tool blocked (declined)
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/read-only] POSIX launcher: fresh node, first commhub call runs, no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': True, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/read-only] POSIX launcher: restart (same CODEX_HOME, thread resumed) → still no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/read-only] Windows launcher (bare TOML values): no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/read-only] agent-node owned app-server: no prompt
 INFO 0.159.2 [never/danger-full-access] control (setting removed): ran
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/danger-full-access] POSIX launcher: fresh node, first commhub call runs, no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': True, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/danger-full-access] POSIX launcher: restart (same CODEX_HOME, thread resumed) → still no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/danger-full-access] Windows launcher (bare TOML values): no prompt
-   {'prompted': False, 'promptMessage': '', 'toolRan': True, 'outputBack': True, 'turnDone': True, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS 0.159.2 [never/danger-full-access] agent-node owned app-server: no prompt
+── L2b precedence against a user's own config.toml (documented in codex-copresence.md)
+PASS 0.133.0 user's own [mcp_servers.commhub] url/default mode → overridden by anet's -c, no prompt
+PASS 0.133.0 user's per-tool approval_mode="prompt" still wins for that tool
+PASS 0.133.0 existing per-tool approve sub-table unaffected
+PASS 0.159.2 user's own [mcp_servers.commhub] url/default mode → overridden by anet's -c, no prompt
+PASS 0.159.2 user's per-tool approval_mode="prompt" still wins for that tool
+PASS 0.159.2 existing per-tool approve sub-table unaffected
+── L4 the REAL POSIX launcher: `anet node start` on a codex co-presence node
+   launcher -c: ['mcp_servers.commhub.url="http://127.0.0.1:9272/mcp"', 'mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"', 'mcp_servers.commhub.default_tools_approval_mode="approve"']
+PASS real POSIX launcher argv carries mcp_servers.commhub.default_tools_approval_mode="approve" (commhub only)
 ── L3 mutations of the shipped source (each must go red)
-   {'prompted': True, 'promptMessage': 'Allow the commhub MCP server to run tool "ping"?', 'toolRan': False, 'outputBack': False, 'turnDone': False, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS mutation M1-drop-setting → red (probe-posix)
-   {'prompted': True, 'promptMessage': 'Allow the commhub MCP server to run tool "ping"?', 'toolRan': False, 'outputBack': False, 'turnDone': False, 'resumed': None, 'toolName': 'mcp__commhub/ping', 'declinedOutput': None, 'errors': []}
 PASS mutation M2-value-prompt → red (probe-posix)
-   {'prompted': True, 'promptMessage': 'Allow the commhub MCP server to run tool "ping"?', 'toolRan': False, 'outputBack': False, 'turnDone': False, 'resumed': None, 'toolName': 'mcp__commhub__/ping', 'declinedOutput': None, 'errors': []}
 PASS mutation M3-agent-node-drop → red (probe-agentNode)
 PASS mutation M4-agent-node-drop-unit → red (unit-node)
+   launcher -c: ['mcp_servers.commhub.url="http://127.0.0.1:9272/mcp"', 'mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"']
+PASS mutation M6-posix-launcher-drops-key → red (launcher-posix)
+PASS mutation M7-windows-launcher-bypasses-builder → red (unit-an)
 PASS mutation M5-posix-launcher-inline → red (unit-an)
-T720 PASS=34 FAIL=0
+T720 PASS=43 FAIL=0

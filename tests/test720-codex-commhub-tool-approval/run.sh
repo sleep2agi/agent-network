@@ -110,6 +110,73 @@ for ver in 0.133.0 0.159.2; do
 done
 export T720_APPROVAL=on-request T720_SANDBOX=read-only
 
+echo "── L2b precedence against a user's own config.toml (documented in codex-copresence.md)"
+for ver in 0.133.0 0.159.2; do
+  # anet's -c beats the user's [mcp_servers.commhub] url + default_tools_approval_mode
+  h=$(fresh_home)
+  r=$(T720_EXTRA_TOML=$'[mcp_servers.commhub]\nurl = "http://127.0.0.1:9/mcp"\ndefault_tools_approval_mode = "prompt"' probe "$ver" "$h" posix)
+  if verdict "$r" clean; then pass "$ver user's own [mcp_servers.commhub] url/default mode → overridden by anet's -c, no prompt"; else fail "$ver user commhub table override"; fi
+  # a per-tool approval_mode the user wrote still wins for that tool
+  h=$(fresh_home)
+  r=$(T720_EXTRA_TOML=$'[mcp_servers.commhub.tools.ping]\napproval_mode = "prompt"' probe "$ver" "$h" posix)
+  if verdict "$r" prompted; then pass "$ver user's per-tool approval_mode=\"prompt\" still wins for that tool"; else fail "$ver per-tool prompt precedence"; fi
+  # a per-tool approve sub-table (what "always allow" writes) keeps working alongside
+  h=$(fresh_home)
+  r=$(T720_EXTRA_TOML=$'[mcp_servers.commhub.tools.ping]\napproval_mode = "approve"' probe "$ver" "$h" posix)
+  if verdict "$r" clean; then pass "$ver existing per-tool approve sub-table unaffected"; else fail "$ver per-tool approve"; fi
+done
+
+echo "── L4 the REAL POSIX launcher: \`anet node start\` on a codex co-presence node"
+# The probes above run the override LIST; this layer checks what the launcher actually
+# hands `codex app-server` (codex on PATH is a stub that records its argv; it never binds,
+# so each start ends at the 25 s bind wait — the argv is already on disk by then).
+# (Windows: its launcher is win32-only; it passes codexWindowsAppServerArgs() verbatim,
+#  pinned by the unit test + the windows probe above.)
+export ANET_START_MEM_GATE=0
+PAIRED_VERSION="$(node -p "require('/workspace/agent-node/package.json').version")"
+PAIR_ROOT="/root/t720-paired/node_modules/@sleep2agi/agent-node"
+mkdir -p "$PAIR_ROOT/dist"
+printf '{"name":"@sleep2agi/agent-node","version":"%s","publishConfig":{"tag":"preview"},"bin":{"agent-node":"dist/cli.js"}}\n' "$PAIRED_VERSION" > "$PAIR_ROOT/package.json"
+printf '%s\n' '#!/usr/bin/env node' 'if (process.argv.includes("--help")) { console.log("--runtime codex-app-server"); process.exit(0); }' 'await new Promise(() => {});' > "$PAIR_ROOT/dist/cli.js"
+chmod 755 "$PAIR_ROOT/dist/cli.js"
+export ANET_AGENT_NODE_BIN="$PAIR_ROOT/dist/cli.js"
+HUB_PORT=9272
+HUB="http://127.0.0.1:$HUB_PORT"
+export COMMHUB_AUTH_TOKEN="t720-hub-token"
+(cd /workspace/server && PORT=$HUB_PORT COMMHUB_DB=/root/t720-hub.db bun run src/index.ts > /root/t720-hub.log 2>&1 &)
+for _ in $(seq 60); do curl -fsS -o /dev/null "$HUB/health" 2>/dev/null && break; sleep 0.5; done
+WORK=$(mktemp -d /root/t720-work.XXXXXX)
+ANET=(bun /workspace/agent-network/bin/cli.ts)
+(cd "$WORK" && { printf '\n' | "${ANET[@]}" init --hub "$HUB" || true; "${ANET[@]}" register --username t720 --password pass123456 || true; "${ANET[@]}" login --username t720 --password pass123456 || true; }) > /root/t720-anet-setup.log 2>&1
+NODE_N=0
+# launcher_argv → prints the app-server argv (one arg per line) from a fresh node's real start
+launcher_argv() {
+  NODE_N=$((NODE_N + 1))
+  local node="t720n$NODE_N" home
+  : > /tmp/t720-codex-argv.log
+  (cd "$WORK" && "${ANET[@]}" node create "$node" --runtime codex-cli --hub "$HUB") >> /root/t720-anet-setup.log 2>&1 || true
+  home="$WORK/.anet/nodes/$node/codex-home"; mkdir -p "$home"; chmod 700 "$home"
+  printf '{"OPENAI_API_KEY":"sk-fake-t720"}\n' > "$home/auth.json"; chmod 600 "$home/auth.json"
+  (cd "$WORK" && timeout 90 "${ANET[@]}" node start "$node" --accept-dev-channels) > "/root/t720-start-$node.log" 2>&1 || true
+  awk '/^--END--$/{exit} {print}' /tmp/t720-codex-argv.log
+}
+APPROVE_ARG='mcp_servers.commhub.default_tools_approval_mode="approve"'
+# check_launcher_argv ARGV → 0 when the launcher passed `-c <approve>` for commhub, exactly once
+check_launcher_argv() {
+  python3 - "$1" "$APPROVE_ARG" <<'PY'
+import sys
+argv = sys.argv[1].split("\n"); want = sys.argv[2]
+if not argv or argv[0] != "app-server": print("   no app-server argv captured:", argv[:3]); sys.exit(1)
+pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
+approvals = [p for p in pairs if "approval_mode" in p]
+print("   launcher -c:", [p for p in pairs if p.startswith("mcp_servers.")])
+ok = approvals == [want] and any(p.startswith("mcp_servers.commhub.url=") for p in pairs)
+sys.exit(0 if ok else 1)
+PY
+}
+argv=$(launcher_argv)
+if check_launcher_argv "$argv"; then pass "real POSIX launcher argv carries $APPROVE_ARG (commhub only)"; else fail "real POSIX launcher argv lacks the commhub pre-approval"; cat "/root/t720-start-t720n$NODE_N.log" | tail -20; fi
+
 echo "── L3 mutations of the shipped source (each must go red)"
 MOD=agent-network/src/codex-commhub-mcp.ts
 RT=agent-node/src/runtime/codex-app-server/runtime.ts
@@ -129,6 +196,7 @@ PY
   case "$check" in
     probe-posix) h=$(fresh_home); r=$(probe 0.159.2 "$h" posix); if verdict "$r" blocked; then red=1; fi ;;
     probe-agentNode) h=$(fresh_home); r=$(probe 0.133.0 "$h" agentNode); if verdict "$r" blocked; then red=1; fi ;;
+    launcher-posix) argv=$(launcher_argv); if ! check_launcher_argv "$argv"; then red=1; fi ;;
     unit-an) (cd agent-network && bun test src/codex-commhub-mcp.test.ts >/dev/null 2>&1) || red=1 ;;
     unit-node) (cd agent-node && bun test src/runtime/codex-app-server/runtime.test.ts >/dev/null 2>&1) || red=1 ;;
   esac
@@ -139,6 +207,9 @@ mutate M1-drop-setting "$MOD" '    `${COMMHUB_TOOLS_APPROVAL_KEY}=${q(COMMHUB_TO
 mutate M2-value-prompt "$MOD" 'COMMHUB_TOOLS_APPROVAL_VALUE = "approve"' 'COMMHUB_TOOLS_APPROVAL_VALUE = "prompt"' probe-posix
 mutate M3-agent-node-drop "$RT" '    cfg.push("-c", `mcp_servers.commhub.default_tools_approval_mode="approve"`);' '' probe-agentNode
 mutate M4-agent-node-drop-unit "$RT" '    cfg.push("-c", `mcp_servers.commhub.default_tools_approval_mode="approve"`);' '' unit-node
+# M6 = the review's mutation B: drop the key at the POSIX launcher call site only (module untouched).
+mutate M6-posix-launcher-drops-key "$CLI" 'commhubMcpOverrides.map((o) => ` -c ${shellQuote(o)}`).join("")' 'commhubMcpOverrides.filter((o) => !o.includes("approval_mode")).map((o) => ` -c ${shellQuote(o)}`).join("")' launcher-posix
+mutate M7-windows-launcher-bypasses-builder "$CLI" 'windowsManagedProcess("appsrv", opts.codexBin, codexWindowsAppServerArgs({' 'windowsManagedProcess("appsrv", opts.codexBin, ((a: any) => codexWindowsAppServerArgs(a).filter((x) => !x.includes("approval_mode")))({' unit-an
 mutate M5-posix-launcher-inline "$CLI" 'codexCommhubMcpOverrides(opts.hub, "quoted")' '[`mcp_servers.commhub.url="${opts.hub}/mcp"`, `mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"`]' unit-an
 
 echo "T720 PASS=$PASS FAIL=$FAIL"

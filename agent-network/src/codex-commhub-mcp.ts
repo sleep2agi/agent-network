@@ -40,3 +40,22 @@ export function codexCommhubMcpOverrides(hubBaseUrl: string, style: "quoted" | "
     `${COMMHUB_TOOLS_APPROVAL_KEY}=${q(COMMHUB_TOOLS_APPROVAL_VALUE)}`,
   ];
 }
+
+/**
+ * The complete argv of the Windows co-presence `codex app-server` (the launcher passes
+ * exactly this to windowsManagedProcess). Pure, so it is testable on Linux CI where the
+ * win32 launcher itself cannot run (#720 review: assert the launcher's real argv).
+ */
+export function codexWindowsAppServerArgs(o: {
+  approvalPolicy: string; sandboxMode: string; model: string; hub: string; wsUrl: string;
+}): string[] {
+  return [
+    "app-server",
+    "-c", `approval_policy=${o.approvalPolicy}`,
+    "-c", `sandbox_mode=${o.sandboxMode}`,
+    "-c", `model=${o.model}`,
+    // url + bearer + pre-approved commhub tools (bare TOML: cmd.exe mangles `"`).
+    ...codexCommhubMcpOverrides(o.hub, "bare").flatMap((x) => ["-c", x]),
+    "--listen", o.wsUrl,
+  ];
+}

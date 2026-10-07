@@ -131,28 +131,41 @@ anet node start codex-human
 
 线程原先记录的模型与配置不同时，**以配置为准**：codex 0.155 实测，`thread/resume` 不带 `model` 时会回到 rollout 最后一条 `turn_context` 里的旧模型、并忽略 app-server 的 `-c model=`；而线程一旦被第一个客户端加载，后来的 TUI `resume -m` 也改不动它。所以 anet 在第一次 `thread/resume` 就带上配置的模型（#512）。
 
-### 首次派活前必须看一眼 TUI 是否卡在审批框
+### commhub 工具审批框：anet 已自动预批准（#720） {#commhub-tool-approval}
 
-::: danger 节点会「看起来完全健康」却什么都干不了
-`--copresence` 起完之后，TUI 一旦接上，MCP 工具调用就变成**要人确认**。如果没人在 TUI 前面点，节点会永远停在：
+Codex 第一次调用每个 MCP 工具时会弹：
 
 ```
 Allow the commhub MCP server to run tool "get_task"?
 › 1. Allow   2. Allow for this session   3. Always allow   4. Cancel
 ```
 
-**此时 hub 上的所有信号都是健康的**：`status=idle`、SSE 已连接、`last_seen_at` 持续更新。派活方看不出任何异常，只会以为它闲着。
+无人值守的节点没人点，这一轮就卡住，Hub 最终判超时；而且此时 hub 上的信号全是健康的（`status=idle`、SSE 在线）。
+这个弹窗**不受 `approval_policy` 单独控制**：实测共存默认姿态（read-only + on-request）下 codex 0.133.0 和 0.159.2 都弹；
+never + read-only 下 0.133.0 仍弹，0.159.2 直接静默拒绝这次调用。「Always allow」也撑不过重启，因为 commhub 是 anet 启动时用 `-c` 传入的，不在 config.toml 里。
 
-**唯一能发现的方法**（hub 的任何字段都查不出来）：
+**现在**：anet 每次为节点启动 codex（POSIX / Windows 共存 app-server、agent-node 自管 app-server、codex-sdk）都会带上
+
+```
+-c mcp_servers.commhub.default_tools_approval_mode="approve"
+```
+
+只作用于 commhub，其他 MCP server 仍按 codex 默认行为询问。codex 0.133.0（取值 `auto|prompt|approve`）和 0.159.2（`auto|prompt|writes|approve`）都支持；
+实测见 `tests/test720-codex-commhub-tool-approval`。
+
+和你自己的 `CODEX_HOME/config.toml` 的关系（同一套件实测）：
+
+- anet 的 `-c` **覆盖**你在 `[mcp_servers.commhub]` 里写的 `url` 和 `default_tools_approval_mode`。
+- 你为某个工具写的 `[mcp_servers.commhub.tools.<工具名>] approval_mode = "prompt"` **仍然优先**，那个工具照样会弹，这是有意保留的逐工具开关。
+- codex 自己写下的逐工具 `approval_mode = "approve"` 子表（「Always allow」留下的）不受影响。
+- 外部 app-server 通道（`codexAppServerUrl` 固定、commhub 来自你自己的 config.toml）**不注入**这个键（单独注入一个未定义 server 的键会让 codex 报 `invalid transport` 起不来），
+  请在自己的 `[mcp_servers.commhub]` 下加 `default_tools_approval_mode = "approve"`。
+
+旧版本 anet 起的节点仍可能卡在这里，排查方法：
 
 ```bash
 tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 ```
-
-**处置**：选 `3. Always allow`（commhub 那几个工具是节点自身运转必需的）；或在 app-server 启动参数里带 `-c approval_policy=never`，从源头避免。
-
-实测（2026-07-31）：新建 TUI 的节点复现；同宿主既有共存节点未受影响（它们的 app-server 启动时带了 `approval_policy=never`）。**所以这是「新建 TUI 时」的坑，不是存量问题。**
-:::
 
 ## 健康分层、降级拒收与自愈 {#health}
 

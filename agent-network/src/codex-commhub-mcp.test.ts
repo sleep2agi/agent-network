@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { codexCommhubMcpOverrides, COMMHUB_TOOLS_APPROVAL_KEY } from "./codex-commhub-mcp";
+import { codexCommhubMcpOverrides, codexWindowsAppServerArgs, COMMHUB_TOOLS_APPROVAL_KEY } from "./codex-commhub-mcp";
 
 describe("#720 codexCommhubMcpOverrides", () => {
   test("quoted (POSIX launcher): url, bearer env name, commhub tools pre-approved", () => {
@@ -28,14 +28,29 @@ describe("#720 codexCommhubMcpOverrides", () => {
     expect(COMMHUB_TOOLS_APPROVAL_KEY.startsWith("mcp_servers.commhub.")).toBe(true);
   });
 
+  test("Windows launcher argv (the exact list windowsManagedProcess receives)", () => {
+    const argv = codexWindowsAppServerArgs({ approvalPolicy: "on-request", sandboxMode: "read-only", model: "gpt-5", hub: "http://127.0.0.1:9200", wsUrl: "ws://127.0.0.1:4500" });
+    expect(argv).toEqual([
+      "app-server",
+      "-c", "approval_policy=on-request",
+      "-c", "sandbox_mode=read-only",
+      "-c", "model=gpt-5",
+      "-c", "mcp_servers.commhub.url=http://127.0.0.1:9200/mcp",
+      "-c", "mcp_servers.commhub.bearer_token_env_var=ANET_CODEX_COMMHUB_TOKEN",
+      "-c", "mcp_servers.commhub.default_tools_approval_mode=approve",
+      "--listen", "ws://127.0.0.1:4500",
+    ]);
+  });
+
   // Both co-presence launchers must take the list from this module — a launcher that
   // re-spells the commhub overrides inline would silently lose the pre-approval.
   test("cli.ts launchers use the shared list, no inline commhub -c fragments", () => {
     const cli = readFileSync(join(import.meta.dir, "..", "bin", "cli.ts"), "utf-8");
-    expect(cli.match(/codexCommhubMcpOverrides\(opts\.hub, "(quoted|bare)"\)/g)?.sort()).toEqual([
-      'codexCommhubMcpOverrides(opts.hub, "bare")',
+    expect(cli.match(/codexCommhubMcpOverrides\(opts\.hub, "(quoted|bare)"\)/g)).toEqual([
       'codexCommhubMcpOverrides(opts.hub, "quoted")',
     ]);
+    // the Windows launcher hands windowsManagedProcess exactly codexWindowsAppServerArgs(...)
+    expect(cli).toMatch(/windowsManagedProcess\("appsrv", opts\.codexBin, codexWindowsAppServerArgs\(\{/);
     expect(cli).not.toMatch(/`mcp_servers\.commhub\.(url|bearer_token_env_var)=/);
   });
 });
