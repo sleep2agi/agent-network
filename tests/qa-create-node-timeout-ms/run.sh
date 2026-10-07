@@ -21,6 +21,9 @@
 #
 # 全程在容器里:HOME=$(mktemp -d),hub 在非 9200 端口。
 set -uo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 if [[ ! -f /.dockerenv && "${ALLOW_NON_DOCKER:-}" != "1" ]]; then
   echo "REFUSING: /.dockerenv absent — this suite boots a hub and kills pids; run it in its container." >&2

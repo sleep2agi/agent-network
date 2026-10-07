@@ -120,6 +120,7 @@ on:
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
+      - 'tests/test678-daemon-token-owner/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -327,6 +328,7 @@ on:
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
+      - 'tests/test678-daemon-token-owner/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
@@ -905,6 +907,15 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test674 -f tests/test674-binding-generation/Dockerfile .
       - run: docker run --rm --init --cpus=2 --network none anet-test674
+
+  test678-daemon-token-owner:
+    name: Daemon token ownership (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test678 -f tests/test678-daemon-token-owner/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test678
 
   test658-codex-adopt-stop:
     name: Codex adoption and stop (Docker, two layouts)

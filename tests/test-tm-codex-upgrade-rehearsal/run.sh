@@ -13,6 +13,9 @@
 # For each: kill the app-server (dead), SIGSTOP it (hung) and, for anet, make it crash at every launch,
 # on the old version and again after an in-place upgrade + restart. Prints timings and the node's log lines.
 set -uo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 OLD_ANET=${OLD_ANET:-2.3.0-preview.115}   OLD_NODE=${OLD_NODE:-2.5.0-preview.88}
 NEW_ANET=${NEW_ANET:-2.3.0-preview.145}   NEW_NODE=${NEW_NODE:-2.5.0-preview.112}

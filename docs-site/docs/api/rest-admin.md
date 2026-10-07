@@ -33,11 +33,21 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 
 **常见 4xx**（verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)）：
 
+节点身份按精确绑定校验：带 `node_id` 的签发和只带名字的签发都会检查同网络的名字冲突。新名字令牌在首次成功注册时固定 `node_id`；已存在节点的名字刷新需要节点属主或同一持有人已有的有效节点凭据，刷新后返回精确绑定的令牌。不会通过刷新补填旧节点的 owner。
+
+**有意的行为变化：** 如果一个旧节点没有 owner，也没有任何历史节点令牌，管理员不能再仅凭知道 alias 为它签发令牌。网络管理员身份不等于节点归属证明。本次不提供隐式认领；显式、有审计的管理员认领流程将另行设计，当前不可用。
+
+旧 daemon 的未绑定凭据保留兼容：alias 必须在网络内唯一；旧无 owner 节点只接受修复前签发的凭据。重复 alias 不按数据库行顺序猜测身份，需使用已经精确绑定的凭据。
+
+升级会持久化令牌签发代际。全部签发服务（包括直接写库的 CLI）必须一起升级，不能混跑旧版 Hub 或旧签发器，也不能回滚到旧签发器，否则新签发的令牌会被误归为旧代际；数据库备份须保留该字段。恢复应使用包含本修复的版本。该兼容层不等于对消息署名或 SSE 全链路身份的验收。
+
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 400 | `network_id and node_name required` | 请求体缺 `network_id` 或 `node_name` |
 | 400 | `not a member of this network` | 调用者不在 `network_id` 内（必须先 join 才能 mint ntok_） |
 | 400 | `no write access to this network` | 调用者是 `viewer` 角色（viewer 不能创建 full-access network token） |
+| 400 | `node_owner_mismatch` | 节点名冲突、身份歧义或持有人无权签发 |
+| 400 | `node_owner_unclaimed` | 指定的旧无 owner 节点缺少同持有人凭据；不会隐式认领 |
 | 401 | `auth required` / `invalid token` | 缺/无效 utok_ |
 
 ### POST /api/auth/tokens
@@ -114,7 +124,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-每行 6 字段对照 [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L462) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
+每行 6 字段对照 [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L466) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
 
 ### DELETE /api/auth/tokens/:id
 
@@ -137,7 +147,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L514) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
+| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L518) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
 
 写 audit log `action='token_revoked'`。撤销后该 token 的下一次请求拿 401 `invalid token`。
 

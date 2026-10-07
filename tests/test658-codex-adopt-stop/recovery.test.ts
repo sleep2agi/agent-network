@@ -8,6 +8,7 @@ import { handleAdoptDoorbell } from "../../agent-node/src/runtime/adopt-daemon.j
 import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifecycle.js";
 import { listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
 import { processStamp } from "../../agent-node/src/runtime/adopt-process-tree.js";
+import { heldIdentityCommand, waitForHeldStages, type HeldStage } from "./fixture-ready.js";
 
 test("manual start supersedes only its captured stopped receipt; fleet parity", () => {
   const bootScript = readFileSync("deploy/fleet/anet-nodes-boot.sh", "utf8");
@@ -90,8 +91,17 @@ test(`recovery ${layout}: old boot never signals; receipt and delete refusals`, 
   identity(boot);
   const names = layout === "native" ? [scope.alias, `${scope.alias}-桥`, `${scope.alias}-appsrv`]
     : [`${scope.alias}-tui`, scope.alias, `${scope.alias}-appsrv`];
-  const create = (name:string, marker:string, home=scope.codexHome) => fixture.exec(["new-session","-d","-s",name,"-c",workdir,
-    `exec env ANET_NODE_MARKER=${marker} CODEX_HOME=${home} sleep 300`]).trim();
+  let wave=0;
+  const create = (name:string, marker:string, home=scope.codexHome, release=`${workdir}/fixture-release-${wave}`) => {
+    const pane=fixture.exec(["new-session","-d","-s",name,"-c",workdir,
+      heldIdentityCommand(release,`exec env ANET_NODE_MARKER=${marker} CODEX_HOME=${home} sleep 300`)]).trim();
+    return {pane, stage:{pane,marker,codexHome:home,cwd:workdir} satisfies HeldStage};
+  };
+  const ready = async (spawned: {pane:string,stage:HeldStage}[], release=`${workdir}/fixture-release-${wave}`) => {
+    await waitForHeldStages(scope, release, spawned.map(item=>item.stage));
+    wave++;
+    return spawned.map(item=>item.pane);
+  };
   const req = {ok:true,request_id:"adopt_fixture",node_id:config.node_id,alias:scope.alias,network_id:config.network_id,workdir};
   const calls:any[] = [];
   const deps = {home:mkdtempSync("/tmp/codex-home-"),workDir:daemon,hubUrl:config.hub,networkId:config.network_id,adoptRoots:[workdir],uid,daemonEnv:{},warn:()=>{},
@@ -100,8 +110,7 @@ test(`recovery ${layout}: old boot never signals; receipt and delete refusals`, 
   const action = (action:"stop"|"delete", id="stop_fixture") => handleAdoptedLifecycle({request_id:id,child_node_id:config.node_id,child_alias:scope.alias,action},deps);
   const markerFile = `${nodeDir}/.hub-stopped`, kill = process.kill;
   try {
-    for (const name of names) create(name,scope.marker);
-    create("unrelated-decoy","foreign",`${workdir}/other-home`);
+    await ready([...names.map(name=>create(name,scope.marker)), create("unrelated-decoy","foreign",`${workdir}/other-home`)]);
     await handleAdoptDoorbell(req,deps);
     expect(calls.at(-1).args.status).toBe("adopted");
     const before = listCodexPanes(scope);
@@ -131,7 +140,7 @@ test(`recovery ${layout}: old boot never signals; receipt and delete refusals`, 
     expect(signals).toBe(0);
     expect(processStamp(Number(decoy[3]))).toEqual(decoyStamp);
     // Different marker + escaped/renamed session but same home is NOT absent.
-    const current = create("new-generation-escaped","new-marker");
+    const [current] = await ready([create("new-generation-escaped","new-marker")]);
     await action("stop","stop_current_generation");
     expect(calls.at(-1).args).toMatchObject({status:"stop_failed",error:"adopt_codex_readopt_required"});
     expect(signals).toBe(0);
@@ -143,12 +152,12 @@ test(`recovery ${layout}: old boot never signals; receipt and delete refusals`, 
     expect(signals).toBe(0);
     expect(listCodexPanes(scope).some(r=>r[2]===current)).toBe(true);
     fixture.exec(["kill-pane","-t",current]);
-    const old = create("old-marker-carrier",scope.marker,`${workdir}/other-home`);
+    const [old] = await ready([create("old-marker-carrier",scope.marker,`${workdir}/other-home`)]);
     await action("stop","stop_old_marker_carrier");
     expect(calls.at(-1).args.error).toBe("adopt_codex_readopt_required");
     expect(signals).toBe(0);
     fixture.exec(["kill-pane","-t",old]);
-    const foreign = create(names[0],"foreign",`${workdir}/other-home`);
+    const [foreign] = await ready([create(names[0],"foreign",`${workdir}/other-home`)]);
     await action("stop","stop_foreign_named_pane");
     expect(calls.at(-1).args.error).toBe("adopt_codex_readopt_required");
     expect(signals).toBe(0);
