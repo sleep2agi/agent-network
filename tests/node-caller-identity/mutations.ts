@@ -59,3 +59,17 @@ await runMutation(
   "if (owned.length === 1) return undefined; // board679-unbound-dup",
   "duplicate alias unbound token keeps the owning node online",
 );
+await runMutation(
+  "plainntok",
+  "src/server.ts",
+  'else if (resolvedCaller && resolvedCaller.reason !== "not_a_node_token") { // board679-plain-ntok',
+  "else if (true) { // board679-plain-ntok",
+  "registration network token signs as the username",
+);
+await runMutation(
+  "ownerlessdup",
+  "src/create-node.ts",
+  "const legacyOwnerless = nodeRow.owner_user_id === null && tokRow.node_identity_epoch === 0;",
+  "const legacyOwnerless = false;",
+  "duplicate ownerless row keeps an unbound epoch 0 token online",
+);

@@ -3,7 +3,7 @@
 // Real HTTP, both SQLite and PostgreSQL:
 //   cd server && COMMHUB_DB=/tmp/x.db bun test src/node-caller-identity-http.test.ts
 //   PG: COMMHUB_TEST_PG_URL=… COMMHUB_PG_EXPERIMENTAL=1
-//       (tests/node-caller-identity runs both, plus the two mutations)
+//       (tests/node-caller-identity runs both, plus five mutations)
 //
 // An unbound token with zero rows keeps the name in the token. First
 // registration still depends on that. A bound token whose row is gone is
@@ -15,7 +15,11 @@
 // second mutation restores a name lookup for a missing bound row and expects
 // "bound row missing does not fall back to the name" to go red. A third
 // drops the single-owner shortcut and expects the duplicate-alias heartbeat
-// to go red. New tests must not use the "caller identity boundary:" prefix.
+// to go red. A fourth treats every failed ntok_ resolve as impersonation
+// and expects "registration network token signs as the username" to go red.
+// A fifth drops the ownerless-row compatibility and expects "duplicate
+// ownerless row keeps an unbound epoch 0 token online" to go red. New tests
+// must not use the "caller identity boundary:" prefix.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -580,3 +584,91 @@ test("a resolved node token can list its own daemon requests", async () => {
   expect(listed.ok).toBe(true);
   expect(listed.count).toBe(0);
 });
+
+test("registration network token signs as the username", async () => {
+  const username = `idvreg${stamp}`;
+  const created = register(username, "CallerIdentReg123!", undefined, "seed");
+  if (!created.ok || !created.network_token || !created.network_id || !created.user) {
+    throw new Error(created.error || "plain network token register failed");
+  }
+  const net = created.network_id;
+  const tokenRow = db.get<{ name: string }>(
+    "SELECT name FROM api_tokens WHERE token_hash = ?1",
+    hashToken(created.network_token),
+  );
+  expect(tokenRow?.name).toBe("default-network");
+  const sink = `idvrgk${stamp}`;
+  db.run(
+    `INSERT INTO sessions (resume_id, alias, network_id, status, updated_at)
+     VALUES (?1, ?2, ?3, 'idle', datetime('now'))`,
+    [`sdk-${sink}`, sink, net],
+  );
+  const task = `plain ntok send ${stamp}`;
+  const sent = await tool(created.network_token, "send_task", { alias: sink, task, network_id: net });
+  expect(sent.ok).toBe(true);
+  expect(db.get<{ from_name: string }>("SELECT from_name FROM tasks WHERE content = ?1", task)?.from_name).toBe(username);
+  const reported = await tool(created.network_token, "report_status", {
+    resume_id: `sdk-${username}`,
+    alias: username,
+    status: "idle",
+    output: "steady",
+    network_id: net,
+  });
+  expect(reported.ok).toBe(true);
+  expect(db.get<{ name: string }>(
+    "SELECT name FROM api_tokens WHERE token_hash = ?1",
+    hashToken(created.network_token),
+  )?.name).toBe(`node:${username}`);
+});
+
+test("duplicate ownerless row keeps an unbound epoch 0 token online", async () => {
+  // Issuer owns neither row. The session points at the ownerless row.
+  // Epoch 0 keeps the ownerless-row compatibility; epoch 2 would first-bind.
+  const alias = `idvord${stamp}`;
+  const ownedId = `n_idv_orda_${stamp}`;
+  const ownerlessNode = `n_idv_ordb_${stamp}`;
+  db.run(
+    `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
+     VALUES (?1, ?2, ?2, ?3, ?4, datetime('now'))`,
+    [ownedId, alias, NET, ownerId],
+  );
+  db.run(
+    `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
+     VALUES (?1, ?2, ?2, ?3, NULL, datetime('now'))`,
+    [ownerlessNode, alias, NET],
+  );
+  db.run(
+    `INSERT INTO sessions (resume_id, alias, node_id, network_id, status, updated_at)
+     VALUES (?1, ?2, ?3, ?4, 'idle', datetime('now'))`,
+    [`sdk-${alias}`, alias, ownerlessNode, NET],
+  );
+  const tok = mint(outsiderId, NET, alias, 0, null);
+  const registered = await report(tok, alias, ownerlessNode, NET, { hostname: "idv-ord-reg" });
+  expect(registered.ok).toBe(true);
+  const heartbeat = await report(tok, alias, ownerlessNode, NET, { hostname: "idv-ord-beat" });
+  expect(heartbeat.ok).toBe(true);
+  expect(db.get<{ node_id: string | null }>(
+    "SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", alias, NET,
+  )?.node_id).toBe(ownerlessNode);
+  expect(db.get<{ alias: string; owner_user_id: string | null; hostname: string | null }>(
+    "SELECT alias, owner_user_id, hostname FROM nodes WHERE node_id = ?1", ownerlessNode,
+  )).toEqual({ alias, owner_user_id: null, hostname: "idv-ord-beat" });
+  expect(db.get<{ alias: string; owner_user_id: string | null; hostname: string | null }>(
+    "SELECT alias, owner_user_id, hostname FROM nodes WHERE node_id = ?1", ownedId,
+  )).toEqual({ alias, owner_user_id: ownerId, hostname: null });
+  const task = `ownerless dup send ${stamp}`;
+  const sent = await tool(tok.token, "send_task", { alias: sinkAlias, task, network_id: NET });
+  expect(sent.ok).toBe(true);
+  expect(db.get<{ from_name: string }>("SELECT from_name FROM tasks WHERE content = ?1", task)?.from_name).toBe(alias);
+  const first = subscribe(`/events/${encodeURIComponent(alias)}`, tok.token, { "X-Anet-Instance-Id": `inst-ord-a-${stamp}` });
+  await first.ready;
+  expect(first.events.some((e) => e.type === "connected")).toBe(true);
+  expect(first.done).toBe(false);
+  const second = subscribe(`/events/${encodeURIComponent(alias)}`, tok.token, { "X-Anet-Instance-Id": `inst-ord-b-${stamp}` });
+  await second.ready;
+  await until(() => first.done, "the ownerless row's own second connection to close the first");
+  expect(first.events.some((e) => e.type === "node_connection_superseded")).toBe(true);
+  expect(second.done).toBe(false);
+  first.abort();
+  second.abort();
+}, 15_000);

@@ -1048,14 +1048,16 @@ return Bun.serve({
       const token = requestToken(req);
       const authCtx = resolveRequestAuth(req);
       const enforceNetId = authCtx?.networkId || null;
-      // Network tokens speak as the node the token is bound to, not the name
-      // string. A rejected token must not fall through to a client-supplied from.
+      // A resolved node token speaks as that node. A token whose name is not
+      // `node:` (the registration network token) keeps the username. Only a
+      // `node:` token refused as not_owner / bound_node_missing / ambiguous
+      // is impersonation, and must not fall through to a client-supplied from.
       let callerAlias: string | null = authCtx?.username || null;
       let callerIdentityRejected = false;
       if (token?.startsWith("ntok_")) {
         const resolvedCaller = authCtx?.tokenId ? resolveNodeCaller(authCtx.tokenId) : null;
         if (resolvedCaller?.ok) callerAlias = resolvedCaller.alias;
-        else {
+        else if (resolvedCaller && resolvedCaller.reason !== "not_a_node_token") { // board679-plain-ntok
           callerAlias = null;
           callerIdentityRejected = true;
         }
