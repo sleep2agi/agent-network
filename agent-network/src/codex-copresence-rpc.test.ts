@@ -14,7 +14,7 @@ function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0, calls?: strin
       if (typeof request.method === "string") calls?.push(request.method);
       if (typeof request.id !== "number") return;
       const result = request.method === "thread/read"
-        ? { thread: { id: THREAD, turns: [{ id: "turn-1", status: "completed" }] } }
+        ? { thread: { id: THREAD, path: `/codex/sessions/rollout-${THREAD}.jsonl`, createdAt: 1, updatedAt: 2, turns: [] } }
         : request.method === "thread/resume" ? { model: "gpt-test" } : {};
       const delay = request.method === "thread/resume" ? resumeDelayMs : request.method === "thread/read" ? readDelayMs : 0;
       setTimeout(() => this.dispatchEvent(new MessageEvent("message", {
@@ -40,7 +40,7 @@ describe("co-presence RPC recovery deadline", () => {
     const result = await createCodexCopresenceThread("ws://fake", 250, THREAD, "gpt-test", { webSocketCtor: slowFakeAppServer(90), rolloutBytes: 780 * 1024 ** 2 });
     expect(Date.now() - started).toBeGreaterThanOrEqual(70);
     expect(result).toMatchObject({ threadId: THREAD, freshDeferred: false, resumedModel: "gpt-test" });
-    expect(result.verification?.historyTurnCount).toBe(1);
+    expect(result.verification?.historyTurnCount).toBe(0);
   });
 
   test("the same slow server still fails closed when its deadline is too small", async () => {
@@ -53,6 +53,49 @@ describe("co-presence RPC recovery deadline", () => {
     const started = Date.now();
     const result = await createCodexCopresenceThread("ws://fake", 250, THREAD, "gpt-test", { webSocketCtor: slowFakeAppServer(20, 90), rolloutBytes: 1024 ** 3 });
     expect(Date.now() - started).toBeGreaterThanOrEqual(90);
-    expect(result.verification).toMatchObject({ threadId: THREAD, historyTurnCount: 1 });
+    expect(result.verification).toMatchObject({ threadId: THREAD, historyTurnCount: 0, persistedPath: `/codex/sessions/rollout-${THREAD}.jsonl` });
+  });
+
+  test("falls back once when a real Codex shape rejects excludeTurns behind experimentalApi", async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    let rejected = false;
+    class CapabilitySocket extends EventTarget {
+      constructor(_url: string) { super(); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (typeof request.id !== "number") return;
+        calls.push({ method: request.method, params: request.params ?? {} });
+        const error = request.method === "thread/resume" && request.params?.excludeTurns && !rejected
+          ? (rejected = true, { code: -32600, message: "thread/resume.excludeTurns requires experimentalApi capability" })
+          : null;
+        const result = request.method === "thread/read"
+          ? { thread: { id: THREAD, path: `/codex/sessions/rollout-${THREAD}.jsonl`, turns: [] } }
+          : {};
+        queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ jsonrpc: "2.0", id: request.id, ...(error ? { error } : { result }) }) })));
+      }
+      close() {}
+    }
+    await createCodexCopresenceThread("ws://fake", 250, THREAD, "gpt-test", { webSocketCtor: CapabilitySocket });
+    expect(calls.filter((call) => call.method === "thread/resume").map((call) => call.params)).toEqual([
+      { threadId: THREAD, excludeTurns: true, model: "gpt-test" },
+      { threadId: THREAD, model: "gpt-test" },
+    ]);
+  });
+
+  test("does not downgrade unrelated -32600 resume failures", async () => {
+    class BrokenSocket extends EventTarget {
+      constructor(_url: string) { super(); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (typeof request.id !== "number") return;
+        const payload = request.method === "thread/resume"
+          ? { error: { code: -32600, message: "invalid session ownership" } }
+          : { result: {} };
+        queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ jsonrpc: "2.0", id: request.id, ...payload }) })));
+      }
+      close() {}
+    }
+    await expect(createCodexCopresenceThread("ws://fake", 250, THREAD, "gpt-test", { webSocketCtor: BrokenSocket }))
+      .rejects.toThrow("invalid session ownership");
   });
 });

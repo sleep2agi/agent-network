@@ -45,4 +45,14 @@ describe("Codex co-presence config environment", () => {
     expect(cli.match(/`\/bin\/rm -f \$\{shellQuote\([^)]*[Ee]nvFilePath\)\}`/g)).toHaveLength(3);
     expect(cli).not.toMatch(/`rm -f \$\{shellQuote\([^)]*[Ee]nvFilePath\)\}`/);
   });
+
+  test("the launcher rejects reserved config.env before either platform stops the old generation", () => {
+    const cli = readFileSync(join(import.meta.dir, "../bin/cli.ts"), "utf8");
+    const validation = cli.indexOf("codexCopresenceStageEnv(opts.configEnv, {});");
+    const windows = cli.indexOf('if (process.platform === "win32")', validation);
+    const posixReap = cli.indexOf("const identityPrep = await prepareIdentityForStart(", validation);
+    expect(validation).toBeGreaterThan(0);
+    expect(validation).toBeLessThan(windows);
+    expect(validation).toBeLessThan(posixReap);
+  });
 });

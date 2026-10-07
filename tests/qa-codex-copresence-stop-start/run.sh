@@ -84,6 +84,10 @@ printf '{"hub":"%s","token":"%s","network_id":"%s"}\n' "$HUB_BASE" "$UTOK" "$NET
 # A host codex login for the launcher to stage into each node's CODEX_HOME. Fake key; the
 # container has no route to use it (`docker run --network none`).
 printf '{"OPENAI_API_KEY":"sk-ccss-not-a-real-key"}\n' > "$HOME/.codex/auth.json"; chmod 600 "$HOME/.codex/auth.json"
+# This suite verifies stop/start and thread continuity, not Codex's updater.
+# Its deliberately old, pinned real binary must not open an update-choice TUI
+# when the registry has moved on while CI is running.
+printf 'check_for_update_on_startup = false\n' > "$HOME/.codex/config.toml"; chmod 600 "$HOME/.codex/config.toml"
 
 # make_node ALIAS — a co-presence node config the way the daemon writes one (codexCopresence:true)
 make_node() {

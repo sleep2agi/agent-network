@@ -81,6 +81,26 @@ export function decidePendingThreadAtStart(
 }
 
 /**
+ * Apply the decision to an in-memory node config without platform-specific
+ * shortcuts.  Both launchers persist `config` before quiescing the old
+ * generation.  Keeping the deletion here makes the Windows stop -> start
+ * behavior executable in the Linux Docker gate instead of relying only on a
+ * source-shape assertion (the native Windows smoke remains the end-to-end
+ * proof).
+ */
+export function reconcilePendingThreadAtStart<T extends Record<string, unknown>>(
+  config: T,
+  marker: PendingMarkerFact,
+  rollouts: RolloutLookup,
+): PendingThreadAtStart & { config: T; changed: boolean } {
+  const decision = decidePendingThreadAtStart(config.codexPendingThread, marker, rollouts);
+  if (decision.kind !== "drop-unmaterialized") return { ...decision, config, changed: false };
+  const next = { ...config };
+  delete next.codexPendingThread;
+  return { ...decision, config: next, changed: true };
+}
+
+/**
  * Every `*-<threadId>.jsonl` under `<codexHome>/sessions` and
  * `<codexHome>/archived_sessions`. A missing directory is "no rollouts"; any
  * other read error makes the whole lookup `null` (the caller then refuses).

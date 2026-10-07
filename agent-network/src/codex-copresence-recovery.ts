@@ -8,6 +8,8 @@ export interface CodexRecoveryVerification {
   verifiedAt: string;
   historyTurnCount: number;
   historyFingerprint: string;
+  /** Metadata-only thread/read proof that Codex resolved this exact rollout. */
+  persistedPath?: string;
 }
 
 export interface CodexRecoveryBackup {
@@ -93,19 +95,29 @@ export function verifyCodexThreadHistory(
   if (!thread || thread.id !== expectedThreadId) {
     throw new Error(`thread/read identity mismatch: expected ${expectedThreadId}`);
   }
-  const hasTurns = Object.prototype.hasOwnProperty.call(thread, "turns");
+  // Codex 0.155.1 deliberately returns `turns: []` when includeTurns:false,
+  // even for a multi-GiB persisted rollout.  The on-disk path is the bounded
+  // metadata proof: an ephemeral / never-materialized thread has no path,
+  // while a successful resume of a stored thread resolves its exact file.
+  const persistedPath = typeof thread.path === "string" && thread.path.length > 0
+    ? thread.path
+    : null;
   const turns = Array.isArray(thread.turns) ? thread.turns : [];
-  if (hasTurns && turns.length === 0) {
-    throw new Error(`thread/read returned no persisted history for ${expectedThreadId}`);
+  if (!persistedPath) {
+    throw new Error(`thread/read returned no persisted rollout metadata for ${expectedThreadId}`);
   }
   return {
     method,
     threadId: expectedThreadId,
     verifiedAt: now.toISOString(),
     historyTurnCount: turns.length,
-    historyFingerprint: hasTurns
-      ? hashJson(turns.map((turn: any) => ({ id: turn?.id ?? null, status: turn?.status ?? null })))
-      : hashJson({ threadId: expectedThreadId, metadataOnly: true }),
+    historyFingerprint: hashJson({
+      threadId: expectedThreadId,
+      persistedPath,
+      createdAt: thread.createdAt ?? null,
+      updatedAt: thread.updatedAt ?? null,
+    }),
+    persistedPath,
   };
 }
 
@@ -135,7 +147,9 @@ export async function resumeAndVerifyCodexThread(
   } catch (error) {
     const code = (error as { code?: unknown })?.code;
     const message = String((error as { message?: unknown })?.message ?? error);
-    if (code !== -32602 && !/excludeTurns.*(?:unknown|unsupported|invalid)|(?:unknown|unsupported).*excludeTurns/i.test(message)) throw error;
+    const unsupportedExcludeTurns = (code === -32602 || code === -32600)
+      && /excludeTurns.*(?:unknown|unsupported|invalid|requires\s+experimentalApi)|(?:unknown|unsupported|invalid|experimentalApi).*excludeTurns/i.test(message);
+    if (!unsupportedExcludeTurns) throw error;
     delete params.excludeTurns;
     resumed = await request("thread/resume", params);
   }

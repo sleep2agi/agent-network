@@ -28,6 +28,24 @@ function mutateSharedDeadline() {
   finally { writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original); }
 }
 
+function mutateExperimentalFallback() {
+  const original = readFileSync("/repo/agent-network/src/codex-copresence-recovery.ts", "utf8");
+  const before = "(code === -32602 || code === -32600)";
+  if (!original.includes(before)) throw new Error("experimental fallback mutation anchor missing");
+  writeFileSync("/repo/agent-network/src/codex-copresence-recovery.ts", original.replace(before, "(code === -32602)"));
+  try { assertRed("src/codex-copresence-rpc.test.ts", "falls back once when a real Codex shape rejects excludeTurns"); }
+  finally { writeFileSync("/repo/agent-network/src/codex-copresence-recovery.ts", original); }
+}
+
+function mutateMetadataOnlyHistory() {
+  const original = readFileSync("/repo/agent-network/src/codex-copresence-recovery.ts", "utf8");
+  const before = "if (!persistedPath) {";
+  if (!original.includes(before)) throw new Error("metadata-only mutation anchor missing");
+  writeFileSync("/repo/agent-network/src/codex-copresence-recovery.ts", original.replace(before, "if (!persistedPath || turns.length === 0) {"));
+  try { assertRed("src/codex-copresence-recovery.test.ts", "resume requires exact thread identity and persisted history"); }
+  finally { writeFileSync("/repo/agent-network/src/codex-copresence-recovery.ts", original); }
+}
+
 function mutateDeferredMaterialization() {
   const original = readFileSync("/repo/agent-node/src/runtime/codex-app-server-bridge.ts", "utf8");
   const before = "if (this.isDeferredThreadMaterialized && !await this.isDeferredThreadMaterialized(id)) {";
@@ -73,6 +91,15 @@ function mutateWindowsPendingPersistence() {
   finally { writeFileSync("/repo/agent-network/bin/cli.ts", original); }
 }
 
+function mutateWindowsPendingBehavior() {
+  const original = readFileSync("/repo/agent-network/src/codex-pending-thread-restart.ts", "utf8");
+  const before = 'if (decision.kind !== "drop-unmaterialized") return { ...decision, config, changed: false };';
+  if (!original.includes(before)) throw new Error("Windows pending behavior mutation anchor missing");
+  writeFileSync("/repo/agent-network/src/codex-pending-thread-restart.ts", original.replace(before, 'if (true) return { ...decision, config, changed: false };'));
+  try { assertRed("src/codex-pending-thread-restart.test.ts", "Windows start -> stop -> start drops an unmaterialized pending thread"); }
+  finally { writeFileSync("/repo/agent-network/src/codex-pending-thread-restart.ts", original); }
+}
+
 function mutateBackupFailOpen() {
   const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
   const before = "persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true)";
@@ -102,11 +129,14 @@ function mutateReservedEnvironment() {
 
 mutateStreamingCopy();
 mutateSharedDeadline();
+mutateExperimentalFallback();
+mutateMetadataOnlyHistory();
 mutateDeferredMaterialization();
 mutateDeferredTimeout();
 mutatePendingRollout();
 mutateNewSession();
 mutateWindowsPendingPersistence();
+mutateWindowsPendingBehavior();
 mutateBackupFailOpen();
 mutatePartialBackupCleanup();
 mutateReservedEnvironment();

@@ -6,12 +6,12 @@ import { backupCodexRecoveryState, codexTopologyAudit, quiesceThenSnapshot, resu
 
 describe("Codex co-presence recovery", () => {
   test("resume requires exact thread identity and persisted history", () => {
-    const v = verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_old", turns: [{ id: "turn_1", status: "completed" }] } }, new Date("2026-08-25T00:00:00Z"));
+    const v = verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_old", path: "/codex/sessions/rollout-thread_old.jsonl", turns: [] } }, new Date("2026-08-25T00:00:00Z"));
     expect(v.threadId).toBe("thread_old");
-    expect(v.historyTurnCount).toBe(1);
-    expect(() => verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_new", turns: [{ id: "x" }] } })).toThrow("identity mismatch");
-    expect(() => verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_old", turns: [] } })).toThrow("no persisted history");
-    expect(verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_old" } }).historyTurnCount).toBe(0);
+    expect(v.historyTurnCount).toBe(0);
+    expect(v.persistedPath).toBe("/codex/sessions/rollout-thread_old.jsonl");
+    expect(() => verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_new", path: "/x" } })).toThrow("identity mismatch");
+    expect(() => verifyCodexThreadHistory("thread/resume", "thread_old", { thread: { id: "thread_old", turns: [] } })).toThrow("no persisted rollout metadata");
   });
 
   test("stub resume failure is fail-closed and never calls thread/start", async () => {
@@ -20,7 +20,7 @@ describe("Codex co-presence recovery", () => {
       calls.push(method);
       if (method === "thread/resume") return { thread: { id: "thread_old" } };
       return { thread: { id: "thread_old", turns: [] } };
-    })).rejects.toThrow("no persisted history");
+    })).rejects.toThrow("no persisted rollout metadata");
     expect(calls).toEqual(["thread/resume", "thread/read"]);
     expect(calls).not.toContain("thread/start");
   });
@@ -29,7 +29,7 @@ describe("Codex co-presence recovery", () => {
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     await resumeAndVerifyCodexThread("thread_old", async (method, params) => {
       calls.push({ method, params });
-      return method === "thread/resume" ? { model: "gpt-test" } : { thread: { id: "thread_old" } };
+      return method === "thread/resume" ? { model: "gpt-test" } : { thread: { id: "thread_old", path: "/codex/sessions/rollout-thread_old.jsonl", turns: [] } };
     }, "gpt-test");
     expect(calls).toEqual([
       { method: "thread/resume", params: { threadId: "thread_old", excludeTurns: true, model: "gpt-test" } },

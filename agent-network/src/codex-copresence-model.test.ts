@@ -45,7 +45,9 @@ describe("#512 resolveCodexCopresenceModel: flag > node config > default", () =>
 });
 
 describe("#512 thread/resume carries the resolved model", () => {
-  const history = { thread: { id: "thread_old", turns: [{ id: "turn_1", status: "completed" }] } };
+  // Real codex 0.155.1 metadata reads include the rollout path and return an
+  // explicit empty turns array when includeTurns:false.
+  const history = { thread: { id: "thread_old", path: "/codex/sessions/rollout-thread_old.jsonl", turns: [] } };
 
   test("model rides on thread/resume (codex 0.155 otherwise resumes on the rollout's recorded model)", async () => {
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];

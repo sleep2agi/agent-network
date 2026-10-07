@@ -44,6 +44,7 @@ writeFileSync(join(userHome, ".anet", "config.json"), JSON.stringify({ hub }, nu
 // (`tail`, not `sleep` — a sleep pane is the "placeholder" the health probe reports) after the fake returns.
 const codexWrapper = `/usr/local/bin/testwd-codex-${runId}`;
 writeFileSync(codexWrapper, `#!/bin/bash
+export ANET_TEST751_MATERIALIZE_ON_CREATE=1
 if [ "$1" = "app-server" ]; then
   n=$(cat ${JSON.stringify(launches)} 2>/dev/null || echo 0)
   echo $((n + 1)) > ${JSON.stringify(launches)}
@@ -61,7 +62,7 @@ if [ "$1" = "app-server" ]; then
   bun ${JSON.stringify(join(repo, "tests/test751-codex-copresence-windows/fake-codex.mjs"))} "$@" >>"$ANET_TEST751_RPC_LOG" 2>&1
   exit $?
 fi
-bun ${JSON.stringify(join(repo, "tests/test751-codex-copresence-windows/fake-codex.mjs"))} "$@" 2>&1 | tee -a "$ANET_TEST751_RPC_LOG"
+  bun ${JSON.stringify(join(repo, "tests/test751-codex-copresence-windows/fake-codex.mjs"))} "$@" 2>&1 | tee -a "$ANET_TEST751_RPC_LOG"
 exec tail -f /dev/null
 `);
 chmodSync(codexWrapper, 0o755);

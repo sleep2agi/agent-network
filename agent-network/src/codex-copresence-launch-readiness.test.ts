@@ -59,10 +59,12 @@ describe("Codex co-presence launch readiness", () => {
     const posixStart = cli.indexOf("async function startCopresenceOrchestration(");
     const posixEnd = cli.indexOf("async function startOpencodeCopresenceOrchestration(", posixStart);
     const posix = cli.slice(posixStart, posixEnd);
-    // app-server keeps the direct export; bridge/TUI receive the same export
-    // from their private source-then-delete env files.
+    // One preflight validates config.env before quiesce. App-server keeps the
+    // direct export; bridge/TUI receive the same export from their private
+    // source-then-delete env files.
     expect(posix.match(/export CODEX_HOME=\$\{shellQuote\(opts\.codexHome\)\}/g)).toHaveLength(1);
-    expect(posix.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(3);
+    expect(posix.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(4);
+    expect(posix).toContain("codexCopresenceStageEnv(opts.configEnv, {});");
     expect(posix).toContain([
       "const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {",
       "      CODEX_HOME: opts.codexHome,",

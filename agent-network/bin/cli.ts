@@ -282,7 +282,7 @@ import {
   migrateCodexPendingThread,
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
-import { decidePendingThreadAtStart, findThreadRollouts } from "../src/codex-pending-thread-restart";
+import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
 import { POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
@@ -984,12 +984,12 @@ async function startWindowsCodexCopresence(
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
   const recoveryCfgPath = join(nodesDir(), resolved.id, "config.json");
-  const recoveryCfg = JSON.parse(readFileSync(recoveryCfgPath, "utf-8"));
+  let recoveryCfg = JSON.parse(readFileSync(recoveryCfgPath, "utf-8"));
   const priorWindowsRecord = readWindowsCopresenceRecord(nodesDir(), resolved.id);
   let authoritativeOldPendingMarker: string | undefined;
   if (!opts.newSession && recoveryCfg.codexPendingThread !== undefined) {
-    const pendingDecision = decidePendingThreadAtStart(
-      recoveryCfg.codexPendingThread,
+    const pendingDecision = reconcilePendingThreadAtStart(
+      recoveryCfg,
       priorWindowsRecord?.version === 2 && priorWindowsRecord.marker
         ? { kind: "ok", marker: priorWindowsRecord.marker }
         : { kind: "missing" },
@@ -998,7 +998,7 @@ async function startWindowsCodexCopresence(
     if (pendingDecision.kind === "migrate") {
       authoritativeOldPendingMarker = pendingDecision.oldMarker;
     } else if (pendingDecision.kind === "drop-unmaterialized") {
-      delete recoveryCfg.codexPendingThread;
+      recoveryCfg = pendingDecision.config;
       atomicWritePrivateJson(recoveryCfgPath, recoveryCfg);
       console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped Windows generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
     } else if (pendingDecision.kind === "refuse") {
@@ -1543,6 +1543,12 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   if (loginGate.state === "unknown") console.log(`[anet] codex login: ${loginGate.reason}`);
 
+  // Validate config.env before either platform quiesces the current
+  // generation.  A reserved loader key is a configuration refusal, not a
+  // reason to stop a healthy app-server / bridge / TUI and leave the node
+  // down.  Stage-specific required values are merged later as before.
+  codexCopresenceStageEnv(opts.configEnv, {});
+
   if (process.platform === "win32") {
     try {
       await startWindowsCodexCopresence(resolved, displayName, opts, model);
@@ -1586,15 +1592,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // never matched what was on disk, and nothing was ever killed while the
   // code reported success). See docs of writeMarker() in copresence-identity.ts.
   const identityMarker = randomUUID();
-  const prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  let prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
   const clearOldStoppedReceipt = stoppedReceiptAtStart(join(nodesDir(), resolved.id), prelaunchCfg.node_id);
   let authoritativeOldPendingMarker: string | undefined;
   if (!opts.newSession && prelaunchCfg.codexPendingThread !== undefined) {
     const oldIdentity = readCopresenceMarker(nodesDir(), resolved.id);
     // #602 — a clean `anet node stop` removes the marker but leaves the candidate; when its thread
     // never got a rollout there is nothing to carry over, so it is dropped instead of refusing forever.
-    const pendingDecision = decidePendingThreadAtStart(
-      prelaunchCfg.codexPendingThread,
+    const pendingDecision = reconcilePendingThreadAtStart(
+      prelaunchCfg,
       oldIdentity.kind === "ok" ? { kind: "ok", marker: oldIdentity.marker.marker }
         : oldIdentity.cause === "MISSING" ? { kind: "missing" }
         : { kind: "unreadable", cause: oldIdentity.cause },
@@ -1603,7 +1609,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     if (pendingDecision.kind === "migrate") {
       authoritativeOldPendingMarker = pendingDecision.oldMarker;
     } else if (pendingDecision.kind === "drop-unmaterialized") {
-      delete prelaunchCfg.codexPendingThread;
+      prelaunchCfg = pendingDecision.config;
       atomicWritePrivateJson(join(nodesDir(), resolved.id, "config.json"), prelaunchCfg);
       console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
     } else if (pendingDecision.kind === "refuse") {

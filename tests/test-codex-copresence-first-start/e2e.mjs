@@ -16,7 +16,7 @@
 //   logged-out   no auth.json; start must report needs-login with the exact login command, exit 3,
 //                and start nothing (no tmux session, no npx call).
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -139,6 +139,13 @@ if (scenario !== "logged-out") {
   // Fake, clearly-not-real credential: the gate only asks "is there a usable login shape".
   writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: `sk-fake-t535-${runId}` }) + "\n", { mode: 0o600 });
 }
+if (scenario === "backup-fails") {
+  const sessionsDir = join(codexHome, "sessions");
+  mkdirSync(sessionsDir, { recursive: true });
+  const outside = join(root, "must-not-copy.jsonl");
+  writeFileSync(outside, "outside recovery scope\n");
+  symlinkSync(outside, join(sessionsDir, "escape.jsonl"));
+}
 
 let started = false;
 try {
@@ -194,6 +201,45 @@ try {
     if (!v.out.includes(`PASS: verify ${alias} (not applicable: identity_attested)`)) fail("verify PASS line does not say identity_attested was not applicable", v.out);
     if (!/^\s+- identity_attested\s+not applicable/m.test(v.out)) fail("identity_attested is not shown as n/a", v.out);
     pass("single node, no --probe-from: verify PASS, identity_attested n/a");
+
+    // A bad config.env must be rejected before the launcher quiesces the
+    // healthy old generation.  This is the production ordering regression:
+    // validation used to happen only while writing the replacement app-server
+    // env file, after all three old sessions had already been killed.
+    const beforeSessions = sessions().sort();
+    const beforePids = new Map(beforeSessions.map((session) => [session, panePid(session)]));
+    const invalidCfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    invalidCfg.env = { ...(invalidCfg.env ?? {}), PATH: "/unsafe/config-path" };
+    writeFileSync(cfgPath, JSON.stringify(invalidCfg, null, 2), { mode: 0o600 });
+    const refused = run(["node", "start", alias, "--codex-bin", codexWrapper, "--accept-dev-channels"]);
+    if (refused.rc === 0 || !refused.out.includes("config.env.PATH is reserved")) {
+      fail("reserved config.env was not rejected before replacement", refused.out);
+    }
+    const afterSessions = sessions().sort();
+    if (JSON.stringify(afterSessions) !== JSON.stringify(beforeSessions)) {
+      fail("reserved config.env changed the live session set", refused.out);
+    }
+    for (const [session, pid] of beforePids) {
+      if (!pid || !existsSync(`/proc/${pid}`) || panePid(session) !== pid) {
+        fail(`reserved config.env killed or replaced ${session} pid=${pid}`, refused.out);
+      }
+    }
+    delete invalidCfg.env.PATH;
+    writeFileSync(cfgPath, JSON.stringify(invalidCfg, null, 2), { mode: 0o600 });
+    pass("reserved config.env fails before quiesce; all three old sessions keep the same pids");
+  } else if (scenario === "backup-fails") {
+    if (start.rc === 0) fail("start succeeded although the recovery backup failed", start.out);
+    if (!start.out.includes("cannot create quiesced Codex recovery point") || !start.out.includes("refuses symlink")) {
+      fail("backup failure was not surfaced as the startup refusal", start.out);
+    }
+    if (sessions().some((session) => session.startsWith(alias))) {
+      fail("backup failure still launched a co-presence process", start.out);
+    }
+    const recoveryDir = join(nodeDir, "recovery");
+    if (existsSync(recoveryDir) && readdirSync(recoveryDir).length !== 0) {
+      fail("backup failure left a partial recovery directory", start.out);
+    }
+    pass("backup failure exits nonzero before app-server/bridge/TUI and removes the partial recovery point");
   } else if (scenario === "bridge-dies") {
     if (start.rc === 0) fail("start succeeded although the bridge's agent-node exits at launch", start.out);
     if (!start.out.includes("bridge exited before attaching")) fail("failure does not say the bridge exited", start.out);
