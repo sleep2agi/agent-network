@@ -6317,6 +6317,7 @@ function upsertNodeIdentity(input: UpsertNodeWithSec1GuardInput): UpsertNodeOutc
       const conflict = db.get("SELECT node_id FROM nodes WHERE network_id=?1 AND alias=?2 AND node_id<>?3 LIMIT 1",
         callerNet, input.alias ?? "", input.node_id);
       if (conflict || token.name !== `node:${input.alias}` || token.user_id !== input.callerUserId || existing) {
+        console.warn(`[commhub] 🚫 report_status node upsert refused (identity_mismatch): node_id=${input.node_id} first-binding conflict`);
         return { result: "refused", reason: "identity_mismatch", existingNet: existing?.network_id ?? null, callerNet };
       }
     }
