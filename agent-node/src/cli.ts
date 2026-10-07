@@ -4112,6 +4112,7 @@ async function processWithCodexAppServer(
   taskId: string | null,
   steerIfExternalTurn = false,
   evidence?: TaskRuntimeEvidenceReporter,
+  trackReceipt = true,
 ): Promise<string> {
   const { codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
@@ -4141,7 +4142,7 @@ async function processWithCodexAppServer(
     onConsumed: (event) => {
       const threadId = session.bridge.getThreadId();
       const inboxId = taskId ? queuedInboxRowByTask.get(taskId) : undefined;
-      if (taskId && inboxId && turnReceiptLedger) {
+      if (trackReceipt && taskId && inboxId && turnReceiptLedger) {
         try {
           turnReceiptLedger.watch({
             taskId,
@@ -5440,6 +5441,7 @@ function think(
   images?: string[],
   steerIfExternalTurn = false,
   evidence?: TaskRuntimeEvidenceReporter,
+  trackReceipt = true,
 ): Promise<string> {
   if (configApplyDraining) {
     // Don't accept new work during a restart drain. The error string
@@ -5483,7 +5485,7 @@ function think(
         return await processWithOpencode(task, from, images, evidence);
       }
       if (RUNTIME === "codex-app-server") {
-        return await processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence);
+        return await processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt);
       }
       return await processWithClaude(task, from, images, evidence);
     } finally {
@@ -5498,7 +5500,7 @@ function think(
   // its own process environment and task identity is carried in the prompt.
   if (RUNTIME === "codex-app-server") {
     incrementInFlight();
-    return processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence)
+    return processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt)
       .finally(() => {
         decrementInFlight();
       });
@@ -5587,6 +5589,7 @@ async function processTask(
   taskId: string | null = null,
   images?: string[],
   steerIfExternalTurn = false,
+  receiptExpected = true,
 ): Promise<{ text: string; failed: boolean; skipped?: boolean }> {
   // The experimental Grok CLI lane writes its prompt into the shared TUI
   // session. Never place credential-shaped input there: mask it before the
@@ -5666,7 +5669,7 @@ async function processTask(
     // delegation is intentionally human-only, so the legacy network-side
     // wrapper is skipped for copresence and remains unchanged elsewhere.
     text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
-      || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence);
+      || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected);
   } catch (err: any) {
     if (err?.code === "codex_task_skipped") {
       // #1930 — the queued row was dropped before its turn because the Hub no
@@ -5743,7 +5746,7 @@ async function processTask(
     );
     await new Promise((r) => setTimeout(r, backoff));
     try {
-      const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence);
+      const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected);
       text = retried;
       failed = false;
       if (GROK_COPRESENCE) {
@@ -6060,6 +6063,7 @@ async function processInbox() {
             logicalTaskId,
             images,
             interactiveDashboardTask,
+            deliveryPolicy.replyExpected,
           ).then((outcome) => {
             // Known before `acknowledge` runs: the wrapper awaits this first.
             skippedOnHub = outcome.skipped === true;
@@ -6251,6 +6255,10 @@ async function deliverReplyReliably(
       // loudly so the operator can see it.
       warn(`reply rejected by server for ${target} (task ${taskId.slice(0, 8)}): ${e.message}`);
       clearPendingReply(target, taskId);
+      // A structured rejection is terminal for this delivery. Keeping the
+      // turn ledger would make the 30s recovery pass recreate and resend the
+      // same rejected receipt forever.
+      turnReceiptLedger?.remove(taskId);
       return "rejected";
     }
     // Transient — leave in queue, drainPendingReplies will retry.

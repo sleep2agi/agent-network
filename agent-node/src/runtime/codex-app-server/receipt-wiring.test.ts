@@ -27,6 +27,28 @@ describe("#703 production receipt wiring", () => {
     );
   });
 
+  test("an app-level Hub rejection settles the ledger instead of retrying forever", () => {
+    const direct = cli.slice(cli.indexOf("async function deliverReplyReliably("), cli.indexOf("// ── Telegram"));
+    const rejected = direct.slice(
+      direct.indexOf("if (e instanceof CommHubError && e.appLevel)"),
+      direct.indexOf("// Transient", direct.indexOf("if (e instanceof CommHubError && e.appLevel)")),
+    );
+    expect(rejected).toContain("clearPendingReply(target, taskId)");
+    expect(rejected).toContain("turnReceiptLedger?.remove(taskId)");
+    expect(rejected.indexOf("turnReceiptLedger?.remove(taskId)")).toBeLessThan(rejected.indexOf('return "rejected"'));
+  });
+
+  test("terminal peer replies enter the runtime without creating a reply ledger row", () => {
+    const process = cli.slice(cli.indexOf("async function processTask("), cli.indexOf("async function processInbox()"));
+    expect(process).toContain("receiptExpected = true");
+    expect(process).toContain("runtimeEvidence, receiptExpected");
+    const appServer = cli.slice(cli.indexOf("async function processWithCodexAppServer("), cli.indexOf("async function processWithGrok("));
+    expect(appServer).toContain("trackReceipt = true");
+    expect(appServer).toContain("if (trackReceipt && taskId && inboxId && turnReceiptLedger)");
+    const inbox = cli.slice(cli.indexOf("const inboxTurn = await runInboxTurnByReplyPolicy("), cli.indexOf('if (inboxTurn.kind === "terminal_peer_reply")'));
+    expect(inbox).toContain("deliveryPolicy.replyExpected");
+  });
+
   test("startup recovery is read-only against Codex and is retried periodically", () => {
     expect(cli).toContain("session.bridge.inspectPersistedTurn(threadId, turnId)");
     expect(cli).toContain("if (turnReceiptLedger?.load().length) void recoverCodexTurnReceipts()");

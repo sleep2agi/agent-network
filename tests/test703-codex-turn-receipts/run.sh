@@ -18,9 +18,11 @@ run_green 2>&1 | tee -a "$REPORT"
 
 cp agent-node/src/runtime/codex-app-server/receipt-ledger.ts /tmp/receipt-ledger.ts
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
+cp agent-node/src/cli.ts /tmp/agent-node-cli.ts
 restore() {
   cp /tmp/receipt-ledger.ts agent-node/src/runtime/codex-app-server/receipt-ledger.ts
   cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
+  cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
 }
 trap restore EXIT
 
@@ -58,6 +60,13 @@ expect_red exact-turn agent-node/src/runtime/codex-app-server-bridge.ts \
           if (found) return classifyPersistedTurn(found);' \
   'const found = turns.find((candidate) => candidate.id !== turnId);
           if (found) return classifyPersistedTurn(found);'
+expect_red rejected-cleanup agent-node/src/cli.ts \
+  'turnReceiptLedger?.remove(taskId);
+      return "rejected";' \
+  'return "rejected";'
+expect_red peer-reply-ledger agent-node/src/cli.ts \
+  'if (trackReceipt && taskId && inboxId && turnReceiptLedger)' \
+  'if (taskId && inboxId && turnReceiptLedger)'
 
 restore
 run_green >/dev/null
