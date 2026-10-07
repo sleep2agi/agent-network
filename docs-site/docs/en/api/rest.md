@@ -368,7 +368,7 @@ Optional request field `keep_cli_tokens` (boolean, default `false`): when `true`
 
 `revoked` is the total number of **other** tokens revoked (it does **not** include the caller's own token — that one is revoked separately by `revokeToken(resolved.user.user_id, resolved.tokenId)` in the password-change handler in `server.ts`); `revoked_login` / `revoked_cli` split it by kind (`revoked = revoked_login + revoked_cli`).
 
-**Key side effects** (verify [`auth.ts` `changePassword` + `revokeTokensAfterPasswordChange`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+**Key side effects** (verify [`auth.ts` `changePassword` + `revokeTokensAfterPasswordChange`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L651) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` explicit delete)
 2. **Other browser / app login sessions** (`api_tokens.kind='login'`) are revoked; counted in `revoked_login`
 3. **CLI / script tokens** (`kind='cli'`: issued to `anet login` and other anet commands, and network-less named tokens from `POST /api/auth/tokens`) are **revoked by default too**, counted in `revoked_cli`; only `keep_cli_tokens: true` keeps them, listed one by one in `kept_cli_tokens` (`token_id` / `name` / `client_label` / `created_at` / `last_used_at`, **never token values**) so they can be revoked individually with `DELETE /api/auth/tokens/:token_id`. The kind is client-declared and only affects display and this explicit keep path. `anet passwd` sends `keep_cli_tokens: true` by default; `--revoke-cli-tokens` omits it
@@ -471,7 +471,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS networks`, including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) (grep `export function getUserNetworks(`) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
+Each row in `networks` has 10 fields: the 9 `networks` table columns ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) — grep `CREATE TABLE IF NOT EXISTS networks`, including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L447) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
 
 ---
 
