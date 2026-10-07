@@ -2144,8 +2144,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // both `attachments` (top-level) and `meta.attachments` are supplied,
       // top-level wins (same rule as REST /api/task L2101).
       meta: z.any().optional().describe("Optional structured reply metadata, e.g. { attachments: [...] }."),
-      thread_id: z.string().min(1).max(200).optional().describe("Late thread identity."),
-      turn_id: z.string().min(1).max(200).optional().describe("Late turn identity."),
+      thread_id: z.string().min(1).max(200).optional().describe("Late thread."),
+      turn_id: z.string().min(1).max(200).optional().describe("Late turn."),
     };
   const handleReply = async (args: any, peerCapabilityRequired: boolean) => {
       const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta, thread_id: threadId, turn_id: turnId } = args;
