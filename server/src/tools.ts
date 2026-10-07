@@ -20,6 +20,7 @@ import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
 import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
+import { agentCancelSchedule, agentCreateSchedule, agentGetSchedule, agentListSchedules, agentRunScheduleNow, agentScheduleRuns, agentUpdateSchedule } from "./schedule-agent.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict } from "./node-permissions.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
@@ -109,7 +110,7 @@ function normalizeMetaJson(meta: unknown): string | null {
  * 排程是「建它的人」的委托(见 scheduled-tasks.ts canMessageAgent),回复送到他的用户名下。
  *
  * 退回 null(= 照旧送 'scheduler')的情形:任务不是 scheduler 派的 / meta 没有排程 id /
- * 排程没有 created_by(外部或旧排程)/ 用户已不存在 / 用户名与本网络某个节点 alias 撞名
+ * 排程没有 created_by(外部或旧排程)/ 排程是 Agent 建的(#733 created_by_node_id,不往主人的未读里灌)/ 用户已不存在 / 用户名与本网络某个节点 alias 撞名
  * (那一行会变成那个节点的待办,不是用户的未读 —— 与 server.ts userInboxAliasCollides 同一条规则)。
  * 只改投递地址;任务归属、reply_target_mismatch 等校验仍按原始发送方 'scheduler' 判。
  */
@@ -124,7 +125,7 @@ function scheduledReplyRecipient(taskId: string, networkId: string | null | unde
   if (!scheduleId) return null;
   const owner = db.get<{ username: string | null }>(
     `SELECT u.username AS username FROM scheduled_tasks s JOIN users u ON u.user_id = s.created_by
-     WHERE s.schedule_id = ?1 AND s.network_id = ?2`,
+     WHERE s.schedule_id = ?1 AND s.network_id = ?2 AND s.created_by_node_id IS NULL`,
     scheduleId, task.network_id,
   );
   const username = owner?.username?.trim();
@@ -248,7 +249,7 @@ function guardNodePermissionTools(server: McpServer, tokenId: string, networkId:
   };
   const wrap = (name: string, handler: (...callArgs: any[]) => any) => async (...callArgs: any[]) => {
     const cls = NODE_TOOL_CLASS[name];
-    if (cls && cls !== "always" && cls !== "read" && cls !== "requirements") {
+    if (cls && cls !== "always" && cls !== "read" && cls !== "requirements" && cls !== "schedule") {
       const id = nodeIdentity(tokenId, networkId);
       const args = callArgs[0] && typeof callArgs[0] === "object" ? callArgs[0] as Record<string, unknown> : {};
       const verdict = id ? verdictFor(id, name, args) : null;
@@ -6247,6 +6248,53 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ id, text, network_id }) => requirementsCall("POST", `/api/requirements/${encodeURIComponent(id)}/comments`, network_id, { text }),
   );
+
+  // Board #733 — Agents manage Hub scheduled tasks. Node tokens only (REST stays people-only); the
+  // permission model lives in schedule-agent.ts.
+  const scheduleCall = (fn: (id: NodeIdentity, canWriteNet: boolean) => Record<string, unknown>) => {
+    let body: Record<string, unknown>;
+    if (!callerTokenIsNetwork || !enforceNetworkId) body = { ok: false, error: "network_token_required" };
+    else {
+      const id = nodeIdentity(callerTokenId, enforceNetworkId);
+      body = id ? fn(id, canWrite(enforceNetworkId)) : { ok: false, error: "node_identity_unbound" };
+    }
+    return { content: [{ type: "text" as const, text: JSON.stringify(body) }] };
+  };
+  // Kept terse on purpose (#476 per-role tools/list ceilings): every value is validated server-side by the
+  // same parseScheduleSpec / validateScheduleCreate as REST, so the schema only names the fields.
+  const schedId = z.string();
+  const schedSpec = z.any().describe("{type:'once',run_at:ISO} | {type:'interval',every_seconds>=60} | {type:'daily',time:'HH:MM'} | {type:'weekly',time,weekdays:[0-6]}");
+  const schedFields = {
+    name: z.string(),
+    task: z.string().describe("sent to the target each run"),
+    target_node_id: z.string().optional(),
+    schedule: schedSpec,
+    timezone: z.string().optional().describe("IANA, default UTC"),
+    priority: z.enum(["high", "normal", "low"]).optional(),
+  };
+  server.tool("schedule_list", "List Hub schedules that target you or that you created.",
+    { status: z.enum(["active", "paused", "completed", "cancelled"]).optional() },
+    async ({ status }) => scheduleCall(id => agentListSchedules(id, status)));
+  server.tool("schedule_get", "Get one of your schedules.", { schedule_id: schedId },
+    async ({ schedule_id }) => scheduleCall(id => agentGetSchedule(id, schedule_id)));
+  server.tool("schedule_create",
+    "Schedule `task` to be sent to target_node_id (default: you) by the Hub. Other targets need send_task access. Max 20 per node.",
+    schedFields,
+    async (args) => scheduleCall((id, w) => agentCreateSchedule(id, w, args as Record<string, unknown>)));
+  server.tool("schedule_update", "Edit, pause or resume one of your schedules. Omitted fields are kept.",
+    {
+      schedule_id: schedId, revision: z.number().optional(), name: z.string().optional(), task: z.string().optional(),
+      target_node_id: z.string().optional(), schedule: z.any().optional(), timezone: z.string().optional(),
+      priority: schedFields.priority, status: z.enum(["active", "paused"]).optional(),
+    },
+    async ({ schedule_id, ...rest }) => scheduleCall((id, w) => agentUpdateSchedule(id, w, schedule_id, rest as Record<string, unknown>)));
+  server.tool("schedule_cancel", "Cancel one of your schedules.", { schedule_id: schedId },
+    async ({ schedule_id }) => scheduleCall((id, w) => agentCancelSchedule(id, w, schedule_id)));
+  server.tool("schedule_run_now", "Run one of your schedules once now.", { schedule_id: schedId },
+    async ({ schedule_id }) => scheduleCall((id, w) => agentRunScheduleNow(id, w, schedule_id)));
+  server.tool("schedule_runs", "Recent runs of one of your schedules.",
+    { schedule_id: schedId, limit: z.number().optional() },
+    async ({ schedule_id, limit }) => scheduleCall(id => agentScheduleRuns(id, schedule_id, limit)));
 
   // #478:tools/list 只列这个调用者真能用的工具(tool-audience.ts)。只滤列表,tools/call 不变。
   const caller: ToolCaller = callerTokenIsNetwork

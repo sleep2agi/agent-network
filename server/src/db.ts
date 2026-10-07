@@ -1613,6 +1613,10 @@ try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN misfire_policy TEXT NOT NU
 // whether the node had ever picked it up: not_received | in_progress.
 try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN blocked_by_task_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN blocked_by_state TEXT"); } catch {}
+// Board #733 — schedules an Agent created over MCP name the creating node. NULL = created by a person
+// (REST / Dashboard) or a row from before this column; old rows keep NULL and old code never reads it.
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN created_by_node_id TEXT"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_creator_node ON scheduled_tasks(network_id, created_by_node_id)"); } catch {}
 // #523 — consecutive-failure alert bookkeeping (scheduled-failures.ts). Additive and nullable:
 // an older Hub never reads them, so rolling back is safe. failure_alert_at = ISO time of the last
 // alert; failure_alert_key = the last successful run_id at that moment ('' = none yet), so a

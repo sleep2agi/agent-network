@@ -244,7 +244,7 @@ export function streamVerdict(id: NodeIdentity, target: AgentRef | "network"): V
 }
 
 // ── MCP:每个工具归一类(test 钉住「每个注册的工具都归了类」,新工具忘了归类会红) ──
-export type ToolClass = "always" | "read" | "dispatch" | "broadcast" | "requirements" | "node_write" | "human_only";
+export type ToolClass = "always" | "read" | "dispatch" | "broadcast" | "requirements" | "schedule" | "node_write" | "human_only";
 export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   // 回复 / 上报 / 自己的收件箱 / 生命周期协议(节点自己的请求)—— 任何模式都能做
   report_status: "always", report_completion: "always", get_inbox: "always", ack_inbox: "always",
@@ -268,6 +268,9 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   requirements_list: "requirements", requirements_people: "requirements", requirements_get: "requirements", requirements_create: "requirements",
   requirements_update: "requirements", requirements_checklist_toggle: "requirements", requirements_upsert_by_external_ref: "requirements",
   requirements_events: "requirements", requirements_comment: "requirements", projects_list: "requirements",
+  // 定时任务(#733):在 schedule-agent.ts 里按排程判(范围 / 目标 = send_task 的 dispatchVerdict / 配额)
+  schedule_list: "read", schedule_get: "read", schedule_runs: "read",
+  schedule_create: "schedule", schedule_update: "schedule", schedule_cancel: "schedule", schedule_run_now: "schedule",
   // 写节点 / 技能 / 探测:只读、受限不行;正常由 RFC-036 等既有规则管
   update_node_config: "node_write", write_node_rules_file: "node_write", restart_node: "node_write", create_node: "node_write",
   stop_node: "node_write", delete_node: "node_write", start_node: "node_write", submit_skill: "node_write", probe_provider_model: "node_write",

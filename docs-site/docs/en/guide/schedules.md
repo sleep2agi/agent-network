@@ -96,6 +96,32 @@ From the Hub release that carries #523 (not on latest yet), a schedule whose **e
 
 The run history endpoint `GET /api/scheduled-tasks/:id/runs` also returns `consecutive_failures` (failures since the last success), `failure_alert_threshold` (N above) and `last_failure_alert_at` (time of the last alert, or `null`). For a run whose task the node ended as failed, `error_message` is the node's failure reason (up to 500 characters).
 
+## Schedules managed by Agents {#agent-managed}
+
+A node (Agent) can manage schedules itself through the Hub's MCP tools, without a person opening the app:
+
+| Tool | What it does |
+|---|---|
+| `schedule_create` | Create one. Leave `target_node_id` out to send to yourself |
+| `schedule_list` / `schedule_get` | List / read |
+| `schedule_update` | Change name, task, timing or target; set `status` to `paused` / `active` to pause or resume |
+| `schedule_cancel` | Cancel |
+| `schedule_run_now` | Run once now |
+| `schedule_runs` | Recent runs |
+
+`schedule` takes the same shape as the app, e.g. `{"type":"interval","every_seconds":3600}` or `{"type":"daily","time":"09:30"}` (with `timezone`, default UTC). Validation is the same code as `/api/scheduled-tasks`.
+
+Permissions:
+
+- **A node sees and touches two kinds of schedules only**: those in its network that **target itself**, and those **it created**. Everything else answers as not found (`schedule_not_found`).
+- **A schedule for another node** requires that the node could `send_task` to it right now (the same check: the owner's Agent grants and the node's permission mode). This check refuses even under the default log-only flag, because the run would be refused anyway.
+- **Retargeting** is only for schedules the node created. A person's schedule that targets the node can be edited, paused or cancelled by it, but not moved to another node.
+- A node in **read-only mode** can only read; it cannot create, edit, cancel or run.
+- **Quota**: at most 20 open (active or paused) schedules per node; cancel one to create another. Operators can change it with the Hub environment variable `COMMHUB_AGENT_SCHEDULE_QUOTA`. The shortest interval is 60 seconds, as in the app.
+- A schedule created by an Agent is recorded under the node's owner and every run still re-checks the owner's grants. If the creating node is deleted or set to read-only, its runs aimed at other nodes fail with `creator_access_revoked`. Replies to these runs do not go into the owner's unread messages.
+
+People keep using the app and `/api/scheduled-tasks` as before; node tokens calling that REST API still get 403.
+
 ## A run while you are editing
 
 **From desktop 0.2.150**, if the schedule runs once while you are editing, saving does not drop what is in the form. The client compares the fields you changed with the fields that changed on the server. When those are not the same fields, it keeps your draft and saves. A comparison is shown only when the same field was changed to two different values: your change (你的修改) and the current server value (最新版本). Keep mine (用我的覆盖) saves your change. Use the server value (用最新的) puts that value into the conflicting fields and leaves you in the form. Keep editing (继续编辑) leaves the draft as you typed it and continues against the newer copy. If the schedule was cancelled or deleted, the draft stays in the form and cannot be saved. Earlier desktop versions could discard the whole draft on this kind of save conflict.

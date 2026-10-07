@@ -19,10 +19,11 @@ export type ScheduleSpec =
 
 export type MisfirePolicy = "catch_up_once" | "skip";
 
-type ScheduledRow = {
+export type ScheduledRow = {
   schedule_id: string;
   network_id: string;
   created_by: string | null;
+  created_by_node_id: string | null;
   name: string;
   target_node_id: string;
   target_alias: string;
@@ -178,11 +179,133 @@ export function nextOccurrence(spec: ScheduleSpec, timezone: string, after: Date
   throw new Error("next_occurrence_unresolvable");
 }
 
+/** REST shape (pinned by rest-explicit-columns-http.test.ts): creator ids stay server-side. */
 function decodeRow(row: ScheduledRow): Record<string, unknown> {
   let schedule: unknown = null;
   try { schedule = JSON.parse(row.schedule_json); } catch {}
-  const { created_by: _createdBy, schedule_json: _scheduleJson, ...publicRow } = row;
+  const { created_by: _createdBy, created_by_node_id: _createdByNode, schedule_json: _scheduleJson, ...publicRow } = row;
   return { ...publicRow, schedule };
+}
+
+/** MCP (agent) shape: REST shape + which node created it (null = a person / old row). Never the user id. */
+export function decodeRowForAgent(row: ScheduledRow): Record<string, unknown> {
+  return { ...decodeRow(row), created_by_node_id: row.created_by_node_id ?? null };
+}
+
+export function getScheduleRow(scheduleId: string): ScheduledRow | null {
+  return db.get<ScheduledRow>(`SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1`, scheduleId);
+}
+
+export class ScheduleInputError extends Error {
+  constructor(public code: string, public status: number, public extra: Record<string, unknown> = {}) { super(code); }
+}
+
+export type ValidatedScheduleCreate = {
+  name: string; content: string; priority: string; misfirePolicy: MisfirePolicy;
+  target: { node_id: string; alias: string }; spec: ScheduleSpec; timezone: string; next: Date;
+};
+
+/** Shared by REST POST and MCP schedule_create. Throws Error(code) like before. */
+export function validateScheduleCreate(networkId: string, body: Record<string, unknown>): ValidatedScheduleCreate {
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const content = typeof body.task === "string" ? body.task.trim() : "";
+  if (!name || name.length > 120) throw new Error("invalid_name");
+  if (!content || content.length > TASK_CONTENT_MAX) throw new Error("invalid_task");
+  const priority = typeof body.priority === "string" ? body.priority : "normal";
+  if (!PRIORITIES.has(priority)) throw new Error("invalid_priority");
+  const misfirePolicy = parseMisfirePolicy(body.misfire_policy);
+  const target = validateTarget(networkId, body.target_node_id);
+  const { spec, timezone } = parseScheduleSpec(body.schedule, body.timezone);
+  const next = nextOccurrence(spec, timezone, new Date());
+  if (!next) throw new Error("schedule_has_no_future_occurrence");
+  return { name, content, priority, misfirePolicy, target, spec, timezone, next };
+}
+
+export function insertSchedule(networkId: string, createdBy: string | null, createdByNodeId: string | null, v: ValidatedScheduleCreate): ScheduledRow {
+  const scheduleId = `sched_${crypto.randomUUID()}`;
+  db.run(
+    `INSERT INTO scheduled_tasks
+     (schedule_id, network_id, created_by, created_by_node_id, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, misfire_policy, next_run_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'skip', ?13, ?14)`,
+    [scheduleId, networkId, createdBy, createdByNodeId, v.name, v.target.node_id, v.target.alias, v.content, v.priority, v.spec.type, JSON.stringify(v.spec), v.timezone, v.misfirePolicy, iso(v.next)],
+  );
+  return getScheduleRow(scheduleId)!;
+}
+
+/** Idempotent cancel (shared by REST DELETE / POST cancel and MCP schedule_cancel). */
+export function cancelSchedule(row: ScheduledRow): void {
+  if (row.status === "cancelled") return;
+  db.run("UPDATE scheduled_tasks SET status = 'cancelled', next_run_at = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?1", [row.schedule_id]);
+}
+
+export function scheduleRuns(row: ScheduledRow, limit: number): Record<string, unknown> {
+  const runs = db.all(
+    // #523 — a task that ended `failed` leaves run.error_message empty; its reason is the task's reply text.
+    `SELECT r.run_id, r.schedule_id, r.scheduled_for, r.task_id, r.status, r.error_code,
+            CASE WHEN r.error_message IS NULL AND r.status = 'failed' THEN SUBSTR(t.result, 1, 500) ELSE r.error_message END AS error_message,
+            r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at
+       FROM scheduled_task_runs r
+       LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
+      WHERE r.schedule_id = ?1 AND r.network_id = ?2 ORDER BY r.created_at DESC, r.scheduled_for DESC LIMIT ?3`,
+    row.schedule_id, row.network_id, limit,
+  );
+  return { runs, ...failureSummary(row.schedule_id) };
+}
+
+/** Shared PATCH semantics (REST PATCH and MCP schedule_update). Throws ScheduleInputError. */
+export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>): ScheduledRow {
+  // Cancellation/completion are terminal states. Editing must never become
+  // an implicit resurrection path (including by supplying status=active).
+  if (row.status === "cancelled") throw new ScheduleInputError("schedule_cancelled", 409);
+  if (row.status === "completed") throw new ScheduleInputError("schedule_completed", 409);
+  if (!Number.isSafeInteger(body.revision) || Number(body.revision) !== row.revision) throw new ScheduleInputError("revision_conflict", 409, { current_revision: row.revision });
+  try {
+    const name = body.name === undefined ? row.name : String(body.name).trim();
+    const content = body.task === undefined ? row.task_content : String(body.task).trim();
+    const priority = body.priority === undefined ? row.priority : String(body.priority);
+    if (!name || name.length > 120) throw new Error("invalid_name");
+    if (!content || content.length > TASK_CONTENT_MAX) throw new Error("invalid_task");
+    if (!PRIORITIES.has(priority)) throw new Error("invalid_priority");
+    const target = body.target_node_id === undefined ? { node_id: row.target_node_id, alias: row.target_alias } : validateTarget(row.network_id, body.target_node_id);
+    const parsed = body.schedule === undefined
+      ? { spec: JSON.parse(row.schedule_json) as ScheduleSpec, timezone: body.timezone === undefined ? row.timezone : String(body.timezone) }
+      : parseScheduleSpec(body.schedule, body.timezone === undefined ? row.timezone : body.timezone);
+    if (!validTimezone(parsed.timezone)) throw new Error("invalid_timezone");
+    const requestedStatus = body.status === undefined ? row.status : String(body.status);
+    if (!new Set(["active", "paused"]).has(requestedStatus)) throw new Error("invalid_status");
+    const misfirePolicy = parseMisfirePolicy(body.misfire_policy, row.misfire_policy);
+    // Editing descriptive fields must not silently reset the schedule's
+    // cadence. Recompute only when the scheduling inputs change, when a
+    // paused schedule resumes, or when repairing an impossible active row
+    // with no next occurrence. The recompute uses the same DST-safe helper
+    // as creation and dispatch advancement.
+    const scheduleJson = JSON.stringify(parsed.spec);
+    const schedulingChanged = scheduleJson !== row.schedule_json || parsed.timezone !== row.timezone;
+    const resumed = row.status !== "active" && requestedStatus === "active";
+    const next = requestedStatus !== "active"
+      ? null
+      : schedulingChanged || resumed || !row.next_run_at
+        ? nextOccurrence(parsed.spec, parsed.timezone, new Date())
+        : new Date(row.next_run_at);
+    if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
+    // Runs no longer bump revision, so the scheduler may have advanced
+    // next_run_at after `row` was read. When cadence is preserved, keep the
+    // stored value instead of writing back the already-fired occurrence.
+    const keepStoredNext = requestedStatus === "active" && !schedulingChanged && !resumed && !!row.next_run_at ? 1 : 0;
+    const updated = db.run(
+      `UPDATE scheduled_tasks SET name = ?1, target_node_id = ?2, target_alias = ?3, task_content = ?4,
+       priority = ?5, schedule_type = ?6, schedule_json = ?7, timezone = ?8, status = ?9,
+       next_run_at = CASE WHEN ?14 = 1 AND next_run_at IS NOT NULL THEN next_run_at ELSE ?10 END,
+       misfire_policy = ?11, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
+      [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision, keepStoredNext],
+    );
+    if (updated.changes !== 1) throw new ScheduleInputError("revision_conflict", 409);
+    return getScheduleRow(row.schedule_id)!;
+  } catch (e: any) {
+    if (e instanceof ScheduleInputError) throw e;
+    const code = String(e?.message || "invalid_schedule");
+    throw new ScheduleInputError(code, code === "target_node_not_found" ? 404 : 400);
+  }
 }
 
 function scopedSchedule(scheduleId: string, scope: RestNetworkScope): ScheduledRow | null {
@@ -310,6 +433,21 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       );
       if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
+    }
+    // Board #733 — an Agent-created schedule aimed at another node is that node's standing send_task: stop
+    // dispatching if the creating node is gone from the network or has since been switched to read-only.
+    if (row.created_by_node_id && row.created_by_node_id !== node.node_id) {
+      const creator = db.get<{ permission_mode: string | null }>(
+        "SELECT permission_mode FROM nodes WHERE node_id = ?1 AND network_id = ?2", row.created_by_node_id, row.network_id);
+      if (!creator || creator.permission_mode === "readonly") {
+        finalStatus = "failed";
+        db.run(
+          "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'creator_access_revoked', error_message = 'The node that created this schedule is gone or read-only', completed_at = datetime('now') WHERE run_id = ?1",
+          [runId],
+        );
+        if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+        return;
+      }
     }
     const lifecycle = assertNodeActive(node.alias, row.network_id);
     if (!lifecycle.ok) {
@@ -516,25 +654,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     if (!networkId) return jsonError("network_id_required", 400);
     if (!writeAllowed(ctx, networkId)) return jsonError("permission_denied", 403);
     try {
-      const name = typeof body.name === "string" ? body.name.trim() : "";
-      const content = typeof body.task === "string" ? body.task.trim() : "";
-      if (!name || name.length > 120) throw new Error("invalid_name");
-      if (!content || content.length > TASK_CONTENT_MAX) throw new Error("invalid_task");
-      const priority = typeof body.priority === "string" ? body.priority : "normal";
-      if (!PRIORITIES.has(priority)) throw new Error("invalid_priority");
-      const misfirePolicy = parseMisfirePolicy(body.misfire_policy);
-      const target = validateTarget(networkId, body.target_node_id);
-      const { spec, timezone } = parseScheduleSpec(body.schedule, body.timezone);
-      const next = nextOccurrence(spec, timezone, new Date());
-      if (!next) throw new Error("schedule_has_no_future_occurrence");
-      const scheduleId = `sched_${crypto.randomUUID()}`;
-      db.run(
-        `INSERT INTO scheduled_tasks
-         (schedule_id, network_id, created_by, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, misfire_policy, next_run_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'skip', ?12, ?13)`,
-        [scheduleId, networkId, ctx.auth?.userId ?? null, name, target.node_id, target.alias, content, priority, spec.type, JSON.stringify(spec), timezone, misfirePolicy, iso(next)],
-      );
-      const created = db.get<ScheduledRow>(`SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1`, scheduleId)!;
+      const created = insertSchedule(networkId, ctx.auth?.userId ?? null, null, validateScheduleCreate(networkId, body));
       return Response.json({ ok: true, schedule: decodeRow(created) }, { status: 201 });
     } catch (e: any) {
       const code = String(e?.message || "invalid_schedule");
@@ -552,17 +672,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
 
   if (sub === "runs" && req.method === "GET") {
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
-    const runs = db.all(
-      // #523 — a task that ended `failed` leaves run.error_message empty; its reason is the task's reply text.
-      `SELECT r.run_id, r.schedule_id, r.scheduled_for, r.task_id, r.status, r.error_code,
-              CASE WHEN r.error_message IS NULL AND r.status = 'failed' THEN SUBSTR(t.result, 1, 500) ELSE r.error_message END AS error_message,
-              r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at
-         FROM scheduled_task_runs r
-         LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
-        WHERE r.schedule_id = ?1 AND r.network_id = ?2 ORDER BY r.created_at DESC, r.scheduled_for DESC LIMIT ?3`,
-      row.schedule_id, row.network_id, limit,
-    );
-    return Response.json({ ok: true, runs, ...failureSummary(row.schedule_id) });
+    return Response.json({ ok: true, ...scheduleRuns(row, limit) });
   }
   if (!sub && req.method === "GET") return Response.json({ ok: true, schedule: decodeRow(row) });
   if (!writeAllowed(ctx, row.network_id)) return jsonError("permission_denied", 403);
@@ -588,64 +698,18 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   // "cancelled" between polls) should get the same outcome whether it's the
   // first click or a retry.
   if ((!sub && req.method === "DELETE") || (sub === "cancel" && req.method === "POST")) {
-    if (row.status === "cancelled") return Response.json({ ok: true, status: "cancelled" });
-    db.run("UPDATE scheduled_tasks SET status = 'cancelled', next_run_at = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?1", [row.schedule_id]);
+    cancelSchedule(row);
     return Response.json({ ok: true, status: "cancelled" });
   }
 
   if (!sub && req.method === "PATCH") {
     let body: Record<string, unknown>;
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
-    // Cancellation/completion are terminal states. Editing must never become
-    // an implicit resurrection path (including by supplying status=active).
-    if (row.status === "cancelled") return jsonError("schedule_cancelled", 409);
-    if (row.status === "completed") return jsonError("schedule_completed", 409);
-    if (!Number.isSafeInteger(body.revision) || Number(body.revision) !== row.revision) return jsonError("revision_conflict", 409, { current_revision: row.revision });
     try {
-      const name = body.name === undefined ? row.name : String(body.name).trim();
-      const content = body.task === undefined ? row.task_content : String(body.task).trim();
-      const priority = body.priority === undefined ? row.priority : String(body.priority);
-      if (!name || name.length > 120) throw new Error("invalid_name");
-      if (!content || content.length > TASK_CONTENT_MAX) throw new Error("invalid_task");
-      if (!PRIORITIES.has(priority)) throw new Error("invalid_priority");
-      const target = body.target_node_id === undefined ? { node_id: row.target_node_id, alias: row.target_alias } : validateTarget(row.network_id, body.target_node_id);
-      const parsed = body.schedule === undefined
-        ? { spec: JSON.parse(row.schedule_json) as ScheduleSpec, timezone: body.timezone === undefined ? row.timezone : String(body.timezone) }
-        : parseScheduleSpec(body.schedule, body.timezone === undefined ? row.timezone : body.timezone);
-      if (!validTimezone(parsed.timezone)) throw new Error("invalid_timezone");
-      const requestedStatus = body.status === undefined ? row.status : String(body.status);
-      if (!new Set(["active", "paused"]).has(requestedStatus)) throw new Error("invalid_status");
-      const misfirePolicy = parseMisfirePolicy(body.misfire_policy, row.misfire_policy);
-      // Editing descriptive fields must not silently reset the schedule's
-      // cadence. Recompute only when the scheduling inputs change, when a
-      // paused schedule resumes, or when repairing an impossible active row
-      // with no next occurrence. The recompute uses the same DST-safe helper
-      // as creation and dispatch advancement.
-      const scheduleJson = JSON.stringify(parsed.spec);
-      const schedulingChanged = scheduleJson !== row.schedule_json || parsed.timezone !== row.timezone;
-      const resumed = row.status !== "active" && requestedStatus === "active";
-      const next = requestedStatus !== "active"
-        ? null
-        : schedulingChanged || resumed || !row.next_run_at
-          ? nextOccurrence(parsed.spec, parsed.timezone, new Date())
-          : new Date(row.next_run_at);
-      if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
-      // Runs no longer bump revision, so the scheduler may have advanced
-      // next_run_at after `row` was read. When cadence is preserved, keep the
-      // stored value instead of writing back the already-fired occurrence.
-      const keepStoredNext = requestedStatus === "active" && !schedulingChanged && !resumed && !!row.next_run_at ? 1 : 0;
-      const updated = db.run(
-        `UPDATE scheduled_tasks SET name = ?1, target_node_id = ?2, target_alias = ?3, task_content = ?4,
-         priority = ?5, schedule_type = ?6, schedule_json = ?7, timezone = ?8, status = ?9,
-         next_run_at = CASE WHEN ?14 = 1 AND next_run_at IS NOT NULL THEN next_run_at ELSE ?10 END,
-         misfire_policy = ?11, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
-        [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision, keepStoredNext],
-      );
-      if (updated.changes !== 1) return jsonError("revision_conflict", 409);
-      return Response.json({ ok: true, schedule: decodeRow(db.get<ScheduledRow>(`SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE schedule_id = ?1`, row.schedule_id)!) });
+      return Response.json({ ok: true, schedule: decodeRow(patchSchedule(row, body)) });
     } catch (e: any) {
-      const code = String(e?.message || "invalid_schedule");
-      return jsonError(code, code === "target_node_not_found" ? 404 : 400);
+      if (e instanceof ScheduleInputError) return jsonError(e.code, e.status, e.extra);
+      throw e;
     }
   }
   return jsonError("method_not_allowed", 405);

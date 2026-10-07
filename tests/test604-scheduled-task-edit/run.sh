@@ -38,7 +38,7 @@ run_real /tmp/test604-green.db
 cp server/src/scheduled-tasks.ts /tmp/test604-scheduled-tasks.ts
 
 echo "L2 witnessed-red: cancelled schedules cannot be resurrected"
-perl -0pi -e 's/(implicit resurrection path \(including by supplying status=active\)\.\n    )if \(row\.status === "cancelled"\)/${1}if (false \&\& row.status === "cancelled")/' server/src/scheduled-tasks.ts
+perl -0pi -e 's/(implicit resurrection path \(including by supplying status=active\)\.\n  )if \(row\.status === "cancelled"\)/${1}if (false \&\& row.status === "cancelled")/' server/src/scheduled-tasks.ts
 grep -Fq 'if (false && row.status === "cancelled")' server/src/scheduled-tasks.ts
 expect_red cancelled-is-terminal /tmp/test604-mut-cancelled.db
 cp /tmp/test604-scheduled-tasks.ts server/src/scheduled-tasks.ts
