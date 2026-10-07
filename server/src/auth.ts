@@ -886,7 +886,7 @@ const NETWORK_CLEANUP_TABLES = [
   "network_members", "network_member_agent_grants", "network_invites", "api_tokens",
   "node_create_requests", "node_start_requests", "node_stop_requests", "node_rules_requests",
   "node_config_updates", "rename_txn", "probe_results", "agent_telemetry", "completions",
-  "task_events", "task_terminal_events", "scheduled_task_runs", "external_schedule_edits",
+  "task_events", "task_terminal_events", "task_late_replies", "scheduled_task_runs", "external_schedule_edits",
   // 标签颜色:网络本身的元数据(标签本体在 requirements 行里,那张表是阻断项)。
   "network_tags",
   // 组织架构(board #419):部门是网络本身的元数据。
