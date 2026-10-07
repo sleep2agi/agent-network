@@ -149,7 +149,7 @@ describe("agent-node inbox wiring", () => {
       "processWithGrokCli(task, from, images, evidence)",
       "processWithGrok(task, from, images, evidence)",
       "processWithOpencode(task, from, images, evidence)",
-      "processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence)",
+      "processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt)",
       "processWithClaude(task, from, images, evidence)",
     ]) {
       expect(branch).toContain(call);
