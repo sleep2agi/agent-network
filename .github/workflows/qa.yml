@@ -119,6 +119,7 @@ on:
       - 'tests/test626-daemon-adoption/**'
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
+      - 'tests/test674-binding-generation/**'
       - 'tests/test678-daemon-token-owner/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
@@ -326,6 +327,7 @@ on:
       - 'tests/test626-daemon-adoption/**'
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
+      - 'tests/test674-binding-generation/**'
       - 'tests/test678-daemon-token-owner/**'
       - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
@@ -896,6 +898,15 @@ jobs:
         run: |
           docker build -t anet-test626-e2e -f tests/test626-daemon-adoption/Dockerfile.e2e .
           docker run --rm --init --network none anet-test626-e2e
+
+  test674-binding-generation:
+    name: Binding generation (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test674 -f tests/test674-binding-generation/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test674
 
   test678-daemon-token-owner:
     name: Daemon token ownership (Docker, SQLite + PostgreSQL HTTP)

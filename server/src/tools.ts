@@ -5423,7 +5423,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Daemon pulls the alias + node_id list of children it spawned (for childrenMap rebuild after restart). RFC-027 PR1.1.",
     {},
     async () => {
-      const callerDaemon = resolveCallerDaemonTokenBound();
+      const callerDaemon = resolveCallerDaemonTokenBound(); // board #674: token-bound snapshot, not a lease
       if (!callerDaemon.ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
       }
@@ -5446,18 +5446,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             AND COALESCE(n.lifecycle_state, 'active') NOT IN ('stopped', 'stop_failed')`,
         callerDaemon.daemonNodeId, callerDaemon.networkId,
       );
-      const children: Array<{ child_node_id: string; alias: string; lifecycle_state: string; managed?: "adopted" }> = rows.map(r => ({
+      const children: Array<{ child_node_id: string; alias: string; lifecycle_state: string; managed?: "adopted"; binding_request_id?: string }> = rows.map(r => ({
         child_node_id: r.child_node_id,
         alias: r.child_name,
         lifecycle_state: r.lifecycle_state ?? "active",
       }));
-      const adopted = db.all<{ node_id: string; alias: string; lifecycle_state: string | null }>(
-        `SELECT n.node_id,n.alias,n.lifecycle_state FROM node_daemon_bindings b
+      const adopted = db.all<{ node_id: string; alias: string; lifecycle_state: string | null; request_id: string }>(
+        `SELECT n.node_id,n.alias,n.lifecycle_state,b.request_id FROM node_daemon_bindings b
          JOIN nodes n ON n.node_id=b.node_id AND n.network_id=b.network_id
          WHERE b.daemon_node_id=?1 AND b.network_id=?2 AND b.status='active'`,
         callerDaemon.daemonNodeId, callerDaemon.networkId,
       );
-      for (const n of adopted) children.push({ child_node_id: n.node_id, alias: n.alias, lifecycle_state: n.lifecycle_state ?? "active", managed: "adopted" });
+      for (const n of adopted) children.push({ child_node_id: n.node_id, alias: n.alias, lifecycle_state: n.lifecycle_state ?? "active", managed: "adopted", binding_request_id: n.request_id });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, count: children.length, children }) }] };
     },
   );
