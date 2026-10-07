@@ -146,3 +146,38 @@ Final coordinator-requested follow-up
   pin gates rc=0. Symbol checks with read-only Git objects: docs 9 checked,
   8 skipped; docs-site 16 checked, 2 skipped; no missing refs or drift. Skipped
   pins are not claimed verified.
+
+CI follow-up on PR #2473 (ordinary follow-up commits, no rebase)
+- node_id E2E: the new first-registration identity_mismatch refusal returned
+  before the older branch's warning. This was a missing product diagnostic,
+  not an obsolete test. Restore the same reason-code warning without tokens,
+  paths or alias contents. Keep the original E2E assertions unchanged.
+- test638: its isolated per-file runner failed at import, not because of shared
+  database/process state. Its Dockerfile lacked agent-network/src/cli-errors
+  and the bin sources required by the recursive issuer guard. Add those inputs
+  exactly as in test798; do not skip tests or narrow the guard.
+- recovered-suites: the failing suite was qa-rfc027-stop-delete, specifically
+  its daemon-B cross-network positive control (not the expected mutation reds).
+  The fixture minted a new token then directly INSERTed an ownerless node,
+  bypassing registration. Replace only that INSERT with real HTTP report_status
+  and additionally assert precise token binding with NULL owner. Keep both the
+  other-network empty result and own-network nonempty result assertions.
+- Local Docker red runs at e9b807a1: node_id E2E rc=1 specifically for missing
+  identity_mismatch log; test638 full L1 203 files, sole failed file has the
+  missing CLI module import (rc=1), reproduced also via its --file runner;
+  qa-rfc027-stop-delete 70 pass / 1 fail / 0 skip, CN daemon-B only (rc=1).
+- Fixed node_id E2E: 23/23, rc=0, original assertions unchanged.
+- Fixed qa-rfc027-stop-delete: 72 pass / 0 fail / 0 skip, rc=0.
+- test678 after the logging fix: SQLite and PG each 21/21 with 347 assertions,
+  rc=0; all 11 independent mutants per backend remain assertion-red.
+- Static registration, coverage, home-path, SHA-binding and mutation-pin gates
+  rc=0; symbol pins 9 checked/8 skipped in docs, 16/2 in docs-site, no missing
+  refs or drift. Read-only Git objects supplied solely to resolve immutable pins.
+- Fixed test638 full L1-L6 rc=0: normal, concurrent normal and reverse orders
+  agree on 203 files / 2304 pass / 0 fail / 0 skip / 13368 assertions.
+  Database scoping, standalone fail-closed, nonzero/timeout/signal/missing-summary/
+  spawn-failure handling, slug collision and per-file DB isolation mutations
+  all meet their original assertions. Aggregate image source is 90764a11;
+  subsequent changes touch only the separate RFC-027 fixture and this report.
+- test831 L0-L8 rc=0 on 1a7ff13f. Security regression and RFC-027 green images
+  also use that product tree. Final report commit changes no tested code.
