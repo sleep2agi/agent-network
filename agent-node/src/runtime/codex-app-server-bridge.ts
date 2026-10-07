@@ -13,7 +13,9 @@
 //
 // Scope discipline (通信龙): Phase 0 is a PoC only. This bridge deliberately
 // does NOT:
-//   - Persist a durable ledger (§9 is Phase 2).
+//   - Persist routing or result data itself. #703 keeps the minimal durable
+//     task↔turn receipt ledger beside node config; this bridge only exposes a
+//     read-only exact-turn inspector for recovery.
 //   - Reconnect on transport loss (Phase 1 will add `thread/resume` retry).
 //   - Wire into CommHub / cli.ts (§8.4 is Phase 1).
 //   - Steer / cancel / interrupt (§7.4 is future scope).
@@ -23,6 +25,7 @@ import { EventEmitter } from "events";
 import { CodexAppServerClient } from "./codex-app-server-client";
 import { DEFAULT_RESUME_ATTEMPTS, DEFAULT_RESUME_TIMEOUT_MS } from "./codex-app-server/resume-timeout";
 import { isCodexSideEffectItem } from "./capacity-retry";
+import type { PersistedTurnResult } from "./codex-app-server/receipt-ledger";
 
 /** Newest turns read when recovering or reconciling a turn from history. */
 const RECENT_TURNS_PAGE_SIZE = 10;
@@ -258,6 +261,58 @@ export class CodexAppServerBridge extends EventEmitter {
   /** The thread this bridge is bound to (final id after bootstrap adoption). */
   getThreadId(): string {
     return this.threadId;
+  }
+
+  /**
+   * Read one exact, previously accepted turn after an agent-node restart.
+   * This is deliberately read-only: recovery may create a reply, but it must
+   * never start/re-run the model turn. Page until the id is found so a busy
+   * thread cannot push an unfinished receipt outside the newest-ten window.
+   */
+  async inspectPersistedTurn(threadId: string, turnId: string): Promise<PersistedTurnResult> {
+    type StoredTurn = {
+      id?: string;
+      status?: string;
+      error?: { message?: string } | null;
+      completedAt?: number | null;
+      items?: Array<{ type?: string; text?: string; phase?: string }>;
+    };
+    let turns: StoredTurn[] = [];
+    if (!this.historyPagingUnsupported.has("thread/turns/list")) {
+      try {
+        let cursor: string | undefined;
+        for (let pageNo = 0; pageNo < 100; pageNo++) {
+          const page = await this.client.request<{ data?: StoredTurn[]; nextCursor?: string | null }>(
+            "thread/turns/list",
+            {
+              threadId,
+              limit: 100,
+              sortDirection: "desc",
+              itemsView: "full",
+              ...(cursor ? { cursor } : {}),
+            },
+          );
+          turns.push(...(page?.data ?? []));
+          const found = turns.find((candidate) => candidate.id === turnId);
+          if (found) return classifyPersistedTurn(found);
+          if (!page?.nextCursor) return { state: "missing" };
+          cursor = page.nextCursor;
+        }
+        // A bounded scan is uncertainty, not proof of absence. Throw so the
+        // receipt stays watching and a later pass can retry.
+        throw new Error("turn history pagination exceeded 100 pages");
+      } catch (error) {
+        if (!isUnsupportedHistoryPaging(error, "thread/turns/list")) throw error;
+        this.historyPagingUnsupported.add("thread/turns/list");
+        this.emit("history_paging_unsupported", { method: "thread/turns/list" });
+      }
+    }
+    const result = await this.client.request<{ thread?: { turns?: StoredTurn[] } }>(
+      "thread/read", { threadId, includeTurns: true },
+    );
+    turns = result?.thread?.turns ?? [];
+    const found = turns.find((candidate) => candidate.id === turnId);
+    return found ? classifyPersistedTurn(found) : { state: "missing" };
   }
 
   /**
@@ -1354,6 +1409,28 @@ function extractTurnId(v: unknown): string | null {
 
 function isTerminalTurnStatus(status: unknown): status is "completed" | "failed" | "interrupted" {
   return status === "completed" || status === "failed" || status === "interrupted";
+}
+
+function classifyPersistedTurn(turn: {
+  status?: string;
+  error?: { message?: string } | null;
+  completedAt?: number | null;
+  items?: Array<{ type?: string; text?: string; phase?: string }>;
+}): PersistedTurnResult {
+  if (!isTerminalTurnStatus(turn.status)) return { state: "running" };
+  if (turn.status === "completed") {
+    const text = [...(turn.items ?? [])].reverse().find((item) =>
+      item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string"
+    )?.text ?? "";
+    return { state: "completed", text };
+  }
+  return {
+    state: turn.status,
+    ...(typeof turn.error?.message === "string" ? { error: turn.error.message } : {}),
+    ...(typeof turn.completedAt === "number" && Number.isFinite(turn.completedAt)
+      ? { completedAt: turn.completedAt }
+      : {}),
+  };
 }
 
 function extractThreadStatus(status: unknown): string | undefined {

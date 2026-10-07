@@ -122,6 +122,7 @@ on:
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
       - 'tests/test705-bridge-epipe/**'
+      - 'tests/test703-codex-turn-receipts/**'
       - 'tests/test678-daemon-token-owner/**'
       - 'tests/node-caller-identity/**'
       - 'tests/test629-lifecycle-read/**'
@@ -334,6 +335,7 @@ on:
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
       - 'tests/test705-bridge-epipe/**'
+      - 'tests/test703-codex-turn-receipts/**'
       - 'tests/test678-daemon-token-owner/**'
       - 'tests/node-caller-identity/**'
       - 'tests/test629-lifecycle-read/**'
@@ -975,6 +977,15 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test658
       - run: docker build -t anet-test658-http -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
       - run: docker run --rm --init --cpus=2 --network none anet-test658-http
+
+  test703-codex-turn-receipts:
+    name: Codex interrupted-turn receipts (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test703 -f tests/test703-codex-turn-receipts/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test703
 
   test627-adopted-lifecycle:
     name: adopted lifecycle (Docker, real Hub + private tmux)
