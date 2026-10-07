@@ -1712,7 +1712,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     `. ${shellQuote(envFilePath)}`,
-    `rm -f ${shellQuote(envFilePath)}`,
+    `/bin/rm -f ${shellQuote(envFilePath)}`,
     `clear`,
     `exec ${shellQuote(opts.codexBin)} app-server`
       + ` -c approval_policy=${approvalPolicy}`
@@ -1896,7 +1896,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     }));
     const bridgeCmd = [
       `. ${shellQuote(bridgeEnvFilePath)}`,
-      `rm -f ${shellQuote(bridgeEnvFilePath)}`,
+      `/bin/rm -f ${shellQuote(bridgeEnvFilePath)}`,
       `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN`,
       codexBridgeTeeCommand(shellQuote(bridgeLog)),
       `exec ${selfInvoke} node start ${shellQuote(displayName)}`,
@@ -1965,7 +1965,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     }));
     const tuiCmd = [
       `. ${shellQuote(tuiEnvFilePath)}`,
-      `rm -f ${shellQuote(tuiEnvFilePath)}`,
+      `/bin/rm -f ${shellQuote(tuiEnvFilePath)}`,
       tuiInvocation,
     ].join(" ; ");
     try {

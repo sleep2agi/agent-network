@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { codexCopresenceEnvFileText, codexCopresenceStageEnv } from "./codex-copresence-env";
 
 describe("Codex co-presence config environment", () => {
@@ -24,5 +26,23 @@ describe("Codex co-presence config environment", () => {
 
   test("rejects keys which could become shell syntax", () => {
     expect(() => codexCopresenceStageEnv({ "BAD;echo": "x" }, {})).toThrow("invalid config.env key");
+  });
+
+  test("rejects PATH and loader hooks, including Windows case variants", () => {
+    for (const key of ["PATH", "path", "NODE_OPTIONS", "node_options", "LD_PRELOAD", "ld_preload", "BUN_OPTIONS", "bash_env"]) {
+      expect(() => codexCopresenceStageEnv({ [key]: "unsafe" }, {})).toThrow("is reserved");
+    }
+  });
+
+  test("Windows case variants cannot replace launcher-owned identity", () => {
+    expect(codexCopresenceStageEnv({ codex_home: "wrong", anet_node_marker: "wrong" }, {
+      CODEX_HOME: "right", ANET_NODE_MARKER: "marker",
+    })).toEqual({ CODEX_HOME: "right", ANET_NODE_MARKER: "marker" });
+  });
+
+  test("all three private env files are removed without consulting config PATH", () => {
+    const cli = readFileSync(join(import.meta.dir, "../bin/cli.ts"), "utf8");
+    expect(cli.match(/`\/bin\/rm -f \$\{shellQuote\([^)]*[Ee]nvFilePath\)\}`/g)).toHaveLength(3);
+    expect(cli).not.toMatch(/`rm -f \$\{shellQuote\([^)]*[Ee]nvFilePath\)\}`/);
   });
 });

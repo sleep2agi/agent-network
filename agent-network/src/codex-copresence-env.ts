@@ -28,7 +28,9 @@ export function codexCopresenceStageEnv(
   for (const [key, value] of Object.entries(configEnv)) {
     if (!ENV_NAME.test(key)) throw new Error(`invalid config.env key for Codex co-presence: ${JSON.stringify(key)}`);
     if (value.includes("\0")) throw new Error(`config.env.${key} contains NUL`);
-    if (!LAUNCHER_ENV.has(key)) out[key] = value;
+    const canonical = key.toUpperCase();
+    if (isReservedEnvKey(canonical)) throw new Error(`config.env.${key} is reserved and cannot enter Codex co-presence`);
+    if (!LAUNCHER_ENV.has(canonical)) out[key] = value;
   }
   for (const [key, value] of Object.entries(required)) {
     if (!ENV_NAME.test(key) || value.includes("\0")) throw new Error(`invalid launcher environment for ${key}`);
@@ -48,3 +50,4 @@ export function codexCopresenceEnvFileText(env: Readonly<Record<string, string>>
     .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
     .join("\n") + "\n";
 }
+import { isReservedEnvKey } from "./shared/reserved-env";
