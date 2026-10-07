@@ -24,6 +24,8 @@ import { waitForStartResources, type StartGateDeps } from "./start-resource-gate
 import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
 import { describeRolloutSize, resolveRecoveryMaxPayloadBytes, resolveResumeTimeoutMs } from "./resume-timeout";
 import { codexSessionsRoot, findCodexRolloutFile } from "../codex-thread-size-check";
+import { nodeRolloutGuard, OWNED_APPSERVER_POINT_AT_NEWER_CODEX } from "../codex-rollout-guard-node";
+import { describeMissingOrdinalFailure, PAGINATED_ROLLOUT_MIN_CODEX, probeCodexVersionCached } from "../codex-rollout-history-guard";
 import { resolveTimeoutEnvMs } from "./timeout-env";
 import { verifyProcessTreeCodexHome, type ProcReader } from "../../codex-home-enforce";
 import {
@@ -210,6 +212,25 @@ export async function openCodexAppServerRuntime(opts: {
   try {
     if (!url) {
       // Owned-server topology: spawn `codex app-server --listen ws://…`.
+      // Board #734 — before spawning: an older codex (< 0.145) must not resume a
+      // paginated rollout. (Shared/co-presence servers are checked by the launcher
+      // that started them.) Read-only; undeterminable cases only warn.
+      if (opts.threadId) {
+        const guardBinary = opts.binary ?? "codex";
+        const guardEnv = { ...process.env, ...(opts.codexHome ? { CODEX_HOME: opts.codexHome } : {}) };
+        const rolloutGuard = nodeRolloutGuard({
+          threadId: opts.threadId,
+          env: guardEnv,
+          codexBin: guardBinary,
+          codexVersion: () => probeCodexVersionCached(guardBinary),
+          pointAtNewerCodex: OWNED_APPSERVER_POINT_AT_NEWER_CODEX,
+        });
+        for (const line of rolloutGuard.warnings) warn(line);
+        if (rolloutGuard.block) {
+          for (const line of rolloutGuard.block) warn(line);
+          throw new Error(`refusing to start codex app-server: paginated rollout needs codex >= ${PAGINATED_ROLLOUT_MIN_CODEX} (board #734)`);
+        }
+      }
       // #612 — admit before spawning. The lease covers spawn + readiness
       // only; it is dropped before the bridge so the next start can proceed.
       const gate = await waitForStartResources("codex app-server", { log, warn, ...opts.startGate });
@@ -308,7 +329,17 @@ export async function openCodexAppServerRuntime(opts: {
     bridge.on("waiting_human", () =>
       warn(`[codex-app-server] turn is waiting on a human approval — bridge will NOT answer`),
     );
-    await bridge.bootstrap();
+    try {
+      await bridge.bootstrap();
+    } catch (bootErr) {
+      // Board #734 — explain the mixed-codex-version failure; still fail closed.
+      const lines = describeMissingOrdinalFailure(String((bootErr as Error)?.message ?? bootErr), {
+        threadId: opts.threadId,
+        rolloutPath: opts.threadId && opts.codexHome ? findCodexRolloutFile(codexSessionsRoot({ ...process.env, CODEX_HOME: opts.codexHome }), opts.threadId) : null,
+      });
+      for (const line of lines) warn(line);
+      throw bootErr;
+    }
     if (opts.serverUrl) {
       await recoverSharedTurnOnAttach(bridge, log, warn);
     }

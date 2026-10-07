@@ -285,6 +285,8 @@ import {
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
 import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
+import { copresenceRolloutGuard } from "../src/codex-copresence-rollout-guard";
+import { describeMissingOrdinalFailure } from "../src/codex-rollout-history-guard";
 import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
@@ -1568,12 +1570,32 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // down.  Stage-specific required values are merged later as before.
   codexCopresenceStageEnv(opts.configEnv, {});
 
+  // Board #734 — before anything is quiesced on either platform: an older codex
+  // (< 0.145) must never append to a thread a newer codex wrote in "paginated"
+  // mode; the thread would become permanently unresumable. Read-only; anything
+  // undeterminable only warns.
+  {
+    const pending = (profile as { codexPendingThread?: { threadId?: unknown } }).codexPendingThread;
+    const guard = copresenceRolloutGuard({
+      codexHome: opts.codexHome,
+      threadIds: opts.newSession ? [] : [requestedThreadId, typeof pending?.threadId === "string" ? pending.threadId : undefined],
+      codexBin: opts.codexBin,
+      displayName,
+    });
+    for (const line of guard.warnings) console.warn(`[anet] ${line}`);
+    if (guard.block) {
+      for (const line of guard.block) console.error(`[anet] ${line}`);
+      process.exit(1);
+    }
+  }
+
   if (process.platform === "win32") {
     try {
       await startWindowsCodexCopresence(resolved, displayName, opts, model);
       return;
     } catch (e) {
       console.error(`[anet] ❌ Windows Codex co-presence failed: ${(e as Error).message}`);
+      for (const line of describeMissingOrdinalFailure(String((e as Error)?.message ?? e), { threadId: requestedThreadId })) console.error(`[anet] ${line}`);
       console.error(`[anet]    Cleanup: anet node stop ${displayName}`);
       process.exit(1);
     }
@@ -1841,6 +1863,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     recoveryAdmission?.release();
     console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
     console.error(`[anet]    Fail-closed: no bridge/TUI was started and thread/start was not used as a fallback.`);
+    for (const line of describeMissingOrdinalFailure(String(e?.message || e), { threadId: requestedThreadId })) console.error(`[anet] ${line}`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
     killTmuxSession(appsrvSession);
     console.error(`[anet]    Rolled back the replacement app-server; existing CODEX_HOME and stored thread remain unchanged.`);
@@ -7900,6 +7923,15 @@ async function startExternalAppserverNode(
 
   if (!existsSync(plan.codexHome)) {
     console.error(`[anet] ❌ CODEX_HOME ${plan.codexHome} does not exist — this node's codex login and sessions live there.`);
+    return 1;
+  }
+  // Board #734 — same pre-start guard as the managed co-presence launchers.
+  const rolloutGuard = copresenceRolloutGuard({
+    codexHome: plan.codexHome, threadIds: [plan.threadId], codexBin: plan.codexBin, displayName: plan.alias,
+  });
+  for (const line of rolloutGuard.warnings) console.warn(`[anet] ${line}`);
+  if (rolloutGuard.block) {
+    for (const line of rolloutGuard.block) console.error(`[anet] ${line}`);
     return 1;
   }
   if (!existsSync(plan.projectDir)) {
