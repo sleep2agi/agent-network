@@ -4,4 +4,4 @@
 # Resource admission itself remains covered by test612 without this launcher.
 set -eu
 export ANET_START_MEM_GATE=0
-exec /usr/local/bin/node-with-start-gate "$@"
+exec /usr/local/bin/node "$@"
