@@ -102,6 +102,11 @@ export function buildOwnedAppServerArgs(url: string, cfgOpts: OwnedAppServerConf
   if (cfgOpts.commhubMcpUrl) {
     cfg.push("-c", `mcp_servers.commhub.url="${cfgOpts.commhubMcpUrl}"`);
     cfg.push("-c", `mcp_servers.commhub.bearer_token_env_var="${COMMHUB_MCP_TOKEN_ENV}"`);
+    // #720 — pre-approve commhub's tools. Without it codex asks 「Allow the commhub MCP
+    // server to run tool …?」 on first use of each tool (approval_policy=never does not
+    // cover it); nobody answers on an unattended node and the turn blocks. Accepted by
+    // codex 0.133.0 and 0.159.2 (tests/test720-codex-commhub-tool-approval). commhub only.
+    cfg.push("-c", `mcp_servers.commhub.default_tools_approval_mode="approve"`);
   }
   return ["app-server", ...cfg, "--listen", url];
 }

@@ -46,6 +46,7 @@ import { evaluateCodexPreflight, evaluateCodexVerify, checkIdentity, checkHome, 
 import { NODE_CLONE_USAGE, formatCloneSummary, parseCloneArgs, realpathLoose, runNodeClone } from "../src/node-clone";
 import { FORK_HOME_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, forkRolloutPath, readLastTurnContextModel, rewriteRollout, rewriteTrustedProjects, uuidV7 } from "../src/codex-lifecycle-fork";
 import { formatThreadList, listExternalThreads, resolveExternalThread } from "../src/codex-adopt";
+import { codexCommhubMcpOverrides, codexWindowsAppServerArgs } from "../src/codex-commhub-mcp";
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
@@ -1109,8 +1110,6 @@ async function startWindowsCodexCopresence(
   const bridgeLog = windowsCopresenceLogPath(nodesDir(), resolved.id, "bridge");
   rmSync(appLog, { force: true });
   rmSync(bridgeLog, { force: true });
-  const hubMcpUrlToml = `mcp_servers.commhub.url=${opts.hub}/mcp`;
-  const bearerTomlLiteral = `mcp_servers.commhub.bearer_token_env_var=ANET_CODEX_COMMHUB_TOKEN`;
   const appEnv = {
     ...process.env,
     CODEX_HOME: opts.codexHome,
@@ -1121,15 +1120,9 @@ async function startWindowsCodexCopresence(
   const managed: WindowsManagedProcess[] = [];
   try {
     try {
-    managed.push(await windowsManagedProcess("appsrv", opts.codexBin, [
-      "app-server",
-      "-c", `approval_policy=${posture.approvalPolicy}`,
-      "-c", `sandbox_mode=${posture.sandboxMode}`,
-      "-c", `model=${model}`,
-      "-c", hubMcpUrlToml,
-      "-c", bearerTomlLiteral,
-      "--listen", wsUrl,
-    ], appEnv, appLog, true));
+    managed.push(await windowsManagedProcess("appsrv", opts.codexBin, codexWindowsAppServerArgs({
+      approvalPolicy: posture.approvalPolicy, sandboxMode: posture.sandboxMode, model, hub: opts.hub, wsUrl,
+    }), appEnv, appLog, true));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed, marker);
     console.log(`[anet] ① app-server pid=${managed[0].pid} listening ${wsUrl} (sandbox=${posture.sandboxMode})…`);
     // npm installs Codex as codex.cmd. Its cmd.exe grandchild does not
@@ -1778,8 +1771,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #P2fix必修2 — shellQuote every `-c` TOML fragment (including the hub
   // URL fragment). assertSafeHubUrl was called above; shellQuote guards
   // even in the face of a validator regression.
-  const hubMcpUrlToml = `mcp_servers.commhub.url="${opts.hub}/mcp"`;
-  const bearerTomlLiteral = `mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"`;
+  // #720 — url + bearer + `default_tools_approval_mode="approve"` for commhub only, so the
+  //   first commhub tool call does not stop on an approval prompt nobody will answer.
+  const commhubMcpOverrides = codexCommhubMcpOverrides(opts.hub, "quoted");
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     `. ${shellQuote(envFilePath)}`,
@@ -1789,8 +1783,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       + ` -c approval_policy=${approvalPolicy}`
       + ` -c sandbox_mode=${sandboxMode}`
       + ` -c model=${shellQuote(model)}`
-      + ` -c ${shellQuote(hubMcpUrlToml)}`
-      + ` -c ${shellQuote(bearerTomlLiteral)}`
+      + commhubMcpOverrides.map((o) => ` -c ${shellQuote(o)}`).join("")
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
   // #612 — admit before the heavy app-server. Release once it binds or the
