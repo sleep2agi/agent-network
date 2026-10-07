@@ -274,6 +274,7 @@ export class CodexAppServerBridge extends EventEmitter {
       id?: string;
       status?: string;
       error?: { message?: string } | null;
+      completedAt?: number | null;
       items?: Array<{ type?: string; text?: string; phase?: string }>;
     };
     let turns: StoredTurn[] = [];
@@ -1413,6 +1414,7 @@ function isTerminalTurnStatus(status: unknown): status is "completed" | "failed"
 function classifyPersistedTurn(turn: {
   status?: string;
   error?: { message?: string } | null;
+  completedAt?: number | null;
   items?: Array<{ type?: string; text?: string; phase?: string }>;
 }): PersistedTurnResult {
   if (!isTerminalTurnStatus(turn.status)) return { state: "running" };
@@ -1425,6 +1427,9 @@ function classifyPersistedTurn(turn: {
   return {
     state: turn.status,
     ...(typeof turn.error?.message === "string" ? { error: turn.error.message } : {}),
+    ...(typeof turn.completedAt === "number" && Number.isFinite(turn.completedAt)
+      ? { completedAt: turn.completedAt }
+      : {}),
   };
 }
 

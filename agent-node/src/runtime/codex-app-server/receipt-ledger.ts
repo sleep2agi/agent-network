@@ -26,6 +26,11 @@ export type TurnReceiptEntry = {
   receiptQueuedAt?: number;
 };
 
+export function receiptQueuedExpired(entry: TurnReceiptEntry, now = Date.now()): boolean {
+  return entry.state === "receipt_queued"
+    && now - (entry.receiptQueuedAt ?? entry.startedAt) >= TURN_RECEIPT_MAX_WATCH_MS;
+}
+
 function validString(value: unknown, max = 512): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value);
 }
@@ -111,7 +116,7 @@ export class TurnReceiptLedger {
 export type PersistedTurnResult =
   | { state: "running" }
   | { state: "completed"; text: string }
-  | { state: "interrupted" | "failed"; error?: string }
+  | { state: "interrupted" | "failed"; error?: string; completedAt?: number }
   | { state: "missing" };
 
 export type RecoveredReceipt = {
@@ -123,8 +128,15 @@ export type RecoveredReceipt = {
 
 function hhmm(now: number): string {
   return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit", minute: "2-digit", hour12: false,
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai",
   }).format(new Date(now));
+}
+
+function codexTimestampMs(value: number | undefined): number | null {
+  if (!Number.isFinite(value) || Number(value) <= 0) return null;
+  // Codex Turn.completedAt is Unix seconds. Tolerate milliseconds so a wire
+  // migration cannot silently move the interruption time into 1970.
+  return Number(value) < 10_000_000_000 ? Number(value) * 1_000 : Number(value);
 }
 
 /** Pure recovery decision. Query errors are represented by throwing and retain the row. */
@@ -132,12 +144,17 @@ export async function recoverTurnReceipts(args: {
   rows: TurnReceiptEntry[];
   inspect: (threadId: string, turnId: string) => Promise<PersistedTurnResult>;
   now?: number;
-}): Promise<{ receipts: RecoveredReceipt[]; watching: TurnReceiptEntry[]; queryErrors: number }> {
+}): Promise<{ receipts: RecoveredReceipt[]; watching: TurnReceiptEntry[]; expiredQueued: TurnReceiptEntry[]; queryErrors: number }> {
   const now = args.now ?? Date.now();
   const receipts: RecoveredReceipt[] = [];
   const watching: TurnReceiptEntry[] = [];
+  const expiredQueued: TurnReceiptEntry[] = [];
   let queryErrors = 0;
   for (const entry of args.rows) {
+    if (receiptQueuedExpired(entry, now)) {
+      expiredQueued.push(entry);
+      continue;
+    }
     if (entry.state === "watching" && now - entry.startedAt >= TURN_RECEIPT_MAX_WATCH_MS) {
       receipts.push({ entry, failed: true, reason: "expired", text: "超过 48 小时未能确认" });
       continue;
@@ -149,13 +166,16 @@ export async function recoverTurnReceipts(args: {
       } else if (result.state === "completed") {
         receipts.push({ entry, failed: false, reason: "completed", text: result.text });
       } else {
-        const observed = hhmm(now);
+        const completedAt = result.state === "missing" ? null : codexTimestampMs(result.completedAt);
+        const observed = hhmm(completedAt ?? now);
         const detail = result.state === "missing" ? "未找到原 turn" : result.error?.trim();
         receipts.push({
           entry,
           failed: true,
           reason: result.state === "missing" ? "missing" : "interrupted",
-          text: `${detail ? `${detail}；` : ""}turn 中断于 ${observed}`,
+          text: `${detail ? `${detail}；` : ""}${completedAt
+            ? `turn 中断于 ${observed}（东八区）`
+            : `最晚于 ${observed}（东八区）判定中断`}`,
         });
       }
     } catch {
@@ -163,5 +183,5 @@ export async function recoverTurnReceipts(args: {
       watching.push(entry);
     }
   }
-  return { receipts, watching, queryErrors };
+  return { receipts, watching, expiredQueued, queryErrors };
 }

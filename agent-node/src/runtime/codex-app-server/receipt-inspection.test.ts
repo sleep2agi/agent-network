@@ -36,7 +36,7 @@ describe("#703 exact persisted turn inspection", () => {
   test("classifies running, interrupted and exhaustive missing without starting a turn", async () => {
     for (const [turn, expected] of [
       [{ id: "target", status: "inProgress" }, { state: "running" }],
-      [{ id: "target", status: "interrupted", error: { message: "watchdog stopped process" } }, { state: "interrupted", error: "watchdog stopped process" }],
+      [{ id: "target", status: "interrupted", completedAt: 1_791_374_454, error: { message: "watchdog stopped process" } }, { state: "interrupted", error: "watchdog stopped process", completedAt: 1_791_374_454 }],
     ] as const) {
       const client = new FakeClient(() => ({ data: [turn], nextCursor: null }));
       const bridge = new CodexAppServerBridge({ client: client as never, threadId: "thread-fixture" });

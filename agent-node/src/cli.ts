@@ -38,6 +38,7 @@ import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLogin
 import { reportedTask } from "./project-dir-mismatch.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
 import {
+  receiptQueuedExpired,
   recoverTurnReceipts,
   TurnReceiptLedger,
 } from "./runtime/codex-app-server/receipt-ledger";
@@ -2533,6 +2534,14 @@ let codexReceiptRecoveryInFlight: Promise<void> | null = null;
 async function recoverCodexTurnReceipts(): Promise<void> {
   if (!turnReceiptLedger || codexReceiptRecoveryInFlight) return codexReceiptRecoveryInFlight ?? undefined;
   codexReceiptRecoveryInFlight = (async () => {
+    // A queued body normally stays in pending-replies until Hub accepts it.
+    // Cap both durable copies together: filtering these rows only after drain
+    // would never run while a transient Hub outage keeps the queue populated.
+    for (const expired of turnReceiptLedger.load().filter((row) => receiptQueuedExpired(row))) {
+      clearPendingReply(expired.replyTo, expired.taskId);
+      turnReceiptLedger.remove(expired.taskId);
+      warn(`[codex-receipt] dropping receipt_queued task=${expired.taskId.slice(0, 8)} after 48h without Hub acceptance`);
+    }
     // A normal completion may already have persisted its outbound reply just
     // before the process died. Give that exact body the first attempt; only
     // inspect Codex history for ledger rows that remain afterwards.
@@ -2545,6 +2554,11 @@ async function recoverCodexTurnReceipts(): Promise<void> {
       rows,
       inspect: (threadId, turnId) => session.bridge.inspectPersistedTurn(threadId, turnId),
     });
+    for (const expired of recovery.expiredQueued) {
+      clearPendingReply(expired.replyTo, expired.taskId);
+      turnReceiptLedger.remove(expired.taskId);
+      warn(`[codex-receipt] dropping receipt_queued task=${expired.taskId.slice(0, 8)} after 48h without Hub acceptance`);
+    }
     if (recovery.queryErrors > 0) {
       warn(`[codex-receipt] ${recovery.queryErrors} turn query/queries failed; retained for retry`);
     }

@@ -16,6 +16,12 @@ echo "# test703 — Codex interrupted-turn receipt recovery" > "$REPORT"
 echo "source_commit=${SOURCE_COMMIT}" >> "$REPORT"
 run_green 2>&1 | tee -a "$REPORT"
 
+codex133=$(find /workspace/agent-node/node_modules/@openai -path '*/vendor/*/bin/codex' -type f -print -quit)
+codex159=$(find /opt/codex159/node_modules/@openai -path '*/vendor/*/bin/codex' -type f -print -quit)
+[[ -x "$codex133" && -x "$codex159" ]]
+CODEX_BIN="$codex133" CODEX_PROBE_VERSION=0.133.0 bun tests/test703-codex-turn-receipts/real-codex-stop-probe.ts 2>&1 | tee -a "$REPORT"
+CODEX_BIN="$codex159" CODEX_PROBE_VERSION=0.159.2 bun tests/test703-codex-turn-receipts/real-codex-stop-probe.ts 2>&1 | tee -a "$REPORT"
+
 cp agent-node/src/runtime/codex-app-server/receipt-ledger.ts /tmp/receipt-ledger.ts
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
 cp agent-node/src/cli.ts /tmp/agent-node-cli.ts
@@ -67,6 +73,16 @@ expect_red rejected-cleanup agent-node/src/cli.ts \
 expect_red peer-reply-ledger agent-node/src/cli.ts \
   'if (trackReceipt && taskId && inboxId && turnReceiptLedger)' \
   'if (taskId && inboxId && turnReceiptLedger)'
+expect_red queued-expiry agent-node/src/runtime/codex-app-server/receipt-ledger.ts \
+  'entry.state === "receipt_queued"
+    && now - (entry.receiptQueuedAt ?? entry.startedAt) >= TURN_RECEIPT_MAX_WATCH_MS' \
+  'false'
+expect_red east-eight-time agent-node/src/runtime/codex-app-server/receipt-ledger.ts \
+  'timeZone: "Asia/Shanghai"' \
+  'timeZone: "UTC"'
+expect_red completed-at agent-node/src/runtime/codex-app-server-bridge.ts \
+  '? { completedAt: turn.completedAt }' \
+  '? {}'
 
 restore
 run_green >/dev/null

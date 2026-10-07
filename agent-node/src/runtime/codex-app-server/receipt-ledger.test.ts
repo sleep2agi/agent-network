@@ -58,13 +58,14 @@ describe("#703 Codex turn receipt ledger", () => {
   });
 
   test("C interrupted turn fails with an observable local minute", async () => {
-    const now = new Date("2026-10-07T08:09:00+08:00").getTime();
+    const now = new Date("2026-10-07T09:10:00+08:00").getTime();
+    const completedAt = new Date("2026-10-07T08:09:00+08:00").getTime() / 1_000;
     const result = await recoverTurnReceipts({
       rows: [row({ startedAt: now - 1_000 })], now,
-      inspect: async () => ({ state: "interrupted" }),
+      inspect: async () => ({ state: "interrupted", completedAt }),
     });
     expect(result.receipts[0]?.failed).toBe(true);
-    expect(result.receipts[0]?.text).toMatch(/turn 中断于 \d{2}:\d{2}/u);
+    expect(result.receipts[0]?.text).toBe("turn 中断于 08:09（东八区）");
   });
 
   test("watchdog stop+start interruption is failed and never converted to a rerun", async () => {
@@ -76,13 +77,14 @@ describe("#703 Codex turn receipt ledger", () => {
     });
     expect(inspections).toBe(1);
     expect(result.receipts[0]).toMatchObject({ failed: true, reason: "interrupted" });
-    expect(result.receipts[0]?.text).toContain("turn 中断于");
+    expect(result.receipts[0]?.text).toMatch(/最晚于 \d{2}:\d{2}（东八区）判定中断$/u);
   });
 
   test("D exact turn missing fails instead of silently rerunning", async () => {
     const result = await recoverTurnReceipts({ rows: [row()], now: 2_000, inspect: async () => ({ state: "missing" }) });
     expect(result.receipts[0]).toMatchObject({ failed: true, reason: "missing" });
     expect(result.receipts[0]?.text).toContain("未找到原 turn");
+    expect(result.receipts[0]?.text).toContain("最晚于");
   });
 
   test("E query failure retains the row and emits no receipt", async () => {
@@ -110,5 +112,17 @@ describe("#703 Codex turn receipt ledger", () => {
     });
     expect(inspected).toBe(0);
     expect(result.receipts[0]).toMatchObject({ failed: true, reason: "expired", text: "超过 48 小时未能确认" });
+  });
+
+  test("receipt_queued expires after 48 hours without creating another receipt", async () => {
+    let inspected = 0;
+    const queued = row({ state: "receipt_queued", receiptQueuedAt: 2_000 });
+    const result = await recoverTurnReceipts({
+      rows: [queued], now: 2_000 + TURN_RECEIPT_MAX_WATCH_MS,
+      inspect: async () => { inspected++; return { state: "completed", text: "must not resend" }; },
+    });
+    expect(inspected).toBe(0);
+    expect(result.receipts).toEqual([]);
+    expect(result.expiredQueued).toEqual([queued]);
   });
 });

@@ -55,5 +55,10 @@ describe("#703 production receipt wiring", () => {
     const recovery = cli.slice(cli.indexOf("async function recoverCodexTurnReceipts"), cli.indexOf("let sideThreadNodeRuntime"));
     expect(recovery).not.toContain("startTaskTurn");
     expect(recovery).not.toContain("processTask(");
+    expect(recovery).toContain("for (const expired of recovery.expiredQueued)");
+    expect(recovery).toContain("turnReceiptLedger.load().filter((row) => receiptQueuedExpired(row))");
+    expect(recovery).toContain("clearPendingReply(expired.replyTo, expired.taskId)");
+    expect(recovery).toContain("turnReceiptLedger.remove(expired.taskId)");
+    expect(recovery).toContain("dropping receipt_queued");
   });
 });
