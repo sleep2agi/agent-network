@@ -139,6 +139,7 @@ import {
 } from "../src/opencode-runtime-binding";
 import { connectGrokAttach } from "../src/grok-attach-client";
 import { ambientTypeScriptTranspiler, nodeServerPayloadFor } from "../src/node-server-payload";
+import { installTeamSkills } from "../src/node-skills";
 import { applyNodeServerPayload } from "../src/node-server-version";
 import {
   agentNodeHelpSupportsGrokCopresence,
@@ -7519,6 +7520,14 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // forgiving and the bug usually only manifests as a missing session
     // banner. Fix: await child exit so parent stays alive while child holds
     // the TTY; main() unwinds naturally only after claude actually exits.
+    try {
+      await installTeamSkills("claude", { workDir: process.cwd() }, {
+        log: (message) => console.log(`[anet] ${message}`),
+        warn: (message) => console.warn(`[anet] ${message}`),
+      });
+    } catch (err: any) {
+      console.warn(`[anet] 团队技能安装失败：${err?.message || err}`);
+    }
     await new Promise<void>(async (resolve) => {
       let child: ReturnType<typeof spawn>;
       try {
