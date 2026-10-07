@@ -2,9 +2,9 @@
 //
 // main 上 POST /api/auth/password 跑的是 `DELETE FROM api_tokens WHERE user_id = ? AND network_id IS NULL
 // AND token_id != ?` —— 每台机器上 `anet login` 拿到的令牌、POST /api/auth/tokens 建的具名脚本令牌,
-// 跟浏览器会话一起被删光。这里每条都钉住新行为:
-//   · 默认(旧 app 不带字段):只撤其他 kind='login' 会话;kind='cli' 照常可用;
-//   · revoke_cli_tokens=true:连 kind='cli' 一起撤;
+// 跟浏览器会话一起被删光。安全复审定的形状:默认不变,保留是显式选项。这里每条都钉住:
+//   · 默认(旧 app、dashboard 代理不带字段):撤销全部不绑网络的令牌 —— 客户端自报的 cli 也活不下来;
+//   · keep_cli_tokens=true(anet passwd 默认带):只撤其他 kind='login' 会话,保留的 cli 令牌列在响应里、不含令牌值;
 //   · 当前会话(换发后的新令牌)永远可用,而且沿用当前令牌的种类;
 //   · 节点 / 网络令牌永远不动;
 //   · 启动迁移按 client_label / scope 回填存量令牌的 kind(夹具库,跑两遍幂等)。
@@ -101,91 +101,125 @@ describe("new tokens are classified at issue time", () => {
   });
 });
 
-describe("POST /api/auth/password (default: old app, no flag)", () => {
-  test("other login sessions are signed out, CLI/script tokens and node tokens keep working", async () => {
+// 响应里出现任何令牌值都算泄漏:换发给调用方的那一条(body.token)除外,它本来就要交给调用方。
+function assertNoTokenValues(body: any, f: Fleet) {
+  const { token: _rotated, ...rest } = body;
+  const text = JSON.stringify(rest);
+  for (const t of [f.regToken, f.app, f.appB, f.cliByLabel, f.cliByKind, f.apiToken, f.nodeToken, f.netToken]) {
+    expect(text.includes(t)).toBe(false);
+  }
+  expect(/\b(utok|atok|ntok)_[A-Za-z0-9]{8,}/.test(text)).toBe(false);
+  expect(text.includes("token_hash")).toBe(false);
+}
+
+describe("POST /api/auth/password (default: old apps, dashboard proxy — no field)", () => {
+  test("every other non-network token is revoked (pre-#711 behaviour); node tokens and the rotated current session survive", async () => {
     const f = await fleet();
     const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2 });
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
-    // 其他 login 会话 = 注册时签发的那条 + appB
-    expect(r.body.revoked_login).toBe(2);
-    expect(r.body.revoked_cli).toBe(0);
-    expect(r.body.revoked).toBe(2);
-    expect(await works(f.regToken)).toBe(false);
-    expect(await works(f.appB)).toBe(false);
-    expect(await works(f.cliByLabel)).toBe(true);
-    expect(await works(f.cliByKind)).toBe(true);
-    expect(await works(f.apiToken)).toBe(true);
+    expect(r.body.revoked_login).toBe(2); // reg + appB
+    expect(r.body.revoked_cli).toBe(3);   // cliByLabel + cliByKind + apiToken
+    expect(r.body.revoked).toBe(5);
+    expect(r.body.kept_cli_tokens).toBeUndefined();
+    for (const t of [f.regToken, f.appB, f.cliByLabel, f.cliByKind, f.apiToken]) expect(await works(t)).toBe(false);
     expect(await works(f.nodeToken)).toBe(true);
     expect(await works(f.netToken)).toBe(true);
-    // 当前会话:换发的新令牌可用,旧的被换掉(既有行为),种类沿用 'login'
     expect(await works(r.body.token)).toBe(true);
     expect(kindOf(r.body.token)).toBe("login");
     expect(await works(f.app)).toBe(false);
   });
 
-  test("a non-boolean flag value is not an opt-in", async () => {
+  test("a client-declared cli token (client_kind / anet label) does NOT survive a default password change", async () => {
     const f = await fleet();
-    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, revoke_cli_tokens: "true" });
+    expect(kindOf(f.cliByKind)).toBe("cli");
+    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2 });
     expect(r.status).toBe(200);
-    expect(r.body.revoked_cli).toBe(0);
-    expect(await works(f.cliByLabel)).toBe(true);
-    expect(await works(f.apiToken)).toBe(true);
+    expect(await works(f.cliByKind)).toBe(false);
+    expect(await works(f.cliByLabel)).toBe(false);
   });
 
-  test("changing the password from a CLI token keeps the rotated token a CLI token", async () => {
+  test("a non-boolean keep_cli_tokens is not an opt-in; the removed revoke_cli_tokens field does nothing", async () => {
     const f = await fleet();
-    const r = await call(f.cliByLabel, "POST", "/api/auth/password", { old_password: PW, new_password: PW2 });
+    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, keep_cli_tokens: "true", revoke_cli_tokens: false });
     expect(r.status).toBe(200);
-    expect(r.body.revoked_login).toBe(3); // reg + app + appB
-    expect(r.body.revoked_cli).toBe(0);
-    expect(await works(r.body.token)).toBe(true);
-    expect(kindOf(r.body.token)).toBe("cli");
-    expect(await works(f.cliByKind)).toBe(true);
-    expect(await works(f.apiToken)).toBe(true);
-    // 再改一次密码(默认):换发出来的命令行令牌仍然保留
-    const r2 = await call(r.body.token, "POST", "/api/auth/password", { old_password: PW2, new_password: PW });
-    expect(r2.status).toBe(200);
-    expect(await works(r2.body.token)).toBe(true);
-    expect(await works(f.cliByKind)).toBe(true);
+    expect(r.body.revoked_cli).toBe(3);
+    expect(await works(f.cliByLabel)).toBe(false);
+    expect(await works(f.apiToken)).toBe(false);
   });
 });
 
-describe("POST /api/auth/password with revoke_cli_tokens=true", () => {
-  test("CLI/script tokens are revoked too; current session and node tokens survive", async () => {
+describe("POST /api/auth/password with keep_cli_tokens=true (anet passwd)", () => {
+  test("only other login sessions are revoked; CLI/script tokens are kept and listed without token values", async () => {
     const f = await fleet();
-    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, revoke_cli_tokens: true });
+    const r = await call(f.cliByLabel, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, keep_cli_tokens: true });
     expect(r.status).toBe(200);
-    expect(r.body.revoked_login).toBe(2);
-    expect(r.body.revoked_cli).toBe(3);
-    expect(r.body.revoked).toBe(5);
-    for (const t of [f.regToken, f.appB, f.cliByLabel, f.cliByKind, f.apiToken]) expect(await works(t)).toBe(false);
+    expect(r.body.revoked_login).toBe(3); // reg + app + appB
+    expect(r.body.revoked_cli).toBe(0);
+    expect(r.body.revoked).toBe(3);
+    for (const t of [f.regToken, f.app, f.appB]) expect(await works(t)).toBe(false);
+    expect(await works(f.cliByKind)).toBe(true);
+    expect(await works(f.apiToken)).toBe(true);
     expect(await works(f.nodeToken)).toBe(true);
     expect(await works(f.netToken)).toBe(true);
+    // 当前会话:换发的新令牌可用,沿用 cli
     expect(await works(r.body.token)).toBe(true);
+    expect(kindOf(r.body.token)).toBe("cli");
+    // 保留清单:不含当前这条(它已被换掉),只含另外两条 cli;字段齐全、无令牌值
+    const kept = r.body.kept_cli_tokens as any[];
+    const idOf = (t: string) => db.get<any>("SELECT token_id FROM api_tokens WHERE token_hash = ?1", hashToken(t)).token_id;
+    expect(kept.map((k) => k.token_id).sort()).toEqual([idOf(f.cliByKind), idOf(f.apiToken)].sort());
+    for (const k of kept) {
+      expect(Object.keys(k).sort()).toEqual(["client_label", "created_at", "last_used_at", "name", "token_id"]);
+      expect(k.token_id).toMatch(/^tok_[0-9a-f]{12}$/);
+    }
+    expect(kept.find((k) => k.token_id === idOf(f.apiToken)).name).toBe("ci-script");
+    assertNoTokenValues(r.body, f);
+    // 可以逐条撤销
+    expect((await call(r.body.token, "DELETE", `/api/auth/tokens/${idOf(f.apiToken)}`)).status).toBe(200);
+    expect(await works(f.apiToken)).toBe(false);
+  });
+
+  test("default response carries no token values either", async () => {
+    const f = await fleet();
+    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2 });
+    expect(r.status).toBe(200);
+    assertNoTokenValues(r.body, f);
   });
 });
 
 describe("changePassword() keeps the current token row in both modes", () => {
-  for (const revokeCliTokens of [false, true]) {
-    test(`revokeCliTokens=${revokeCliTokens}: current login token kept`, async () => {
+  test("no opts at all = default: CLI tokens revoked, current kept", async () => {
+    const f = await fleet();
+    const cur = db.get<any>("SELECT token_id FROM api_tokens WHERE token_hash = ?1", hashToken(f.app)).token_id;
+    const r = changePassword(f.userId, PW, PW2, cur);
+    expect(r.ok).toBe(true);
+    expect(r.revoked_cli).toBe(3);
+    expect(r.kept_cli_tokens).toBeUndefined();
+    expect(await works(f.app)).toBe(true);
+    expect(await works(f.cliByKind)).toBe(false);
+    expect(await works(f.apiToken)).toBe(false);
+  });
+
+  for (const keepCliTokens of [false, true]) {
+    test(`keepCliTokens=${keepCliTokens}: current login token kept`, async () => {
       const f = await fleet();
       const cur = db.get<any>("SELECT token_id FROM api_tokens WHERE token_hash = ?1", hashToken(f.app)).token_id;
-      const r = changePassword(f.userId, PW, PW2, cur, { revokeCliTokens });
+      const r = changePassword(f.userId, PW, PW2, cur, { keepCliTokens });
       expect(r.ok).toBe(true);
       expect(await works(f.app)).toBe(true);
       expect(await works(f.appB)).toBe(false);
-      expect(await works(f.cliByLabel)).toBe(!revokeCliTokens);
+      expect(await works(f.cliByLabel)).toBe(keepCliTokens);
       expect(await works(f.nodeToken)).toBe(true);
     });
-    test(`revokeCliTokens=${revokeCliTokens}: current CLI token kept`, async () => {
+    test(`keepCliTokens=${keepCliTokens}: current CLI token kept`, async () => {
       const f = await fleet();
       const cur = db.get<any>("SELECT token_id FROM api_tokens WHERE token_hash = ?1", hashToken(f.cliByKind)).token_id;
-      const r = changePassword(f.userId, PW, PW2, cur, { revokeCliTokens });
+      const r = changePassword(f.userId, PW, PW2, cur, { keepCliTokens });
       expect(r.ok).toBe(true);
       expect(await works(f.cliByKind)).toBe(true);
       expect(await works(f.app)).toBe(false);
-      expect(await works(f.apiToken)).toBe(!revokeCliTokens);
+      expect(await works(f.apiToken)).toBe(keepCliTokens);
     });
   }
 });
@@ -217,6 +251,8 @@ describe("startup migration backfills api_tokens.kind on a fixture DB", () => {
     ins(id("browser"), null, "user", "Chrome on macOS");
     ins(id("nolabel"), null, "user", null);
     ins(id("lookalike"), null, "user", "planet-anet dashboard");
+    ins(id("upper"), null, "user", "ANET 2.4.0 · box · login");
+    ins(id("padded"), null, "user", "  anet 2.4.0 · box · login");
     ins(id("named"), null, "full", null);
     ins(id("node"), f.net, "network", null);
     ins(id("netfull"), f.net, "full", null);
@@ -228,6 +264,8 @@ describe("startup migration backfills api_tokens.kind on a fixture DB", () => {
     expect(k("browser")).toBe("login");
     expect(k("nolabel")).toBe("login");
     expect(k("lookalike")).toBe("login");
+    expect(k("upper")).toBe("login");   // 区分大小写:SQLite 的 LIKE 会把它当 cli,PG 不会 —— 两边必须一致
+    expect(k("padded")).toBe("cli");    // 与运行时一样先 trim
     expect(k("named")).toBe("cli");
     expect(k("node")).toBe(null);
     expect(k("netfull")).toBe(null);
@@ -243,9 +281,9 @@ describe("startup migration backfills api_tokens.kind on a fixture DB", () => {
     expect(k("named")).toBe("cli");
     expect(k("browser")).toBe("login");
 
-    // 迁移后的库上,默认改密码照样保留回填成 cli 的存量令牌
+    // 迁移后的库上,keep_cli_tokens 保留回填成 cli 的存量令牌
     const cur = db.get<any>("SELECT token_id FROM api_tokens WHERE token_hash = ?1", hashToken(f.app)).token_id;
-    const r = changePassword(f.userId, PW, PW2, cur);
+    const r = changePassword(f.userId, PW, PW2, cur, { keepCliTokens: true });
     expect(r.ok).toBe(true);
     expect(k("named")).toBe("cli");
     expect(k("cli_demo")).toBe("cli");

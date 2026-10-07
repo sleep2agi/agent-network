@@ -102,9 +102,10 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 - 下次 API 调用拿 `401 unauthorized` → 必须重新登录
 
 **其他机器上的 `anet` 登录、脚本令牌**(#711)
-- **默认保留**:`anet login` / `anet register` / `anet hub start`(含 admin-utok.json)签的令牌、`POST /api/auth/tokens` 建的不绑网络的具名令牌都算命令行令牌(`kind='cli'`),改密码不会让它们下线
-- 想一起撤销(比如怀疑令牌泄漏):`anet passwd --revoke-cli-tokens`;REST 是请求体带 `"revoke_cli_tokens": true`
-- 改完会打印两类各撤销了几条
+- `anet login` / `anet register` / `anet hub start`(含 admin-utok.json)签的令牌、`POST /api/auth/tokens` 建的不绑网络的具名令牌算命令行令牌(`kind='cli'`)
+- 用 `anet passwd` 改密码时**保留**它们(请求带 `keep_cli_tokens: true`),并逐条打印保留了哪些,可用 `anet token revoke <token_id>` 单独撤
+- 想一起撤销(比如怀疑令牌泄漏):`anet passwd --revoke-cli-tokens`
+- 从 app / Dashboard 改密码(不带这个字段)= **全部撤销**
 
 **Dashboard（浏览器）**
 - 已登录的 tab：下一次 REST 请求拿 401 → Dashboard 跳回登录页 → 输入新密码 → 拿新 cookie

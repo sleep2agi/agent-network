@@ -101,9 +101,10 @@ Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). F
 - Next API call returns `401 unauthorized` → must log in again
 
 **`anet` logins on other machines, script tokens** (#711)
-- **Kept by default**: tokens issued to `anet login` / `anet register` / `anet hub start` (including admin-utok.json) and network-less named tokens from `POST /api/auth/tokens` are CLI tokens (`kind='cli'`); a password change does not sign them out
-- To revoke them too (e.g. you suspect a leak): `anet passwd --revoke-cli-tokens`; over REST, send `"revoke_cli_tokens": true`
-- The command prints how many of each kind were revoked
+- Tokens issued to `anet login` / `anet register` / `anet hub start` (including admin-utok.json) and network-less named tokens from `POST /api/auth/tokens` are CLI tokens (`kind='cli'`)
+- `anet passwd` **keeps** them (it sends `keep_cli_tokens: true`) and prints each kept token; revoke one with `anet token revoke <token_id>`
+- To revoke them too (e.g. you suspect a leak): `anet passwd --revoke-cli-tokens`
+- Changing the password from the app / Dashboard (no such field) **revokes all of them**
 
 **Dashboard (browser)**
 - Logged-in tab: next REST request returns 401 → Dashboard redirects to login → enter new password → fresh cookie

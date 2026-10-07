@@ -647,7 +647,7 @@ for (const ddl of [
   "ALTER TABLE api_tokens ADD COLUMN client_label TEXT",
   "ALTER TABLE api_tokens ADD COLUMN user_agent TEXT",
   // #711 不绑网络的用户令牌分两类:'login' = 浏览器 / app 的登录会话;'cli' = anet 命令行登录、
-  // POST /api/auth/tokens 建的具名脚本令牌。改密码默认只踢 'login'。节点 / 网络令牌(network_id 非空)不填。
+  // POST /api/auth/tokens 建的具名脚本令牌。只用于展示和 keep_cli_tokens 那条显式保留路径;节点 / 网络令牌(network_id 非空)不填。
   "ALTER TABLE api_tokens ADD COLUMN kind TEXT",
 ]) {
   try { db.exec(ddl); }
@@ -657,10 +657,12 @@ for (const ddl of [
 }
 // #711 回填 kind:只碰 kind 还是 NULL 的非网络令牌(幂等;回滚到旧 Hub 期间新签的行,下次启动照样补上)。
 // 能明确认出是 anet 命令行的才算 'cli':scope='full'(POST /api/auth/tokens 建的具名令牌),
-// 或 client_label 以「anet 」开头(anet 自报的「anet <版本> · <主机> · <子命令>」)。其余一律 'login'。
+// 或 client_label 去掉首尾空格后以「anet 」开头(anet 自报的「anet <版本> · <主机> · <子命令>」)。其余一律 'login'。
+// 用 SUBSTR + = 而不是 LIKE:SQLite 的 LIKE 不分大小写、PG 分,两边结果会不一样;= 两边都区分大小写,
+// 与运行时 isAnetClientLabel(auth.ts)同一条规则。
 db.run(
   `UPDATE api_tokens SET kind = CASE
-     WHEN scope = 'full' OR client_label LIKE 'anet %' THEN 'cli'
+     WHEN scope = 'full' OR SUBSTR(TRIM(client_label), 1, 5) = 'anet ' THEN 'cli'
      ELSE 'login' END
    WHERE network_id IS NULL AND kind IS NULL`,
 );

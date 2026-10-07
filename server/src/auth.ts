@@ -324,16 +324,23 @@ const LAST_USED_WRITE_INTERVAL_SECONDS = 3600;
 export type SessionClientInfo = { label?: unknown; userAgent?: unknown; kind?: unknown };
 
 // #711 不绑网络的用户令牌的种类(api_tokens.kind):
-//   'login' — 浏览器 / app 的登录会话;改密码时默认撤销(当前这条除外)。
-//   'cli'   — anet 命令行登录、POST /api/auth/tokens 建的具名脚本令牌;改密码时默认保留,
-//             调用方显式 revoke_cli_tokens=true 才一起撤销。
+//   'login' — 浏览器 / app 的登录会话;
+//   'cli'   — anet 命令行登录、POST /api/auth/tokens 建的具名脚本令牌。
+// 种类由客户端自报(client_kind / client_label),**只用于展示和「显式保留」那条路**:
+// 改密码默认仍撤销全部不绑网络的令牌(当前这条除外),调用方显式 keep_cli_tokens=true 才保留 'cli'。
+// 所以一个自称 cli 的令牌永远不能靠自报在默认改密码里活下来。
 // 节点 / 网络令牌(network_id 非空)不分类,改密码永远不碰。
 export type UserTokenKind = "login" | "cli";
 
 /** 登录 / 注册请求签发的令牌算哪一类:客户端显式报 kind='cli',或 client_label 是 anet 自报的「anet <版本> · …」。 */
+/** anet 自报的 client_label:去掉首尾空白后,区分大小写地以「anet 」开头(启动回填用同一条规则,见 db.ts)。 */
+export function isAnetClientLabel(label: string): boolean {
+  return label.trim().startsWith("anet ");
+}
+
 export function userTokenKindFor(client: SessionClientInfo = {}): UserTokenKind {
   if (client.kind === "cli") return "cli";
-  if (typeof client.label === "string" && client.label.trimStart().startsWith("anet ")) return "cli";
+  if (typeof client.label === "string" && isAnetClientLabel(client.label)) return "cli";
   return "login";
 }
 
@@ -522,7 +529,7 @@ export function createToken(userId: string, name: string, networkId?: string): {
   }
   const token = generateToken();
   const tokenId = generateId("tok");
-  // #711 不绑网络的具名令牌是给脚本 / 命令行长期用的:kind='cli',改密码默认保留。
+  // #711 不绑网络的具名令牌是给脚本 / 命令行长期用的:kind='cli'(改密码时可显式 keep_cli_tokens 保留)。
   db.run(
     "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, kind, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
     [tokenId, hashToken(token), userId, networkId || null, name, "full", networkId ? null : "cli"]
@@ -557,21 +564,31 @@ export function getUserTokenMeta(userId: string, tokenId: string): { kind: UserT
 }
 
 // #711 改密码撤销哪些令牌。kind 为 NULL 的(启动回填之后由旧版 Hub 签出的)按 'login' 算。
-const LOGIN_KIND_SQL = "COALESCE(kind, 'login') <> 'cli'";
 const CLI_KIND_SQL = "kind = 'cli'";
+const NOT_CLI_KIND_SQL = "COALESCE(kind, 'login') <> 'cli'";
+
+/** 改密码后保留下来的命令行 / 脚本令牌(给 UI 列出来、让用户逐条撤销)。**永远不含令牌值。** */
+export type KeptCliToken = { token_id: string; name: string; client_label: string | null; created_at: string; last_used_at: string | null };
 
 /**
- * 改密码后的令牌撤销:默认只撤其他 'login' 会话;revokeCli=true 时连 'cli' 一起撤。
- * 当前这条(exceptTokenId)和节点 / 网络令牌永远不动。
+ * 改密码后的令牌撤销。默认(keepCli=false)= 改密码前的行为:撤销全部不绑网络的令牌;
+ * keepCli=true 时保留 kind='cli' 的,并把它们列出来。当前这条(exceptTokenId)和节点 / 网络令牌永远不动。
  */
-export function revokeTokensAfterPasswordChange(userId: string, exceptTokenId: string | null | undefined, revokeCli: boolean): { login: number; cli: number } {
+export function revokeTokensAfterPasswordChange(userId: string, exceptTokenId: string | null | undefined, keepCli: boolean): { login: number; cli: number; kept: KeptCliToken[] } {
   const except = exceptTokenId ? " AND token_id != ?2" : "";
   const params = exceptTokenId ? [userId, exceptTokenId] : [userId];
-  const login = db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL AND ${LOGIN_KIND_SQL}${except}`, params).changes;
-  const cli = revokeCli
-    ? db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL AND ${CLI_KIND_SQL}${except}`, params).changes
-    : 0;
-  return { login, cli };
+  const login = db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL AND ${NOT_CLI_KIND_SQL}${except}`, params).changes;
+  if (!keepCli) {
+    const cli = db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL${except}`, params).changes;
+    return { login, cli, kept: [] };
+  }
+  const kept = db.all<any>(
+    `SELECT token_id, name, client_label, created_at, last_used_at FROM api_tokens
+     WHERE user_id = ?1 AND network_id IS NULL AND ${CLI_KIND_SQL}${except}
+     ORDER BY created_at DESC`,
+    ...params,
+  ).map((r) => ({ token_id: r.token_id, name: r.name, client_label: r.client_label ?? null, created_at: r.created_at, last_used_at: r.last_used_at ?? null }));
+  return { login, cli: 0, kept };
 }
 
 export function revokeOtherUserTokens(userId: string, exceptTokenId?: string | null): number {
@@ -624,14 +641,14 @@ export function revokeOtherSessions(userId: string, currentTokenId: string): num
   return db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND token_id != ?2`, [userId, currentTokenId]).changes;
 }
 
-export type ChangePasswordResult = { ok: boolean; error?: string; revoked?: number; revoked_login?: number; revoked_cli?: number };
+export type ChangePasswordResult = { ok: boolean; error?: string; revoked?: number; revoked_login?: number; revoked_cli?: number; kept_cli_tokens?: KeptCliToken[] };
 
 /**
- * 改密码。#711:默认只让其他浏览器 / app 登录会话(kind='login')下线,anet 命令行登录和具名脚本令牌
- * (kind='cli')照常可用;opts.revokeCliTokens=true 时连它们一起撤。当前会话和节点令牌永远保留。
+ * 改密码。默认撤销该用户全部不绑网络的令牌(改密码前的行为,旧 app 依赖它)。#711:opts.keepCliTokens=true
+ * 时保留 kind='cli' 的(anet 命令行登录、具名脚本令牌),并在 kept_cli_tokens 里列出。当前会话和节点令牌永远保留。
  * revoked = 两类合计(旧字段,兼容旧客户端)。
  */
-export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null, opts: { revokeCliTokens?: boolean } = {}): ChangePasswordResult {
+export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null, opts: { keepCliTokens?: boolean } = {}): ChangePasswordResult {
   const passwordError = validatePasswordStrength(newPassword, "new password");
   if (passwordError) return { ok: false, error: passwordError };
   const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
@@ -646,8 +663,9 @@ export function changePassword(userId: string, oldPassword: string, newPassword:
   // nudge goes away on next login. SET to 0 explicitly (rather than skip)
   // so a future flag flip can't drift the state.
   db.run("UPDATE users SET password_hash = ?1, must_change_password = 0, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
-  const r = revokeTokensAfterPasswordChange(userId, currentTokenId, opts.revokeCliTokens === true);
-  return { ok: true, revoked: r.login + r.cli, revoked_login: r.login, revoked_cli: r.cli };
+  const keep = opts.keepCliTokens === true;
+  const r = revokeTokensAfterPasswordChange(userId, currentTokenId, keep);
+  return { ok: true, revoked: r.login + r.cli, revoked_login: r.login, revoked_cli: r.cli, ...(keep ? { kept_cli_tokens: r.kept } : {}) };
 }
 
 /**

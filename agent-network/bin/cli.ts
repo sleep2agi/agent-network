@@ -4492,7 +4492,7 @@ Other:
   anet login                  Login (username + password)
   anet login --token <tok>    Login with API token
   anet logout                 Revoke this login on the Hub, then remove the saved token
-  anet passwd                 Change password (keeps CLI/script tokens; --revoke-cli-tokens to revoke them too)
+  anet passwd                 Change password (keeps your CLI/script tokens; --revoke-cli-tokens revokes them too)
   anet whoami                 Show current user + networks
   anet network ls             List my networks
   anet network create <name>  Create a network
@@ -15915,8 +15915,9 @@ async function passwdCommand() {
     const res = await fetch(`${hub}/api/auth/password`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      // #711 默认只让其他浏览器 / app 登录会话下线;--revoke-cli-tokens 连其他机器的 anet 登录、具名脚本令牌一起撤。
-      body: JSON.stringify({ old_password: oldPw, new_password: newPw, ...(revokeCli ? { revoke_cli_tokens: true } : {}) }),
+      // #711 用户是在自己机器上跑 anet:默认请求 keep_cli_tokens,其他机器的 anet 登录、具名脚本令牌保留;
+      // --revoke-cli-tokens 不带这个字段 = Hub 的默认(撤销全部)。旧 Hub 不认这个字段,也是撤销全部。
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw, ...(revokeCli ? {} : { keep_cli_tokens: true }) }),
     }).then(r => r.json() as any);
 
     if (res.ok) {
@@ -15928,7 +15929,14 @@ async function passwdCommand() {
       if (res.token) console.log("[anet] Login token rotated and saved.");
       if (typeof res.revoked_login === "number") {
         console.log(`[anet] Signed out ${res.revoked_login} other login session(s); revoked ${res.revoked_cli ?? 0} CLI/script token(s).`);
-        if (!revokeCli) console.log("[anet] CLI/script tokens were kept. Use --revoke-cli-tokens to revoke them too.");
+      }
+      if (Array.isArray(res.kept_cli_tokens)) {
+        const kept = res.kept_cli_tokens as Array<{ token_id: string; name: string; client_label?: string | null; last_used_at?: string | null }>;
+        console.log(`[anet] Kept ${kept.length} CLI/script token(s):`);
+        for (const t of kept) console.log(`  ${t.token_id}  ${t.client_label || t.name}  last used: ${t.last_used_at || "never"}`);
+        if (kept.length > 0) console.log("[anet] Revoke one with: anet token revoke <token_id>  (or pass --revoke-cli-tokens next time)");
+      } else if (!revokeCli) {
+        console.log("[anet] This Hub does not support keeping CLI tokens; all other tokens were revoked.");
       }
     } else {
       console.error(`[anet] Failed: ${hubErrorText(res)}`); markFailed();

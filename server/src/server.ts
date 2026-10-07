@@ -1473,9 +1473,10 @@ return Bun.serve({
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       try {
         const body = await req.json() as any;
-        // #711 revoke_cli_tokens 缺省 = false:不带这个字段的旧 app 拿到新的安全默认(只踢其他登录会话)。
+        // #711 不带 keep_cli_tokens 的请求(旧 app、dashboard 代理)= 改密码前的行为:撤销全部不绑网络的令牌。
+        // keep_cli_tokens 必须是布尔 true 才保留命令行 / 脚本令牌。
         const meta = resolved.tokenId ? getUserTokenMeta(resolved.user.user_id, resolved.tokenId) : null;
-        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password, resolved.tokenId, { revokeCliTokens: body.revoke_cli_tokens === true });
+        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password, resolved.tokenId, { keepCliTokens: body.keep_cli_tokens === true });
         if (result.ok) {
           // 换发的新令牌沿用当前这条的种类和设备标识:anet passwd 换完仍是命令行令牌。
           const issued = issueUserToken(resolved.user.user_id, "password-change", { kind: meta?.kind, clientLabel: meta?.client_label, userAgent: meta?.user_agent });
