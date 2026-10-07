@@ -1,5 +1,18 @@
 Board #674: token-bound active binding generation projection
 
+B2 integration assertion follow-up
+----------------------------------
+Tested source: 89825140c3313a1677034e0ec18e632d73e73be7.
+Only test678's exact adopted-item expectation adds binding_request_id: requestId;
+the assertion remains toContainEqual (not weakened to a partial match).
+No product implementation changed in this follow-up.
+Docker: tests/test678-daemon-token-owner/Dockerfile, SOURCE_COMMIT as above;
+run --init --cpus=2 --network none, no source mount or TEST678_CASES override.
+SQLite: 21 pass, 0 fail, 347 assertions; all 11 ownership mutations assertion-red.
+PostgreSQL: 21 pass, 0 fail, 347 assertions; all 11 ownership mutations assertion-red.
+Combined test678 suite rc=0. SQLite completed before PostgreSQL ran.
+This result append is the only post-test change; production was not touched.
+
 Reverification after #678 / Hub .111 (supersedes counts below)
 ------------------------------------------------------------
 Tested source: 2e73b48373cf6f9362652225d6d89e97158920a1.
