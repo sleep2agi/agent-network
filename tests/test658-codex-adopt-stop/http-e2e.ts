@@ -7,6 +7,7 @@ import { stoppedReceiptAtStart, isHubStopped } from "../../agent-network/src/sto
 import { execFileSync } from "node:child_process";
 import { codexTmuxEnv, listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
 import { processStamp } from "../../agent-node/src/runtime/adopt-process-tree.js";
+import { heldIdentityCommand, waitForHeldStages } from "./fixture-ready.js";
 
 const root=mkdtempSync("/tmp/codex-http-"), home=`${root}/home`, workdir=`${home}/manual`, daemonDir=`${home}/supervisor`;
 const uid=process.getuid!(), socket=`${root}/socket`, alias="三段演示", nodeDir=`${workdir}/.anet/nodes/n_manual_fixture`;
@@ -43,8 +44,14 @@ try{
  db.query("INSERT INTO nodes(node_id,node_name,alias,network_id,hostname,lifecycle_state,config_snapshot) VALUES(?,?,?,?,?,'active',?)").run("n_manual_fixture",alias,alias,network,hostname(),JSON.stringify({runtime:"codex-app-server",codexCopresence:true}));
  writeFileSync(`${nodeDir}/config.json`,JSON.stringify({node_id:"n_manual_fixture",alias,node_name:alias,network_id:network,hub,runtime:"codex-app-server",codexCopresence:true,env:{ANET_TMUX_SOCKET:socket}}),{mode:0o600});
  writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker,owner_uid:uid,boot_id:readFileSync("/proc/sys/kernel/random/boot_id","utf8").trim()}),{mode:0o600});
- for(const name of [alias,`${alias}-桥`,`${alias}-appsrv`,"unrelated-decoy"])execTmux(["new-session","-d","-s",name,"-c",workdir,
-  `exec env ANET_NODE_MARKER=${name==="unrelated-decoy"?"foreign":marker} CODEX_HOME=${codexHome} sleep 300`],{env});
+ const releaseA=`${workdir}/fixture-release-a`, first=[];
+ for(const name of [alias,`${alias}-桥`,`${alias}-appsrv`,"unrelated-decoy"]){
+  const stageMarker=name==="unrelated-decoy"?"foreign":marker;
+  const pane=execTmux(["new-session","-d","-s",name,"-c",workdir,
+   heldIdentityCommand(releaseA,`exec env ANET_NODE_MARKER=${stageMarker} CODEX_HOME=${codexHome} sleep 300`)],{env}).trim();
+  first.push({pane,marker:stageMarker,codexHome,cwd:workdir});
+ }
+ await waitForHeldStages(scope,releaseA,first);
  const before=listCodexPanes(scope), decoy=before.find(r=>r[0]==="unrelated-decoy")!, birth=processStamp(Number(decoy[3]));
  const tool=async(name:string,args:object)=>{
   const response=await fetch(`${hub}/mcp`,{method:"POST",headers:{...headers,Accept:"application/json, text/event-stream","MCP-Protocol-Version":"2025-03-26"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name,arguments:{...args,network_id:network}}})});
@@ -66,8 +73,12 @@ try{
  const recordResume=stoppedReceiptAtStart(nodeDir,"n_manual_fixture");
  const nextMarker="88888888-8888-4888-8888-888888888888";
  writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker:nextMarker,owner_uid:uid,boot_id:readFileSync("/proc/sys/kernel/random/boot_id","utf8").trim()}),{mode:0o600});
- const manualPanes=[alias,`${alias}-桥`,`${alias}-appsrv`].map(name=>execTmux(["new-session","-d","-s",name,"-c",workdir,
-   `exec env ANET_NODE_MARKER=${nextMarker} CODEX_HOME=${codexHome} sleep 300`],{env}).trim());
+ const releaseB=`${workdir}/fixture-release-b`;
+ const manualStages=[alias,`${alias}-桥`,`${alias}-appsrv`].map(name=>({pane:execTmux(["new-session","-d","-s",name,"-c",workdir,
+   heldIdentityCommand(releaseB,`exec env ANET_NODE_MARKER=${nextMarker} CODEX_HOME=${codexHome} sleep 300`)],{env}).trim(),
+   marker:nextMarker,codexHome,cwd:workdir}));
+ await waitForHeldStages({...scope,marker:nextMarker},releaseB,manualStages);
+ const manualPanes=manualStages.map(stage=>stage.pane);
  recordResume();
  check(!isHubStopped(nodeDir,"n_manual_fixture"),"manual startup supersedes exact old receipt without re-adoption");
  const binding:any=db.query("SELECT request_id,status FROM node_daemon_bindings WHERE node_id='n_manual_fixture' AND status='active'").get();

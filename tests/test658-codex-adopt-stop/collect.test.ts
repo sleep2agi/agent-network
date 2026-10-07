@@ -9,6 +9,7 @@ import { verifyCodexPanes } from "../../agent-node/src/runtime/adopt-codex-evide
 import { stopCodexStages } from "../../agent-node/src/runtime/adopt-codex-stop.js";
 import { processStamp } from "../../agent-node/src/runtime/adopt-process-tree.js";
 import { hasAdoptionMarker, readAdoptionProc } from "../../agent-node/src/runtime/adopt-proc.js";
+import { heldIdentityCommand, waitForHeldStages } from "./fixture-ready.js";
 
 function barrier(ready:()=>boolean) {
   const deadline=Date.now()+3000;
@@ -26,11 +27,16 @@ test(`signal boundary: ${scenario}`,async()=>{
   const env=codexTmuxEnv(scope.socket),kill=process.kill;
   let escaped:ReturnType<typeof Bun.spawn>|undefined,foreignPid:number|undefined;
   try {
+    const release=`${workdir}/fixture-release`;
+    const held=[];
     for(const name of [`${scope.alias}-桥`,scope.alias,`${scope.alias}-appsrv`]){
-      const command=scenario==="late-foreign-child" && name.endsWith("-桥")
-        ? `bun /test/tests/test658-codex-adopt-stop/late-child.ts ${workdir}` : "sleep 300";
-      execTmux(["new-session","-d","-s",name,"-c",workdir,`exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${scope.codexHome} ${command}`],{env});
+      const late=scenario==="late-foreign-child" && name.endsWith("-桥");
+      const command=late ? `bun /test/tests/test658-codex-adopt-stop/late-child.ts ${workdir}` : "sleep 300";
+      const pane=execTmux(["new-session","-d","-s",name,"-c",workdir,heldIdentityCommand(release,
+        `exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${scope.codexHome} ${command}`)],{env}).trim();
+      held.push({pane,marker:scope.marker,codexHome:scope.codexHome,cwd:workdir,...(late?{argvIncludes:"late-child.ts"}:{})});
     }
+    await waitForHeldStages(scope,release,held);
     if(scenario==="late-foreign-child")barrier(()=>existsSync(`${workdir}/ready`));
     const target=listCodexPanes(scope).find(r=>r[0]===`${scope.alias}-${scenario==="late-escape"?"appsrv":"桥"}`)!;
     let injected=false;
@@ -67,11 +73,14 @@ test("mixed layout and unknown layout reject before any signal", async () => {
   const scope = {layout:"native" as const,alias:"布局样例",socket,codexHome,workdir,uid,marker:"22222222-2222-4222-8222-222222222222"};
   const env = codexTmuxEnv(socket);
   const fixture=fixtureTmux(socket),execTmux=fixture.exec;
-  const spawn = (name:string) => execTmux(["new-session","-d","-s",name,"-c",workdir,
-    `exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${codexHome} sleep 300`],{env});
+  const release=`${workdir}/fixture-release`;
+  const held:{pane:string}[]=[];
+  const spawn = (name:string) => held.push({pane:execTmux(["new-session","-d","-s",name,"-c",workdir,
+    heldIdentityCommand(release,`exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${codexHome} sleep 300`)],{env}).trim()});
   try {
     for(const name of [`${scope.alias}-appsrv`,`${scope.alias}-tui`,scope.alias]) spawn(name);
     spawn(`${scope.alias}-桥`);
+    await waitForHeldStages(scope,release,held.map(stage=>({...stage,marker:scope.marker,codexHome,cwd:workdir})));
     const before=listCodexPanes(scope), kill=process.kill; let signals=0;
     process.kill=((...args:any[])=>{signals++;return (kill as any)(...args);}) as typeof process.kill;
     try {
@@ -96,13 +105,17 @@ test(`partial stop recovery: ${scenario}`,async()=>{
   const fixture=fixtureTmux(scope.socket),execTmux=fixture.exec;
   const env=codexTmuxEnv(scope.socket);let escaped:ReturnType<typeof Bun.spawn>|undefined;
   try {
+    const release=`${workdir}/fixture-release`, childCwd=`${workdir}/child`, held=[];
     for(const name of [`${scope.alias}-桥`,scope.alias,`${scope.alias}-appsrv`]) {
       if(scenario==="missing-bridge" && name.endsWith("-桥"))continue;
-      const command=scenario==="descendant-cwd" && name.endsWith("-appsrv")
+      const descendant=scenario==="descendant-cwd" && name.endsWith("-appsrv");
+      const command=descendant
         ? `exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${scope.codexHome} bash -c '(cd child; exec sleep 300) & wait'`
         : `exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${scope.codexHome} sleep 300`;
-      execTmux(["new-session","-d","-s",name,"-c",workdir,command],{env});
+      const pane=execTmux(["new-session","-d","-s",name,"-c",workdir,heldIdentityCommand(release,command)],{env}).trim();
+      held.push({pane,marker:scope.marker,codexHome:scope.codexHome,cwd:workdir,...(descendant?{descendantCwd:childCwd}:{})});
     }
+    await waitForHeldStages(scope,release,held);
     const before=listCodexPanes(scope);
     if(scenario==="frozen") for(const row of before) process.kill(Number(row[3]),"SIGSTOP");
     if(scenario==="remain-on-exit") for(const row of before) execTmux(["set-option","-p","-t",row[2],"remain-on-exit","on"],{env});
@@ -138,8 +151,15 @@ for (const layout of ["native","external-appserver"] as const) test(`private fix
   try {
     barrier(()=>{try{readAdoptionProc(bad.pid);return false;}catch(e:any){return e.message==="adopt_proc_invalid";}});
     expect(processStamp(bad.pid)).not.toBeNull();
-    for (const name of names) execTmux(["new-session", "-d", "-s", name, "-c", workdir,
-      `exec env ANET_NODE_MARKER=${name === "unrelated-decoy" ? "foreign" : scope.marker} CODEX_HOME=${codexHome} sleep 300`], {env});
+    const releaseCollect=`${workdir}/fixture-release-collect`;
+    const collected=[];
+    for (const name of names) {
+      const marker=name === "unrelated-decoy" ? "foreign" : scope.marker;
+      const pane=execTmux(["new-session", "-d", "-s", name, "-c", workdir,
+        heldIdentityCommand(releaseCollect,`exec env ANET_NODE_MARKER=${marker} CODEX_HOME=${codexHome} sleep 300`)], {env}).trim();
+      collected.push({pane,marker,codexHome,cwd:workdir});
+    }
+    await waitForHeldStages(scope,releaseCollect,collected);
     const panes = collectCodexPanes(scope);
     expect(panes.length).toBe(3);
     expect(panes.every(p => /^%\d+$/.test(p.pane))).toBe(true);
@@ -152,8 +172,14 @@ for (const layout of ["native","external-appserver"] as const) test(`private fix
     // The production canonical home is inside nodeDir; relaunch with it.
     for (const pane of panes) execTmux(["kill-pane","-t",pane.pane], {env});
     const realHome = `${nodeDir}/codex-home`; mkdirSync(realHome,{mode:0o700});
-    for (const name of names.slice(0,3)) execTmux(["new-session","-d","-s",name,"-c",workdir,
-      `exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${realHome} sleep 300`],{env});
+    const releaseAdopt=`${workdir}/fixture-release-adopt`;
+    const adopted=[];
+    for (const name of names.slice(0,3)) {
+      const pane=execTmux(["new-session","-d","-s",name,"-c",workdir,
+        heldIdentityCommand(releaseAdopt,`exec env ANET_NODE_MARKER=${scope.marker} CODEX_HOME=${realHome} sleep 300`)],{env}).trim();
+      adopted.push({pane,marker:scope.marker,codexHome:realHome,cwd:workdir});
+    }
+    await waitForHeldStages({...scope,codexHome:realHome},releaseAdopt,adopted);
     writeFileSync(`${nodeDir}/config.json`, JSON.stringify({node_id:"n_fixture",alias:scope.alias,network_id:"net_fixture",
       hub:"http://127.0.0.1:9999",runtime:"codex-app-server",codexCopresence:true,env:{ANET_TMUX_SOCKET:socket},...(layout==="external-appserver"?{codexLaunchLayout:layout}:{})}),{mode:0o600});
     writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker:scope.marker,owner_uid:uid,
@@ -186,8 +212,14 @@ for (const layout of ["native","external-appserver"] as const) test(`private fix
     await handleAdoptedLifecycle({request_id:"stop_retry",child_node_id:"n_fixture",child_alias:scope.alias,action:"stop"},deps);
     expect(calls.at(-1).args).toMatchObject({status:"stopped"});
     const marker2="33333333-3333-4333-8333-333333333333";
-    for(const name of names.slice(0,3)) execTmux(["new-session","-d","-s",name,"-c",workdir,
-      `exec env ANET_NODE_MARKER=${marker2} CODEX_HOME=${realHome} sleep 300`],{env});
+    const releaseRotated=`${workdir}/fixture-release-rotated`;
+    const rotated=[];
+    for(const name of names.slice(0,3)) {
+      const pane=execTmux(["new-session","-d","-s",name,"-c",workdir,
+        heldIdentityCommand(releaseRotated,`exec env ANET_NODE_MARKER=${marker2} CODEX_HOME=${realHome} sleep 300`)],{env}).trim();
+      rotated.push({pane,marker:marker2,codexHome:realHome,cwd:workdir});
+    }
+    await waitForHeldStages({...scope,marker:marker2,codexHome:realHome},releaseRotated,rotated);
     writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker:marker2,owner_uid:uid,
       boot_id:readFileSync("/proc/sys/kernel/random/boot_id","utf8").trim()}),{mode:0o600});
     await handleAdoptedLifecycle({request_id:"stop_rotated",child_node_id:"n_fixture",child_alias:scope.alias,action:"stop"},deps);
