@@ -5,6 +5,9 @@ export const CODEX_RESUME_TIMEOUT_ENV = "ANET_CODEX_RESUME_TIMEOUT_MS";
 export const CODEX_RESUME_BASE_TIMEOUT_MS = 300_000;
 export const CODEX_RESUME_PER_GIB_MS = 120_000;
 export const CODEX_RESUME_MAX_TIMEOUT_MS = 15 * 60_000;
+export const CODEX_RECOVERY_MIN_PAYLOAD_BYTES = 128 * 1024 ** 2;
+export const CODEX_RECOVERY_PAYLOAD_OVERHEAD_BYTES = 64 * 1024 ** 2;
+export const CODEX_RECOVERY_MAX_PAYLOAD_BYTES = 1536 * 1024 ** 2;
 
 export interface CopresenceResumeBudget {
   timeoutMs: number;
@@ -63,4 +66,23 @@ export function resolveCopresenceResumeTimeoutMs(
 
 export function formatCopresenceRolloutSize(bytes: number | null): string {
   return bytes === null ? "rollout size unavailable" : `rollout ${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+}
+
+/** A finite receive ceiling for the one large thread/resume frame emitted by
+ * older Codex app-servers. Twice the rollout plus protocol headroom covers the
+ * measured JSON expansion without giving the loopback peer an unlimited heap. */
+export function resolveCopresenceMaxPayloadBytes(rolloutBytes: number | null): number {
+  const derived = rolloutBytes === null
+    ? CODEX_RECOVERY_MIN_PAYLOAD_BYTES
+    : rolloutBytes * 2 + CODEX_RECOVERY_PAYLOAD_OVERHEAD_BYTES;
+  return Math.min(
+    CODEX_RECOVERY_MAX_PAYLOAD_BYTES,
+    Math.max(CODEX_RECOVERY_MIN_PAYLOAD_BYTES, Math.ceil(derived)),
+  );
+}
+
+/** The bridge can make one retry after a resume timeout, so launcher readiness
+ * covers both bounded attempts instead of killing it at the old fixed 25 s. */
+export function resolveCopresenceBridgeAttachTimeoutMs(resumeTimeoutMs: number): number {
+  return resumeTimeoutMs * 2 + 10_000;
 }

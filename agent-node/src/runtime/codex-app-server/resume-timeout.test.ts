@@ -9,9 +9,12 @@ import { CodexAppServerBridge, CodexResumeTimeoutError } from "../codex-app-serv
 import { openCodexAppServerRuntime } from "./runtime";
 import {
   DEFAULT_RESUME_TIMEOUT_MS,
+  RECOVERY_MAX_PAYLOAD_BYTES,
+  RECOVERY_MAX_PAYLOAD_ENV,
   RESUME_TIMEOUT_ENV,
   resetResumeTimeoutWarnings,
   resolveResumeTimeoutMs,
+  resolveRecoveryMaxPayloadBytes,
 } from "./resume-timeout";
 
 type Msg = { id: number; method: string; params?: unknown };
@@ -169,6 +172,19 @@ describe("resolveResumeTimeoutMs", () => {
     }
     expect(warns.length).toBe(7);
     expect(warns[0]).toContain(`${RESUME_TIMEOUT_ENV}="abc"`);
+  });
+});
+
+describe("resolveRecoveryMaxPayloadBytes", () => {
+  test("uses a finite launcher ceiling and rejects unlimited or oversized values", () => {
+    expect(resolveRecoveryMaxPayloadBytes("missing", { [RECOVERY_MAX_PAYLOAD_ENV]: String(1068 * 1024 ** 2) })).toBe(1068 * 1024 ** 2);
+    expect(resolveRecoveryMaxPayloadBytes("missing", { [RECOVERY_MAX_PAYLOAD_ENV]: "0" })).toBe(128 * 1024 ** 2);
+    expect(resolveRecoveryMaxPayloadBytes("missing", { [RECOVERY_MAX_PAYLOAD_ENV]: String(RECOVERY_MAX_PAYLOAD_BYTES + 1) })).toBe(128 * 1024 ** 2);
+  });
+
+  test("runtime gives the bridge the bounded payload option", () => {
+    const runtimeSource = readFileSync(join(import.meta.dir, "runtime.ts"), "utf8");
+    expect(runtimeSource).toContain("maxPayloadBytes: resolveRecoveryMaxPayloadBytes");
   });
 });
 

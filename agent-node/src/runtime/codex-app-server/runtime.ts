@@ -22,7 +22,7 @@ import { CodexAppServerClient, resolveWebSocketCtor } from "../codex-app-server-
 import { CodexAppServerBridge } from "../codex-app-server-bridge";
 import { waitForStartResources, type StartGateDeps } from "./start-resource-gate";
 import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
-import { describeRolloutSize, resolveResumeTimeoutMs } from "./resume-timeout";
+import { describeRolloutSize, resolveRecoveryMaxPayloadBytes, resolveResumeTimeoutMs } from "./resume-timeout";
 import { codexSessionsRoot, findCodexRolloutFile } from "../codex-thread-size-check";
 import { resolveTimeoutEnvMs } from "./timeout-env";
 import { verifyProcessTreeCodexHome, type ProcReader } from "../../codex-home-enforce";
@@ -260,7 +260,11 @@ export async function openCodexAppServerRuntime(opts: {
       log(`[codex-app-server] attaching to shared server ${url}`);
     }
 
-    const client = new CodexAppServerClient({ url, clientLabel: "anet_codex_bridge" });
+    const client = new CodexAppServerClient({
+      url,
+      clientLabel: "anet_codex_bridge",
+      maxPayloadBytes: resolveRecoveryMaxPayloadBytes(opts.threadId, { ...process.env, ...(opts.codexHome ? { CODEX_HOME: opts.codexHome } : {}) }),
+    });
     client.on("error", (e) => warn(`[codex-app-server] client error: ${String(e).slice(0, 200)}`));
     await client.connect();
 

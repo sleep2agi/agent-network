@@ -1,11 +1,9 @@
 import { copresenceThreadPlan } from "./codex-copresence-thread";
 import { resumeAndVerifyCodexThread, type CodexRecoveryVerification } from "./codex-copresence-recovery";
-import { formatCopresenceRolloutSize } from "./codex-copresence-resume-timeout";
+import { formatCopresenceRolloutSize, resolveCopresenceMaxPayloadBytes } from "./codex-copresence-resume-timeout";
 
 export const SAFE_CODEX_THREAD_ID = /^[A-Za-z0-9_-]+$/;
-export const CODEX_RECOVERY_WS_OPTIONS = Object.freeze({ maxPayload: 0, perMessageDeflate: false });
-
-async function defaultWebSocketCtor(): Promise<any> {
+async function defaultWebSocketCtor(maxPayload: number): Promise<any> {
   // Node's built-in WebSocket inherits undici's fixed receive ceiling. Codex
   // 0.133 cannot suppress turns on thread/resume, so a legitimate persisted
   // thread can exceed that ceiling by hundreds of MiB. `ws` lets this
@@ -13,11 +11,13 @@ async function defaultWebSocketCtor(): Promise<any> {
   // deadline remains the resource bound. Bun's native client already accepts
   // the measured payload and avoids adding a second implementation there.
   if (!(process.versions as Record<string, string | undefined>).bun) {
-    const wsModule = await import("ws");
+    // Keep this runtime-only: source-only smoke images intentionally do not
+    // install dependencies before bundling unrelated CLI paths.
+    const wsModule = await import(["w", "s"].join(""));
     const NodeWebSocket = wsModule.WebSocket;
     return class CodexRecoveryWebSocket extends NodeWebSocket {
       constructor(url: string) {
-        super(url, CODEX_RECOVERY_WS_OPTIONS);
+        super(url, { maxPayload, perMessageDeflate: false });
       }
     };
   }
@@ -45,7 +45,8 @@ export async function createCodexCopresenceThread(
   model?: string,
   options: { webSocketCtor?: any; rolloutBytes?: number | null } = {},
 ): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean; resumedModel?: string }> {
-  const WsCtor = options.webSocketCtor ?? await defaultWebSocketCtor();
+  const maxPayload = resolveCopresenceMaxPayloadBytes(options.rolloutBytes ?? null);
+  const WsCtor = options.webSocketCtor ?? await defaultWebSocketCtor(maxPayload);
   const socket = new WsCtor(ws);
   const deadline = Date.now() + timeoutMs;
   await new Promise<void>((resolve, reject) => {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { CODEX_RECOVERY_WS_OPTIONS, createCodexCopresenceThread } from "./codex-copresence-rpc";
+import { createCodexCopresenceThread } from "./codex-copresence-rpc";
+import { CODEX_RECOVERY_MAX_PAYLOAD_BYTES, resolveCopresenceMaxPayloadBytes } from "./codex-copresence-resume-timeout";
 
 const THREAD = "01999999-1111-7222-8333-444444444444";
 
@@ -27,7 +28,9 @@ function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0, calls?: strin
 
 describe("co-presence RPC recovery deadline", () => {
   test("Node recovery lifts the fixed WebSocket frame ceiling for Codex 0.133", () => {
-    expect(CODEX_RECOVERY_WS_OPTIONS).toEqual({ maxPayload: 0, perMessageDeflate: false });
+    expect(resolveCopresenceMaxPayloadBytes(502 * 1024 ** 2)).toBeGreaterThan(1024 ** 3);
+    expect(resolveCopresenceMaxPayloadBytes(20 * 1024 ** 3)).toBe(CODEX_RECOVERY_MAX_PAYLOAD_BYTES);
+    expect(CODEX_RECOVERY_MAX_PAYLOAD_BYTES).toBeLessThan(2 * 1024 ** 3);
   });
   test("a fresh launch is deferred to the TUI and never creates a thread over RPC", async () => {
     const calls: string[] = [];

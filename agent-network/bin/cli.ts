@@ -291,7 +291,7 @@ import {
   quiesceThenSnapshot,
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
-import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
+import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceBridgeAttachTimeoutMs, resolveCopresenceMaxPayloadBytes, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
 import { codexCopresenceEnvFileText, codexCopresenceStageEnv } from "../src/codex-copresence-env";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
@@ -1102,6 +1102,7 @@ async function startWindowsCodexCopresence(
         ANET_NODE_MARKER: marker,
         ANET_COPRESENCE_BRIDGE: "1",
         ANET_CODEX_RESUME_TIMEOUT_MS: String(resumeBudget.timeoutMs),
+        ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES: String(resolveCopresenceMaxPayloadBytes(resumeBudget.rolloutBytes)),
       }),
     };
     delete bridgeEnv.COMMHUB_TOKEN;
@@ -1115,7 +1116,8 @@ async function startWindowsCodexCopresence(
       : freshDeferred
         ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
         : bridgeClientHealthReceipt(wsUrl, threadId);
-    if (!await waitForFileText(bridgeLog, bridgeReceipt, 25_000)) {
+    const bridgeAttachTimeoutMs = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);
+    if (!await waitForFileText(bridgeLog, bridgeReceipt, bridgeAttachTimeoutMs)) {
       throw new Error(`bridge did not attach to the shared app-server before TUI launch; log=${bridgeLog}`);
     }
     if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
@@ -1152,7 +1154,10 @@ async function startWindowsCodexCopresence(
     //
     // 并且原文案不说它找的是什么 —— pid / birth / port 一个都没有。
     // 一条只报结论、不报「比对的那两样东西」的报错,只能靠从头复现来查。
-    const TUI_HEALTH_MS = 25_000;
+    // Old Codex releases hydrate the same large rollout again when the TUI
+    // connects. Give that second client the same size-aware recovery budget;
+    // a fixed 25s window reported a healthy, still-loading TUI as dead.
+    const TUI_HEALTH_MS = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);
     const tuiHealthStart = Date.now();
     const tuiHealthDeadline = tuiHealthStart + TUI_HEALTH_MS;
     let tuiConnected = false;
@@ -1806,9 +1811,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let threadId: string;
   let freshDeferred = false;
   let recoveryTimeoutMs = 300_000;
+  let recoveryRolloutBytes: number | null = null;
   try {
     const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
     recoveryTimeoutMs = resumeBudget.timeoutMs;
+    recoveryRolloutBytes = resumeBudget.rolloutBytes;
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
     const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
@@ -1898,6 +1905,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       ANET_NODE_MARKER: identityMarker,
       ANET_COPRESENCE_BRIDGE: "1",
       ANET_CODEX_RESUME_TIMEOUT_MS: String(recoveryTimeoutMs),
+      ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES: String(resolveCopresenceMaxPayloadBytes(recoveryRolloutBytes)),
       ANET_CODEX_TUI_SESSION: tuiSession,
       ...(pairedAgentNodeEntrypoint ? { ANET_CODEX_PAIRED_AGENT_NODE: pairedAgentNodeEntrypoint } : {}),
     }));
@@ -1930,10 +1938,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       : freshDeferred
         ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
         : bridgeClientHealthReceipt(wsUrl, threadId);
+    const bridgeAttachTimeoutMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
     const bridgeReady = await waitForTmuxPaneText(
       bridgeSession,
       bridgeReceipt,
-      25_000,
+      bridgeAttachTimeoutMs,
     );
     if (!bridgeReady) {
       await new Promise((r) => setTimeout(r, 300)); // let tee flush the last lines
@@ -1942,7 +1951,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       for (const line of bridgeLaunchFailureLines({
         bridgeAlive: tmuxSessionRunning(bridgeSession),
         attachCommand: `tmux attach -t ${shellQuote(`=${bridgeSession}`)}`,
-        logPath: bridgeLog, logText, waitedSeconds: 25,
+        logPath: bridgeLog, logText, waitedSeconds: Math.ceil(bridgeAttachTimeoutMs / 1000),
         cleanupCommand: `anet node stop ${shellQuote(displayName)}`,
       })) console.error(line);
       process.exit(1);
@@ -2001,7 +2010,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
   };
   const requireTuiPainted = async () => {
-    const TUI_PAINT_TIMEOUT_MS = 40_000;
+    // Codex 0.133 can spend longer than 40s hydrating a large resumed rollout
+    // before its first paint. This is the same bounded recovery operation, so
+    // use the launcher's finite size-aware budget rather than a fixed window.
+    const TUI_PAINT_TIMEOUT_MS = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
     const tuiState = await codexTuiStateAfterRender(tuiSession, TUI_PAINT_TIMEOUT_MS);
     if (tuiState !== "usable") {
       console.error("");

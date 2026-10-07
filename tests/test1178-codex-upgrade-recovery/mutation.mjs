@@ -29,12 +29,12 @@ function mutateSharedDeadline() {
 }
 
 function mutateLargePayloadCeiling() {
-  const original = readFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", "utf8");
-  const before = "Object.freeze({ maxPayload: 0, perMessageDeflate: false })";
+  const original = readFileSync("/repo/agent-network/src/codex-copresence-resume-timeout.ts", "utf8");
+  const before = "export const CODEX_RECOVERY_MAX_PAYLOAD_BYTES = 1536 * 1024 ** 2;";
   if (!original.includes(before)) throw new Error("large-payload mutation anchor missing");
-  writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original.replace(before, "Object.freeze({ maxPayload: 100 * 1024 * 1024, perMessageDeflate: false })"));
+  writeFileSync("/repo/agent-network/src/codex-copresence-resume-timeout.ts", original.replace(before, "export const CODEX_RECOVERY_MAX_PAYLOAD_BYTES = 100 * 1024 ** 2;"));
   try { assertRed("src/codex-copresence-rpc.test.ts", "Node recovery lifts the fixed WebSocket frame ceiling"); }
-  finally { writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original); }
+  finally { writeFileSync("/repo/agent-network/src/codex-copresence-resume-timeout.ts", original); }
 }
 
 function mutateTransportClose() {
@@ -44,6 +44,42 @@ function mutateTransportClose() {
   writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original.replace(before, "    // mutation: leave requests waiting until the deadline"));
   try { assertRed("src/codex-copresence-rpc.test.ts", "a broken large-payload connection fails immediately"); }
   finally { writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original); }
+}
+
+function mutateBridgePayloadCeiling() {
+  const original = readFileSync("/repo/agent-node/src/runtime/codex-app-server/runtime.ts", "utf8");
+  const before = "      maxPayloadBytes: resolveRecoveryMaxPayloadBytes(opts.threadId, { ...process.env, ...(opts.codexHome ? { CODEX_HOME: opts.codexHome } : {}) }),";
+  if (!original.includes(before)) throw new Error("bridge payload mutation anchor missing");
+  writeFileSync("/repo/agent-node/src/runtime/codex-app-server/runtime.ts", original.replace(before, "      // mutation: bridge uses the runtime's fixed receive ceiling"));
+  try { assertRed("src/runtime/codex-app-server/resume-timeout.test.ts", "runtime gives the bridge the bounded payload option", "/repo/agent-node"); }
+  finally { writeFileSync("/repo/agent-node/src/runtime/codex-app-server/runtime.ts", original); }
+}
+
+function mutateBridgeTransportClose() {
+  const original = readFileSync("/repo/agent-node/src/runtime/codex-app-server-client.ts", "utf8");
+  const before = "        for (const [, pending] of this.pending) pending.reject(error);";
+  if (!original.includes(before)) throw new Error("bridge transport-close mutation anchor missing");
+  writeFileSync("/repo/agent-node/src/runtime/codex-app-server-client.ts", original.replace(before, "        // mutation: leave bridge requests pending until their deadline"));
+  try { assertRed("src/runtime/codex-app-server-client.test.ts", "a transport error rejects an in-flight request immediately", "/repo/agent-node"); }
+  finally { writeFileSync("/repo/agent-node/src/runtime/codex-app-server-client.ts", original); }
+}
+
+function mutateBridgeAttachBudget() {
+  const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
+  const before = "resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs)";
+  if (!original.includes(before)) throw new Error("bridge attach mutation anchor missing");
+  writeFileSync("/repo/agent-network/bin/cli.ts", original.replace(before, "25_000"));
+  try { assertRed("src/codex-copresence-resume-timeout.test.ts", "both launchers give bridge and TUI the finite payload/recovery budget"); }
+  finally { writeFileSync("/repo/agent-network/bin/cli.ts", original); }
+}
+
+function mutateTuiRecoveryBudget() {
+  const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
+  const before = "const TUI_PAINT_TIMEOUT_MS = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);";
+  if (!original.includes(before)) throw new Error("TUI recovery-budget mutation anchor missing");
+  writeFileSync("/repo/agent-network/bin/cli.ts", original.replace(before, "const TUI_PAINT_TIMEOUT_MS = 40_000;"));
+  try { assertRed("src/codex-copresence-resume-timeout.test.ts", "both launchers give bridge and TUI the finite payload/recovery budget"); }
+  finally { writeFileSync("/repo/agent-network/bin/cli.ts", original); }
 }
 
 function mutateExperimentalFallback() {
@@ -149,6 +185,10 @@ mutateStreamingCopy();
 mutateSharedDeadline();
 mutateLargePayloadCeiling();
 mutateTransportClose();
+mutateBridgePayloadCeiling();
+mutateBridgeTransportClose();
+mutateBridgeAttachBudget();
+mutateTuiRecoveryBudget();
 mutateExperimentalFallback();
 mutateMetadataOnlyHistory();
 mutateDeferredMaterialization();

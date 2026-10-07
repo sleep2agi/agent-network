@@ -2,7 +2,7 @@ import { closeSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } fr
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { createCodexCopresenceThread } from "/tmp/codex-copresence-rpc.mjs";
+import { createCodexCopresenceThread } from "/repo/agent-network/.test-codex-copresence-rpc.mjs";
 
 const codexHome = process.env.CODEX_HOME;
 if (!codexHome) throw new Error("CODEX_HOME is required");

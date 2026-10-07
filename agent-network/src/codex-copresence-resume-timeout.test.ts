@@ -6,6 +6,8 @@ import {
   CODEX_RESUME_BASE_TIMEOUT_MS,
   CODEX_RESUME_MAX_TIMEOUT_MS,
   codexThreadIdForStart,
+  resolveCopresenceBridgeAttachTimeoutMs,
+  resolveCopresenceMaxPayloadBytes,
   resolveCopresenceResumeBudget,
   resolveCopresenceResumeTimeoutMs,
 } from "./codex-copresence-resume-timeout";
@@ -52,6 +54,13 @@ describe("Codex co-presence resume timeout", () => {
     expect(resolveCopresenceResumeBudget(rollout(bytes), THREAD, { ANET_CODEX_RESUME_TIMEOUT_MS: "350000" }))
       .toEqual({ timeoutMs: 350_000, rolloutBytes: bytes });
   });
+
+  test("large-frame ceiling is finite, size-aware, and bridge readiness covers both attempts", () => {
+    expect(resolveCopresenceMaxPayloadBytes(null)).toBe(128 * 1024 ** 2);
+    expect(resolveCopresenceMaxPayloadBytes(502 * 1024 ** 2)).toBe(1068 * 1024 ** 2);
+    expect(resolveCopresenceMaxPayloadBytes(2 * 1024 ** 3)).toBe(1536 * 1024 ** 2);
+    expect(resolveCopresenceBridgeAttachTimeoutMs(420_000)).toBe(850_000);
+  });
 });
 
 describe("--new-session co-presence wiring", () => {
@@ -61,5 +70,14 @@ describe("--new-session co-presence wiring", () => {
     expect(cli.match(/const requestedThreadId = codexThreadIdForStart\(/g)).toHaveLength(2);
     expect(cli.match(/if \(opts\.newSession\) delete rawCfg\.codexPendingThread;/g)).toHaveLength(2);
     expect(cli).toContain("newSession: forceNewSession,");
+  });
+
+  test("both launchers give bridge and TUI the finite payload/recovery budget", () => {
+    expect(cli.match(/ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES:/g)).toHaveLength(2);
+    expect(cli.match(/resolveCopresenceBridgeAttachTimeoutMs\(/g)).toHaveLength(4); // bridge + TUI on Windows + POSIX
+    expect(cli).not.toContain("waitForFileText(bridgeLog, bridgeReceipt, 25_000)");
+    expect(cli).toContain("const TUI_HEALTH_MS = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);");
+    expect(cli).toContain("const TUI_PAINT_TIMEOUT_MS = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);");
+    expect(cli).not.toContain("const TUI_PAINT_TIMEOUT_MS = 40_000;");
   });
 });
