@@ -13,7 +13,7 @@ async function runMutation(label: string, file: string, from: string, to: string
     console.log(`WITNESSED_RED ${label} rc=${rc} assertion=${testName}`);
   } finally { writeFileSync(file, original); }
 }
-await runMutation("resolver", "src/create-node.ts", 'if (!ownsNode && !boundToNode && !legacyOwnerless) return { ok: false, error: "caller_not_a_daemon" };', '', 'daemon identity boundary:');
+await runMutation("resolver", "src/create-node.ts", 'if (!ownsNode && !boundToNode && !legacyOwnerless) return { ok: false, reason: "not_owner" };', '', 'daemon identity boundary:');
 await runMutation("mint", "src/auth.ts", 'nodeId = checkNodeTokenClaim(userId, networkId, nodeName, nodeId);', '', 'name-only issuance checks existing ownership atomically');
 await runMutation("legacy", "src/create-node.ts", 'const ownsNode = !!tokRow.user_id && tokRow.user_id === nodeRow.owner_user_id;', 'const ownsNode = false;', 'legacy owner and exact bound identity remain supported');
 await runMutation("bound", "src/create-node.ts", 'const boundToNode = tokRow.bound_node_id === nodeRow.node_id;', 'const boundToNode = false;', 'legacy owner and exact bound identity remain supported');

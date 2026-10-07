@@ -75,6 +75,7 @@ import {
   TASK_REST_SELECT,
 } from "./rest-projections.js";
 import { resolveRestFromSession } from "./rest-identity.js";
+import { resolveNodeCaller } from "./create-node.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { diagnoseTask } from "./task-diagnostic.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
@@ -197,12 +198,12 @@ function sweepStaleRateLimits(): void {
 }
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, includeProtocolTools = false): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, includeProtocolTools = false, callerIdentityRejected = false): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId, { includeProtocol: includeProtocolTools });
+  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId, { includeProtocol: includeProtocolTools }, callerIdentityRejected);
   return server;
 }
 
@@ -272,6 +273,16 @@ function nodeSubscriberInfo(req: Request, server: any, tokenId: string | null, a
   return { nodeId, instanceId, remote, userAgent: req.headers.get("user-agent")?.slice(0, 200) ?? null };
 }
 
+// The stream belongs to a node id, not a name. A session that never stored
+// node_id still owns its stream when this network has exactly one nodes row
+// for the alias. Null does not match null.
+function streamOwnerNodeId(alias: string, networkId: string): string | null {
+  const fromSession = db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", alias, networkId)?.node_id ?? null;
+  if (fromSession) return fromSession;
+  const rows = db.all<{ node_id: string }>("SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2", alias, networkId);
+  return rows.length === 1 ? rows[0].node_id : null;
+}
+
 function isLocalhostIP(ip: string): boolean {
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip === "localhost";
 }
@@ -310,17 +321,24 @@ function isHubAdminCredential(resolved: { networkId: string | null; user: { role
 function nodeTokenAlias(resolved: { tokenName: string | null }): string | null {
   return resolved.tokenName?.startsWith("node:") ? resolved.tokenName.slice("node:".length) : null;
 }
-function nodeMayRename(resolved: { networkId: string | null; tokenName: string | null }, networkId: unknown, oldAlias: unknown): boolean {
-  if (!resolved.networkId) return true;
-  return networkId === resolved.networkId && typeof oldAlias === "string" && oldAlias === nodeTokenAlias(resolved);
+function resolvedNodeAlias(resolved: { networkId: string | null; tokenName: string | null; tokenId?: string | null }): string | null {
+  if (!resolved.tokenId) return nodeTokenAlias(resolved);
+  const caller = resolveNodeCaller(resolved.tokenId);
+  if (!caller.ok) return null;
+  if (resolved.networkId && caller.networkId !== resolved.networkId) return null;
+  return caller.alias;
 }
-function nodeMayRenameTxn(resolved: { networkId: string | null; tokenName: string | null }, txnId: unknown): boolean {
+function nodeMayRename(resolved: { networkId: string | null; tokenName: string | null; tokenId?: string | null }, networkId: unknown, oldAlias: unknown): boolean {
+  if (!resolved.networkId) return true;
+  return networkId === resolved.networkId && typeof oldAlias === "string" && oldAlias === resolvedNodeAlias(resolved);
+}
+function nodeMayRenameTxn(resolved: { networkId: string | null; tokenName: string | null; tokenId?: string | null }, txnId: unknown): boolean {
   if (!resolved.networkId) return true;
   if (typeof txnId !== "string") return false;
   const txn = db.get<{ network_id: string; old_alias: string; new_alias: string }>("SELECT network_id, old_alias, new_alias FROM rename_txn WHERE txn_id = ?1", txnId);
   if (!txn || txn.network_id !== resolved.networkId) return false;
   // commit 前后令牌名可能已被改成新 alias(api_tokens.name 跟随改名),两个都算它自己。
-  const self = nodeTokenAlias(resolved);
+  const self = resolvedNodeAlias(resolved);
   return self === txn.old_alias || self === txn.new_alias;
 }
 
@@ -1030,11 +1048,18 @@ return Bun.serve({
       const token = requestToken(req);
       const authCtx = resolveRequestAuth(req);
       const enforceNetId = authCtx?.networkId || null;
-      // Derive the calling alias from the token name (e.g., 'node:视频审查')
-      // so peer agents see the real sender instead of 'hub' on send_task.
-      const callerAlias = authCtx?.tokenName?.startsWith("node:")
-        ? authCtx.tokenName.slice("node:".length)
-        : (authCtx?.username || null);
+      // Network tokens speak as the node the token is bound to, not the name
+      // string. A rejected token must not fall through to a client-supplied from.
+      let callerAlias: string | null = authCtx?.username || null;
+      let callerIdentityRejected = false;
+      if (token?.startsWith("ntok_")) {
+        const resolvedCaller = authCtx?.tokenId ? resolveNodeCaller(authCtx.tokenId) : null;
+        if (resolvedCaller?.ok) callerAlias = resolvedCaller.alias;
+        else {
+          callerAlias = null;
+          callerIdentityRejected = true;
+        }
+      }
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
@@ -1052,7 +1077,7 @@ return Bun.serve({
         labelRoute(req, mcpParsedBody === undefined ? "?" : mcpRouteLabel(mcpParsedBody));
       }
       // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url));
+      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url), callerIdentityRejected);
       await mcpServer.connect(transport);
       const response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
       // Disconnect after response to prevent McpServer leak
@@ -1206,11 +1231,22 @@ return Bun.serve({
           nodeId: db.get<{ node_id: string | null }>("SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2", sessionName, scopedNetId)?.node_id ?? null,
         }));
         if (streamDenied) return streamDenied;
-        // #507 — the node's OWN stream (token bound to this alias) is node-scoped:
-        // at most one per (network, alias), newest wins. A node token watching some
-        // other alias stays a plain monitor and can never supersede that node.
-        if (authCtx.tokenName === `node:${sessionName}` && authCtx.networkId === scopedNetId) {
-          return createSSEStream(sessionName, scopedNetId, { node: nodeSubscriberInfo(req, server, authCtx.tokenId, sessionName, scopedNetId) });
+        // #507 — the node's OWN stream is node-scoped: at most one per (network,
+        // alias), newest wins. Own means the resolved node id equals this stream's
+        // node id. A matching token name is not enough, and a monitor never supersedes.
+        const resolvedCaller = authCtx.tokenId ? resolveNodeCaller(authCtx.tokenId) : null;
+        const streamNodeId = streamOwnerNodeId(sessionName, scopedNetId);
+        if (
+          resolvedCaller?.ok
+          && resolvedCaller.kind === "node"
+          && resolvedCaller.nodeId
+          && streamNodeId
+          && resolvedCaller.nodeId === streamNodeId
+          && resolvedCaller.networkId === scopedNetId
+        ) {
+          const info = nodeSubscriberInfo(req, server, authCtx.tokenId, sessionName, scopedNetId);
+          if (!info.nodeId) info.nodeId = resolvedCaller.nodeId;
+          return createSSEStream(sessionName, scopedNetId, { node: info });
         }
         return createSSEStream(sessionName, scopedNetId);
       }
@@ -1395,8 +1431,9 @@ return Bun.serve({
       // RFC-040:managed_department_ids = 我负责的部门 + 全部下级(空 = 不是负责人;viewer 恒空;节点令牌不是人,恒空)。
       const networks = (resolved.networkId ? allNetworks.filter((n: any) => n.network_id === resolved.networkId) : allNetworks)
         .map((n: any) => ({ ...n, managed_department_ids: resolved.networkId ? [] : managedDepartmentIds(n.network_id, resolved.user.user_id) }));
+      const nodeCaller = resolved.networkId && resolved.tokenId ? resolveNodeCaller(resolved.tokenId) : null;
       const credential = resolved.networkId
-        ? { kind: "node", network_id: resolved.networkId, node_alias: resolved.tokenName?.startsWith("node:") ? resolved.tokenName.slice(5) : null, acts_as_owner: false }
+        ? { kind: "node", network_id: resolved.networkId, node_alias: nodeCaller?.ok ? nodeCaller.alias : null, acts_as_owner: false }
         : { kind: "user" };
       return withCors(req, Response.json({ ok: true, user: resolved.user, networks, current_network: resolved.networkId, credential }));
     }
@@ -3546,6 +3583,7 @@ return Bun.serve({
       const identity = resolveRestFromSession({
         token: requestToken(req),
         tokenName: restAuth?.tokenName,
+        tokenId: restAuth?.tokenId,
         authenticatedUsername: restAuth?.username,
         requestedFrom: body.from,
       });

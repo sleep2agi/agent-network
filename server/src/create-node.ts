@@ -232,26 +232,24 @@ export type DaemonResolveResult =
   | { ok: true; daemonNodeId: string; daemonAlias: string; networkId: string }
   | { ok: false; error: string };
 
-export function resolveCallerDaemonTokenBound(opts: {
-  callerTokenIsNetwork: boolean;
-  callerTokenId: string | null | undefined;
-  enforceNetworkId: string | null | undefined;
-}): DaemonResolveResult {
-  if (!opts.callerTokenIsNetwork || !opts.callerTokenId) {
-    return { ok: false, error: "caller_not_a_daemon" };
-  }
-  if (!opts.enforceNetworkId) {
-    return { ok: false, error: "caller_not_a_daemon" };
-  }
+export type NodeCallerResolution =
+  | { ok: true; kind: "node"; nodeId: string; alias: string; networkId: string }
+  | { ok: true; kind: "unregistered"; alias: string; networkId: string }
+  | { ok: false; reason: "not_a_node_token" | "bound_node_missing" | "ambiguous" | "not_owner" };
+
+// One lookup for every caller-identity entry. The token name is a hint.
+// bound_node_id is the row: if that row is gone, refuse — do not look up by name.
+// An unbound token with no row in its network stays the token name. First
+// registration (report_status) still depends on that; sending and subscribing
+// do not get a second exception.
+export function resolveNodeCaller(tokenId: string | null | undefined): NodeCallerResolution {
+  if (!tokenId) return { ok: false, reason: "not_a_node_token" };
   const tokRow = db.get<{ name: string; network_id: string | null; user_id: string | null; bound_node_id: string | null; node_identity_epoch: number }>(
     `SELECT name, network_id, user_id, bound_node_id, node_identity_epoch FROM api_tokens WHERE token_id = ?1 AND revoked_at IS NULL`,
-    opts.callerTokenId,
+    tokenId,
   );
-  if (!tokRow || !tokRow.name || !tokRow.name.startsWith("node:")) {
-    return { ok: false, error: "caller_not_a_daemon" };
-  }
-  if (tokRow.network_id !== opts.enforceNetworkId) {
-    return { ok: false, error: "caller_not_a_daemon" };
+  if (!tokRow || !tokRow.name || !tokRow.name.startsWith("node:") || !tokRow.network_id) {
+    return { ok: false, reason: "not_a_node_token" };
   }
   const tokenAlias = tokRow.name.slice(5);
   type DaemonRow = { node_id: string; alias: string; network_id: string; owner_user_id: string | null };
@@ -259,20 +257,38 @@ export function resolveCallerDaemonTokenBound(opts: {
     ? db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE node_id = ?1 AND network_id = ?2`, tokRow.bound_node_id, tokRow.network_id)
     : db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE alias = ?1 AND network_id = ?2`, tokenAlias, tokRow.network_id);
   const nodeRow = rows.length === 1 ? rows[0] : undefined;
-  if (!nodeRow) {
-    return { ok: false, error: "caller_not_a_daemon" };
+  // board679-bound-row-missing: a bound token with no row is refused. Do not look up by name.
+  if (tokRow.bound_node_id && !nodeRow) return { ok: false, reason: "bound_node_missing" };
+  if (!nodeRow && rows.length === 0) {
+    return { ok: true, kind: "unregistered", alias: tokenAlias, networkId: tokRow.network_id };
   }
-  // Legacy daemon tokens have no bound_node_id: retain their owner's authority.
-  // A token name is a lookup hint, never proof of authority over that node.
+  if (!nodeRow) return { ok: false, reason: "ambiguous" };
+  // Legacy unbound tokens keep their owner's authority. A token name is only a hint.
   const ownsNode = !!tokRow.user_id && tokRow.user_id === nodeRow.owner_user_id;
   const boundToNode = tokRow.bound_node_id === nodeRow.node_id;
   const legacyOwnerless = nodeRow.owner_user_id === null && tokRow.node_identity_epoch === 0;
-  if (!ownsNode && !boundToNode && !legacyOwnerless) return { ok: false, error: "caller_not_a_daemon" };
+  if (!ownsNode && !boundToNode && !legacyOwnerless) return { ok: false, reason: "not_owner" };
+  return { ok: true, kind: "node", nodeId: nodeRow.node_id, alias: nodeRow.alias, networkId: nodeRow.network_id };
+}
+
+export function resolveCallerDaemonTokenBound(opts: {
+  callerTokenIsNetwork: boolean;
+  callerTokenId: string | null | undefined;
+  enforceNetworkId: string | null | undefined;
+}): DaemonResolveResult {
+  if (!opts.callerTokenIsNetwork || !opts.callerTokenId || !opts.enforceNetworkId) {
+    return { ok: false, error: "caller_not_a_daemon" };
+  }
+  const resolved = resolveNodeCaller(opts.callerTokenId);
+  // No row yet is not a daemon. First registration stays on report_status.
+  if (!resolved.ok || resolved.kind !== "node" || resolved.networkId !== opts.enforceNetworkId) {
+    return { ok: false, error: "caller_not_a_daemon" };
+  }
   return {
     ok: true,
-    daemonNodeId: nodeRow.node_id,
-    daemonAlias: nodeRow.alias,
-    networkId: nodeRow.network_id,
+    daemonNodeId: resolved.nodeId,
+    daemonAlias: resolved.alias,
+    networkId: resolved.networkId,
   };
 }
 
