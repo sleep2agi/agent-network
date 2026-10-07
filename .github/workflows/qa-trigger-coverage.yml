@@ -36,4 +36,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: python3 .github/scripts/check-qa-trigger-coverage.py --selftest
       - run: python3 .github/scripts/check-qa-trigger-coverage.py

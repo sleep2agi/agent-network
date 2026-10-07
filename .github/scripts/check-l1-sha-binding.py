@@ -56,17 +56,18 @@ DECLARE_RE = re.compile(r"^\s*(ARG|ENV|LABEL)\b.*SOURCE_COMMIT.*$", re.M | re.I)
 
 
 def l1_suites(tests_dir: pathlib.Path) -> list[str]:
-    """L1 是 tests/<套件>/qa.l1。可注入目录，selftest 用它验取集层本身。
+    """L1 是 tests/<套件>/qa.l1 这个普通文件，目录名不以点开头。
+
+    可注入目录，selftest 用它验取集层本身。隐藏目录、目录型 qa.l1、断链都不收，
+    和 scripts/qa.sh 一致。
 
     #675 之前这里正则抓 qa.sh 的 L1_TESTS 数组。数组没了，抓空会被当成
     「没有未绑定套件」而放行，所以取集改看标记文件，空目录仍然返回 []，
     main 据此退 2。
     """
-    if not tests_dir.is_dir():
-        return []
-    return sorted(
-        p.name for p in tests_dir.iterdir() if p.is_dir() and (p / "qa.l1").is_file()
-    )
+    from l1_markers import marker_names
+
+    return marker_names(tests_dir)
 
 
 def suite_texts(suite_dir: pathlib.Path) -> str:
@@ -228,11 +229,20 @@ def selftest() -> int:
         (marker_root / "b" / "qa.l1").write_text("# 注释\n", encoding="utf-8")
         (marker_root / "c").mkdir()
         (marker_root / "c" / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (marker_root / ".hidden").mkdir()
+        (marker_root / ".hidden" / "qa.l1").write_text("\n", encoding="utf-8")
+        (marker_root / "suite-dir").mkdir()
+        (marker_root / "suite-dir" / "qa.l1").mkdir()
+        (marker_root / "suite-dangling").mkdir()
+        (marker_root / "suite-dangling" / "qa.l1").symlink_to("missing-target")
         found = l1_suites(marker_root)
     cases += [
         ("基线文件不存在 → None（main 据此退 2）", read_baseline.__doc__ is not None),
         ("qa.l1 取集含 a,b", found == ["a", "b"]),
         ("没有标记的目录不进 L1", "c" not in found),
+        ("隐藏目录不进 L1", ".hidden" not in found),
+        ("qa.l1 是目录不进 L1", "suite-dir" not in found),
+        ("断链不进 L1", "suite-dangling" not in found),
         ("没有目录时返回空（main 会据此退 2）", l1_suites(pathlib.Path(td) / "missing") == []),
     ]
 

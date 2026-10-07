@@ -164,7 +164,7 @@ comm -23 /tmp/b /tmp/d      # build 了但没 done 的 —— 就是它
    - L0：`<module>/src/<file>.test.ts` 旁边
    - L1+：`tests/qa-<id>-<topic>/{Dockerfile,run.sh,README.md}`
 3. 实跑通过：本地 `bun test` 或 `sg docker -c 'docker build ... && docker run ...'`
-4. L0 仍加进 [scripts/qa.sh](../../scripts/qa.sh) 的 `L0_TESTS`。L1 不要再改那份数组，也不要往 `qa.yml` 的 `paths` 加一行：在套件目录放 `qa.l1`，并把这一层写进 `.github/scripts/l1-layer-inventory.txt`。漏改清单，层比对门会红。
+4. L0 仍加进 [scripts/qa.sh](../../scripts/qa.sh) 的 `L0_TESTS`。L1 不要再改那份数组，也不要往 `qa.yml` 的 `paths` 加一行：在套件目录放 `qa.l1`（普通文件，目录名不以点开头），并把这一层写进 `.github/scripts/l1-layer-inventory.txt`。漏改清单，层比对门会红。单独做成 qa.yml 里一个 job 的套件也要在清单里加一行（`名字<TAB>job:<job 名>`）。只加 job、不加这一行，层比对门会红。
 5. 写 [docs/tests/report-<id>.txt](../tests/)：步骤 + 结果 + 抠出的契约
 6. 矩阵 🟡 → ✅，commit + push
 

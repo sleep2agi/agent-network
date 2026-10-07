@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """L1 套件的层不能在收集方式换掉之后悄悄变掉。
 
-看板 #675。L1 的成员是 tests/<套件>/qa.l1，不再是 scripts/qa.sh 里的一份
-手写数组，也不再是 qa.yml 里逐套件的 paths 行。这份清单是换收集方式之前
-每个套件所在的层。之后：
+看板 #675。L1 的成员是 tests/<套件>/qa.l1 这个普通文件（目录名不以点开头），
+不再是 scripts/qa.sh 里的一份手写数组，也不再是 qa.yml 里逐套件的 paths 行。
+实际跑哪些，以 `bash scripts/qa.sh --list` 为准，和 marker 逐个比。
+这份清单是换收集方式之前每个套件所在的层。之后：
 
   - 新增一个 qa.l1，而清单里没有它 → 红
   - 删掉一个 qa.l1，而清单里还有它 → 红
@@ -18,6 +19,8 @@ tests/** 会让只改孤儿套件或豁免套件的 PR 也触发整份 qa workfl
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -28,20 +31,17 @@ except ImportError:
     print("::error::PyYAML is not available — cannot parse qa.yml, refusing to pass")
     sys.exit(2)
 
+from l1_markers import marker_names
+
 REPO = Path(__file__).resolve().parents[2]
 INVENTORY = REPO / ".github" / "scripts" / "l1-layer-inventory.txt"
 QA_YML = REPO / ".github" / "workflows" / "qa.yml"
 TESTS = REPO / "tests"
+QA_SH = REPO / "scripts" / "qa.sh"
 
 _SUITE_REF = re.compile(r"tests/([A-Za-z0-9_.-]+)/")
-
-
-def marker_names(tests: Path) -> list[str]:
-    """目录里有 qa.l1 的套件。没有这个文件的 run.sh 不算 L1。"""
-    if not tests.is_dir():
-        return []
-    names = [p.name for p in tests.iterdir() if p.is_dir() and (p / "qa.l1").is_file()]
-    return sorted(names)
+# 和 ci-docs-only.py 的 l1_suites() 用同一条。L0 行是 `  - 名字  (路径)`，匹配不上。
+_L1_LIST_LINE = re.compile(r"^\s*- tests/([\w.-]+)/\s*$", re.M)
 
 
 def _is_suite_dir(tests: Path, name: str) -> bool:
@@ -153,6 +153,51 @@ def diff_layers(inventory: dict[str, set[str]], live: dict[str, set[str]]) -> li
     return problems
 
 
+def qa_list_diff(script: Path) -> tuple[int, list[str], list[str]]:
+    """跑 `bash <script> --list`，和脚本所在仓库的 marker_names() 逐个比。
+
+    返回 (rc, 问题, 列出的名字)。rc 2 = 脚本自己没给出名单。rc 1 = 对不上。
+    不能只比数量：少一个、多一个、顺序不同，都是红。
+    """
+    root = script.resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(script), "--list"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    listed = _L1_LIST_LINE.findall(proc.stdout or "")
+    markers = marker_names(root / "tests")
+    if proc.returncode != 0:
+        tail = ""
+        err = (proc.stderr or "").strip()
+        if err:
+            tail = "（" + err.splitlines()[-1] + "）"
+        return 2, [f"::error::bash scripts/qa.sh --list 退出 {proc.returncode}，拒绝拿另一份名单放行{tail}"], listed
+    if not listed:
+        return 2, ["::error::qa.sh --list 没有列出任何 L1 套件 —— 取集塌了，拒绝通过"], listed
+    if listed == markers:
+        return 0, [], listed
+    only_list = sorted(set(listed) - set(markers))
+    only_mark = sorted(set(markers) - set(listed))
+    problems = []
+    if only_list:
+        problems.append(
+            "::error::qa.sh --list 多收了这些套件，但没有普通文件 tests/<名>/qa.l1："
+            + ", ".join(only_list)
+        )
+    if only_mark:
+        problems.append(
+            "::error::这些套件有 tests/<名>/qa.l1，qa.sh --list 没列出，少跑不能绿："
+            + ", ".join(only_mark)
+        )
+    if not only_list and not only_mark:
+        problems.append(
+            "::error::qa.sh --list 和 qa.l1 的名字对不上（顺序或重复），不能只比数量"
+        )
+    return 1, problems, listed
+
+
 def main() -> int:
     if not QA_YML.is_file():
         print(f"::error::{QA_YML} 不存在 —— 取集塌了，拒绝通过")
@@ -173,16 +218,23 @@ def main() -> int:
         print("::error::qa.l1 和 qa.yml job 都没有取到套件 —— 取集塌了，拒绝通过")
         return 2
     problems = diff_layers(inventory, live)
+    # 执行时真正用的是 qa.sh 的 glob。Python 取集和它对不上，清单再一致也是少跑。
+    list_rc, list_problems, listed = qa_list_diff(QA_SH)
     l1_inv = sorted(n for n, tags in inventory.items() if "l1" in tags)
     l1_live = sorted(n for n, tags in live.items() if "l1" in tags)
     print(
         f"inventory={len(inventory)} live={len(live)} "
         f"l1_inventory={len(l1_inv)} l1_markers={len(l1_live)} "
-        f"moved={len(problems)}"
+        f"l1_qa_sh={len(listed)} "
+        f"moved={len(problems)} list_diff={len(list_problems)}"
     )
     for line in problems:
         print(line)
-    if problems:
+    for line in list_problems:
+        print(line)
+    if list_rc == 2:
+        return 2
+    if problems or list_problems:
         return 1
     print("every suite is still in the same layer.")
     return 0
@@ -266,6 +318,55 @@ jobs:
         live_deleted = live_layers(tests, qa)
         check("取集不再把删掉标记的套件当 l1", "l1" not in live_deleted.get("suite-b", set()))
         check("删标记对原清单是红", any("suite-b" in e for e in diff_layers(inventory, live_deleted)))
+
+        # 隐藏目录、qa.l1 不是普通文件：和 qa.sh 一样不收。
+        (tests / ".hidden").mkdir()
+        (tests / ".hidden" / "qa.l1").write_text("\n", encoding="utf-8")
+        (tests / "suite-dirmark").mkdir()
+        (tests / "suite-dirmark" / "qa.l1").mkdir()
+        (tests / "suite-dangling").mkdir()
+        (tests / "suite-dangling" / "qa.l1").symlink_to("missing-target")
+        rejected = marker_names(tests)
+        check("隐藏目录不收", ".hidden" not in rejected)
+        check("qa.l1 是目录不收", "suite-dirmark" not in rejected)
+        check("断链不收", "suite-dangling" not in rejected)
+
+    # 真跑 qa.sh --list。少收一个套件必须红。脚本会 cd 到自己的仓库根。
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "scripts").mkdir()
+        tests = root / "tests"
+        (tests / "suite-a").mkdir(parents=True)
+        (tests / "suite-a" / "qa.l1").write_text("\n", encoding="utf-8")
+        (tests / "suite-b").mkdir()
+        (tests / "suite-b" / "qa.l1").write_text("\n", encoding="utf-8")
+        (tests / ".hidden").mkdir()
+        (tests / ".hidden" / "qa.l1").write_text("\n", encoding="utf-8")
+        (tests / "suite-dir").mkdir()
+        (tests / "suite-dir" / "qa.l1").mkdir()
+        (tests / "suite-dangling").mkdir()
+        (tests / "suite-dangling" / "qa.l1").symlink_to("missing-target")
+        (tests / "suite-link").mkdir()
+        (tests / "suite-link" / "target").write_text("\n", encoding="utf-8")
+        (tests / "suite-link" / "qa.l1").symlink_to("target")
+        marks = marker_names(tests)
+        check("夹具只收普通文件", marks == ["suite-a", "suite-b", "suite-link"])
+        shutil.copy(QA_SH, root / "scripts" / "qa.sh")
+        rc, probs, listed = qa_list_diff(root / "scripts" / "qa.sh")
+        check("qa.sh --list 和 marker 逐个相等", rc == 0 and probs == [] and listed == marks)
+        needle = "sed 's|/qa.l1$||; s|.*/||' | LC_ALL=C sort"
+        mutated = QA_SH.read_text(encoding="utf-8").replace(
+            needle,
+            "sed 's|/qa.l1$||; s|.*/||' | grep -vx suite-b | LC_ALL=C sort",
+            1,
+        )
+        check("少收实验改到了 qa.sh 的管道", needle in QA_SH.read_text(encoding="utf-8") and mutated != QA_SH.read_text(encoding="utf-8"))
+        (root / "scripts" / "qa-drop.sh").write_text(mutated, encoding="utf-8")
+        rc2, probs2, listed2 = qa_list_diff(root / "scripts" / "qa-drop.sh")
+        check(
+            "qa.sh 少收一个套件 → 红",
+            rc2 == 1 and listed2 == ["suite-a", "suite-link"] and any("suite-b" in p for p in probs2),
+        )
 
     check("空清单文件 → None 与空 dict 分开", load_inventory(Path("/no/such/l1-layer-inventory.txt")) is None)
     with tempfile.TemporaryDirectory() as td:

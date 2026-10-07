@@ -25,15 +25,19 @@ except ImportError:
     print("::error::PyYAML is not available — cannot parse the workflow, refusing to pass")
     sys.exit(2)
 
+from l1_markers import marker_names
+
 QA_YML = Path(".github/workflows/qa.yml")
 TESTS = Path("tests")
 
 
 def l1_suites(tests: Path) -> list[str]:
-    """Suite names that opted into L1 with tests/<suite>/qa.l1."""
-    if not tests.is_dir():
-        return []
-    return sorted(p.name for p in tests.iterdir() if p.is_dir() and (p / "qa.l1").is_file())
+    """Suite names that opted into L1 with a regular tests/<suite>/qa.l1.
+
+    Hidden directories and a qa.l1 that is not a regular file are not L1.
+    Same rule as scripts/qa.sh.
+    """
+    return marker_names(tests)
 
 
 def pr_paths(doc: dict) -> list[str]:
@@ -113,10 +117,19 @@ def selftest() -> int:
         (tests / "test-b" / "qa.l1").write_text("note\n", encoding="utf-8")
         (tests / "test-c").mkdir()
         (tests / "test-c" / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (tests / ".hidden").mkdir()
+        (tests / ".hidden" / "qa.l1").write_text("\n", encoding="utf-8")
+        (tests / "suite-dir").mkdir()
+        (tests / "suite-dir" / "qa.l1").mkdir()
+        (tests / "suite-dangling").mkdir()
+        (tests / "suite-dangling" / "qa.l1").symlink_to("missing-target")
         found = l1_suites(tests)
     cases = [
         ("qa.l1 markers parsed in full", found == ["qa-a", "test-b"]),
         ("run.sh without qa.l1 is not L1", "test-c" not in found),
+        ("hidden dir is not L1", ".hidden" not in found),
+        ("qa.l1 directory is not L1", "suite-dir" not in found),
+        ("dangling qa.l1 is not L1", "suite-dangling" not in found),
         ("missing tests dir yields empty (→ exit 2 upstream)", l1_suites(Path(td) / "nope") == []),
         ("paths read from on.pull_request", len(pr_paths(yml)) == 2),
         ("bare `on:` parsed as True still works", len(pr_paths({True: yml["on"]})) == 2),

@@ -63,12 +63,24 @@ L0_TESTS=(
   #    L0 的测试 import server/src,而 db.ts 的 import 链会长(#2247 起经 node-health-store 带上 zod)。
   #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
-# L1 的成员是 tests/<套件>/qa.l1，不再是手写数组。
+# L1 的成员是 tests/<套件>/qa.l1 这个普通文件，不再是手写数组。
+# 目录名不以点开头：隐藏目录不收（调用方开了 dotglob 也一样）。
+# qa.l1 必须是普通文件。目录、断链不收；指向普通文件的链接收（[[ -f ]]）。
 # 目录名按 LC_ALL=C 排序。顺序和旧数组不同，这不是换层。
 # 一条都取不到是取集塌了：没跑不能当成绿。
+if shopt -q dotglob; then _qa_dotglob=1; else _qa_dotglob=0; fi
 shopt -s nullglob
-_l1_markers=(tests/*/qa.l1)
+shopt -u dotglob
+_l1_markers=()
+for _m in tests/*/qa.l1; do
+  _l1_name=${_m#tests/}
+  _l1_name=${_l1_name%/qa.l1}
+  [[ "$_l1_name" == .* ]] && continue
+  [[ -f "$_m" ]] || continue
+  _l1_markers+=("$_m")
+done
 shopt -u nullglob
+[[ "$_qa_dotglob" == 1 ]] && shopt -s dotglob
 if (( ${#_l1_markers[@]} == 0 )); then
   fail "L1: tests/*/qa.l1 一条都没有 —— 取集塌了，拒绝通过"
   exit 2
