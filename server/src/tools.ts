@@ -83,6 +83,7 @@ import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js"
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
+import { listTaskLateReplies } from "./task-late-replies.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -101,6 +102,15 @@ function normalizeMetaJson(meta: unknown): string | null {
   // (otherwise REST and MCP transports would have different meta_json
   // shapes for the same send).
   try { return JSON.stringify(stripHostLocalPathsForCrossHostSafe(meta)); } catch { return null; }
+}
+
+function lateReplyContextMatches(
+  storedThreadId: string | null,
+  storedTurnId: string | null,
+  threadId: string,
+  turnId: string,
+): boolean {
+  return storedThreadId === threadId && storedTurnId === turnId;
 }
 
 /**
@@ -1405,16 +1415,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
       const rowsParams: any[] = [alias];
       let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json,
+         CASE WHEN EXISTS(SELECT 1 FROM task_late_replies lr WHERE lr.inbox_id=inbox.id) THEN 1 ELSE 0 END AS late,
          CASE WHEN type = 'task' THEN COALESCE(task_id, id) ELSE task_id END AS task_id
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
       rowsSql = addReadScope(rowsSql, rowsParams, readScope);
       rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
          LIMIT ?${rowsParams.length + 1}`;
       rowsParams.push(limit);
-      const rows = db.all(rowsSql, ...rowsParams).map((row: any) => ({
-        ...row,
-        meta: parseMetaJson(row.meta_json),
-      }));
+      const rows = db.all(rowsSql, ...rowsParams).map((row: any) => {
+        const { late, ...rest } = row;
+        const isLate = late === 1 || late === true;
+        return { ...rest, ...(isLate ? { late: true } : {}), meta: parseMetaJson(row.meta_json) };
+      });
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows }) }],
@@ -2133,14 +2145,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // both `attachments` (top-level) and `meta.attachments` are supplied,
       // top-level wins (same rule as REST /api/task L2101).
       meta: z.any().optional().describe("Optional structured reply metadata, e.g. { attachments: [...] }."),
+      // Exact late-receipt identity. Keep the tools/list schema terse (#476
+      // byte ceiling): the 1..200 length bound is enforced in handleReply,
+      // not advertised; the full contract lives in the task API docs.
+      thread_id: z.string().optional(),
+      turn_id: z.string().optional(),
     };
   const handleReply = async (args: any, peerCapabilityRequired: boolean) => {
-      const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta } = args;
+      const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta, thread_id: threadId, turn_id: turnId } = args;
       const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       if (peerCapabilityRequired && !in_reply_to) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "peer_reply_task_required" }) }] };
+      }
+      if ([threadId, turnId].some((v) => v !== undefined && (typeof v !== "string" || v.length < 1 || v.length > 200))) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_context_invalid", message: "thread_id and turn_id must be 1-200 characters" }) }] };
+      }
+      if ((threadId && !turnId) || (!threadId && turnId)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_context_incomplete", message: "thread_id and turn_id must be supplied together" }) }] };
       }
 
       // #507 — validate attachments BEFORE any DB write. Rejects malformed
@@ -2203,6 +2226,97 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       {
         const lc = assertNodeActive(replyDeliveryAlias, effectiveNetId ?? null);
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
+
+      // #710 — A recovered runtime turn may finish after its task became
+      // terminal. Preserve that result as an append-only receipt: never
+      // rewrite the task row and never run the parent-task reply chain.
+      if (in_reply_to) {
+        type LateTask = { status: string; from_name: string; to_node_id: string | null; thread_id: string | null; turn_id: string | null };
+        const lateParams: any[] = [in_reply_to];
+        let lateSql = "SELECT status,from_name,to_node_id,thread_id,turn_id FROM tasks WHERE task_id=?1";
+        lateSql = addScope(lateSql, lateParams, effectiveNetId);
+        const lateCandidate = db.get<LateTask>(lateSql, ...lateParams) ?? null;
+        if (lateCandidate && !["created", "delivered", "acked", "running"].includes(lateCandidate.status)) {
+          // Old runtimes do not send turn identity and retain the old result.
+          if (!threadId || !turnId) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              ok: false, error: "reply_task_terminal",
+              message: `cannot apply reply: task is already terminal (${lateCandidate.status})`,
+              in_reply_to, task_status: lateCandidate.status, reply_queued: false,
+            }) }] };
+          }
+          if (!callerTokenIsNetwork || !callerTokenId || !enforceNetworkId) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_node_token_required", reply_queued: false }) }] };
+          }
+          const token = db.get<{ bound_node_id: string | null }>(
+            "SELECT bound_node_id FROM api_tokens WHERE token_id=?1 AND network_id=?2",
+            callerTokenId, enforceNetworkId,
+          );
+          if (!token?.bound_node_id || !lateCandidate.to_node_id || token.bound_node_id !== lateCandidate.to_node_id) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_task_not_owned", reply_queued: false }) }] };
+          }
+          if (!lateReplyContextMatches(lateCandidate.thread_id, lateCandidate.turn_id, threadId, turnId)) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_context_mismatch", reply_queued: false }) }] };
+          }
+          const canonicalOrigin = resolveCanonicalAlias(enforceNetworkId, lateCandidate.from_name).alias;
+          if (replyTargetAlias !== canonicalOrigin) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "reply_target_mismatch", reply_queued: false }) }] };
+          }
+
+          const lateOutcome = db.transaction(() => {
+            const currentParams: any[] = [in_reply_to];
+            let currentSql = "SELECT status,to_node_id,thread_id,turn_id FROM tasks WHERE task_id=?1";
+            currentSql = addScope(currentSql, currentParams, effectiveNetId);
+            const current = db.get<{ status: string; to_node_id: string | null; thread_id: string | null; turn_id: string | null }>(currentSql, ...currentParams);
+            if (!current || ["created", "delivered", "acked", "running"].includes(current.status)) {
+              return { ok: false as const, error: "late_reply_task_not_terminal" as const };
+            }
+            if (current.to_node_id !== token.bound_node_id || !lateReplyContextMatches(current.thread_id, current.turn_id, threadId, turnId)) {
+              return { ok: false as const, error: "late_reply_context_mismatch" as const };
+            }
+            const existing = db.get<{ late_reply_id: string; inbox_id: string; from_node_id: string; status: string; result: string }>(
+              "SELECT late_reply_id,inbox_id,from_node_id,status,result FROM task_late_replies WHERE task_id=?1 AND thread_id=?2 AND turn_id=?3",
+              in_reply_to, threadId, turnId,
+            );
+            if (existing) {
+              if (existing.from_node_id !== token.bound_node_id || existing.status !== replyStatus || existing.result !== text) {
+                return { ok: false as const, error: "late_reply_conflict" as const };
+              }
+              return { ok: true as const, duplicate: true as const, lateReplyId: existing.late_reply_id, inboxId: existing.inbox_id };
+            }
+            const lateReplyId = uuidv4();
+            const lateMeta = normalizeMetaJson({
+              ...(mergedMeta && typeof mergedMeta === "object" && !Array.isArray(mergedMeta) ? mergedMeta : {}),
+              late: true, late_reply_id: lateReplyId, thread_id: threadId, turn_id: turnId,
+            });
+            db.run(
+              `INSERT INTO inbox (id,session_name,node_id,type,priority,content,from_session,in_reply_to,requires_response,network_id,meta_json)
+               VALUES (?1,?2,?3,'reply','normal',?4,?5,?6,'none',?7,?8)`,
+              [id, replyDeliveryAlias, replyTargetNodeId, text, from_session, in_reply_to,
+              effectiveNetId ?? null, lateMeta],
+            );
+            db.run(
+              `INSERT INTO task_late_replies
+               (late_reply_id,inbox_id,task_id,network_id,from_node_id,thread_id,turn_id,status,result,meta_json)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`,
+              [lateReplyId, id, in_reply_to, effectiveNetId ?? null, token.bound_node_id,
+              threadId, turnId, replyStatus, text, lateMeta],
+            );
+            return { ok: true as const, duplicate: false as const, lateReplyId, inboxId: id };
+          });
+          if (!lateOutcome.ok) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: lateOutcome.error, reply_queued: false }) }] };
+          }
+          if (!lateOutcome.duplicate) {
+            pushEvent(replyDeliveryAlias, { type: "new_reply", inbox_count: pendingInboxCount(replyDeliveryAlias, effectiveNetId), from: from_session, message_id: lateOutcome.inboxId, in_reply_to, status: replyStatus, late: true }, effectiveNetId);
+            pushNetworkObserverEvent(effectiveNetId, { type: "new_reply", task_id: in_reply_to, message_id: lateOutcome.inboxId, from: from_session, to: replyDeliveryAlias, status: replyStatus, late: true });
+          }
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: true, message_id: lateOutcome.inboxId, late_reply_id: lateOutcome.lateReplyId,
+            late: true, duplicate: lateOutcome.duplicate,
+          }) }] };
+        }
       }
       const replyOutcome = db.transaction(() => {
         type ReplyTask = {
@@ -2582,6 +2696,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let sql = "SELECT * FROM tasks WHERE task_id = ?1";
       sql = addAgentTimelineScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       const task = db.get<any>(sql, ...params);
+      if (task) {
+        task.late_replies = listTaskLateReplies(db, task_id, typeof task.network_id === "string" ? task.network_id : null);
+      }
       return {
         content: [{
           type: "text" as const,

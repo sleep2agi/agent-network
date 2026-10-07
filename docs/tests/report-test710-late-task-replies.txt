@@ -1,0 +1,52 @@
+board #710 — Hub late task receipts
+
+Scope
+-----
+- Additive task_late_replies storage; the original task row remains terminal and unchanged.
+- Acceptance requires the token-bound original executor plus the exact persisted thread_id/turn_id.
+- One exact turn produces one inbox receipt. Identical retries are idempotent; changed payloads conflict.
+- The original sender sees late=true in inbox/messages. Single-task detail projections include late_replies.
+- Old calls without thread_id/turn_id keep the pre-existing reply_task_terminal result.
+
+Docker command
+--------------
+docker build --build-arg SOURCE_COMMIT=<full-sha> -t anet-test710 -f tests/test710-late-task-replies/Dockerfile .
+docker run --rm --init --cpus=2 --network none anet-test710
+
+SQLite
+------
+4 behavior tests, 46 assertions: PASS
+executor mutation: WITNESSED_RED rc=1 at the named wrong-executor assertion
+turn mutation: WITNESSED_RED rc=1 at the named wrong-turn assertion
+terminal-row mutation: WITNESSED_RED rc=1 at the named unchanged-terminal assertion
+duplicate mutation: WITNESSED_RED rc=1 at the named idempotent-retry assertion
+
+PostgreSQL
+----------
+4 behavior tests, 46 assertions: PASS
+executor mutation: WITNESSED_RED rc=1 at the named wrong-executor assertion
+turn mutation: WITNESSED_RED rc=1 at the named wrong-turn assertion
+terminal-row mutation: WITNESSED_RED rc=1 at the named unchanged-terminal assertion
+duplicate mutation: WITNESSED_RED rc=1 at the named idempotent-retry assertion
+
+Published app compatibility replay
+----------------------------------
+- desktop-v0.2.219 = 38612478b0ddba337778bfaa6b2bb48e641a7fbb
+- desktop-v0.2.220 = 587688a607db3c75da9040da6aeb7f697a809fb9
+- Replayed each tag's real src/api.ts fetchTaskDetail parser against the new one-task response shape.
+- Both retained task_id/status/original result while ignoring the additive late_replies field: 1/1 PASS each.
+- The true Hub HTTP suite separately reads that same additive shape from
+  /api/tasks?task_id=... (the endpoint those releases use) and /api/tasks/:id.
+
+Tool audience budget regression
+-------------------------------
+- Kept `thread_id` / `turn_id` self-describing in the schema and moved their
+  detailed late-receipt semantics to the task API documentation.
+- Focused Docker gate: 12/12 PASS; node tools/list = 58854 B (ceiling 59000 B).
+- Complete non-root server unit Docker gate: 206/206 files, failed_files=0;
+  registration-password mutation witnessed red; rc=0.
+
+Safety
+------
+- No production Hub, node, tmux server, token, hostname, or real task id was used.
+- All Hub behavior ran in disposable Docker databases; PostgreSQL used a disposable cluster.

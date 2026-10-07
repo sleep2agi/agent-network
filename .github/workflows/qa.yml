@@ -121,6 +121,7 @@ on:
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
+      - 'tests/test710-late-task-replies/**'
       - 'tests/test705-bridge-epipe/**'
       - 'tests/test703-codex-turn-receipts/**'
       - 'tests/test678-daemon-token-owner/**'
@@ -335,6 +336,7 @@ on:
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
+      - 'tests/test710-late-task-replies/**'
       - 'tests/test705-bridge-epipe/**'
       - 'tests/test703-codex-turn-receipts/**'
       - 'tests/test678-daemon-token-owner/**'
@@ -950,6 +952,15 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test678 -f tests/test678-daemon-token-owner/Dockerfile .
       - run: docker run --rm --init --cpus=2 --network none anet-test678
+
+  test710-late-task-replies:
+    name: Late task replies (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test710 -f tests/test710-late-task-replies/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test710
 
   node-caller-identity:
     name: Node caller identity (Docker, SQLite + PostgreSQL HTTP)

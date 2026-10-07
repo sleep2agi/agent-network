@@ -78,6 +78,7 @@ import { resolveRestFromSession } from "./rest-identity.js";
 import { resolveNodeCaller } from "./create-node.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { diagnoseTask } from "./task-diagnostic.js";
+import { listTaskLateReplies } from "./task-late-replies.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
@@ -3969,7 +3970,9 @@ return Bun.serve({
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 3600000).toISOString().replace("T", " ").slice(0, 19);
       const alias = url.searchParams.get("alias")?.trim() || null;
       const params: any[] = [since];
-      let sql = "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, acked, created_at, network_id FROM inbox WHERE created_at >= ?1";
+      let sql = `SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, acked, created_at, network_id,
+        CASE WHEN EXISTS(SELECT 1 FROM task_late_replies lr WHERE lr.inbox_id=inbox.id) THEN 1 ELSE 0 END AS late
+        FROM inbox WHERE created_at >= ?1`;
       if (alias) {
         params.push(alias);
         sql += ` AND session_name = ?${params.length}`;
@@ -3977,7 +3980,10 @@ return Bun.serve({
       sql = addOwnTrafficScope(sql, params, restScope, { from: "from_session", to: "session_name" });
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
-      const rows = db.all(sql, ...params);
+      const rows = db.all<any>(sql, ...params).map((row) => {
+        const { late, ...rest } = row;
+        return { ...rest, ...(late === 1 || late === true ? { late: true } : {}) };
+      });
 
       let pendingCount: number | undefined;
       if (alias) {
@@ -4819,6 +4825,7 @@ return Bun.serve({
         liveSseConnections,
         targetEverReportedRuntimeEvidence,
       });
+      task.late_replies = listTaskLateReplies(db, taskId, taskNetworkId);
       return withCors(req, Response.json({ ok: true, task, diagnostic }));
     }
 
@@ -4865,7 +4872,15 @@ return Bun.serve({
       sql += ` ORDER BY created_at DESC, task_id DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
 
-      const rows = db.all(sql, ...params);
+      const rows = db.all<any>(sql, ...params);
+      // Existing desktop clients implement their one-task detail read as
+      // `/api/tasks?task_id=…&limit=1`. Keep broad list responses lean, but
+      // enrich that exact-detail shape as well as `/api/tasks/:id`.
+      if (taskId) {
+        for (const row of rows) {
+          row.late_replies = listTaskLateReplies(db, String(row.task_id), typeof row.network_id === "string" ? row.network_id : null);
+        }
+      }
       if (skipStats) {
         return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length }));
       }

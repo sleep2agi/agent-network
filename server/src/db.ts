@@ -1489,6 +1489,31 @@ try { db.exec("ALTER TABLE tasks ADD COLUMN consumed_at TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN thread_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN turn_id TEXT"); } catch {}
 
+// Board #710 — a result that arrives after the task is already terminal is
+// evidence about that exact runtime turn, not a second task transition. Keep
+// it in an additive table: old clients and old Hub code continue to read the
+// tasks row unchanged, while new detail readers can project `late_replies`.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS task_late_replies (
+    late_reply_id TEXT PRIMARY KEY,
+    inbox_id TEXT NOT NULL UNIQUE,
+    task_id TEXT NOT NULL,
+    network_id TEXT,
+    from_node_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('replied','failed','cancelled')),
+    result TEXT NOT NULL,
+    meta_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (task_id, thread_id, turn_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_task_late_replies_task_time
+    ON task_late_replies(task_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_task_late_replies_network
+    ON task_late_replies(network_id, created_at);
+`);
+
 // #1181 durable outbound terminal cursor.  A task's created_at cannot be used
 // as a recovery watermark because an old task may become terminal after newer
 // tasks.  Record terminal transitions in their own monotonically increasing
