@@ -35,6 +35,12 @@ export async function waitForCodexRecoveryResources(
   rolloutBytes: number | null,
   deps: CodexRecoveryGateDeps = {},
 ): Promise<StartGateResult> {
+  const platform = deps.platform ?? process.platform;
+  if (platform !== "linux") {
+    (deps.warn ?? ((m: string) => console.warn(m)))(
+      `[recovery-gate] ${platform}: host-wide recovery lease and memory admission are unavailable; continuing without this Linux-only protection`,
+    );
+  }
   const requiredMb = estimatedCodexRecoveryMemoryMb(rolloutBytes);
   const env = { ...(deps.env ?? process.env) };
   const configuredFloor = Number(env.ANET_START_MIN_MEM_MB);

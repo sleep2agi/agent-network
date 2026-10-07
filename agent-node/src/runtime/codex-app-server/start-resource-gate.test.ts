@@ -223,10 +223,12 @@ describe("#612 waitForStartResources", () => {
     const r = await waitForStartResources("codex app-server", h.deps);
     expect(r.outcome).toBe("single-lane");
     expect(r.waitedMs).toBe(600_000);
-    expect(h.warns.length).toBe(1);
+    expect(h.warns.length).toBe(2);
     expect(h.warns[0]).toContain(START_GATE_SINGLE_LANE_STATUS);
     expect(h.warns[0]).toContain("MemAvailable 307 MiB");
     expect(h.warns[0]).not.toContain("giving up waiting and starting anyway");
+    expect(h.warns[1]).toContain("available 307 MiB, required 4096 MiB");
+    expect(h.warns[1]).toContain("may still hit OOM");
     expect(h.reports).toEqual([START_GATE_WAITING_BOTH_STATUS, START_GATE_SINGLE_LANE_STATUS]);
     // progress is logged at most about once a minute, not every re-check
     expect(h.logs.length).toBeLessThanOrEqual(12);

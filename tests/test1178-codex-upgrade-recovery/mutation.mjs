@@ -91,6 +91,19 @@ function mutateRecoveryGateWiring() {
   finally { writeFileSync("/repo/agent-network/bin/cli.ts", original); }
 }
 
+function mutateRecoveryLeaseHeartbeat() {
+  const paths = [
+    "/repo/agent-network/src/start-resource-gate.ts",
+    "/repo/agent-node/src/runtime/codex-app-server/start-resource-gate.ts",
+  ];
+  const originals = paths.map((path) => readFileSync(path, "utf8"));
+  const before = "    heartbeatTimer = setInterval(() => {";
+  if (originals.some((source) => !source.includes(before))) throw new Error("recovery lease heartbeat mutation anchor missing");
+  for (let i = 0; i < paths.length; i++) writeFileSync(paths[i], originals[i].replace(before, "    if (false) heartbeatTimer = setInterval(() => {"));
+  try { assertRed("src/codex-recovery-resource-gate.test.ts", "a live holder renews past TTL; SIGKILL permits takeover within one TTL"); }
+  finally { for (let i = 0; i < paths.length; i++) writeFileSync(paths[i], originals[i]); }
+}
+
 function mutateBridgeAttachBudget() {
   const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
   const before = "resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs)";
@@ -217,6 +230,7 @@ mutateBridgeTransportClose();
 mutateBridgePayloadUpperBound();
 mutateBridgeCloseToNewThread();
 mutateRecoveryGateWiring();
+mutateRecoveryLeaseHeartbeat();
 mutateBridgeAttachBudget();
 mutateTuiRecoveryBudget();
 mutateExperimentalFallback();
