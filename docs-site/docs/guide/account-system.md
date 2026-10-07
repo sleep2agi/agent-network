@@ -97,10 +97,14 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 - CLI 拿到新签发的 `utok_`，自动写回 `~/.anet/config.json`
 - 后续 `anet` 命令照旧能用，**无需重新登录**
 
-**其他设备 / 其他 CLI session**
-- 服务端**撤销该用户所有旧 `utok_`**（包括 admin-utok.json bootstrap 时颁的）
-- 下次 API 调用拿 `401 unauthorized` → 必须 `anet login` 重新登录拿新 `utok_`
-- 设备越多，rotate 噪音越大 — 改密码前可以先 `anet token ls` 看一眼
+**其他浏览器 / app 登录**
+- 服务端**撤销该用户其他所有登录会话**(`kind='login'`)
+- 下次 API 调用拿 `401 unauthorized` → 必须重新登录
+
+**其他机器上的 `anet` 登录、脚本令牌**(#711)
+- **默认保留**:`anet login` / `anet register` / `anet hub start`(含 admin-utok.json)签的令牌、`POST /api/auth/tokens` 建的不绑网络的具名令牌都算命令行令牌(`kind='cli'`),改密码不会让它们下线
+- 想一起撤销(比如怀疑令牌泄漏):`anet passwd --revoke-cli-tokens`;REST 是请求体带 `"revoke_cli_tokens": true`
+- 改完会打印两类各撤销了几条
 
 **Dashboard（浏览器）**
 - 已登录的 tab：下一次 REST 请求拿 401 → Dashboard 跳回登录页 → 输入新密码 → 拿新 cookie

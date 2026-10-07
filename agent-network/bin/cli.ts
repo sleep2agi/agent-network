@@ -4492,7 +4492,7 @@ Other:
   anet login                  Login (username + password)
   anet login --token <tok>    Login with API token
   anet logout                 Revoke this login on the Hub, then remove the saved token
-  anet passwd                 Change password
+  anet passwd                 Change password (keeps CLI/script tokens; --revoke-cli-tokens to revoke them too)
   anet whoami                 Show current user + networks
   anet network ls             List my networks
   anet network create <name>  Create a network
@@ -10112,7 +10112,7 @@ async function serverCommand() {
         const reg = await fetch(`${hubUrl}/api/auth/register`, {
           method: "POST",
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
-          body: JSON.stringify({ username: defaultUser, password: defaultPass, client_label: loginClientLabel("hub start") }),
+          body: JSON.stringify({ username: defaultUser, password: defaultPass, client_label: loginClientLabel("hub start"), client_kind: "cli" }),
         }).then(r => r.json() as any);
         if (reg.ok) {
           defaultAccountReady = true;
@@ -15334,7 +15334,7 @@ async function registerCommand() {
     const res = await fetch(`${hub}/api/auth/register`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register") }),
+      body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register"), client_kind: "cli" }),
     }).then(r => r.json() as any);
 
     if (!res.ok) { console.error(`Registration failed: ${hubErrorText(res)}`); process.exit(1); }
@@ -15399,7 +15399,7 @@ async function loginCommand() {
     res = await fetch(`${hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, client_label: loginClientLabel("login") }),
+      body: JSON.stringify({ username, password, client_label: loginClientLabel("login"), client_kind: "cli" }),
     }).then(r => r.json() as any);
   } catch (e: any) {
     // Network / DNS / connection error — show the friendly hint, not the
@@ -15895,6 +15895,7 @@ async function passwdCommand() {
   if (!hub || !token) { console.error("Not logged in. Run: anet login"); markFailed(); return; }
 
   const opts = parseOpts();
+  const revokeCli = opts["revoke-cli-tokens"] === "true";
   const oldPw = opts["old-password"] || opts.old || await ask("Current password");
   const scriptedNew = opts["new-password"] || opts["new"];
   const newPw = scriptedNew || await ask("New password (min 8)");
@@ -15914,7 +15915,8 @@ async function passwdCommand() {
     const res = await fetch(`${hub}/api/auth/password`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+      // #711 默认只让其他浏览器 / app 登录会话下线;--revoke-cli-tokens 连其他机器的 anet 登录、具名脚本令牌一起撤。
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw, ...(revokeCli ? { revoke_cli_tokens: true } : {}) }),
     }).then(r => r.json() as any);
 
     if (res.ok) {
@@ -15924,6 +15926,10 @@ async function passwdCommand() {
       }
       console.log("[anet] Password changed successfully.");
       if (res.token) console.log("[anet] Login token rotated and saved.");
+      if (typeof res.revoked_login === "number") {
+        console.log(`[anet] Signed out ${res.revoked_login} other login session(s); revoked ${res.revoked_cli ?? 0} CLI/script token(s).`);
+        if (!revokeCli) console.log("[anet] CLI/script tokens were kept. Use --revoke-cli-tokens to revoke them too.");
+      }
     } else {
       console.error(`[anet] Failed: ${hubErrorText(res)}`); markFailed();
     }
@@ -17417,7 +17423,7 @@ async function demoSciTeamCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team") }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team"), client_kind: "cli" }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);
@@ -17994,7 +18000,7 @@ async function createBatchWizardCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch") }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch"), client_kind: "cli" }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);

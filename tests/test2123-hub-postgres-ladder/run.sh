@@ -199,6 +199,8 @@ run_pg_tests_rc anet_task_access_test src/task-access-http.test.ts
 run_pg_tests_rc anet_req_stats_test src/requirements-stats-http.test.ts
 # 标签管理:改写整网卡片 tags 的事务、network_tags 的 ON CONFLICT upsert、scoped 成员被挡 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_tag_ops_test src/requirement-tag-ops-http.test.ts
+# #711 改密码只撤 kind='login' 会话、cli 令牌按旗标撤、节点令牌不动;kind 列 ALTER + 回填(DROP COLUMN 回到旧表再迁一遍)—— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_pwchange_kind_test src/auth-password-change-cli-tokens-http.test.ts
 # Scheduled-task replies routed to the schedule creator (scheduled_tasks ⋈ users, tasks.meta_json read in JS),
 # counted by unread_by_agent and cleared by ack-by-agent — on real PostgreSQL rows.
 run_pg_tests_rc anet_sched_reply_test src/scheduled-reply-unread-http.test.ts

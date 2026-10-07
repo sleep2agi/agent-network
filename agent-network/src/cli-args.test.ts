@@ -42,6 +42,7 @@ describe("CLI argument parsing", () => {
       "--opencode-unsafe-tools",
       "--pick",
       "--resume-latest",
+      "--revoke-cli-tokens",
       "--self",
       "--tmux",
       "--yes",

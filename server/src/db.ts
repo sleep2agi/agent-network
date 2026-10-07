@@ -646,12 +646,24 @@ for (const ddl of [
   // 登录会话的设备标识(GET /api/auth/sessions 显示用):客户端自报的 client_label + 登录请求的 User-Agent。
   "ALTER TABLE api_tokens ADD COLUMN client_label TEXT",
   "ALTER TABLE api_tokens ADD COLUMN user_agent TEXT",
+  // #711 不绑网络的用户令牌分两类:'login' = 浏览器 / app 的登录会话;'cli' = anet 命令行登录、
+  // POST /api/auth/tokens 建的具名脚本令牌。改密码默认只踢 'login'。节点 / 网络令牌(network_id 非空)不填。
+  "ALTER TABLE api_tokens ADD COLUMN kind TEXT",
 ]) {
   try { db.exec(ddl); }
   catch (e: any) {
     if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
   }
 }
+// #711 回填 kind:只碰 kind 还是 NULL 的非网络令牌(幂等;回滚到旧 Hub 期间新签的行,下次启动照样补上)。
+// 能明确认出是 anet 命令行的才算 'cli':scope='full'(POST /api/auth/tokens 建的具名令牌),
+// 或 client_label 以「anet 」开头(anet 自报的「anet <版本> · <主机> · <子命令>」)。其余一律 'login'。
+db.run(
+  `UPDATE api_tokens SET kind = CASE
+     WHEN scope = 'full' OR client_label LIKE 'anet %' THEN 'cli'
+     ELSE 'login' END
+   WHERE network_id IS NULL AND kind IS NULL`,
+);
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_request ON api_tokens(request_id)`); }
 catch (e: any) { /* index may already exist */ void e; }
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_bound_node ON api_tokens(bound_node_id)`); }

@@ -347,19 +347,24 @@ curl -X POST http://localhost:9200/api/auth/password \
 {
   "ok": true,
   "revoked": 2,
+  "revoked_login": 2,
+  "revoked_cli": 0,
   "token": "utok_xxxxxxxxxxxxxxxx",
   "token_id": "tok_new_session_id"
 }
 ```
 
-`revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销）。
+可选请求字段 `revoke_cli_tokens`(布尔,默认 `false`):为 `true` 时连命令行 / 脚本令牌一起撤销。不带这个字段的旧客户端得到下面的默认行为。
 
-**关键副作用** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L581) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+`revoked` 是**其他**令牌被撤销的总数(不含本次调用方自己的 token,那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销);`revoked_login` / `revoked_cli` 是按种类拆开的数(`revoked = revoked_login + revoked_cli`)。
+
+**关键副作用** (verify [`auth.ts` `changePassword` + `revokeTokensAfterPasswordChange`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
-2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
-3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
-4. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回 —— 调用方应立即用新 token 覆盖本地存储
-5. 写 audit log: `action='password_changed'`
+2. **其他浏览器 / app 登录会话**(`api_tokens.kind='login'`)同步撤销,计数在 `revoked_login`
+3. **命令行 / 脚本令牌**(`kind='cli'`:`anet login` 等 anet 命令签的、`POST /api/auth/tokens` 建的不绑网络的具名令牌)**默认保留**;`revoke_cli_tokens: true` 时一起撤销,计数在 `revoked_cli`。命令行对应 `anet passwd --revoke-cli-tokens`
+4. **`ntok_` / 网络令牌不受影响**(只删 `network_id IS NULL` 的 token,agent node 用 `ntok_` 跑着的不会被改密打断)
+5. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回,种类沿用当前这条 —— 调用方应立即用新 token 覆盖本地存储
+6. 写 audit log: `action='password_changed'`
 
 跟 `anet passwd` CLI 行为一致（CLI 拿到新 token 后自动写 `~/.anet/config.json`）。其他设备下次请求拿 `401 invalid token` → 必须 `anet login` 重新登录。
 
