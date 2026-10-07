@@ -5993,7 +5993,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const scope = resolveRestNetworkScope(enforceNetworkId ? null : (clientNetId ?? null), mcpAuthCtx, false);
     if (scope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "access_denied", message: scope.denied }) }] };
     const url = new URL(`http://mcp.internal${path}`);
-    const req = new Request(url, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const req = new Request(url, { method, headers: { "content-type": "application/json", "x-anet-accept-columns": "abandoned" }, body: body ? JSON.stringify(body) : undefined });
     const res = await handleRequirementsRequest({
       req, url,
       auth: mcpAuthCtx ? { ...mcpAuthCtx, username: "", tokenId: callerTokenId ?? null, tokenName: callerTokenIsNetwork && callerAlias ? `node:${callerAlias}` : null } : null,
@@ -6021,7 +6021,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     tags: z.array(z.string()).max(10).optional().describe("Task labels; each 1–20 Unicode characters. Omit to preserve, [] to clear."),
     name: z.string().min(1).max(80).optional(),
     priority: z.enum(["high", "normal", "low", "lowest"]).optional().describe("high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低"),
-    column: z.enum(["pool", "doing", "done"]).optional(),
+    column: z.enum(["pool", "doing", "done", "abandoned"]).optional(),
     due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears"),
     start: z.string().max(40).optional().describe("start date (Gantt): same shapes as due; \"\" clears"),
     description: z.string().max(20_000).optional().describe("markdown"),
@@ -6037,7 +6037,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
   // #475 —— status 是 column 的别名(列表的筛选参数就叫 status,Agent 写任务时也常这么写)。只在 MCP 这层换名,REST 不变;
   // 两个都给且不同 → 400 status_conflicts_with_column,不替调用方挑一个。
-  const reqStatus = z.enum(["pool", "doing", "done"]).optional().describe("alias of column; must match it if both are sent");
+  const reqStatus = z.enum(["pool", "doing", "done", "abandoned"]).optional().describe("alias of column; must match it if both are sent");
   const withColumn = (args: Record<string, unknown>, call: (args: Record<string, unknown>) => Promise<{ content: { type: "text"; text: string }[] }>) => {
     if (args.status === undefined) return call(args);
     if (args.column !== undefined && args.column !== args.status) return Promise.resolve({ content: [{ type: "text" as const, text: JSON.stringify({ ...errorBody("status_conflicts_with_column"), status: 400 }) }] });
@@ -6053,7 +6053,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const reqListShape = {
     network_id: z.string().max(200).optional(),
     seq: z.number().int().positive().optional().describe("short number (#N) of one task in this network"),
-    status: z.enum(["pool", "doing", "done"]).optional(),
+    status: z.enum(["pool", "doing", "done", "abandoned"]).optional(),
     project_id: z.string().max(200).optional(),
     owner: z.string().max(210).optional(),
     agent_owner: z.string().max(210).optional(),
@@ -6134,14 +6134,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_create",
-    "Create a requirement task. name is required. column (or its alias status) = pool / doing / done. A duplicate external_ref in the network returns 409 external_ref_exists with existing_id — use requirements_upsert_by_external_ref for syncing.",
+    "Create a requirement task. name is required. column (or its alias status) = pool / doing / done / abandoned. A duplicate external_ref in the network returns 409 external_ref_exists with existing_id — use requirements_upsert_by_external_ref for syncing.",
     { network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, name: z.string().min(1).max(80), external_ref: z.string().max(200).optional() },
     async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
 
   server.tool(
     "requirements_update",
-    "Patch a requirement task (id or \"#N\"); omitted fields keep their value. column (or its alias status) moves it between pool / doing / done. participants REPLACES the whole list; to add or remove people without dropping the others use participants_add / participants_remove. archived=true hides it from the default list (agents cannot delete).",
+    "Patch a requirement task (id or \"#N\"); omitted fields keep their value. column (or its alias status) moves it between pool / doing / done / abandoned. participants REPLACES the whole list; to add or remove people without dropping the others use participants_add / participants_remove. archived=true hides it from the default list (agents cannot delete).",
     { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, participants_add: reqPeopleDelta("add"), participants_remove: reqPeopleDelta("remove"), external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
     async (args) => withColumn(args, a => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(a, [...REQ_WRITE_KEYS, "participants_add", "participants_remove"]))),
   );

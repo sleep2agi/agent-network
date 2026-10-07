@@ -122,6 +122,7 @@ on:
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
       - 'tests/test705-bridge-epipe/**'
+      - 'tests/test703-codex-turn-receipts/**'
       - 'tests/test678-daemon-token-owner/**'
       - 'tests/node-caller-identity/**'
       - 'tests/test629-lifecycle-read/**'
@@ -176,6 +177,7 @@ on:
       - 'tests/test637-database-url-guard/**'
       - 'tests/test2123-hub-postgres-ladder/**'
       - 'tests/test-status-read-cache/**'
+      - 'tests/test-req-abandoned-column/**'
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
@@ -207,6 +209,7 @@ on:
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -333,6 +336,7 @@ on:
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
       - 'tests/test705-bridge-epipe/**'
+      - 'tests/test703-codex-turn-receipts/**'
       - 'tests/test678-daemon-token-owner/**'
       - 'tests/node-caller-identity/**'
       - 'tests/test629-lifecycle-read/**'
@@ -386,6 +390,7 @@ on:
       - 'tests/test637-database-url-guard/**'
       - 'tests/test2123-hub-postgres-ladder/**'
       - 'tests/test-status-read-cache/**'
+      - 'tests/test-req-abandoned-column/**'
       - 'tests/test649-token-cli/**'
       - 'tests/test651-init-no-token-prompt/**'
       - 'tests/test5-auth/**'
@@ -417,6 +422,7 @@ on:
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -973,6 +979,15 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test658
       - run: docker build -t anet-test658-http -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
       - run: docker run --rm --init --cpus=2 --network none anet-test658-http
+
+  test703-codex-turn-receipts:
+    name: Codex interrupted-turn receipts (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test703 -f tests/test703-codex-turn-receipts/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test703
 
   test627-adopted-lifecycle:
     name: adopted lifecycle (Docker, real Hub + private tmux)
@@ -1934,6 +1949,7 @@ jobs:
           - test637-database-url-guard
           - test2123-hub-postgres-ladder
           - test-status-read-cache
+          - test-req-abandoned-column
           - test649-token-cli
           - test651-init-no-token-prompt
           - test5-auth
@@ -1992,6 +2008,11 @@ jobs:
           # health.codex_login (fingerprint + shared_with), with an in-suite witnessed red.
           # Not L1: two bun installs + three node processes; same budget reasoning as test185.
           - test594-codex-login-health
+          # #720: real codex 0.133.0 + 0.159.2 app-server with anet's commhub -c overrides —
+          # first commhub tool call (and again after restart) runs with no 「Allow the commhub
+          # MCP server to run tool」 prompt; control without the setting prompts/declines;
+          # in-suite mutations M1-M5. Not L1: the image installs two ~150 MB codex binaries.
+          - test720-codex-commhub-tool-approval
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}

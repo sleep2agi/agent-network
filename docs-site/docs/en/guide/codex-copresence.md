@@ -132,28 +132,41 @@ The start output names the value and its source, e.g. `[anet] model: o3 (source:
 
 When the thread was recorded on a different model, **the configured model wins**: measured on codex 0.155, a `thread/resume` without `model` puts the thread back on the model in the rollout's last `turn_context` and ignores the app-server's `-c model=`, and once the first client has loaded the thread a later TUI `resume -m` does not change it. So anet sends the configured model on that first `thread/resume` (#512).
 
-### Check the TUI for a pending approval before the first dispatch
+### commhub tool approval prompts: pre-approved by anet (#720) {#commhub-tool-approval}
 
-::: danger The node can look completely healthy while doing nothing
-Once a TUI attaches, MCP tool calls become interactive. With nobody watching the pane, the node stalls forever on:
+The first time Codex runs each MCP tool it asks:
 
 ```
 Allow the commhub MCP server to run tool "get_task"?
 › 1. Allow   2. Allow for this session   3. Always allow   4. Cancel
 ```
 
-**Every signal the hub exposes still reads healthy**: `status=idle`, SSE connected, `last_seen_at` ticking. A dispatcher sees nothing wrong and assumes the node is simply free.
+On an unattended node nobody answers, the turn blocks and the Hub eventually times the task out, while every hub signal still reads healthy (`status=idle`, SSE connected).
+The prompt is **not governed by `approval_policy` alone**: measured with the co-presence default (read-only + on-request), codex 0.133.0 and 0.159.2 both prompt;
+with never + read-only, 0.133.0 still prompts and 0.159.2 silently declines the call. "Always allow" does not survive a restart either, because anet passes commhub with `-c` at launch, not in config.toml.
 
-**The only way to detect it** (no hub field reveals this):
+**Now** every codex launch anet makes for a node (POSIX / Windows co-presence app-server, agent-node's owned app-server, codex-sdk) carries
+
+```
+-c mcp_servers.commhub.default_tools_approval_mode="approve"
+```
+
+It applies to commhub only; other MCP servers keep Codex's default behaviour. Supported by codex 0.133.0 (values `auto|prompt|approve`) and 0.159.2 (`auto|prompt|writes|approve`);
+measured in `tests/test720-codex-commhub-tool-approval`.
+
+How it interacts with your own `CODEX_HOME/config.toml` (measured by the same suite):
+
+- anet's `-c` **overrides** the `url` and `default_tools_approval_mode` you set under `[mcp_servers.commhub]`.
+- A per-tool `[mcp_servers.commhub.tools.<tool>] approval_mode = "prompt"` you wrote **still wins** for that tool. That per-tool switch is kept on purpose.
+- Per-tool `approval_mode = "approve"` sub-tables that Codex wrote ("Always allow") are unaffected.
+- The external-app-server lane (fixed `codexAppServerUrl`, commhub from your own config.toml) does **not** inject the key, because injecting a lone key for an undefined server makes codex refuse to start with `invalid transport`.
+  Add `default_tools_approval_mode = "approve"` under your own `[mcp_servers.commhub]`.
+
+Nodes started by an older anet can still stall here. To check:
 
 ```bash
 tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 ```
-
-**Fix**: choose `3. Always allow` — the commhub tools are what the node needs to function — or start the app-server with `-c approval_policy=never` so the prompt never appears.
-
-Measured 2026-07-31: reproduced on a freshly created TUI; pre-existing co-presence nodes on the same host were unaffected because their app-servers were started with `approval_policy=never`. **This is a new-TUI hazard, not a latent fleet problem.**
-:::
 
 ## Layered health, degraded refusal and self-healing {#health}
 

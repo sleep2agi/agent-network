@@ -149,7 +149,7 @@ describe("agent-node inbox wiring", () => {
       "processWithGrokCli(task, from, images, evidence)",
       "processWithGrok(task, from, images, evidence)",
       "processWithOpencode(task, from, images, evidence)",
-      "processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence)",
+      "processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt)",
       "processWithClaude(task, from, images, evidence)",
     ]) {
       expect(branch).toContain(call);
@@ -163,8 +163,9 @@ describe("agent-node inbox wiring", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const branch = cli.slice(start, end);
-    expect(branch).toContain("threadId: session.bridge.getThreadId()");
+    expect(branch).toContain("const threadId = session.bridge.getThreadId()");
     expect(branch).toContain("turnId: event.turnId");
+    expect(branch).toContain("evidence?.consumed({ threadId, turnId: event.turnId })");
     expect(branch).not.toContain("threadId: task");
   });
 

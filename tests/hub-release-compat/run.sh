@@ -9,6 +9,7 @@
 #
 # Release-specific checks are opt-in env passed through to the container:
 #   CHECK_75=1 SCHED_BASELINE=counted          (phase A)
+#   CHECK_ABANDONED=1                          (phase A: abandoned column + old-app projection)
 #   CHECK_BYTES=1 EXPECT_BACKFILL=0 OLD_LABEL NEW_LABEL   (phase B)
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
@@ -32,7 +33,7 @@ done
 docker build -q --build-arg BASE_VERSION="$BASE_VERSION" -t "$IMAGE" -f "$ROOT/tests/hub-release-compat/Dockerfile" "$CTX" >/dev/null || { echo "FAIL: docker build"; exit 1; }
 
 envs=(-e APP_TAGS="$APP_TAGS")
-for v in CHECK_75 SCHED_BASELINE CHECK_BYTES EXPECT_BACKFILL OLD_LABEL NEW_LABEL; do
+for v in CHECK_75 CHECK_ABANDONED SCHED_BASELINE CHECK_BYTES EXPECT_BACKFILL OLD_LABEL NEW_LABEL; do
   if [[ -n "${!v:-}" ]]; then envs+=(-e "$v=${!v}"); fi
 done
 
