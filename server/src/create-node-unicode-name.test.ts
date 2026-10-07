@@ -96,6 +96,8 @@ describe("#652 create_node via /mcp — Unicode names", () => {
   test("illegal characters are refused with reason + char + message, and no row is written", async () => {
     for (const [name, reason] of [["a/b", "forbidden_char"], ["a\\b", "forbidden_char"], ["a:b", "forbidden_char"],
       [".hidden", "forbidden_char"], ["..", "forbidden_char"], ["a b", "forbidden_char"], ["a\u0007b", "forbidden_char"],
+      ["a\nb", "forbidden_char"], ["a\tb", "forbidden_char"], ["a\u001fb", "forbidden_char"], ["a\u007fb", "forbidden_char"],
+      ["a\u2028b", "forbidden_char"], ["a\u2029b", "forbidden_char"],
       ["-x", "leading_dash"], ["测".repeat(65), "too_long"]] as const) {
       const r = await create(name);
       expect({ name, error: r.error, reason: r.reason }).toEqual({ name, error: "node_name_invalid", reason });

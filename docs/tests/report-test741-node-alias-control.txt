@@ -1,0 +1,22 @@
+Board #741 — node alias control-character guard
+Date: 2026-10-08
+
+Scope
+- create_node keeps using the shared node-name validator.
+- rename prepare now uses the same validator before reserving an alias.
+- scan-node-aliases.ts opens SQLite with readonly:true and only reports invalid rows.
+
+Docker evidence (--cpus=2)
+- Targeted Hub tests: 19 pass, 0 fail, 128 expect calls.
+- Read-only scanner fixture: 2 rows scanned, 1 invalid control-character alias reported.
+- Mutation, rename guard removed: witnessed red (1 failed test).
+- Mutation, create guard removed: witnessed red (2 failed tests, including the illegal-character case).
+
+Production inventory (read-only snapshot)
+- Source was opened with SQLite mode=ro and copied with the SQLite backup API.
+- The snapshot file was chmod 0444 before the scanner ran.
+- 587 stored aliases scanned across nodes and sessions; 0 invalid aliases found.
+- Raw output is empty. No production alias, hostname, token, or path is recorded here.
+
+Server aggregate
+- 209 files, 2,374 pass, 0 fail, 0 skip, 14,088 expect calls; rc=0.

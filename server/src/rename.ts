@@ -18,6 +18,7 @@ import { getUserNetworkRole, getNetworkMembers } from "./auth";
 import { canSeeAgent, isAgentRestricted } from "./agent-access";
 import { pushEvent } from "./push";
 import { eventBus } from "./event_bus";
+import { aliasControlCharacter, describeAliasControlCharacter } from "./node-alias-control";
 
 export interface RenameResult {
   ok: boolean;
@@ -25,6 +26,9 @@ export interface RenameResult {
   error?: string;
   code?: string;
   suggested?: string;
+  reason?: string;
+  char?: string;
+  message?: string;
 }
 
 export interface CanonicalAlias {
@@ -111,6 +115,17 @@ export function prepareRename(
 ): RenameResult {
   if (!hasWriteAccess(userId, networkId)) return { ok: false, error: "no write access to this network" };
   if (!oldAlias || !newAlias) return { ok: false, error: "old and new alias required" };
+  const control = aliasControlCharacter(newAlias);
+  if (control !== null) {
+    return {
+      ok: false,
+      code: "node_alias_invalid",
+      error: "node_alias_invalid",
+      reason: "control_character",
+      char: control,
+      message: `alias cannot contain control character ${describeAliasControlCharacter(control)}`,
+    };
+  }
   if (oldAlias === newAlias) return { ok: false, error: "old and new alias are identical" };
 
   // old-alias must exist as a session in this network

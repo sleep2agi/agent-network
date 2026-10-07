@@ -1260,7 +1260,7 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 | `new_reply` | 收到 reply（`send_reply`） | `{inbox_count, from, message_id, in_reply_to, status}` |
 | `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
 | `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `chained_reply`) | `{parent_task_id, child_task_id, child_alias}` |
-| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L196)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
+| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L211)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 实际 payload 以上表为准。**自 #1439/#1441 起 `new_message` / `new_reply` / `broadcast` / `new_task`（含 retry/reassign）都带真实 `inbox_count`（收件人未读数），客户端可直接用它显示新消息数；`broadcast` 不再是硬编码 1。**另注：`new_task` / `new_message` 在目标 alias **刚被改名**时会额外带一个 `renamed_from` 字段（指向旧 alias，`tools.ts` 的 `canonical.renamed` 分支）。
 >
