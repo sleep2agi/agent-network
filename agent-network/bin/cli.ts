@@ -276,7 +276,7 @@ import {
   type WindowsManagedProcess,
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
-import { copresenceThreadPlan } from "../src/codex-copresence-thread";
+import { createCodexCopresenceThread, SAFE_CODEX_THREAD_ID } from "../src/codex-copresence-rpc";
 import {
   bridgeClientHealthReceipt,
   assertPendingServerQuiesced,
@@ -284,16 +284,17 @@ import {
   migrateCodexPendingThread,
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
-import { decidePendingThreadAtStart, findThreadRollouts } from "../src/codex-pending-thread-restart";
-import { POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
+import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
+import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
   codexTopologyAudit,
   quiesceThenSnapshot,
-  resumeAndVerifyCodexThread,
-  verifyCodexThreadHistory,
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
+import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceBridgeAttachTimeoutMs, resolveCopresenceMaxPayloadBytes, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
+import { waitForCodexRecoveryResources } from "../src/codex-recovery-resource-gate";
+import { codexCopresenceEnvFileText, codexCopresenceStageEnv } from "../src/codex-copresence-env";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -512,6 +513,12 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
         //    Reproduced every time in a clean container; instrumented to
         //    confirm this exact branch.
         if (!paneTarget) {
+          // `new-session` already returned before this waiter starts. If the
+          // exact session is now gone, the bridge exited; a larger recovery
+          // budget must not turn that terminal failure into minutes of
+          // misleading "still attaching" time. A live session whose pane is
+          // not listable yet keeps polling as before.
+          if (!tmuxSessionRunning(sessionName)) { resolve(false); return; }
           if (Date.now() >= deadline) { resolve(false); return; }
           setTimeout(poll, 400);
           return;
@@ -575,97 +582,6 @@ async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) 
   }
 }
 
-async function resolveCopresenceWebSocketCtor(): Promise<any> {
-  const g = (globalThis as any).WebSocket;
-  if (typeof g === "function") return g;
-  try {
-    const undici = await import("undici");
-    if (typeof (undici as any).WebSocket === "function") return (undici as any).WebSocket;
-  } catch { /* fall through */ }
-  throw new Error(
-    "no WebSocket available — need Bun / Node 22+ (global WebSocket) or `undici` in node_modules",
-  );
-}
-
-// Minimal WebSocket JSON-RPC thread creator against a running `codex
-// app-server`. Mirrors agent-node/tests/rfc-030-create-thread.ts but inlined
-// so the shipped CLI can call it (tests/ is not published).
-async function createCodexCopresenceThread(
-  ws: string,
-  timeoutMs = 60_000,
-  resumeThreadId?: string,
-  model?: string,
-): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean; resumedModel?: string }> {
-  const WsCtor = await resolveCopresenceWebSocketCtor();
-  const socket = new WsCtor(ws);
-  const deadline = Date.now() + timeoutMs;
-  await new Promise<void>((resolve, reject) => {
-    const to = setTimeout(() => reject(new Error(`ws open timeout on ${ws}`)), Math.max(1000, deadline - Date.now()));
-    socket.addEventListener("open", () => { clearTimeout(to); resolve(); }, { once: true });
-    socket.addEventListener("error", (e: any) => { clearTimeout(to); reject(new Error(`ws error: ${e?.message || e}`)); }, { once: true });
-  });
-  let nextId = 1;
-  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
-  socket.addEventListener("message", (ev: any) => {
-    let msg: any;
-    try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : ev.data.toString()); } catch { return; }
-    if (typeof msg?.id === "number" && !msg.method) {
-      const p = pending.get(msg.id);
-      if (!p) return;
-      pending.delete(msg.id);
-      if (msg.error) {
-        // #P2fix复审顺手4 — attach .code so isAlreadyInitializedError's
-        // code-based branch is live (mirrors codex-app-server-client.ts
-        // where the shared client attaches err.error.code).
-        const rpcErr = new Error(`${msg.error.code}: ${msg.error.message}`);
-        (rpcErr as Error & { code?: number }).code = msg.error.code;
-        p.reject(rpcErr);
-      } else p.resolve(msg.result);
-    }
-  });
-  const request = (method: string, params: any, timeoutMsInner: number) => new Promise<any>((resolve, reject) => {
-    const id = nextId++;
-    const to = setTimeout(() => { pending.delete(id); reject(new Error(`request ${method} timeout`)); }, timeoutMsInner);
-    pending.set(id, {
-      resolve: (v) => { clearTimeout(to); resolve(v); },
-      reject: (e) => { clearTimeout(to); reject(e); },
-    });
-    socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-  });
-  const notify = (method: string, params: any) =>
-    socket.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
-  try {
-    try {
-      await request("initialize", {
-        clientInfo: { name: "anet-copresence-creator", title: "creator", version: "0.0.1" },
-      }, 10_000);
-      notify("initialized", {});
-    } catch (e) {
-      // #P2fix顺手4 — only swallow "already initialized" on the shared
-      // server path; every other initialize failure is real.
-      if (!isAlreadyInitializedError(e)) throw e;
-    }
-    const plan = copresenceThreadPlan(resumeThreadId);
-    if (plan.method === "thread/resume") {
-      if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
-      // #512 — the resolved model rides on thread/resume; without it codex resumes
-      // on the rollout's recorded model and ignores the app-server's -c model=.
-      const { resumedModel, ...verification } = await resumeAndVerifyCodexThread(
-          plan.params.threadId,
-          (method, params) => request(method, params, 15_000),
-          model,
-        );
-      return { threadId: plan.params.threadId, verification, freshDeferred: false, resumedModel };
-    }
-    // A fresh Codex 0.148 thread cannot be resumed by a second client until
-    // the human TUI owns/materializes it. Do not create or mutate a thread:
-    // the deferred bridge observes the TUI's unique thread/started event.
-    return { threadId: "", freshDeferred: true };
-  } finally {
-    try { socket.close(); } catch { /* ignore */ }
-  }
-}
-
 async function askTypedConfirmation(prompt: string, expected: string): Promise<boolean> {
   const rl = getRL();
   const answer = await new Promise<string>((resolve) => rl.question(prompt, (s) => resolve(s)));
@@ -700,13 +616,14 @@ function assertSafeHubUrl(hub: string): void {
   }
 }
 
-// #P2fix必修1 — token must NOT appear in argv or tmux pane_start_command.
-// Writes ANET_CODEX_COMMHUB_TOKEN to a 0600 file inside <codexHome> (0700);
-// the tmux child sources then removes it before exec'ing codex, so the
-// value never reaches /proc/*/cmdline nor tmux's pane_start_command.
+// #P2fix必修1 — secrets must NOT appear in argv or tmux pane_start_command.
+// Writes the stage's resolved config.env plus its required launcher values to
+// one 0600 file inside <codexHome> (0700); each tmux child sources then removes
+// it before exec. The fixed name is safely reused only after the previous stage
+// has proved ready (and therefore has already sourced + removed its copy).
 // Do NOT use `tmux new-session -e KEY=VAL` (env pairs are argv) or
 // `tmux send-keys` (writes into pane history).
-function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
+function writeCodexCopresenceEnvFile(codexHome: string, env: Readonly<Record<string, string>>): string {
   const envPath = join(codexHome, ".anet-copresence.env");
   // #P2fix复审必修 — TOCTOU + symlink-follow attack surface.
   // Without pre-unlink, a pre-existing symlink at envPath would be followed
@@ -715,26 +632,9 @@ function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
   // the file at umask default (typically 0644) and the chmod-to-0600 race is
   // observable to any world-readable scan.
   try { unlinkSync(envPath); } catch (err: any) { if (err?.code !== "ENOENT") throw err; }
-  writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`, { mode: 0o600, flag: "wx" });
+  writeFileSync(envPath, codexCopresenceEnvFileText(env), { mode: 0o600, flag: "wx" });
   chmodIfPosix(envPath, 0o600);  // belt-and-suspenders in case older node ignores mode option
   return envPath;
-}
-
-// #P2fix顺手3 — threadId comes from our own JSON-RPC thread/start response
-// (server-generated UUID / ULID / opaque token), but we interpolate it into
-// a bash string, so a strict-shape check is cheap defense-in-depth against
-// a protocol change or a compromised app-server.
-const SAFE_THREAD_ID = /^[A-Za-z0-9_-]+$/;
-
-// #P2fix顺手4 — mirrors codex-app-server-bridge.ts:isAlreadyInitialized.
-// Only "already initialized" (code -32600 or matching message) is expected
-// on the shared-server bootstrap path; every other initialize failure is
-// real and must re-throw. Inline copy — cli.ts stays package-boundary-free.
-function isAlreadyInitializedError(e: unknown): boolean {
-  const code = (e as { code?: unknown })?.code;
-  if (code === -32600) return true;
-  const msg = (e as { message?: unknown })?.message;
-  return typeof msg === "string" && /already initialized/i.test(msg);
 }
 
 interface CopresenceOptions {
@@ -752,6 +652,12 @@ interface CopresenceOptions {
   tuiFirst?: boolean;
   /** #514: --allow-shared-codex-login — stage a login another node already uses (unsafe). */
   allowSharedCodexLogin?: boolean;
+  /** Explicit fresh conversation: do not resume codexThreadId or a pending candidate. */
+  newSession?: boolean;
+  /** Explicitly accept starting without a recovery-point backup. */
+  skipRecoveryBackup?: boolean;
+  /** Resolved config.env values. Each native stage receives the same set. */
+  configEnv: Record<string, string>;
 }
 
 /** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
@@ -1040,7 +946,11 @@ function checkCodexCredentialSharingForNode(
   });
 }
 
-function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
+function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string, skip: boolean): void {
+  if (skip) {
+    console.error("[anet] ⚠ --skip-recovery-backup: STARTING WITHOUT A CODEX RECOVERY POINT; CODEX_HOME may be modified and this launch cannot be rolled back safely.");
+    return;
+  }
   const nodeDir = join(nodesDir(), resolved.id);
   const backup = backupCodexRecoveryState({ nodeDir, codexHome });
   const cfgPath = join(nodeDir, "config.json");
@@ -1069,6 +979,14 @@ async function holdAppServerStart(nodeId: string): Promise<{ release: () => void
   });
 }
 
+async function holdCodexRecovery(nodeId: string, rolloutBytes: number | null): Promise<{ release: () => void }> {
+  return waitForCodexRecoveryResources(nodeId, rolloutBytes, {
+    log: (m) => console.log(`[anet] ${m}`),
+    warn: (m) => console.warn(`[anet] ${m}`),
+    report: (text) => console.log(`[anet] [recovery-gate] blocked ${text}`),
+  });
+}
+
 async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
@@ -1082,21 +1000,33 @@ async function startWindowsCodexCopresence(
   if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(model)) {
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
-  const recoveryCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  const recoveryCfgPath = join(nodesDir(), resolved.id, "config.json");
+  let recoveryCfg = JSON.parse(readFileSync(recoveryCfgPath, "utf-8"));
   const priorWindowsRecord = readWindowsCopresenceRecord(nodesDir(), resolved.id);
   let authoritativeOldPendingMarker: string | undefined;
-  if (recoveryCfg.codexPendingThread !== undefined) {
-    if (priorWindowsRecord?.version !== 2 || !priorWindowsRecord.marker
-      || recoveryCfg.codexPendingThread?.marker !== priorWindowsRecord.marker) {
-      throw new Error("pending Codex thread is not bound to the exact private previous-generation Windows record");
+  if (!opts.newSession && recoveryCfg.codexPendingThread !== undefined) {
+    const pendingDecision = reconcilePendingThreadAtStart(
+      recoveryCfg,
+      priorWindowsRecord?.version === 2 && priorWindowsRecord.marker
+        ? { kind: "ok", marker: priorWindowsRecord.marker }
+        : { kind: "missing" },
+      (tid) => findThreadRollouts(opts.codexHome, tid),
+    );
+    if (pendingDecision.kind === "migrate") {
+      authoritativeOldPendingMarker = pendingDecision.oldMarker;
+    } else if (pendingDecision.kind === "drop-unmaterialized") {
+      recoveryCfg = pendingDecision.config;
+      atomicWritePrivateJson(recoveryCfgPath, recoveryCfg);
+      console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped Windows generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
+    } else if (pendingDecision.kind === "refuse") {
+      throw new Error(`pending Codex thread is not bound to the exact private previous-generation Windows record: ${pendingDecision.reason}`);
     }
-    authoritativeOldPendingMarker = priorWindowsRecord.marker;
   }
   // Authoritative snapshot only after all prior writers have been reaped.
   // Failure aborts before any replacement app-server can start.
   await quiesceThenSnapshot(
     () => stopPriorWindowsCopresence(resolved.id),
-    () => persistCodexRecoveryPoint(resolved, opts.codexHome),
+    () => persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true),
   );
   if (authoritativeOldPendingMarker) {
     await assertPendingServerQuiesced(recoveryCfg.codexAppServerUrl, (oldPort) => waitForLoopbackPort(oldPort, 750));
@@ -1112,12 +1042,15 @@ async function startWindowsCodexCopresence(
   rmSync(bridgeLog, { force: true });
   const appEnv = {
     ...process.env,
-    CODEX_HOME: opts.codexHome,
-    ANET_NODE_MARKER: marker,
-    ANET_CODEX_COMMHUB_TOKEN: opts.token,
+    ...codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: marker,
+      ANET_CODEX_COMMHUB_TOKEN: opts.token,
+    }),
   };
   const admission = await holdAppServerStart(resolved.id);
   const managed: WindowsManagedProcess[] = [];
+  let recoveryAdmission: { release: () => void } | undefined;
   try {
     try {
     managed.push(await windowsManagedProcess("appsrv", opts.codexBin, codexWindowsAppServerArgs({
@@ -1141,13 +1074,18 @@ async function startWindowsCodexCopresence(
     } finally {
       admission.release();
     }
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId, model);
+    const requestedThreadId = codexThreadIdForStart(resolved.profile.codexThreadId, opts.newSession === true);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
+    console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    recoveryAdmission = await holdCodexRecovery(resolved.id, resumeBudget.rolloutBytes);
+    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
     let freshDeferred = thread.freshDeferred;
-    if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
+    if (!freshDeferred && !SAFE_CODEX_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+    if (opts.newSession) delete rawCfg.codexPendingThread;
     let pendingRecoveryId: string | undefined;
     if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
       const migrated = migrateCodexPendingThread(
@@ -1169,9 +1107,13 @@ async function startWindowsCodexCopresence(
 
     const bridgeEnv: NodeJS.ProcessEnv = {
       ...process.env,
-      CODEX_HOME: opts.codexHome,
-      ANET_NODE_MARKER: marker,
-      ANET_COPRESENCE_BRIDGE: "1",
+      ...codexCopresenceStageEnv(opts.configEnv, {
+        CODEX_HOME: opts.codexHome,
+        ANET_NODE_MARKER: marker,
+        ANET_COPRESENCE_BRIDGE: "1",
+        ANET_CODEX_RESUME_TIMEOUT_MS: String(resumeBudget.timeoutMs),
+        ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES: String(resolveCopresenceMaxPayloadBytes(resumeBudget.rolloutBytes)),
+      }),
     };
     delete bridgeEnv.COMMHUB_TOKEN;
     delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
@@ -1184,7 +1126,8 @@ async function startWindowsCodexCopresence(
       : freshDeferred
         ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
         : bridgeClientHealthReceipt(wsUrl, threadId);
-    if (!await waitForFileText(bridgeLog, bridgeReceipt, 25_000)) {
+    const bridgeAttachTimeoutMs = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);
+    if (!await waitForFileText(bridgeLog, bridgeReceipt, bridgeAttachTimeoutMs)) {
       throw new Error(`bridge did not attach to the shared app-server before TUI launch; log=${bridgeLog}`);
     }
     if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
@@ -1199,7 +1142,8 @@ async function startWindowsCodexCopresence(
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
     const tuiArgs = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
     const tui = spawn(opts.codexBin, tuiArgs, {
-      cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
+      cwd: process.cwd(),
+      env: { ...process.env, ...codexCopresenceStageEnv(opts.configEnv, { CODEX_HOME: opts.codexHome, ANET_NODE_MARKER: marker }) },
       stdio: "inherit", windowsHide: false, shell: true,
     });
     await new Promise<void>((resolve, reject) => {
@@ -1220,7 +1164,10 @@ async function startWindowsCodexCopresence(
     //
     // 并且原文案不说它找的是什么 —— pid / birth / port 一个都没有。
     // 一条只报结论、不报「比对的那两样东西」的报错,只能靠从头复现来查。
-    const TUI_HEALTH_MS = 25_000;
+    // Old Codex releases hydrate the same large rollout again when the TUI
+    // connects. Give that second client the same size-aware recovery budget;
+    // a fixed 25s window reported a healthy, still-loading TUI as dead.
+    const TUI_HEALTH_MS = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);
     const tuiHealthStart = Date.now();
     const tuiHealthDeadline = tuiHealthStart + TUI_HEALTH_MS;
     let tuiConnected = false;
@@ -1282,11 +1229,14 @@ async function startWindowsCodexCopresence(
     //    ⚠️ `connection=pid-attributed` 这个子串**不能动**:
     //    windows-codex-copresence.test.ts 用 indexOf 钉它的出现顺序。追加在其后是安全的。
     console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed probes=${tuiProbes} probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`);
+    recoveryAdmission.release();
+    recoveryAdmission = undefined;
     const code = await new Promise<number>((resolve, reject) => {
       tui.once("exit", (c) => resolve(c ?? 1));
     });
     if (code !== 0) throw new Error(`Codex TUI exited with code ${code}`);
   } catch (e) {
+    recoveryAdmission?.release();
     for (const process of [...managed].reverse()) {
       if (probeWindowsCreationDate(process.pid) === process.creationDate) {
         try { taskkillWindowsProcessTree(process.pid); } catch {}
@@ -1454,6 +1404,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   const profile = resolved.profile;
+  const requestedThreadId = codexThreadIdForStart(profile.codexThreadId, opts.newSession === true);
   // Resolve once for both platform backends. Keeping a second default inside
   // the Windows branch lets Windows and POSIX silently drift.
   // #512 — `opts.model` is ONLY the --model flag. The node's own config `model`
@@ -1611,6 +1562,12 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   if (loginGate.state === "unknown") console.log(`[anet] codex login: ${loginGate.reason}`);
 
+  // Validate config.env before either platform quiesces the current
+  // generation.  A reserved loader key is a configuration refusal, not a
+  // reason to stop a healthy app-server / bridge / TUI and leave the node
+  // down.  Stage-specific required values are merged later as before.
+  codexCopresenceStageEnv(opts.configEnv, {});
+
   if (process.platform === "win32") {
     try {
       await startWindowsCodexCopresence(resolved, displayName, opts, model);
@@ -1654,15 +1611,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // never matched what was on disk, and nothing was ever killed while the
   // code reported success). See docs of writeMarker() in copresence-identity.ts.
   const identityMarker = randomUUID();
-  const prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  let prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
   const clearOldStoppedReceipt = stoppedReceiptAtStart(join(nodesDir(), resolved.id), prelaunchCfg.node_id);
   let authoritativeOldPendingMarker: string | undefined;
-  if (prelaunchCfg.codexPendingThread !== undefined) {
+  if (!opts.newSession && prelaunchCfg.codexPendingThread !== undefined) {
     const oldIdentity = readCopresenceMarker(nodesDir(), resolved.id);
     // #602 — a clean `anet node stop` removes the marker but leaves the candidate; when its thread
     // never got a rollout there is nothing to carry over, so it is dropped instead of refusing forever.
-    const pendingDecision = decidePendingThreadAtStart(
-      prelaunchCfg.codexPendingThread,
+    const pendingDecision = reconcilePendingThreadAtStart(
+      prelaunchCfg,
       oldIdentity.kind === "ok" ? { kind: "ok", marker: oldIdentity.marker.marker }
         : oldIdentity.cause === "MISSING" ? { kind: "missing" }
         : { kind: "unreadable", cause: oldIdentity.cause },
@@ -1671,7 +1628,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     if (pendingDecision.kind === "migrate") {
       authoritativeOldPendingMarker = pendingDecision.oldMarker;
     } else if (pendingDecision.kind === "drop-unmaterialized") {
-      delete prelaunchCfg.codexPendingThread;
+      prelaunchCfg = pendingDecision.config;
       atomicWritePrivateJson(join(nodesDir(), resolved.id, "config.json"), prelaunchCfg);
       console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
     } else if (pendingDecision.kind === "refuse") {
@@ -1734,7 +1691,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         }
       }
       await new Promise((r) => setTimeout(r, 500));
-    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome));
+    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true));
   } catch (e) {
     console.error(`[anet] ❌ cannot create quiesced Codex recovery point: ${(e as Error).message}`);
     process.exit(1);
@@ -1767,7 +1724,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
   // #P2fix必修1 — token to 0600 file, sourced-then-removed inside the tmux
   // child. Never appears in argv / /proc/*/cmdline / tmux pane_start_command.
-  const envFilePath = writeCodexCopresenceEnvFile(opts.codexHome, opts.token);
+  const envFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+    CODEX_HOME: opts.codexHome,
+    ANET_NODE_MARKER: identityMarker,
+    ANET_CODEX_COMMHUB_TOKEN: opts.token,
+  }));
   // #P2fix必修2 — shellQuote every `-c` TOML fragment (including the hub
   // URL fragment). assertSafeHubUrl was called above; shellQuote guards
   // even in the face of a validator regression.
@@ -1777,7 +1738,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     `. ${shellQuote(envFilePath)}`,
-    `rm -f ${shellQuote(envFilePath)}`,
+    `/bin/rm -f ${shellQuote(envFilePath)}`,
     `clear`,
     `exec ${shellQuote(opts.codexBin)} app-server`
       + ` -c approval_policy=${approvalPolicy}`
@@ -1862,13 +1823,22 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
   let freshDeferred = false;
+  let recoveryTimeoutMs = 300_000;
+  let recoveryRolloutBytes: number | null = null;
+  let recoveryAdmission: { release: () => void } | undefined;
   try {
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId, model);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
+    recoveryTimeoutMs = resumeBudget.timeoutMs;
+    recoveryRolloutBytes = resumeBudget.rolloutBytes;
+    console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    recoveryAdmission = await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes);
+    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;
     profile.codexRecoveryVerification = thread.verification;
   } catch (e: any) {
+    recoveryAdmission?.release();
     console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
     console.error(`[anet]    Fail-closed: no bridge/TUI was started and thread/start was not used as a fallback.`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
@@ -1881,7 +1851,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #P2fix顺手3 — defense-in-depth shape check before threadId flows into
   // a bash-string interpolation. Server-generated ids match; anything else
   // means either a protocol drift or a compromised app-server.
-  if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) {
+  if (!freshDeferred && !SAFE_CODEX_THREAD_ID.test(threadId)) {
     console.error(`[anet] internal error: unexpected threadId shape (rejected before shell interpolation)`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
@@ -1892,6 +1862,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
   const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+  if (opts.newSession) delete rawCfg.codexPendingThread;
   let pendingRecoveryId: string | undefined;
   if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
     try {
@@ -1945,8 +1916,18 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // <node>/codex-bridge.log (0600, truncated each start, capped), and a failure prints the tail.
     const bridgeLog = join(nodesDir(), resolved.id, CODEX_BRIDGE_LOG_NAME);
     try { writeFileSync(bridgeLog, "", { mode: 0o600 }); chmodIfPosix(bridgeLog, 0o600); } catch { /* best-effort: the tee still creates it */ }
+    const bridgeEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: identityMarker,
+      ANET_COPRESENCE_BRIDGE: "1",
+      ANET_CODEX_RESUME_TIMEOUT_MS: String(recoveryTimeoutMs),
+      ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES: String(resolveCopresenceMaxPayloadBytes(recoveryRolloutBytes)),
+      ANET_CODEX_TUI_SESSION: tuiSession,
+      ...(pairedAgentNodeEntrypoint ? { ANET_CODEX_PAIRED_AGENT_NODE: pairedAgentNodeEntrypoint } : {}),
+    }));
     const bridgeCmd = [
-      `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+      `. ${shellQuote(bridgeEnvFilePath)}`,
+      `/bin/rm -f ${shellQuote(bridgeEnvFilePath)}`,
       `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN`,
       codexBridgeTeeCommand(shellQuote(bridgeLog)),
       `exec ${selfInvoke} node start ${shellQuote(displayName)}`,
@@ -1959,12 +1940,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         "-e", `CODEX_HOME=${opts.codexHome}`,
         // #448 — health.tui probes this exact session name.
         "-e", `ANET_CODEX_TUI_SESSION=${tuiSession}`,
-        // #535 — the entrypoint ⓪ already resolved and validated; the bridge re-validates it, no npx.
-        ...(pairedAgentNodeEntrypoint ? ["-e", `ANET_CODEX_PAIRED_AGENT_NODE=${pairedAgentNodeEntrypoint}`] : []),
         "bash", "-lc", bridgeCmd,
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${bridgeSession} failed: ${e?.message || e}`);
+      try { rmSync(bridgeEnvFilePath, { force: true }); } catch { /* best-effort */ }
       console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
       process.exit(1);
     }
@@ -1974,10 +1954,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       : freshDeferred
         ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
         : bridgeClientHealthReceipt(wsUrl, threadId);
+    const bridgeAttachTimeoutMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
     const bridgeReady = await waitForTmuxPaneText(
       bridgeSession,
       bridgeReceipt,
-      25_000,
+      bridgeAttachTimeoutMs,
     );
     if (!bridgeReady) {
       await new Promise((r) => setTimeout(r, 300)); // let tee flush the last lines
@@ -1986,7 +1967,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       for (const line of bridgeLaunchFailureLines({
         bridgeAlive: tmuxSessionRunning(bridgeSession),
         attachCommand: `tmux attach -t ${shellQuote(`=${bridgeSession}`)}`,
-        logPath: bridgeLog, logText, waitedSeconds: 25,
+        logPath: bridgeLog, logText, waitedSeconds: Math.ceil(bridgeAttachTimeoutMs / 1000),
         cleanupCommand: `anet node stop ${shellQuote(displayName)}`,
       })) console.error(line);
       process.exit(1);
@@ -2010,8 +1991,13 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
     const tuiArgv = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
     const tuiInvocation = `exec ${shellQuote(opts.codexBin)} ${tuiArgv.map(shellQuote).join(" ")}`;
+    const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: identityMarker,
+    }));
     const tuiCmd = [
-      `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+      `. ${shellQuote(tuiEnvFilePath)}`,
+      `/bin/rm -f ${shellQuote(tuiEnvFilePath)}`,
       tuiInvocation,
     ].join(" ; ");
     try {
@@ -2023,6 +2009,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${tuiSession} failed: ${e?.message || e}`);
+      try { rmSync(tuiEnvFilePath, { force: true }); } catch { /* best-effort */ }
       console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
       process.exit(1);
     }
@@ -2039,7 +2026,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
   };
   const requireTuiPainted = async () => {
-    const TUI_PAINT_TIMEOUT_MS = 40_000;
+    // Codex 0.133 can spend longer than 40s hydrating a large resumed rollout
+    // before its first paint. This is the same bounded recovery operation, so
+    // use the launcher's finite size-aware budget rather than a fixed window.
+    const TUI_PAINT_TIMEOUT_MS = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
     const tuiState = await codexTuiStateAfterRender(tuiSession, TUI_PAINT_TIMEOUT_MS);
     if (tuiState !== "usable") {
       console.error("");
@@ -2105,8 +2095,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
   // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
+  const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
   const attribution = await waitForPosixOwnedLoopbackConnection({
-    rootPid: tuiIdentity.pid, port, deadlineMs: POSIX_TUI_ATTRIBUTION_MS,
+    rootPid: tuiIdentity.pid, port, deadlineMs: posixTuiAttributionMs,
     probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
     alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
   });
@@ -2124,6 +2115,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
     : `[anet] client-health role=bridge remote=exact thread=exact`);
   console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
+  recoveryAdmission?.release();
+  recoveryAdmission = undefined;
 
   clearOldStoppedReceipt(); // Successful manual start, not a failed/partial attempt.
   const hubBase = opts.hub.replace(/\/+$/, "");
@@ -4560,6 +4553,7 @@ Usage: anet node start <name> [options]
 Options:
   --tmux                       Start in a tmux session
   --new-session               Start with a fresh model session
+  --skip-recovery-backup      DANGEROUS: start without a Codex recovery-point backup
   --copresence                Start a shared human + agent TUI\n                              (codex-app-server | opencode-cli | grok-build-cli)
                               (codex: recorded on the node, so the next start
                               needs no flag — plain 'anet node start <name>')
@@ -8183,6 +8177,9 @@ async function startCommand() {
       token: profileTok,
       tuiFirst: opts["tui-first"] === "true",
       allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",
+      newSession: forceNewSession,
+      skipRecoveryBackup: opts["skip-recovery-backup"] === "true",
+      configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id)),
     });
     return;
   }

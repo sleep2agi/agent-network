@@ -84,6 +84,10 @@ printf '{"hub":"%s","token":"%s","network_id":"%s"}\n' "$HUB_BASE" "$UTOK" "$NET
 # A host codex login for the launcher to stage into each node's CODEX_HOME. Fake key; the
 # container has no route to use it (`docker run --network none`).
 printf '{"OPENAI_API_KEY":"sk-ccss-not-a-real-key"}\n' > "$HOME/.codex/auth.json"; chmod 600 "$HOME/.codex/auth.json"
+# This suite verifies stop/start and thread continuity, not Codex's updater.
+# Its deliberately old, pinned real binary must not open an update-choice TUI
+# when the registry has moved on while CI is running.
+printf 'check_for_update_on_startup = false\n' > "$HOME/.codex/config.toml"; chmod 600 "$HOME/.codex/config.toml"
 
 # make_node ALIAS — a co-presence node config the way the daemon writes one (codexCopresence:true)
 make_node() {
@@ -96,6 +100,13 @@ make_node() {
     '{node_name:$a,runtime:"codex-app-server",model:"gpt-5.5",hub:$h,token:$t,network_id:$n,flags:{permissionMode:"default"},codexCopresence:true}' \
     > "$dir/config.json"
   chmod 600 "$dir/config.json"
+  # This suite measures co-presence lifecycle, not Codex's interactive model
+  # migration notice. Pin the acknowledgement in the throwaway node home so
+  # newer real Codex builds cannot cover the prompt and defeat paint/readiness.
+  mkdir -p "$dir/codex-home"
+  printf '[notice.model_migrations]\n"gpt-5.5" = "gpt-6-sol"\n"gpt-5.6-terra" = "gpt-6-sol"\n' \
+    > "$dir/codex-home/config.toml"
+  chmod 600 "$dir/codex-home/config.toml"
 }
 cfg()    { jq -c "${2:-.}" "$WORK/.anet/nodes/$1/config.json" 2>/dev/null; }
 marker() { jq -r '.marker // empty' "$WORK/.anet/nodes/$1/copresence-identity.json" 2>/dev/null; }

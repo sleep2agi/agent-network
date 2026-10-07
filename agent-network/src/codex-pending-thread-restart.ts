@@ -9,7 +9,9 @@ import { join } from "node:path";
  * not had a conversation yet (codex only writes a rollout on the first turn).
  * It is bound to the identity marker of the generation that saw it, so a
  * restart after a crash can carry it over to the next generation without
- * guessing (`migrateCodexPendingThread`).
+ * guessing (`migrateCodexPendingThread`) once its exact rollout exists. A
+ * candidate acknowledged by RPC but never materialized remains pending and
+ * is dropped on the next start, even if the old marker file survived.
  *
  * A clean `anet node stop` reaps that generation and removes its marker, but
  * the candidate stays in the config. Before #602 the next start then refused
@@ -51,9 +53,17 @@ export function decidePendingThreadAtStart(
   const p = pending as { version?: unknown; threadId?: unknown; marker?: unknown } | null;
   const markerOf = typeof p?.marker === "string" ? p.marker : undefined;
   if (marker.kind === "ok") {
-    return markerOf !== undefined && markerOf === marker.marker
-      ? { kind: "migrate", oldMarker: marker.marker }
-      : { kind: "refuse", reason: "the pending candidate is bound to a different marker than the one on disk" };
+    if (markerOf === undefined || markerOf !== marker.marker) {
+      return { kind: "refuse", reason: "the pending candidate is bound to a different marker than the one on disk" };
+    }
+    if (!p || p.version !== 1 || typeof p.threadId !== "string" || !THREAD_ID.test(p.threadId)) {
+      return { kind: "refuse", reason: "the pending candidate is malformed" };
+    }
+    const found = rollouts(p.threadId);
+    if (found === null) return { kind: "refuse", reason: "could not search CODEX_HOME for the candidate's rollout" };
+    return found.length === 0
+      ? { kind: "drop-unmaterialized", threadId: p.threadId }
+      : { kind: "migrate", oldMarker: marker.marker };
   }
   if (marker.kind === "unreadable") {
     return { kind: "refuse", reason: `the identity marker cannot be trusted (${marker.cause})` };
@@ -68,6 +78,26 @@ export function decidePendingThreadAtStart(
     return { kind: "refuse", reason: `the candidate thread has a rollout (${found[0]}) but the marker that bound it is gone` };
   }
   return { kind: "drop-unmaterialized", threadId: p.threadId };
+}
+
+/**
+ * Apply the decision to an in-memory node config without platform-specific
+ * shortcuts.  Both launchers persist `config` before quiescing the old
+ * generation.  Keeping the deletion here makes the Windows stop -> start
+ * behavior executable in the Linux Docker gate instead of relying only on a
+ * source-shape assertion (the native Windows smoke remains the end-to-end
+ * proof).
+ */
+export function reconcilePendingThreadAtStart<T extends Record<string, unknown>>(
+  config: T,
+  marker: PendingMarkerFact,
+  rollouts: RolloutLookup,
+): PendingThreadAtStart & { config: T; changed: boolean } {
+  const decision = decidePendingThreadAtStart(config.codexPendingThread, marker, rollouts);
+  if (decision.kind !== "drop-unmaterialized") return { ...decision, config, changed: false };
+  const next = { ...config };
+  delete next.codexPendingThread;
+  return { ...decision, config: next, changed: true };
 }
 
 /**

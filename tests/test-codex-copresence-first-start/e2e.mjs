@@ -16,7 +16,7 @@
 //   logged-out   no auth.json; start must report needs-login with the exact login command, exit 3,
 //                and start nothing (no tmux session, no npx call).
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -102,6 +102,13 @@ const run = (args, timeoutMs = 150_000) => {
 // -L default under the private TMUX_TMPDIR = exactly the socket anet uses here, named explicitly.
 const tmux = (args) => spawnSync("tmux", ["-u", "-L", "default", ...args], { env, encoding: "utf8" });
 const sessions = () => (tmux(["list-sessions", "-F", "#{session_name}"]).stdout ?? "").split("\n").filter(Boolean);
+const panePid = (name) => {
+  const rows = (tmux(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}"]).stdout ?? "").split("\n");
+  const row = rows.map((line) => line.split("\t")).find(([session]) => session === name);
+  return row?.[1] ? Number(row[1]) : null;
+};
+const procHasEnv = (pid, key, value) => pid !== null
+  && readFileSync(`/proc/${pid}/environ`).toString("utf8").split("\0").includes(`${key}=${value}`);
 const npxCalls = () => (existsSync(npxLog) ? readFileSync(npxLog, "utf8").split("\n").filter(Boolean) : []);
 const fail = (msg, out = "") => {
   console.log(`FAIL ${msg}`);
@@ -119,10 +126,25 @@ must(run(["login", "--username", `t535${runId.replace(/[^a-z0-9]/gi, "")}`, "--p
 must(run(["node", "create", alias, "--runtime", "codex-cli", "--hub", hub]), "node create");
 const nodeDir = join(project, ".anet", "nodes", alias);
 const codexHome = join(nodeDir, "codex-home");
+const configEnvKey = "ANET_T535_PROVIDER_KEY";
+const configEnvValue = `fake-provider-${runId}`;
+{
+  const cfgPath = join(nodeDir, "config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfg.env = { ...(cfg.env ?? {}), [configEnvKey]: configEnvValue };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+}
 if (scenario !== "logged-out") {
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   // Fake, clearly-not-real credential: the gate only asks "is there a usable login shape".
   writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: `sk-fake-t535-${runId}` }) + "\n", { mode: 0o600 });
+}
+if (scenario === "backup-fails") {
+  const sessionsDir = join(codexHome, "sessions");
+  mkdirSync(sessionsDir, { recursive: true });
+  const outside = join(root, "must-not-copy.jsonl");
+  writeFileSync(outside, "outside recovery scope\n");
+  symlinkSync(outside, join(sessionsDir, "escape.jsonl"));
 }
 
 let started = false;
@@ -143,6 +165,14 @@ try {
     const calls = npxCalls().filter((l) => l.includes("--print-entrypoint"));
     if (calls.length !== 1) fail(`expected exactly one agent-node resolution (by the launcher), saw ${calls.length}`, start.out);
     pass(`first start with a ${delayS}s agent-node fetch reached ready in ${secs}s; one npx call, before any tmux session`);
+    for (const [role, session] of [["app-server", `${alias}-appsrv`], ["bridge", `${alias}-桥`], ["TUI", alias]]) {
+      const pid = panePid(session);
+      if (!procHasEnv(pid, configEnvKey, configEnvValue)) {
+        fail(`${role} pane pid=${pid ?? "missing"} did not inherit config.env.${configEnvKey}`, start.out);
+      }
+    }
+    if (existsSync(join(codexHome, ".anet-copresence.env"))) fail("private source-then-delete environment file still exists", start.out);
+    pass("config.env reaches app-server, bridge, and TUI via the private source-then-delete file");
     const log = join(nodeDir, "codex-bridge.log");
     if (!existsSync(log) || (statSync(log).mode & 0o077) !== 0) fail("codex-bridge.log missing or not private", start.out);
     if (!readFileSync(log, "utf8").includes("client-health role=bridge")) fail("bridge log does not hold the bridge output", readFileSync(log, "utf8"));
@@ -171,6 +201,45 @@ try {
     if (!v.out.includes(`PASS: verify ${alias} (not applicable: identity_attested)`)) fail("verify PASS line does not say identity_attested was not applicable", v.out);
     if (!/^\s+- identity_attested\s+not applicable/m.test(v.out)) fail("identity_attested is not shown as n/a", v.out);
     pass("single node, no --probe-from: verify PASS, identity_attested n/a");
+
+    // A bad config.env must be rejected before the launcher quiesces the
+    // healthy old generation.  This is the production ordering regression:
+    // validation used to happen only while writing the replacement app-server
+    // env file, after all three old sessions had already been killed.
+    const beforeSessions = sessions().sort();
+    const beforePids = new Map(beforeSessions.map((session) => [session, panePid(session)]));
+    const invalidCfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    invalidCfg.env = { ...(invalidCfg.env ?? {}), PATH: "/unsafe/config-path" };
+    writeFileSync(cfgPath, JSON.stringify(invalidCfg, null, 2), { mode: 0o600 });
+    const refused = run(["node", "start", alias, "--codex-bin", codexWrapper, "--accept-dev-channels"]);
+    if (refused.rc === 0 || !refused.out.includes("config.env.PATH is reserved")) {
+      fail("reserved config.env was not rejected before replacement", refused.out);
+    }
+    const afterSessions = sessions().sort();
+    if (JSON.stringify(afterSessions) !== JSON.stringify(beforeSessions)) {
+      fail("reserved config.env changed the live session set", refused.out);
+    }
+    for (const [session, pid] of beforePids) {
+      if (!pid || !existsSync(`/proc/${pid}`) || panePid(session) !== pid) {
+        fail(`reserved config.env killed or replaced ${session} pid=${pid}`, refused.out);
+      }
+    }
+    delete invalidCfg.env.PATH;
+    writeFileSync(cfgPath, JSON.stringify(invalidCfg, null, 2), { mode: 0o600 });
+    pass("reserved config.env fails before quiesce; all three old sessions keep the same pids");
+  } else if (scenario === "backup-fails") {
+    if (start.rc === 0) fail("start succeeded although the recovery backup failed", start.out);
+    if (!start.out.includes("cannot create quiesced Codex recovery point") || !start.out.includes("refuses symlink")) {
+      fail("backup failure was not surfaced as the startup refusal", start.out);
+    }
+    if (sessions().some((session) => session.startsWith(alias))) {
+      fail("backup failure still launched a co-presence process", start.out);
+    }
+    const recoveryDir = join(nodeDir, "recovery");
+    if (existsSync(recoveryDir) && readdirSync(recoveryDir).length !== 0) {
+      fail("backup failure left a partial recovery directory", start.out);
+    }
+    pass("backup failure exits nonzero before app-server/bridge/TUI and removes the partial recovery point");
   } else if (scenario === "bridge-dies") {
     if (start.rc === 0) fail("start succeeded although the bridge's agent-node exits at launch", start.out);
     if (!start.out.includes("bridge exited before attaching")) fail("failure does not say the bridge exited", start.out);

@@ -7,11 +7,19 @@ mkdir -p "$(dirname "$REPORT")"
   echo
   echo "Layer 1: pure recovery + existing thread lifecycle"
   cd /repo/agent-network
-  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-thread.test.ts src/opencode-agent-node-pair.test.ts
+  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-resume-timeout.test.ts src/codex-copresence-env.test.ts src/codex-copresence-rpc.test.ts src/codex-copresence-thread.test.ts src/codex-pending-thread-restart.test.ts src/codex-recovery-resource-gate.test.ts src/opencode-agent-node-pair.test.ts
+  cd /repo/agent-node
+  bun test src/runtime/codex-app-server-bridge.test.ts src/runtime/codex-app-server-client.test.ts src/runtime/codex-app-server/resume-timeout.test.ts
+  cd /repo/agent-network
   echo
   echo "Layer 2: production wiring invariants"
-  grep -q 'resumeAndVerifyCodexThread' bin/cli.ts
+  grep -q 'resumeAndVerifyCodexThread' src/codex-copresence-rpc.ts
   grep -q 'recovery point created' bin/cli.ts
+  [ "$(grep -c 'persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true)' bin/cli.ts)" -eq 2 ] || { echo "FAIL: both launchers must fail closed on backup unless explicitly skipped" >&2; exit 1; }
+  grep -q -- '--skip-recovery-backup: STARTING WITHOUT A CODEX RECOVERY POINT' bin/cli.ts
+  grep -q 'isDeferredThreadMaterialized' /repo/agent-node/src/runtime/codex-app-server-bridge.ts
+  [ "$(grep -c 'resolveCopresenceResumeBudget(opts.codexHome' bin/cli.ts)" -eq 2 ] || { echo "FAIL: both launchers must derive the bounded recovery deadline" >&2; exit 1; }
+  [ "$(grep -c 'ANET_CODEX_RESUME_TIMEOUT_MS.*resumeBudget.timeoutMs\|ANET_CODEX_RESUME_TIMEOUT_MS.*recoveryTimeoutMs' bin/cli.ts)" -eq 2 ] || { echo "FAIL: both launchers must hand the same recovery deadline to the bridge" >&2; exit 1; }
   grep -q 'codexRecoveryVerification' bin/cli.ts
   grep -q 'codexTopologyAudit' bin/cli.ts
   grep -q 'resolveCodexAgentNodeLaunchPlan' bin/cli.ts
@@ -33,14 +41,39 @@ mkdir -p "$(dirname "$REPORT")"
   bun run build
   echo "PASS: typecheck and production bundle"
   echo
+  echo "Layer 3b: real Codex 0.133 large-rollout resume under Node"
+  export CODEX_HOME
+  CODEX_HOME=$(mktemp -d /tmp/test1178-codex-home-XXXXXX)
+  printf '{"OPENAI_API_KEY":"sk-test1178-offline"}\n' > "$CODEX_HOME/auth.json"
+  printf 'check_for_update_on_startup = false\n' > "$CODEX_HOME/config.toml"
+  node /repo/real-0133-large-resume.mjs
+  find "$CODEX_HOME" -mindepth 1 -delete
+  rmdir "$CODEX_HOME"
+  node /repo/node-payload-mutation.mjs
+  bun build src/codex-copresence-rpc.ts --target node --format esm --outfile /repo/agent-network/.test-codex-copresence-rpc.mjs
+  echo
+  echo "Layer 4: witnessed-red mutations"
+  bun /repo/mutation.mjs
+  echo
   echo "Witnessed-red contract"
-  echo "Mutation proven by unit stub: thread/read returns exact id with empty history; test rejects and call trace is only thread/resume,thread/read (no thread/start)."
+  echo "Mutation proven by unit stub: thread/read returns exact id with empty explicit history; metadata-only verification never hydrates full turns and never calls thread/start."
   echo "Mutation proven by paired-runtime stub: preview.33 differs from the required preview.34; the resolution plan has allowPathGlobal=false and an exact non-floating spec. Missing codex-app-server help is rejected."
   echo "Mutation proven by active-writer stub: snapshot throws if reached while writer=true; production Windows and POSIX call the shared quiesceThenSnapshot boundary exactly once each."
   echo "Mutation proven by recursive state fixture: nested session files have relative path + byte size + sha256; a symlink to outside CODEX_HOME is rejected instead of copied."
+  echo "Mutation proven by >2 GiB sparse rollout: restoring a whole-file read fails while the streaming sparse copy passes."
+  echo "Mutation proven by slow fake app-server: reducing the derived thread/resume deadline below its response delay fails closed."
+  echo "Mutation proven by payload-ceiling and close stubs: Node recovery uses a finite rollout-sized WebSocket ceiling, and a closed launcher or bridge transport rejects immediately with its real reason instead of waiting for the recovery deadline."
+  echo "Mutation proven by recovery quota: both native launchers keep one rollout-sized host lease through exact bridge/TUI attribution; the bridge payload derivation retains its finite upper bound and a transport close never creates a replacement thread."
+  echo "Real Codex 0.133 large-rollout E2E: the production Node bundle resumes and verifies the exact 256 MiB persisted thread without a 1006 payload disconnect."
+  echo "Mutation proven by acknowledged-without-rollout fake: a deferred candidate cannot become codexThreadId until its exact rollout exists; the materialization retry shares ANET_CODEX_RESUME_TIMEOUT_MS."
+  echo "Mutation proven by --new-session selector: restoring the recorded thread id makes the co-presence test fail; both native platform lanes also discard pending candidates."
+  echo "Mutation proven by Windows pending-state wiring: an unmaterialized stopped-generation candidate is deleted and that deletion is persisted before snapshot/start."
+  echo "Mutation proven by recovery fail-closed wiring and partial-backup cleanup: both launchers require a backup unless explicitly skipped; failed directories are removed."
+  echo "Mutation proven by config.env filtering: PATH and loader hooks are rejected case-insensitively before any stage starts."
+  echo "Real private-tmux E2E (test535): a fake config.env provider key is present in app-server, bridge, and TUI /proc environments; deleting the merge is witnessed red. Values never enter argv and the 0600 source file is gone after launch."
   echo "Identity boundary: config-recovery.json is redacted non-credential metadata only. The original config.json and CODEX_HOME remain in place and are never replaced or cleared."
   echo
   echo "Release gate (report-only; this Draft does not publish or bump versions)"
-  echo "preview.45 is immutable/already published. This release candidate bumps agent-network to preview.46, agent-node to preview.34, and commhub-server to preview.30; run all release gates before publishing. Do not overwrite an existing version or move latest."
+  echo "This change does not bump or publish any package. A release must be built later from an exact main SHA after merge."
   echo "RESULT: PASS"
 } 2>&1 | sed 's/[[:space:]]*$//' | tee "$REPORT"

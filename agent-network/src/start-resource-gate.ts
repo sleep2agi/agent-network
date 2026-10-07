@@ -16,7 +16,9 @@
 // as the free-memory reading: min(4 GiB, 15% of min(MemTotal, cgroup limit)).
 // Page cache (inactive_file) is not usage. Leases live in
 // ~/.anet/run/start-slots/ keyed by node id. A lease records pid plus the
-// process start time from /proc/<pid>/stat field 22, and it expires.
+// process start time from /proc/<pid>/stat field 22. A live holder renews its
+// expiry while the caller holds the returned lease; expiry is only a crash
+// recovery boundary, never a maximum duration for healthy work.
 // After the max wait, concurrency drops to 1 and the log/status say
 // 「已超时，按单路放行」. That wait never skips the lease. One waiter takes
 // the slot only when the holder is actually stuck (the lease expired, or its
@@ -75,6 +77,8 @@ const START_GATE_BLOCKED_STATUSES = new Set<string>([
 export const START_GATE_TAKEOVER_STATUS = "接管卡死租约";
 /** Startup leases older than this are not live. ANET_START_LEASE_TTL_SEC overrides it. */
 export const START_GATE_LEASE_TTL_MS = 10 * 60 * 1000;
+/** A healthy holder renews well before the default lease expiry. */
+export const START_GATE_LEASE_HEARTBEAT_MS = 30_000;
 /** An empty or unreadable lock younger than this is still being published, not dead. */
 export const START_GATE_LOCK_STALE_MS = 30_000;
 /**
@@ -117,6 +121,8 @@ export interface StartGateDeps {
   jitterMs?: number;
   /** Lease lifetime. Default 10 minutes, or ANET_START_LEASE_TTL_SEC. */
   leaseTtlMs?: number;
+  /** @internal deterministic short-TTL seam. Defaults to min(30s, TTL/3). */
+  leaseHeartbeatMs?: number;
   /** Empty/unreadable locks younger than this are held, not dead. */
   lockStaleMs?: number;
   /** A live matching lock older than this is an orphan. Default 60s. */
@@ -760,6 +766,45 @@ function acquireLease(
   }
 }
 
+type RefreshKind = "renewed" | "busy" | "lost";
+
+/** Extend only the exact lease still owned by this pid generation. The global
+ * file lock prevents a heartbeat racing a takeover from resurrecting the old
+ * holder after another process has acquired the slot. */
+function refreshLease(
+  dir: string,
+  key: string,
+  holderPid: number,
+  selfStart: string | null,
+  ttlMs: number,
+  now: () => number,
+  isPidAlive: (pid: number) => boolean,
+  readStart: (pid: number) => string | null,
+  staleMs: number,
+  orphanMs: number,
+  monotonicNow: () => number | null,
+  warn: (m: string) => void,
+): RefreshKind {
+  const token = takeFileLock(
+    dir, holderPid, selfStart, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs, warn,
+  );
+  if (token === null) return "busy";
+  const still = () => lockStillOurs(dir, holderPid, selfStart, token);
+  try {
+    if (!still()) return "busy";
+    const path = join(dir, key);
+    const rec = readRecord(path);
+    const ours = rec.pid === holderPid
+      && (rec.start === null || selfStart === null || rec.start === selfStart);
+    if (!ours) return "lost";
+    writeFileSync(path, `${holderPid} ${selfStart ?? "-"} ${now() + ttlMs}\n`, { mode: 0o600 });
+    try { chmodSync(path, 0o600); } catch { /* best effort */ }
+    return still() ? "renewed" : "lost";
+  } finally {
+    releaseFileLock(dir, holderPid, selfStart, token);
+  }
+}
+
 function tryDropLease(
   dir: string,
   key: string,
@@ -925,6 +970,8 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   const recheckMs = deps.recheckMs ?? START_GATE_RECHECK_MS;
   const jitterSpan = deps.jitterMs ?? START_GATE_RECHECK_JITTER_MS;
   const leaseTtlMs = deps.leaseTtlMs ?? positiveNumberEnv(env, "ANET_START_LEASE_TTL_SEC", START_GATE_LEASE_TTL_MS / 1000, warn) * 1000;
+  const leaseHeartbeatMs = deps.leaseHeartbeatMs
+    ?? Math.max(10, Math.min(START_GATE_LEASE_HEARTBEAT_MS, Math.floor(leaseTtlMs / 3)));
   const lockStaleMs = deps.lockStaleMs ?? START_GATE_LOCK_STALE_MS;
   const lockOrphanMs = deps.lockOrphanMs ?? START_GATE_LOCK_ORPHAN_MS;
   const monotonicNow = deps.monotonicNow ?? defaultMonotonicNow;
@@ -970,16 +1017,33 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   };
 
   let releaseImpl = noopRelease;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let released = false;
   const release = () => {
     if (released) return;
     released = true;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
     try { releaseImpl(); } catch { /* a leaked lease expires, and the next admit reaps it */ }
   };
   const ownLease = () => {
     releaseImpl = () => scheduleDrop(
       slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, monotonicNow, warn,
     );
+    heartbeatTimer = setInterval(() => {
+      void enqueueSlot(slotsDir, () => released ? "lost" : refreshLease(
+        slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart,
+        lockStaleMs, lockOrphanMs, monotonicNow, warn,
+      )).then((result) => {
+        if (result !== "lost" || released) return;
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+        warn(`[start-gate] start slot ${key} was lost while its holder was alive; renewal stopped`);
+      }, (e) => {
+        warn(`[start-gate] could not renew start slot ${key}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }, leaseHeartbeatMs);
+    heartbeatTimer.unref();
   };
 
   const tryAcquire = (cap: number): Promise<AcquireKind> =>
@@ -1025,6 +1089,11 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
         warn(
           `[start-gate] ${label}: ${START_GATE_SINGLE_LANE_STATUS} after ${Math.round(waitedMs / 1000)}s (${why}); concurrency forced to 1 until this start finishes or fails (ANET_START_GATE_MAX_WAIT_SEC=${maxWaitMs / 1000})`,
         );
+        if (shortage) {
+          const available = s ? `${Math.round(s.memAvailableMb)} MiB` : "unknown";
+          const required = `${Math.round(minMemMb)} MiB`;
+          warn(`[start-gate] ${label}: resource requirement remains unmet after the wait cap (available ${available}, required ${required}); continuing in the single recovery lane may still hit OOM`);
+        }
         safeReport(deps.report, START_GATE_SINGLE_LANE_STATUS, warn);
       }
 

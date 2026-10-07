@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const rpcLog = process.env.ANET_TEST751_RPC_LOG;
@@ -43,18 +43,34 @@ if (args[0] === "app-server") {
         if (msg.method === "thread/read") result = {
           thread: {
             id: msg.params.threadId,
+            // Match codex 0.155.1: metadata-only reads still identify the
+            // persisted rollout and explicitly return an empty turns array.
+            path: `${process.env.CODEX_HOME || "/fake-codex"}/sessions/rollout-${msg.params.threadId}.jsonl`,
             status: humanTurnActive ? { type: "active", activeFlags: [] } : { type: "idle" },
-            ...(msg.params.includeTurns ? { turns } : {}),
+            turns: msg.params.includeTurns ? turns : [],
           },
         };
         // codex >=0.151 pages history; the bridge reads the newest turns here.
         if (msg.method === "thread/turns/list") result = { data: [...turns].reverse(), nextCursor: null, backwardsCursor: null };
         if (msg.method === "test/human-turn/start") {
           humanTurnActive = true;
+          // Real Codex materializes a fresh deferred thread at its first turn.
+          // The bridge intentionally refuses to promote before this exact
+          // rollout exists, so the shared fake must model the disk boundary.
+          if (process.env.CODEX_HOME) {
+            const sessionDir = `${process.env.CODEX_HOME}/sessions/2026/10/07`;
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(`${sessionDir}/rollout-test-thread_windows_e2e.jsonl`, "{}\n");
+          }
           result = { turnId: "turn_windows_human" };
           queueMicrotask(() => broadcast({ jsonrpc: "2.0", method: "turn/started", params: { threadId: "thread_windows_e2e", turn: { id: "turn_windows_human", status: "inProgress" } } }));
         }
         if (msg.method === "test/tui-thread/create") {
+          if (process.env.ANET_TEST751_MATERIALIZE_ON_CREATE === "1" && process.env.CODEX_HOME) {
+            const sessionDir = `${process.env.CODEX_HOME}/sessions/2026/10/07`;
+            mkdirSync(sessionDir, { recursive: true });
+            writeFileSync(`${sessionDir}/rollout-test-thread_windows_e2e.jsonl`, "{}\n");
+          }
           result = { threadId: "thread_windows_e2e" };
           queueMicrotask(() => broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "thread_windows_e2e", threadSource: "user" } } }));
         }

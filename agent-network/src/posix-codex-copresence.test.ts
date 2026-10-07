@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ownedConnectionFromSnapshot, POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "./posix-codex-copresence";
+import { ownedConnectionFromSnapshot, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "./posix-codex-copresence";
 
 const closers: Array<() => void> = [];
 afterEach(() => { while (closers.length) closers.pop()?.(); });
@@ -80,10 +80,12 @@ describe("waitForPosixOwnedLoopbackConnection (#2255: paint before connect)", ()
     expect(r.probes).toBe(9);
   });
 
-  test("budget matches the Windows path (TUI_HEALTH_MS = 25 s)", () => {
-    expect(POSIX_TUI_ATTRIBUTION_MS).toBe(25_000);
+  test("POSIX and Windows attribution use the size-aware recovery budget", () => {
     const cli = readFileSync(join(import.meta.dir, "..", "bin", "cli.ts"), "utf8");
-    expect(cli).toContain("const TUI_HEALTH_MS = 25_000;");
+    expect(cli).toContain("const TUI_HEALTH_MS = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);");
+    expect(cli).toContain("const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);");
+    expect(cli).toContain("deadlineMs: posixTuiAttributionMs");
+    expect(cli).not.toContain("deadlineMs: POSIX_TUI_ATTRIBUTION_MS");
   });
 
   test("real sockets: a TUI that connects 400 ms after it is checked is attributed", async () => {

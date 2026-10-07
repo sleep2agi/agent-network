@@ -98,7 +98,7 @@ CommHub ──SSE task──▶ Agent Node ──▶ Runtime / model
 
 `codex-app-server` 节点一次只跑一个 turn，后来的任务排队。排队超过 30 分钟仍未开始的任务会以「在队列中等待 N 分钟仍未开始」失败。要改这个上限，在启动节点的环境里设 `ANET_QUEUE_TIMEOUT_MS`（整数毫秒，例如 6 小时 = `21600000`）；非法值会被忽略并在节点日志里警告一次。
 
-节点启动时要先恢复（resume）它绑定的线程，才开始接任务。线程很大时（rollout 文件上百 MB）这一步可能要几十秒；每次恢复最多等 120 秒，超时重试一次，仍失败就先向 hub 报离线再退出，不会改用新线程（那会丢掉对话历史）。要改这个上限，设 `ANET_CODEX_RESUME_TIMEOUT_MS`（整数毫秒，规则同上）。
+节点启动时要先恢复（resume）它绑定的线程，才开始接任务。线程很大时（rollout 文件上百 MB）这一步可能要几分钟；默认每次最多等 300 秒，超时重试一次，仍失败就先向 hub 报离线再退出，不会改用新线程（那会丢掉对话历史）。同一期限也用于等待新 TUI 线程真正生成 rollout，避免把尚未落盘的 thread id 写成可恢复会话。要改这个上限，设 `ANET_CODEX_RESUME_TIMEOUT_MS`（整数毫秒，规则同上）。旧版 Codex 会把完整历史生成为一个大响应帧；客户端的有限 `maxPayload` 只限制接收端，不能限制 Codex 生成这段数据时的内存。因此 Linux 上的恢复阶段另有主机级单路闸门：按 rollout 的 9 倍（最低 4 GiB）预留可用内存，余量不足时排队并打印原因，直到 launcher、bridge 和 TUI 都完成精确线程绑定才释放；持有期间会续租，不会因恢复超过 10 分钟而放进第二个节点。等满 600 秒仍不满足内存要求时，为兼容既有启动流程并避免整批节点永久卡住，闸门只允许一个恢复继续，同时明确 WARN 当前可用量、需求量和 OOM 风险。Windows / macOS 没有这道基于 `/proc` 和文件租约的保护，启动日志会明确告警。
 
 `opencode` 节点每个任务默认最多等 30 分钟。共存模式（`opencodeMode: "copresence"`）下这是整个任务的总时长；到点后 bridge 只是停止等待，不会中止共享会话里的这一轮。任务会在节点的 TUI 里继续跑完，发送方收到的回复会写明这一点，但最终结果不会再自动回传。headless 模式下这是「连续没有任何进展输出」的时长，到点会结束 opencode 子进程，这一轮就中止了。要改这个上限，设环境变量 `OPENCODE_TIMEOUT_MS`，或在节点 `config.json` 里设 `flags.timeout` / `flags.opencodeTimeoutMs`（整数毫秒；`0` = 不设上限）。优先级依次是环境变量、`flags.timeout`、`flags.opencodeTimeoutMs`。节点启动时会打印一行 `[opencode] task timeout=… source=…`，写明实际取到的值和来源。
 

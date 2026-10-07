@@ -86,27 +86,51 @@ run_e2e bridge-dies dies 0
 echo "L5 logged out: needs-login, exit 3, nothing started"
 run_e2e logged-out out 0
 
-echo "L6 witnessed red (P1-1): the bridge resolves agent-node itself again (slow npx inside the 25 s wait)"
-bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts '...(pairedAgentNodeEntrypoint ? ["-e", `ANET_CODEX_PAIRED_AGENT_NODE=${pairedAgentNodeEntrypoint}`] : []),' ''
+echo "L6 recovery backup failure is fail-closed before any replacement process"
+run_e2e backup-fails backup 0
+
+echo "L7 witnessed red: swallowing recovery backup failure must start nothing"
+bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts \
+  '  const backup = backupCodexRecoveryState({ nodeDir, codexHome });' \
+  '  let backup; try { backup = backupCodexRecoveryState({ nodeDir, codexHome }); } catch { console.error("MUTANT swallowed recovery backup failure"); return; }'
+expect_red backup-fail-open 'start succeeded although the recovery backup failed' run_e2e backup-fails red-backup 0
+restore_cli
+
+echo "L8 witnessed red (P1-1): the bridge resolves agent-node itself again (slow npx inside the 25 s wait)"
+bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts '      ...(pairedAgentNodeEntrypoint ? { ANET_CODEX_PAIRED_AGENT_NODE: pairedAgentNodeEntrypoint } : {}),' ''
 expect_red bridge-resolves 'did not reach ready' run_e2e slow-fetch red-slow "$DELAY"
 restore_cli
 
-echo "L7 witnessed red (P1-2): the bridge output is no longer copied to its log"
+echo "L9 witnessed red (P1-2): the bridge output is no longer copied to its log"
 bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts '      codexBridgeTeeCommand(shellQuote(bridgeLog)),' ''
 expect_red no-bridge-log "the bridge's own error line was not printed" run_e2e bridge-dies red-dies 0
 restore_cli
 
-echo "L8 witnessed red (P1-3): the login gate is skipped"
+echo "L10 witnessed red (P1-3): the login gate is skipped"
 bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts 'if (loginGate.state === "needs-login") {' 'if (false) {'
 expect_red no-login-gate 'logged-out start exited' run_e2e logged-out red-out 0
 restore_cli
 
-echo "L9 witnessed red (P2-9): identity_attested back to unknown without a peer"
+echo "L11 witnessed red (P2-9): identity_attested back to unknown without a peer"
 bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts 'const unattested = { key: "identity_attested", status: "n/a" as const' 'const unattested = { key: "identity_attested", status: "unknown" as const'
 expect_red verify-unknown 'single-node verify exited 2' run_e2e slow-fetch red-verify 0
 restore_cli
 
+echo "L12 witnessed red: config.env must reach all three co-presence processes"
+cp agent-network/src/codex-copresence-env.ts /tmp/t535-env-helper.ts
+bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/src/codex-copresence-env.ts '  return out;' '  return Object.fromEntries(Object.entries(required));'
+expect_red missing-config-env 'app-server pane pid=' run_e2e slow-fetch red-env 0
+cp /tmp/t535-env-helper.ts agent-network/src/codex-copresence-env.ts
+
+echo "L13 witnessed red: reserved config.env validation must precede quiesce"
+bun tests/test-codex-copresence-first-start/mutate.mjs agent-network/bin/cli.ts \
+  '  codexCopresenceStageEnv(opts.configEnv, {});' \
+  '  // mutation: defer reserved config.env validation until after quiesce'
+expect_red late-reserved-env 'reserved config.env changed the live session set' run_e2e slow-fetch red-env-order 0
+restore_cli
+
 cmp -s /tmp/t535-cli.ts "$CLI" || { echo "FAIL: cli.ts not restored"; exit 1; }
+cmp -s /tmp/t535-env-helper.ts agent-network/src/codex-copresence-env.ts || { echo "FAIL: codex-copresence-env.ts not restored"; exit 1; }
 leftover=$(pgrep -f 't535-codex app-server' || true)
 [ -z "$leftover" ] || { echo "FAIL: app-server left running: $leftover"; exit 1; }
 echo "T535 PASS"

@@ -23,7 +23,8 @@ RUN curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --ret
  && rm -rf /tmp/bun.zip /tmp/bunx
 ENV PATH="/root/.bun/bin:${PATH}"
 
-RUN npm install -g --no-audit --no-fund @openai/codex@0.147.0
+ARG CODEX_VERSION=0.147.0
+RUN npm install -g --no-audit --no-fund @openai/codex@${CODEX_VERSION}
 
 WORKDIR /app
 

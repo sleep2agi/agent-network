@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "fs";
+import { chmodSync, closeSync, existsSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync, writeSync } from "fs";
 import { join, sep } from "path";
 
 export interface CodexRecoveryVerification {
@@ -8,6 +8,8 @@ export interface CodexRecoveryVerification {
   verifiedAt: string;
   historyTurnCount: number;
   historyFingerprint: string;
+  /** Metadata-only thread/read proof that Codex resolved this exact rollout. */
+  persistedPath?: string;
 }
 
 export interface CodexRecoveryBackup {
@@ -17,6 +19,7 @@ export interface CodexRecoveryBackup {
 }
 
 const SESSION_STATE_NAMES = new Set(["sessions", "history.jsonl", "state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal"]);
+const RECOVERY_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
 
 /** Transaction boundary shared by Windows and POSIX cutovers: the snapshot
  * cannot begin until every authoritative state writer has quiesced. */
@@ -39,6 +42,46 @@ function redactRecoveryConfig(value: unknown, key = ""): unknown {
   return value;
 }
 
+/** Copy and hash without ever materializing the whole file in a Buffer.
+ * Zero chunks are sought over and the final length is truncated explicitly,
+ * so a multi-GiB sparse rollout stays sparse in the private recovery point. */
+export function copyAndHashRecoveryFile(source: string, target: string): { size: number; sha256: string } {
+  const input = openSync(source, "r");
+  let output: number | undefined;
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(RECOVERY_COPY_CHUNK_BYTES);
+  let offset = 0;
+  try {
+    output = openSync(target, "wx", 0o600);
+    for (;;) {
+      const count = readSync(input, buffer, 0, buffer.length, offset);
+      if (count === 0) break;
+      const chunk = buffer.subarray(0, count);
+      hash.update(chunk);
+      let allZero = true;
+      for (let i = 0; i < count; i += 1) {
+        if (chunk[i] !== 0) { allZero = false; break; }
+      }
+      if (!allZero) {
+        let written = 0;
+        while (written < count) written += writeSync(output, chunk, written, count - written, offset + written);
+      }
+      offset += count;
+    }
+    ftruncateSync(output, offset);
+    chmodSync(target, 0o600);
+    return { size: offset, sha256: hash.digest("hex") };
+  } catch (error) {
+    try { if (output !== undefined) closeSync(output); } catch { /* best effort */ }
+    output = undefined;
+    try { unlinkSync(target); } catch { /* best effort */ }
+    throw error;
+  } finally {
+    closeSync(input);
+    if (output !== undefined) closeSync(output);
+  }
+}
+
 /** A stored thread is never considered resumed until app-server reads the
  * exact thread back with persisted history. This is deliberately stricter
  * than accepting a successful thread/resume RPC response. */
@@ -52,16 +95,29 @@ export function verifyCodexThreadHistory(
   if (!thread || thread.id !== expectedThreadId) {
     throw new Error(`thread/read identity mismatch: expected ${expectedThreadId}`);
   }
+  // Codex 0.155.1 deliberately returns `turns: []` when includeTurns:false,
+  // even for a multi-GiB persisted rollout.  The on-disk path is the bounded
+  // metadata proof: an ephemeral / never-materialized thread has no path,
+  // while a successful resume of a stored thread resolves its exact file.
+  const persistedPath = typeof thread.path === "string" && thread.path.length > 0
+    ? thread.path
+    : null;
   const turns = Array.isArray(thread.turns) ? thread.turns : [];
-  if (turns.length === 0) {
-    throw new Error(`thread/read returned no persisted history for ${expectedThreadId}`);
+  if (!persistedPath) {
+    throw new Error(`thread/read returned no persisted rollout metadata for ${expectedThreadId}`);
   }
   return {
     method,
     threadId: expectedThreadId,
     verifiedAt: now.toISOString(),
     historyTurnCount: turns.length,
-    historyFingerprint: hashJson(turns.map((turn: any) => ({ id: turn?.id ?? null, status: turn?.status ?? null }))),
+    historyFingerprint: hashJson({
+      threadId: expectedThreadId,
+      persistedPath,
+      createdAt: thread.createdAt ?? null,
+      updatedAt: thread.updatedAt ?? null,
+    }),
+    persistedPath,
   };
 }
 
@@ -83,10 +139,21 @@ export async function resumeAndVerifyCodexThread(
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   model?: string,
 ): Promise<CodexRecoveryVerification & { resumedModel?: string }> {
-  const params: Record<string, unknown> = { threadId };
+  const params: Record<string, unknown> = { threadId, excludeTurns: true };
   if (typeof model === "string" && model.trim()) params.model = model.trim();
-  const resumed = await request("thread/resume", params);
-  const read = await request("thread/read", { threadId, includeTurns: true });
+  let resumed: unknown;
+  try {
+    resumed = await request("thread/resume", params);
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    const message = String((error as { message?: unknown })?.message ?? error);
+    const unsupportedExcludeTurns = (code === -32602 || code === -32600)
+      && /excludeTurns.*(?:unknown|unsupported|invalid|requires\s+experimentalApi)|(?:unknown|unsupported|invalid|experimentalApi).*excludeTurns/i.test(message);
+    if (!unsupportedExcludeTurns) throw error;
+    delete params.excludeTurns;
+    resumed = await request("thread/resume", params);
+  }
+  const read = await request("thread/read", { threadId, includeTurns: false });
   const verification = verifyCodexThreadHistory("thread/resume", threadId, read);
   const resumedModel = (resumed as { model?: unknown } | null)?.model;
   return typeof resumedModel === "string" ? { ...verification, resumedModel } : verification;
@@ -105,6 +172,7 @@ export function backupCodexRecoveryState(opts: {
   const stamp = now.toISOString().replace(/[:.]/g, "-");
   const backupDir = join(opts.nodeDir, "recovery", stamp);
   mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  try {
   const configPath = join(opts.nodeDir, "config.json");
   if (!existsSync(configPath)) throw new Error(`missing node config: ${configPath}`);
   const rawConfig = readFileSync(configPath);
@@ -131,9 +199,8 @@ export function backupCodexRecoveryState(opts: {
       return;
     }
     if (!info.isFile()) throw new Error(`recovery snapshot refuses non-file state: ${relativePath}`);
-    copyFileSync(source, target);
-    const copied = readFileSync(target);
-    manifestFiles.push({ path: relativePath, size: copied.length, sha256: createHash("sha256").update(copied).digest("hex") });
+    const copied = copyAndHashRecoveryFile(source, target);
+    manifestFiles.push({ path: relativePath, ...copied });
   };
   if (existsSync(opts.codexHome)) {
     for (const name of readdirSync(opts.codexHome)) {
@@ -152,6 +219,10 @@ export function backupCodexRecoveryState(opts: {
   };
   writeFileSync(join(backupDir, "manifest.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });
   return { backupDir, createdAt: now.toISOString(), stateFiles };
+  } catch (error) {
+    rmSync(backupDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export function codexTopologyAudit(profile: Record<string, any>, nodeDir: string, cwd: string) {

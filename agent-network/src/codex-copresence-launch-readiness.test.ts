@@ -3,13 +3,16 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+const rpc = readFileSync(new URL("./codex-copresence-rpc.ts", import.meta.url), "utf8");
 const tmuxPresent = (() => { try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; } })();
 
 describe("Codex co-presence launch readiness", () => {
   test("tmux receipt capture joins wrapped lines before exact identity matching", () => {
     const waitStart = cli.indexOf("function waitForTmuxPaneText(");
     const waitEnd = cli.indexOf("function capturePane(", waitStart);
-    expect(cli.slice(waitStart, waitEnd)).toContain('"-p", "-J", "-S", "-200"');
+    const waiter = cli.slice(waitStart, waitEnd);
+    expect(waiter).toContain('"-p", "-J", "-S", "-200"');
+    expect(waiter).toContain("if (!tmuxSessionRunning(sessionName)) { resolve(false); return; }");
   });
 
   test.skipIf(!tmuxPresent)("80-column tmux -J reconstructs an exact long bridge receipt", async () => {
@@ -58,13 +61,22 @@ describe("Codex co-presence launch readiness", () => {
     const posixStart = cli.indexOf("async function startCopresenceOrchestration(");
     const posixEnd = cli.indexOf("async function startOpencodeCopresenceOrchestration(", posixStart);
     const posix = cli.slice(posixStart, posixEnd);
-    expect(posix.match(/export CODEX_HOME=\$\{shellQuote\(opts\.codexHome\)\}/g)).toHaveLength(3);
+    // One preflight validates config.env before quiesce. App-server keeps the
+    // direct export; bridge/TUI receive the same export from their private
+    // source-then-delete env files.
+    expect(posix.match(/export CODEX_HOME=\$\{shellQuote\(opts\.codexHome\)\}/g)).toHaveLength(1);
+    expect(posix.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(4);
+    expect(posix).toContain("codexCopresenceStageEnv(opts.configEnv, {});");
+    expect(posix).toContain([
+      "const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {",
+      "      CODEX_HOME: opts.codexHome,",
+    ].join("\n"));
 
     const windowsStart = cli.indexOf("async function startWindowsCodexCopresence(");
     const windowsEnd = cli.indexOf("async function startCopresenceOrchestration(", windowsStart);
     const windows = cli.slice(windowsStart, windowsEnd);
     expect(windows).toContain("CODEX_HOME: opts.codexHome");
-    expect(windows).toContain("env: { ...process.env, CODEX_HOME: opts.codexHome }");
+    expect(windows.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(3);
   });
 
   test("each POSIX role receives the node marker exactly once", () => {
@@ -99,12 +111,9 @@ describe("Codex co-presence launch readiness", () => {
   });
 
   test("fresh path performs no thread RPC and launches deferred bridge before remote-only TUI", () => {
-    const start = cli.indexOf("async function createCodexCopresenceThread(");
-    const end = cli.indexOf("async function askTypedConfirmation", start);
-    const body = cli.slice(start, end);
-    expect(body).toContain('return { threadId: "", freshDeferred: true }');
-    expect(body).not.toContain("createTuiHealthChallenge");
-    expect(body).not.toContain('request("thread/start"');
+    expect(rpc).toContain('return { threadId: "", freshDeferred: true }');
+    expect(rpc).not.toContain("createTuiHealthChallenge");
+    expect(rpc).not.toContain('request("thread/start"');
     const orchestration = cli.slice(cli.indexOf("async function startCopresenceOrchestration("), cli.indexOf("async function startOpencodeCopresenceOrchestration("));
     const waiting = orchestration.indexOf("waiting-for-tui-thread");
     const remoteOnly = orchestration.indexOf("const tuiArgv = codexTuiLaunchArgs(");
