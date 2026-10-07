@@ -19,7 +19,7 @@ run_case() {
     env HOME="$fixture_dir" COMMHUB_DB="$fixture_dir/hub.db" COMMHUB_PG_EXPERIMENTAL=1 MUTATION_CASE="$case_name" bun run /work/tests/test674-binding-generation/mutations.ts
   fi
 }
-for case_name in green projection token daemon network join active rotation revival consumer; do run_case sqlite "$case_name"; done
+for case_name in green projection token daemon child network join active rotation revival consumer; do run_case sqlite "$case_name"; done
 echo 'RESULT sqlite PASS'
 if [[ "${TEST674_SQLITE_ONLY:-0}" == 1 ]]; then exit 0; fi
 pg_bin=$(find /usr/lib/postgresql -name initdb -printf '%h\n' | sort -V | tail -1)
@@ -32,5 +32,5 @@ runuser -u postgres -- "$pg_bin/initdb" -D "$pg_data" --auth-local=trust --auth-
 runuser -u postgres -- "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_root/socket/log" -o "-p 25434 -k $pg_socket -c listen_addresses=127.0.0.1" -w start >/dev/null
 fixture_password="fixture-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 runuser -u postgres -- "$pg_bin/psql" -h "$pg_socket" -p 25434 -c "CREATE ROLE binding_tester LOGIN PASSWORD '$fixture_password'" >/dev/null
-for case_name in green projection token daemon network join active rotation revival consumer; do run_case pg "$case_name"; done
+for case_name in green projection token daemon child network join active rotation revival consumer; do run_case pg "$case_name"; done
 echo 'RESULT postgres PASS'

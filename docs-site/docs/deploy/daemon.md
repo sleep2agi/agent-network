@@ -418,7 +418,10 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 
 daemon 专用 MCP `list_my_children` 对当前 active 的 adopted 子项额外返回
 `binding_request_id`，它就是不透明的绑定代际。只接受绑定目标 daemon 的有效节点令牌，
-按 daemon 与网络共同限定；人类凭据、其他 daemon 或跨网络令牌不能通过此接口读取该绑定。
+按 daemon 与网络共同限定。owner 的 utok 也读不到；这不表示 owner 持有目标 daemon 的有效节点令牌时不能读取。
+身份按 Hub .111 的令牌属主/精确节点绑定校验（包括既有旧令牌兼容规则）解析，而非信任令牌名称：
+解析为其他 daemon 的令牌、子节点自己的节点令牌和跨网络令牌都不能读取目标 daemon 的这条绑定。
+子节点用自己的有效节点令牌调用时，若没有自己管理的子项，返回成功的空列表。
 `get_adopt_request` 仍只查询 pending，不开放 active 查询。撤销后再收编会生成新 request_id，
 旧代际不会复活；旧 Hub 缺字段时，daemon 启动前置门继续拒绝，不得用本地值补齐。
 **投影只是一次读取时的快照，不是租约。** 启动执行方须在动作边界重新确认同代绑定，

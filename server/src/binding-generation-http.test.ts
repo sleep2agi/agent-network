@@ -67,6 +67,21 @@ test("token boundary denies humans general revoked and other owners",async()=>{
   for(const t of [wrong,cross]){const r=await list(t);expect(r.ok).toBe(true);expect(r.children).toEqual([]);}
   expect((await unadopt()).ok).toBe(true);
 });
+test("child node token sees an empty list, not its parent binding",async()=>{
+  const id=await activate();
+  try {
+    const issued=await fetch(`${base}/api/auth/node-token`,{method:"POST",
+      headers:{Authorization:`Bearer ${owner.token}`,"Content-Type":"application/json"},
+      body:JSON.stringify({network_id:owner.network_id,node_name:child,node_id:child})});
+    expect(issued.status).toBe(200);
+    const credential=await issued.json() as any;
+    expect(credential.ok).toBe(true);
+    expect(typeof credential.token).toBe("string");
+    // Same owner and network do not confer the parent's daemon identity.
+    expect((await list()).children.find((n:any)=>n.child_node_id===child).binding_request_id).toBe(id);
+    expect(await list(credential.token)).toEqual({ok:true,count:0,children:[]});
+  } finally {expect((await unadopt()).ok).toBe(true);}
+});
 test("network predicate rejects corrupted cross-network binding sentinel",async()=>{
   const id=await activate();
   // Deliberately inconsistent test DB: daemon stays in A, binding and child in B.
