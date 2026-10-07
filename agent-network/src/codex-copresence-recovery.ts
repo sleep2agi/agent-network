@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { chmodSync, closeSync, existsSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, unlinkSync, writeFileSync, writeSync } from "fs";
+import { chmodSync, closeSync, existsSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync, writeSync } from "fs";
 import { join, sep } from "path";
 
 export interface CodexRecoveryVerification {
@@ -24,22 +24,6 @@ const RECOVERY_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
 export async function quiesceThenSnapshot<T>(quiesce: () => Promise<void>, snapshot: () => T): Promise<T> {
   await quiesce();
   return snapshot();
-}
-
-/** A recovery point is defense-in-depth: failure must be visible, but must not
- * strand a quiesced node before its replacement runtime can start. */
-export function bestEffortCodexRecoveryPoint(
-  snapshot: () => void,
-  warn: (message: string) => void,
-): boolean {
-  try {
-    snapshot();
-    return true;
-  } catch (error) {
-    warn(`[anet] ⚠ skipped Codex recovery-point backup: ${(error as Error)?.message || error}`);
-    warn("[anet]    Startup will continue with the original CODEX_HOME unchanged; no backup was recorded.");
-    return false;
-  }
 }
 
 function hashJson(value: unknown): string {
@@ -174,6 +158,7 @@ export function backupCodexRecoveryState(opts: {
   const stamp = now.toISOString().replace(/[:.]/g, "-");
   const backupDir = join(opts.nodeDir, "recovery", stamp);
   mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  try {
   const configPath = join(opts.nodeDir, "config.json");
   if (!existsSync(configPath)) throw new Error(`missing node config: ${configPath}`);
   const rawConfig = readFileSync(configPath);
@@ -220,6 +205,10 @@ export function backupCodexRecoveryState(opts: {
   };
   writeFileSync(join(backupDir, "manifest.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });
   return { backupDir, createdAt: now.toISOString(), stateFiles };
+  } catch (error) {
+    rmSync(backupDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export function codexTopologyAudit(profile: Record<string, any>, nodeDir: string, cwd: string) {

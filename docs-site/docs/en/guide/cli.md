@@ -580,6 +580,8 @@ Common environment variables:
 | `COMMHUB_TOKEN` | Authentication token; a token in node configuration takes precedence |
 | `COMMHUB_AUTH_TOKEN` | Legacy Hub master-token compatibility path; new deployments use user and node tokens |
 | `ANET_CODEX_RESUME_TIMEOUT_MS` | Codex session-resume deadline for `anet node start --copresence` (whole milliseconds, max 900000); when unset it starts at 300 s and adds 120 s per started GiB of rollout, capped at 15 minutes; timeout errors report elapsed time and rollout size |
+
+Codex co-presence startup creates a private recovery point after quiescing the old processes. A failed backup is fail-closed and its partial directory is removed. Only an operator who explicitly accepts losing safe rollback may pass `--skip-recovery-backup`; the command prints a prominent warning and does not present an older recovery point as the backup for this launch.
 | `ANTHROPIC_BASE_URL` | Anthropic-compatible model endpoint |
 | `ANTHROPIC_AUTH_TOKEN` | Credential for third-party Anthropic-compatible endpoints |
 | `ANTHROPIC_API_KEY` | Credential for Anthropic's official endpoint |

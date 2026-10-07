@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, truncateSync, writeFileSync } from "fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, truncateSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { backupCodexRecoveryState, bestEffortCodexRecoveryPoint, codexTopologyAudit, quiesceThenSnapshot, resumeAndVerifyCodexThread, verifyCodexThreadHistory } from "./codex-copresence-recovery";
+import { backupCodexRecoveryState, codexTopologyAudit, quiesceThenSnapshot, resumeAndVerifyCodexThread, verifyCodexThreadHistory } from "./codex-copresence-recovery";
 
 describe("Codex co-presence recovery", () => {
   test("resume requires exact thread identity and persisted history", () => {
@@ -79,13 +79,6 @@ describe("Codex co-presence recovery", () => {
     expect(events).toEqual(["quiesce:start", "quiesce:complete", "snapshot"]);
   });
 
-  test("a failed optional recovery point is explicit but does not block startup", () => {
-    const warnings: string[] = [];
-    expect(bestEffortCodexRecoveryPoint(() => { throw new Error("disk full"); }, warnings.push.bind(warnings))).toBe(false);
-    expect(warnings.join("\n")).toContain("skipped Codex recovery-point backup: disk full");
-    expect(warnings.join("\n")).toContain("Startup will continue");
-  });
-
   test("recursive snapshot rejects symlinks instead of following state outside CODEX_HOME", () => {
     const root = mkdtempSync(join(tmpdir(), "anet-recovery-link-"));
     const nodeDir = join(root, "node"); const codexHome = join(nodeDir, "codex-home");
@@ -95,6 +88,7 @@ describe("Codex co-presence recovery", () => {
     writeFileSync(outside, "must-not-copy");
     symlinkSync(outside, join(codexHome, "sessions", "escape.jsonl"));
     expect(() => backupCodexRecoveryState({ nodeDir, codexHome })).toThrow("refuses symlink");
+    expect(readdirSync(join(nodeDir, "recovery"))).toEqual([]);
   });
 
   test("a rollout larger than 2 GiB is copied and hashed without a whole-file Buffer", () => {
@@ -121,5 +115,12 @@ describe("Codex co-presence recovery", () => {
     const audit = codexTopologyAudit({ codexCopresence: true, codexThreadId: "thread_1", token: "ntok_secret", flags: { sandboxMode: "read-only" } }, "/nodes/n1", "/work");
     expect(audit.threadId).toBe("thread_1");
     expect(JSON.stringify(audit)).not.toContain("ntok_secret");
+  });
+
+  test("launcher is fail-closed unless the operator explicitly skips recovery backup", () => {
+    const cli = readFileSync(join(import.meta.dir, "../bin/cli.ts"), "utf8");
+    expect(cli).toContain("persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true)");
+    expect(cli).toContain("--skip-recovery-backup: STARTING WITHOUT A CODEX RECOVERY POINT");
+    expect(cli).toContain(`skipRecoveryBackup: opts["skip-recovery-backup"] === "true"`);
   });
 });

@@ -34,6 +34,7 @@ export const BOOLEAN_FLAGS = new Set([
   "--grok-headless",
   "--hub-only",                  // #516 (node delete <node_id> --hub-only)
   "--new-session",
+  "--skip-recovery-backup",
   "--no-codex-login",            // #514 (fork)
   "--no-auto-self",
   "--no-yolo",

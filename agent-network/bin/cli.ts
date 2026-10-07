@@ -286,7 +286,6 @@ import { decidePendingThreadAtStart, findThreadRollouts } from "../src/codex-pen
 import { POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
-  bestEffortCodexRecoveryPoint,
   codexTopologyAudit,
   quiesceThenSnapshot,
   type CodexRecoveryVerification,
@@ -646,6 +645,8 @@ interface CopresenceOptions {
   allowSharedCodexLogin?: boolean;
   /** Explicit fresh conversation: do not resume codexThreadId or a pending candidate. */
   newSession?: boolean;
+  /** Explicitly accept starting without a recovery-point backup. */
+  skipRecoveryBackup?: boolean;
   /** Resolved config.env values. Each native stage receives the same set. */
   configEnv: Record<string, string>;
 }
@@ -936,17 +937,19 @@ function checkCodexCredentialSharingForNode(
   });
 }
 
-function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
-  bestEffortCodexRecoveryPoint(() => {
-    const nodeDir = join(nodesDir(), resolved.id);
-    const backup = backupCodexRecoveryState({ nodeDir, codexHome });
-    const cfgPath = join(nodeDir, "config.json");
-    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-    cfg.codexRecoveryBackup = { createdAt: backup.createdAt, stateFiles: backup.stateFiles, path: backup.backupDir };
-    atomicWritePrivateJson(cfgPath, cfg);
-    resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
-    console.log(`[anet] recovery point created after prior runtime quiesced (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
-  }, (message) => console.error(message));
+function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string, skip: boolean): void {
+  if (skip) {
+    console.error("[anet] ⚠ --skip-recovery-backup: STARTING WITHOUT A CODEX RECOVERY POINT; CODEX_HOME may be modified and this launch cannot be rolled back safely.");
+    return;
+  }
+  const nodeDir = join(nodesDir(), resolved.id);
+  const backup = backupCodexRecoveryState({ nodeDir, codexHome });
+  const cfgPath = join(nodeDir, "config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfg.codexRecoveryBackup = { createdAt: backup.createdAt, stateFiles: backup.stateFiles, path: backup.backupDir };
+  atomicWritePrivateJson(cfgPath, cfg);
+  resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
+  console.log(`[anet] recovery point created after prior runtime quiesced (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
 }
 
 /** #512 — say what the resumed thread is actually on; differs only if codex refused the override. */
@@ -1006,7 +1009,7 @@ async function startWindowsCodexCopresence(
   // Failure aborts before any replacement app-server can start.
   await quiesceThenSnapshot(
     () => stopPriorWindowsCopresence(resolved.id),
-    () => persistCodexRecoveryPoint(resolved, opts.codexHome),
+    () => persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true),
   );
   if (authoritativeOldPendingMarker) {
     await assertPendingServerQuiesced(recoveryCfg.codexAppServerUrl, (oldPort) => waitForLoopbackPort(oldPort, 750));
@@ -1663,7 +1666,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         }
       }
       await new Promise((r) => setTimeout(r, 500));
-    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome));
+    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true));
   } catch (e) {
     console.error(`[anet] ❌ cannot create quiesced Codex recovery point: ${(e as Error).message}`);
     process.exit(1);
@@ -4512,6 +4515,7 @@ Usage: anet node start <name> [options]
 Options:
   --tmux                       Start in a tmux session
   --new-session               Start with a fresh model session
+  --skip-recovery-backup      DANGEROUS: start without a Codex recovery-point backup
   --copresence                Start a shared human + agent TUI\n                              (codex-app-server | opencode-cli | grok-build-cli)
                               (codex: recorded on the node, so the next start
                               needs no flag — plain 'anet node start <name>')
@@ -8128,6 +8132,7 @@ async function startCommand() {
       tuiFirst: opts["tui-first"] === "true",
       allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",
       newSession: forceNewSession,
+      skipRecoveryBackup: opts["skip-recovery-backup"] === "true",
       configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id)),
     });
     return;

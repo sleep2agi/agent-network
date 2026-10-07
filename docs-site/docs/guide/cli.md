@@ -551,6 +551,8 @@ token**，且改完要重启该 daemon 才生效）。
 | `COMMHUB_TOKEN` | 认证 token；节点配置中的 token 优先级更高 |
 | `COMMHUB_AUTH_TOKEN` | legacy Hub master-token 兼容入口；新部署使用用户和节点 token |
 | `ANET_CODEX_RESUME_TIMEOUT_MS` | `anet node start --copresence` 恢复 Codex 会话的超时（整数毫秒，最大 900000）；未设置时从 300 秒起，按 rollout 每开始 1 GiB 增加 120 秒，最高 15 分钟；超时会报告实际等待时间和 rollout 大小 |
+
+Codex 共存启动会在旧进程停止后先创建私有恢复点；备份失败时默认拒绝启动，并清掉半成品。只有操作员明确接受无法安全回滚时，才可使用 `--skip-recovery-backup` 跳过；命令会打印醒目的风险警告，且不会把旧恢复点冒充成这次启动的新备份。
 | `ANTHROPIC_BASE_URL` | Anthropic 兼容模型端点 |
 | `ANTHROPIC_AUTH_TOKEN` | 第三方 Anthropic 兼容端点凭据 |
 | `ANTHROPIC_API_KEY` | Anthropic 官方端点凭据 |

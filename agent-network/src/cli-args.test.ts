@@ -43,6 +43,7 @@ describe("CLI argument parsing", () => {
       "--pick",
       "--resume-latest",
       "--self",
+      "--skip-recovery-backup",
       "--tmux",
       "--yes",
       "--yes-danger-full-access",
