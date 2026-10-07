@@ -20,11 +20,12 @@ import { notifyLeaderDeleted, notifyParticipantChange } from "./requirement-noti
 import { departmentCardsFor, departmentSubtree } from "./department-heads.js";
 import { dueReminderTimezone, dueWithinSql, ensureDueReminders, overdueSql } from "./requirement-due-reminders.js";
 import { diffRequirement, ensureRequirementEvents, eventPublic, recordRequirementEvents, type EventRow } from "./requirement-events.js";
-import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
+import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementColumnCheck, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
 migrateRequirementPriorityCheck(db);
+migrateRequirementColumnCheck(db);
 migrateRequirementAgentOwners(db);
 ensureRequirementProjects(db);
 ensureRequirementIndexes(db);
@@ -52,7 +53,23 @@ export type RequirementsRequestContext = {
   strictOwner?: boolean;
 };
 
-const COLUMNS = new Set(["pool", "doing", "done"]);
+const COLUMNS = new Set(["pool", "doing", "done", "abandoned"]);
+/**
+ * 废弃(abandoned):和 done 一样是关闭态 —— 不算开着、不算逾期、不发到期提醒,不记完成时间;能改回 pool / doing。
+ * 旧客户端(desktop ≤ 0.2.220)只认 pool / doing / done,不认识的值一律当成 pool(会把废弃的卡摆回需求池、还标逾期)。
+ * 所以客户端没声明认识它时,响应里把 abandoned 投影成 done;声明方式二选一:
+ *   请求头 `X-Anet-Accept-Columns: abandoned`,或查询参数 `accept_columns=abandoned`。
+ * MCP(tools.ts)总是声明。文档:docs-site/docs/api/mcp-tools.md「需求池 / 任务看板」的 column 字段。
+ */
+const ACCEPT_COLUMNS_HEADER = "x-anet-accept-columns";
+function knowsAbandoned(ctx: RequirementsRequestContext): boolean {
+  const raw = `${ctx.req.headers.get(ACCEPT_COLUMNS_HEADER) ?? ""},${ctx.url.searchParams.get("accept_columns") ?? ""}`;
+  return raw.split(",").some(v => v.trim() === "abandoned");
+}
+/** 旧客户端看到的状态:abandoned → done,其余原样。 */
+export function projectColumn(column: string, aware: boolean): string {
+  return column === "abandoned" && !aware ? "done" : column;
+}
 // 界面上 P0–P3:high=P0 最高、normal=P1 普通、low=P2 低、lowest=P3 极低。存的值不变,旧客户端照常读写前三个。
 const PRIORITIES = new Set(["high", "normal", "low", "lowest"]);
 const DUE = /^\d{4}-\d{2}-\d{2}$/;
@@ -563,7 +580,9 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
   if (!perms) permsByCtx.set(ctx, perms = taskPermissionsResolver(taskCaller(ctx)));
   // viewer_can:只对「只看相关任务」的调用者出现,客户端据此画只读锁、藏删除;不出现 = 与今天一样全能(旧 Hub 也不出现)。
   const can = perms(row);
-  const pub = can ? { ...toPublic(row), viewer_can: can } : toPublic(row);
+  const base = toPublic(row);
+  base.column = projectColumn(base.column, knowsAbandoned(ctx));
+  const pub = can ? { ...base, viewer_can: can } : base;
   const hidden = hiddenNodeFilter(ctx, row.network_id);
   if (!hidden) return pub;
   return {
@@ -578,7 +597,7 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
 }
 
 const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, seq, completed_at, completed_by_json, completed_at_approx, " +
-  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0) AS children_total, " +
+  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name <> 'abandoned') AS children_total, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
@@ -730,7 +749,7 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
 // list_summary:GET 认 view=summary(不带描述正文与子任务条目,见 toSummary);changes:GET 认 changes=1 + updated_since
 // (改过的卡含归档的,加上 deleted 墓碑与 server_time,见 listChanges)。
 // events:GET /api/requirements/events —— 字段级的改动流水(谁、何时、旧值 → 新值,requirement-events.ts)。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes", "events", "last_event"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes", "events", "last_event", "column_abandoned"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -1017,7 +1036,10 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     archived = body.archived ? 1 : 0;
   }
   const updatedAt = new Date().toISOString();
-  const column = has("column") ? String(body.column) : row.column_name;
+  // 旧客户端眼里废弃的卡是 done:它回传 column=done 不是「改成完成」,保持废弃。
+  const column = !has("column") ? row.column_name
+    : row.column_name === "abandoned" && body.column === "done" && !knowsAbandoned(ctx) ? "abandoned"
+    : String(body.column);
   const actor = JSON.stringify(actorOf(ctx));
   // 完成时间:移进「完成」= 此刻 + 这次的操作者;移出 = 清空;留在「完成」(done → done、改别的字段)= 原样不动。
   const completed = column !== "done" ? { at: null, by: null, approx: 0 }
@@ -1083,7 +1105,9 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
   const status = q.get("status");
   if (status !== null) {
     if (!COLUMNS.has(status)) return jsonError("invalid_status", 400);
-    sql += ` AND column_name = ?${params.push(status)}`;
+    // 旧客户端把废弃的卡看成 done:它按 done 筛时也要带上废弃的,否则同一张卡在列表里有、筛出来没有。
+    if (status === "done" && ctx && !knowsAbandoned(ctx)) sql += " AND column_name IN ('done', 'abandoned')";
+    else sql += ` AND column_name = ?${params.push(status)}`;
   }
   const project = q.get("project_id");
   if (project !== null) sql += project === "none" ? " AND project_id IS NULL" : ` AND project_id = ?${params.push(project)}`;
@@ -1479,7 +1503,7 @@ function listCacheAcl(ctx: RequirementsRequestContext): string | null {
 
 function listCacheKey(ctx: RequirementsRequestContext): string {
   const sorted = [...ctx.url.searchParams.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify({ u: ctx.auth?.userId ?? null, n: ctx.auth?.networkId ?? null, a: ctx.isAdmin, t: ctx.isNodeToken, s: ctx.scope, q: sorted });
+  return JSON.stringify({ u: ctx.auth?.userId ?? null, n: ctx.auth?.networkId ?? null, a: ctx.isAdmin, t: ctx.isNodeToken, s: ctx.scope, q: sorted, c: knowsAbandoned(ctx) });
 }
 
 /** Test-only. */

@@ -120,6 +120,37 @@ export function migrateRequirementPriorityCheck(database: DbAdapter): { rebuilt:
 }
 
 /**
+ * 状态加 abandoned(废弃)。同 migrateRequirementPriorityCheck:旧库的 CHECK(column_name IN ('pool', 'doing', 'done'))
+ * SQLite 不能就地改,只重建一次;PostgreSQL 换掉默认名的列约束。已经放开的库什么都不做。存量值不改。
+ */
+const OLD_COLUMN_CHECK = /CHECK\s*\(\s*column_name\s+IN\s*\(\s*'pool'\s*,\s*'doing'\s*,\s*'done'\s*\)\s*\)/i;
+export const COLUMN_CHECK = "CHECK(column_name IN ('pool', 'doing', 'done', 'abandoned'))";
+export function migrateRequirementColumnCheck(database: DbAdapter): { rebuilt: boolean } {
+  if (database.dialect === "postgres") {
+    try {
+      database.exec("ALTER TABLE requirements DROP CONSTRAINT IF EXISTS requirements_column_name_check");
+      database.exec(`ALTER TABLE requirements ADD CONSTRAINT requirements_column_name_check ${COLUMN_CHECK}`);
+    } catch {}
+    return { rebuilt: false };
+  }
+  const table = database.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'requirements'");
+  if (!table?.sql || !OLD_COLUMN_CHECK.test(table.sql)) return { rebuilt: false };
+  const indexes = database.all<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'requirements' AND sql IS NOT NULL");
+  const createSql = table.sql
+    .replace(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?requirements["`]?/i, "CREATE TABLE requirements_migrated")
+    .replace(OLD_COLUMN_CHECK, COLUMN_CHECK);
+  database.transaction(() => {
+    database.exec("DROP TABLE IF EXISTS requirements_migrated");
+    database.exec(createSql);
+    database.exec("INSERT INTO requirements_migrated SELECT * FROM requirements");
+    database.exec("DROP TABLE requirements");
+    database.exec("ALTER TABLE requirements_migrated RENAME TO requirements");
+    for (const index of indexes) database.exec(index.sql);
+  });
+  return { rebuilt: true };
+}
+
+/**
  * 任务短号 seq:每个网络自己的 #1、#2…,界面显示和按 #N 查都用它。主键 requirement_id 不变。
  * - 加可空列 seq;没有号的旧行按 created_at(再按 requirement_id)补号,接在该网络已有的最大号后面。
  * - requirement_seq_counters 记每个网络发到过的最大号:删掉 / 归档的卡,号也不回收。

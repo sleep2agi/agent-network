@@ -8,11 +8,22 @@
 //   incompatible — a tool is gone; a baseline property is gone or its schema
 //                  changed (descriptions ignored); `required` differs; any other
 //                  top-level inputSchema key (e.g. additionalProperties) differs
-//   additive     — new tools; new properties that are not required
+//   additive     — new tools; new properties that are not required; an input
+//                  property whose `enum` only gained values (every call an old
+//                  caller could make is still accepted), everything else equal
 export type Tool = { name: string; inputSchema?: Record<string, any> };
 export type ToolsDiff = { incompatible: string[]; added: string[]; newTools: string[] };
 
 const noDesc = (v: unknown) => JSON.stringify(v, (k, x) => (k === "description" ? undefined : x));
+
+/** Values added to an input enum, when that is the ONLY difference and nothing was removed; otherwise null. */
+function enumWidened(base: any, cand: any): string[] | null {
+  if (!Array.isArray(base?.enum) || !Array.isArray(cand?.enum)) return null;
+  if (noDesc({ ...base, enum: null }) !== noDesc({ ...cand, enum: null })) return null;
+  if (!base.enum.every((x: unknown) => cand.enum.includes(x))) return null;
+  const plus = cand.enum.filter((x: unknown) => !base.enum.includes(x)).map(String);
+  return plus.length ? plus : null;
+}
 
 export function compareTools(base: Tool[], cand: Tool[]): ToolsDiff {
   const incompatible: string[] = [], added: string[] = [];
@@ -24,7 +35,11 @@ export function compareTools(base: Tool[], cand: Tool[]): ToolsDiff {
     const bp = bs.properties ?? {}, np = ns.properties ?? {};
     for (const [k, v] of Object.entries(bp)) {
       if (!(k in np)) incompatible.push(`${t.name}.${k}: property removed`);
-      else if (noDesc(v) !== noDesc(np[k])) incompatible.push(`${t.name}.${k}: retyped ${noDesc(v)} → ${noDesc(np[k])}`);
+      else if (noDesc(v) !== noDesc(np[k])) {
+        const widened = enumWidened(v, np[k]);
+        if (widened) added.push(`${t.name}.${k} enum+[${widened.join(",")}]`);
+        else incompatible.push(`${t.name}.${k}: retyped ${noDesc(v)} → ${noDesc(np[k])}`);
+      }
     }
     const br = JSON.stringify([...(bs.required ?? [])].sort()), nr = JSON.stringify([...(ns.required ?? [])].sort());
     if (br !== nr) incompatible.push(`${t.name}: required ${br} → ${nr}`);

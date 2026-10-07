@@ -43,6 +43,23 @@ if (process.env.CHECK_75 === "1") {
   const base = a["newparam.list_summary"]?.shape?.requirements?.[0] ?? {};
   check("description" in base, `baseline ignores view=summary (still returns description) — shows the param is new`);
 }
+// 废弃状态(abandoned):设置要带声明;没声明的读拿到 done;关闭态不逾期;每个被测 app tag 把旧读到的那行归进 done,
+// 而把真值 abandoned 归进 pool(这就是投影存在的理由 —— 后一条若哪天变成 done,说明那个版本已认识 abandoned)。
+if (process.env.CHECK_ABANDONED === "1") {
+  const v = b["newparam.abandoned_values"]?.shape ?? {};
+  check(b["newparam.abandoned_set"]?.status === 200 && v.set === "abandoned", `candidate: PATCH column=abandoned with the declaration → ${b["newparam.abandoned_set"]?.status} ${v.set}`);
+  check(v.legacy_get === "done" && v.legacy_row?.column === "done", `candidate: undeclared reads see done (get ${v.legacy_get}, list ${v.legacy_row?.column})`);
+  check(v.aware_get === "abandoned", `candidate: declared read sees abandoned (${v.aware_get})`);
+  check(v.overdue_has_it === false, `candidate: abandoned card with a past due is not in overdue=1`);
+  check(a["newparam.abandoned_set"]?.status === 400, `baseline rejects abandoned (${a["newparam.abandoned_set"]?.status}) — shows the value is new`);
+  for (const tag of (process.env.APP_TAGS ?? "").split(",").filter(Boolean)) {
+    const m = require(`/apps/${tag}/src/requirements-hub.ts`);
+    const legacy = m.requirementFromHub(v.legacy_row)?.column;
+    const raw = m.requirementFromHub(v.aware_row)?.column;
+    check(legacy === "done", `app ${tag} files the projected card under done (${legacy})`);
+    console.log(`INFO app ${tag} would file the unprojected value abandoned under: ${raw}`);
+  }
+}
 {
   const x = a["mcp.tools_list"], y = b["mcp.tools_list"];
   const bt = x?.tools ?? [], ct = y?.tools ?? [];
