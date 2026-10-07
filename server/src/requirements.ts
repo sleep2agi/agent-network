@@ -66,6 +66,19 @@ function knowsAbandoned(ctx: RequirementsRequestContext): boolean {
   const raw = `${ctx.req.headers.get(ACCEPT_COLUMNS_HEADER) ?? ""},${ctx.url.searchParams.get("accept_columns") ?? ""}`;
   return raw.split(",").some(v => v.trim() === "abandoned");
 }
+/**
+ * 动态的旧客户端视图:column 改动的 old / new、created 的 new.column 都投影;投影后前后一样(done ↔ abandoned)= null(不回)。
+ */
+function projectEvent<T extends { kind: string; field: string | null; old: unknown; new: unknown }>(ev: T, aware: boolean): T | null {
+  if (aware) return ev;
+  if (ev.kind === "created" && ev.new && typeof ev.new === "object" && typeof (ev.new as any).column === "string") {
+    return { ...ev, new: { ...(ev.new as object), column: projectColumn((ev.new as any).column, false) } };
+  }
+  if (ev.field !== "column") return ev;
+  const old = typeof ev.old === "string" ? projectColumn(ev.old, false) : ev.old;
+  const neu = typeof ev.new === "string" ? projectColumn(ev.new, false) : ev.new;
+  return old === neu ? null : { ...ev, old, new: neu };
+}
 /** 旧客户端看到的状态:abandoned → done,其余原样。 */
 export function projectColumn(column: string, aware: boolean): string {
   return column === "abandoned" && !aware ? "done" : column;
@@ -90,6 +103,7 @@ type Row = {
   parent_id: string | null;
   children_total: number | null;
   children_done: number | null;
+  children_abandoned?: number | null;
   participants_json: string;
   requirement_id: string;
   network_id: string;
@@ -528,7 +542,8 @@ function toPublic(row: Row) {
     updated_by: row.updated_by_json ? JSON.parse(row.updated_by_json) : null,
     // 子需求:parent_id(可空)和父卡上的子需求进度(未归档的子需求数 / 其中完成的)。
     parent_id: row.parent_id || null,
-    children: { total: Number(row.children_total ?? 0), done: Number(row.children_done ?? 0) },
+    // 废弃的子需求不算进度(total 里减掉);旧客户端眼里它是 done,见 toPublicFor。
+    children: { total: Number(row.children_total ?? 0) - Number(row.children_abandoned ?? 0), done: Number(row.children_done ?? 0) },
     // 完成时间:进「完成」列的时刻,移出清空(不在「完成」列 = null)。completedAtApprox = 升级前就完成的卡,
     // 时刻是按 updated_at 补的近似值。completedBy = 谁移进「完成」的(近似值的卡为 null)。旧 App 忽略这三个字段。
     completedAt: row.completed_at || null,
@@ -581,7 +596,12 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
   // viewer_can:只对「只看相关任务」的调用者出现,客户端据此画只读锁、藏删除;不出现 = 与今天一样全能(旧 Hub 也不出现)。
   const can = perms(row);
   const base = toPublic(row);
-  base.column = projectColumn(base.column, knowsAbandoned(ctx));
+  if (!knowsAbandoned(ctx)) {
+    base.column = projectColumn(base.column, false);
+    // 旧客户端把废弃的子需求当 done 列出来:进度也按「算进总数、算作完成」给,和它看到的子需求列表对得上。
+    const abandoned = Number(row.children_abandoned ?? 0);
+    base.children = { total: base.children.total + abandoned, done: base.children.done + abandoned };
+  }
   const pub = can ? { ...base, viewer_can: can } : base;
   const hidden = hiddenNodeFilter(ctx, row.network_id);
   if (!hidden) return pub;
@@ -597,7 +617,8 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
 }
 
 const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, seq, completed_at, completed_by_json, completed_at_approx, " +
-  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name <> 'abandoned') AS children_total, " +
+  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0) AS children_total, " +
+  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'abandoned') AS children_abandoned, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
@@ -1343,7 +1364,9 @@ function lastEventsFor(ctx: RequirementsRequestContext, rows: readonly Row[]): M
     ...ids,
   );
   if (!events.length) return out;
-  const pubs = events.map(eventPublic);
+  const aware = knowsAbandoned(ctx);
+  // 投影后成了 done → done 的那条:当作没有可展示的字段(同下面隐去节点的处理)。
+  const pubs = events.map(e => { const ev = eventPublic(e); return projectEvent(ev, aware) ?? { ...ev, field: null, old: null, new: null }; });
   const userIds = new Set<string>(), nodeIds = new Set<string>();
   for (const ev of pubs) if (isRef(ev.actor)) (ev.actor.kind === "user" ? userIds : nodeIds).add(ev.actor.id);
   // 名字规则同 GET /api/requirements/people 的 name(没设显示名 → 用户名 / alias / node_name)。
@@ -1408,6 +1431,7 @@ function listEvents(ctx: RequirementsRequestContext): Response {
   const serverTime = new Date().toISOString();
   const caller = taskCaller(ctx);
   const hidden = hiddenNodeFilter(ctx, networkId);
+  const aware = knowsAbandoned(ctx);
   const seen = new Map<string, boolean>();
   const canSee = (id: string): boolean => {
     if (!caller) return true;
@@ -1423,7 +1447,8 @@ function listEvents(ctx: RequirementsRequestContext): Response {
   };
   const shown = (row: EventRow) => {
     if (!canSee(row.requirement_id)) return null;
-    const ev = eventPublic(row);
+    const ev = projectEvent(eventPublic(row), aware);
+    if (!ev) return null;
     if (!hidden) return ev;
     const mask = (ref: unknown) => (isHiddenRef(ref, hidden) ? null : ref);
     const masked = { ...ev, actor: mask(ev.actor) };

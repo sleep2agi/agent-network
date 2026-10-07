@@ -127,11 +127,14 @@ const OLD_COLUMN_CHECK = /CHECK\s*\(\s*column_name\s+IN\s*\(\s*'pool'\s*,\s*'doi
 export const COLUMN_CHECK = "CHECK(column_name IN ('pool', 'doing', 'done', 'abandoned'))";
 export function migrateRequirementColumnCheck(database: DbAdapter): { rebuilt: boolean } {
   if (database.dialect === "postgres") {
-    try {
-      database.exec("ALTER TABLE requirements DROP CONSTRAINT IF EXISTS requirements_column_name_check");
-      database.exec(`ALTER TABLE requirements ADD CONSTRAINT requirements_column_name_check ${COLUMN_CHECK}`);
-    } catch {}
-    return { rebuilt: false };
+    // 只在约束还不认识 abandoned(或不存在)时动;一条 ALTER TABLE 里先删后加 = 一个语句,原子,
+    // 失败(比如存量里有不合法的值)整条回滚、旧约束原样留着,并且直接抛出 —— 不吞错,启动就该停下来。
+    const def = database.get<{ def: string }>(
+      "SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE t.relname = 'requirements' AND c.conname = 'requirements_column_name_check'",
+    )?.def ?? "";
+    if (def.includes("'abandoned'")) return { rebuilt: false };
+    database.exec(`ALTER TABLE requirements DROP CONSTRAINT IF EXISTS requirements_column_name_check, ADD CONSTRAINT requirements_column_name_check ${COLUMN_CHECK}`);
+    return { rebuilt: true };
   }
   const table = database.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'requirements'");
   if (!table?.sql || !OLD_COLUMN_CHECK.test(table.sql)) return { rebuilt: false };

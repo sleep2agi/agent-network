@@ -7,6 +7,7 @@
 #   L3  witnessed red:每个变异都要让 L1 里点名的那条测试红。
 #       - abandoned-counted-open:逾期判据把废弃当成开着的卡
 #       - projection-removed:旧客户端也拿到 abandoned(desktop ≤ 0.2.220 会把它当 pool)
+#       - checklist-projection-removed / events-projection-removed:勾子任务的响应、动态流水不投影
 #
 # PostgreSQL 那一半由 test2123-hub-postgres-ladder 原样再跑 requirements-abandoned-http.test.ts。
 # 全部一次性:HOME=$(mktemp -d)、临时 SQLite、端口 0(从不碰 9200)。
@@ -53,6 +54,22 @@ bun /work/tests/mutate.ts src/requirements.ts \
   'return column;'
 expect_red projection-removed src/requirements-abandoned-http.test.ts \
   'abandoned column > old clients (no declaration) see abandoned as done; their writes cannot un-abandon it by echo'
+cp /tmp/requirements.ts src/requirements.ts
+
+cp src/requirements.ts /tmp/requirements.ts
+bun /work/tests/mutate.ts src/requirements.ts \
+  'return Response.json({ ok: true, requirement: toPublicFor(ctx, updated) });' \
+  'return Response.json({ ok: true, requirement: { ...toPublicFor(ctx, updated), column: updated.column_name } });'
+expect_red checklist-projection-removed src/requirements-abandoned-http.test.ts \
+  'abandoned column > checklist toggle response is projected for undeclared callers'
+cp /tmp/requirements.ts src/requirements.ts
+
+cp src/requirements.ts /tmp/requirements.ts
+bun /work/tests/mutate.ts src/requirements.ts \
+  'const ev = projectEvent(eventPublic(row), aware);' \
+  'const ev = projectEvent(eventPublic(row), true);'
+expect_red events-projection-removed src/requirements-abandoned-http.test.ts \
+  'abandoned column > events and last_event: undeclared callers see the projected column; done ↔ abandoned disappears for them'
 cp /tmp/requirements.ts src/requirements.ts
 
 # 复原后再绿一次:变异没有留在树里。

@@ -61,7 +61,7 @@ const list = (qs = "", headers: Record<string, string> = {}) => send("GET", `/ap
 const ids = (r: R) => (r.body.requirements as any[]).map(x => x.id);
 const columnIn = (r: R, id: string) => (r.body.requirements as any[]).find(x => x.id === id)?.column;
 const sentFor = (out: Array<{ requirement_id: string; kind: string }>, id: string) => out.filter(x => x.requirement_id === id).map(x => x.kind);
-const columnEvents = async (id: string) => ((await send("GET", `/api/requirements/events?network_id=${NET}&requirement_id=${id}`)).body.events as any[])
+const columnEvents = async (id: string) => ((await send("GET", `/api/requirements/events?network_id=${NET}&requirement_id=${id}`, undefined, AWARE)).body.events as any[])
   .filter(e => e.kind === "changed" && e.field === "column").map(e => [e.old, e.new]).reverse();
 
 beforeAll(async () => {
@@ -91,8 +91,18 @@ describe("abandoned column", () => {
       // 模拟旧 PG 库:换回旧约束,迁移后 abandoned 能写,再跑一次照样不报错。
       db.exec("ALTER TABLE requirements DROP CONSTRAINT IF EXISTS requirements_column_name_check");
       db.exec("ALTER TABLE requirements ADD CONSTRAINT requirements_column_name_check CHECK(column_name IN ('pool', 'doing', 'done'))");
-      migrateRequirementColumnCheck(db);
-      migrateRequirementColumnCheck(db);
+      expect(migrateRequirementColumnCheck(db).rebuilt).toBe(true);
+      // 已经认识 abandoned:不再动表(不是每次启动都删了重加)
+      expect(migrateRequirementColumnCheck(db).rebuilt).toBe(false);
+      // 加约束失败要响亮地失败,而且是一条语句:旧约束原样留着,不会落到「没约束」
+      db.exec("ALTER TABLE requirements DROP CONSTRAINT IF EXISTS requirements_column_name_check");
+      db.exec("ALTER TABLE requirements ADD CONSTRAINT requirements_column_name_check CHECK(column_name IN ('pool', 'doing', 'done', 'bogus'))");
+      db.run("INSERT INTO requirements (requirement_id, network_id, title, column_name) VALUES ('req_ab_bogus', ?1, 'bogus', 'bogus')", [NET]);
+      expect(() => migrateRequirementColumnCheck(db)).toThrow();
+      const def = (db.get("SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE t.relname = 'requirements' AND c.conname = 'requirements_column_name_check'") as any)?.def ?? "";
+      expect(def).toContain("'bogus'");
+      db.run("DELETE FROM requirements WHERE requirement_id = 'req_ab_bogus'");
+      expect(migrateRequirementColumnCheck(db).rebuilt).toBe(true);
     } else {
       expect(migrateRequirementColumnCheck(db).rebuilt).toBe(false);
     }
@@ -139,7 +149,10 @@ describe("abandoned column", () => {
     const kid = await card("ab-kid", { parent_id: parent });
     await card("ab-kid2", { parent_id: parent });
     await patch(kid, { column: "abandoned" }, AWARE);
-    expect((await get(parent)).body.requirement.children).toEqual({ total: 1, done: 0 });
+    // 声明了:废弃的子需求不算进度;没声明(旧 App 把它当 done 列出来):算进总数、算作完成,和它看到的列表对得上
+    expect((await get(parent, AWARE)).body.requirement.children).toEqual({ total: 1, done: 0 });
+    expect((await get(parent)).body.requirement.children).toEqual({ total: 2, done: 1 });
+    expect(columnIn(await list("&parent_id=" + parent), kid)).toBe("done");
     // 改回 doing:又逾期、又提醒
     await patch(id, { column: "doing" }, AWARE);
     await patch(old, { column: "doing" }, AWARE);
@@ -176,6 +189,39 @@ describe("abandoned column", () => {
     const done = await patch(id, { column: "done" }, AWARE);
     expect(done.body.requirement.column).toBe("done");
     expect(done.body.requirement.completedAt).not.toBeNull();
+  }, 60_000);
+
+  test("events and last_event: undeclared callers see the projected column; done ↔ abandoned disappears for them", async () => {
+    const id = await card("ab-events");
+    await patch(id, { column: "abandoned" }, AWARE);
+    await patch(id, { column: "done" }, AWARE);
+    await patch(id, { column: "abandoned" }, AWARE);
+    const evs = async (headers: Record<string, string> = {}) => ((await send("GET", `/api/requirements/events?network_id=${NET}&requirement_id=${id}`, undefined, headers)).body.events as any[])
+      .filter(e => e.kind === "changed" && e.field === "column").map(e => [e.old, e.new]).reverse();
+    expect(await evs(AWARE)).toEqual([["pool", "abandoned"], ["abandoned", "done"], ["done", "abandoned"]]);
+    expect(await evs()).toEqual([["pool", "done"]]);
+    const legacyRaw = JSON.stringify((await send("GET", `/api/requirements/events?network_id=${NET}`)).body.events);
+    expect(legacyRaw).not.toContain("abandoned");
+    // 每行的 last_event:最新一条是 done → abandoned,旧客户端那里投影后前后一样 → 不给字段 / 摘要
+    const legacyRow = (await list()).body.requirements.find((r: any) => r.id === id);
+    expect(legacyRow.last_event.field).toBeNull();
+    expect(legacyRow.last_event.summary).toBeUndefined();
+    const awareRow = (await list("", AWARE)).body.requirements.find((r: any) => r.id === id);
+    expect(awareRow.last_event).toMatchObject({ field: "column", summary: "done → abandoned" });
+    await patch(id, { column: "doing" }, AWARE);
+    const back = (await list()).body.requirements.find((r: any) => r.id === id);
+    expect(back.last_event).toMatchObject({ field: "column", summary: "done → doing" });
+    expect(JSON.stringify((await list()).body.requirements)).not.toContain("abandoned");
+  }, 60_000);
+
+  test("checklist toggle response is projected for undeclared callers", async () => {
+    const id = await card("ab-check", { checklist: [{ id: "c1", text: "one" }] });
+    await patch(id, { column: "abandoned" }, AWARE);
+    const legacy = await send("PATCH", `/api/requirements/${id}/checklist/c1?network_id=${NET}`, { done: true });
+    expect(legacy.status).toBe(200);
+    expect(legacy.body.requirement.column).toBe("done");
+    const aware = await send("PATCH", `/api/requirements/${id}/checklist/c1?network_id=${NET}`, { done: false }, AWARE);
+    expect(aware.body.requirement.column).toBe("abandoned");
   }, 60_000);
 
   test("MCP declares support: requirements_update / get / list carry the real value", async () => {
