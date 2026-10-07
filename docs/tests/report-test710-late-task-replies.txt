@@ -38,6 +38,14 @@ Published app compatibility replay
 - The true Hub HTTP suite separately reads that same additive shape from
   /api/tasks?task_id=... (the endpoint those releases use) and /api/tasks/:id.
 
+Tool audience budget regression
+-------------------------------
+- Kept `thread_id` / `turn_id` self-describing in the schema and moved their
+  detailed late-receipt semantics to the task API documentation.
+- Focused Docker gate: 12/12 PASS; node tools/list = 58854 B (ceiling 59000 B).
+- Complete non-root server unit Docker gate: 206/206 files, failed_files=0;
+  registration-password mutation witnessed red; rc=0.
+
 Safety
 ------
 - No production Hub, node, tmux server, token, hostname, or real task id was used.
