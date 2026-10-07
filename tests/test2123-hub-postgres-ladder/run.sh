@@ -199,6 +199,8 @@ run_pg_tests_rc anet_task_access_test src/task-access-http.test.ts
 run_pg_tests_rc anet_req_stats_test src/requirements-stats-http.test.ts
 # 标签管理:改写整网卡片 tags 的事务、network_tags 的 ON CONFLICT upsert、scoped 成员被挡 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_tag_ops_test src/requirement-tag-ops-http.test.ts
+# #711 改密码只撤 kind='login' 会话、cli 令牌按旗标撤、节点令牌不动;kind 列 ALTER + 回填(DROP COLUMN 回到旧表再迁一遍)—— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_pwchange_kind_test src/auth-password-change-cli-tokens-http.test.ts
 # Scheduled-task replies routed to the schedule creator (scheduled_tasks ⋈ users, tasks.meta_json read in JS),
 # counted by unread_by_agent and cleared by ack-by-agent — on real PostgreSQL rows.
 run_pg_tests_rc anet_sched_reply_test src/scheduled-reply-unread-http.test.ts
@@ -216,6 +218,8 @@ run_pg_tests_rc anet_status_cache_test src/status-read-cache-http.test.ts
 run_pg_tests_rc anet_owner_strict_test src/requirements-owner-strict-mcp-http.test.ts
 # #472 任务 / 项目错误带 field / message / hint(error 码原样),每条提示一个测试 + 错误码登记取集门。
 run_pg_tests_rc anet_req_errors_test src/requirements-errors-mcp-http.test.ts
+# 任务状态「废弃」:CHECK 约束换新(PG 换默认名约束)、关闭态不逾期 / 不提醒 / 不计开着、旧客户端投影成 done —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_req_abandoned_test src/requirements-abandoned-http.test.ts
 # #474 评论:只追加、进动态 kind=comment、看不见 404 / 只读 403、不改任务本身 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_req_comment_test src/requirements-comment-http.test.ts
 # #506 列表每行 last_event:MAX(id) GROUP BY 子查询 + IN 绑参(每个都用上)、评论算最新、节点操作者、ETag 随评论变、受限成员隐去;

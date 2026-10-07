@@ -12,7 +12,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { listSkills, readSkill } from "./node-skills";
+import { readSkill, skillView } from "./node-skills";
 import { listNodeFiles, readNodeFile } from "./node-files";
 
 export const RULES_FILE_MAX_BYTES = 256 * 1024;
@@ -147,15 +147,15 @@ export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Prom
         });
         deps.log(`[rules-file] wrote ${r.file_name} bytes=${r.bytes} (${req.request_id})`);
       } else if (req.op === "skills_list") {
-        const skills = await listSkills(deps.runtime, { workDir: deps.workDir, home: deps.home, codexHome: deps.codexHome ?? process.env.CODEX_HOME });
+        const view = await skillView(deps.runtime, { workDir: deps.workDir, home: deps.home, codexHome: deps.codexHome ?? process.env.CODEX_HOME });
         await deps.callCommHub("ack_rules_file_request", {
           request_id: req.request_id,
           status: "done",
           file_name: "skills",
-          exists: skills.length > 0,
-          content: JSON.stringify({ skills }),
+          exists: view.skills.length > 0,
+          content: JSON.stringify(view),
         });
-        deps.log(`[skills] listed ${skills.length} skill(s) (${req.request_id})`);
+        deps.log(`[skills] listed ${view.skills.length} skill(s) (${req.request_id})`);
       } else if (req.op === "skill_read") {
         const r = await readSkill(deps.runtime, { workDir: deps.workDir, home: deps.home, codexHome: deps.codexHome ?? process.env.CODEX_HOME }, req.content);
         await deps.callCommHub("ack_rules_file_request", {

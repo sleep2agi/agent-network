@@ -137,8 +137,8 @@ export function register(username: string, password: string, email?: string, dis
   const userToken = generateUserToken();
   const userTokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
-    [userTokenId, hashToken(userToken), userId, null, "user-login", "user", cleanClientField(opts.client?.label, 64), cleanClientField(opts.client?.userAgent, 256)]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, kind, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+    [userTokenId, hashToken(userToken), userId, null, "user-login", "user", cleanClientField(opts.client?.label, 64), cleanClientField(opts.client?.userAgent, 256), userTokenKindFor(opts.client)]
   );
 
   // Network token (ntok_) — bound to default network, for agent-node
@@ -217,8 +217,8 @@ export function login(username: string, password: string, client: SessionClientI
   const userToken = generateUserToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
-    [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user", cleanClientField(client.label, 64), cleanClientField(client.userAgent, 256)]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, kind, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+    [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user", cleanClientField(client.label, 64), cleanClientField(client.userAgent, 256), userTokenKindFor(client)]
   );
 
   // Find default network
@@ -321,7 +321,28 @@ const SESSION_TOKEN_SQL = "scope = 'user' AND network_id IS NULL";
 // 以小时为粒度对一个以天计的闲置窗口没有影响。
 const LAST_USED_WRITE_INTERVAL_SECONDS = 3600;
 
-export type SessionClientInfo = { label?: unknown; userAgent?: unknown };
+export type SessionClientInfo = { label?: unknown; userAgent?: unknown; kind?: unknown };
+
+// #711 不绑网络的用户令牌的种类(api_tokens.kind):
+//   'login' — 浏览器 / app 的登录会话;
+//   'cli'   — anet 命令行登录、POST /api/auth/tokens 建的具名脚本令牌。
+// 种类由客户端自报(client_kind / client_label),**只用于展示和「显式保留」那条路**:
+// 改密码默认仍撤销全部不绑网络的令牌(当前这条除外),调用方显式 keep_cli_tokens=true 才保留 'cli'。
+// 所以一个自称 cli 的令牌永远不能靠自报在默认改密码里活下来。
+// 节点 / 网络令牌(network_id 非空)不分类,改密码永远不碰。
+export type UserTokenKind = "login" | "cli";
+
+/** 登录 / 注册请求签发的令牌算哪一类:客户端显式报 kind='cli',或 client_label 是 anet 自报的「anet <版本> · …」。 */
+/** anet 自报的 client_label:去掉首尾空白后,区分大小写地以「anet 」开头(启动回填用同一条规则,见 db.ts)。 */
+export function isAnetClientLabel(label: string): boolean {
+  return label.trim().startsWith("anet ");
+}
+
+export function userTokenKindFor(client: SessionClientInfo = {}): UserTokenKind {
+  if (client.kind === "cli") return "cli";
+  if (typeof client.label === "string" && isAnetClientLabel(client.label)) return "cli";
+  return "login";
+}
 
 function cleanClientField(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
@@ -508,9 +529,10 @@ export function createToken(userId: string, name: string, networkId?: string): {
   }
   const token = generateToken();
   const tokenId = generateId("tok");
+  // #711 不绑网络的具名令牌是给脚本 / 命令行长期用的:kind='cli'(改密码时可显式 keep_cli_tokens 保留)。
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
-    [tokenId, hashToken(token), userId, networkId || null, name, "full"]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, kind, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+    [tokenId, hashToken(token), userId, networkId || null, name, "full", networkId ? null : "cli"]
   );
   return { ok: true, token, token_id: tokenId };
 }
@@ -520,14 +542,53 @@ export function revokeToken(userId: string, tokenId: string): { ok: boolean; err
   return result.changes > 0 ? { ok: true } : { ok: false, error: "token not found" };
 }
 
-export function issueUserToken(userId: string, name = "user-login"): { token: string; token_id: string } {
+export function issueUserToken(
+  userId: string,
+  name = "user-login",
+  opts: { kind?: UserTokenKind; clientLabel?: string | null; userAgent?: string | null } = {},
+): { token: string; token_id: string } {
   const token = generateUserToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, NULL, ?4, 'user', 1)",
-    [tokenId, hashToken(token), userId, name]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, kind, node_identity_epoch) VALUES (?1, ?2, ?3, NULL, ?4, 'user', ?5, ?6, ?7, 1)",
+    [tokenId, hashToken(token), userId, name, opts.clientLabel ?? null, opts.userAgent ?? null, opts.kind === "cli" ? "cli" : "login"]
   );
   return { token, token_id: tokenId };
+}
+
+/** 一条令牌的种类和设备标识(改密码换发新令牌时沿用,命令行的令牌换完还是命令行的)。 */
+export function getUserTokenMeta(userId: string, tokenId: string): { kind: UserTokenKind; client_label: string | null; user_agent: string | null } | null {
+  const row = db.get<any>("SELECT kind, client_label, user_agent FROM api_tokens WHERE token_id = ?1 AND user_id = ?2 AND network_id IS NULL", tokenId, userId);
+  if (!row) return null;
+  return { kind: row.kind === "cli" ? "cli" : "login", client_label: row.client_label ?? null, user_agent: row.user_agent ?? null };
+}
+
+// #711 改密码撤销哪些令牌。kind 为 NULL 的(启动回填之后由旧版 Hub 签出的)按 'login' 算。
+const CLI_KIND_SQL = "kind = 'cli'";
+const NOT_CLI_KIND_SQL = "COALESCE(kind, 'login') <> 'cli'";
+
+/** 改密码后保留下来的命令行 / 脚本令牌(给 UI 列出来、让用户逐条撤销)。**永远不含令牌值。** */
+export type KeptCliToken = { token_id: string; name: string; client_label: string | null; created_at: string; last_used_at: string | null };
+
+/**
+ * 改密码后的令牌撤销。默认(keepCli=false)= 改密码前的行为:撤销全部不绑网络的令牌;
+ * keepCli=true 时保留 kind='cli' 的,并把它们列出来。当前这条(exceptTokenId)和节点 / 网络令牌永远不动。
+ */
+export function revokeTokensAfterPasswordChange(userId: string, exceptTokenId: string | null | undefined, keepCli: boolean): { login: number; cli: number; kept: KeptCliToken[] } {
+  const except = exceptTokenId ? " AND token_id != ?2" : "";
+  const params = exceptTokenId ? [userId, exceptTokenId] : [userId];
+  const login = db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL AND ${NOT_CLI_KIND_SQL}${except}`, params).changes;
+  if (!keepCli) {
+    const cli = db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL${except}`, params).changes;
+    return { login, cli, kept: [] };
+  }
+  const kept = db.all<any>(
+    `SELECT token_id, name, client_label, created_at, last_used_at FROM api_tokens
+     WHERE user_id = ?1 AND network_id IS NULL AND ${CLI_KIND_SQL}${except}
+     ORDER BY created_at DESC`,
+    ...params,
+  ).map((r) => ({ token_id: r.token_id, name: r.name, client_label: r.client_label ?? null, created_at: r.created_at, last_used_at: r.last_used_at ?? null }));
+  return { login, cli: 0, kept };
 }
 
 export function revokeOtherUserTokens(userId: string, exceptTokenId?: string | null): number {
@@ -544,6 +605,7 @@ export type LoginSession = {
   last_used_at: string | null;
   client_label: string | null;
   user_agent: string | null;
+  kind: UserTokenKind;
   is_current: boolean;
 };
 
@@ -551,7 +613,7 @@ export type LoginSession = {
 export function listSessions(userId: string, currentTokenId: string | null): LoginSession[] {
   const cutoff = idleCutoffOffset();
   const rows = db.all<any>(
-    `SELECT token_id, name, created_at, last_used_at, client_label, user_agent FROM api_tokens
+    `SELECT token_id, name, created_at, last_used_at, client_label, user_agent, kind FROM api_tokens
      WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND revoked_at IS NULL${cutoff ? `
        AND COALESCE(last_used_at, created_at) >= datetime('now', ?2)` : ""}
      ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC`,
@@ -563,6 +625,7 @@ export function listSessions(userId: string, currentTokenId: string | null): Log
     last_used_at: r.last_used_at ?? null,
     client_label: r.client_label ?? null,
     user_agent: r.user_agent ?? null,
+    kind: r.kind === "cli" ? "cli" : "login",
     is_current: !!currentTokenId && r.token_id === currentTokenId,
   }));
 }
@@ -578,7 +641,14 @@ export function revokeOtherSessions(userId: string, currentTokenId: string): num
   return db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND token_id != ?2`, [userId, currentTokenId]).changes;
 }
 
-export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null): { ok: boolean; error?: string; revoked?: number } {
+export type ChangePasswordResult = { ok: boolean; error?: string; revoked?: number; revoked_login?: number; revoked_cli?: number; kept_cli_tokens?: KeptCliToken[] };
+
+/**
+ * 改密码。默认撤销该用户全部不绑网络的令牌(改密码前的行为,旧 app 依赖它)。#711:opts.keepCliTokens=true
+ * 时保留 kind='cli' 的(anet 命令行登录、具名脚本令牌),并在 kept_cli_tokens 里列出。当前会话和节点令牌永远保留。
+ * revoked = 两类合计(旧字段,兼容旧客户端)。
+ */
+export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null, opts: { keepCliTokens?: boolean } = {}): ChangePasswordResult {
   const passwordError = validatePasswordStrength(newPassword, "new password");
   if (passwordError) return { ok: false, error: passwordError };
   const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
@@ -593,8 +663,9 @@ export function changePassword(userId: string, oldPassword: string, newPassword:
   // nudge goes away on next login. SET to 0 explicitly (rather than skip)
   // so a future flag flip can't drift the state.
   db.run("UPDATE users SET password_hash = ?1, must_change_password = 0, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
-  const revoked = revokeOtherUserTokens(userId, currentTokenId);
-  return { ok: true, revoked };
+  const keep = opts.keepCliTokens === true;
+  const r = revokeTokensAfterPasswordChange(userId, currentTokenId, keep);
+  return { ok: true, revoked: r.login + r.cli, revoked_login: r.login, revoked_cli: r.cli, ...(keep ? { kept_cli_tokens: r.kept } : {}) };
 }
 
 /**
