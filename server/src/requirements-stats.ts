@@ -93,7 +93,7 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
   const sparkDays = new Set(days.slice(-STATS_SPARK_DAYS));
   const daily = new Map(days.map(d => [d, 0]));
 
-  let done = 0, approx = 0, created = 0, createdDone = 0, doing = 0, pool = 0, unattributed = 0;
+  let done = 0, approx = 0, created = 0, createdDone = 0, doing = 0, pool = 0, abandoned = 0, unattributed = 0;
   const byProject = new Map<string | null, number>();
   const byCompleter = new Map<string, { ref: Ref; n: number; spark: Map<string, number> }>();
   const recent: { row: StatsRow; ms: number; by: Ref | null }[] = [];
@@ -102,6 +102,7 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
     // 当前还开着的卡(不看时间范围;归档的不算「进行中」)。
     if (!row.archived && row.column_name === "doing") doing++;
     if (!row.archived && row.column_name === "pool") pool++;
+    if (!row.archived && row.column_name === "abandoned") abandoned++;
     const completedMs = row.column_name === "done" ? msOf(row.completed_at) : null;
     const createdMs = msOf(row.created_at);
     if (inRange(createdMs)) {
@@ -143,6 +144,8 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
       completion_rate: created ? createdDone / created : null,
       doing,
       pool,
+      // 废弃(关闭,不算开着也不算完成)。旧 App 忽略这个字段。
+      abandoned,
     },
     daily: days.map(date => ({ date, n: daily.get(date) ?? 0 })),
     by_project: [...byProject].map(([project_id, n]) => ({ project_id, n })).sort((a, b) => b.n - a.n || String(a.project_id).localeCompare(String(b.project_id))),

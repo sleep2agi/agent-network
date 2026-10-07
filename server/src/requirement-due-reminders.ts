@@ -227,7 +227,7 @@ export function dueReminderFor(due: string, nowMs: number, tz: string, maxOverdu
 export function overdueSql(params: unknown[], nowMs: number, tz: string): string {
   const today = localDate(nowMs, tz);
   const nowIso = new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, "Z");
-  return `(due_on IS NOT NULL AND column_name <> 'done' AND ((length(due_on) = 10 AND due_on < ?${params.push(today)}) OR (length(due_on) > 10 AND due_on <= ?${params.push(nowIso)})))`;
+  return `(due_on IS NOT NULL AND column_name NOT IN ('done', 'abandoned') AND ((length(due_on) = 10 AND due_on < ?${params.push(today)}) OR (length(due_on) > 10 AND due_on <= ?${params.push(nowIso)})))`;
 }
 /** 没逾期、且在 tz 的「今天 + days」那天结束之前到期(0 = 今天内)。 */
 export function dueWithinSql(params: unknown[], days: number, nowMs: number, tz: string): string {
@@ -235,7 +235,7 @@ export function dueWithinSql(params: unknown[], days: number, nowMs: number, tz:
   const lastDay = addDays(today, days);
   const endIso = new Date(localMidnightMs(addDays(lastDay, 1), tz)).toISOString().replace(/\.\d{3}Z$/, "Z");
   const nowIso = new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, "Z");
-  return `(due_on IS NOT NULL AND column_name <> 'done' AND ((length(due_on) = 10 AND due_on >= ?${params.push(today)} AND due_on <= ?${params.push(lastDay)}) OR (length(due_on) > 10 AND due_on > ?${params.push(nowIso)} AND due_on < ?${params.push(endIso)})))`;
+  return `(due_on IS NOT NULL AND column_name NOT IN ('done', 'abandoned') AND ((length(due_on) = 10 AND due_on >= ?${params.push(today)} AND due_on <= ?${params.push(lastDay)}) OR (length(due_on) > 10 AND due_on > ?${params.push(nowIso)} AND due_on < ?${params.push(endIso)})))`;
 }
 
 // ── 扫描 ───────────────────────────────────────────────────
@@ -332,7 +332,7 @@ export function runDueReminders(opts: { now?: number } = {}): DueReminderSent[] 
   const rows = db.all<DueRow>(
     `SELECT requirement_id, network_id, seq, title, due_on, owner_json, participants_json, agent_owner_json
        FROM requirements
-      WHERE due_on IS NOT NULL AND due_on >= ?1 AND due_on < ?2 AND column_name <> 'done' AND COALESCE(archived, 0) = 0${netFilter}${ownerFilter}`,
+      WHERE due_on IS NOT NULL AND due_on >= ?1 AND due_on < ?2 AND column_name NOT IN ('done', 'abandoned') AND COALESCE(archived, 0) = 0${netFilter}${ownerFilter}`,
     ...params,
   );
   const out: DueReminderSent[] = [];

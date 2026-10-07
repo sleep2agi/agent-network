@@ -54,7 +54,7 @@ const ENTRIES: Record<string, Entry> = {
   participants_conflict: { field: 'participants', message: 'participants (replace the whole list) cannot be combined with participants_add / participants_remove.', hint: 'Use participants_add / participants_remove to change a few people, or participants alone to replace the list.' },
   participants_add_remove_overlap: { field: 'participants_remove', message: 'The same person is in both participants_add and participants_remove.', hint: 'Send each person in only one of the two lists.' },
   too_many_participants: { field: 'participants_add', message: 'A task can have at most 100 participants.', hint: 'Remove some with participants_remove first.' },
-  status_conflicts_with_column: { field: 'status', message: 'status is an alias of column, and the two values sent differ.', hint: 'Send only one of them (pool, doing or done).' },
+  status_conflicts_with_column: { field: 'status', message: 'status is an alias of column, and the two values sent differ.', hint: 'Send only one of them (pool, doing, done or abandoned).' },
   invalid_assignee: { field: 'assignee', message: 'assignee must be a string (legacy free-text field).', hint: 'Prefer owner / agent_owner.' },
   // ── 项目 ──
   invalid_project: { field: 'project_id', message: 'project_id must be a project id string or null.', hint: 'Call projects_list to get project ids (proj_…); null removes the task from its project.' },
@@ -77,14 +77,14 @@ const ENTRIES: Record<string, Entry> = {
   empty_patch: (ctx) => {
     const sent = ctx.sent ?? [];
     const writable = ctx.writable?.length ? ctx.writable.join(', ') : 'name, column, priority, due, start, description, checklist, tags, owner, agent_owner, participants, project_id, parent_id, external_ref, external_url, archived';
-    const statusHint = sent.includes('status') ? 'To move a task between pool / doing / done, use column (status is the name of the list filter). ' : '';
+    const statusHint = sent.includes('status') ? 'To move a task between pool / doing / done / abandoned, use column (status is the name of the list filter). ' : '';
     return { message: sent.length ? `None of the keys sent (${sent.join(', ')}) is a writable field.` : 'The patch changes nothing.', hint: `${statusHint}Writable fields: ${writable}.` };
   },
   invalid_json: { message: 'The request body must be a JSON object.' },
   invalid_name: { field: 'name', message: 'name must be 1–80 characters.' },
   invalid_description: { field: 'description', message: 'description must be a string (markdown) of at most 20 000 characters.' },
-  invalid_column: { field: 'column', message: 'column must be pool, doing or done.' },
-  invalid_status: { field: 'status', message: 'status (list filter) must be pool, doing or done.' },
+  invalid_column: { field: 'column', message: 'column must be pool, doing, done or abandoned.' },
+  invalid_status: { field: 'status', message: 'status (list filter) must be pool, doing, done or abandoned.' },
   invalid_priority: { field: 'priority', message: 'priority must be high (P0), normal (P1), low (P2) or lowest (P3).' },
   invalid_due: { field: 'due', message: 'due is not a date this hub understands.', hint: `Use ${DUE_FORMATS}.` },
   invalid_start: { field: 'start', message: 'start is not a date this hub understands.', hint: `Use ${DUE_FORMATS}.` },

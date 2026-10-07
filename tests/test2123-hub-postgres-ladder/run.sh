@@ -218,6 +218,8 @@ run_pg_tests_rc anet_status_cache_test src/status-read-cache-http.test.ts
 run_pg_tests_rc anet_owner_strict_test src/requirements-owner-strict-mcp-http.test.ts
 # #472 任务 / 项目错误带 field / message / hint(error 码原样),每条提示一个测试 + 错误码登记取集门。
 run_pg_tests_rc anet_req_errors_test src/requirements-errors-mcp-http.test.ts
+# 任务状态「废弃」:CHECK 约束换新(PG 换默认名约束)、关闭态不逾期 / 不提醒 / 不计开着、旧客户端投影成 done —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_req_abandoned_test src/requirements-abandoned-http.test.ts
 # #474 评论:只追加、进动态 kind=comment、看不见 404 / 只读 403、不改任务本身 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_req_comment_test src/requirements-comment-http.test.ts
 # #506 列表每行 last_event:MAX(id) GROUP BY 子查询 + IN 绑参(每个都用上)、评论算最新、节点操作者、ETag 随评论变、受限成员隐去;
