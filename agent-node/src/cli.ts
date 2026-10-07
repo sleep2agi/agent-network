@@ -1295,6 +1295,7 @@ if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && RUNTIME !== "codex-ap
 
 // ── 日志：终端 + 文件 ──
 import { appendFileSync, mkdirSync, statSync } from "fs";
+import { installProcessSurvivalLog } from "./process-survival-log";
 
 // #1019 —— 节点自己的版本号。sessions.version 这一列一直是空的:
 // 服务端早就收(report_status 的 schema 里有 `version`)也早就写
@@ -1319,6 +1320,10 @@ const PRIVATE_LOG_DIR = GROK_EXECUTION_MODE === "cli"
 if (GROK_EXECUTION_MODE !== "cli") {
   try { mkdirSync(LOG_DIR, { recursive: true }); } catch {}
 }
+const processSurvivalLog = installProcessSurvivalLog({
+  logDir: LOG_DIR,
+  redact: (text) => persistenceRedactor.redactText(text).text,
+});
 
 function _log(level: string, levelNum: number, msg: string) {
   if (levelNum < LOG_LEVEL) return;
@@ -1326,7 +1331,7 @@ function _log(level: string, levelNum: number, msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
   const tag = level.toUpperCase().padEnd(5);
   const line = `[${ts}] [${tag}] [${ALIAS}] ${safeMsg}`;
-  console.log(line);
+  if (!processSurvivalLog.outputBroken()) console.log(line);
   try {
     const date = new Date().toISOString().slice(0, 10);
     if (GROK_EXECUTION_MODE === "cli") {

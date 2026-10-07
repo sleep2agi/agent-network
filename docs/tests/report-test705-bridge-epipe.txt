@@ -1,0 +1,50 @@
+Test 705 — bridge survives a broken stdout tee
+source_commit=11f9107999ad76244cff0025db6a0772f69f29a3
+
+Layer 1: process + tee behavior
+bun test v1.3.14 (0d9b296a)
+
+src/process-survival-log.test.ts:
+(pass) agent-node process survival log > the production logger switches to file-only output after EPIPE [2.13ms]
+(pass) agent-node process survival log > closed stdout records EPIPE and the process stays alive [397.61ms]
+(pass) agent-node process survival log > uncaught exception exits 1 with a synchronous reason [63.83ms]
+(pass) agent-node process survival log > unhandled rejection exits 1 with a synchronous reason [65.30ms]
+
+ 4 pass
+ 0 fail
+ 10 expect() calls
+Ran 4 tests across 1 file. [568.00ms]
+bun test v1.3.14 (0d9b296a)
+
+src/codex-copresence-bridge-log.test.ts:
+(pass) #535 codex bridge launch log > tee keeps the writer alive when a secondary sink closes [12.55ms]
+(pass) #535 codex bridge launch log > a dead bridge: tail + path, and no tmux attach to a session that is gone [0.78ms]
+(pass) #535 codex bridge launch log > a live but silent bridge keeps the attach hint and says the log is empty [0.16ms]
+(pass) #535 codex bridge launch log > tailLines drops trailing blanks and CRs [0.07ms]
+(pass) #535 codex bridge launch log > the tee statement copies stdout+stderr to the log, whole lines up to the cap, without breaking the writer [6.68ms]
+(pass) #535 codex bridge launch log > a line reaches the log while the writer is still running (a live bridge that never attached) [55.83ms]
+
+ 6 pass
+ 0 fail
+ 19 expect() calls
+Ran 6 tests across 1 file. [115.00ms]
+
+Layer 2: typecheck and production builds
+$ bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+Bundled 372 modules in 210ms
+
+  cli.js  1.48 MB  (entry point)
+
+Bundled 221 modules in 80ms
+
+  upload-file-mcp-stdio.js  0.27 MB  (entry point)
+
+$ tsc --noEmit
+
+Layer 3: witnessed-red mutations
+WITNESSED_RED: no-stdout-epipe-listener (closed stdout records EPIPE)
+WITNESSED_RED: cli-does-not-switch-to-file-only (the production logger switches to file-only output after EPIPE)
+WITNESSED_RED: no-uncaught-diagnostic (uncaught exception exits 1 with a synchronous reason)
+WITNESSED_RED: tee-without-p (tee keeps the writer alive)
+
+RESULT: PASS

@@ -6,6 +6,17 @@ import { join } from "node:path";
 import { bridgeLaunchFailureLines, codexBridgeTeeCommand, tailLines } from "./codex-copresence-bridge-log";
 
 describe("#535 codex bridge launch log", () => {
+  test("tee keeps the writer alive when a secondary sink closes", () => {
+    const d = mkdtempSync(join(tmpdir(), "t705-tee-p-"));
+    try {
+      const pane = join(d, "pane.txt");
+      const script = `exec > >(tee -p >(head -c 1 >/dev/null)) 2>&1; head -c 1048576 /dev/zero | tr '\\0' x; echo; echo writer-survived`;
+      const r = spawnSync("bash", ["-c", `(${script}) > '${pane}'`], { encoding: "utf8" });
+      expect(r.status).toBe(0);
+      expect(readFileSync(pane, "utf8")).toContain("writer-survived");
+      expect(codexBridgeTeeCommand("'/tmp/log'")).toContain("tee -p");
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
   test("a dead bridge: tail + path, and no tmux attach to a session that is gone", () => {
     const logText = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n") + "\nError: exact paired package identity validation failed\n\n";
     const lines = bridgeLaunchFailureLines({ bridgeAlive: false, attachCommand: "tmux attach -t '=x-桥'", logPath: "/n/codex-bridge.log", logText, waitedSeconds: 25, cleanupCommand: "anet node stop x" });

@@ -40,7 +40,9 @@ export function codexBridgeTeeCommand(quotedLogPath: string, capBytes = CODEX_BR
   //    `cat >/dev/null`, so it keeps draining and tee never sees a closed pipe.
   const cap = Math.max(0, Math.floor(capBytes));
   const sink = `n=0; while IFS= read -r l || [ -n "$l" ]; do n=$((n + \${#l} + 1)); if [ "$n" -gt ${cap} ]; then exec cat >/dev/null; fi; printf '%s\\n' "$l" >> ${quotedLogPath}; done`;
-  return `exec > >(tee >(${sink})) 2>&1`;
+  // `-p` = --output-error=warn-nopipe. If the capped file sink disappears,
+  // tee keeps the pane output alive instead of closing agent-node's stdout.
+  return `exec > >(tee -p >(${sink})) 2>&1`;
 }
 
 /** Last `n` non-empty lines, with trailing whitespace trimmed. */
