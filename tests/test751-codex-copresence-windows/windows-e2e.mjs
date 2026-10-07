@@ -130,6 +130,11 @@ if (firstConfig.runtime !== "codex-app-server" || firstConfig.codexCopresence !=
 }
 const codexHome = join(project, ".anet", "nodes", "windows-picker", "codex-home");
 env.ANET_TEST751_CODEX_HOME = codexHome;
+// The restart half of this smoke is a persisted-thread test. Model Codex's
+// first user turn by materializing the rollout when the fake TUI creates the
+// identity; an unmaterialized deferred identity is intentionally discarded by
+// #2480 and must not be resumed on the next generation.
+env.ANET_TEST751_MATERIALIZE_ON_CREATE = "1";
 mkdirSync(codexHome, { recursive: true });
 // #535 — co-presence start now stops at needs-login (exit 3) when the node's CODEX_HOME has no usable
 // login; `{}` is "not logged in". A clearly fake API key is a usable login shape; nothing here calls a model.

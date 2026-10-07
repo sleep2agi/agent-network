@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createCodexCopresenceThread } from "./codex-copresence-rpc";
+import { CODEX_RECOVERY_WS_OPTIONS, createCodexCopresenceThread } from "./codex-copresence-rpc";
 
 const THREAD = "01999999-1111-7222-8333-444444444444";
 
@@ -26,6 +26,9 @@ function slowFakeAppServer(resumeDelayMs: number, readDelayMs = 0, calls?: strin
 }
 
 describe("co-presence RPC recovery deadline", () => {
+  test("Node recovery lifts the fixed WebSocket frame ceiling for Codex 0.133", () => {
+    expect(CODEX_RECOVERY_WS_OPTIONS).toEqual({ maxPayload: 0, perMessageDeflate: false });
+  });
   test("a fresh launch is deferred to the TUI and never creates a thread over RPC", async () => {
     const calls: string[] = [];
     const result = await createCodexCopresenceThread("ws://fake", 250, undefined, "gpt-test", {
@@ -97,5 +100,34 @@ describe("co-presence RPC recovery deadline", () => {
     }
     await expect(createCodexCopresenceThread("ws://fake", 250, THREAD, "gpt-test", { webSocketCtor: BrokenSocket }))
       .rejects.toThrow("invalid session ownership");
+  });
+
+  test("a broken large-payload connection fails immediately with its transport reason", async () => {
+    class PayloadLimitedSocket extends EventTarget {
+      constructor(_url: string) { super(); queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (request.method === "initialize") {
+          queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", {
+            data: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} }),
+          })));
+          return;
+        }
+        if (request.method !== "thread/resume") return;
+        queueMicrotask(() => {
+          const close = new Event("close") as Event & { code?: number; reason?: string };
+          close.code = 1009;
+          close.reason = "Payload size exceeds maximum allowed size";
+          this.dispatchEvent(close);
+        });
+      }
+      close() {}
+    }
+    const started = Date.now();
+    await expect(createCodexCopresenceThread("ws://fake", 5_000, THREAD, "gpt-test", {
+      webSocketCtor: PayloadLimitedSocket,
+      rolloutBytes: 500 * 1024 ** 2,
+    })).rejects.toThrow("Payload size exceeds maximum allowed size");
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });

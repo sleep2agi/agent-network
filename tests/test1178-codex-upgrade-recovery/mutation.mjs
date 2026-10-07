@@ -28,6 +28,24 @@ function mutateSharedDeadline() {
   finally { writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original); }
 }
 
+function mutateLargePayloadCeiling() {
+  const original = readFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", "utf8");
+  const before = "Object.freeze({ maxPayload: 0, perMessageDeflate: false })";
+  if (!original.includes(before)) throw new Error("large-payload mutation anchor missing");
+  writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original.replace(before, "Object.freeze({ maxPayload: 100 * 1024 * 1024, perMessageDeflate: false })"));
+  try { assertRed("src/codex-copresence-rpc.test.ts", "Node recovery lifts the fixed WebSocket frame ceiling"); }
+  finally { writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original); }
+}
+
+function mutateTransportClose() {
+  const original = readFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", "utf8");
+  const before = "    rejectPending(socketFailure ?? new Error(`Codex app-server WebSocket closed (code ${event?.code ?? \"unknown\"})${reason}`));";
+  if (!original.includes(before)) throw new Error("transport-close mutation anchor missing");
+  writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original.replace(before, "    // mutation: leave requests waiting until the deadline"));
+  try { assertRed("src/codex-copresence-rpc.test.ts", "a broken large-payload connection fails immediately"); }
+  finally { writeFileSync("/repo/agent-network/src/codex-copresence-rpc.ts", original); }
+}
+
 function mutateExperimentalFallback() {
   const original = readFileSync("/repo/agent-network/src/codex-copresence-recovery.ts", "utf8");
   const before = "(code === -32602 || code === -32600)";
@@ -129,6 +147,8 @@ function mutateReservedEnvironment() {
 
 mutateStreamingCopy();
 mutateSharedDeadline();
+mutateLargePayloadCeiling();
+mutateTransportClose();
 mutateExperimentalFallback();
 mutateMetadataOnlyHistory();
 mutateDeferredMaterialization();

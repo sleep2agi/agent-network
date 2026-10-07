@@ -3,8 +3,24 @@ import { resumeAndVerifyCodexThread, type CodexRecoveryVerification } from "./co
 import { formatCopresenceRolloutSize } from "./codex-copresence-resume-timeout";
 
 export const SAFE_CODEX_THREAD_ID = /^[A-Za-z0-9_-]+$/;
+export const CODEX_RECOVERY_WS_OPTIONS = Object.freeze({ maxPayload: 0, perMessageDeflate: false });
 
 async function defaultWebSocketCtor(): Promise<any> {
+  // Node's built-in WebSocket inherits undici's fixed receive ceiling. Codex
+  // 0.133 cannot suppress turns on thread/resume, so a legitimate persisted
+  // thread can exceed that ceiling by hundreds of MiB. `ws` lets this
+  // loopback-only recovery client lift the ceiling; the overall recovery
+  // deadline remains the resource bound. Bun's native client already accepts
+  // the measured payload and avoids adding a second implementation there.
+  if (!(process.versions as Record<string, string | undefined>).bun) {
+    const wsModule = await import("ws");
+    const NodeWebSocket = wsModule.WebSocket;
+    return class CodexRecoveryWebSocket extends NodeWebSocket {
+      constructor(url: string) {
+        super(url, CODEX_RECOVERY_WS_OPTIONS);
+      }
+    };
+  }
   const globalCtor = (globalThis as any).WebSocket;
   if (typeof globalCtor === "function") return globalCtor;
   try {
@@ -39,6 +55,20 @@ export async function createCodexCopresenceThread(
   });
   let nextId = 1;
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: any) => void }>();
+  let socketFailure: Error | null = null;
+  const rejectPending = (error: Error) => {
+    socketFailure = error;
+    for (const request of pending.values()) request.reject(error);
+    pending.clear();
+  };
+  socket.addEventListener("error", (event: any) => {
+    const detail = event?.error?.message || event?.message || String(event?.error || event || "unknown websocket error");
+    rejectPending(new Error(`Codex app-server WebSocket failed: ${detail}`));
+  });
+  socket.addEventListener("close", (event: any) => {
+    const reason = typeof event?.reason === "string" && event.reason ? `: ${event.reason}` : "";
+    rejectPending(socketFailure ?? new Error(`Codex app-server WebSocket closed (code ${event?.code ?? "unknown"})${reason}`));
+  });
   socket.addEventListener("message", (event: any) => {
     let message: any;
     try { message = JSON.parse(typeof event.data === "string" ? event.data : event.data.toString()); } catch { return; }
@@ -53,6 +83,10 @@ export async function createCodexCopresenceThread(
     } else request.resolve(message.result);
   });
   const request = (method: string, params: any, requestTimeoutMs: number) => new Promise<any>((resolve, reject) => {
+    if (socketFailure) {
+      reject(socketFailure);
+      return;
+    }
     const id = nextId++;
     const startedAt = Date.now();
     const timer = setTimeout(() => {

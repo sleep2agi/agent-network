@@ -30,7 +30,9 @@ describe("#448 co-presence tmux sessions: CODEX_HOME set on the pane's FIRST pro
     expect(posix.split("`export CODEX_HOME=${shellQuote(opts.codexHome)}`").length - 1).toBe(1);
     // Each role sources a private file after bash -l has read profiles; that
     // file exports the launcher-owned CODEX_HOME again.
-    expect(posix.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(3);
+    // #2480 validates config.env once before quiescing the old runtime, then
+    // builds one private environment for each of app-server, bridge and TUI.
+    expect(posix.match(/codexCopresenceStageEnv\(opts\.configEnv,/g)).toHaveLength(4);
     expect(posix.match(/\. \$\{shellQuote\([^)]*[Ee]nvFilePath\)\}/g)).toHaveLength(3);
   });
 

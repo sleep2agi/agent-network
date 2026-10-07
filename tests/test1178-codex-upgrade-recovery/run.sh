@@ -41,6 +41,15 @@ mkdir -p "$(dirname "$REPORT")"
   bun run build
   echo "PASS: typecheck and production bundle"
   echo
+  echo "Layer 3b: real Codex 0.133 large-rollout resume under Node"
+  export CODEX_HOME
+  CODEX_HOME=$(mktemp -d /tmp/test1178-codex-home-XXXXXX)
+  printf '{"OPENAI_API_KEY":"sk-test1178-offline"}\n' > "$CODEX_HOME/auth.json"
+  printf 'check_for_update_on_startup = false\n' > "$CODEX_HOME/config.toml"
+  node /repo/real-0133-large-resume.mjs
+  find "$CODEX_HOME" -mindepth 1 -delete
+  rmdir "$CODEX_HOME"
+  echo
   echo "Layer 4: witnessed-red mutations"
   bun /repo/mutation.mjs
   echo
@@ -51,6 +60,8 @@ mkdir -p "$(dirname "$REPORT")"
   echo "Mutation proven by recursive state fixture: nested session files have relative path + byte size + sha256; a symlink to outside CODEX_HOME is rejected instead of copied."
   echo "Mutation proven by >2 GiB sparse rollout: restoring a whole-file read fails while the streaming sparse copy passes."
   echo "Mutation proven by slow fake app-server: reducing the derived thread/resume deadline below its response delay fails closed."
+  echo "Mutation proven by payload-ceiling and close stubs: Node recovery has no fixed WebSocket frame ceiling, and a closed transport rejects immediately with its real reason instead of waiting for the recovery deadline."
+  echo "Real Codex 0.133 large-rollout E2E: the production Node bundle resumes and verifies the exact 256 MiB persisted thread without a 1006 payload disconnect."
   echo "Mutation proven by acknowledged-without-rollout fake: a deferred candidate cannot become codexThreadId until its exact rollout exists; the materialization retry shares ANET_CODEX_RESUME_TIMEOUT_MS."
   echo "Mutation proven by --new-session selector: restoring the recorded thread id makes the co-presence test fail; both native platform lanes also discard pending candidates."
   echo "Mutation proven by Windows pending-state wiring: an unmaterialized stopped-generation candidate is deleted and that deletion is persisted before snapshot/start."

@@ -72,12 +72,14 @@
     "@inquirer/prompts": "^8.4.3",
     "@larksuiteoapi/node-sdk": "^1.42.0",
     "markdown-it": "^14.1.0",
-    "puppeteer-core": "^24.10.2"
+    "puppeteer-core": "^24.10.2",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^25.0.0",
+    "@types/ws": "^8.18.2",
     "javascript-obfuscator": "^5.4.1",
     "node-pty": "^1.1.0",
     "typescript": "^5.0.0"
