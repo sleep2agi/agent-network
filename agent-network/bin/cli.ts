@@ -291,7 +291,7 @@ import {
   quiesceThenSnapshot,
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
-import { resolveCopresenceResumeTimeoutMs } from "../src/codex-copresence-resume-timeout";
+import { formatCopresenceRolloutSize, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -1041,9 +1041,9 @@ async function startWindowsCodexCopresence(
     } finally {
       admission.release();
     }
-    const resumeTimeoutMs = resolveCopresenceResumeTimeoutMs(opts.codexHome, resolved.profile.codexThreadId);
-    console.log(`[anet] Codex thread recovery deadline: ${resumeTimeoutMs}ms`);
-    const thread = await createCodexCopresenceThread(wsUrl, resumeTimeoutMs, resolved.profile.codexThreadId, model);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, resolved.profile.codexThreadId);
+    console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, resolved.profile.codexThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
     let freshDeferred = thread.freshDeferred;
@@ -1765,9 +1765,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let threadId: string;
   let freshDeferred = false;
   try {
-    const resumeTimeoutMs = resolveCopresenceResumeTimeoutMs(opts.codexHome, profile.codexThreadId);
-    console.log(`[anet] Codex thread recovery deadline: ${resumeTimeoutMs}ms`);
-    const thread = await createCodexCopresenceThread(wsUrl, resumeTimeoutMs, profile.codexThreadId, model);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, profile.codexThreadId);
+    console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, profile.codexThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;

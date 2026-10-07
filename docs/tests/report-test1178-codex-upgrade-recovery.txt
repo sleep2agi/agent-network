@@ -4,40 +4,41 @@ Layer 1: pure recovery + existing thread lifecycle
 bun test v1.3.14 (0d9b296a)
 
 src/codex-copresence-resume-timeout.test.ts:
-(pass) Codex co-presence resume timeout > default grows by 120 seconds per started GiB and caps at 15 minutes [4.12ms]
-(pass) Codex co-presence resume timeout > missing or ambiguous rollout keeps the 60 second base [0.43ms]
-(pass) Codex co-presence resume timeout > valid environment override wins; invalid values warn and fall back [0.29ms]
+(pass) Codex co-presence resume timeout > default grows by 120 seconds per started GiB and caps at 15 minutes [3.89ms]
+(pass) Codex co-presence resume timeout > missing or ambiguous rollout keeps the 300 second base [0.34ms]
+(pass) Codex co-presence resume timeout > valid environment override wins; invalid values warn and fall back [0.27ms]
+(pass) Codex co-presence resume timeout > budget retains rollout bytes for timeout diagnostics even with an override [0.42ms]
 
 src/codex-copresence-rpc.test.ts:
-(pass) co-presence RPC recovery deadline > a slow fake app-server can finish thread/resume inside the configured deadline [95.17ms]
-(pass) co-presence RPC recovery deadline > the same slow server still fails closed when its deadline is too small [31.30ms]
+(pass) co-presence RPC recovery deadline > a slow fake app-server can finish thread/resume inside the configured deadline [95.82ms]
+(pass) co-presence RPC recovery deadline > the same slow server still fails closed when its deadline is too small [31.45ms]
 
 src/opencode-agent-node-pair.test.ts:
-(pass) OpenCode agent-node release pairing > pins the exact versions being released together [0.79ms]
+(pass) OpenCode agent-node release pairing > pins the exact versions being released together [0.73ms]
 (pass) OpenCode agent-node release pairing > rejects latest 2.4.x-style help and accepts the RFC-029 capability [0.09ms]
-(pass) OpenCode agent-node release pairing > codex bridge ignores stale PATH globals and resolves only the immutable pair [0.21ms]
-(pass) OpenCode agent-node release pairing > codex capability is explicit and fails closed when absent [0.05ms]
-(pass) OpenCode agent-node release pairing > admits only the exact preview package identity with safe file modes [6.12ms]
-(pass) OpenCode agent-node release pairing > skips an exact project-local impersonator and selects the later global package [4.86ms]
+(pass) OpenCode agent-node release pairing > codex bridge ignores stale PATH globals and resolves only the immutable pair [0.24ms]
+(pass) OpenCode agent-node release pairing > codex capability is explicit and fails closed when absent [0.06ms]
+(pass) OpenCode agent-node release pairing > admits only the exact preview package identity with safe file modes [6.26ms]
+(pass) OpenCode agent-node release pairing > skips an exact project-local impersonator and selects the later global package [6.31ms]
 
 src/codex-copresence-thread.test.ts:
-(pass) co-presence thread lifecycle > restart resumes the persisted conversation [0.09ms]
-(pass) co-presence thread lifecycle > only a node with no persisted thread creates one [0.05ms]
+(pass) co-presence thread lifecycle > restart resumes the persisted conversation [0.07ms]
+(pass) co-presence thread lifecycle > only a node with no persisted thread creates one [0.08ms]
 
 src/codex-copresence-recovery.test.ts:
-(pass) Codex co-presence recovery > resume requires exact thread identity and persisted history [0.29ms]
-(pass) Codex co-presence recovery > stub resume failure is fail-closed and never calls thread/start [0.33ms]
-(pass) Codex co-presence recovery > backup preserves config and session state but excludes credentials [3.49ms]
-(pass) Codex co-presence recovery > active state writer is quiesced before the authoritative snapshot [0.31ms]
-(pass) Codex co-presence recovery > a failed optional recovery point is explicit but does not block startup [0.16ms]
+(pass) Codex co-presence recovery > resume requires exact thread identity and persisted history [0.38ms]
+(pass) Codex co-presence recovery > stub resume failure is fail-closed and never calls thread/start [0.24ms]
+(pass) Codex co-presence recovery > backup preserves config and session state but excludes credentials [3.38ms]
+(pass) Codex co-presence recovery > active state writer is quiesced before the authoritative snapshot [0.32ms]
+(pass) Codex co-presence recovery > a failed optional recovery point is explicit but does not block startup [0.13ms]
 (pass) Codex co-presence recovery > recursive snapshot rejects symlinks instead of following state outside CODEX_HOME [0.95ms]
-(pass) Codex co-presence recovery > a rollout larger than 2 GiB is copied and hashed without a whole-file Buffer [11671.42ms]
-(pass) Codex co-presence recovery > audit exposes topology without config secrets [0.35ms]
+(pass) Codex co-presence recovery > a rollout larger than 2 GiB is copied and hashed without a whole-file Buffer [12093.18ms]
+(pass) Codex co-presence recovery > audit exposes topology without config secrets [0.48ms]
 
- 21 pass
+ 22 pass
  0 fail
- 63 expect() calls
-Ran 21 tests across 5 files. [11.88s]
+ 64 expect() calls
+Ran 22 tests across 5 files. [12.30s]
 
 Layer 2: production wiring invariants
 PASS: launcher uses exact resume/read verification, quiesced private snapshot, and audit projection
@@ -46,7 +47,7 @@ PASS: stale PATH globals are ignored; codex bridge selects exact paired preview.
 Layer 3: typecheck + production bundle
 $ tsc --noEmit
 $ bun build src/client.ts --outdir dist/src --target node --minify && bun build src/daemon-capability-display.ts --outdir dist/src --target browser --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify && bun build src/im/feishu/worker.ts --outdir dist/src/im/feishu --target node --minify --external @larksuiteoapi/node-sdk && tsc --emitDeclarationOnly --declaration --outDir dist && bun x javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && bun x javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && bun x javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true && node scripts/stamp-node-server-version.mjs && cp bin/anet.cjs dist/bin/anet.cjs
-Bundled 3 modules in 21ms
+Bundled 3 modules in 7ms
 
   client.js  5.79 KB  (entry point)
 
@@ -54,15 +55,15 @@ Bundled 1 module in 5ms
 
   daemon-capability-display.js  5.34 KB  (entry point)
 
-Bundled 300 modules in 192ms
+Bundled 300 modules in 147ms
 
   cli.js  1.55 MB  (entry point)
 
-Bundled 247 modules in 101ms
+Bundled 247 modules in 70ms
 
   node-server.js  0.32 MB  (entry point)
 
-Bundled 601 modules in 198ms
+Bundled 601 modules in 216ms
 
   worker.js  2.30 MB  (entry point)
 

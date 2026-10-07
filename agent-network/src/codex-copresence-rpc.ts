@@ -1,5 +1,6 @@
 import { copresenceThreadPlan } from "./codex-copresence-thread";
 import { resumeAndVerifyCodexThread, type CodexRecoveryVerification } from "./codex-copresence-recovery";
+import { formatCopresenceRolloutSize } from "./codex-copresence-resume-timeout";
 
 export const SAFE_CODEX_THREAD_ID = /^[A-Za-z0-9_-]+$/;
 
@@ -26,9 +27,9 @@ export async function createCodexCopresenceThread(
   timeoutMs: number,
   resumeThreadId?: string,
   model?: string,
-  injectedWebSocketCtor?: any,
+  options: { webSocketCtor?: any; rolloutBytes?: number | null } = {},
 ): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean; resumedModel?: string }> {
-  const WsCtor = injectedWebSocketCtor ?? await defaultWebSocketCtor();
+  const WsCtor = options.webSocketCtor ?? await defaultWebSocketCtor();
   const socket = new WsCtor(ws);
   const deadline = Date.now() + timeoutMs;
   await new Promise<void>((resolve, reject) => {
@@ -53,7 +54,14 @@ export async function createCodexCopresenceThread(
   });
   const request = (method: string, params: any, requestTimeoutMs: number) => new Promise<any>((resolve, reject) => {
     const id = nextId++;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`request ${method} timeout`)); }, requestTimeoutMs);
+    const startedAt = Date.now();
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      const diagnostic = method === "thread/resume"
+        ? ` after ${Date.now() - startedAt}ms (${formatCopresenceRolloutSize(options.rolloutBytes ?? null)})`
+        : "";
+      reject(new Error(`request ${method} timeout${diagnostic}`));
+    }, requestTimeoutMs);
     pending.set(id, {
       resolve: (value) => { clearTimeout(timer); resolve(value); },
       reject: (error) => { clearTimeout(timer); reject(error); },

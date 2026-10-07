@@ -14,7 +14,7 @@ mkdir -p "$(dirname "$REPORT")"
   grep -q 'recovery point created' bin/cli.ts
   grep -q 'bestEffortCodexRecoveryPoint' bin/cli.ts
   grep -q 'skipped Codex recovery-point backup' src/codex-copresence-recovery.ts
-  [ "$(grep -c 'resolveCopresenceResumeTimeoutMs(opts.codexHome' bin/cli.ts)" -eq 2 ] || { echo "FAIL: both launchers must derive the bounded recovery deadline" >&2; exit 1; }
+  [ "$(grep -c 'resolveCopresenceResumeBudget(opts.codexHome' bin/cli.ts)" -eq 2 ] || { echo "FAIL: both launchers must derive the bounded recovery deadline" >&2; exit 1; }
   grep -q 'codexRecoveryVerification' bin/cli.ts
   grep -q 'codexTopologyAudit' bin/cli.ts
   grep -q 'resolveCodexAgentNodeLaunchPlan' bin/cli.ts

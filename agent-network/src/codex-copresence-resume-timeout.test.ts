@@ -5,6 +5,7 @@ import { join } from "path";
 import {
   CODEX_RESUME_BASE_TIMEOUT_MS,
   CODEX_RESUME_MAX_TIMEOUT_MS,
+  resolveCopresenceResumeBudget,
   resolveCopresenceResumeTimeoutMs,
 } from "./codex-copresence-resume-timeout";
 
@@ -22,12 +23,12 @@ function rollout(bytes: number): string {
 
 describe("Codex co-presence resume timeout", () => {
   test("default grows by 120 seconds per started GiB and caps at 15 minutes", () => {
-    expect(resolveCopresenceResumeTimeoutMs(rollout(1), THREAD, {})).toBe(180_000);
-    expect(resolveCopresenceResumeTimeoutMs(rollout(1024 ** 3 + 1), THREAD, {})).toBe(300_000);
+    expect(resolveCopresenceResumeTimeoutMs(rollout(1), THREAD, {})).toBe(420_000);
+    expect(resolveCopresenceResumeTimeoutMs(rollout(1024 ** 3 + 1), THREAD, {})).toBe(540_000);
     expect(resolveCopresenceResumeTimeoutMs(rollout(8 * 1024 ** 3), THREAD, {})).toBe(CODEX_RESUME_MAX_TIMEOUT_MS);
   });
 
-  test("missing or ambiguous rollout keeps the 60 second base", () => {
+  test("missing or ambiguous rollout keeps the 300 second base", () => {
     expect(resolveCopresenceResumeTimeoutMs(rollout(1), undefined, {})).toBe(CODEX_RESUME_BASE_TIMEOUT_MS);
     expect(resolveCopresenceResumeTimeoutMs("/does/not/exist", THREAD, {})).toBe(CODEX_RESUME_BASE_TIMEOUT_MS);
   });
@@ -35,7 +36,13 @@ describe("Codex co-presence resume timeout", () => {
   test("valid environment override wins; invalid values warn and fall back", () => {
     const warnings: string[] = [];
     expect(resolveCopresenceResumeTimeoutMs("/none", THREAD, { ANET_CODEX_RESUME_TIMEOUT_MS: "420000" }, warnings.push.bind(warnings))).toBe(420_000);
-    expect(resolveCopresenceResumeTimeoutMs("/none", THREAD, { ANET_CODEX_RESUME_TIMEOUT_MS: "900001" }, warnings.push.bind(warnings))).toBe(60_000);
+    expect(resolveCopresenceResumeTimeoutMs("/none", THREAD, { ANET_CODEX_RESUME_TIMEOUT_MS: "900001" }, warnings.push.bind(warnings))).toBe(300_000);
     expect(warnings).toHaveLength(1);
+  });
+
+  test("budget retains rollout bytes for timeout diagnostics even with an override", () => {
+    const bytes = 780 * 1024 ** 2;
+    expect(resolveCopresenceResumeBudget(rollout(bytes), THREAD, { ANET_CODEX_RESUME_TIMEOUT_MS: "350000" }))
+      .toEqual({ timeoutMs: 350_000, rolloutBytes: bytes });
   });
 });

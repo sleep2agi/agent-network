@@ -93,9 +93,12 @@ describe("#512 launcher wiring (source)", () => {
   });
 
   test("both platforms pass the resolved model into thread recovery", () => {
-    const calls = cli.match(/createCodexCopresenceThread\(wsUrl, resumeTimeoutMs, [^)]*\)/g) ?? [];
+    const calls = cli.match(/createCodexCopresenceThread\(wsUrl, resumeBudget\.timeoutMs, [^\n]*\)/g) ?? [];
     expect(calls.length).toBe(2);
-    for (const c of calls) expect(c.endsWith(", model)")).toBe(true);
+    for (const c of calls) {
+      expect(c).toContain(", model,");
+      expect(c).toContain("rolloutBytes: resumeBudget.rolloutBytes");
+    }
     expect(rpc).toMatch(/resumeAndVerifyCodexThread\([\s\S]*?model,\s*\)/);
   });
 });
