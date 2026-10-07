@@ -157,6 +157,10 @@ policy_mutation 'reporting load shortage as memory hides the cause' \
   'if (loadHigh) return START_GATE_WAITING_LOAD_STATUS;' \
   'if (loadHigh) return START_GATE_WAITING_MEMORY_STATUS;' \
   'load status mismatch'
+policy_mutation 'restoring only memory wait leaves load-blocked nodes stuck' \
+  'return typeof task === "string" && START_GATE_BLOCKED_STATUSES.has(task);' \
+  'return task === START_GATE_WAITING_MEMORY_STATUS;' \
+  'restore does not recognize gate status'
 
 RECHECK_ANCHOR='const still = () => lockStillOurs(dir, holderPid, selfStart, token); // before the lease is written'
 RECHECK_REPL='const still = () => true; // before the lease is written'

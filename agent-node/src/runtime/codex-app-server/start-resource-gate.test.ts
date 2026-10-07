@@ -22,6 +22,7 @@ import {
   parseLoad1,
   parseMemAvailableMb,
   parseProcStartTicks,
+  startGateStatusToRestore,
   waitForStartResources,
   withHeavyStartAdmission,
   type StartGateDeps,
@@ -90,6 +91,21 @@ describe("#612 parsers", () => {
     const nodeGate = readFileSync(join(import.meta.dir, "start-resource-gate.ts"));
     const anetGate = readFileSync(join(import.meta.dir, "../../../../agent-network/src/start-resource-gate.ts"));
     expect(anetGate.equals(nodeGate)).toBe(true);
+  });
+
+  test("all four resource waits restore the pre-gate status after admission", () => {
+    const previous = { status: "working", task: "original task" };
+    for (const task of [
+      START_GATE_WAITING_STATUS,
+      START_GATE_WAITING_LOAD_STATUS,
+      START_GATE_WAITING_BOTH_STATUS,
+      START_GATE_WAITING_PROBE_STATUS,
+    ]) {
+      expect(startGateStatusToRestore({ status: "blocked", task }, previous)).toEqual(previous);
+    }
+    expect(startGateStatusToRestore({ status: "blocked", task: START_GATE_SINGLE_LANE_STATUS }, previous)).toEqual(previous);
+    expect(startGateStatusToRestore({ status: "blocked", task: "human block" }, previous)).toBeNull();
+    expect(startGateStatusToRestore({ status: "working", task: START_GATE_WAITING_LOAD_STATUS }, previous)).toBeNull();
   });
 
   test("MemAvailable and load1 parse from /proc text", () => {

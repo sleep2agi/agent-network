@@ -64,6 +64,13 @@ export const START_GATE_WAITING_PROBE_STATUS = "等待资源探测";
 /** #686 compatibility alias for callers that used the original memory-only status. */
 export const START_GATE_WAITING_STATUS = START_GATE_WAITING_MEMORY_STATUS;
 export const START_GATE_SINGLE_LANE_STATUS = "已超时，按单路放行";
+const START_GATE_BLOCKED_STATUSES = new Set<string>([
+  START_GATE_WAITING_MEMORY_STATUS,
+  START_GATE_WAITING_LOAD_STATUS,
+  START_GATE_WAITING_BOTH_STATUS,
+  START_GATE_WAITING_PROBE_STATUS,
+  START_GATE_SINGLE_LANE_STATUS,
+]);
 /** Logged when one waiter atomically replaces a stuck lease. The wait cap must not admit without this. */
 export const START_GATE_TAKEOVER_STATUS = "接管卡死租约";
 /** Startup leases older than this are not live. ANET_START_LEASE_TTL_SEC overrides it. */
@@ -144,6 +151,27 @@ export interface HostSample {
   memTotalMb: number;
   load1: number;
   cpuCount: number;
+}
+
+export interface StartGateStatusSnapshot {
+  status: string;
+  task?: string;
+}
+
+/** True only for blocked text owned by this gate, including single-lane wait. */
+export function isStartGateBlockedStatus(task: string | undefined): boolean {
+  return typeof task === "string" && START_GATE_BLOCKED_STATUSES.has(task);
+}
+
+/**
+ * Once admission returns, restore the pre-gate status only if the live status
+ * is still ours. A concurrent task/status update must win over stale restore.
+ */
+export function startGateStatusToRestore(
+  live: StartGateStatusSnapshot,
+  previous: StartGateStatusSnapshot,
+): StartGateStatusSnapshot | null {
+  return live.status === "blocked" && isStartGateBlockedStatus(live.task) ? previous : null;
 }
 
 interface HolderRecord {
