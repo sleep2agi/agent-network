@@ -129,6 +129,12 @@ test("wrong executor, sibling turn, cross-network reader and legacy shape cannot
   expect(await mcp(owner.token, "send_reply", {
     in_reply_to: taskId, text: "human cannot forge runtime evidence", thread_id: threadId, turn_id: turnId,
   })).toMatchObject({ ok: false, error: "late_reply_node_token_required" });
+  // Length bound is enforced in the handler (kept out of tools/list for #476).
+  for (const bad of ["", "x".repeat(201)]) {
+    expect(await mcp(workerToken, "send_reply", {
+      in_reply_to: taskId, text: "bad identity", thread_id: bad, turn_id: turnId,
+    })).toMatchObject({ ok: false, error: "late_reply_context_invalid" });
+  }
   expect(count()).toBe(before);
   expect((await get(outsider.token, `/api/tasks/${taskId}`)).status).toBe(404);
   expect((await mcp(outsider.token, "get_task", { task_id: taskId })).ok).toBe(false);

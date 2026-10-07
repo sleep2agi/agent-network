@@ -2144,10 +2144,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // both `attachments` (top-level) and `meta.attachments` are supplied,
       // top-level wins (same rule as REST /api/task L2101).
       meta: z.any().optional().describe("Optional structured reply metadata, e.g. { attachments: [...] }."),
-      // Exact late-receipt identity. Keep the tools/list schema terse; the
-      // complete contract and failure modes live in the task API docs.
-      thread_id: z.string().min(1).max(200).optional(),
-      turn_id: z.string().min(1).max(200).optional(),
+      // Exact late-receipt identity. Keep the tools/list schema terse (#476
+      // byte ceiling): the 1..200 length bound is enforced in handleReply,
+      // not advertised; the full contract lives in the task API docs.
+      thread_id: z.string().optional(),
+      turn_id: z.string().optional(),
     };
   const handleReply = async (args: any, peerCapabilityRequired: boolean) => {
       const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta, thread_id: threadId, turn_id: turnId } = args;
@@ -2156,6 +2157,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       if (peerCapabilityRequired && !in_reply_to) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "peer_reply_task_required" }) }] };
+      }
+      if ([threadId, turnId].some((v) => v !== undefined && (typeof v !== "string" || v.length < 1 || v.length > 200))) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_context_invalid", message: "thread_id and turn_id must be 1-200 characters" }) }] };
       }
       if ((threadId && !turnId) || (!threadId && turnId)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_context_incomplete", message: "thread_id and turn_id must be supplied together" }) }] };
