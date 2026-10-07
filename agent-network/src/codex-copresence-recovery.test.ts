@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "fs";
+import { mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, truncateSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { backupCodexRecoveryState, codexTopologyAudit, quiesceThenSnapshot, resumeAndVerifyCodexThread, verifyCodexThreadHistory } from "./codex-copresence-recovery";
+import { backupCodexRecoveryState, bestEffortCodexRecoveryPoint, codexTopologyAudit, quiesceThenSnapshot, resumeAndVerifyCodexThread, verifyCodexThreadHistory } from "./codex-copresence-recovery";
 
 describe("Codex co-presence recovery", () => {
   test("resume requires exact thread identity and persisted history", () => {
@@ -66,6 +66,13 @@ describe("Codex co-presence recovery", () => {
     expect(events).toEqual(["quiesce:start", "quiesce:complete", "snapshot"]);
   });
 
+  test("a failed optional recovery point is explicit but does not block startup", () => {
+    const warnings: string[] = [];
+    expect(bestEffortCodexRecoveryPoint(() => { throw new Error("disk full"); }, warnings.push.bind(warnings))).toBe(false);
+    expect(warnings.join("\n")).toContain("skipped Codex recovery-point backup: disk full");
+    expect(warnings.join("\n")).toContain("Startup will continue");
+  });
+
   test("recursive snapshot rejects symlinks instead of following state outside CODEX_HOME", () => {
     const root = mkdtempSync(join(tmpdir(), "anet-recovery-link-"));
     const nodeDir = join(root, "node"); const codexHome = join(nodeDir, "codex-home");
@@ -76,6 +83,26 @@ describe("Codex co-presence recovery", () => {
     symlinkSync(outside, join(codexHome, "sessions", "escape.jsonl"));
     expect(() => backupCodexRecoveryState({ nodeDir, codexHome })).toThrow("refuses symlink");
   });
+
+  test("a rollout larger than 2 GiB is copied and hashed without a whole-file Buffer", () => {
+    const root = mkdtempSync(join(tmpdir(), "anet-recovery-large-"));
+    const nodeDir = join(root, "node");
+    const sessions = join(nodeDir, "codex-home", "sessions");
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(nodeDir, "config.json"), JSON.stringify({ codexThreadId: "large" }));
+    const source = join(sessions, "large.jsonl");
+    const bytes = 2 * 1024 ** 3 + 4096;
+    writeFileSync(source, "prefix");
+    truncateSync(source, bytes);
+    const backup = backupCodexRecoveryState({ nodeDir, codexHome: join(nodeDir, "codex-home") });
+    const target = join(backup.backupDir, "codex-state", "sessions", "large.jsonl");
+    expect(statSync(target).size).toBe(bytes);
+    const manifest = JSON.parse(readFileSync(join(backup.backupDir, "manifest.json"), "utf8"));
+    expect(manifest.stateFiles[0]).toMatchObject({ path: "sessions/large.jsonl", size: bytes });
+    expect(manifest.stateFiles[0].sha256).toMatch(/^[0-9a-f]{64}$/);
+    // A sparse fixture must stay sparse; otherwise this test itself would need >2 GiB disk.
+    expect(statSync(target).blocks * 512).toBeLessThan(32 * 1024 ** 2);
+  }, 30_000);
 
   test("audit exposes topology without config secrets", () => {
     const audit = codexTopologyAudit({ codexCopresence: true, codexThreadId: "thread_1", token: "ntok_secret", flags: { sandboxMode: "read-only" } }, "/nodes/n1", "/work");

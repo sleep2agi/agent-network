@@ -7,11 +7,14 @@ mkdir -p "$(dirname "$REPORT")"
   echo
   echo "Layer 1: pure recovery + existing thread lifecycle"
   cd /repo/agent-network
-  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-thread.test.ts src/opencode-agent-node-pair.test.ts
+  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-resume-timeout.test.ts src/codex-copresence-rpc.test.ts src/codex-copresence-thread.test.ts src/opencode-agent-node-pair.test.ts
   echo
   echo "Layer 2: production wiring invariants"
-  grep -q 'resumeAndVerifyCodexThread' bin/cli.ts
+  grep -q 'resumeAndVerifyCodexThread' src/codex-copresence-rpc.ts
   grep -q 'recovery point created' bin/cli.ts
+  grep -q 'bestEffortCodexRecoveryPoint' bin/cli.ts
+  grep -q 'skipped Codex recovery-point backup' src/codex-copresence-recovery.ts
+  [ "$(grep -c 'resolveCopresenceResumeTimeoutMs(opts.codexHome' bin/cli.ts)" -eq 2 ] || { echo "FAIL: both launchers must derive the bounded recovery deadline" >&2; exit 1; }
   grep -q 'codexRecoveryVerification' bin/cli.ts
   grep -q 'codexTopologyAudit' bin/cli.ts
   grep -q 'resolveCodexAgentNodeLaunchPlan' bin/cli.ts
@@ -33,14 +36,19 @@ mkdir -p "$(dirname "$REPORT")"
   bun run build
   echo "PASS: typecheck and production bundle"
   echo
+  echo "Layer 4: witnessed-red mutations"
+  bun /repo/mutation.mjs
+  echo
   echo "Witnessed-red contract"
   echo "Mutation proven by unit stub: thread/read returns exact id with empty history; test rejects and call trace is only thread/resume,thread/read (no thread/start)."
   echo "Mutation proven by paired-runtime stub: preview.33 differs from the required preview.34; the resolution plan has allowPathGlobal=false and an exact non-floating spec. Missing codex-app-server help is rejected."
   echo "Mutation proven by active-writer stub: snapshot throws if reached while writer=true; production Windows and POSIX call the shared quiesceThenSnapshot boundary exactly once each."
   echo "Mutation proven by recursive state fixture: nested session files have relative path + byte size + sha256; a symlink to outside CODEX_HOME is rejected instead of copied."
+  echo "Mutation proven by >2 GiB sparse rollout: restoring a whole-file read fails while the streaming sparse copy passes."
+  echo "Mutation proven by slow fake app-server: reducing the derived thread/resume deadline below its response delay fails closed."
   echo "Identity boundary: config-recovery.json is redacted non-credential metadata only. The original config.json and CODEX_HOME remain in place and are never replaced or cleared."
   echo
   echo "Release gate (report-only; this Draft does not publish or bump versions)"
-  echo "preview.45 is immutable/already published. This release candidate bumps agent-network to preview.46, agent-node to preview.34, and commhub-server to preview.30; run all release gates before publishing. Do not overwrite an existing version or move latest."
+  echo "This change does not bump or publish any package. A release must be built later from an exact main SHA after merge."
   echo "RESULT: PASS"
 } 2>&1 | sed 's/[[:space:]]*$//' | tee "$REPORT"

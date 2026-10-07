@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+const rpc = readFileSync(new URL("./codex-copresence-rpc.ts", import.meta.url), "utf8");
 const tmuxPresent = (() => { try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; } })();
 
 describe("Codex co-presence launch readiness", () => {
@@ -99,12 +100,9 @@ describe("Codex co-presence launch readiness", () => {
   });
 
   test("fresh path performs no thread RPC and launches deferred bridge before remote-only TUI", () => {
-    const start = cli.indexOf("async function createCodexCopresenceThread(");
-    const end = cli.indexOf("async function askTypedConfirmation", start);
-    const body = cli.slice(start, end);
-    expect(body).toContain('return { threadId: "", freshDeferred: true }');
-    expect(body).not.toContain("createTuiHealthChallenge");
-    expect(body).not.toContain('request("thread/start"');
+    expect(rpc).toContain('return { threadId: "", freshDeferred: true }');
+    expect(rpc).not.toContain("createTuiHealthChallenge");
+    expect(rpc).not.toContain('request("thread/start"');
     const orchestration = cli.slice(cli.indexOf("async function startCopresenceOrchestration("), cli.indexOf("async function startOpencodeCopresenceOrchestration("));
     const waiting = orchestration.indexOf("waiting-for-tui-thread");
     const remoteOnly = orchestration.indexOf("const tuiArgv = codexTuiLaunchArgs(");

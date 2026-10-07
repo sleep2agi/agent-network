@@ -579,6 +579,7 @@ Common environment variables:
 | `COMMHUB_ALIAS` | Node alias |
 | `COMMHUB_TOKEN` | Authentication token; a token in node configuration takes precedence |
 | `COMMHUB_AUTH_TOKEN` | Legacy Hub master-token compatibility path; new deployments use user and node tokens |
+| `ANET_CODEX_RESUME_TIMEOUT_MS` | Codex session-resume deadline for `anet node start --copresence` (whole milliseconds, max 900000); when unset it starts at 60 s and adds 120 s per started GiB of rollout, capped at 15 minutes |
 | `ANTHROPIC_BASE_URL` | Anthropic-compatible model endpoint |
 | `ANTHROPIC_AUTH_TOKEN` | Credential for third-party Anthropic-compatible endpoints |
 | `ANTHROPIC_API_KEY` | Credential for Anthropic's official endpoint |

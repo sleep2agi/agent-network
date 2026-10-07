@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "fs";
+import { chmodSync, closeSync, existsSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, unlinkSync, writeFileSync, writeSync } from "fs";
 import { join, sep } from "path";
 
 export interface CodexRecoveryVerification {
@@ -17,12 +17,29 @@ export interface CodexRecoveryBackup {
 }
 
 const SESSION_STATE_NAMES = new Set(["sessions", "history.jsonl", "state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal"]);
+const RECOVERY_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
 
 /** Transaction boundary shared by Windows and POSIX cutovers: the snapshot
  * cannot begin until every authoritative state writer has quiesced. */
 export async function quiesceThenSnapshot<T>(quiesce: () => Promise<void>, snapshot: () => T): Promise<T> {
   await quiesce();
   return snapshot();
+}
+
+/** A recovery point is defense-in-depth: failure must be visible, but must not
+ * strand a quiesced node before its replacement runtime can start. */
+export function bestEffortCodexRecoveryPoint(
+  snapshot: () => void,
+  warn: (message: string) => void,
+): boolean {
+  try {
+    snapshot();
+    return true;
+  } catch (error) {
+    warn(`[anet] ⚠ skipped Codex recovery-point backup: ${(error as Error)?.message || error}`);
+    warn("[anet]    Startup will continue with the original CODEX_HOME unchanged; no backup was recorded.");
+    return false;
+  }
 }
 
 function hashJson(value: unknown): string {
@@ -37,6 +54,46 @@ function redactRecoveryConfig(value: unknown, key = ""): unknown {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [childKey, redactRecoveryConfig(child, childKey)]));
   }
   return value;
+}
+
+/** Copy and hash without ever materializing the whole file in a Buffer.
+ * Zero chunks are sought over and the final length is truncated explicitly,
+ * so a multi-GiB sparse rollout stays sparse in the private recovery point. */
+export function copyAndHashRecoveryFile(source: string, target: string): { size: number; sha256: string } {
+  const input = openSync(source, "r");
+  let output: number | undefined;
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(RECOVERY_COPY_CHUNK_BYTES);
+  let offset = 0;
+  try {
+    output = openSync(target, "wx", 0o600);
+    for (;;) {
+      const count = readSync(input, buffer, 0, buffer.length, offset);
+      if (count === 0) break;
+      const chunk = buffer.subarray(0, count);
+      hash.update(chunk);
+      let allZero = true;
+      for (let i = 0; i < count; i += 1) {
+        if (chunk[i] !== 0) { allZero = false; break; }
+      }
+      if (!allZero) {
+        let written = 0;
+        while (written < count) written += writeSync(output, chunk, written, count - written, offset + written);
+      }
+      offset += count;
+    }
+    ftruncateSync(output, offset);
+    chmodSync(target, 0o600);
+    return { size: offset, sha256: hash.digest("hex") };
+  } catch (error) {
+    try { if (output !== undefined) closeSync(output); } catch { /* best effort */ }
+    output = undefined;
+    try { unlinkSync(target); } catch { /* best effort */ }
+    throw error;
+  } finally {
+    closeSync(input);
+    if (output !== undefined) closeSync(output);
+  }
 }
 
 /** A stored thread is never considered resumed until app-server reads the
@@ -131,9 +188,8 @@ export function backupCodexRecoveryState(opts: {
       return;
     }
     if (!info.isFile()) throw new Error(`recovery snapshot refuses non-file state: ${relativePath}`);
-    copyFileSync(source, target);
-    const copied = readFileSync(target);
-    manifestFiles.push({ path: relativePath, size: copied.length, sha256: createHash("sha256").update(copied).digest("hex") });
+    const copied = copyAndHashRecoveryFile(source, target);
+    manifestFiles.push({ path: relativePath, ...copied });
   };
   if (existsSync(opts.codexHome)) {
     for (const name of readdirSync(opts.codexHome)) {

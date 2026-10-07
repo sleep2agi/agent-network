@@ -6,6 +6,8 @@ import { DEFAULT_CODEX_MODEL } from "./codex-model-default";
 import { resumeAndVerifyCodexThread } from "./codex-copresence-recovery";
 import { codexTuiLaunchArgs } from "./codex-tui-client-health";
 
+const rpc = readFileSync(join(import.meta.dir, "codex-copresence-rpc.ts"), "utf8");
+
 // #512 — codex co-presence nodes ignored the `model` in their own config.json at
 // start: the launcher computed `opts.model || DEFAULT_CODEX_MODEL` where
 // opts.model is only the --model flag, and thread/resume carried no model so
@@ -91,10 +93,9 @@ describe("#512 launcher wiring (source)", () => {
   });
 
   test("both platforms pass the resolved model into thread recovery", () => {
-    const calls = cli.match(/createCodexCopresenceThread\(wsUrl, 60_000, [^)]*\)/g) ?? [];
+    const calls = cli.match(/createCodexCopresenceThread\(wsUrl, resumeTimeoutMs, [^)]*\)/g) ?? [];
     expect(calls.length).toBe(2);
     for (const c of calls) expect(c.endsWith(", model)")).toBe(true);
-    const create = cli.slice(cli.indexOf("async function createCodexCopresenceThread("), cli.indexOf("async function askTypedConfirmation"));
-    expect(create).toMatch(/resumeAndVerifyCodexThread\([\s\S]*?model,\s*\)/);
+    expect(rpc).toMatch(/resumeAndVerifyCodexThread\([\s\S]*?model,\s*\)/);
   });
 });

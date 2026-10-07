@@ -274,7 +274,7 @@ import {
   type WindowsManagedProcess,
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
-import { copresenceThreadPlan } from "../src/codex-copresence-thread";
+import { createCodexCopresenceThread, SAFE_CODEX_THREAD_ID } from "../src/codex-copresence-rpc";
 import {
   bridgeClientHealthReceipt,
   assertPendingServerQuiesced,
@@ -286,12 +286,12 @@ import { decidePendingThreadAtStart, findThreadRollouts } from "../src/codex-pen
 import { POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
+  bestEffortCodexRecoveryPoint,
   codexTopologyAudit,
   quiesceThenSnapshot,
-  resumeAndVerifyCodexThread,
-  verifyCodexThreadHistory,
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
+import { resolveCopresenceResumeTimeoutMs } from "../src/codex-copresence-resume-timeout";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -573,97 +573,6 @@ async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) 
   }
 }
 
-async function resolveCopresenceWebSocketCtor(): Promise<any> {
-  const g = (globalThis as any).WebSocket;
-  if (typeof g === "function") return g;
-  try {
-    const undici = await import("undici");
-    if (typeof (undici as any).WebSocket === "function") return (undici as any).WebSocket;
-  } catch { /* fall through */ }
-  throw new Error(
-    "no WebSocket available — need Bun / Node 22+ (global WebSocket) or `undici` in node_modules",
-  );
-}
-
-// Minimal WebSocket JSON-RPC thread creator against a running `codex
-// app-server`. Mirrors agent-node/tests/rfc-030-create-thread.ts but inlined
-// so the shipped CLI can call it (tests/ is not published).
-async function createCodexCopresenceThread(
-  ws: string,
-  timeoutMs = 60_000,
-  resumeThreadId?: string,
-  model?: string,
-): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean; resumedModel?: string }> {
-  const WsCtor = await resolveCopresenceWebSocketCtor();
-  const socket = new WsCtor(ws);
-  const deadline = Date.now() + timeoutMs;
-  await new Promise<void>((resolve, reject) => {
-    const to = setTimeout(() => reject(new Error(`ws open timeout on ${ws}`)), Math.max(1000, deadline - Date.now()));
-    socket.addEventListener("open", () => { clearTimeout(to); resolve(); }, { once: true });
-    socket.addEventListener("error", (e: any) => { clearTimeout(to); reject(new Error(`ws error: ${e?.message || e}`)); }, { once: true });
-  });
-  let nextId = 1;
-  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
-  socket.addEventListener("message", (ev: any) => {
-    let msg: any;
-    try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : ev.data.toString()); } catch { return; }
-    if (typeof msg?.id === "number" && !msg.method) {
-      const p = pending.get(msg.id);
-      if (!p) return;
-      pending.delete(msg.id);
-      if (msg.error) {
-        // #P2fix复审顺手4 — attach .code so isAlreadyInitializedError's
-        // code-based branch is live (mirrors codex-app-server-client.ts
-        // where the shared client attaches err.error.code).
-        const rpcErr = new Error(`${msg.error.code}: ${msg.error.message}`);
-        (rpcErr as Error & { code?: number }).code = msg.error.code;
-        p.reject(rpcErr);
-      } else p.resolve(msg.result);
-    }
-  });
-  const request = (method: string, params: any, timeoutMsInner: number) => new Promise<any>((resolve, reject) => {
-    const id = nextId++;
-    const to = setTimeout(() => { pending.delete(id); reject(new Error(`request ${method} timeout`)); }, timeoutMsInner);
-    pending.set(id, {
-      resolve: (v) => { clearTimeout(to); resolve(v); },
-      reject: (e) => { clearTimeout(to); reject(e); },
-    });
-    socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-  });
-  const notify = (method: string, params: any) =>
-    socket.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
-  try {
-    try {
-      await request("initialize", {
-        clientInfo: { name: "anet-copresence-creator", title: "creator", version: "0.0.1" },
-      }, 10_000);
-      notify("initialized", {});
-    } catch (e) {
-      // #P2fix顺手4 — only swallow "already initialized" on the shared
-      // server path; every other initialize failure is real.
-      if (!isAlreadyInitializedError(e)) throw e;
-    }
-    const plan = copresenceThreadPlan(resumeThreadId);
-    if (plan.method === "thread/resume") {
-      if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
-      // #512 — the resolved model rides on thread/resume; without it codex resumes
-      // on the rollout's recorded model and ignores the app-server's -c model=.
-      const { resumedModel, ...verification } = await resumeAndVerifyCodexThread(
-          plan.params.threadId,
-          (method, params) => request(method, params, 15_000),
-          model,
-        );
-      return { threadId: plan.params.threadId, verification, freshDeferred: false, resumedModel };
-    }
-    // A fresh Codex 0.148 thread cannot be resumed by a second client until
-    // the human TUI owns/materializes it. Do not create or mutate a thread:
-    // the deferred bridge observes the TUI's unique thread/started event.
-    return { threadId: "", freshDeferred: true };
-  } finally {
-    try { socket.close(); } catch { /* ignore */ }
-  }
-}
-
 async function askTypedConfirmation(prompt: string, expected: string): Promise<boolean> {
   const rl = getRL();
   const answer = await new Promise<string>((resolve) => rl.question(prompt, (s) => resolve(s)));
@@ -716,23 +625,6 @@ function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
   writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`, { mode: 0o600, flag: "wx" });
   chmodIfPosix(envPath, 0o600);  // belt-and-suspenders in case older node ignores mode option
   return envPath;
-}
-
-// #P2fix顺手3 — threadId comes from our own JSON-RPC thread/start response
-// (server-generated UUID / ULID / opaque token), but we interpolate it into
-// a bash string, so a strict-shape check is cheap defense-in-depth against
-// a protocol change or a compromised app-server.
-const SAFE_THREAD_ID = /^[A-Za-z0-9_-]+$/;
-
-// #P2fix顺手4 — mirrors codex-app-server-bridge.ts:isAlreadyInitialized.
-// Only "already initialized" (code -32600 or matching message) is expected
-// on the shared-server bootstrap path; every other initialize failure is
-// real and must re-throw. Inline copy — cli.ts stays package-boundary-free.
-function isAlreadyInitializedError(e: unknown): boolean {
-  const code = (e as { code?: unknown })?.code;
-  if (code === -32600) return true;
-  const msg = (e as { message?: unknown })?.message;
-  return typeof msg === "string" && /already initialized/i.test(msg);
 }
 
 interface CopresenceOptions {
@@ -1039,14 +931,16 @@ function checkCodexCredentialSharingForNode(
 }
 
 function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
-  const nodeDir = join(nodesDir(), resolved.id);
-  const backup = backupCodexRecoveryState({ nodeDir, codexHome });
-  const cfgPath = join(nodeDir, "config.json");
-  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-  cfg.codexRecoveryBackup = { createdAt: backup.createdAt, stateFiles: backup.stateFiles, path: backup.backupDir };
-  atomicWritePrivateJson(cfgPath, cfg);
-  resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
-  console.log(`[anet] recovery point created after prior runtime quiesced (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
+  bestEffortCodexRecoveryPoint(() => {
+    const nodeDir = join(nodesDir(), resolved.id);
+    const backup = backupCodexRecoveryState({ nodeDir, codexHome });
+    const cfgPath = join(nodeDir, "config.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    cfg.codexRecoveryBackup = { createdAt: backup.createdAt, stateFiles: backup.stateFiles, path: backup.backupDir };
+    atomicWritePrivateJson(cfgPath, cfg);
+    resolved.profile.codexRecoveryBackup = cfg.codexRecoveryBackup;
+    console.log(`[anet] recovery point created after prior runtime quiesced (${backup.stateFiles.length} session-state item(s); credentials excluded)`);
+  }, (message) => console.error(message));
 }
 
 /** #512 — say what the resumed thread is actually on; differs only if codex refused the override. */
@@ -1147,11 +1041,13 @@ async function startWindowsCodexCopresence(
     } finally {
       admission.release();
     }
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId, model);
+    const resumeTimeoutMs = resolveCopresenceResumeTimeoutMs(opts.codexHome, resolved.profile.codexThreadId);
+    console.log(`[anet] Codex thread recovery deadline: ${resumeTimeoutMs}ms`);
+    const thread = await createCodexCopresenceThread(wsUrl, resumeTimeoutMs, resolved.profile.codexThreadId, model);
     reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
     let freshDeferred = thread.freshDeferred;
-    if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
+    if (!freshDeferred && !SAFE_CODEX_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
     let pendingRecoveryId: string | undefined;
@@ -1869,7 +1765,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let threadId: string;
   let freshDeferred = false;
   try {
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId, model);
+    const resumeTimeoutMs = resolveCopresenceResumeTimeoutMs(opts.codexHome, profile.codexThreadId);
+    console.log(`[anet] Codex thread recovery deadline: ${resumeTimeoutMs}ms`);
+    const thread = await createCodexCopresenceThread(wsUrl, resumeTimeoutMs, profile.codexThreadId, model);
     reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;
@@ -1887,7 +1785,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #P2fix顺手3 — defense-in-depth shape check before threadId flows into
   // a bash-string interpolation. Server-generated ids match; anything else
   // means either a protocol drift or a compromised app-server.
-  if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) {
+  if (!freshDeferred && !SAFE_CODEX_THREAD_ID.test(threadId)) {
     console.error(`[anet] internal error: unexpected threadId shape (rejected before shell interpolation)`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
