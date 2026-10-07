@@ -274,9 +274,7 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/guide/codex-cheatsheet.md
 #     docs-site/docs/en/guide/codex-cheatsheet.md
 #   两页都没有 #L 源码行号 pin。本套件先在该提交上红("预期扫 121 …,实际 123")才来抬。
-# board #710:123 → 124。新增一份迟到回执的双库与旧客户端兼容报告;
-# 报告不含源码行号 pin，所以只有文件分母 +1，uniq / occ 均不变。
-[[ "$files" -eq 124 ]] || fail "预期扫 124 个文档文件(= git ls-files 的结果),实际 $files"
+[[ "$files" -eq 123 ]] || fail "预期扫 123 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
 # 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——
