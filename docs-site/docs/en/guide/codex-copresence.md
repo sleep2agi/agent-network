@@ -181,7 +181,7 @@ final paginated rollout record at <path> is missing an ordinal
 So **never mix codex versions on one thread**. anet now checks before starting (co-presence launchers on POSIX and Windows, external app-server nodes, agent-node's own app-server and codex-sdk):
 
 - It finds the rollout the way codex does (newest in `sessions/`, `archived_sessions/` only if none) and reads only its **first line** (bounded: a file of hundreds of MB costs tens of KB).
-- It runs `codex --version` and trusts only a `codex-cli x.y.z` line (a wrapper's own version line does not count; no match = unknown). Without `--codex-bin`, a bare `codex` is resolved once on the login-shell PATH the launch really uses, so the binary checked is the binary started.
+- It runs `codex --version` and trusts only a `codex-cli x.y.z` line (a wrapper's own version line does not count; no match = unknown). The version probe runs through the exact shell preamble of the launch (`bash -lc` login shell for co-presence; the workspace `.env` sourced first for external app-server nodes), so the binary checked is the binary started. The launch command itself is unchanged.
 - Paginated thread + codex < 0.145: **refuse to start**. Nothing is started, the rollout is not touched, and the message says how to point the node at a newer codex:
   `anet node start <node> --codex-bin /path/to/codex` (co-presence nodes), or `codexBin` in config.json / `ANET_CODEX_BIN` (codex-sdk nodes), or make the first `codex` on PATH ≥ 0.145.
 - Rollout not found, first line unreadable, version unknown: warn only, start as before.

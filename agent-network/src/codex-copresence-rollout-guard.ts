@@ -4,6 +4,7 @@
 import { spawnSync } from "child_process";
 import {
   checkRolloutCodexCompat,
+  parseCodexVersionOutput,
   probeCodexVersionCached,
   resolveCodexResumeRollout,
   type FirstLineRead,
@@ -13,7 +14,7 @@ export interface CopresenceRolloutGuardInput {
   codexHome: string;
   /** Threads this start may resume (recorded thread, pending candidate). Empty entries are skipped. */
   threadIds: Array<string | undefined | null>;
-  /** The binary the launch will run — resolve it first (resolveLaunchCodexBin) so probe = launch. */
+  /** The binary as the launch names it (probeVersion should run it the way the launch does). */
   codexBin: string;
   displayName: string;
   probeVersion?: (bin: string) => string | null;
@@ -29,29 +30,32 @@ export interface CopresenceRolloutGuardResult {
 }
 
 /**
- * The POSIX launchers run codex inside `bash -lc "exec <codexBin> …"`, so a bare
- * name is looked up on the LOGIN shell's PATH, which can differ from anet's own
- * PATH (profile scripts, nvm, …). Resolve it once, the same way, and hand the
- * absolute path to both the version probe and the launch so they cannot diverge.
- * Paths (containing "/") are returned unchanged; on failure the name is returned
- * unchanged (the launch then behaves exactly as before).
+ * `codex --version` run through the SAME shell preamble the launch uses, so the
+ * probe sees the binary the launch will run: the launch command itself is never
+ * rewritten. The co-presence panes run `bash -lc "… exec <codexBin> app-server"`
+ * (login-shell PATH); external app-server panes run `bash -c "<source .env>; …;
+ * <codexBin> app-server"` (the workspace .env may set PATH). `script` must end in
+ * `exec <codexBin> --version`. Only a codex-identifying line counts; anything
+ * else (or any failure) is null = unknown, which never blocks.
  */
-export function resolveLaunchCodexBin(
-  codexBin: string,
+export function probeCodexVersionViaShell(
+  script: string,
   opts: { loginShell: boolean; env?: NodeJS.ProcessEnv; run?: typeof spawnSync },
-): { bin: string; resolvedFrom?: string } {
-  if (process.platform === "win32" || codexBin.includes("/")) return { bin: codexBin };
-  const run = opts.run ?? spawnSync;
-  const env = opts.env ?? process.env;
+): string | null {
+  if (process.platform === "win32") return null;
+  const key = `${opts.loginShell ? "l" : "c"}\0${script}`;
+  if (!opts.run && shellProbeCache.has(key)) return shellProbeCache.get(key) ?? null;
+  let version: string | null = null;
   try {
-    const r = run("bash", [opts.loginShell ? "-lc" : "-c", 'command -v -- "$1"', "anet-resolve-codex", codexBin], {
-      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], env,
+    const r = (opts.run ?? spawnSync)("bash", [opts.loginShell ? "-lc" : "-c", script], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"], env: opts.env ?? process.env,
     });
-    const out = String(r.stdout ?? "").trim().split("\n").pop() ?? "";
-    if (!r.error && r.status === 0 && out.startsWith("/")) return { bin: out, resolvedFrom: codexBin };
-  } catch { /* fall through */ }
-  return { bin: codexBin };
+    if (!r.error && r.status === 0) version = parseCodexVersionOutput(`${r.stdout ?? ""}\n${r.stderr ?? ""}`);
+  } catch { version = null; }
+  if (!opts.run) shellProbeCache.set(key, version);
+  return version;
 }
+const shellProbeCache = new Map<string, string | null>();
 
 export function copresenceRolloutGuard(input: CopresenceRolloutGuardInput): CopresenceRolloutGuardResult {
   const warnings: string[] = [];

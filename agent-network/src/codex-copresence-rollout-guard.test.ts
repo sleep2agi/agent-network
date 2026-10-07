@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { copresenceRolloutGuard, resolveLaunchCodexBin } from "./codex-copresence-rollout-guard";
+import { copresenceRolloutGuard, probeCodexVersionViaShell } from "./codex-copresence-rollout-guard";
+import { appserverShellCommand, versionProbeShellCommand } from "./codex-external-appserver";
 
 const THREAD = "01a11846-d796-72f1-af68-8d9215a65dc8";
 const meta = (historyMode?: string) =>
@@ -68,14 +69,30 @@ describe("board #734 co-presence pre-start guard", () => {
     } finally { rmSync(h, { recursive: true, force: true }); }
   });
 
-  test("resolveLaunchCodexBin: paths unchanged; bare names resolved through the given shell mode", () => {
-    expect(resolveLaunchCodexBin("/opt/x/codex", { loginShell: true })).toEqual({ bin: "/opt/x/codex" });
+  test("probeCodexVersionViaShell: runs the given shell form, strict parse, failure = unknown", () => {
     const calls: string[][] = [];
-    const run = ((cmd: string, args: string[]) => { calls.push([cmd, ...args]); return { status: 0, stdout: "/login/bin/codex\n" }; }) as any;
-    expect(resolveLaunchCodexBin("codex", { loginShell: true, run })).toEqual({ bin: "/login/bin/codex", resolvedFrom: "codex" });
-    expect(calls[0].slice(0, 2)).toEqual(["bash", "-lc"]);
-    const fail = (() => ({ status: 1, stdout: "" })) as any;
-    expect(resolveLaunchCodexBin("codex", { loginShell: false, run: fail })).toEqual({ bin: "codex" });
+    const run = ((cmd: string, args: string[]) => { calls.push([cmd, ...args]); return { status: 0, stdout: "nvm 0.39.7\ncodex-cli 0.159.2\n" }; }) as any;
+    expect(probeCodexVersionViaShell("exec 'codex' --version", { loginShell: true, run })).toBe("0.159.2");
+    expect(calls[0]).toEqual(["bash", "-lc", "exec 'codex' --version"]);
+    expect(probeCodexVersionViaShell("x", { loginShell: false, run: (() => ({ status: 0, stdout: "nvm 0.39.7" })) as any })).toBeNull();
+    expect(probeCodexVersionViaShell("x", { loginShell: false, run: (() => ({ status: 127, stdout: "" })) as any })).toBeNull();
+  });
+
+  test("external app-server: the version probe uses the app-server pane's exact preamble", () => {
+    const plan = {
+      alias: "n1", nodeDir: "/n", configPath: "/n/config.json", workspaceDir: "/ws", url: "ws://127.0.0.1:1", host: "127.0.0.1",
+      port: 1, readyzUrl: "http://127.0.0.1:1/readyz", projectDir: "/p", projectDirFromWorkspace: false, threadId: THREAD,
+      model: "", codexHome: "/h", codexBin: "codex", tui: false, sessions: { appsrv: "a", tui: "t", bridge: "b" },
+    } as any;
+    const launch = appserverShellCommand(plan, "/bun");
+    const probe = versionProbeShellCommand(plan);
+    const tail = "exec 'codex' --version";
+    expect(probe.endsWith(`; ${tail}`)).toBe(true);
+    // .env sourcing, NO_PROXY and CODEX_HOME come first in both, byte for byte.
+    const preamble = probe.slice(0, -tail.length);
+    expect(launch.startsWith(preamble)).toBe(true);
+    expect(preamble).toContain("/ws/.env");
+    expect(launch).toContain("'codex' -C '/p' app-server");
   });
 });
 

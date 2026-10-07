@@ -246,6 +246,7 @@ import {
   resumedThreadVerdict,
   sessionsAlreadyPresent,
   tuiShellCommand,
+  versionProbeShellCommand,
   waitForReadyz,
   type ExternalAppserverPlan,
 } from "../src/codex-external-appserver";
@@ -285,7 +286,7 @@ import {
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
 import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
-import { copresenceRolloutGuard, resolveLaunchCodexBin } from "../src/codex-copresence-rollout-guard";
+import { copresenceRolloutGuard, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
 import { describeMissingOrdinalFailure } from "../src/codex-rollout-history-guard";
 import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
@@ -1575,19 +1576,18 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // mode; the thread would become permanently unresumable. Read-only; anything
   // undeterminable only warns.
   {
-    // The POSIX launch runs `bash -lc "exec <codexBin> …"`: resolve the bare name on that
-    // login-shell PATH once, and launch the same absolute path we probe.
-    const launchBin = resolveLaunchCodexBin(opts.codexBin, { loginShell: true });
-    if (launchBin.resolvedFrom) {
-      console.log(`[anet] codex binary: ${launchBin.bin} (resolved "${launchBin.resolvedFrom}" on the login-shell PATH)`);
-      opts.codexBin = launchBin.bin;
-    }
     const pending = (profile as { codexPendingThread?: { threadId?: unknown } }).codexPendingThread;
     const guard = copresenceRolloutGuard({
       codexHome: opts.codexHome,
       threadIds: opts.newSession ? [] : [requestedThreadId, typeof pending?.threadId === "string" ? pending.threadId : undefined],
       codexBin: opts.codexBin,
       displayName,
+      // The POSIX launch runs `bash -lc "export CODEX_HOME=…; …; exec <codexBin> app-server"`;
+      // probe through that same login shell so a bare `codex` resolves the same way. The
+      // launch command is not touched. (config.env cannot set PATH: it is a reserved key.)
+      probeVersion: process.platform === "win32"
+        ? undefined
+        : (bin) => probeCodexVersionViaShell(`export CODEX_HOME=${shellQuote(opts.codexHome)} ; exec ${shellQuote(bin)} --version`, { loginShell: true }),
     });
     for (const line of guard.warnings) console.warn(`[anet] ${line}`);
     if (guard.block) {
@@ -7932,15 +7932,12 @@ async function startExternalAppserverNode(
     console.error(`[anet] ❌ CODEX_HOME ${plan.codexHome} does not exist — this node's codex login and sessions live there.`);
     return 1;
   }
-  // Board #734 — same pre-start guard as the managed co-presence launchers. The panes run
-  // `bash -c "<codexBin> …"`; resolve a bare name once and launch the path we probed.
-  const launchBin = resolveLaunchCodexBin(plan.codexBin, { loginShell: false });
-  if (launchBin.resolvedFrom) {
-    console.log(`[anet] codex binary: ${launchBin.bin} (resolved "${launchBin.resolvedFrom}" on PATH)`);
-    plan.codexBin = launchBin.bin;
-  }
+  // Board #734 — same pre-start guard as the managed co-presence launchers. The version
+  // probe runs with the app-server pane's own preamble (workspace .env sourced, `bash -c`),
+  // so it sees the binary that pane will run; the launch command is unchanged.
   const rolloutGuard = copresenceRolloutGuard({
     codexHome: plan.codexHome, threadIds: [plan.threadId], codexBin: plan.codexBin, displayName: plan.alias,
+    probeVersion: () => probeCodexVersionViaShell(versionProbeShellCommand(plan), { loginShell: false, env: { ...process.env, CODEX_HOME: plan.codexHome } }),
   });
   for (const line of rolloutGuard.warnings) console.warn(`[anet] ${line}`);
   if (rolloutGuard.block) {

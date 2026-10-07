@@ -5,7 +5,7 @@
 # an old codex on such a thread, and must explain the failure when it already happened.
 # Real codex 0.133.0 / 0.159.2 for the version probe, the owned app-server, the real resume
 # failure and the real POSIX launcher; synthetic rollouts (mk-rollout.py). Every layer has a
-# witnessed red (mutations M1-M9 of the shipped source).
+# witnessed red (mutations M1-M10 of the shipped source).
 set -euo pipefail
 cd /workspace
 echo "T734 source=${T734_SOURCE_COMMIT:-unknown}"
@@ -169,6 +169,48 @@ launch mixed "$C159" --new-session
 if newsession_fresh; then pass "L5 --new-session on the mixed rollout: fresh thread, old thread not resumed"; else fail "L5 --new-session fresh thread"; tail -30 "$LAST_LOG"; fi
 if [ "$LAST_SUM" = "$(sha256sum "$LAST_ROLLOUT")" ]; then pass "L5 --new-session left the rollout untouched"; else fail "L5 --new-session rollout changed"; fi
 
+echo "── L6 external app-server node (#630): the workspace .env sets PATH"
+# The app-server pane runs `bash -c "<source .env>; …; codex -C … app-server …"`. The probe must
+# see the binary that pane runs, and the launch command must stay exactly as before #734.
+SOCK=/tmp/t734.tmux.sock
+EXT_N=0
+ext_launch() { # ENV-PATH-DIR ANET-PATH-DIR MODE → sets EXT_LOG, EXT_START (appsrv pane start command)
+  EXT_N=$((EXT_N + 1))
+  local node="t734x$EXT_N" ws port=$((9400 + EXT_N)) i
+  ws=$(mktemp -d /root/t734-ext.XXXXXX)
+  mkdir -p "$ws/.anet/nodes/$node/codex-home" "$ws/.anet/nodes/$node/logs"
+  printf '{"node_name":"%s","alias":"%s","runtime":"codex-app-server","hub":"%s","token":"ntok_t734fake","codexAppServerUrl":"ws://127.0.0.1:%s","codexThreadId":"%s","codexProjectDir":"%s","codexCopresence":false,"model":"","channels":[],"env":{},"flags":{}}\n' \
+    "$node" "$node" "$HUB" "$port" "$TID" "$ws" > "$ws/.anet/nodes/$node/config.json"
+  chmod 600 "$ws/.anet/nodes/$node/config.json"
+  python3 "$SUITE/mk-rollout.py" "$ws/.anet/nodes/$node/codex-home" "$TID" "$3" >/dev/null
+  printf 'PATH=%s:$PATH\n' "$1" > "$ws/.env"
+  : > /tmp/t734-appserver-argv.log
+  EXT_LOG="/root/t734-ext-$node.log"; EXT_START=""
+  (cd "$ws" && ANET_TMUX_SOCKET=$SOCK PATH="$2:$PATH" timeout 60 "${ANET[@]}" node start "$node" --external-appserver --verify-timeout 1 > "$EXT_LOG" 2>&1 || true) &
+  local bg=$!
+  for i in $(seq 40); do
+    EXT_START=$(tmux -S "$SOCK" list-panes -a -F '#{session_name}|#{pane_start_command}' 2>/dev/null | grep -F "$node-appsrv|" || true)
+    [ -n "$EXT_START" ] && break
+    kill -0 "$bg" 2>/dev/null || break
+    sleep 0.5
+  done
+  wait "$bg" || true
+  tmux -S "$SOCK" kill-server >/dev/null 2>&1 || true
+}
+ext_allows_env_binary() { ! grep -Fq 'refusing to start' "$EXT_LOG" && grep -q '^0.159.2 -C ' /tmp/t734-appserver-argv.log; }
+ext_launch /opt/t734-p159 /opt/t734-p133 paginated
+echo "   appsrv pane: ${EXT_START#*|}"
+if ext_allows_env_binary; then pass "L6 .env PATH=0.159.2, anet PATH=0.133: probe sees 0.159.2, pane runs 0.159.2"; else fail "L6 .env newer"; tail -20 "$EXT_LOG"; cat /tmp/t734-appserver-argv.log; fi
+if printf '%s' "$EXT_START" | grep -Fq "codex' -C " && ! printf '%s' "$EXT_START" | grep -Fq '/opt/t734-p'; then
+  pass "L6 launch command still runs the bare configured 'codex' (no substituted path)"
+else fail "L6 launch command changed: ${EXT_START:-<no pane>}"; fi
+ext_launch /opt/t734-p133 /opt/t734-p159 paginated
+if grep -Fq 'refusing to start codex 0.133.0' "$EXT_LOG" && [ ! -s /tmp/t734-appserver-argv.log ] && [ -z "$EXT_START" ]; then
+  pass "L6 .env PATH=0.133, anet PATH=0.159.2: refused, nothing started"
+else fail "L6 .env older"; tail -20 "$EXT_LOG"; fi
+ext_launch /opt/t734-p133 /opt/t734-p159 legacy
+if ! grep -Fq 'refusing to start' "$EXT_LOG" && grep -q '^0.133.0 -C ' /tmp/t734-appserver-argv.log; then pass "L6 legacy thread: the .env binary (0.133) runs, as before #734"; else fail "L6 legacy"; tail -20 "$EXT_LOG"; fi
+
 echo "── mutations of the shipped source (each must go red)"
 GUARD_AN=agent-network/src/codex-rollout-history-guard.ts
 GUARD_NODE=agent-node/src/runtime/codex-rollout-history-guard.ts
@@ -194,6 +236,7 @@ PY
     l5-block) launch paginated /usr/local/bin/codex-stub-0.133.0; launcher_blocks || red=1 ;;
     l5-twopath) twopath /opt/t734-p133 /opt/t734-p159; twopath_allows || red=1 ;;
     l5-newsession) launch mixed "$C159" --new-session; newsession_fresh || red=1 ;;
+    l6-env) ext_launch /opt/t734-p159 /opt/t734-p133 paginated; ext_allows_env_binary || red=1 ;;
     unit-node) (cd agent-node && bun test src/runtime/codex-rollout-history-guard.test.ts src/goals/codex-wake.test.ts >/dev/null 2>&1) || red=1 ;;
   esac
   cp "$bak" "$file"; rm -f "$bak"
@@ -205,8 +248,9 @@ mutate M3-launcher-guard-not-wired "$CLI" '      threadIds: opts.newSession ? []
 mutate M4-launcher-ignores-block "$CLI" '    if (guard.block) {' '    if (guard.block && false) {' l5-block
 mutate M5-launcher-ignores-new-session "$TIMEOUT_MOD" '  return newSession ? undefined : recordedThreadId;' '  return recordedThreadId;' l5-newsession
 mutate M6-first-semver-wins "$GUARD_AN" '  const m = /\bcodex(?:-cli)?\s+v?(\d+\.\d+\.\d+)/i.exec(text);' '  const m = /(\d+\.\d+\.\d+)/.exec(text);' l2-wrapper
-mutate M7-probe-anet-path-not-login-path "$CLI" '      opts.codexBin = launchBin.bin;' '' l5-twopath
+mutate M7-probe-anet-path-not-login-path "$CLI" '        : (bin) => probeCodexVersionViaShell(`export CODEX_HOME=${shellQuote(opts.codexHome)} ; exec ${shellQuote(bin)} --version`, { loginShell: true }),' '        : (bin) => probeCodexVersionViaShell(`export CODEX_HOME=${shellQuote(opts.codexHome)} ; exec ${shellQuote(bin)} --version`, { loginShell: false }),' l5-twopath
 mutate M8-archived-before-sessions "$GUARD_NODE" '  return newestRolloutUnder(join(codexHome, "sessions"), threadId)' '  return newestRolloutUnder(join(codexHome, "archived_sessions"), threadId) ?? newestRolloutUnder(join(codexHome, "sessions"), threadId)' unit-node
+mutate M10-probe-skips-dotenv agent-network/src/codex-external-appserver.ts '    dotenvSnippet(plan.workspaceDir), // MUTATION-ANCHOR:probe-sources-dotenv' '' l6-env
 mutate M9-goal-wake-unguarded "$WAKE" '    const refusal = deps.guardResume?.(goal.codex_thread_id) ?? null;' '    const refusal = null;' unit-node
 
 echo "T734 PASS=$PASS FAIL=$FAIL"
