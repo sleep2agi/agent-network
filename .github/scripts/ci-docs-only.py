@@ -81,6 +81,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "server-unit": {"test798-server-unit-ci"},
     "agent-node-unit": {"test725-agent-node-unit-ci", "test556-node-tmux-format-locale"},
     "test1755-rules-file-e2e": {"test1755-rules-file-e2e"},
+    "test9763-team-skills-e2e": {"test9763-team-skills-e2e"},
     "qa-node-logs-e2e": {"qa-node-logs-e2e"},
     "qa-board673-claude-process-auth": {"qa-board673-claude-process-auth"},
     "qa-create-node-workdir": {"qa-create-node-workdir"},

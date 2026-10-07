@@ -3655,7 +3655,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "list_node_skills",
-    "Ask a node to list the skills its runtime loads (name, scope project|user|system, display path, frontmatter description). Read-only; no path argument. Poll get_rules_file_result — content is JSON {skills:[…]}.",
+    "Ask a node to list the skills its runtime loads (name, scope project|user|system, display path, frontmatter description; team skills also include origin \"team\"). Read-only; no path argument. Poll get_rules_file_result — content is JSON {skills:[…], roots, warnings}.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),
@@ -3666,7 +3666,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_skill",
-    "Ask a node for one skill's SKILL.md by name. Read-only; the node resolves the name under its own runtime's skills roots — no path argument. Poll get_rules_file_result — content is JSON {name, scope, path_rel, description, content}.",
+    "Ask a node for one skill's SKILL.md by name. Read-only; the node resolves the name under its own runtime's skills roots — no path argument. Poll get_rules_file_result — content is JSON {name, scope, path_rel, description, content, origin?}. origin is \"team\" only for a team skill.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),

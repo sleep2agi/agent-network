@@ -1309,6 +1309,7 @@ import { appendFileSync, mkdirSync, statSync } from "fs";
 //    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
+import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
@@ -1359,6 +1360,11 @@ const NODE_CODEX_HOME: string | undefined = (RUNTIME === "codex" || RUNTIME === 
     return applied.codexHome;
   })()
   : undefined;
+try {
+  await installTeamSkills(RUNTIME, { workDir: process.cwd(), codexHome: NODE_CODEX_HOME }, { log, warn }); // board-team-skills-install
+} catch (err: any) {
+  warn(`[skills] 团队技能安装失败：${err?.message || err}`);
+}
 // #448 —— 分层健康(只报告):bridge / app_server / tui / model_auth,随 report_status 的 `health` 上报。
 // 只给 codex-app-server 运行时开;其他运行时不带这一格(旧 Hub 本来就丢弃未知顶层键)。
 const codexModelAuth = new ModelAuthTracker();

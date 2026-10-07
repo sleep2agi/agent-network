@@ -44,6 +44,7 @@ import {
 } from "./outbound-attachments";
 import { attachLocalLinks } from "./reply-local-links";
 import { drainRulesFileRequests, handleRulesFileEvent } from "./node-server-rules-file";
+import { installTeamSkills } from "./node-skills";
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
 import { PEER_REPLY_TOOL_NAME, sendChannelPeerReply } from "./channel-peer-reply";
 
@@ -838,6 +839,9 @@ const drainChannelInbox = createSingleFlight(async () => {
 
 // ── Main ────────────────────────────────────────────
 async function main() {
+  await installTeamSkills("claude", { workDir: process.cwd() }, { log, warn: log }).catch((err) => {
+    log(`[skills] 团队技能安装失败：${err?.message || err}`);
+  });
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
   log("MCP stdio connected");

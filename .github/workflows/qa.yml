@@ -29,6 +29,7 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test556-node-tmux-format-locale/**'
       - 'tests/test1755-rules-file-e2e/**'
+      - 'tests/test9763-team-skills-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test505-tmux-socket-isolation/**'
       - 'tests/test533-tmux-format-locale/**'
@@ -246,6 +247,7 @@ on:
       - 'tests/test725-agent-node-unit-ci/**'
       - 'tests/test556-node-tmux-format-locale/**'
       - 'tests/test1755-rules-file-e2e/**'
+      - 'tests/test9763-team-skills-e2e/**'
       - 'tests/test745-agent-network-unit-ci/**'
       - 'tests/test505-tmux-socket-isolation/**'
       - 'tests/test533-tmux-format-locale/**'
@@ -645,6 +647,28 @@ jobs:
 
       - name: Run rules-file e2e
         run: docker run --rm anet-test1755-rules-file-e2e
+
+  test9763-team-skills-e2e:
+    # 团队技能:启动时把 ~/.anet/skills/<name> 链进该运行时的用户级目录。
+    # 真 hub + 真 agent-node。验 skills_list 的 origin、日志里的「全机生效」、
+    # 已有同名目录不覆盖、两个 codex home 各链各的,以及拿掉安装调用后链接不再出现。
+    name: team skills e2e (Docker, real hub + agent-node)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test9763-team-skills-e2e"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact team-skills e2e image
+        run: |
+          docker build \
+            --build-arg TEST9763_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test9763-team-skills-e2e \
+            -f tests/test9763-team-skills-e2e/Dockerfile .
+
+      - name: Run team-skills e2e
+        run: docker run --rm --init --cpus=2 anet-test9763-team-skills-e2e
 
   qa-node-logs-e2e:
     # 节点运行日志(tail_node_logs)端到端:真 hub + 真 agent-node 同镜像。验单测验不了的那几条:
