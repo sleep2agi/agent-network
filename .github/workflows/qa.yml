@@ -208,6 +208,7 @@ on:
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -419,6 +420,7 @@ on:
       - 'tests/test698-atomic-peer-reply/**'
       - 'tests/test519-claude-code-peer-reply/**'
       - 'tests/test750-codex-copresence-onecommand/**'
+      - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -1995,6 +1997,11 @@ jobs:
           # health.codex_login (fingerprint + shared_with), with an in-suite witnessed red.
           # Not L1: two bun installs + three node processes; same budget reasoning as test185.
           - test594-codex-login-health
+          # #720: real codex 0.133.0 + 0.159.2 app-server with anet's commhub -c overrides —
+          # first commhub tool call (and again after restart) runs with no 「Allow the commhub
+          # MCP server to run tool」 prompt; control without the setting prompts/declines;
+          # in-suite mutations M1-M5. Not L1: the image installs two ~150 MB codex binaries.
+          - test720-codex-commhub-tool-approval
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}

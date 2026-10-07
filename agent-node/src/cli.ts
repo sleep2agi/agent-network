@@ -3436,6 +3436,10 @@ function buildCodexConfig(workdir: string): Record<string, any> {
     commhub: {
       command: "bun",
       args: [nodeServerPath],
+      // #720 — pre-approve commhub's tools so a first call never waits on an
+      // 「Allow the commhub MCP server to run tool …?」 prompt nobody answers.
+      // commhub only; other MCP servers keep codex's default.
+      default_tools_approval_mode: "approve",
       // env intentionally omitted: codex CLI subprocess inherits this
       // agent-node parent process's env, which includes the per-node
       // COMMHUB_ALIAS / COMMHUB_TOKEN / COMMHUB_URL that anet's

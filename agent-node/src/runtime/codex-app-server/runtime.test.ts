@@ -46,8 +46,17 @@ describe("buildOwnedAppServerArgs", () => {
       "app-server",
       "-c", `mcp_servers.commhub.url="http://127.0.0.1:9200"`,
       "-c", `mcp_servers.commhub.bearer_token_env_var="${COMMHUB_MCP_TOKEN_ENV}"`,
+      "-c", `mcp_servers.commhub.default_tools_approval_mode="approve"`,
       "--listen", URL,
     ]);
+  });
+
+  test("#720 — commhub tools are pre-approved; no other MCP server is", () => {
+    const args = buildOwnedAppServerArgs(URL, { commhubMcpUrl: "http://127.0.0.1:9200" });
+    const approvals = args.filter((a) => a.includes("approval_mode"));
+    expect(approvals).toEqual([`mcp_servers.commhub.default_tools_approval_mode="approve"`]);
+    // without a commhub server there is nothing to pre-approve
+    expect(buildOwnedAppServerArgs(URL).some((a) => a.includes("approval_mode"))).toBe(false);
   });
 
   test("the CommHub bearer TOKEN never appears in argv (only the env-var NAME)", () => {
