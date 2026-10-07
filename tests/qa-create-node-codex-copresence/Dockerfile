@@ -43,6 +43,13 @@ COPY tests/qa-create-node-codex-copresence/paired-registry.py /app/tests/qa-crea
 RUN chmod +x /app/tests/qa-create-node-codex-copresence/run.sh
 
 # 镜像 ↔ 提交绑定(run.sh 校验 run.sh 自身的 blob)。
+# daemon minimalEnv strips the parent export; isolate its child launches too.
+# This interpreter wrapper exists only in this non-admission test image.
+COPY tests/lib/node-no-start-gate.sh /tmp/node-no-start-gate.sh
+RUN mv /usr/local/bin/node /usr/local/bin/node-with-start-gate \
+ && install -m 0755 /tmp/node-no-start-gate.sh /usr/local/bin/node \
+ && env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp node -e 'if (process.env.ANET_START_MEM_GATE !== "0") process.exit(1)'
+
 ARG SOURCE_COMMIT
 ARG RUNSH_BLOB
 ENV CNCC_SOURCE_COMMIT=$SOURCE_COMMIT
