@@ -115,10 +115,11 @@ Permissions:
 
 - **A node sees and touches two kinds of schedules only**: those in its network that **target itself**, and those **it created**. Everything else answers as not found (`schedule_not_found`).
 - **A schedule for another node** requires that the node could `send_task` to it right now (the same check: the owner's Agent grants and the node's permission mode). This check refuses even under the default log-only flag, because the run would be refused anyway.
-- **Retargeting** is only for schedules the node created. A person's schedule that targets the node can be edited, paused or cancelled by it, but not moved to another node.
+- **Only its own schedules can be changed**: edit, pause, resume, cancel and run-now are limited to schedules the node created. A person's schedule that targets the node is read-only for it (`not_schedule_creator`).
 - A node in **read-only mode** can only read; it cannot create, edit, cancel or run.
 - **Quota**: at most 20 open (active or paused) schedules per node; cancel one to create another. Operators can change it with the Hub environment variable `COMMHUB_AGENT_SCHEDULE_QUOTA`. The shortest interval is 60 seconds, as in the app.
-- A schedule created by an Agent is recorded under the node's owner and every run still re-checks the owner's grants. If the creating node is deleted or set to read-only, its runs aimed at other nodes fail with `creator_access_revoked`. Replies to these runs do not go into the owner's unread messages.
+- **Every run re-checks the creating node as it is now** (the same check as `send_task`, with the node's current owner). The run fails with `creator_node_gone` if the node was deleted, `creator_node_readonly` if it is read-only, or `creator_access_revoked` if its owner changed and the new owner may not send tasks to the target.
+- **Provenance is stated**: a task from an Agent-created schedule always starts with a line `[scheduled by agent <alias> (<node_id>)]`, and its meta carries `scheduled_by_node_id` and `scheduled_by_alias`. The Hub sets these and the Agent cannot remove them, so it cannot pass as a person's schedule. Replies to these runs do not go into the owner's unread messages.
 
 People keep using the app and `/api/scheduled-tasks` as before; node tokens calling that REST API still get 403.
 

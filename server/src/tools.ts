@@ -6263,38 +6263,26 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // Kept terse on purpose (#476 per-role tools/list ceilings): every value is validated server-side by the
   // same parseScheduleSpec / validateScheduleCreate as REST, so the schema only names the fields.
   const schedId = z.string();
-  const schedSpec = z.any().describe("{type:'once',run_at:ISO} | {type:'interval',every_seconds>=60} | {type:'daily',time:'HH:MM'} | {type:'weekly',time,weekdays:[0-6]}");
   const schedFields = {
-    name: z.string(),
-    task: z.string().describe("sent to the target each run"),
-    target_node_id: z.string().optional(),
-    schedule: schedSpec,
-    timezone: z.string().optional().describe("IANA, default UTC"),
-    priority: z.enum(["high", "normal", "low"]).optional(),
+    name: z.string(), task: z.string(), target_node_id: z.string().optional(),
+    schedule: z.any().describe("once{run_at}|interval{every_seconds>=60}|daily{time}|weekly{time,weekdays}"),
+    timezone: z.string().optional(), priority: z.string().optional(),
   };
-  server.tool("schedule_list", "List Hub schedules that target you or that you created.",
-    { status: z.enum(["active", "paused", "completed", "cancelled"]).optional() },
+  server.tool("schedule_list", "Hub schedules for or by you.", { status: z.string().optional() },
     async ({ status }) => scheduleCall(id => agentListSchedules(id, status)));
-  server.tool("schedule_get", "Get one of your schedules.", { schedule_id: schedId },
+  server.tool("schedule_get", "One schedule.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall(id => agentGetSchedule(id, schedule_id)));
-  server.tool("schedule_create",
-    "Schedule `task` to be sent to target_node_id (default: you) by the Hub. Other targets need send_task access. Max 20 per node.",
-    schedFields,
+  server.tool("schedule_create", "Schedule a task to target_node_id (default you).", schedFields,
     async (args) => scheduleCall((id, w) => agentCreateSchedule(id, w, args as Record<string, unknown>)));
-  server.tool("schedule_update", "Edit, pause or resume one of your schedules. Omitted fields are kept.",
-    {
-      schedule_id: schedId, revision: z.number().optional(), name: z.string().optional(), task: z.string().optional(),
-      target_node_id: z.string().optional(), schedule: z.any().optional(), timezone: z.string().optional(),
-      priority: schedFields.priority, status: z.enum(["active", "paused"]).optional(),
-    },
+  server.tool("schedule_update", "Edit your schedule; status=paused|active.",
+    { ...schedFields, schedule_id: schedId, name: z.string().optional(), task: z.string().optional(), schedule: z.any().optional(), status: z.string().optional() },
     async ({ schedule_id, ...rest }) => scheduleCall((id, w) => agentUpdateSchedule(id, w, schedule_id, rest as Record<string, unknown>)));
-  server.tool("schedule_cancel", "Cancel one of your schedules.", { schedule_id: schedId },
+  server.tool("schedule_cancel", "Cancel your schedule.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall((id, w) => agentCancelSchedule(id, w, schedule_id)));
-  server.tool("schedule_run_now", "Run one of your schedules once now.", { schedule_id: schedId },
+  server.tool("schedule_run_now", "Run your schedule now.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall((id, w) => agentRunScheduleNow(id, w, schedule_id)));
-  server.tool("schedule_runs", "Recent runs of one of your schedules.",
-    { schedule_id: schedId, limit: z.number().optional() },
-    async ({ schedule_id, limit }) => scheduleCall(id => agentScheduleRuns(id, schedule_id, limit)));
+  server.tool("schedule_runs", "A schedule's recent runs.", { schedule_id: schedId },
+    async ({ schedule_id }) => scheduleCall(id => agentScheduleRuns(id, schedule_id)));
 
   // #478:tools/list 只列这个调用者真能用的工具(tool-audience.ts)。只滤列表,tools/call 不变。
   const caller: ToolCaller = callerTokenIsNetwork

@@ -89,7 +89,7 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `schedule_list` | 列本网络里目标是自己、或自己建的定时任务 |
 | `schedule_get` | 查看其中一条 |
 | `schedule_create` | 新建；`target_node_id` 缺省为自己，发给别的节点要求此刻能对它 `send_task`；每节点最多 20 条未结束 |
-| `schedule_update` | 改内容 / 时间 / 目标（只限自己建的才能改目标），`status` 暂停或恢复 |
+| `schedule_update` | 改内容 / 时间 / 目标，`status` 暂停或恢复；改、取消、执行都只限自己建的 |
 | `schedule_cancel` | 取消 |
 | `schedule_run_now` | 立刻执行一次 |
 | `schedule_runs` | 最近的执行记录 |

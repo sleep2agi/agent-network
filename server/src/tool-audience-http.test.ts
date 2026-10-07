@@ -189,6 +189,8 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // $schema + execution — after trimming schemas to bare field names; values are validated server-side);
   // all 78 / 74,485 B → 85 / 77,256 B; user 58 / 56,834 B → 58 / 56,834 B. main had 164 B node headroom left,
   // so any new node tool needs this; ceilings keep the same ~400–750 B margin.
+  // Review follow-up: descriptions / schemas cut further → node 59 / 61,100 B, all 85 / 76,749 B (−507 B each),
+  // leaving ≥ 700 B node margin even with #2488 (+116 B) merged.
   const CEILINGS = { node: 62_000, user: 57_500, all: 78_000 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);

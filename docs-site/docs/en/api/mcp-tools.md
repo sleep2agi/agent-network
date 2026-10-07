@@ -92,7 +92,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `schedule_list` | List schedules in this network that target you or that you created |
 | `schedule_get` | Read one of them |
 | `schedule_create` | Create one; `target_node_id` defaults to you, another target needs `send_task` access to it right now; at most 20 open per node |
-| `schedule_update` | Change task / timing / target (retarget only your own), pause or resume via `status` |
+| `schedule_update` | Change task / timing / target, pause or resume via `status`; edit, cancel and run only your own |
 | `schedule_cancel` | Cancel |
 | `schedule_run_now` | Run once now |
 | `schedule_runs` | Recent runs |

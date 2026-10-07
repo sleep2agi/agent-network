@@ -4,7 +4,8 @@ import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limi
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
-import { canMessageAgent } from "./agent-access.js";
+import { canMessageAgent, type AgentRef } from "./agent-access.js";
+import { dispatchVerdict } from "./node-permissions.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
@@ -338,6 +339,25 @@ function stuckNoticeFor(row: ScheduledRow, reason: StuckNotice["reason"], blocke
   };
 }
 
+/** The line an Agent-created schedule's task always starts with (board #733). */
+export function agentSchedulePrefix(alias: string | null, nodeId: string): string {
+  return `[scheduled by agent ${alias ?? "?"} (${nodeId})]\n`;
+}
+
+function agentCreatorDenial(row: ScheduledRow, target: AgentRef): { code: string; message: string } | null {
+  const creator = db.get<{ alias: string | null; owner_user_id: string | null; permission_mode: string | null }>(
+    "SELECT alias, owner_user_id, permission_mode FROM nodes WHERE node_id = ?1 AND network_id = ?2", row.created_by_node_id, row.network_id);
+  if (!creator) return { code: "creator_node_gone", message: "The node that created this schedule no longer exists in this network" };
+  const mode = creator.permission_mode === "readonly" || creator.permission_mode === "restricted" ? creator.permission_mode : "normal";
+  if (mode === "readonly") return { code: "creator_node_readonly", message: "The node that created this schedule is read-only" };
+  const verdict = dispatchVerdict({
+    networkId: row.network_id, nodeId: row.created_by_node_id, logKey: row.created_by_node_id!,
+    aliases: creator.alias ? [creator.alias] : [], ownerUserId: creator.owner_user_id, mode,
+  }, target);
+  if (verdict) return { code: "creator_access_revoked", message: `The node that created this schedule may not send_task to this agent now (${verdict.reason})` };
+  return null;
+}
+
 type DispatchEvent = { alias: string; networkId: string; taskId: string; priority: string; state: "delivered" | "queued" };
 
 export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: string, advanceSchedule: boolean, advanceAfter = new Date()): { runId: string; taskId?: string; status: string; event?: DispatchEvent } {
@@ -425,30 +445,25 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     }
     // 多用户 Agent 权限:排程是「建它的人」的委托。建的人后来被设成受限成员、而且没被授权
     // 给目标 Agent 发任务时,不再代他派发(否则受限前建的排程会永远绕过授权)。
-    if (row.created_by && !canMessageAgent(row.created_by, row.network_id, { alias: node.alias, nodeId: node.node_id })) {
+    // Board #733 — an Agent-created schedule is that node's standing send_task: every run re-evaluates the
+    // creating node as it is NOW (exists, not read-only, current owner) with send_task's own dispatchVerdict.
+    const creatorDenial = row.created_by_node_id
+      ? agentCreatorDenial(row, { alias: node.alias, nodeId: node.node_id })
+      : row.created_by && !canMessageAgent(row.created_by, row.network_id, { alias: node.alias, nodeId: node.node_id })
+        ? { code: "creator_access_revoked", message: "The schedule creator is no longer allowed to message this agent" }
+        : null;
+    if (creatorDenial) {
       finalStatus = "failed";
       db.run(
-        "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'creator_access_revoked', error_message = 'The schedule creator is no longer allowed to message this agent', completed_at = datetime('now') WHERE run_id = ?1",
-        [runId],
+        "UPDATE scheduled_task_runs SET status = 'failed', error_code = ?1, error_message = ?2, completed_at = datetime('now') WHERE run_id = ?3",
+        [creatorDenial.code, creatorDenial.message, runId],
       );
       if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
     }
-    // Board #733 — an Agent-created schedule aimed at another node is that node's standing send_task: stop
-    // dispatching if the creating node is gone from the network or has since been switched to read-only.
-    if (row.created_by_node_id && row.created_by_node_id !== node.node_id) {
-      const creator = db.get<{ permission_mode: string | null }>(
-        "SELECT permission_mode FROM nodes WHERE node_id = ?1 AND network_id = ?2", row.created_by_node_id, row.network_id);
-      if (!creator || creator.permission_mode === "readonly") {
-        finalStatus = "failed";
-        db.run(
-          "UPDATE scheduled_task_runs SET status = 'failed', error_code = 'creator_access_revoked', error_message = 'The node that created this schedule is gone or read-only', completed_at = datetime('now') WHERE run_id = ?1",
-          [runId],
-        );
-        if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
-        return;
-      }
-    }
+    const creatorNode = row.created_by_node_id
+      ? db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE node_id = ?1 AND network_id = ?2", row.created_by_node_id, row.network_id)
+      : null;
     const lifecycle = assertNodeActive(node.alias, row.network_id);
     if (!lifecycle.ok) {
       finalStatus = "failed";
@@ -487,26 +502,32 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     );
     const deliveryState: "delivered" | "queued" =
       (session && session.status !== "offline") || hasSubscribers(node.alias, row.network_id) ? "delivered" : "queued";
+    // Board #733 — provenance is server-set: an Agent-created schedule names its node in meta and in a
+    // prefix the receiving agent always sees first, so it can never pass as a person's schedule.
     const metaJson = JSON.stringify({
       scheduled_task_id: row.schedule_id,
       scheduled_run_id: runId,
       scheduled_for: scheduledFor,
       auth_origin: "hub_scheduler",
+      ...(row.created_by_node_id ? { scheduled_by_node_id: row.created_by_node_id, scheduled_by_alias: creatorNode?.alias ?? null } : {}),
     });
+    const taskContent = row.created_by_node_id
+      ? `${agentSchedulePrefix(creatorNode?.alias ?? null, row.created_by_node_id)}${row.task_content}`
+      : row.task_content;
     db.run(
       `INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
        VALUES (?1, ?1, ?2, ?3, 'task', ?4, ?5, 'scheduler', 'reply', ?6, ?7)`,
-      [taskId, node.alias, node.node_id, row.priority, row.task_content, row.network_id, metaJson],
+      [taskId, node.alias, node.node_id, row.priority, taskContent, row.network_id, metaJson],
     );
     db.run(
       `INSERT INTO tasks (task_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, meta_json)
        VALUES (?1, 'scheduler', ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', '+86400 seconds'), ?6, ?7)`,
-      [taskId, node.node_id, node.alias, row.priority, row.task_content, row.network_id, metaJson],
+      [taskId, node.node_id, node.alias, row.priority, taskContent, row.network_id, metaJson],
     );
     // Dispatch is not completion. Keep the run open until the exact bound
     // task reaches replied/failed/cancelled/expired; db.ts owns that mirror.
     db.run("UPDATE scheduled_task_runs SET task_id = ?1, status = ?2, completed_at = NULL WHERE run_id = ?3", [taskId, deliveryState, runId]);
-    db.run(`UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3`, [sessionTaskPreview(row.task_content), node.node_id, row.network_id]);
+    db.run(`UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3`, [sessionTaskPreview(taskContent), node.node_id, row.network_id]);
     db.run("UPDATE scheduled_tasks SET target_alias = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3", [node.alias, scheduledFor, row.schedule_id]);
     if (advanceSchedule) advance({ ...row, target_alias: node.alias }, scheduledFor, advanceAfter);
     createdTaskId = taskId;

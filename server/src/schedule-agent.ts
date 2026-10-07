@@ -12,7 +12,8 @@
 //     verdict send_task gets for that target (node-permissions.ts dispatchVerdict, owner's Agent grants +
 //     the node's mode). Stricter than send_task in one way: the verdict is enforced even under
 //     COMMHUB_NODE_PERMISSIONS=log, because the scheduler would refuse the run later anyway.
-//   • Retargeting is only for schedules this node created — it cannot redirect a person's schedule.
+//   • Mutations (update / pause / resume / cancel / run_now) only on schedules THIS node created
+//     (created_by_node_id = self). A person's schedule that targets the node is read-only for it.
 //   • created_by = the node's owner user id (the identity send_task's dispatchVerdict checks), so the
 //     scheduler's per-run canMessageAgent(created_by, …) keeps re-checking the owner's grants on every run.
 //     A node without a known owner cannot create schedules (a NULL created_by would skip that re-check).
@@ -46,6 +47,18 @@ function visibleRow(id: NodeIdentity, scheduleId: string): ScheduledRow | null {
   const row = getScheduleRow(scheduleId);
   return row && nodeMaySeeSchedule(id, row) ? row : null;
 }
+
+/** Visible AND created by this node; else the error to return. Exported for the mutation tests. */
+export function nodeMayMutateSchedule(id: NodeIdentity, row: ScheduledRow): boolean {
+  return !!id.nodeId && row.created_by_node_id === id.nodeId;
+}
+function ownRow(id: NodeIdentity, scheduleId: string): ScheduledRow | AgentScheduleResult {
+  const row = visibleRow(id, scheduleId);
+  if (!row) return fail("schedule_not_found");
+  if (!nodeMayMutateSchedule(id, row)) return fail("not_schedule_creator", { message: "only schedules this node created can be changed" });
+  return row;
+}
+const isRow = (r: ScheduledRow | AgentScheduleResult): r is ScheduledRow => typeof (r as ScheduledRow).schedule_id === "string";
 
 /** send_task's verdict for this target, always enforced (see header). null = allowed. */
 function targetDenied(id: NodeIdentity, route: string, target: { node_id: string; alias: string }): AgentScheduleResult | null {
@@ -111,10 +124,9 @@ export function agentUpdateSchedule(id: NodeIdentity, canWrite: boolean, schedul
   const route = "mcp:schedule_update";
   const gate = writeGate(id, canWrite, route);
   if (gate) return gate;
-  const row = visibleRow(id, scheduleId);
-  if (!row) return fail("schedule_not_found");
+  const row = ownRow(id, scheduleId);
+  if (!isRow(row)) return row;
   const retarget = body.target_node_id !== undefined && body.target_node_id !== row.target_node_id;
-  if (retarget && row.created_by_node_id !== id.nodeId) return fail("retarget_not_allowed", { message: "only schedules this node created can be retargeted" });
   let target = { node_id: row.target_node_id, alias: row.target_alias };
   if (retarget) {
     const node = db.get<{ node_id: string; alias: string | null }>(
@@ -133,8 +145,8 @@ export function agentUpdateSchedule(id: NodeIdentity, canWrite: boolean, schedul
 export function agentCancelSchedule(id: NodeIdentity, canWrite: boolean, scheduleId: string): AgentScheduleResult {
   const gate = writeGate(id, canWrite, "mcp:schedule_cancel");
   if (gate) return gate;
-  const row = visibleRow(id, scheduleId);
-  if (!row) return fail("schedule_not_found");
+  const row = ownRow(id, scheduleId);
+  if (!isRow(row)) return row;
   cancelSchedule(row);
   return { ok: true, status: "cancelled" };
 }
@@ -143,8 +155,8 @@ export function agentRunScheduleNow(id: NodeIdentity, canWrite: boolean, schedul
   const route = "mcp:schedule_run_now";
   const gate = writeGate(id, canWrite, route);
   if (gate) return gate;
-  const row = visibleRow(id, scheduleId);
-  if (!row) return fail("schedule_not_found");
+  const row = ownRow(id, scheduleId);
+  if (!isRow(row)) return row;
   if (row.status === "cancelled") return fail("schedule_cancelled");
   const denied = targetDenied(id, route, { node_id: row.target_node_id, alias: row.target_alias });
   if (denied) return denied;
