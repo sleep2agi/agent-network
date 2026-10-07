@@ -2017,7 +2017,7 @@ jobs:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
 
-      # 🔴 **从 Dockerfile 里读 ARG 名，不硬编码**。这六个套件有四种形状：
+      # 🔴 **从 Dockerfile 里读 provenance ARG 名，不硬编码**。这六个套件有四种形状：
       #     qa-hub-17 / qa-hub-19        无 ARG
       #     test643 / test688            SOURCE_COMMIT
       #     test635                      TEST635_SOURCE_COMMIT
@@ -2037,7 +2037,10 @@ jobs:
           BUILD_ARGS=()
           while read -r name; do
             [ -n "$name" ] && BUILD_ARGS+=(--build-arg "$name=$GITHUB_SHA")
-          done < <(grep -oE '^ARG [A-Z0-9_]+' "$DF" | awk '{print $2}')
+          # Only provenance args receive GITHUB_SHA. Dockerfiles may also expose
+          # real build inputs such as BUN_VERSION or a checksum; treating every
+          # ARG as a source pin silently replaces those values with a git SHA.
+          done < <(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' "$DF" | awk '{print $2}')
           echo "detected build args: ${BUILD_ARGS[*]:-(none)}"
           docker build "${BUILD_ARGS[@]}" -t "anet-${{ matrix.suite }}" -f "$DF" .
           # #1324: ARTIFACT_DIR 一直传进来,但容器带 --rm 直接删掉,套件写的报告
