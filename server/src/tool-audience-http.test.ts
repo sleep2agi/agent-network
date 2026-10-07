@@ -184,7 +184,14 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // 量出来(#478 合入时):全部 74 个工具 71,559 B;节点 52 个 57,632 B(−19%);人 56 个 54,780 B(−23%)。留 ~1.5 KB 余量。
   // Board #625 adds 2 human tools + 2 hidden daemon protocol tools. Measured:
   // all 78 / 73,969 B; user 58 / 56,615 B; node remains 52 / 58,320 B.
-  const CEILINGS = { node: 59_000, user: 57_500, all: 75_000 } as const;
+  // Board #733 adds 7 node-only schedule_* tools (user list unchanged). Measured before → after on the same run:
+  // node 52 / 58,836 B → 59 / 61,607 B (+2,771 B, ~396 B per tool of which ~180 B is SDK per-tool overhead —
+  // $schema + execution — after trimming schemas to bare field names; values are validated server-side);
+  // all 78 / 74,485 B → 85 / 77,256 B; user 58 / 56,834 B → 58 / 56,834 B. main had 164 B node headroom left,
+  // so any new node tool needs this; ceilings keep the same ~400–750 B margin.
+  // Review follow-up: descriptions / schemas cut further → node 59 / 61,100 B, all 85 / 76,749 B (−507 B each),
+  // leaving ≥ 700 B node margin even with #2488 (+116 B) merged.
+  const CEILINGS = { node: 62_000, user: 57_500, all: 78_000 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);

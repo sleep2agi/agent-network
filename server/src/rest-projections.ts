@@ -49,7 +49,7 @@ export const COMPLETION_REST_COLUMNS = [
 // `schedule_json` are intentionally selected for server-side auth/decoding,
 // then removed by decodeRow before the REST response is serialized.
 export const SCHEDULED_TASK_STORAGE_COLUMNS = [
-  "schedule_id", "network_id", "created_by", "name", "target_node_id",
+  "schedule_id", "network_id", "created_by", "created_by_node_id", "name", "target_node_id",
   "target_alias", "task_content", "priority", "schedule_type", "schedule_json",
   "timezone", "overlap_policy", "misfire_policy", "status", "next_run_at",
   "last_run_at", "revision", "created_at", "updated_at",

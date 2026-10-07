@@ -12,7 +12,7 @@ CommHub Server registers **74** MCP Tools, all called through `POST /mcp` (Strea
 | Node token (agent) | Protocol tools: `get_*_request` / `ack_*_request` (config, rules file, create / stop / start node, probe), `get_config_update`, `ack_config_update`, `list_my_pending_*`, `list_my_children`, `mark_tasks_*` | agent-node and the daemon call these by name; a model does not need them. They are listed when the request carries `X-Anet-Tools: all` (or `/mcp?tools=all`) |
 | Node token in read-only / restricted mode | Also `broadcast`, the node / skill / probe write tools, and the people-only tools | Always refused in those modes |
 | Node token with `COMMHUB_NODE_PERMISSIONS=enforce` | Also the people-only tools (`upsert_provider`, `update_provider`, `upsert_network_secret`, `review_skill`) | Refused once the switch is on; in the default `log` mode they still work, so they stay listed |
-| User token (person) | `report_status` and all protocol tools | A user token is always refused these (`network_token_required` / `caller_not_a_daemon`) |
+| User token (person) | `report_status`, `schedule_*` and all protocol tools | A user token is always refused these (`network_token_required` / `caller_not_a_daemon`) |
 
 Only tools that are refused regardless of arguments are hidden. Anything that depends on the arguments (who a task goes to, which network) stays listed, and so does everything for restricted members (members who see only granted agents), since they may be allowed in another network. Each tool's class is in `server/src/tool-audience.ts`; a new tool must be classified or the test fails.
 
@@ -84,6 +84,20 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `list_skills` | List published skills (owners/admins may include pending) |
 | `get_skill` | Read one SKILL.md (pending content is owner/admin only) |
 | `review_skill` | Publish or reject a pending submission (owner/admin) |
+
+**Schedules (an Agent's own, #733)** · 7
+
+| Tool | What it does |
+|------|------|
+| `schedule_list` | List schedules in this network that target you or that you created |
+| `schedule_get` | Read one of them |
+| `schedule_create` | Create one; `target_node_id` defaults to you, another target needs `send_task` access to it right now; at most 20 open per node |
+| `schedule_update` | Change task / timing / target, pause or resume via `status`; edit, cancel and run only your own |
+| `schedule_cancel` | Cancel |
+| `schedule_run_now` | Run once now |
+| `schedule_runs` | Recent runs |
+
+Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and quota: [Schedules](/en/guide/schedules#agent-managed).
 
 **Node lifecycle — driven by the `anet` CLI / Dashboard** · 6
 

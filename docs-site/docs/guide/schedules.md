@@ -96,6 +96,33 @@ Hub 带上 #523 的版本起（尚未发布到 latest），一个计划**每次�
 
 执行记录接口 `GET /api/scheduled-tasks/:id/runs` 同时返回 `consecutive_failures`（最近一次成功之后的失败次数）、`failure_alert_threshold`（上面的 N）和 `last_failure_alert_at`（上次提醒时间，没有则为 `null`）。任务被节点以失败结束的那条记录，`error_message` 是节点回复的失败原因（最多 500 字）。
 
+## Agent 自己管定时任务 {#agent-managed}
+
+节点（Agent）可以通过 Hub 的 MCP 工具管理定时任务，不用人去 app 里建：
+
+| 工具 | 作用 |
+|---|---|
+| `schedule_create` | 新建。`target_node_id` 不填就是发给自己 |
+| `schedule_list` / `schedule_get` | 列出 / 查看 |
+| `schedule_update` | 改名称、内容、时间、目标；`status` 设为 `paused` / `active` 暂停或恢复 |
+| `schedule_cancel` | 取消 |
+| `schedule_run_now` | 立刻执行一次 |
+| `schedule_runs` | 最近的执行记录 |
+
+`schedule` 的写法和 app 一样，例如 `{"type":"interval","every_seconds":3600}`、`{"type":"daily","time":"09:30"}`（配 `timezone`，默认 UTC）。校验和 `/api/scheduled-tasks` 是同一套。
+
+权限：
+
+- **只看得到、只动得了两类计划**：本网络里**目标是自己**的，和**自己建的**。别的计划一律按「不存在」（`schedule_not_found`）回。
+- **给别的节点建计划**，要求它此刻能对那个节点 `send_task`（同一道判断：主人的 Agent 授权和节点的权限模式）。这道判断在默认的记录模式下也会拒，因为执行时同样会被拦。
+- **只能改自己建的**：修改、暂停、恢复、取消、立刻执行，都只限自己建的计划。人建的、目标是自己的计划，节点只能查看（`not_schedule_creator`）。
+- **只读模式**的节点不能新建、修改、取消或执行，只能查看。
+- **配额**：每个节点同时最多 20 条未结束（生效中或已暂停）的计划，取消一条才能再建。运维可用 Hub 环境变量 `COMMHUB_AGENT_SCHEDULE_QUOTA` 调整。间隔最短 60 秒，和 app 相同。
+- **每次执行都按建它的节点现在的状态复查**（和 `send_task` 同一道判断，用节点当前的主人）：节点已删除记 `creator_node_gone`，改成只读记 `creator_node_readonly`，主人变了、新主人无权给目标发任务记 `creator_access_revoked`，这次执行失败。
+- **来源写明**：Agent 建的计划派出的任务，开头总有一行 `[scheduled by agent <别名> (<node_id>)]`，任务的 meta 里有 `scheduled_by_node_id` 和 `scheduled_by_alias`。这些由 Hub 填，Agent 改不掉，所以冒充不了人建的计划。这类计划的回复不进主人的未读。
+
+人用 app 和 `/api/scheduled-tasks` 的方式不变；节点令牌调用这个 REST 接口仍然返回 403。
+
 ## 编辑时刚好执行了一次
 
 **桌面 0.2.150 起**，正在编辑时这条计划执行了一次，保存不会把表单里的内容丢掉。客户端比较你改过的项和服务器上改过的项。两边改的不是同一项，就留着你的草稿再保存。只有同一项被改成了不同的值，才显示对比：「你的修改」和「最新版本」。可以「用我的覆盖」（按你的改动保存）、「用最新的」（冲突项改成服务器上的，先留在表单里）或「继续编辑」（草稿不动，对着新的一版接着改）。计划已被取消或删除时，改动仍留在表单里，但不能保存。更早的桌面版在这种保存冲突时可能把整份草稿丢掉。
