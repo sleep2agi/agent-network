@@ -2,14 +2,17 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { Database } from "bun:sqlite";
-import { execTmux } from "../../agent-node/src/tmux.js";
+import { fixtureTmux } from "./fixture-tmux.js";
+import { stoppedReceiptAtStart, isHubStopped } from "../../agent-network/src/stopped-receipt.js";
+import { execFileSync } from "node:child_process";
 import { codexTmuxEnv, listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
 import { processStamp } from "../../agent-node/src/runtime/adopt-process-tree.js";
 
 const root=mkdtempSync("/tmp/codex-http-"), home=`${root}/home`, workdir=`${home}/manual`, daemonDir=`${home}/supervisor`;
-const uid=process.getuid!(), socket=`/tmp/tmux-${uid}/default`, alias="三段演示", nodeDir=`${workdir}/.anet/nodes/n_manual_fixture`;
+const uid=process.getuid!(), socket=`${root}/socket`, alias="三段演示", nodeDir=`${workdir}/.anet/nodes/n_manual_fixture`;
 const marker="22222222-2222-4222-8222-222222222222", codexHome=`${nodeDir}/codex-home`;
-for(const dir of [home,workdir,daemonDir,nodeDir,codexHome,`/tmp/tmux-${uid}`])mkdirSync(dir,{recursive:true,mode:0o700});
+for(const dir of [home,workdir,daemonDir,nodeDir,codexHome])mkdirSync(dir,{recursive:true,mode:0o700});
+const fixture=fixtureTmux(socket),execTmux=fixture.exec;
 const scope={layout:"native" as const,alias,socket,workdir,codexHome,marker,uid}, env=codexTmuxEnv(socket);
 const reserve=Bun.serve({hostname:"127.0.0.1",port:0,fetch:()=>new Response()});
 const port=reserve.port;reserve.stop(true);
@@ -38,7 +41,7 @@ try{
  await until(()=>{const r:any=db.query("SELECT config_snapshot FROM nodes WHERE node_id='n_supervisor_fixture'").get();return r&&JSON.parse(r.config_snapshot||"{}")?.daemon_capabilities?.adopt_capable;},"real daemon adoption capability");
  // Only fixture node row is seeded: no real codex/model credentials or bridge.
  db.query("INSERT INTO nodes(node_id,node_name,alias,network_id,hostname,lifecycle_state,config_snapshot) VALUES(?,?,?,?,?,'active',?)").run("n_manual_fixture",alias,alias,network,hostname(),JSON.stringify({runtime:"codex-app-server",codexCopresence:true}));
- writeFileSync(`${nodeDir}/config.json`,JSON.stringify({node_id:"n_manual_fixture",alias,node_name:alias,network_id:network,hub,runtime:"codex-app-server",codexCopresence:true}),{mode:0o600});
+ writeFileSync(`${nodeDir}/config.json`,JSON.stringify({node_id:"n_manual_fixture",alias,node_name:alias,network_id:network,hub,runtime:"codex-app-server",codexCopresence:true,env:{ANET_TMUX_SOCKET:socket}}),{mode:0o600});
  writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker,owner_uid:uid,boot_id:readFileSync("/proc/sys/kernel/random/boot_id","utf8").trim()}),{mode:0o600});
  for(const name of [alias,`${alias}-桥`,`${alias}-appsrv`,"unrelated-decoy"])execTmux(["new-session","-d","-s",name,"-c",workdir,
   `exec env ANET_NODE_MARKER=${name==="unrelated-decoy"?"foreign":marker} CODEX_HOME=${codexHome} sleep 300`],{env});
@@ -58,9 +61,34 @@ try{
  check(after.length===1&&after[0][2]===decoy[2],"only original unrelated decoy remains");
  check(processStamp(Number(decoy[3]))?.birth===birth?.birth,"decoy process generation unchanged");
  check(before.filter(r=>r[0]!=="unrelated-decoy").every(r=>!processStamp(Number(r[3]))),"all three original processes gone");
+ // Fake the manual three-stage launcher, invoking the exact CLI receipt seam.
+ // No provider, TUI automation, automatic re-adoption, or host tmux is involved.
+ const recordResume=stoppedReceiptAtStart(nodeDir,"n_manual_fixture");
+ const nextMarker="88888888-8888-4888-8888-888888888888";
+ writeFileSync(`${nodeDir}/copresence-identity.json`,JSON.stringify({marker:nextMarker,owner_uid:uid,boot_id:readFileSync("/proc/sys/kernel/random/boot_id","utf8").trim()}),{mode:0o600});
+ const manualPanes=[alias,`${alias}-桥`,`${alias}-appsrv`].map(name=>execTmux(["new-session","-d","-s",name,"-c",workdir,
+   `exec env ANET_NODE_MARKER=${nextMarker} CODEX_HOME=${codexHome} sleep 300`],{env}).trim());
+ recordResume();
+ check(!isHubStopped(nodeDir,"n_manual_fixture"),"manual startup supersedes exact old receipt without re-adoption");
+ const binding:any=db.query("SELECT request_id,status FROM node_daemon_bindings WHERE node_id='n_manual_fixture' AND status='active'").get();
+ check(binding?.request_id===adopt.request_id,"manual start does not invent a new active binding");
+ db.query("UPDATE nodes SET lifecycle_state='active' WHERE node_id='n_manual_fixture'").run(); // fixture heartbeat
+ const rotatedStop=await tool("stop_node",{child_node_id:"n_manual_fixture",force:true});
+ await until(()=>{const row:any=db.query("SELECT status FROM node_stop_requests WHERE request_id=?").get(rotatedStop.request_id);return row?.status==="stop_failed";},"rotated generation refuses old authority");
+ const refusal:any=await(await fetch(`${hub}/api/node-lifecycle-requests?kind=stop&request_id=${rotatedStop.request_id}&network_id=${network}`,{headers})).json();
+ check(refusal.request?.error==="adopt_codex_readopt_required","real HTTP preserves fresh-adoption refusal");
+ check(manualPanes.every(p=>listCodexPanes(scope).some(r=>r[2]===p)),"old binding cannot stop newly marked stages");
+ // Simulate reboot's process disappearance using only fixture-owned IDs.
+ for(const pane of manualPanes)execTmux(["kill-pane","-t",pane]);
+ const bootScript=readFileSync("deploy/fleet/anet-nodes-boot.sh","utf8");
+ const probe=bootScript.split("<<'HUB_STOPPED_PROBE' || rc=$?\n")[1].split("\nHUB_STOPPED_PROBE")[0];
+ let bootRc=0;try{execFileSync("node",["-",`${nodeDir}/config.json`],{input:probe});}catch(e:any){bootRc=e.status;}
+ check(bootRc===42&&!isHubStopped(nodeDir,"n_manual_fixture"),"after simulated reboot both boot readers permit recovery");
+ writeFileSync(`${nodeDir}/.hub-stopped`,JSON.stringify({node_id:"n_manual_fixture",stopped:true,request_id:"stop_new_intent"}),{mode:0o600});
+ check(isHubStopped(nodeDir,"n_manual_fixture"),"new stop intent overrides earlier manual-resume certificate");
  db.close();
 }catch(e){console.error(e);for(const name of ["hub","daemon"])try{console.error(readFileSync(`${root}/${name}.log`,"utf8").slice(-4000).replace(/(?:ntok|utok)_[A-Za-z0-9_-]+/g,"[redacted]"));}catch{}process.exitCode=1;}
 finally{
  for(const child of children.reverse()){child.kill();await child.exited;}
- try{for(const row of listCodexPanes(scope,true))execTmux(["kill-pane","-t",row[2]],{env});}catch{}
+ fixture.cleanup();
 }

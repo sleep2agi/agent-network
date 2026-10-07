@@ -13,6 +13,7 @@
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
+import { stoppedReceiptAtStart, isHubStopped } from "../src/stopped-receipt.js";
 import { formatScrubbedEnvLine, scrubInheritedSessionIdentityEnv } from "../src/daemon-inherited-env.js";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -1660,6 +1661,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // code reported success). See docs of writeMarker() in copresence-identity.ts.
   const identityMarker = randomUUID();
   const prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  const clearOldStoppedReceipt = stoppedReceiptAtStart(join(nodesDir(), resolved.id), prelaunchCfg.node_id);
   let authoritativeOldPendingMarker: string | undefined;
   if (prelaunchCfg.codexPendingThread !== undefined) {
     const oldIdentity = readCopresenceMarker(nodesDir(), resolved.id);
@@ -2129,6 +2131,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     : `[anet] client-health role=bridge remote=exact thread=exact`);
   console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
 
+  clearOldStoppedReceipt(); // Successful manual start, not a failed/partial attempt.
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
   console.log(`[anet] ✅ 共存节点 ${displayName} 就绪`);
@@ -7923,6 +7926,7 @@ async function startExternalAppserverNode(
   }
   const launch = resolveExternalAppserverBridgeOrExit();
   const logOffset = fileSize(bridgeLogPath(plan));
+  const clearOldStoppedReceipt = stoppedReceiptAtStart(plan.nodeDir, JSON.parse(readFileSync(join(plan.nodeDir, "config.json"), "utf8")).node_id);
 
   const codexEnv = ["-e", `CODEX_HOME=${plan.codexHome}`, "-e", `LANG=${process.env.LANG || "C.UTF-8"}`];
   const admission = await holdAppServerStart(resolved.id);
@@ -7973,6 +7977,7 @@ async function startExternalAppserverNode(
     return 1;
   }
   const rc = await verifyExternalAppserverResume(plan, logOffset, verifyTimeoutSec(opts));
+  if (rc === 0) clearOldStoppedReceipt();
   console.log(`[anet] sessions: ${wanted.filter((n) => plan.tui || n !== plan.sessions.tui).join(", ")}   (attach: tmux attach -t ${shellQuote(plan.sessions.tui)})`);
   return rc;
 }
@@ -13039,7 +13044,7 @@ async function projectUp(invokedAs = "anet project up") {
     // Board #628 — Hub stop writes <nodeDir>/.hub-stopped. Do not start the
     // node and do not delete .pid. A live pid is still preserved below: deleting
     // it is what let `project up` start the second copy (#1332 / #1130).
-    if (existsSync(join(nodesDir(), n.id, ".hub-stopped"))) {
+    if (isHubStopped(join(nodesDir(), n.id), n.profile?.node_id)) {
       console.log(`  ⏭  ${n.alias} — hub-stopped, leaving it down`);
       continue;
     }

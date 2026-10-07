@@ -402,6 +402,35 @@ so restart the daemon afterwards.
 
 ## Adopted-node lifecycle {#adopted-lifecycle}
 
+### Recovery after a machine reboot
+
+Old boot IDs, PIDs and markers never authorize signals to current processes. The daemon may acknowledge
+an already-absent node only after a no-signal check finds no matching sessions and no same-UID process
+carrying the old marker or the node's CODEX_HOME. Any remaining/new-generation process requires fresh
+adoption (`adopt_codex_readopt_required`); unreadable evidence fails closed. Delete remains unsupported
+and preserves `adopted_node_delete_unsupported`, without removing directories or stopping processes.
+
+A successful manual CLI start of either Codex co-presence layout writes `.hub-resumed`, superseding only
+the exact `.hub-stopped` receipt captured before startup. It never unlinks a concurrently written stop.
+Both `anet project up` and the repository `deploy/fleet/anet-nodes-boot.sh` understand this certificate;
+a new stop automatically invalidates it. Failed starts and malformed/foreign evidence keep the node down.
+Deploy the updated CLI and boot script together. Older scanners conservatively retain the stop. These
+files are local state: restoring a backup with changed file identity keeps the stop until an explicit start.
+Rollback does not automatically restart stopped nodes. Services, ports, secret sources and orchestration
+are unchanged; this does not implement board #659 B remote three-stage startup.
+
+Deployment is an operator action, not performed by this PR. Record the current CLI version and the
+boot service's actual ExecStart path; back up its installed script and review drift against the repository.
+Install the CLI released from an exact merged main commit, then install that commit's
+`deploy/fleet/anet-nodes-boot.sh` at the service's actual entrypoint, preserving executable permissions.
+Verify the CLI version and installed script SHA-256 against the release sources. In an isolated directory,
+check retained stops, successful manual-resume certificates and subsequent new stops before scheduling
+a real boot sweep; do not restart real nodes just to validate this change. Roll back the CLI and saved
+script together without clearing stop receipts. Local state is restored only from node-data backups.
+Fingerprints contain inode, ctime and content hash, not boot-dependent device numbers. Old-format
+certificates conservatively retain the stop; an explicit successful start creates a new certificate.
+Only probe exit 42 permits startup; exceptions and every other exit code keep the node stopped.
+
 Stop / Start for adopted nodes is available from agent-node ≥ `2.5.0-preview.118` and agent-network (`anet`) ≥ `2.3.0-preview.151`.
 From commhub-server ≥ `0.9.0-preview.109`, the Hub answers a restart of an adopted node with `adopted_restart_requires_daemon`, asking you to Stop and then Start (`.108` and earlier have no such refusal).
 From the original workspace, run `anet daemon adopt <alias> --daemon <daemon-id>` to inspect the plan.

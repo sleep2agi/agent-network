@@ -11,5 +11,8 @@ COPY server ./server
 COPY agent-node ./agent-node
 RUN cd agent-node && bun run build
 COPY tests/test658-codex-adopt-stop ./tests/test658-codex-adopt-stop
+COPY agent-network/src/stopped-receipt.ts ./agent-network/src/stopped-receipt.ts
+COPY deploy/fleet/anet-nodes-boot.sh ./deploy/fleet/anet-nodes-boot.sh
+ENV TEST658_CONTAINER=1
 USER node
 CMD ["bun", "run", "tests/test658-codex-adopt-stop/http-e2e.ts"]

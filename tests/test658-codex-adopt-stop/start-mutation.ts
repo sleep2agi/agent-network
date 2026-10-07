@@ -16,3 +16,4 @@ await runMutation("receipt tampering", "agent-node/src/runtime/adopt-codex-start
 await runMutation("no live stages", "agent-node/src/runtime/adopt-codex-start-preflight.ts", "  assertCodexStopped(scope);", "  // mutation: liveness check removed");
 await runMutation("project permission", "agent-node/src/runtime/adopt-codex-start-inputs.ts", " || (st.mode & 0o022)", "");
 await runMutation("project owner", "agent-node/src/runtime/adopt-codex-start-inputs.ts", " || st.uid !== scope.uid", "");
+await runMutation("fixture exec readiness", "tests/test658-codex-adopt-stop/start-preflight.test.ts", "    await waitForFixtureStages();", "");
