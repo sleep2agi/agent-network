@@ -55,7 +55,7 @@ function agentNodeModuleDir(): string {
   return packageRoot ? packageRoot.replace(/\/+$/, "") + "/dist" : __dirname;
 }
 import { validateCodexPendingThread } from "./runtime/codex-app-server/pending-thread";
-import { START_GATE_SINGLE_LANE_STATUS, START_GATE_WAITING_STATUS, waitForStartResources } from "./runtime/codex-app-server/start-resource-gate";
+import { startGateStatusToRestore, waitForStartResources } from "./runtime/codex-app-server/start-resource-gate";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { computeFeishuWorkerCandidates } from "./feishu-worker-resolve";
 import { claudeCommhubToolAliases } from "./claude-tool-aliases";
@@ -2461,10 +2461,8 @@ function ownedSpawnStartGate(): { nodeId?: string; report: (text: string) => voi
 }
 
 function restoreStatusAfterStartGate(prev: { status: string; task?: string }): void {
-  const live = lastReportedStatus;
-  if (live.status === "blocked" && (live.task === START_GATE_WAITING_STATUS || live.task === START_GATE_SINGLE_LANE_STATUS)) {
-    void reportStatus(prev.status, prev.task).catch(() => {});
-  }
+  const restore = startGateStatusToRestore(lastReportedStatus, prev);
+  if (restore) void reportStatus(restore.status, restore.task).catch(() => {});
 }
 
 async function ensureCodexAppServerSession(): Promise<

@@ -12,7 +12,7 @@
 // Docker image that copies only agent-network/ can still resolve the import.
 //
 // While MemAvailable (the smaller of /proc and a real cgroup limit) or load
-// is short, wait and report 「等待内存」. The floor uses the same cgroup limit
+// is short, wait and report the resource that is short. The floor uses the same cgroup limit
 // as the free-memory reading: min(4 GiB, 15% of min(MemTotal, cgroup limit)).
 // Page cache (inactive_file) is not usage. Leases live in
 // ~/.anet/run/start-slots/ keyed by node id. A lease records pid plus the
@@ -50,15 +50,27 @@ import { dirname, join } from "path";
 
 export const START_GATE_DEFAULT_MIN_MEM_MB = 4096;
 export const START_GATE_DEFAULT_MEM_FRACTION = 0.15;
-export const START_GATE_DEFAULT_MAX_LOAD_PER_CPU = 2;
+export const START_GATE_DEFAULT_MAX_LOAD_PER_CPU = 4;
 export const START_GATE_DEFAULT_MAX_WAIT_SEC = 600;
 export const START_GATE_DEFAULT_MAX_CONCURRENT = 2;
 export const START_GATE_SINGLE_LANE_CONCURRENT = 1;
 export const START_GATE_RECHECK_MS = 15_000;
 /** Jitter added to each re-check while still inside the max wait: uniform [0, RECHECK_JITTER_MS). */
 export const START_GATE_RECHECK_JITTER_MS = 5_000;
-export const START_GATE_WAITING_STATUS = "等待内存";
+export const START_GATE_WAITING_MEMORY_STATUS = "等待内存";
+export const START_GATE_WAITING_LOAD_STATUS = "等待负载";
+export const START_GATE_WAITING_BOTH_STATUS = "等待内存和负载";
+export const START_GATE_WAITING_PROBE_STATUS = "等待资源探测";
+/** #686 compatibility alias for callers that used the original memory-only status. */
+export const START_GATE_WAITING_STATUS = START_GATE_WAITING_MEMORY_STATUS;
 export const START_GATE_SINGLE_LANE_STATUS = "已超时，按单路放行";
+const START_GATE_BLOCKED_STATUSES = new Set<string>([
+  START_GATE_WAITING_MEMORY_STATUS,
+  START_GATE_WAITING_LOAD_STATUS,
+  START_GATE_WAITING_BOTH_STATUS,
+  START_GATE_WAITING_PROBE_STATUS,
+  START_GATE_SINGLE_LANE_STATUS,
+]);
 /** Logged when one waiter atomically replaces a stuck lease. The wait cap must not admit without this. */
 export const START_GATE_TAKEOVER_STATUS = "接管卡死租约";
 /** Startup leases older than this are not live. ANET_START_LEASE_TTL_SEC overrides it. */
@@ -139,6 +151,27 @@ export interface HostSample {
   memTotalMb: number;
   load1: number;
   cpuCount: number;
+}
+
+export interface StartGateStatusSnapshot {
+  status: string;
+  task?: string;
+}
+
+/** True only for blocked text owned by this gate, including single-lane wait. */
+export function isStartGateBlockedStatus(task: string | undefined): boolean {
+  return typeof task === "string" && START_GATE_BLOCKED_STATUSES.has(task);
+}
+
+/**
+ * Once admission returns, restore the pre-gate status only if the live status
+ * is still ours. A concurrent task/status update must win over stale restore.
+ */
+export function startGateStatusToRestore(
+  live: StartGateStatusSnapshot,
+  previous: StartGateStatusSnapshot,
+): StartGateStatusSnapshot | null {
+  return live.status === "blocked" && isStartGateBlockedStatus(live.task) ? previous : null;
 }
 
 interface HolderRecord {
@@ -276,6 +309,17 @@ export function startGateReasons(s: HostSample, minMemMb: number, maxLoadPerCpu:
     reasons.push(`load1 ${s.load1.toFixed(2)} > ${maxLoad} (${maxLoadPerCpu} x ${s.cpuCount} CPUs, ANET_START_MAX_LOAD_PER_CPU)`);
   }
   return reasons;
+}
+
+/** User-facing blocked status. Keep this structured instead of parsing the diagnostic reasons. */
+export function startGateWaitingStatus(s: HostSample | null, minMemMb: number, maxLoadPerCpu: number): string | null {
+  if (!s) return START_GATE_WAITING_PROBE_STATUS;
+  const memoryLow = s.memAvailableMb < minMemMb;
+  const loadHigh = s.load1 > maxLoadPerCpu * s.cpuCount;
+  if (memoryLow && loadHigh) return START_GATE_WAITING_BOTH_STATUS;
+  if (memoryLow) return START_GATE_WAITING_MEMORY_STATUS;
+  if (loadHigh) return START_GATE_WAITING_LOAD_STATUS;
+  return null;
 }
 
 function cgroupMemoryFiles(text: string): { maxPath: string; currentPath: string; statPath: string; v1: boolean } | null {
@@ -954,7 +998,7 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   let checks = 0;
   let lastShortageLogAt = -Infinity;
   let lastSlotLogAt = -Infinity;
-  let reportedWaiting = false;
+  let reportedWaitingStatus: string | null = null;
   let announcedSingleLane = false;
 
   const slotSleepMs = (waitedMs: number, capToMaxWait: boolean): number => {
@@ -970,8 +1014,10 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
       checks++;
       const waitedMs = now() - started;
       const timedOut = waitedMs >= maxWaitMs;
-      const reasons = s ? startGateReasons(s, minMemFor(s), maxLoadPerCpu) : ["/proc unreadable"];
+      const minMemMb = s ? minMemFor(s) : START_GATE_DEFAULT_MIN_MEM_MB;
+      const reasons = s ? startGateReasons(s, minMemMb, maxLoadPerCpu) : ["/proc unreadable"];
       const shortage = reasons.length > 0;
+      const waitingStatus = startGateWaitingStatus(s, minMemMb, maxLoadPerCpu);
 
       if (timedOut && !announcedSingleLane) {
         announcedSingleLane = true;
@@ -983,9 +1029,9 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
       }
 
       if (!timedOut && shortage) {
-        if (!reportedWaiting) {
-          reportedWaiting = true;
-          safeReport(deps.report, START_GATE_WAITING_STATUS, warn);
+        if (waitingStatus && waitingStatus !== reportedWaitingStatus) {
+          reportedWaitingStatus = waitingStatus;
+          safeReport(deps.report, waitingStatus, warn);
         }
         if (checks === 1 || waitedMs - lastShortageLogAt >= 60_000) {
           lastShortageLogAt = waitedMs;
