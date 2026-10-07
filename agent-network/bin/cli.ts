@@ -513,6 +513,12 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
         //    Reproduced every time in a clean container; instrumented to
         //    confirm this exact branch.
         if (!paneTarget) {
+          // `new-session` already returned before this waiter starts. If the
+          // exact session is now gone, the bridge exited; a larger recovery
+          // budget must not turn that terminal failure into minutes of
+          // misleading "still attaching" time. A live session whose pane is
+          // not listable yet keeps polling as before.
+          if (!tmuxSessionRunning(sessionName)) { resolve(false); return; }
           if (Date.now() >= deadline) { resolve(false); return; }
           setTimeout(poll, 400);
           return;

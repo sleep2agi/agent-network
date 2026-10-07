@@ -10,7 +10,9 @@ describe("Codex co-presence launch readiness", () => {
   test("tmux receipt capture joins wrapped lines before exact identity matching", () => {
     const waitStart = cli.indexOf("function waitForTmuxPaneText(");
     const waitEnd = cli.indexOf("function capturePane(", waitStart);
-    expect(cli.slice(waitStart, waitEnd)).toContain('"-p", "-J", "-S", "-200"');
+    const waiter = cli.slice(waitStart, waitEnd);
+    expect(waiter).toContain('"-p", "-J", "-S", "-200"');
+    expect(waiter).toContain("if (!tmuxSessionRunning(sessionName)) { resolve(false); return; }");
   });
 
   test.skipIf(!tmuxPresent)("80-column tmux -J reconstructs an exact long bridge receipt", async () => {
