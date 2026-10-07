@@ -1,11 +1,50 @@
 import { describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bridgeLaunchFailureLines, codexBridgeTeeCommand, tailLines } from "./codex-copresence-bridge-log";
 
 describe("#535 codex bridge launch log", () => {
+  test("tee keeps the writer alive when a secondary sink closes", () => {
+    const d = mkdtempSync(join(tmpdir(), "t705-tee-p-"));
+    try {
+      const pane = join(d, "pane.txt");
+      const script = `exec > >(tee -p >(head -c 1 >/dev/null)) 2>&1; head -c 1048576 /dev/zero | tr '\\0' x; echo; echo writer-survived`;
+      const r = spawnSync("bash", ["-c", `(${script}) > '${pane}'`], { encoding: "utf8" });
+      expect(r.status).toBe(0);
+      expect(readFileSync(pane, "utf8")).toContain("writer-survived");
+      const production = codexBridgeTeeCommand("'/tmp/log'");
+      expect(production).toContain("if tee -p </dev/null");
+      expect(production).toContain("then tee_arg=-p");
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+  test("a non-GNU tee falls back to portable tee without losing pane or file output", () => {
+    const d = mkdtempSync(join(tmpdir(), "t705-portable-tee-"));
+    try {
+      const fakeBin = join(d, "bin");
+      const calls = join(d, "calls.txt");
+      const log = join(d, "bridge.log");
+      const pane = join(d, "pane.txt");
+      spawnSync("mkdir", ["-p", fakeBin]);
+      writeFileSync(join(fakeBin, "tee"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$TEE_CALLS"\nif [ "\${1-}" = -p ]; then exit 64; fi\nexec /usr/bin/tee "$@"\n`);
+      chmodSync(join(fakeBin, "tee"), 0o755);
+      const script = `${codexBridgeTeeCommand(`'${log}'`)} && echo portable-line`;
+      const r = spawnSync("bash", ["-c", `(${script}) > '${pane}'`], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, TEE_CALLS: calls },
+      });
+      expect(r.status).toBe(0);
+      const readOf = (file: string) => { try { return readFileSync(file, "utf8"); } catch { return ""; } };
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline && !(readOf(pane).includes("portable-line") && readOf(log).includes("portable-line"))) {
+        spawnSync("sleep", ["0.05"]);
+      }
+      expect(readOf(pane)).toContain("portable-line");
+      expect(readOf(log)).toContain("portable-line");
+      expect(readOf(calls).split("\n")).toEqual(expect.arrayContaining(["-p", ""]));
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
   test("a dead bridge: tail + path, and no tmux attach to a session that is gone", () => {
     const logText = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n") + "\nError: exact paired package identity validation failed\n\n";
     const lines = bridgeLaunchFailureLines({ bridgeAlive: false, attachCommand: "tmux attach -t '=x-桥'", logPath: "/n/codex-bridge.log", logText, waitedSeconds: 25, cleanupCommand: "anet node stop x" });

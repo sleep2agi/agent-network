@@ -64,6 +64,9 @@ L0_TESTS=(
   #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
 L1_TESTS=(
+  # board #705: bridge stdout/sink failure must not terminate agent-node;
+  # includes witnessed-red checks for EPIPE, fatal diagnostics and tee -p.
+  "test705-bridge-epipe"
   "test674-binding-generation"
   "test658-codex-adopt-stop"
   # #1253 —— grok 换模型 hot→restart 回退路径。纯本地:跑 agent-node 源码的
