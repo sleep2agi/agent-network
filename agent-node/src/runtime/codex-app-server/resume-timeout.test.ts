@@ -103,7 +103,7 @@ describe("startup thread/resume deadline", () => {
     expect(bridge.currentStatus()).not.toBe("idle");
   });
 
-  test("the bridge default is 120 s, not the client's generic 30 s", async () => {
+  test("the bridge default is 300 s, not the client's generic 30 s", async () => {
     const app = fakeApp((_n, respond) => respond({ result: {} }));
     cleanups.push(app.stop);
     const { client, bridge } = await bridgeFor(app.url);
@@ -115,7 +115,7 @@ describe("startup thread/resume deadline", () => {
     }) as typeof client.request;
     await bridge.bootstrap();
     expect(timeouts).toEqual([DEFAULT_RESUME_TIMEOUT_MS]);
-    expect(DEFAULT_RESUME_TIMEOUT_MS).toBe(120_000);
+    expect(DEFAULT_RESUME_TIMEOUT_MS).toBe(300_000);
   });
 
   test("non-timeout resume errors are not retried", async () => {
@@ -169,6 +169,17 @@ describe("resolveResumeTimeoutMs", () => {
     }
     expect(warns.length).toBe(7);
     expect(warns[0]).toContain(`${RESUME_TIMEOUT_ENV}="abc"`);
+  });
+});
+
+describe("co-presence materialization deadline wiring", () => {
+  const runtimeSource = readFileSync(join(import.meta.dir, "runtime.ts"), "utf8");
+
+  test("one ANET_CODEX_RESUME_TIMEOUT_MS-derived value governs resume and fresh-thread materialization", () => {
+    expect(runtimeSource).toContain("const resumeTimeoutMs = resolveResumeTimeoutMs(process.env, warn)");
+    expect(runtimeSource).toContain("resumeTimeoutMs,\n      deferredThreadTimeoutMs: resumeTimeoutMs,");
+    expect(runtimeSource).toContain("isDeferredThreadMaterialized:");
+    expect(runtimeSource).toContain("findCodexRolloutFile(codexSessionsRoot(");
   });
 });
 

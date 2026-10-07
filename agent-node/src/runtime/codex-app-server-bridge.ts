@@ -65,7 +65,7 @@ export interface CodexAppServerBridgeOptions {
   deferredThreadTimeoutMs?: number;
   /**
    * Deadline for each startup `thread/resume` of a persisted thread. Defaults
-   * to 120 s (see codex-app-server/resume-timeout.ts); the JSON-RPC client's
+   * to 300 s (see codex-app-server/resume-timeout.ts); the JSON-RPC client's
    * generic 30 s default is too short for threads with very large rollouts.
    */
   resumeTimeoutMs?: number;
@@ -75,6 +75,12 @@ export interface CodexAppServerBridgeOptions {
   deferredResumeGapMs?: number;
   initialDeferredThreadId?: string;
   onDeferredCandidate?: (threadId: string) => void | Promise<void>;
+  /**
+   * Shared-TUI candidates are not durable until Codex creates their rollout.
+   * Production supplies an exact CODEX_HOME lookup; the optional seam keeps
+   * protocol-only users and unit fakes independent from a local filesystem.
+   */
+  isDeferredThreadMaterialized?: (threadId: string) => boolean | Promise<boolean>;
 }
 
 export type BridgeStatus =
@@ -195,6 +201,7 @@ export class CodexAppServerBridge extends EventEmitter {
   private readonly deferredResumeGapMs: number;
   private readonly initialDeferredThreadId: string;
   private readonly onDeferredCandidate?: (threadId: string) => void | Promise<void>;
+  private readonly isDeferredThreadMaterialized?: (threadId: string) => boolean | Promise<boolean>;
   private readonly shouldStartQueued?: CodexAppServerBridgeOptions["shouldStartQueued"];
   /**
    * A turn started by the human TUI. Dashboard chat is allowed to steer this
@@ -244,13 +251,16 @@ export class CodexAppServerBridge extends EventEmitter {
     this.fullHistoryReconciliationIntervalMs =
       opts.fullHistoryReconciliationIntervalMs ?? 60_000;
     this.deferThreadUntilTui = opts.deferThreadUntilTui === true;
-    this.deferredThreadTimeoutMs = opts.deferredThreadTimeoutMs ?? 120_000;
+    this.deferredThreadTimeoutMs = opts.deferredThreadTimeoutMs ?? opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
     this.resumeTimeoutMs = opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
     this.resumeAttempts = Math.max(1, opts.resumeAttempts ?? DEFAULT_RESUME_ATTEMPTS);
-    this.deferredResumeAttempts = opts.deferredResumeAttempts ?? 100;
+    // An explicit attempt cap remains a test/debug seam. Production is
+    // governed by deferredThreadTimeoutMs, not the old 100 * 200 ms window.
+    this.deferredResumeAttempts = opts.deferredResumeAttempts ?? Number.POSITIVE_INFINITY;
     this.deferredResumeGapMs = opts.deferredResumeGapMs ?? 200;
     this.initialDeferredThreadId = opts.initialDeferredThreadId ?? "";
     this.onDeferredCandidate = opts.onDeferredCandidate;
+    this.isDeferredThreadMaterialized = opts.isDeferredThreadMaterialized;
     this.shouldStartQueued = opts.shouldStartQueued;
     this.attachClientListeners();
   }
@@ -838,9 +848,20 @@ export class CodexAppServerBridge extends EventEmitter {
       this.deferredReject?.(error instanceof Error ? error : new Error(String(error)));
       return;
     }
-    for (let attempt = 0; attempt < this.deferredResumeAttempts; attempt++) {
+    const deadline = Date.now() + this.deferredThreadTimeoutMs;
+    for (let attempt = 0; attempt < this.deferredResumeAttempts && Date.now() < deadline; attempt++) {
       try {
         await this.resumeThread(id);
+        // A successful RPC is not proof that a fresh TUI thread survived to
+        // disk. Codex can acknowledge it before the first turn creates the
+        // rollout (for example while an update prompt blocks the TUI). Keep
+        // only codexPendingThread until the exact rollout exists; otherwise a
+        // later start would persist and try to resume a thread that never did.
+        if (this.isDeferredThreadMaterialized && !await this.isDeferredThreadMaterialized(id)) {
+          const remaining = deadline - Date.now();
+          if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(this.deferredResumeGapMs, remaining)));
+          continue;
+        }
         const resolve = this.deferredResolve;
         this.deferredResolve = null;
         resolve?.(id);
@@ -851,11 +872,15 @@ export class CodexAppServerBridge extends EventEmitter {
           this.deferredReject?.(error instanceof Error ? error : new Error(String(error)));
           return;
         }
-        await new Promise((resolve) => setTimeout(resolve, this.deferredResumeGapMs));
+        const remaining = deadline - Date.now();
+        if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(this.deferredResumeGapMs, remaining)));
       }
     }
     this.deferredResolve = null;
-    this.deferredReject?.(new Error(`TUI thread ${id} did not materialize within the bounded retry window`));
+    this.deferredReject?.(new Error(
+      `TUI thread ${id} did not materialize within ${this.deferredThreadTimeoutMs}ms ` +
+      `(configure ANET_CODEX_RESUME_TIMEOUT_MS)`,
+    ));
   }
 
   private onReverseRequest(rr: { id: number; method: string; params: unknown }): void {

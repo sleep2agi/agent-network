@@ -4,41 +4,142 @@ Layer 1: pure recovery + existing thread lifecycle
 bun test v1.3.14 (0d9b296a)
 
 src/codex-copresence-resume-timeout.test.ts:
-(pass) Codex co-presence resume timeout > default grows by 120 seconds per started GiB and caps at 15 minutes [3.89ms]
-(pass) Codex co-presence resume timeout > missing or ambiguous rollout keeps the 300 second base [0.34ms]
-(pass) Codex co-presence resume timeout > valid environment override wins; invalid values warn and fall back [0.27ms]
-(pass) Codex co-presence resume timeout > budget retains rollout bytes for timeout diagnostics even with an override [0.42ms]
+(pass) Codex co-presence resume timeout > default grows by 120 seconds per started GiB and caps at 15 minutes [5.55ms]
+(pass) Codex co-presence resume timeout > missing or ambiguous rollout keeps the 300 second base [0.59ms]
+(pass) Codex co-presence resume timeout > valid environment override wins; invalid values warn and fall back [0.33ms]
+(pass) Codex co-presence resume timeout > budget retains rollout bytes for timeout diagnostics even with an override [0.47ms]
 
 src/codex-copresence-rpc.test.ts:
-(pass) co-presence RPC recovery deadline > a slow fake app-server can finish thread/resume inside the configured deadline [95.82ms]
-(pass) co-presence RPC recovery deadline > the same slow server still fails closed when its deadline is too small [31.45ms]
+(pass) co-presence RPC recovery deadline > a slow fake app-server can finish thread/resume inside the configured deadline [97.92ms]
+(pass) co-presence RPC recovery deadline > the same slow server still fails closed when its deadline is too small [31.54ms]
 
 src/opencode-agent-node-pair.test.ts:
-(pass) OpenCode agent-node release pairing > pins the exact versions being released together [0.73ms]
-(pass) OpenCode agent-node release pairing > rejects latest 2.4.x-style help and accepts the RFC-029 capability [0.09ms]
-(pass) OpenCode agent-node release pairing > codex bridge ignores stale PATH globals and resolves only the immutable pair [0.24ms]
-(pass) OpenCode agent-node release pairing > codex capability is explicit and fails closed when absent [0.06ms]
-(pass) OpenCode agent-node release pairing > admits only the exact preview package identity with safe file modes [6.26ms]
-(pass) OpenCode agent-node release pairing > skips an exact project-local impersonator and selects the later global package [6.31ms]
+(pass) OpenCode agent-node release pairing > pins the exact versions being released together [2.11ms]
+(pass) OpenCode agent-node release pairing > rejects latest 2.4.x-style help and accepts the RFC-029 capability [0.12ms]
+(pass) OpenCode agent-node release pairing > codex bridge ignores stale PATH globals and resolves only the immutable pair [0.34ms]
+(pass) OpenCode agent-node release pairing > codex capability is explicit and fails closed when absent [0.13ms]
+(pass) OpenCode agent-node release pairing > admits only the exact preview package identity with safe file modes [8.47ms]
+(pass) OpenCode agent-node release pairing > skips an exact project-local impersonator and selects the later global package [10.44ms]
+
+src/codex-pending-thread-restart.test.ts:
+(pass) #602 decidePendingThreadAtStart > no candidate → nothing to do [0.30ms]
+(pass) #602 decidePendingThreadAtStart > marker on disk and bound to it but no rollout → drop the unmaterialized fresh candidate [0.64ms]
+(pass) #602 decidePendingThreadAtStart > marker on disk and bound to it with a rollout → migrate the materialized candidate [0.36ms]
+(pass) #602 decidePendingThreadAtStart > marker on disk but candidate bound to another marker → refuse (unchanged) [0.07ms]
+(pass) #602 decidePendingThreadAtStart > marker untrustworthy (corrupt/mode/owner) → refuse, never dropped [0.22ms]
+(pass) #602 decidePendingThreadAtStart > the bug: marker removed by a clean stop, thread never had a rollout → drop, start fresh [0.06ms]
+(pass) #602 decidePendingThreadAtStart > marker gone but the thread HAS a rollout → refuse (never adopt an unproven binding) [0.29ms]
+(pass) #602 decidePendingThreadAtStart > marker gone and the rollout search failed → refuse [0.10ms]
+(pass) #602 decidePendingThreadAtStart > marker gone and the candidate is malformed → refuse [0.11ms]
+(pass) #602 decidePendingThreadAtStart > rollout lookup is asked for exactly the candidate's thread id [0.27ms]
+(pass) #602 findThreadRollouts > no sessions dirs at all → no rollouts (not an error) [0.74ms]
+(pass) #602 findThreadRollouts > finds the exact thread under sessions/YYYY/MM/DD and archived_sessions, ignores other threads [1.39ms]
+(pass) #602 findThreadRollouts > an empty rollout file still counts (the thread was persisted) [0.67ms]
+(pass) #602 findThreadRollouts > an unreadable directory makes the whole lookup fail (caller refuses) [0.11ms]
+(pass) #602 wiring in anet node start > the decision runs before the previous generation is reaped and before any session starts [0.06ms]
+(pass) #602 wiring in anet node start > only a MISSING marker maps to `missing`; every other refusal cause stays untrustworthy [0.04ms]
+(pass) #602 wiring in anet node start > rollouts are looked up in the CODEX_HOME this launch hands to the app-server [0.03ms]
+(pass) #602 wiring in anet node start > refuse still exits before any reap/start [0.21ms]
 
 src/codex-copresence-thread.test.ts:
-(pass) co-presence thread lifecycle > restart resumes the persisted conversation [0.07ms]
-(pass) co-presence thread lifecycle > only a node with no persisted thread creates one [0.08ms]
+(pass) co-presence thread lifecycle > restart resumes the persisted conversation [0.05ms]
+(pass) co-presence thread lifecycle > only a node with no persisted thread creates one [0.03ms]
 
 src/codex-copresence-recovery.test.ts:
-(pass) Codex co-presence recovery > resume requires exact thread identity and persisted history [0.38ms]
-(pass) Codex co-presence recovery > stub resume failure is fail-closed and never calls thread/start [0.24ms]
-(pass) Codex co-presence recovery > backup preserves config and session state but excludes credentials [3.38ms]
+(pass) Codex co-presence recovery > resume requires exact thread identity and persisted history [0.46ms]
+(pass) Codex co-presence recovery > stub resume failure is fail-closed and never calls thread/start [0.49ms]
+(pass) Codex co-presence recovery > backup preserves config and session state but excludes credentials [5.67ms]
 (pass) Codex co-presence recovery > active state writer is quiesced before the authoritative snapshot [0.32ms]
-(pass) Codex co-presence recovery > a failed optional recovery point is explicit but does not block startup [0.13ms]
-(pass) Codex co-presence recovery > recursive snapshot rejects symlinks instead of following state outside CODEX_HOME [0.95ms]
-(pass) Codex co-presence recovery > a rollout larger than 2 GiB is copied and hashed without a whole-file Buffer [12093.18ms]
-(pass) Codex co-presence recovery > audit exposes topology without config secrets [0.48ms]
+(pass) Codex co-presence recovery > a failed optional recovery point is explicit but does not block startup [0.33ms]
+(pass) Codex co-presence recovery > recursive snapshot rejects symlinks instead of following state outside CODEX_HOME [1.99ms]
+(pass) Codex co-presence recovery > a rollout larger than 2 GiB is copied and hashed without a whole-file Buffer [13858.58ms]
+(pass) Codex co-presence recovery > audit exposes topology without config secrets [0.35ms]
 
- 22 pass
+ 40 pass
  0 fail
- 64 expect() calls
-Ran 22 tests across 5 files. [12.30s]
+ 91 expect() calls
+Ran 40 tests across 6 files. [14.11s]
+bun test v1.3.14 (0d9b296a)
+
+src/runtime/codex-app-server-bridge.test.ts:
+(pass) CodexAppServerBridge — bootstrap + task mapping > bootstrap sends initialize + initialized + thread/resume in order [10.08ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > empty threadId → bootstrap creates a thread (thread/start) and adopts its id [5.91ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > deferred co-presence binds the unique TUI-owned thread without thread/start [8.58ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > deferred binding ignores non-user events and deduplicates the same TUI id [7.11ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > deferred binding times out fail-closed without creating a thread [15.68ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > deferred binding rejects two distinct user-owned thread identities [7.21ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > deferred candidate persists before resume and restart retries only that exact id [9.11ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > a successful resume does not promote a fresh candidate until its exact rollout materializes [16.00ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > an acknowledged but never-materialized fresh candidate fails closed and is never thread_ready [40.72ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > stale threadId with no rollout → resume fails, bootstrap falls back to thread/start [7.23ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > startTaskTurn returns the server-assigned turnId and marks bridge working [2.50ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed for OUR turn fires task_reply mapped back to the task_id [13.69ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > only exact owned-turn item events emit task_activity [14.69ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > a command before the identity echo is still a side effect; text is not [45.72ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > authenticated Dashboard native /goal text reaches the shared thread unchanged and replies [13.51ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > clientUserMessageId rebinds a task when a goal successor replaces the turn/start response id [49.10ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > client-id ownership observed before the RPC response wins without reversing task event order [23.12ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > real bridge + runtime bounds a deferred terminal when exact client identity never arrives [31.36ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > real bridge + runtime bounds an unresolved turn/start through the left-FIFO fallback [56.82ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > agentMessage/delta accumulates when server omits finalText [14.50ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed for a HUMAN-TUI-initiated turn is dropped (§7.5) [13.79ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > events for a DIFFERENT thread are dropped (defense in depth) [13.87ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > startTaskTurn refuses a second task while one is active [3.16ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed with an error field fires task_error, NOT task_reply [12.73ms]
+(pass) CodexAppServerBridge — bootstrap + task mapping > turn/completed with interrupted status cannot become a successful reply [13.81ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > reverse-request approval records waiting_human and sends NO response [14.06ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > serverRequest/resolved clears waiting_human and status recovers [23.90ms]
+(pass) CodexAppServerBridge — approvals (waiting_human) §7.6 > multiple concurrent approvals: bridge stays waiting_human until all resolve [36.26ms]
+(pass) CodexAppServerBridge — two-client race for idle > only one bridge wins turn/start; the other observes and does not reply [20.72ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect recovers an active human turn and keeps it steerable [4.22ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect provenance keeps an orphaned network turn FIFO-only [23.42ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect provenance ignores leading whitespace before the network prefix [3.77ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconnect stays FIFO-only when real-wire active history omits userMessage [3.00ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > uses exact turn/steer contract and maps the human turn final answer [23.40ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > an interrupted human turn surfaces the steered Dashboard row as an error, not a reply [26.43ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > multiple Dashboard rows steer one human turn while ordinary agent work stays queued [40.49ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > steer mismatch fails closed and preserves the task in the normal FIFO [35.10ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > turn completion cannot attribute a task before turn/steer acceptance [35.65ms]
+(pass) CodexAppServerBridge — authenticated Dashboard steering > reconciliation recovers a missed human turn completion and exact steered reply [14.77ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > concurrent startTaskTurn: exactly ONE turn/start reaches the server even with a slow response [54.57ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > submitTask queues the second task and drains it after turn/completed (order preserved) [115.65ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > cancelQueuedTask removes only the named FIFO row before it can execute [55.02ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read recovers a completed owned turn while a successor keeps the thread active [105.69ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read uses clientUserMessageId to recover a replacement turn when all live item events were lost [3.78ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > slow full-history fallback recovers when both terminal and successor notifications are lost [2.54ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > full history never attributes a different completed turn to the owned task [3.00ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > thread/read never recovers an interrupted turn as success [2.22ms]
+(pass) CodexAppServerBridge — sync claim + FIFO queue (通信龙) > drain losing the idle race requeues at the FRONT and retries on next idle [165.18ms]
+(pass) CodexAppServerBridge — #1930 queued rows are re-checked before their turn > reproduction: a row queued behind a live turn, then acked on the Hub, still starts a turn when the gate is absent [25.61ms]
+(pass) CodexAppServerBridge — #1930 queued rows are re-checked before their turn > with the gate saying the row is no longer pending, no turn starts and task_skipped is emitted [24.09ms]
+(pass) CodexAppServerBridge — #1930 queued rows are re-checked before their turn > a row the gate confirms as pending starts exactly as before [24.73ms]
+(pass) CodexAppServerBridge — #1930 queued rows are re-checked before their turn > the gate is fail-open: a throwing check starts the row [24.35ms]
+(pass) CodexAppServerBridge — #1930 queued rows are re-checked before their turn > a skipped row does not block the row behind it [24.84ms]
+(pass) CodexAppServerBridge — #1930 queued rows are re-checked before their turn > the gate is never consulted for a row that starts immediately [3.18ms]
+(pass) CodexAppServerBridge — never hydrates full thread history > startup resume sends excludeTurns:true [2.40ms]
+(pass) CodexAppServerBridge — never hydrates full thread history > deferred TUI-thread resume sends excludeTurns:true [2.53ms]
+(pass) CodexAppServerBridge — never hydrates full thread history > recovery and reconciliation read one bounded page, never includeTurns:true [3.55ms]
+(pass) CodexAppServerBridge — never hydrates full thread history > pre-0.151 codex: capability rejection falls back to the legacy calls once [3.35ms]
+(pass) CodexAppServerBridge — never hydrates full thread history > a resume timeout is retried with excludeTurns, never downgraded to full hydration [64.51ms]
+(pass) CodexAppServerBridge — never hydrates full thread history > an unrelated resume error is not treated as missing excludeTurns support [3.41ms]
+
+src/runtime/codex-app-server/resume-timeout.test.ts:
+(pass) startup thread/resume deadline > a slow resume inside the budget succeeds and keeps the thread [304.33ms]
+(pass) startup thread/resume deadline > a timed-out resume retries once and succeeds on the loaded thread [153.70ms]
+(pass) startup thread/resume deadline > resume timing out on every attempt fails loudly and never starts a new thread [204.14ms]
+(pass) startup thread/resume deadline > the bridge default is 300 s, not the client's generic 30 s [4.51ms]
+(pass) startup thread/resume deadline > non-timeout resume errors are not retried [3.10ms]
+(pass) runtime wiring > ANET_CODEX_RESUME_TIMEOUT_MS reaches the bridge and each timeout is logged with the thread id [248.41ms]
+(pass) resolveResumeTimeoutMs > unset or blank → default [0.18ms]
+(pass) resolveResumeTimeoutMs > whole milliseconds are honoured, including the timer maximum [0.11ms]
+(pass) resolveResumeTimeoutMs > invalid values fall back to the default with one warning per distinct value [0.32ms]
+(pass) co-presence materialization deadline wiring > one ANET_CODEX_RESUME_TIMEOUT_MS-derived value governs resume and fresh-thread materialization [0.18ms]
+(pass) cli startup failure path > reports the node offline before exiting, since it already registered [1.41ms]
+
+ 71 pass
+ 0 fail
+ 280 expect() calls
+Ran 71 tests across 2 files. [2.45s]
 
 Layer 2: production wiring invariants
 PASS: launcher uses exact resume/read verification, quiesced private snapshot, and audit projection
@@ -51,19 +152,19 @@ Bundled 3 modules in 7ms
 
   client.js  5.79 KB  (entry point)
 
-Bundled 1 module in 5ms
+Bundled 1 module in 4ms
 
   daemon-capability-display.js  5.34 KB  (entry point)
 
-Bundled 300 modules in 147ms
+Bundled 300 modules in 140ms
 
   cli.js  1.55 MB  (entry point)
 
-Bundled 247 modules in 70ms
+Bundled 247 modules in 64ms
 
   node-server.js  0.32 MB  (entry point)
 
-Bundled 601 modules in 216ms
+Bundled 601 modules in 189ms
 
   worker.js  2.30 MB  (entry point)
 
@@ -79,6 +180,9 @@ PASS: typecheck and production bundle
 Layer 4: witnessed-red mutations
 WITNESSED_RED src/codex-copresence-recovery.test.ts: WHOLE_FILE_READ_LIMIT
 WITNESSED_RED src/codex-copresence-rpc.test.ts: request thread/resume timeout
+WITNESSED_RED src/runtime/codex-app-server-bridge.test.ts: an acknowledged but never-materialized fresh candidate
+WITNESSED_RED src/runtime/codex-app-server/resume-timeout.test.ts: one ANET_CODEX_RESUME_TIMEOUT_MS-derived value governs resume and fresh-thread materialization
+WITNESSED_RED src/codex-pending-thread-restart.test.ts: marker on disk and bound to it but no rollout
 
 Witnessed-red contract
 Mutation proven by unit stub: thread/read returns exact id with empty history; test rejects and call trace is only thread/resume,thread/read (no thread/start).
@@ -87,6 +191,7 @@ Mutation proven by active-writer stub: snapshot throws if reached while writer=t
 Mutation proven by recursive state fixture: nested session files have relative path + byte size + sha256; a symlink to outside CODEX_HOME is rejected instead of copied.
 Mutation proven by >2 GiB sparse rollout: restoring a whole-file read fails while the streaming sparse copy passes.
 Mutation proven by slow fake app-server: reducing the derived thread/resume deadline below its response delay fails closed.
+Mutation proven by acknowledged-without-rollout fake: a deferred candidate cannot become codexThreadId until its exact rollout exists; the materialization retry shares ANET_CODEX_RESUME_TIMEOUT_MS.
 Identity boundary: config-recovery.json is redacted non-credential metadata only. The original config.json and CODEX_HOME remain in place and are never replaced or cleared.
 
 Release gate (report-only; this Draft does not publish or bump versions)

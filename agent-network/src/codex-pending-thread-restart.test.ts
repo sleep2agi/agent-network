@@ -16,8 +16,14 @@ describe("#602 decidePendingThreadAtStart", () => {
     expect(decidePendingThreadAtStart(undefined, { kind: "missing" }, none)).toEqual({ kind: "none" });
   });
 
-  test("marker on disk and bound to it → migrate (crash recovery, unchanged)", () => {
-    expect(decidePendingThreadAtStart(pending(), { kind: "ok", marker: M1 }, none)).toEqual({ kind: "migrate", oldMarker: M1 });
+  test("marker on disk and bound to it but no rollout → drop the unmaterialized fresh candidate", () => {
+    expect(decidePendingThreadAtStart(pending(), { kind: "ok", marker: M1 }, none))
+      .toEqual({ kind: "drop-unmaterialized", threadId: TID });
+  });
+
+  test("marker on disk and bound to it with a rollout → migrate the materialized candidate", () => {
+    expect(decidePendingThreadAtStart(pending(), { kind: "ok", marker: M1 }, has()))
+      .toEqual({ kind: "migrate", oldMarker: M1 });
   });
 
   test("marker on disk but candidate bound to another marker → refuse (unchanged)", () => {

@@ -6,7 +6,9 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends python3 mak
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && bun install --frozen-lockfile
 COPY agent-network ./agent-network
-COPY agent-node/package.json ./agent-node/package.json
+COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
+RUN cd agent-node && bun install --frozen-lockfile
+COPY agent-node ./agent-node
 COPY tests/test1178-codex-upgrade-recovery/run.sh ./run.sh
 COPY tests/test1178-codex-upgrade-recovery/mutation.mjs ./mutation.mjs
 RUN chmod +x ./run.sh

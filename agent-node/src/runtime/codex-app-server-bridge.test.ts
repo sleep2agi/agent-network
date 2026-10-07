@@ -264,6 +264,49 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     await clientB.close(); await app2.stop();
   });
 
+  test("a successful resume does not promote a fresh candidate until its exact rollout materializes", async () => {
+    const app2 = await startFakeApp();
+    const client2 = new CodexAppServerClient({ url: app2.url });
+    await client2.connect();
+    let probes = 0;
+    const ready: unknown[] = [];
+    const bridge2 = new CodexAppServerBridge({
+      client: client2,
+      deferThreadUntilTui: true,
+      initialDeferredThreadId: "tui-not-yet-durable",
+      deferredThreadTimeoutMs: 100,
+      deferredResumeGapMs: 5,
+      isDeferredThreadMaterialized: () => ++probes >= 3,
+    });
+    bridge2.on("thread_ready", (event) => ready.push(event));
+    await bridge2.bootstrap();
+    expect(probes).toBe(3);
+    expect(app2.received.filter((m) => (m as any).method === "thread/resume")).toHaveLength(3);
+    expect(ready).toHaveLength(1);
+    expect(bridge2.getThreadId()).toBe("tui-not-yet-durable");
+    await client2.close(); await app2.stop();
+  });
+
+  test("an acknowledged but never-materialized fresh candidate fails closed and is never thread_ready", async () => {
+    const app2 = await startFakeApp();
+    const client2 = new CodexAppServerClient({ url: app2.url });
+    await client2.connect();
+    const ready: unknown[] = [];
+    const bridge2 = new CodexAppServerBridge({
+      client: client2,
+      deferThreadUntilTui: true,
+      initialDeferredThreadId: "tui-ack-without-rollout",
+      deferredThreadTimeoutMs: 35,
+      deferredResumeGapMs: 5,
+      isDeferredThreadMaterialized: () => false,
+    });
+    bridge2.on("thread_ready", (event) => ready.push(event));
+    await expect(bridge2.bootstrap()).rejects.toThrow(/(did not materialize|waiting-for-tui-thread timed out)/);
+    expect(ready).toEqual([]);
+    expect(app2.received.some((m) => (m as any).method === "thread/start")).toBe(false);
+    await client2.close(); await app2.stop();
+  });
+
   test("stale threadId with no rollout → resume fails, bootstrap falls back to thread/start", async () => {
     const app2 = await startFakeApp({
       onRequest: (msg, respond) => {

@@ -8,15 +8,16 @@
 // node exited after it had already registered with the hub, so the hub kept
 // showing it idle while nothing consumed its tasks.
 //
-// Default 120 s: ~4x the slowest observed resume, and the same budget the
-// bridge already gives the co-presence "wait for the TUI's thread" path
-// (`deferredThreadTimeoutMs`). Operators with even larger threads can raise it.
+// Default 300 s: field evidence shows even 0.26–0.78 GiB threads can exceed
+// 60 s during a cold Codex start. The same budget governs the co-presence
+// "wait for the TUI's thread to materialize" path. Operators with even larger
+// threads can raise it (the launcher also derives a size-aware budget).
 import { statSync } from "node:fs";
 import { codexSessionsRoot, findCodexRolloutFile } from "../codex-thread-size-check";
 import { resolveTimeoutEnvMs } from "./timeout-env";
 
 export const RESUME_TIMEOUT_ENV = "ANET_CODEX_RESUME_TIMEOUT_MS";
-export const DEFAULT_RESUME_TIMEOUT_MS = 120_000;
+export const DEFAULT_RESUME_TIMEOUT_MS = 300_000;
 /** Total resume attempts on timeout (1 retry). A retry usually lands on a thread the app-server finished loading meanwhile. */
 export const DEFAULT_RESUME_ATTEMPTS = 2;
 const warnedValues = new Set<string>();

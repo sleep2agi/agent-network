@@ -23,6 +23,7 @@ import { CodexAppServerBridge } from "../codex-app-server-bridge";
 import { waitForStartResources, type StartGateDeps } from "./start-resource-gate";
 import type { CodexAppServerTaskActivity } from "../codex-app-server-bridge";
 import { describeRolloutSize, resolveResumeTimeoutMs } from "./resume-timeout";
+import { codexSessionsRoot, findCodexRolloutFile } from "../codex-thread-size-check";
 import { resolveTimeoutEnvMs } from "./timeout-env";
 import { verifyProcessTreeCodexHome, type ProcReader } from "../../codex-home-enforce";
 import {
@@ -263,12 +264,20 @@ export async function openCodexAppServerRuntime(opts: {
     client.on("error", (e) => warn(`[codex-app-server] client error: ${String(e).slice(0, 200)}`));
     await client.connect();
 
+    const resumeTimeoutMs = resolveResumeTimeoutMs(process.env, warn);
     const bridge = new CodexAppServerBridge({
       client, threadId: opts.threadId, deferThreadUntilTui: opts.deferThreadUntilTui,
       initialDeferredThreadId: opts.initialDeferredThreadId,
       onDeferredCandidate: opts.onDeferredCandidate,
+      isDeferredThreadMaterialized: opts.codexHome
+        ? (threadId) => findCodexRolloutFile(codexSessionsRoot({ ...process.env, CODEX_HOME: opts.codexHome }), threadId) !== null
+        : undefined,
       shouldStartQueued: opts.shouldStartQueued,
-      resumeTimeoutMs: resolveResumeTimeoutMs(process.env, warn),
+      // Fresh-TUI materialization and persisted-thread resume are the same
+      // recovery operation from an operator's perspective. One environment
+      // setting governs both; the old hidden ~20 s retry cap is gone.
+      resumeTimeoutMs,
+      deferredThreadTimeoutMs: resumeTimeoutMs,
     });
     bridge.on("resume_timeout", (e: { threadId: string; attempt: number; attempts: number; timeoutMs: number; elapsedMs: number }) => {
       const next = e.attempt < e.attempts ? "retrying" : "giving up";

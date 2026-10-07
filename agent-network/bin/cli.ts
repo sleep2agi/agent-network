@@ -1074,6 +1074,7 @@ async function startWindowsCodexCopresence(
       CODEX_HOME: opts.codexHome,
       ANET_NODE_MARKER: marker,
       ANET_COPRESENCE_BRIDGE: "1",
+      ANET_CODEX_RESUME_TIMEOUT_MS: String(resumeBudget.timeoutMs),
     };
     delete bridgeEnv.COMMHUB_TOKEN;
     delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
@@ -1764,8 +1765,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
   let freshDeferred = false;
+  let recoveryTimeoutMs = 300_000;
   try {
     const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, profile.codexThreadId);
+    recoveryTimeoutMs = resumeBudget.timeoutMs;
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
     const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, profile.codexThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
@@ -1861,6 +1864,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         "-e", `ANET_NODE_MARKER=${identityMarker}`,
         "-e", "ANET_COPRESENCE_BRIDGE=1",
         "-e", `CODEX_HOME=${opts.codexHome}`,
+        "-e", `ANET_CODEX_RESUME_TIMEOUT_MS=${recoveryTimeoutMs}`,
         // #448 — health.tui probes this exact session name.
         "-e", `ANET_CODEX_TUI_SESSION=${tuiSession}`,
         // #535 — the entrypoint ⓪ already resolved and validated; the bridge re-validates it, no npx.
