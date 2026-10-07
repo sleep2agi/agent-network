@@ -475,6 +475,47 @@ describe("team skills", () => {
     expect(io.logs).toEqual(["[skills] 已移除失效的团队链接 ~/.claude/skills/gone"]);
   });
 
+  test("3 nodes installing at once, several rounds: no aborted install, final links correct", async () => {
+    const user = (home: string) => path.join(home, ".claude", "skills");
+    const linked = async (home: string) => {
+      const out: Record<string, string> = {};
+      for (const name of (await fs.readdir(user(home))).sort()) out[name] = await fs.readlink(path.join(user(home), name)).catch(() => "<dir>");
+      return out;
+    };
+    for (let round = 0; round < 8; round++) {
+      const work = await tmp("skills-w-");
+      const home = await tmp("skills-h-");
+      const ctx = { workDir: work, home };
+      const team = teamSkillsDir(ctx);
+      for (const n of ["a", "b", "c", "d", "e"]) await skill(team, `team-${n}`, md(n));
+      await skill(user(home), "mine", md("mine"));
+      const ios = [say(), say(), say()];
+      const first = await Promise.allSettled(ios.map((io) => installTeamSkills("claude", ctx, io)));
+      expect(first.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason))).toEqual([]);
+      for (const io of ios) expect(io.warns).toEqual([]);
+      // 被别的节点抢先建好、指向同一个源的，算成功，不是「跳过」。
+      for (const io of ios) expect(io.logs.filter((l) => l.includes("本次跳过"))).toEqual([]);
+      const expected: Record<string, string> = {};
+      for (const n of ["a", "b", "c", "d", "e"]) expected[`team-${n}`] = path.join(team, `team-${n}`);
+      const { mine: _mine, ...links } = await linked(home);
+      expect(links).toEqual(expected);
+      // 删两个、加一个，再同时启动三次：失效的被清掉，新的被链上，用户自己的不动。
+      await fs.rm(path.join(team, "team-b"), { recursive: true });
+      await fs.rm(path.join(team, "team-d"), { recursive: true });
+      await skill(team, "team-f", md("f"));
+      const ios2 = [say(), say(), say()];
+      const second = await Promise.allSettled(ios2.map((io) => installTeamSkills("claude", ctx, io)));
+      expect(second.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason))).toEqual([]);
+      for (const io of ios2) expect(io.warns).toEqual([]);
+      for (const io of ios2) expect(io.logs.filter((l) => l.includes("本次跳过"))).toEqual([]);
+      const after = await linked(home);
+      expect(Object.keys(after)).toEqual(["mine", "team-a", "team-c", "team-e", "team-f"]);
+      expect(after["team-f"]).toBe(path.join(team, "team-f"));
+      expect(await fs.readFile(path.join(user(home), "mine", "SKILL.md"), "utf8")).toBe(md("mine"));
+      expect((await skillView("claude", ctx)).warnings).toEqual([]);
+    }
+  });
+
   test("a normal user skill omits origin", async () => {
     const work = await tmp("skills-w-");
     const home = await tmp("skills-h-");

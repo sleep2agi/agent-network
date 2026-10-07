@@ -429,32 +429,50 @@ export async function installTeamSkills(runtime: string | null | undefined, ctx:
     const hiddenBy = await projectHasSkill(runtime, ctx, name);
     if (hiddenBy) say.warn(`[skills] 团队技能 ${name} 被 ${hiddenBy}/${name} 挡住`);
     const target = path.join(dest.dir, name);
-    if (!(await pathExists(target))) {
+    try {
+      if (!(await pathExists(target))) {
+        const kind = await placeTeamLink(src, target);
+        say.log(`[skills] 团队技能 ${name} 已${kind === "copied" ? "复制" : "链"}到 ${note}`);
+        continue;
+      }
+      if (!(await isOurTeamEntry(target, teamDir))) {
+        say.warn(`[skills] 团队技能 ${name} 未覆盖 ${dest.label}/${name}：目标已存在，且不是指向团队目录的链接`);
+        continue;
+      }
+      const pointed = await ourEntrySource(target, teamDir);
+      // 链接已经指向这份源:不用动。复制件(Windows 无权限建链接时的退路)每次启动按源刷新。
+      if (pointed === src && !(await hasTeamCopyMarker(target))) continue;
+      await removeOurEntry(target);
       const kind = await placeTeamLink(src, target);
       say.log(`[skills] 团队技能 ${name} 已${kind === "copied" ? "复制" : "链"}到 ${note}`);
-      continue;
+    } catch (err) {
+      // 同机多个节点同时启动：别人抢先建好 / 删掉了这一项。抢先建的就是同一个源，算成功；
+      // 其余这两种情况只跳过这一项，接着装下一项，不让整次安装中断。
+      if (!isRaceCode(err)) throw err;
+      if (await ourEntrySource(target, teamDir) === src) continue;
+      say.log(`[skills] 团队技能 ${name} 本次跳过：${(err as NodeJS.ErrnoException).code}（多个节点同时安装）`);
     }
-    if (!(await isOurTeamEntry(target, teamDir))) {
-      say.warn(`[skills] 团队技能 ${name} 未覆盖 ${dest.label}/${name}：目标已存在，且不是指向团队目录的链接`);
-      continue;
-    }
-    const pointed = await ourEntrySource(target, teamDir);
-    // 链接已经指向这份源:不用动。复制件(Windows 无权限建链接时的退路)每次启动按源刷新。
-    if (pointed === src && !(await hasTeamCopyMarker(target))) continue;
-    await removeOurEntry(target);
-    const kind = await placeTeamLink(src, target);
-    say.log(`[skills] 团队技能 ${name} 已${kind === "copied" ? "复制" : "链"}到 ${note}`);
   }
   if (!(await pathExists(dest.dir))) return;
-  for (const name of await fs.readdir(dest.dir)) {
+  for (const name of await fs.readdir(dest.dir).catch(() => [] as string[])) {
     if (!isValidSkillName(name) || name.startsWith(".")) continue;
     const target = path.join(dest.dir, name);
-    if (!(await isOurTeamEntry(target, teamDir))) continue;
     const pointed = await ourEntrySource(target, teamDir);
-    if (pointed && live.has(pointed) && await pathExists(pointed)) continue;
-    await removeOurEntry(target);
+    if (!pointed) continue;
+    if (live.has(pointed) && await pathExists(pointed)) continue;
+    try {
+      await removeOurEntry(target);
+    } catch (err) {
+      if (isRaceCode(err)) continue; // 别的节点已经清掉了
+      throw err;
+    }
     say.log(`[skills] 已移除失效的团队链接 ${dest.label}/${name}`);
   }
+}
+
+function isRaceCode(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === "EEXIST" || code === "ENOENT";
 }
 
 export async function teamSkillWarnings(runtime: string | null | undefined, ctx: SkillContext): Promise<string[]> {
