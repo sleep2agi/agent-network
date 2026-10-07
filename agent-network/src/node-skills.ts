@@ -240,9 +240,9 @@ async function ourEntrySource(dest: string, teamDir: string): Promise<string | n
   return resolvesUnderTeam(path.resolve(path.dirname(dest), link), teamDir);
 }
 
-/** 是不是我们建的：链接目标在团队目录下，或者目录里有复制标记。不看名字。 */
+/** 是不是我们建的：链接目标在团队目录下，或者复制标记里记的 source 解析后在团队目录下。不看名字。
+ *  只有标记、source 却指向别处的（比如用户把复制件拷出去自己改了），不算我们的，不删。 */
 export async function isOurTeamEntry(dest: string, teamDir: string): Promise<boolean> {
-  if (await hasTeamCopyMarker(dest)) return true;
   return (await ourEntrySource(dest, teamDir)) !== null;
 }
 

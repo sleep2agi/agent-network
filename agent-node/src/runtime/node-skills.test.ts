@@ -439,6 +439,42 @@ describe("team skills", () => {
     expect(fourth.logs).toEqual([]);
   });
 
+  test("a .anet-team-copy marker counts only when its source resolves inside the team dir", async () => {
+    const work = await tmp("skills-w-");
+    const home = await tmp("skills-h-");
+    const outside = await tmp("skills-out-");
+    const ctx = { workDir: work, home };
+    const team = teamSkillsDir(ctx);
+    await skill(team, "team-echo", md("echo"));
+    await skill(outside, "elsewhere", md("elsewhere"));
+    // 团队目录里一个指向外面的软链接：字面路径在团队目录下，真实路径不在。
+    await fs.symlink(path.join(outside, "elsewhere"), path.join(team, "sneaky"));
+    const user = path.join(home, ".claude", "skills");
+    const marked = async (name: string, source: string) => {
+      await fs.mkdir(path.join(user, name), { recursive: true });
+      await fs.writeFile(path.join(user, name, "SKILL.md"), "USER EDIT\n");
+      await fs.writeFile(path.join(user, name, TEAM_COPY_MARKER), `anet-team-skill\nsource=${source}\n`);
+    };
+    await marked("team-echo", path.join(outside, "elsewhere"));
+    await marked("my-fork", path.join(outside, "elsewhere"));
+    await marked("via-link", path.join(team, "sneaky"));
+    await marked("dotdot", `${team}/../../etc`);
+    await marked("gone", path.join(team, "deleted-skill"));
+    for (const name of ["team-echo", "my-fork", "via-link", "dotdot"]) {
+      expect(await isOurTeamEntry(path.join(user, name), team)).toBe(false);
+    }
+    expect(await isOurTeamEntry(path.join(user, "gone"), team)).toBe(true);
+    const io = say();
+    await installTeamSkills("claude", ctx, io);
+    for (const name of ["team-echo", "my-fork", "via-link", "dotdot"]) {
+      expect((await fs.lstat(path.join(user, name))).isSymbolicLink()).toBe(false);
+      expect(await fs.readFile(path.join(user, name, "SKILL.md"), "utf8")).toBe("USER EDIT\n");
+    }
+    await expect(fs.lstat(path.join(user, "gone"))).rejects.toThrow();
+    expect(io.warns).toEqual(["[skills] 团队技能 team-echo 未覆盖 ~/.claude/skills/team-echo：目标已存在，且不是指向团队目录的链接"]);
+    expect(io.logs).toEqual(["[skills] 已移除失效的团队链接 ~/.claude/skills/gone"]);
+  });
+
   test("a normal user skill omits origin", async () => {
     const work = await tmp("skills-w-");
     const home = await tmp("skills-h-");
