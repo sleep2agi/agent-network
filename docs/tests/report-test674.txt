@@ -1,0 +1,58 @@
+Board #674: token-bound active binding generation projection
+Tested source: fe1b52a53ab0ed75cc6b898926b1c85fd54b3c1b
+Base: 28c82c7681b44b8ed4ef3dcc706e442acbe86699
+
+Only active adopted list_my_children items add binding_request_id. The existing
+request UUID is the opaque generation. No schema migration, authority widening,
+new start action or existing-field change. Created items remain byte-for-field
+equivalent. get_adopt_request remains pending-only. Snapshot is not a lease.
+
+Docker build: tests/test674-binding-generation/Dockerfile, SOURCE_COMMIT as above.
+Run: --rm --init --cpus=2 --network none. No source mount. SQLite runs first;
+any failure stops the ladder before PostgreSQL. PG is a fresh in-container
+server with an ordinary password-authenticated role, one database per case.
+Hub binds loopback port 0; every case uses its own temporary HOME/database.
+Requests, acknowledgements, revocation and reads go through real HTTP/MCP.
+Fixture users/nodes/tokens and deliberately inconsistent isolation sentinels
+are seeded in the disposable test database, never in a real Hub.
+
+SQLite: 6 pass, 0 fail, 43 assertions; suite rc=0.
+PostgreSQL: 6 pass, 0 fail, 43 assertions; suite rc=0.
+No PostgreSQL extra-bind or parameter type failures. Both positional values
+remain bound in predicate-removal mutants so SQL errors cannot fake a red test.
+
+Independent mutants (each starts a fresh Hub/database and restores its source):
+name        SQLite     PostgreSQL   assertion that goes red
+projection  rc=1       rc=1         exact adopted generation response
+token       rc=1       rc=1         humans/general/revoked/other owner denial
+daemon      rc=1       rc=1         same-network wrong daemon sees no children
+network     rc=1       rc=1         cross-network binding sentinel excluded
+join        rc=1       rc=1         node/binding network mismatch excluded
+active      rc=1       rc=1         pending/refused/revoked never authoritative
+rotation    rc=1       rc=1         revoked R1 is not reused by new request
+revival     rc=1       rc=1         old ack cannot reactivate revoked R1
+consumer    rc=1       rc=1         old/missing generation refused by daemon
+Every row required the named failing test AND an expect(received) diagnostic;
+an environment/import/syntax failure alone does not pass the mutation driver.
+Mutation driver and final combined suite rc=0 for both databases.
+
+Related SQLite regression: node-daemon-bindings, node-lifecycle-controllable,
+start-node: 22 pass, 0 fail, 93 assertions, Docker rc=0 (product-equivalent
+snapshot before adding the extra pending-only HTTP assertion).
+Docker static gates: registration, coverage, home paths, L1 SHA, mutation pins
+rc=0; 598 anchors checked, 4 unchanged baseline exceptions. Symbol pins root:
+9 checked / 8 skipped; docs-site: 16 checked / 2 skipped; no drift/missing refs.
+Skips are not passes. No full server-wide suite or PG migration ladder run.
+
+Compatibility: only one additive field, no existing field changes. Source-level
+old-consumer projection and created shape tested. Actual released app x new Hub
+and .120 daemon x new Hub replay remains an operator pre-deployment gate; NOT
+claimed completed here. Existing human lifecycle-read API is not changed.
+Later #659 B must re-read authority at action boundaries and honor in-flight
+revocation protection. This read is not a startup lease.
+
+Recovery: same Hub service/deploy scripts, ports/proxies and secret sources.
+Upgrade/rollback uses the existing exact-main release process; no migration or
+data conversion. Existing binding records still require normal DB backups.
+No production, real nodes, real tmux, package release or deployment touched.
+Post-test changes are documentation only (scope wording plus this report).

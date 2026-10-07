@@ -459,7 +459,7 @@ Do not delete stop markers to bypass refusal.
 The daemon-only MCP tool `list_my_children` additionally returns `binding_request_id` on active
 adopted items. This is the opaque binding generation. The caller must use the bound daemon's valid
 node token, scoped to both daemon and network; human credentials and other daemons cannot read
-that binding. `get_adopt_request` remains pending-only. Re-adoption after revocation creates a new
+that binding through this interface. `get_adopt_request` remains pending-only. Re-adoption after revocation creates a new
 request ID; the old generation never revives. Old Hubs omit the field and the daemon preflight still
 refuses: never fill missing authority from local state. **The projection is a read-time snapshot, not
 a lease.** Executors must recheck the generation at action boundaries and honor in-flight lifecycle
