@@ -37,6 +37,10 @@ import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-siz
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
 import { reportedTask } from "./project-dir-mismatch.js";
 import { decideQueuedRowStart, QUEUED_ROW_CHECK_LIMIT } from "./runtime/codex-app-server/queued-row-hub-check";
+import {
+  recoverTurnReceipts,
+  TurnReceiptLedger,
+} from "./runtime/codex-app-server/receipt-ledger";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
 import { hostname as osHostname, homedir } from "os";
@@ -1941,6 +1945,9 @@ const PENDING_REPLIES_PATH = configFilePath
 const pendingReplies: PendingReplyQueue | null = PENDING_REPLIES_PATH
   ? new PendingReplyQueue(PENDING_REPLIES_PATH, { redactor: persistenceRedactorHandle })
   : null;
+const turnReceiptLedger = RUNTIME === "codex-app-server"
+  ? new TurnReceiptLedger(join(NODE_DIR, "codex-turn-receipts.json"))
+  : null;
 
 function persistPendingReply(entry: Omit<PendingReply, "attempts">): void {
   if (!pendingReplies) return;
@@ -1967,6 +1974,7 @@ async function drainPendingReplies(): Promise<void> {
   debug(`pending-replies: draining ${items.length} entry/ies`);
   const { delivered, dropped, requeued } = await pendingReplies.drain(async (entry) => {
     await sendReply(entry.to, entry.text, entry.taskId, entry.failed);
+    if (entry.taskId) turnReceiptLedger?.remove(entry.taskId);
     log(`pending-replies: re-delivered to ${entry.to}${entry.taskId ? ` (task ${entry.taskId.slice(0, 8)})` : ""} after ${entry.attempts + 1} attempt(s)`);
   });
   if (dropped > 0) warn(`pending-replies: dropped ${dropped} entry/ies — server-side app-level rejection`);
@@ -2520,6 +2528,42 @@ async function ensureCodexAppServerSession(): Promise<
   });
   writebackCodexThread(session.threadId);
   return session;
+}
+let codexReceiptRecoveryInFlight: Promise<void> | null = null;
+async function recoverCodexTurnReceipts(): Promise<void> {
+  if (!turnReceiptLedger || codexReceiptRecoveryInFlight) return codexReceiptRecoveryInFlight ?? undefined;
+  codexReceiptRecoveryInFlight = (async () => {
+    // A normal completion may already have persisted its outbound reply just
+    // before the process died. Give that exact body the first attempt; only
+    // inspect Codex history for ledger rows that remain afterwards.
+    await drainPendingReplies();
+    const queuedTaskIds = new Set((pendingReplies?.load() ?? []).map((row) => row.taskId).filter(Boolean));
+    const rows = turnReceiptLedger.load().filter((row) => !queuedTaskIds.has(row.taskId));
+    if (!rows.length) return;
+    const session = await ensureCodexAppServerSession();
+    const recovery = await recoverTurnReceipts({
+      rows,
+      inspect: (threadId, turnId) => session.bridge.inspectPersistedTurn(threadId, turnId),
+    });
+    if (recovery.queryErrors > 0) {
+      warn(`[codex-receipt] ${recovery.queryErrors} turn query/queries failed; retained for retry`);
+    }
+    for (const receipt of recovery.receipts) {
+      const body = `[${ALIAS}] ${receipt.text.slice(0, 2000)}`;
+      const delivery = await deliverReplyReliably(
+        receipt.entry.replyTo,
+        body,
+        receipt.entry.taskId,
+        receipt.failed,
+      );
+      log(`[codex-receipt] recovered task=${receipt.entry.taskId.slice(0, 8)} turn=${receipt.entry.turnId.slice(0, 8)} reason=${receipt.reason} delivery=${delivery}`);
+    }
+  })().catch((cause) => {
+    warn(`[codex-receipt] recovery pass failed; retained for retry: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }).finally(() => {
+    codexReceiptRecoveryInFlight = null;
+  });
+  return codexReceiptRecoveryInFlight;
 }
 let sideThreadNodeRuntime: { enabled: boolean; capability: Record<string, unknown>; close(): void } | null = null;
 let sideThreadOwnedSession: import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
@@ -4094,10 +4138,28 @@ async function processWithCodexAppServer(
       });
     },
     onSubmitted: evidence?.submitted,
-    onConsumed: (event) => evidence?.consumed({
-      threadId: session.bridge.getThreadId(),
-      turnId: event.turnId,
-    }),
+    onConsumed: (event) => {
+      const threadId = session.bridge.getThreadId();
+      const inboxId = taskId ? queuedInboxRowByTask.get(taskId) : undefined;
+      if (taskId && inboxId && turnReceiptLedger) {
+        try {
+          turnReceiptLedger.watch({
+            taskId,
+            inboxId,
+            replyTo: _from,
+            threadId,
+            turnId: event.turnId,
+            startedAt: Date.now(),
+          });
+        } catch (ledgerError) {
+          // A turn without durable receipt identity can become permanently
+          // silent after a bridge crash. Fail closed before acknowledging the
+          // runtime evidence rather than pretending this turn is recoverable.
+          throw new Error(`codex receipt ledger write failed: ${ledgerError instanceof Error ? ledgerError.message : String(ledgerError)}`);
+        }
+      }
+      evidence?.consumed({ threadId, turnId: event.turnId });
+    },
     onCapacityRetry: reportCapacityRetry,
   });
 
@@ -6057,7 +6119,10 @@ async function processInbox() {
         // inbox reply, so the sender is not woken by an acknowledgement.
         const closed = await closeLowValueTask(hubToolCall, { alias: ALIAS, taskId: logicalTaskId, msgType, result });
         if (closed.kind === "error") warn(formatCloseOutcome(logicalTaskId, closed));
-        else if (closed.kind !== "not-applicable") log(formatCloseOutcome(logicalTaskId, closed));
+        else if (closed.kind !== "not-applicable") {
+          log(formatCloseOutcome(logicalTaskId, closed));
+          turnReceiptLedger?.remove(logicalTaskId);
+        }
         return;
       }
 
@@ -6161,7 +6226,7 @@ async function deliverReplyReliably(
   body: string,
   taskId: string,
   failed: boolean,
-): Promise<void> {
+): Promise<"delivered" | "queued" | "rejected"> {
   // The queue already scrubs at serialization, but every egress must use the
   // same body. Otherwise a goal/channel bypass can persist a safe copy while
   // still sending or logging the raw model/error text.
@@ -6171,22 +6236,26 @@ async function deliverReplyReliably(
   // Persist BEFORE attempting — crash safety. Attempts=0 means "not yet
   // tried"; drainPendingReplies increments on each failed retry.
   persistPendingReply({ to: target, text: safeBody, taskId, failed, queuedAt: Date.now() });
+  turnReceiptLedger?.markReceiptQueued(taskId);
   log(`sending reply to ${target} (task ${taskId.slice(0, 8)}, status=${failed ? "failed" : "replied"})...`);
   try {
     await sendReply(target, safeBody, taskId, failed);
     clearPendingReply(target, taskId);
+    turnReceiptLedger?.remove(taskId);
     lastReplyTime[target] = Date.now();
     log(`→ [${target}] ${safeBody.slice(0, 100)}`);
+    return "delivered";
   } catch (e: any) {
     if (e instanceof CommHubError && e.appLevel) {
       // Server told us "no" with a structured reason. Drop and log
       // loudly so the operator can see it.
       warn(`reply rejected by server for ${target} (task ${taskId.slice(0, 8)}): ${e.message}`);
       clearPendingReply(target, taskId);
-      return;
+      return "rejected";
     }
     // Transient — leave in queue, drainPendingReplies will retry.
     warn(`reply failed for ${target} (task ${taskId.slice(0, 8)}): ${e.message} — queued for retry`);
+    return "queued";
   }
 }
 
@@ -7396,6 +7465,16 @@ if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
     await reportStatus("offline").catch(() => {});
     process.exit(1);
   }
+}
+
+// #703 — a bridge/app-server/watchdog restart must not strand a turn that
+// already consumed an inbox row. Recovery is read-only against Codex and only
+// creates the missing outbound receipt; it never starts a model turn.
+if (turnReceiptLedger?.load().length) void recoverCodexTurnReceipts();
+if (turnReceiptLedger) {
+  setInterval(() => {
+    if (turnReceiptLedger.load().length) void recoverCodexTurnReceipts();
+  }, 30_000).unref?.();
 }
 
 // #448 —— 分层健康探针:每 30s 一次 ws 握手 + (共存节点)TUI pane 检查。任一层翻转时立即补报一次

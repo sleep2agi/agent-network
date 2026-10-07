@@ -1,0 +1,16 @@
+# test703 — Codex interrupted-turn receipt recovery
+
+Date: 2026-10-07
+Environment: Docker (`oven/bun:1.3.14`, `--cpus=2`, `--network none`)
+
+- A–G ledger/inspection/wiring: 14 pass, 0 fail, 36 assertions.
+- Agent-node production bundle: PASS.
+- Witnessed-red mutations:
+  - 48-hour terminal fallback removed: rc=1.
+  - query-error retention counter removed: rc=1.
+  - delivered-ledger cleanup removed: rc=1.
+  - exact turn-id match inverted: rc=1.
+- The watchdog stop+start fixture is classified as failed with
+  `turn 中断于 HH:MM`; no code path calls `turn/start` or `processTask` during
+  recovery.
+- Fixtures use synthetic aliases, task ids, thread ids, and turn ids only.

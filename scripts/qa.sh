@@ -64,6 +64,9 @@ L0_TESTS=(
   #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
 L1_TESTS=(
+  # board #703: a bridge/watchdog restart must recover the exact persisted
+  # Codex turn and emit one durable receipt without re-running the model.
+  "test703-codex-turn-receipts"
   # board #705: bridge stdout/sink failure must not terminate agent-node;
   # includes witnessed-red checks for EPIPE, fatal diagnostics and tee -p.
   "test705-bridge-epipe"
@@ -593,6 +596,7 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       _qa_run_flags=""
       if [[ "$t" == "test658-codex-adopt-stop" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       if [[ "$t" == "test674-binding-generation" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
+      if [[ "$t" == "test703-codex-turn-receipts" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       _run_cmd="docker run"
       for _f in "${_run_flags[@]}"; do _run_cmd+=" ${_f}"; done
       _run_cmd+=" ${_qa_run_flags} anet-$t"
