@@ -9,8 +9,12 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  START_GATE_DEFAULT_MAX_LOAD_PER_CPU,
   START_GATE_SINGLE_LANE_STATUS,
   START_GATE_TAKEOVER_STATUS,
+  START_GATE_WAITING_BOTH_STATUS,
+  START_GATE_WAITING_LOAD_STATUS,
+  START_GATE_WAITING_PROBE_STATUS,
   START_GATE_WAITING_STATUS,
   cgroupFreeMb,
   cgroupLimitMb,
@@ -82,6 +86,12 @@ const HEALTHY = { memKb: 20 * GiB_KB, load1: 4 };
 const FROZEN = { memKb: Math.round(0.3 * GiB_KB), load1: 146 }; // the 10-06 incident shape on a 16-core host
 
 describe("#612 parsers", () => {
+  test("agent-node and anet ship the byte-identical gate", () => {
+    const nodeGate = readFileSync(join(import.meta.dir, "start-resource-gate.ts"));
+    const anetGate = readFileSync(join(import.meta.dir, "../../../../agent-network/src/start-resource-gate.ts"));
+    expect(anetGate.equals(nodeGate)).toBe(true);
+  });
+
   test("MemAvailable and load1 parse from /proc text", () => {
     expect(parseMemAvailableMb(meminfo(4 * GiB_KB))).toBe(4096);
     expect(parseMemAvailableMb("MemTotal: 1 kB\n")).toBeNull();
@@ -152,19 +162,43 @@ describe("#612 waitForStartResources", () => {
     const first = h.logs[0];
     expect(first).toContain("waiting before start");
     expect(first).toContain("MemAvailable 307 MiB < 4096 MiB");
-    expect(first).toContain("load1 146.00 > 32 (2 x 16 CPUs");
+    expect(first).toContain("load1 146.00 > 64 (4 x 16 CPUs");
     expect(h.logs.at(-1)).toContain("host has headroom after 35s");
     expect(h.warns).toEqual([]);
-    expect(h.reports).toEqual([START_GATE_WAITING_STATUS]);
+    expect(h.reports).toEqual([START_GATE_WAITING_BOTH_STATUS]);
     r.release();
   });
 
-  test("load alone over 2 x CPUs is enough to wait", async () => {
-    const h = fakeHost([{ memKb: 20 * GiB_KB, load1: 33 }, HEALTHY]);
+  test("load alone over 4 x CPUs is enough to wait and reports load", async () => {
+    const h = fakeHost([{ memKb: 20 * GiB_KB, load1: 65 }, HEALTHY]);
     const r = await waitForStartResources("x", h.deps);
     expect(r.outcome).toBe("waited");
-    expect(h.logs[0]).toContain("load1 33.00 > 32");
+    expect(h.logs[0]).toContain("load1 65.00 > 64");
     expect(h.logs[0]).not.toContain("MemAvailable");
+    expect(h.reports).toEqual([START_GATE_WAITING_LOAD_STATUS]);
+    r.release();
+  });
+
+  test("the 4 x default admits the CI and DEV high-load shapes when memory is ample", async () => {
+    expect(START_GATE_DEFAULT_MAX_LOAD_PER_CPU).toBe(4);
+    for (const [cpuCount, load1] of [[4, 9.81], [8, 24]] as const) {
+      const h = fakeHost([{ memKb: 20 * GiB_KB, load1 }], { cpuCount: () => cpuCount });
+      const r = await waitForStartResources("x", h.deps);
+      expect(r.outcome).toBe("ok");
+      expect(h.reports).toEqual([]);
+      r.release();
+    }
+  });
+
+  test("blocked status follows the actual shortage as it changes", async () => {
+    const h = fakeHost([
+      { memKb: Math.round(0.3 * GiB_KB), load1: 146 },
+      { memKb: 20 * GiB_KB, load1: 146 },
+      HEALTHY,
+    ]);
+    const r = await waitForStartResources("x", h.deps);
+    expect(r.outcome).toBe("waited");
+    expect(h.reports).toEqual([START_GATE_WAITING_BOTH_STATUS, START_GATE_WAITING_LOAD_STATUS]);
     r.release();
   });
 
@@ -177,7 +211,7 @@ describe("#612 waitForStartResources", () => {
     expect(h.warns[0]).toContain(START_GATE_SINGLE_LANE_STATUS);
     expect(h.warns[0]).toContain("MemAvailable 307 MiB");
     expect(h.warns[0]).not.toContain("giving up waiting and starting anyway");
-    expect(h.reports).toEqual([START_GATE_WAITING_STATUS, START_GATE_SINGLE_LANE_STATUS]);
+    expect(h.reports).toEqual([START_GATE_WAITING_BOTH_STATUS, START_GATE_SINGLE_LANE_STATUS]);
     // progress is logged at most about once a minute, not every re-check
     expect(h.logs.length).toBeLessThanOrEqual(12);
     expect(slotNames(h.slotsDir)).toEqual(["n-test"]);
@@ -225,7 +259,7 @@ describe("#612 waitForStartResources", () => {
     expect(r.waitedMs).toBe(600_000);
     expect(h.sleeps.length).toBeGreaterThan(0);
     expect(h.warns.join("\n")).toContain(START_GATE_SINGLE_LANE_STATUS);
-    expect(h.reports).toEqual([START_GATE_WAITING_STATUS, START_GATE_SINGLE_LANE_STATUS]);
+    expect(h.reports).toEqual([START_GATE_WAITING_PROBE_STATUS, START_GATE_SINGLE_LANE_STATUS]);
     r.release();
   });
 
@@ -458,7 +492,7 @@ describe("#612 waitForStartResources", () => {
     expect(maxStarting).toBe(1);
     for (const r of results) expect(r.outcome).toBe("single-lane");
     expect(reports.filter((text) => text === START_GATE_SINGLE_LANE_STATUS)).toHaveLength(14);
-    expect(reports.filter((text) => text === START_GATE_WAITING_STATUS)).toHaveLength(14);
+    expect(reports.filter((text) => text === START_GATE_WAITING_BOTH_STATUS)).toHaveLength(14);
     expect(warns.join("\n")).not.toContain("放行本次启动");
     expect(warns.join("\n")).not.toContain(START_GATE_TAKEOVER_STATUS);
     expect(slotNames(slotsDir)).toEqual([]);

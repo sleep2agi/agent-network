@@ -3,6 +3,8 @@ FROM oven/bun:1.3.1
 # Only the gate source. A full agent-node install pulls SDKs this suite never runs.
 WORKDIR /work
 COPY agent-node/src/runtime/codex-app-server/start-resource-gate.ts /agent-node-src/src/runtime/codex-app-server/start-resource-gate.ts
+COPY agent-network/src/start-resource-gate.ts /agent-network-src/src/start-resource-gate.ts
+COPY tests/test612-start-admission/policy.mjs /test612/policy.mjs
 COPY tests/test612-start-admission/probe.mjs /test612/probe.mjs
 COPY tests/test612-start-admission/race.mjs /test612/race.mjs
 COPY tests/test612-start-admission/recheck.mjs /test612/recheck.mjs

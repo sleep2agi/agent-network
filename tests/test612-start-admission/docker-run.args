@@ -5,3 +5,4 @@
 # ANET_START_MIN_MEM_MB to force the single-lane cap.
 --memory=512m
 --memory-swap=512m
+--cpus=2

@@ -12,12 +12,22 @@ set -euo pipefail
 printf 'source_commit=%s\n' "$TEST612_SOURCE_COMMIT"
 
 GATE=/agent-node-src/src/runtime/codex-app-server/start-resource-gate.ts
+ANET_GATE=/agent-network-src/src/start-resource-gate.ts
 ANCHOR='const cap = timedOut ? START_GATE_SINGLE_LANE_CONCURRENT : maxConcurrent;'
 REPL='const cap = maxConcurrent;'
 
 run_probe() {
   bun /test612/probe.mjs
 }
+
+echo '== green: mirrored implementations are byte-identical =='
+cmp -s "$GATE" "$ANET_GATE" || {
+  echo 'FAIL: agent-node and agent-network start gates differ' >&2
+  exit 1
+}
+
+echo '== green: 4x policy and resource-specific statuses =='
+bun /test612/policy.mjs
 
 echo '== green: real cgroup, single-lane after the wait =='
 run_probe
@@ -65,6 +75,26 @@ if ! grep -F -q 'FAIL: maxStarting=' /tmp/test612-mut.txt; then
   exit 1
 fi
 echo 'mutation red as required'
+
+policy_mutation() {
+  local label="$1" anchor="$2" repl="$3" witness="$4"
+  echo "== red: $label =="
+  mutate "$anchor" "$repl"
+  set +e
+  bun /test612/policy.mjs > /tmp/test612-policy-mut.txt 2>&1
+  rc=$?
+  set -e
+  cat /tmp/test612-policy-mut.txt
+  restore_mut
+  if [[ "$rc" -eq 0 ]]; then
+    echo "FAIL: $label mutation stayed green"
+    exit 1
+  fi
+  grep -F -q "$witness" /tmp/test612-policy-mut.txt || {
+    echo "FAIL: $label mutation died without its assertion witness"
+    exit 1
+  }
+}
 
 echo '== green: sixteen processes, a new node id each round =='
 timeout 150 bun /test612/race.mjs
@@ -114,6 +144,19 @@ restore_mut() {
     exit 1
   fi
 }
+
+policy_mutation 'restoring the 2x load default blocks the CI shape' \
+  'export const START_GATE_DEFAULT_MAX_LOAD_PER_CPU = 4;' \
+  'export const START_GATE_DEFAULT_MAX_LOAD_PER_CPU = 2;' \
+  'default load multiplier is not 4'
+policy_mutation 'deleting the memory shortage check admits low memory' \
+  'if (s.memAvailableMb < minMemMb) {' \
+  'if (false) {' \
+  'low memory was admitted'
+policy_mutation 'reporting load shortage as memory hides the cause' \
+  'if (loadHigh) return START_GATE_WAITING_LOAD_STATUS;' \
+  'if (loadHigh) return START_GATE_WAITING_MEMORY_STATUS;' \
+  'load status mismatch'
 
 RECHECK_ANCHOR='const still = () => lockStillOurs(dir, holderPid, selfStart, token); // before the lease is written'
 RECHECK_REPL='const still = () => true; // before the lease is written'
