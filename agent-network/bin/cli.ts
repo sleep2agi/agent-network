@@ -291,7 +291,7 @@ import {
   quiesceThenSnapshot,
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
-import { formatCopresenceRolloutSize, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
+import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -642,6 +642,8 @@ interface CopresenceOptions {
   tuiFirst?: boolean;
   /** #514: --allow-shared-codex-login — stage a login another node already uses (unsafe). */
   allowSharedCodexLogin?: boolean;
+  /** Explicit fresh conversation: do not resume codexThreadId or a pending candidate. */
+  newSession?: boolean;
 }
 
 /** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
@@ -977,7 +979,7 @@ async function startWindowsCodexCopresence(
   const recoveryCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
   const priorWindowsRecord = readWindowsCopresenceRecord(nodesDir(), resolved.id);
   let authoritativeOldPendingMarker: string | undefined;
-  if (recoveryCfg.codexPendingThread !== undefined) {
+  if (!opts.newSession && recoveryCfg.codexPendingThread !== undefined) {
     if (priorWindowsRecord?.version !== 2 || !priorWindowsRecord.marker
       || recoveryCfg.codexPendingThread?.marker !== priorWindowsRecord.marker) {
       throw new Error("pending Codex thread is not bound to the exact private previous-generation Windows record");
@@ -1041,15 +1043,17 @@ async function startWindowsCodexCopresence(
     } finally {
       admission.release();
     }
-    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, resolved.profile.codexThreadId);
+    const requestedThreadId = codexThreadIdForStart(resolved.profile.codexThreadId, opts.newSession === true);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
-    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, resolved.profile.codexThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
+    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
     let freshDeferred = thread.freshDeferred;
     if (!freshDeferred && !SAFE_CODEX_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+    if (opts.newSession) delete rawCfg.codexPendingThread;
     let pendingRecoveryId: string | undefined;
     if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
       const migrated = migrateCodexPendingThread(
@@ -1357,6 +1361,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   const profile = resolved.profile;
+  const requestedThreadId = codexThreadIdForStart(profile.codexThreadId, opts.newSession === true);
   // Resolve once for both platform backends. Keeping a second default inside
   // the Windows branch lets Windows and POSIX silently drift.
   // #512 — `opts.model` is ONLY the --model flag. The node's own config `model`
@@ -1560,7 +1565,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   const prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
   const clearOldStoppedReceipt = stoppedReceiptAtStart(join(nodesDir(), resolved.id), prelaunchCfg.node_id);
   let authoritativeOldPendingMarker: string | undefined;
-  if (prelaunchCfg.codexPendingThread !== undefined) {
+  if (!opts.newSession && prelaunchCfg.codexPendingThread !== undefined) {
     const oldIdentity = readCopresenceMarker(nodesDir(), resolved.id);
     // #602 — a clean `anet node stop` removes the marker but leaves the candidate; when its thread
     // never got a rollout there is nothing to carry over, so it is dropped instead of refusing forever.
@@ -1767,10 +1772,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let freshDeferred = false;
   let recoveryTimeoutMs = 300_000;
   try {
-    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, profile.codexThreadId);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
     recoveryTimeoutMs = resumeBudget.timeoutMs;
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
-    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, profile.codexThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
+    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;
@@ -1799,6 +1804,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
   const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+  if (opts.newSession) delete rawCfg.codexPendingThread;
   let pendingRecoveryId: string | undefined;
   if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
     try {
@@ -8083,6 +8089,7 @@ async function startCommand() {
       token: profileTok,
       tuiFirst: opts["tui-first"] === "true",
       allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",
+      newSession: forceNewSession,
     });
     return;
   }

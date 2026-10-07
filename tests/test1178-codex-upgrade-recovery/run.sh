@@ -52,6 +52,7 @@ mkdir -p "$(dirname "$REPORT")"
   echo "Mutation proven by >2 GiB sparse rollout: restoring a whole-file read fails while the streaming sparse copy passes."
   echo "Mutation proven by slow fake app-server: reducing the derived thread/resume deadline below its response delay fails closed."
   echo "Mutation proven by acknowledged-without-rollout fake: a deferred candidate cannot become codexThreadId until its exact rollout exists; the materialization retry shares ANET_CODEX_RESUME_TIMEOUT_MS."
+  echo "Mutation proven by --new-session selector: restoring the recorded thread id makes the co-presence test fail; both native platform lanes also discard pending candidates."
   echo "Identity boundary: config-recovery.json is redacted non-credential metadata only. The original config.json and CODEX_HOME remain in place and are never replaced or cleared."
   echo
   echo "Release gate (report-only; this Draft does not publish or bump versions)"

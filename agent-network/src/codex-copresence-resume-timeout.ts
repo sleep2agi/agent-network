@@ -11,6 +11,16 @@ export interface CopresenceResumeBudget {
   rolloutBytes: number | null;
 }
 
+/** `--new-session` is authoritative for co-presence too: never feed the
+ * recorded thread into thread/resume when the operator explicitly asked for
+ * a fresh conversation. */
+export function codexThreadIdForStart(
+  recordedThreadId: string | undefined,
+  newSession: boolean,
+): string | undefined {
+  return newSession ? undefined : recordedThreadId;
+}
+
 /** Resolve the recovery deadline once, before opening the app-server socket.
  * The automatic budget is 300 s plus 120 s for each started GiB of the exact
  * recorded rollout, capped at 15 minutes. An explicit environment value wins. */

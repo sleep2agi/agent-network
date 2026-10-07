@@ -55,3 +55,10 @@ witnessedRed(
   "src/codex-pending-thread-restart.test.ts",
   "marker on disk and bound to it but no rollout",
 );
+witnessedRed(
+  `${root}/src/codex-copresence-resume-timeout.ts`,
+  "return newSession ? undefined : recordedThreadId;",
+  "return recordedThreadId;",
+  "src/codex-copresence-resume-timeout.test.ts",
+  "--new-session suppresses the recorded co-presence thread",
+);
