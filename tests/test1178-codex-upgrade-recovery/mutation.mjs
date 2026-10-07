@@ -64,6 +64,33 @@ function mutateBridgeTransportClose() {
   finally { writeFileSync("/repo/agent-node/src/runtime/codex-app-server-client.ts", original); }
 }
 
+function mutateBridgePayloadUpperBound() {
+  const original = readFileSync("/repo/agent-node/src/runtime/codex-app-server/resume-timeout.ts", "utf8");
+  const before = "    RECOVERY_MAX_PAYLOAD_BYTES,\n    Math.max(RECOVERY_MIN_PAYLOAD_BYTES, rolloutBytes * 2 + 64 * 1024 ** 2),";
+  if (!original.includes(before)) throw new Error("bridge payload upper-bound mutation anchor missing");
+  writeFileSync("/repo/agent-node/src/runtime/codex-app-server/resume-timeout.ts", original.replace(before, "    Number.MAX_SAFE_INTEGER,\n    Math.max(RECOVERY_MIN_PAYLOAD_BYTES, rolloutBytes * 2 + 64 * 1024 ** 2),"));
+  try { assertRed("src/runtime/codex-app-server/resume-timeout.test.ts", "rollout-derived payload sizing is finite and capped", "/repo/agent-node"); }
+  finally { writeFileSync("/repo/agent-node/src/runtime/codex-app-server/resume-timeout.ts", original); }
+}
+
+function mutateBridgeCloseToNewThread() {
+  const original = readFileSync("/repo/agent-node/src/runtime/codex-app-server-bridge.ts", "utf8");
+  const before = "        if (!isNoRollout(e)) throw e;";
+  if (!original.includes(before)) throw new Error("bridge close fallback mutation anchor missing");
+  writeFileSync("/repo/agent-node/src/runtime/codex-app-server-bridge.ts", original.replace(before, "        if (false) throw e;"));
+  try { assertRed("src/runtime/codex-app-server/resume-timeout.test.ts", "a transport close during resume fails closed and never starts a replacement thread", "/repo/agent-node"); }
+  finally { writeFileSync("/repo/agent-node/src/runtime/codex-app-server-bridge.ts", original); }
+}
+
+function mutateRecoveryGateWiring() {
+  const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
+  const before = "recoveryAdmission = await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes);";
+  if (!original.includes(before)) throw new Error("recovery gate wiring mutation anchor missing");
+  writeFileSync("/repo/agent-network/bin/cli.ts", original.replace(before, "// mutation: POSIX legacy recovery bypasses the host quota"));
+  try { assertRed("src/codex-recovery-resource-gate.test.ts", "both native launchers hold the recovery lease through TUI attribution"); }
+  finally { writeFileSync("/repo/agent-network/bin/cli.ts", original); }
+}
+
 function mutateBridgeAttachBudget() {
   const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
   const before = "resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs)";
@@ -187,6 +214,9 @@ mutateLargePayloadCeiling();
 mutateTransportClose();
 mutateBridgePayloadCeiling();
 mutateBridgeTransportClose();
+mutateBridgePayloadUpperBound();
+mutateBridgeCloseToNewThread();
+mutateRecoveryGateWiring();
 mutateBridgeAttachBudget();
 mutateTuiRecoveryBudget();
 mutateExperimentalFallback();

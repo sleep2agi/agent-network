@@ -284,7 +284,7 @@ import {
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
 import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
-import { POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
+import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
   codexTopologyAudit,
@@ -292,6 +292,7 @@ import {
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
 import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceBridgeAttachTimeoutMs, resolveCopresenceMaxPayloadBytes, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
+import { waitForCodexRecoveryResources } from "../src/codex-recovery-resource-gate";
 import { codexCopresenceEnvFileText, codexCopresenceStageEnv } from "../src/codex-copresence-env";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
@@ -971,6 +972,14 @@ async function holdAppServerStart(nodeId: string): Promise<{ release: () => void
   });
 }
 
+async function holdCodexRecovery(nodeId: string, rolloutBytes: number | null): Promise<{ release: () => void }> {
+  return waitForCodexRecoveryResources(nodeId, rolloutBytes, {
+    log: (m) => console.log(`[anet] ${m}`),
+    warn: (m) => console.warn(`[anet] ${m}`),
+    report: (text) => console.log(`[anet] [recovery-gate] blocked ${text}`),
+  });
+}
+
 async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
@@ -1036,6 +1045,7 @@ async function startWindowsCodexCopresence(
   };
   const admission = await holdAppServerStart(resolved.id);
   const managed: WindowsManagedProcess[] = [];
+  let recoveryAdmission: { release: () => void } | undefined;
   try {
     try {
     managed.push(await windowsManagedProcess("appsrv", opts.codexBin, [
@@ -1068,6 +1078,7 @@ async function startWindowsCodexCopresence(
     const requestedThreadId = codexThreadIdForStart(resolved.profile.codexThreadId, opts.newSession === true);
     const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    recoveryAdmission = await holdCodexRecovery(resolved.id, resumeBudget.rolloutBytes);
     const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
@@ -1219,11 +1230,14 @@ async function startWindowsCodexCopresence(
     //    ⚠️ `connection=pid-attributed` 这个子串**不能动**:
     //    windows-codex-copresence.test.ts 用 indexOf 钉它的出现顺序。追加在其后是安全的。
     console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed probes=${tuiProbes} probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`);
+    recoveryAdmission.release();
+    recoveryAdmission = undefined;
     const code = await new Promise<number>((resolve, reject) => {
       tui.once("exit", (c) => resolve(c ?? 1));
     });
     if (code !== 0) throw new Error(`Codex TUI exited with code ${code}`);
   } catch (e) {
+    recoveryAdmission?.release();
     for (const process of [...managed].reverse()) {
       if (probeWindowsCreationDate(process.pid) === process.creationDate) {
         try { taskkillWindowsProcessTree(process.pid); } catch {}
@@ -1812,17 +1826,20 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let freshDeferred = false;
   let recoveryTimeoutMs = 300_000;
   let recoveryRolloutBytes: number | null = null;
+  let recoveryAdmission: { release: () => void } | undefined;
   try {
     const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
     recoveryTimeoutMs = resumeBudget.timeoutMs;
     recoveryRolloutBytes = resumeBudget.rolloutBytes;
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    recoveryAdmission = await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes);
     const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
     reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;
     profile.codexRecoveryVerification = thread.verification;
   } catch (e: any) {
+    recoveryAdmission?.release();
     console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
     console.error(`[anet]    Fail-closed: no bridge/TUI was started and thread/start was not used as a fallback.`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
@@ -2079,8 +2096,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
   // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
+  const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
   const attribution = await waitForPosixOwnedLoopbackConnection({
-    rootPid: tuiIdentity.pid, port, deadlineMs: POSIX_TUI_ATTRIBUTION_MS,
+    rootPid: tuiIdentity.pid, port, deadlineMs: posixTuiAttributionMs,
     probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
     alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
   });
@@ -2098,6 +2116,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
     : `[anet] client-health role=bridge remote=exact thread=exact`);
   console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
+  recoveryAdmission?.release();
+  recoveryAdmission = undefined;
 
   clearOldStoppedReceipt(); // Successful manual start, not a failed/partial attempt.
   const hubBase = opts.hub.replace(/\/+$/, "");

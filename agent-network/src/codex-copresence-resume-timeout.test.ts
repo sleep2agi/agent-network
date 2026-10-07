@@ -74,7 +74,7 @@ describe("--new-session co-presence wiring", () => {
 
   test("both launchers give bridge and TUI the finite payload/recovery budget", () => {
     expect(cli.match(/ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES:/g)).toHaveLength(2);
-    expect(cli.match(/resolveCopresenceBridgeAttachTimeoutMs\(/g)).toHaveLength(4); // bridge + TUI on Windows + POSIX
+    expect(cli.match(/resolveCopresenceBridgeAttachTimeoutMs\(/g)).toHaveLength(5); // bridge + TUI on Windows + POSIX, plus POSIX attribution
     expect(cli).not.toContain("waitForFileText(bridgeLog, bridgeReceipt, 25_000)");
     expect(cli).toContain("const TUI_HEALTH_MS = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);");
     expect(cli).toContain("const TUI_PAINT_TIMEOUT_MS = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);");

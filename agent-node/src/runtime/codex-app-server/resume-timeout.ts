@@ -38,6 +38,13 @@ export function resetResumeTimeoutWarnings(): void {
   warnedValues.clear();
 }
 
+export function boundedRecoveryPayloadBytes(rolloutBytes: number): number {
+  return Math.min(
+    RECOVERY_MAX_PAYLOAD_BYTES,
+    Math.max(RECOVERY_MIN_PAYLOAD_BYTES, rolloutBytes * 2 + 64 * 1024 ** 2),
+  );
+}
+
 /** Strictly consume the finite launcher-computed receive ceiling. Standalone
  * bridges derive the same bound from the exact rollout on disk. */
 export function resolveRecoveryMaxPayloadBytes(
@@ -52,7 +59,7 @@ export function resolveRecoveryMaxPayloadBytes(
   try {
     const path = findCodexRolloutFile(codexSessionsRoot(env), threadId);
     const bytes = path ? statSync(path).size : 0;
-    return Math.min(RECOVERY_MAX_PAYLOAD_BYTES, Math.max(RECOVERY_MIN_PAYLOAD_BYTES, bytes * 2 + 64 * 1024 ** 2));
+    return boundedRecoveryPayloadBytes(bytes);
   } catch {
     return RECOVERY_MIN_PAYLOAD_BYTES;
   }
