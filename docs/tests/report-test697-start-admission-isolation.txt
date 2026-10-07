@@ -1,0 +1,106 @@
+Codex behavior suites: isolate CI from host start admission
+
+Base: 0a2ebe497ea206d4ea2d61c03c0f19c2b7ca9baa
+Test changes: fb62ffdadc7b021021b5090793503741555acfd1
+Daemon fixture: 9e653a6cbc2119570c48a0f8e7ad80b1a2e556e2.
+Scope: tests only. No product code, versions, production configuration or nodes changed.
+
+Cause
+-----
+Read the original job log via GitHub's jobs/logs API:
+  run 37563593983, job 112607250624
+  COPRESENCE_DEFAULT_MODEL_NOT_WIRED
+  load1 9.81 > 8 (2 x 4 CPUs, ANET_START_MAX_LOAD_PER_CPU)
+The five-second model-wiring probe expired before the resource gate admitted it.
+
+Reproduction and results
+------------------------
+All executions were in disposable Docker containers, via sg docker, --cpus=2.
+The shared host was NOT CPU-stressed. Instead, a read-only file containing
+"999999.00 999999.00 999999.00 1/1 1" was mounted over /proc/loadavg in the
+test containers. This is a deterministic high-load INPUT, not a real CPU-load
+benchmark. It exercises the production file-reading gate without affecting
+live services. Both model runs used --memory=4g, --network none and
+ANET_START_MIN_MEM_MB=64, isolating the load condition from memory shortage.
+
+Before: original main test697 image, rc=1 at L7b.
+  COPRESENCE_DEFAULT_MODEL_NOT_WIRED
+  load1 999999.00 > 16 (2 x 8 CPUs, ANET_START_MAX_LOAD_PER_CPU)
+After: identical test697 sources plus its three-line environment isolation,
+  rc=0, RESULT: PASS, all L0-L8 including 37 witnessed-red mutations.
+  No TEST697_SKIP_MUTATIONS flag. Real bundled Codex app-server probes included.
+  Image SOURCE_COMMIT label remained the base SHA because this first verification
+  was built before the test-only commit; the tested run.sh is byte-identical to
+  fb62ffda. The daemon-only follow-up does not change that Dockerfile or script.
+
+Additional verification:
+  qa-daemon-stop-codex-copresence at 9e653a6c under the same high-load input:
+    rc=0, PASS=40 FAIL=0. Real disposable Hub + daemon + bundled Codex + tmux,
+    create/delete/create/stop, unrelated fixture session survived.
+    This verifies the opt-out survives daemon minimalEnv, not just the parent
+    shell export. Dockerfile's empty-environment assertion also passed.
+  test-codex-external-appserver under the same high-load input: rc=0,
+    RESULT: PASS (15 layers), M1/M2/M3 witnessed red; private fixture tmux only.
+  test612-start-admission, unchanged, --memory=512m --network none: rc=0.
+    Real cgroup shortage, single lane, independent-process contention, stale
+    lease takeover, reentry/recheck checks and original mutations retained.
+  start-resource-gate.test.ts: rc=0, 36 pass, 202 expect() calls.
+  bash -n on all 15 changed suite entrypoints in Docker: rc=0.
+  Daemon wrapper with env -i (HOME/PATH only): SANITIZED_CHILD_GATE_DISABLED,
+    process.execPath remains /usr/local/bin/node (the real binary is unchanged).
+    Without wrapper, the same policy assertion gives
+    CHILD_GATE_POLICY_MISSING, rc=1 (assertion failure, not an environment crash).
+
+Reproduce model comparison (run each build at its respective checkout):
+  docker build --build-arg SOURCE_COMMIT=<full-checkout-SHA> \
+    -f tests/test697-codex-default-model/Dockerfile -t test697-load .
+  docker run --init --cpus=2 --memory=4g --network none \
+    -e ANET_START_MIN_MEM_MB=64 \
+    -v <absolute-load-fixture>:/proc/loadavg:ro test697-load
+The high-load file must contain the line quoted above. Do not set the gate
+opt-out on docker run: it must come from the checked-in suite entrypoint.
+
+Inventory and exclusions
+------------------------
+Searched tests/**/*.sh, *.mjs and *.ts for copresence, codex app-server,
+CLI node start/restart and openCodexAppServerRuntime. Changed behavior fixtures:
+  test697, test466, test750, test532, test561, test1191 Linux E2E,
+  test1204 production-process E2E, test-codex-appserver-watchdog,
+  test-codex-copresence-first-start, test-codex-external-appserver,
+  test-tm-codex-upgrade-rehearsal, qa-codex-copresence-stop-start,
+  qa-create-node-codex-copresence, qa-create-node-timeout-ms,
+  qa-daemon-stop-codex-copresence.
+Every entrypoint states why resource admission is outside its subject.
+The three daemon images additionally prepend a Node launcher in /usr/local/sbin:
+minimalEnv
+intentionally drops ANET_* from child environments. No production whitelist
+is widened. The real Node binary, CLI package and trust validation stay intact.
+The wrapper lives only in these Docker images, and each image checks it with
+an empty environment. The create/timeout suites include deliberate preflight
+failures; this keeps any reached launch independent of host pressure too.
+
+Not disabled: test612 and start-resource-gate unit tests. Existing owned-runtime
+unit fixtures already inject startGate.env.ANET_START_MEM_GATE=0 individually.
+No blanket ENV in aggregate unit-test images or global CI workflows.
+Windows-native starts bypass this Linux gate; test1191 includes a Linux lane
+and is therefore included. Pure source/docs/protocol tests and direct raw
+Codex schema probes do not launch through the gate. test658 manually creates
+fake stages and does not use the gated launcher. No changes there.
+Only the explicitly listed verification was rerun; this is not a claim that
+all 15 full suites were locally executed.
+
+Read-only product judgment
+-------------------------
+startGateReasons treats memory and load as independent rejection reasons.
+Thus load 24 on eight observed cores blocks even when memory is sufficient.
+For responsive interactive starts on a shared host this is conservative and
+can be overly restrictive: a one-minute aggregate load sample cannot by itself
+establish that one more app-server cannot start safely. It still protects CPU
+headroom; adequate memory alone does not prove adequate CPU capacity either.
+Consider separate memory/load messaging and sustained pressure/concurrency
+policy in a separately reviewed product change; do not silently remove the
+production protection in this CI fix.
+The 600-second value is NOT a hard total wait limit: after it, the code switches
+to a one-slot lease and can continue waiting for that slot. The displayed CPU
+count uses os.cpus(), not the Docker --cpus quota (8 reported in this fixture).
+No production thresholds or admission code were changed here.
