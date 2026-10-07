@@ -13,6 +13,8 @@
 // human as an attribution.
 //
 // Production network tokens pass tokenId and resolve through resolveNodeCaller.
+// A token whose name is not `node:` (not_a_node_token, the registration token
+// before report_status) falls back to nodeAliasForToken, same as main.
 // tokenId omitted keeps the name-only shape used by the unit cases below.
 
 import { resolveNodeCaller } from "./create-node.js";
@@ -53,7 +55,13 @@ export function resolveRestFromSession(input: RestIdentityInput): RestIdentityRe
   let alias: string | null;
   if (input.token.startsWith("ntok_") && input.tokenId) {
     const resolved = resolveNodeCaller(input.tokenId);
-    if (!resolved.ok) {
+    if (resolved.ok) {
+      alias = resolved.alias;
+    } else if (resolved.reason === "not_a_node_token") { // board679-plain-ntok-rest
+      // Name is not `node:` yet. Main signs that as api, and refuses a claim.
+      // not_owner / bound_node_missing / ambiguous stay the hard reject.
+      alias = nodeAliasForToken(input.token, input.tokenName);
+    } else {
       return {
         ok: false,
         error: "from_session_identity_mismatch",
@@ -62,7 +70,6 @@ export function resolveRestFromSession(input: RestIdentityInput): RestIdentityRe
         requestedFromSession: requested,
       };
     }
-    alias = resolved.alias;
   } else {
     alias = nodeAliasForToken(input.token, input.tokenName);
   }

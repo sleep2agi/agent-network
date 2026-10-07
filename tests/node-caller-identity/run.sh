@@ -19,7 +19,7 @@ run_case() {
     env HOME="$fixture_dir" COMMHUB_DB="$fixture_dir/hub.db" COMMHUB_PG_EXPERIMENTAL=1 MUTATION_CASE="$case_name" bun run /work/tests/node-caller-identity/mutations.ts
   fi
 }
-for case_name in ${CALLER_CASES:-green owner boundmissing unbounddup plainntok ownerlessdup}; do run_case sqlite "$case_name"; done
+for case_name in ${CALLER_CASES:-green owner boundmissing unbounddup plainntok ownerlessdup plainntokrest}; do run_case sqlite "$case_name"; done
 echo 'RESULT sqlite PASS'
 pg_bin=$(find /usr/lib/postgresql -name initdb -printf '%h\n' | sort -V | tail -1)
 pg_root=$(mktemp -d /tmp/caller679-pg.XXXXXX)
@@ -31,5 +31,5 @@ runuser -u postgres -- "$pg_bin/initdb" -D "$pg_data" --auth-local=trust --auth-
 runuser -u postgres -- "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_socket/log" -o "-p 25479 -k $pg_socket -c listen_addresses=127.0.0.1" -w start >/dev/null
 fixture_password="fixture-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 runuser -u postgres -- "$pg_bin/psql" -h "$pg_socket" -p 25479 -c "CREATE ROLE caller_tester LOGIN PASSWORD '$fixture_password'" >/dev/null
-for case_name in ${CALLER_CASES:-green owner boundmissing unbounddup plainntok ownerlessdup}; do run_case pg "$case_name"; done
+for case_name in ${CALLER_CASES:-green owner boundmissing unbounddup plainntok ownerlessdup plainntokrest}; do run_case pg "$case_name"; done
 echo 'RESULT postgres PASS'

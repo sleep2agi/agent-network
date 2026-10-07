@@ -73,3 +73,10 @@ await runMutation(
   "const legacyOwnerless = false;",
   "duplicate ownerless row keeps an unbound epoch 0 token online",
 );
+await runMutation(
+  "plainntokrest",
+  "src/rest-identity.ts",
+  '} else if (resolved.reason === "not_a_node_token") { // board679-plain-ntok-rest',
+  "} else if (false) { // board679-plain-ntok-rest",
+  "unreported registration token signs as api",
+);

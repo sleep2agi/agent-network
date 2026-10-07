@@ -3,7 +3,7 @@
 // Real HTTP, both SQLite and PostgreSQL:
 //   cd server && COMMHUB_DB=/tmp/x.db bun test src/node-caller-identity-http.test.ts
 //   PG: COMMHUB_TEST_PG_URL=… COMMHUB_PG_EXPERIMENTAL=1
-//       (tests/node-caller-identity runs both, plus five mutations)
+//       (tests/node-caller-identity runs both, plus six mutations)
 //
 // An unbound token with zero rows keeps the name in the token. First
 // registration still depends on that. A bound token whose row is gone is
@@ -18,8 +18,10 @@
 // to go red. A fourth treats every failed ntok_ resolve as impersonation
 // and expects "registration network token signs as the username" to go red.
 // A fifth drops the ownerless-row compatibility and expects "duplicate
-// ownerless row keeps an unbound epoch 0 token online" to go red. New tests
-// must not use the "caller identity boundary:" prefix.
+// ownerless row keeps an unbound epoch 0 token online" to go red. A sixth
+// treats not_a_node_token on REST as impersonation and expects "unreported
+// registration token signs as api" to go red. New tests must not use the
+// "caller identity boundary:" prefix.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -583,6 +585,44 @@ test("a resolved node token can list its own daemon requests", async () => {
   const listed = await tool(victimTok.token, "list_my_pending_create_requests", {});
   expect(listed.ok).toBe(true);
   expect(listed.count).toBe(0);
+});
+
+test("unreported registration token signs as api", async () => {
+  const username = `idvure${stamp}`;
+  const created = register(username, "CallerIdentUre123!", undefined, "seed");
+  if (!created.ok || !created.network_token || !created.network_id) {
+    throw new Error(created.error || "unreported network token register failed");
+  }
+  const net = created.network_id;
+  const tokenRow = db.get<{ name: string }>(
+    "SELECT name FROM api_tokens WHERE token_hash = ?1",
+    hashToken(created.network_token),
+  );
+  expect(tokenRow?.name).toBe("default-network");
+  const sink = `idvurk${stamp}`;
+  db.run(
+    `INSERT INTO sessions (resume_id, alias, network_id, status, updated_at)
+     VALUES (?1, ?2, ?3, 'idle', datetime('now'))`,
+    [`sdk-${sink}`, sink, net],
+  );
+  const open = `unreported rest open ${stamp}`;
+  const sent = await api(created.network_token, "POST", "/api/task", { alias: sink, task: open, network_id: net });
+  expect(sent.status).toBe(200);
+  expect(sent.body.ok).toBe(true);
+  expect(db.get<{ from_name: string }>("SELECT from_name FROM tasks WHERE content = ?1", open)?.from_name).toBe("api");
+  const claimed = `unreported rest claim ${stamp}`;
+  const other = `idvuro${stamp}`;
+  const refused = await api(created.network_token, "POST", "/api/task", {
+    alias: sink, task: claimed, from: other, network_id: net,
+  });
+  expect(refused.status).toBe(403);
+  expect(refused.body.error).toBe("from_session_identity_mismatch");
+  expect(refused.body.token_alias).toBe("");
+  expect(taskCount(claimed)).toBe(0);
+  expect(db.get<{ name: string }>(
+    "SELECT name FROM api_tokens WHERE token_hash = ?1",
+    hashToken(created.network_token),
+  )?.name).toBe("default-network");
 });
 
 test("registration network token signs as the username", async () => {
