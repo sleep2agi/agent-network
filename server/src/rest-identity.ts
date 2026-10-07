@@ -12,15 +12,20 @@
 // task row and, once sender labels reach the copresence TUIs, rendered to a
 // human as an attribution.
 //
-// This is the same decision expressed as a pure function so every credential
-// kind is a directly constructible test input rather than a hand-assembled
-// Request (the #503 convention in this codebase).
+// Production network tokens pass tokenId and resolve through resolveNodeCaller.
+// A token whose name is not `node:` (not_a_node_token, the registration token
+// before report_status) falls back to nodeAliasForToken, same as main.
+// tokenId omitted keeps the name-only shape used by the unit cases below.
+
+import { resolveNodeCaller } from "./create-node.js";
 
 export interface RestIdentityInput {
   /** Raw bearer token, only its prefix matters (`ntok_` = network-bound). */
   token: string;
   /** `api_tokens.name`; for node tokens it is `node:<alias>`. */
   tokenName: string | null | undefined;
+  /** Set on the production path. Network tokens then ignore tokenName as authority. */
+  tokenId?: string | null;
   /** Username resolved from the authenticated token. */
   authenticatedUsername?: string | null;
   /** Caller-supplied `body.from`. */
@@ -46,8 +51,28 @@ export function nodeAliasForToken(token: string, tokenName: string | null | unde
 }
 
 export function resolveRestFromSession(input: RestIdentityInput): RestIdentityResult {
-  const alias = nodeAliasForToken(input.token, input.tokenName);
   const requested = typeof input.requestedFrom === "string" ? input.requestedFrom.trim() : "";
+  let alias: string | null;
+  if (input.token.startsWith("ntok_") && input.tokenId) {
+    const resolved = resolveNodeCaller(input.tokenId);
+    if (resolved.ok) {
+      alias = resolved.alias;
+    } else if (resolved.reason === "not_a_node_token") { // board679-plain-ntok-rest
+      // Name is not `node:` yet. Main signs that as api, and refuses a claim.
+      // not_owner / bound_node_missing / ambiguous stay the hard reject.
+      alias = nodeAliasForToken(input.token, input.tokenName);
+    } else {
+      return {
+        ok: false,
+        error: "from_session_identity_mismatch",
+        message: "network token from_session does not match token-bound node alias",
+        tokenAlias: "",
+        requestedFromSession: requested,
+      };
+    }
+  } else {
+    alias = nodeAliasForToken(input.token, input.tokenName);
+  }
 
   // A network-bound token whose name we cannot resolve to an alias (`node:`,
   // `node:   `, or a name that was never node-scoped) is the degenerate case.
