@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 REPO="${REPO:-/app}"
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

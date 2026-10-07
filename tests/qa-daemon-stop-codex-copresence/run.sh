@@ -23,6 +23,9 @@
 #
 # 全程在容器里:HOME=$(mktemp -d),hub 在 9596,tmux 是这个容器自己的服务器。
 set -uo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 if [[ ! -f /.dockerenv && "${ALLOW_NON_DOCKER:-}" != "1" ]]; then
   echo "REFUSING: /.dockerenv absent — this suite starts tmux servers and kills pids; run it in its container." >&2

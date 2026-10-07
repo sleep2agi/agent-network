@@ -50,6 +50,12 @@ COPY tests/qa-create-node-codex-copresence/paired-registry.py /app/tests/qa-crea
 COPY tests/qa-daemon-stop-codex-copresence/run.sh /app/tests/qa-daemon-stop-codex-copresence/run.sh
 RUN chmod +x /app/tests/qa-daemon-stop-codex-copresence/run.sh
 
+# daemon minimalEnv strips the parent export; isolate its child launches too.
+# This interpreter wrapper exists only in this non-admission test image.
+COPY tests/lib/node-no-start-gate.sh /tmp/node-no-start-gate.sh
+RUN install -m 0755 /tmp/node-no-start-gate.sh /usr/local/sbin/node \
+ && env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin HOME=/tmp node -e 'if (process.env.ANET_START_MEM_GATE !== "0") process.exit(1)'
+
 ARG SOURCE_COMMIT=unknown
 ENV DSCC_SOURCE_COMMIT=$SOURCE_COMMIT
 

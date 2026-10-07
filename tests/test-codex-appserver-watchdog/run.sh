@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 # testwd — #461 App Server watchdog (agent-node): a dead co-presence app-server is relaunched on the
 # original tmux session / argv / --listen / CODEX_HOME, the bridge resumes the original thread, the
