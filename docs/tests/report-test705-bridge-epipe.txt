@@ -53,3 +53,11 @@ WITNESSED_RED: tee-without-p (tee keeps the writer alive)
 WITNESSED_RED: tee-without-portable-fallback (a non-GNU tee falls back)
 
 RESULT: PASS
+
+Board #714 follow-up (2026-10-08)
+- Docker: tests/test705-bridge-epipe/Dockerfile, --cpus=2, rc=0.
+- The GNU tee case now executes codexBridgeTeeCommand instead of a hand-written
+  approximation and closes its generated secondary sink before the writer's
+  next burst.
+- Witnessed-red mutation removes `$tee_arg` from the production tee invocation:
+  rc=1 at "tee keeps the writer alive" (not an environment failure).

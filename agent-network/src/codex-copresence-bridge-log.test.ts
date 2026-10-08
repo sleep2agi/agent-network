@@ -10,13 +10,16 @@ describe("#535 codex bridge launch log", () => {
     const d = mkdtempSync(join(tmpdir(), "t705-tee-p-"));
     try {
       const pane = join(d, "pane.txt");
-      const script = `exec > >(tee -p >(head -c 1 >/dev/null)) 2>&1; head -c 1048576 /dev/zero | tr '\\0' x; echo; echo writer-survived`;
+      // Execute the production command. This test-only unquoted "path" makes
+      // its generated secondary sink exit after the first line, reproducing
+      // the dead sink that requires GNU tee's `-p`.
+      const script = `set -e; ${codexBridgeTeeCommand("/dev/null; exit 0; :")}; echo close-sink; sleep 0.2; head -c 1048576 /dev/zero | tr '\\0' x; echo; echo writer-survived`;
       const r = spawnSync("bash", ["-c", `(${script}) > '${pane}'`], { encoding: "utf8" });
       expect(r.status).toBe(0);
-      expect(readFileSync(pane, "utf8")).toContain("writer-survived");
-      const production = codexBridgeTeeCommand("'/tmp/log'");
-      expect(production).toContain("if tee -p </dev/null");
-      expect(production).toContain("then tee_arg=-p");
+      const readPane = () => { try { return readFileSync(pane, "utf8"); } catch { return ""; } };
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline && !readPane().includes("writer-survived")) spawnSync("sleep", ["0.05"]);
+      expect(readPane().includes("writer-survived")).toBe(true);
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
   test("a non-GNU tee falls back to portable tee without losing pane or file output", () => {
