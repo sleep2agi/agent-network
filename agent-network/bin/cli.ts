@@ -575,14 +575,33 @@ function capturePane(sessionName: string, scrollbackLines?: number): string | nu
  */
 async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
+  // A banner paints before the empty-thread composer on real Codex 0.147.
+  // Returning on that first painted frame turned the new fail-closed gate into
+  // a false refusal. Give the current screen a short, bounded settle window and
+  // require the composer to remain visible across multiple polls. Known
+  // blockers still return immediately; an unknown surface remains fail-closed.
+  const inputSettleMs = Math.min(timeoutMs, 5_000);
+  const stableComposerMs = 800;
+  let paintedAt: number | null = null;
+  let composerSeenAt: number | null = null;
   for (;;) {
     const onScreen = capturePane(sessionName);
     if (onScreen !== null) {
       const everSeen = capturePane(sessionName, 400) ?? onScreen;
       const state = codexTuiPaneState(onScreen, everSeen);
-      if (state !== "not-painted") return state;
+      if (state === "usable") {
+        composerSeenAt ??= Date.now();
+        if (Date.now() - composerSeenAt >= stableComposerMs) return state;
+      } else {
+        composerSeenAt = null;
+        if (state !== "not-painted") {
+          if (state !== "input-not-ready") return state;
+          paintedAt ??= Date.now();
+          if (Date.now() - paintedAt >= inputSettleMs) return state;
+        }
+      }
     }
-    if (Date.now() >= deadline) return "not-painted" as const;
+    if (Date.now() >= deadline) return paintedAt === null ? "not-painted" as const : "input-not-ready" as const;
     await new Promise((r) => setTimeout(r, 400));
   }
 }

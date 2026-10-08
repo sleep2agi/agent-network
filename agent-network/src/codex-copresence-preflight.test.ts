@@ -91,6 +91,17 @@ describe("is the TUI actually usable", () => {
     expect(codexTuiPaneState(WORKING)).toBe("usable");
   });
 
+  test("the Codex 0.147 empty-thread composer is usable even when its suggestion rotates", () => {
+    const emptyThread = `  │ >_ OpenAI Codex (v0.147.0) │
+
+  To get started, describe a task or try one of these commands:
+
+  › Use /skills to list available skills
+
+    gpt-5.5 default · ~/proj`;
+    expect(codexTuiPaneState(emptyThread)).toBe("usable");
+  });
+
   test("🔴 a painted TUI without the current composer is not ready for the first message", () => {
     const announcement = `  │ >_ OpenAI Codex (v0.159.2) │\n\n  Meet GPT-6 Sol\n\n  Continue`;
     expect(codexTuiPaneState(announcement)).toBe("input-not-ready");

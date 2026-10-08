@@ -130,6 +130,10 @@ const PAINTED_MARKERS: readonly string[] = [
  */
 const INPUT_READY_MARKERS: readonly string[] = [
   "Ask Codex to do anything",
+  // Codex 0.147 rotates the suggested prompt (`Explain this codebase`,
+  // `Use /skills …`, …), but this empty-thread composer heading is stable.
+  // Do not accept a generic `›`: startup pickers use that glyph as well.
+  "To get started, describe a task or try one of these commands:",
 ];
 
 /**
