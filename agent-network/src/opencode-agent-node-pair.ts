@@ -41,6 +41,25 @@ export function pairedAgentNodeResolution(): PairedAgentNodeResolution {
   };
 }
 
+/** Cold npm downloads get their own budget, separate from bridge attachment. */
+export function pairedAgentNodeResolveTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.ANET_AGENT_NODE_RESOLVE_TIMEOUT_MS;
+  if (!raw?.trim()) return 300_000;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 2_147_483_647) {
+    throw new Error("ANET_AGENT_NODE_RESOLVE_TIMEOUT_MS must be an integer from 1 to 2147483647 (milliseconds)");
+  }
+  return value;
+}
+
+export function pairedAgentNodeResolveError(error: any, timeoutMs: number): string {
+  const detail = error?.stderr || error?.message || String(error);
+  if (error?.code !== "ETIMEDOUT") return `could not resolve exact paired package: ${detail}`;
+  return `could not resolve exact paired package: npx timed out after ${timeoutMs}ms` +
+    `\nIncrease ANET_AGENT_NODE_RESOLVE_TIMEOUT_MS for a slow network.` +
+    `\nPre-fetch the exact package, then retry node start:\n  npx -y ${PAIRED_AGENT_NODE_SPEC} --print-entrypoint`;
+}
+
 export function agentNodeHelpSupportsCodexAppServer(help: string): boolean {
   return help.includes("codex-app-server");
 }
