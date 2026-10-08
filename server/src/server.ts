@@ -9,7 +9,7 @@ import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
-import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
+import { auditDepartment, createDepartment, deleteDepartment, listDepartments, listNodePlacements, nodeDepartment, setMemberDepartment, setNodeDepartment, updateDepartment } from "./departments.js";
 import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupTx, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
@@ -1885,11 +1885,13 @@ return Bun.serve({
     const deptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments(?:\/([^/]+))?$/);
     const memberDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/department$/);
     const deptSubMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments\/([^/]+)\/(project-grants|nodes|group)$/);
-    if (deptMatch || memberDeptMatch || deptSubMatch) {
+    // #751:Agent(节点)归部门。PUT {department_id}(null = 未分配)。
+    const nodeDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/nodes\/([^/]+)\/department$/);
+    if (deptMatch || memberDeptMatch || deptSubMatch || nodeDeptMatch) {
       const token = requestToken(req, { allowQueryToken: false });
       const resolved = token ? resolveToken(token) : null;
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
-      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch ?? deptSubMatch)![1]);
+      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch ?? deptSubMatch ?? nodeDeptMatch)![1]);
       if (resolved.networkId && resolved.networkId !== netId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       const hubAdmin = isHubAdminCredential(resolved);
       const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
@@ -1905,7 +1907,33 @@ return Bun.serve({
         // viewer_can:manage = 能改名 / 移动 / 删除 / 换负责人;create_child = 能在它下面建子部门。
         // project_grants(部门项目授权)只给 owner / admin:项目 id 不对只看相关任务的成员公开。
         const departments = listed.departments.map((d) => ({ ...d, viewer_can: { manage: canManage || head.strict.has(d.id), create_child: canManage || head.managed.has(d.id) } }));
-        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
+        // #751:归了部门的 Agent 放在单独的 nodes[](旧 app 用 members.length / members[] 数人,混进去会数错);
+        // 没有任何节点归部门 → 不出这个键,响应与以前逐字节相同。只看授权 Agent 的成员只看到授权的那些。
+        let placedNodes = listNodePlacements(netId);
+        if (placedNodes.length && !hubAdmin && !resolved.networkId && isAgentRestricted(resolved.user.user_id, netId)) {
+          const seen = visibleAgents(resolved.user.user_id, netId);
+          placedNodes = placedNodes.filter((n) => seen.nodeIds.includes(n.node_id) || (!!n.alias && seen.aliases.includes(n.alias)));
+        }
+        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, ...(placedNodes.length ? { nodes: placedNodes } : {}), ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
+      }
+      if (nodeDeptMatch) {
+        if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+        const nodeId = decodeURIComponent(nodeDeptMatch[2]);
+        if (!canManage && (resolved.networkId || !isHead)) return scopeDenied();
+        let nodeBody: Record<string, unknown> = {};
+        try { const b = await req.json(); nodeBody = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+        if (!canManage) {
+          // 节点令牌不能改;负责人:目标部门在自己的子树里,节点当前所在的部门(有的话)也在 —— 清空只看当前部门。
+          // 和 GET …/departments/:dept/nodes 一样不看 Agent 授权(能管组织 ≠ 能用这个 Agent;放进部门不给任何人新权限)。
+          const target = nodeBody.department_id === undefined || nodeBody.department_id === null || nodeBody.department_id === "" ? null : nodeBody.department_id;
+          const current = nodeDepartment(netId, nodeId);
+          const inScope = (id: unknown) => typeof id === "string" && head.managed.has(id);
+          if (target === null ? !inScope(current) : (!inScope(target) || (current !== null && !inScope(current)))) return scopeDenied();
+        }
+        const r = setNodeDepartment(netId, nodeId, nodeBody.department_id);
+        if (!r.ok) return withCors(req, Response.json({ ok: false, error: r.error }, { status: r.status }));
+        auditDepartment(resolved.user, "node_department_set", netId, `${nodeId} → ${r.department_id ?? "(unassigned)"}${canManage ? "" : " via=leader"}`);
+        return withCors(req, Response.json(r));
       }
       if (deptSubMatch) {
         const deptId = decodeURIComponent(deptSubMatch[2]);

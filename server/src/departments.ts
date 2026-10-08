@@ -33,6 +33,19 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_network_departments_parent ON network_departments(network_id, parent_id);
 `);
+// #751:Agent(节点)也能归一个部门。用独立的映射表而不是 nodes 多一列:nodes 行在多处被 SELECT * 读出,
+// 新表让所有节点接口的响应保持原样。行存在 = 在这个部门;没有行 = 未分配。读的时候 JOIN nodes / network_departments,
+// 节点删了或部门没了的残留行自然不出现。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_node_departments (
+    network_id    TEXT NOT NULL,
+    node_id       TEXT NOT NULL,
+    department_id TEXT NOT NULL,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, node_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_network_node_departments_dept ON network_node_departments(network_id, department_id);
+`);
 
 export const MAX_DEPTH = 10;
 export const MAX_DEPARTMENTS = 500;
@@ -217,6 +230,42 @@ export function updateDepartment(networkId: string, id: string, body: Record<str
   return { ok: true, department: publicOne(networkId, id) };
 }
 
+/** #751:归了部门的节点(kind 固定 "node",和人的 members[] 分开放,旧 app 只读 members[])。 */
+export type NodePlacement = { kind: "node"; node_id: string; alias: string | null; display_name: string | null; department_id: string };
+export function listNodePlacements(networkId: string): NodePlacement[] {
+  return db.all<Omit<NodePlacement, "kind">>(
+    `SELECT m.node_id, n.alias, n.display_name, m.department_id
+       FROM network_node_departments m
+       JOIN nodes n ON n.node_id = m.node_id AND n.network_id = m.network_id
+       JOIN network_departments d ON d.network_id = m.network_id AND d.department_id = m.department_id
+      WHERE m.network_id = ?1 ORDER BY n.alias, m.node_id`,
+    networkId,
+  ).map((r) => ({ kind: "node" as const, node_id: r.node_id, alias: r.alias, display_name: r.display_name, department_id: r.department_id }));
+}
+function nodeInNetwork(networkId: string, nodeId: string): { alias: string | null } | null {
+  return db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE network_id = ?1 AND node_id = ?2", networkId, nodeId) ?? null;
+}
+/** 节点当前所在的(仍存在的)部门;未分配 → null。 */
+export function nodeDepartment(networkId: string, nodeId: string): string | null {
+  return db.get<{ department_id: string }>(
+    `SELECT m.department_id FROM network_node_departments m
+       JOIN network_departments d ON d.network_id = m.network_id AND d.department_id = m.department_id
+      WHERE m.network_id = ?1 AND m.node_id = ?2`,
+    networkId, nodeId,
+  )?.department_id ?? null;
+}
+/** 把节点放进一个部门(null = 未分配)。 */
+export function setNodeDepartment(networkId: string, nodeId: string, departmentId: unknown): Ok<{ node_id: string; department_id: string | null }> | Fail {
+  if (!nodeInNetwork(networkId, nodeId)) return fail(404, "node_not_found");
+  const dept = departmentId === null || departmentId === "" ? null : departmentId;
+  if (dept !== null && (typeof dept !== "string" || !one(networkId, dept))) return fail(400, "department_not_found");
+  db.transaction(() => {
+    db.run("DELETE FROM network_node_departments WHERE network_id = ?1 AND node_id = ?2", [networkId, nodeId]);
+    if (dept !== null) db.run("INSERT INTO network_node_departments (network_id, node_id, department_id) VALUES (?1, ?2, ?3)", [networkId, nodeId, dept]);
+  });
+  return { ok: true, node_id: nodeId, department_id: dept as string | null };
+}
+
 /** 只删空部门:有子部门 / 有成员 → 409(带数字,界面照着说)。 */
 export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: string }> | (Fail & { children?: number; members?: number }) {
   if (!one(networkId, id)) return fail(404, "department_not_found");
@@ -226,6 +275,8 @@ export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: s
   // RFC-040:部门的项目授权(network_department_project_grants)和部门同一事务删掉。
   groupTx(() => {
     db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [networkId, id]);
+    // #751:节点不挡删除(和人不同,Agent 不必先移走);归在这个部门的节点变回未分配。
+    db.run("DELETE FROM network_node_departments WHERE network_id = ?1 AND department_id = ?2", [networkId, id]);
     deleteDepartmentGrants(networkId, id);
     // RFC-042:部门群解除关联(群和成员、以后的聊天记录都留着),不删。
     unlinkDepartmentGroup(networkId, id);
@@ -251,6 +302,7 @@ export function setMemberDepartment(networkId: string, userId: string, departmen
 /** 网络删掉时一起清(和项目授权同一时机调用)。 */
 export function deleteDepartmentsForNetwork(networkId: string): void {
   db.run("DELETE FROM network_departments WHERE network_id = ?1", [networkId]);
+  db.run("DELETE FROM network_node_departments WHERE network_id = ?1", [networkId]);
   deleteDepartmentGrantsForNetwork(networkId);
   deleteChatGroupsForNetwork(networkId); // RFC-042:网络没了,群一起删
 }
