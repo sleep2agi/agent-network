@@ -6392,7 +6392,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.tool("schedule_create", "Schedule a task to target_node_id (default you).", schedFields,
     async (args) => scheduleCall((id, w) => agentCreateSchedule(id, w, args as Record<string, unknown>)));
   server.tool("schedule_update", "Edit your schedule; status=paused|active.",
-    { ...schedFields, schedule_id: schedId, name: z.string().optional(), task: z.string().optional(), schedule: z.any().optional(), status: z.string().optional() },
+    { ...schedFields, schedule_id: schedId, base_revision: z.number().int().min(0).optional().describe("Reject if current revision differs."), name: z.string().optional(), task: z.string().optional(), schedule: z.any().optional(), status: z.string().optional() },
     async ({ schedule_id, ...rest }) => scheduleCall((id, w) => agentUpdateSchedule(id, w, schedule_id, rest as Record<string, unknown>)));
   server.tool("schedule_cancel", "Cancel your schedule.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall((id, w) => agentCancelSchedule(id, w, schedule_id)));
