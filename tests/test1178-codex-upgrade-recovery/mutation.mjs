@@ -104,6 +104,18 @@ function mutateRecoveryLeaseHeartbeat() {
   finally { for (let i = 0; i < paths.length; i++) writeFileSync(paths[i], originals[i]); }
 }
 
+function mutateRecoveryLeaseReleaseAfterReady() {
+  // Board #762 — dropping the release after "bridge and TUI ready" must go red:
+  // a foreground launcher would otherwise keep the cap-1 recovery lane forever.
+  const path = "/repo/agent-network/src/codex-recovery-lease.ts";
+  const original = readFileSync(path, "utf8");
+  const before = '  p.lease.release("bridge and TUI ready");';
+  if (!original.includes(before)) throw new Error("recovery lease release-after-ready mutation anchor missing");
+  writeFileSync(path, original.replace(before, "  // mutation: lease kept after ready"));
+  try { assertRed("src/codex-recovery-lease.test.ts", "a foreground launcher that keeps running frees the lane right after ready"); }
+  finally { writeFileSync(path, original); }
+}
+
 function mutateBridgeAttachBudget() {
   const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
   const before = "resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs)";
@@ -231,6 +243,7 @@ mutateBridgePayloadUpperBound();
 mutateBridgeCloseToNewThread();
 mutateRecoveryGateWiring();
 mutateRecoveryLeaseHeartbeat();
+mutateRecoveryLeaseReleaseAfterReady();
 mutateBridgeAttachBudget();
 mutateTuiRecoveryBudget();
 mutateExperimentalFallback();

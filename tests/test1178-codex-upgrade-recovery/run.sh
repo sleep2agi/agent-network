@@ -7,7 +7,7 @@ mkdir -p "$(dirname "$REPORT")"
   echo
   echo "Layer 1: pure recovery + existing thread lifecycle"
   cd /repo/agent-network
-  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-resume-timeout.test.ts src/codex-copresence-env.test.ts src/codex-copresence-rpc.test.ts src/codex-copresence-thread.test.ts src/codex-pending-thread-restart.test.ts src/codex-recovery-resource-gate.test.ts src/opencode-agent-node-pair.test.ts
+  bun test src/codex-copresence-recovery.test.ts src/codex-copresence-resume-timeout.test.ts src/codex-copresence-env.test.ts src/codex-copresence-rpc.test.ts src/codex-copresence-thread.test.ts src/codex-pending-thread-restart.test.ts src/codex-recovery-resource-gate.test.ts src/codex-recovery-lease.test.ts src/opencode-agent-node-pair.test.ts
   cd /repo/agent-node
   bun test src/runtime/codex-app-server-bridge.test.ts src/runtime/codex-app-server-client.test.ts src/runtime/codex-app-server/resume-timeout.test.ts
   cd /repo/agent-network
