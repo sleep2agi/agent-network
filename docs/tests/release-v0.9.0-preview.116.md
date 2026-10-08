@@ -24,18 +24,18 @@ same repository are not released by this Hub-only version change.
 - Additive scheduler column: `offline_alert_at`.
 - No new required client request fields. Existing membership defaults are not
   claimed to change retroactively; the new-member policy is intentional.
-- Runtime rollback compatibility must be checked against npm `.115` before
-  release. Do not infer rollback safety merely from additive schema.
+- Isolated rollback/re-upgrade replay against npm `.115` passed with the
+  seeded database. This does not replace backing up production data.
 - Token issuance protections remain in effect. Do not mix historical Hub
   issuers against one database or roll back across the security boundary.
 
 ## Release gate
 
-Version-only PR: package version and lockfile, plus this note. Existing product
-tests are owned by the merged feature PRs; avoid another redundant local full
-suite. Run the release compatibility replay in isolated Docker against `.115`
-and an existing App, retain its actual results, then require PR CI and
-`assert-pr-mergeable` success. Compatibility replay is pending at preparation.
+Release preparation: package version and lockfile, this note, and the replay's
+explicit new-member-policy expectation. No product implementation changes.
+Existing product tests are owned by the merged feature PRs; avoid another
+redundant local full suite. The isolated `.115` / `.116` replay with App
+`desktop-v0.2.224` passed. PR CI and `assert-pr-mergeable` must still pass.
 
 After merge, dispatch `release.yml` with package `commhub-server`, version
 `0.9.0-preview.116`, `publish=true` and the exact 40-character main commit.
@@ -62,4 +62,8 @@ Production upgrade is a separate operation and is not performed by this PR.
 ## Validation status
 
 Docker offline version metadata check: 3/3, rc=0 (package and both lockfile
-version entries). Release compatibility replay and PR CI remain pending.
+version entries). Compatibility: A1/A2 each 62 steps, zero unexpected changes
+and zero check failures; upgrade/rollback/re-upgrade B zero failures, rc=0.
+See `report-hub116-compat.txt` for the initial stale-expectation failures and
+the explicit release parameters. PR CI remains pending; no npm publication
+or production upgrade is claimed.

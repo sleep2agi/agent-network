@@ -33,7 +33,7 @@ done
 docker build -q --build-arg BASE_VERSION="$BASE_VERSION" -t "$IMAGE" -f "$ROOT/tests/hub-release-compat/Dockerfile" "$CTX" >/dev/null || { echo "FAIL: docker build"; exit 1; }
 
 envs=(-e APP_TAGS="$APP_TAGS")
-for v in CHECK_75 CHECK_ABANDONED SCHED_BASELINE CHECK_BYTES EXPECT_BACKFILL OLD_LABEL NEW_LABEL; do
+for v in CHECK_75 CHECK_ABANDONED SCHED_BASELINE CHECK_BYTES EXPECT_BACKFILL OLD_LABEL NEW_LABEL NEW_MEMBER_TASK_ACCESS; do
   if [[ -n "${!v:-}" ]]; then envs+=(-e "$v=${!v}"); fi
 done
 
