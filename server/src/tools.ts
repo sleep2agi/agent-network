@@ -84,6 +84,7 @@ import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue
 import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
+import { orgWhoami } from "./org-whoami.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -6400,6 +6401,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ schedule_id }) => scheduleCall((id, w) => agentRunScheduleNow(id, w, schedule_id)));
   server.tool("schedule_runs", "A schedule's recent runs.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall(id => agentScheduleRuns(id, schedule_id)));
+
+  // #752 —— 节点在组织架构里的位置(org-whoami.ts)。只读;只看令牌绑定的网络,不收任何参数。
+  server.tool("org_whoami", "Your org chart: department, ancestors, head, same-department people and Agents (≤50). source: node|owner|none.", {},
+    async () => scheduleCall(id => orgWhoami(id.networkId, id.nodeId, id.ownerUserId)));
 
   // #478:tools/list 只列这个调用者真能用的工具(tool-audience.ts)。只滤列表,tools/call 不变。
   const caller: ToolCaller = callerTokenIsNetwork
