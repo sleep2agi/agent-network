@@ -162,6 +162,7 @@ import {
 } from "../src/codex-copresence-profile";
 import {
   codexHomeStagePlan,
+  codexKnownStartupPromptAction,
   codexTuiPaneState,
   describeCodexTuiBlocker,
   describeCodexTuiNotPainted,
@@ -582,11 +583,44 @@ async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) 
   // blockers still return immediately; an unknown surface remains fail-closed.
   const inputSettleMs = Math.min(timeoutMs, 5_000);
   const stableComposerMs = 800;
+  const stableKnownPromptMs = 800;
   let paintedAt: number | null = null;
   let composerSeenAt: number | null = null;
+  let knownPromptSeenAt: number | null = null;
+  let handledKnownPrompt = false;
   for (;;) {
     const onScreen = capturePane(sessionName);
     if (onScreen !== null) {
+      const knownAction = handledKnownPrompt ? null : codexKnownStartupPromptAction(onScreen);
+      if (knownAction) {
+        knownPromptSeenAt ??= Date.now();
+        if (Date.now() - knownPromptSeenAt >= stableKnownPromptMs) {
+          // The migration picker is rendered before the main Codex banner, so
+          // this exact-current-screen action must precede generic paint
+          // classification. Re-read immediately before the one permitted key:
+          // stale scrollback or an earlier frame must never authorise input.
+          const freshScreen = capturePane(sessionName);
+          const freshAction = freshScreen === null ? null : codexKnownStartupPromptAction(freshScreen);
+          const paneTarget = freshAction?.key === knownAction.key ? tmuxPaneTarget(sessionName) : null;
+          if (paneTarget) {
+            try {
+              execTmux(["send-keys", "-t", paneTarget, "-l", knownAction.key], { stdio: "ignore" });
+              handledKnownPrompt = true;
+              knownPromptSeenAt = null;
+              console.log("[anet] acknowledged the known Codex model migration prompt; keeping the existing model");
+              await new Promise((r) => setTimeout(r, 400));
+              continue;
+            } catch {
+              // The pane changed between the final read and send. Keep the
+              // readiness gate fail-closed; the next poll must prove the
+              // current screen again before any further action is allowed.
+              knownPromptSeenAt = null;
+            }
+          }
+        }
+      } else {
+        knownPromptSeenAt = null;
+      }
       const everSeen = capturePane(sessionName, 400) ?? onScreen;
       const state = codexTuiPaneState(onScreen, everSeen);
       if (state === "usable") {
