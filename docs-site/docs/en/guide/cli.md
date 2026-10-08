@@ -463,6 +463,13 @@ Adoption and revocation never restart or signal the node. Only bare/default-sock
 is supported; co-presence or unreproducible environments are refused (key names, never values).
 Run `anet daemon adopted` from the daemon workdir to list local records with active Hub authority.
 
+`adopt_path_writable_by_others`: the workdir, `.anet`, `.anet/nodes`, the node directory or
+`config.json` is group/other-writable. Fix it with `chmod go-w` on the reported path. For a shared
+team workspace (e.g. `2775`) that must stay group-writable, the **workdir itself only** may instead
+carry the sticky bit: a daemon-owned workdir with `chmod +t <workdir>` (e.g. `drwxrwsr-t`) is accepted,
+because other users then cannot rename or delete the daemon-owned `.anet` inside it. `.anet` and
+everything below it must still be `go-w`.
+
 This increment binds nodes only; remote stop/start for adopted nodes requires
 board #627. Until then it fails explicitly instead of entering legacy child-process cleanup.
 Registry: `<daemon-workdir>/.anet/child-workdirs.json`. Original node configurations

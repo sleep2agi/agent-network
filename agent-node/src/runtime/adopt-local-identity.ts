@@ -31,11 +31,13 @@ function under(child: string, parent: string): boolean {
   const rel = relative(parent, child);
   return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
-function secure(path: string, uid: number, directory: boolean): void {
+// stickyWorkdir: ONLY the workdir itself may be group/other-writable, and only with the sticky
+// bit (S_ISVTX) on a daemon-owned directory, so others can't rename/delete its .anet (#747).
+function secure(path: string, uid: number, directory: boolean, stickyWorkdir = false): void {
   const st = lstatSync(path);
   if (st.isSymbolicLink() || (directory ? !st.isDirectory() : !st.isFile())) refuse("adopt_path_not_regular");
   if (st.uid !== uid) refuse("adopt_path_owner_mismatch");
-  if (st.mode & 0o022) refuse("adopt_path_writable_by_others");
+  if ((st.mode & 0o022) && !(stickyWorkdir && directory && (st.mode & 0o1000))) refuse("adopt_path_writable_by_others");
 }
 function canonicalHub(raw: unknown): string {
   if (typeof raw !== "string") return refuse("adopt_hub_missing");
@@ -54,7 +56,7 @@ export function verifyAdoptionLocalIdentity(req: AdoptionIdentityRequest, opts: 
   const home = realpathSync(opts.home);
   assertWorkdirAllowed(workdir, { home });
   if (!opts.adoptRoots.some(root => isAbsolute(root) && under(workdir, realpathSync(root)))) refuse("adopt_workdir_outside_roots");
-  secure(workdir, opts.uid, true);
+  secure(workdir, opts.uid, true, true);
   const anet = join(workdir, ".anet");
   const nodes = join(anet, "nodes");
   secure(anet, opts.uid, true);
