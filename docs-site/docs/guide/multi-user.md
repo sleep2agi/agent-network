@@ -10,6 +10,12 @@ Hub 0.9.0-preview.68 起，服务器提供两样已经生效的能力：成员�
 
 授权由该网络的 owner / admin，或 Hub 管理员，通过接口整体替换。授权表示能看见、能对话，不是能改这个 Agent 的配置、规则或日志。能看见一个 Agent，就能看到它完整的聊天记录：不同的人打开同一个节点，看到的消息是一样的——包括 owner 和其他成员发给它的消息，以及授权之前的历史。判定和字段见 [用户与 Agent 权限端点](/api/rest-admin#用户与-agent-权限端点)。
 
+## 成员能看哪些任务
+
+新加入的 member / viewer，任务范围（`task_access`）默认是 `scoped`，也就是「只看相关任务」：自己负责的、参与的、自己建的卡，加上授权给他的项目里的卡（viewer 只看授权项目）。管理员建号、`POST /api/networks/{id}/members`、邀请码加入都按这个默认值入库。升级到这一版之前就在网络里的成员仍是 `all`，可见范围不因升级改变。owner、admin 和 Hub 管理员不受这道限制；新加的 admin 照旧存 `all`。
+
+要让某个成员看全部任务，由 owner / admin 或 Hub 管理员调用 `PUT /api/networks/{id}/members/{user_id}/task-grants`，传 `{"task_access": "all"}`；传 `project_grants` 则整体替换他的项目授权。加成员时也可以直接在 `POST /api/networks/{id}/members` 里带 `"task_access": "all"`。
+
 ## 人与人私聊
 
 同一网络里的两个用户可以用这些接口互发私聊，只接受用户令牌：

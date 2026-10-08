@@ -78,7 +78,7 @@ beforeAll(async () => {
   const stamp = Date.now();
   alice = await mk(`rs_alice_${stamp}`);
   carol = await mk(`rs_carol_${stamp}`);
-  // 新成员默认值 NEW_MEMBER_TASK_ACCESS 暂时是 'all',alice 要显式设成 scoped。
+  // #746 起新成员默认就是 scoped;这里仍显式设一次,不依赖默认值。
   expect((await send(admin.token, "PUT", `/api/networks/${NET}/members/${alice.id}/task-grants`, { task_access: "scoped" })).status).toBe(200);
   db.run("UPDATE network_members SET task_access = 'all' WHERE network_id = ?1 AND user_id = ?2", [NET, carol.id]);
 

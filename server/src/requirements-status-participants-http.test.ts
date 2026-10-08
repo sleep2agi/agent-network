@@ -59,6 +59,8 @@ beforeAll(async () => {
   expect((await rest(U.owner.token, "POST", "/api/admin/users", { username, password: PW, network_id: NET, role: "member" })).status).toBe(200);
   const login = await rest("", "POST", "/api/auth/login", { username, password: PW });
   U.member = { token: login.body.token, id: login.body.user.user_id };
+  // #746 起新成员默认 scoped;这里测的是 'all' 成员的 REST 键,显式放宽。
+  expect((await rest(U.owner.token, "PUT", `/api/networks/${NET}/members/${U.member.id}/task-grants`, { task_access: "all" })).status).toBe(200);
   for (const [k, alias] of [["nodeA", "示例-甲"], ["nodeB", "示例-乙"], ["nodeC", "示例-丙"]] as const) {
     const nodeId = `node_sp_${k}`;
     U[k] = { token: createNetworkTokenForNode(U.owner.id, NET, alias, nodeId).token!, id: nodeId };

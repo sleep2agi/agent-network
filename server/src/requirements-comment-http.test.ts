@@ -58,6 +58,8 @@ beforeAll(async () => {
   const mk = async (username: string, role: string) => {
     expect((await rest(U.owner.token, "POST", "/api/admin/users", { username, password: PW, network_id: NET, role })).status).toBe(200);
     const login = await rest("", "POST", "/api/auth/login", { username, password: PW });
+    // #746 起新成员默认 scoped;这里的 member / viewer 模拟老成员('all'),scoped 那位下面再收窄。
+    expect((await rest(U.owner.token, "PUT", `/api/networks/${NET}/members/${login.body.user.user_id}/task-grants`, { task_access: "all" })).status).toBe(200);
     return { token: login.body.token as string, id: login.body.user.user_id as string };
   };
   const stamp = Date.now();

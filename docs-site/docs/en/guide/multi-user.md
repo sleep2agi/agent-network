@@ -10,6 +10,12 @@ A member or viewer added from this version on has `agent_access` `granted` by de
 
 The network owner or admin, or a Hub admin, replaces the grant list through the API. A grant means the person can see that Agent and talk to it. It does not let them change its config, rules, or logs. Anyone who can see an Agent sees its full chat history: different people opening the same node see the same messages, including messages the owner and other members sent it and history from before the grant. The rule and the fields are in [Users & Agent Access Endpoints](/en/api/rest-admin#users-agent-access-endpoints).
 
+## Which tasks a member can see
+
+A member or viewer added from this version on has task access (`task_access`) `scoped` by default, meaning related tasks only: cards they own, participate in, or created, plus cards in projects granted to them (a viewer sees only granted projects). Admin-created accounts, `POST /api/networks/{id}/members`, and invite-code joins all use this default. Members who were already in the network before the upgrade stay on `all`, so the upgrade does not change what they can see. Owners, admins, and Hub admins are not limited by this rule; a newly added admin is still stored as `all`.
+
+To let a member see every task, the network owner or admin, or a Hub admin, calls `PUT /api/networks/{id}/members/{user_id}/task-grants` with `{"task_access": "all"}`; passing `project_grants` replaces their project grants. You can also pass `"task_access": "all"` directly in `POST /api/networks/{id}/members` when adding the member.
+
 ## Human-to-human messages
 
 Two users in the same network can message each other with these endpoints. User tokens only:

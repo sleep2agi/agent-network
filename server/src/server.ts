@@ -33,7 +33,7 @@ import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
-import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
+import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, newMemberTaskAccess } from "./task-access.js";
 import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
@@ -2206,12 +2206,12 @@ return Bun.serve({
         if (body.agent_access !== undefined && body.agent_access !== "all" && body.agent_access !== "granted") {
           return withCors(req, Response.json({ ok: false, error: "invalid_agent_access" }, { status: 400 }));
         }
-        // task_access 缺省 NEW_MEMBER_TASK_ACCESS(RFC-038 §9.4);显式传 'all' / 'scoped' 覆盖。
+        // task_access 缺省 newMemberTaskAccess(role)(RFC-038 §9.4,#746 起 member/viewer 为 'scoped');显式传 'all' / 'scoped' 覆盖。
         if (body.task_access !== undefined && body.task_access !== "all" && body.task_access !== "scoped") {
           return withCors(req, Response.json({ ok: false, error: "invalid_task_access" }, { status: 400 }));
         }
         const result = addNetworkMember(netId, body.user_id, body.role || "member", resolved.user.user_id, { agentAccess: body.agent_access, taskAccess: body.task_access });
-        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"} agent_access=${body.agent_access === "all" ? "all" : "granted"} task_access=${body.task_access ?? NEW_MEMBER_TASK_ACCESS}`, undefined, netId);
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"} agent_access=${body.agent_access === "all" ? "all" : "granted"} task_access=${body.task_access ?? newMemberTaskAccess(body.role || "member")}`, undefined, netId);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       }
       if (req.method === "PUT" && targetUid) {

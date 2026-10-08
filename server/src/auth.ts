@@ -5,7 +5,7 @@ import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken,
 import { WEAK_PASSWORDS } from "./password-dict.js";
 import { checkNodeTokenClaim, legacyNodeHolder } from "./node-token-ownership.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
-import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, NEW_MEMBER_TASK_ACCESS, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
+import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, newMemberTaskAccess, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
 
 // Round-6 A1 hardening — dummy hash for username-enumeration timing
 // close. We compute ONE scrypt hash of a throwaway password and reuse
@@ -749,8 +749,8 @@ export function usernameCollidesWithAgent(networkId: string, userId: string): bo
 export function addNetworkMember(networkId: string, userId: string, role: string, invitedBy?: string, opts: { agentAccess?: "all" | "granted"; taskAccess?: TaskAccessMode } = {}): { ok: boolean; error?: string } {
   if (!MEMBER_ROLES.has(role)) return { ok: false, error: "invalid role" };
   const agentAccess = opts.agentAccess === "all" ? "all" : "granted";
-  // 任务范围:新成员默认 NEW_MEMBER_TASK_ACCESS(task-access.ts 一处定义)。
-  const taskAccess: TaskAccessMode = opts.taskAccess === "all" || opts.taskAccess === "scoped" ? opts.taskAccess : NEW_MEMBER_TASK_ACCESS;
+  // 任务范围:显式传值优先;否则 newMemberTaskAccess(role)(#746:member/viewer 'scoped',admin 'all')。
+  const taskAccess: TaskAccessMode = opts.taskAccess === "all" || opts.taskAccess === "scoped" ? opts.taskAccess : newMemberTaskAccess(role);
   if (!db.get("SELECT 1 FROM users WHERE user_id = ?1", userId)) return { ok: false, error: "user not found" };
   const existing = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
   if (existing) return { ok: false, error: "user already a member" };
@@ -816,7 +816,7 @@ export function joinByInvite(inviteCode: string, userId: string): { ok: boolean;
   if (usernameCollidesWithAgent(invite.network_id, userId)) return { ok: false, error: "username_collides_with_agent_alias" };
   // Add member + increment used count
   db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access, task_access) VALUES (?1, ?2, ?3, ?4, 'granted', ?5)",
-    [invite.network_id, userId, invite.role, invite.created_by, NEW_MEMBER_TASK_ACCESS]);
+    [invite.network_id, userId, invite.role, invite.created_by, newMemberTaskAccess(invite.role)]);
   db.run("UPDATE network_invites SET used_count = used_count + 1 WHERE invite_code = ?1", [inviteCode]);
   // 受限成员不能持有网络令牌(resolveToken 会拒),别签一个用不了的。
   if (isAgentRestricted(userId, invite.network_id)) return { ok: true, network_id: invite.network_id, role: invite.role };
