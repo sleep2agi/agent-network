@@ -35,6 +35,21 @@ Added NOT-IN-CI.md pointing at the existing complete server-unit collector
 and its revisit condition; did not exempt either behavior test from CI or add
 a duplicate CI matrix entry.
 
+CI follow-up 2026-10-09 06:49 CST:
+Run 37855148307 job 113578213111 executed all 213 server test files;
+only node-permissions-http.test.ts failed: schedule_batch_interval was missing
+from NODE_TOOL_CLASS. Added the same "schedule" class as schedule_update.
+Docker rerun against the existing image with only node-permissions.ts mounted
+read-only (network none, 2 CPUs, disposable databases):
+- node-permissions-http.test.ts: 15 pass, 0 fail, 77 assertions, 1.84s.
+- schedule-agent-mcp-http.test.ts: 19 pass, 0 fail, 134 assertions, 4.16s.
+Command: docker run --rm --network none --cpus=2
+  -v /dev/shm/anet-schedule-bulk-interval/server/src/node-permissions.ts:/work/server/src/node-permissions.ts:ro
+  anet-schedule816:test bash -c
+  'COMMHUB_DB=/tmp/test816-permissions.db bun test src/node-permissions-http.test.ts && COMMHUB_DB=/tmp/test816-schedules.db bun test src/schedule-agent-mcp-http.test.ts'
+(Executed through sg docker -c.) The local reproducer now includes this
+existing permission registry test; CI collection remains unchanged.
+
 Recovery impact: no schema migration, new service, port, tunnel, secret or
 environment variable. Existing Hub startup/deployment remains unchanged.
 Release only a reviewed main SHA; verify tool listing plus an isolated node
