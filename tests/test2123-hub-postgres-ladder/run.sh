@@ -234,8 +234,6 @@ run_pg_tests_rc anet_part_notify_test src/requirement-participant-notify-http.te
 run_pg_tests_rc anet_mcp_proj_events_test src/mcp-projects-events-http.test.ts
 # 组织架构(board #419):network_departments 新表 + network_members.department_id(ALTER)、IS NULL 分支的同级查重 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_departments_test src/departments-http.test.ts
-# Agent 归部门(#751):network_node_departments 新表、JOIN nodes / network_departments、删部门清节点归属 —— 在真 PostgreSQL 上。
-run_pg_tests_rc anet_node_depts_test src/node-departments-http.test.ts
 # 项目列表的 viewer_can.edit(app 任务页审计 L13):一次读授权表 + 每个项目真建卡比对 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_proj_viewer_can_test src/project-viewer-can-http.test.ts
 # 降级节点拒收新任务(#460):REST /api/task 409、MCP send_task / retry / reassign、定时任务 run 记 node_degraded —— 在真 PostgreSQL 上。

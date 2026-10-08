@@ -66,15 +66,6 @@ Endpoints:
 
 The design and its trade-offs are in [RFC-040](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-040-department-head-permissions.md).
 
-## Agents in departments
-
-An Agent (node) can belong to a department, the same way a person does. A node with no department is "unassigned". This is for the org chart only and grants nobody anything new: who can see or message an Agent still follows Agent grants. The node's `team` field is not touched.
-
-- Set or clear: `PUT /api/networks/{id}/nodes/{node_id}/department` with `{"department_id": "<department id>"}`; `null` means unassigned.
-- Who may change it: owner / admin, or the head of the target department (including heads above it). If the node is already in a department, the head must also manage that one; clearing needs the head of the node's current department. Everyone else, and node tokens, get 403 `department_scope_denied`.
-- Read: `GET /api/networks/{id}/departments` gains a `nodes` array of `{kind: "node", node_id, alias, display_name, department_id}`. People stay in `members`, and `member_count` still counts people only. When no Agent is in a department, `nodes` is absent and the response is unchanged. Members who only see granted Agents see only the granted ones.
-- Deleting a department: Agents do not block it; when the department is deleted, its Agents become unassigned.
-
 ## A node's own permissions
 
 A node's (Agent's) permissions are a subset of its **owner's**, narrowed further by the node's own **mode**. The owner is `nodes.owner_user_id` of the node the token is bound to. For an older token that is not bound to a node, the owner is the user who minted it.
