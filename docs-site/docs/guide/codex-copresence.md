@@ -186,12 +186,28 @@ final paginated rollout record at <path> is missing an ordinal
 - 找不到 rollout、第一行读不出来、版本拿不到：只警告，照旧启动。
 
 已经混用过的线程：恢复时 anet 会说明原因、说明原文件没动，然后照旧 fail-closed（不会偷偷开新线程）。
-安全的出路只有两条：等 #734 的 fork 恢复，或由人决定放弃这段历史后 `anet node start <节点> --new-session`。不要手改或删除 rollout。只读自查：
+安全的出路只有两条：fork 恢复（见下一节），或由人决定放弃这段历史后 `anet node start <节点> --new-session`。不要手改或删除 rollout。只读自查：
 
 ```bash
 head -n 1 <rollout> | grep -o '"history_mode":"[a-z]*"'   # paginated = 新版写的
 tail -n 1 <rollout> | grep -c '"ordinal"'                   # 0 = 末尾被旧版追加过
 ```
+
+### 线程恢复不了的节点怎么救（#738） {#fork-on-resume-failure}
+
+用 codex ≥ 0.145 把这条线程 fork 成一条**新线程**（历史一样），节点改在新线程上启动：
+
+```bash
+anet node start <节点> --fork-on-resume-failure          # 会问 [y/N]，只有回答 y 才 fork
+anet node start <节点> --fork-on-resume-failure --yes    # 没有终端（脚本 / CI）时必须再加 --yes
+```
+
+- 只在恢复失败、而且报错正是 `missing an ordinal` 时才会 fork；其它恢复失败照旧 fail-closed，不 fork。不加这个参数时行为和以前完全一样。
+- 没确认（回答不是 y，或非交互又没加 `--yes`）：不 fork，不动任何文件。
+- fork 之前先把原 rollout **复制**一份只读快照到 `<节点目录>/rollout-snapshots/`；原文件从头到尾不改（fork 后会再比对一次哈希，变了就不切换）。
+- 旧线程 → 新线程、快照路径、时间记在 `<节点目录>/codex-fork-recovery.json`（和 config.json 同目录）。fork 成功后才把 config 里记录的线程改成新线程。
+- 🔴 新线程的历史仍然要读**原 rollout 文件**：原文件必须保留，不要移动或删除。
+- 目前只覆盖共存节点的 `anet node start`。
 
 ## 健康分层、降级拒收与自愈 {#health}
 

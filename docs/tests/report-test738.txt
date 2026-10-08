@@ -1,0 +1,79 @@
+test738 — board #738 --fork-on-resume-failure (local Docker, --cpus=2, real codex 0.133.0 + 0.159.2)
+date: 2026-10-08 08:11:00 CST  rc=0
+T738 source=(local build of this PR)
+── L1 unit
+bun test v1.3.14 (0d9b296a)
+src/cli-args.test.ts:
+(pass) CLI argument parsing > pins the complete presence-only flag set [0.17ms]
+(pass) CLI argument parsing > --accept-dev-channels does not swallow a following positional operand [0.34ms]
+(pass) CLI argument parsing > --accept-dev-channels works after a positional operand [0.06ms]
+(pass) CLI argument parsing > --dev-open does not swallow a following positional operand [0.01ms]
+(pass) CLI argument parsing > --dev-open works after a positional operand [0.01ms]
+(pass) CLI argument parsing > --dry-run does not swallow a following positional operand
+(pass) CLI argument parsing > --dry-run works after a positional operand
+(pass) CLI argument parsing > --follow does not swallow a following positional operand
+(pass) CLI argument parsing > --follow works after a positional operand
+(pass) CLI argument parsing > --no-auto-self does not swallow a following positional operand
+(pass) CLI argument parsing > --no-auto-self works after a positional operand
+(pass) CLI argument parsing > --no-yolo does not swallow a following positional operand
+(pass) CLI argument parsing > --no-yolo works after a positional operand
+(pass) CLI argument parsing > --resume-latest does not swallow a following positional operand
+(pass) CLI argument parsing > --resume-latest works after a positional operand [0.01ms]
+(pass) CLI argument parsing > --self does not swallow a following positional operand
+(pass) CLI argument parsing > --self works after a positional operand
+(pass) CLI argument parsing > --f does not swallow a following positional operand
+(pass) CLI argument parsing > --f works after a positional operand
+(pass) CLI argument parsing > --force does not swallow a following positional operand
+(pass) CLI argument parsing > --force works after a positional operand
+(pass) CLI argument parsing > --yes does not swallow a following positional operand [0.04ms]
+(pass) CLI argument parsing > --yes works after a positional operand
+(pass) CLI argument parsing > presence-only flags do not accept an explicit true or false value [0.05ms]
+(pass) CLI argument parsing > value flags, repeatable flags, and multiple positionals retain their behavior [0.09ms]
+(pass) CLI argument parsing > #536 --pick never swallows the node name [0.07ms]
+(pass) CLI argument parsing > key=value remains unsupported and is treated as the complete key [0.05ms]
+src/codex-fork-recovery.test.ts:
+(pass) resumeOrForkOnMissingOrdinal > a successful resume is returned unchanged; no fork [3.33ms]
+(pass) resumeOrForkOnMissingOrdinal > without the flag: the original error, no fork, no files [1.20ms]
+(pass) resumeOrForkOnMissingOrdinal > another resume error class: no fork even with the flag and --yes [0.66ms]
+(pass) resumeOrForkOnMissingOrdinal > non-interactive without --yes: no fork, no files [0.98ms]
+(pass) resumeOrForkOnMissingOrdinal > interactive answer other than yes: no fork, no files [0.84ms]
+(pass) resumeOrForkOnMissingOrdinal > confirmed: read-only snapshot, fork, mapping recorded, original untouched [6.46ms]
+(pass) resumeOrForkOnMissingOrdinal > --yes without a terminal confirms [5.88ms]
+(pass) resumeOrForkOnMissingOrdinal > original changed during the fork: refuse, no mapping [2.11ms]
+(pass) resumeOrForkOnMissingOrdinal > a fork that returns the old thread id is refused [1.06ms]
+src/codex-copresence-rpc.test.ts:
+(pass) co-presence RPC recovery deadline > Node recovery lifts the fixed WebSocket frame ceiling for Codex 0.133 [0.11ms]
+(pass) co-presence RPC recovery deadline > a fresh launch is deferred to the TUI and never creates a thread over RPC [2.79ms]
+(pass) co-presence RPC recovery deadline > a slow fake app-server can finish thread/resume inside the configured deadline [93.93ms]
+(pass) co-presence RPC recovery deadline > the same slow server still fails closed when its deadline is too small [31.79ms]
+(pass) co-presence RPC recovery deadline > metadata verification shares the recovery deadline instead of a fixed 15 second timeout [113.33ms]
+(pass) co-presence RPC recovery deadline > falls back once when a real Codex shape rejects excludeTurns behind experimentalApi [2.11ms]
+(pass) co-presence RPC recovery deadline > does not downgrade unrelated -32600 resume failures [0.78ms]
+(pass) co-presence RPC recovery deadline > a broken large-payload connection fails immediately with its transport reason [1.00ms]
+ 44 pass
+ 0 fail
+ 102 expect() calls
+Ran 44 tests across 3 files. [316.00ms]
+PASS L1 unit
+── L2 fixture: a REAL mixed rollout (0.159.2 writes, 0.133.0 appends)
+   thread=01a118cd-212b-7331-9638-14d2203a1560 "history_mode":"paginated" last-line-ordinals=0; RESUME ERROR error resuming thread: Fatal error: Failed to initialize session: thread-store internal error: failed to resume local thread recorder: final paginated rollout record at /root/t738-template/sessions/2026/10/07/rollout-2026-10-07T23-57-38-01a118cd-212b-7331-9638-14d2203a1560.jsonl is missing an ordinal
+PASS L2 real mixed rollout reproduces 'missing an ordinal' on 0.159.2
+── L3 the REAL POSIX launcher: anet node start (co-presence, codex 0.159.2)
+PASS L3 without the flag: fail-closed with the #2501 diagnosis, nothing changed (as before)
+PASS L3 flag, no terminal, no --yes: no fork, no file changes
+PASS L3 flag, interactive answer 'n': no fork, no file changes
+PASS L3 a different resume failure (no session meta) with --fork-on-resume-failure --yes: no fork
+PASS L3 --fork-on-resume-failure --yes: forked, node on the new thread, original unchanged, r/o snapshot, mapping recorded
+   --- launcher output (fork) ---
+   [anet] --fork-on-resume-failure: thread 01a118cd-212b-7331-9638-14d2203a1560 of t738n5 cannot be resumed ("missing an ordinal", board #734).
+   [anet]    First a read-only snapshot of the original rollout is taken; the original is never modified:
+   [anet] read-only snapshot: /root/t738-work.Z6EXKd/.anet/nodes/t738n5/rollout-snapshots/rollout-2026-10-07T23-57-38-01a118cd-212b-7331-9638-14d2203a1560.jsonl.2026-10-07T23-57-59-078Z.snapshot
+   [anet] forked thread 01a118cd-212b-7331-9638-14d2203a1560 → 01a118cd-6fcf-7122-8cd0-88086f4d6ac3 (recorded in /root/t738-work.Z6EXKd/.anet/nodes/t738n5/codex-fork-recovery.json); the original rollout is unchanged.
+   [anet] thread: 01a118cd-6fcf-7122-8cd0-88086f4d6ac3
+PASS L3 interactive answer 'y': forked
+── mutations of the shipped source (each must go red)
+PASS mutation M1-fork-without-confirmation → red (no-yes)
+PASS mutation M2-any-error-class → red (other-class)
+PASS mutation M3-writes-the-original → red (fork)
+PASS mutation M4-snapshot-left-writable → red (fork)
+T738 PASS=12 FAIL=0

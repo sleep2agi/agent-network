@@ -43,7 +43,8 @@ export async function createCodexCopresenceThread(
   timeoutMs: number,
   resumeThreadId?: string,
   model?: string,
-  options: { webSocketCtor?: any; rolloutBytes?: number | null } = {},
+  /** forkFirst (board #738): `thread/fork` the recorded thread, then resume the NEW thread. */
+  options: { webSocketCtor?: any; rolloutBytes?: number | null; forkFirst?: boolean } = {},
 ): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean; resumedModel?: string }> {
   const maxPayload = resolveCopresenceMaxPayloadBytes(options.rolloutBytes ?? null);
   const WsCtor = options.webSocketCtor ?? await defaultWebSocketCtor(maxPayload);
@@ -114,12 +115,19 @@ export async function createCodexCopresenceThread(
     const plan = copresenceThreadPlan(resumeThreadId);
     if (plan.method !== "thread/resume") return { threadId: "", freshDeferred: true };
     if (!SAFE_CODEX_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
+    let resumeId = plan.params.threadId;
+    if (options.forkFirst) {
+      const forked = await request("thread/fork", { threadId: resumeId }, Math.max(1, deadline - Date.now()));
+      const id = forked?.thread?.id;
+      if (typeof id !== "string" || !SAFE_CODEX_THREAD_ID.test(id)) throw new Error("thread/fork returned no usable thread id");
+      resumeId = id;
+    }
     const { resumedModel, ...verification } = await resumeAndVerifyCodexThread(
-      plan.params.threadId,
+      resumeId,
       (method, params) => request(method, params, Math.max(1, deadline - Date.now())),
       model,
     );
-    return { threadId: plan.params.threadId, verification, freshDeferred: false, resumedModel };
+    return { threadId: resumeId, verification, freshDeferred: false, resumedModel };
   } finally {
     try { socket.close(); } catch { /* ignore */ }
   }

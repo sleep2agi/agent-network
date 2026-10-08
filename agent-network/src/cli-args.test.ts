@@ -33,6 +33,7 @@ describe("CLI argument parsing", () => {
       "--f",
       "--follow",
       "--force",
+      "--fork-on-resume-failure",
       "--grok-headless",
       "--hub-only",
       "--new-session",

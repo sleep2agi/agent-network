@@ -187,12 +187,28 @@ So **never mix codex versions on one thread**. anet now checks before starting (
 - Rollout not found, first line unreadable, version unknown: warn only, start as before.
 
 A thread that is already mixed: on resume anet explains the cause, says the original file is untouched, and stays fail-closed (no silent fresh thread).
-There are only two safe ways out: wait for fork recovery (#734), or, after a human decides the history can be left behind, `anet node start <node> --new-session`. Do not edit or delete the rollout. Read-only check:
+There are only two safe ways out: fork recovery (next section), or, after a human decides the history can be left behind, `anet node start <node> --new-session`. Do not edit or delete the rollout. Read-only check:
 
 ```bash
 head -n 1 <rollout> | grep -o '"history_mode":"[a-z]*"'   # paginated = written by codex >= 0.145
 tail -n 1 <rollout> | grep -c '"ordinal"'                   # 0 = an older codex appended to it
 ```
+
+### Recovering a node whose thread can't be resumed (#738) {#fork-on-resume-failure}
+
+Fork the thread with codex ≥ 0.145 into a **new thread** with the same history and start the node on it:
+
+```bash
+anet node start <node> --fork-on-resume-failure          # asks [y/N]; forks only on y
+anet node start <node> --fork-on-resume-failure --yes    # no terminal (scripts / CI): --yes is required too
+```
+
+- It forks only when resume fails with exactly the `missing an ordinal` error. Any other resume failure stays fail-closed, no fork. Without the flag nothing changes.
+- Not confirmed (any answer but y, or non-interactive without `--yes`): no fork, no file is touched.
+- Before forking, the original rollout is **copied** to a read-only snapshot in `<node dir>/rollout-snapshots/`. The original is never modified (its hash is compared again after the fork; if it changed, the node is not switched).
+- Old thread → new thread, the snapshot path and the time are recorded in `<node dir>/codex-fork-recovery.json`, next to config.json. The thread recorded in config changes only after the fork succeeds.
+- 🔴 The new thread still reads its history from the **original rollout file**: keep it, do not move or delete it.
+- Currently covers `anet node start` of co-presence nodes only.
 
 ## Layered health, degraded refusal and self-healing {#health}
 

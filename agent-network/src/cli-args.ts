@@ -19,6 +19,7 @@ export const BOOLEAN_FLAGS = new Set([
   "--external-appserver",        // #630
   "--f",
   "--follow",
+  "--fork-on-resume-failure",    // #738 (node start <codex node> --fork-on-resume-failure)
   // 🔴 #1736 —— 这两个以前**没登记**,于是 `--force <token>` / `--yes <token>`
   //    会把下一个 token 当成它们的值吃掉。实测:
   //      parseCliOptions(["init","--force","myname"]) → {"force":"myname"}
