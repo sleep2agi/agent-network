@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CODEX_HOME_INHERITED_FILES,
   codexHomeStagePlan,
+  codexKnownStartupPromptAction,
   codexTuiPaneState,
   describeCodexTuiBlocker,
   describeCodexTuiNotPainted,
@@ -56,6 +57,42 @@ describe("what the node HOME inherits", () => {
     for (const s of codexHomeStagePlan("/h", "/n", stats({ "/h/auth.json": 1, "/h/version.json": 1 }), join)) {
       expect(s.because.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("known startup prompt actions", () => {
+  const migration = `
+  Meet GPT-6 Sol
+
+  Our latest Sol is more intelligent and more efficient.
+
+› 1. Try new model
+  2. Use existing model
+
+  enter/esc confirm · ctrl+c quit`;
+
+  test("the exact model migration picker chooses the explicit keep-existing option", () => {
+    expect(codexKnownStartupPromptAction(migration)).toEqual({
+      kind: "keep-existing-model",
+      key: "2",
+    });
+  });
+
+  test("a heading alone or a partial picker authorises no key", () => {
+    expect(codexKnownStartupPromptAction("Meet GPT-6 Sol")).toBeNull();
+    expect(codexKnownStartupPromptAction("Meet GPT-6 Sol\n1. Try new model")).toBeNull();
+  });
+
+  test("a different dialog with the same numeric choices authorises no key", () => {
+    expect(codexKnownStartupPromptAction(
+      "Choose a profile\n1. Try new model\n2. Use existing model",
+    )).toBeNull();
+  });
+
+  test("unknown migration copy is fail-closed", () => {
+    expect(codexKnownStartupPromptAction(
+      migration.replace("Meet GPT-6 Sol", "Meet an unknown model"),
+    )).toBeNull();
   });
 });
 

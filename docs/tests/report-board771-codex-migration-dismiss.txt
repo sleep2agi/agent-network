@@ -1,0 +1,26 @@
+board #771 — known Codex startup prompt dismissal
+date: 2026-10-08
+scope: local branch only; not merged, released, or exercised on production nodes
+
+Contract
+- Recognise only the complete current-screen `Meet GPT-6 Sol` migration picker,
+  including its real position before the main Codex banner is painted.
+- After the picker remains stable, re-read the current pane immediately before input.
+- Send literal `2`, the upstream picker's explicit "Use existing model" action.
+- Never send Enter/Escape or guess at an unknown or partial prompt.
+- Reuse the existing composer-readiness gate before declaring the node ready.
+
+Evidence
+- preflight unit: 27 pass, 0 fail, 41 assertions.
+- Docker test-codex-copresence-first-start (`--cpus=2`): T535 PASS.
+- Real private-tmux fixture: the fake picker received exactly `2`, exposed the composer,
+  and the launcher reached ready.
+- Mutation: replacing the known-prompt action with null failed on
+  `known model migration prompt did not reach ready` (rc=1).
+- Existing first-start, bridge-failure, logged-out, backup-failure, config.env, and
+  lifecycle mutations remained red for their intended reasons.
+
+Upstream evidence
+- Codex `model_migration.rs` maps character `2` directly to UseExistingModel/Rejected.
+- Enter and Escape confirm the currently highlighted option, whose initial value is
+  TryNewModel; generic confirmation would therefore change the configured model.

@@ -15,6 +15,8 @@
 //                the log path, and no `tmux attach` to a session that is gone.
 //   logged-out   no auth.json; start must report needs-login with the exact login command, exit 3,
 //                and start nothing (no tmux session, no npx call).
+//   migration    the exact known model-migration picker must receive explicit `2`, then start;
+//                generic confirmation and unknown/partial prompt handling are unit-tested.
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -131,7 +133,11 @@ const configEnvValue = `fake-provider-${runId}`;
 {
   const cfgPath = join(nodeDir, "config.json");
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-  cfg.env = { ...(cfg.env ?? {}), [configEnvKey]: configEnvValue };
+  cfg.env = {
+    ...(cfg.env ?? {}),
+    [configEnvKey]: configEnvValue,
+    ...(scenario === "migration" ? { ANET_TEST751_MODEL_MIGRATION_PROMPT: "1" } : {}),
+  };
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), { mode: 0o600 });
 }
 if (scenario !== "logged-out") {
@@ -150,12 +156,31 @@ if (scenario === "backup-fails") {
 let started = false;
 try {
   const t0 = Date.now();
-  const start = run(["node", "start", alias, "--codex-bin", codexWrapper, "--accept-dev-channels"]);
+  // A migration prompt is a small current-screen gate: the product path
+  // clears it in about 5s in this real-tmux fixture. Bound this scenario more
+  // tightly so the witnessed-red mutant cannot occupy a CI worker for the
+  // launcher's much larger recovery budget.
+  const start = run(
+    ["node", "start", alias, "--codex-bin", codexWrapper, "--accept-dev-channels"],
+    scenario === "migration" ? 15_000 : 150_000,
+  );
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   started = true;
   console.log(`start rc=${start.rc} in ${secs}s`);
 
-  if (scenario === "slow-fetch") {
+  if (scenario === "migration") {
+    if (start.rc !== 0 || !start.out.includes("✅ 共存节点")) {
+      fail(`known model migration prompt did not reach ready (rc=${start.rc})`, start.out);
+    }
+    const rpc = existsSync(rpcLog) ? readFileSync(rpcLog, "utf8") : "";
+    if (!rpc.includes('tui-migration-key:"2"')) {
+      fail("known model migration prompt did not receive the explicit keep-existing key 2", rpc);
+    }
+    if (!start.out.includes("keeping the existing model")) {
+      fail("launcher did not report the known migration acknowledgement", start.out);
+    }
+    pass("known model migration picker receives explicit 2 and reaches the composer");
+  } else if (scenario === "slow-fetch") {
     if (start.rc !== 0 || !start.out.includes("✅ 共存节点")) fail(`first start with a ${delayS}s agent-node fetch did not reach ready (rc=${start.rc})`, start.out);
     if (!/⓪ agent-node: resolving @sleep2agi\/agent-node@/.test(start.out)) fail("no progress line before the agent-node fetch", start.out);
     if (!/⓪ agent-node READY \(paired, \d+\.\d+s\)/.test(start.out)) fail("no READY line after the agent-node fetch", start.out);

@@ -101,6 +101,26 @@ export function codexHomeStagePlan(
 export type CodexTuiBlocker = "sign-in" | "update-prompt" | "trust-prompt" | "input-not-ready";
 export type CodexTuiPaneState = CodexTuiBlocker | "not-painted" | "usable";
 
+export interface CodexKnownStartupPromptAction {
+  readonly kind: "keep-existing-model";
+  readonly key: "2";
+}
+
+/**
+ * Return the one startup action whose exact current-screen contract we know.
+ *
+ * Codex's model-migration picker defaults to "Try new model" and both Enter
+ * and Escape confirm that highlighted choice. Sending a generic confirmation
+ * would therefore silently change the node's configured model. The explicit
+ * `2` choice preserves the current model and acknowledges this exact notice.
+ */
+export function codexKnownStartupPromptAction(onScreen: string): CodexKnownStartupPromptAction | null {
+  if (!onScreen.includes("Meet GPT-6 Sol")) return null;
+  if (!onScreen.includes("1. Try new model")) return null;
+  if (!onScreen.includes("2. Use existing model")) return null;
+  return { kind: "keep-existing-model", key: "2" };
+}
+
 /** Markers taken verbatim from panes observed on 2026-08-20. */
 const BLOCKER_MARKERS: ReadonlyArray<{ blocker: CodexTuiBlocker; needles: readonly string[] }> = [
   { blocker: "sign-in", needles: ["Sign in with ChatGPT", "Sign in with Device Code"] },
