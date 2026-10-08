@@ -212,6 +212,7 @@ run_pg_tests_rc anet_req_events_test src/requirement-events-http.test.ts
 run_pg_tests_rc anet_req_people_test src/requirements-people-http.test.ts
 # Agent 团队(#764):network_agent_teams / network_agent_team_members 新表、同级查重(parent_id IS NULL)、删节点清归属 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_agent_teams_test src/agent-teams-http.test.ts
+run_pg_tests_rc anet_team_whoami_test src/agent-team-whoami-http.test.ts
 # /api/status?node_id=:按节点过滤与网络范围叠加(不越权、未知 id 空列表、light 带 node_id)—— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_status_node_test src/status-node-id-filter-http.test.ts
 # #431 /api/status 记忆化 + ETag:缓存正文 == 当场重算(随机写序列)、写钩子挂在 PG 适配器上、无指向 sessions 的外键/触发器。

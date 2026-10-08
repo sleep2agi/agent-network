@@ -125,6 +125,28 @@ export function listAgentTeams(networkId: string, hidden: Hidden) {
   }));
 }
 
+/** #765: node-token identity only; no fallback to a human's department.
+ * Reuse the REST projection's network joins and display-name privacy rules.
+ */
+export function agentTeamWhoami(networkId: string, nodeId: string | null) {
+  if (!nodeId) return { ok: false, error: "node_identity_unbound" };
+  const teams = listAgentTeams(networkId, () => false);
+  const self = teams.find(t => t.members.some(n => n.node_id === nodeId));
+  if (!self) return { ok: true, source: "none", node_id: nodeId, team: null, ancestors: [], lead: null, owner: null, agents: [], truncated: false };
+  const byId = new Map(teams.map(t => [t.id, t]));
+  const seen = new Set([self.id]);
+  const ancestors: { id: string; name: string }[] = [];
+  for (let id = self.parent_id; id && !seen.has(id);) {
+    const parent = byId.get(id);
+    if (!parent) break;
+    seen.add(id);
+    ancestors.push({ id, name: parent.name });
+    id = parent.parent_id;
+  }
+  return { ok: true, source: "node", node_id: nodeId, team: { id: self.id, name: self.name }, ancestors,
+    lead: self.lead, owner: self.owner, agents: self.members.slice(0, 50), truncated: self.members.length > 50 };
+}
+
 /** scope = null 表示全管;否则是调用者能管的团队集合。 */
 export function createAgentTeam(networkId: string, actor: string, scope: Set<string> | null, hidden: Hidden, body: Record<string, unknown>) {
   const name = cleanName(body.name);
