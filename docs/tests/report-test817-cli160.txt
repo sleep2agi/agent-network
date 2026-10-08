@@ -1,0 +1,34 @@
+Hub #817 — CLI 2.3.0-preview.160 release preparation
+Base: e60466ee4e1d3591a5c3fdd501eedc299cfdfc77 (main)
+Previous release source: 502390bfc79401935086f91455109fb6e96426ea
+Scope: version metadata, paired CLI constant, guide stamps, release notes.
+No new product behavior, runtime/Hub version, workflow or production changes.
+
+Preflight 2026-10-09 (CST):
+- npm CLI preview=.159, latest=.76; candidate .160 HTTP 404.
+- Paired agent-node .126 HTTP 200, preview=.126; pin unchanged.
+- No open .160 release PR or Hub task before #817 was created.
+- sync-pinned-versions.sh dry-run exit 0: four expected version positions.
+- Git log since .159 lists only #2530 and #2532 for agent-network.
+- #2532 final head had 157 successful checks before merge. Functional Docker
+  regression/mutation/real Codex E2E evidence remains in #812/#814 reports and CI.
+
+Docker focused verification:
+sg docker -c 'docker run --rm --cpus=2 -v /dev/shm/anet-cli160:/candidate:ro anet-paired812:test bash -lc "set -e; cp -a /candidate/agent-network/. /workspace/agent-network/; cd /workspace/agent-network; bun test src/package-version-consistency.test.ts src/opencode-agent-node-pair.test.ts; npm run build"'
+- Reused dependency image; candidate source copied inside disposable container.
+- 8 pass, 0 fail, 25 assertions (52ms).
+- npm run build exit 0: bundles, declarations, obfuscation and node-server .160 stamp.
+- This branch build was test-only and was not published or retained as a release artifact.
+
+Documentation checker in anet-android-publish810:test, source/Git metadata
+mounted read-only, --cpus=1:
+python3 scripts/check-doc-version-claims.py --package agent-network --version 2.3.0-preview.160 --verify-latest-from-npm
+- Initial container failed Git ownership check before evaluating docs.
+- Re-ran with container-only GIT_CONFIG_COUNT=1,
+  GIT_CONFIG_KEY_0=safe.directory, GIT_CONFIG_VALUE_0=/dev/shm/anet-cli160.
+- Exit 0: four stamps across two docs; actual latest=.76 unchanged.
+- Host Git/global npm configuration unchanged. git diff --check exit 0.
+
+Pending: version PR CI/merge, official release gate bound to exact main SHA,
+npm preview/tarball/install verification. Not yet published or deployed.
+No real node restarts, credentials, ports, launcher files or data were changed.
