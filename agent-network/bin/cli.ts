@@ -103,6 +103,8 @@ import {
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
   pairedAgentNodeResolution,
+  pairedAgentNodeResolveTimeoutMs,
+  pairedAgentNodeResolveError,
   resolveAgentNodePackageEntrypointFromPath,
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
@@ -3886,13 +3888,14 @@ function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
     source = "paired";
   } else {
     let output: string;
+    const resolveTimeoutMs = pairedAgentNodeResolveTimeoutMs(probeEnv);
     try {
       const resolution = pairedAgentNodeResolution();
       output = execFileSync("npx", resolution.args, {
-        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000, env: probeEnv,
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: resolveTimeoutMs, env: probeEnv,
       });
     } catch (error: any) {
-      throw pairedAgentNodeError(`could not resolve exact paired package: ${error?.stderr || error?.message || error}`);
+      throw pairedAgentNodeError(pairedAgentNodeResolveError(error, resolveTimeoutMs));
     }
     const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (lines.length !== 1 || !isAbsolute(lines[0])) {
