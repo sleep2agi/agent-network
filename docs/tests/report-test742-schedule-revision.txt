@@ -1,0 +1,19 @@
+board #742 — schedule_update base_revision
+date: 2026-10-08
+
+Scope
+- MCP schedule_update only; REST and the other schedule_* tools are unchanged.
+- base_revision is optional. A mismatch returns revision_conflict plus current_revision and writes nothing.
+
+Docker results (--cpus=2)
+- SQLite real HTTP: schedule-agent-mcp-http + tool-audience-http: 27 pass, 0 fail, 397 expect, rc=0.
+- tools/list bytes: node 61,342; user 56,950; all 76,991. Existing ceilings unchanged.
+- PostgreSQL ladder: level 6 / floor 6, schedule-agent-mcp-http 15 pass, 0 fail, rc=0.
+
+Mutation
+- Removed the new base_revision comparison and rebuilt the Docker image.
+- The stale second writer succeeded and overwrote the first writer; the focused suite failed at the revision_conflict assertion: 14 pass, 1 fail, rc=1.
+- Restored the comparison before the green runs recorded above.
+
+Compatibility
+- A schedule_update call without base_revision still updates against the freshly read row revision; the real HTTP regression advances the revision and preserves the prior behavior.

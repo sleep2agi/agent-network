@@ -126,6 +126,9 @@ export function agentUpdateSchedule(id: NodeIdentity, canWrite: boolean, schedul
   if (gate) return gate;
   const row = ownRow(id, scheduleId);
   if (!isRow(row)) return row;
+  if (body.base_revision !== undefined && Number(body.base_revision) !== row.revision) {
+    return fail("revision_conflict", { current_revision: row.revision });
+  }
   const retarget = body.target_node_id !== undefined && body.target_node_id !== row.target_node_id;
   let target = { node_id: row.target_node_id, alias: row.target_alias };
   if (retarget) {

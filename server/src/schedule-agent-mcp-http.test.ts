@@ -108,6 +108,24 @@ describe("happy path from a node", () => {
     expect((await mcp(node.a.token, "schedule_run_now", { schedule_id: s.schedule_id })).error).toBe("schedule_cancelled");
   });
 
+  test("base_revision prevents a stale Agent update; omitting it keeps legacy last-write behavior", async () => {
+    const made = (await create("a")).schedule;
+    const baseRevision = made.revision;
+    const first = await mcp(node.a.token, "schedule_update", {
+      schedule_id: made.schedule_id, base_revision: baseRevision, name: "first writer",
+    });
+    expect(first).toMatchObject({ ok: true, schedule: { name: "first writer", revision: baseRevision + 1 } });
+
+    const stale = await mcp(node.a.token, "schedule_update", {
+      schedule_id: made.schedule_id, base_revision: baseRevision, name: "stale writer",
+    });
+    expect(stale).toEqual({ ok: false, error: "revision_conflict", current_revision: baseRevision + 1 });
+    expect((await mcp(node.a.token, "schedule_get", { schedule_id: made.schedule_id })).schedule.name).toBe("first writer");
+
+    const legacy = await mcp(node.a.token, "schedule_update", { schedule_id: made.schedule_id, name: "legacy writer" });
+    expect(legacy).toMatchObject({ ok: true, schedule: { name: "legacy writer", revision: baseRevision + 2 } });
+  });
+
   test("a schedule for another node the caller can send_task to; the target can read it but not change it", async () => {
     const c = await create("a", { target_node_id: node.b.id });
     expect(c.ok).toBe(true);
