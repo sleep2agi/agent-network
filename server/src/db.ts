@@ -1648,6 +1648,9 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_creator_node ON sc
 // success in between re-arms the alert.
 try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN failure_alert_at TEXT"); } catch {}
 try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN failure_alert_key TEXT"); } catch {}
+// Board #757 — one warning per continuous target-offline episode. The scheduler
+// clears this as soon as the target session is online again; older Hubs ignore it.
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN offline_alert_at TEXT"); } catch {}
 
 // RFC-036 / B4 — owner-authorized edits of node-host managed schedules.
 // This is intentionally separate from Hub scheduled_tasks: these rows are
