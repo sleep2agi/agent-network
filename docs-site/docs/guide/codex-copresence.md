@@ -206,6 +206,7 @@ anet node start <节点> --fork-on-resume-failure --yes    # 没有终端（脚�
 - 没确认（回答不是 y，或非交互又没加 `--yes`）：不 fork，不动任何文件。
 - fork 之前先把原 rollout **复制**一份只读快照到 `<节点目录>/rollout-snapshots/`；原文件从头到尾不改（fork 后会再比对一次哈希，变了就不切换）。
 - 旧线程 → 新线程、快照路径、时间记在 `<节点目录>/codex-fork-recovery.json`（和 config.json 同目录）。fork 成功后才把 config 里记录的线程改成新线程。
+- 已有映射记录读不了、JSON 损坏或缺少 `forks` 数组时，确认后仍会在快照和 fork 之前停止，保留原文件并报出路径。先备份现场、检查文件权限或从有效备份恢复记录后再重试；不要删除记录来绕过检查。首次恢复尚无此文件时照常创建。
 - 🔴 新线程的历史仍然要读**原 rollout 文件**：原文件必须保留，不要移动或删除。
 - 目前只覆盖共存节点的 `anet node start`。
 

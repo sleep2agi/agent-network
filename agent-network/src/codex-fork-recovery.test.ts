@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FORK_RECOVERY_SNAPSHOT_DIR, FORK_RECOVERY_STATE_FILE, resumeOrForkOnMissingOrdinal, sha256OfFile, type ForkRecoveryOptions } from "./codex-fork-recovery";
+import { FORK_RECOVERY_SNAPSHOT_DIR, FORK_RECOVERY_STATE_FILE, recordForkMapping, resumeOrForkOnMissingOrdinal, sha256OfFile, type ForkRecoveryOptions, type ForkMapping } from "./codex-fork-recovery";
 
 const OLD = "01a11846-d796-72f1-af68-8d9215a65dc8";
 const NEW = "01a11900-0000-7000-8000-000000000001";
@@ -39,6 +39,42 @@ function starter(error: Error, onFork: () => void = () => {}) {
   };
   return { calls, start };
 }
+
+describe("fork mapping history", () => {
+  const entry: ForkMapping = { oldThreadId: OLD, newThreadId: NEW, originalRollout: "original", snapshot: "snapshot", sha256: "digest", at: "2026-10-09T00:00:00Z" };
+
+  test("first write and append preserve earlier mappings", () => {
+    const f = fixture();
+    const path = recordForkMapping(f.nodeDir, entry);
+    const next = { ...entry, oldThreadId: NEW, newThreadId: "next-thread" };
+    recordForkMapping(f.nodeDir, next);
+    expect(JSON.parse(readFileSync(path, "utf8")).forks).toEqual([entry, next]);
+  });
+
+  test.each(["{broken", "{}", '{"forks":{}}', "null"])("malformed history is preserved: %s", async (raw) => {
+    const f = fixture();
+    const path = join(f.nodeDir, FORK_RECOVERY_STATE_FILE);
+    writeFileSync(path, raw);
+    expect(() => recordForkMapping(f.nodeDir, entry)).toThrow(/Cannot read fork recovery history/);
+    expect(readFileSync(path, "utf8")).toBe(raw);
+    const s = starter(ordinalError(f.rollout));
+    await expect(resumeOrForkOnMissingOrdinal(s.start, opts(f, { yes: true }))).rejects.toThrow(path);
+    expect(s.calls).toEqual([false]);
+    expect(readFileSync(path, "utf8")).toBe(raw);
+    expect(readdirSync(f.nodeDir)).toEqual([FORK_RECOVERY_STATE_FILE]);
+  });
+
+  test("a history read error stops before snapshot or fork", async () => {
+    const f = fixture();
+    const path = join(f.nodeDir, FORK_RECOVERY_STATE_FILE);
+    mkdirSync(path);
+    const s = starter(ordinalError(f.rollout));
+    await expect(resumeOrForkOnMissingOrdinal(s.start, opts(f, { yes: true }))).rejects.toThrow(/Cannot read fork recovery history/);
+    expect(s.calls).toEqual([false]);
+    expect(statSync(path).isDirectory()).toBe(true);
+    expect(readdirSync(f.nodeDir)).toEqual([FORK_RECOVERY_STATE_FILE]);
+  });
+});
 
 describe("resumeOrForkOnMissingOrdinal", () => {
   test("a successful resume is returned unchanged; no fork", async () => {

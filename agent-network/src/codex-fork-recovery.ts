@@ -88,13 +88,21 @@ export function snapshotRollout(original: string, nodeDir: string, now: Date): {
   return { path, sha256: before };
 }
 
-export function recordForkMapping(nodeDir: string, entry: ForkMapping): string {
+function readForkMappings(nodeDir: string): ForkMapping[] {
   const path = join(nodeDir, FORK_RECOVERY_STATE_FILE);
-  let forks: ForkMapping[] = [];
   try {
     const prev = JSON.parse(readFileSync(path, "utf8"));
-    if (Array.isArray(prev?.forks)) forks = prev.forks;
-  } catch { /* first fork */ }
+    if (!Array.isArray(prev?.forks)) throw new Error("expected a forks array");
+    return prev.forks;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error(`Cannot read fork recovery history ${path}: ${(error as Error).message}. Preserve this file and restore a valid history from backup before retrying; it has not been replaced.`);
+  }
+}
+
+export function recordForkMapping(nodeDir: string, entry: ForkMapping): string {
+  const path = join(nodeDir, FORK_RECOVERY_STATE_FILE);
+  const forks = readForkMappings(nodeDir);
   atomicWritePrivateJson(path, { forks: [...forks, entry] });
   return path;
 }
@@ -138,6 +146,8 @@ export async function resumeOrForkOnMissingOrdinal<T extends { threadId: string 
       log(`Not confirmed: nothing was forked and no file was changed.`);
       throw error;
     }
+    // A damaged audit trail must not trigger a new fork or be treated as empty.
+    readForkMappings(o.nodeDir);
     const now = (o.now ?? (() => new Date()))();
     const snap = snapshotRollout(original, o.nodeDir, now);
     log(`read-only snapshot: ${snap.path}`);

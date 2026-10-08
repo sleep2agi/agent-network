@@ -1,0 +1,29 @@
+Board #814 — preserve unreadable fork recovery history
+2026-10-09 Asia/Shanghai
+Base: 1f638e4b67f063e26b4920b73599913b1c92e9d9
+
+Scope: one production module; no automatic repair, new recovery triggers,
+confirmation changes, runtime binary changes or production operations.
+
+Focused Docker test (Bun 1.3.14, source mounted read-only, no network):
+sg docker -c 'docker run --rm --network none --cpus=2 -v /dev/shm/anet-fork-mapping-preserve/agent-network/src:/workspace/agent-network/src:ro -w /workspace/agent-network anet-paired812:test bun test src/codex-fork-recovery.test.ts'
+rc=0: 15 pass, 0 fail, 60 expect() calls.
+
+Coverage:
+- missing file: first mapping is created; valid history: earlier entries retained;
+- broken JSON, missing/wrong forks array, null: clear error, original bytes kept;
+- history read error (directory at file path): no fork or snapshot;
+- confirmed recovery rejects damaged history before calling start(true);
+- prior successful-resume, confirmation, unrelated-error, snapshot/hash checks pass.
+
+Mutation in disposable Docker container only:
+Change readForkMappings catch from ENOENT-only return [] to unconditional return [].
+Run the same test file: rc=1, 10 pass / 5 fail; damaged-history tests report
+"Received function did not throw" and read-error test sees the old late rename error.
+Harness verified rc=1 and the expected fork-mapping-history failure; harness rc=0.
+Tracked source was not mutated. The same mutation is M5 in the existing test738 run.sh.
+
+The existing test738 Docker CI suite runs these unit cases and the real Codex
+fork E2E (0.133.0 + 0.159.2), followed by mutations M1-M5. That full suite was not
+rerun locally in this iteration; its CI success is required before merging.
+This report does not claim Windows-native or production recovery validation.
