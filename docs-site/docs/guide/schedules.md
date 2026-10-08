@@ -105,11 +105,14 @@ Hub 带上 #523 的版本起（尚未发布到 latest），一个计划**每次�
 | `schedule_create` | 新建。`target_node_id` 不填就是发给自己 |
 | `schedule_list` / `schedule_get` | 列出 / 查看 |
 | `schedule_update` | 改名称、内容、时间、目标；`status` 设为 `paused` / `active` 暂停或恢复 |
+| `schedule_batch_interval` | 批量改自己创建的 interval 计划间隔，不改内容、目标或启停状态 |
 | `schedule_cancel` | 取消 |
 | `schedule_run_now` | 立刻执行一次 |
 | `schedule_runs` | 最近的执行记录 |
 
 `schedule` 的写法和 app 一样，例如 `{"type":"interval","every_seconds":3600}`、`{"type":"daily","time":"09:30"}`（配 `timezone`，默认 UTC）。校验和 `/api/scheduled-tasks` 是同一套。
+
+批量示例（需要部署包含此工具的 Hub 版本；旧 Hub 没有这个工具）：通过 `/mcp` 的 `tools/call` 调用 `schedule_batch_interval`，参数 `{"schedule_ids":["sched_a","sched_b"],"every_seconds":600}`，即把选中的计划改为每 10 分钟执行。每批 1–100 个 ID，重复 ID 只处理一次；间隔为 60–31536000 的整数秒。无效间隔整批不写入；有效请求逐项处理，不是整批事务，某项失败不撤销其他成功项。返回 `updated` / `failed` 和 `results`，每项含 ID、`ok`，成功项含间隔、状态、revision、下次执行时间，失败项含错误原因；顶层 `ok` 仅全部成功时为 true。daily / weekly / once 不转换（`not_interval_schedule`）；暂停计划仍暂停，`next_run_at` 为 null。生效中计划的间隔改变后，从修改时刻重新计算下一次执行；已经排出的任务不撤回。未选中的计划不变。
 
 权限：
 

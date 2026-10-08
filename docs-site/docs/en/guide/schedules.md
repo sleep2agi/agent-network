@@ -105,11 +105,14 @@ A node (Agent) can manage schedules itself through the Hub's MCP tools, without 
 | `schedule_create` | Create one. Leave `target_node_id` out to send to yourself |
 | `schedule_list` / `schedule_get` | List / read |
 | `schedule_update` | Change name, task, timing or target; set `status` to `paused` / `active` to pause or resume |
+| `schedule_batch_interval` | Change intervals of self-created interval schedules; retain content, target and active/paused state |
 | `schedule_cancel` | Cancel |
 | `schedule_run_now` | Run once now |
 | `schedule_runs` | Recent runs |
 
 `schedule` takes the same shape as the app, e.g. `{"type":"interval","every_seconds":3600}` or `{"type":"daily","time":"09:30"}` (with `timezone`, default UTC). Validation is the same code as `/api/scheduled-tasks`.
+
+Batch example (requires a Hub version containing this tool; older Hubs do not expose it): call `schedule_batch_interval` via `/mcp` `tools/call` with `{"schedule_ids":["sched_a","sched_b"],"every_seconds":600}` to change selected schedules to every ten minutes. Supply 1–100 IDs; duplicates are processed once. Intervals are integer seconds from 60 to 31536000. An invalid interval writes nothing. Otherwise each ID is processed independently, not as an all-or-nothing transaction: one failure does not roll back successful items. The response has `updated`, `failed` and `results`; each result has its ID and `ok`, with interval, status, revision and next execution time on success, or an error on failure. Top-level `ok` is true only when all items succeed. Daily, weekly and once schedules are not converted (`not_interval_schedule`). Paused schedules stay paused with null `next_run_at`. Changing an active interval recalculates its next execution from the edit time; already-dispatched tasks are not recalled. Unselected schedules are unchanged.
 
 Permissions:
 

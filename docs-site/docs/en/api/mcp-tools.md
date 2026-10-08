@@ -97,7 +97,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `get_skill` | Read one SKILL.md (pending content is owner/admin only) |
 | `review_skill` | Publish or reject a pending submission (owner/admin) |
 
-**Schedules (an Agent's own, #733)** · 7
+**Schedules (an Agent's own, #733)** · 8
 
 | Tool | What it does |
 |------|------|
@@ -105,6 +105,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `schedule_get` | Read one of them |
 | `schedule_create` | Create one; `target_node_id` defaults to you, another target needs `send_task` access to it right now; at most 20 open per node |
 | `schedule_update` | Change task / timing / target, pause or resume via `status`; edit, cancel and run only your own |
+| `schedule_batch_interval` | Change the interval of multiple self-created interval schedules, with per-ID results |
 | `schedule_cancel` | Cancel |
 | `schedule_run_now` | Run once now |
 | `schedule_runs` | Recent runs |

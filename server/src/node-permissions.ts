@@ -271,6 +271,7 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   // 定时任务(#733):在 schedule-agent.ts 里按排程判(范围 / 目标 = send_task 的 dispatchVerdict / 配额)
   schedule_list: "read", schedule_get: "read", schedule_runs: "read",
   schedule_create: "schedule", schedule_update: "schedule", schedule_cancel: "schedule", schedule_run_now: "schedule",
+  schedule_batch_interval: "schedule",
   // 写节点 / 技能 / 探测:只读、受限不行;正常由 RFC-036 等既有规则管
   update_node_config: "node_write", write_node_rules_file: "node_write", restart_node: "node_write", create_node: "node_write",
   stop_node: "node_write", delete_node: "node_write", start_node: "node_write", submit_skill: "node_write", probe_provider_model: "node_write",

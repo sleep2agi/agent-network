@@ -43,6 +43,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   mark_tasks_consumed: { task_ids: ["task_probe"] },
   upsert_network_secret: { key: "PROBE_KEY" },
   update_provider: { provider_id: "prov_probe" },
+  schedule_batch_interval: { schedule_ids: ["sched_probe"], every_seconds: 60 },
 };
 function fill(schema: any, key: string, ctx: Record<string, unknown>): unknown {
   if (!schema) return "probe";

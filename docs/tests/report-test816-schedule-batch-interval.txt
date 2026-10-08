@@ -1,0 +1,62 @@
+Board #816 / parent #815 / Issue #2533
+2026-10-09 06:39 CST
+Base: 1f638e4b67f063e26b4920b73599913b1c92e9d9
+
+Scope: schedule_batch_interval on the node-authenticated MCP HTTP API.
+One batch changes only interval schedules created by this node. Existing
+network, creator, write-mode and target-access checks remain. Human-created
+schedule delegation, user REST API changes, deployment and live schedule
+changes are NOT part of this delivery.
+
+Commands (Docker only, disposable databases, no production mounts):
+sg docker -c 'docker build -t anet-schedule816:test -f tests/test816-schedule-batch-interval/Dockerfile .'
+sg docker -c 'docker run --rm --network none --cpus=2 anet-schedule816:test'
+
+Final run exit 0:
+- schedule-agent-mcp-http.test.ts: 19 pass, 0 fail, 134 assertions, 4.07s.
+  Includes four new real-HTTP cases: two updates and duplicate handling;
+  paused/unselected fields preserved; mixed success and human/foreign/daily/
+  cancelled failures; invalid input and readonly/user-token rejection;
+  creator with revoked target access refused. Existing single-update flows pass.
+- tool-audience-http.test.ts: 12 pass, 0 fail, 295 assertions, 13.06s.
+  Tool registry/listing/HTTP replay and unchanged size ceilings passed.
+  all=87 tools/77635 bytes; node=61/61986; user=58/56950.
+
+First run: schedule tests 19/19 passed; audience tests failed because the
+generic probe generated an empty ID array, and node listing exceeded its
+62000-byte ceiling by 64 bytes. Added a legal probe override and shortened
+the NEW tool schema/description. Did not loosen the ceiling or permissions.
+
+CI uses the existing complete server-unit collector, which discovers both
+modified *.test.ts files. This standalone Dockerfile reproduces only these
+relevant tests locally; no extra full-suite local run or mutation run.
+CI follow-up: registration gate required the wrapper's coverage declaration.
+Added NOT-IN-CI.md pointing at the existing complete server-unit collector
+and its revisit condition; did not exempt either behavior test from CI or add
+a duplicate CI matrix entry.
+
+CI follow-up 2026-10-09 06:49 CST:
+Run 37855148307 job 113578213111 executed all 213 server test files;
+only node-permissions-http.test.ts failed: schedule_batch_interval was missing
+from NODE_TOOL_CLASS. Added the same "schedule" class as schedule_update.
+Docker rerun against the existing image with only node-permissions.ts mounted
+read-only (network none, 2 CPUs, disposable databases):
+- node-permissions-http.test.ts: 15 pass, 0 fail, 77 assertions, 1.84s.
+- schedule-agent-mcp-http.test.ts: 19 pass, 0 fail, 134 assertions, 4.16s.
+Command: docker run --rm --network none --cpus=2
+  -v /dev/shm/anet-schedule-bulk-interval/server/src/node-permissions.ts:/work/server/src/node-permissions.ts:ro
+  anet-schedule816:test bash -c
+  'COMMHUB_DB=/tmp/test816-permissions.db bun test src/node-permissions-http.test.ts && COMMHUB_DB=/tmp/test816-schedules.db bun test src/schedule-agent-mcp-http.test.ts'
+(Executed through sg docker -c.) The local reproducer now includes this
+existing permission registry test; CI collection remains unchanged.
+
+Recovery impact: no schema migration, new service, port, tunnel, secret or
+environment variable. Existing Hub startup/deployment remains unchanged.
+Release only a reviewed main SHA; verify tool listing plus an isolated node
+call after deployment. Roll back the Hub version to remove the new tool;
+that does NOT undo interval changes already made. Schedule data and old
+intervals are production state, requiring an existing data backup/audit source
+or explicitly recorded values, not reconstructible from this Git change.
+
+Not claimed: CI completion, merge, npm publication, production deployment,
+PostgreSQL run locally, human-created schedule authorization, production edits.

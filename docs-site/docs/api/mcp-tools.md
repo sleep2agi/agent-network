@@ -94,7 +94,7 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `get_skill` | 读一份 SKILL.md（待审内容仅 owner/admin 可见） |
 | `review_skill` | 发布或驳回待审技能（owner/admin） |
 
-**定时任务（Agent 管自己的，#733）** · 7 个
+**定时任务（Agent 管自己的，#733）** · 8 个
 
 | 工具 | 说明 |
 |------|------|
@@ -102,6 +102,7 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `schedule_get` | 查看其中一条 |
 | `schedule_create` | 新建；`target_node_id` 缺省为自己，发给别的节点要求此刻能对它 `send_task`；每节点最多 20 条未结束 |
 | `schedule_update` | 改内容 / 时间 / 目标，`status` 暂停或恢复；改、取消、执行都只限自己建的 |
+| `schedule_batch_interval` | 一次修改自己创建的多条 interval 计划的间隔，逐项返回结果 |
 | `schedule_cancel` | 取消 |
 | `schedule_run_now` | 立刻执行一次 |
 | `schedule_runs` | 最近的执行记录 |
