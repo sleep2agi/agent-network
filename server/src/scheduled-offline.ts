@@ -1,5 +1,6 @@
 import { sendAgentNotice } from "./agent-notice.js";
 import { db, uuidv4 } from "./db.js";
+import { parseDbTimestampMs } from "./db-timestamp.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { pushEvent } from "./push.js";
 
@@ -19,7 +20,7 @@ export function scheduledTargetOffline(nodeId: string, alias: string, networkId:
   );
   if (!session) return true;
   const raw = session.last_seen_at || session.updated_at;
-  const seen = raw ? new Date(String(raw).replace(" ", "T") + "Z").getTime() : 0;
+  const seen = raw ? parseDbTimestampMs(raw) : 0;
   return String(session.status || "").toLowerCase() === "offline" || !Number.isFinite(seen) || nowMs - seen > SESSION_STALE_MS;
 }
 

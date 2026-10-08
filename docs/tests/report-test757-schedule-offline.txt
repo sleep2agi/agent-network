@@ -11,7 +11,9 @@ Scope
   dispatched through the existing path.
 
 SQLite targeted/regression (Docker, --cpus=2)
-- scheduled-offline.test.ts: 3 pass, 0 fail, 19 expect, rc=0
+- scheduled-offline.test.ts: 4 pass, 0 fail, 22 expect, rc=0
+- fresh timestamps in SQLite UTC format, ISO Z format, and ISO Z with
+  milliseconds all keep the idle target online.
 - scheduler regression group: 53 pass, 0 fail, 518 expect, rc=0
 
 Witnessed-red mutation
@@ -19,6 +21,10 @@ Witnessed-red mutation
 - scheduled-offline.test.ts: 0 pass, 3 fail, rc=1; failures were assertion
   mismatches (queued/delivered instead of skipped), not environment errors.
 - Restored the production condition before the green runs below.
+- Replaced parseDbTimestampMs with the previous hand-written append-Z parser.
+- scheduled-offline.test.ts: 3 pass, 1 fail, rc=1; the ISO Z timestamp was
+  misclassified as offline on an assertion mismatch, not an environment error.
+- Restored parseDbTimestampMs before the final green run.
 
 PostgreSQL ladder (Docker, --cpus=2)
 - scheduled-offline.test.ts: 3 pass, 0 fail, rc=0

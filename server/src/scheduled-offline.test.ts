@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { register } from "./auth.js";
 import { db } from "./db.js";
 import { dispatchScheduledOccurrence, getScheduleRow } from "./scheduled-tasks.js";
-import { SCHEDULE_TARGET_OFFLINE_NOTICE_KIND } from "./scheduled-offline.js";
+import { SCHEDULE_TARGET_OFFLINE_NOTICE_KIND, scheduledTargetOffline } from "./scheduled-offline.js";
 
 const activeDbPath = process.env.COMMHUB_DB ?? (process.env.COMMHUB_TEST_PG_URL ? "postgres" : undefined);
 if (!activeDbPath) throw new Error("scheduled-offline requires COMMHUB_DB (or COMMHUB_TEST_PG_URL) before module import");
@@ -113,5 +113,19 @@ describe("#757 scheduled target offline", () => {
     expect(run.status).toBe("skipped");
     expect(taskCount()).toBe(before);
     expect(db.get<{ error_code: string }>("SELECT error_code FROM scheduled_task_runs WHERE run_id = ?1", run.runId)?.error_code).toBe("target_offline");
+  });
+
+  test("recent SQLite and ISO timestamps all keep an idle target online", () => {
+    const now = Date.now();
+    const isoMs = new Date(now - 1_000).toISOString();
+    const values = [
+      isoMs.slice(0, 19).replace("T", " "),
+      `${isoMs.slice(0, 19)}Z`,
+      isoMs,
+    ];
+    for (const value of values) {
+      db.run("UPDATE sessions SET status = 'idle', last_seen_at = ?1 WHERE node_id = ?2 AND network_id = ?3", [value, TARGET_ID, NET]);
+      expect(scheduledTargetOffline(TARGET_ID, TARGET, NET, now)).toBe(false);
+    }
   });
 });
