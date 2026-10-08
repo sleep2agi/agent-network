@@ -28,6 +28,7 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
+import { flagOrphanTasks } from "./task-orphan.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
@@ -973,6 +974,18 @@ export function patrolExpiredTasks(): void {
     if (stale.length > 0) console.log(`[patrol] closed ${stale.length} stale acked/running task(s) (#519)`);
   } catch (e: any) {
     console.error(`[patrol] stale-open phase failed: ${e?.message || e}`);
+  }
+}
+
+// #758 — acked/running tasks whose node went idle/offline after starting them
+// and never replied: one task.orphan_suspected event + one sender notice per
+// task (task-orphan.ts). Status untouched. Same 5-minute timer as the TTL patrol.
+export function patrolOrphanTasks(): void {
+  try {
+    const flagged = flagOrphanTasks();
+    if (flagged.length > 0) console.warn(`[patrol] flagged ${flagged.length} orphan-suspected task(s), notified ${flagged.filter((f) => f.notified).length}`);
+  } catch (e: any) {
+    console.error(`[patrol] orphan phase failed: ${e?.message || e}`);
   }
 }
 
@@ -5086,7 +5099,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   const deliveredStalePatrolMs = Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) > 0
     ? Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) : 5 * 1000;
   const rateLimitSweepTimer = setInterval(sweepStaleRateLimits, rateLimitSweepMs);
-  const taskPatrolTimer = setInterval(patrolExpiredTasks, taskPatrolMs);
+  const taskPatrolTimer = setInterval(() => { patrolExpiredTasks(); patrolOrphanTasks(); }, taskPatrolMs);
   patrolDeliveredStaleTasks();
   const deliveredStalePatrolTimer = setInterval(patrolDeliveredStaleTasks, deliveredStalePatrolMs);
   const scheduledTaskTimer = startScheduledTaskScheduler();

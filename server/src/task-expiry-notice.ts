@@ -201,31 +201,33 @@ function noteEvent(taskId: string, status: string, detail: string): void {
   } catch {}
 }
 
-function deliverToAgent(alias: string, networkId: string | null, inReplyTo: string, text: string, meta: Record<string, unknown>): string {
-  const id = `exp_${uuidv4().replace(/-/g, "").slice(0, 20)}`;
+function deliverToAgent(alias: string, networkId: string | null, inReplyTo: string, text: string, meta: Record<string, unknown>, status = "expired", prefix = "exp_"): string {
+  const id = `${prefix}${uuidv4().replace(/-/g, "").slice(0, 20)}`;
   const nodeId = agentSession(alias, networkId)?.node_id ?? null;
   db.run(
     `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id, meta_json)
      VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, 'hub', ?5, 'none', ?6, ?7)`,
     [id, alias, nodeId, text, inReplyTo, networkId, JSON.stringify(meta)],
   );
-  pushEvent(alias, { type: "new_reply", inbox_count: pendingInboxCount(alias, networkId), from: "hub", message_id: id, in_reply_to: inReplyTo, status: "expired" }, networkId);
+  pushEvent(alias, { type: "new_reply", inbox_count: pendingInboxCount(alias, networkId), from: "hub", message_id: id, in_reply_to: inReplyTo, status }, networkId);
   return id;
 }
 
-function deliver(
+/** 按 route 投递一条通知。#758 孤儿任务通知复用它(kind / status / id 前缀不同)。 */
+export function deliver(
   route: Extract<ExpirySenderRoute, { kind: "agent" | "user" }>,
   networkId: string | null,
   fromAlias: string,
   inReplyTo: string,
   notice: { title: string; text: string },
   meta: Record<string, unknown>,
+  as: { kind: string; status: string; agentPrefix: string; userPrefix: string } = { kind: TASK_EXPIRED_NOTICE_KIND, status: "expired", agentPrefix: "exp_", userPrefix: "dm_expired_" },
 ): string | null {
-  if (route.kind === "agent") return deliverToAgent(route.alias, networkId, inReplyTo, notice.text, meta);
+  if (route.kind === "agent") return deliverToAgent(route.alias, networkId, inReplyTo, notice.text, meta, as.status, as.agentPrefix);
   if (!networkId) return null;
   return sendAgentNotice({
-    networkId, userId: route.userId, fromAlias, kind: TASK_EXPIRED_NOTICE_KIND,
-    title: notice.title, text: notice.text, severity: "warning", meta, idPrefix: "dm_expired_",
+    networkId, userId: route.userId, fromAlias, kind: as.kind,
+    title: notice.title, text: notice.text, severity: "warning", meta, idPrefix: as.userPrefix,
   });
 }
 
