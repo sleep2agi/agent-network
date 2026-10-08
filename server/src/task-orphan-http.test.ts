@@ -25,7 +25,9 @@ process.env.COMMHUB_DB ||= join(DIR, "hub.db");
 process.env.COMMHUB_UPLOADS_DIR = join(DIR, "uploads");
 process.env.HOST = "127.0.0.1";
 const ENV = "COMMHUB_ORPHAN_TASK_MINUTES";
+const LOOKBACK_ENV = "COMMHUB_ORPHAN_TASK_LOOKBACK_HOURS";
 delete process.env[ENV];
+delete process.env[LOOKBACK_ENV];
 const PW = "Orphan123!xyz";
 const stamp = Date.now();
 
@@ -226,6 +228,34 @@ describe("#758 not orphans", () => {
     withMinutes(undefined, () => patrol());
     expect(orphanEvents(t.id).length).toBe(0);
     expect(agentNotices().length).toBe(0);
+  });
+});
+
+describe("#758 lookback cap", () => {
+  test("a 10-day-old orphan is not flagged by default (72h cap) but is with lookback 0", async () => {
+    // 10 天前的那条直接写库(目标上已有开着的任务时 /api/task 回 202 排队,而这里要两条同时开着)。
+    const t = { id: `orphan_old_${stamp}` };
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, from_node_id, to_name, to_node_id, priority, status, content, requires_response, created_at, delivered_at, network_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, 'normal', 'acked', 'ten days old', 'reply', datetime('now', '-240 hours'), datetime('now', '-240 hours'), ?6)`,
+      [t.id, nodes.sender.alias, nodes.sender.nodeId, nodes.target.alias, nodes.target.nodeId, NET],
+    );
+    await targetStatus("idle");
+    withMinutes(undefined, () => patrol());
+    expect(orphanEvents(t.id).length).toBe(0);
+    expect(agentNotices().length).toBe(0);
+    // 71 小时的照常标出:上限只挡更老的。
+    const recent = await dispatch(nodes.sender.token);
+    await ack(recent.id);
+    age(recent.id, 71 * 60);
+    await targetStatus("idle");
+    withMinutes(undefined, () => patrol());
+    expect(orphanEvents(recent.id).length).toBe(1);
+    expect(orphanEvents(t.id).length).toBe(0);
+    process.env[LOOKBACK_ENV] = "0";
+    try { withMinutes(undefined, () => patrol()); } finally { delete process.env[LOOKBACK_ENV]; }
+    expect(orphanEvents(t.id).length).toBe(1);
+    expect(agentNotices().map((n) => n.in_reply_to).sort()).toEqual([recent.id, t.id].sort());
   });
 });
 

@@ -7,6 +7,7 @@
 // 规则(每次 5 分钟任务巡检跑一遍,server.ts runTaskPatrol):
 //   status ∈ {acked, running}
 //   ∧ 开工时刻 = COALESCE(started_at, delivered_at, created_at) 早于 COMMHUB_ORPHAN_TASK_MINUTES(默认 60;0 = 关)
+//   ∧ 开工时刻在最近 COMMHUB_ORPHAN_TASK_LOOKBACK_HOURS 内(默认 72;0 = 不设上限)—— 首次部署不爆发历史通知
 //   ∧ 接收节点(sessions 同网络同别名)当前 status ∈ {idle, offline}
 //   ∧ 节点最后一次报状态 COALESCE(last_seen_at, updated_at) 晚于开工时刻
 // 命中后对每条任务**只做一次**:
@@ -22,6 +23,8 @@ import { classifyExpirySender, deliver, type ExpiredTaskRow } from "./task-expir
 
 export const ORPHAN_TASK_ENV = "COMMHUB_ORPHAN_TASK_MINUTES";
 export const ORPHAN_DEFAULT_MINUTES = 60;
+export const ORPHAN_LOOKBACK_ENV = "COMMHUB_ORPHAN_TASK_LOOKBACK_HOURS";
+export const ORPHAN_DEFAULT_LOOKBACK_HOURS = 72;
 export const ORPHAN_EVENT_TYPE = "task.orphan_suspected";
 export const ORPHAN_NOTICE_KIND = "task_orphan_suspected";
 const BATCH_LIMIT = 200;
@@ -33,6 +36,15 @@ export function orphanTaskMinutes(env: Record<string, string | undefined> = proc
   const n = Number(raw);
   if (!Number.isFinite(n)) return ORPHAN_DEFAULT_MINUTES;
   return n > 0 ? n : null;
+}
+
+/** 只看开工时刻在最近 N 小时内的任务:未设 / 非数字 / 负数 → 默认 72;0 → 不设上限。
+ *  首次部署时不把几周前的历史 acked / running 一次性全标出来、给派活方(包括 owner)刷一屏通知。 */
+export function orphanLookbackHours(env: Record<string, string | undefined> = process.env): number | null {
+  const raw = (env[ORPHAN_LOOKBACK_ENV] ?? "").trim();
+  const n = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(n) || n < 0) return ORPHAN_DEFAULT_LOOKBACK_HOURS;
+  return n === 0 ? null : n;
 }
 
 type OrphanRow = ExpiredTaskRow & { status: string; started: string; node_status: string; node_seen: string };
@@ -52,11 +64,15 @@ export function orphanNoticeText(r: Pick<OrphanRow, "task_id" | "to_name" | "sta
 }
 
 /** 一次巡检的孤儿阶段。返回本次新标记的任务(测试 / 日志用)。调用方负责吞异常。 */
-export function flagOrphanTasks(opts: { minutes?: number | null; nowMs?: number } = {}): OrphanFlagged[] {
+export function flagOrphanTasks(opts: { minutes?: number | null; lookbackHours?: number | null; nowMs?: number } = {}): OrphanFlagged[] {
   const minutes = opts.minutes === undefined ? orphanTaskMinutes() : opts.minutes;
   if (!minutes || minutes <= 0) return [];
   const cutoff = `datetime('now', '-${Math.max(1, Math.round(minutes * 60))} seconds')`;
   const started = "COALESCE(t.started_at, t.delivered_at, t.created_at)";
+  const lookback = opts.lookbackHours === undefined ? orphanLookbackHours() : opts.lookbackHours;
+  const lookbackSql = lookback && lookback > 0
+    ? `AND ${started} >= datetime('now', '-${Math.max(1, Math.round(lookback * 3600))} seconds')`
+    : "";
   const rows = db.all<OrphanRow>(
     `SELECT t.task_id, t.network_id, t.from_name, t.from_node_id, t.to_name, t.content, t.created_at, t.expires_at,
             t.parent_task_id, t.meta_json, t.status, ${started} AS started,
@@ -65,6 +81,7 @@ export function flagOrphanTasks(opts: { minutes?: number | null; nowMs?: number 
        JOIN sessions s ON s.alias = t.to_name AND s.network_id = COALESCE(t.network_id, 'default')
       WHERE t.status IN ('acked', 'running')
         AND ${started} < ${cutoff}
+        ${lookbackSql}
         AND s.status IN ('idle', 'offline')
         AND COALESCE(s.last_seen_at, s.updated_at) > ${started}
         AND NOT EXISTS (SELECT 1 FROM task_events e WHERE e.task_id = t.task_id AND e.event_key = '${ORPHAN_EVENT_TYPE}')
