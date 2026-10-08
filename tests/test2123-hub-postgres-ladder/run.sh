@@ -264,6 +264,9 @@ run_pg_tests_rc anet_expiry_notice_test src/task-expiry-notice-http.test.ts
 # 长时间无动静的已开工任务(#519):acked / running 的「每列都早于截止点 + NOT EXISTS 更晚的 task_events」判据(TEXT 时间戳 + datetime 偏移翻译)、
 # ORDER BY … LIMIT 500 + 每行带同样条件的守卫 UPDATE、COALESCE(result, ?) 写原因、task.stale_expired 事件;以及过期通知「前面还有几个」的 24 小时下界 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_stale_open_test src/task-stale-open-http.test.ts
+# 孤儿任务(#758):acked / running 的任务 JOIN sessions(COALESCE(network_id, 'default'))、idle / offline 且 COALESCE(last_seen_at, updated_at) 晚于开工时刻(TEXT 时间戳比较)、
+# datetime 偏移截止点、ON CONFLICT(task_id, event_key) DO NOTHING 的 changes 只通知一次、inbox reply / user_inbox 通知、scheduler 不通知 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_orphan_test src/task-orphan-http.test.ts
 # 派活时的队列信息(#500 第二步):开着任务 COUNT + SUM(CASE) 按分支绑参、24 小时窗口(datetime 偏移翻译)、耗时样本 ORDER BY … LIMIT、
 # /api/status 全量 queue_depth 的 GROUP BY network_id, to_name、写 tasks 让全量缓存失效 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_queue_ahead_test src/task-queue-ahead-http.test.ts

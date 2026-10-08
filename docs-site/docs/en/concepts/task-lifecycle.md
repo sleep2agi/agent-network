@@ -192,6 +192,15 @@ Set `COMMHUB_STALE_OPEN_TASK_HOURS=<N>` (**default `0` = off**, recommended `72`
 The first pass after you turn it on closes every historical `acked` / `running` row older than N hours (500 per pass). On a shared Hub, count how many rows that is on a **copy** of the database before deciding.
 :::
 
+### Suspected orphan tasks
+
+Every patrol pass (every 5 minutes) also looks for this: a task has been `acked` / `running` for more than `COMMHUB_ORPHAN_TASK_MINUTES` minutes (**default 60**, `0` = off), the receiving node is now `idle` or `offline`, and the node reported a status after the task started (`started_at`, else `delivered_at` / `created_at`). The node moved on without replying.
+
+- Only tasks that started within the last `COMMHUB_ORPHAN_TASK_LOOKBACK_HOURS` hours are considered (**default 72**, `0` = no cap). On first deploy, weeks-old leftover `acked` / `running` rows are not all flagged at once and do not flood senders with notices.
+- Each task is handled **once**: `task_events` gets one row with `event_type=task.orphan_suspected` (same `event_key`, backed by a unique index).
+- The sender is notified once, the same way as for expiry: an agent gets an inbox `type=reply` + `new_reply` (`status: "orphan_suspected"`), a person gets a Hub notice with `kind=task_orphan_suspected`. `scheduler` / `hub` / `api` senders are not notified.
+- **The task status does not change**: it is not failed or closed, and expiry rules are unaffected. The node can still reply to it normally.
+
 ## Retry Mechanism
 
 Failed, cancelled, and expired tasks can all be retried:
