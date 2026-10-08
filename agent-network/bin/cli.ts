@@ -300,6 +300,7 @@ import {
 } from "../src/codex-copresence-recovery";
 import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceBridgeAttachTimeoutMs, resolveCopresenceMaxPayloadBytes, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
 import { waitForCodexRecoveryResources } from "../src/codex-recovery-resource-gate";
+import { createRecoveryLeaseHolder, launchCopresencePiecesReleasingRecovery } from "../src/codex-recovery-lease";
 import { codexCopresenceEnvFileText, codexCopresenceStageEnv } from "../src/codex-copresence-env";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
@@ -1947,13 +1948,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   let freshDeferred = false;
   let recoveryTimeoutMs = 300_000;
   let recoveryRolloutBytes: number | null = null;
-  let recoveryAdmission: { release: () => void } | undefined;
+  // #762 — released as soon as the bridge and TUI are ready, on every failure
+  // (process.exit included), and never left renewing behind a foreground launcher.
+  const recoveryAdmission = createRecoveryLeaseHolder({ log: (m) => console.log(`[anet] ${m}`) });
   try {
     const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
     recoveryTimeoutMs = resumeBudget.timeoutMs;
     recoveryRolloutBytes = resumeBudget.rolloutBytes;
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
-    recoveryAdmission = await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes);
+    recoveryAdmission.hold(await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes));
     const thread = await resumeOrForkOnMissingOrdinal(
       (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst }),
       forkRecoveryOptions(resolved.id, displayName, opts, requestedThreadId),
@@ -1963,7 +1966,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     freshDeferred = thread.freshDeferred;
     profile.codexRecoveryVerification = thread.verification;
   } catch (e: any) {
-    recoveryAdmission?.release();
+    recoveryAdmission.release();
     console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
     console.error(`[anet]    Fail-closed: no bridge/TUI was started and thread/start was not used as a fallback.`);
     for (const line of describeMissingOrdinalFailure(String(e?.message || e), { threadId: requestedThreadId })) console.error(`[anet] ${line}`);
@@ -2166,83 +2169,84 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       process.exit(1);
     }
   };
-  if (tuiFirst) {
-    launchTui();
-    await requireTuiPainted();
-    console.log(`[anet] ③→② TUI restored on the exact session; attaching the bridge now (--tui-first)`);
-    await launchBridge();
-  } else {
-    await launchBridge();
-    launchTui();
-  }
+  const afterLaunch = () => {
+    // #P3fix复审 finding #5 — best-effort marker-file update with bridge/tui
+    // observability hints now that both sessions are up. Marker file was
+    // already written after appsrv (see above) with just appsrv's hint —
+    // reap identity is unchanged (still environ scan for uuid). This write
+    // is purely for post-mortem debugging so operators can `cat` the marker
+    // file and see all three pane pids. Best-effort: if the rewrite fails,
+    // the appsrv-only marker still works for reap.
+    try {
+      writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
+        appsrv: harvestSession(appsrvSession),
+        bridge: harvestSession(bridgeSession),
+        tui:    harvestSession(tuiSession),
+      });
+    } catch { /* best-effort observability update; appsrv-only marker still governs reap */ }
 
-  // #P3fix复审 finding #5 — best-effort marker-file update with bridge/tui
-  // observability hints now that both sessions are up. Marker file was
-  // already written after appsrv (see above) with just appsrv's hint —
-  // reap identity is unchanged (still environ scan for uuid). This write
-  // is purely for post-mortem debugging so operators can `cat` the marker
-  // file and see all three pane pids. Best-effort: if the rewrite fails,
-  // the appsrv-only marker still works for reap.
-  try {
-    writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
-      appsrv: harvestSession(appsrvSession),
-      bridge: harvestSession(bridgeSession),
-      tui:    harvestSession(tuiSession),
+    // 就绪 covers three tmux sessions, so it has to be true of all three at the
+    // moment it is printed — ① proved itself by its listening line, but that was
+    // several seconds and two spawns ago.
+    const dead = [appsrvSession, bridgeSession, tuiSession].filter(s => !tmuxSessionRunning(s));
+    if (dead.length > 0) {
+      console.error(`[anet] ❌ 共存节点 ${displayName} 没起来 — 这些 tmux 会话已经不在了: ${dead.join(", ")}`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+  };
+
+  // Paint can precede the TUI WebSocket. Keep cap 1 until the existing exact
+  // process/port attribution succeeds; an error still releases via the exit hook.
+  const requireTuiConnected = async () => {
+    assertCopresenceSessionsCodexHome([appsrvSession, bridgeSession, tuiSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
+
+    // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
+    //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
+    //   !probePosixOwned…       → pid 拿到了,但没有一条回环连接能归属到它
+    // 前者要去看 tmux 会话,后者才该去看 CODEX_HOME / 端口。指错方向的代价是整整一轮排查。
+    const tuiIdentity = harvestSession(tuiSession);
+    if (!tuiIdentity) {
+      console.error(`[anet] ❌ TUI second-client health failed: 拿不到 TUI 会话 ${tuiSession} 的进程身份(pid)。`);
+      console.error(`[anet]    这不是"连不上",是**根本没找到那个 TUI** —— 先看 tmux 会话在不在、名字对不对,`);
+      console.error(`[anet]    不要去查 CODEX_HOME / 端口。`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+    // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
+    // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
+    const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
+    const attribution = await waitForPosixOwnedLoopbackConnection({
+      rootPid: tuiIdentity.pid, port, deadlineMs: posixTuiAttributionMs,
+      probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
+      alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
     });
-  } catch { /* best-effort observability update; appsrv-only marker still governs reap */ }
-
-  // 就绪 covers three tmux sessions, so it has to be true of all three at the
-  // moment it is printed — ① proved itself by its listening line, but that was
-  // several seconds and two spawns ago.
-  const dead = [appsrvSession, bridgeSession, tuiSession].filter(s => !tmuxSessionRunning(s));
-  if (dead.length > 0) {
-    console.error(`[anet] ❌ 共存节点 ${displayName} 没起来 — 这些 tmux 会话已经不在了: ${dead.join(", ")}`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
-
-  // 就绪 has to mean "can take a task", not "three sessions exist". Both times
-  // a node was unusable on 2026-08-20 the ✅ had already been printed over a
-  // TUI parked on an interactive prompt.
-  if (!tuiFirst) await requireTuiPainted();
-  assertCopresenceSessionsCodexHome([appsrvSession, bridgeSession, tuiSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
-
-  // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
-  //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
-  //   !probePosixOwned…       → pid 拿到了,但没有一条回环连接能归属到它
-  // 前者要去看 tmux 会话,后者才该去看 CODEX_HOME / 端口。指错方向的代价是整整一轮排查。
-  const tuiIdentity = harvestSession(tuiSession);
-  if (!tuiIdentity) {
-    console.error(`[anet] ❌ TUI second-client health failed: 拿不到 TUI 会话 ${tuiSession} 的进程身份(pid)。`);
-    console.error(`[anet]    这不是"连不上",是**根本没找到那个 TUI** —— 先看 tmux 会话在不在、名字对不对,`);
-    console.error(`[anet]    不要去查 CODEX_HOME / 端口。`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
-  // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
-  // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
-  const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
-  const attribution = await waitForPosixOwnedLoopbackConnection({
-    rootPid: tuiIdentity.pid, port, deadlineMs: posixTuiAttributionMs,
-    probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
-    alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
+    if (attribution.outcome !== "connected") {
+      console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
+      console.error(`[anet]    找的是: pid=${tuiIdentity.pid} port=${port} session=${tuiSession}`);
+      console.error(attribution.outcome === "tui-exited"
+        ? `[anet]    TUI 在等连接期间退出了(探了 ${attribution.probes} 次,${attribution.waitedMs} ms)—— 先看 TUI 会话里它为什么退。`
+        : `[anet]    等了 ${attribution.waitedMs} ms、探了 ${attribution.probes} 次,TUI 一直没有连到这个端口。`);
+      console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+  };
+  await launchCopresencePiecesReleasingRecovery({
+    tuiFirst,
+    launchBridge,
+    launchTui,
+    requireTuiPainted,
+    requireTuiConnected,
+    afterLaunch,
+    announceTuiFirst: () => console.log(`[anet] ③→② TUI restored on the exact session; attaching the bridge now (--tui-first)`),
+    lease: recoveryAdmission,
   });
-  if (attribution.outcome !== "connected") {
-    console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
-    console.error(`[anet]    找的是: pid=${tuiIdentity.pid} port=${port} session=${tuiSession}`);
-    console.error(attribution.outcome === "tui-exited"
-      ? `[anet]    TUI 在等连接期间退出了(探了 ${attribution.probes} 次,${attribution.waitedMs} ms)—— 先看 TUI 会话里它为什么退。`
-      : `[anet]    等了 ${attribution.waitedMs} ms、探了 ${attribution.probes} 次,TUI 一直没有连到这个端口。`);
-    console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
   console.log(freshDeferred
     ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
     : `[anet] client-health role=bridge remote=exact thread=exact`);
   console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
-  recoveryAdmission?.release();
-  recoveryAdmission = undefined;
+  recoveryAdmission.release(); // idempotent: already released once the bridge and TUI were ready
 
   clearOldStoppedReceipt(); // Successful manual start, not a failed/partial attempt.
   const hubBase = opts.hub.replace(/\/+$/, "");

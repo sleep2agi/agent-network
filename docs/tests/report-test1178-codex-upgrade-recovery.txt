@@ -1,5 +1,8 @@
 Test 1178 — Codex upgrade recovery and topology audit
 
+Historical baseline output follows. The board #762 review follow-up at the end
+records the current run; prior measurements are not claims of new execution.
+
 Layer 1: pure recovery + existing thread lifecycle
 bun test v1.3.14 (0d9b296a)
 
@@ -287,3 +290,45 @@ Identity boundary: config-recovery.json is redacted non-credential metadata only
 Release gate (report-only; this Draft does not publish or bump versions)
 This change does not bump or publish any package. A release must be built later from an exact main SHA after merge.
 RESULT: PASS
+
+Board #762 review follow-up — 2026-10-08
+Base: origin/main a625706e1365a65255ab36739ed8f8147fc7f495, merged normally.
+Scope: POSIX recovery lease lifetime only; no package version, Hub, or production changes.
+Ready means bridge READY plus exact TUI process-tree/port attribution, not paint.
+The prior CLI attribution predicates, diagnostics and process.exit paths remain intact.
+
+Docker: tests/test1178-codex-upgrade-recovery/Dockerfile (Node 22, Codex 0.133.0,
+Bun 1.3.14); run --cpus=2 --network none. No host tmux or real node touched.
+Initial run stopped at layer 1: the new delayed waiter correctly returned
+outcome=waited, while the test incorrectly expected ok. Corrected that expectation;
+all assertions forbidding admission before attribution were already passing.
+Reused the same image with only that test file mounted read-only; no product change
+between the initial and successful run. Full existing test1178 then completed rc=0.
+
+Layer 1: launcher 75 pass / 0 fail / 215 expects; bridge 93 pass / 0 fail / 346 expects.
+Layer 2: production wiring invariants PASS.
+Layer 3: typecheck and production bundle PASS.
+Layer 3b: real Node + Codex 0.133 exact 256.0 MiB rollout resume PASS in 41812 ms.
+Mutation: real Node + Codex 0.133 with 100 MiB receive ceiling WITNESSED_RED.
+Layer 4: 25 unit/wiring mutations WITNESSED_RED (26 total including the Node case).
+
+Lease tests cover both launch orders, live foreground launcher after readiness,
+heartbeat/slot cleanup, failure and exit hooks, idempotence, delayed attribution,
+and failed attribution. The delayed-attribution fixture uses the real gate and
+slot files with injected healthy resource readings, not real TUI processes.
+It finishes paint while keeping connection unresolved, observes a waiting second
+recovery, then resolves attribution and observes outcome=waited with the lane freed.
+WITNESSED_RED: removing successful release fails the foreground cleanup case.
+WITNESSED_RED: removing await p.requireTuiConnected() fails the delayed-attribution case.
+Existing lease heartbeat and launcher wiring mutations remain red.
+
+Static Docker checks, each rc=0:
+- doc symbol pins: docs and docs-site; zero drift, skips explicitly reported.
+- doc source pins: zero broken pins, baseline unchanged.
+- mutation pins: 691 checked; unchecked 4 <= existing baseline 4.
+git diff --check: rc=0.
+
+No new test745 full-unit or test535 private-tmux E2E rerun is claimed in this follow-up.
+Earlier footer references to test535 and historical peak memory remain prior evidence.
+No production measurement or deployment is implied by this isolated verification.
+Current follow-up RESULT: PASS (source verification only; CI/release gates still apply).

@@ -84,10 +84,10 @@ function mutateBridgeCloseToNewThread() {
 
 function mutateRecoveryGateWiring() {
   const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
-  const before = "recoveryAdmission = await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes);";
+  const before = "recoveryAdmission.hold(await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes));";
   if (!original.includes(before)) throw new Error("recovery gate wiring mutation anchor missing");
   writeFileSync("/repo/agent-network/bin/cli.ts", original.replace(before, "// mutation: POSIX legacy recovery bypasses the host quota"));
-  try { assertRed("src/codex-recovery-resource-gate.test.ts", "both native launchers hold the recovery lease through TUI attribution"); }
+  try { assertRed("src/codex-recovery-resource-gate.test.ts", "both native launchers hold the recovery lease until the bridge and TUI are ready"); }
   finally { writeFileSync("/repo/agent-network/bin/cli.ts", original); }
 }
 
@@ -102,6 +102,28 @@ function mutateRecoveryLeaseHeartbeat() {
   for (let i = 0; i < paths.length; i++) writeFileSync(paths[i], originals[i].replace(before, "    if (false) heartbeatTimer = setInterval(() => {"));
   try { assertRed("src/codex-recovery-resource-gate.test.ts", "a live holder renews past TTL; SIGKILL permits takeover within one TTL"); }
   finally { for (let i = 0; i < paths.length; i++) writeFileSync(paths[i], originals[i]); }
+}
+
+function mutateRecoveryLeaseReleaseAfterReady() {
+  // Board #762 — dropping the release after "bridge and TUI ready" must go red:
+  // a foreground launcher would otherwise keep the cap-1 recovery lane forever.
+  const path = "/repo/agent-network/src/codex-recovery-lease.ts";
+  const original = readFileSync(path, "utf8");
+  const before = '  p.lease.release("bridge and TUI ready");';
+  if (!original.includes(before)) throw new Error("recovery lease release-after-ready mutation anchor missing");
+  writeFileSync(path, original.replace(before, "  // mutation: lease kept after ready"));
+  try { assertRed("src/codex-recovery-lease.test.ts", "a foreground launcher that keeps running frees the lane right after ready"); }
+  finally { writeFileSync(path, original); }
+}
+
+function mutateRecoveryLeaseEarlyRelease() {
+  const path = "/repo/agent-network/src/codex-recovery-lease.ts";
+  const original = readFileSync(path, "utf8");
+  const before = "    await p.requireTuiConnected();";
+  if (!original.includes(before)) throw new Error("connection-before-release mutation anchor missing");
+  writeFileSync(path, original.replace(before, "    // mutation: paint is incorrectly treated as connected"));
+  try { assertRed("src/codex-recovery-lease.test.ts", "paint without an attributed connection cannot admit the next recovery"); }
+  finally { writeFileSync(path, original); }
 }
 
 function mutateBridgeAttachBudget() {
@@ -231,6 +253,8 @@ mutateBridgePayloadUpperBound();
 mutateBridgeCloseToNewThread();
 mutateRecoveryGateWiring();
 mutateRecoveryLeaseHeartbeat();
+mutateRecoveryLeaseReleaseAfterReady();
+mutateRecoveryLeaseEarlyRelease();
 mutateBridgeAttachBudget();
 mutateTuiRecoveryBudget();
 mutateExperimentalFallback();
