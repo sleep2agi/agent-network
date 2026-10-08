@@ -67,6 +67,9 @@ export interface CopresencePieces {
   launchTui: () => void;
   /** Resolves once the TUI has painted a usable screen. */
   requireTuiPainted: () => Promise<void>;
+  /** The TUI's own process tree must connect to the exact app-server; paint alone
+   * can precede WebSocket hydration and does not release the recovery lane. */
+  requireTuiConnected: () => Promise<void>;
   /** Runs once both sessions were launched (marker refresh, liveness check). */
   afterLaunch?: () => void;
   /** Printed between the TUI paint and the bridge attach on the --tui-first path. */
@@ -91,6 +94,7 @@ export async function launchCopresencePiecesReleasingRecovery(p: CopresencePiece
       p.afterLaunch?.();
       await p.requireTuiPainted();
     }
+    await p.requireTuiConnected();
   } catch (e) {
     p.lease.release("bridge/TUI start failed");
     throw e;

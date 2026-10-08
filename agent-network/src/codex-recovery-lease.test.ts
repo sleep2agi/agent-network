@@ -77,9 +77,10 @@ describe("codex recovery lease is released once the bridge and TUI are ready (#7
         launchTui: () => { order.push("tui"); },
         afterLaunch: () => { order.push("after"); },
         requireTuiPainted: async () => { order.push("painted"); expect(holder.held).toBe(true); },
+        requireTuiConnected: async () => { order.push("connected"); expect(holder.held).toBe(true); },
         lease: holder,
       });
-      expect(order).toEqual(["bridge", "tui", "after", "painted"]);
+      expect(order).toEqual(["bridge", "tui", "after", "painted", "connected"]);
 
       // The launcher stays in the foreground (as the bridge host would), for
       // several heartbeat periods. Nothing may renew or recreate the lease.
@@ -112,9 +113,10 @@ describe("codex recovery lease is released once the bridge and TUI are ready (#7
       announceTuiFirst: () => { order.push("announce"); },
       launchBridge: async () => { order.push("bridge"); expect(holder.held).toBe(true); },
       afterLaunch: () => { order.push("after"); },
+      requireTuiConnected: async () => { order.push("connected"); expect(holder.held).toBe(true); },
       lease: holder,
     });
-    expect(order).toEqual(["tui", "painted", "announce", "bridge", "after"]);
+    expect(order).toEqual(["tui", "painted", "announce", "bridge", "after", "connected"]);
     expect(leaseFiles(dir)).toEqual([]);
   });
 
@@ -129,6 +131,7 @@ describe("codex recovery lease is released once the bridge and TUI are ready (#7
         launchBridge: async () => { throw new Error("bridge never reported READY"); },
         launchTui: () => { throw new Error("must not launch the TUI"); },
         requireTuiPainted: async () => {},
+        requireTuiConnected: async () => {},
         lease: holder,
       })).rejects.toThrow("bridge never reported READY");
       expect(leaseFiles(dir)).toEqual([]);
@@ -148,6 +151,61 @@ describe("codex recovery lease is released once the bridge and TUI are ready (#7
     holder.hold(await acquire(dir, "node_exit"));
     expect(exitHooks).toHaveLength(1);
     exitHooks[0]();
+    expect(holder.held).toBe(false);
+    expect(leaseFiles(dir)).toEqual([]);
+  });
+
+  test.skipIf(process.platform !== "linux")("paint without an attributed connection cannot admit the next recovery", async () => {
+    const dir = slotsDir();
+    const holder = createRecoveryLeaseHolder({ onProcessExit: () => () => {} });
+    holder.hold(await acquire(dir, "node_connecting"));
+    let connect!: () => void;
+    const connection = new Promise<void>((resolve) => { connect = resolve; });
+    let painted = false;
+    const launch = launchCopresencePiecesReleasingRecovery({
+      tuiFirst: false,
+      launchBridge: async () => {},
+      launchTui: () => {},
+      requireTuiPainted: async () => { painted = true; },
+      requireTuiConnected: () => connection,
+      lease: holder,
+    });
+    let waits = 0;
+    let admitted = false;
+    const next = acquire(dir, "node_waiting", async (ms) => { waits++; await sleep(ms); })
+      .then((lease) => { admitted = true; return lease; });
+    try {
+      await sleep(HEARTBEAT_MS * 3);
+      expect(painted).toBe(true);
+      expect(holder.held).toBe(true);
+      expect(leaseFiles(dir)).toHaveLength(1);
+      expect(waits).toBeGreaterThan(0);
+      expect(admitted).toBe(false);
+      connect();
+      await launch;
+      const second = await next;
+      expect(holder.held).toBe(false);
+      expect(second.outcome).toBe("waited");
+    } finally {
+      connect();
+      await launch;
+      holder.release();
+      (await next).release();
+    }
+  });
+
+  test.skipIf(process.platform !== "linux")("failed connection attribution releases without reporting success", async () => {
+    const dir = slotsDir();
+    const holder = createRecoveryLeaseHolder({ onProcessExit: () => () => {} });
+    holder.hold(await acquire(dir, "node_no_connection"));
+    await expect(launchCopresencePiecesReleasingRecovery({
+      tuiFirst: false,
+      launchBridge: async () => {},
+      launchTui: () => {},
+      requireTuiPainted: async () => {},
+      requireTuiConnected: async () => { throw new Error("TUI connection attribution failed"); },
+      lease: holder,
+    })).rejects.toThrow("TUI connection attribution failed");
     expect(holder.held).toBe(false);
     expect(leaseFiles(dir)).toEqual([]);
   });

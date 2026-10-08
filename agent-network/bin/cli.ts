@@ -2196,52 +2196,52 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     }
   };
 
-  // 就绪 has to mean "can take a task", not "three sessions exist". Both times
-  // a node was unusable on 2026-08-20 the ✅ had already been printed over a
-  // TUI parked on an interactive prompt — so both orders wait for the TUI paint.
-  // #762 — the recovery lane is released right here, once the bridge is READY and
-  // the TUI has painted, whatever this launcher does afterwards.
+  // Paint can precede the TUI WebSocket. Keep cap 1 until the existing exact
+  // process/port attribution succeeds; an error still releases via the exit hook.
+  const requireTuiConnected = async () => {
+    assertCopresenceSessionsCodexHome([appsrvSession, bridgeSession, tuiSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
+
+    // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
+    //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
+    //   !probePosixOwned…       → pid 拿到了,但没有一条回环连接能归属到它
+    // 前者要去看 tmux 会话,后者才该去看 CODEX_HOME / 端口。指错方向的代价是整整一轮排查。
+    const tuiIdentity = harvestSession(tuiSession);
+    if (!tuiIdentity) {
+      console.error(`[anet] ❌ TUI second-client health failed: 拿不到 TUI 会话 ${tuiSession} 的进程身份(pid)。`);
+      console.error(`[anet]    这不是"连不上",是**根本没找到那个 TUI** —— 先看 tmux 会话在不在、名字对不对,`);
+      console.error(`[anet]    不要去查 CODEX_HOME / 端口。`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+    // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
+    // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
+    const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
+    const attribution = await waitForPosixOwnedLoopbackConnection({
+      rootPid: tuiIdentity.pid, port, deadlineMs: posixTuiAttributionMs,
+      probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
+      alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
+    });
+    if (attribution.outcome !== "connected") {
+      console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
+      console.error(`[anet]    找的是: pid=${tuiIdentity.pid} port=${port} session=${tuiSession}`);
+      console.error(attribution.outcome === "tui-exited"
+        ? `[anet]    TUI 在等连接期间退出了(探了 ${attribution.probes} 次,${attribution.waitedMs} ms)—— 先看 TUI 会话里它为什么退。`
+        : `[anet]    等了 ${attribution.waitedMs} ms、探了 ${attribution.probes} 次,TUI 一直没有连到这个端口。`);
+      console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+  };
   await launchCopresencePiecesReleasingRecovery({
     tuiFirst,
     launchBridge,
     launchTui,
     requireTuiPainted,
+    requireTuiConnected,
     afterLaunch,
     announceTuiFirst: () => console.log(`[anet] ③→② TUI restored on the exact session; attaching the bridge now (--tui-first)`),
     lease: recoveryAdmission,
   });
-  assertCopresenceSessionsCodexHome([appsrvSession, bridgeSession, tuiSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
-
-  // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
-  //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
-  //   !probePosixOwned…       → pid 拿到了,但没有一条回环连接能归属到它
-  // 前者要去看 tmux 会话,后者才该去看 CODEX_HOME / 端口。指错方向的代价是整整一轮排查。
-  const tuiIdentity = harvestSession(tuiSession);
-  if (!tuiIdentity) {
-    console.error(`[anet] ❌ TUI second-client health failed: 拿不到 TUI 会话 ${tuiSession} 的进程身份(pid)。`);
-    console.error(`[anet]    这不是"连不上",是**根本没找到那个 TUI** —— 先看 tmux 会话在不在、名字对不对,`);
-    console.error(`[anet]    不要去查 CODEX_HOME / 端口。`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
-  // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
-  // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
-  const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
-  const attribution = await waitForPosixOwnedLoopbackConnection({
-    rootPid: tuiIdentity.pid, port, deadlineMs: posixTuiAttributionMs,
-    probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
-    alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
-  });
-  if (attribution.outcome !== "connected") {
-    console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
-    console.error(`[anet]    找的是: pid=${tuiIdentity.pid} port=${port} session=${tuiSession}`);
-    console.error(attribution.outcome === "tui-exited"
-      ? `[anet]    TUI 在等连接期间退出了(探了 ${attribution.probes} 次,${attribution.waitedMs} ms)—— 先看 TUI 会话里它为什么退。`
-      : `[anet]    等了 ${attribution.waitedMs} ms、探了 ${attribution.probes} 次,TUI 一直没有连到这个端口。`);
-    console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
   console.log(freshDeferred
     ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
     : `[anet] client-health role=bridge remote=exact thread=exact`);

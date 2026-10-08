@@ -126,9 +126,17 @@ describe("Codex legacy recovery resource gate", () => {
     const posixReady = cli.indexOf("await launchCopresencePiecesReleasingRecovery({", posixAcquire);
     const posixLease = cli.indexOf("lease: recoveryAdmission,", posixReady);
     const posixHealth = cli.indexOf("client-health role=tui", posixReady);
+    const connectionCheck = cli.indexOf("const requireTuiConnected = async () => {", posixAcquire);
+    const attribution = cli.indexOf("await waitForPosixOwnedLoopbackConnection({", connectionCheck);
+    const connectionArgument = cli.indexOf("    requireTuiConnected,", posixReady);
     expect(posixAcquire).toBeGreaterThan(0);
     expect(posixReady).toBeGreaterThan(posixAcquire);
     expect(posixLease).toBeGreaterThan(posixReady);
     expect(posixHealth).toBeGreaterThan(posixLease);
+    expect(connectionCheck).toBeGreaterThan(posixAcquire);
+    expect(attribution).toBeGreaterThan(connectionCheck);
+    expect(posixReady).toBeGreaterThan(attribution);
+    expect(connectionArgument).toBeGreaterThan(posixReady);
+    expect(posixLease).toBeGreaterThan(connectionArgument);
   });
 });

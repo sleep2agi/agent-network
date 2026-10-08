@@ -116,6 +116,16 @@ function mutateRecoveryLeaseReleaseAfterReady() {
   finally { writeFileSync(path, original); }
 }
 
+function mutateRecoveryLeaseEarlyRelease() {
+  const path = "/repo/agent-network/src/codex-recovery-lease.ts";
+  const original = readFileSync(path, "utf8");
+  const before = "    await p.requireTuiConnected();";
+  if (!original.includes(before)) throw new Error("connection-before-release mutation anchor missing");
+  writeFileSync(path, original.replace(before, "    // mutation: paint is incorrectly treated as connected"));
+  try { assertRed("src/codex-recovery-lease.test.ts", "paint without an attributed connection cannot admit the next recovery"); }
+  finally { writeFileSync(path, original); }
+}
+
 function mutateBridgeAttachBudget() {
   const original = readFileSync("/repo/agent-network/bin/cli.ts", "utf8");
   const before = "resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs)";
@@ -244,6 +254,7 @@ mutateBridgeCloseToNewThread();
 mutateRecoveryGateWiring();
 mutateRecoveryLeaseHeartbeat();
 mutateRecoveryLeaseReleaseAfterReady();
+mutateRecoveryLeaseEarlyRelease();
 mutateBridgeAttachBudget();
 mutateTuiRecoveryBudget();
 mutateExperimentalFallback();
