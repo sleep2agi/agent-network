@@ -1,0 +1,50 @@
+Hub #818 — .118 release preparation (2026-10-09 CST)
+
+Candidate source: e812740fe09715ad3df917674e97843698808081 (main).
+Previous .117 release commit: 67c92ddbb801eb488f22bd4f432f07b0725ec896.
+git log <previous>..<candidate> -- server lists only:
+  e9d148b11025cfb01d634cecc4aaa6298dad71c7 (#2534, batch interval MCP).
+Baseline: actual npm @sleep2agi/commhub-server@0.9.0-preview.117.
+Baseline shasum: 5fb35e3a3068f6982b2423ef405b8b71b01d232c.
+Client adapter: published desktop-v0.2.224 (not a draft release).
+
+Setup: reused tests/hub-release-compat/Dockerfile and scripts, unchanged.
+Copied server/{package.json,src,bin} from the clean candidate main SHA into a
+temporary Docker build context BEFORE the version-only bump. Copied the
+existing compat suite; shallow-cloned desktop-v0.2.224 into compat/apps/.
+Built with BASE_VERSION=0.9.0-preview.117, image anet-hub118-compat:test.
+Image ID: sha256:9dc9c3a940e8bcb7801fe34d1a9db08230f4f50fd3b86062898d9ed64807ef81.
+No test fixture changes or assertion relaxations were needed.
+
+Docker runs used sg docker, --rm --cpus=2 --network=none, no published ports:
+  APP_TAGS=desktop-v0.2.224 SCHED_BASELINE=counted EXPECT_BACKFILL=0
+  NEW_MEMBER_TASK_ACCESS=scoped OLD_LABEL=.117 NEW_LABEL=.118
+  A1/A2: image default command (bash /compat/run-compat.sh)
+  B: CHECK_BYTES=1, --entrypoint bash, /compat/run-upgrade.sh
+
+A1: rc=0, steps=62 unexpected=0 check_failures=0.
+A2: rc=0, steps=62 unexpected=0 check_failures=0.
+  MCP tools: 86 -> 87, only addition schedule_batch_interval.
+  Existing schemas retained; comparator negative controls passed.
+  Scheduled replies still counted unread for their creator on both versions.
+  Existing App adapter ignores member_presence events. Candidate 5xx: none.
+  Both runtime version labels print .117 because this checks the exact merged
+  feature code before a metadata-only bump; candidate identity is the SHA above,
+  not that old package version string. This is not npm .118 artifact verification.
+
+B: rc=0, upgrade_check_failures=0.
+  .117 -> candidate -> .117 rollback -> candidate re-upgrade all start.
+  Existing all-access member sees the same 3 cards throughout.
+  Every field, exact completedAt, and full-list bytes remain identical.
+  Independently added member defaults to scoped and sees 0 unrelated cards.
+
+Version-only bump: Docker --cpus=1 --network=none, candidate server/ mounted
+read-only. Assert package.json.version, lockfile.version and root-package.version
+all equal 0.9.0-preview.118: PASS 3/3, rc=0. git diff --check: rc=0.
+No CLI pin/runtime change; .118 is an independent Hub release, like .117.
+No redundant local server-wide suite: #2534 already passed 157 CI checks.
+
+Pending: this version PR CI/merge, exact-main-SHA formal release gates,
+registry visibility, tarball integrity and installed-package verification.
+No npm publication or production upgrade is claimed by this report.
+No running nodes, real schedules, global packages, credentials or data changed.
