@@ -32,3 +32,41 @@ python3 scripts/check-doc-version-claims.py --package agent-network --version 2.
 Pending: version PR CI/merge, official release gate bound to exact main SHA,
 npm preview/tarball/install verification. Not yet published or deployed.
 No real node restarts, credentials, ports, launcher files or data were changed.
+
+Post-publication verification — 2026-10-09 07:54 CST:
+- Version PR #2535 merged; release SHA e812740fe09715ad3df917674e97843698808081.
+- release.yml run 37860204071 completed successfully, all four gates passed.
+  https://github.com/sleep2agi/agent-network/actions/runs/37860204071
+- Release main ancestry was checked before dispatch, inside the workflow, and
+  again against freshly fetched main after publication (exit 0).
+- npm publish returned success at 07:38:08 CST. The workflow saw preview .160
+  and the matching shasum at 07:51:59, after 831 seconds / 34 attempts.
+  Earlier 404 responses were retained as pending observations, not failures
+  requiring a duplicate publication or a version bump.
+- Registry preview=2.3.0-preview.160; latest=2.3.0-preview.76 unchanged.
+- npm tarball SHA-1: 461ba5ca9a75272d05d38c9b1ac9d7925e912d7b.
+  Matches registry metadata and the formally gated CI tarball.
+
+Actual package Docker verification (anet-paired812:test, --rm --cpus=2):
+1. npm pack @sleep2agi/agent-network@2.3.0-preview.160 --pack-destination /tmp.
+2. Assert downloaded tarball SHA-1 equals the value above.
+3. npm install --prefix /tmp/cli160 --no-audit --no-fund
+   /tmp/sleep2agi-agent-network-2.3.0-preview.160.tgz.
+   Success: 164 packages added in 11 seconds; no host/global install.
+4. Run installed dist/bin/anet.cjs --version and --help: exit 0,
+   version prints anet v2.3.0-preview.160. Dependency report notes missing
+   bunx in this CLI-only test image; no local Hub startup is claimed.
+5. Symlink /workspace/anet-test.mjs to that installed dist/bin/anet.cjs.
+   Mount tests/test812-paired-resolve-timeout read-only at /probe and run
+   node /probe/e2e.mjs. Do NOT run run.sh, which rebuilds the source bundle.
+   PASS real CLI budget=100, refusal and inherited proxy.
+   PASS real CLI budget=3000, refusal and inherited proxy.
+   This checks timeout/error distinction, exact prefetch hint, and HTTP_PROXY,
+   HTTPS_PROXY and NO_PROXY inheritance against the npm-installed executable.
+Entire container exited 0; no CLI rebuild or replacement source bundle used.
+
+Conclusion: CLI .160 preview publication and focused installed-artifact
+acceptance are complete. This does not mean any production node was upgraded
+or the original tm-dev01 machine was changed. Fork protection uses the same
+hash-verified release bytes and pre-release #2532 evidence; the real Codex E2E
+was not redundantly re-run here. Hub API and client recovery UI remain separate.
