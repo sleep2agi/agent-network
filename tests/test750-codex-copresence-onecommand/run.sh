@@ -83,6 +83,31 @@ UNIT_TOTAL=$(bun test src/codex-copresence-profile.test.ts src/codex-copresence-
 log "unit assertions: $UNIT_TOTAL"
 pass "profile + preflight decision functions ($UNIT_TOTAL tests)"
 
+log "[L1b] witnessed red: a painted banner without the current composer is not ready"
+PREFLIGHT=src/codex-copresence-preflight.ts
+PREFLIGHT_BAK=$(mktemp)
+cp "$PREFLIGHT" "$PREFLIGHT_BAK"
+python3 - "$PREFLIGHT" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+a = '  if (!INPUT_READY_MARKERS.some((n) => onScreen.includes(n))) return "input-not-ready";'
+b = '  if (false && !INPUT_READY_MARKERS.some((n) => onScreen.includes(n))) return "input-not-ready";'
+assert s.count(a) == 1, f"mutation anchor not found exactly once in {p}: {a!r}"
+open(p, "w").write(s.replace(a, b))
+PY
+set +e
+bun test src/codex-copresence-preflight.test.ts >/tmp/test750-input-ready-mutation.log 2>&1
+MUTATION_RC=$?
+set -e
+cp "$PREFLIGHT_BAK" "$PREFLIGHT"
+rm -f "$PREFLIGHT_BAK"
+[ "$MUTATION_RC" -ne 0 ] || fail "removing the current-composer gate stayed green"
+grep -Eq '^\(fail\).*painted TUI without the current composer' /tmp/test750-input-ready-mutation.log \
+  || { cat /tmp/test750-input-ready-mutation.log >>"$REPORT"; fail "mutation went red for the wrong reason"; }
+log "MUTATION_RED current-composer-gate-removed rc=$MUTATION_RC"
+pass "removing the input-readiness gate is witnessed by the named behavior"
+
 log "[L2] create writes what start will read"
 # A real hub, the way the other CLI suites do it (see tests/test20-cli-ux):
 # `anet node create` refuses to write a profile without one, and faking that

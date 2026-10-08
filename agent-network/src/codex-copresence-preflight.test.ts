@@ -91,6 +91,17 @@ describe("is the TUI actually usable", () => {
     expect(codexTuiPaneState(WORKING)).toBe("usable");
   });
 
+  test("🔴 a painted TUI without the current composer is not ready for the first message", () => {
+    const announcement = `  │ >_ OpenAI Codex (v0.159.2) │\n\n  Meet GPT-6 Sol\n\n  Continue`;
+    expect(codexTuiPaneState(announcement)).toBe("input-not-ready");
+  });
+
+  test("a composer seen only in scrollback does not authorise injection now", () => {
+    const modal = "  Meet a new model\n  Press Enter to continue";
+    const history = `${WORKING}\n${modal}`;
+    expect(codexTuiPaneState(modal, history)).toBe("input-not-ready");
+  });
+
   test("🔴 launcher output before the TUI paints is NOT usable", () => {
     // The bug this exists for: an earlier rule read "pane has ≥3 non-empty
     // lines" as ready. It fired at t≈3s on exactly this text, six seconds
@@ -111,7 +122,7 @@ describe("is the TUI actually usable", () => {
   });
 
   test("every message says where to look", () => {
-    for (const b of ["sign-in", "update-prompt", "trust-prompt"] as const) {
+    for (const b of ["sign-in", "update-prompt", "trust-prompt", "input-not-ready"] as const) {
       expect(describeCodexTuiBlocker(b, "n", "n-tui")).toContain("tmux attach -t '=n-tui'");
     }
     expect(describeCodexTuiNotPainted("n", "n-tui", 25_000)).toContain("tmux attach -t '=n-tui'");
@@ -123,6 +134,12 @@ describe("is the TUI actually usable", () => {
 
   test("not-painted is reported as its own thing, not as a blocker", () => {
     expect(describeCodexTuiNotPainted("n", "n-tui", 25_000)).toContain("did not paint");
+  });
+
+  test("unknown startup surfaces fail closed without pretending to dismiss them", () => {
+    const msg = describeCodexTuiBlocker("input-not-ready", "n", "n-tui");
+    expect(msg).toContain("message input is not ready");
+    expect(msg).toContain("No key was sent automatically");
   });
 });
 

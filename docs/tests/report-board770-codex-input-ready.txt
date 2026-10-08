@@ -1,0 +1,23 @@
+# board #770 — Codex TUI first-message readiness gate
+
+Date: 2026-10-08
+Base: origin/main ccab0d0a951803a19a2ae57590cc3c608e98f361
+
+Scope
+- Require the current Codex TUI screen to show the message composer before the
+  co-presence launcher reports the node usable.
+- Unknown startup surfaces fail closed. This change sends no keys and does not
+  dismiss any popup; known-popup handling remains board #771.
+
+Docker evidence
+- Image: tests/test750-codex-copresence-onecommand/Dockerfile
+- Runtime: --network none --cpus=2
+- Result: rc=0; 11 groups passed, 0 failed.
+- Decision tests: 83 passed.
+- Mutation: removing the current-composer gate failed the named
+  "painted TUI without the current composer" assertion, rc=1.
+
+Static evidence
+- git diff --check: rc=0
+- python3 scripts/check-mutation-pins.py: rc=0; 688 checked anchors,
+  4 existing unchecked anchors (baseline 4).
