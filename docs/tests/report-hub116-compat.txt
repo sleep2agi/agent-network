@@ -1,0 +1,46 @@
+Hub .116 release compatibility, board #775
+Date: 2026-10-08
+Candidate server source: 47dcbe945edc7d90385ee5f2ad8a4d85404693fc
+Baseline: npm @sleep2agi/commhub-server@0.9.0-preview.115
+Existing client tag: desktop-v0.2.224
+
+Environment
+- Existing tests/hub-release-compat/Dockerfile, disposable containers.
+- docker run constrained to --cpus=2 via an exported shell wrapper.
+- Container-local ports/data only; no host port published or production access.
+- No server implementation changes in this release preparation.
+
+Initial run (recorded, not treated as product failure or success)
+- A1/A2: 62 steps, unexpected=0, check_failures=1, rc=1.
+  Default expected baseline .73-style uncounted schedule replies; .115 already
+  counts them. Both the .115 and .116 observed results were counted.
+- B: rc=1, two historical expectations mismatched: approximate completion
+  backfill and default task_access=all for a newly added member.
+  Existing member visibility and field retention/rollback checks passed.
+
+Release-specific replay parameters
+BASE_VERSION=0.9.0-preview.115
+APP_TAGS=desktop-v0.2.224
+SCHED_BASELINE=counted
+EXPECT_BACKFILL=0
+OLD_LABEL=.115 NEW_LABEL=.116
+NEW_MEMBER_TASK_ACCESS=scoped
+
+The only harness behavior added is a closed all/scoped expectation for NEW
+members. In scoped mode the new member must see zero of three unrelated cards;
+existing-member checks still require the same three cards and unchanged fields.
+Older releases retain the previous all-access default expectation.
+
+Final Docker run: bash tests/hub-release-compat/run.sh
+A1 rc=0 steps=62 unexpected=0 check_failures=0
+A2 rc=0 steps=62 unexpected=0 check_failures=0
+B rc=0 upgrade_check_failures=0
+Overall rc=0. App ignores the candidate member_presence event as expected.
+No candidate 5xx responses. Rollback to .115 and re-upgrade retain seeded data.
+
+Limits
+This is a REST/MCP contract replay using the existing App source adapters,
+not a device UI test. No production update or npm release has occurred here.
+The first CI run also had a test225 local-Hub curl 404 with only 4/7 floor PASS
+lines; the same main baseline QA run was green. This remains a CI failure,
+not a waived check, and the new head must pass the normal merge gate.
