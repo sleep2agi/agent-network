@@ -116,15 +116,19 @@ describe("Codex legacy recovery resource gate", () => {
     }
   }, 10_000);
 
-  test("both native launchers hold the recovery lease through TUI attribution", () => {
+  test("both native launchers hold the recovery lease until the bridge and TUI are ready", () => {
     const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
     expect(cli.match(/await holdCodexRecovery\(/g)).toHaveLength(2);
     expect(cli.match(/recoveryAdmission(?:\?\.|\.)release\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
-    const posixAcquire = cli.indexOf("recoveryAdmission = await holdCodexRecovery(nodeId");
-    const posixHealth = cli.indexOf("client-health role=tui", posixAcquire);
-    const posixRelease = cli.indexOf("recoveryAdmission?.release()", posixHealth);
+    const posixAcquire = cli.indexOf("recoveryAdmission.hold(await holdCodexRecovery(nodeId");
+    // #762 — the POSIX launcher hands the held lease to the helper that brings up
+    // the bridge and TUI and releases it once both are ready (or either fails).
+    const posixReady = cli.indexOf("await launchCopresencePiecesReleasingRecovery({", posixAcquire);
+    const posixLease = cli.indexOf("lease: recoveryAdmission,", posixReady);
+    const posixHealth = cli.indexOf("client-health role=tui", posixReady);
     expect(posixAcquire).toBeGreaterThan(0);
-    expect(posixHealth).toBeGreaterThan(posixAcquire);
-    expect(posixRelease).toBeGreaterThan(posixHealth);
+    expect(posixReady).toBeGreaterThan(posixAcquire);
+    expect(posixLease).toBeGreaterThan(posixReady);
+    expect(posixHealth).toBeGreaterThan(posixLease);
   });
 });
