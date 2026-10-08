@@ -101,6 +101,11 @@ if (args[0] === "app-server") {
   log(`tui-home:${process.env.CODEX_HOME}`);
   console.log(">_ OpenAI Codex (test co-presence)");
   console.log(`FAKE_CODEX_TUI_RESUMED ${threadId}`);
+  // Model the current input surface, not just a historical banner. The real
+  // Codex TUI does not accept the first task until this composer is visible;
+  // launch/readiness E2Es must exercise that same contract rather than rely
+  // on a fake pane that can never become input-ready.
+  console.log("› Ask Codex to do anything");
   if (process.env.ANET_TEST751_EXPECT_CODEX_HOME
     && process.env.CODEX_HOME !== process.env.ANET_TEST751_EXPECT_CODEX_HOME) {
     console.log("FAKE_CODEX_TUI_CLOUD_FALLBACK");

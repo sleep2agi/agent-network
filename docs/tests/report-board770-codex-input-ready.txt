@@ -35,3 +35,17 @@ CI compatibility follow-up
 - Re-run: `qa-codex-copresence-stop-start` with real Codex 0.147, private tmux,
   isolated Hub, `--network none --cpus=2`: rc=0, PASS=35, FAIL=0.
 - Focused Docker unit: 23 passed, 0 failed, 36 assertions.
+
+Fake-TUI contract follow-up
+- The next CI run exposed three existing integration fixtures that painted only
+  a banner and `FAKE_CODEX_TUI_RESUMED`, but never painted an input composer.
+  The new production gate correctly refused those synthetic panes.
+- Fixed the shared fake Codex TUI to model the real current input surface with
+  `Ask Codex to do anything`; the product gate was not weakened.
+- Docker `--cpus=2` reruns:
+  - test1191-windows-steer-contract: rc=0, RESULT: PASS; Linux real Hub path
+    and all three witnessed-red checks passed.
+  - test-codex-appserver-watchdog: rc=0, TESTWD PASS; normal exit, hung process,
+    delayed TUI connection, foreign-marker safety, and witnessed-red checks passed.
+  - test-codex-copresence-first-start: rc=0, T535 PASS; the original 30-second
+    first-fetch path reached ready in 33.7 seconds and every mutation was red.
