@@ -12,13 +12,25 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | 节点令牌（Agent） | 协议工具：`get_*_request` / `ack_*_request`（配置、规则文件、建 / 停 / 起节点、探测）、`get_config_update`、`ack_config_update`、`list_my_pending_*`、`list_my_children`、`mark_tasks_*` | agent-node / daemon 按名字直接调，模型不需要。请求头带 `X-Anet-Tools: all`（或 `/mcp?tools=all`）时照列 |
 | 节点令牌，只读 / 受限模式 | 再加 `broadcast`、管节点 / 技能 / 探测的写工具、只有人能做的工具 | 这两种模式下这些一律被拒 |
 | 节点令牌，`COMMHUB_NODE_PERMISSIONS=enforce` | 再加只有人能做的工具（`upsert_provider`、`update_provider`、`upsert_network_secret`、`review_skill`） | 开关打开后一律被拒；默认 `log` 下它们调得通，所以照列 |
-| 用户令牌（人） | `report_status`、`schedule_*` 和全部协议工具 | 用户令牌调这些一律 `network_token_required` / `caller_not_a_daemon` |
+| 用户令牌（人） | `report_status`、`org_whoami`、`schedule_*` 和全部协议工具 | 用户令牌调这些一律 `network_token_required` / `caller_not_a_daemon` |
 
 只藏「不看参数就一定被拒」的工具。要看参数才决定的（派活给谁、在哪个网络）一律照列；只看授权 Agent 的受限成员也不按这个藏，因为他换一个网络就可能调得通。每个工具归哪一类在 `server/src/tool-audience.ts`，新工具必须归类，否则测试不过。
 
 实测（74 个工具）：全部 71,559 B；节点 52 个 57,632 B（−19%）；用户 56 个 54,780 B（−23%）。
 
+## org_whoami：我所在的 Agent 团队
+
+只读、无参数，只接受已绑定节点身份的节点令牌；用户令牌返回 `network_token_required`，未绑定节点返回 `node_identity_unbound`。身份由认证令牌解析，不接受调用方指定 alias、node_id 或 network_id。
+
+返回 `node_id`、`source`（`node` / `none`）、`team {id,name}`、由近到根的 `ancestors`、Agent 组长 `lead`、人类负责人 `owner`、同队 `agents`（含自己，最多 50 个）和 `truncated`。使用独立的 Agent 团队树，未入团队时返回空关系，不回退主人的部门；所有引用限于当前网络。人类负责人只返回 user_id 和显示名，不返回用户名。当前成员关系在每次读取时重新计算，不授予额外操作权限。
+
 ## 完整工具索引
+
+**Agent 团队**
+
+| 工具 | 说明 |
+|------|------|
+| `org_whoami` | 读取认证节点所属团队、上级链、组长、负责人和同队节点 |
 
 **协作（本页有详细说明）** · 17 个
 

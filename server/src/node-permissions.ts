@@ -257,7 +257,7 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   get_adopt_request: "always", ack_adopt_request: "always",
   send_desktop_message: "always", // 发给人的私信,不是派活
   // 读
-  get_all_status: "read", get_session_status: "read", get_task: "read", list_tasks: "read", get_completions: "read",
+  get_all_status: "read", get_session_status: "read", get_task: "read", list_tasks: "read", get_completions: "read", org_whoami: "read",
   list_skills: "read", get_skill: "read", list_host_supervisors: "read", list_network_secrets: "read", list_providers: "read",
   get_probe_results: "read", read_node_rules_file: "read", list_node_skills: "read", read_node_skill: "read", list_node_files: "read",
   read_node_file: "read", tail_node_logs: "read",

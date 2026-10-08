@@ -1,0 +1,43 @@
+Board #765: org_whoami reads Agent teams
+Date: 2026-10-08
+Base: 8aa112eae991434a15dc78a9bdea25c1950857d2
+
+Scope
+- Read-only MCP tool, authenticated node identity, existing Agent team projection.
+- No human-department fallback, schema migration, REST change, client change or version bump.
+- Caller-supplied alias/node/network do not choose the identity.
+- Current-network references only; human owner exposes display name, not login name.
+- No membership returns an explicit empty relation; teammates capped at 50 with truncated=true.
+
+Docker evidence (--cpus=2, isolated DBs, port 0; no production)
+1. tests/test-agent-team-whoami/Dockerfile + run.sh: rc=0.
+   SQLite: 6/6 tests, 46 assertions. PostgreSQL: 6/6, 46 assertions.
+   Both use real HTTP POST /mcp and minted node/user tokens.
+2. Independent assertion-red mutations, each run on BOTH databases:
+   identity: choosing first team instead of exact node -> unassigned-node assertion, rc=1.
+   network: removing scoped node selection -> foreign-node exclusion assertion, rc=1.
+   bound: removing null-node rejection -> unbound identity assertion, rc=1.
+   cap: removing 50-item slice -> result length assertion, rc=1.
+   Harness requires named failing test plus expect(received); setup errors are not counted.
+3. Existing focused compatibility tests in separate isolated DBs: rc=0.
+   tool-audience-http 12/12 (292 assertions), mcp-context-cost-http 5/5 (129),
+   tools-list-json-schema 2/2 (11), node-permissions-http 15/15 (77).
+   tools/list bytes: all=77244 (86 tools), node=61595 (60), user=56950 (58).
+   Existing ceilings unchanged. Existing tools remain callable/listed as before.
+4. Registration/shape checks in Docker: rc=0.
+   test-suite-registration: no new orphan; l1-sha-binding: 82/82 bound;
+   MCP index: 86 tools in both languages; tool anchors: 75 checked, zero mismatches;
+   mutation-pins: 689 checked, unchecked 4 equals existing baseline (not raised).
+5. Documentation pins rechecked with git available and full repository objects mounted
+   read-only: rc=0. Symbol pins in docs and docs-site: zero unavailable refs, zero drift;
+   source pins: 123 tracked files, 6 unique pins, zero broken, baseline unchanged.
+
+Harness corrections before final green
+- Initial network mutation matched a longer neighboring query too; made anchor exact.
+- Initial PG fixture name violated the existing anet_*_test safety guard; corrected name.
+- Initial source-pin container lacked git; this was a harness failure, not a passing gate.
+
+CI wiring
+- New isolated SQLite/PG HTTP and mutation suite in qa.yml (push and PR paths), scripts/qa.sh.
+- Existing server unit discovers the HTTP test; PG ladder explicitly includes it.
+- No production write or release performed; full server/PG ladder delegated to CI.

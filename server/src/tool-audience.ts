@@ -26,7 +26,7 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   request_adopt_node: "user", unadopt_node: "user",
   get_adopt_request: "protocol", ack_adopt_request: "protocol",
   // ── 节点:用户令牌一律 network_token_required ──
-  report_status: "node",
+  report_status: "node", org_whoami: "node",
   // #733 定时任务:节点工具(用户令牌一律 network_token_required;人走 REST /api/scheduled-tasks)
   schedule_list: "node", schedule_get: "node", schedule_create: "node", schedule_update: "node",
   schedule_cancel: "node", schedule_run_now: "node", schedule_runs: "node",
