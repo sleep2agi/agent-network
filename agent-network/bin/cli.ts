@@ -288,6 +288,7 @@ import {
 import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
 import { copresenceRolloutGuard, copresenceVersionProbeScript, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
 import { describeMissingOrdinalFailure } from "../src/codex-rollout-history-guard";
+import { resumeOrForkOnMissingOrdinal, type ForkRecoveryOptions } from "../src/codex-fork-recovery";
 import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
@@ -585,6 +586,20 @@ async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) 
   }
 }
 
+/** Board #738 — options for resumeOrForkOnMissingOrdinal from one co-presence start. */
+function forkRecoveryOptions(nodeId: string, displayName: string, opts: CopresenceOptions, threadId: string | undefined): ForkRecoveryOptions {
+  return {
+    enabled: opts.forkOnResumeFailure === true, yes: opts.yes === true, interactive: process.stdin.isTTY === true,
+    threadId, codexHome: opts.codexHome, nodeDir: join(nodesDir(), nodeId), node: displayName,
+    confirm: async (prompt) => {
+      const rl = getRL();
+      const answer = await new Promise<string>((resolve) => rl.question(prompt, (a) => resolve(a)));
+      closeRL();
+      return /^y(es)?$/i.test(answer.trim());
+    },
+  };
+}
+
 async function askTypedConfirmation(prompt: string, expected: string): Promise<boolean> {
   const rl = getRL();
   const answer = await new Promise<string>((resolve) => rl.question(prompt, (s) => resolve(s)));
@@ -659,6 +674,10 @@ interface CopresenceOptions {
   newSession?: boolean;
   /** Explicitly accept starting without a recovery-point backup. */
   skipRecoveryBackup?: boolean;
+  /** Board #738: fork the thread when resume fails with "missing an ordinal" (after a human's yes). */
+  forkOnResumeFailure?: boolean;
+  /** --yes: confirms the fork when there is no terminal to ask. */
+  yes?: boolean;
   /** Resolved config.env values. Each native stage receives the same set. */
   configEnv: Record<string, string>;
 }
@@ -1081,7 +1100,10 @@ async function startWindowsCodexCopresence(
     const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
     recoveryAdmission = await holdCodexRecovery(resolved.id, resumeBudget.rolloutBytes);
-    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
+    const thread = await resumeOrForkOnMissingOrdinal(
+      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst }),
+      forkRecoveryOptions(resolved.id, displayName, opts, requestedThreadId),
+    );
     reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
     let freshDeferred = thread.freshDeferred;
@@ -1861,7 +1883,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     recoveryRolloutBytes = resumeBudget.rolloutBytes;
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
     recoveryAdmission = await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes);
-    const thread = await createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes });
+    const thread = await resumeOrForkOnMissingOrdinal(
+      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst }),
+      forkRecoveryOptions(resolved.id, displayName, opts, requestedThreadId),
+    );
     reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;
@@ -4584,6 +4609,9 @@ Options:
   --tmux                       Start in a tmux session
   --new-session               Start with a fresh model session
   --skip-recovery-backup      DANGEROUS: start without a Codex recovery-point backup
+  --fork-on-resume-failure    codex: if the thread cannot be resumed ("missing an
+                              ordinal"), ask, then fork it into a new thread
+                              (non-interactive: also pass --yes)
   --copresence                Start a shared human + agent TUI\n                              (codex-app-server | opencode-cli | grok-build-cli)
                               (codex: recorded on the node, so the next start
                               needs no flag — plain 'anet node start <name>')
@@ -8221,6 +8249,8 @@ async function startCommand() {
       allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",
       newSession: forceNewSession,
       skipRecoveryBackup: opts["skip-recovery-backup"] === "true",
+      forkOnResumeFailure: opts["fork-on-resume-failure"] === "true",
+      yes: opts.yes === "true",
       configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id)),
     });
     return;
