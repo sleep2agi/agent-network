@@ -209,6 +209,19 @@ anet node start <节点> --fork-on-resume-failure --yes    # 没有终端（脚�
 - 🔴 新线程的历史仍然要读**原 rollout 文件**：原文件必须保留，不要移动或删除。
 - 目前只覆盖共存节点的 `anet node start`。
 
+### 给节点钉住一个 codex（#739） {#codex-bin-pin}
+
+一台机器上装了几个 codex 版本时，为了不让它们混用同一条线程，在每个共存节点的 `config.json` 里钉住：
+
+```json
+{ "codexBin": "/opt/codex-0.159.2/bin/codex", "codexVersion": "0.159.2" }
+```
+
+- `codexBin`（绝对路径）：启动**和** #734 版本检查都用这个可执行文件，不管 PATH 上谁排在前面。临时加 `--codex-bin` 仍然优先。
+- `codexVersion`：启动时 anet 跑一次 `<codexBin> --version`（和 #734 检查同一种方式）。不是这个版本、或者读不出版本，就在启动任何东西之前拒绝：`expected 0.159.2, got 0.133.0, path …`。
+- 两个都不设：照旧用 PATH 上的 `codex`。设了之后 `anet info <节点>` 会显示这两项。
+- 目前只覆盖共存节点的 `anet node start`（外部 app-server 节点不检查版本）。anet 不会自动安装 codex。
+
 ## 健康分层、降级拒收与自愈 {#health}
 
 「在线」只说明 bridge 进程还活着。`codex-app-server` 运行时的节点（共存和普通的都算）从 agent-node `2.5.0-preview.94` 起，会把另外几层分开报给 Hub。报告随 `report_status` 走，字段名是 `health`：
