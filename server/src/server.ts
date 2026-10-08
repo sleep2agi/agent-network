@@ -4,6 +4,7 @@ import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip"
 import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
+import { AGENT_TEAM_SCOPE_DENIED, clearNodeFromAgentTeams, createAgentTeam, deleteAgentTeam, listAgentTeams, ownedScope, setNodeAgentTeam, updateAgentTeam } from "./agent-teams.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
@@ -1871,6 +1872,48 @@ return Bun.serve({
       // 已连着的观察流 / 用户流按旧权限鉴权过,断开让它按新权限重连。
       closeUserStreamsInNetwork(netId, targetUid);
       return withCors(req, Response.json({ ok: true, network_id: netId, user_id: targetUid, agent_access: result.agent_access, restricted: isAgentRestricted(targetUid, netId), grants: result.grants, group_grants: result.group_grants }));
+    }
+
+    // ── Agent 团队(#764):Agent 自己的组织树,和人的部门树无关。读:网络任何成员 / 本网络的节点令牌 / Hub 管理员;
+    // 写:owner / admin / Hub 管理员全管;团队 owner_user_id 管自己的子树(规则在 agent-teams.ts);节点令牌只读。 ──
+    const teamMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/agent-teams(?:\/([^/]+))?$/);
+    const nodeTeamMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/nodes\/([^/]+)\/agent-team$/);
+    if (teamMatch || nodeTeamMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const netId = decodeURIComponent((teamMatch ?? nodeTeamMatch)![1]);
+      const notMember = () => withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      if (resolved.networkId && resolved.networkId !== netId) return notMember();
+      const hubAdmin = isHubAdminCredential(resolved);
+      const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
+      if (!hubAdmin && !role && !resolved.networkId) return notMember();
+      if (!db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)) return withCors(req, Response.json({ ok: false, error: "network_not_found" }, { status: 404 }));
+      const canManage = hubAdmin || (!resolved.networkId && (role === "owner" || role === "admin"));
+      // 只看授权 Agent 的成员:看不见的节点不出现在 members / lead 里(和 Agent 列表同一判据);写路径用同一个判据,看不见 = 404。
+      const seen = !hubAdmin && !resolved.networkId && isAgentRestricted(resolved.user.user_id, netId) ? visibleAgents(resolved.user.user_id, netId) : null;
+      const hidden = (n: { node_id: string; alias: string | null }) => !!seen && !seen.nodeIds.includes(n.node_id) && !(n.alias && seen.aliases.includes(n.alias));
+      if (teamMatch && !teamMatch[2] && req.method === "GET") {
+        return withCors(req, Response.json({ ok: true, network_id: netId, teams: listAgentTeams(netId, hidden) }));
+      }
+      const write = teamMatch ? (teamMatch[2] ? ["PATCH", "DELETE"] : ["POST"]) : ["PUT"];
+      if (!write.includes(req.method)) return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+      // null = 全管;节点令牌 / 普通成员 → 空集(任何写都 403);团队 owner → 自己的子树。
+      const scope = canManage ? null : resolved.networkId ? new Set<string>() : ownedScope(netId, resolved.user.user_id);
+      if (scope && scope.size === 0) return withCors(req, Response.json({ ok: false, error: AGENT_TEAM_SCOPE_DENIED }, { status: 403 }));
+      let body: Record<string, unknown> = {};
+      if (req.method !== "DELETE") {
+        try { const b = await req.json(); body = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      }
+      const teamId = teamMatch?.[2] ? decodeURIComponent(teamMatch[2]) : "";
+      const nodeId = nodeTeamMatch ? decodeURIComponent(nodeTeamMatch[2]) : undefined;
+      const r = nodeId !== undefined ? setNodeAgentTeam(netId, nodeId, scope, hidden, body.team_id)
+        : req.method === "POST" ? createAgentTeam(netId, resolved.user.user_id, scope, hidden, body)
+        : req.method === "PATCH" ? updateAgentTeam(netId, teamId, scope, hidden, body)
+        : deleteAgentTeam(netId, teamId, scope);
+      if (!r.ok) { const { ok: _ok, status, ...rest } = r; return withCors(req, Response.json({ ok: false, ...rest }, { status })); }
+      logAudit(resolved.user.user_id, resolved.user.username, `agent_team_${req.method.toLowerCase()}`, "network", netId, JSON.stringify({ team_id: teamId || undefined, node_id: nodeId, ...body }).slice(0, 2000), undefined, netId);
+      return withCors(req, Response.json(r, { status: req.method === "POST" ? 201 : 200 }));
     }
 
     // ── 多用户:网络里的人类成员通讯录 —— 任何成员(含受限成员)都能看,只有身份字段 ──
@@ -4196,6 +4239,7 @@ return Bun.serve({
 
       db.transaction(() => {
         db.run("DELETE FROM nodes WHERE node_id = ?1", [node.node_id]);
+        clearNodeFromAgentTeams(node.node_id); // #764
         if (node.alias) {
           db.run(
             "DELETE FROM sessions WHERE alias = ?1 AND (network_id = ?2 OR (CAST(?2 AS TEXT) IS NULL AND network_id IS NULL))",

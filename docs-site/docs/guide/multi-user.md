@@ -112,6 +112,16 @@ GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 
 设计和取舍见 RFC-041。
 
+## Agent 团队
+
+Agent（节点）有自己的一棵组织树「Agent 团队」，和人的部门树互不相关。团队可以多层，同一上级下不重名；一个 Agent 最多归一个团队，不归就是「未分配」。团队只用于组织 Agent，不给任何人新权限：谁能看、能对话哪个 Agent，仍按 Agent 授权。
+
+- 读：`GET /api/networks/{id}/agent-teams` 返回整棵树，每个团队带 `members`（`node_id`、`alias`、`display_name`）、`lead`（负责的 Agent）和 `owner`（`user_id` 和显示名）。网络成员和本网络的节点令牌都能读；只看授权 Agent 的成员只看到授权给他的那些。
+- 建、改、删：`POST /api/networks/{id}/agent-teams` `{name, parent_id?}`；`PATCH …/agent-teams/{team_id}` `{name?, parent_id?, sort?, lead_node_id?, owner_user_id?}`（不能挂到自己或下级下面；`lead_node_id` 必须是本网络的节点，`owner_user_id` 必须是本网络成员）；`DELETE …/agent-teams/{team_id}` 只能删没有子团队的团队，里面的 Agent 变回未分配。
+- 归团队：`PUT /api/networks/{id}/nodes/{node_id}/agent-team` `{"team_id": "<团队 id>"}`，传 `null` 表示未分配。
+- 谁能改：owner / admin 全部；团队的 owner 管这个团队的子树（改名、建子团队、在子树里移动、把 Agent 放进或移出子树、设 lead），但不能改自己那个团队的 owner，也不能把它移出去或删掉。其他成员和节点令牌只读，写返回 403 `agent_team_scope_denied`。
+- 删除节点时，它的团队归属一起清掉，以它为 lead 的团队 lead 变成空。
+
 ## 相关
 
 - [账号、Token 与角色](/guide/account-system)
