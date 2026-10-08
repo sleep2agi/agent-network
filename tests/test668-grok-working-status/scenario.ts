@@ -360,6 +360,9 @@ async function main(): Promise<void> {
 
   await sendTask(userToken, networkId, `${LATER} this arrived while the first turn was still running`);
   const during = readState();
+  // An idle heartbeat already on the wire can land after SIGSTOP. Check the
+  // same snapshot's status before blaming dispatch for the idle preview.
+  if (during.status !== "working") fail("FAIL: heartbeat-idle");
   if (during.task !== preview || during.task.includes(LATER)) fail("FAIL: later message");
 
   process.kill(node.pid, "SIGCONT");
