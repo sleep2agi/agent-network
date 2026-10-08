@@ -118,6 +118,7 @@ export function codexKnownStartupPromptAction(onScreen: string): CodexKnownStart
   if (!onScreen.includes("Meet GPT-6 Sol")) return null;
   if (!onScreen.includes("1. Try new model")) return null;
   if (!onScreen.includes("2. Use existing model")) return null;
+  if (!onScreen.includes("enter/esc confirm")) return null;
   return { kind: "keep-existing-model", key: "2" };
 }
 

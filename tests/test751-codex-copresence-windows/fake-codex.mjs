@@ -105,6 +105,7 @@ if (args[0] === "app-server") {
     console.log("Meet GPT-6 Sol");
     console.log("1. Try new model");
     console.log("2. Use existing model");
+    console.log("enter/esc confirm · ctrl+c quit");
     // The real TUI switches its terminal to raw mode, so a numbered picker
     // receives one byte immediately. Model that boundary: requiring a newline
     // here would let a test pass with generic Enter even though production's

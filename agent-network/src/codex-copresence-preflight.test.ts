@@ -81,11 +81,14 @@ describe("known startup prompt actions", () => {
   test("a heading alone or a partial picker authorises no key", () => {
     expect(codexKnownStartupPromptAction("Meet GPT-6 Sol")).toBeNull();
     expect(codexKnownStartupPromptAction("Meet GPT-6 Sol\n1. Try new model")).toBeNull();
+    expect(codexKnownStartupPromptAction(
+      "Meet GPT-6 Sol\n1. Try new model\n2. Use existing model",
+    )).toBeNull();
   });
 
   test("a different dialog with the same numeric choices authorises no key", () => {
     expect(codexKnownStartupPromptAction(
-      "Choose a profile\n1. Try new model\n2. Use existing model",
+      "Choose a profile\n1. Try new model\n2. Use existing model\nenter/esc confirm",
     )).toBeNull();
   });
 
