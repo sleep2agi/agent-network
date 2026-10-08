@@ -29,7 +29,7 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   report_status: "node", org_whoami: "node",
   // #733 定时任务:节点工具(用户令牌一律 network_token_required;人走 REST /api/scheduled-tasks)
   schedule_list: "node", schedule_get: "node", schedule_create: "node", schedule_update: "node",
-  schedule_cancel: "node", schedule_run_now: "node", schedule_runs: "node",
+  schedule_cancel: "node", schedule_run_now: "node", schedule_runs: "node", schedule_batch_interval: "node",
   // ── 协议:用户令牌一律 network_token_required / node_token_required / caller_not_a_daemon ──
   mark_tasks_runtime_submitted: "protocol", mark_tasks_consumed: "protocol",
   get_config_update: "protocol", ack_config_update: "protocol",

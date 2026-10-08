@@ -23,7 +23,7 @@
 import { db } from "./db.js";
 import {
   cancelSchedule, decodeRowForAgent, dispatchScheduledOccurrence, getScheduleRow, insertSchedule, patchSchedule,
-  scheduleRuns, ScheduleInputError, validateScheduleCreate, type ScheduledRow,
+  scheduleRuns, ScheduleInputError, validateScheduleCreate, parseScheduleSpec, type ScheduledRow,
 } from "./scheduled-tasks.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { dispatchVerdict, nodePermissionDeniedBody, recordNodePermission, type NodeIdentity } from "./node-permissions.js";
@@ -143,6 +143,25 @@ export function agentUpdateSchedule(id: NodeIdentity, canWrite: boolean, schedul
     const patched = patchSchedule(row, { ...body, revision: body.revision ?? row.revision });
     return { ok: true, schedule: decodeRowForAgent(patched) };
   } catch (e) { return inputError(e); }
+}
+
+/** #816: partial success, one result per distinct ID; no change to existing write authority. */
+export function agentBatchScheduleInterval(id: NodeIdentity, canWrite: boolean, scheduleIds: string[], everySeconds: number): AgentScheduleResult {
+  const gate = writeGate(id, canWrite, "mcp:schedule_batch_interval");
+  if (gate) return gate;
+  const schedule = { type: "interval", every_seconds: everySeconds };
+  try { parseScheduleSpec(schedule, "UTC"); } catch (e) { return inputError(e); }
+  const results = [...new Set(scheduleIds)].map(schedule_id => {
+    const row = ownRow(id, schedule_id);
+    if (!isRow(row)) return { schedule_id, ...row };
+    if (row.schedule_type !== "interval") return { schedule_id, ok: false, error: "not_interval_schedule" };
+    const result = agentUpdateSchedule(id, canWrite, schedule_id, { schedule, base_revision: row.revision });
+    if (!result.ok) return { schedule_id, ...result };
+    const updated = result.schedule as ReturnType<typeof decodeRowForAgent>;
+    return { schedule_id, ok: true, every_seconds: everySeconds, next_run_at: updated.next_run_at, status: updated.status, revision: updated.revision };
+  });
+  const updated = results.filter(r => r.ok).length;
+  return { ok: updated === results.length, updated, failed: results.length - updated, results };
 }
 
 export function agentCancelSchedule(id: NodeIdentity, canWrite: boolean, scheduleId: string): AgentScheduleResult {

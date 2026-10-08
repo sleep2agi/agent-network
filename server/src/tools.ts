@@ -21,7 +21,7 @@ import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
 import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
-import { agentCancelSchedule, agentCreateSchedule, agentGetSchedule, agentListSchedules, agentRunScheduleNow, agentScheduleRuns, agentUpdateSchedule } from "./schedule-agent.js";
+import { agentBatchScheduleInterval, agentCancelSchedule, agentCreateSchedule, agentGetSchedule, agentListSchedules, agentRunScheduleNow, agentScheduleRuns, agentUpdateSchedule } from "./schedule-agent.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict } from "./node-permissions.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
@@ -6396,6 +6396,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.tool("schedule_update", "Edit your schedule; status=paused|active.",
     { ...schedFields, schedule_id: schedId, base_revision: z.number().int().min(0).optional().describe("Reject if current revision differs."), name: z.string().optional(), task: z.string().optional(), schedule: z.any().optional(), status: z.string().optional() },
     async ({ schedule_id, ...rest }) => scheduleCall((id, w) => agentUpdateSchedule(id, w, schedule_id, rest as Record<string, unknown>)));
+  server.tool("schedule_batch_interval", "Batch interval edit; per-ID results.",
+    { schedule_ids: z.array(z.string()).min(1).max(100), every_seconds: z.number() },
+    async ({ schedule_ids, every_seconds }) => scheduleCall((id, w) => agentBatchScheduleInterval(id, w, schedule_ids, every_seconds)));
   server.tool("schedule_cancel", "Cancel your schedule.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall((id, w) => agentCancelSchedule(id, w, schedule_id)));
   server.tool("schedule_run_now", "Run your schedule now.", { schedule_id: schedId },

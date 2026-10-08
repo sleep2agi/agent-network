@@ -161,6 +161,72 @@ describe("happy path from a node", () => {
   });
 });
 
+describe("batch interval updates (#816)", () => {
+  const batch = (token: string, schedule_ids: string[], every_seconds = 600) =>
+    mcp(token, "schedule_batch_interval", { schedule_ids, every_seconds });
+  const get = async (id: string) => (await mcp(node.b.token, "schedule_get", { schedule_id: id })).schedule;
+
+  test("two updates, deduplicated IDs, paused stays paused, unselected stays untouched", async () => {
+    const a = (await create("b")).schedule, b = (await create("b")).schedule;
+    const untouched = (await create("b")).schedule;
+    await mcp(node.b.token, "schedule_update", { schedule_id: b.schedule_id, status: "paused" });
+    const before = Date.now();
+    const result = await batch(node.b.token, [a.schedule_id, b.schedule_id, a.schedule_id]);
+    expect(result).toMatchObject({ ok: true, updated: 2, failed: 0 });
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]).toMatchObject({ schedule_id: a.schedule_id, every_seconds: 600, revision: a.revision + 1, status: "active" });
+    expect(Date.parse(result.results[0].next_run_at)).toBeGreaterThanOrEqual(before + 600_000);
+    expect(result.results[1]).toMatchObject({ status: "paused", next_run_at: null, every_seconds: 600 });
+    for (const original of [a, b]) {
+      expect(await get(original.schedule_id)).toMatchObject({ name: original.name, task_content: original.task_content, target_node_id: original.target_node_id, schedule: { type: "interval", every_seconds: 600 } });
+    }
+    expect(await get(untouched.schedule_id)).toEqual(untouched);
+  });
+
+  test("partial results preserve human, foreign-network, daily and cancelled schedules", async () => {
+    const own = (await create("b")).schedule;
+    const daily = (await create("b", { schedule: { type: "daily", time: "09:30" } })).schedule;
+    const cancelled = (await create("b")).schedule;
+    await mcp(node.b.token, "schedule_cancel", { schedule_id: cancelled.schedule_id });
+    const human = await rest(user.boss.token, "POST", "/api/scheduled-tasks", { network_id: net, name: "human batch", task: "t", target_node_id: node.b.id, schedule: EVERY_MIN });
+    const foreign = (await create("x")).schedule;
+    const ids = [human.body.schedule.schedule_id, foreign.schedule_id, "no-such-schedule", daily.schedule_id, cancelled.schedule_id, own.schedule_id];
+    const result = await batch(node.b.token, ids);
+    expect(result).toMatchObject({ ok: false, updated: 1, failed: 5 });
+    expect(result.results.map((r: any) => r.error ?? "ok")).toEqual(["not_schedule_creator", "schedule_not_found", "schedule_not_found", "not_interval_schedule", "schedule_cancelled", "ok"]);
+    expect((await get(ids[0])).schedule).toEqual(EVERY_MIN);
+    expect((await mcp(node.x.token, "schedule_get", { schedule_id: foreign.schedule_id })).schedule).toEqual(foreign);
+    expect(await get(daily.schedule_id)).toEqual(daily);
+    expect((await get(cancelled.schedule_id)).status).toBe("cancelled");
+  });
+
+  test("invalid interval or batch shape performs no writes; node-only and readonly gates remain", async () => {
+    const own = (await create("b")).schedule, ids = [own.schedule_id];
+    for (const seconds of [59, 60.5, 365 * 86400 + 1]) {
+      expect(await batch(node.b.token, ids, seconds)).toMatchObject({ ok: false, error: "invalid_interval" });
+    }
+    for (const invalid of [[], Array(101).fill(own.schedule_id), [""]]) {
+      expect((await batch(node.b.token, invalid)).ok).not.toBe(true);
+    }
+    expect((await batch(user.boss.token, ids)).error).toBe("network_token_required");
+    expect(await batch(node.ro.token, ids)).toMatchObject({ error: "node_permission_denied", reason: "mode_readonly" });
+    expect(await get(own.schedule_id)).toEqual(own);
+  });
+
+  test("creator still needs permission to reach the current target", async () => {
+    const own = (await create("b", { target_node_id: node.a.id })).schedule;
+    db.run("UPDATE nodes SET owner_user_id = ?1 WHERE node_id = ?2", [user.rst.id, node.b.id]);
+    try {
+      const result = await batch(node.b.token, [own.schedule_id]);
+      expect(result).toMatchObject({ ok: false, updated: 0, failed: 1 });
+      expect(result.results[0]).toMatchObject({ reason: "agent_not_granted_to_owner" });
+      expect(await get(own.schedule_id)).toEqual(own);
+    } finally {
+      db.run("UPDATE nodes SET owner_user_id = ?1 WHERE node_id = ?2", [user.boss.id, node.b.id]);
+    }
+  });
+});
+
 describe("denials", () => {
   test("another network: cannot target, see or touch it", async () => {
     const mine = (await create("a")).schedule.schedule_id;
