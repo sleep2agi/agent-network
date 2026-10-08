@@ -438,6 +438,11 @@ anet daemon unadopt demo --yes
 仅支持 bare / 默认 tmux socket；co-presence 或无法重建的环境会拒绝，错误只列环境键名。
 从 daemon 工作目录运行 `anet daemon adopted`，列出同时具有本机登记和 Hub 有效绑定的节点。
 
+`adopt_path_writable_by_others`：工作目录、`.anet`、`.anet/nodes`、节点目录或 `config.json`
+对组 / 其他用户可写。修法是对报出的路径 `chmod go-w`。共享团队目录（如 `2775`）不想去掉组写时，
+**仅工作目录本身**可改为加粘滞位：目录属 daemon 用户且 `chmod +t <workdir>`（如 `drwxrwsr-t`）也被接受，
+因为粘滞位下其他用户无法改名或删除其中属 daemon 的 `.anet`；`.anet` 及以下仍必须 `go-w`。
+
 此增量只完成收编协议，收编节点的远程停启需后续 board #627；当前会明确拒绝，
 不会落入旧 daemon 子进程清理路径。登记文件是 daemon 工作目录下
 `.anet/child-workdirs.json`，节点配置及密钥仍在原目录。空机恢复需恢复这些私有文件和
