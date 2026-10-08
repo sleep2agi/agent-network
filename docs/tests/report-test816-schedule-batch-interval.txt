@@ -30,6 +30,10 @@ the NEW tool schema/description. Did not loosen the ceiling or permissions.
 CI uses the existing complete server-unit collector, which discovers both
 modified *.test.ts files. This standalone Dockerfile reproduces only these
 relevant tests locally; no extra full-suite local run or mutation run.
+CI follow-up: registration gate required the wrapper's coverage declaration.
+Added NOT-IN-CI.md pointing at the existing complete server-unit collector
+and its revisit condition; did not exempt either behavior test from CI or add
+a duplicate CI matrix entry.
 
 Recovery impact: no schema migration, new service, port, tunnel, secret or
 environment variable. Existing Hub startup/deployment remains unchanged.
