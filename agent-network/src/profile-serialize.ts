@@ -66,6 +66,10 @@ export function serializeProfileForConfigJson(
     ...((normalized.codexBin ?? profile.codexBin)
       ? { codexBin: normalized.codexBin ?? profile.codexBin }
       : {}),
+    // #739 — 共存节点钉住的 codex 版本(启动时核对 codexBin 的 --version)。漏在白名单里 = 一存就丢。
+    ...((normalized.codexVersion ?? profile.codexVersion)
+      ? { codexVersion: normalized.codexVersion ?? profile.codexVersion }
+      : {}),
     ...((normalized.opencodeMode ?? profile.opencodeMode)
       ? { opencodeMode: normalized.opencodeMode ?? profile.opencodeMode }
       : {}),

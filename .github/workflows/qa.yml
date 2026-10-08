@@ -213,6 +213,7 @@ on:
       - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test734-codex-paginated-rollout-guard/**'
       - 'tests/test738-codex-fork-on-resume-failure/**'
+      - 'tests/test739-codex-bin-pin/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -429,6 +430,7 @@ on:
       - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test734-codex-paginated-rollout-guard/**'
       - 'tests/test738-codex-fork-on-resume-failure/**'
+      - 'tests/test739-codex-bin-pin/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -2038,6 +2040,10 @@ jobs:
           # error and only after y / --yes; original unchanged, r/o snapshot, mapping recorded.
           # Mutations M1-M4. Not L1: the image installs two ~150 MB codex binaries (same as test734).
           - test738-codex-fork-on-resume-failure
+          # board #739: per-node codex pin — config.json codexBin is what the launch and the #734
+          # probe run (0.133 first on PATH), codexVersion mismatch refuses before anything starts.
+          # Mutations M1-M4. Not L1: two ~150 MB codex binaries (same as test738).
+          - test739-codex-bin-pin
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}

@@ -248,7 +248,7 @@ mutate M3-launcher-guard-not-wired "$CLI" '      threadIds: opts.newSession ? []
 mutate M4-launcher-ignores-block "$CLI" '    if (guard.block) {' '    if (guard.block && false) {' l5-block
 mutate M5-launcher-ignores-new-session "$TIMEOUT_MOD" '  return newSession ? undefined : recordedThreadId;' '  return recordedThreadId;' l5-newsession
 mutate M6-first-semver-wins "$GUARD_AN" '  const m = /\bcodex(?:-cli)?\s+v?(\d+\.\d+\.\d+)/i.exec(text);' '  const m = /(\d+\.\d+\.\d+)/.exec(text);' l2-wrapper
-mutate M7-probe-anet-path-not-login-path "$CLI" '        : (bin) => probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true }),' '        : (bin) => probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: false }),' l5-twopath
+mutate M7-probe-anet-path-not-login-path "$CLI" '    : probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true });' '    : probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: false });' l5-twopath
 mutate M8-archived-before-sessions "$GUARD_NODE" '  return newestRolloutUnder(join(codexHome, "sessions"), threadId)' '  return newestRolloutUnder(join(codexHome, "archived_sessions"), threadId) ?? newestRolloutUnder(join(codexHome, "sessions"), threadId)' unit-node
 mutate M10-probe-skips-dotenv agent-network/src/codex-external-appserver.ts '    dotenvSnippet(plan.workspaceDir), // MUTATION-ANCHOR:probe-sources-dotenv' '' l6-env
 mutate M9-goal-wake-unguarded "$WAKE" '    const refusal = deps.guardResume?.(goal.codex_thread_id) ?? null;' '    const refusal = null;' unit-node

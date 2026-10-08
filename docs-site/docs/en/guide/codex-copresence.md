@@ -210,6 +210,19 @@ anet node start <node> --fork-on-resume-failure --yes    # no terminal (scripts 
 - 🔴 The new thread still reads its history from the **original rollout file**: keep it, do not move or delete it.
 - Currently covers `anet node start` of co-presence nodes only.
 
+### Pin a node to one codex (#739) {#codex-bin-pin}
+
+So that one machine with several codex versions never mixes them on a thread, pin each co-presence node in its `config.json`:
+
+```json
+{ "codexBin": "/opt/codex-0.159.2/bin/codex", "codexVersion": "0.159.2" }
+```
+
+- `codexBin` (absolute path): the binary the launch **and** the #734 version check use, whatever comes first on PATH. A one-off `--codex-bin` still wins.
+- `codexVersion`: at start anet runs `<codexBin> --version` (the same way it checks for #734). If it is not exactly this version, or cannot be read, the start is refused before anything is started: `expected 0.159.2, got 0.133.0, path …`.
+- Neither set: bare `codex` from PATH, as before. `anet info <node>` shows both when set.
+- Currently covers `anet node start` of co-presence nodes only (not external app-server nodes). anet never installs codex.
+
 ## Layered health, degraded refusal and self-healing {#health}
 
 "Online" only means the bridge process is alive. From agent-node `2.5.0-preview.94`, nodes on the `codex-app-server` runtime (co-presence and ordinary alike) report the other layers to the Hub separately. The report travels with `report_status` as `health`:

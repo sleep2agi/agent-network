@@ -287,7 +287,8 @@ import {
 } from "../src/codex-tui-client-health";
 import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
 import { copresenceRolloutGuard, copresenceVersionProbeScript, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
-import { describeMissingOrdinalFailure } from "../src/codex-rollout-history-guard";
+import { describeMissingOrdinalFailure, probeCodexVersionCached } from "../src/codex-rollout-history-guard";
+import { codexVersionPinMismatch, configuredCodexBin, configuredCodexVersion, resolveCopresenceCodexBin } from "../src/codex-bin-pin";
 import { resumeOrForkOnMissingOrdinal, type ForkRecoveryOptions } from "../src/codex-fork-recovery";
 import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
@@ -657,6 +658,8 @@ function writeCodexCopresenceEnvFile(codexHome: string, env: Readonly<Record<str
 
 interface CopresenceOptions {
   codexBin: string;
+  /** Board #739 — config.json codexVersion: the codex at codexBin must report exactly this. */
+  codexVersion?: string;
   codexHome: string;
   model?: string;
   port?: number;
@@ -1455,6 +1458,24 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(describeMissingDeps(missingDeps, displayName));
     process.exit(1);
   }
+  // Board #734/#739 — the ONE way this start reads `<codexBin> --version`: the POSIX launch
+  // runs `bash -lc "export CODEX_HOME=…; …; exec <codexBin> app-server"`, so probe through
+  // that same login shell (a bare `codex` resolves the same way); Windows spawns codexBin
+  // directly. Used by the version pin below and the paginated-rollout guard further down.
+  const probeLaunchCodexVersion = (bin: string): string | null => process.platform === "win32"
+    ? probeCodexVersionCached(bin)
+    : probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true });
+  // Board #739 — config.json codexVersion: refuse before anything is started or touched.
+  if (opts.codexVersion) {
+    const pinned = codexVersionPinMismatch({
+      expected: opts.codexVersion, actual: probeLaunchCodexVersion(opts.codexBin), codexBin: opts.codexBin, displayName,
+    });
+    if (pinned) {
+      for (const line of pinned) console.error(`[anet] ${line}`);
+      process.exit(1);
+    }
+    console.log(`[anet] codex: ${opts.codexBin} = ${opts.codexVersion} (pinned in config.json)`);
+  }
   if (!opts.token || !opts.token.startsWith("ntok_")) {
     console.error(`[anet] ❌ node token is missing or not an ntok_ (co-presence bridge requires network-scoped ntok_).`);
     console.error(`[anet]    Run \`anet doctor --fix\` to repair, or recreate the node.`);
@@ -1604,12 +1625,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       threadIds: opts.newSession ? [] : [requestedThreadId, typeof pending?.threadId === "string" ? pending.threadId : undefined],
       codexBin: opts.codexBin,
       displayName,
-      // The POSIX launch runs `bash -lc "export CODEX_HOME=…; …; exec <codexBin> app-server"`;
-      // probe through that same login shell so a bare `codex` resolves the same way. The
+      // Same probe as the #739 pin above (login shell on POSIX, like the launch). The
       // launch command is not touched. (config.env cannot set PATH: it is a reserved key.)
-      probeVersion: process.platform === "win32"
-        ? undefined
-        : (bin) => probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true }),
+      probeVersion: probeLaunchCodexVersion,
     });
     for (const line of guard.warnings) console.warn(`[anet] ${line}`);
     if (guard.block) {
@@ -2633,6 +2651,8 @@ interface Profile {
   codexProjectDir?: string;
   /** #1969 — codex-sdk runtime: explicit codex binary (agent-node passes it as codexPathOverride). */
   codexBin?: string;
+  /** #739 — co-presence: the version codexBin must report at start (e.g. "0.159.2"). */
+  codexVersion?: string;
   /** #448 — explicit `--codex-home` override, persisted so every respawn recomputes it from config, not env. */
   codexHome?: string;
   opencodeMode?: "headless" | "copresence";
@@ -8235,7 +8255,9 @@ async function startCommand() {
       }
     }
     await startCopresenceOrchestration(id, {
-      codexBin: opts["codex-bin"] || "codex",
+      // Board #739 — --codex-bin > config.json codexBin > "codex"; codexVersion is checked at start.
+      codexBin: resolveCopresenceCodexBin(opts["codex-bin"], prof),
+      codexVersion: configuredCodexVersion(prof),
       // #448 — absolute, and from the node's own config/dir; never from the environment.
       codexHome: resolve(opts["codex-home"] || (typeof prof.codexHome === "string" && prof.codexHome ? prof.codexHome : codexHomeDefault)),
       model: opts.model,
@@ -18229,6 +18251,10 @@ async function infoCommand() {
   console.log(`  model:    ${profile.model || "(default)"}`);
   console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
   console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
+  // Board #739 — the node's codex pin, only when set.
+  const pinBin = configuredCodexBin(profile as any), pinVersion = configuredCodexVersion(profile as any);
+  if (pinBin) console.log(`  codexBin: ${pinBin}`);
+  if (pinVersion) console.log(`  codexVersion: ${pinVersion}`);
   // Co-presence reduces config to one of two runtime-owned process profiles;
   // pinned Grok ignores a general --tools allowlist in interactive TUI mode.
   const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
