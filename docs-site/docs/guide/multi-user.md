@@ -60,15 +60,6 @@ Hub 0.9.0-preview.91 起生效；app 从 0.2.196 起有「管理本部门」入�
 
 设计和取舍见 [RFC-040](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-040-department-head-permissions.md)。
 
-## Agent 归部门
-
-Agent（节点）也可以像人一样归一个部门，不归部门就是「未分配」。归部门只用于组织架构的展示，不给任何人新权限：谁能看、能对话哪个 Agent，仍按 Agent 授权。节点的 `team` 字段不受影响。
-
-- 设置或清空：`PUT /api/networks/{id}/nodes/{node_id}/department`，请求体 `{"department_id": "<部门 id>"}`，传 `null` 表示未分配。
-- 谁能改：owner / admin；或目标部门的负责人（含上级负责人），节点原来已在某个部门时，还要同时负责那个部门；清空时要负责节点当前的部门。其他人和节点令牌返回 403 `department_scope_denied`。
-- 读：`GET /api/networks/{id}/departments` 多一个 `nodes` 数组，每项是 `{kind: "node", node_id, alias, display_name, department_id}`。人仍在 `members` 里，`member_count` 只数人。没有任何 Agent 归部门时不出现 `nodes`，响应与以前相同。只看授权 Agent 的成员只看到授权给他的那些。
-- 删除部门：Agent 不阻止删除，部门删掉后，里面的 Agent 变回未分配。
-
 ## 节点自己的权限
 
 节点（Agent）的权限是它**主人**权限的子集，再按节点自己的**模式**往下收。主人是令牌绑定节点的 `nodes.owner_user_id`；没绑定节点的老令牌，主人是铸令牌的人。
