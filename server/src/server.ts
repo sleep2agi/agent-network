@@ -1877,10 +1877,10 @@ return Bun.serve({
       if (!hubAdmin && !role && !resolved.networkId) return notMember();
       if (!db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)) return withCors(req, Response.json({ ok: false, error: "network_not_found" }, { status: 404 }));
       const canManage = hubAdmin || (!resolved.networkId && (role === "owner" || role === "admin"));
+      // 只看授权 Agent 的成员:看不见的节点不出现在 members / lead 里(和 Agent 列表同一判据);写路径用同一个判据,看不见 = 404。
+      const seen = !hubAdmin && !resolved.networkId && isAgentRestricted(resolved.user.user_id, netId) ? visibleAgents(resolved.user.user_id, netId) : null;
+      const hidden = (n: { node_id: string; alias: string | null }) => !!seen && !seen.nodeIds.includes(n.node_id) && !(n.alias && seen.aliases.includes(n.alias));
       if (teamMatch && !teamMatch[2] && req.method === "GET") {
-        // 只看授权 Agent 的成员:看不见的节点不出现在 members / lead 里(和 Agent 列表同一判据)。
-        const seen = !hubAdmin && !resolved.networkId && isAgentRestricted(resolved.user.user_id, netId) ? visibleAgents(resolved.user.user_id, netId) : null;
-        const hidden = (n: { node_id: string; alias: string | null }) => !!seen && !seen.nodeIds.includes(n.node_id) && !(n.alias && seen.aliases.includes(n.alias));
         return withCors(req, Response.json({ ok: true, network_id: netId, teams: listAgentTeams(netId, hidden) }));
       }
       const write = teamMatch ? (teamMatch[2] ? ["PATCH", "DELETE"] : ["POST"]) : ["PUT"];
@@ -1893,12 +1893,13 @@ return Bun.serve({
         try { const b = await req.json(); body = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
       }
       const teamId = teamMatch?.[2] ? decodeURIComponent(teamMatch[2]) : "";
-      const r = nodeTeamMatch ? setNodeAgentTeam(netId, decodeURIComponent(nodeTeamMatch[2]), scope, body.team_id)
-        : req.method === "POST" ? createAgentTeam(netId, resolved.user.user_id, scope, body)
-        : req.method === "PATCH" ? updateAgentTeam(netId, teamId, scope, body)
+      const nodeId = nodeTeamMatch ? decodeURIComponent(nodeTeamMatch[2]) : undefined;
+      const r = nodeId !== undefined ? setNodeAgentTeam(netId, nodeId, scope, hidden, body.team_id)
+        : req.method === "POST" ? createAgentTeam(netId, resolved.user.user_id, scope, hidden, body)
+        : req.method === "PATCH" ? updateAgentTeam(netId, teamId, scope, hidden, body)
         : deleteAgentTeam(netId, teamId, scope);
       if (!r.ok) { const { ok: _ok, status, ...rest } = r; return withCors(req, Response.json({ ok: false, ...rest }, { status })); }
-      logAudit(resolved.user.user_id, resolved.user.username, `agent_team_${req.method.toLowerCase()}`, "network", netId, JSON.stringify({ team_id: teamId || undefined, ...body }).slice(0, 2000), undefined, netId);
+      logAudit(resolved.user.user_id, resolved.user.username, `agent_team_${req.method.toLowerCase()}`, "network", netId, JSON.stringify({ team_id: teamId || undefined, node_id: nodeId, ...body }).slice(0, 2000), undefined, netId);
       return withCors(req, Response.json(r, { status: req.method === "POST" ? 201 : 200 }));
     }
 

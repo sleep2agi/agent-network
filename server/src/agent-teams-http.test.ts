@@ -76,6 +76,10 @@ beforeAll(async () => {
   }
   expect(createNetworkTokenForNode(U.owner2.id, NET2, "外网节点", N.x1).error ?? null).toBe(null);
   db.run("UPDATE nodes SET display_name = ?1 WHERE node_id = ?2", ["节点一号", N.n1]);
+  // 成员默认「只看授权 Agent」:ownerA 看得见 n1、n2(看不见 n3),ownerB 看得见 n2、n3。
+  const grant = (k: string, ids: string[]) => send(U.owner.token, "PUT", `/api/networks/${NET}/members/${U[k].id}/agent-grants`, { agent_access: "granted", grants: ids.map((node_id) => ({ node_id })) });
+  expect((await grant("ownerA", [N.n1, N.n2])).status).toBe(200);
+  expect((await grant("ownerB", [N.n2, N.n3])).status).toBe(200);
   before = await snapshot();
 }, 60_000);
 
@@ -89,10 +93,10 @@ describe("#764 CRUD (network owner)", () => {
     expect(await teams()).toEqual([]);
     const p = await create("owner", "平台");
     expect(p.status).toBe(201);
-    T.plat = p.body.team.team_id;
-    T.ops = (await create("owner", "运维")).body.team.team_id;
-    T.api = (await create("owner", "接口", T.plat)).body.team.team_id;
-    T.web = (await create("owner", "前端", T.plat)).body.team.team_id;
+    T.plat = p.body.team.id;
+    T.ops = (await create("owner", "运维")).body.team.id;
+    T.api = (await create("owner", "接口", T.plat)).body.team.id;
+    T.web = (await create("owner", "前端", T.plat)).body.team.id;
     const t = await team(T.api);
     expect(t).toMatchObject({ id: T.api, name: "接口", parent_id: T.plat, lead: null, owner: null, members: [] });
   });
@@ -112,7 +116,8 @@ describe("#764 CRUD (network owner)", () => {
     expect(t.lead).toEqual({ node_id: N.n1, alias: "示例节点一", display_name: "节点一号" });
     expect(t.owner).toEqual({ user_id: U.ownerA.id, display_name: "平台负责人" });
     expect((await team(T.ops)).owner).toEqual({ user_id: U.ownerB.id, display_name: "" });
-    expect((await patch("owner", T.plat, { lead_node_id: "node_nope" })).body.error).toBe("lead_not_in_network");
+    const nope = await patch("owner", T.plat, { lead_node_id: "node_nope" });
+    expect(nope.status).toBe(404); expect(nope.body.error).toBe("node_not_found");
     expect((await patch("owner", T.plat, { owner_user_id: U.owner2.id })).body.error).toBe("owner_not_member");
     expect((await patch("owner", T.plat, {})).body.error).toBe("empty_patch");
   });
@@ -126,7 +131,7 @@ describe("#764 CRUD (network owner)", () => {
   test("delete with children rejected; leaf delete clears memberships", async () => {
     const r = await del("owner", T.plat);
     expect(r.status).toBe(409); expect(r.body.error).toBe("team_has_children"); expect(r.body.children).toBe(2);
-    const tmp = (await create("owner", "临时", T.ops)).body.team.team_id;
+    const tmp = (await create("owner", "临时", T.ops)).body.team.id;
     expect((await assign("owner", N.n3, tmp)).status).toBe(200);
     expect(await teamOf(N.n3)).toBe(tmp);
     expect((await del("owner", tmp)).status).toBe(200);
@@ -156,9 +161,9 @@ describe("#764 subtree owner vs sibling owner", () => {
     expect((await patch("ownerA", T.plat, { name: "平台", lead_node_id: N.n2 })).status).toBe(200);
     const c = await create("ownerA", "网关", T.api);
     expect(c.status).toBe(201);
-    T.gw = c.body.team.team_id;
+    T.gw = c.body.team.id;
     expect((await patch("ownerA", T.gw, { parent_id: T.web })).status).toBe(200); // 子树内挪动
-    expect((await patch("ownerA", T.web, { owner_user_id: U.member.id })).status).toBe(200); // 下级的 owner 可以换
+    expect((await patch("ownerA", T.web, { owner_user_id: U.ownerA.id })).status).toBe(200); // 下级的 owner 可以换
     expect((await assign("ownerA", N.n1, T.gw)).status).toBe(200);
     expect((await assign("ownerA", N.n1, T.api)).status).toBe(200);
     expect((await assign("ownerA", N.n1, null)).status).toBe(200);
@@ -205,16 +210,62 @@ describe("#764 read-only callers", () => {
   });
 });
 
+describe("#764 restricted subtree owner: invisible nodes are the same as missing ones", () => {
+  test("cannot set an invisible lead; cannot assign an invisible node; 404 identical to a nonexistent node", async () => {
+    expect((await assign("owner", N.n3, null)).status).toBe(200);
+    const leadHidden = await raw(U.ownerA.token, "PATCH", `/api/networks/${NET}/agent-teams/${T.api}`, { lead_node_id: N.n3 });
+    const leadMissing = await raw(U.ownerA.token, "PATCH", `/api/networks/${NET}/agent-teams/${T.api}`, { lead_node_id: "node_nope" });
+    expect(leadHidden.status).toBe(404);
+    expect(leadHidden.text).toBe(leadMissing.text);
+    expect((await team(T.api)).lead).toBe(null);
+    const putHidden = await raw(U.ownerA.token, "PUT", `/api/networks/${NET}/nodes/${N.n3}/agent-team`, { team_id: T.api });
+    const putMissing = await raw(U.ownerA.token, "PUT", `/api/networks/${NET}/nodes/node_nope/agent-team`, { team_id: T.api });
+    expect(putHidden.status).toBe(404);
+    expect(putHidden.text).toBe(putMissing.text.replace("node_nope", N.n3));
+    expect(await teamOf(N.n3)).toBe(null);
+    // 能看见的节点照常可设
+    const ok = await patch("ownerA", T.api, { lead_node_id: N.n1 });
+    expect(ok.status).toBe(200); expect(ok.body.team.lead.node_id).toBe(N.n1);
+  });
+  test("PATCH response never echoes an invisible lead", async () => {
+    expect((await patch("owner", T.web, { lead_node_id: N.n3 })).status).toBe(200);
+    const r = await patch("ownerA", T.web, { name: "前端组" });
+    expect(r.status).toBe(200);
+    expect(r.body.team.lead).toBe(null);
+    expect(JSON.stringify(r.body)).not.toContain(N.n3);
+  });
+  test("owner_not_member is only reported after the permission check", async () => {
+    denied(await patch("ownerA", T.plat, { owner_user_id: "user_nope" }));
+    denied(await patch("ownerB", T.plat, { owner_user_id: "user_nope" }));
+    denied(await patch("member", T.plat, { owner_user_id: "user_nope" }));
+  });
+});
+
+describe("#764 network owner (not a Hub admin)", () => {
+  test("owner2 manages its own network's teams end to end", async () => {
+    expect(db.get<{ role: string }>("SELECT role FROM users WHERE user_id = ?1", U.owner2.id)?.role).not.toBe("admin");
+    const c = await create("owner2", "外网根", null, NET2);
+    expect(c.status).toBe(201);
+    const id = c.body.team.id;
+    const child = (await create("owner2", "外网子", id, NET2)).body.team.id;
+    expect((await patch("owner2", child, { name: "外网子组", lead_node_id: N.x1, owner_user_id: U.owner2.id }, NET2)).status).toBe(200);
+    expect((await assign("owner2", N.x1, child, NET2)).status).toBe(200);
+    expect((await assign("owner2", N.x1, null, NET2)).status).toBe(200);
+    expect((await send(U.owner2.token, "DELETE", `/api/networks/${NET2}/agent-teams/${child}`)).status).toBe(200);
+    expect((await send(U.owner2.token, "DELETE", `/api/networks/${NET2}/agent-teams/${id}`)).status).toBe(200);
+  });
+});
+
 describe("#764 cross-network", () => {
   test("foreign network's ids are not usable here", async () => {
-    const foreign = (await create("owner2", "外网团队", null, NET2)).body.team.team_id;
+    const foreign = (await create("owner2", "外网团队", null, NET2)).body.team.id;
     expect((await patch("owner", foreign, { name: "x" })).status).toBe(404);
     expect((await del("owner", foreign)).status).toBe(404);
     expect((await create("owner", "x", foreign)).body.error).toBe("parent_not_found");
     expect((await patch("owner", T.api, { parent_id: foreign })).body.error).toBe("parent_not_found");
     expect((await assign("owner", N.n1, foreign)).body.error).toBe("team_not_found");
     expect((await assign("owner", N.x1, T.api)).status).toBe(404);
-    expect((await patch("owner", T.api, { lead_node_id: N.x1 })).body.error).toBe("lead_not_in_network");
+    expect((await patch("owner", T.api, { lead_node_id: N.x1 })).status).toBe(404);
     expect((await assign("owner2", N.x1, T.api, NET2)).body.error).toBe("team_not_found");
     // 非成员 / 别的网络的节点令牌
     expect((await send(U.owner2.token, "GET", `/api/networks/${NET}/agent-teams`)).status).toBe(403);
@@ -231,6 +282,34 @@ describe("#764 node delete cleans up", () => {
     expect((await team(T.plat)).lead).toBe(null);
     expect(db.get("SELECT 1 AS x FROM network_agent_team_members WHERE node_id = ?1", N.n2) ?? null).toBe(null);
     expect(db.get("SELECT 1 AS x FROM network_agent_teams WHERE lead_node_id = ?1", N.n2) ?? null).toBe(null);
+  });
+});
+
+describe("#764 network deletion removes team rows", () => {
+  const rowsIn = (net: string) => ({
+    teams: db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_agent_teams WHERE network_id = ?1", net)!.n,
+    members: db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_agent_team_members WHERE network_id = ?1", net)!.n,
+  });
+  const seed = async (who: string) => {
+    const r = register(`at_${who}_${Date.now()}`, PW, undefined, who);
+    U[who] = { token: r.token!, id: r.user!.user_id };
+    const team_id = (await create(who, "将删", null, r.network_id!)).body.team.id;
+    db.run("INSERT INTO network_agent_team_members (network_id, node_id, team_id) VALUES (?1, ?2, ?3)", [r.network_id!, `node_gone_${who}`, team_id]);
+    expect(rowsIn(r.network_id!)).toEqual({ teams: 1, members: 1 });
+    return r.network_id!;
+  };
+  test("Hub admin deleting an empty network (NETWORK_CLEANUP_TABLES)", async () => {
+    const net = await seed("owner3");
+    const r = await send(U.owner.token, "DELETE", `/api/networks/${net}`);
+    expect(r.status).toBe(200);
+    expect(r.body.cleaned.network_agent_teams).toBe(1);
+    expect(r.body.cleaned.network_agent_team_members).toBe(1);
+    expect(rowsIn(net)).toEqual({ teams: 0, members: 0 });
+  });
+  test("owner deleting its own network", async () => {
+    const net = await seed("owner4");
+    expect((await send(U.owner4.token, "DELETE", `/api/networks/${net}`)).status).toBe(200);
+    expect(rowsIn(net)).toEqual({ teams: 0, members: 0 });
   });
 });
 

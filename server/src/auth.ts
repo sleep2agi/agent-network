@@ -514,7 +514,7 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
     // single-network user to "ambiguous" or auto-resolve writes INTO the
     // deleted network. Remove memberships with the network.
     db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
-    deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); // #2144, #419 (one line: docs pin auth.ts line numbers)
+    deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); for (const t of AGENT_TEAM_TABLES) if (tableExists(t)) db.run(`DELETE FROM ${t} WHERE network_id = ?1`, [networkId]); // #2144, #419, #764 (one line: docs pin auth.ts line numbers)
   });
   return { ok: true };
 }
@@ -953,6 +953,7 @@ const NETWORK_CONTENT_CHECKS: Array<[label: string, sql: string]> = [
   ["pending_node_create_requests", "SELECT COUNT(*) AS cnt FROM node_create_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
   ["pending_node_start_requests", "SELECT COUNT(*) AS cnt FROM node_start_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
 ];
+const AGENT_TEAM_TABLES = ["network_agent_teams", "network_agent_team_members"]; // #764
 const NETWORK_CLEANUP_TABLES = [
   "network_members", "network_member_agent_grants", "network_invites", "api_tokens",
   "node_create_requests", "node_start_requests", "node_stop_requests", "node_rules_requests",
@@ -962,6 +963,8 @@ const NETWORK_CLEANUP_TABLES = [
   "network_tags",
   // 组织架构(board #419):部门是网络本身的元数据。
   "network_departments",
+  // Agent 团队(#764):Agent 自己的组织树,同样是网络元数据。
+  ...AGENT_TEAM_TABLES,
 ];
 
 function tableExists(name: string): boolean {

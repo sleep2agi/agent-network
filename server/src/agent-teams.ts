@@ -74,8 +74,14 @@ function height(parent: Map<string, string | null>, id: string): number {
 }
 const isMember = (networkId: string, userId: string) =>
   !!db.get("SELECT user_id FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
-const nodeInNetwork = (networkId: string, nodeId: string) =>
-  !!db.get("SELECT node_id FROM nodes WHERE network_id = ?1 AND node_id = ?2", networkId, nodeId);
+type Hidden = (n: NodeRef) => boolean;
+/** 写路径用同一个可见性判据:不在本网络、或调用者看不见(只看授权 Agent)→ 一律当不存在(同一个 404,不能拿来探测)。 */
+function visibleNode(networkId: string, nodeId: unknown, hidden: Hidden): boolean {
+  if (typeof nodeId !== "string") return false;
+  const n = db.get<NodeRef>("SELECT node_id, alias, display_name FROM nodes WHERE network_id = ?1 AND node_id = ?2", networkId, nodeId);
+  return !!n && !hidden(n);
+}
+const publicTeam = (networkId: string, id: string, hidden: Hidden) => listAgentTeams(networkId, hidden).find((t) => t.id === id)!;
 const cleanName = (raw: unknown): string | null => {
   if (typeof raw !== "string") return null;
   const n = raw.trim();
@@ -99,7 +105,7 @@ export function ownedScope(networkId: string, userId: string): Set<string> {
 
 type NodeRef = { node_id: string; alias: string | null; display_name: string | null };
 /** 整棵树 + 每个团队的成员 / lead / owner。hidden(node) = true 的节点不出现(只看授权 Agent 的成员)。 */
-export function listAgentTeams(networkId: string, hidden: (n: NodeRef) => boolean) {
+export function listAgentTeams(networkId: string, hidden: Hidden) {
   const nodes = new Map(db.all<NodeRef>("SELECT node_id, alias, display_name FROM nodes WHERE network_id = ?1", networkId).map((n) => [n.node_id, n]));
   const people = new Map(db.all<{ user_id: string; username: string; display_name: string | null }>(
     "SELECT u.user_id, u.username, u.display_name FROM network_members m JOIN users u ON u.user_id = m.user_id WHERE m.network_id = ?1", networkId,
@@ -120,7 +126,7 @@ export function listAgentTeams(networkId: string, hidden: (n: NodeRef) => boolea
 }
 
 /** scope = null 表示全管;否则是调用者能管的团队集合。 */
-export function createAgentTeam(networkId: string, actor: string, scope: Set<string> | null, body: Record<string, unknown>) {
+export function createAgentTeam(networkId: string, actor: string, scope: Set<string> | null, hidden: Hidden, body: Record<string, unknown>) {
   const name = cleanName(body.name);
   if (!name) return fail(400, "invalid_team_name");
   const parentId = nil(body.parent_id) ? null : body.parent_id;
@@ -132,10 +138,10 @@ export function createAgentTeam(networkId: string, actor: string, scope: Set<str
   const id = `team_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const sort = rows(networkId).filter((r) => r.parent_id === parentId).length;
   db.run("INSERT INTO network_agent_teams (network_id, team_id, name, parent_id, sort, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", [networkId, id, name, parentId, sort, actor]);
-  return { ok: true as const, team: one(networkId, id)! };
+  return { ok: true as const, team: publicTeam(networkId, id, hidden) };
 }
 
-export function updateAgentTeam(networkId: string, id: string, scope: Set<string> | null, body: Record<string, unknown>) {
+export function updateAgentTeam(networkId: string, id: string, scope: Set<string> | null, hidden: Hidden, body: Record<string, unknown>) {
   const cur = one(networkId, id);
   if (!cur) return fail(404, "team_not_found");
   // 子树 owner:团队本身要在范围里;改 owner / 挪动还要求它的上级也在范围里(不能改自己那个团队的 owner、不能挪出去)。
@@ -163,13 +169,13 @@ export function updateAgentTeam(networkId: string, id: string, scope: Set<string
   }
   if (body.lead_node_id !== undefined) {
     const l = nil(body.lead_node_id) ? null : body.lead_node_id;
-    if (l !== null && (typeof l !== "string" || !nodeInNetwork(networkId, l))) return fail(400, "lead_not_in_network");
+    if (l !== null && !visibleNode(networkId, l, hidden)) return fail(404, "node_not_found");
     next.lead_node_id = l as string | null; touched = true;
   }
   if (body.owner_user_id !== undefined) {
     const o = nil(body.owner_user_id) ? null : body.owner_user_id;
+    if (!parentInScope) return fail(403, AGENT_TEAM_SCOPE_DENIED); // 先判权限,再判成员:没权限的人不能借此探测谁是成员
     if (o !== null && (typeof o !== "string" || !isMember(networkId, o))) return fail(400, "owner_not_member");
-    if (!parentInScope) return fail(403, AGENT_TEAM_SCOPE_DENIED);
     next.owner_user_id = o as string | null; touched = true;
   }
   if (!touched) return fail(400, "empty_patch");
@@ -178,7 +184,7 @@ export function updateAgentTeam(networkId: string, id: string, scope: Set<string
     "UPDATE network_agent_teams SET name = ?3, parent_id = ?4, sort = ?5, lead_node_id = ?6, owner_user_id = ?7, updated_at = datetime('now') WHERE network_id = ?1 AND team_id = ?2",
     [networkId, id, next.name, next.parent_id, next.sort, next.lead_node_id, next.owner_user_id],
   );
-  return { ok: true as const, team: one(networkId, id)! };
+  return { ok: true as const, team: publicTeam(networkId, id, hidden) };
 }
 
 /** 只删没有子团队的团队;成员归属同一事务清掉(节点变回未分配)。 */
@@ -196,8 +202,8 @@ export function deleteAgentTeam(networkId: string, id: string, scope: Set<string
 }
 
 /** 节点归一个团队(null = 未分配)。子树 owner:目标团队、节点当前的团队(有的话)都要在范围里。 */
-export function setNodeAgentTeam(networkId: string, nodeId: string, scope: Set<string> | null, teamId: unknown) {
-  if (!nodeInNetwork(networkId, nodeId)) return fail(404, "node_not_found");
+export function setNodeAgentTeam(networkId: string, nodeId: string, scope: Set<string> | null, hidden: Hidden, teamId: unknown) {
+  if (!visibleNode(networkId, nodeId, hidden)) return fail(404, "node_not_found");
   const target = nil(teamId) ? null : teamId;
   if (target !== null && !one(networkId, target)) return fail(400, "team_not_found");
   const current = db.get<{ team_id: string }>("SELECT team_id FROM network_agent_team_members WHERE network_id = ?1 AND node_id = ?2", networkId, nodeId)?.team_id ?? null;
