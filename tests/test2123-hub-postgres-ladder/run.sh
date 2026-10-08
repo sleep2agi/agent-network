@@ -210,6 +210,9 @@ run_pg_tests_rc anet_req_slim_test src/requirements-list-slim-http.test.ts
 run_pg_tests_rc anet_req_events_test src/requirement-events-http.test.ts
 # 可选人列表:display_name 单独返回(COALESCE 空串),name 回落不变 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_req_people_test src/requirements-people-http.test.ts
+# Agent 团队(#764):network_agent_teams / network_agent_team_members 新表、同级查重(parent_id IS NULL)、删节点清归属 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_agent_teams_test src/agent-teams-http.test.ts
+run_pg_tests_rc anet_team_whoami_test src/agent-team-whoami-http.test.ts
 # /api/status?node_id=:按节点过滤与网络范围叠加(不越权、未知 id 空列表、light 带 node_id)—— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_status_node_test src/status-node-id-filter-http.test.ts
 # #431 /api/status 记忆化 + ETag:缓存正文 == 当场重算(随机写序列)、写钩子挂在 PG 适配器上、无指向 sessions 的外键/触发器。
@@ -234,8 +237,6 @@ run_pg_tests_rc anet_part_notify_test src/requirement-participant-notify-http.te
 run_pg_tests_rc anet_mcp_proj_events_test src/mcp-projects-events-http.test.ts
 # 组织架构(board #419):network_departments 新表 + network_members.department_id(ALTER)、IS NULL 分支的同级查重 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_departments_test src/departments-http.test.ts
-# Agent 归部门(#751):network_node_departments 新表、JOIN nodes / network_departments、删部门清节点归属 —— 在真 PostgreSQL 上。
-run_pg_tests_rc anet_node_depts_test src/node-departments-http.test.ts
 # 项目列表的 viewer_can.edit(app 任务页审计 L13):一次读授权表 + 每个项目真建卡比对 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_proj_viewer_can_test src/project-viewer-can-http.test.ts
 # 降级节点拒收新任务(#460):REST /api/task 409、MCP send_task / retry / reassign、定时任务 run 记 node_degraded —— 在真 PostgreSQL 上。
@@ -257,6 +258,8 @@ run_pg_tests_rc anet_sched_stuck_test src/scheduled-stuck-http.test.ts
 # 定时任务连续失败(#523):「最近一次成功之后的 failed 数」(TEXT 比较 scheduled_for)、去重条件写(COALESCE(key, '') <> ?2 / ISO 时间比较)、
 # 自动暂停条件写、/runs 的 LEFT JOIN tasks + CASE/SUBSTR 取失败原因 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_sched_failing_test src/scheduled-failures-http.test.ts
+# 定时目标离线(#757):sessions 的状态/五分钟新鲜度、skipped run、告警去重与恢复后重新派发 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_sched_offline_test src/scheduled-offline.test.ts
 # Agent 管定时任务(#733):新列 created_by_node_id(ALTER 加列 + 索引)、按网络 ∧ (目标 ∨ 创建节点) 取集、每节点配额 COUNT、派发时复查创建节点 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_agent_sched_test src/schedule-agent-mcp-http.test.ts
 # 任务过期通知发送方(#500):巡检的 consumed_at < expires_at 判据(TEXT 时间戳比较)、按分支绑参的「前面还有几个」计数、inbox reply 行 + user_inbox 通知、父任务不被改终态 —— 在真 PostgreSQL 上。
@@ -264,6 +267,9 @@ run_pg_tests_rc anet_expiry_notice_test src/task-expiry-notice-http.test.ts
 # 长时间无动静的已开工任务(#519):acked / running 的「每列都早于截止点 + NOT EXISTS 更晚的 task_events」判据(TEXT 时间戳 + datetime 偏移翻译)、
 # ORDER BY … LIMIT 500 + 每行带同样条件的守卫 UPDATE、COALESCE(result, ?) 写原因、task.stale_expired 事件;以及过期通知「前面还有几个」的 24 小时下界 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_stale_open_test src/task-stale-open-http.test.ts
+# 孤儿任务(#758):acked / running 的任务 JOIN sessions(COALESCE(network_id, 'default'))、idle / offline 且 COALESCE(last_seen_at, updated_at) 晚于开工时刻(TEXT 时间戳比较)、
+# datetime 偏移截止点、ON CONFLICT(task_id, event_key) DO NOTHING 的 changes 只通知一次、inbox reply / user_inbox 通知、scheduler 不通知 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_orphan_test src/task-orphan-http.test.ts
 # 派活时的队列信息(#500 第二步):开着任务 COUNT + SUM(CASE) 按分支绑参、24 小时窗口(datetime 偏移翻译)、耗时样本 ORDER BY … LIMIT、
 # /api/status 全量 queue_depth 的 GROUP BY network_id, to_name、写 tasks 让全量缓存失效 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_queue_ahead_test src/task-queue-ahead-http.test.ts

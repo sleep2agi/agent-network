@@ -99,8 +99,34 @@ if (args[0] === "app-server") {
   log(`tui:${threadId}`);
   log(`tui-remote:${args[args.indexOf("--remote") + 1]}`);
   log(`tui-home:${process.env.CODEX_HOME}`);
+  if (process.env.ANET_TEST751_MODEL_MIGRATION_PROMPT === "1") {
+    // Upstream runs this picker before it constructs the main TUI, so there is
+    // deliberately no OpenAI Codex banner to satisfy generic paint detection.
+    console.log("Meet GPT-6 Sol");
+    console.log("1. Try new model");
+    console.log("2. Use existing model");
+    console.log("enter/esc confirm · ctrl+c quit");
+    // The real TUI switches its terminal to raw mode, so a numbered picker
+    // receives one byte immediately. Model that boundary: requiring a newline
+    // here would let a test pass with generic Enter even though production's
+    // safe action is the explicit `2` choice.
+    process.stdin.setRawMode?.(true);
+    process.stdin.resume();
+    const key = await Promise.race([
+      new Promise((resolve) => process.stdin.once("data", (chunk) => resolve(String(chunk)))),
+      Bun.sleep(8_000).then(() => { throw new Error("model migration prompt received no key"); }),
+    ]);
+    log(`tui-migration-key:${JSON.stringify(key)}`);
+    if (key !== "2") throw new Error(`expected explicit keep-existing-model key 2, got ${JSON.stringify(key)}`);
+    console.log("FAKE_CODEX_TUI_MODEL_KEPT");
+  }
   console.log(">_ OpenAI Codex (test co-presence)");
   console.log(`FAKE_CODEX_TUI_RESUMED ${threadId}`);
+  // Model the current input surface, not just a historical banner. The real
+  // Codex TUI does not accept the first task until this composer is visible;
+  // launch/readiness E2Es must exercise that same contract rather than rely
+  // on a fake pane that can never become input-ready.
+  console.log("› Ask Codex to do anything");
   if (process.env.ANET_TEST751_EXPECT_CODEX_HOME
     && process.env.CODEX_HOME !== process.env.ANET_TEST751_EXPECT_CODEX_HOME) {
     console.log("FAKE_CODEX_TUI_CLOUD_FALLBACK");

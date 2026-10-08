@@ -162,6 +162,7 @@ import {
 } from "../src/codex-copresence-profile";
 import {
   codexHomeStagePlan,
+  codexKnownStartupPromptAction,
   codexTuiPaneState,
   describeCodexTuiBlocker,
   describeCodexTuiNotPainted,
@@ -287,7 +288,8 @@ import {
 } from "../src/codex-tui-client-health";
 import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
 import { copresenceRolloutGuard, copresenceVersionProbeScript, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
-import { describeMissingOrdinalFailure } from "../src/codex-rollout-history-guard";
+import { describeMissingOrdinalFailure, probeCodexVersionCached } from "../src/codex-rollout-history-guard";
+import { codexVersionPinMismatch, configuredCodexBin, configuredCodexVersion, resolveCopresenceCodexBin } from "../src/codex-bin-pin";
 import { resumeOrForkOnMissingOrdinal, type ForkRecoveryOptions } from "../src/codex-fork-recovery";
 import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
@@ -575,14 +577,66 @@ function capturePane(sessionName: string, scrollbackLines?: number): string | nu
  */
 async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
+  // A banner paints before the empty-thread composer on real Codex 0.147.
+  // Returning on that first painted frame turned the new fail-closed gate into
+  // a false refusal. Give the current screen a short, bounded settle window and
+  // require the composer to remain visible across multiple polls. Known
+  // blockers still return immediately; an unknown surface remains fail-closed.
+  const inputSettleMs = Math.min(timeoutMs, 5_000);
+  const stableComposerMs = 800;
+  const stableKnownPromptMs = 800;
+  let paintedAt: number | null = null;
+  let composerSeenAt: number | null = null;
+  let knownPromptSeenAt: number | null = null;
+  let handledKnownPrompt = false;
   for (;;) {
     const onScreen = capturePane(sessionName);
     if (onScreen !== null) {
+      const knownAction = handledKnownPrompt ? null : codexKnownStartupPromptAction(onScreen);
+      if (knownAction) {
+        knownPromptSeenAt ??= Date.now();
+        if (Date.now() - knownPromptSeenAt >= stableKnownPromptMs) {
+          // The migration picker is rendered before the main Codex banner, so
+          // this exact-current-screen action must precede generic paint
+          // classification. Re-read immediately before the one permitted key:
+          // stale scrollback or an earlier frame must never authorise input.
+          const freshScreen = capturePane(sessionName);
+          const freshAction = freshScreen === null ? null : codexKnownStartupPromptAction(freshScreen);
+          const paneTarget = freshAction?.key === knownAction.key ? tmuxPaneTarget(sessionName) : null;
+          if (paneTarget) {
+            try {
+              execTmux(["send-keys", "-t", paneTarget, "-l", knownAction.key], { stdio: "ignore" });
+              handledKnownPrompt = true;
+              knownPromptSeenAt = null;
+              console.log("[anet] acknowledged the known Codex model migration prompt; keeping the existing model");
+              await new Promise((r) => setTimeout(r, 400));
+              continue;
+            } catch {
+              // The pane changed between the final read and send. Keep the
+              // readiness gate fail-closed; the next poll must prove the
+              // current screen again before any further action is allowed.
+              knownPromptSeenAt = null;
+            }
+          }
+        }
+      } else {
+        knownPromptSeenAt = null;
+      }
       const everSeen = capturePane(sessionName, 400) ?? onScreen;
       const state = codexTuiPaneState(onScreen, everSeen);
-      if (state !== "not-painted") return state;
+      if (state === "usable") {
+        composerSeenAt ??= Date.now();
+        if (Date.now() - composerSeenAt >= stableComposerMs) return state;
+      } else {
+        composerSeenAt = null;
+        if (state !== "not-painted") {
+          if (state !== "input-not-ready") return state;
+          paintedAt ??= Date.now();
+          if (Date.now() - paintedAt >= inputSettleMs) return state;
+        }
+      }
     }
-    if (Date.now() >= deadline) return "not-painted" as const;
+    if (Date.now() >= deadline) return paintedAt === null ? "not-painted" as const : "input-not-ready" as const;
     await new Promise((r) => setTimeout(r, 400));
   }
 }
@@ -658,6 +712,8 @@ function writeCodexCopresenceEnvFile(codexHome: string, env: Readonly<Record<str
 
 interface CopresenceOptions {
   codexBin: string;
+  /** Board #739 — config.json codexVersion: the codex at codexBin must report exactly this. */
+  codexVersion?: string;
   codexHome: string;
   model?: string;
   port?: number;
@@ -1456,6 +1512,24 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.error(describeMissingDeps(missingDeps, displayName));
     process.exit(1);
   }
+  // Board #734/#739 — the ONE way this start reads `<codexBin> --version`: the POSIX launch
+  // runs `bash -lc "export CODEX_HOME=…; …; exec <codexBin> app-server"`, so probe through
+  // that same login shell (a bare `codex` resolves the same way); Windows spawns codexBin
+  // directly. Used by the version pin below and the paginated-rollout guard further down.
+  const probeLaunchCodexVersion = (bin: string): string | null => process.platform === "win32"
+    ? probeCodexVersionCached(bin)
+    : probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true });
+  // Board #739 — config.json codexVersion: refuse before anything is started or touched.
+  if (opts.codexVersion) {
+    const pinned = codexVersionPinMismatch({
+      expected: opts.codexVersion, actual: probeLaunchCodexVersion(opts.codexBin), codexBin: opts.codexBin, displayName,
+    });
+    if (pinned) {
+      for (const line of pinned) console.error(`[anet] ${line}`);
+      process.exit(1);
+    }
+    console.log(`[anet] codex: ${opts.codexBin} = ${opts.codexVersion} (pinned in config.json)`);
+  }
   if (!opts.token || !opts.token.startsWith("ntok_")) {
     console.error(`[anet] ❌ node token is missing or not an ntok_ (co-presence bridge requires network-scoped ntok_).`);
     console.error(`[anet]    Run \`anet doctor --fix\` to repair, or recreate the node.`);
@@ -1605,12 +1679,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       threadIds: opts.newSession ? [] : [requestedThreadId, typeof pending?.threadId === "string" ? pending.threadId : undefined],
       codexBin: opts.codexBin,
       displayName,
-      // The POSIX launch runs `bash -lc "export CODEX_HOME=…; …; exec <codexBin> app-server"`;
-      // probe through that same login shell so a bare `codex` resolves the same way. The
+      // Same probe as the #739 pin above (login shell on POSIX, like the launch). The
       // launch command is not touched. (config.env cannot set PATH: it is a reserved key.)
-      probeVersion: process.platform === "win32"
-        ? undefined
-        : (bin) => probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true }),
+      probeVersion: probeLaunchCodexVersion,
     });
     for (const line of guard.warnings) console.warn(`[anet] ${line}`);
     if (guard.block) {
@@ -2637,6 +2708,8 @@ interface Profile {
   codexProjectDir?: string;
   /** #1969 — codex-sdk runtime: explicit codex binary (agent-node passes it as codexPathOverride). */
   codexBin?: string;
+  /** #739 — co-presence: the version codexBin must report at start (e.g. "0.159.2"). */
+  codexVersion?: string;
   /** #448 — explicit `--codex-home` override, persisted so every respawn recomputes it from config, not env. */
   codexHome?: string;
   opencodeMode?: "headless" | "copresence";
@@ -8239,7 +8312,9 @@ async function startCommand() {
       }
     }
     await startCopresenceOrchestration(id, {
-      codexBin: opts["codex-bin"] || "codex",
+      // Board #739 — --codex-bin > config.json codexBin > "codex"; codexVersion is checked at start.
+      codexBin: resolveCopresenceCodexBin(opts["codex-bin"], prof),
+      codexVersion: configuredCodexVersion(prof),
       // #448 — absolute, and from the node's own config/dir; never from the environment.
       codexHome: resolve(opts["codex-home"] || (typeof prof.codexHome === "string" && prof.codexHome ? prof.codexHome : codexHomeDefault)),
       model: opts.model,
@@ -18233,6 +18308,10 @@ async function infoCommand() {
   console.log(`  model:    ${profile.model || "(default)"}`);
   console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
   console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
+  // Board #739 — the node's codex pin, only when set.
+  const pinBin = configuredCodexBin(profile as any), pinVersion = configuredCodexVersion(profile as any);
+  if (pinBin) console.log(`  codexBin: ${pinBin}`);
+  if (pinVersion) console.log(`  codexVersion: ${pinVersion}`);
   // Co-presence reduces config to one of two runtime-owned process profiles;
   // pinned Grok ignores a general --tools allowlist in interactive TUI mode.
   const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];

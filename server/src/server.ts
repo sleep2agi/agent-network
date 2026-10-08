@@ -4,12 +4,13 @@ import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip"
 import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
+import { AGENT_TEAM_SCOPE_DENIED, clearNodeFromAgentTeams, createAgentTeam, deleteAgentTeam, listAgentTeams, ownedScope, setNodeAgentTeam, updateAgentTeam } from "./agent-teams.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
-import { auditDepartment, createDepartment, deleteDepartment, listDepartments, listNodePlacements, nodeDepartment, setMemberDepartment, setNodeDepartment, updateDepartment } from "./departments.js";
+import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
 import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupTx, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
@@ -28,12 +29,13 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
+import { flagOrphanTasks } from "./task-orphan.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
-import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, NEW_MEMBER_TASK_ACCESS } from "./task-access.js";
+import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, newMemberTaskAccess } from "./task-access.js";
 import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
@@ -976,6 +978,18 @@ export function patrolExpiredTasks(): void {
   }
 }
 
+// #758 — acked/running tasks whose node went idle/offline after starting them
+// and never replied: one task.orphan_suspected event + one sender notice per
+// task (task-orphan.ts). Status untouched. Same 5-minute timer as the TTL patrol.
+export function patrolOrphanTasks(): void {
+  try {
+    const flagged = flagOrphanTasks();
+    if (flagged.length > 0) console.warn(`[patrol] flagged ${flagged.length} orphan-suspected task(s), notified ${flagged.filter((f) => f.notified).length}`);
+  } catch (e: any) {
+    console.error(`[patrol] orphan phase failed: ${e?.message || e}`);
+  }
+}
+
 function patrolDeliveredStaleTasks(): void {
   try {
     const result = recordDeliveredStaleEvents();
@@ -1860,6 +1874,48 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: true, network_id: netId, user_id: targetUid, agent_access: result.agent_access, restricted: isAgentRestricted(targetUid, netId), grants: result.grants, group_grants: result.group_grants }));
     }
 
+    // ── Agent 团队(#764):Agent 自己的组织树,和人的部门树无关。读:网络任何成员 / 本网络的节点令牌 / Hub 管理员;
+    // 写:owner / admin / Hub 管理员全管;团队 owner_user_id 管自己的子树(规则在 agent-teams.ts);节点令牌只读。 ──
+    const teamMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/agent-teams(?:\/([^/]+))?$/);
+    const nodeTeamMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/nodes\/([^/]+)\/agent-team$/);
+    if (teamMatch || nodeTeamMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const netId = decodeURIComponent((teamMatch ?? nodeTeamMatch)![1]);
+      const notMember = () => withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      if (resolved.networkId && resolved.networkId !== netId) return notMember();
+      const hubAdmin = isHubAdminCredential(resolved);
+      const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
+      if (!hubAdmin && !role && !resolved.networkId) return notMember();
+      if (!db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)) return withCors(req, Response.json({ ok: false, error: "network_not_found" }, { status: 404 }));
+      const canManage = hubAdmin || (!resolved.networkId && (role === "owner" || role === "admin"));
+      // 只看授权 Agent 的成员:看不见的节点不出现在 members / lead 里(和 Agent 列表同一判据);写路径用同一个判据,看不见 = 404。
+      const seen = !hubAdmin && !resolved.networkId && isAgentRestricted(resolved.user.user_id, netId) ? visibleAgents(resolved.user.user_id, netId) : null;
+      const hidden = (n: { node_id: string; alias: string | null }) => !!seen && !seen.nodeIds.includes(n.node_id) && !(n.alias && seen.aliases.includes(n.alias));
+      if (teamMatch && !teamMatch[2] && req.method === "GET") {
+        return withCors(req, Response.json({ ok: true, network_id: netId, teams: listAgentTeams(netId, hidden) }));
+      }
+      const write = teamMatch ? (teamMatch[2] ? ["PATCH", "DELETE"] : ["POST"]) : ["PUT"];
+      if (!write.includes(req.method)) return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+      // null = 全管;节点令牌 / 普通成员 → 空集(任何写都 403);团队 owner → 自己的子树。
+      const scope = canManage ? null : resolved.networkId ? new Set<string>() : ownedScope(netId, resolved.user.user_id);
+      if (scope && scope.size === 0) return withCors(req, Response.json({ ok: false, error: AGENT_TEAM_SCOPE_DENIED }, { status: 403 }));
+      let body: Record<string, unknown> = {};
+      if (req.method !== "DELETE") {
+        try { const b = await req.json(); body = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      }
+      const teamId = teamMatch?.[2] ? decodeURIComponent(teamMatch[2]) : "";
+      const nodeId = nodeTeamMatch ? decodeURIComponent(nodeTeamMatch[2]) : undefined;
+      const r = nodeId !== undefined ? setNodeAgentTeam(netId, nodeId, scope, hidden, body.team_id)
+        : req.method === "POST" ? createAgentTeam(netId, resolved.user.user_id, scope, hidden, body)
+        : req.method === "PATCH" ? updateAgentTeam(netId, teamId, scope, hidden, body)
+        : deleteAgentTeam(netId, teamId, scope);
+      if (!r.ok) { const { ok: _ok, status, ...rest } = r; return withCors(req, Response.json({ ok: false, ...rest }, { status })); }
+      logAudit(resolved.user.user_id, resolved.user.username, `agent_team_${req.method.toLowerCase()}`, "network", netId, JSON.stringify({ team_id: teamId || undefined, node_id: nodeId, ...body }).slice(0, 2000), undefined, netId);
+      return withCors(req, Response.json(r, { status: req.method === "POST" ? 201 : 200 }));
+    }
+
     // ── 多用户:网络里的人类成员通讯录 —— 任何成员(含受限成员)都能看,只有身份字段 ──
     const humansMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/humans$/);
     if (humansMatch && req.method === "GET") {
@@ -1885,13 +1941,11 @@ return Bun.serve({
     const deptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments(?:\/([^/]+))?$/);
     const memberDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/department$/);
     const deptSubMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments\/([^/]+)\/(project-grants|nodes|group)$/);
-    // #751:Agent(节点)归部门。PUT {department_id}(null = 未分配)。
-    const nodeDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/nodes\/([^/]+)\/department$/);
-    if (deptMatch || memberDeptMatch || deptSubMatch || nodeDeptMatch) {
+    if (deptMatch || memberDeptMatch || deptSubMatch) {
       const token = requestToken(req, { allowQueryToken: false });
       const resolved = token ? resolveToken(token) : null;
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
-      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch ?? deptSubMatch ?? nodeDeptMatch)![1]);
+      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch ?? deptSubMatch)![1]);
       if (resolved.networkId && resolved.networkId !== netId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       const hubAdmin = isHubAdminCredential(resolved);
       const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
@@ -1907,33 +1961,7 @@ return Bun.serve({
         // viewer_can:manage = 能改名 / 移动 / 删除 / 换负责人;create_child = 能在它下面建子部门。
         // project_grants(部门项目授权)只给 owner / admin:项目 id 不对只看相关任务的成员公开。
         const departments = listed.departments.map((d) => ({ ...d, viewer_can: { manage: canManage || head.strict.has(d.id), create_child: canManage || head.managed.has(d.id) } }));
-        // #751:归了部门的 Agent 放在单独的 nodes[](旧 app 用 members.length / members[] 数人,混进去会数错);
-        // 没有任何节点归部门 → 不出这个键,响应与以前逐字节相同。只看授权 Agent 的成员只看到授权的那些。
-        let placedNodes = listNodePlacements(netId);
-        if (placedNodes.length && !hubAdmin && !resolved.networkId && isAgentRestricted(resolved.user.user_id, netId)) {
-          const seen = visibleAgents(resolved.user.user_id, netId);
-          placedNodes = placedNodes.filter((n) => seen.nodeIds.includes(n.node_id) || (!!n.alias && seen.aliases.includes(n.alias)));
-        }
-        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, ...(placedNodes.length ? { nodes: placedNodes } : {}), ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
-      }
-      if (nodeDeptMatch) {
-        if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
-        const nodeId = decodeURIComponent(nodeDeptMatch[2]);
-        if (!canManage && (resolved.networkId || !isHead)) return scopeDenied();
-        let nodeBody: Record<string, unknown> = {};
-        try { const b = await req.json(); nodeBody = b && typeof b === "object" && !Array.isArray(b) ? b as Record<string, unknown> : {}; } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
-        if (!canManage) {
-          // 节点令牌不能改;负责人:目标部门在自己的子树里,节点当前所在的部门(有的话)也在 —— 清空只看当前部门。
-          // 和 GET …/departments/:dept/nodes 一样不看 Agent 授权(能管组织 ≠ 能用这个 Agent;放进部门不给任何人新权限)。
-          const target = nodeBody.department_id === undefined || nodeBody.department_id === null || nodeBody.department_id === "" ? null : nodeBody.department_id;
-          const current = nodeDepartment(netId, nodeId);
-          const inScope = (id: unknown) => typeof id === "string" && head.managed.has(id);
-          if (target === null ? !inScope(current) : (!inScope(target) || (current !== null && !inScope(current)))) return scopeDenied();
-        }
-        const r = setNodeDepartment(netId, nodeId, nodeBody.department_id);
-        if (!r.ok) return withCors(req, Response.json({ ok: false, error: r.error }, { status: r.status }));
-        auditDepartment(resolved.user, "node_department_set", netId, `${nodeId} → ${r.department_id ?? "(unassigned)"}${canManage ? "" : " via=leader"}`);
-        return withCors(req, Response.json(r));
+        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
       }
       if (deptSubMatch) {
         const deptId = decodeURIComponent(deptSubMatch[2]);
@@ -2206,12 +2234,12 @@ return Bun.serve({
         if (body.agent_access !== undefined && body.agent_access !== "all" && body.agent_access !== "granted") {
           return withCors(req, Response.json({ ok: false, error: "invalid_agent_access" }, { status: 400 }));
         }
-        // task_access 缺省 NEW_MEMBER_TASK_ACCESS(RFC-038 §9.4);显式传 'all' / 'scoped' 覆盖。
+        // task_access 缺省 newMemberTaskAccess(role)(RFC-038 §9.4,#746 起 member/viewer 为 'scoped');显式传 'all' / 'scoped' 覆盖。
         if (body.task_access !== undefined && body.task_access !== "all" && body.task_access !== "scoped") {
           return withCors(req, Response.json({ ok: false, error: "invalid_task_access" }, { status: 400 }));
         }
         const result = addNetworkMember(netId, body.user_id, body.role || "member", resolved.user.user_id, { agentAccess: body.agent_access, taskAccess: body.task_access });
-        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"} agent_access=${body.agent_access === "all" ? "all" : "granted"} task_access=${body.task_access ?? NEW_MEMBER_TASK_ACCESS}`, undefined, netId);
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"} agent_access=${body.agent_access === "all" ? "all" : "granted"} task_access=${body.task_access ?? newMemberTaskAccess(body.role || "member")}`, undefined, netId);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       }
       if (req.method === "PUT" && targetUid) {
@@ -4211,6 +4239,7 @@ return Bun.serve({
 
       db.transaction(() => {
         db.run("DELETE FROM nodes WHERE node_id = ?1", [node.node_id]);
+        clearNodeFromAgentTeams(node.node_id); // #764
         if (node.alias) {
           db.run(
             "DELETE FROM sessions WHERE alias = ?1 AND (network_id = ?2 OR (CAST(?2 AS TEXT) IS NULL AND network_id IS NULL))",
@@ -5114,7 +5143,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   const deliveredStalePatrolMs = Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) > 0
     ? Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) : 5 * 1000;
   const rateLimitSweepTimer = setInterval(sweepStaleRateLimits, rateLimitSweepMs);
-  const taskPatrolTimer = setInterval(patrolExpiredTasks, taskPatrolMs);
+  const taskPatrolTimer = setInterval(() => { patrolExpiredTasks(); patrolOrphanTasks(); }, taskPatrolMs);
   patrolDeliveredStaleTasks();
   const deliveredStalePatrolTimer = setInterval(patrolDeliveredStaleTasks, deliveredStalePatrolMs);
   const scheduledTaskTimer = startScheduledTaskScheduler();

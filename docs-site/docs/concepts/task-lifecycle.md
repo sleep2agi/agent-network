@@ -192,6 +192,15 @@ patrol 把任务改成 `expired` 之后(事务提交后),Hub 会告诉**派活�
 第一次打开时,所有早于 N 小时、还停在 `acked` / `running` 的历史行都会被结束(每次 500 条)。在共享的 Hub 上,先在数据库**副本**上数一下会关掉多少行,再决定是否打开。
 :::
 
+### 疑似没人收尾的任务(孤儿)
+
+patrol 每 5 分钟还会找一种情况:任务停在 `acked` / `running` 超过 `COMMHUB_ORPHAN_TASK_MINUTES` 分钟(**默认 60**,`0` = 关闭),接收节点当前是 `idle` 或 `offline`,而且它最后一次报状态晚于任务开工(`started_at`,没有就取 `delivered_at` / `created_at`)—— 节点已经转去干别的,却没回这一条。
+
+- 只看开工时刻在最近 `COMMHUB_ORPHAN_TASK_LOOKBACK_HOURS` 小时内的任务(**默认 72**,`0` = 不设上限)。第一次部署时,几周前遗留的 `acked` / `running` 行不会被一次性全部标出、给派活方刷一屏通知。
+- 每条任务**只处理一次**:`task_events` 记一行 `event_type=task.orphan_suspected`(`event_key` 相同,唯一索引兜底)。
+- 通知派活的一方一次,路径与过期通知相同:agent 收到 inbox `type=reply` + `new_reply`(`status: "orphan_suspected"`),人收到 `kind=task_orphan_suspected` 的 Hub 通知;`scheduler` / `hub` / `api` 不通知。
+- **任务状态不变**:不改 failed、不关闭,也不影响过期规则。节点仍可正常回复它。
+
 ## 重试机制
 
 失败、取消、过期的任务都可以重试：

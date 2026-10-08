@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { lockNodeAlias } from "./node-token-ownership.js";
+import { clearNodeFromAgentTeams, agentTeamWhoami } from "./agent-teams.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { nodeHealthSchema, normalizeNodeHealth, recordNodeHealth } from "./node-health-store.js";
@@ -5348,6 +5349,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               );
             }
             db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
+            clearNodeFromAgentTeams(row.child_node_id); // #764
             auditCreateNodeStrict({
               action: "delete_node_completed",
               user_id: null, network_id: row.network_id, target_id: request_id,
@@ -6400,6 +6402,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ schedule_id }) => scheduleCall((id, w) => agentRunScheduleNow(id, w, schedule_id)));
   server.tool("schedule_runs", "A schedule's recent runs.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall(id => agentScheduleRuns(id, schedule_id)));
+
+  // #765: exact authenticated node; team tree is independent of human departments.
+  server.tool("org_whoami", "Your Agent team, ancestors, lead, owner and up to 50 teammates. Read-only.", {},
+    async () => scheduleCall(id => agentTeamWhoami(id.networkId, id.nodeId)));
 
   // #478:tools/list 只列这个调用者真能用的工具(tool-audience.ts)。只滤列表,tools/call 不变。
   const caller: ToolCaller = callerTokenIsNetwork

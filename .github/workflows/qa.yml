@@ -121,6 +121,7 @@ on:
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
+      - 'tests/test-agent-team-whoami/**'
       - 'tests/test710-late-task-replies/**'
       - 'tests/test705-bridge-epipe/**'
       - 'tests/test703-codex-turn-receipts/**'
@@ -213,6 +214,7 @@ on:
       - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test734-codex-paginated-rollout-guard/**'
       - 'tests/test738-codex-fork-on-resume-failure/**'
+      - 'tests/test739-codex-bin-pin/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -338,6 +340,7 @@ on:
       - 'tests/test627-adopted-lifecycle/**'
       - 'tests/test658-codex-adopt-stop/**'
       - 'tests/test674-binding-generation/**'
+      - 'tests/test-agent-team-whoami/**'
       - 'tests/test710-late-task-replies/**'
       - 'tests/test705-bridge-epipe/**'
       - 'tests/test703-codex-turn-receipts/**'
@@ -429,6 +432,7 @@ on:
       - 'tests/test720-codex-commhub-tool-approval/**'
       - 'tests/test734-codex-paginated-rollout-guard/**'
       - 'tests/test738-codex-fork-on-resume-failure/**'
+      - 'tests/test739-codex-bin-pin/**'
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
@@ -947,6 +951,15 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test674 -f tests/test674-binding-generation/Dockerfile .
       - run: docker run --rm --init --cpus=2 --network none anet-test674
+
+  test-agent-team-whoami:
+    name: Agent team identity (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-team-whoami -f tests/test-agent-team-whoami/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-team-whoami
 
   test678-daemon-token-owner:
     name: Daemon token ownership (Docker, SQLite + PostgreSQL HTTP)
@@ -2038,6 +2051,10 @@ jobs:
           # error and only after y / --yes; original unchanged, r/o snapshot, mapping recorded.
           # Mutations M1-M4. Not L1: the image installs two ~150 MB codex binaries (same as test734).
           - test738-codex-fork-on-resume-failure
+          # board #739: per-node codex pin — config.json codexBin is what the launch and the #734
+          # probe run (0.133 first on PATH), codexVersion mismatch refuses before anything starts.
+          # Mutations M1-M4. Not L1: two ~150 MB codex binaries (same as test738).
+          - test739-codex-bin-pin
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}

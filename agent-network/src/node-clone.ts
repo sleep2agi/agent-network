@@ -203,7 +203,7 @@ export function emptyLedger(): CloneLedger {
 /** Settings carried over verbatim. Anything not listed here or below is NOT copied. */
 const COPY_FIELDS = [
   "anet_version", "runtime", "model", "tools", "hub", "network_id",
-  "systemPrompt", "team", "role", "codexBin", "codexCopresence", "codexCopresenceFullAccess",
+  "systemPrompt", "team", "role", "codexBin", "codexVersion", "codexCopresence", "codexCopresenceFullAccess",
   "opencodeMode", "grokCopresence",
 ] as const;
 

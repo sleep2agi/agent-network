@@ -108,23 +108,27 @@ describe("scheduler doorbell for sessions reported without node_id", () => {
     }
   });
 
-  test("a live subscriber counts even when the session row says offline", async () => {
+  test("an offline session is skipped even if a stale subscriber is still connected", async () => {
     seedSession("offline", null);
     const sub = subscribe();
     try {
       await settle();
       const result = dispatchScheduledOccurrence(seedSchedule(), new Date().toISOString(), false);
       await settle();
-      expect(result.status).toBe("delivered");
-      expect(sub.frames.filter((f) => f.type === "new_task")).toHaveLength(1);
+      expect(result.status).toBe("skipped");
+      expect(db.get<{ error_code: string; task_id: string | null }>("SELECT error_code, task_id FROM scheduled_task_runs WHERE run_id = ?1", result.runId))
+        .toEqual({ error_code: "target_offline", task_id: null });
+      expect(sub.frames.filter((f) => f.type === "new_task")).toHaveLength(0);
     } finally {
       await sub.close();
     }
   });
 
-  test("offline session with nobody listening stays queued", () => {
+  test("offline session with nobody listening is skipped without a task", () => {
     seedSession("offline", null);
     const result = dispatchScheduledOccurrence(seedSchedule(), new Date().toISOString(), false);
-    expect(result.status).toBe("queued");
+    expect(result.status).toBe("skipped");
+    expect(db.get<{ error_code: string; task_id: string | null }>("SELECT error_code, task_id FROM scheduled_task_runs WHERE run_id = ?1", result.runId))
+      .toEqual({ error_code: "target_offline", task_id: null });
   });
 });

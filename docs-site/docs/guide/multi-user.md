@@ -10,6 +10,12 @@ Hub 0.9.0-preview.68 起，服务器提供两样已经生效的能力：成员�
 
 授权由该网络的 owner / admin，或 Hub 管理员，通过接口整体替换。授权表示能看见、能对话，不是能改这个 Agent 的配置、规则或日志。能看见一个 Agent，就能看到它完整的聊天记录：不同的人打开同一个节点，看到的消息是一样的——包括 owner 和其他成员发给它的消息，以及授权之前的历史。判定和字段见 [用户与 Agent 权限端点](/api/rest-admin#用户与-agent-权限端点)。
 
+## 成员能看哪些任务
+
+新加入的 member / viewer，任务范围（`task_access`）默认是 `scoped`，也就是「只看相关任务」：自己负责的、参与的、自己建的卡，加上授权给他的项目里的卡（viewer 只看授权项目）。管理员建号、`POST /api/networks/{id}/members`、邀请码加入都按这个默认值入库。升级到这一版之前就在网络里的成员仍是 `all`，可见范围不因升级改变。owner、admin 和 Hub 管理员不受这道限制；新加的 admin 照旧存 `all`。
+
+要让某个成员看全部任务，由 owner / admin 或 Hub 管理员调用 `PUT /api/networks/{id}/members/{user_id}/task-grants`，传 `{"task_access": "all"}`；传 `project_grants` 则整体替换他的项目授权。加成员时也可以直接在 `POST /api/networks/{id}/members` 里带 `"task_access": "all"`。
+
 ## 人与人私聊
 
 同一网络里的两个用户可以用这些接口互发私聊，只接受用户令牌：
@@ -60,15 +66,6 @@ Hub 0.9.0-preview.91 起生效；app 从 0.2.196 起有「管理本部门」入�
 
 设计和取舍见 [RFC-040](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-040-department-head-permissions.md)。
 
-## Agent 归部门
-
-Agent（节点）也可以像人一样归一个部门，不归部门就是「未分配」。归部门只用于组织架构的展示，不给任何人新权限：谁能看、能对话哪个 Agent，仍按 Agent 授权。节点的 `team` 字段不受影响。
-
-- 设置或清空：`PUT /api/networks/{id}/nodes/{node_id}/department`，请求体 `{"department_id": "<部门 id>"}`，传 `null` 表示未分配。
-- 谁能改：owner / admin；或目标部门的负责人（含上级负责人），节点原来已在某个部门时，还要同时负责那个部门；清空时要负责节点当前的部门。其他人和节点令牌返回 403 `department_scope_denied`。
-- 读：`GET /api/networks/{id}/departments` 多一个 `nodes` 数组，每项是 `{kind: "node", node_id, alias, display_name, department_id}`。人仍在 `members` 里，`member_count` 只数人。没有任何 Agent 归部门时不出现 `nodes`，响应与以前相同。只看授权 Agent 的成员只看到授权给他的那些。
-- 删除部门：Agent 不阻止删除，部门删掉后，里面的 Agent 变回未分配。
-
 ## 节点自己的权限
 
 节点（Agent）的权限是它**主人**权限的子集，再按节点自己的**模式**往下收。主人是令牌绑定节点的 `nodes.owner_user_id`；没绑定节点的老令牌，主人是铸令牌的人。
@@ -114,6 +111,16 @@ GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
 
 设计和取舍见 RFC-041。
+
+## Agent 团队
+
+Agent（节点）有自己的一棵组织树「Agent 团队」，和人的部门树互不相关。团队可以多层，同一上级下不重名；一个 Agent 最多归一个团队，不归就是「未分配」。团队只用于组织 Agent，不给任何人新权限：谁能看、能对话哪个 Agent，仍按 Agent 授权。
+
+- 读：`GET /api/networks/{id}/agent-teams` 返回整棵树，每个团队带 `members`（`node_id`、`alias`、`display_name`）、`lead`（负责的 Agent）和 `owner`（`user_id` 和显示名）。网络成员和本网络的节点令牌都能读；只看授权 Agent 的成员只看到授权给他的那些。
+- 建、改、删：`POST /api/networks/{id}/agent-teams` `{name, parent_id?}`；`PATCH …/agent-teams/{team_id}` `{name?, parent_id?, sort?, lead_node_id?, owner_user_id?}`（不能挂到自己或下级下面；`lead_node_id` 必须是本网络的节点，`owner_user_id` 必须是本网络成员）；`DELETE …/agent-teams/{team_id}` 只能删没有子团队的团队，里面的 Agent 变回未分配。
+- 归团队：`PUT /api/networks/{id}/nodes/{node_id}/agent-team` `{"team_id": "<团队 id>"}`，传 `null` 表示未分配。
+- 谁能改：owner / admin 全部；团队的 owner 管这个团队的子树（改名、建子团队、在子树里移动、把 Agent 放进或移出子树、设 lead），但不能改自己那个团队的 owner，也不能把它移出去或删掉。其他成员和节点令牌只读，写返回 403 `agent_team_scope_denied`。
+- 删除节点时，它的团队归属一起清掉，以它为 lead 的团队 lead 变成空。
 
 ## 相关
 

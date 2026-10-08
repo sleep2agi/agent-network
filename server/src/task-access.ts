@@ -17,7 +17,7 @@ import { deleteDepartmentGrantsForProject, departmentGrantsForMember, headCardsF
 
 // ── 表结构(放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次) ──
 // ALTER 的 DEFAULT 'all' 让**升级前已有的**成员行全部落在旧语义 —— 升级不收窄任何人;新成员按下面的
-// NEW_MEMBER_TASK_ACCESS 入库。项目授权:行存在 = 可看,can_edit=1 = 可改。
+// newMemberTaskAccess() 入库(#746:默认 'scoped')。项目授权:行存在 = 可看,can_edit=1 = 可改。
 try { db.exec("ALTER TABLE network_members ADD COLUMN task_access TEXT NOT NULL DEFAULT 'all'"); } catch {}
 db.exec(`
   CREATE TABLE IF NOT EXISTS network_member_project_grants (
@@ -33,12 +33,19 @@ db.exec(`
 `);
 
 /**
- * 新成员(管理员建号 / POST members / 邀请码)默认的任务范围。
- * 暂时是 'all':app ≤0.2.163 没有任务权限界面,从那些 app 加的成员若默认 scoped 会一张卡都看不到,
- * 管理员也没法在那些 app 里放宽。等 owner 的设备都 ≥0.2.164 且他确认后,改回 'scoped'(只改这一行)。
- * 显式 task_access='scoped'(POST members / PUT task-grants)不受这个默认值影响。
+ * 新成员默认的任务范围(#746,owner 选方案 2):只看相关任务。入库路径全部显式写这一列,不靠列 DEFAULT:
+ *   ① addNetworkMember —— POST /api/networks/:id/members、POST /api/admin/users(带 network_id)
+ *   ② joinByInvite     —— POST /api/networks/join(邀请码)
+ * owner 行(register 自动建网、createNetwork、db.ts 的 V3.13 迁移)不经过这里,照旧落列默认 'all'。
+ * 列 DEFAULT 仍是 'all'、不迁移老行 —— 升级前的成员一个都不收窄。显式 task_access 覆盖默认;
+ * 管理员随时可 PUT /api/networks/:id/members/:uid/task-grants {task_access:'all'} 放宽。
  */
-export const NEW_MEMBER_TASK_ACCESS: TaskAccessMode = "all";
+export const NEW_MEMBER_TASK_ACCESS: TaskAccessMode = "scoped";
+
+/** 新成员行要写入的 task_access。admin 角色本来就不受这一列约束,照旧存 'all'(降级成 member 时与今天行为一致)。 */
+export function newMemberTaskAccess(role: string): TaskAccessMode {
+  return UNRESTRICTED_ROLES.has(role) ? "all" : NEW_MEMBER_TASK_ACCESS;
+}
 
 export type TaskAccessMode = "all" | "scoped";
 export type ProjectGrant = { project_id: string; can_edit: boolean };

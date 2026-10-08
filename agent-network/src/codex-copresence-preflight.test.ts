@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CODEX_HOME_INHERITED_FILES,
   codexHomeStagePlan,
+  codexKnownStartupPromptAction,
   codexTuiPaneState,
   describeCodexTuiBlocker,
   describeCodexTuiNotPainted,
@@ -59,6 +60,45 @@ describe("what the node HOME inherits", () => {
   });
 });
 
+describe("known startup prompt actions", () => {
+  const migration = `
+  Meet GPT-6 Sol
+
+  Our latest Sol is more intelligent and more efficient.
+
+› 1. Try new model
+  2. Use existing model
+
+  enter/esc confirm · ctrl+c quit`;
+
+  test("the exact model migration picker chooses the explicit keep-existing option", () => {
+    expect(codexKnownStartupPromptAction(migration)).toEqual({
+      kind: "keep-existing-model",
+      key: "2",
+    });
+  });
+
+  test("a heading alone or a partial picker authorises no key", () => {
+    expect(codexKnownStartupPromptAction("Meet GPT-6 Sol")).toBeNull();
+    expect(codexKnownStartupPromptAction("Meet GPT-6 Sol\n1. Try new model")).toBeNull();
+    expect(codexKnownStartupPromptAction(
+      "Meet GPT-6 Sol\n1. Try new model\n2. Use existing model",
+    )).toBeNull();
+  });
+
+  test("a different dialog with the same numeric choices authorises no key", () => {
+    expect(codexKnownStartupPromptAction(
+      "Choose a profile\n1. Try new model\n2. Use existing model\nenter/esc confirm",
+    )).toBeNull();
+  });
+
+  test("unknown migration copy is fail-closed", () => {
+    expect(codexKnownStartupPromptAction(
+      migration.replace("Meet GPT-6 Sol", "Meet an unknown model"),
+    )).toBeNull();
+  });
+});
+
 describe("is the TUI actually usable", () => {
   const SIGN_IN = `  Welcome to Codex, OpenAI's command-line coding agent
   Sign in with ChatGPT to use Codex as part of your paid plan
@@ -91,6 +131,28 @@ describe("is the TUI actually usable", () => {
     expect(codexTuiPaneState(WORKING)).toBe("usable");
   });
 
+  test("the Codex 0.147 empty-thread composer is usable even when its suggestion rotates", () => {
+    const emptyThread = `  │ >_ OpenAI Codex (v0.147.0) │
+
+  To get started, describe a task or try one of these commands:
+
+  › Use /skills to list available skills
+
+    gpt-5.5 default · ~/proj`;
+    expect(codexTuiPaneState(emptyThread)).toBe("usable");
+  });
+
+  test("🔴 a painted TUI without the current composer is not ready for the first message", () => {
+    const announcement = `  │ >_ OpenAI Codex (v0.159.2) │\n\n  Meet GPT-6 Sol\n\n  Continue`;
+    expect(codexTuiPaneState(announcement)).toBe("input-not-ready");
+  });
+
+  test("a composer seen only in scrollback does not authorise injection now", () => {
+    const modal = "  Meet a new model\n  Press Enter to continue";
+    const history = `${WORKING}\n${modal}`;
+    expect(codexTuiPaneState(modal, history)).toBe("input-not-ready");
+  });
+
   test("🔴 launcher output before the TUI paints is NOT usable", () => {
     // The bug this exists for: an earlier rule read "pane has ≥3 non-empty
     // lines" as ready. It fired at t≈3s on exactly this text, six seconds
@@ -111,7 +173,7 @@ describe("is the TUI actually usable", () => {
   });
 
   test("every message says where to look", () => {
-    for (const b of ["sign-in", "update-prompt", "trust-prompt"] as const) {
+    for (const b of ["sign-in", "update-prompt", "trust-prompt", "input-not-ready"] as const) {
       expect(describeCodexTuiBlocker(b, "n", "n-tui")).toContain("tmux attach -t '=n-tui'");
     }
     expect(describeCodexTuiNotPainted("n", "n-tui", 25_000)).toContain("tmux attach -t '=n-tui'");
@@ -123,6 +185,12 @@ describe("is the TUI actually usable", () => {
 
   test("not-painted is reported as its own thing, not as a blocker", () => {
     expect(describeCodexTuiNotPainted("n", "n-tui", 25_000)).toContain("did not paint");
+  });
+
+  test("unknown startup surfaces fail closed without pretending to dismiss them", () => {
+    const msg = describeCodexTuiBlocker("input-not-ready", "n", "n-tui");
+    expect(msg).toContain("message input is not ready");
+    expect(msg).toContain("No key was sent automatically");
   });
 });
 

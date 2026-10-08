@@ -10,6 +10,12 @@ A member or viewer added from this version on has `agent_access` `granted` by de
 
 The network owner or admin, or a Hub admin, replaces the grant list through the API. A grant means the person can see that Agent and talk to it. It does not let them change its config, rules, or logs. Anyone who can see an Agent sees its full chat history: different people opening the same node see the same messages, including messages the owner and other members sent it and history from before the grant. The rule and the fields are in [Users & Agent Access Endpoints](/en/api/rest-admin#users-agent-access-endpoints).
 
+## Which tasks a member can see
+
+A member or viewer added from this version on has task access (`task_access`) `scoped` by default, meaning related tasks only: cards they own, participate in, or created, plus cards in projects granted to them (a viewer sees only granted projects). Admin-created accounts, `POST /api/networks/{id}/members`, and invite-code joins all use this default. Members who were already in the network before the upgrade stay on `all`, so the upgrade does not change what they can see. Owners, admins, and Hub admins are not limited by this rule; a newly added admin is still stored as `all`.
+
+To let a member see every task, the network owner or admin, or a Hub admin, calls `PUT /api/networks/{id}/members/{user_id}/task-grants` with `{"task_access": "all"}`; passing `project_grants` replaces their project grants. You can also pass `"task_access": "all"` directly in `POST /api/networks/{id}/members` when adding the member.
+
 ## Human-to-human messages
 
 Two users in the same network can message each other with these endpoints. User tokens only:
@@ -59,15 +65,6 @@ Endpoints:
 | `GET /api/requirements?department_id=` | Only cards whose owner is in that department (sub-departments included), or whose Agent belongs to such a person, within what the caller can see. Also a `requirements_list` parameter in MCP |
 
 The design and its trade-offs are in [RFC-040](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-040-department-head-permissions.md).
-
-## Agents in departments
-
-An Agent (node) can belong to a department, the same way a person does. A node with no department is "unassigned". This is for the org chart only and grants nobody anything new: who can see or message an Agent still follows Agent grants. The node's `team` field is not touched.
-
-- Set or clear: `PUT /api/networks/{id}/nodes/{node_id}/department` with `{"department_id": "<department id>"}`; `null` means unassigned.
-- Who may change it: owner / admin, or the head of the target department (including heads above it). If the node is already in a department, the head must also manage that one; clearing needs the head of the node's current department. Everyone else, and node tokens, get 403 `department_scope_denied`.
-- Read: `GET /api/networks/{id}/departments` gains a `nodes` array of `{kind: "node", node_id, alias, display_name, department_id}`. People stay in `members`, and `member_count` still counts people only. When no Agent is in a department, `nodes` is absent and the response is unchanged. Members who only see granted Agents see only the granted ones.
-- Deleting a department: Agents do not block it; when the department is deleted, its Agents become unassigned.
 
 ## A node's own permissions
 
@@ -128,6 +125,16 @@ GET /api/networks/{id}/node-permission-report?since=<ISO time>
 The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
 
 See RFC-041 for the design and trade-offs.
+
+## Agent teams
+
+Agents (nodes) have their own org tree, "agent teams", separate from the human department tree. Teams can nest, sibling names are unique, and an agent belongs to at most one team (none = unassigned). Teams only organise agents and grant nobody anything: who can see or message an agent is still decided by agent grants.
+
+- Read: `GET /api/networks/{id}/agent-teams` returns the whole tree; each team carries `members` (`node_id`, `alias`, `display_name`), `lead` (the lead agent) and `owner` (`user_id` and display name). Any network member and this network's node tokens can read it; a member restricted to granted agents only sees those agents.
+- Create, edit, delete: `POST /api/networks/{id}/agent-teams` `{name, parent_id?}`; `PATCH …/agent-teams/{team_id}` `{name?, parent_id?, sort?, lead_node_id?, owner_user_id?}` (no cycles; `lead_node_id` must be a node in this network, `owner_user_id` a member of it); `DELETE …/agent-teams/{team_id}` only for a team without child teams, and its agents become unassigned.
+- Assign: `PUT /api/networks/{id}/nodes/{node_id}/agent-team` `{"team_id": "<team id>"}`, or `null` to unassign.
+- Who can write: network owner / admin can do everything. A team's owner manages that team's subtree (rename, create child teams, move within the subtree, put agents in or take them out of the subtree, set the lead) but cannot change their own team's owner, move it out or delete it. Other members and node tokens are read-only; writes return 403 `agent_team_scope_denied`.
+- Deleting a node removes its team membership, and a team whose lead was that node gets no lead.
 
 ## See also
 

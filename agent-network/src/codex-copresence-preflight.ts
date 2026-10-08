@@ -98,8 +98,29 @@ export function codexHomeStagePlan(
 // once the TUI sat on the sign-in page, once on the update prompt. The pane is
 // the only place that distinguishes "running" from "usable".
 
-export type CodexTuiBlocker = "sign-in" | "update-prompt" | "trust-prompt";
+export type CodexTuiBlocker = "sign-in" | "update-prompt" | "trust-prompt" | "input-not-ready";
 export type CodexTuiPaneState = CodexTuiBlocker | "not-painted" | "usable";
+
+export interface CodexKnownStartupPromptAction {
+  readonly kind: "keep-existing-model";
+  readonly key: "2";
+}
+
+/**
+ * Return the one startup action whose exact current-screen contract we know.
+ *
+ * Codex's model-migration picker defaults to "Try new model" and both Enter
+ * and Escape confirm that highlighted choice. Sending a generic confirmation
+ * would therefore silently change the node's configured model. The explicit
+ * `2` choice preserves the current model and acknowledges this exact notice.
+ */
+export function codexKnownStartupPromptAction(onScreen: string): CodexKnownStartupPromptAction | null {
+  if (!onScreen.includes("Meet GPT-6 Sol")) return null;
+  if (!onScreen.includes("1. Try new model")) return null;
+  if (!onScreen.includes("2. Use existing model")) return null;
+  if (!onScreen.includes("enter/esc confirm")) return null;
+  return { kind: "keep-existing-model", key: "2" };
+}
 
 /** Markers taken verbatim from panes observed on 2026-08-20. */
 const BLOCKER_MARKERS: ReadonlyArray<{ blocker: CodexTuiBlocker; needles: readonly string[] }> = [
@@ -116,6 +137,24 @@ const PAINTED_MARKERS: readonly string[] = [
   "OpenAI Codex",      // the working banner: ">_ OpenAI Codex (v0.147.0)"
   "Welcome to Codex",  // the sign-in page
   "Update available!", // the update prompt paints before the banner
+];
+
+/**
+ * A banner proves that Codex painted once; it does not prove that the composer
+ * can accept the first message now. Startup announcements and other modal
+ * surfaces are rendered over the same painted TUI, so treating the banner as
+ * ready lets the first injected message disappear into that surface (#719).
+ *
+ * Keep this deliberately narrower than the popup recogniser: this PR only
+ * establishes the fail-closed readiness boundary. Known popup dismissal is a
+ * separate operation and must never be inferred from a missing composer.
+ */
+const INPUT_READY_MARKERS: readonly string[] = [
+  "Ask Codex to do anything",
+  // Codex 0.147 rotates the suggested prompt (`Explain this codebase`,
+  // `Use /skills …`, …), but this empty-thread composer heading is stable.
+  // Do not accept a generic `›`: startup pickers use that glyph as well.
+  "To get started, describe a task or try one of these commands:",
 ];
 
 /**
@@ -149,6 +188,7 @@ export function codexTuiPaneState(onScreen: string, everSeen: string = onScreen)
     if (m.needles.some((n) => onScreen.includes(n))) return m.blocker;
   }
   if (!PAINTED_MARKERS.some((n) => everSeen.includes(n))) return "not-painted";
+  if (!INPUT_READY_MARKERS.some((n) => onScreen.includes(n))) return "input-not-ready";
   return "usable";
 }
 
@@ -175,6 +215,9 @@ export function describeCodexTuiBlocker(
         + `[anet]   replace the codex binary every node on this host shares.\n${where}`;
     case "trust-prompt":
       return `${head}\n[anet]   Blocked on: the folder-trust prompt.\n${where}`;
+    case "input-not-ready":
+      return `${head}\n[anet]   Blocked on: the message input is not ready; an unknown startup surface may still be open.\n`
+        + `[anet]   No key was sent automatically. Inspect the TUI before retrying.\n${where}`;
   }
 }
 
