@@ -207,6 +207,7 @@ anet node start <node> --fork-on-resume-failure --yes    # no terminal (scripts 
 - Not confirmed (any answer but y, or non-interactive without `--yes`): no fork, no file is touched.
 - Before forking, the original rollout is **copied** to a read-only snapshot in `<node dir>/rollout-snapshots/`. The original is never modified (its hash is compared again after the fork; if it changed, the node is not switched).
 - Old thread → new thread, the snapshot path and the time are recorded in `<node dir>/codex-fork-recovery.json`, next to config.json. The thread recorded in config changes only after the fork succeeds.
+- If existing mapping history cannot be read, contains invalid JSON, or lacks a `forks` array, confirmed recovery stops before taking a snapshot or forking, preserving the file and reporting its path. Back up the current state, check permissions or restore valid history from backup, then retry; do not delete history to bypass the check. A first recovery with no history file still creates it normally.
 - 🔴 The new thread still reads its history from the **original rollout file**: keep it, do not move or delete it.
 - Currently covers `anet node start` of co-presence nodes only.
 

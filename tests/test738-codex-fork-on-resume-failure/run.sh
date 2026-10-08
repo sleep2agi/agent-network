@@ -160,6 +160,7 @@ PY
     no-yes) launch mixed - --fork-on-resume-failure; no_fork_no_changes || red=1 ;;
     other-class) launch broken - --fork-on-resume-failure --yes; no_fork_no_changes || red=1 ;;
     fork) launch mixed - --fork-on-resume-failure --yes; forked_ok >/dev/null || red=1 ;;
+    mapping) (cd agent-network && bun test src/codex-fork-recovery.test.ts) >/tmp/t738-mapping-mutant.log 2>&1 || red=1 ;;
   esac
   cp "$bak" "$file"; rm -f "$bak"
   if [ "$red" -eq 1 ]; then pass "mutation $name → red ($check)"; else fail "mutation $name stayed green ($check)"; fi
@@ -168,6 +169,7 @@ mutate M1-fork-without-confirmation "$FORK" '    let confirmed = false;' '    le
 mutate M2-any-error-class "$FORK" '    if (!o.enabled || !o.threadId || !isMissingOrdinalError(message)) throw error;' '    if (!o.enabled || !o.threadId) throw error;' other-class
 mutate M3-writes-the-original "$FORK" '    const after = sha256OfFile(original);' '    require("node:fs").appendFileSync(original, "\n"); const after = snap.sha256;' fork
 mutate M4-snapshot-left-writable "$FORK" '  chmodSync(path, statSync(path).mode & 0o555);' '  chmodSync(path, statSync(path).mode | 0o200);' fork
+mutate M5-unreadable-history-is-empty "$FORK" '    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];' '    return []; // mutant: swallow all history errors' mapping
 
 echo "T738 PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]
