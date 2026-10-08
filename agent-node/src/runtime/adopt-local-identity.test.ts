@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { verifyAdoptionLocalIdentity, verifyAdoptionProcess } from "./adopt-local-identity.js";
 
 const roots: string[] = [];
@@ -60,4 +61,21 @@ test("process exact config/alias/home and reproducible environment", () => {
   expect(() => verifyAdoptionProcess(identity, { ...evidence, env: { ...env, HOME: "/other" } }, opts)).toThrow("adopt_process_home_mismatch");
   expect(() => verifyAdoptionProcess(identity, { ...evidence, env: { ...env, TMUX: "/other/socket,12,0" } }, opts)).toThrow("adopt_tmux_socket_mismatch");
   expect(() => verifyAdoptionProcess(identity, evidence, { ...opts, reproducibleEnv: { HOME: env.HOME, PATH: env.PATH } })).toThrow("adopt_env_not_reproducible:API_KEY");
+});
+// Bun 1.3 fs.chmodSync drops setgid/sticky bits, so use the real chmod(1).
+const chmodBits = (path: string, mode: number) => { if (spawnSync("chmod", [mode.toString(8), path]).status !== 0) throw new Error("chmod failed"); };
+test("#747 sticky group-writable workdir accepted only for the workdir itself", () => {
+  const f = fixture(); const anet = join(f.req.workdir, ".anet");
+  chmodBits(f.req.workdir, 0o3775);
+  expect(verifyAdoptionLocalIdentity(f.req, f.opts).configPath).toBe(f.configPath);
+  chmodBits(f.req.workdir, 0o2775);
+  expect(() => verifyAdoptionLocalIdentity(f.req, f.opts)).toThrow("adopt_path_writable_by_others");
+  chmodBits(f.req.workdir, 0o3775);
+  for (const [path, ok] of [[anet, 0o700], [join(anet, "nodes"), 0o700], [f.nodeDir, 0o700], [f.configPath, 0o600]] as const) {
+    chmodBits(path, path === f.configPath ? 0o1660 : 0o3775);
+    expect(() => verifyAdoptionLocalIdentity(f.req, f.opts)).toThrow("adopt_path_writable_by_others");
+    chmodBits(path, ok);
+  }
+  expect(verifyAdoptionLocalIdentity(f.req, f.opts).configPath).toBe(f.configPath);
+  expect(() => verifyAdoptionLocalIdentity(f.req, { ...f.opts, uid: f.opts.uid + 1 })).toThrow("adopt_path_owner_mismatch");
 });
