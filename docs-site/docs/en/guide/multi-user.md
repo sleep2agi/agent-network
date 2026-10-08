@@ -129,6 +129,16 @@ The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, p
 
 See RFC-041 for the design and trade-offs.
 
+## Agent teams
+
+Agents (nodes) have their own org tree, "agent teams", separate from the human department tree. Teams can nest, sibling names are unique, and an agent belongs to at most one team (none = unassigned). Teams only organise agents and grant nobody anything: who can see or message an agent is still decided by agent grants.
+
+- Read: `GET /api/networks/{id}/agent-teams` returns the whole tree; each team carries `members` (`node_id`, `alias`, `display_name`), `lead` (the lead agent) and `owner` (`user_id` and display name). Any network member and this network's node tokens can read it; a member restricted to granted agents only sees those agents.
+- Create, edit, delete: `POST /api/networks/{id}/agent-teams` `{name, parent_id?}`; `PATCH …/agent-teams/{team_id}` `{name?, parent_id?, sort?, lead_node_id?, owner_user_id?}` (no cycles; `lead_node_id` must be a node in this network, `owner_user_id` a member of it); `DELETE …/agent-teams/{team_id}` only for a team without child teams, and its agents become unassigned.
+- Assign: `PUT /api/networks/{id}/nodes/{node_id}/agent-team` `{"team_id": "<team id>"}`, or `null` to unassign.
+- Who can write: network owner / admin can do everything. A team's owner manages that team's subtree (rename, create child teams, move within the subtree, put agents in or take them out of the subtree, set the lead) but cannot change their own team's owner, move it out or delete it. Other members and node tokens are read-only; writes return 403 `agent_team_scope_denied`.
+- Deleting a node removes its team membership, and a team whose lead was that node gets no lead.
+
 ## See also
 
 - [Accounts, Tokens & Roles](/en/guide/account-system)

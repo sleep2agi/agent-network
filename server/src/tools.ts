@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { lockNodeAlias } from "./node-token-ownership.js";
+import { clearNodeFromAgentTeams } from "./agent-teams.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { nodeHealthSchema, normalizeNodeHealth, recordNodeHealth } from "./node-health-store.js";
@@ -5348,6 +5349,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               );
             }
             db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
+            clearNodeFromAgentTeams(row.child_node_id); // #764
             auditCreateNodeStrict({
               action: "delete_node_completed",
               user_id: null, network_id: row.network_id, target_id: request_id,
