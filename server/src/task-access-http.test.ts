@@ -2,7 +2,7 @@
 //
 // 场景:Hub 管理员 admin 的网络 NET。成员:
 //   alice —— 新建成员,经授权接口显式设成 scoped,授权 P1(只看)、P2(可改);
-//            (新成员默认值 NEW_MEMBER_TASK_ACCESS 暂时是 'all',见「默认值与授权接口」)
+//            (#746 起新成员默认值 NEW_MEMBER_TASK_ACCESS 就是 'scoped',见「默认值与授权接口」)
 //   carol —— 升级前的老成员(task_access='all'):行为必须与今天逐字相同;
 //   vic   —— 经授权接口显式设成 scoped 的 viewer,授权 P3(只看)。
 // admin 建的卡:c_own(负责人 alice)、c_part(参与人 alice)、c_p1 / c_p2 / c_p3(在项目里)、c_other(与 alice 无关)。
@@ -117,10 +117,14 @@ afterAll(() => {
 });
 
 describe("默认值与授权接口", () => {
-  test("新成员默认 all:常量是 'all';管理员建号 / POST members / 邀请码加入都落在 all 且看得见全部卡", async () => {
-    expect(NEW_MEMBER_TASK_ACCESS).toBe("all");
-    const all = ["ta-other", "ta-own", "ta-p1", "ta-p2", "ta-p3", "ta-part"];
+  test("#746 新成员默认 scoped:管理员建号 / POST members / 邀请码加入都落在 scoped —— 只看自己的卡与授权项目;admin 角色照旧 all", async () => {
+    expect(NEW_MEMBER_TASK_ACCESS).toBe("scoped");
     const stamp = Date.now();
+    const names = async (t: string) => {
+      const r = await get(t, `/api/requirements?network_id=${NET}`);
+      expect(r.status).toBe(200);
+      return (r.body.requirements as any[]).map(x => x.name).filter((n: string) => n.startsWith("ta-") || n.startsWith("dm-")).sort();
+    };
     // 管理员建号
     const u1 = { username: `ta_new1_${stamp}`, password: PW, network_id: NET, role: "member" };
     expect((await send(admin.token, "POST", "/api/admin/users", u1)).status).toBe(200);
@@ -128,24 +132,43 @@ describe("默认值与授权接口", () => {
     // POST /members 不带 task_access
     const u2 = register(`ta_new2_${stamp}`, PW);
     expect((await send(admin.token, "POST", `/api/networks/${NET}/members`, { user_id: u2.user!.user_id, role: "member" })).status).toBe(200);
-    // 邀请码加入
+    // 邀请码加入(member 与 viewer 两种邀请)
     const inv = await send(admin.token, "POST", `/api/networks/${NET}/invite`, { role: "member" });
     const u3 = register(`ta_new3_${stamp}`, PW);
     expect((await send(u3.token!, "POST", "/api/networks/join", { invite_code: inv.body.invite_code })).status).toBe(200);
-    for (const [id, token] of [[l1.body.user.user_id, l1.body.token], [u2.user!.user_id, u2.token!], [u3.user!.user_id, u3.token!]] as [string, string][]) {
+    const paths: Array<[string, string, string]> = [["admin-users", l1.body.user.user_id, l1.body.token], ["post-members", u2.user!.user_id, u2.token!], ["invite", u3.user!.user_id, u3.token!]];
+    for (const [path, id, token] of paths) {
       const g = await get(admin.token, `/api/networks/${NET}/members/${id}/task-grants`);
-      expect(g.body.task_access).toBe("all");
-      expect(g.body.restricted).toBe(false);
-      expect(await listIds(token)).toEqual(all);
+      expect([path, g.body.task_access, g.body.restricted]).toEqual([path, "scoped", true]);
       const me = await get(token, "/api/auth/me");
-      expect(me.body.networks.find((n: any) => n.network_id === NET).task_access).toBe("all");
+      expect(me.body.networks.find((n: any) => n.network_id === NET).task_access).toBe("scoped");
+      // 自己负责的卡 + 授权项目 P1 看得见;别人的无关卡(ta-other)列表里没有、直取也是 404
+      expect((await send(admin.token, "POST", "/api/requirements", { network_id: NET, name: `dm-own-${path}`, owner: userRef(id) })).status).toBe(201);
+      expect((await send(admin.token, "PUT", `/api/networks/${NET}/members/${id}/task-grants`, { project_grants: [P["ta-P1"]] })).status).toBe(200);
+      expect([path, await names(token)]).toEqual([path, [`dm-own-${path}`, "ta-p1"]]);
+      expect((await get(token, `/api/requirements/${C["ta-other"].id}?network_id=${NET}`)).status).toBe(404);
     }
-    // POST /members 显式传 scoped 仍然生效
+    // 管理员仍能经现有接口把成员放宽到 all,之后看见全部卡
+    expect((await send(admin.token, "PUT", `/api/networks/${NET}/members/${u2.user!.user_id}/task-grants`, { task_access: "all" })).status).toBe(200);
+    expect((await names(u2.token!))).toContain("ta-other");
+    // admin 角色(POST members / 邀请码)照旧存 'all';不受这一列约束
+    const a1 = register(`ta_new5_${stamp}`, PW);
+    expect((await send(admin.token, "POST", `/api/networks/${NET}/members`, { user_id: a1.user!.user_id, role: "admin" })).status).toBe(200);
+    const invA = await send(admin.token, "POST", `/api/networks/${NET}/invite`, { role: "admin" });
+    const a2 = register(`ta_new6_${stamp}`, PW);
+    expect((await send(a2.token!, "POST", "/api/networks/join", { invite_code: invA.body.invite_code })).status).toBe(200);
+    for (const a of [a1, a2]) {
+      const g = await get(admin.token, `/api/networks/${NET}/members/${a.user!.user_id}/task-grants`);
+      expect([g.body.task_access, g.body.restricted]).toEqual(["all", false]);
+      expect(await names(a.token!)).toContain("ta-other");
+    }
+    // 升级前的老成员(carol,直接写 'all' 的行)照旧全看见
+    expect(await names(carol.token)).toContain("ta-other");
+    // POST /members 显式传 all 仍然生效
     const u4 = register(`ta_new4_${stamp}`, PW);
-    expect((await send(admin.token, "POST", `/api/networks/${NET}/members`, { user_id: u4.user!.user_id, role: "member", task_access: "scoped" })).status).toBe(200);
-    expect((await get(admin.token, `/api/networks/${NET}/members/${u4.user!.user_id}/task-grants`)).body.task_access).toBe("scoped");
-    expect(await listIds(u4.token!)).toEqual([]);
-    for (const id of [l1.body.user.user_id, u2.user!.user_id, u3.user!.user_id, u4.user!.user_id]) {
+    expect((await send(admin.token, "POST", `/api/networks/${NET}/members`, { user_id: u4.user!.user_id, role: "member", task_access: "all" })).status).toBe(200);
+    expect((await get(admin.token, `/api/networks/${NET}/members/${u4.user!.user_id}/task-grants`)).body.task_access).toBe("all");
+    for (const id of [l1.body.user.user_id, u2.user!.user_id, u3.user!.user_id, u4.user!.user_id, a1.user!.user_id, a2.user!.user_id]) {
       expect((await send(admin.token, "DELETE", `/api/networks/${NET}/members/${id}`)).status).toBe(200);
     }
   });

@@ -55,7 +55,8 @@ beforeAll(async () => {
     expect((await send(U.owner.token, "POST", "/api/admin/users", { username, password: PW, network_id: NET, role })).status).toBe(200);
     const login = await send("", "POST", "/api/auth/login", { username, password: PW });
     U[k] = { token: login.body.token, id: login.body.user.user_id };
-    if (scoped && role !== "admin") expect((await send(U.owner.token, "PUT", `/api/networks/${NET}/members/${U[k].id}/task-grants`, { task_access: "scoped" })).status).toBe(200);
+    // #746 起新成员默认就是 scoped;allMember 显式放宽到 'all'(模拟升级前的老成员)。
+    if (role !== "admin") expect((await send(U.owner.token, "PUT", `/api/networks/${NET}/members/${U[k].id}/task-grants`, { task_access: scoped ? "scoped" : "all" })).status).toBe(200);
   };
   await add("admin", "admin");
   for (const k of ["head", "parentHead", "member", "be", "sales"]) await add(k, "member");
