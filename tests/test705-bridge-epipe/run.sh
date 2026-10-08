@@ -60,7 +60,7 @@ expect_red() {
 
   cp /repo/agent-network/src/codex-copresence-bridge-log.ts /tmp/codex-copresence-bridge-log.ts
   bun /repo/mutation.mjs /repo/agent-network/src/codex-copresence-bridge-log.ts \
-    'then tee_arg=-p; fi;' 'then tee_arg=; fi;'
+    'tee $tee_arg >(${sink})' 'tee >(${sink})'
   expect_red tee-without-p "tee keeps the writer alive" \
     bash -lc 'cd /repo/agent-network && bun test src/codex-copresence-bridge-log.test.ts -t "tee keeps the writer alive"'
   cp /tmp/codex-copresence-bridge-log.ts /repo/agent-network/src/codex-copresence-bridge-log.ts
