@@ -257,6 +257,8 @@ run_pg_tests_rc anet_sched_stuck_test src/scheduled-stuck-http.test.ts
 # 定时任务连续失败(#523):「最近一次成功之后的 failed 数」(TEXT 比较 scheduled_for)、去重条件写(COALESCE(key, '') <> ?2 / ISO 时间比较)、
 # 自动暂停条件写、/runs 的 LEFT JOIN tasks + CASE/SUBSTR 取失败原因 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_sched_failing_test src/scheduled-failures-http.test.ts
+# 定时目标离线(#757):sessions 的状态/五分钟新鲜度、skipped run、告警去重与恢复后重新派发 —— 在真 PostgreSQL 上。
+run_pg_tests_rc anet_sched_offline_test src/scheduled-offline.test.ts
 # Agent 管定时任务(#733):新列 created_by_node_id(ALTER 加列 + 索引)、按网络 ∧ (目标 ∨ 创建节点) 取集、每节点配额 COUNT、派发时复查创建节点 —— 在真 PostgreSQL 上。
 run_pg_tests_rc anet_agent_sched_test src/schedule-agent-mcp-http.test.ts
 # 任务过期通知发送方(#500):巡检的 consumed_at < expires_at 判据(TEXT 时间戳比较)、按分支绑参的「前面还有几个」计数、inbox reply 行 + user_inbox 通知、父任务不被改终态 —— 在真 PostgreSQL 上。

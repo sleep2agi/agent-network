@@ -11,6 +11,7 @@ import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { blockerTimedOut, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
 import { evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
+import { scheduledTargetOffline, sendOfflineNotice, type OfflineNotice } from "./scheduled-offline.js";
 
 export type ScheduleSpec =
   | { type: "once"; run_at: string }
@@ -366,6 +367,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
   let finalStatus = "failed";
   let createdTaskId: string | undefined;
   const notices: StuckNotice[] = [];
+  let offlineNotice: OfflineNotice | null = null;
   const timedOut: Array<{ taskId: string; fromStatus: string }> = [];
 
   db.transaction(() => {
@@ -376,6 +378,35 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
        VALUES (?1, ?2, ?3, ?4, 'claiming')`,
       [runId, row.schedule_id, row.network_id, scheduledFor],
     );
+
+    // Board #757 — do not create a task that will merely expire while its
+    // exact target session is offline. This branch deliberately precedes the
+    // overlap check: target_offline is the actionable reason for this round.
+    const targetNode = db.get<{ node_id: string; alias: string | null }>(
+      "SELECT node_id, alias FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+      row.target_node_id, row.network_id,
+    );
+    if (targetNode?.alias && scheduledTargetOffline(targetNode.node_id, targetNode.alias, row.network_id, advanceAfter.getTime())) {
+      finalStatus = "skipped";
+      db.run(
+        `UPDATE scheduled_task_runs SET status = 'skipped', error_code = 'target_offline',
+           error_message = 'The target node is offline; no task was created', completed_at = datetime('now') WHERE run_id = ?1`,
+        [runId],
+      );
+      const claimed = db.run(
+        "UPDATE scheduled_tasks SET offline_alert_at = ?1 WHERE schedule_id = ?2 AND offline_alert_at IS NULL",
+        [advanceAfter.toISOString(), row.schedule_id],
+      ).changes === 1;
+      if (claimed) offlineNotice = {
+        scheduleId: row.schedule_id, scheduleName: row.name, networkId: row.network_id,
+        createdBy: row.created_by, createdByNodeId: row.created_by_node_id,
+        targetAlias: targetNode.alias,
+      };
+      if (advanceSchedule) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, advanceAfter);
+      return;
+    }
+    // Seeing the target online rearms exactly one warning for a future offline episode.
+    if (targetNode?.alias) db.run("UPDATE scheduled_tasks SET offline_alert_at = NULL WHERE schedule_id = ?1 AND offline_alert_at IS NOT NULL", [row.schedule_id]);
 
     if (row.overlap_policy === "skip") {
       const placeholders = OPEN_TASK_STATUSES.map((_, i) => `?${i + 2}`).join(", ");
@@ -430,10 +461,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       }
     }
 
-    const node = db.get<{ node_id: string; alias: string | null }>(
-      "SELECT node_id, alias FROM nodes WHERE node_id = ?1 AND network_id = ?2",
-      row.target_node_id, row.network_id,
-    );
+    const node = targetNode;
     if (!node?.alias) {
       finalStatus = "failed";
       db.run(
@@ -541,6 +569,7 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
   try {
     for (const t of timedOut) logTaskEvent(t.taskId, t.fromStatus, "expired", "hub-scheduler", `stuck timeout; schedule=${row.schedule_id} run=${runId}`);
     for (const n of notices) sendStuckNotice(n);
+    if (offlineNotice) sendOfflineNotice(offlineNotice);
     // #523 — a run that failed at dispatch counts toward the consecutive-failure alert (task failures arrive via db.ts).
     if (finalStatus === "failed") evaluateScheduleFailures(row.schedule_id, advanceAfter);
     if (createdTaskId) logTaskEvent(createdTaskId, null, "delivered", "hub-scheduler", `schedule=${row.schedule_id} run=${runId}`);
