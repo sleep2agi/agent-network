@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
-const root = '/home/test829-native';
+const root = '/home/node/test883';
 const project = `${root}/project`;
 // The real client uses the daemon-advertised HOME plus the node folder.
 const childProject = process.env.TEST829_CLIENT_DRIVER ? `${root}/home/oc829` : project;

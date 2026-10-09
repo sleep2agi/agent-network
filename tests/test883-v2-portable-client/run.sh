@@ -4,10 +4,10 @@ set -euo pipefail
 test "$SOURCE_COMMIT" = "${EXPECTED_SOURCE_COMMIT:?}"
 test "$(id -u)" = 1000
 test "$(id -g)" = 1000
-test "${TEST829_TMUX_SOCKET:?}" = /home/test829-native/tmux.sock
+test "${TEST829_TMUX_SOCKET:?}" = /home/node/test883/tmux.sock
 unset TMUX TMUX_PANE
-mkdir -m 700 -p /home/test829-native/home /tmp/tmux-1000
-env HOME=/home/test829-native/home tmux -S "$TEST829_TMUX_SOCKET" new-session -d -s test829-socket-anchor 'sleep 300'
+mkdir -m 700 -p /home/node/test883/home /tmp/tmux-1000
+env HOME=/home/node/test883/home tmux -S "$TEST829_TMUX_SOCKET" new-session -d -s test829-socket-anchor 'sleep 300'
 trap 'tmux -S "$TEST829_TMUX_SOCKET" kill-session -t =test829-socket-anchor 2>/dev/null || true' EXIT
 ln -s "$TEST829_TMUX_SOCKET" /tmp/tmux-1000/default
 tmux -S /tmp/tmux-1000/default has-session -t =test829-socket-anchor

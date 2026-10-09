@@ -30,13 +30,13 @@ COPY --from=client /client-web /client-web
 COPY --from=client /app/tests/test-layout-sweep/harness.mjs /client-plumbing/harness.mjs
 COPY tests/test543-opencode-v2-copresence/stub-model.py /test827/stub-model.py
 COPY tests/test883-v2-portable-client /workspace/tests/test883-v2-portable-client
-RUN mkdir -p /home/test829-native /artifacts /run/user/1000 && chown node:node /home/test829-native /artifacts /run/user/1000 && chmod 700 /run/user/1000
+RUN mkdir -p /home/node/test883 /artifacts /run/user/1000 && chown node:node /home/node/test883 /artifacts /run/user/1000 && chmod 700 /run/user/1000
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT \
     CLIENT_SOURCE_COMMIT=4500c233e38fbdc2db5932f5edbe92f4fdd1ab9c \
     ANET_AGENT_NODE_BIN=/opt/node_modules/@sleep2agi/agent-node/dist/cli.js \
-    ANET_TMUX_SOCKET=/home/test829-native/tmux.sock \
-    TEST829_TMUX_SOCKET=/home/test829-native/tmux.sock \
+    ANET_TMUX_SOCKET=/home/node/test883/tmux.sock \
+    TEST829_TMUX_SOCKET=/home/node/test883/tmux.sock \
     TEST829_CLIENT_DRIVER=/workspace/tests/test883-v2-portable-client/create-client.mjs \
     TEST829_MODEL_DRIVER=/workspace/tests/test883-v2-portable-client/model-client.mjs \
     TEST829_LIFECYCLE=1 \
