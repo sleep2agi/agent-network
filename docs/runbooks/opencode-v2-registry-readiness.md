@@ -24,6 +24,34 @@ transport ignores AbortSignal. It rechecks connection after registry success;
 this is a startup observation, not a guarantee against future disconnects.
 Post-readiness reconnect/recovery remains the existing runtime lifecycle.
 
+## V2 capability decision (#828)
+
+Decision recorded on 2026-10-09 for **`@opencode/cli@2.0.22` only**:
+retain the explicit unsafe-tools preview gate. Native deny experiments are
+not enough to offer an ANet default safe mode. They do not establish an OS
+sandbox, nor do they constrain code that runs before model-tool dispatch.
+
+| Capability | Observed evidence | Supported conclusion / limit |
+| --- | --- | --- |
+| Native shell/read/write/edit deny | Six configurations, 24 forced calls and six unauthenticated API refusals in [test828 policy](../tests/report-test828.txt) | Inline deny and project deny refused execution with unchanged/absent sentinels. Inline deny over project allow also refused. This is a pinned upstream experiment, not the product's safe preset. |
+| Rule ordering and V1 environment switches | The same policy probe | A later matching allow executes; V1 deny environment switches do not override V2 inline allow. Do not copy V1 policy or infer safety from a deny rule's presence alone. |
+| CommHub dispatch and receipt identity | [test828 MCP](../tests/report-test828-mcp.txt) | The controlled model called the real isolated Hub with the node's identity; sender spoofing was refused without a task write. The test used all-allow permissions and catalog discovery, not a selective safe policy or autonomous paid-model behavior. |
+| Cold first-turn MCP availability | [test832 main restack](../tests/report-test832-main-restack.txt) | Three cold starts at 0/1200/3500 ms passed dispatch, identity and receipt checks. Missing tools, authentication refusal and startup deadline stop before model usage. Startup readiness does not promise permanent availability. |
+| CLI lifecycle and generated observer cleanup | [test827 main restack](../tests/report-test827-main-restack.txt) and the stronger cleanup replay in [test832 main restack](../tests/report-test832-main-restack.txt) | Isolated Linux CLI/Hub/TUI start, receipt and stop were exercised. This does not accept native Windows/macOS clients, production rollout or complete backup restoration. |
+| Default safe mode / hostile tasks | Not established by these suites | **Unsupported for V2.** Keep refusing V2 without explicit unsafe-tools opt-in; do not default, inherit or auto-retry that consent. Use only trusted workspaces and tasks in the preview. |
+
+Before changing the last row, separately verify selective CommHub allow
+without local-tool escape, plugin/local MCP execution before permissions,
+user-global and managed configuration, agent-specific/saved permissions,
+reload/discovery overrides, and filesystem/network/process isolation. A
+passing identity test cannot stand in for any of these checks. Missing
+evidence keeps the existing gate closed; it is not permission to broaden it.
+
+The CLI/daemon/client entrypoints and signed client release have their own
+acceptance under #829 and #539. Package publication or a merged UI patch
+does not change this capability decision. The table consolidates existing
+evidence; it makes no new upstream-version or registry-availability claim.
+
 ## Restore, validate and roll back
 
 1. Restore the repository and an approved exact-main runtime release using the
