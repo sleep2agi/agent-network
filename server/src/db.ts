@@ -320,6 +320,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 `);
 
+// Human profile avatar. Additive for existing databases; old binaries ignore it.
+if (!db.all<{ name: string }>("PRAGMA table_info(users)").some((c) => c.name === "avatar_url")) {
+  db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT");
+}
+
 // #261 P0-2 (2026-06-28): must_change_password flag. Added via ALTER
 // (not in the CREATE block above) so it's a no-op on fresh DBs that
 // already get the column via the CREATE path's full definition AND a

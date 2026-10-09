@@ -1455,6 +1455,30 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: true, user: resolved.user, networks, current_network: resolved.networkId, credential }));
     }
 
+    // Separate route: older Hubs must return unsupported, not silently ignore
+    // avatar_url in their existing profile PUT and pretend that it was saved.
+    if (url.pathname === "/api/auth/me/avatar" && req.method === "PUT") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
+      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      let body: unknown;
+      try { body = await req.json(); } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body)
+          || !Object.hasOwn(body, "avatar_url")
+          || Object.keys(body).some((key) => key !== "avatar_url")) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_avatar_body", reason: "expected only avatar_url (string or null)" }, { status: 400 }));
+      }
+      const avatar = validateAvatarUrl((body as { avatar_url: unknown }).avatar_url);
+      if (!avatar.ok) return withCors(req, Response.json({ ok: false, error: "invalid_avatar_url", reason: avatar.reason }, { status: 400 }));
+      // No supplied target ID/alias; user identity comes exclusively from auth.
+      db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [avatar.value, resolved.user.user_id]);
+      return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: avatar.value }));
+    }
+
     if (url.pathname === "/api/auth/me" && req.method === "PUT") {
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
@@ -1473,7 +1497,7 @@ return Bun.serve({
           db.run(`UPDATE users SET ${updates.join(", ")} WHERE user_id = ?${params.length}`, params);
         }
         // Re-fetch
-        const user = db.get<any>("SELECT user_id, username, display_name, email, role FROM users WHERE user_id = ?1", resolved.user.user_id);
+        const user = db.get<any>("SELECT user_id, username, display_name, avatar_url, email, role FROM users WHERE user_id = ?1", resolved.user.user_id);
         return withCors(req, Response.json({ ok: true, user }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
