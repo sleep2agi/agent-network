@@ -143,6 +143,29 @@ function walk(root: string): string[] {
 const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
+  test("#829 V2 create writes generation/mode into actual child config, not flags", async () => {
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
+    const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
+    expect(acks.map(a => a.status)).toEqual(["started"]);
+    expect(spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBe("v2");
+    expect(cfg.opencodeMode).toBe("copresence");
+    expect(cfg.flags).toEqual({ opencodeUnsafeTools: true, timeout: 600000 });
+    expect(flags.opencodeGeneration).toBe("v2");
+  });
+
+  test("#829 unsafe opt-in is required before write or spawn; existing config unchanged", async () => {
+    const dir = join(workDir, ".anet", "nodes", "v2-child");
+    mkdirSync(dir, { recursive: true });
+    const original = JSON.stringify({ alias: "v2-child", opencodeGeneration: "v1" });
+    writeFileSync(join(dir, "config.json"), original);
+    const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", flags: { opencodeGeneration: "v2" } }, "cr_v2refuse");
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_requires_unsafe_opt_in");
+    expect(spawned).toHaveLength(0);
+    expect(readFileSync(join(dir, "config.json"), "utf8")).toBe(original);
+  });
   test("「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels", async () => {
     // The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`
     // (sleep2agi/agent-network-app create-node-workdir.ts). That folder must be what lands on disk.
