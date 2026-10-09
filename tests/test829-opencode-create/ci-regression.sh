@@ -12,6 +12,7 @@ mkdir -m 700 "$HOME"
 cd /opt/node_modules/@sleep2agi/agent-node
 bun test src/runtime/opencode-create-profile.test.ts src/runtime/node-name-652.test.ts
 bun test src/runtime/opencode-copresence/launcher-health.test.ts src/runtime/opencode-copresence/v2-session.test.ts
+bun test src/runtime/opencode-start-completion.test.ts src/runtime/start-daemon.test.ts
 cd /workspace
 bun test agent-network/src/opencode-create-security-parity.test.ts
 bun test agent-network/src/opencode-start-mode.test.ts agent-network/src/opencode-copresence-cli.test.ts
