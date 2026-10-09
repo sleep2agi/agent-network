@@ -4489,7 +4489,7 @@ return Bun.serve({
       }
       const params: any[] = [requestId];
       let sql = `SELECT request_id, daemon_node_id, child_name, network_id, runtime, model, status, error,
-                        created_at, delivered_at, acked_at
+                        created_at, delivered_at, acked_at, child_node_id, launch_verified_at
                  FROM node_create_requests WHERE request_id = ?1`;
       sql = addNetworkScope(sql, params, restScope);
       const row = db.get<Record<string, unknown>>(sql, ...params);

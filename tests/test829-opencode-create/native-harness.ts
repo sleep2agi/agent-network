@@ -103,6 +103,15 @@ try {
   check('daemon did not reject the runtime after registration',
     !(logs.daemon ?? '').includes('runtime_capability_check_failed'));
   check('child token remains active after daemon verdict', settled?.status === 'succeeded' && settled.revoked_at === null);
+  let completion: any;
+  check('client REST receives explicit daemon launch proof and exact child identity', await until(async () => {
+    completion = await api(`/api/node-create-requests?request_id=${created.request_id}&network_id=${networkId}`);
+    return completion.request?.status === 'succeeded'
+      && completion.request?.child_node_id === row.child_node_id
+      && typeof completion.request?.launch_verified_at === 'number'
+      && completion.request.launch_verified_at > 0;
+  }, 5000));
+  console.log('client launch confirmation:', JSON.stringify(completion.request));
   console.log('L4 task receipt from remotely created runtime');
   const sent = await api('/api/task', { alias: 'oc829', task: 'Reply with exactly REMOTE829', network_id: networkId });
   check('task accepted', sent.ok && sent.message_id);
