@@ -76,3 +76,27 @@ mounts, and EXPECTED_SOURCE_COMMIT=8fdf716fb471a6763f32f015cc1eb90e364e3af0.
 It has passed L0, L1, L2, all L3 acceptance cases and mutations M1/M2;
 remaining mutations are still running. Candidate CI 156 SUCCESS / 6 running,
 zero failures at this snapshot; still no merge/publication approval.
+
+Final independent native result — 19:12 CST readback
+---------------------------------------------------
+anet-test738-8fdf-native completed T738 PASS=14 FAIL=0, exit 0.
+All original five mutation controls failed their acceptance as expected:
+M1 unconfirmed fork, M2 unrelated-error fork, M3 original rollout modification,
+M4 writable snapshot, M5 unreadable mapping history silently treated as empty.
+The original native fixture contract and all six L3 acceptance paths remain
+intact. The additional pass is only the four-case L0 transport gate.
+Reproduction:
+sg docker -c 'docker build \
+ -f tests/test738-codex-fork-on-resume-failure/Dockerfile \
+ --build-arg SOURCE_COMMIT=8fdf716fb471a6763f32f015cc1eb90e364e3af0 \
+ -t anet-test738:release-8fdf .'
+sg docker -c 'docker run --name anet-test738-8fdf-native \
+ -e EXPECTED_SOURCE_COMMIT=8fdf716fb471a6763f32f015cc1eb90e364e3af0 \
+ anet-test738:release-8fdf'
+Build context was the clean release/opencode-v2-delivery worktree at the SHA
+above; no source mounts or host credentials were supplied at runtime.
+
+New-head PR CI at this readback: 160 SUCCESS / 2 IN_PROGRESS / 0 FAILURE.
+This report does not substitute the two remaining CI jobs or formal main-SHA
+release gates. The test-only correction is ready for their independent verdict;
+PR #2554 remains unmerged, with no npm publication or production restart.
