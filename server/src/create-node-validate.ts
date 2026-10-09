@@ -337,6 +337,9 @@ function kebab(k: string): string {
 // shell, no string concat). Each value has already passed type/enum
 // validation, so String() coercion is safe.
 export function buildAnetArgs(spec: NodeSpec): string[] {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+    if (Object.prototype.hasOwnProperty.call(spec, field)) throw new ValidationError("flag_location_invalid", { field, reason: "use node_spec.flags" });
+  }
   validateName(spec.name);
   validateRuntime(spec.runtime);
   validateModel(spec.model);

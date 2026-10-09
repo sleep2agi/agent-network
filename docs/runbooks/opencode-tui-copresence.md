@@ -1,5 +1,34 @@
 # OpenCode TUI 共存运行手册
 
+## OpenCode V2 远程创建接口（#829 开发中）
+
+以下是 Hub/daemon 参数与落盘切片，**不是已经上线的客户端入口或真实 V2
+生命周期验收**。现有 CLI、原生 V2 权限、客户端界面和正式发布仍各有门禁。
+
+新接口沿用 runtime `opencode-cli`，在 `node_spec.flags` 里显式传
+`opencodeGeneration: "v2"` 和 `opencodeUnsafeTools: true`。
+V2 仍是高风险 preview：所有本地工具可用，只能用于可信任务，不能默认勾选、
+从其它 runtime/模板继承授权，或把无授权拒绝改成自动重试。
+Hub 与 daemon 都校验类型、runtime 和 opt-in；这两个字段误放顶层会被拒绝。
+旧 Hub/daemon 不认识 flags 中的字段时应明确拒绝，不能偷偷退回 V1。
+
+daemon 直接写子节点配置（不调用 CLI create）：代际写到顶层
+`opencodeGeneration`，V2 模式写为 `opencodeMode: "copresence"`；
+权限保留在 `flags.opencodeUnsafeTools`。省略代际保持旧 V1 行为，
+显式 V1 不接受这条新建接口的 unsafe 开关。已有节点不迁移。
+
+验证入口为 `tests/test829-opencode-create/Dockerfile`，绑定完整源码 SHA，
+运行时传同一 `EXPECTED_SOURCE_COMMIT`，报告在容器
+`/tmp/art/report-test829.txt`。目前测试真实 Hub handler 存取与 daemon 写盘，
+启动进程是测试替身；不据此宣称真实 V2 上线成功。下一门需要精确版本就绪、
+真 daemon/Hub/V2 注册和任务回执、停止/再启动及客户端 UI 回读。
+
+此切片不新增常驻服务、端口、代理、密钥来源或迁移。仍用本文的启动流程，
+凭据由已有 Hub/节点密钥流程提供，不写入测试报告。正式升级只从经过门禁的
+main 完整 SHA 构建；回滚须回到已验证版本，先停止新增 V2 节点，不能让旧版本
+静默接管 V2 配置。数据库/节点数据来自原有备份，clone 不包含这些数据；
+本切片测试不构成灾难恢复演练证明。
+
 状态：候选已实现并通过 Docker + 实机验收，尚未合并或发布。已发布的 npm `latest` 不含本功能；当前 preview 包也要等本候选正式发布后才可使用以下一等命令。
 
 ## 用户操作

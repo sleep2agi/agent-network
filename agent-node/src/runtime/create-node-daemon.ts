@@ -717,6 +717,9 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
 }
 
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+    if (Object.prototype.hasOwnProperty.call(spec, field)) throw new Error(`flag_location_invalid:${field}:use node_spec.flags`);
+  }
   {
     // #652 — same rule as the hub. The hub forwards the trimmed name, so anything that
     // is not already in its normalized form here did not come through a current hub.

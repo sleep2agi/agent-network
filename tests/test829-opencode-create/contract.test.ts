@@ -5,6 +5,13 @@ import { buildAnetArgsDaemon, childConfigFieldsFromSpec } from "../../agent-node
 const spec = { name: "v2-child", runtime: "opencode-cli" as const, model: "stub/model" };
 const valid = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
 
+test("misplaced controls fail even on a direct daemon request", () => {
+  for (const fields of [{ opencodeGeneration: "v2" }, { opencodeUnsafeTools: true }]) {
+    expect(() => buildAnetArgs({ ...spec, ...fields })).toThrow("flag_location_invalid");
+    expect(() => buildAnetArgsDaemon({ ...spec, ...fields })).toThrow("flag_location_invalid");
+  }
+});
+
 test("Hub and daemon produce identical CLI-compatible V2 argv", () => {
   const expected = ["node", "create", "v2-child", "--runtime", "opencode-cli", "--model", "stub/model", "--opencode-generation", "v2", "--opencode-unsafe-tools"];
   expect(buildAnetArgs({ ...spec, flags: valid })).toEqual(expected);

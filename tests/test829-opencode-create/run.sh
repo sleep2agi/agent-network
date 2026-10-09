@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+mkdir -p "${ARTIFACT_DIR:=/tmp/art}"
+exec > >(tee "$ARTIFACT_DIR/report-test829.txt") 2>&1
 [[ "${SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]]
 test "$SOURCE_COMMIT" = "${EXPECTED_SOURCE_COMMIT:?}"
 export COMMHUB_DB=/tmp/test829-hub.db
