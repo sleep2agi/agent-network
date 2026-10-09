@@ -22,6 +22,17 @@ daemon 直接写子节点配置（不调用 CLI create）：代际写到顶层
 权限保留在 `flags.opencodeUnsafeTools`。省略代际保持旧 V1 行为，
 显式 V1 不接受这条新建接口的 unsafe 开关。已有节点不迁移。
 
+daemon 新建 OpenCode 节点时，先复用 CLI 的 no-follow 私密目录与 Git
+未跟踪校验，再在同一运行用户的 `HOME/.anet/opencode-runtime-bindings/`
+建立外部身份记录，最后原子写入含 token 的 0600 配置。不能只复制项目
+目录后补造绑定；已有配置只有相同 create request/node_id、alias 且绑定
+完整时才允许重试。绑定或私密路径被篡改时应调查并走显式重建，不能删除
+身份记录来绕过拒绝。CLI 与 daemon 的四个安全模块为字节一致镜像，
+由 `opencode-create-security-parity.test.ts` 阻止单边修改。
+恢复时节点私密配置及上述 HOME 绑定属于加密备份数据，不属于 Git 源码；
+必须恢复至匹配的规范项目路径，否则重新注册/创建。此补丁不改端口、
+代理、常驻服务入口、凭据来源或正式发布流程，也未完成整机恢复演练。
+
 验证入口为 `tests/test829-opencode-create/Dockerfile`，绑定完整源码 SHA，
 运行时传同一 `EXPECTED_SOURCE_COMMIT`，报告在容器
 `/tmp/art/report-test829.txt`。目前测试真实 Hub handler 存取与 daemon 写盘，

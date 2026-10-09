@@ -25,6 +25,7 @@ import {
 } from "./config-apply.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
+import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
 import {
   execVersionReal,
   requiredCliStatus,
@@ -1037,7 +1038,11 @@ export async function handleCreateNodeDoorbell(
       return;
     }
   }
-  try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
+  // OpenCode creates and validates each path component without following
+  // symlinks inside writeCreatedOpencodeProfile, before any token is written.
+  if (req.node_spec.runtime !== "opencode-cli") {
+    try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
+  }
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
   const { flags: flagsObj, codexCopresence, opencodeGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
@@ -1058,7 +1063,11 @@ export async function handleCreateNodeDoorbell(
       ...(opencodeGeneration ? { opencodeGeneration } : {}),
       ...(opencodeMode ? { opencodeMode } : {}),
     };
-    atomicWriteJson(childCfgPath, childCfg);
+    if (req.node_spec.runtime === "opencode-cli") {
+      writeCreatedOpencodeProfile(childDir, childCfg);
+    } else {
+      atomicWriteJson(childCfgPath, childCfg);
+    }
     deps.log(`[create-node] wrote child config: ${childCfgPath}`);
   } catch (e: any) {
     deps.warn(`[create-node] write child config failed: ${e?.message || e}`);
