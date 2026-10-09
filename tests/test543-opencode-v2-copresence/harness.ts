@@ -89,7 +89,7 @@ const mcp = Bun.serve({
     // gate; do not weaken that gate to accommodate an incomplete fake.
     if (body.method === "tools/list") return r({ tools: [
       { name: "send_message", description: "send", inputSchema: { type: "object", properties: { alias: { type: "string" } } } },
-      { name: "send_task", description: "dispatch a task", inputSchema: { type: "object", properties: { alias: { type: "string" }, content: { type: "string" } }, required: ["alias", "content"] } },
+      { name: "send_task", description: "dispatch a task", inputSchema: { type: "object", properties: { alias: { type: "string" }, task: { type: "string" } }, required: ["alias", "task"] } },
       { name: "get_task", description: "read a task receipt", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"] } },
     ] });
     if (body.method === "ping") return r({});
