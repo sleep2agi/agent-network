@@ -1,0 +1,11 @@
+# Exploratory native gate, reusing dependency layers only. Verify the local
+# base image ID against report-test829-native-create.txt before building.
+ARG DEPENDENCY_IMAGE=anet-test827:close-drain
+FROM ${DEPENDENCY_IMAGE}
+COPY server /workspace/server
+COPY agent-network /workspace/agent-network
+COPY agent-node /opt/node_modules/@sleep2agi/agent-node
+COPY tests/test829-opencode-create /workspace/tests/test829-opencode-create
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=$SOURCE_COMMIT OVERLAY_SOURCE_COMMIT=$SOURCE_COMMIT
+ENTRYPOINT ["bash", "/workspace/tests/test829-opencode-create/native-overlay.sh"]

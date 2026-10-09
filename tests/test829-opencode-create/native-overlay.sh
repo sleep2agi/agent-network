@@ -2,6 +2,8 @@
 # Exploratory only: run inside test827 native image AFTER integrated source copy.
 # Does not claim an immutable-source image or formal release gate.
 set -euo pipefail
+[[ "${OVERLAY_SOURCE_COMMIT:?}" =~ ^[0-9a-f]{40}$ ]]
+test "$OVERLAY_SOURCE_COMMIT" = "${EXPECTED_SOURCE_COMMIT:?}"
 unset TMUX TMUX_PANE
 mkdir -p /artifacts /tmp/tmux-0
 chmod 700 /tmp/tmux-0
