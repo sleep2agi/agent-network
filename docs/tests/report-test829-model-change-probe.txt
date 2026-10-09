@@ -1,0 +1,67 @@
+OpenCode V2 model-config restart exploration — 2026-10-09 UTC+08:00
+
+Scope: real browser creation -> real Hub/daemon/native V2 -> model update via
+MCP -> config revision/model readback -> new process generation -> same TUI
+answer. Only loopback model and browser OS IPC are fixtures. No production
+node/config/database/credential, package channel or release candidate changed.
+
+Inputs (exploratory cached build, NOT fresh main release)
+Product source: f4bf739a96bf7a9f89504e0796922c5ba25de6d3.
+Browser export: e19a4154a3b0c77620e84c7f440a457dca412efd.
+Probe source: 23417070d3231afb0be0780a3fd05ff88e33ad8d.
+Base image anet-test539:release-f4bf:
+  sha256:d17e9af239ea9c4b3092bb65da3e117b1b0639c0f6459e40ba24e0094e452d26
+Probe image anet-test829:model-probe-234:
+  sha256:151c89b11833d9885cc0503ece3a3688b51a143ee846cc8999de84009be9ad50
+Config digest: sha256:ea1e89feee88c1a68bcf213d500cd521758c2110be5f17b4c270787d3a827dc2
+Backend builds inherited from the full CLI/runtime candidate image; no claim
+of recompiling product source, native WebView, or current official artifacts.
+Original daemon-e2e harness is copied into the probe and extended after the
+original create/task layer. Existing safety checks/cleanup remain intact.
+
+Build
+  sg docker -c 'docker build -f tests/test829-model-change-probe/Dockerfile --build-arg PROBE_COMMIT=23417070d3231afb0be0780a3fd05ff88e33ad8d -t anet-test829:model-probe-234 .'
+An earlier FROM sha256:<image-id> attempt was interpreted by BuildKit as a
+registry repository and failed before any test. The local tag build above
+resolved to the exact base digest recorded here (BuildKit output).
+
+Run (positive, isolated UID1000, no source/secret mounts)
+  sg docker -c 'docker run --name anet-test829-model-probe-234-socket --init --network none --cap-drop ALL --security-opt no-new-privileges -e EXPECTED_SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3 -e EXPECTED_CLIENT_SOURCE_COMMIT=e19a4154a3b0c77620e84c7f440a457dca412efd -e ANET_TMUX_SOCKET=/home/test829-native/tmux.sock anet-test829:model-probe-234'
+Started 19:30:23.761; finished 19:30:45.751; Docker inspect exit=0.
+
+Layered results
+PASS environment/private runtime directory and real @opencode/cli 2.0.22.
+PASS Hub authentication and refusal before unauthorized V2 create side effects.
+PASS rendered Web create/confirmation, daemon launch proof, exact node identity,
+     first task terminal receipt and response visible in native TUI.
+PASS config_update_capable, update_node_config with prior revision and new model.
+PASS model changed stub/stub-model -> stub/stub-model-next; revision 0 -> 1.
+PASS new native bridge generation, native TUI, subsequent MODEL829 task reply
+     and ANSWER829_MODEL829 visible in that TUI.
+PASS owned harness process cleanup and final exit=0.
+Bridge log: old TUI replaced with restart placeholder in pane %2, exit75,
+new runtime boots new model, then regenerated TUI relaunched in same pane %2.
+
+Failures retained (do not hide them as product fixes)
+1. Container anet-test829-model-probe-234 exited1 at browser version binding:
+   EXPECTED_CLIENT_SOURCE_COMMIT omitted by operator. No model layer reached.
+2. Container anet-test829-model-probe-234-bound (19:29:11–19:30:01) exited1 at
+   model-restart TUI gate, after successful revision/model and new-process
+   readback. No post-model task was sent after this gate failed. Bridge log
+   showed tmux respawn-pane using /run/test827-tmux.sock, while harness created
+   /home/test829-native/tmux.sock. The inherited ANET_TMUX_SOCKET still pointed
+   at the old base-image path; TEST829_TMUX_SOCKET used the non-root path.
+3. Same image with only ANET_TMUX_SOCKET aligned passed the entire probe.
+   No product fix, timeout increase, or assertion relaxation was needed.
+   Existing Issue #1957 concerns related TUI config-restart behavior but is
+   closed; this fixture mismatch is not evidence to reopen that product issue.
+
+Limitations / next gate
+The model operation uses real MCP, not the client's model button. Model UI
+read/error/real deadline/late response and config-update conflicts remain
+separate tests. The deterministic model replies do not prove real provider
+model availability or inspect the outbound model parameter. Process-generation
+change is observed, not a complete audit of all old-generation descendants.
+This local cached probe has no maintained mutation controls/clean CI build yet.
+Hub #829's combined client lifecycle/model acceptance remains incomplete.
+Do not move these branch artifacts to a public release or close parent #539.
