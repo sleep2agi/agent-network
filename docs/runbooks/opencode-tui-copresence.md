@@ -28,10 +28,19 @@ Linux 候选实现会在原生 V2 就绪后写节点目录内的
 serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 复用、
 死进程或非零退出不放行。运行代际关闭/serve 退出时清理自己的记录。
 此文件是可重建的运行证据，不是需要从备份恢复的数据，不能复制旧记录
-冒充就绪。仅 Linux daemon 创建完成判定有此证据路径，其他平台未验收。
+冒充就绪。Linux daemon 创建和远程 start 完成判定使用此证据路径，其他平台未验收。
 不要把 Hub 首次注册的 `succeeded` 或 launcher 的退出 0 单独当作健康；
 应等 daemon 延迟检查结束，验证 token 仍有效，再验真实任务终态。
 没有新增常驻服务、端口、环境变量或密钥来源；既有升级/回滚流程不变。
+
+远程 `start_node` 的 V2 共存候选先回报 `starting`，有界等待启动器退出，
+再验证本次三进程身份，成功后以真实 bridge PID 回报 `started`。失败、信号、
+超时或证据不匹配回报 `start_failed`，不能以启动器 kill-0 成功替代就绪。
+旧 Hub 若未声明完成回执能力，明确返回 `opencode_start_completion_unsupported`，
+应按正式升级流程升级 Hub/daemon，而非绕过判定。同一 daemon 生命周期内同请求
+重放不重复启动；不保证 daemon 重启后的持久去重。35 秒启动器超时只向本次
+持有的启动器发送 SIGTERM，不按名称清扫。失败后应检查残留，不代表完整子树
+已停止；使用已有身份校验的停止流程，禁止盲删状态文件。
 
 daemon 新建 OpenCode 节点时，先复用 CLI 的 no-follow 私密目录与 Git
 未跟踪校验，再在同一运行用户的 `HOME/.anet/opencode-runtime-bindings/`
