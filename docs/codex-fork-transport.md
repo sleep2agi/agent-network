@@ -1,10 +1,12 @@
-# Confirmed Codex fork transport — internal candidate (#822)
+# Confirmed Codex fork transport — source merged (#822)
 
-This is source work for core Issue #2539, not a deployment or release. The daemon
-receiver, Hub storage/read path and daemon capability advertisement exist in this
-candidate. CLI request correlation (#821 / PR2541) passed its 157 CI checks and
-merged into main 102dd0f2c11a2d72b8789e9a1ba3a3fde31eca1e. This backend candidate
-still needs its own PR checks and review before merge.
+This is source work for core Issue #2539, not a deployment or release. CLI request
+correlation (#821 / PR2541) merged into main
+102dd0f2c11a2d72b8789e9a1ba3a3fde31eca1e. The daemon receiver, Hub storage/read
+path and capability advertisement (#822 / PR2542) passed 157/157 CI checks and
+merged into main 9af6bcc7c7e62e2462f02a32f358836db8d11787. Compatible release
+candidates are Hub 0.9.0-preview.119, agent-node 2.5.0-preview.127 and CLI
+2.3.0-preview.161; these version declarations do not prove npm publication.
 Do not enable a capability by editing a production snapshot to bypass the gate.
 
 ## Contract

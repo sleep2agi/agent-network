@@ -1,0 +1,73 @@
+#819 coordinated preview version candidate — 2026-10-09 10:38 CST
+
+Base main: 9af6bcc7c7e62e2462f02a32f358836db8d11787 (PR2542).
+Candidates: commhub-server 0.9.0-preview.119, agent-node 2.5.0-preview.127,
+agent-network 2.3.0-preview.161. No dependency changes; lock root versions
+and exact CLI/runtime pairing updated. No production/global install performed.
+
+Registry read-only preflight:
+  preview .118 / .126 / .160 respectively; candidates returned E404.
+  latest stays Hub .30 / runtime .58 / CLI .76.
+  No open release-title PR found at preflight; recheck before publication.
+
+All tests/builds ran with sg docker -c 'docker ...'; host source mounts read-only.
+Existing independent test Dockerfiles/images reused; no new full matrix.
+
+L1 — anet-test625:env-completion, Bun 1.3.14, --network none:
+  Overlay candidate agent-network src + package.json + package-lock.json under
+  /workspace/agent-network, and matching agent-node/server package.json.
+  bun test src/package-version-consistency.test.ts
+    src/opencode-agent-node-pair.test.ts src/hub-server-version.test.ts
+  RESULT: 25 pass, 0 fail, 82 expect calls.
+  Covers exact pair and current registry-channel/floor behavior. The old SOP
+  describes PINNED_SERVER_VERSION as a default; current #511 implementation
+  uses it as a compatibility floor. Retained the existing published .47 floor
+  and test766 literal. Do not sync it prematurely to unpublished Hub .119.
+
+L1 — anet-test819:start-completion, Bun 1.3.14, --network none:
+  Overlay candidate agent-node/server src and package/lock manifests at /work.
+  bun test agent-node/src/package-version-consistency.test.ts
+    server/src/package-version-consistency.test.ts
+  RESULT: 4 pass, 0 fail, 4 expect calls.
+  cd agent-node && bun run build
+  RESULT: success; cli 378 modules / upload-file 221 modules.
+
+Build — anet-test225:completion-packer, --network none:
+  Copy candidate agent-network src/bin/scripts/manifests/tsconfig from /src:ro
+  into the container's /build/agent-network; keep image dependencies. Copy the
+  paired runtime manifest to /build/agent-node. Run npm run build, then
+  node dist/bin/anet.cjs --version.
+  RESULT: complete bundle, declarations and obfuscation succeeded.
+  Version: anet v2.3.0-preview.161; node-server stamp .161.
+  The isolated image lacks bunx on runtime PATH; --version correctly warned
+  that Hub launch there would require Bun. This was not a Hub deployment test.
+
+L2 doc-claim smoke — anet-test625:env-completion, --network none:
+  Reuse tests/test661-explicit-bootstrap-db db-tool.ts + fixture-server.ts,
+  seed /tmp/release-bootstrap.db, serve fixture on 127.0.0.1:25661.
+  Candidate CLI: COMMHUB_DB=/tmp/release-bootstrap.db timeout 20
+    bun bin/cli.ts hub start --port 25661 (capture output inside container).
+  Assert password output matches anet- followed by exactly 22 hex characters.
+  RESULT: PASS-cli161-random-bootstrap-password-shape, CLI exit 0.
+  This exercises actual CLI bootstrap against a fixture, not a production Hub.
+  No generated credential was copied out or printed in this report.
+
+Documentation gates — anet-test225:completion-packer:
+  Initial harness lacked worktree gitdir and failed before checking claims.
+  Corrected by mounting the worktree and shared .git at original absolute
+  paths read-only, with safe.directory set only inside container.
+  First real check caught stale .160 stamps/prose in both getting-started pages.
+  After the actual CLI smoke above, changed both stamp and prose to .161.
+  python3 scripts/check-doc-version-claims.py --package <package>
+    --version <candidate-version> --verify-latest-from-npm
+  RESULT: all 3 candidates pass; 4 stamps across 2 docs; latest .76 unchanged.
+  New notes for all 3 packages have Install and Upgrade sections with exact
+  target versions. Do not deploy the updated website before npm publication.
+
+Source feature evidence remains PR2542's 157/157 CI and
+report-test822-fork-transport.txt (105 pass / 589 assertions focused chain).
+Those are not substitutes for this candidate's PR/release gates. Before merge,
+wait for candidate CI; before publishing, verify the full 40-character SHA is
+on main. Publish/verify Hub first, runtime second, CLI last. Keep latest stable.
+No artifact publication, native UI acceptance, production rollout, vdev node
+recovery or empty-server restore is established by these candidate checks.
