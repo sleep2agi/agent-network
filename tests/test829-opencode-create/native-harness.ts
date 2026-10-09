@@ -44,7 +44,8 @@ function start(name: string, bin: string, args: string[], opts: object) {
 const server = start('hub', 'bun', ['src/index.ts'], { cwd: '/workspace/server', env: { ...env, PORT: '9287', COMMHUB_DB: `${root}/hub.db`, COMMHUB_AUTH_TOKEN: 'test829-bootstrap' } });
 const stub = start('model', 'python3', ['/test827/stub-model.py', '18827', `${artifact}/stub.log`, 'ANSWER829_'], { env });
 let daemon: ReturnType<typeof start> | undefined;
-const tmux = (...args: string[]) => spawnSync('tmux', ['-S', '/run/test827-tmux.sock', ...args], { env, encoding: 'utf8' });
+const tmuxSocket = process.env.TEST829_TMUX_SOCKET || '/run/test827-tmux.sock';
+const tmux = (...args: string[]) => spawnSync('tmux', ['-S', tmuxSocket, ...args], { env, encoding: 'utf8' });
 try {
   console.log('L0 environment');
   check('exact real OpenCode V2', spawnSync('opencode', ['--version'], { encoding: 'utf8' }).stdout.trim() === 'opencode v2.0.22');
