@@ -154,6 +154,7 @@ import {
   grokCopresenceSocketPaths,
 } from "../src/grok-copresence-profile";
 import { canonicalSocketsForProfile, planReapableSockets, reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
+import { opencodeV2CopresenceRequested } from "../src/opencode-start-mode";
 import {
   codexCopresencePosture,
   codexCopresenceCreateFields,
@@ -2309,6 +2310,9 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
       ? [`export ANET_OPENCODE_SAFE_BASE=${shellQuote(process.env.ANET_OPENCODE_SAFE_BASE)}`]
       : []),
     `export ANET_OPENCODE_MODE=copresence`,
+    // Ordinary V2 starts now select orchestration from the persisted profile.
+    // This internal start owns the runtime, not a second TUI/bridge pair.
+    `export ANET_COPRESENCE_BRIDGE=1`,
     `exec > >(tee -a ${shellQuote(bridgeLog)}) 2>&1`,
     `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
@@ -8281,7 +8285,8 @@ async function startCommand() {
   //    runtime=codex-app-server". Each lane answers for itself.
   if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
     && (codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
-      || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any))) {
+      || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
+      || opencodeV2CopresenceRequested(resolvedForCopresence.profile))) {
     const copresenceRuntime = runtimeForExecution(
       resolvedForCopresence.profile,
       `start copresence node ${JSON.stringify(id)}`,

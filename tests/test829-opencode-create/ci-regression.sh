@@ -13,6 +13,7 @@ cd /opt/node_modules/@sleep2agi/agent-node
 bun test src/runtime/opencode-create-profile.test.ts src/runtime/node-name-652.test.ts
 cd /workspace
 bun test agent-network/src/opencode-create-security-parity.test.ts
+bun test agent-network/src/opencode-start-mode.test.ts agent-network/src/opencode-copresence-cli.test.ts
 export COMMHUB_DB=/tmp/test829-ci-audience.db
 bun test server/src/tool-audience-http.test.ts
 export COMMHUB_DB=/tmp/test829-ci-schema.db

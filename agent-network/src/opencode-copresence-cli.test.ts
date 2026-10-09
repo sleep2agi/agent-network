@@ -69,6 +69,13 @@ describe("OpenCode co-presence CLI wiring", () => {
     expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id, opts.hub)");
   });
 
+  test("ordinary V2 profile starts select orchestration, but internal bridge starts do not recurse", () => {
+    const start = functionBody("startCommand");
+    expect(start).toContain("opencodeV2CopresenceRequested(resolvedForCopresence.profile)");
+    expect(start).toContain('process.env.ANET_COPRESENCE_BRIDGE !== "1"');
+    expect(body).toContain("export ANET_COPRESENCE_BRIDGE=1");
+  });
+
   test("operator help names the create, attach, and stop commands", () => {
     expect(cli).toContain("anet node create <name> --runtime opencode-cli --mode copresence");
     expect(cli).toContain("tmux attach -t '=<name>'");
