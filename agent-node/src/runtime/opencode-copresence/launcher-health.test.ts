@@ -64,5 +64,7 @@ describe("daemon OpenCode live launch generation", () => {
     expect(source).toContain("forgetSpawnedChildIfPid(childNodeIdForMap, childPid)");
     expect(source).toContain("successfulLauncherExit(ex) && health.ok");
     expect(source).toContain("recordSpawnedChild(childNodeIdForMap, req.node_spec.name, health.bridgePid)");
+    expect(source.indexOf("const health = inspectLaunchHealth")).toBeLessThan(source.indexOf("let stillAlive = false"));
+    expect(source).toContain("while (!launcherExit && Date.now() < deadline)");
   });
 });

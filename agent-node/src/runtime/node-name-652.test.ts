@@ -158,7 +158,9 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     applyDaemonExtraPath([fixtureBin]);
     const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
     const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
-    expect(acks.map(a => ({ status: a.status, error: a.error }))).toEqual([{ status: "started", error: undefined }]);
+    // sleep is deliberately NOT a healthy V2 generation. This test proves
+    // persistence, not runtime readiness, and must not produce a started ack.
+    expect(acks.map(a => a.status)).toEqual(["runtime_capability_check_failed"]);
     expect(spawned).toHaveLength(1);
     const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
     expect(cfg.opencodeGeneration).toBe("v2");
