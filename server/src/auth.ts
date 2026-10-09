@@ -35,6 +35,7 @@ export interface AuthUser {
   user_id: string;
   username: string;
   display_name: string | null;
+  avatar_url?: string | null;
   email: string | null;
   role: string;
 }
@@ -161,7 +162,7 @@ export function register(username: string, password: string, email?: string, dis
 
 export function login(username: string, password: string, client: SessionClientInfo = {}): AuthResult {
   const user = db.get<any>(
-    "SELECT user_id, username, password_hash, display_name, email, role, must_change_password FROM users WHERE username = ?1",
+    "SELECT user_id, username, password_hash, display_name, avatar_url, email, role, must_change_password FROM users WHERE username = ?1",
     username);
 
   if (!user) {
@@ -232,7 +233,7 @@ export function login(username: string, password: string, client: SessionClientI
 
   return {
     ok: true,
-    user: { user_id: user.user_id, username: user.username, display_name: user.display_name, email: user.email, role: user.role },
+    user: { user_id: user.user_id, username: user.username, display_name: user.display_name, avatar_url: user.avatar_url, email: user.email, role: user.role },
     token,
     token_id: tokenId,
     network_id: networkId,
@@ -384,7 +385,7 @@ function lookupToken(token: string): { row: any; rejected?: undefined } | { row?
   const cutoff = idleCutoffOffset();
   const row = db.get<any>(
     `SELECT t.token_id, t.user_id, t.network_id, t.scope, t.name AS token_name,
-            u.username, u.display_name, u.email, u.role,
+            u.username, u.display_name, u.avatar_url, u.email, u.role,
             CASE WHEN t.network_id IS NULL THEN 1
                  WHEN EXISTS (SELECT 1 FROM network_members nm WHERE nm.network_id = t.network_id AND nm.user_id = t.user_id) THEN 1
                  ELSE 0 END AS is_member
@@ -433,7 +434,7 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
   );
 
   return {
-    user: { user_id: row.user_id, username: row.username, display_name: row.display_name, email: row.email, role: row.role },
+    user: { user_id: row.user_id, username: row.username, display_name: row.display_name, avatar_url: row.avatar_url, email: row.email, role: row.role },
     networkId: row.network_id,
     tokenId: row.token_id || null,
     // tokenName carries the binding identity. For node-scoped ntok_, it's
@@ -702,7 +703,7 @@ export function resetUserPassword(targetUsername: string, callerIsHubAdmin: bool
 
 export function getNetworkMembers(networkId: string) {
   return db.all<any>(
-    `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name,
+    `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name, u.avatar_url,
             CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access,
             (SELECT COUNT(*) FROM network_member_agent_grants g WHERE g.network_id = nm.network_id AND g.user_id = nm.user_id) AS agent_grant_count,
             CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.task_access = 'all' THEN 'all' ELSE 'scoped' END AS task_access,
@@ -716,8 +717,8 @@ export function getNetworkMembers(networkId: string) {
 
 /** 网络里的人类成员(给受限成员也能看的通讯录):只有身份字段,不含角色与授权。 */
 export function getNetworkHumans(networkId: string) {
-  return db.all<{ user_id: string; username: string; display_name: string | null }>(
-    `SELECT u.user_id, u.username, u.display_name
+  return db.all<{ user_id: string; username: string; display_name: string | null; avatar_url: string | null }>(
+    `SELECT u.user_id, u.username, u.display_name, u.avatar_url
        FROM network_members nm JOIN users u ON nm.user_id = u.user_id
       WHERE nm.network_id = ?1 ORDER BY COALESCE(NULLIF(u.display_name, ''), u.username), u.user_id`,
     networkId);

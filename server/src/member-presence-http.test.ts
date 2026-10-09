@@ -3,7 +3,7 @@
 // GET /api/networks/:id/humans 给每个人加 online / last_seen_at(判据 = 此刻有没有活着的用户流
 // /events/users/me);用户流上推 member_presence。两个方向都测:
 //   看得到:普通成员、受限成员、viewer;连上 → online=true,断开 → online=false + last_seen_at。
-//   看不到:非成员 403;节点令牌拿到的仍是原来三个身份字段;别的网络的人收不到推送;自己收不到自己的。
+//   看不到:非成员 403;节点令牌只拿身份字段(含头像),无在线状态;别的网络的人收不到推送;自己收不到自己的。
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
@@ -125,7 +125,8 @@ describe("GET /api/networks/:id/humans — online / last_seen_at", () => {
   test("never connected since hub start → online=false, last_seen_at=null (unknown, not 'long ago')", async () => {
     const r = await get(users.pres_alpha.token, `/api/networks/${NET}/humans`);
     expect(r.status).toBe(200);
-    expect(Object.keys(r.body.humans[0]).sort()).toEqual(["display_name", "last_seen_at", "online", "user_id", "username"]);
+    expect(Object.keys(r.body.humans[0]).sort()).toEqual(["avatar_url", "display_name", "last_seen_at", "online", "user_id", "username"]);
+    expect(r.body.humans.every((h: any) => h.avatar_url === null)).toBe(true);
     const beta = r.body.humans.find((h: any) => h.user_id === users.pres_beta.userId);
     expect(beta.online).toBe(false);
     expect(beta.last_seen_at).toBeNull();
@@ -181,11 +182,14 @@ describe("who must NOT see presence", () => {
     expect(r.body.humans).toBeUndefined();
   });
 
-  test("node token → same three identity fields as before, no online / last_seen_at", async () => {
+  test("node token → identity fields including avatar, no online / last_seen_at", async () => {
     const beta = await openUserStream(users.pres_beta.token, NET);
     const r = await get(nodeToken, `/api/networks/${NET}/humans`);
     expect(r.status).toBe(200);
-    for (const h of r.body.humans) expect(Object.keys(h).sort()).toEqual(["display_name", "user_id", "username"]);
+    for (const h of r.body.humans) {
+      expect(Object.keys(h).sort()).toEqual(["avatar_url", "display_name", "user_id", "username"]);
+      expect(h.avatar_url).toBeNull();
+    }
     // 节点令牌也不能订阅用户流(既有行为,这里钉住:不能借它收 member_presence)。
     expect((await fetch(`${BASE}/events/users/me?network_id=${NET}`, { headers: auth(nodeToken) })).status).toBe(403);
     beta.close();

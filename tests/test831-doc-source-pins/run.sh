@@ -280,8 +280,11 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 # 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——
 # 那一行被本 PR 在 register() 里加的一行挤漂(check-doc-source-pins 报 trivial-line)。
 # 同一个 auth.ts pin 减 1,两处引用减 2;没有减少扫描文件或放宽基线。
-[[ "$uniq"  -eq 6  ]] || fail "预期 6 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 18 ]] || fail "预期 18 处原始出现,实际 $occ"
+# #833: auth.ts getUserNetworks/listTokens/revokeToken/changePassword 的
+# L447/L487/L540/L651 改为文件链接 + 原有函数定位；中英各四处。
+# 唯一 pin 6-4=2，出现次数 18-8=10；123 个扫描文件和基线不变。
+[[ "$uniq"  -eq 2  ]] || fail "预期 2 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 10 ]] || fail "预期 10 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------

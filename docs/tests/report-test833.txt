@@ -1,0 +1,116 @@
+test833 — human profile avatar backend contract (not client acceptance)
+Observed: 2026-10-09 12:38 Asia/Shanghai
+Source: ca0c60e7e707029cbd72b4dc63a986a68586dfac
+Base main: 9a0f5a85a45e0396289627fd6b40323435b17801
+Image: anet-test833:ca0c60e7
+Image config: sha256:0286d85c1191d67c2187b81d4b99b814425d885beb3eeefe5b65aa349b44ff80
+Container: anet-test833-ca0c60e7 (exit 0)
+Pinned Bun: 1.3.14; dependencies from server/package-lock.json, frozen install.
+No host source mount, no credentials, no production endpoint; --network none.
+
+Command (from source worktree):
+sg docker -c 'docker build -f tests/test833-user-avatar/Dockerfile -t anet-test833:ca0c60e7 . && docker run --name anet-test833-ca0c60e7 --network none anet-test833:ca0c60e7'
+
+Layered run.sh uses set -euo pipefail (no later layer on failure):
+1. Existing-user schema migration + next-process persistence: 1 pass, 3 assertions.
+2. Existing avatar URL validation matrix: 23 pass, 55 assertions.
+3. Sequential real HTTP scenario: 1 pass, 56 assertions.
+   user authentication; invalid/node credential rejection; pool save/read;
+   second login and existing profile update preserve avatar; authorized member
+   directory projection; stranger denied; other user unchanged; malformed and
+   unknown-field/target-ID/hostile-URL writes denied without changing old value;
+   HTTP(S) reference storage; null/blank reset visible to second session.
+4. Existing login/session regression: 17 pass, 89 assertions.
+Total: 42 tests passed, 0 failed, 203 assertions.
+
+Earlier working-tree runs passed, but counts above are ONLY this exact-source run.
+No browser/mobile/native UI test, photo upload, deployment or release performed.
+Full empty-server disaster recovery and old atok_ exhaustive regression are not
+claimed. Human avatars are global per user on the Hub, not per-network overrides.
+Hub #833 / sleep2agi/agent-network-app#781 stays doing; backend is a candidate.
+
+2026-10-09 20:43 CST — PostgreSQL initialization repair
+Source: c7a43a0fc979a789e602c54fe90a1d9001f03834 (candidate, not merged).
+Original CI run 37884889116 job 113672559910 reached PG then failed with
+"syntax error at or near PRAGMA" at server/src/db.ts:324. This was a product
+migration defect, not a timeout or an intended mutation-test failure.
+Replace the SQLite-only column query with the existing adapter-neutral additive
+ALTER pattern: only duplicate/already-exists errors are ignored; other errors
+still abort startup. No schema/data removal or production migration was run.
+
+Exact-source Docker results (no source mount; --network none):
+- tests/test833-user-avatar: existing-user migration/next-process persistence,
+  URL validation, real avatar HTTP and auth/session regression all PASS; exit 0.
+- tests/test674-binding-generation: SQLite and PostgreSQL each 7 positive HTTP
+  tests / 51 assertions PASS, followed by 10 expected assertion-negative
+  mutations per backend. Both RESULT lines PASS; container exit 0.
+- This proves the previously failing PG schema initialization path now works.
+  It does not prove all 11 prior CI failures fixed, nor PG old-user avatar
+  migration/persistence or the avatar HTTP matrix itself on PostgreSQL.
+
+Images / retained containers:
+anet-avatar:c7a4 / anet-avatar-c7a4
+  sha256:6ebc06b975707d5600d50beb3f0c7ae6583b17efba0764c78e4f24234cc98794
+anet-avatar-pg:c7a4 / anet-avatar-pg-c7a4
+  sha256:33cd70f2bac7311908a8af8a2abb9979d9cfbea5c4b4172498e5e571825fea41
+Reproduction from the source above:
+sg docker -c 'docker build -f tests/test833-user-avatar/Dockerfile -t anet-avatar:c7a4 . && docker run --network none anet-avatar:c7a4'
+sg docker -c 'docker build -f tests/test674-binding-generation/Dockerfile --build-arg SOURCE_COMMIT=c7a43a0fc979a789e602c54fe90a1d9001f03834 -t anet-avatar-pg:c7a4 . && docker run --init --cpus=2 --network none anet-avatar-pg:c7a4'
+
+Remaining: reconcile latest main, full new-head CI, agent-acl/member-presence
+failures, client/upload acceptance and formal main release. Existing deployment,
+ports, secrets and rollback procedures unchanged; old binaries ignore the new
+nullable column. No claim of empty-machine data recovery or production effect.
+
+2026-10-09 20:57 CST — latest-main directory contract and documentation repair
+Test source: fcf719480fc761402bb304ce8f9299d9cedee1c2
+Integrated main: 8a7e48f67178008388edffd2eec22c91198836b5
+This section does not supersede the earlier failures or turn them into passes.
+
+CI run 37931977415 (head 0063066863d803eb17491aa6fed847b78a5df737)
+failed in jobs 113824665367/113824901313/113824901368: four new trivial-line
+auth.ts pins; db.ts team-column claim drift; exact human-directory keys still
+expecting the pre-avatar shape. A node-directory assertion failed before stream
+cleanup, with a subsequent member-presence wait timing out. The same ACL key
+assertion also failed in PG ladder job 113824902664; that job had already reached
+ladder L6 and passed migration, so it was not another PRAGMA startup failure.
+
+Changes: update exact key sets to include avatar_url and assert default null;
+keep node presence exclusion, nonmember rejection and cross-network isolation.
+Extend test833 with the existing ACL and presence suites in separate DBs.
+Replace four auth.ts line pins (eight bilingual occurrences) with file links
+whose labels name the original functions. Scanned docs remain 123, baseline 0;
+unique pins 6->2 and occurrences 18->10, still asserted exactly. Update team
+column claim AND prose AND mutation target to line 449; retain wrong-line 438.
+
+Exact-source isolated Docker results:
+- test833: 108 pass, 0 fail, 463 assertions (1+23+1+17+60+6 tests).
+  Container anet-avatar-fcf7 exited 0; no production access, --network none.
+  Image index sha256:92fbdd7b7b43b9c3e7edc5971178411a2de4420987275f17b3cbc52d0e24cc88
+- test831: RESULT PASS, including bad-pin/baseline/path/tool-index mutation
+  controls; 123 docs, 2 unique pins, 10 occurrences, 0 broken/0 baseline.
+  Container anet-avatar-doc831-fcf7 exited 0.
+  Image index sha256:7a777fad2c4446f1ba3c8492618dd9577d1695940c21775e9000a2bce1bd748a
+- test846: 8 claims PASS; wrong-line, empty-manifest and path-escape controls
+  each fail as intended and restore green. Container anet-avatar-doc846-fcf7 exit 0.
+  Image index sha256:c80f6952dbb542d8cad50fa1e27e246e42010c563f92b66d87fa4a8a875e85dd
+
+Reproduce from fcf719480fc761402bb304ce8f9299d9cedee1c2:
+sg docker -c 'docker build -f tests/test833-user-avatar/Dockerfile -t anet-avatar:fcf7 . && docker run --network none anet-avatar:fcf7'
+sg docker -c 'docker build -f tests/test831-doc-source-pins/Dockerfile --build-arg TEST831_SOURCE_COMMIT=fcf719480fc761402bb304ce8f9299d9cedee1c2 --build-arg TEST831_RUNSH_BLOB=be6818dd4b099ff8e8acfd4e30a99b57a121f28b -t anet-avatar-doc831:fcf7 . && docker run --network none anet-avatar-doc831:fcf7'
+sg docker -c 'docker build -f tests/test846-doc-claims/Dockerfile --build-arg TEST846_SOURCE_COMMIT=fcf719480fc761402bb304ce8f9299d9cedee1c2 --build-arg TEST846_RUNSH_BLOB=457e7d399d741281e06ba4557f03aaf4fe1783fc -t anet-avatar-doc846:fcf7 . && docker run --network none anet-avatar-doc846:fcf7'
+
+Full server aggregation and fresh-head CI are separate gates. No UI/upload,
+native client, public package, production migration or release is claimed here.
+
+2026-10-09 20:59 CST — full server aggregation on the same fcf71948 source
+test798-server-unit-ci: executed_files=216 discovered_files=216 failed_files=0.
+Non-root uid=1000, Bun 1.3.14, Node v22.23.3, per-file isolated temporary DBs.
+Registration-password-floor mutation returned rc=1 as expected; RESULT PASS.
+Container anet-avatar-unit-fcf7 exited 0, --network none, no host source mount.
+Image index sha256:3dae2d0b2eb73f910c8b278aac22882e2e2040eba2b7beabca5fea8a7cf8d93a
+sg docker -c 'docker build -f tests/test798-server-unit-ci/Dockerfile --build-arg SOURCE_COMMIT=fcf719480fc761402bb304ce8f9299d9cedee1c2 --build-arg RUNSH_BLOB=d4a01d27d1ca0f98ba3c1f46a134edb940cae7cc -t anet-avatar-unit:fcf7 . && docker run --network none anet-avatar-unit:fcf7'
+
+The previous-head test638 aggregate job 113824903080 also failed specifically
+on the old ACL/presence key sets. This local test798 pass is not a claim that
+the different test638/PG ladder or the complete new-head CI have already passed.

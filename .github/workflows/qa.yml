@@ -224,6 +224,7 @@ on:
       - 'tests/test829-opencode-create/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test828-opencode-v2-policy/**'
+      - 'tests/test833-user-avatar/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test185-external-schedules/**'
@@ -448,6 +449,7 @@ on:
       - 'tests/test829-opencode-create/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test828-opencode-v2-policy/**'
+      - 'tests/test833-user-avatar/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
       - 'tests/test185-external-schedules/**'
@@ -2038,6 +2040,7 @@ jobs:
           - test829-opencode-create
           - test832-opencode-v2-registry
           - test828-opencode-v2-policy
+          - test833-user-avatar
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
           - test-codex-appserver-watchdog
