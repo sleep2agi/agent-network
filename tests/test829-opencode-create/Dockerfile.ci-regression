@@ -6,8 +6,7 @@ COPY server /workspace/server
 COPY agent-network /workspace/agent-network
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
 COPY tests/test829-opencode-create /workspace/tests/test829-opencode-create
-RUN mv /usr/local/bin/opencode /usr/local/bin/opencode.native-test-fixture && \
-    chown -R node:node /workspace /opt/node_modules/@sleep2agi/agent-node
+RUN mv /usr/local/bin/opencode /usr/local/bin/opencode.native-test-fixture
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 USER node
