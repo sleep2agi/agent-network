@@ -72,3 +72,29 @@ Limits: in-browser Tauri IPC adaptation, not real native IPC; local synthetic
 provider, not live vendor credentials; no signed desktop/mobile installer,
 multi-user or production acceptance. This closes the local-image dependency
 gap at local Docker level, not all of #829/#539 and not a release claim.
+
+2026-10-09 22:33 CST — CI integration corrections and repeated acceptance
+Tested source: 0337454f6ac678dbf3c81e88d9ba74ee73f22e3b
+PR: https://github.com/sleep2agi/agent-network/pull/2558
+The preceding PR head failed three repository integration checks. Fixed:
+- Base-image guard recognizes previously declared build stages, but still
+  rejects floating ancestors, unknown and forward stage references. Added
+  six self-tests; no baseline increase.
+- Registered the suite in both central QA push/PR trigger path lists.
+- Extracted the read-only /proc process-generation observer from the mutating
+  harness. Exact PID/start-tick/reaping semantics remain unchanged; mutation
+  detection guard and its baseline are unchanged.
+Docker guard run: base-image self-tests 21/21; 344 Dockerfiles, 3 existing
+baseline offenders; QA coverage 255 directories / 101 executed / 186 filtered;
+mutation pins 367 shell + 140 script mutators, 693 anchors, unchecked 4 <= 4.
+All three commands exit 0 in the isolated container.
+
+Repeated command:
+sg docker -c 'ARTIFACT_DIR=/tmp/anet-test883-ci-integrated bash tests/test883-v2-portable-client/ci.sh'
+Image ID: sha256:0ff8138fbf720d635a3149d322658fc7aece1b0cb7e1c954dacb45da061c4e77
+Orchestrator exit 0; positive exit 0 including original identities reaped,
+configuration retained and new task after restart. Wrong-model exit 1 only at
+the expected post-change provider-model assertion, with no later lifecycle
+layer. Both owned-process cleanups pass. This rerun reuses build cache; it is
+not a claim of a wiped builder. Full GitHub exact-head CI is pending; no merge
+or public release is asserted by this report.
