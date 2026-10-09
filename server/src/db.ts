@@ -321,8 +321,12 @@ db.exec(`
 `);
 
 // Human profile avatar. Additive for existing databases; old binaries ignore it.
-if (!db.all<{ name: string }>("PRAGMA table_info(users)").some((c) => c.name === "avatar_url")) {
+try {
   db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT");
+} catch (e: any) {
+  // Both supported adapters report a duplicate column on the next startup.
+  // Do not send SQLite PRAGMA to PostgreSQL or swallow other migration errors.
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
 // #261 P0-2 (2026-06-28): must_change_password flag. Added via ALTER
