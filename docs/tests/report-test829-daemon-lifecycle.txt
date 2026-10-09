@@ -1,0 +1,90 @@
+test829 — real daemon stop/start and late create acknowledgement consistency
+Date: 2026-10-09, Asia/Shanghai. Hub #539 / #829; Issue #2544; PR #2551.
+No merge, release, production config change, or global package modification.
+
+Product fix source: cec65869582f60edfdd89debeee09948b9a877b3.
+Existing failure acks revoked the request's child token even if registration
+had already set request.status=succeeded, but their guarded status update
+excluded succeeded. Include succeeded in that same failure update. Caller
+daemon/network authorization and revocation policy are unchanged. A later
+started ack cannot restore failed request status or un-revoke a token.
+No schema migration, new service, port, secret or startup configuration.
+This does not redesign create acknowledgement semantics or fix historical
+production rows; no production database was accessed for this change.
+
+Witnessed-red, Docker anet-test829:health-535c plus read-only new test file:
+container anet-test829-late-ack-red: exit 1, 10 pass / 3 fail, 36 assertions.
+All three added cases (failed/rejected/runtime_capability_check_failed after
+succeeded) actually observed succeeded instead of the expected failure.
+This is explicitly a mounted-test negative, not an exact-source release test.
+
+Exact-source non-root regression:
+image anet-test829:late-ack-cec6
+sha256:60d72376c91f176f9fb80b81c6ee48e5e0cef1fbc1d0f0429e507da720473c6c
+container anet-test829-late-ack-cec6: exit 0, 147 tests / 801 assertions.
+  profile/writer 30/132; launch health + V2 core 24/79; parity 4/4;
+  CLI/mode 14/45; real HTTP tool audience 12/295; create schemas 47/185;
+  ack handler + MCP SDK in-memory transport 16/61.
+The three new late-ack cases assert final status/error/acked_at, revoked token,
+and no resurrection on delayed started. Tests use isolated SQLite, network
+none and no vendor CLI on PATH; they are not the entire CI suite.
+
+Native integration source: fbbc9dce5629a6bcc6f9d61f93b8e57ee1f0379d.
+Includes unmerged #2550 registry and #2545 CLI/disposal stack, not PR #2551
+alone. Full git archive copied into image, bundles built inside container.
+image anet-test829:lifecycle-fbbc
+sha256:1a08793526368680f80776bb817d60a4295321bcb6ad7b47608b90cbae8fee76
+Real @opencode/cli 2.0.22 + real Hub/daemon/CLI, loopback model stub,
+private HOME/SQLite/tmux, network none, no production credentials.
+Dependency base anet-test827:close-drain
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac.
+Cached dependency fixture => exploratory integration, not formal release gate.
+
+Positive container anet-test829-lifecycle-fbbc: exit 0.
+Create cr_6916c872-9f41-47d0-ad30-8f773110773f;
+stop sr_eb5d77c7c8ca; start str_9f4635d73fcc.
+PASS environment, auth, explicit-unsafe-opt-in refusal, remote create,
+final create identity verdict, active child token, exact network answer and
+same-TUI display. Actual MCP stop_node returns stopping, then persisted stop
+request becomes stopped. Frozen bridge/serve/TUI PID+birth identities are gone
+(zombies do not pass), exact old TUI/bridge sessions absent, config retained.
+Actual MCP start_node produces new bridge launch evidence, renders TUI,
+accepts another task, replies exactly [oc829] ANSWER829_RESTART829, displays
+that answer in TUI, and its request status is started with no error.
+Owned harness process cleanup also completes. It is separate from product
+stop evidence. Earlier b3bbb265ce792caf2d4b044266fa62f87ab0b7a8 lifecycle run
+also exited 0 but lacked the final start-request-state assertion; fbbc adds it.
+
+Negative container anet-test829-late-ack-negative-fbbc: wrapper exit 0.
+Request cr_180af65a-81d6-4893-ae1d-b8c00b2e8720.
+Docker-only native-generation-negative.sh mutates published generation to
+ses_test829mismatch while the real session is unchanged, then rebuilds.
+Expected native harness failure, exit 1, at final daemon verdict. Wrapper
+verifies exact mismatch refusal, cleanup, and no task layer executed.
+Observed final state: runtime_capability_check_failed, tokenRevoked=true.
+This proves the late-ack discrepancy seen in report-test829-launch-health.txt
+is fixed in this candidate; previous report remains the historical evidence.
+Mutated copy is NOT an unmodified-source positive result.
+
+Repro: git archive <full source SHA> | sg docker -c 'docker build
+ -f tests/test829-opencode-create/Dockerfile.native-cached
+ --build-arg SOURCE_COMMIT=<full source SHA> -t <test-image> -';
+positive: docker run --network none -e EXPECTED_SOURCE_COMMIT=<full SHA>
+ -e TEST829_LIFECYCLE=1 <test-image>.
+negative: same image/env, --entrypoint bash, command
+ /workspace/tests/test829-opencode-create/native-generation-negative.sh.
+Run Docker commands through sg docker. Reports and redacted Hub/daemon/bridge
+logs remain in named containers /artifacts. Do not publish raw fixture DBs.
+
+Boundaries: one stop/start cycle on Linux, not repeated stress or Windows/macOS.
+Does not cover restart_node/config-update, model changes, client UI, provider
+failure after restart, dead-TUI start negative, or same-alias isolation matrix.
+start-daemon's non-Codex legacy path still acknowledges its spawned launcher
+early; this positive functional chain does not prove fail-closed readiness
+for all start failures. Keep this as a subsequent lifecycle hardening gate.
+No complete CI green claim and no release/main availability claim.
+
+Patrol around 15:27 +08: TMAI负责人 and TMA云盘牛 working; TMAI狗 and
+TMA客户端牛 idle with recent heartbeat. Client HOLD remains respected.
+TMA云牛 remains offline (last heartbeat Oct 6); distinct from TMA云盘牛.
+No blind restart. Linux installer + anet.sh download entry remains Hub #843.
