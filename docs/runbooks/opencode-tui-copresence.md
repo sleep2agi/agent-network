@@ -1,11 +1,13 @@
 # OpenCode TUI 共存运行手册
 
-状态：共存功能在 preview 通道。V2 受限预览由 PR #2380 引入，首次随
-`agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107` 发布；
-这不是当前通道版本声明。升级时使用仓库版本配对表指定的精确 CLI/runtime，
-不要混用不同批次，也不要把 V1 的安全保证套到 V2。
-
 ## OpenCode V2 远程创建接口（#829 开发中）
+
+daemon 发现 `opencode --version` 为 V2 时，通用 runtime-readiness 只报告
+`unknown`（CLI 已发现，provider/auth 尚未确认），不把 V1 的 opencode.ai HEAD
+结果当成所有 V2 provider 的结论。本地/局域网 provider 不依赖该站点；反之，
+站点可达也不证明选定模型可用。客户端显示未检测仍允许配置，创建/启动时的
+精确包身份、显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、
+其他 runtime 的认证/网络判据不因此放宽。这里的版本字符串不是可信包身份。
 
 以下是 Hub/daemon 参数与落盘切片，**不是已经上线的客户端入口或真实 V2
 生命周期验收**。现有 CLI、原生 V2 权限、客户端界面和正式发布仍各有门禁。
@@ -42,8 +44,9 @@ serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 
 只有绑定 daemon 在启动器退出及本轮三进程检查通过后，以真实 bridge PID
 回报 `launch_verified: true` 才记录；失败清除此证据，迟到成功不能复活失败。
 GET `/api/node-create-requests` 按原网络权限返回该列和 `child_node_id`。
-客户端必须检查本次请求、失败状态、精确节点身份及在线状态；OpenCode 还必须
-等明确启动证据，不能从 `acked_at` 推断。旧 Hub/daemon 缺证据仅显示尚未确认。
+客户端必须检查本次请求、失败状态、精确节点身份及在线状态；V2 还必须
+等明确启动证据，不能从 `acked_at` 推断。V2 在旧 Hub/daemon 缺证据时仅显示尚未确认。
+客户端依据实际提交的代际启用此门；旧 V1 不要求它不提供的 V2 证据。
 该时间是一次启动检查记录，不是持续健康保证。升级/回滚仍用 main SHA 门禁，
 旧程序可忽略新增可空列；请求历史随原 Hub 数据库加密备份恢复，不伪造确认时间。
 
@@ -79,6 +82,10 @@ main 完整 SHA 构建；回滚须回到已验证版本，先停止新增 V2 节
 静默接管 V2 配置。数据库/节点数据来自原有备份，clone 不包含这些数据；
 本切片测试不构成灾难恢复演练证明。
 
+状态：共存功能在 preview 通道。V2 受限预览由 PR #2380 引入，首次随
+`agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107` 发布；
+这不是当前通道版本声明。升级时使用仓库版本配对表指定的精确 CLI/runtime，
+不要混用不同批次，也不要把 V1 的安全保证套到 V2。
 
 ## 先选择代际
 

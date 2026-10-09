@@ -5,6 +5,8 @@ exec > >(tee /tmp/test829-ci-art/report.txt) 2>&1
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
 test "$SOURCE_COMMIT" = "${EXPECTED_SOURCE_COMMIT:?}"
 test "$(id -u)" != 0
+test "$(stat -c %u /run/user/1000)" = "$(id -u)"
+test "$(stat -c %a /run/user/1000)" = 700
 if command -v opencode; then echo 'FAIL: unexpected vendor binary'; exit 1; fi
 echo "source=$SOURCE_COMMIT uid=$(id -u); no vendor OpenCode on PATH"
 export HOME=/tmp/test829-ci-home
@@ -12,6 +14,7 @@ mkdir -m 700 "$HOME"
 cd /opt/node_modules/@sleep2agi/agent-node
 bun test src/runtime/opencode-create-profile.test.ts src/runtime/node-name-652.test.ts
 bun test src/runtime/opencode-copresence/launcher-health.test.ts src/runtime/opencode-copresence/v2-session.test.ts
+bun test src/runtime/opencode-copresence/v2-readiness.test.ts src/runtime/runtime-readiness.test.ts
 bun test src/runtime/opencode-start-completion.test.ts src/runtime/start-daemon.test.ts
 cd /workspace
 bun test agent-network/src/opencode-create-security-parity.test.ts
