@@ -3,6 +3,7 @@
 ARG DEPENDENCY_IMAGE=anet-test829:client-deadline-2d3
 FROM ${DEPENDENCY_IMAGE}
 USER root
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 COPY agent-network /workspace/agent-network
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
 COPY server /workspace/server
