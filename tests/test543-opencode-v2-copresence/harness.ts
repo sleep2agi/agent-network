@@ -14,7 +14,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { openOpenCodeCopresenceRuntime } from "/agent-node-src/src/runtime/opencode-copresence/runtime";
 import { OPENCODE_V2_BACKEND } from "/agent-node-src/src/runtime/opencode-backend";
 import { OpenCodeProviderError } from "/agent-node-src/src/runtime/opencode-provider-error";
@@ -167,6 +167,7 @@ try {
 
   // ── Layer 3 ────────────────────────────────────────────────────────────
   let workDir = "";
+  let launchRoot = "";
   if (layer("Layer 3 — opt-in (flags.opencodeUnsafeTools=true): real serve, package gate, CommHub MCP")) {
     workDir = join(root, "node-v2");
     mkdirSync(join(workDir, ".config", "opencode"), { recursive: true, mode: 0o700 });
@@ -183,6 +184,10 @@ try {
     check("loopback serve", /^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.url), runtime.url);
     check("V2 session id", /^ses_/.test(runtime.sessionId), runtime.sessionId);
     const launcher = readFileSync(runtime.attachScriptPath, "utf8");
+    // Read only the generated test path, never log the credential-bearing script.
+    const dataRoot = launcher.match(/^export XDG_DATA_HOME='([^']+)'$/m)?.[1];
+    launchRoot = dataRoot ? dirname(dataRoot) : "";
+    check("captured existing private launch root", Boolean(launchRoot) && existsSync(launchRoot));
     check("launcher joins with --server/--session (no attach, no --pure)",
       launcher.includes(`--server '${runtime.url}' --session '${runtime.sessionId}'`) && !launcher.includes(" attach ") && !launcher.includes("--pure"));
     check("launcher spawns the gated package binary", launcher.includes(`exec '${binary}'`));
@@ -246,6 +251,7 @@ try {
     check("runtime reports stopped", runtime.isRunning === false);
     check("launcher removed", !existsSync(launcherPath));
     check("serve + TUI processes gone", await waitFor(() => opencodeProcs().length === 0, 10_000), opencodeProcs().join(" | "));
+    check("close reclaimed private launch root including registry observer", Boolean(launchRoot) && !existsSync(launchRoot));
     check("no per-user background service was started", !opencodeProcs().some((p) => p.includes("--service"))
       && spawnSync("curl", ["-s", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:49374/api/info"]).status !== 0);
     runtime = undefined;
