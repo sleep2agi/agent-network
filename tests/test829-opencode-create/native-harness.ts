@@ -110,6 +110,50 @@ try {
   check('task terminal receipt', await until(async () => { const r = await api(`/api/tasks?task_id=${sent.message_id}&network_id=${networkId}`); task = r.tasks?.find((t: any) => (t.task_id ?? t.id) === sent.message_id); return ['replied', 'failed', 'cancelled'].includes(task?.status); }, 60000));
   check('exact answer from model, not prompt echo', task.status === 'replied' && task.result === '[oc829] ANSWER829_REMOTE829');
   check('answer visible in same TUI', await until(() => tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout.includes('ANSWER829_REMOTE829')));
+  if (process.env.TEST829_LIFECYCLE === '1') {
+    console.log('L5 actual daemon stop/start lifecycle');
+    const nodeDir = `${project}/.anet/nodes/oc829`;
+    const health = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8'));
+    const attach = JSON.parse(readFileSync(`${nodeDir}/opencode-attach.json`, 'utf8'));
+    const identities = [health.bridge, health.serve, { pid: attach.pid, ticks: String(attach.startTicks) }];
+    const gone = (p: { pid: number; ticks: string }) => {
+      try {
+        const stat = readFileSync(`/proc/${p.pid}/stat`, 'utf8');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+        // PID reuse is not the old generation. Zombies do not prove reaping.
+        return fields[19] !== p.ticks;
+      } catch { return true; }
+    };
+    const stop = await mcp('stop_node', { child_node_id: row.child_node_id, daemon_node_id: daemonId, network_id: networkId });
+    console.log('stop result:', redact(JSON.stringify(stop)));
+    check('actual stop dispatched', stop.ok && stop.request_id);
+    let stopRow: any;
+    check('stop request completed', await until(() => {
+      stopRow = db.query('SELECT status,error FROM node_stop_requests WHERE request_id=?').get(stop.request_id);
+      return stopRow?.status === 'stopped';
+    }, 30000));
+    console.log('stop status:', JSON.stringify(stopRow));
+    check('old bridge serve TUI identities reaped', await until(() => identities.every(gone), 15000));
+    check('old TUI and bridge sessions absent', tmux('has-session', '-t', '=oc829').status !== 0 && tmux('has-session', '-t', '=oc829-桥').status !== 0);
+    check('config preserved after stop', existsSync(`${nodeDir}/config.json`));
+    const startResult = await mcp('start_node', { child_node_id: row.child_node_id, daemon_node_id: daemonId, network_id: networkId });
+    console.log('start result:', redact(JSON.stringify(startResult)));
+    check('actual start dispatched', startResult.ok && startResult.request_id);
+    check('new launch evidence produced', await until(() => {
+      try { const h = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8')); return h.bridge.ticks !== health.bridge.ticks || h.bridge.pid !== health.bridge.pid; } catch { return false; }
+    }, 45000));
+    check('restarted native TUI rendered', await until(() => /ctrl\+p/.test(tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout)));
+    const again = await api('/api/task', { alias: 'oc829', task: 'Reply with exactly RESTART829', network_id: networkId });
+    check('post-start task accepted', again.ok && again.message_id);
+    let reply: any;
+    check('post-start task replied exactly', await until(async () => {
+      const r = await api(`/api/tasks?task_id=${again.message_id}&network_id=${networkId}`);
+      reply = r.tasks?.find((t: any) => (t.task_id ?? t.id) === again.message_id);
+      return reply?.status === 'replied' && reply.result === '[oc829] ANSWER829_RESTART829';
+    }, 60000));
+    check('post-start answer visible in TUI', await until(() => tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout.includes('ANSWER829_RESTART829')));
+    console.log('PASS actual daemon stop/start task chain; model/client UI remain separate');
+  }
   console.log('PASS test829 real daemon create and task; remote stop/restart and client UI remain separate gates');
 } finally {
   writeFileSync(`${artifact}/tui.txt`, tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout || '');
