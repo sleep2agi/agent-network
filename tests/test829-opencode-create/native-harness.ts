@@ -1,0 +1,98 @@
+// Docker-only real Hub / daemon / CLI / OpenCode V2. No vendor credentials.
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { Database } from 'bun:sqlite';
+const root = '/run/test829-native';
+const project = `${root}/project`;
+const artifact = '/artifacts';
+mkdirSync(project, { recursive: true });
+mkdirSync(artifact, { recursive: true });
+const hub = 'http://127.0.0.1:9287';
+const env = { ...process.env, HOME: `${root}/home`, TERM: 'xterm-256color', ANET_BIN_ABS: '/workspace/agent-network/dist/bin/anet.cjs', ANET_DAEMON_ALLOW_ENV_BIN: '1' };
+mkdirSync(env.HOME, { recursive: true, mode: 0o700 });
+const redact = (s: string) => s.replace(/\b(?:atok|ntok|utok)_[A-Za-z0-9_-]+/g, '[test-token]');
+const pause = (ms = 200) => new Promise(r => setTimeout(r, ms));
+function check(name: string, ok: unknown) { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}`); if (!ok) throw new Error(name); }
+async function until(fn: () => Promise<boolean> | boolean, ms = 30000) { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await pause(); } return false; }
+async function cli(args: string[]) {
+  const c = Bun.spawn([env.ANET_BIN_ABS, ...args], { cwd: project, env, stdin: new Blob(['\n']), stdout: 'pipe', stderr: 'pipe' });
+  const [out, err, code] = await Promise.all([new Response(c.stdout).text(), new Response(c.stderr).text(), c.exited]);
+  console.log(redact(`CLI ${args.join(' ')} exit=${code}\n${out}${err}`));
+  check(`CLI ${args.slice(0, 3).join(' ')}`, code === 0);
+}
+let token = '', networkId = '', daemonId = '';
+async function api(path: string, body?: unknown) {
+  const r = await fetch(hub + path, { method: body === undefined ? 'GET' : 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  if (!r.ok) throw new Error(`${path}: ${r.status} ${redact(await r.text())}`);
+  return r.json() as Promise<any>;
+}
+async function mcp(name: string, args: object) {
+  const r = await fetch(hub + '/mcp', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-03-26' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) });
+  const text = await r.text();
+  const data = text.split('\n').find(l => l.startsWith('data: '))?.slice(6) ?? text;
+  const result = JSON.parse(data);
+  if (result.error) return { error: result.error };
+  return JSON.parse(result.result.content[0].text);
+}
+const logs: Record<string, string> = {};
+function start(name: string, bin: string, args: string[], opts: object) {
+  const p = spawn(bin, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] }); logs[name] = '';
+  p.stdout!.on('data', b => logs[name] += b); p.stderr!.on('data', b => logs[name] += b); return p;
+}
+const server = start('hub', 'bun', ['src/index.ts'], { cwd: '/workspace/server', env: { ...env, PORT: '9287', COMMHUB_DB: `${root}/hub.db`, COMMHUB_AUTH_TOKEN: 'test829-bootstrap' } });
+const stub = start('model', 'python3', ['/test827/stub-model.py', '18827', `${artifact}/stub.log`, 'ANSWER829_'], { env });
+let daemon: ReturnType<typeof start> | undefined;
+const tmux = (...args: string[]) => spawnSync('tmux', ['-S', '/run/test827-tmux.sock', ...args], { env, encoding: 'utf8' });
+try {
+  console.log('L0 environment');
+  check('exact real OpenCode V2', spawnSync('opencode', ['--version'], { encoding: 'utf8' }).stdout.trim() === 'opencode v2.0.22');
+  check('Hub health', await until(() => fetch(hub + '/health').then(r => r.ok, () => false)));
+  check('model health', await until(() => fetch('http://127.0.0.1:18827/v1/models').then(r => r.ok, () => false)));
+  console.log('L1 authentication and real daemon registration');
+  check('unauthenticated dispatch refused', (await fetch(hub + '/api/task', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status === 401);
+  await cli(['init', '--hub', hub]);
+  await cli(['register', '--username', 't829', '--password', 'fixture-only-password']);
+  await cli(['login', '--username', 't829', '--password', 'fixture-only-password']);
+  const global = JSON.parse(readFileSync(`${env.HOME}/.anet/config.json`, 'utf8'));
+  token = global.token; networkId = global.network_id;
+  await cli(['daemon', 'init', 'daemon829']);
+  daemon = start('daemon', env.ANET_BIN_ABS, ['daemon', 'start', 'daemon829'], { cwd: project, env });
+  check('daemon registered as host supervisor', await until(async () => { const r = await api(`/api/host-supervisors?network_id=${networkId}`); daemonId = r.daemons?.find((d: any) => d.alias === 'daemon829')?.daemon_node_id; return Boolean(daemonId); }, 45000));
+  const db = new Database(`${root}/hub.db`, { readonly: true });
+  const count = () => (db.query('SELECT COUNT(*) AS n FROM node_create_requests').get() as any).n;
+  console.log('L2 actual MCP validation before create side effects');
+  const before = count();
+  const denied = await mcp('create_node', { daemon_node_id: daemonId, network_id: networkId, node_spec: { name: 'refused829', runtime: 'opencode-cli', flags: { opencodeGeneration: 'v2' } } });
+  check('V2 without explicit unsafe opt-in refused', !denied.request_id && JSON.stringify(denied).includes('opencodeUnsafeTools'));
+  check('no create request or node config on refusal', count() === before && !existsSync(`${project}/.anet/nodes/refused829/config.json`));
+  console.log('L3 real daemon remote create -> native V2 startup');
+  // Only provider fixture is preseeded; node identity/config must come from daemon.
+  const provider = `${project}/.anet/nodes/oc829/.config/opencode`;
+  mkdirSync(provider, { recursive: true, mode: 0o700 });
+  writeFileSync(`${provider}/opencode.json`, JSON.stringify({ model: 'stub/stub-model', provider: { stub: { npm: '@ai-sdk/openai-compatible', name: 'Stub', options: { baseURL: 'http://127.0.0.1:18827/v1', apiKey: 'test-only' }, models: { 'stub-model': { name: 'Stub' } } } } }), { mode: 0o600 });
+  const created = await mcp('create_node', { daemon_node_id: daemonId, network_id: networkId, node_spec: { name: 'oc829', runtime: 'opencode-cli', model: 'stub/stub-model', flags: { opencodeGeneration: 'v2', opencodeUnsafeTools: true } } });
+  console.log('create result:', redact(JSON.stringify(created)));
+  check('actual MCP create accepted with request id', created.ok && created.request_id);
+  let row: any;
+  check('daemon settles create request', await until(() => { row = db.query('SELECT status, error, child_pid, child_node_id FROM node_create_requests WHERE request_id=?').get(created.request_id); return ['succeeded', 'failed', 'rejected', 'runtime_capability_check_failed', 'started'].includes(row?.status); }, 60000));
+  console.log('create status:', JSON.stringify(row));
+  const cfg = JSON.parse(readFileSync(`${project}/.anet/nodes/oc829/config.json`, 'utf8'));
+  check('daemon persisted V2 generation and explicit opt-in', cfg.opencodeGeneration === 'v2' && cfg.opencodeMode === 'copresence' && cfg.flags.opencodeUnsafeTools === true);
+  check('create status reports started, not capability failure', ['started', 'succeeded'].includes(row.status));
+  check('native TUI rendered', await until(() => /ctrl\+p/.test(tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout)));
+  console.log('L4 task receipt from remotely created runtime');
+  const sent = await api('/api/task', { alias: 'oc829', task: 'Reply with exactly REMOTE829', network_id: networkId });
+  check('task accepted', sent.ok && sent.message_id);
+  let task: any;
+  check('task terminal receipt', await until(async () => { const r = await api(`/api/tasks?task_id=${sent.message_id}&network_id=${networkId}`); task = r.tasks?.find((t: any) => (t.task_id ?? t.id) === sent.message_id); return ['replied', 'failed', 'cancelled'].includes(task?.status); }, 60000));
+  check('exact answer from model, not prompt echo', task.status === 'replied' && task.result === '[oc829] ANSWER829_REMOTE829');
+  check('answer visible in same TUI', await until(() => tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout.includes('ANSWER829_REMOTE829')));
+  console.log('PASS test829 real daemon create and task; remote stop/restart and client UI remain separate gates');
+} finally {
+  writeFileSync(`${artifact}/tui.txt`, tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout || '');
+  const bridge = `${project}/.anet/nodes/oc829/logs/copresence-bridge.log`;
+  if (existsSync(bridge)) writeFileSync(`${artifact}/bridge.log`, redact(readFileSync(bridge, 'utf8')));
+  for (const name of ['oc829', 'oc829-桥']) tmux('kill-session', '-t', `=${name}`);
+  daemon?.kill('SIGTERM'); server.kill('SIGTERM'); stub.kill('SIGTERM');
+  for (const [name, log] of Object.entries(logs)) writeFileSync(`${artifact}/${name}.log`, redact(log));
+}
