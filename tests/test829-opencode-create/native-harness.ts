@@ -36,7 +36,7 @@ async function mcp(name: string, args: object) {
 }
 const logs: Record<string, string> = {};
 function start(name: string, bin: string, args: string[], opts: object) {
-  const p = spawn(bin, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] }); logs[name] = '';
+  const p = spawn(bin, args, { ...opts, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }); logs[name] = '';
   p.stdout!.on('data', b => logs[name] += b); p.stderr!.on('data', b => logs[name] += b); return p;
 }
 const server = start('hub', 'bun', ['src/index.ts'], { cwd: '/workspace/server', env: { ...env, PORT: '9287', COMMHUB_DB: `${root}/hub.db`, COMMHUB_AUTH_TOKEN: 'test829-bootstrap' } });
@@ -86,6 +86,10 @@ try {
   check('daemon persisted V2 generation and explicit opt-in', cfg.opencodeGeneration === 'v2' && cfg.opencodeMode === 'copresence' && cfg.flags.opencodeUnsafeTools === true);
   check('create status reports started, not capability failure', ['started', 'succeeded'].includes(row.status));
   check('native TUI rendered', await until(() => /ctrl\+p/.test(tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout)));
+  if (process.env.TEST829_STOP_TUI_BEFORE_VERDICT === '1') {
+    console.log('NEGATIVE CONTROL: stop exact owned TUI before daemon verdict');
+    check('negative control TUI stop', tmux('kill-session', '-t', '=oc829').status === 0);
+  }
   // Registration can finalize the Hub request before the daemon's 5-second
   // launcher check. Do not advance on that transient succeeded state: a late
   // failed ack may revoke the token while the TUI and request still look green.
@@ -110,6 +114,13 @@ try {
   const bridge = `${project}/.anet/nodes/oc829/logs/copresence-bridge.log`;
   if (existsSync(bridge)) writeFileSync(`${artifact}/bridge.log`, redact(readFileSync(bridge, 'utf8')));
   for (const name of ['oc829', 'oc829-桥']) tmux('kill-session', '-t', `=${name}`);
-  daemon?.kill('SIGTERM'); server.kill('SIGTERM'); stub.kill('SIGTERM');
+  // The daemon wrapper may leave a grandchild holding our stdout pipe open.
+  // These groups were created by this Docker-only harness, never discovered
+  // by pattern. Bound cleanup, then close our pipe handles explicitly.
+  const owned = [daemon, server, stub].filter(Boolean) as ReturnType<typeof start>[];
+  for (const p of owned) { try { process.kill(-p.pid!, 'SIGTERM'); } catch {} }
+  const stopped = await until(() => owned.every(p => p.exitCode !== null || p.signalCode !== null), 5000);
+  for (const p of owned) { p.stdout?.destroy(); p.stderr?.destroy(); }
   for (const [name, log] of Object.entries(logs)) writeFileSync(`${artifact}/${name}.log`, redact(log));
+  check('owned harness processes exited', stopped);
 }
