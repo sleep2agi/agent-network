@@ -29,7 +29,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("content-length", 0)); body = json.loads(self.rfile.read(n) or b"{}")
         if LOG:
-            with open(LOG, "a") as f: f.write(json.dumps({"path": self.path, "tools": [t.get("function", {}).get("name") for t in body.get("tools", []) or []], "user": last_user(body)[:200]}) + "\n")
+            with open(LOG, "a") as f: f.write(json.dumps({"path": self.path, "model": body.get("model"), "tools": [t.get("function", {}).get("name") for t in body.get("tools", []) or []], "user": last_user(body)[:200]}) + "\n")
         u = last_user(body)
         if "STUB_FAIL" in u:
             self._json(400, {"error": {"message": "stub provider refused: STUB_FAIL requested", "type": "invalid_request_error"}}); return

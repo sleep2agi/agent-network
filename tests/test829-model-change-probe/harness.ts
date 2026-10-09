@@ -152,12 +152,25 @@ try {
   const providerConfig = JSON.parse(readFileSync(providerFile, 'utf8'));
   providerConfig.provider.stub.models['stub-model-next'] = { name: 'Stub Next' };
   writeFileSync(providerFile, JSON.stringify(providerConfig), { mode: 0o600 });
+  if (process.env.TEST829_MODEL_DRIVER) {
+    const child = Bun.spawn(['node', process.env.TEST829_MODEL_DRIVER], {
+      env, stdin: new Blob([JSON.stringify({ hub, token, networkId, nodeId: row.child_node_id, baseRevision: beforeConfig.config_revision })]),
+      stdout: 'pipe', stderr: 'pipe',
+    });
+    const deadline = setTimeout(() => child.kill(), 115000);
+    try {
+      const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      console.log(redact(out + err));
+      check('rendered client model change and revision confirmation', code === 0 && out.includes('MODEL_CLIENT_RESULT {"ok":true}'));
+    } finally { clearTimeout(deadline); }
+  } else {
   const changed = await mcp('update_node_config', {
     node_id: row.child_node_id, network_id: networkId,
     base_revision: beforeConfig.config_revision, patch: { model: 'stub/stub-model-next' },
   });
   console.log('model update result:', redact(JSON.stringify(changed)));
   check('model update accepted', changed.ok === true);
+  }
   let modelView: any;
   check('new revision and requested model read back', await until(async () => {
     modelView = await api(`/api/nodes/${row.child_node_id}/config`);
@@ -179,7 +192,11 @@ try {
     return t?.status === 'replied' && t.result === '[oc829] ANSWER829_MODEL829';
   }, 45000));
   check('post-model answer visible in TUI', await until(() => tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout.includes('ANSWER829_MODEL829')));
-  console.log('PASS real V2 config-update model probe; UI and actual provider model choice unproven');
+  const providerRequests = readFileSync(`${artifact}/stub.log`, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  check('initial task reached original provider model', providerRequests.some(r => r.user.includes('Reply with exactly REMOTE829') && r.model === 'stub-model'));
+  const afterModel = providerRequests.filter(r => r.user.includes('Reply with exactly MODEL829'));
+  check('post-change task reached new provider model only', afterModel.length > 0 && afterModel.every(r => r.model === 'stub-model-next'));
+  console.log(`PASS real V2 model probe; rendered UI=${Boolean(process.env.TEST829_MODEL_DRIVER)}; provider model verified`);
 
   if (process.env.TEST829_LIFECYCLE === '1') {
     console.log('L5 actual daemon stop/start lifecycle');
@@ -263,4 +280,3 @@ try {
   for (const [name, log] of Object.entries(logs)) writeFileSync(`${artifact}/${name}.log`, redact(log));
   check('owned harness processes exited', stopped);
 }
-
