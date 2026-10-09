@@ -1,7 +1,8 @@
 Board #822 / core Issue #2539 — backend fork recovery transport preparation
 Date: 2026-10-09 CST
 Base: main 9f407449fc28c5da6334b33056fc93f5fb66ea2f
-State: INTERNAL PREPARATION ONLY; daemon receiver implemented, Hub transport pending.
+State: INTERNAL CANDIDATE; daemon receiver and Hub storage/read implemented;
+daemon capability advertisement and final CLI integration gate pending.
 Not a complete backend candidate, merge, release, or production deployment.
 
 L1: Docker isolated filesystem evidence reader (Bun 1.3.14, no network)
@@ -62,3 +63,36 @@ Next: Hub explicit confirmation persistence, daemon/CLI capability advertisement
 and dispatch gate (including old daemon pull refusal), recovery ack persistence,
 compatible result read API and recovery-specific integrated tests after #821.
 No service/port/environment/secret or production data changes in this draft.
+
+2026-10-09 — Hub transport slice (supersedes the earlier pending list)
+- Persist strict per-request confirmation and separate fork result in additive
+  nullable node_start_requests columns. Old rows/ordinary start keep old shape.
+- Dispatch requires created binding + explicit daemon protocol/CLI capability;
+  pull refuses old daemons, without turning recovery into an ordinary launch.
+- Terminal receipt preserves fork evidence even on startup failure. Missing or
+  corrupt evidence is unknown. Idempotent terminal ack cannot overwrite it.
+- Existing authenticated human result endpoint retains current node-grant and
+  tenant checks, exposes only validated evidence, never raw JSON or paths.
+- Existing ordinary stale-start behavior is unchanged; a stale confirmed fork
+  is not silently superseded, because receipt absence cannot prove no effect.
+- Repository contract/recovery/rollback notes: docs/codex-fork-transport.md.
+  Outstanding confirmed requests must be reconciled before old-Hub downgrade.
+
+Docker verification (Bun 1.3.14, no network, read-only candidate source mounts):
+  src/start-node.test.ts: 14 pass, 0 fail, 68 assertions.
+  Includes Hub -> daemon -> real CLI-shaped executable -> Hub receipt/read for
+  exit 0 and 7. The fixture checks exact argv and writes a mapping; it is NOT
+  an actual Codex recovery/model test. No production nodes were started.
+  src/node-lifecycle-read-http.test.ts: 14 pass, 0 fail, 240 assertions.
+  Actual port-0 HTTP: cross-tenant/restricted/no-grant/daemon access refused;
+  granted viewer reads evidence; corrupt stored extra path is not returned.
+  src/codex-fork-migration.test.ts: 1 pass, 0 fail, 2 assertions.
+  An old SQLite start table is upgraded in two separate Hub-import processes;
+  ordinary row stays unchanged and receipt survives the second migration.
+  PostgreSQL migration and full empty-server recovery were not exercised.
+  Complete updated test819 runner: 101 pass, 0 fail, 546 assertions total
+  (daemon 72 + migration 1 + Hub lifecycle 14 + authenticated HTTP 14).
+
+Still pending: real daemon capability producer (tests seed a capability fixture),
+#821 compatible CLI gate/merge and final candidate review/PR. No UI, release,
+production snapshot edits, database migration or daemon restart performed.

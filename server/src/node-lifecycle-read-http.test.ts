@@ -140,6 +140,27 @@ test("cross-network request and node guesses do not disclose data", async () => 
     expect((await get(query(kind, `request_id=${id}&network_id=${a.network_id}`), b.token)).status).toBe(403);
   }
 });
+test("fork receipt uses the same authenticated node visibility and redacts corrupt storage", async () => {
+  const receipt = { state: "forked", old_thread_id: "01a11846-d796-72f1-af68-8d9215a65dc8", new_thread_id: "01a11900-0000-7000-8000-000000000001" };
+  const path = query("start", "request_id=start_read_failed");
+  try {
+    db.run("UPDATE node_start_requests SET fork_recovery_json=?1,fork_result_json=?2 WHERE request_id='start_read_failed'",
+      [JSON.stringify({ kind: "fork_on_missing_ordinal", confirmed: true }), JSON.stringify(receipt)]);
+    expect((await get(path)).body.request.fork_recovery).toEqual({ requested: true, result: receipt });
+    expect((await get(path, b.token)).status).toBe(404);
+    expect((await get(path, limited.token)).status).toBe(404);
+    expect((await get(path, daemonToken)).status).toBe(403);
+    db.run("INSERT INTO network_member_agent_grants(network_id,user_id,node_id,can_message) VALUES(?1,?2,?3,0)", [a.network_id, limited.user.user_id, ids.active]);
+    expect((await get(path, limited.token)).body.request.fork_recovery.result).toEqual(receipt);
+    db.run("UPDATE node_start_requests SET fork_result_json=?1 WHERE request_id='start_read_failed'", [JSON.stringify({ ...receipt, snapshot: "/private/secret" })]);
+    const corrupted = await get(path, limited.token);
+    expect(corrupted.body.request.fork_recovery.result).toEqual({ state: "unknown", reason: "result_invalid" });
+    expect(JSON.stringify(corrupted)).not.toContain("/private");
+  } finally {
+    db.run("DELETE FROM network_member_agent_grants WHERE user_id=?1 AND node_id=?2", [limited.user.user_id, ids.active]);
+    db.run("UPDATE node_start_requests SET fork_recovery_json=NULL,fork_result_json=NULL WHERE request_id='start_read_failed'");
+  }
+});
 test("same-network restricted viewer without node grants cannot read requests", async () => {
   for (const kind of ["adopt", "start", "stop"]) {
     expect((await get(query(kind, `node_id=${ids.active}&network_id=${a.network_id}`), limited.token)).status).toBe(404);

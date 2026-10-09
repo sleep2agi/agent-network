@@ -504,6 +504,12 @@ db.exec(`
 `);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_start_req_daemon ON node_start_requests(daemon_node_id, status)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_start_req_child ON node_start_requests(child_node_id)`);
+// Additive: old rows remain ordinary starts (NULL). Keep the request and the
+// observed side effect separate from launcher status, including startup failure.
+for (const column of ["fork_recovery_json", "fork_result_json"]) {
+  try { db.exec(`ALTER TABLE node_start_requests ADD COLUMN ${column} TEXT`); }
+  catch (e: any) { if (!/duplicate column|already exists/i.test(e?.message || "")) throw e; }
+}
 try {
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_start_req_child_inflight
              ON node_start_requests(child_node_id)

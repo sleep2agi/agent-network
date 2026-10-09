@@ -1,8 +1,11 @@
 import { db } from "./db.js";
 import { addAgentNetworkScope, type RestNetworkScope } from "./network-scope.js";
+import { publicForkResult } from "./codex-fork-contract.js";
 
 // Exact public codes only; daemon exception text must never reach node viewers.
 const publicLifecycleErrors = new Set([
+  "codex_fork_confirmation_invalid", "codex_fork_recovery_unsupported", "codex_fork_cli_unsupported",
+  "codex_fork_result_invalid", "codex_fork_outcome_unknown",
   "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",
   "adopt_active_binding_required", "adopt_binding_unavailable",
   "adopt_binding_revoked_during_start", "adopt_explicit_private_socket_required",
@@ -91,9 +94,16 @@ export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Res
   const params: any[] = [requestId ?? nodeId];
   const sql = scopeNodes(`SELECT r.request_id,r.${nodeColumn} AS node_id,r.network_id,r.daemon_node_id,
       r.status,r.error,r.created_at,${kind === "adopt" ? "r.updated_at" : "r.acked_at,r.delivered_at"}
+      ${kind === "start" ? ",r.fork_recovery_json,r.fork_result_json" : ""}
     FROM ${table} r JOIN nodes n ON n.node_id=r.${nodeColumn} AND n.network_id=r.network_id
     WHERE r.${requestId ? "request_id" : nodeColumn}=?1${kind === "stop" ? " AND r.action='stop'" : ""}`, params, scope);
   const row = db.get<Record<string, unknown>>(sql + " ORDER BY r.created_at DESC,r.request_id DESC LIMIT 1", ...params);
   if (!row && requestId) return fail("request_not_found", 404);
-  return Response.json({ ok: true, request: row ? { kind, ...row, error: publicLifecycleError(row.error) } : null });
+  if (!row) return Response.json({ ok: true, request: null });
+  const { fork_recovery_json, fork_result_json, ...publicRow } = row;
+  return Response.json({ ok: true, request: { kind, ...publicRow, error: publicLifecycleError(row.error),
+    ...(kind === "start" && fork_recovery_json != null ? { fork_recovery: {
+      requested: true, result: publicForkResult(fork_result_json),
+    } } : {}),
+  } });
 }
