@@ -1,0 +1,96 @@
+Test829: verified remote OpenCode V2 start completion
+Date: 2026-10-09 15:37 CST (UTC+08:00)
+Scope: Hub #539 / #829; candidate PR #2551. NOT merged or released.
+
+Outcome
+The old remote start path acknowledged started on spawn even when the finite
+launcher subsequently refused startup. The new V2-only path acknowledges
+starting before spawning, waits for bounded launcher completion, and verifies
+the current bridge/serve/TUI launch identity before acknowledging started.
+Legacy and Codex paths retain their existing behavior and regression coverage.
+
+Exact source / images
+Product regression: 863dfaeeeeb77ce1b9144056a5d3914c9bf42ad0
+  anet-test829:start-863d
+  sha256:fc4c73f46ef805586438546f91790b4cd8935cc84e2a0ef8002e2a1066e693ee
+Native red: 6ec2daec2c9ea8db472640372a50ba94ca1a061c
+  anet-test829:start-red-6ec2
+  sha256:aa77191e53b7f1bb685b84de818e8e2d61f08e90b060b28cd26d234a9ccf2a58
+Native fixed integration: 92b191072eb4ce27f78ec8c159d98b5e48e5b2b7
+  anet-test829:start-native-92b1
+  sha256:c0324e62371fda38cd57b7635ff9f76b7d031dc266d7c8cdad365f1364f8a4ed
+Native integration includes unmerged sibling PR #2550 registry readiness and
+PR #2545 CLI/disposal changes; it is not proof that standalone #2551 or main
+passes. Images use exact archived source with no runtime source bind mount.
+Native Dockerfile.native-cached uses dependency base anet-test827:close-drain,
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac.
+These are exploratory integration gates, not a fresh formal release build.
+
+Environment and isolation
+Docker through sg docker; non-root UID 1000; network none for test runs.
+Isolated SQLite and HOME, private tmux socket /run/test827-tmux.sock; no host
+vendor CLI, production credentials, production changes or global npm writes.
+Real @opencode/cli 2.0.22, loopback model fixture, real Hub MCP and daemon.
+Tests stop at the first failed prerequisite. Runtime task answers are compared
+against exact fixture responses and confirmed visible in the same native TUI.
+
+Regression: PASS (container anet-test829-start-863d, exit 0)
+171 tests / 872 assertions:
+  profile/writer                         30 / 132
+  launch health + V2 core                 24 / 79
+  start completion + legacy/Codex start   24 / 71
+  mirrored-source parity                  4 / 4
+  CLI/mode                               14 / 45
+  real HTTP audience                     12 / 295
+  schemas                                47 / 185
+  ack handler + transport                16 / 61
+Start-specific cases include delayed nonzero exit, signal exit, stale identity,
+spawn error, timeout with late exit, unsupported/rejected progress, concurrent
+same-request replay and lost terminal-ack retry without duplicate spawning.
+
+Native RED: witnessed expected failure (anet-test829-start-red-6ec2, exit 1)
+L0 environment, L1 authentication, L2 opt-in refusal, L3 remote create, L4 real
+task and L5 stop/process-reaping checks passed. Then only the stopped Docker
+node's opencodeUnsafeTools flag was set false. Real start_node was dispatched;
+request str_1a679926e5ff reported started, failing the assertion that denial
+must report start_failed. This was a product false positive, not a model error.
+Create cr_0c9e58b7-ad3f-4027-8987-c190dc5bb3a4; stop sr_9f9b4086ba10.
+
+Native positive: PASS (anet-test829-start-positive-92b1, exit 0)
+L0-L4 passed, including post-create daemon verdict and active child token.
+Real stop reaped frozen bridge/serve/TUI identities (PID + start ticks), removed
+exact TUI/bridge sessions and preserved config. Real start generated new launch
+evidence and native TUI; a new task replied exactly and appeared in that TUI.
+Persisted start request status: started, error null.
+Create cr_453a38c5-fc83-4984-a9a1-e4af28f3f06a
+Stop sr_ef13c86e8752; start str_6039c9d19941.
+
+Native denied restart: PASS (anet-test829-start-denied-92b1, exit 0)
+Same prerequisite layers through real stop passed. Removing explicit opt-in
+from only the owned stopped Docker node produced persisted start_failed with
+error opencode_launcher_exit:1; no TUI or bridge session was created. The
+post-start task layer was intentionally not executed after this rejection.
+Create cr_416219e6-f095-4f6b-bbe1-08753e08d416
+Stop sr_eae3bb03d1d3; start str_122969f9efba.
+Both fixed native containers confirmed owned harness processes exited.
+
+Reproduce native runs from the exact integration image
+sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=92b191072eb4ce27f78ec8c159d98b5e48e5b2b7 -e TEST829_LIFECYCLE=1 anet-test829:start-native-92b1'
+sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=92b191072eb4ce27f78ec8c159d98b5e48e5b2b7 -e TEST829_LIFECYCLE=1 -e TEST829_DENY_RESTART=1 anet-test829:start-native-92b1'
+Harness/source recipe: tests/test829-opencode-create/{native-harness.ts,
+native-overlay.sh,Dockerfile.native-cached} on the integration SHA above.
+Raw redacted logs and reports remain under /artifacts in named containers.
+Do not export fixture DBs or credentials as public test evidence.
+
+Limits / next gates
+V2 remains explicit unsafe-tools preview; this does not establish native safe
+tool authorization. Same-request replay cache is daemon-local and historical,
+not durable recovery or ongoing runtime health. The 35-second timeout signals
+only the held launcher: complete descendant cleanup is NOT thereby proved.
+Old Hub completion protocol rejection happens before spawning. Do not silently
+downgrade to spawn-only started. No blind process-name killing or state unlink.
+Model settings, client UI, multi-user/security and macOS/Windows gates remain
+separate. No merge, npm publish, installer upload or production deployment.
+Formal release still requires the exact merged main SHA and fresh release gates.
+Recovery/operation facts: docs/runbooks/opencode-tui-copresence.md; no new ports,
+services or secret sources were introduced by this start-completion change.
