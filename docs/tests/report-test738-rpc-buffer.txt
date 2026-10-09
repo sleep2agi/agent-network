@@ -1,0 +1,60 @@
+test738 fixture transport correction — 2026-10-09
+Discovered during Hub #539 candidate PR #2554 validation.
+
+Observed CI failure
+-------------------
+Candidate head d512835fc94f3c0f66cce869143a82509683ad99.
+https://github.com/sleep2agi/agent-network/actions/runs/37917887288/job/113779587143
+L1: 56 pass, 0 fail, 164 assertions.
+L2: native mixed-rollout preparation failed at old Codex thread/resume:
+  resume failed: {'message': 'timeout'}
+No L3/product-start acceptance was reached in that failed CI attempt.
+The existing helper used select(stdout) followed by TextIOWrapper.readline().
+That combination can buffer multiple frames while leaving no readable fd data.
+Relevant helper and product recovery sources had no diff against base main.
+
+Deterministic transport negative control
+---------------------------------------
+Docker python:3.12-slim, network none, cap-drop ALL, no-new-privileges,
+only fixture sources mounted read-only. Fake executable writes a notification
+and matching JSON-RPC response in ONE pipe write, then waits for input.
+Old helper: exit 1 from the probe's 3-second deadline (response not consumed).
+Fixed helper: PASS. This establishes a fixture bug; it does not prove this was
+the sole cause of the historical native CI timeout, whose per-frame data is
+unavailable.
+
+Change
+------
+Test-only fix on evidence branch: fed48e3d8f62c9469aad991881cffe0d78c5c0d4.
+Cherry-picked candidate head: 8fdf716fb471a6763f32f015cc1eb90e364e3af0.
+Three files under tests/test738-codex-fork-on-resume-failure only:
+- codex-rpc.py: raw-byte reads with an explicit line buffer, drain complete
+  frames before polling fd, share the existing 60-second deadline (monotonic),
+  reap the fixture-owned subprocess after termination.
+- rpc-buffer-probe.py: coalesced notification/response, malformed/non-object
+  lines, fragmented response and EOF. 4/4 passed in isolated Docker.
+- run.sh: fail-fast L0 transport checks before the existing native L1/L2/L3.
+No product code, fork acceptance, permission condition, CI matrix, or timeout
+limit was relaxed. The fake executable does not replace native Codex L2/L3.
+
+Exploratory native comparison (running at 18:57 CST)
+---------------------------------------------------
+Original exact d512 Docker image: anet-test738:release-d512
+image config sha256:e4c1bd683caa138394544af12ed34c952f7b635c9a69e4df97a66edc309b1b2a
+base node:22-bookworm-slim
+sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+Containers: anet-test738-d512-original and anet-test738-d512-buffer-fix.
+The latter mounts the fixed test directory read-only over original image;
+it is explicitly an exploratory overlay, not a clean new-SHA image result.
+Both use --network none, unlike the current CI's bridge-network baseline.
+Both passed native L2 on this attempt (intermittency is not a clean bill of
+health) and the first L3 confirmed-fork case. Remaining L3/mutations pending.
+The suite uses real pinned Codex 0.133.0/0.159.2 and ANet POSIX launcher, but a
+stub paired agent-node; do not claim a full real bridge/TUI task lifecycle.
+
+New source validation
+---------------------
+Fresh 8fdf image build and exact-head PR CI are in progress. Final outcomes
+must be appended before claiming this suite passed. Existing d512 release
+preflights are historical evidence, not new-head merge/publication approval.
+No merge, npm publication, global npm change or production restart performed.
