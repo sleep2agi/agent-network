@@ -66,7 +66,7 @@ try {
       },
     };
   }, bootstrap);
-  await page.goto(web.url);
+  await page.goto(`${web.url}?safeAreaSim=0,0,0,0`);
   try {
     await page.waitForFunction(() => !!window.__anetLayoutSweep);
     // Navigation shortcut only: daemon list and every Hub response stay real.

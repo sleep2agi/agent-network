@@ -5,6 +5,7 @@ ARG NATIVE_IMAGE=anet-test829:native-create-proof-504b
 FROM ${CLIENT_IMAGE} AS client
 FROM ${NATIVE_IMAGE}
 RUN apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
 COPY --from=client /qa-tools /qa-tools
 COPY --from=client /web-v2 /client-web
 COPY --from=client /app/tests/test-layout-sweep/harness.mjs /client-plumbing/harness.mjs
