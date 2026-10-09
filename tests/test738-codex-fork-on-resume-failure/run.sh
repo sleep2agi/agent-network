@@ -97,15 +97,16 @@ forked_ok() { # the fork happened, the node runs on the new thread, original unt
   original_untouched || { echo "   original rollout changed"; return 1; }
   [ -n "$CFG_THREAD" ] && [ "$CFG_THREAD" != "$TID" ] || { echo "   config thread=$CFG_THREAD"; return 1; }
   grep -Fq "thread: $CFG_THREAD" "$LOG" || { echo "   launcher did not continue on $CFG_THREAD"; return 1; }
-  r=$(python3 - "$NODE_DIR/codex-fork-recovery.json" "$TID" "$CFG_THREAD" "$ROLLOUT" "${SUM0%% *}" <<'PY'
+  r=$(python3 - "$NODE_DIR/codex-fork-recovery.json" "$TID" "$CFG_THREAD" "$ROLLOUT" "${SUM0%% *}" "${1:-}" <<'PY'
 import json, os, stat, sys
-p, old, new, orig, sha = sys.argv[1:]
+p, old, new, orig, sha, request_id = sys.argv[1:]
 f = json.load(open(p))["forks"]
 m = f[-1]
 ok = len(f) == 1 and m["oldThreadId"] == old and m["newThreadId"] == new and m["originalRollout"] == orig \
   and m["sha256"] == sha and m["at"] and os.path.isfile(m["snapshot"]) \
   and not (os.stat(m["snapshot"]).st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)) \
-  and open(m["snapshot"], "rb").read() == open(orig, "rb").read()
+  and open(m["snapshot"], "rb").read() == open(orig, "rb").read() \
+  and (m.get("requestId") == request_id if request_id else "requestId" not in m)
 print("ok" if ok else "bad " + json.dumps(m))
 PY
 ) || r="no state file"
@@ -134,8 +135,8 @@ if grep -Fq 'Fail-closed' "$LOG" && ! grep -Fq 'missing an ordinal' "$LOG" && no
   pass "L3 a different resume failure (no session meta) with --fork-on-resume-failure --yes: no fork"
 else fail "L3 other error class"; tail -30 "$LOG"; fi
 
-launch mixed - --fork-on-resume-failure --yes
-if forked_ok; then pass "L3 --fork-on-resume-failure --yes: forked, node on the new thread, original unchanged, r/o snapshot, mapping recorded"
+launch mixed - --fork-on-resume-failure --yes --fork-recovery-request-id str_0123456789ab
+if forked_ok str_0123456789ab; then pass "L3 --fork-on-resume-failure --yes: forked, node on the new thread, original unchanged, r/o snapshot, request-bound mapping recorded"
 else fail "L3 fork with --yes"; tail -40 "$LOG"; fi
 echo "   --- launcher output (fork) ---"; grep -F -e '[anet] --fork' -e 'snapshot' -e 'forked thread' -e 'thread:' "$LOG" | sed 's/^/   /' || true
 

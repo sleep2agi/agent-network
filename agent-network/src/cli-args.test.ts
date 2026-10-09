@@ -19,6 +19,11 @@ const formerlyMissingBooleanFlags = [
 ];
 
 describe("CLI argument parsing", () => {
+  test("fork request ID is a value flag and leaves the node alias intact", () => {
+    const argv = ["--fork-recovery-request-id", "str_0123456789ab", "node-a", "--fork-on-resume-failure", "--yes"];
+    expect(parseCliOptions(argv)["fork-recovery-request-id"]).toBe("str_0123456789ab");
+    expect(positionalArgs(argv)).toEqual(["node-a"]);
+  });
   test("pins the complete presence-only flag set", () => {
     expect([...BOOLEAN_FLAGS].sort()).toEqual([
       "--accept-dev-channels",

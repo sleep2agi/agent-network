@@ -1,5 +1,9 @@
 # 更新日志
 
+## 未发布：Codex fork 请求关联（2026-10-09）
+
+- 共存节点单次启动新增可选 `--fork-recovery-request-id`，在已确认的 fork 映射中记录请求 ID，保留旧历史。它不代表完整启动成功；Hub/daemon 传参与客户端恢复按钮尚未接入。见 [恢复说明](./guide/codex-copresence.md#fork-on-resume-failure)。
+
 按时间倒序列出面向用户的变化。查通道此刻指向哪个版本：`npm view @sleep2agi/agent-network dist-tags`（`agent-node`、`commhub-server` 同理）；每一版 npm 包的完整发布说明在仓库的 [`docs/tests/release-v<版本号>.md`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests)，桌面端见 [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)。
 
 ## 节点可见性：规则文件、技能、项目文件夹——preview（2026-09-23 至 09-25）
