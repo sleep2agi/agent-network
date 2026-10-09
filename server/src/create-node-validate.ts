@@ -52,7 +52,7 @@ export type Runtime = typeof RUNTIMES[number];
 // 🔴 故意放在 flags 里而不是 node_spec 顶层:老 hub 的 zod 会静默丢弃未知顶层字段、老 daemon 也静默忽略
 //    —— 那正是 #584 的形状(用户选了共存,拿到无头节点,没有任何报错)。flags 的未知键在老 hub(这份
 //    FLAG_KEYS)和老 daemon(buildAnetArgsDaemon)都**拒绝**,新 app 撞到老组件得到的是一条报错。
-export const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence"] as const;
+export const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence", "opencodeGeneration", "opencodeUnsafeTools"] as const;
 
 /** #584 —— 只有这些 runtime 认 `flags.copresence`。目前只有 codex-app-server 的共存靠 config 字段
  *  (`codexCopresence`)决定;grok-build-cli / opencode-cli 各有自己的字段,接进来之前一律拒,不静默吞。 */
@@ -137,6 +137,12 @@ export function isValidTimeoutMs(v: unknown): v is number {
 
 export function validateFlagValue(k: string, v: unknown): void {
   switch (k) {
+    case "opencodeGeneration":
+      if (v !== "v1" && v !== "v2") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be v1 or v2" });
+      return;
+    case "opencodeUnsafeTools":
+      if (typeof v !== "boolean") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be boolean" });
+      return;
     case "permissionMode":
       if (typeof v !== "string" || !(PERMISSION_MODES as readonly string[]).includes(v)) {
         throw new ValidationError("flag_value_invalid", { field: k, reason: "must be one of default/acceptEdits/plan/bypassPermissions" });
@@ -171,8 +177,21 @@ export function validateFlagValue(k: string, v: unknown): void {
 /** #584 —— 逐键校验之外的跨字段一条:`copresence` 只对 COPRESENCE_FLAG_RUNTIMES 有意义。
  *  在别的 runtime 上收下它而什么都不做,就是又一个「选了共存、拿到无头」。 */
 export function validateFlagsForRuntime(runtime: string, flags: Record<string, unknown> | undefined | null): void {
-  if (!flags || !Object.prototype.hasOwnProperty.call(flags, "copresence")) return;
-  if (!(COPRESENCE_FLAG_RUNTIMES as readonly string[]).includes(runtime)) {
+  if (!flags) return;
+  // Strict flags envelope: old Hub/daemon reject these keys rather than dropping
+  // unknown node_spec fields. Opt-in must be explicit on this create request.
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+    if (!Object.prototype.hasOwnProperty.call(flags, field)) continue;
+    validateFlagValue(field, flags[field]);
+    if (runtime !== "opencode-cli") throw new ValidationError("flag_not_applicable_to_runtime", { field, runtime, applicable: ["opencode-cli"] });
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "opencodeUnsafeTools") && flags.opencodeGeneration !== "v2") {
+    throw new ValidationError("opencode_unsafe_requires_v2", { reason: "opencodeUnsafeTools requires explicit opencodeGeneration=v2" });
+  }
+  if (flags.opencodeGeneration === "v2" && flags.opencodeUnsafeTools !== true) {
+    throw new ValidationError("opencode_v2_requires_unsafe_opt_in", { reason: "V2 preview enables every local tool; trusted tasks only. Explicit opencodeUnsafeTools=true required." });
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "copresence") && !(COPRESENCE_FLAG_RUNTIMES as readonly string[]).includes(runtime)) {
     throw new ValidationError("flag_not_applicable_to_runtime", {
       field: "copresence", runtime, applicable: [...COPRESENCE_FLAG_RUNTIMES],
     });
@@ -318,6 +337,9 @@ function kebab(k: string): string {
 // shell, no string concat). Each value has already passed type/enum
 // validation, so String() coercion is safe.
 export function buildAnetArgs(spec: NodeSpec): string[] {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+    if (Object.prototype.hasOwnProperty.call(spec, field)) throw new ValidationError("flag_location_invalid", { field, reason: "use node_spec.flags" });
+  }
   validateName(spec.name);
   validateRuntime(spec.runtime);
   validateModel(spec.model);
@@ -333,6 +355,7 @@ export function buildAnetArgs(spec: NodeSpec): string[] {
       validateFlagValue(k, v);
       // `anet node create --copresence` 是布尔开关,不吃值。
       if (k === "copresence") { if (v === true) args.push("--copresence"); continue; }
+      if (k === "opencodeUnsafeTools") { if (v === true) args.push("--opencode-unsafe-tools"); continue; }
       args.push(`--${kebab(k)}`, String(v));
     }
     validateFlagsForRuntime(spec.runtime, spec.flags);

@@ -4279,6 +4279,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         model: z.string().min(1).max(100).optional().nullable(),
         flags: z.record(z.string(), z.unknown()).optional(),
         env_refs: z.array(z.string().max(64)).optional(),
+        // Wrong placement must fail, not silently create a legacy V1 node.
+        // These options belong under the strict flags envelope.
+        opencodeGeneration: z.never().optional().describe("Use flags.opencodeGeneration"),
+        opencodeUnsafeTools: z.never().optional().describe("Use flags.opencodeUnsafeTools"),
         channels: z.array(z.unknown()).optional(),
         // app「新建节点」确认页的工作目录(绝对路径或 ~/…,daemon 侧展开并校验)。
         // 缺席 = 老行为:落 daemon 的 cwd。
