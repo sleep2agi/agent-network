@@ -1,0 +1,39 @@
+OpenCode V2 pre-publication source guard — 2026-10-09 18:39 CST
+Issue #2544 / Hub #539 / candidate PR #2554.
+No production writes, npm publish, tags or workflow dispatch performed.
+
+Reviewed candidate source: d512835fc94f3c0f66cce869143a82509683ad99.
+Guard and fixture are existing tracked files, not modified for this test.
+Execution image: anet-test539:release-f4bf
+sha256:d17e9af239ea9c4b3092bb65da3e117b1b0639c0f6459e40ba24e0094e452d26
+Both scripts mounted read-only; all temporary repositories are container-local.
+
+Command
+-------
+sg docker -c 'docker run --rm --network none --cap-drop ALL \
+ --security-opt no-new-privileges \
+ -v /dev/shm/anet-opencode-v2-release/.github/scripts/verify-release-main.sh:/guard.sh:ro \
+ -v /dev/shm/anet-opencode-v2-release/tests/release-main-sha/run.sh:/run.sh:ro \
+ --entrypoint bash anet-test539:release-f4bf /run.sh'
+
+Results (exit 0)
+---------------
+PASS rejected missing full40 SHA.
+PASS rejected short SHA.
+PASS rejected branch name.
+PASS rejected checked-out HEAD differing from supplied full40 SHA.
+PASS rejected feature commit absent from main.
+PASS accepted main ancestor after main advances.
+PASS nonpublishing feature run allowed.
+The printed ::error:: lines are expected negative-control results, not failures
+of the overall test. Fixture remote is a local bare Git repository, not GitHub.
+
+Boundary
+--------
+This verifies the guard behavior only. It does not make the candidate a main
+ancestor or make pending CI mergeable. Publication must execute the guard on
+the real checked-out full40 main commit and freshly fetched main, once before
+building and again before npm publication, as release.yml already specifies.
+No branch image/tarball may be relabeled as a formal main release artifact.
+Exact-head PR CI and all actual release gates remain required. An aggregate
+verdict that always exits 0 is not a substitute for each gate's success.
