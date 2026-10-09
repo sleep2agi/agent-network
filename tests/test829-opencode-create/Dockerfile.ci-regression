@@ -3,6 +3,7 @@
 # Reuses locked deps only. All relevant repository source is replaced below.
 ARG DEPENDENCY_IMAGE=anet-test827:close-drain
 FROM ${DEPENDENCY_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 COPY server /workspace/server
 COPY agent-network /workspace/agent-network
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
