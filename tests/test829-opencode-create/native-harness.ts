@@ -88,6 +88,8 @@ try {
   check('native TUI rendered', await until(() => /ctrl\+p/.test(tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout)));
   if (process.env.TEST829_STOP_TUI_BEFORE_VERDICT === '1') {
     console.log('NEGATIVE CONTROL: stop exact owned TUI before daemon verdict');
+    check('negative control precedes capability verdict',
+      !/\[create-node\].*(?:\+5000ms|runtime_capability_check_failed)/.test(logs.daemon ?? ''));
     check('negative control TUI stop', tmux('kill-session', '-t', '=oc829').status === 0);
   }
   // Registration can finalize the Hub request before the daemon's 5-second
