@@ -1,10 +1,48 @@
 # OpenCode TUI 共存运行手册
 
-状态：候选已实现并通过 Docker + 实机验收，尚未合并或发布。已发布的 npm `latest` 不含本功能；当前 preview 包也要等本候选正式发布后才可使用以下一等命令。
+状态：共存功能在 preview 通道。V2 受限预览由 PR #2380 引入，首次随
+`agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107` 发布；
+这不是当前通道版本声明。升级时使用仓库版本配对表指定的精确 CLI/runtime，
+不要混用不同批次，也不要把 V1 的安全保证套到 V2。
 
-## 用户操作
+## 先选择代际
 
-发布后创建并启动：
+| 代际 | 上游包 / 固定版本 | 模式 | 安全边界 |
+| --- | --- | --- | --- |
+| V1（默认） | `opencode-ai@1.18.34`，过渡兼容 `1.18.1` | headless / copresence | 原有逐项 deny 安全预设 |
+| V2（受限 preview） | `@opencode/cli@2.0.22` | 仅 copresence | 必须显式确认 `flags.opencodeUnsafeTools=true`；默认拒绝 |
+
+两个上游包都安装名为 `opencode` 的命令，**不能装进同一个 npm prefix**。
+V2 应安装在独立、所有者可信且不可组写的前缀，再让启动命令的 PATH 优先指向它。
+不要通过覆盖生产全局 V1 来试用 V2。切回 V1 使用独立 V1 节点和对应 PATH；
+V2 session 没有承诺可降级为 V1 session。
+
+V2 创建命令（仅用于可信工作区和可信任务，先理解工具权限风险）：
+
+```bash
+anet node create opencode-v2 \
+  --runtime opencode-cli \
+  --opencode-generation v2 \
+  --opencode-unsafe-tools \
+  --model '<provider>/<model>'
+anet node start opencode-v2 --copresence
+tmux attach -t '=opencode-v2'
+anet node stop opencode-v2
+```
+
+V2 忽略 V1 的 `OPENCODE_PERMISSION` 等环境开关。没有显式 opt-in 时应看到
+拒绝提示，而不是删除校验或把安全模式改成宽松模式。原生 V2 安全策略、
+daemon/API/客户端 V2 创建入口与模型主动调用 CommHub 工具的完整验收，
+仍由 Hub #539 / GitHub #2544 跟踪；这里的 CLI 示例不代表这些入口已支持。
+
+V2 使用 `opencode --server <url> --session <id>`，不是 V1 的 `attach`。
+网络任务经 `/api/session/:id/prompt`、`delivery=queue` 提交，在消息历史中
+确认任务归属和终态后才回执。普通通知暂时只记日志并 ack，**不在 V2 TUI 弹 toast**；
+不要据此判断用户已看到通知，也不要通过伪造 user turn 来补 toast。
+
+## V1 用户操作
+
+创建并启动：
 
 ```bash
 anet node create opencode-指挥狗 \
@@ -53,7 +91,7 @@ TUI 已退出但桥仍在线，`tmux attach -t <alias>` 会把 `<alias>` 模糊�
 TUI 不存在，可重新执行 `anet node start <alias> --copresence` 重建桥和 TUI；
 不要用 `pkill -f`、`killall` 或模糊 tmux 匹配停止节点。
 
-## 实现拓扑
+## V1 实现拓扑
 
 `opencode-cli` 仍是一个 runtime，通过 `config.json` 的 `opencodeMode` 分派：
 
@@ -92,7 +130,7 @@ OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可�
 
 ## 安全与生命周期
 
-- OpenCode 版本严格固定为 `opencode-ai@1.18.34`(#541 从 `1.18.1` 升上来)。过渡期内已装 `1.18.1` 的主机仍可启动,启动时打印一行升级提示;升级命令 `anet opencode upgrade-pin 1.18.34`(或 `npm install -g opencode-ai@1.18.34`),装好后下次 start 自动用新版本。其他任何版本(含 OpenCode 2 `@opencode/cli`)一律拒绝。
+- V1 严格固定为 `opencode-ai@1.18.34`（#541 从 `1.18.1` 升上来）。过渡期已装 `1.18.1` 的主机仍可启动并提示升级；其他 V1 版本拒绝。V2 必须显式选择代际并满足上表中的包身份、版本和风险确认条件，不能当成 V1 的原位升级。
 - 版本探针不接触 vendor credential；通过包身份校验后才生成一次性运行环境。
 - TUI launcher 位于节点私有目录，mode 必须为 `0700`；它包含本次启动的 loopback 密码和 CommHub token export，不得复制、打印或提交。serve/attach 子进程也通过环境变量持有这些 secret；同 UID 用户与 root 可经 `/proc/<pid>/environ` 或进程环境读取，因此安全边界是“同 UID + 私有目录”，不是 secret 不进入 `/proc`/tmux 环境。
 - CommHub token 只通过每节点私有环境变量交给 OpenCode；MCP 配置正文只保存 `{env:...}` 引用，不内嵌 token。每个节点必须独占自己的启动环境，不能共用 attach launcher 或 server。
@@ -108,6 +146,10 @@ OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可�
 并发/生命周期窄套件：`tests/test228-opencode-inbox-concurrency/`。
 发送者可见性窄套件：`tests/test230-opencode-sender-label/`。
 回复超时中止窄套件：`tests/test651-opencode-timeout-abort/`。
+V2 后端及真实 TUI 窄套件：`tests/test543-opencode-v2-copresence/`。
+V2 完整 CLI/Hub/打包 runtime/TUI 链路：`tests/test827-opencode-v2-hub/`。
+后者只替换模型为 loopback stub，不替换 OpenCode、Hub 或 agent-node；
+它不证明真实模型的工具选择，也不证明客户端/daemon 创建入口。
 
 ```bash
 sg docker -c 'docker build -t anet-test227:dev \
