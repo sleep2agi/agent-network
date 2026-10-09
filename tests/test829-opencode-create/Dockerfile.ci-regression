@@ -1,6 +1,7 @@
-# Local regression fixture; DEPENDENCY_IMAGE must be the recorded image ID.
+# Local regression fixture; verify DEPENDENCY_IMAGE resolves to the recorded
+# image ID before building. A bare sha256 ID is not a portable Docker FROM ref.
 # Reuses locked deps only. All relevant repository source is replaced below.
-ARG DEPENDENCY_IMAGE
+ARG DEPENDENCY_IMAGE=anet-test827:close-drain
 FROM ${DEPENDENCY_IMAGE}
 COPY server /workspace/server
 COPY agent-network /workspace/agent-network
