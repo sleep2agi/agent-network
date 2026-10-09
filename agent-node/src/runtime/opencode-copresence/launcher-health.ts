@@ -88,3 +88,26 @@ export function inspectLaunchHealth(dir: string, configPath: string, launchedAt:
       readRecord(join(dir, "opencode-attach.json")), configPath, launchedAt);
   } catch { return { ok: false as const, reason: "missing or unsafe launch/attach record" }; }
 }
+
+/** The attach shell publishes its PID before exec. A zero-exit launcher can
+ * therefore precede matching TUI argv. Recheck the SAME full guard only within
+ * the caller's existing deadline; missing/foreign identities never pass. */
+export async function waitForLaunchHealth(
+  dir: string, configPath: string, launchedAt: number, deadline: number,
+  deps: {
+    inspect?: typeof inspectLaunchHealth;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+) {
+  const inspect = deps.inspect ?? inspectLaunchHealth;
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  let health = inspect(dir, configPath, launchedAt);
+  while (!health.ok && now() < deadline) {
+    await sleep(Math.min(50, deadline - now()));
+    if (now() >= deadline) break;
+    health = inspect(dir, configPath, launchedAt);
+  }
+  return health;
+}

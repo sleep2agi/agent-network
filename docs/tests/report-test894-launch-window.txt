@@ -1,0 +1,86 @@
+#894 bounded attach exec readiness — source candidate, TEST ONLY
+Observed 2026-10-10 04:05 Asia/Shanghai. No merge, npm publish or production action.
+Baseline main80c6ab5b883a2056784326e73a6b6ec09ac0ce2c plus this narrow source delta.
+Product file SHA256 (unchanged throughout recorded tests):
+create-node-daemon.ts 1a7a55141e96e8b011c3dc687a713bbb2d83afeb29c00683047fb726d5f74d2c
+launcher-health.ts 7e6ef32a10087e2fdc95409af269549bd659b724df51e648ba2d93e10973a3c6
+
+Problem evidence
+App PR795 fixed-style package3593d8a, tested mergec6d1030d, previously failed a
+native creation prerequisite with launcher exit0 / TUI session mismatch. Full
+record and package details are in app docs/tests/report-test895-fixed-package.txt.
+The failing-time argv was not preserved; do not claim it was recovered here.
+An independent source probe using unmodified backend edc68a4 established a real
+pre-exec window: actual renderAttachRecordShell publishes PID/ticks before exec,
+launcher exits0, original guard rejects shell argv, then the same PID/ticks and
+session passes after exec. The workload is a process fixture, NOT real OpenCode.
+
+Narrow change
+Only successful launcher exits may wait for the existing complete health guard.
+Uses the SAME original creation deadline (35 seconds), never a fresh budget.
+No change to validateLaunchHealth/session/PID/start-ticks/config/parent checks,
+token authentication, V1 selection, successful ack rules or public schema.
+Foreign identity, missing proof and nonzero/unknown exits cannot become success
+merely because a timer expired. No installed preview pin/version change.
+
+1. Atomic Docker suite tests/test894-launch-window/Dockerfile
+Image e8a2b5489910f689c8152b7c77dfdd451aaa76e20488d988eb6135ae2eca8d00
+Final named container anet894-launch-window-final, exit0.
+Non-root, offline, cap-drop ALL, no-new-privileges.
+11 unit tests / 50 expects, 0 failures. Covers original identity safety plus
+same-session readiness, exact remaining budget, expiry and timer overshoot.
+Real-process positive:
+PASS: real launcher exit0 + live same-generation records BEFORE exec precisely rejects TUI session mismatch
+PASS: AFTER exec same PID/start ticks/generation passes original health guard
+PASS: repeated probes never accept a foreign generation
+PASS: reused PID/start ticks rejected
+PASS: foreign config and nonzero launcher remain rejected; restored exact identity healthy
+The fixed helper starts BEFORE releasing the barrier and observes healthy exec
+within its deadline. The original strict probe still rejects the held state.
+
+Negative TEST_SKIP_HEALTH_WAIT=1 bypasses wait to model the old one-shot behavior.
+It reaches the pre-exec assertion then exits1 precisely:
+AssertionError: bounded full-identity wait did not observe exec
+Harness requires exit1, prerequisite PASS and that exact assertion line.
+PASS: bypassed wait rejected at exact post-exec readiness assertion
+First harness attempt incorrectly matched a lowercase error prefix; the actual
+negative already threw the right AssertionError, but the harness rejected it.
+Corrected to exact full AssertionError line; final fresh container passed. No
+product assertion relaxed; first harness exit1 is not counted as accepted suite.
+
+2. Existing test829 contract/persistence regression, Docker, network none
+Image d042579ca95380a3ec87590fea08b2d6ccbe685e5e9f04c4057e126faa503fe6
+Container anet894-create-contract exit0. SOURCE_COMMIT/EXPECTED_SOURCE_COMMIT
+are baseline80c6ab5b markers, NOT a claim this dirty candidate was already in main.
+The file hashes above identify the actual source delta tested in that image.
+Counts by invocation: 18 + 47 + 47 + 84 + 18 + 29 + 24 = 267 pass, 0 fail.
+The 29 includes the 11 health tests; do not add duplicate invocations as unique
+coverage. Runtime-shaped fake serve, Hub validation/config persistence and start
+contracts included; real native GUI/runtime end-to-end acceptance NOT included.
+Final: PASS test829 contract/persistence slice; real runtime startup and client UI NOT covered
+Existing minimal image emits pgrep-not-found in several unrelated node-name
+cleanup probes; assertions still pass. Do not claim real process-stop coverage
+from those cases. npm ci audit printed existing dependency vulnerabilities; no
+lockfile changes or security remediation claimed.
+
+3. Source build / integration wiring
+Same test829 image npm run build succeeded (387 CLI modules / 221 upload modules).
+No artifacts published. tsc --no-install was unavailable in this agent-node image;
+no standalone backend TypeScript-check claim. App scoped-probe typecheck passed
+separately. QA trigger coverage and push/PR path symmetry passed in Docker;
+workflow YAML parsed in Docker. test894 added to QA matrix and both path filters.
+Initial read-only mount using image UID10001 could not read mktemp mode0700;
+guard scripts reran as container root against a read-only mount, no host edits.
+
+Evidence/cleanup
+/tmp/anet894-launch-window.p4DW6s contains contract log, rejected first matcher
+and accepted final atomic/negative logs; copy only test reports, not credentials.
+All three named containers were stopped and removed after copying evidence.
+Temporary files are not rebuild authority: Dockerfiles, scripts and this report
+are tracked. Rebuild from the source commit containing these exact file hashes.
+
+Remaining release gates
+Fresh PR CI (including actual V2 portable client), review, authorized main merge,
+exact-main package inputs, native fixed-package normal cancellation and real V1
+compatibility. Source fix is not a delivered installer or #895 acceptance. #894
+and #895 stay doing. Runtime/account data and production credentials untouched.
