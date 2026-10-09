@@ -1,0 +1,77 @@
+test828 OpenCode V2 MCP identity/receipt — Docker-only test, NOT a release
+Date: 2026-10-09 12:20 CST
+Exact tested source: c6e62299b4461d0d1fdfc2a6af19fdc87c1558fb
+Base main: 3b5bf7976644e960f99610a0e7430398bc162230
+Image config: sha256:02acf8aa2ab837c3dd7d1cc91493ae6a51bd5992072b5ea44d2c63978bfa6597
+Container: anet-test828-mcp-c6e62299 (exit 0)
+Authority: https://github.com/sleep2agi/agent-network/issues/2544 ; Hub #539/#828
+Cold readiness follow-up: Hub #832 (P0 pool, same formal Issue binding).
+
+Reproduce from this tested SHA (report-only follow-up commits do not alter suite):
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=c6e62299b4461d0d1fdfc2a6af19fdc87c1558fb -f tests/test828-opencode-v2-mcp/Dockerfile -t anet-test828-mcp:c6e62299 .'
+sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=c6e62299b4461d0d1fdfc2a6af19fdc87c1558fb anet-test828-mcp:c6e62299'
+
+Scope:
+- Real pinned @opencode/cli@2.0.22, real isolated Hub and repository MCP wiring helper.
+- Deterministic loopback model produces execute code-mode calls; no paid provider.
+- Positive tool dispatch, persisted node identities and terminal receipt; spoof rejected.
+- Wrong-node valid token is a witnessed-red assertion control, NOT a product auth bypass.
+- No host source mounts at runtime, no production credentials, no external network/ports.
+- All-allow native permissions ONLY inside this test; unsafeTools product gate unchanged.
+- Tests identity after bounded MCP catalog discovery, NOT first-turn readiness.
+- First discovery returned empty; second returned tools.commhub.send_task.
+- Does NOT prove autonomous model selection, multi-user isolation, safe-mode permissions,
+  daemon/client entrypoints or Windows/macOS acceptance. Parent #539 remains doing.
+- CI trigger coverage, path symmetry and suite registration scripts passed in Docker.
+  Trigger checker currently does not resolve the hub matrix; suite is registered in that
+  matrix and both trigger path lists. Existing unrelated orphan/exemption notices remain.
+- npm ci reported existing dependency advisories; no audit fix/lockfile mutation performed.
+Artifacts: /artifacts/report-test828-mcp.txt, results.json, mcp.json, hub.log,
+opencode.log, negative/run.log plus negative results/MCP logs. Tokens redacted.
+
+Captured stdout:
+test828 MCP identity source=c6e62299b4461d0d1fdfc2a6af19fdc87c1558fb date=2026-10-09T04:20:29+00:00
+L0 environment
+PASS: exact upstream V2
+PASS: Hub ready
+PASS: Hub unauthenticated write rejected
+L1 isolated owner and node identities
+PASS: fresh network
+PASS: sender828 node token
+PASS: sender828 registered
+PASS: receiver828 node token
+PASS: receiver828 registered
+PASS: decoy828 node token
+PASS: decoy828 registered
+PASS: config uses env reference, not literal node token
+PASS: authenticated V2 ready
+PASS: V2 rejects unauthenticated access
+L2 real model tool -> V2 Code Mode -> Hub -> authoritative task row
+PASS: discovery-0 turn finishes
+{"label":"discovery-0","offered":["edit","glob","grep","question","read","shell","skill","subagent","webfetch","websearch","write","execute"],"result":{"paths":[]}}
+PASS: discovery-1 turn finishes
+{"label":"discovery-1","offered":["edit","glob","grep","question","read","shell","skill","subagent","webfetch","websearch","write","execute"],"result":{"paths":["tools.commhub.send_task","tools.commhub.send_message","tools.commhub.send_ack","tools.commhub.send_peer_reply","tools.commhub.send_reply"]}}
+PASS: actual Code Mode catalog includes send_task
+PASS: positive turn finishes
+{"label":"positive","offered":["edit","glob","grep","question","read","shell","skill","subagent","webfetch","websearch","write","execute"],"result":{"ok":true,"message_id":"ff96ca20-d9ee-4ccc-8cdb-0f067c977ba7","actual_to":{"alias":"receiver828","to_node_id":"n_receiver828","network_id":"net_a21bd72d6ad0"},"session_status":"idle","queue_ahead":0,"target_busy":false,"est_wait_minutes":0}}
+PASS: MCP tool result returns concrete message id
+TASK_ROW {"task_id":"ff96ca20-d9ee-4ccc-8cdb-0f067c977ba7","from_node_id":"n_sender828","from_name":"sender828","to_node_id":"n_receiver828","to_name":"receiver828","priority":"normal","status":"delivered","content":"MCP828_POSITIVE","result":null,"in_reply_to":null,"requires_response":"reply","scope":"single","created_at":"2026-10-09 04:20:33","delivered_at":"2026-10-09 04:20:33","started_at":null,"runtime_submitted_at":null,"consumed_at":null,"completed_at":null,"expires_at":"2026-10-09 05:20:33","network_id":"net_a21bd72d6ad0","parent_task_id":null,"meta_json":null,"thread_id":null,"turn_id":null}
+PASS: Hub actually persists exact dispatched task
+PASS: sender alias is token-bound
+PASS: sender and recipient stable node ids are preserved
+L3 receiver terminal reply -> model get_task -> authoritative receipt
+PASS: recipient reply accepted
+PASS: receipt turn finishes
+{"label":"receipt","offered":["edit","glob","grep","question","read","shell","skill","subagent","webfetch","websearch","write","execute"],"result":{"ok":true,"task":{"task_id":"ff96ca20-d9ee-4ccc-8cdb-0f067c977ba7","from_node_id":"n_sender828","from_name":"sender828","to_node_id":"n_receiver828","to_name":"receiver828","priority":"normal","status":"replied","content":"MCP828_POSITIVE","result":"MCP828_RECEIPT","in_reply_to":null,"requires_response":"reply","scope":"single","created_at":"2026-10-09 04:20:33","delivered_at":"2026-10-09 04:20:33","started_at":null,"runtime_submitted_at":null,"consumed_at":null,"thread_id":null,"turn_id":null,"completed_at":"2026-10-09 04:20:33","expires_at":"2026-10-09 05:20:33","network_id":"net_a21bd72d6ad0","parent_task_id":null,"meta_json":null,"late_replies":[]}}}
+RECEIPT {"ok":true,"task":{"task_id":"ff96ca20-d9ee-4ccc-8cdb-0f067c977ba7","from_node_id":"n_sender828","from_name":"sender828","to_node_id":"n_receiver828","to_name":"receiver828","priority":"normal","status":"replied","content":"MCP828_POSITIVE","result":"MCP828_RECEIPT","in_reply_to":null,"requires_response":"reply","scope":"single","created_at":"2026-10-09 04:20:33","delivered_at":"2026-10-09 04:20:33","started_at":null,"runtime_submitted_at":null,"consumed_at":null,"thread_id":null,"turn_id":null,"completed_at":"2026-10-09 04:20:33","expires_at":"2026-10-09 05:20:33","network_id":"net_a21bd72d6ad0","parent_task_id":null,"meta_json":null,"late_replies":[]}}
+PASS: model receives exact task terminal receipt
+L4 explicit sender spoof is refused without a task write
+PASS: spoof turn finishes
+{"label":"spoof","offered":["edit","glob","grep","question","read","shell","skill","subagent","webfetch","websearch","write","execute"],"result":{"ok":false,"error":"from_session_identity_mismatch","message":"network token from_session does not match token-bound node alias","token_alias":"sender828","requested_from_session":"decoy828"}}
+PASS: Hub explicitly refuses sender mismatch
+PASS: spoof task not persisted
+PASS: real MCP calls use only the intended node credential
+PASS: real Hub saw both task dispatch and receipt tool calls
+PASS: real V2 MCP task and node identity
+PASS: wrong-node credential witnessed red at sender identity assertion (exit 1)
+
