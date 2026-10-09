@@ -1,6 +1,6 @@
 // Docker-only real Hub / daemon / CLI / OpenCode V2. No vendor credentials.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
 const root = '/home/test829-native';
 const project = `${root}/project`;
@@ -48,6 +48,11 @@ const tmuxSocket = process.env.TEST829_TMUX_SOCKET || '/run/test827-tmux.sock';
 const tmux = (...args: string[]) => spawnSync('tmux', ['-S', tmuxSocket, ...args], { env, encoding: 'utf8' });
 try {
   console.log('L0 environment');
+  if (process.getuid?.() !== 0) {
+    const safeBase = `/run/user/${process.getuid!()}`;
+    const st = existsSync(safeBase) ? statSync(safeBase) : null;
+    check('user-owned mode-0700 safe runtime base', st?.isDirectory() && st.uid === process.getuid!() && (st.mode & 0o777) === 0o700);
+  }
   check('exact real OpenCode V2', spawnSync('opencode', ['--version'], { encoding: 'utf8' }).stdout.trim() === 'opencode v2.0.22');
   check('Hub health', await until(() => fetch(hub + '/health').then(r => r.ok, () => false)));
   check('model health', await until(() => fetch('http://127.0.0.1:18827/v1/models').then(r => r.ok, () => false)));

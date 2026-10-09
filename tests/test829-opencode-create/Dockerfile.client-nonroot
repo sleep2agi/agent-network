@@ -12,7 +12,8 @@ WORKDIR /workspace/agent-network
 RUN bun build bin/cli.ts --outdir dist/bin --target node --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && \
     cp bin/anet.cjs dist/bin/anet.cjs && chmod 755 dist/bin/anet.cjs && \
     ln -s /opt/node_modules/@sleep2agi/agent-node/dist/cli.js /usr/local/bin/agent-node
-RUN mkdir -p /home/test829-native /artifacts && chown node:node /home/test829-native /artifacts
+RUN mkdir -p /home/test829-native /artifacts /run/user/1000 && \
+    chown node:node /home/test829-native /artifacts /run/user/1000 && chmod 700 /run/user/1000
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 ENV TEST829_TMUX_SOCKET=/home/test829-native/tmux.sock
