@@ -98,6 +98,7 @@ const mcp = Bun.serve({
 });
 
 let runtime: Awaited<ReturnType<typeof openOpenCodeCopresenceRuntime>> | undefined;
+let drainingChild: ReturnType<typeof spawn> | undefined;
 const root = mkdtempSync(join(tmpdir(), "anet-test543-"));
 chmodSync(root, 0o700);
 try {
@@ -247,6 +248,20 @@ try {
   // ── Layer 7 ────────────────────────────────────────────────────────────
   if (runtime && layer("Layer 7 — lifecycle")) {
     const launcherPath = runtime.attachScriptPath;
+    // Deterministic exit race: a descendant retaining this exact XDG root
+    // drains briefly after SIGTERM, like an attached TUI. Without it the
+    // real TUI sometimes exits before cleanup and masks the one-shot bug.
+    drainingChild = spawn(process.execPath, ["-e", `
+      process.on("SIGTERM", () => setTimeout(() => process.exit(0), 1500));
+      setTimeout(() => process.exit(2), 6000);
+      process.stdout.write("ready\\n");
+    `], { env: { ...process.env, XDG_DATA_HOME: join(launchRoot, "data") }, stdio: ["ignore", "pipe", "ignore"] });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("draining descendant did not start")), 3000);
+      drainingChild!.stdout!.once("data", () => { clearTimeout(timer); resolve(); });
+      drainingChild!.once("error", error => { clearTimeout(timer); reject(error); });
+    });
+    drainingChild.kill("SIGTERM");
     await runtime.close();
     check("runtime reports stopped", runtime.isRunning === false);
     check("launcher removed", !existsSync(launcherPath));
@@ -260,6 +275,7 @@ try {
   check("harness ran to completion", false, `${error?.stack ?? error}\n${error?.startupOutput ?? ""}`);
 } finally {
   await runtime?.close().catch(() => {});
+  if (drainingChild?.exitCode === null) drainingChild.kill("SIGKILL");
   try { tmux("kill-session", "-t", `=${TUI}`); } catch {}
   mcp.stop(true);
   stub.kill("SIGKILL");
