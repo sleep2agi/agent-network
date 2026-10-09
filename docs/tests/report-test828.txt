@@ -1,0 +1,56 @@
+test828 — pinned OpenCode V2 native tool policy probe
+Date: 2026-10-09, Asia/Shanghai
+Tracking: Hub #539 / #828; sleep2agi/agent-network Issue #2544
+Scope: upstream @opencode/cli@2.0.22, Bun 1.3.14, Docker Linux x64.
+This is test-only research, NOT a production safe-mode implementation or release.
+
+Measured in anet-test828-r3 (existing test827 image, read-only probe mount,
+--network none, exit 0): six configurations x four forced model tool calls.
+All calls use a deterministic loopback OpenAI-compatible stub; no paid provider.
+
+Configuration                    shell/read/write/edit outcome
+inline native allow              all four execute (positive controls)
+inline native deny               all four explicitly refused
+project deny, no inline rules    all four explicitly refused (discovery control)
+project allow + inline deny      all four explicitly refused
+inline deny followed by allow    all four execute (last matching rule wins)
+V1 deny env + inline allow       all four execute (V1 env cannot override this)
+
+Native shape: permissions: [{action: "*", resource: "*", effect: "deny"}].
+The deny cases expose no tools, but the stub deliberately submits a tool call
+anyway. Upstream replies tool.execution / "No tool named ... is currently
+available". This is runtime registry rejection, not just prompt guidance or
+absence from the model's advertised list. Positive controls create/write/edit
+sentinel files or return a read sentinel in the next model request.
+
+First run r1 stopped because the refusal-text assertion did not recognize
+"No tool named"; the actual deny was effective. Corrected r2 passed 16 calls;
+r3 added project discovery and ordered-rule controls, passing 24 calls.
+Final harness additionally asserts unauthenticated API HTTP 401, exact unchanged
+sentinel state on denied edits/reads, and absence of denied shell/write files.
+Standalone-image final replay: anet-test828-final, --network none, no mounts,
+exit 0 at 2026-10-09 11:53 Asia/Shanghai; all 24 tool cases plus six 401 checks
+passed with the stricter unchanged/absent-file assertions.
+Image: sha256:76db3169bb5b33014b5976be6ad62b65cdc662dbcc70445a328426c44469f31d.
+
+Reproduce (Docker only, repository root):
+  sg docker -c 'docker build -t anet-test828:native-policy -f tests/test828-opencode-v2-policy/Dockerfile .'
+  sg docker -c 'docker run --name anet-test828-final --network none anet-test828:native-policy'
+Artifacts: /artifacts/report-test828.txt, results.json (tool returns + history),
+per-configuration serve logs. Only synthetic local credentials/data are used.
+The runner stops on first failed layer. No Hub, daemon, tmux, production node,
+user global package, or production runtime safety gate is modified.
+
+Source cross-check (v2.0.22 tag resolves to
+527f0b931d1f9b3ebd34e106c51b31ce5db5b075):
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/schema/src/permission.ts
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/core/src/config/normalize.ts
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/core/src/tool/plugin/shell.ts
+These establish schema/tool arguments only; execution claims above come from
+the real pinned binary, not from reading the source.
+
+Remaining #828 gates: node-scoped CommHub code-mode calls and sender identity;
+MCP selective allow policy; plugins/local MCP startup before model permissions;
+user-global/managed policy, agent-specific rules, saved permissions, config
+reload/discovery expansion and filesystem/network/process isolation.
+Do not remove unsafeTools fail-closed gating based on this test alone.
