@@ -2,6 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
+import { generationGone } from './process-generation';
 const root = '/home/node/test883';
 const project = `${root}/project`;
 const artifact = '/artifacts';
@@ -205,14 +206,6 @@ try {
     const health = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8'));
     const attach = JSON.parse(readFileSync(`${nodeDir}/opencode-attach.json`, 'utf8'));
     const identities = [health.bridge, health.serve, { pid: attach.pid, ticks: String(attach.startTicks) }];
-    const gone = (p: { pid: number; ticks: string }) => {
-      try {
-        const stat = readFileSync(`/proc/${p.pid}/stat`, 'utf8');
-        const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
-        // PID reuse is not the old generation. Zombies do not prove reaping.
-        return fields[19] !== p.ticks;
-      } catch { return true; }
-    };
     const clientLifecycle = async (action: 'stop' | 'start') => {
       const child = Bun.spawn(['node', process.env.TEST829_MODEL_DRIVER!], {
         env, stdin: new Blob([JSON.stringify({ hub, token, networkId, nodeId: row.child_node_id, daemonId, action })]), stdout: 'pipe', stderr: 'pipe',
@@ -235,7 +228,7 @@ try {
       return stopRow?.status === 'stopped';
     }, 30000));
     console.log('stop status:', JSON.stringify(stopRow));
-    check('old bridge serve TUI identities reaped', await until(() => identities.every(gone), 15000));
+    check('old bridge serve TUI identities reaped', await until(() => identities.every(generationGone), 15000));
     check('old TUI and bridge sessions absent', tmux('has-session', '-t', '=oc829').status !== 0 && tmux('has-session', '-t', '=oc829-桥').status !== 0);
     check('config preserved after stop', existsSync(`${nodeDir}/config.json`));
     const denyRestart = process.env.TEST829_DENY_RESTART === '1';

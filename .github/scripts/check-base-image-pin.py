@@ -77,7 +77,16 @@ def unpinned(tag: str, text: str = "") -> bool:
 
 
 def offenders(text: str):
-    return [t for t in FROM_RE.findall(text) if unpinned(t, text)]
+    # A previously defined stage inherits its base; it is not a registry image.
+    # Still inspect the original stage FROM, and never exempt forward references.
+    stages, bad = set(), []
+    for match in re.finditer(r"^\s*FROM\s+(\S+)(?:\s+AS\s+([A-Za-z0-9_-]+))?", text, re.M | re.I):
+        tag, alias = match.groups()
+        if tag.lower() not in stages and unpinned(tag, text):
+            bad.append(tag)
+        if alias:
+            stages.add(alias.lower())
+    return bad
 
 
 def selftest() -> int:
@@ -101,6 +110,17 @@ def selftest() -> int:
     # 🔴 registry 端口不能被当成 tag
     ck("registry 带端口无 tag → 未钉", "reg.local:5000/img", "", True)
     ck("registry 带端口有 tag → 已钉", "reg.local:5000/img:1.2.3", "", False)
+
+    for name, text, want in [
+        ("pinned stage inheritance", "FROM node:22 AS base\nFROM base AS client\nFROM base", []),
+        ("floating ancestor still rejected", "FROM node AS base\nFROM base", ["node"]),
+        ("unknown stage is an external image", "FROM missing", ["missing"]),
+        ("forward stage reference rejected", "FROM base\nFROM node:22 AS base", ["base"]),
+        ("case-insensitive stage", "from node:22 as Base\nFROM BASE", []),
+        ("unrelated unpinned image rejected", "FROM node:22 AS base\nFROM ubuntu", ["ubuntu"]),
+    ]:
+        got = offenders(text)
+        cases.append((name, got == want, f"got={got} want={want}"))
 
     # ── 取集自检：这道门的坏法是「圈错哪些文件算 Dockerfile」。
     #    直接喂复用来的 is_dockerfile()，确认它真的收进后缀式。
