@@ -121,3 +121,14 @@ CI must run for the exact PR head. After merge, formal artifacts must be freshly
 built from a verified full40 main SHA, gated, published Hub -> runtime -> CLI,
 then registry/tarball/behavior verified. No npm tags were moved; latest unchanged.
 The app needs its own main-SHA artifact release. Hub #539/#829 stay doing.
+
+CI registration follow-up (18:29 CST)
+-----------------------------------
+PR #2554 first head 8ac8f007 failed test-suite-registration: this new local
+candidate suite was not registered. Added NOT-IN-CI.md under the existing
+explicit-exemption policy, with owner, verified date, evidence and revisit
+condition. Its hardcoded candidate/local native-client base is unsuitable for
+generic CI; no baseline or gate implementation changed. Validate registration
+and its selftest inside Docker, then rerun exact-head CI; old CI is not reused.
+Local Docker registration validation passed: selftest 10/10, suites=307,
+registered=233, exempt=18, orphans=56, baseline=56, new=0; exit 0.
