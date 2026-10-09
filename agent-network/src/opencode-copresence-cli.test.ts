@@ -15,6 +15,14 @@ function functionBody(name: string): string {
 describe("OpenCode co-presence CLI wiring", () => {
   const body = functionBody("startOpencodeCopresenceOrchestration");
 
+  test("generation policy is checked before touching profiles or live sessions", () => {
+    const guard = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal(");
+    expect(guard).toBeGreaterThan(-1);
+    expect(body.indexOf("saveProfile(")).toBeGreaterThan(guard);
+    expect(body.indexOf("killTmuxSession(")).toBeGreaterThan(guard);
+    expect(body.slice(guard, body.indexOf("saveProfile("))).toContain("if (generationRefusal)");
+  });
+
   test("persists copresence mode before launching the bridge", () => {
     const save = body.indexOf('opencodeMode: "copresence"');
     const bridge = body.indexOf('"new-session"');
