@@ -280,6 +280,9 @@ try {
     OPENCODE_PASSWORD: "test828",
     OPENCODE_CONFIG_CONTENT: JSON.stringify({
       model: "stub/stub-model",
+      ...(process.env.TEST832_REGISTRY === "1" ? {
+        plugins: [{ package: "/test828-mcp/registry-probe", options: { missing: process.env.TEST832_MISSING_TOOL === "1" } }],
+      } : {}),
       provider: {
         stub: {
           npm: "@ai-sdk/openai-compatible",
@@ -343,6 +346,26 @@ try {
     const started = Date.now();
     try {
       await waitForOpenCodeV2Commhub(base, "test828", Number(process.env.TEST832_TIMEOUT_MS ?? 10000));
+      if (process.env.TEST832_REGISTRY === "1") {
+        const deadline = started + Number(process.env.TEST832_TIMEOUT_MS ?? 10000);
+        let ready = false, polls = 0;
+        while (Date.now() < deadline) {
+          const response = await fetch(base + "/api/rpc/anet.registry-probe/ready", {
+            method: "POST",
+            headers: { authorization: "Basic " + Buffer.from("opencode:test828").toString("base64"), "content-type": "application/json" },
+            body: JSON.stringify({ input: {} }),
+            signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+          });
+          if (!response.ok) throw Error(`Registry observation HTTP ${response.status}`);
+          const result: any = await response.json();
+          polls++;
+          if (result.output?.ready === true) { ready = true; break; }
+          if (result.output?.ready !== false) throw Error("Registry observation invalid schema");
+          await pause(Math.min(25, Math.max(0, deadline - Date.now())));
+        }
+        if (!ready) throw Error("OpenCode v2 CommHub MCP readiness timed out waiting for final registry");
+        console.log(`REGISTRY_READY polls=${polls} elapsedMs=${Date.now() - started}`);
+      }
       check("MCP readiness gate completed", process.env.TEST832_EXPECT_FAILURE !== "1");
       if (process.env.TEST832_DELAY_MS) check("gate waited for delayed handshake", Date.now() - started >= Number(process.env.TEST832_DELAY_MS));
     } catch (error: any) {
