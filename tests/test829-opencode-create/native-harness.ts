@@ -2,8 +2,10 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
-const root = '/run/test829-native';
+const root = '/home/test829-native';
 const project = `${root}/project`;
+// The real client uses the daemon-advertised HOME plus the node folder.
+const childProject = process.env.TEST829_CLIENT_DRIVER ? `${root}/home/oc829` : project;
 const artifact = '/artifacts';
 mkdirSync(project, { recursive: true });
 mkdirSync(artifact, { recursive: true });
@@ -67,7 +69,7 @@ try {
   check('no create request or node config on refusal', count() === before && !existsSync(`${project}/.anet/nodes/refused829/config.json`));
   console.log('L3 real daemon remote create -> native V2 startup');
   // Only provider fixture is preseeded; node identity/config must come from daemon.
-  const provider = `${project}/.anet/nodes/oc829/.config/opencode`;
+  const provider = `${childProject}/.anet/nodes/oc829/.config/opencode`;
   mkdirSync(provider, { recursive: true, mode: 0o700 });
   writeFileSync(`${provider}/opencode.json`, JSON.stringify({ model: 'stub/stub-model', provider: { stub: { npm: '@ai-sdk/openai-compatible', name: 'Stub', options: { baseURL: 'http://127.0.0.1:18827/v1', apiKey: 'test-only' }, models: { 'stub-model': { name: 'Stub' } } } } }), { mode: 0o600 });
   let created: any;
@@ -97,7 +99,7 @@ try {
     const replay = spawnSync(env.ANET_BIN_ABS, ['node', 'start', 'oc829'], { cwd: project, env: { HOME: env.HOME, PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' }, encoding: 'utf8', timeout: 15000 });
     console.log('failed-stage startup replay:', replay.status, redact(`${replay.stdout}${replay.stderr}`));
   }
-  const cfg = JSON.parse(readFileSync(`${project}/.anet/nodes/oc829/config.json`, 'utf8'));
+  const cfg = JSON.parse(readFileSync(`${childProject}/.anet/nodes/oc829/config.json`, 'utf8'));
   check('daemon persisted V2 generation and explicit opt-in', cfg.opencodeGeneration === 'v2' && cfg.opencodeMode === 'copresence' && cfg.flags.opencodeUnsafeTools === true);
   check('create status reports started, not capability failure', ['started', 'succeeded'].includes(row.status));
   check('native TUI rendered', await until(() => /ctrl\+p/.test(tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout)));
@@ -136,7 +138,7 @@ try {
   check('answer visible in same TUI', await until(() => tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout.includes('ANSWER829_REMOTE829')));
   if (process.env.TEST829_LIFECYCLE === '1') {
     console.log('L5 actual daemon stop/start lifecycle');
-    const nodeDir = `${project}/.anet/nodes/oc829`;
+    const nodeDir = `${childProject}/.anet/nodes/oc829`;
     const health = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8'));
     const attach = JSON.parse(readFileSync(`${nodeDir}/opencode-attach.json`, 'utf8'));
     const identities = [health.bridge, health.serve, { pid: attach.pid, ticks: String(attach.startTicks) }];
@@ -203,7 +205,7 @@ try {
   console.log('PASS test829 real daemon create and task; model/client UI remain separate gates');
 } finally {
   writeFileSync(`${artifact}/tui.txt`, tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout || '');
-  const bridge = `${project}/.anet/nodes/oc829/logs/copresence-bridge.log`;
+  const bridge = `${childProject}/.anet/nodes/oc829/logs/copresence-bridge.log`;
   if (existsSync(bridge)) writeFileSync(`${artifact}/bridge.log`, redact(readFileSync(bridge, 'utf8')));
   for (const name of ['oc829', 'oc829-桥']) tmux('kill-session', '-t', `=${name}`);
   // The daemon wrapper may leave a grandchild holding our stdout pipe open.
