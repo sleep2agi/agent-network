@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased: Codex fork request correlation (2026-10-09)
+
+- A single co-presence node start optionally accepts `--fork-recovery-request-id`, recording the ID on a confirmed fork mapping while preserving prior history. This does not mean startup completed; Hub/daemon forwarding and the client recovery button are not connected yet. See [recovery notes](./guide/codex-copresence.md#fork-on-resume-failure).
+
 User-facing changes, newest first. To see which version a channel points to right now: `npm view @sleep2agi/agent-network dist-tags` (same for `agent-node` and `commhub-server`). Full release notes for every npm version are in the repository's [`docs/tests/release-v<version>.md`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests); desktop notes are at [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases).
 
 ## Node visibility: rules files, skills, project folder — preview (2026-09-23 to 09-25)
