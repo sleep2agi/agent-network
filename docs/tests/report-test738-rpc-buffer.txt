@@ -4,6 +4,8 @@ Discovered during Hub #539 candidate PR #2554 validation.
 Observed CI failure
 -------------------
 Candidate head d512835fc94f3c0f66cce869143a82509683ad99.
+The Actions PR-merge checkout logged source dd49500bbabb9abd9e51cab76ae294e513e1238b;
+this is the workflow's merge-ref SHA, not the branch head above.
 https://github.com/sleep2agi/agent-network/actions/runs/37917887288/job/113779587143
 L1: 56 pass, 0 fail, 164 assertions.
 L2: native mixed-rollout preparation failed at old Codex thread/resume:
@@ -58,3 +60,19 @@ Fresh 8fdf image build and exact-head PR CI are in progress. Final outcomes
 must be appended before claiming this suite passed. Existing d512 release
 preflights are historical evidence, not new-head merge/publication approval.
 No merge, npm publication, global npm change or production restart performed.
+
+Follow-up 19:07 CST
+-------------------
+Exploratory original container completed T738 PASS=13 FAIL=0, exit 0.
+Exploratory fixed-overlay container completed T738 PASS=14 FAIL=0, exit 0
+(the extra pass is the new L0 transport gate, not a new product capability).
+All five existing mutation controls went red as expected in both runs.
+The original native pass does not erase its demonstrated coalesced-frame bug.
+Fresh candidate 8fdf image built successfully:
+anet-test738:release-8fdf
+image config sha256:48704aa2802ba90f1183b9d6afccb959a7aabc1d7634900e882f9f20051c1cc6
+Container anet-test738-8fdf-native uses bridge networking like CI, no source
+mounts, and EXPECTED_SOURCE_COMMIT=8fdf716fb471a6763f32f015cc1eb90e364e3af0.
+It has passed L0, L1, L2, all L3 acceptance cases and mutations M1/M2;
+remaining mutations are still running. Candidate CI 156 SUCCESS / 6 running,
+zero failures at this snapshot; still no merge/publication approval.
