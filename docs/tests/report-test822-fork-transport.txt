@@ -118,3 +118,11 @@ test738) and independent exact-head merge gate passed; main merge commit is
 Remaining: final combined candidate validation/review/PR, not implementation of
 the capability producer. Real model recovery evidence comes from #821 test738;
 #822 tests exercise the transport using CLI-shaped executable fixtures.
+
+Final combined source check after merging main 102dd0f2 into the candidate:
+test819 runner: 103 pass, 0 fail, 563 assertions
+(daemon73/245 + SQLite migration1/2 + Hub lifecycle15/76 + real HTTP14/240).
+Doc-symbol check initially found send_reply's line anchor moved; corrected it
+and its adjacent send_ack anchor to their actual tool registration strings.
+Docker doc-symbol recheck: docs 17 scanned/9 judged/8 skipped/0 drift;
+docs-site 18 scanned/16 judged/2 skipped/0 drift. Skips are not passes.
