@@ -10,6 +10,9 @@ COPY agent-node /opt/node_modules/@sleep2agi/agent-node
 RUN ln -s /opt/node_modules/@sleep2agi/agent-node /workspace/agent-node
 COPY tests/test829-opencode-create /workspace/tests/test829-opencode-create
 RUN mv /usr/local/bin/opencode /usr/local/bin/opencode.native-test-fixture
+# No logind in this non-root fixture: provision its private runtime base.
+# Product safe-base ownership/mode checks stay enabled.
+RUN install -d -m 0700 -o node -g node /run/user/1000
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 USER node
