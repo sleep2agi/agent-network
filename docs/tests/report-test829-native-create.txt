@@ -49,6 +49,21 @@ A standalone Dockerfile.native is supplied for future clean builds; it was NOT
 built/run during this round. native-overlay.sh runs only inside Docker.
 Existing test829 contract Dockerfile/run.sh retain their independent meaning.
 
+CI follow-up observed 2026-10-09 14:30 CST (not local native result):
+PR2551 head e67a777efc6b71fca8b9bfc72446e4b6d919b4e6, CI merge source
+a7838d8eb3eb831c5c50183f7331f2c6b083513c, run 37892722798:
+- server unit non-root job 113697655157: tool-audience-http size ceiling,
+  expected node tools/list <=62500 bytes, got 62524; 213 other files passed.
+  Do not simply increase the ceiling; compact the new forbidden-field schema
+  descriptions while retaining actual schema rejection and regression tests.
+- agent-node unit non-root job 113697654785: new node-name-652 V2 writer
+  case expected started, got rejected; 2658 pass, 1 skip, 1 fail.
+  The helper supplies sleep only for spawn and still probes real opencode;
+  unlike test829 image, generic unit image may not have that binary. This is
+  a fixture-dependency hypothesis until the rejected error is captured under
+  that image. Do not waive the job or claim the production startup was tested.
+These remain unresolved; no CI rerun or product patch is claimed here.
+
 Recovery impact: test files only after integration. No new production services,
 ports, secrets, deployment, rollback or backup changes. Operational runbook remains
 docs/runbooks/opencode-tui-copresence.md; this is not a disaster recovery rehearsal.
