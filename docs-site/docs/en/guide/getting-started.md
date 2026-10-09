@@ -5,9 +5,10 @@
      given version). They all become false the moment a new version ships. The release gate compares the
      version being published against these stamps and blocks the release, listing every line to update.
      Change the prose, change the stamp — the gate also fails when the two disagree.
-     Only "current state" claims are stamped; historical references (e.g. `<= 2.3.0-preview.37`) are not. -->
+     The latest stamp records the checked channel version; the preview stamp records the validated
+     release candidate, not npm publication. Historical references (e.g. `<= 2.3.0-preview.37`) are not stamped. -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.160 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.161 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
 
@@ -59,7 +60,8 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-Today's `latest` (`2.3.0-preview.76`) and `preview` (`2.3.0-preview.160`) both print a random password: `anet-` followed by 22 hex characters.
+The checked `latest` (`2.3.0-preview.76`) and validated `preview` release candidate (`2.3.0-preview.161`) both print a random password: `anet-` followed by 22 hex characters.
+**Candidate validation does not mean publication.** Run `npm view @sleep2agi/agent-network dist-tags` for the currently installable channel versions; do not treat the candidate number as the current npm `preview`.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 
 The credentials are also written to `~/.anet/server/admin-utok.json`, which holds only
