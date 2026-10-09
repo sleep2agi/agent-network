@@ -1,0 +1,49 @@
+Test829: remote-create candidate restacked after CLI slice landed
+2026-10-09 16:50 CST (UTC+08:00). Hub #539 / #829, PR #2551.
+Candidate verification only; NOT a release or deployment.
+
+PR #2545 landed on main at 2026-10-09 16:41:54 CST:
+merge 402b796ba3a6d966ace02e189a8784271c7fd24c
+reviewed head 434451ad8212849ea2ace6de2cd3436bcae30122, 160 successful checks.
+Head ancestry in fetched main verified. This is the CLI guard/guidance slice,
+not completion of all OpenCode V2 runtime/client work.
+
+Tested PR #2551 merge SHA:
+cc7698c7ae74e9da0aa623e43418d90ceb304b7d
+Parents: f95134ab2a1426246b39df20abfd89c593337fee and the main merge above.
+Code auto-merged; two documentation conflicts resolved:
+- architecture dashboardReleaseTag and dashboard command source anchors updated
+  to merged CLI lines 3115 and 10510;
+- copresence runbook retains remote-create candidate, identity/consent,
+  launch_verified_at, start completion and provider-readiness boundaries while
+  preserving main's historical PR #2380 initial-preview release statement.
+That historical statement is not a claim about the current public version.
+Docker read-only source/doc check: PASS for both anchors, retained safeguards,
+absence of conflict markers, and QA registrations for test827/test829 (3 each).
+git diff --check: PASS.
+
+Dockerfile: tests/test829-opencode-create/Dockerfile.ci-regression
+Build SOURCE_COMMIT and run EXPECTED_SOURCE_COMMIT = full tested SHA above.
+Image: anet-test829:main-restack-cc7
+sha256:c0c84e51c15b6f1f3e146e900510bde06a5117f541309034b2fd47cf8ac1df8a
+Non-root UID 1000, --network none; no vendor OpenCode on PATH.
+Container anet-test829-main-restack-cc7: exit 0.
+Targeted regression: 182 pass, 0 fail, 927 assertions across 9 invocations.
+This includes the additional landed CLI test; do not reuse the older 181 count.
+Container anet-test829-main-restack-readiness-cc7: exit 0.
+Entrypoint bun test /opt/node_modules/@sleep2agi/agent-node/src/runtime/runtime-readiness.test.ts
+Readiness: 27 pass, 0 fail, 106 assertions.
+Raw output retained in named container logs and regression /tmp/test829-ci-art/report.txt.
+
+This is targeted regression evidence for exactly the merge SHA, not native
+startup or full unit-domain evidence. Non-root rendered-client/native lifecycle
+and single-CPU denied-restart evidence belongs to the separately stacked
+test/opencode-v2-daemon-e2e branch, report-test829-client-nonroot.txt, tested
+bc09fe19adcfb6b323fd589e35548d7845fcdabd with client
+19595b59095ac822f32f673494e7bb77ed898d17. Do not transfer that native result
+to this standalone candidate or call its artifacts main release artifacts.
+
+No production service, port, proxy, secret source, migration or data change.
+Startup/recovery authority remains the repository runbook; existing rollback
+and encrypted-backup requirements are unchanged. Latest-head CI must rerun
+after push; old-head CI success is not evidence for this merge SHA.

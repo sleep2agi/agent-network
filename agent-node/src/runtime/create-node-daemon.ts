@@ -25,6 +25,8 @@ import {
 } from "./config-apply.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
+import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
+import { inspectLaunchHealth, successfulLauncherExit } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
   requiredCliStatus,
@@ -621,6 +623,12 @@ const PERMISSION_MODES = new Set(["default", "acceptEdits", "plan", "bypassPermi
 // or fork argv. Per 通信牛 PR #299 BLOCKER #2.
 export function validateFlagValueDaemon(k: string, v: unknown): void {
   switch (k) {
+    case "opencodeGeneration":
+      if (v !== "v1" && v !== "v2") throw new Error(`flag_value_invalid:${k}:must be v1 or v2`);
+      return;
+    case "opencodeUnsafeTools":
+      if (typeof v !== "boolean") throw new Error(`flag_value_invalid:${k}:must be boolean`);
+      return;
     case "permissionMode":
       if (typeof v !== "string" || !PERMISSION_MODES.has(v)) {
         throw new Error(`flag_value_invalid:${k}:must be default/acceptEdits/plan/bypassPermissions`);
@@ -668,6 +676,21 @@ function kebab(k: string): string { return k.replace(/([A-Z])/g, "-$1").toLowerC
 /** #584 —— hub 的 COPRESENCE_FLAG_RUNTIMES 的副本(两个包之间没有依赖)。 */
 const COPRESENCE_FLAG_RUNTIMES_DAEMON: ReadonlySet<string> = new Set(["codex-app-server"]);
 
+/** Mirrors Hub validateFlagsForRuntime; never infer unsafe opt-in from a template. */
+export function validateOpenCodeCreateFlags(runtime: string, flags: Record<string, unknown>): void {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+    if (!Object.prototype.hasOwnProperty.call(flags, field)) continue;
+    validateFlagValueDaemon(field, flags[field]);
+    if (runtime !== "opencode-cli") throw new Error(`flag_not_applicable_to_runtime:${field}:${runtime}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "opencodeUnsafeTools") && flags.opencodeGeneration !== "v2") {
+    throw new Error("opencode_unsafe_requires_v2:opencodeUnsafeTools requires explicit opencodeGeneration=v2");
+  }
+  if (flags.opencodeGeneration === "v2" && flags.opencodeUnsafeTools !== true) {
+    throw new Error("opencode_v2_requires_unsafe_opt_in:V2 preview enables every local tool; trusted tasks only. Explicit opencodeUnsafeTools=true required.");
+  }
+}
+
 /**
  * #584 —— 把 node_spec.flags 拆成「写进子节点 config 的那份」和「建节点时的开关」。
  *
@@ -680,14 +703,25 @@ const COPRESENCE_FLAG_RUNTIMES_DAEMON: ReadonlySet<string> = new Set(["codex-app
 export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" | "flags">): {
   flags: Record<string, unknown>;
   codexCopresence?: true;
+  opencodeGeneration?: "v1" | "v2";
+  opencodeMode?: "copresence";
 } {
   const flags: Record<string, unknown> = { ...(spec.flags || {}) };
+  validateOpenCodeCreateFlags(spec.runtime, flags);
+  const generation = flags.opencodeGeneration;
+  delete flags.opencodeGeneration;
   const wanted = flags.copresence === true;
   delete flags.copresence;
+  if (generation === "v1" || generation === "v2") {
+    return { flags, opencodeGeneration: generation, ...(generation === "v2" ? { opencodeMode: "copresence" as const } : {}) };
+  }
   return wanted && spec.runtime === "codex-app-server" ? { flags, codexCopresence: true } : { flags };
 }
 
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+    if (Object.prototype.hasOwnProperty.call(spec, field)) throw new Error(`flag_location_invalid:${field}:use node_spec.flags`);
+  }
   {
     // #652 — same rule as the hub. The hub forwards the trimmed name, so anything that
     // is not already in its normalized form here did not come through a current hub.
@@ -701,8 +735,9 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   if (Array.isArray(spec.channels) && spec.channels.length > 0) throw new Error("channels_not_supported_in_p1");
   const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
   if (spec.model) args.push("--model", spec.model);
+  validateOpenCodeCreateFlags(spec.runtime, spec.flags || {});
   for (const [k, v] of Object.entries(spec.flags || {})) {
-    if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence"].includes(k)) {
+    if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence", "opencodeGeneration", "opencodeUnsafeTools"].includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
     }
     // §4.2.2 daemon double-layer: defense in depth (per 通信牛 PR
@@ -710,6 +745,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
     // could smuggle `maxTurns: "DROP TABLE"` etc; we type/range
     // check before String() coerces into argv.
     validateFlagValueDaemon(k, v);
+    if (k === "opencodeUnsafeTools") { if (v === true) args.push("--opencode-unsafe-tools"); continue; }
     if (k === "copresence") {
       // #584 —— 同 hub validateFlagsForRuntime:别的 runtime 收下它而不生效 = 又一个静默无头。
       if (!COPRESENCE_FLAG_RUNTIMES_DAEMON.has(spec.runtime)) throw new Error(`flag_not_applicable_to_runtime:${k}:${spec.runtime}`);
@@ -1003,10 +1039,16 @@ export async function handleCreateNodeDoorbell(
       return;
     }
   }
-  try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
+  // OpenCode creates and validates each path component without following
+  // symlinks inside writeCreatedOpencodeProfile, before any token is written.
+  if (req.node_spec.runtime !== "opencode-cli") {
+    try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
+  }
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
-  const { flags: flagsObj, codexCopresence } = childConfigFieldsFromSpec(req.node_spec);
+  const { flags: flagsObj, codexCopresence, opencodeGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  const opencodeCopresence = req.node_spec.runtime === "opencode-cli"
+    && opencodeGeneration === "v2" && opencodeMode === "copresence";
   // Best-effort: also derive `permissionMode` etc into a `flags` block
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
@@ -1021,8 +1063,14 @@ export async function handleCreateNodeDoorbell(
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),
       ...(codexCopresence ? { codexCopresence } : {}),
+      ...(opencodeGeneration ? { opencodeGeneration } : {}),
+      ...(opencodeMode ? { opencodeMode } : {}),
     };
-    atomicWriteJson(childCfgPath, childCfg);
+    if (req.node_spec.runtime === "opencode-cli") {
+      writeCreatedOpencodeProfile(childDir, childCfg);
+    } else {
+      atomicWriteJson(childCfgPath, childCfg);
+    }
     deps.log(`[create-node] wrote child config: ${childCfgPath}`);
   } catch (e: any) {
     deps.warn(`[create-node] write child config failed: ${e?.message || e}`);
@@ -1073,6 +1121,7 @@ export async function handleCreateNodeDoorbell(
   //     symptom if the real cause is insta-crash on first vendor call /
   //     missing API key / config issue)
   let childPid = -1;
+  const launchedAt = Date.now();
   // #596 — how the launcher ended, if it did. A codex co-presence launcher
   // (`anet node start` on a codexCopresence config) brings the three tmux
   // sessions up and then EXITS 0 by design; without this, the +5 s check below
@@ -1100,7 +1149,7 @@ export async function handleCreateNodeDoorbell(
       // A co-presence launcher's pid is dead weight once it exits: keeping it in
       // the children map would let a later stop signal whoever reuses the number.
       // Stop/delete reach the generation through its identity marker instead.
-      if (codexCopresence) {
+      if (codexCopresence || opencodeCopresence) {
         import("./stop-daemon.js")
           .then(({ forgetSpawnedChildIfPid }) => { forgetSpawnedChildIfPid(childNodeIdForMap, spawnedPid); })
           .catch(() => { /* best-effort */ });
@@ -1186,6 +1235,29 @@ export async function handleCreateNodeDoorbell(
   // surfaces the gap between declaration and reality).
   const FAIL_FAST_MS = deps.capabilityCheckMs ?? 5_000;
   await new Promise<void>(resolve => setTimeout(resolve, FAIL_FAST_MS));
+  if (opencodeCopresence) {
+    // A still-running launcher is not proof of runtime readiness.
+    const deadline = launchedAt + (deps.capabilityCheckMs === undefined ? 35_000 : FAIL_FAST_MS);
+    while (!launcherExit && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
+    const ex = launcherExit as { code: number | null; signal: NodeJS.Signals | null } | null;
+    const health = inspectLaunchHealth(childDir, childCfgPath, launchedAt);
+    const { forgetSpawnedChildIfPid, recordSpawnedChild } = await import("./stop-daemon.js");
+    forgetSpawnedChildIfPid(childNodeIdForMap, childPid);
+    if (successfulLauncherExit(ex) && health.ok) {
+      recordSpawnedChild(childNodeIdForMap, req.node_spec.name, health.bridgePid);
+      deps.log(`[create-node] +${FAIL_FAST_MS}ms: OpenCode launcher exited 0; live bridge/serve/TUI generation verified`);
+      await deps.callCommHub("ack_create_request", {
+        request_id, status: "started", child_pid: health.bridgePid, launch_verified: true,
+      }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
+      return;
+    }
+    const msg = `OpenCode launcher exit=${ex?.code ?? "unknown"} signal=${ex?.signal ?? "none"}; ${health.ok ? "live generation but unsuccessful launcher" : health.reason}`;
+    deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "runtime_capability_check_failed", error: msg, runtime: req.node_spec.runtime,
+    }).catch(() => {});
+    return;
+  }
   let stillAlive = false;
   if (childPid > 0) {
     try {

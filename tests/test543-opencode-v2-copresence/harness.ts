@@ -14,7 +14,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { openOpenCodeCopresenceRuntime } from "/agent-node-src/src/runtime/opencode-copresence/runtime";
 import { OPENCODE_V2_BACKEND } from "/agent-node-src/src/runtime/opencode-backend";
 import { OpenCodeProviderError } from "/agent-node-src/src/runtime/opencode-provider-error";
@@ -71,6 +71,7 @@ const binary = execFileSync("bash", ["-c", "readlink -f \"$(command -v opencode)
 
 const mcpToken = "test543-node-token";
 const mcpSeen: string[] = [];
+const mcpMethods: string[] = [];
 const mcp = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -79,16 +80,25 @@ const mcp = Bun.serve({
     if (request.headers.get("authorization") !== `Bearer ${mcpToken}`) return new Response("unauthorized", { status: 401 });
     if (request.method !== "POST") return new Response(null, { status: 405 });
     const body: any = await request.json().catch(() => ({}));
+    mcpMethods.push(String(body.method ?? ""));
     if (String(body.method ?? "").startsWith("notifications/")) return new Response(null, { status: 202 });
     const r = (result: unknown) => Response.json({ jsonrpc: "2.0", id: body.id, result }, { headers: { "mcp-session-id": "s543" } });
     if (body.method === "initialize") return r({ protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "test543-commhub", version: "1" } });
-    if (body.method === "tools/list") return r({ tools: [{ name: "send_message", description: "send", inputSchema: { type: "object", properties: { alias: { type: "string" } } } }] });
+    // This fixture verifies transport/startup, not tool execution. Match the
+    // minimum real CommHub task contract required by the product readiness
+    // gate; do not weaken that gate to accommodate an incomplete fake.
+    if (body.method === "tools/list") return r({ tools: [
+      { name: "send_message", description: "send", inputSchema: { type: "object", properties: { alias: { type: "string" } } } },
+      { name: "send_task", description: "dispatch a task", inputSchema: { type: "object", properties: { alias: { type: "string" }, task: { type: "string" } }, required: ["alias", "task"] } },
+      { name: "get_task", description: "read a task receipt", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"] } },
+    ] });
     if (body.method === "ping") return r({});
     return Response.json({ jsonrpc: "2.0", id: body.id, error: { code: -32601, message: "nf" } });
   },
 });
 
 let runtime: Awaited<ReturnType<typeof openOpenCodeCopresenceRuntime>> | undefined;
+let drainingChild: ReturnType<typeof spawn> | undefined;
 const root = mkdtempSync(join(tmpdir(), "anet-test543-"));
 chmodSync(root, 0o700);
 try {
@@ -158,12 +168,14 @@ try {
 
   // ── Layer 3 ────────────────────────────────────────────────────────────
   let workDir = "";
+  let launchRoot = "";
   if (layer("Layer 3 — opt-in (flags.opencodeUnsafeTools=true): real serve, package gate, CommHub MCP")) {
     workDir = join(root, "node-v2");
     mkdirSync(join(workDir, ".config", "opencode"), { recursive: true, mode: 0o700 });
     writeFileSync(join(workDir, ".config", "opencode", "opencode.json"), JSON.stringify({ provider: PROVIDER, model: MODEL }), { mode: 0o600 });
     const project = join(root, "project");
     mkdirSync(project, { recursive: true, mode: 0o700 });
+    const modelCallsBeforeStartup = stubLog().length;
     runtime = await openOpenCodeCopresenceRuntime({
       backend: OPENCODE_V2_BACKEND, cwd: project, workDir, model: MODEL, unsafeTools: true,
       binarySearchPath: process.env.PATH!, startupTimeoutMs: 30_000,
@@ -173,9 +185,15 @@ try {
     check("loopback serve", /^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.url), runtime.url);
     check("V2 session id", /^ses_/.test(runtime.sessionId), runtime.sessionId);
     const launcher = readFileSync(runtime.attachScriptPath, "utf8");
+    // Read only the generated test path, never log the credential-bearing script.
+    const dataRoot = launcher.match(/^export XDG_DATA_HOME='([^']+)'$/m)?.[1];
+    launchRoot = dataRoot ? dirname(dataRoot) : "";
+    check("captured existing private launch root", Boolean(launchRoot) && existsSync(launchRoot));
     check("launcher joins with --server/--session (no attach, no --pure)",
       launcher.includes(`--server '${runtime.url}' --session '${runtime.sessionId}'`) && !launcher.includes(" attach ") && !launcher.includes("--pure"));
     check("launcher spawns the gated package binary", launcher.includes(`exec '${binary}'`));
+    check("MCP tools discovered before ready, without a model warmup", mcpMethods.includes("tools/list") && stubLog().length === modelCallsBeforeStartup);
+    check("no unauthenticated MCP startup call", !mcpSeen.some((s) => s.endsWith("auth-bad")));
   }
 
   // ── Layer 4 ────────────────────────────────────────────────────────────
@@ -186,7 +204,8 @@ try {
     check("network task reply", r1.replyText === "NET543A", r1.replyText);
     check("network turn visible in the TUI", await waitFor(() => pane().includes("NET543A"), 10_000));
     check("sender provenance visible in the TUI", pane().includes("[来自 test543-peer]"));
-    // V2 connects MCP servers lazily (first turn), so this is checked after one.
+    // Startup now waits for the final registry; retain the after-turn auth
+    // check to detect an unexpected credential change during actual use.
     check("CommHub MCP connected with the node bearer token", await waitFor(() => mcpSeen.some((s) => s.startsWith("POST auth-ok")), 15_000), mcpSeen.join(","));
     check("no unauthenticated MCP call", !mcpSeen.some((s) => s.endsWith("auth-bad")));
   }
@@ -196,7 +215,9 @@ try {
     tmux("send-keys", "-t", TUI, "-l", "STUB_DELAY_3 Reply with exactly HUMAN543");
     await sleep(800);
     tmux("send-keys", "-t", TUI, "Enter");
-    await sleep(1_200);
+    const humanAdmitted = await waitFor(() => stubLog().some(e => e.user === "STUB_DELAY_3 Reply with exactly HUMAN543"), 15_000);
+    check("human turn reached model before submitting network turn", humanAdmitted);
+    if (!humanAdmitted) throw new Error("human turn was not admitted; refusing to test queue order without its precondition");
     const r2 = await runtime.submit("Reply with exactly NET543B", 60_000);
     check("queued network turn answered with its own text (not the human's)", r2.replyText === "NET543B", r2.replyText);
     check("human turn answered in the TUI", await waitFor(() => pane().includes("HUMAN543"), 10_000));
@@ -207,7 +228,9 @@ try {
     // Whatever the TUI does (queue or steer), a human answer must never be
     // claimed as the network reply.
     const pending = runtime.submit("STUB_DELAY_3 Reply with exactly NET543C", 60_000).then((r) => ({ r }), (e) => ({ e }));
-    await sleep(1_000);
+    const networkAdmitted = await waitFor(() => stubLog().some(e => e.user === "STUB_DELAY_3 Reply with exactly NET543C"), 15_000);
+    check("network turn reached model before reverse-order human input", networkAdmitted);
+    if (!networkAdmitted) throw new Error("network turn was not admitted before reverse-order input");
     tmux("send-keys", "-t", TUI, "-l", "Reply with exactly HUMAN543D");
     await sleep(500);
     tmux("send-keys", "-t", TUI, "Enter");
@@ -229,10 +252,25 @@ try {
   // ── Layer 7 ────────────────────────────────────────────────────────────
   if (runtime && layer("Layer 7 — lifecycle")) {
     const launcherPath = runtime.attachScriptPath;
+    // Deterministic exit race: a descendant retaining this exact XDG root
+    // drains briefly after SIGTERM, like an attached TUI. Without it the
+    // real TUI sometimes exits before cleanup and masks the one-shot bug.
+    drainingChild = spawn(process.execPath, ["-e", `
+      process.on("SIGTERM", () => setTimeout(() => process.exit(0), 1500));
+      setTimeout(() => process.exit(2), 6000);
+      process.stdout.write("ready\\n");
+    `], { env: { ...process.env, XDG_DATA_HOME: join(launchRoot, "data") }, stdio: ["ignore", "pipe", "ignore"] });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("draining descendant did not start")), 3000);
+      drainingChild!.stdout!.once("data", () => { clearTimeout(timer); resolve(); });
+      drainingChild!.once("error", error => { clearTimeout(timer); reject(error); });
+    });
+    drainingChild.kill("SIGTERM");
     await runtime.close();
     check("runtime reports stopped", runtime.isRunning === false);
     check("launcher removed", !existsSync(launcherPath));
     check("serve + TUI processes gone", await waitFor(() => opencodeProcs().length === 0, 10_000), opencodeProcs().join(" | "));
+    check("close reclaimed private launch root including registry observer", Boolean(launchRoot) && !existsSync(launchRoot));
     check("no per-user background service was started", !opencodeProcs().some((p) => p.includes("--service"))
       && spawnSync("curl", ["-s", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:49374/api/info"]).status !== 0);
     runtime = undefined;
@@ -241,7 +279,8 @@ try {
   check("harness ran to completion", false, `${error?.stack ?? error}\n${error?.startupOutput ?? ""}`);
 } finally {
   await runtime?.close().catch(() => {});
-  try { tmux("kill-server"); } catch {}
+  if (drainingChild?.exitCode === null) drainingChild.kill("SIGKILL");
+  try { tmux("kill-session", "-t", `=${TUI}`); } catch {}
   mcp.stop(true);
   stub.kill("SIGKILL");
   rmSync(root, { recursive: true, force: true });

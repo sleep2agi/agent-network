@@ -11,16 +11,27 @@ os.makedirs(cwd, exist_ok=True)
 p = subprocess.Popen([binary, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                      stderr=subprocess.DEVNULL, text=True, cwd=cwd)
 def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+pending = bytearray()
 def wait(id_, t=60):
-    end = time.time() + t
-    while time.time() < end:
-        r, _, _ = select.select([p.stdout], [], [], 1)
+    end = time.monotonic() + t
+    # Do not mix select(fd) with TextIOWrapper.readline(): readline can buffer
+    # the response after a notification, leaving the fd empty until the timeout.
+    # Drain complete buffered frames first; partial frames share the deadline.
+    while time.monotonic() < end:
+        if b"\n" in pending:
+            line, _, rest = pending.partition(b"\n")
+            pending[:] = rest
+            try: m = json.loads(line)
+            except ValueError: continue
+            if isinstance(m, dict) and m.get("id") == id_: return m
+            continue
+        remaining = end - time.monotonic()
+        if remaining <= 0: break
+        r, _, _ = select.select([p.stdout], [], [], min(1, remaining))
         if not r: continue
-        line = p.stdout.readline()
-        if not line: break
-        try: m = json.loads(line)
-        except ValueError: continue
-        if m.get("id") == id_: return m
+        chunk = os.read(p.stdout.fileno(), 65536)
+        if not chunk: break
+        pending.extend(chunk)
     return {"error": {"message": "timeout"}}
 send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "t738", "version": "0"}}}); wait(1)
 send({"method": "initialized"})
@@ -42,3 +53,4 @@ try:
         else: print("RESUME OK", r["result"]["thread"]["id"])
 finally:
     p.kill()
+    p.wait()

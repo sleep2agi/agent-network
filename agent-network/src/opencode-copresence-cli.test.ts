@@ -15,11 +15,40 @@ function functionBody(name: string): string {
 describe("OpenCode co-presence CLI wiring", () => {
   const body = functionBody("startOpencodeCopresenceOrchestration");
 
+  test("stop drains the frozen OpenCode agent before closing tmux, then retains the residual audit", () => {
+    const stop = functionBody("stopResolvedNode");
+    const drain = stop.indexOf("const drainDeadline");
+    expect(drain).toBeGreaterThan(-1);
+    const guard = stop.slice(stop.indexOf("// OpenCode's bridge owns"), drain);
+    expect(guard).toContain('allowLegacyTmuxNameSweep && process.platform === "linux"');
+    expect(guard).toContain('resolved.profile.runtime === "opencode-cli"');
+    expect(guard).toContain('resolved.profile.opencodeMode === "copresence"');
+    expect(guard).toContain('identity.role === "agent"');
+    expect(guard).toContain('current.kind === "live" && current.birth === identity.birth');
+    expect(stop.indexOf("killTmuxSession(session)")).toBeGreaterThan(drain);
+    expect(stop.indexOf("await reapOwnedGeneration(stopProcesses)")).toBeGreaterThan(drain);
+  });
+
+  test("generation policy is checked before touching profiles or live sessions", () => {
+    const guard = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal(");
+    expect(guard).toBeGreaterThan(-1);
+    expect(body.indexOf("saveProfile(")).toBeGreaterThan(guard);
+    expect(body.indexOf("killTmuxSession(")).toBeGreaterThan(guard);
+    expect(body.slice(guard, body.indexOf("saveProfile("))).toContain("if (generationRefusal)");
+  });
+
   test("persists copresence mode before launching the bridge", () => {
     const save = body.indexOf('opencodeMode: "copresence"');
     const bridge = body.indexOf('"new-session"');
     expect(save).toBeGreaterThan(-1);
     expect(bridge).toBeGreaterThan(save);
+  });
+
+  test("policy refusal precedes profile writes and session replacement", () => {
+    const refusal = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal");
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(body.indexOf("saveProfile(resolved.id, profile)"));
+    expect(refusal).toBeLessThan(body.indexOf("killTmuxSession(name)"));
   });
 
   test("starts only exact alias and alias-bridge tmux sessions", () => {
@@ -67,6 +96,13 @@ describe("OpenCode co-presence CLI wiring", () => {
     const dispatch = cli.indexOf('if (copresenceRuntime === "opencode-cli")');
     expect(dispatch).toBeGreaterThan(-1);
     expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id, opts.hub)");
+  });
+
+  test("ordinary V2 profile starts select orchestration, but internal bridge starts do not recurse", () => {
+    const start = functionBody("startCommand");
+    expect(start).toContain("opencodeV2CopresenceRequested(resolvedForCopresence.profile)");
+    expect(start).toContain('process.env.ANET_COPRESENCE_BRIDGE !== "1"');
+    expect(body).toContain("export ANET_COPRESENCE_BRIDGE=1");
   });
 
   test("operator help names the create, attach, and stop commands", () => {

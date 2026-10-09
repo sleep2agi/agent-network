@@ -4279,6 +4279,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         model: z.string().min(1).max(100).optional().nullable(),
         flags: z.record(z.string(), z.unknown()).optional(),
         env_refs: z.array(z.string().max(64)).optional(),
+        // Wrong placement must fail, not silently create a legacy V1 node.
+        // These options belong under the strict flags envelope.
+        opencodeGeneration: z.never().optional(),
+        opencodeUnsafeTools: z.never().optional(),
         channels: z.array(z.unknown()).optional(),
         // app「新建节点」确认页的工作目录(绝对路径或 ~/…,daemon 侧展开并校验)。
         // 缺席 = 老行为:落 daemon 的 cwd。
@@ -4753,8 +4757,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       error: z.string().max(1000).optional(),
       child_pid: z.number().int().optional(),
       runtime: z.string().max(64).optional(),   // populated by daemon when status=runtime_capability_check_failed
+      launch_verified: z.boolean().optional(), // finite launcher exit + live generation proof, not mere registration/spawn
     },
-    async ({ request_id, status, error: ackError, child_pid: _pid, runtime: ackRuntime }) => {
+    async ({ request_id, status, error: ackError, child_pid: _pid, runtime: ackRuntime, launch_verified }) => {
       const callerDaemon = resolveCallerDaemonTokenBound();
       if (!callerDaemon.ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
@@ -4772,6 +4777,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       const ackedAt = Date.now();
       if (status === "started") {
+        if (launch_verified === true && (!Number.isInteger(_pid) || _pid! <= 0)) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "verified_child_pid_required" }) }] };
+        }
+        if (launch_verified === true) {
+          // A child can register before this acknowledgement arrives. Preserve
+          // both event orders, but a late success must never revive a failure.
+          db.run(`UPDATE node_create_requests SET launch_verified_at = COALESCE(launch_verified_at, ?1)
+                  WHERE request_id = ?2 AND status IN ('pending', 'delivered', 'succeeded')`, [ackedAt, request_id]);
+        }
         // Don't flip to 'succeeded' here — that happens via content-
         // match when the child actually registers. We just stamp ack.
         db.run(
@@ -4781,12 +4795,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "awaiting_register" }) }] };
       }
       // failed / rejected / runtime_capability_check_failed — revoke
-      // child-ntok + mark request terminal.
+      // child-ntok + mark request terminal. Registration can precede the
+      // daemon's final capability verdict; don't leave succeeded visible
+      // while this same failure acknowledgement revokes its child token.
       if (row.child_token_id) {
         db.run(`UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = ?1 AND revoked_at IS NULL`, [row.child_token_id]);
       }
       db.run(
-        `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3 WHERE request_id = ?4 AND status IN ('pending', 'delivered')`,
+        `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3, launch_verified_at = NULL WHERE request_id = ?4 AND status IN ('pending', 'delivered', 'succeeded')`,
         [status, ackError || null, ackedAt, request_id],
       );
       // RFC-026 §9.3 D2 — surface declaration↔reality gap on a

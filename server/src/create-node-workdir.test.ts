@@ -107,6 +107,27 @@ describe("daemonDefaultWorkdirRoot — sanitize the self-report", () => {
 });
 
 describe("create_node + workdir", () => {
+  test("#829 V2 flags survive Hub storage and daemon pull", async () => {
+    seed({ runtimes_supported: ["opencode-cli"] });
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: { name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags } });
+    expect(r.ok).toBe(true);
+    const row = db.get<{ flags_json: string }>("SELECT flags_json FROM node_create_requests WHERE request_id = ?1", r.request_id);
+    expect(JSON.parse(row!.flags_json)).toEqual(flags);
+    const pulled = await call(tools(DAEMON_TOK).get_create_request, { request_id: r.request_id });
+    expect(pulled.ok).toBe(true);
+    expect(pulled.node_spec.flags).toEqual(flags);
+  });
+
+  test("#829 missing opt-in rejected before request or child token mint", async () => {
+    seed({ runtimes_supported: ["opencode-cli"] });
+    const tokenCount = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE network_id = ?1", NET)!.n;
+    const before = tokenCount();
+    const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: { name: "v2-child", runtime: "opencode-cli", flags: { opencodeGeneration: "v2" } } });
+    expect(r.error).toBe("opencode_v2_requires_unsafe_opt_in");
+    expect(rowCount()).toBe(0);
+    expect(tokenCount()).toBe(before);
+  });
   test("🔴 old daemon (no default_workdir_root) + workdir → workdir_not_supported_by_daemon, NO row", async () => {
     seed({});
     const r = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: { ...baseSpec, workdir: `${ROOT}/wd-child` } });

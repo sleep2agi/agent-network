@@ -1,0 +1,20 @@
+# Local regression fixture; verify DEPENDENCY_IMAGE resolves to the recorded
+# image ID before building. A bare sha256 ID is not a portable Docker FROM ref.
+# Reuses locked deps only. All relevant repository source is replaced below.
+ARG DEPENDENCY_IMAGE=anet-test827:close-drain
+FROM ${DEPENDENCY_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+COPY server /workspace/server
+COPY agent-network /workspace/agent-network
+COPY agent-node /opt/node_modules/@sleep2agi/agent-node
+RUN ln -s /opt/node_modules/@sleep2agi/agent-node /workspace/agent-node
+COPY tests/test829-opencode-create /workspace/tests/test829-opencode-create
+RUN mv /usr/local/bin/opencode /usr/local/bin/opencode.native-test-fixture
+# No logind in this non-root fixture: provision its private runtime base.
+# Product safe-base ownership/mode checks stay enabled.
+RUN install -d -m 0700 -o node -g node /run/user/1000
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
+USER node
+WORKDIR /workspace
+ENTRYPOINT ["bash", "/workspace/tests/test829-opencode-create/ci-regression.sh"]

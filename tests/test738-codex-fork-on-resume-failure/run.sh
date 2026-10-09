@@ -20,6 +20,10 @@ PASS=0; FAIL=0
 pass() { PASS=$((PASS + 1)); echo "PASS $*"; }
 fail() { FAIL=$((FAIL + 1)); echo "FAIL $*"; }
 
+echo "── L0 fixture transport (coalesced and partial JSON-RPC frames)"
+python3 "$SUITE/rpc-buffer-probe.py" "$SUITE/codex-rpc.py"
+pass "L0 fixture transport"
+
 echo "── L1 unit"
 l1=0
 (cd agent-network && bun test src/codex-fork-recovery.test.ts src/cli-args.test.ts src/codex-copresence-rpc.test.ts) || l1=1

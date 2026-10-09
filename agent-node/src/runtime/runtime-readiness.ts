@@ -240,6 +240,19 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
     }
   }
 
+  // V2 chooses its provider/model in the node's own configuration. The V1
+  // Zen endpoint and auth-file probes cannot establish V2 readiness: an
+  // offline/LAN provider can work while opencode.ai is unreachable, and a
+  // reachable website does not prove model authentication. Keep this unknown,
+  // not ready. Exact package identity, consent and launch checks still run at
+  // creation/start; a --version string here is observational, not authorization.
+  if (runtime === "opencode-cli" && out.cli === "found" && /^2\./.test(out.version ?? "")) {
+    out.auth = "unknown";
+    out.network = "skipped";
+    out.reason = "检测到 OpenCode V2;provider、模型和登录取决于目标节点配置,不能用 opencode.ai 的连通性确认。创建时仍需校验准确版本、显式工具授权和启动结果";
+    return out;
+  }
+
   // ── 2. 登录(只看存在性)──
   const fileHit = spec.authFiles.some((rel) => deps.fileExists(join(deps.home, rel)));
   const envHit = spec.authEnvKeys.some((k) => typeof deps.childEnv[k] === "string" && deps.childEnv[k] !== "");

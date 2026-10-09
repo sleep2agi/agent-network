@@ -1,0 +1,123 @@
+#829 OpenCode V2 remote-create contract audit
+Recorded: 2026-10-09, Asia/Shanghai
+Status: diagnostic baseline / implementation NOT complete / no release.
+
+Authority
+- Hub #539 -> #829; issue sleep2agi/agent-network#2544.
+- Server/daemon inspected: 54dac56030931fde07cd298ecce1be4a5f8c509d.
+- Docker tested: 643ab39c3cb24b4aa0a72599add62ce932814ca9.
+  Inspected create-node validator/schema/daemon files have no diff between these SHAs.
+- Client: sleep2agi/agent-network-app main
+  41dc1251e45dd63731474748b81a90a1a45b6c45.
+  Read src/CreateNodeWizardScreen.tsx and src/create-node-request.ts via GitHub API.
+  Issue searches (all states): OpenCode, "V2". No dedicated OpenCode V2 client
+  issue found in these results. #198 is general lifecycle meta, #199 closed
+  runtime allowlist work; neither is evidence of V2 support. Search again before
+  creating a client implementation card. No GitHub Project used.
+
+Observed contract gaps
+1. Actual create_node node_spec Zod schema strips unknown top-level
+   opencodeGeneration / opencodeUnsafeTools; parsing succeeds without them.
+   This is a reproduced schema-level loss, not a claim that a V2 node started.
+2. Putting either field in flags is explicitly rejected as flag_key_unknown
+   by BOTH Hub buildAnetArgs and daemon buildAnetArgsDaemon.
+3. Daemon does not invoke the CLI create command: it validates argv, then writes
+   child config directly. Extending CLI argv alone will NOT implement this path.
+   childConfigFieldsFromSpec currently extracts only Codex copresence. The
+   actual childCfg write must persist OpenCode generation/mode explicitly.
+4. Existing CLI V2 profile is opencodeGeneration="v2", opencodeMode="copresence",
+   flags.opencodeUnsafeTools=true. This is still a high-risk preview, not safe mode.
+5. Client has one opencode-cli / OpenCode TUI option; buildCreateNodeSpec sends
+   no generation/unsafe opt-in. No client code was changed in this audit.
+6. Runtime list/readiness currently identifies opencode-cli, not proof of
+   the installed generation/package/version required by the selected mode.
+
+Docker evidence
+Image: anet-test832:close-drain
+Image index: sha256:ae0a5cff46f70582d12493aff13e525f44554557e0f1675da4ad6f5d89faaac8
+Source marker: 643ab39c3cb24b4aa0a72599add62ce932814ca9
+Node 22.23.3; Bun 1.3.14. No source mounts, --network none.
+Rebuild foundation: tests/test832-opencode-v2-registry/Dockerfile at source SHA.
+
+Attempt 1: anet-test829-contract-baseline, exit 1.
+- Missing explicit COMMHUB_DB caused test-default-prod guard to refuse the schema
+  import. 45 validator tests passed, one schema import failed. Daemon stage
+  did not run. This is a harness setup error, NOT a product regression.
+Attempt 2: anet-test829-contract-isolated, exit 0.
+- Explicit COMMHUB_DB=/tmp/test829-contract.db inside disposable container.
+- server: 46 tests / 181 assertions passed.
+- daemon: 83 tests / 209 assertions passed.
+- Total: 129 tests, 390 assertions. Existing behavior baseline only.
+
+Replay container configuration: use sg docker -c for docker run, --network none,
+no mounts, -e COMMHUB_DB=/tmp/test829-contract.db, --entrypoint bash, the above
+image, and -lc with the following script as ONE argument. Quote it so the source
+marker expands inside the container, not in the host shell:
+  set -e
+  test "$SOURCE_COMMIT" = 643ab39c3cb24b4aa0a72599add62ce932814ca9
+  cd /workspace/server
+  bun test src/create-node-validate.test.ts src/create-node-tool-schema.test.ts
+  cd /opt/node_modules/@sleep2agi/agent-node
+  bun test src/runtime/create-node-daemon.test.ts
+
+Probe: anet-test829-schema-probe, exit 0; same image, database /tmp/test829-probe.db.
+The following diagnostic was passed to bun -e with workdir /workspace/server.
+It captures the REAL registered MCP schema; no duplicate Zod schema is used.
+A zero exit confirms the observed gap, NOT successful V2 remote creation.
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerTools } from "./src/tools.ts";
+import { buildAnetArgs } from "./src/create-node-validate.ts";
+import { buildAnetArgsDaemon } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/create-node-daemon.ts";
+const server = new McpServer({name:"contract-probe",version:"0"});
+let schema;
+const orig = server.tool.bind(server);
+server.tool = (name,desc,s,h) => { if(name==="create_node") schema=s.node_spec; return orig(name,desc,s,h); };
+registerTools(server, undefined,null,"contract-probe","contract-probe",false,null);
+const base={name:"probe",runtime:"opencode-cli",model:"stub/model"};
+const parsed=schema.parse({...base,opencodeGeneration:"v2",opencodeUnsafeTools:true});
+if ("opencodeGeneration" in parsed || "opencodeUnsafeTools" in parsed) throw Error("baseline changed: re-audit schema");
+console.log("OBSERVED GAP: top-level generation/unsafe fields stripped by actual MCP schema");
+for(const [name,build] of [["hub",buildAnetArgs],["daemon",buildAnetArgsDaemon]]){
+ for(const flags of [{opencodeGeneration:"v2"},{opencodeUnsafeTools:true}]){
+ let refused=false;
+ try {build({...base,flags});} catch(e){ refused=String(e).includes("flag_key_unknown");}
+ if(!refused) throw Error(name+" baseline changed");
+ console.log("OBSERVED: "+name+" rejects "+Object.keys(flags)[0]+" in flags");
+ }
+}
+console.log("Diagnostic baseline only; NOT V2 create acceptance");
+process.exit(0);
+
+Next implementation slices (not implemented by this report)
+A. Hub + daemon transport and persistence:
+   use explicit generation and unsafe fields under the existing strict flags
+   envelope so mixed-version peers reject rather than silently downgrade.
+   Validate types, opencode-cli applicability, v1/v2 enum and the existing
+   unsafe-preview requirement independently at Hub and daemon, before writes,
+   token mint (Hub), or spawn. Preserve omitted-generation legacy V1 behavior.
+   Extract generation to child config top level; retain explicit unsafe flag;
+   set V2 copresence mode. Do not inherit opt-in from another runtime/template.
+   Verify exact generation/package in readiness and persist/read back the same
+   requested values. Existing V1 local configs must not be silently migrated.
+B. Actual daemon Docker E2E:
+   authenticated Hub create -> pull -> child config -> pinned V2 startup ->
+   registration -> model task receipt -> stop -> restart -> config/model readback.
+   Include old Hub/daemon, invalid enum, string "true", omitted/false unsafe,
+   wrong runtime, wrong installed generation, and rejected request with no
+   child spawn/config overwrite. Passing helpers alone does not complete A/B.
+C. Client repository:
+   create a dedicated linked issue after fresh duplicate search; separate UI
+   generation selection, explicit non-default high-risk acknowledgement,
+   mixed-version errors, loading/error recovery, and lifecycle readback.
+   Do not bypass the TMA客户端牛 HOLD. Native platform/UI acceptance is separate.
+D. main-only release:
+   retain PR gates, exact full main ancestor SHA, formal rebuild and release
+   verification. No feature-branch binary reuse as release evidence.
+
+Recovery / production boundary
+This audit changes no service, launcher, port, proxy, tunnel, installed version,
+environment/key source, database schema/data, or production process.
+Existing runbook remains docs/runbooks/opencode-tui-copresence.md.
+No restart/rollback operation is necessary for this documentation-only change.
+No production data recovery is proved; data still depends on documented backups.

@@ -17,6 +17,8 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import {
   _resetAnetBinAbsForTest,
+  _resetDaemonExtraPathForTest,
+  applyDaemonExtraPath,
   buildAnetArgsDaemon,
   handleCreateNodeDoorbell,
   serializeEnvLocalDaemon,
@@ -25,6 +27,7 @@ import { verifyStoppedChildConfig } from "./start-daemon.js";
 import { _resetChildrenMapForTest, handleStopDoorbell } from "./stop-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
 import { NODE_NAME_CASES, nodeFolderSlug } from "../shared/node-name.js";
+import { readOpencodeRuntimeBinding } from "../shared/opencode-runtime-binding.js";
 
 const CN = "测试";
 const CN_DIR = nodeFolderSlug(CN);   // node-<6 hex>
@@ -65,6 +68,7 @@ const ENV_KEYS = ["HOME", "ANET_BIN_ABS", "ANET_DAEMON_ALLOW_ENV_BIN", "ANET_BIN
 
 beforeEach(() => {
   _resetChildrenMapForTest();
+  _resetDaemonExtraPathForTest();
   home = realpathSync(mkdtempSync(join(tmpdir(), "t652-home-")));
   workDir = join(home, "daemon");
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
@@ -83,6 +87,7 @@ afterEach(() => {
   for (const pid of killPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
   for (const k of ENV_KEYS) { if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k]; }
   _resetAnetBinAbsForTest();
+  _resetDaemonExtraPathForTest();
   rmSync(home, { recursive: true, force: true });
   rmSync(pinRoot, { recursive: true, force: true });
 });
@@ -143,6 +148,40 @@ function walk(root: string): string[] {
 const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
+  test("#829 V2 create writes generation/mode into actual child config, not flags", async () => {
+    // This is a config-writer test, not native OpenCode startup. Supply the
+    // required version probe explicitly: the generic non-root CI image has
+    // no vendor binary. Do not rely on the developer's/global native install.
+    const fixtureBin = join(pinRoot, "probe-bin");
+    mkdirSync(fixtureBin, { mode: 0o700 });
+    writeFileSync(join(fixtureBin, "opencode"), '#!/bin/sh\nprintf "opencode v2.0.22\\n"\n', { mode: 0o755 });
+    applyDaemonExtraPath([fixtureBin]);
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
+    const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
+    // sleep is deliberately NOT a healthy V2 generation. This test proves
+    // persistence, not runtime readiness, and must not produce a started ack.
+    expect(acks.map(a => a.status)).toEqual(["runtime_capability_check_failed"]);
+    expect(spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBe("v2");
+    expect(cfg.opencodeMode).toBe("copresence");
+    expect(cfg.flags).toEqual({ opencodeUnsafeTools: true, timeout: 600000 });
+    expect(readOpencodeRuntimeBinding(join(workDir, ".anet", "nodes", "v2-child"), home))
+      .toEqual({ schemaVersion: 1, runtime: "opencode-cli", projectRoot: workDir, nodeId: "v2-child" });
+    expect(flags.opencodeGeneration).toBe("v2");
+  });
+
+  test("#829 unsafe opt-in is required before write or spawn; existing config unchanged", async () => {
+    const dir = join(workDir, ".anet", "nodes", "v2-child");
+    mkdirSync(dir, { recursive: true });
+    const original = JSON.stringify({ alias: "v2-child", opencodeGeneration: "v1" });
+    writeFileSync(join(dir, "config.json"), original);
+    const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", flags: { opencodeGeneration: "v2" } }, "cr_v2refuse");
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_requires_unsafe_opt_in");
+    expect(spawned).toHaveLength(0);
+    expect(readFileSync(join(dir, "config.json"), "utf8")).toBe(original);
+  });
   test("「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels", async () => {
     // The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`
     // (sleep2agi/agent-network-app create-node-workdir.ts). That folder must be what lands on disk.

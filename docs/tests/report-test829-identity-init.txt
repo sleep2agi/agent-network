@@ -1,0 +1,373 @@
+# test829 daemon identity initialization — 2026-10-09 14:48 +08
+
+Status: targeted unit/HTTP checks PASS; native create advances to Hub succeeded
+but native TUI-render gate FAILS. NOT a full V2 acceptance or release result.
+PR: https://github.com/sleep2agi/agent-network/pull/2551 (draft)
+Authority: https://github.com/sleep2agi/agent-network/issues/2544 ; Hub #539/#829.
+
+Product change: 41640047ce189ec56fda118a2a73bef98a87596c
+Targeted exact source: 8027d499fc35625d6c8c0da86f14220ec8853685
+Native integrated exact source: e0cfbd71af295f464c80c93f1080d436f9ea96b8
+Native branch includes PR2550 at 54dac56030931fde07cd298ecce1be4a5f8c509d
+and PR2551 through 80fad11b5079241d02ec51bc65ed13b972ce4d61.
+8027 adds only a daemon-binding assertion and git in generic CI Dockerfile;
+do not transfer this native result to future product changes.
+
+Scope:
+- Fresh daemon-created OpenCode profiles use the existing CLI no-follow private
+  filesystem and Git-untracked checks, then an external HOME binding, then the
+  atomic private token write.
+- Four security modules are byte-identical standalone-package mirrors with
+  parity checks. No runtime import outside the published package.
+- Retry requires the same node_id/alias/runtime and valid prior binding.
+  Unbound or different existing identity and malformed binding fail closed.
+- No startup-time legacy adoption, global npm modification, production writes,
+  tmux kill-server, merge, registry publication or client release.
+- Recovery/backup boundary documented in docs/runbooks/opencode-tui-copresence.md.
+
+Docker provenance:
+Base dependency image anet-test827:close-drain
+verified ID sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac.
+Both images replace repository source from git archive, no source mounts.
+Dependency reuse is local exploratory/targeted evidence, not formal release gating.
+All executions --network none; isolated HOME, Hub DB, loopback model fixture;
+no production credentials. Native probe uses a private tmux socket/session set.
+
+Targeted image anet-test829:binding-8027
+ID sha256:f187fcd3cc37de879d70503c39b27fd403e53ae57b23ba6342af3a6320217d72
+container anet-test829-binding-8027, exit 0, UID 1000.
+93 pass, 0 fail, 616 assertions:
+  profile/daemon writer: 30 tests / 132 assertions
+  byte parity: 4 / 4
+  actual HTTP tool audience: 12 / 295
+  actual registered schema + validator: 47 / 185
+node tools/list 62433 bytes (ceiling unchanged).
+
+Native image anet-test829:native-binding-e0cf
+ID sha256:edcfdfd59df88b12dec483e57104c97f426271ee01bf1fe6a7efdd9873565711
+container anet-test829-native-binding-e0cf, exit 1.
+Real OpenCode @opencode/cli@2.0.22; bundled current CLI + runtime.
+Environment/authentication/real host supervisor/MCP opt-in refusal passed.
+Real create cr_5394f02f-c234-4715-afaa-5775e7834eb4 reached Hub succeeded,
+child_node_id node_5394f02f-c234-4715-afaa-5775e7834eb4.
+V2 generation/mode/opt-in were persisted; previous missing-binding failure is
+no longer the stopping point.
+FAIL: native TUI rendered. Stop at first failed layer: no task receipt,
+remote stop/restart, UI management, or deployment acceptance claimed.
+
+Source inspection of remaining gap:
+daemon launches ["node", "start", childDirName]; startCommand's co-presence
+entry gate consults codex/grok flags/profile but not OpenCode stored mode.
+Do not simply accept launcher exit 0 or generic kill-0 as native TUI health.
+Next slice must handle OpenCode mode dispatch without recursive bridge startup,
+then verify the actual runtime generation and remote lifecycle.
+
+Earlier attempts retained:
+- 41640047 targeted run: 29 pass / 1 fail because fixture image lacked git,
+  not a passing product security test. Explicit git dependency added to both
+  targeted and generic node-unit Dockerfiles; test was not skipped.
+- native 547fb9758cf7082a0464918a91e45b77f6e320d9 stopped at trusted installed
+  manifest mode 0664 after COPY; corrected only container package.json to 0644,
+  preserving product package ownership/mode checks.
+- Prior native missing-binding red evidence: report-test829-native-create.txt.
+
+Reproduction (from corresponding source archives):
+git archive 8027d499fc35625d6c8c0da86f14220ec8853685 | sg docker -c 'docker build -t anet-test829:binding-8027 --build-arg SOURCE_COMMIT=8027d499fc35625d6c8c0da86f14220ec8853685 -f tests/test829-opencode-create/Dockerfile.ci-regression -'
+sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=8027d499fc35625d6c8c0da86f14220ec8853685 anet-test829:binding-8027'
+git archive e0cfbd71af295f464c80c93f1080d436f9ea96b8 | sg docker -c 'docker build -t anet-test829:native-binding-e0cf --build-arg SOURCE_COMMIT=e0cfbd71af295f464c80c93f1080d436f9ea96b8 -f tests/test829-opencode-create/Dockerfile.native-cached -'
+sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=e0cfbd71af295f464c80c93f1080d436f9ea96b8 anet-test829:native-binding-e0cf'
+
+## Raw targeted output
+source=8027d499fc35625d6c8c0da86f14220ec8853685 uid=1000; no vendor OpenCode on PATH
+bun test v1.3.14 (0d9b296a)
+
+src/runtime/node-name-652.test.ts:
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > Chinese / upper-case / digit-first names are accepted [3.52ms]
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > every shared vector gets the same verdict as the hub [2.50ms]
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > illegal characters are refused with a reason a human can read [0.97ms]
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > a name the hub would have trimmed did not come through a current hub [0.79ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > #829 V2 create writes generation/mode into actual child config, not flags [144.07ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > #829 unsafe opt-in is required before write or spawn; existing config unchanged [1.84ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > 「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels [126.85ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > full-path edit to a non-folder-shaped last segment falls back to node-<hash> [111.29ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > folder already holding ANOTHER node → refused (workdir_has_other_node), nothing written [6.46ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > 「测试」 without a workdir (daemon cwd): node dir is ASCII too [111.23ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > legacy name keeps its old directory (= the name) [110.16ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > derived directory already holding ANOTHER alias → rejected, nothing overwritten, no spawn [8.09ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > illegal name is refused by the daemon before anything touches disk [1.42ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > resolveChildDirName never lands on a directory whose config names another alias [1.73ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > resolveChildDirName: legacy alias dir first, else derived; invalid alias → null [1.73ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > start: verifyStoppedChildConfig resolves 「测试」 to node-<hash>/config.json [1.89ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > stop without a map entry: a local record under node-<hash> counts as mine [10.90ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > delete moves node-<hash> to the trash (ASCII backup name), config gone [9.49ms]
+
+src/runtime/opencode-create-profile.test.ts:
+(pass) fresh daemon profile has CLI-readable external binding and private files [20.10ms]
+(pass) exact request retry preserves the binding inode [32.21ms]
+(pass) another request cannot overwrite an existing node token [21.26ms]
+(pass) legacy unbound config is not silently adopted [9.25ms]
+(pass) tampered binding is never repaired by creation [23.30ms]
+(pass) symlink config refuses before token write and leaves victim unchanged [5.17ms]
+(pass) hardlink config refuses before token write and leaves victim unchanged [5.16ms]
+(pass) symlinked ancestor cannot create secret paths outside the project [1.01ms]
+(pass) tracked node state refuses before binding or profile write [25.73ms]
+(pass) unsafe HOME refuses before token write [7.25ms]
+(pass) missing HOME refuses before token write [6.35ms]
+(pass) project-overlapping binding root refuses before token write [6.98ms]
+
+ 30 pass
+ 0 fail
+ 132 expect() calls
+Ran 30 tests across 2 files. [891.00ms]
+bun test v1.3.14 (0d9b296a)
+
+agent-network/src/opencode-create-security-parity.test.ts:
+(pass) OpenCode daemon/CLI security helper parity: opencode-preset [2.70ms]
+(pass) OpenCode daemon/CLI security helper parity: opencode-runtime-binding [0.19ms]
+(pass) OpenCode daemon/CLI security helper parity: opencode-owner-mode [0.06ms]
+(pass) OpenCode daemon/CLI security helper parity: posix-modes [0.08ms]
+
+ 4 pass
+ 0 fail
+ 4 expect() calls
+Ran 4 tests across 1 file. [54.00ms]
+bun test v1.3.14 (0d9b296a)
+
+server/src/tool-audience-http.test.ts:
+[commhub] database: /tmp/test829-ci-audience.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) every tool is classified > registry == TOOL_AUDIENCE (no unclassified tool, no stale entry) [0.63ms]
+[06:47:26] probe-victim → report_completion: probe [net]
+[06:47:26] probe-victim → get_inbox: 0 pending messages
+[06:47:26] probe-victim → ack_inbox: probe
+[06:47:26] hub → get_all_status net=net_8943234b
+[06:47:26] hub → get_session_status: probe-victim
+[06:47:26] ta-normal → send_ack → task probe
+[06:47:26] ta-normal → retry_task → probe
+[06:47:26] ta-normal → cancel_task → probe
+[06:47:26] ta-normal → reassign_task → probe → probe-victim
+[06:47:26] hub → broadcast: probe [net=net_8943234b]
+[06:47:26] hub → get_completions
+[commhub] ← ack_stop_request request=probe status=stopped
+[commhub] ✕ ack_stop_request rejected: request_not_found request=probe
+(pass) compat replay: nothing callable today disappears from the list > node (normal, log) [1996.47ms]
+[06:47:28] probe-victim → report_completion: probe [net]
+[06:47:28] probe-victim → get_inbox: 0 pending messages
+[06:47:28] probe-victim → ack_inbox: probe
+[06:47:28] hub → get_all_status net=net_8943234b
+[06:47:28] hub → get_session_status: probe-victim
+[06:47:28] ta-readonly → send_ack → task probe
+[06:47:28] ta-readonly → retry_task → probe
+[06:47:28] ta-readonly → cancel_task → probe
+[06:47:28] hub → get_completions
+[commhub] ← ack_stop_request request=probe status=stopped
+[commhub] ✕ ack_stop_request rejected: request_not_found request=probe
+(pass) compat replay: nothing callable today disappears from the list > node (readonly) [1851.34ms]
+[06:47:29] probe-victim → report_completion: probe [net]
+[06:47:29] probe-victim → get_inbox: 0 pending messages
+[06:47:29] probe-victim → ack_inbox: probe
+[06:47:30] hub → get_all_status net=net_8943234b
+[06:47:30] hub → get_session_status: probe-victim
+[06:47:30] ta-restricted → send_ack → task probe
+[06:47:30] ta-restricted → retry_task → probe
+[06:47:30] ta-restricted → cancel_task → probe
+[06:47:30] ta-restricted → reassign_task → probe → probe-victim
+[06:47:30] hub → get_completions
+[commhub] ← ack_stop_request request=probe status=stopped
+[commhub] ✕ ack_stop_request rejected: request_not_found request=probe
+(pass) compat replay: nothing callable today disappears from the list > node (restricted) [1890.73ms]
+[06:47:31] probe-victim → report_completion: probe [net]
+[06:47:31] probe-victim → get_inbox: 0 pending messages
+[06:47:31] probe-victim → ack_inbox: probe
+[06:47:31] hub → get_all_status net=net_8943234b
+[06:47:31] hub → get_session_status: probe-victim
+[06:47:32] ta-normal → send_ack → task probe
+[06:47:32] ta-normal → retry_task → probe
+[06:47:32] ta-normal → cancel_task → probe
+[06:47:32] ta-normal → reassign_task → probe → probe-victim
+[06:47:32] hub → broadcast: probe [net=net_8943234b]
+[06:47:32] hub → get_completions
+[commhub] ← ack_stop_request request=probe status=stopped
+[commhub] ✕ ack_stop_request rejected: request_not_found request=probe
+(pass) compat replay: nothing callable today disappears from the list > node (normal, enforce) [1763.17ms]
+[06:47:33] probe-victim → report_completion: probe [net]
+[06:47:33] probe-victim → get_inbox: 0 pending messages
+[06:47:33] probe-victim → ack_inbox: probe
+[06:47:33] hub → get_all_status
+[06:47:33] hub → get_session_status: probe-victim
+[06:47:33] ta_owner_1791528445143 → send_ack → task probe
+[06:47:33] ta_owner_1791528445143 → retry_task → probe
+[06:47:33] ta_owner_1791528445143 → cancel_task → probe
+[06:47:33] ta_owner_1791528445143 → reassign_task → probe → probe-victim
+[06:47:33] hub → broadcast: probe [net=net_8943234b]
+[06:47:33] hub → get_completions
+[commhub] ← ack_stop_request request=probe status=stopped
+(pass) compat replay: nothing callable today disappears from the list > owner [1643.08ms]
+[06:47:35] hub → get_all_status
+[06:47:35] hub → get_session_status: probe-victim
+[06:47:35] hub → get_completions
+(pass) compat replay: nothing callable today disappears from the list > member [1640.02ms]
+[06:47:36] hub → get_all_status
+[06:47:36] hub → get_session_status: probe-victim
+[06:47:37] hub → get_completions
+(pass) compat replay: nothing callable today disappears from the list > viewer [1574.47ms]
+(pass) what each caller sees > node: no human-only tools; protocol tools only with X-Anet-Tools: all; user: no node / protocol tools [136.93ms]
+(pass) what each caller sees > node modes: readonly / restricted drop broadcast + node writes + human-only; enforce drops human-only for normal nodes [95.39ms]
+(pass) what each caller sees > a hidden tool still answers tools/call exactly as before (only the list changes) [41.33ms]
+tools/list bytes — all 87 tools 79041 B; node 61 tools 62433 B (−21%); user 58 tools 57228 B (−28%)
+(pass) bytes per role (#476 ceilings stay meaningful per role) > node / user / all [65.78ms]
+
+ 12 pass
+ 0 fail
+ 295 expect() calls
+Ran 12 tests across 1 file. [14.17s]
+bun test v1.3.14 (0d9b296a)
+
+server/src/create-node-tool-schema.test.ts:
+[commhub] database: /tmp/test829-ci-schema.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) create_node MCP schema > #829 rejects misplaced V2 controls instead of stripping them [49.03ms]
+(pass) create_node MCP schema > model is optional on daemon create specs but empty strings stay invalid [19.67ms]
+
+server/src/create-node-validate.test.ts:
+(pass) validateName (§4.2.2, #652 Unicode names) > good names — incl. Chinese, upper case, digits first [2.00ms]
+(pass) validateName (§4.2.2, #652 Unicode names) > returns the trimmed name [0.05ms]
+(pass) validateName (§4.2.2, #652 Unicode names) > rejects shell-injection-like and path-like names with a reason [1.89ms]
+(pass) validateName (§4.2.2, #652 Unicode names) > error carries reason + offending char + a readable message [0.17ms]
+(pass) validateRuntime / validateModel (§4.2.2) > runtime enum [0.23ms]
+(pass) validateRuntime / validateModel (§4.2.2) > model with dots, colons, dashes OK; bad chars rejected [0.59ms]
+(pass) validateFlagValue (§4.2.2) > budget decimal allowed [0.36ms]
+(pass) validateFlagValue (§4.2.2) > maxTurns integer 1..9999 [0.18ms]
+(pass) validateFlagValue (§4.2.2) > dangerouslySkipPermissions boolean [0.18ms]
+(pass) validateFlagValue (§4.2.2) > permissionMode enum [0.11ms]
+(pass) validateFlagValue (§4.2.2) > timeout is milliseconds: 0 or 1000..3_600_000 (#605) [0.51ms]
+(pass) validateFlagValue (§4.2.2) > timeout range matches update_node_config's (#605) [0.77ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > good keys resolve [0.47ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G7: PATH rejected (exact denylist) [0.32ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G8: LD_PRELOAD / DYLD_* / BUN_* / NPM_* / NODE_OPTIONS rejected (prefix) [0.29ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G1 bad regex (lowercase / digit-first / too long) [0.22ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G2 duplicate [0.12ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G3 over max count [0.49ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G4 not in vault [0.15ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G5 not in daemon allowlist [0.17ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > undefined/empty refs is OK (no env at all) [0.08ms]
+(pass) serializeEnvLocal (§4.4.7 G6 — safe escape) > newline in secret value escapes to literal \n, no line pollution [0.26ms]
+(pass) serializeEnvLocal (§4.4.7 G6 — safe escape) > backslash escaped first (so subsequent escapes survive) [0.09ms]
+(pass) serializeEnvLocal (§4.4.7 G6 — safe escape) > multi-key [0.07ms]
+(pass) validateChannelsP1 (§4.2.5 C5) > empty / omitted OK [0.16ms]
+(pass) validateChannelsP1 (§4.2.5 C5) > non-empty rejected (any element) [0.14ms]
+(pass) validateChannelsP1 (§4.2.5 C5) > not-an-array rejected [0.06ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > happy path [0.61ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > permissionMode kebab-case [0.12ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > omitted model is allowed and does not emit --model [0.08ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > empty model is still rejected [0.11ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > rejects bad name with shell metachar [0.12ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > rejects bad flag key [0.26ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > rejects channels at build time too (E end-to-end injection) [0.14ms]
+(pass) validateRuntime — 报错要可操作 > 非法 runtime 的报错带上允许集合 [0.17ms]
+(pass) validateRuntime — 报错要可操作 > 报错带上一条出路提示 [0.10ms]
+(pass) validateRuntime — 报错要可操作 > 仍然回报用户传进来的那个值（便于识别是不是打错了） [0.05ms]
+(pass) validateRuntime — 报错要可操作 > 🔴 合法 runtime 一个都不能被这次改动误伤 [0.23ms]
+(pass) #1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致 > 三个共存 runtime 不再被拒 [0.11ms]
+(pass) #1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致 > 原有四个仍然放行（放开不该顺手改坏别的） [0.11ms]
+(pass) #1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致 > 🔴 恰好七个 —— 多一个少一个都要有人解释 [0.21ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > is a known flag key and must be boolean [0.25ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > only codex-app-server accepts it — elsewhere it would be swallowed silently [0.46ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > buildAnetArgs emits the CLI's boolean `--copresence` (no value), and nothing for false [0.24ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > the old request shape (no flag) is unchanged [0.08ms]
+
+ 47 pass
+ 0 fail
+ 185 expect() calls
+Ran 47 tests across 2 files. [807.00ms]
+PASS: targeted CI regressions; not real OpenCode startup or full unit domains
+
+
+## Raw native output (fixture credentials only; generated tokens redacted by harness)
+EXPLORATORY source overlay: e0cfbd71af295f464c80c93f1080d436f9ea96b8; base source: e0cfbd71af295f464c80c93f1080d436f9ea96b8
+
+> @sleep2agi/agent-node@2.5.0-preview.127 build
+> bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+
+Bundled 385 modules in 101ms
+
+  cli.js  1.53 MB  (entry point)
+
+Bundled 221 modules in 42ms
+
+  upload-file-mcp-stdio.js  0.27 MB  (entry point)
+
+Bundled 310 modules in 204ms
+
+  cli.js  2.51 MB  (entry point)
+
+L0 environment
+PASS: exact real OpenCode V2
+PASS: Hub health
+PASS: model health
+L1 authentication and real daemon registration
+PASS: unauthenticated dispatch refused
+CLI init --hub http://127.0.0.1:9287 exit=0
+✅ CommHub v0.9.0-preview.119 — 0 sessions, 0 SSE
+
+Saved to /run/test829-native/home/.anet/config.json
+Next: anet init project
+
+PASS: CLI init --hub http://127.0.0.1:9287
+CLI register --username t829 --password fixture-only-password exit=0
+[anet] Registered and logged in as t829
+[anet] Default network: t829
+[anet] Token saved to ~/.anet/config.json
+
+PASS: CLI register --username t829
+CLI login --username t829 --password fixture-only-password exit=0
+✅ Logged in as t829
+   network: t829
+   token saved to ~/.anet/config.json
+✅ Login successful — next: anet status / anet node create my-agent
+
+PASS: CLI login --username t829
+CLI daemon init daemon829 exit=0
+[anet daemon] using anet binary: /workspace/agent-network/dist/bin/anet.cjs
+[anet daemon] ✓ created host_supervisor daemon "daemon829"
+              config:     .anet/nodes/daemon829/config.json
+              node_id:    node_daemon_8b5a4d77aafe
+              secret keys allowed: (none — add with: anet daemon init daemon829 --force --allow-secret KEY)
+
+[anet daemon] ⚠ Permission posture:
+              flags.dangerouslySkipPermissions = true  (no per-call confirmation)
+              flags.teammateMode = true
+              role = host_supervisor                   (can fork child agent-nodes via hub)
+              → Run daemons only on machines you trust to act on your behalf.
+              → Edit .anet/nodes/daemon829/config.json to disable individual flags.
+
+Next: start it
+  anet daemon start daemon829    (or anet daemon up daemon829 to init+start in one go)
+
+PASS: CLI daemon init daemon829
+PASS: daemon registered as host supervisor
+L2 actual MCP validation before create side effects
+PASS: V2 without explicit unsafe opt-in refused
+PASS: no create request or node config on refusal
+L3 real daemon remote create -> native V2 startup
+create result: {"ok":true,"request_id":"cr_5394f02f-c234-4715-afaa-5775e7834eb4"}
+PASS: actual MCP create accepted with request id
+PASS: daemon settles create request
+create status: {"status":"succeeded","error":null,"child_node_id":"node_5394f02f-c234-4715-afaa-5775e7834eb4"}
+PASS: daemon persisted V2 generation and explicit opt-in
+PASS: create status reports started, not capability failure
+FAIL: native TUI rendered
+10 | const hub = 'http://127.0.0.1:9287';
+11 | const env = { ...process.env, HOME: `${root}/home`, TERM: 'xterm-256color', ANET_BIN_ABS: '/workspace/agent-network/dist/bin/anet.cjs', ANET_DAEMON_ALLOW_ENV_BIN: '1' };
+12 | mkdirSync(env.HOME, { recursive: true, mode: 0o700 });
+13 | const redact = (s: string) => s.replace(/\b(?:atok|ntok|utok)_[A-Za-z0-9_-]+/g, '[test-token]');
+14 | const pause = (ms = 200) => new Promise(r => setTimeout(r, ms));
+15 | function check(name: string, ok: unknown) { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}`); if (!ok) throw new Error(name); }
+                                                                                                                     ^
+error: native TUI rendered
+      at check (/workspace/tests/test829-opencode-create/native-harness.ts:15:113)
+      at /workspace/tests/test829-opencode-create/native-harness.ts:88:3
+
+Bun v1.3.14 (Linux x64 baseline)

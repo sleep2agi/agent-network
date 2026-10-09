@@ -154,6 +154,7 @@ import {
   grokCopresenceSocketPaths,
 } from "../src/grok-copresence-profile";
 import { canonicalSocketsForProfile, planReapableSockets, reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
+import { opencodeV2CopresenceRequested } from "../src/opencode-start-mode";
 import {
   codexCopresencePosture,
   codexCopresenceCreateFields,
@@ -2276,6 +2277,17 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     console.error(`[anet] ❌ OpenCode --copresence requires runtime=opencode-cli (node "${displayName}" is runtime=${runtime}).`);
     process.exit(1);
   }
+  // Refuse before saving the profile or replacing an existing bridge/TUI.
+  // Otherwise the actionable V2 policy error is buried/truncated in the
+  // bridge tail and misreported as a 30-second launcher timeout (#827).
+  const generationRefusal = opencodeStartGenerationRefusal(resolved.profile, {
+    copresence: true,
+    configFile: join(nodesDir(), resolved.id, "config.json"),
+  });
+  if (generationRefusal) {
+    console.error(`[anet] ❌ ${generationRefusal}`);
+    process.exit(1);
+  }
   if (!tmuxAvailable()) {
     console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
     process.exit(1);
@@ -2309,6 +2321,9 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
       ? [`export ANET_OPENCODE_SAFE_BASE=${shellQuote(process.env.ANET_OPENCODE_SAFE_BASE)}`]
       : []),
     `export ANET_OPENCODE_MODE=copresence`,
+    // Ordinary V2 starts now select orchestration from the persisted profile.
+    // This internal start owns the runtime, not a second TUI/bridge pair.
+    `export ANET_COPRESENCE_BRIDGE=1`,
     `exec > >(tee -a ${shellQuote(bridgeLog)}) 2>&1`,
     `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
@@ -5335,6 +5350,15 @@ function printOpencodeCreationSecurityDisclosure(id: string, profile: Profile): 
     unsafeTools,
     configFile: join(nodesDir(), id, "config.json"),
   })) console.warn(line);
+  if (opencodeGenerationOfConfig(profile) === "v2") {
+    console.log(`\n[anet] ⚠ OpenCode V2 co-presence PREVIEW:`);
+    console.log(`[anet]    HIGH RISK: flags.opencodeUnsafeTools=true enables every local tool; trusted tasks only.`);
+    console.log(`[anet]    V1 permission environment switches do not enforce the V2 safety policy.`);
+    console.log(`[anet]    Cwd: project cwd. Use Docker/VM for process and filesystem isolation.`);
+    console.log(`[anet]    CommHub: agent-node receives tasks and publishes final text; a node-scoped MCP is configured.`);
+    console.log(`[anet]    Model-driven MCP tool calls require separate verification; plain messages are logged, not shown as TUI toasts.`);
+    return;
+  }
   console.log(`\n[anet] ${unsafeTools ? "⚠" : "🛡"} OpenCode tool/cwd policy:`);
   if (unsafeTools) {
     console.log(`[anet]    Built-in: bash / read / glob / grep / edit / write / list / task / skill ENABLED`);
@@ -5358,9 +5382,14 @@ async function configureOpencodeRuntime(
   interactive = Boolean(process.stdin.isTTY),
 ): Promise<void> {
   wizardOpts.runtime = "opencode-cli";
-  const currentPin = readEffectivePin();
-  console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
-  console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+  if (wizardOpts["opencode-generation"] === "v2") {
+    console.log(`[anet] 请确保已安装 OpenCode V2 (exact): ${opencodeGenerationInstallCommand("v2")}`);
+    console.log(`[anet]   V1 and V2 both install 'opencode': use separate npm prefixes and select the V2 prefix on PATH.`);
+  } else {
+    const currentPin = readEffectivePin();
+    console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
+    console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+  }
 
   if (!interactive) {
     wizardOpts._opencodePreset ||= "anthropic";
@@ -6453,6 +6482,10 @@ async function createCommand(idOverride?: string) {
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(id, profile);
+    console.log(`\nStart: anet node start ${id}${profile.opencodeMode === "copresence" ? " --copresence" : ""}`);
+    closeRL();
+    if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0);
+    return;
   } else if (profile.grokCopresence === true) {
     printGrokCopresenceWarning(id, profile.tools, "configured");
     console.log(`[anet]   One command brings up the node and its shared TUI together.`);
@@ -8281,7 +8314,8 @@ async function startCommand() {
   //    runtime=codex-app-server". Each lane answers for itself.
   if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
     && (codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
-      || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any))) {
+      || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
+      || opencodeV2CopresenceRequested(resolvedForCopresence.profile))) {
     const copresenceRuntime = runtimeForExecution(
       resolvedForCopresence.profile,
       `start copresence node ${JSON.stringify(id)}`,
@@ -12682,6 +12716,31 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
     // reinterpret that failure as permission to kill by name.
     console.error(`[anet]    Refusing the legacy tmux-name sweep: identity check did not complete.`);
     process.exit(1);
+  }
+
+  // OpenCode's bridge owns its private launch root. Closing tmux first also
+  // kills its tee/foreground wrapper, interrupting asynchronous cleanup even
+  // when every process eventually disappears. Give the frozen agent identity
+  // a bounded graceful shutdown before touching its terminal or descendants.
+  // Never widen marker-authorized teardown or signal an unverified pidfile.
+  if (allowLegacyTmuxNameSweep && process.platform === "linux"
+      && resolved.profile.runtime === "opencode-cli" && resolved.profile.opencodeMode === "copresence") {
+    const agents = stopProcesses.filter(identity => identity.role === "agent");
+    for (const identity of agents) {
+      const current = processIdentitySnapshot(identity.pid);
+      if (current.kind === "live" && current.birth === identity.birth) {
+        try { process.kill(identity.pid, "SIGTERM"); } catch { /* reaper audits below */ }
+      }
+    }
+    const drainDeadline = Date.now() + 10_000;
+    while (Date.now() < drainDeadline && agents.some(identity => {
+      const current = processIdentitySnapshot(identity.pid);
+      return current.kind === "unverifiable" || (current.kind === "live" && current.birth === identity.birth);
+    })) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    // Timeout is not success: the unchanged identity reaper below verifies
+    // remaining descendants and refuses the offline receipt on any residual.
   }
 
   // RFC-030 P2 legacy path — nodes without an identity marker may own three

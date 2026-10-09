@@ -7,7 +7,7 @@
      latest 标记已核对的通道版本，preview 标记已验证的发布候选，不代表 npm 已发布；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.161 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.162 -->
 
 从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。
 
@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.76`）与已验证的 `preview` 发布候选（`2.3.0-preview.161`）都打印随机密码，形如 `anet-` 加 22 位十六进制字符。
+已核对的 `latest`（`2.3.0-preview.76`）与已验证的 `preview` 发布候选（`2.3.0-preview.162`）都打印随机密码，形如 `anet-` 加 22 位十六进制字符。
 **候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 

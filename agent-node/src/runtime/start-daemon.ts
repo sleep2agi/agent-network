@@ -13,6 +13,8 @@ import { handleAdoptedLifecycle } from "./adopt-lifecycle.js";
 import type { AdoptDaemonDeps } from "./adopt-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
 import { completeCodexStart } from "./codex-start-completion.js";
+import { completeOpenCodeStart } from "./opencode-start-completion.js";
+import type { inspectLaunchHealth } from "./opencode-copresence/launcher-health.js";
 
 
 interface StartRequest {
@@ -40,6 +42,8 @@ export interface StartDoorbellDeps {
   // #1448 finding-6 — replay 幂等路径复验 recorded.pid 的 /proc/<pid>/cmdline,
   // 挡 PID 复用假阳。可注入以便测试(默认读真 /proc)。
   readProcCmdline?: (pid: number) => string | null;
+  opencodeStartTimeoutMs?: number;
+  inspectOpenCodeStartHealth?: typeof inspectLaunchHealth;
 }
 
 /** #1448 finding-6 — /proc/<pid>/cmdline 是否 token 精确匹配 `--alias <alias>`
@@ -135,6 +139,7 @@ export async function handleStartDoorbell(
   const childWorkDir = childWorkDirFor(deps.workDir, req.child_alias);
   const nodesRoot = deps.nodesRoot ?? join(childWorkDir, ".anet", "nodes");
   let codexCopresence = false;
+  let opencodeCopresence = false;
   let childDirName = req.child_alias;
   let verifiedChildDir = "";
   let runtime: unknown;
@@ -145,6 +150,8 @@ export async function handleStartDoorbell(
     const config = JSON.parse(readFileSync(cfgPath, "utf8"));
     codexCopresence = config?.codexCopresence === true;
     runtime = config?.runtime;
+    opencodeCopresence = runtime === "opencode-cli" && config?.opencodeGeneration === "v2"
+      && config?.opencodeMode === "copresence";
   } catch (e: any) {
     const error = `local_identity: ${e?.message || e}`;
     deps.warn(`[start-daemon] ${error}`);
@@ -156,6 +163,18 @@ export async function handleStartDoorbell(
   if (recovery && (!codexCopresence || runtime !== "codex-app-server")) {
     await deps.callCommHub("ack_start_request", { request_id: event.request_id,
       status: "start_failed", error: "codex_fork_recovery_unsupported" });
+    return;
+  }
+
+  // V2 must never fall back to a spawn-only success on older Hubs.
+  if (opencodeCopresence) {
+    if (req.start_completion_capable !== true) {
+      await deps.callCommHub("ack_start_request", { request_id: event.request_id,
+        status: "start_failed", error: "opencode_start_completion_unsupported" });
+      return;
+    }
+    await completeOpenCodeStart(event.request_id, req.child_node_id, req.child_alias,
+      childDirName, childWorkDir, verifiedChildDir, deps);
     return;
   }
 
