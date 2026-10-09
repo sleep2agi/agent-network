@@ -1235,6 +1235,29 @@ export async function handleCreateNodeDoorbell(
   // surfaces the gap between declaration and reality).
   const FAIL_FAST_MS = deps.capabilityCheckMs ?? 5_000;
   await new Promise<void>(resolve => setTimeout(resolve, FAIL_FAST_MS));
+  if (opencodeCopresence) {
+    // A still-running launcher is not proof of runtime readiness.
+    const deadline = launchedAt + (deps.capabilityCheckMs === undefined ? 35_000 : FAIL_FAST_MS);
+    while (!launcherExit && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
+    const ex = launcherExit as { code: number | null; signal: NodeJS.Signals | null } | null;
+    const health = inspectLaunchHealth(childDir, childCfgPath, launchedAt);
+    const { forgetSpawnedChildIfPid, recordSpawnedChild } = await import("./stop-daemon.js");
+    forgetSpawnedChildIfPid(childNodeIdForMap, childPid);
+    if (successfulLauncherExit(ex) && health.ok) {
+      recordSpawnedChild(childNodeIdForMap, req.node_spec.name, health.bridgePid);
+      deps.log(`[create-node] +${FAIL_FAST_MS}ms: OpenCode launcher exited 0; live bridge/serve/TUI generation verified`);
+      await deps.callCommHub("ack_create_request", {
+        request_id, status: "started", child_pid: health.bridgePid,
+      }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
+      return;
+    }
+    const msg = `OpenCode launcher exit=${ex?.code ?? "unknown"} signal=${ex?.signal ?? "none"}; ${health.ok ? "live generation but unsuccessful launcher" : health.reason}`;
+    deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "runtime_capability_check_failed", error: msg, runtime: req.node_spec.runtime,
+    }).catch(() => {});
+    return;
+  }
   let stillAlive = false;
   if (childPid > 0) {
     try {
@@ -1242,27 +1265,6 @@ export async function handleCreateNodeDoorbell(
       stillAlive = true;
       deps.log(`[create-node] +${FAIL_FAST_MS}ms capability check OK: pid=${childPid} still alive`);
     } catch (kerr: any) {
-      if (opencodeCopresence) {
-        for (let i = 0; i < 10 && !launcherExit; i++) await new Promise(r => setTimeout(r, 50));
-        const ex = launcherExit as { code: number | null; signal: NodeJS.Signals | null } | null;
-        const health = inspectLaunchHealth(childDir, childCfgPath, launchedAt);
-        const { forgetSpawnedChildIfPid, recordSpawnedChild } = await import("./stop-daemon.js");
-        forgetSpawnedChildIfPid(childNodeIdForMap, childPid);
-        if (successfulLauncherExit(ex) && health.ok) {
-          recordSpawnedChild(childNodeIdForMap, req.node_spec.name, health.bridgePid);
-          deps.log(`[create-node] +${FAIL_FAST_MS}ms: OpenCode launcher exited 0; live bridge/serve/TUI generation verified`);
-          await deps.callCommHub("ack_create_request", {
-            request_id, status: "started", child_pid: health.bridgePid,
-          }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
-          return;
-        }
-        const msg = `OpenCode launcher exit=${ex?.code ?? "unknown"} signal=${ex?.signal ?? "none"}; ${health.ok ? "live generation but unsuccessful launcher" : health.reason}`;
-        deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
-        await deps.callCommHub("ack_create_request", {
-          request_id, status: "runtime_capability_check_failed", error: msg, runtime: req.node_spec.runtime,
-        }).catch(() => {});
-        return;
-      }
       // #596 — a co-presence launcher that exited 0 after writing its identity
       // marker finished its job; that is a start, not a capability failure.
       if (codexCopresence) {
