@@ -1,7 +1,7 @@
 // Docker only. Real upstream OpenCode and full ANet chain; only the model is a
 // deterministic loopback stub. No production token, model call, or daemon.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const root = "/run/test827";
@@ -98,6 +98,17 @@ try {
   console.log("L2 single-command startup, real bridge and TUI");
   await cli(["node", "start", "oc827", "--copresence"]);
   check("TUI actually rendered", await until(() => /ctrl\+p/.test(pane())), pane().slice(-1000));
+  // #832: exercise the actual packaged runtime's generated observer, not a
+  // test plugin substituted into a manually launched OpenCode process.
+  const launcherPath = join(project, ".anet/nodes/oc827/opencode-attach.sh");
+  const launcher = readFileSync(launcherPath, "utf8");
+  const dataRoot = /^export XDG_DATA_HOME='([^']+)'$/m.exec(launcher)?.[1];
+  check("packaged V2 launcher owns an isolated data root", typeof dataRoot === "string" && dataRoot.startsWith("/run/"));
+  const observers = readdirSync(dataRoot!).filter(name => name.startsWith("anet-commhub-registry-"));
+  check("packaged runtime installed exactly one registry observer", observers.length === 1);
+  const observerDir = join(dataRoot!, observers[0]);
+  check("observer directory is private", (statSync(observerDir).mode & 0o777) === 0o700);
+  check("observer is generated from bundled registry implementation", readFileSync(join(observerDir, "index.js"), "utf8").includes("ctx.tool.list()"));
   console.log("L3 Hub task -> model -> task receipt -> same TUI");
   const reply = await task("Reply with exactly NET827A");
   check("exact network reply with Hub sender envelope", reply === `[oc827] ${responsePrefix}NET827A`, reply);
@@ -134,6 +145,7 @@ try {
     const p = spawnSync("pgrep", ["-af", "opencode/cli|agent-node/dist/cli.js"], { encoding: "utf8" });
     return !p.stdout.trim();
   }));
+  check("stop removes generated registry observer and launcher", await until(() => !existsSync(observerDir) && !existsSync(launcherPath)));
   writeFileSync(cfgPath, JSON.stringify(safe), { mode: 0o600 });
   const rejected = await cli(["node", "start", "oc827", "--copresence"], false);
   check("default safe mode refuses with actionable reason", rejected.code !== 0 && rejected.output.includes("opencodeUnsafeTools"));

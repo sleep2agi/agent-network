@@ -14,6 +14,7 @@ bun test ./src/opencode-generation-create.test.ts ./src/opencode-free-tier.test.
   ./src/opencode-copresence-cli.test.ts ./src/opencode-preset.test.ts
 cd /opt/node_modules/@sleep2agi/agent-node
 bun test ./src/runtime/opencode-copresence/v2-session.test.ts \
+  ./src/runtime/opencode-copresence/v2-readiness.test.ts \
   ./src/runtime/opencode-acp/binary-v2.test.ts ./src/runtime/opencode-backend.test.ts \
   ./src/runtime/opencode-v1-spawn-snapshot.test.ts
 timeout 240s bun /test827/harness.ts
