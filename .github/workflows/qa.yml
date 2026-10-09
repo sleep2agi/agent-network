@@ -220,6 +220,7 @@ on:
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test828-opencode-v2-mcp/**'
+      - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test828-opencode-v2-policy/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
@@ -441,6 +442,7 @@ on:
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test828-opencode-v2-mcp/**'
+      - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test828-opencode-v2-policy/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
       - 'tests/test736-pm2-fleet-rebuild/**'
@@ -2026,6 +2028,7 @@ jobs:
           # native binary and the run drives a real TUI (~40 s).
           - test543-opencode-v2-copresence
           - test828-opencode-v2-mcp
+          - test832-opencode-v2-registry
           - test828-opencode-v2-policy
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
