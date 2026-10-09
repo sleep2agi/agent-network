@@ -79,7 +79,7 @@ describe("CommHub MCP wiring (V2 native mcp.servers shape)", () => {
   test("adds mcp.servers.commhub with an {env:} bearer and the instructions file; keeps the policy", () => {
     const root = mkdtempSync(join(tmpdir(), "anet-543-mcp-"));
     try {
-      const env: NodeJS.ProcessEnv = { PWD: root, OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { "*": "allow" }, model: "p/m" }) };
+      const env: NodeJS.ProcessEnv = { PWD: root, XDG_DATA_HOME: root, OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { "*": "allow" }, model: "p/m" }) };
       const handle = wireOpenCodeV2CommhubMcp(env, { url: "http://127.0.0.1:9/mcp", token: "ntok_x", alias: "a" });
       const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
       expect(config.mcp.servers.commhub).toEqual({
@@ -89,6 +89,9 @@ describe("CommHub MCP wiring (V2 native mcp.servers shape)", () => {
       expect(config.permission).toEqual({ "*": "allow" });
       expect(config.model).toBe("p/m");
       expect(config.instructions).toEqual([handle.path]);
+      expect(config.plugins).toHaveLength(1);
+      expect(readFileSync(join(config.plugins[0].package, "index.js"), "utf8")).toContain("ctx.tool.list()");
+      expect(statSync(config.plugins[0].package).mode & 0o777).toBe(0o700);
       expect(env.ANET_OPENCODE_COMMHUB_TOKEN).toBe("ntok_x");
       expect(JSON.stringify(config)).not.toContain("ntok_x");
       expect(() => wireOpenCodeV2CommhubMcp({ ...env }, { url: "http://u:p@127.0.0.1/mcp", token: "t" })).toThrow(/credential-free/);
@@ -108,24 +111,54 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     root = undefined;
   });
 
-  async function open() {
+  async function open(extraEnv: NodeJS.ProcessEnv = {}, startupTimeoutMs = 10_000) {
     root = mkdtempSync(join(tmpdir(), "anet-543-core-"));
     chmodSync(FAKE, 0o755);
     const warnings: string[] = [];
     session = await openVettedOpenCodeCopresence({
       backend: OPENCODE_V2_BACKEND,
       binary: FAKE,
-      env: { PATH: process.env.PATH ?? "", HOME: root },
+      env: { PATH: process.env.PATH ?? "", HOME: root, ...extraEnv },
       cwd: root,
       workDir: root,
       model: "stub/stub-model",
-      startupTimeoutMs: 10_000,
+      startupTimeoutMs,
       tmuxRunner: noTmux,
       tmuxRespawn: noTmux,
       warn: (m) => warnings.push(m),
     });
     return { session, warnings };
   }
+
+  test("MCP readiness failure creates no session/attach script and reaps serve", async () => {
+    const traceRoot = mkdtempSync(join(tmpdir(), "anet-832-trace-"));
+    const trace = join(traceRoot, "requests");
+    try {
+      await expect(open({ TEST832_TRACE: trace, TEST832_MISSING: "1",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp: { servers: { commhub: {} } } }) }, 250)).rejects.toThrow("readiness timed out");
+      expect(existsSync(join(root!, "opencode-attach.sh"))).toBe(false);
+      const requests = readFileSync(trace, "utf8");
+      expect(requests).toContain("/api/rpc/anet.commhub-readiness/ready");
+      expect(requests).not.toContain("/api/session");
+      const pid = Number(requests.split(" ")[0]);
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally { rmSync(traceRoot, { recursive: true, force: true }); }
+  });
+
+  test("MCP observation precedes session and ready launcher; close reaps serve", async () => {
+    const traceRoot = mkdtempSync(join(tmpdir(), "anet-832-order-"));
+    const trace = join(traceRoot, "requests");
+    try {
+      const { session } = await open({ TEST832_TRACE: trace,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp: { servers: { commhub: {} } } }) });
+      const requests = readFileSync(trace, "utf8");
+      expect(requests.indexOf("/api/rpc/anet.commhub-readiness/ready")).toBeLessThan(requests.indexOf("/api/session"));
+      expect(existsSync(session.attachScriptPath)).toBe(true);
+      await session.close();
+      expect(existsSync(session.attachScriptPath)).toBe(false);
+      expect(() => process.kill(Number(requests.split(" ")[0]), 0)).toThrow();
+    } finally { rmSync(traceRoot, { recursive: true, force: true }); }
+  });
 
   async function fake(path: string, init: RequestInit = {}) {
     const launcher = readFileSync(session!.attachScriptPath, "utf8");

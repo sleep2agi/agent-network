@@ -65,6 +65,7 @@ import {
 import { readLinuxProcessGroupIdentity } from "./process-group";
 import { relaunchPreviousAttach, stopRecordedAttach } from "./attach-tui";
 import { resolve } from "path";
+import { installV2RegistryPlugin, waitForOpenCodeV2Commhub } from "./v2-readiness";
 
 const USERNAME = "opencode";
 const HISTORY_PAGE_LIMIT = 200;
@@ -198,8 +199,10 @@ export function wireOpenCodeV2CommhubMcp(
   if (!childEnv.PWD || !resolve(instructionPath).startsWith(`${resolve(childEnv.PWD)}/`)) {
     throw new Error("OpenCode CommHub instruction path escaped the launch workspace");
   }
-  const instructions = writeOpenCodeCommhubInstructions(instructionPath, opts.alias);
   const config = JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}");
+  if (config.plugins !== undefined && !Array.isArray(config.plugins)) throw new Error("OpenCode v2 plugins must be an array");
+  const pluginDirectory = installV2RegistryPlugin(childEnv.XDG_DATA_HOME);
+  const instructions = writeOpenCodeCommhubInstructions(instructionPath, opts.alias);
   config.mcp = {
     ...(config.mcp ?? {}),
     servers: {
@@ -213,6 +216,7 @@ export function wireOpenCodeV2CommhubMcp(
     },
   };
   config.instructions = [...(config.instructions ?? []), instructionPath];
+  config.plugins = [...(config.plugins ?? []), { package: pluginDirectory }];
   childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(config);
   childEnv[OPENCODE_COMMHUB_TOKEN_ENV] = opts.token;
   return instructions;
@@ -316,6 +320,10 @@ export async function openVettedOpenCodeV2Copresence(
   const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
   try {
     const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
+    if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
+      await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000,
+        () => child.exitCode === null && child.signalCode === null);
+    }
     const created = await fetchOpenCodeJson(url, password, "/api/session", {
       method: "POST",
       body: JSON.stringify({
