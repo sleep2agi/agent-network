@@ -9,7 +9,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-node/ /agent-node-src/
 COPY tests/test543-opencode-v2-copresence/stub-model.py /fixture/stub-model.py
 COPY tests/test894-v1-runtime/ /fixture/
-ENV HOME=/home/bun TERM=xterm-256color
+ENV TERM=xterm-256color
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 USER bun

@@ -59,3 +59,22 @@ evidence and rebuildable images remain. No running test workload remains.
 Scope not verified: real CommHub integration, create-node launcher ACK,
 packaged desktop native IPC/UI, V1 safe mode, migration or formal release.
 V2 evidence and branch/main provenance remain separate. #894 stays doing.
+
+## 04:32 CST — fixture HOME portability follow-up
+
+CI run37986232459/job114008809180 on 31f3cdd78cd57109bec5ef36a2840f20a8d20715
+failed home-path-baseline: the Dockerfile explicitly encoded the base image's
+machine-account home path. Removed only that HOME assignment; USER bun remains.
+No scanner exemptions, baseline increases, runtime changes or weaker assertions.
+Docker verified UID 1000 and HOME == os.userInfo().homedir with the new image.
+The unchanged real-runtime positive/exact-negative suite passed again, exit 0;
+this is configuration regression validation, not a new runtime capability count.
+Image anet894-v1:portable-home:
+sha256:1ac56124b582ee9d74a4760ec71f1819efe43b60436bd0bb6776a89901f33719
+SOURCE_COMMIT=31f3cdd78cd57109bec5ef36a2840f20a8d20715 plus this one-line
+Dockerfile delta; product/probe hashes above unchanged. Docker scanner selftest
+13/13 and full tracked scan passed: 3749 files, 238 occurrences in 77 files,
+none above baseline. Read-only repository/common-git mounts were used only for
+the scanner; runtime tests still had no host mounts and --network none.
+Copied report to the existing evidence directory's portable-home subdirectory,
+then removed the stopped anet894-v1-portable-home container. No production edits.
