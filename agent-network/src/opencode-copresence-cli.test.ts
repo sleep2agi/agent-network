@@ -44,6 +44,13 @@ describe("OpenCode co-presence CLI wiring", () => {
     expect(bridge).toBeGreaterThan(save);
   });
 
+  test("policy refusal precedes profile writes and session replacement", () => {
+    const refusal = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal");
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(body.indexOf("saveProfile(resolved.id, profile)"));
+    expect(refusal).toBeLessThan(body.indexOf("killTmuxSession(name)"));
+  });
+
   test("starts only exact alias and alias-bridge tmux sessions", () => {
     expect(body).toContain("const bridgeSession = `${displayName}-桥`");
     expect(body).toContain("const tuiSession = displayName");
@@ -89,6 +96,13 @@ describe("OpenCode co-presence CLI wiring", () => {
     const dispatch = cli.indexOf('if (copresenceRuntime === "opencode-cli")');
     expect(dispatch).toBeGreaterThan(-1);
     expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id, opts.hub)");
+  });
+
+  test("ordinary V2 profile starts select orchestration, but internal bridge starts do not recurse", () => {
+    const start = functionBody("startCommand");
+    expect(start).toContain("opencodeV2CopresenceRequested(resolvedForCopresence.profile)");
+    expect(start).toContain('process.env.ANET_COPRESENCE_BRIDGE !== "1"');
+    expect(body).toContain("export ANET_COPRESENCE_BRIDGE=1");
   });
 
   test("operator help names the create, attach, and stop commands", () => {

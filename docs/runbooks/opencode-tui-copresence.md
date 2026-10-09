@@ -22,6 +22,11 @@ daemon 直接写子节点配置（不调用 CLI create）：代际写到顶层
 权限保留在 `flags.opencodeUnsafeTools`。省略代际保持旧 V1 行为，
 显式 V1 不接受这条新建接口的 unsafe 开关。已有节点不迁移。
 
+候选 V2 配置的 `opencodeMode: "copresence"` 使普通 `anet node start`
+进入 TUI/桥编排；内部桥使用 `ANET_COPRESENCE_BRIDGE=1` 防止递归启动。
+此选择不授予 unsafe 权限，V1 仍保持下文显式 `--copresence` 行为。
+daemon 对编排启动器的完成判定、远程停止/重启仍须独立验证，不代表已发布。
+
 daemon 新建 OpenCode 节点时，先复用 CLI 的 no-follow 私密目录与 Git
 未跟踪校验，再在同一运行用户的 `HOME/.anet/opencode-runtime-bindings/`
 建立外部身份记录，最后原子写入含 token 的 0600 配置。不能只复制项目

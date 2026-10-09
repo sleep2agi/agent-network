@@ -27,6 +27,7 @@ import { verifyStoppedChildConfig } from "./start-daemon.js";
 import { _resetChildrenMapForTest, handleStopDoorbell } from "./stop-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
 import { NODE_NAME_CASES, nodeFolderSlug } from "../shared/node-name.js";
+import { readOpencodeRuntimeBinding } from "../shared/opencode-runtime-binding.js";
 
 const CN = "测试";
 const CN_DIR = nodeFolderSlug(CN);   // node-<6 hex>
@@ -163,6 +164,8 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(cfg.opencodeGeneration).toBe("v2");
     expect(cfg.opencodeMode).toBe("copresence");
     expect(cfg.flags).toEqual({ opencodeUnsafeTools: true, timeout: 600000 });
+    expect(readOpencodeRuntimeBinding(join(workDir, ".anet", "nodes", "v2-child"), home))
+      .toEqual({ schemaVersion: 1, runtime: "opencode-cli", projectRoot: workDir, nodeId: "v2-child" });
     expect(flags.opencodeGeneration).toBe("v2");
   });
 
