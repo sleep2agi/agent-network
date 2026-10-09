@@ -1,0 +1,55 @@
+test819 — Codex finite launcher completion (Issue #2539, Hub #819/#820)
+Date: 2026-10-09, Asia/Shanghai
+Base: f8a23f611f230cf05eef9f9c9f6b8b36a5795c44
+Scope: source candidate only; no npm publication or production deployment.
+
+Change
+- New Hub get_start_request advertises start_completion_capable.
+- Authenticated starting ack refreshes the existing stale-start clock; it does not
+  mark the child active or add completion audit evidence. Terminal requests cannot
+  be reopened by a delayed progress ack. No schema migration or permission changes.
+- New daemon waits for managed Codex launcher's exit: 0 => started,
+  nonzero/signal/async spawn error => start_failed. Progress interval: 20 seconds.
+- Same-request replay shares the launch and its terminal result in this daemon
+  lifetime. Exited launcher PID is removed from the children map.
+- Old Hub / old daemon behavior remains legacy; foreground/adopted paths unchanged.
+- Fork confirmation/result mapping API and client button are NOT implemented here.
+
+Reproduce (Docker only)
+  sg docker -c 'docker build -t anet-test819:start-completion -f tests/test819-codex-start-completion/Dockerfile .'
+  sg docker -c 'docker run --rm --cpus 2 --network none anet-test819:start-completion'
+No host workspace mounts, host ports, credentials or real nodes in the behavior run.
+Image manifest: sha256:79e04dc89361111805449fac92325587b73651e6face5e737757dd9cc228cf32
+Image config: sha256:e4af7fd21c15510cd4b28fda4006f15123b316490a7de943fa4ea49c7c1f51b3
+Bun: 1.3.14. Base image oven/bun:1.3.14 resolved to
+sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4.
+
+Final result: container exit 0
+  agent-node: 59 pass / 0 fail / 162 assertions across 3 files (258 ms)
+  server:      8 pass / 0 fail /  34 assertions across 1 file (1.53 s)
+  Total:      67 pass / 0 fail / 196 assertions
+Includes dispatch -> daemon handler -> real isolated child process exit 0 / 7
+-> real Hub handler / database state. Hub handlers are invoked in-process (not an
+HTTP transport test). The launcher fixture is not a real Codex/model/TUI session.
+Other new coverage: pending launch, signal exit, spawn error, simultaneous replay,
+lost terminal ack replay, old Hub compatibility, progress refresh and late progress.
+Existing tests cover private config identity, child workdirs and adoption boundary.
+
+Source SHA256 (host/image readback matched)
+  c4e4fadfb6b80c917a5b8b3e408d7e5036e7315d62c2b2fda56176bb36d9aae1  agent-node/src/runtime/codex-start-completion.ts
+  71c0710ee2ca70aea68ddcc7e29a24ae4a68469c4a3f7d85904e4a67b8e2f1dc  agent-node/src/runtime/start-daemon.ts
+  8616a99a635b33099b3bfdcb687ca5c06a96a98acd7678fb852bee6cd93490cc  server/src/tools.ts
+
+Harness corrections before final run
+- A pending promise expectation in the lost-ack fixture stalled before the test
+  could emit its exit event. Stopped only that disposable container; attached a
+  rejection handler first, then emitted exit, then asserted the settled result.
+- The initial image lacked pgrep (adjacent child-workdir tests printed warnings).
+  Added procps and repeated the focused suite; final run had no missing-tool warning.
+
+Coverage limits
+- No model-level recovery, native client clicks, daemon-restart replay persistence,
+  or production upgrade was tested. started is launch completion, not ongoing health.
+- Progress clock semantics are tested without waiting 60 seconds in real time.
+- Existing complete agent-node-unit/server-unit CI collectors discover these tests;
+  the standalone Docker runner contains no extra assertions or redundant CI job.

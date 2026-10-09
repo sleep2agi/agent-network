@@ -58,6 +58,28 @@ Other features on this page have their own lower bounds:
 
 ## Try `anet daemon` in 5 minutes {#try-anet-daemon}
 
+### Codex co-presence start completion (source capability, not yet released) {#codex-start-completion}
+
+When both Hub and daemon contain the #819 completion protocol, daemon-created Codex co-presence
+starts remain `starting` until `anet node start` finishes its existing readiness checks and exits.
+Exit 0 reports `started`; a nonzero exit or signal reports `start_failed`. A launcher PID alone
+is no longer success. Progress every 20 seconds refreshes the Hub's existing 60-second stale-start
+clock without shortening the CLI's large-history recovery budget. `codex_launcher_exit:<code or signal>`
+means launcher failure, not that all tmux sessions have been cleaned up.
+
+Negotiation uses `get_start_request.start_completion_capable`. Old Hubs/daemons retain the legacy
+start behavior; foreground runtimes and adopted nodes are unchanged. Both Hub and agent-node must
+be upgraded for this behavior; the CLI remains the daemon's pinned anet. This does not add a fork
+confirmation API or client recovery button. Same-request replay reuses the outcome within one
+daemon lifetime, not across daemon restarts. `started` is not continuous health evidence. An exited
+launcher is removed from the child process map and is not later used as stop authority.
+
+This change adds no service launcher, port, proxy, secret source, disk state, or database migration.
+Back up Hub data and node configuration using the existing procedure, pin a released main SHA,
+and verify `starting → started/start_failed` on an isolated node before upgrading a real daemon.
+Rollback restores the previous Hub/runtime artifacts and legacy behavior without a schema downgrade.
+Node history and credentials still require their controlled backups; Git does not contain them.
+
 ### 1. Install
 
 ```bash

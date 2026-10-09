@@ -54,6 +54,25 @@ anet daemon             # 有：打印 Usage: anet daemon <subcommand> …
 
 ## 5 分钟体验 `anet daemon` {#try-anet-daemon}
 
+### Codex 共存启动结果（源码能力，待发布） {#codex-start-completion}
+
+Hub 和 daemon 均包含 #819 的启动完成协议时，daemon 创建的 Codex 共存节点会保持
+`starting`，直到 `anet node start` 完成已有就绪检查并退出：退出码 0 才上报
+`started`，非零退出或进程信号上报 `start_failed`，不再把 launcher PID 存在当成启动成功。
+运行中每 20 秒上报进度，刷新 Hub 原有的 60 秒过期判断；不额外缩短 CLI 的大历史恢复预算。
+错误码 `codex_launcher_exit:<退出码或信号>` 表示启动器未成功，不表示已清理所有 tmux 会话。
+
+协议通过 `get_start_request.start_completion_capable` 协商；旧 Hub、旧 daemon 仍走旧启动行为，
+普通前台 runtime 和 adopted 节点不走此分支。需要 Hub 与 agent-node 都升级后才能生效；
+CLI 仍使用 daemon 已钉住的 anet。当前没有新的 fork 确认 API 或客户端恢复按钮。
+同一 daemon 存活期间重复请求复用原启动结果；不承诺 daemon 重启后恢复该内存结果，
+`started` 也不是持续健康证明。退出后 launcher PID 从子进程表移除，不作为后续停止的进程依据。
+
+本片不改变常驻服务启动脚本、端口、代理或密钥来源，不新增磁盘状态或数据库 migration。
+部署前按既有流程备份 Hub 数据和节点配置，固定已合入 main 的发布 SHA；用隔离节点核对
+`starting → started/start_failed` 后再升级实际 daemon。回滚到原 Hub/runtime 制品将恢复旧行为，
+无需数据降级迁移；节点历史与凭据仍需从原有受控备份恢复，Git 不包含这些数据。
+
 ### 1. 安装
 
 ```bash

@@ -5509,7 +5509,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (row.network_id !== callerDaemon.networkId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
       if (!['pending', 'delivered'].includes(row.status)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_startable", status: row.status }) }] };
       db.run(`UPDATE node_start_requests SET status='delivered', delivered_at=?1 WHERE request_id=?2 AND status='pending'`, [Date.now(), request_id]);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id, child_node_id: row.child_node_id, child_alias: row.child_alias }) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id, child_node_id: row.child_node_id, child_alias: row.child_alias, start_completion_capable: true }) }] };
     },
   );
 
@@ -5518,7 +5518,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Host supervisor reports start completion or failure.",
     {
       request_id: z.string().min(1).max(200),
-      status: z.enum(["started", "start_failed"]),
+      status: z.enum(["starting", "started", "start_failed"]),
       child_pid: z.number().int().positive().optional(),
       error: z.string().max(1000).optional(),
     },
@@ -5536,6 +5536,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       if (!['pending', 'delivered'].includes(row.status)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_ackable", status: row.status }) }] };
+      }
+      // A finite co-presence launcher can spend minutes restoring a large thread.
+      // Refresh the existing stale-start clock, without claiming startup completed.
+      if (status === "starting") {
+        db.run(`UPDATE node_start_requests SET acked_at=?1 WHERE request_id=?2`, [Date.now(), request_id]);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "starting" }) }] };
       }
       if (status === "started" && !child_pid) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "child_pid_required" }) }] };
