@@ -138,8 +138,8 @@ async function callAck(handler: ToolHandler, args: any): Promise<AckReply> {
 }
 
 function readRequest(request_id: string) {
-  return db.get<{ status: string; error: string | null; acked_at: number | null }>(
-    `SELECT status, error, acked_at FROM node_create_requests WHERE request_id = ?1`,
+  return db.get<{ status: string; error: string | null; acked_at: number | null; launch_verified_at: number | null }>(
+    `SELECT status, error, acked_at, launch_verified_at FROM node_create_requests WHERE request_id = ?1`,
     request_id,
   );
 }
@@ -304,6 +304,8 @@ describe("ack_create_request HANDLER — pre-existing happy-path stays green (re
       const child_token_id = `tok_late_${status}`;
       seedCreateRequest({ request_id, child_token_id, status: 'succeeded' });
       const handler = buildAckHandler();
+      await callAck(handler, { request_id, status: 'started', child_pid: 7777, launch_verified: true });
+      expect(readRequest(request_id)?.launch_verified_at).toBeGreaterThan(0);
       const reply = await callAck(handler, { request_id, status, error: 'post-register launch verdict' });
       expect(reply).toMatchObject({ ok: true, status });
       expect(readRequest(request_id)?.status).toBe(status);
@@ -311,8 +313,9 @@ describe("ack_create_request HANDLER — pre-existing happy-path stays green (re
       expect(readRequest(request_id)?.acked_at).toBeGreaterThan(0);
       expect(readToken(child_token_id)?.revoked_at).not.toBeNull();
       // Delayed success must not resurrect either the request or its token.
-      await callAck(handler, { request_id, status: 'started' });
+      await callAck(handler, { request_id, status: 'started', child_pid: 7777, launch_verified: true });
       expect(readRequest(request_id)?.status).toBe(status);
+      expect(readRequest(request_id)?.launch_verified_at).toBeNull();
       expect(readToken(child_token_id)?.revoked_at).not.toBeNull();
     });
   }
@@ -330,9 +333,29 @@ describe("ack_create_request HANDLER — pre-existing happy-path stays green (re
     // 'started' doesn't flip to terminal; status stays 'delivered'.
     expect(row?.status).toBe("delivered");
     expect(row?.acked_at).toBeGreaterThan(0);
+    expect(row?.launch_verified_at).toBeNull();
     // child ntok is NOT revoked on 'started'.
     expect(readToken(childTok)?.revoked_at).toBeNull();
   });
+
+  for (const status of ['pending', 'delivered', 'succeeded'] as const) {
+    test(`verified launch persists independently of registration: ${status}`, async () => {
+      seedDaemonWorld();
+      const request_id = `cr_verified_${status}`;
+      seedCreateRequest({ request_id, child_token_id: `tok_verified_${status}`, status });
+      const handler = buildAckHandler();
+      expect(readRequest(request_id)?.launch_verified_at).toBeNull();
+      const bad = await callAck(handler, { request_id, status: 'started', launch_verified: true });
+      expect(bad.ok).toBe(false);
+      expect(readRequest(request_id)?.launch_verified_at).toBeNull();
+      await callAck(handler, { request_id, status: 'started', child_pid: 7777, launch_verified: true });
+      const first = readRequest(request_id)!;
+      expect(first.status).toBe(status);
+      expect(first.launch_verified_at).toBeGreaterThan(0);
+      await callAck(handler, { request_id, status: 'started', child_pid: 7777, launch_verified: true });
+      expect(readRequest(request_id)?.launch_verified_at).toBe(first.launch_verified_at);
+    });
+  }
 
   test("status='failed' still revokes child + flips to failed (no audit_log daemon_capability_lied)", async () => {
     seedDaemonWorld();

@@ -1247,7 +1247,7 @@ export async function handleCreateNodeDoorbell(
       recordSpawnedChild(childNodeIdForMap, req.node_spec.name, health.bridgePid);
       deps.log(`[create-node] +${FAIL_FAST_MS}ms: OpenCode launcher exited 0; live bridge/serve/TUI generation verified`);
       await deps.callCommHub("ack_create_request", {
-        request_id, status: "started", child_pid: health.bridgePid,
+        request_id, status: "started", child_pid: health.bridgePid, launch_verified: true,
       }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
       return;
     }
