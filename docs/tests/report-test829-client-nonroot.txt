@@ -1,0 +1,72 @@
+Hub #539/#829: non-root rendered client and native V2 lifecycle
+2026-10-09 16:46 CST (UTC+08:00). Candidate test, NOT a release.
+
+Source: bc09fe19adcfb6b323fd589e35548d7845fcdabd
+Client export: 19595b59095ac822f32f673494e7bb77ed898d17 (app PR #785)
+Image anet-test829:client-nonroot-bc0
+sha256:9e85e6fd47e2de7c6d7e625d4691288afc8e778e34ba71e119b9f80d46fef0e2
+Dockerfile tests/test829-opencode-create/Dockerfile.client-nonroot
+Dependency image anet-test829:client-941
+sha256:57869799497e3673da730c187a1242fd8ff30f477bc042267fcd3d3f284b7f52
+Local test dependency, not a public release input. Its recipe and client/base
+inputs are recorded in report-test829-real-client.txt. Candidate server/CLI/
+runtime/harness source copied; executable builds occur during image build.
+Run has no host source mounts and no build steps. Client export unchanged.
+
+Normal lifecycle: PASS, exit 0
+Container anet-test829-client-nonroot-bc0, user=node (UID/GID 1000), network none,
+cap-drop ALL, security-opt no-new-privileges, TEST829_LIFECYCLE=1.
+SOURCE_COMMIT/EXPECTED_SOURCE_COMMIT equal full source SHA; expected client
+SHA matches inherited client export metadata. Isolated HOME, SQLite, tmux,
+loopback deterministic model; no production credentials or global changes.
+L0 validates user-owned 0700 /run/user/1000 before authentication/creation.
+L1 real Hub auth refusal and actual CLI/daemon setup pass.
+L2 no-opt-in refusal has no request/config side effects.
+L3 actual rendered Chromium creation, real daemon probe/Hub HTTP, explicit
+V2 consent, exact child ID and daemon launch proof confirmed by the page.
+create cr_9019fce3-552f-41dd-94af-c15a1b8bbb6f
+launch_verified_at=1791535467009; registration acked_at=1791535463261.
+Child token active after final daemon verdict; actual native TUI rendered.
+L4 exact task reply [oc829] ANSWER829_REMOTE829 and same TUI output pass.
+L5 stop sr_e8ea6db7fb0e reaches stopped; old bridge/serve/TUI PID generations
+are reaped, sessions absent, config retained. Start str_27e2b41df4cc produces
+new live generation, reaches started, replies ANSWER829_RESTART829 in Hub/TUI.
+Harness-owned processes exit; docker inspect confirms exit=0, user=node,
+CapDrop=[ALL], SecurityOpt=[no-new-privileges].
+
+Single-CPU denied-restart control: PASS, exit 0
+Same exact image/source/client, container
+anet-test829-client-nonroot-bc0-denied; additionally --cpus 1 and
+TEST829_DENY_RESTART=1. Layers L0-L4 and actual stop passed first.
+create cr_30685021-121f-4441-87f5-5051c7324c7c
+stop sr_6bef7c1278ec, start str_58186a7ad2f0.
+Only the owned stopped test node's explicit V2 unsafe opt-in was removed.
+Actual start reached start_failed (opencode_launcher_exit:1), never started;
+no new TUI/bridge session. No post-denial task layer executed. Cleanup passed.
+This is a current negative control, not a newly repeated old-code mutation.
+
+Preserved environment failure
+Earlier source 2390cd990858b7ecd6f03e3a0b608dc0a6abdc36, container
+anet-test829-client-nonroot-239, exited 1. No logind-created /run/user/1000
+existed. Product correctly refused the unsafe/missing runtime base. Do not
+replace the product's owner/mode check or claim a product fix. The Dockerfile
+now prepares only that owned 0700 directory; L0 checks it before later layers.
+Private tmux default alias is /tmp/tmux-1000/default, not the root UID path.
+
+Evidence: named container docker logs and /artifacts/report-test829-native.txt,
+client-success.png, daemon.log, hub.log, bridge.log, tui.txt, stub.log.
+Tauri OS IPC adapted in Chromium; no native WebView, macOS or Windows claim.
+The same explicit unsafe-tools preview requirement remains; non-root and
+container flags do not prove a V2 tool security sandbox. Subsequent task and
+lifecycle calls use actual APIs, not rendered client lifecycle controls.
+
+Incremental landing (separate from this stacked test candidate)
+PR #2545 merged after exact head 434451ad8212849ea2ace6de2cd3436bcae30122
+had 160 successful checks, clean mergeability, reviewed fixed TUI assertions
+and the exact-source Docker replay in report-test827-main-restack.txt.
+Merge: 402b796ba3a6d966ace02e189a8784271c7fd24c at 2026-10-09T08:41:54Z.
+Fetched origin/main and verified head ancestry. This lands only the smaller
+CLI safety/error/install-guidance slice and test827. No version bump, public
+artifact, npm dist-tag, deployment or production restart was performed.
+The test candidate still includes unmerged registry/cleanup/create siblings;
+it cannot be published as main. Main-based rebuild/release gates remain due.
