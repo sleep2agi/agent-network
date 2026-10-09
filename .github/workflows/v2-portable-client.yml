@@ -1,0 +1,39 @@
+name: OpenCode V2 portable client
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tests/test883-v2-portable-client/**'
+      - 'tests/test543-opencode-v2-copresence/stub-model.py'
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+      - '.github/workflows/v2-portable-client.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tests/test883-v2-portable-client/**'
+      - 'tests/test543-opencode-v2-copresence/stub-model.py'
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+      - '.github/workflows/v2-portable-client.yml'
+permissions:
+  contents: read
+jobs:
+  real-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Build from tracked source and run isolated positive then negative
+        run: sg docker -c 'ARTIFACT_DIR=/tmp/test883-artifacts bash tests/test883-v2-portable-client/ci.sh'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-only-v2-portable-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/test883-artifacts
+          retention-days: 7
