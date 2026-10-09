@@ -126,3 +126,23 @@ Doc-symbol check initially found send_reply's line anchor moved; corrected it
 and its adjacent send_ack anchor to their actual tool registration strings.
 Docker doc-symbol recheck: docs 17 scanned/9 judged/8 skipped/0 drift;
 docs-site 18 scanned/16 judged/2 skipped/0 drift. Skips are not passes.
+
+2026-10-09 10:05 CST — PR2542 CI budget correction
+Initial HEAD 77c04b2e8c0e73933e30a6314a72a5987dee28d1 failed the server-unit
+tool-audience-http byte ceiling (CI job 113633309632): node 62,368 > 62,000 B.
+The job reported 214 discovered/executed files, only this file failed; its other
+11 tests passed. Full PR CI was still pending, not an overall success.
+
+Same-image isolated Docker comparison (anet-test819:start-completion,
+--network none, fresh COMMHUB_DB in /tmp, server/src/tool-audience-http.test.ts):
+  main 102dd0f2: all 87 tools / 77,646 B; node 61 / 61,986 B;
+                 user 58 / 56,950 B; 12 pass / 295 assertions.
+  candidate:    all 87 tools / 78,976 B; node 61 / 62,368 B;
+                 user 58 / 57,163 B; 11 pass / 1 budget failure.
+No new tools/audience changes. Added schemas cost 1,330 B total:
+start_node +213 B, report_status +169 B, hidden pull/ack +948 B.
+Kept strict confirmation/receipt schemas and the user ceiling; changed node
+ceiling 62,000 -> 62,500 and total 78,000 -> 79,500 (132/524 B headroom).
+Focused Docker rerun: 12 pass, 0 fail, 295 assertions, same measured byte counts.
+No product behavior changed in this follow-up. No repeated full local E2E,
+production changes, package publication or claim that the new CI has passed.
