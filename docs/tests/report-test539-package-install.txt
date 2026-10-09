@@ -1,0 +1,82 @@
+OpenCode V2 test-only tarball clean install — 2026-10-09 18:34 CST
+Issue: https://github.com/sleep2agi/agent-network/issues/2544
+Release candidate PR: https://github.com/sleep2agi/agent-network/pull/2554
+No publication, dist-tag mutation or production upgrade performed.
+
+Purpose
+-------
+While exact-head candidate CI runs, verify npm packaging and fresh installation
+without inheriting the source worktree or cached runtime resolution environment.
+This evidence lives on test/opencode-v2-package-install, separately from the
+release candidate; it does not reset or replace PR #2554's CI.
+
+Inputs
+------
+Product source: f4bf739a96bf7a9f89504e0796922c5ba25de6d3.
+Candidate PR head: d512835fc94f3c0f66cce869143a82509683ad99; only report and
+registration metadata differ from the tested product source.
+Test harness: 3ad583382d70823f539420778b709b5fd72740c1.
+Input build image: anet-test539:release-f4bf
+  sha256:d17e9af239ea9c4b3092bb65da3e117b1b0639c0f6459e40ba24e0094e452d26
+Clean install base: node:24-slim
+  sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+Result image: anet-test539:install-3ad
+  sha256:1ba6492329e4c03f932ecdba1aff327c22d3f6df77fe79ab2f3fa659f8bdc53d
+
+The first stage packs the previously fully compiled product, with
+npm pack --ignore-scripts, not a new compile. npm pack is not publication;
+do not assume prepublishOnly will build it. The second stage receives only
+the three test tarballs and Bun executable, then performs a fresh npm global
+installation inside Docker. It does not copy dependency trees or /workspace.
+Dependency install had public registry access; runtime smoke used network none.
+No host credentials, HOME, source or npm cache mounts were supplied.
+
+Commands
+--------
+git archive 3ad583382d70823f539420778b709b5fd72740c1 | sg docker -c \
+ 'docker build --build-arg TEST_SOURCE_COMMIT=3ad583382d70823f539420778b709b5fd72740c1 \
+ -f tests/test539-v2-release-candidate/Dockerfile.install \
+ -t anet-test539:install-3ad -'
+
+sg docker -c 'docker run --name anet-test539-install-3ad --network none \
+ --cap-drop ALL --security-opt no-new-privileges \
+ -e EXPECTED_TEST_SOURCE_COMMIT=3ad583382d70823f539420778b709b5fd72740c1 \
+ anet-test539:install-3ad'
+
+Build exit 0; npm installed 371 packages in 28 seconds. npm warned that the
+protobufjs@7.6.6 postinstall was not covered by allowScripts; no allow-list
+change or bypass was added. Smoke exit 0 under the resulting default policy.
+
+Test tarball SHA256 (not official release artifact hashes)
+-------------------------------------------------------
+CLI .162:
+4997e421870bc67b088740a1034ae3df450d87c9ff64ad66ca97818f4a1bdba0
+runtime .128:
+93b4b75071dffe2a4b455b5c11e0a53f3d49d9c1a6dd63302c1a76340abd6daa
+Hub .120:
+8d61bc19ad13f6e8decad35710cf6f49cb2874a933fb345000331ec4c00fd43b
+
+Results
+-------
+PASS no /workspace, no /opt/node_modules, no NODE_PATH source fallback.
+PASS installed package names/versions and all declared bin files.
+PASS runtime bundle includes anet.commhub-readiness and both tool identifiers.
+PASS installed Hub db.ts contains launch_verified_at migration.
+  These two checks prove packaged presence, not plugin/migration behavior.
+PASS actual anet --version = anet v2.3.0-preview.162 (first-line contract).
+PASS actual agent-node --help advertises codex-app-server and opencode-cli.
+PASS actual commhub-server --help runs.
+PASS actual installed Hub starts with isolated HOME/SQLite and loopback port.
+PASS GET /health is 2xx; unauthenticated POST /api/task returns 401.
+Cleanup kills/waits only the owned Hub child; container exits 0.
+
+Boundary
+--------
+Fresh installation is not fresh compilation: build input remains the cached
+candidate image identified above. This test does not run native V2, TUI,
+client UI, authenticated task receipt, real-TTY wizard, third-party model or
+multi-user isolation. Those have separate evidence/gates.
+There is no claim all optional SDK/native dependencies work on every platform.
+Official publication still requires exact-head CI, merge, full40 main-SHA
+fresh build, formal release gates and registry/tarball verification. Do not
+publish these branch tarballs or use these digests for the later main build.
