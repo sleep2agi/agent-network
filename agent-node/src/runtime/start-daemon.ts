@@ -22,6 +22,8 @@ interface StartRequest {
   child_node_id?: string;
   child_alias?: string;
   start_completion_capable?: boolean;
+  managed?: "created" | "adopted";
+  fork_recovery?: { kind: "fork_on_missing_ordinal"; confirmed: true };
 }
 
 export interface StartDoorbellDeps {
@@ -33,6 +35,7 @@ export interface StartDoorbellDeps {
   nodesRoot?: string;
   anetBin?: () => string;
   spawnChild?: typeof spawn;
+  probeCodexForkRecovery?: (bin: string, cwd: string) => Promise<boolean>;
   signalProcess?: (pid: number, signal: 0) => void;
   // #1448 finding-6 — replay 幂等路径复验 recorded.pid 的 /proc/<pid>/cmdline,
   // 挡 PID 复用假阳。可注入以便测试(默认读真 /proc)。
@@ -89,7 +92,9 @@ export async function handleStartDoorbell(
   deps: StartDoorbellDeps,
 ): Promise<void> {
   let req: StartRequest;
-  try { req = await deps.callCommHub("get_start_request", { request_id: event.request_id }); }
+  try { req = await deps.callCommHub("get_start_request", {
+    request_id: event.request_id, fork_recovery_capable: true,
+  }); }
   catch (e: any) {
     deps.warn(`[start-daemon] get_start_request failed: ${e?.message || e}`);
     return;
@@ -98,7 +103,23 @@ export async function handleStartDoorbell(
     deps.warn(`[start-daemon] request rejected: ${req?.error || "invalid_envelope"}`);
     return;
   }
-  if (deps.adoption && await handleAdoptedLifecycle({ request_id: event.request_id, child_node_id: req.child_node_id,
+  // Only the authenticated envelope can authorize this per-request action.
+  // Reject malformed/unconfirmed recovery before any adopted/legacy launcher.
+  const recovery = req.fork_recovery !== undefined;
+  if (recovery && (req.fork_recovery?.kind !== "fork_on_missing_ordinal"
+      || req.fork_recovery?.confirmed !== true || req.request_id !== event.request_id
+      || event.request_id.match(/^str_[A-Za-z0-9_-]{1,128}$/)?.[0] !== event.request_id)) {
+    await deps.callCommHub("ack_start_request", { request_id: event.request_id,
+      status: "start_failed", error: "codex_fork_confirmation_invalid" });
+    return;
+  }
+  if (recovery && (req.start_completion_capable !== true || req.managed !== "created"
+      || adoptedChild(deps.workDir, req.child_alias))) {
+    await deps.callCommHub("ack_start_request", { request_id: event.request_id,
+      status: "start_failed", error: "codex_fork_recovery_unsupported" });
+    return;
+  }
+  if (!recovery && deps.adoption && await handleAdoptedLifecycle({ request_id: event.request_id, child_node_id: req.child_node_id,
     child_alias: req.child_alias, action: "start" }, deps.adoption)) return;
   // Missing adoption context is fail-closed; never use the created-child path.
   if (adoptedChild(deps.workDir, req.child_alias)) {
@@ -115,10 +136,15 @@ export async function handleStartDoorbell(
   const nodesRoot = deps.nodesRoot ?? join(childWorkDir, ".anet", "nodes");
   let codexCopresence = false;
   let childDirName = req.child_alias;
+  let verifiedChildDir = "";
+  let runtime: unknown;
   try {
     const cfgPath = verifyStoppedChildConfig(nodesRoot, req.child_node_id, req.child_alias);
     childDirName = basename(dirname(cfgPath));
-    try { codexCopresence = JSON.parse(readFileSync(cfgPath, "utf8"))?.codexCopresence === true; } catch { /* verified above */ }
+    verifiedChildDir = dirname(cfgPath);
+    const config = JSON.parse(readFileSync(cfgPath, "utf8"));
+    codexCopresence = config?.codexCopresence === true;
+    runtime = config?.runtime;
   } catch (e: any) {
     const error = `local_identity: ${e?.message || e}`;
     deps.warn(`[start-daemon] ${error}`);
@@ -127,12 +153,18 @@ export async function handleStartDoorbell(
     }).catch(() => {});
     return;
   }
+  if (recovery && (!codexCopresence || runtime !== "codex-app-server")) {
+    await deps.callCommHub("ack_start_request", { request_id: event.request_id,
+      status: "start_failed", error: "codex_fork_recovery_unsupported" });
+    return;
+  }
 
   // Negotiate with the Hub: older Hubs do not accept progress acknowledgements.
   // Adopted nodes have their own lifecycle above; only managed Codex launchers
   // exit after readiness checks and can use this completion contract.
   if (codexCopresence && req.start_completion_capable === true) {
-    await completeCodexStart(event.request_id, req.child_node_id, req.child_alias, childDirName, childWorkDir, deps);
+    await completeCodexStart(event.request_id, req.child_node_id, req.child_alias, childDirName, childWorkDir, deps,
+      recovery ? { nodeDir: verifiedChildDir } : undefined);
     return;
   }
 

@@ -1,0 +1,176 @@
+Board #822 / core Issue #2539 — backend fork recovery transport preparation
+Date: 2026-10-09 CST
+Base: main 9f407449fc28c5da6334b33056fc93f5fb66ea2f
+State: BACKEND SOURCE CANDIDATE; daemon receiver, capability advertisement and
+Hub storage/read implemented. Candidate PR checks/review/merge still pending.
+Not a complete backend candidate, merge, release, or production deployment.
+
+L1: Docker isolated filesystem evidence reader (Bun 1.3.14, no network)
+sg docker -c 'docker run --rm --network none -v "$PWD/agent-node/src/runtime:/candidate:ro" -w /candidate anet-test819:start-completion bun test codex-fork-result.test.ts'
+6 pass, 0 fail, 24 assertions.
+- Exact request match even when it is not the last entry; file unchanged.
+- Missing file, legacy records, other-request records: not_observed (not proof
+  that no side effect happened).
+- Read/JSON/schema failure: unknown, no local paths or raw exception returned.
+- Duplicate matching request records: unknown, never last-entry-wins.
+- Invalid/same thread IDs or invalid request IDs: cannot report forked.
+Existing test819 runner now selects this test; no new suite/matrix/Dockerfile.
+Full existing test819 runner passed below. Recovery-specific Hub/daemon E2E is
+NOT yet available: Hub persistence/dispatch/projection remain unimplemented.
+
+Read-only source findings for integration
+- server/src/node-lifecycle-read.ts already projects authenticated human-visible
+  requests at GET /api/node-lifecycle-requests; extend that projection, rather
+  than expose daemon-only get_start_request to the client.
+- daemon_capabilities in report_status uses a non-strict schema: old Hubs strip
+  new fields. Online/declared runtime/version alone cannot prove new capability.
+- request_id correlation must be independent of launcher completion status;
+  fork evidence survives a later failed startup. Do not return full rollout or
+  snapshot paths in the result projection.
+
+2026-10-09 09:42 CST — daemon receiver slice
+New authenticated envelope fields (internal draft, not a released protocol):
+  managed: "created"
+  fork_recovery: { kind: "fork_on_missing_ordinal", confirmed: true }
+The pull declares fork_recovery_capable=true (protocol support, NOT CLI health).
+Require matching valid request_id, completion support, created binding and local
+codex-app-server co-presence. Reject malformed confirmation, adopted nodes, other
+runtimes and old completion protocol before launch; no ordinary-start fallback.
+Probe the pinned launch binary's `node start --help` using execFile, no shell,
+5-second timeout and 64-KiB buffer. Check exact flag boundaries, including help's
+`--yes)` punctuation; do not mistake --yes-danger-full-access for --yes.
+Use the same binary and explicit argv for the launcher; read exact-ID evidence
+at completion, independently of exit status, and cache that receipt for replay.
+This cache does NOT survive daemon restart. Missing mapping is NOT proof of no
+fork. CLI help support is NOT evidence of live Codex readiness or a healthy TUI.
+
+L1: existing Docker image, candidate source mounted read-only, network disabled
+  bun test codex-fork-result + codex-fork-start + start-daemon
+27 pass, 0 fail, 110 assertions (Bun 1.3.14).
+Includes exit 0/7 after recording a fork, exact argv, unconfirmed/mismatched
+request, unsupported protocol/adoption/runtime/CLI, missing mapping, lost ack
+replay, and a real executable help fixture. No production Codex was launched.
+
+L2: existing test819 runner with candidate node/server sources mounted read-only
+sg docker -c 'docker run --rm --network none -v /dev/shm/anet-fork-transport/agent-node/src:/work/agent-node/src:ro -v /dev/shm/anet-fork-transport/server/src:/work/server/src:ro -v /dev/shm/anet-fork-transport/tests/test819-codex-start-completion/run.sh:/work/run.sh:ro anet-test819:start-completion'
+Daemon: 72 pass, 0 fail, 236 assertions across 5 files.
+Hub: 8 pass, 0 fail, 34 assertions, including existing real launcher exit 0/7.
+Those Hub tests verify ordinary-start compatibility, not the pending recovery API.
+Docker `bun run build` also passed: agent-node CLI 378 modules, upload MCP 221
+modules. Artifacts existed only inside the removed test container, not a release.
+
+Next: Hub explicit confirmation persistence, daemon/CLI capability advertisement
+and dispatch gate (including old daemon pull refusal), recovery ack persistence,
+compatible result read API and recovery-specific integrated tests after #821.
+No service/port/environment/secret or production data changes in this draft.
+
+2026-10-09 — Hub transport slice (supersedes the earlier pending list)
+- Persist strict per-request confirmation and separate fork result in additive
+  nullable node_start_requests columns. Old rows/ordinary start keep old shape.
+- Dispatch requires created binding + explicit daemon protocol/CLI capability;
+  pull refuses old daemons, without turning recovery into an ordinary launch.
+- Terminal receipt preserves fork evidence even on startup failure. Missing or
+  corrupt evidence is unknown. Idempotent terminal ack cannot overwrite it.
+- Existing authenticated human result endpoint retains current node-grant and
+  tenant checks, exposes only validated evidence, never raw JSON or paths.
+- Existing ordinary stale-start behavior is unchanged; a stale confirmed fork
+  is not silently superseded, because receipt absence cannot prove no effect.
+- Repository contract/recovery/rollback notes: docs/codex-fork-transport.md.
+  Outstanding confirmed requests must be reconciled before old-Hub downgrade.
+
+Docker verification (Bun 1.3.14, no network, read-only candidate source mounts):
+  src/start-node.test.ts: 14 pass, 0 fail, 68 assertions.
+  Includes Hub -> daemon -> real CLI-shaped executable -> Hub receipt/read for
+  exit 0 and 7. The fixture checks exact argv and writes a mapping; it is NOT
+  an actual Codex recovery/model test. No production nodes were started.
+  src/node-lifecycle-read-http.test.ts: 14 pass, 0 fail, 240 assertions.
+  Actual port-0 HTTP: cross-tenant/restricted/no-grant/daemon access refused;
+  granted viewer reads evidence; corrupt stored extra path is not returned.
+  src/codex-fork-migration.test.ts: 1 pass, 0 fail, 2 assertions.
+  An old SQLite start table is upgraded in two separate Hub-import processes;
+  ordinary row stays unchanged and receipt survives the second migration.
+  PostgreSQL migration and full empty-server recovery were not exercised.
+  Complete updated test819 runner: 101 pass, 0 fail, 546 assertions total
+  (daemon 72 + migration 1 + Hub lifecycle 14 + authenticated HTTP 14).
+
+Still pending: real daemon capability producer (tests seed a capability fixture),
+#821 compatible CLI gate/merge and final candidate review/PR. No UI, release,
+production snapshot edits, database migration or daemon restart performed.
+
+2026-10-09 — capability producer slice (supersedes previous pending list)
+Host-supervisor-only background monitor probes pinned CLI help on boot and
+every ten minutes; heartbeat attaches cached capability. Initial absence is not
+support. Probe coalesces overlapping calls, failed pin becomes false, unchanged
+result does not trigger redundant onChange reports. Actual execution rechecks.
+Bad capability telemetry is dropped without rejecting the entire report_status.
+
+Docker checks:
+- daemon capability + config-apply: 114 pass, 0 fail, 268 assertions.
+- Hub start-node: 15 pass, 0 fail, 76 assertions. New real help executable probe
+  -> built daemon snapshot -> actual report_status schema -> handler/storage ->
+  start_node admission verifies the capability producer/consumer path.
+- agent-node build: 378 CLI modules + 221 upload MCP modules, passed.
+No real daemon was restarted or production snapshot patched for these checks.
+
+#821 PR2541 merged at 09:53:46 CST after all 157 checks (including real Codex
+test738) and independent exact-head merge gate passed; main merge commit is
+102dd0f2c11a2d72b8789e9a1ba3a3fde31eca1e. This does not publish either package.
+Remaining: final combined candidate validation/review/PR, not implementation of
+the capability producer. Real model recovery evidence comes from #821 test738;
+#822 tests exercise the transport using CLI-shaped executable fixtures.
+
+Final combined source check after merging main 102dd0f2 into the candidate:
+test819 runner: 103 pass, 0 fail, 563 assertions
+(daemon73/245 + SQLite migration1/2 + Hub lifecycle15/76 + real HTTP14/240).
+Doc-symbol check initially found send_reply's line anchor moved; corrected it
+and its adjacent send_ack anchor to their actual tool registration strings.
+Docker doc-symbol recheck: docs 17 scanned/9 judged/8 skipped/0 drift;
+docs-site 18 scanned/16 judged/2 skipped/0 drift. Skips are not passes.
+
+2026-10-09 10:05 CST — PR2542 CI budget correction
+Initial HEAD 77c04b2e8c0e73933e30a6314a72a5987dee28d1 failed the server-unit
+tool-audience-http byte ceiling (CI job 113633309632): node 62,368 > 62,000 B.
+The job reported 214 discovered/executed files, only this file failed; its other
+11 tests passed. Full PR CI was still pending, not an overall success.
+
+Same-image isolated Docker comparison (anet-test819:start-completion,
+--network none, fresh COMMHUB_DB in /tmp, server/src/tool-audience-http.test.ts):
+  main 102dd0f2: all 87 tools / 77,646 B; node 61 / 61,986 B;
+                 user 58 / 56,950 B; 12 pass / 295 assertions.
+  candidate:    all 87 tools / 78,976 B; node 61 / 62,368 B;
+                 user 58 / 57,163 B; 11 pass / 1 budget failure.
+No new tools/audience changes. Added schemas cost 1,330 B total:
+start_node +213 B, report_status +169 B, hidden pull/ack +948 B.
+Kept strict confirmation/receipt schemas and the user ceiling; changed node
+ceiling 62,000 -> 62,500 and total 78,000 -> 79,500 (132/524 B headroom).
+Focused Docker rerun: 12 pass, 0 fail, 295 assertions, same measured byte counts.
+No product behavior changed in this follow-up. No repeated full local E2E,
+production changes, package publication or claim that the new CI has passed.
+
+2026-10-09 10:09 CST — PR2542 review corrections
+Review comments 4225941074 / 4225941079 identified two actual gaps:
+1. Background and execution-time probes used getAnetBinAbs, a process-cached
+   path, despite requiring a fresh installation/integrity check. The capability
+   monitor now defaults to loadAndVerifyAnetBin; CLI wiring uses that default.
+   Confirmed recovery also uses the uncached verifier before help/spawn. Ordinary
+   launches retain their existing resolver. No new pin configuration or service.
+2. A non-NULL persisted confirmation was projected as requested:true even if
+   malformed. The read path now uses the same strict request schema as pull;
+   damaged/noncanonical confirmation returns requested:null (unknown), retaining
+   any independently valid fork evidence. NULL ordinary rows remain unchanged.
+
+Docker-only focused evidence (anet-test819:start-completion, network none):
+- fork start/evidence: 16 pass / 99 assertions. Added actual path.conf + package
+  executable + SHA fixtures: prime old cached path, change pin, confirm monitor
+  and production recovery resolver use current path; tamper pinned bytes, confirm
+  capability false and no help probe/spawn on recovery. Environment restored.
+- real authenticated HTTP: 14 pass / 250 assertions. Bad JSON/null/object/false
+  confirmation/extra private field cannot assert confirmation or leak raw paths;
+  independently valid thread mapping remains readable under existing grants.
+- existing test819 runner: 105 pass / 589 assertions, 0 failures
+  (daemon75/261 + migration1/2 + Hub lifecycle15/76 + HTTP14/250).
+- agent-node build passed (378 CLI + 221 upload modules).
+- doc-symbol checks: docs9 judged/8 skipped, docs-site16 judged/2 skipped,
+  zero drift. Skips are not passes.
+No production restart, pin edit, database mutation or publication. No claim of
+live model recovery, cross-restart exactly-once, or completed new-head CI.
