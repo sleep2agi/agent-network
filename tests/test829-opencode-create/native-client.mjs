@@ -71,6 +71,8 @@ try {
     await page.waitForFunction(() => !!window.__anetLayoutSweep);
     // Navigation shortcut only: daemon list and every Hub response stay real.
     await page.evaluate(() => window.__anetLayoutSweep.setScreen({ name: 'picker' }));
+    await page.getByTestId(`daemon-card-${daemonId}`).waitFor({ timeout: 15000 });
+    await page.getByText('下一步', { exact: true }).click();
     await page.getByTestId('create-name-input').waitFor({ timeout: 15000 });
     await page.getByTestId('create-name-input').fill('oc829');
     await page.getByTestId('create-node-next').click();
