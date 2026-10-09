@@ -19,6 +19,7 @@ echo
 echo "## Layer 0 — unit (V2 core vs protocol fake, package gate, backend + table, V1 golden)"
 l0=0
 (cd /agent-node-src && bun test \
+    src/runtime/opencode-copresence/close-cleanup.test.ts \
     src/runtime/opencode-copresence/v2-session.test.ts \
     src/runtime/opencode-acp/binary-v2.test.ts \
     src/runtime/opencode-backend.test.ts \
