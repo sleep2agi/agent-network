@@ -1,0 +1,142 @@
+test829 real daemon creation — FAILED, expected delivery gate remains closed
+Date: 2026-10-09 14:30 CST
+Scope: isolated Docker, no production write, no public package/release.
+Integrated parent: 268bed27 (full parents PR2550 54dac56030931fde07cd298ecce1be4a5f8c509d
+and PR2551 e67a777efc6b71fca8b9bfc72446e4b6d919b4e6).
+Exploratory source overlay: 72d8ad8f6419dadd1c1741fa3789abe0025c9025
+Base image: anet-test827:close-drain
+Base source: 643ab39c3cb24b4aa0a72599add62ce932814ca9
+Base image index: sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac
+Container: anet-test829-native-72d8 (network none), exit 1.
+Full server/CLI/runtime source copied from clean integration worktree;
+runtime and un-obfuscated real CLI built INSIDE container.
+Native upstream @opencode/cli 2.0.22; deterministic loopback model.
+No source mount, but NOT an immutable exact-source image: overlay experiment only.
+Private tmux socket in container; default socket path symlinked to private socket
+because daemon deliberately strips caller ANET_TMUX_SOCKET from child env.
+Provider fixture only was preseeded; daemon created identity/config itself.
+No LLM credentials; real host-supervisor registration and real HTTP MCP tools/call.
+
+Results:
+- L0 real binary/Hub/model health PASS.
+- L1 auth refusal, real CLI init/register/login/daemon init, real daemon registration PASS.
+- L2 V2 without unsafe opt-in refused; no request-row/config side effect PASS.
+- L3 real MCP create accepted and daemon persisted generation/mode/opt-in PASS.
+- L3 startup FAIL: request runtime_capability_check_failed, child died +5000ms.
+- Same failing plain start replay under minimal child env exited 1:
+  OpenCode runtime binding is missing; refusing legacy/unproven state.
+- No native V2 TUI, task receipt, remote stop/restart, client UI or release claim.
+- Stop at failing layer. No safety checks weakened and no product fix in this branch.
+
+Root cause grounded in source:
+agent-network/bin/cli.ts saveProfile creates external runtime binding and validates
+private node state/Git-untracked boundary before token-bearing config write.
+resolveStartProfile requires that binding before starting an OpenCode node.
+agent-node/src/runtime/create-node-daemon.ts bypasses saveProfile and directly writes
+childCfg; its new #829 generation fields do not establish that binding.
+Fix needs shared trusted initialization/transaction semantics, not an automatic
+legacy-binding migration or a skip of resolveStartProfile.
+Further gates AFTER binding fix: plain-start copresence dispatch and launcher exit
+classification (currently codex-specific) need separate actual repro; not yet
+claimed as runtime failures because current run never got past binding.
+
+Harness history:
+fb6c38d5088ee67196b8f620e1d471658f7e4b8f stopped at a harness SQLite query error
+(nonexistent child_pid); not a product bug. Corrected columns in 74545081c3dfae7e2f0e87cad8810ec537eddb56.
+74545081 run reproduced capability failure. 72d8ad8f added failed-stage replay
+to expose exact binding reason; no product-code difference.
+A standalone Dockerfile.native is supplied for future clean builds; it was NOT
+built/run during this round. native-overlay.sh runs only inside Docker.
+Existing test829 contract Dockerfile/run.sh retain their independent meaning.
+
+Recovery impact: test files only after integration. No new production services,
+ports, secrets, deployment, rollback or backup changes. Operational runbook remains
+docs/runbooks/opencode-tui-copresence.md; this is not a disaster recovery rehearsal.
+
+Raw stdout/stderr from decisive container:
+EXPLORATORY source overlay: 72d8ad8f6419dadd1c1741fa3789abe0025c9025; base source: 643ab39c3cb24b4aa0a72599add62ce932814ca9
+
+> @sleep2agi/agent-node@2.5.0-preview.127 build
+> bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify
+
+Bundled 380 modules in 117ms
+
+  cli.js  1.51 MB  (entry point)
+
+Bundled 221 modules in 40ms
+
+  upload-file-mcp-stdio.js  0.27 MB  (entry point)
+
+Bundled 310 modules in 110ms
+
+  cli.js  2.51 MB  (entry point)
+
+L0 environment
+PASS: exact real OpenCode V2
+PASS: Hub health
+PASS: model health
+L1 authentication and real daemon registration
+PASS: unauthenticated dispatch refused
+CLI init --hub http://127.0.0.1:9287 exit=0
+✅ CommHub v0.9.0-preview.119 — 0 sessions, 0 SSE
+
+Saved to /run/test829-native/home/.anet/config.json
+Next: anet init project
+
+PASS: CLI init --hub http://127.0.0.1:9287
+CLI register --username t829 --password fixture-only-password exit=0
+[anet] Registered and logged in as t829
+[anet] Default network: t829
+[anet] Token saved to ~/.anet/config.json
+
+PASS: CLI register --username t829
+CLI login --username t829 --password fixture-only-password exit=0
+✅ Logged in as t829
+   network: t829
+   token saved to ~/.anet/config.json
+✅ Login successful — next: anet status / anet node create my-agent
+
+PASS: CLI login --username t829
+CLI daemon init daemon829 exit=0
+[anet daemon] using anet binary: /workspace/agent-network/dist/bin/anet.cjs
+[anet daemon] ✓ created host_supervisor daemon "daemon829"
+              config:     .anet/nodes/daemon829/config.json
+              node_id:    node_daemon_f57aaadbd55c
+              secret keys allowed: (none — add with: anet daemon init daemon829 --force --allow-secret KEY)
+
+[anet daemon] ⚠ Permission posture:
+              flags.dangerouslySkipPermissions = true  (no per-call confirmation)
+              flags.teammateMode = true
+              role = host_supervisor                   (can fork child agent-nodes via hub)
+              → Run daemons only on machines you trust to act on your behalf.
+              → Edit .anet/nodes/daemon829/config.json to disable individual flags.
+
+Next: start it
+  anet daemon start daemon829    (or anet daemon up daemon829 to init+start in one go)
+
+PASS: CLI daemon init daemon829
+PASS: daemon registered as host supervisor
+L2 actual MCP validation before create side effects
+PASS: V2 without explicit unsafe opt-in refused
+PASS: no create request or node config on refusal
+L3 real daemon remote create -> native V2 startup
+create result: {"ok":true,"request_id":"cr_cc3d672f-1a64-430b-89a0-8b99c9fdaea7"}
+PASS: actual MCP create accepted with request id
+PASS: daemon settles create request
+create status: {"status":"runtime_capability_check_failed","error":"child died within 5000ms post-spawn (likely missing runtime binary or auth for runtime='opencode-cli'): kill ESRCH","child_node_id":null}
+failed-stage startup replay: 1 [anet] Refusing to start node "oc829": OpenCode runtime binding is missing for node "oc829". Refusing legacy/unproven state; recreate this preview node before starting it.
+
+PASS: daemon persisted V2 generation and explicit opt-in
+FAIL: create status reports started, not capability failure
+10 | const hub = 'http://127.0.0.1:9287';
+11 | const env = { ...process.env, HOME: `${root}/home`, TERM: 'xterm-256color', ANET_BIN_ABS: '/workspace/agent-network/dist/bin/anet.cjs', ANET_DAEMON_ALLOW_ENV_BIN: '1' };
+12 | mkdirSync(env.HOME, { recursive: true, mode: 0o700 });
+13 | const redact = (s: string) => s.replace(/\b(?:atok|ntok|utok)_[A-Za-z0-9_-]+/g, '[test-token]');
+14 | const pause = (ms = 200) => new Promise(r => setTimeout(r, ms));
+15 | function check(name: string, ok: unknown) { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}`); if (!ok) throw new Error(name); }
+                                                                                                                     ^
+error: create status reports started, not capability failure
+      at check (/workspace/tests/test829-opencode-create/native-harness.ts:15:113)
+      at /workspace/tests/test829-opencode-create/native-harness.ts:87:3
+
+Bun v1.3.14 (Linux x64 baseline)
