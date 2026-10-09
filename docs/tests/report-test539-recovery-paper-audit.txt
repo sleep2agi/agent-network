@@ -1,0 +1,76 @@
+OpenCode V2 release candidate: repository-only recovery paper audit
+Date: 2026-10-09, UTC+08:00
+Source inspected: 8fdf716fb471a6763f32f015cc1eb90e364e3af0 (PR #2554).
+This is a document/source inspection, NOT an executed recovery drill, not
+proof of current production configuration, and not authorization to deploy.
+
+Six recovery questions
+
+1. Startup and authoritative scripts
+   deploy/hub/hub-daemon.sh and deploy/hub/ecosystem.config.cjs are checked-in
+   Hub startup authorities; deploy/hub/README.md describes installation and PM2.
+   V2 runtime launcher and readiness observer are bundled repository code at
+   agent-node/src/runtime/opencode-copresence/{runtime,v2-readiness}.ts.
+   docs/runbooks/opencode-tui-copresence.md gives exact CLI generation/consent
+   commands. V1 and V2 must have separate trusted installation prefixes.
+
+2. Topology and ports
+   Hub launcher has HOST default 0.0.0.0 and PORT default 9200, configurable via
+   hub.env. Runtime runbook specifies authenticated loopback serve with a
+   per-launch port and private TUI/bridge. V2 adds no public proxy or tunnel.
+   These documents do not establish a full host-specific reverse-proxy/tunnel
+   inventory for vdev. That remains outside this narrow audit's proof.
+
+3. Environment and secret source
+   Hub env file is owner-only; ANET_HUB_SECRET_VAULT_KEY must be the original
+   key from independent encrypted backup or network-owner delivery. The Hub
+   README explicitly marks the precise vault backup record name NOT COVERED.
+   Runtime credentials come from node registration/private config and selected
+   provider's node-local auth store. Repository clone cannot recreate secrets.
+   No secret values were read, copied, or committed for this audit.
+
+4. Change version and verify actual activation
+   Candidate notes pair Hub .120, runtime .128 and CLI .162 and require exact
+   main-SHA build/publication, then separately authorized activation. Verify
+   real process/executable, health/version, authenticated launch proof, task
+   receipt and same-TUI answer. Package installation is not daemon activation.
+   Checked-in Hub RUNTIME_DIR still references runtime-v35-preview47; it must
+   not be auto-bumped to an unpublished candidate or treated as fresh evidence
+   of actual production version. The README's historical production Bun1.4.0
+   claim is not new verification; candidate Docker evidence uses Bun1.3.14.
+   Target-host runtime qualification is separate from npm package validation.
+
+5. Rollback
+   Candidate notes require draining/reconciling pending V2 requests and stopping
+   new V2 nodes before restoring Hub .119 / runtime .127 / CLI .161 as relevant.
+   Hub runbook retains previous installed runtime and switches the launch path.
+   Never convert V2 sessions into V1 or restore old launch-health evidence as
+   current readiness. Actual production rollback coordinates need fresh readback.
+
+6. State requiring backups
+   Hub identities/tasks/request history and original vault key require data
+   backup. Private node config and external HOME runtime bindings also require
+   matched encrypted restore at the canonical project path, or re-registration.
+   Generated launch proof/plugin directories are regenerated, not restored as
+   health evidence. Hub README specifies consistent SQLite VACUUM INTO plus
+   integrity_check; it does not prove an off-host backup currently exists or
+   its retention/restore accessibility. Do not copy an active WAL DB blindly.
+
+Result and disposition
+Software entry points, topology, activation and rollback are documented for
+this narrow V2 slice, but full empty-machine recovery is NOT established.
+Unresolved backup-source/retention/access and host-topology coordinates must be
+reviewed with the deployment owner before claiming production recoverability.
+No production process, database, service file, pin, model or secret changed.
+No installation or executable test run was performed as part of this paper
+audit. Prior Docker lifecycle tests remain separate evidence, not a DR drill.
+This report does not waive PR CI or close Hub #539 / #829 acceptance criteria.
+
+Inputs read
+  deploy/hub/README.md
+  deploy/hub/hub-daemon.sh (startup path/env/port definitions)
+  docs/runbooks/opencode-tui-copresence.md
+  docs/runbooks/opencode-v2-registry-readiness.md
+  docs/tests/release-v0.9.0-preview.120.md
+  docs/tests/release-v2.5.0-preview.128.md
+  docs/tests/release-v2.3.0-preview.162.md
