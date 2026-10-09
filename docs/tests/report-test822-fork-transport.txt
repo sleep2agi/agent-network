@@ -1,7 +1,7 @@
 Board #822 / core Issue #2539 — backend fork recovery transport preparation
 Date: 2026-10-09 CST
 Base: main 9f407449fc28c5da6334b33056fc93f5fb66ea2f
-State: INTERNAL PREPARATION ONLY; Hub/daemon transport not implemented yet.
+State: INTERNAL PREPARATION ONLY; daemon receiver implemented, Hub transport pending.
 Not a complete backend candidate, merge, release, or production deployment.
 
 L1: Docker isolated filesystem evidence reader (Bun 1.3.14, no network)
@@ -14,7 +14,8 @@ sg docker -c 'docker run --rm --network none -v "$PWD/agent-node/src/runtime:/ca
 - Duplicate matching request records: unknown, never last-entry-wins.
 - Invalid/same thread IDs or invalid request IDs: cannot report forked.
 Existing test819 runner now selects this test; no new suite/matrix/Dockerfile.
-Full test819 runner and actual Hub/daemon transport E2E are NOT yet run for #822.
+Full existing test819 runner passed below. Recovery-specific Hub/daemon E2E is
+NOT yet available: Hub persistence/dispatch/projection remain unimplemented.
 
 Read-only source findings for integration
 - server/src/node-lifecycle-read.ts already projects authenticated human-visible
@@ -26,6 +27,38 @@ Read-only source findings for integration
   fork evidence survives a later failed startup. Do not return full rollout or
   snapshot paths in the result projection.
 
-Next: integrate after #821 gate/merge; explicit confirmation and capability
-checks, persistence, daemon argv, startup/fork result and compatible read API.
+2026-10-09 09:42 CST — daemon receiver slice
+New authenticated envelope fields (internal draft, not a released protocol):
+  managed: "created"
+  fork_recovery: { kind: "fork_on_missing_ordinal", confirmed: true }
+The pull declares fork_recovery_capable=true (protocol support, NOT CLI health).
+Require matching valid request_id, completion support, created binding and local
+codex-app-server co-presence. Reject malformed confirmation, adopted nodes, other
+runtimes and old completion protocol before launch; no ordinary-start fallback.
+Probe the pinned launch binary's `node start --help` using execFile, no shell,
+5-second timeout and 64-KiB buffer. Check exact flag boundaries, including help's
+`--yes)` punctuation; do not mistake --yes-danger-full-access for --yes.
+Use the same binary and explicit argv for the launcher; read exact-ID evidence
+at completion, independently of exit status, and cache that receipt for replay.
+This cache does NOT survive daemon restart. Missing mapping is NOT proof of no
+fork. CLI help support is NOT evidence of live Codex readiness or a healthy TUI.
+
+L1: existing Docker image, candidate source mounted read-only, network disabled
+  bun test codex-fork-result + codex-fork-start + start-daemon
+27 pass, 0 fail, 110 assertions (Bun 1.3.14).
+Includes exit 0/7 after recording a fork, exact argv, unconfirmed/mismatched
+request, unsupported protocol/adoption/runtime/CLI, missing mapping, lost ack
+replay, and a real executable help fixture. No production Codex was launched.
+
+L2: existing test819 runner with candidate node/server sources mounted read-only
+sg docker -c 'docker run --rm --network none -v /dev/shm/anet-fork-transport/agent-node/src:/work/agent-node/src:ro -v /dev/shm/anet-fork-transport/server/src:/work/server/src:ro -v /dev/shm/anet-fork-transport/tests/test819-codex-start-completion/run.sh:/work/run.sh:ro anet-test819:start-completion'
+Daemon: 72 pass, 0 fail, 236 assertions across 5 files.
+Hub: 8 pass, 0 fail, 34 assertions, including existing real launcher exit 0/7.
+Those Hub tests verify ordinary-start compatibility, not the pending recovery API.
+Docker `bun run build` also passed: agent-node CLI 378 modules, upload MCP 221
+modules. Artifacts existed only inside the removed test container, not a release.
+
+Next: Hub explicit confirmation persistence, daemon/CLI capability advertisement
+and dispatch gate (including old daemon pull refusal), recovery ack persistence,
+compatible result read API and recovery-specific integrated tests after #821.
 No service/port/environment/secret or production data changes in this draft.
