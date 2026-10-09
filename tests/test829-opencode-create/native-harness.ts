@@ -136,9 +136,27 @@ try {
     check('old bridge serve TUI identities reaped', await until(() => identities.every(gone), 15000));
     check('old TUI and bridge sessions absent', tmux('has-session', '-t', '=oc829').status !== 0 && tmux('has-session', '-t', '=oc829-桥').status !== 0);
     check('config preserved after stop', existsSync(`${nodeDir}/config.json`));
+    const denyRestart = process.env.TEST829_DENY_RESTART === '1';
+    if (denyRestart) {
+      const stoppedConfig = JSON.parse(readFileSync(`${nodeDir}/config.json`, 'utf8'));
+      stoppedConfig.flags.opencodeUnsafeTools = false;
+      writeFileSync(`${nodeDir}/config.json`, JSON.stringify(stoppedConfig), { mode: 0o600 });
+      console.log('NEGATIVE CONTROL: remove explicit V2 unsafe opt-in from owned stopped test node');
+    }
     const startResult = await mcp('start_node', { child_node_id: row.child_node_id, daemon_node_id: daemonId, network_id: networkId });
     console.log('start result:', redact(JSON.stringify(startResult)));
     check('actual start dispatched', startResult.ok && startResult.request_id);
+    if (denyRestart) {
+      let failedStart: any;
+      check('denied start reaches terminal verdict', await until(() => {
+        failedStart = db.query('SELECT status,error FROM node_start_requests WHERE request_id=?').get(startResult.request_id);
+        return ['started', 'start_failed'].includes(failedStart?.status);
+      }, 45000));
+      console.log('denied start status:', JSON.stringify(failedStart));
+      check('denied V2 start reports start_failed, never started', failedStart.status === 'start_failed');
+      check('denied start has no TUI or bridge session', tmux('has-session', '-t', '=oc829').status !== 0 && tmux('has-session', '-t', '=oc829-桥').status !== 0);
+      console.log('PASS denied-start negative; no post-start task layer executed');
+    } else {
     check('new launch evidence produced', await until(() => {
       try { const h = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8')); return h.bridge.ticks !== health.bridge.ticks || h.bridge.pid !== health.bridge.pid; } catch { return false; }
     }, 45000));
@@ -156,6 +174,7 @@ try {
     console.log('start status:', JSON.stringify(startRow));
     check('start request completed', startRow?.status === 'started');
     console.log('PASS actual daemon stop/start task chain; model/client UI remain separate');
+    }
   }
   console.log('PASS test829 real daemon create and task; model/client UI remain separate gates');
 } finally {
