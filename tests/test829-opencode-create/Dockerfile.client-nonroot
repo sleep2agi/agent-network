@@ -1,6 +1,10 @@
 # Local test input, digest recorded in report; never a release artifact.
 ARG DEPENDENCY_IMAGE=anet-test829:client-941
+ARG CLIENT_IMAGE=anet-app-v2:working-bad
+FROM ${CLIENT_IMAGE} AS client
 FROM ${DEPENDENCY_IMAGE}
+COPY --from=client /web-v2 /client-web
+COPY --from=client /app/tests/test-layout-sweep/harness.mjs /client-plumbing/harness.mjs
 COPY server /workspace/server
 COPY agent-network /workspace/agent-network
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
@@ -16,6 +20,8 @@ RUN mkdir -p /home/test829-native /artifacts /run/user/1000 && \
     chown node:node /home/test829-native /artifacts /run/user/1000 && chmod 700 /run/user/1000
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
+ARG CLIENT_SOURCE_COMMIT
+ENV CLIENT_SOURCE_COMMIT=$CLIENT_SOURCE_COMMIT
 ENV TEST829_TMUX_SOCKET=/home/test829-native/tmux.sock
 USER node
 ENTRYPOINT ["bash", "/workspace/tests/test829-opencode-create/native-nonroot.sh"]
