@@ -5,6 +5,9 @@ FROM ${DEPENDENCY_IMAGE}
 COPY server /workspace/server
 COPY agent-network /workspace/agent-network
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
+# git archive can preserve a group-writable package.json from host umask;
+# emulate npm's trusted installed manifest, without touching dependency trees.
+RUN chmod 644 /opt/node_modules/@sleep2agi/agent-node/package.json
 COPY tests/test829-opencode-create /workspace/tests/test829-opencode-create
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT OVERLAY_SOURCE_COMMIT=$SOURCE_COMMIT
