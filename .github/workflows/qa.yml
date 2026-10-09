@@ -225,6 +225,7 @@ on:
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test883-v2-portable-client/**'
       - 'tests/test894-launch-window/**'
+      - 'tests/test894-v1-runtime/**'
       - 'tests/test828-opencode-v2-policy/**'
       - 'tests/test833-user-avatar/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -452,6 +453,7 @@ on:
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test883-v2-portable-client/**'
       - 'tests/test894-launch-window/**'
+      - 'tests/test894-v1-runtime/**'
       - 'tests/test828-opencode-v2-policy/**'
       - 'tests/test833-user-avatar/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -2043,6 +2045,7 @@ jobs:
           - test828-opencode-v2-mcp
           - test829-opencode-create
           - test894-launch-window
+          - test894-v1-runtime
           - test832-opencode-v2-registry
           - test828-opencode-v2-policy
           - test833-user-avatar
