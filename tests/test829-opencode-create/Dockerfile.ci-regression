@@ -6,6 +6,7 @@ FROM ${DEPENDENCY_IMAGE}
 COPY server /workspace/server
 COPY agent-network /workspace/agent-network
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
+RUN ln -s /opt/node_modules/@sleep2agi/agent-node /workspace/agent-node
 COPY tests/test829-opencode-create /workspace/tests/test829-opencode-create
 RUN mv /usr/local/bin/opencode /usr/local/bin/opencode.native-test-fixture
 ARG SOURCE_COMMIT

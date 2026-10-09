@@ -10,8 +10,9 @@ echo "source=$SOURCE_COMMIT uid=$(id -u); no vendor OpenCode on PATH"
 export HOME=/tmp/test829-ci-home
 mkdir -m 700 "$HOME"
 cd /opt/node_modules/@sleep2agi/agent-node
-bun test src/runtime/node-name-652.test.ts
+bun test src/runtime/opencode-create-profile.test.ts src/runtime/node-name-652.test.ts
 cd /workspace
+bun test agent-network/src/opencode-create-security-parity.test.ts
 export COMMHUB_DB=/tmp/test829-ci-audience.db
 bun test server/src/tool-audience-http.test.ts
 export COMMHUB_DB=/tmp/test829-ci-schema.db
