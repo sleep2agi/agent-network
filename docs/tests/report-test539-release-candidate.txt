@@ -1,0 +1,123 @@
+OpenCode V2 coordinated version candidate — 2026-10-09 18:26 CST
+Issue: https://github.com/sleep2agi/agent-network/issues/2544
+Hub: #539 / #829. Neither is complete; no publication/production claim.
+
+Inputs
+------
+Backend main base: ac38e6bb54d2bfb4caa0fc749d9ec8f6e2f582a6 (#2551 merged).
+Tested candidate source: f4bf739a96bf7a9f89504e0796922c5ba25de6d3.
+Candidate versions: Hub 0.9.0-preview.120, runtime 2.5.0-preview.128,
+CLI 2.3.0-preview.162. Package/lock roots and immutable pair agree.
+App product/Web source: e19a4154a3b0c77620e84c7f440a457dca412efd.
+App main merge: 9978eac5820c35d862c811390a9a9c34f3d6d4db (#785).
+Native harness provenance: integration branch test/opencode-v2-daemon-e2e,
+report commit 9f7871580d64b983a521d5cb3d9553fe5ce31f69,
+tested integration source 2d3ad4ec6728f5956c0c0114d149b5c7df146bfa.
+The native harness/client export are inherited from the local dependency image;
+they are NOT claimed to be supplied by the candidate main tree.
+
+Dependency image anet-test829:client-deadline-2d3:
+sha256:a4455fa6be1b07640fd53111783820a5028bf6235c5ce13739a274d0bc870690
+Candidate image anet-test539:release-f4bf:
+sha256:d17e9af239ea9c4b3092bb65da3e117b1b0639c0f6459e40ba24e0094e452d26
+This is cached-dependency local validation, NOT a clean-install build or an
+official release artifact. The local dependency image is a reproduction
+prerequisite; this report does not claim an empty-machine rebuild rehearsal.
+
+Scope and preflight
+-------------------
+Each package bump has a separate commit. No dependency upgrades, launcher,
+ports, secrets, production config or global npm package changes.
+Read-only registry preflight at 18:17 CST:
+  CLI latest .76 / preview .161; .162 absent.
+  runtime latest .58 / preview .127; .128 absent.
+  Hub latest .30 / preview .119; .120 absent.
+These observations do not reserve versions; recheck before publishing.
+Three sync-pinned-versions.sh dry runs passed and targets were reviewed.
+Do not blindly --apply: PINNED_SERVER_VERSION remains the .47 compatibility
+floor under the current registry-resolving implementation. test766 and the
+production launcher runtime-v35-preview47 are intentionally unchanged.
+
+Build failures and corrections
+------------------------------
+Initial source e0c705521ca3debc75578848be157877aac1520d failed environment
+setup: git init -> git: not found (exit 127). No later layer was run.
+705be077331fe1327df34f49f8327ad14fa2ddb8 adds Git to the test image;
+its build and compiled bootstrap smoke passed. Only then were the Chinese and
+English preview doc stamps changed to .162, retaining the not-published caveat.
+Final f4bf739a source was rebuilt and all following gates rerun.
+
+Reproduction (all commands through sg docker; no source/credential mounts)
+------------------------------------------------------------------------
+git archive f4bf739a96bf7a9f89504e0796922c5ba25de6d3 | sg docker -c \
+ 'docker build --build-arg SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3 \
+ -f tests/test539-v2-release-candidate/Dockerfile -t anet-test539:release-f4bf -'
+
+Build PASS:
+  29 tests / 5 files / 86 expectations / 0 failed.
+  Package-lock parity, exact CLI/runtime pair, Hub registry/floor behavior.
+  Runtime compiled: 387 modules; upload helper: 221 modules.
+  Full npm run build CLI: bundle, declarations, all three obfuscations,
+  node-server stamp .162 and anet.cjs wrapper; exit 0.
+
+sg docker -c 'docker run --name anet-test539-release-f4bf-smoke --network none \
+ --cap-drop ALL --security-opt no-new-privileges \
+ -e EXPECTED_SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3 \
+ anet-test539:release-f4bf'
+18:24:52–18:24:55 CST, exit 0:
+  PASS compiled CLI version and runtime help
+  PASS release-note Install/Upgrade/version shape
+  PASS compiled CLI random-bootstrap-password shape (credential not printed)
+The bootstrap Hub is a loopback fixture with an isolated seeded database.
+
+sg docker -c 'docker run --name anet-test539-release-f4bf-docs --cap-drop ALL \
+ --security-opt no-new-privileges \
+ -e EXPECTED_SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3 \
+ anet-test539:release-f4bf docs'
+18:24:54–18:24:56 CST, exit 0; network only for public npm metadata:
+  doc checker selftest 19/19;
+  all three candidate version checks passed (4 stamps / 2 documents);
+  npm CLI latest remains 2.3.0-preview.76.
+
+sg docker -c 'docker run --name anet-test539-release-f4bf-native --user node \
+ --network none --cap-drop ALL --security-opt no-new-privileges \
+ -e EXPECTED_SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3 \
+ -e EXPECTED_CLIENT_SOURCE_COMMIT=e19a4154a3b0c77620e84c7f440a457dca412efd \
+ -e TEST829_LIFECYCLE=1 --entrypoint bash anet-test539:release-f4bf \
+ /workspace/tests/test829-opencode-create/native-nonroot.sh'
+18:25:04–18:25:27 CST, exit 0:
+  UID/GID 1000, user-owned runtime base 0700, real OpenCode v2.0.22.
+  Actual CLI init/register/login and daemon; unauthenticated dispatch refused.
+  Missing unsafe opt-in rejected before request/config side effects.
+  Rendered client -> real Hub -> real daemon -> V2 TUI confirmed.
+  Create cr_3966d8c9-b7d5-42b3-ac7c-c8cb58666e2b succeeded;
+  launch_verified_at=1791541516891; exact child identity/token remained valid.
+  Actual model-stub answer returned in task receipt AND the same TUI.
+  Stop sr_8280a82391a0 completed; old bridge/serve/TUI identities reaped;
+  exact owned tmux sessions gone, config preserved.
+  Start str_22df1045ee48 completed with new generation evidence, rendered TUI,
+  new task receipt and same-TUI answer. Owned harness processes exited.
+
+Repeat the previous command with name anet-test539-release-f4bf-denied,
+--cpus 1 and -e TEST829_DENY_RESTART=1.
+18:25:42–18:26:11 CST, exit 0:
+  Same environment/authentication/create/task/stop layers passed.
+  Create cr_75aee5d3-2cf9-4b84-962c-154edfe65b46;
+  launch_verified_at=1791541565731; stop sr_45b05f460e07.
+  Remove only the stopped test node's explicit unsafe opt-in.
+  Start str_f1a1f6851ae6 -> start_failed / opencode_launcher_exit:1.
+  No new TUI/bridge; no post-denial task layer executed.
+  Owned harness processes exited.
+
+Boundaries / release gate still outstanding
+------------------------------------------
+The native tests use a deterministic loopback model and browser OS-IPC adapter;
+they do not prove native WebView, macOS/Windows packaging, all model-setting
+UI, fork, full chat-loading UX, multi-user isolation or a safe V2 sandbox.
+V2 remains explicit unsafe-tools preview; V1 remains default.
+This report commit only adds evidence. Do not transfer source-image identity
+to the report commit, CI head or a later main commit.
+CI must run for the exact PR head. After merge, formal artifacts must be freshly
+built from a verified full40 main SHA, gated, published Hub -> runtime -> CLI,
+then registry/tarball/behavior verified. No npm tags were moved; latest unchanged.
+The app needs its own main-SHA artifact release. Hub #539/#829 stay doing.
