@@ -1,0 +1,21 @@
+# Post-publication test only. Install the public registry bytes, not branch builds.
+# The local image is used ONLY as a Bun binary source; no product/source is copied.
+ARG BUN_SOURCE=anet-test539:release-f4bf
+FROM ${BUN_SOURCE} AS bun_source
+FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+COPY --from=bun_source /usr/local/bin/bun /usr/local/bin/bun
+ENV npm_config_audit=false npm_config_fund=false
+ARG HUB_SHA256
+ARG NODE_SHA256
+ARG CLI_SHA256
+RUN mkdir /registry-tarballs && \
+    npm pack --ignore-scripts --pack-destination /registry-tarballs @sleep2agi/commhub-server@0.9.0-preview.120 @sleep2agi/agent-node@2.5.0-preview.128 @sleep2agi/agent-network@2.3.0-preview.162
+RUN cd /registry-tarballs && \
+    test "${#HUB_SHA256}" = 64 && test "${#NODE_SHA256}" = 64 && test "${#CLI_SHA256}" = 64 && \
+    printf '%s  %s\n' "$HUB_SHA256" sleep2agi-commhub-server-0.9.0-preview.120.tgz "$NODE_SHA256" sleep2agi-agent-node-2.5.0-preview.128.tgz "$CLI_SHA256" sleep2agi-agent-network-2.3.0-preview.162.tgz | sha256sum -c -
+RUN npm install -g /registry-tarballs/*.tgz
+COPY tests/test539-v2-release-candidate/install-probe.mjs /test539/install-probe.mjs
+COPY tests/test539-v2-release-candidate/registry-smoke.sh /test539/registry-smoke.sh
+ARG TEST_SOURCE_COMMIT
+ENV TEST_SOURCE_COMMIT=$TEST_SOURCE_COMMIT
+ENTRYPOINT ["bash", "/test539/registry-smoke.sh"]

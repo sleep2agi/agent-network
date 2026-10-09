@@ -14,3 +14,10 @@ Docker runs are recorded in `docs/tests/report-test539-release-candidate.txt`.
 This exemption does not exempt the PR from existing version, pairing, Docker
 E2E or documentation checks, nor any formal `release.yml` artifact gate. Branch
 images are test-only. The full40 main-SHA build/publication gate remains required.
+
+`Dockerfile.registry` is a separate post-publication probe for the same three
+versions: it downloads registry tarballs and requires the SHA256 values printed
+by each formal release job, then installs them in an isolated slim image. Only
+the Bun executable comes from the local dependency image. Run it after all three
+versions are publicly visible; preparation of this harness is not a passing
+test. It does not publish, promote tags, or replace native V2/client acceptance.
