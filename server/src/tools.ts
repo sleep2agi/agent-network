@@ -4785,12 +4785,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "awaiting_register" }) }] };
       }
       // failed / rejected / runtime_capability_check_failed — revoke
-      // child-ntok + mark request terminal.
+      // child-ntok + mark request terminal. Registration can precede the
+      // daemon's final capability verdict; don't leave succeeded visible
+      // while this same failure acknowledgement revokes its child token.
       if (row.child_token_id) {
         db.run(`UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = ?1 AND revoked_at IS NULL`, [row.child_token_id]);
       }
       db.run(
-        `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3 WHERE request_id = ?4 AND status IN ('pending', 'delivered')`,
+        `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3 WHERE request_id = ?4 AND status IN ('pending', 'delivered', 'succeeded')`,
         [status, ackError || null, ackedAt, request_id],
       );
       // RFC-026 §9.3 D2 — surface declaration↔reality gap on a

@@ -297,6 +297,26 @@ describe("ack_create_request HANDLER — B2 audit_log daemon_capability_lied", (
 });
 
 describe("ack_create_request HANDLER — pre-existing happy-path stays green (regression)", () => {
+  for (const status of ['failed', 'rejected', 'runtime_capability_check_failed']) {
+    test(`late ${status} after registration cannot leave succeeded with a revoked token`, async () => {
+      seedDaemonWorld();
+      const request_id = `cr_late_${status}`;
+      const child_token_id = `tok_late_${status}`;
+      seedCreateRequest({ request_id, child_token_id, status: 'succeeded' });
+      const handler = buildAckHandler();
+      const reply = await callAck(handler, { request_id, status, error: 'post-register launch verdict' });
+      expect(reply).toMatchObject({ ok: true, status });
+      expect(readRequest(request_id)?.status).toBe(status);
+      expect(readRequest(request_id)?.error).toBe('post-register launch verdict');
+      expect(readRequest(request_id)?.acked_at).toBeGreaterThan(0);
+      expect(readToken(child_token_id)?.revoked_at).not.toBeNull();
+      // Delayed success must not resurrect either the request or its token.
+      await callAck(handler, { request_id, status: 'started' });
+      expect(readRequest(request_id)?.status).toBe(status);
+      expect(readToken(child_token_id)?.revoked_at).not.toBeNull();
+    });
+  }
+
   test("status='started' still flips acked_at without terminal teardown", async () => {
     seedDaemonWorld();
     const reqId = "cr_ack_started_regression";
