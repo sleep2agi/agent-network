@@ -42,3 +42,14 @@ no additional suite/matrix added. Real-Codex Docker E2E must pass before merge.
 Recovery docs: bilingual co-presence guide distinguishes fork side effects from
 later startup failure, forbids timestamp/latest-record inference, and describes
 existing state backups and rollback limitations. No new service/port/secret.
+
+2026-10-09 09:28 CST — first CI failure and narrow correction
+doc-symbol-pins run 37869596998 reported two main-branch CLI line anchors in
+docs/architecture.md shifted by the added source lines. Updated dashboard branch
+10465 -> 10476 and dashboardReleaseTag definition 3095 -> 3100; no runtime edit.
+Docker (anet-test225:completion-packer, network disabled, read-only source and Git):
+python3 scripts/check-doc-symbol-pins.py .
+  OK: 17 scanned, 9 judged, 8 skipped, 0 unresolved refs, 0 drift.
+python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site
+  OK: 18 scanned, 16 judged, 2 skipped, 0 unresolved refs, 0 drift.
+Skipped pins are not verified pins. Full CI / real Codex E2E still pending.
