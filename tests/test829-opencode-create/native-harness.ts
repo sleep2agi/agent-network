@@ -76,6 +76,12 @@ try {
   let row: any;
   check('daemon settles create request', await until(() => { row = db.query('SELECT status, error, child_node_id FROM node_create_requests WHERE request_id=?').get(created.request_id); return ['succeeded', 'failed', 'rejected', 'runtime_capability_check_failed', 'started'].includes(row?.status); }, 60000));
   console.log('create status:', JSON.stringify(row));
+  if (!['started', 'succeeded'].includes(row.status)) {
+    // Diagnostic replay of the exact plain start in the daemon's minimal env.
+    // This does not change the failed request or permit later test layers.
+    const replay = spawnSync(env.ANET_BIN_ABS, ['node', 'start', 'oc829'], { cwd: project, env: { HOME: env.HOME, PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' }, encoding: 'utf8', timeout: 15000 });
+    console.log('failed-stage startup replay:', replay.status, redact(`${replay.stdout}${replay.stderr}`));
+  }
   const cfg = JSON.parse(readFileSync(`${project}/.anet/nodes/oc829/config.json`, 'utf8'));
   check('daemon persisted V2 generation and explicit opt-in', cfg.opencodeGeneration === 'v2' && cfg.opencodeMode === 'copresence' && cfg.flags.opencodeUnsafeTools === true);
   check('create status reports started, not capability failure', ['started', 'succeeded'].includes(row.status));
