@@ -215,7 +215,9 @@ try {
     tmux("send-keys", "-t", TUI, "-l", "STUB_DELAY_3 Reply with exactly HUMAN543");
     await sleep(800);
     tmux("send-keys", "-t", TUI, "Enter");
-    await sleep(1_200);
+    const humanAdmitted = await waitFor(() => stubLog().some(e => e.user === "STUB_DELAY_3 Reply with exactly HUMAN543"), 15_000);
+    check("human turn reached model before submitting network turn", humanAdmitted);
+    if (!humanAdmitted) throw new Error("human turn was not admitted; refusing to test queue order without its precondition");
     const r2 = await runtime.submit("Reply with exactly NET543B", 60_000);
     check("queued network turn answered with its own text (not the human's)", r2.replyText === "NET543B", r2.replyText);
     check("human turn answered in the TUI", await waitFor(() => pane().includes("HUMAN543"), 10_000));
@@ -226,7 +228,9 @@ try {
     // Whatever the TUI does (queue or steer), a human answer must never be
     // claimed as the network reply.
     const pending = runtime.submit("STUB_DELAY_3 Reply with exactly NET543C", 60_000).then((r) => ({ r }), (e) => ({ e }));
-    await sleep(1_000);
+    const networkAdmitted = await waitFor(() => stubLog().some(e => e.user === "STUB_DELAY_3 Reply with exactly NET543C"), 15_000);
+    check("network turn reached model before reverse-order human input", networkAdmitted);
+    if (!networkAdmitted) throw new Error("network turn was not admitted before reverse-order input");
     tmux("send-keys", "-t", TUI, "-l", "Reply with exactly HUMAN543D");
     await sleep(500);
     tmux("send-keys", "-t", TUI, "Enter");
