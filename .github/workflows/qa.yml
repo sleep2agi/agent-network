@@ -219,6 +219,7 @@ on:
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
+      - 'tests/test827-opencode-v2-hub/**'
       - 'tests/test828-opencode-v2-mcp/**'
       - 'tests/test829-opencode-create/**'
       - 'tests/test828-opencode-v2-policy/**'
@@ -441,6 +442,7 @@ on:
       - 'tests/test-codex-external-appserver/**'
       - 'tests/test1225-opencode-copresence-onecommand/**'
       - 'tests/test543-opencode-v2-copresence/**'
+      - 'tests/test827-opencode-v2-hub/**'
       - 'tests/test828-opencode-v2-mcp/**'
       - 'tests/test829-opencode-create/**'
       - 'tests/test828-opencode-v2-policy/**'
@@ -2027,6 +2029,9 @@ jobs:
           # loopback stub model, private tmux socket. Not L1: the image installs a ~200 MB
           # native binary and the run drives a real TUI (~40 s).
           - test543-opencode-v2-copresence
+          # Hub #827 / #539: real CLI -> Hub -> packaged runtime -> V2 TUI,
+          # deterministic loopback model, private tmux; no paid credentials.
+          - test827-opencode-v2-hub
           - test828-opencode-v2-mcp
           - test829-opencode-create
           - test828-opencode-v2-policy
