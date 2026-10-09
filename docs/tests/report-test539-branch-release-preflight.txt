@@ -1,0 +1,63 @@
+OpenCode V2 candidate release preflight — 2026-10-09 18:46 CST
+Hub #539 / authoritative Issue #2544 / candidate PR #2554.
+
+Source and scope
+----------------
+Exact source: d512835fc94f3c0f66cce869143a82509683ad99.
+Branch: release/opencode-v2-delivery (NOT a formal main release).
+Existing .github/workflows/release.yml was dispatched with publish=false.
+The workflow was unchanged relative to candidate base main
+ac38e6bb54d2bfb4caa0fc749d9ec8f6e2f582a6.
+All three build logs explicitly report PUBLISH: false, and identify the
+package/version below. Each publish job is SKIPPED, not a successful publish.
+
+Runs (package mapping confirmed from build logs)
+-----------------------------------------------
+commhub-server 0.9.0-preview.120:
+https://github.com/sleep2agi/agent-network/actions/runs/37919119956
+agent-node 2.5.0-preview.128:
+https://github.com/sleep2agi/agent-network/actions/runs/37919122960
+agent-network 2.3.0-preview.162:
+https://github.com/sleep2agi/agent-network/actions/runs/37919124020
+
+Readback at 18:46 CST
+--------------------
+All three runs: build-tarball SUCCESS, and each of the four actual gates SUCCESS:
+1. Docker install-path smoke (package-specific checks; see scope below).
+2. Existing PINNED_* published-version audit.
+3. Release-note Install/Upgrade/exact-version check.
+4. Getting-started version-claim checks.
+Hub/runtime aggregate jobs SUCCESS; CLI aggregate still queued at this snapshot.
+All three publish jobs SKIPPED. The aggregate verdict always exits 0, so it is
+not used as evidence in place of the actual four gate results above.
+Candidate PR exact-head full CI: 112 SUCCESS / 4 IN_PROGRESS / 46 QUEUED,
+0 failures, 162 total. No merge or publication authorized by this snapshot.
+
+Gate-1 boundaries
+-----------------
+The common job name says real TTY, but package-specific paths differ:
+Hub: clean Bun package install/version/bin checks.
+Runtime: clean npm package install/version/bin/runtime-help checks.
+CLI: clean npm package install/version/help, isolated Hub boot/health,
+bootstrap file mode, login, and expect-driven real-TTY first wizard prompt.
+This workflow does not itself prove full native V2 lifecycle, native app
+WebView behavior, model-setting UI, multi-user behavior or a security sandbox.
+Additional Docker lifecycle/denied-restart evidence is in
+report-test539-release-candidate.txt; separate clean-install evidence is in
+report-test539-package-install.txt.
+
+Next gate
+---------
+Wait for all exact-head PR checks, independently check merge readiness, lock
+the merged head, verify fresh main ancestry, and dispatch NEW formal main-SHA
+builds. Never reuse these branch artifacts as formal release bytes.
+Formal preview release order: Hub .120, runtime .128, then CLI .162;
+latest remains unchanged. Production daemon/runtime pin upgrades and native
+app distribution are separate actions and are not claimed here.
+
+Evidence isolation
+------------------
+This report is stored on test/opencode-v2-package-install, not the candidate
+branch, so recording evidence does not mutate or reset the CI source head.
+No production configuration, global npm installation, release tag, public
+dist-tag or production data changed in this preflight.
