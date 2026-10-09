@@ -15,6 +15,20 @@ function functionBody(name: string): string {
 describe("OpenCode co-presence CLI wiring", () => {
   const body = functionBody("startOpencodeCopresenceOrchestration");
 
+  test("stop drains the frozen OpenCode agent before closing tmux, then retains the residual audit", () => {
+    const stop = functionBody("stopResolvedNode");
+    const drain = stop.indexOf("const drainDeadline");
+    expect(drain).toBeGreaterThan(-1);
+    const guard = stop.slice(stop.indexOf("// OpenCode's bridge owns"), drain);
+    expect(guard).toContain('allowLegacyTmuxNameSweep && process.platform === "linux"');
+    expect(guard).toContain('resolved.profile.runtime === "opencode-cli"');
+    expect(guard).toContain('resolved.profile.opencodeMode === "copresence"');
+    expect(guard).toContain('identity.role === "agent"');
+    expect(guard).toContain('current.kind === "live" && current.birth === identity.birth');
+    expect(stop.indexOf("killTmuxSession(session)")).toBeGreaterThan(drain);
+    expect(stop.indexOf("await reapOwnedGeneration(stopProcesses)")).toBeGreaterThan(drain);
+  });
+
   test("generation policy is checked before touching profiles or live sessions", () => {
     const guard = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal(");
     expect(guard).toBeGreaterThan(-1);

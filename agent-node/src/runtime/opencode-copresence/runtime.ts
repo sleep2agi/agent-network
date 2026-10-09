@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { randomBytes } from "crypto";
+import { cleanupAfterExit } from "./close-cleanup";
 import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { createServer } from "net";
 import { join } from "path";
@@ -1084,7 +1085,7 @@ export async function openOpenCodeCopresenceRuntime(
       async close(mode?: { restart?: boolean }) {
         await core!.close(mode);
         removeInstructions();
-        if (!cleanup()) {
+        if (!await cleanupAfterExit(cleanup)) {
           opts.warn?.("[opencode-copresence] launch-root cleanup deferred; a live descendant still references it");
         }
       },
@@ -1093,7 +1094,7 @@ export async function openOpenCodeCopresenceRuntime(
   } catch (error) {
     await core?.close().catch(() => {});
     removeInstructions();
-    cleanup();
+    await cleanupAfterExit(cleanup);
     throw error;
   }
 }

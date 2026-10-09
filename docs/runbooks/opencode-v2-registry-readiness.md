@@ -43,6 +43,12 @@ Post-readiness reconnect/recovery remains the existing runtime lifecycle.
 5. Stop through the existing runtime close path before changing version.
    Startup failure reaps serve; the outer launcher removes its own instructions
    and the existing identity-checked launch-root cleanup removes the plugin.
+   Close retries the same identity/live-process guarded cleanup for up to five
+   seconds of waiting (at most 50 retries) while the attached TUI exits. Every
+   retry revalidates ownership and live references; it never force-deletes or
+   signals extra processes. Persistent live/unknown references leave the root
+   in place with a warning, for the existing later stale-root sweep. This adds
+   no service, configuration, port, credential source or persistent state.
    Cleanup defers if a live descendant still owns that root. Roll back to a
    previously approved exact-main release via the same existing procedure.
 6. Hub tasks, identities and other persistent business state are not in Git;

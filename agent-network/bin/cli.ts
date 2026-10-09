@@ -12713,6 +12713,31 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
     process.exit(1);
   }
 
+  // OpenCode's bridge owns its private launch root. Closing tmux first also
+  // kills its tee/foreground wrapper, interrupting asynchronous cleanup even
+  // when every process eventually disappears. Give the frozen agent identity
+  // a bounded graceful shutdown before touching its terminal or descendants.
+  // Never widen marker-authorized teardown or signal an unverified pidfile.
+  if (allowLegacyTmuxNameSweep && process.platform === "linux"
+      && resolved.profile.runtime === "opencode-cli" && resolved.profile.opencodeMode === "copresence") {
+    const agents = stopProcesses.filter(identity => identity.role === "agent");
+    for (const identity of agents) {
+      const current = processIdentitySnapshot(identity.pid);
+      if (current.kind === "live" && current.birth === identity.birth) {
+        try { process.kill(identity.pid, "SIGTERM"); } catch { /* reaper audits below */ }
+      }
+    }
+    const drainDeadline = Date.now() + 10_000;
+    while (Date.now() < drainDeadline && agents.some(identity => {
+      const current = processIdentitySnapshot(identity.pid);
+      return current.kind === "unverifiable" || (current.kind === "live" && current.birth === identity.birth);
+    })) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    // Timeout is not success: the unchanged identity reaper below verifies
+    // remaining descendants and refuses the offline receipt on any residual.
+  }
+
   // RFC-030 P2 legacy path — nodes without an identity marker may own three
   // tmux sessions (`<alias>`, `<alias>-appsrv`, `<alias>-桥`). Sweep those
   // names only when marker absence proves this is the ordinary legacy path.

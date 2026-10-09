@@ -1,0 +1,101 @@
+Hub #539/#832 — direct close launch-root drain race
+2026-10-09 Asia/Shanghai. Branch test evidence, NOT published software.
+
+Observed cause and scope
+stopRecordedAttach sends SIGTERM synchronously; delivery is not proof of exit.
+The outer runtime previously attempted identity-checked root cleanup only once.
+An attached TUI still retaining XDG roots could cause safe refusal with no retry.
+The previous test543 green container retained its private root/observer. Adding
+a root assertion alone passed once on old source d7bd7ad41e1c8b393a10832e532b188e63ec101b:
+this race is timing-dependent, so that pass does not invalidate the leak.
+
+Deterministic negative control
+Source 724d9d952ce47183a27d6d6b0df3a222f543652c (d7bd7ad + fixture-only
+643ab39 cherry-pick, without product fix). Before closing the real native V2
+runtime, a test child inherits the exact generated XDG_DATA_HOME and holds it
+for 1500ms after SIGTERM. This models a draining descendant; it is not a claim
+that every native TUI takes that long. A six-second child watchdog plus exact
+child cleanup bounds the fixture. No model/permission/network behavior changes.
+Container anet-test543-close-drain-red, image
+sha256:9bcfd14fdcb3f97097f655dc8f45da33980bfc25615d3d19a29c7b8f6afb63ce.
+Exit1: earlier native layers pass, processes/launcher disappear, but the
+private-root assertion fails and docker diff retains .anet-opencode-launch-bs8H1B.
+Raw stdout and /tmp/art/report-test543.txt remain in this isolated container.
+
+Product correction
+Source 643ab39c3cb24b4aa0a72599add62ce932814ca9 includes implementation
+1882e43cb32242137e0c0d4693eeedbebf034a3f plus the identical drain fixture.
+close-cleanup.ts retries the EXISTING cleanup callback at most 50 times with
+up to five seconds waiting and a monotonic deadline. Each attempt revalidates
+the original tracked root, ownership and live references. No force deletion,
+extra signalling or broad scan-based process killing was introduced. A still
+live, unknown or mismatched identity remains refused. Both outer normal close
+and failed-open cleanup use the bounded helper. Existing stale sweep remains.
+Runbook updated together with code; no port, secret source, persistent state,
+production startup script or configuration changes.
+
+Verified native green
+Container anet-test543-close-drain-green, image
+sha256:2a49ffa833b3d3d6bae8a9737db7f9c94972596ef532c9f8b23298001f24b0ac.
+Exit0: 41 tests/153 assertions; all seven native layers including root removal
+pass. Post-exit docker diff contains no .anet-opencode-launch entry. It still
+refuses default-safe V2; opt-in is not removed. Transport fake is not real MCP
+execution evidence.
+
+CPU1 exposed an independent fixture timing assumption on this source: Layer5
+sent the network turn after a fixed1200ms without observing human admission;
+the model received NET543B first. Container anet-test543-close-drain-green-cpu1
+exited1, later layers skipped. Do not count this as lifecycle acceptance.
+Fixture-only correction d10d7ee8a80271a202c01d60c6b0c7aaf0087a44 waits for the
+exact model request before either order experiment (bounded15s), retaining the
+order assertion. Only test543/harness.ts differs from643ab39; product unchanged.
+Image sha256:4c814b569352a163c810e14678e89b33fada50f803e8c381b85affe4c09da8e9.
+Both anet-test543-close-drain-observed and anet-test543-close-drain-observed-cpu1
+exited0, 41 tests/153 assertions plus all native layers. Both post-exit docker
+diff outputs contain no private launch root. No failure was waived or hidden.
+
+Guard regression
+Container anet-opencode-close-guard-unit (1882e43 product source): child-env,
+attach-tui and close-cleanup suites: 31 pass, 379 assertions. Includes live
+descendant/PID mismatch, symlink ownership, exact attach signal and bounded
+refusal. Expanded shared runtime suite was first attempted in the test543
+Node18.20.4/Bun1.3.1 image:64 pass/2 fail (556 assertions), one fixture timeout
+at5000ms and Node ESM bundle import SyntaxError. Preserve this incompatible
+environment attempt; do not attribute its exit1 to a successful regression.
+Re-executed shared runtime/child-env/close-cleanup (without tmux attach tests)
+in the pinned test832 Node22.23.3/Bun1.3.14 image at643ab39, no timeout override:
+anet-opencode-close-runtime-node22 exited0,58 pass/521 assertions. The previously
+timed-out capacity test passed217ms; Node transport ESM probe passed5497ms.
+
+Full CLI and first-turn MCP gates (exact source643ab39)
+test827 image sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac,
+container anet-test827-close-drain: exit0, CLI45 tests/198 assertions, runtime69
+tests/336 assertions; all real CLI/Hub/native TUI layers pass, including human
+queue, error/recovery, refused restart preserving the live generation, stop
+with observer/launcher removal and cold safe-mode refusal.
+test832 image sha256:ae0a5cff46f70582d12493aff13e525f44554557e0f1675da4ad6f5d89faaac8,
+container anet-test832-close-drain: exit0,69 tests/336 assertions, package build,
+three real first-turn MCP dispatch/identity/receipt runs (0/1200/3500ms delay),
+wrong-node-token witnessed negative, sender spoof refusal, missing-tool/auth/
+deadline refusal before model use. Both ran --network none, no source mounts,
+EXPECTED_SOURCE_COMMIT=643ab39c3cb24b4aa0a72599add62ce932814ca9. Their inputs are
+unchanged by the later test543-only fixture correction; do not label the images
+as built from d10d7ee. Raw reports retained under /artifacts in those containers.
+
+Reproduction
+Clean checkout at the exact red or green SHA; Docker only, no source mounts:
+sg docker -c 'docker build -f tests/test543-opencode-v2-copresence/Dockerfile -t close-drain-test .'
+sg docker -c 'docker run --network none close-drain-test'
+Repeat green with --cpus 1. Set SOURCE_COMMIT metadata to the checkout SHA.
+The negative source is retained on test/opencode-close-drain-red (test only,
+not for merging/releasing). Positive commits are on the PR2550 integration branch.
+Native tests use Bun1.3.1, fixed @opencode/cli2.0.22, private tmux -L test543,
+unset TMUX/TMUX_PANE, exact owned-session cleanup, loopback stubs, no production
+credentials. Never print/copy generated launchers or credential-bearing roots.
+
+Delivery state
+No release, global npm mutation or production restart. PR2545 older head now
+has159 successful checks but conflicts with main; checks alone do not authorize
+claiming it merged. PR2549/2550 remain draft. Final-source CI remains required.
+Skill exit-race lesson appended to anet-opencode-v2-delivery and validated in
+Docker with quick_validate (PyYAML6.0.3). #539 remains doing.
