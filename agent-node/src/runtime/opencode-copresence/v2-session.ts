@@ -246,6 +246,41 @@ async function waitForV2Health(
   throw new Error(`OpenCode v2 serve readiness timed out after ${timeoutMs}ms`);
 }
 
+/** The HTTP server can be healthy before its location-scoped MCP startup
+ * finishes. Never spend a model turn warming up an empty Code Mode catalog. */
+export async function waitForOpenCodeV2Commhub(
+  url: string,
+  password: string,
+  timeoutMs: number,
+  isRunning: () => boolean = () => true,
+): Promise<void> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("OpenCode v2 CommHub MCP readiness requires a positive finite timeout");
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isRunning()) throw new Error("OpenCode v2 serve exited before CommHub MCP readiness");
+    let body: any;
+    try {
+      body = await fetchOpenCodeJson(url, password, "/api/mcp", {}, Math.max(1, Math.min(1000, deadline - Date.now())));
+    } catch (error: any) {
+      if (Date.now() >= deadline || error?.name === "TimeoutError" || error?.name === "AbortError") break;
+      const status = /HTTP (\d{3})/.exec(error?.message ?? "")?.[1];
+      throw new Error(`OpenCode v2 CommHub MCP readiness probe failed${status ? ` (HTTP ${status})` : ""}; check the local V2 API`);
+    }
+    if (!Array.isArray(body?.data)) throw new Error("OpenCode v2 CommHub MCP readiness returned an invalid server list");
+    const state = body.data.find((entry: any) => entry?.name === "commhub")?.status?.status;
+    if (state === "connected") return;
+    if (state !== undefined && state !== "pending") {
+      // Upstream errors may contain headers/URLs; report only a known state.
+      const safeState = ["failed", "disabled", "needs_auth"].includes(state) ? state : "unknown";
+      throw new Error(`OpenCode v2 CommHub MCP not ready (${safeState}); check Hub reachability and node credentials`);
+    }
+    await new Promise((r) => setTimeout(r, Math.min(100, Math.max(0, deadline - Date.now()))));
+  }
+  throw new Error(`OpenCode v2 CommHub MCP readiness timed out after ${timeoutMs}ms; no session or model turn was started`);
+}
+
 /** Entries after `messageId` (oldest first), or null when `messageId` is not
  *  in the session history (yet). */
 async function readEntriesAfter(
@@ -316,6 +351,10 @@ export async function openVettedOpenCodeV2Copresence(
   const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
   try {
     const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
+    if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
+      await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000,
+        () => child.exitCode === null && child.signalCode === null);
+    }
     const created = await fetchOpenCodeJson(url, password, "/api/session", {
       method: "POST",
       body: JSON.stringify({

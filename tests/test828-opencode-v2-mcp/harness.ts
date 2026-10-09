@@ -1,7 +1,7 @@
 // Docker-only: real pinned V2, real isolated Hub, deterministic model tool calls.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { wireOpenCodeV2CommhubMcp } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-copresence/v2-session.ts";
+import { wireOpenCodeV2CommhubMcp, waitForOpenCodeV2Commhub } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-copresence/v2-session.ts";
 
 const artifact = process.env.ARTIFACT_DIR ?? "/artifacts";
 const root =
@@ -99,6 +99,10 @@ const proxy = Bun.serve({
   async fetch(req) {
     const body = req.method === "POST" ? await req.text() : undefined;
     const parsed = body ? JSON.parse(body) : {};
+    if (parsed.method === "initialize" && process.env.TEST832_DELAY_MS) {
+      await pause(Number(process.env.TEST832_DELAY_MS));
+    }
+    if (process.env.TEST832_REJECT_AUTH === "1") return new Response("Unauthorized", { status: 401 });
     const response = await fetch(hub + "/mcp", {
       method: req.method,
       headers: req.headers,
@@ -335,6 +339,23 @@ try {
     "V2 rejects unauthenticated access",
     (await fetch(base + "/api/info")).status === 401,
   );
+  if (process.env.TEST832_READINESS === "1") {
+    const started = Date.now();
+    try {
+      await waitForOpenCodeV2Commhub(base, "test828", Number(process.env.TEST832_TIMEOUT_MS ?? 10000));
+      check("MCP readiness gate completed", process.env.TEST832_EXPECT_FAILURE !== "1");
+      if (process.env.TEST832_DELAY_MS) check("gate waited for delayed handshake", Date.now() - started >= Number(process.env.TEST832_DELAY_MS));
+    } catch (error: any) {
+      if (process.env.TEST832_EXPECT_FAILURE !== "1") throw error;
+      console.log("READINESS_ERROR " + error.message);
+      check("expected actionable MCP failure", /CommHub MCP (not ready \(failed\)|readiness timed out)/.test(error.message));
+      check("failure did not call the model", evidence.length === 0 && current === undefined);
+      console.log("PASS: readiness failure before model turn");
+      process.exitCode = 0;
+      // Let finally stop both private processes and capture evidence.
+      throw Object.assign(new Error("TEST832_EXPECTED_FAILURE"), { expectedReadinessFailure: true });
+    }
+  }
   async function probe(label: string, args: any, tool = "send_task") {
     current = {
       name: "execute",
@@ -388,7 +409,7 @@ try {
   // V2 may expose an empty Code Mode inventory on its first turn while MCP
   // connects. Record that limitation and require real discovery before dispatch.
   let discovered = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < (process.env.TEST832_READINESS === "1" ? 0 : 3); attempt++) {
     const found = await probe(`discovery-${attempt}`, {});
     if (found?.items?.some((i: any) => i.path === "tools.commhub.send_task")) {
       discovered = true;
@@ -396,7 +417,7 @@ try {
     }
     await pause(300);
   }
-  check("actual Code Mode catalog includes send_task", discovered);
+  if (process.env.TEST832_READINESS !== "1") check("actual Code Mode catalog includes send_task", discovered);
   const marker = "MCP828_POSITIVE";
   const output = await probe("positive", {
     alias: "receiver828",
@@ -477,6 +498,8 @@ try {
       ),
   );
   console.log("PASS: real V2 MCP task and node identity");
+} catch (error: any) {
+  if (!error.expectedReadinessFailure) throw error;
 } finally {
   await opencode?.stop("opencode.log");
   await server.stop("hub.log");
