@@ -17,6 +17,14 @@ Review follow-up 2026-10-09 11:42 Asia/Shanghai:
   mounts, --network none, exit 0; 44 CLI + 35 runtime tests and L0-L7 passed.
   This is a mounted-test replay, not a new immutable source image. The earlier
   clean-image pass alone did not establish assistant-specific TUI rendering.
+  Negative control 11:43-11:44: anet-test827-no-assistant-r2 mechanically strips
+  only ANSWER827_ from captured pane text, leaving prompt echoes and Hub receipt
+  intact. L0-L2 and the exact Hub reply passed; L3 failed at "assistant network
+  reply visible in human TUI", exit 1, as intended. No repository code mutated.
+  Initial control launcher could not import a long data URL in Bun; rerun used
+  Bun stdin, and only the second container is behavioral evidence.
+  Isolated HTTP probe: shared stub default returns TOKEN; explicit prefix returns
+  ANSWER827_TOKEN. Both passed; existing #543 default behavior is preserved.
 Environment: Docker, Node 22, Bun 1.3.14, real @opencode/cli@2.0.22,
 real source-built and exact-pair-validated agent-node, real CommHub server,
 private tmux socket /run/test827-tmux.sock. Docker runtime --network none;
