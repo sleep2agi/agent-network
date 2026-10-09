@@ -254,7 +254,7 @@ try {
   check("harness ran to completion", false, `${error?.stack ?? error}\n${error?.startupOutput ?? ""}`);
 } finally {
   await runtime?.close().catch(() => {});
-  try { tmux("kill-server"); } catch {}
+  try { tmux("kill-session", "-t", `=${TUI}`); } catch {}
   mcp.stop(true);
   stub.kill("SIGKILL");
   rmSync(root, { recursive: true, force: true });
