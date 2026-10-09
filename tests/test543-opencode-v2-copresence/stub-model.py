@@ -6,6 +6,9 @@
 import json, re, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = sys.argv[2] if len(sys.argv) > 2 else None
+# Optional response-only marker for rendered-output tests; default #543 behavior
+# stays unchanged. The marker must never be included in the submitted prompt.
+RESPONSE_PREFIX = sys.argv[3] if len(sys.argv) > 3 else ""
 def last_user(body):
     for m in reversed(body.get("messages", [])):
         if m.get("role") == "user":
@@ -31,7 +34,7 @@ class H(BaseHTTPRequestHandler):
         if "STUB_FAIL" in u:
             self._json(400, {"error": {"message": "stub provider refused: STUB_FAIL requested", "type": "invalid_request_error"}}); return
         m = re.search(r"Reply with exactly (\S+)", u)
-        text = m.group(1) if m else "STUB_OK"
+        text = RESPONSE_PREFIX + (m.group(1) if m else "STUB_OK")
         d = re.search(r"STUB_DELAY_(\d+)", u)
         if d: time.sleep(int(d.group(1)))
         if not body.get("stream"):

@@ -9,6 +9,7 @@ const project = join(root, "project");
 mkdirSync(project, { recursive: true, mode: 0o700 });
 const hub = "http://127.0.0.1:9287";
 const artifact = process.env.ARTIFACT_DIR!;
+const responsePrefix = "ANSWER827_";
 const env = { ...process.env, TERM: "xterm-256color" };
 const pause = (ms = 200) => new Promise(r => setTimeout(r, ms));
 function check(name: string, ok: unknown, detail = "") {
@@ -47,6 +48,7 @@ async function api(path: string, body?: unknown) {
   return r.json() as Promise<any>;
 }
 async function task(text: string, failed = false) {
+  check("response-only marker is absent from network prompt", !text.includes(responsePrefix));
   const sent = await api("/api/task", { alias: "oc827", task: text, network_id: networkId });
   check("Hub accepts task with concrete id", sent.ok && sent.message_id);
   let row: any;
@@ -65,7 +67,7 @@ const server = spawn("bun", ["src/index.ts"], {
 let hubLog = "";
 server.stdout!.on("data", b => { hubLog += b; });
 server.stderr!.on("data", b => { hubLog += b; });
-const stub = spawn("python3", ["/test827/stub-model.py", "18827", join(artifact, "stub.log")], { stdio: "inherit" });
+const stub = spawn("python3", ["/test827/stub-model.py", "18827", join(artifact, "stub.log"), responsePrefix], { stdio: "inherit" });
 let cfgPath = "";
 try {
   console.log("L0 environment");
@@ -98,19 +100,19 @@ try {
   check("TUI actually rendered", await until(() => /ctrl\+p/.test(pane())), pane().slice(-1000));
   console.log("L3 Hub task -> model -> task receipt -> same TUI");
   const reply = await task("Reply with exactly NET827A");
-  check("exact network reply with Hub sender envelope", reply === "[oc827] NET827A", reply);
-  check("network reply visible in human TUI", await until(() => pane().includes("NET827A")));
+  check("exact network reply with Hub sender envelope", reply === `[oc827] ${responsePrefix}NET827A`, reply);
+  check("assistant network reply visible in human TUI", await until(() => pane().includes(`${responsePrefix}NET827A`)));
   console.log("L4 human turn and queued network task");
   check("human types in real TUI", tmux("send-keys", "-t", "=oc827:", "-l", "STUB_DELAY_3 Reply with exactly HUMAN827").status === 0);
   await pause(500);
   tmux("send-keys", "-t", "=oc827:", "Enter");
   check("human turn reached model before network dispatch", await until(() => readFileSync(join(artifact, "stub.log"), "utf8").includes("HUMAN827")));
-  check("queued task gets its own answer", await task("Reply with exactly QUEUED827") === "[oc827] QUEUED827");
-  check("human answer remains visible in shared TUI", await until(() => pane().includes("HUMAN827")));
+  check("queued task gets its own answer", await task("Reply with exactly QUEUED827") === `[oc827] ${responsePrefix}QUEUED827`);
+  check("assistant human reply remains visible in shared TUI", await until(() => pane().includes(`${responsePrefix}HUMAN827`)));
   console.log("L5 provider failure and recovery");
   const error = await task("STUB_FAIL now", true);
   check("upstream error preserved", error.includes("stub provider refused"), error);
-  check("session recovers", await task("Reply with exactly NET827B") === "[oc827] NET827B");
+  check("session recovers", await task("Reply with exactly NET827B") === `[oc827] ${responsePrefix}NET827B`);
   console.log("L6 policy refusal preserves the existing live generation");
   const originalConfig = readFileSync(cfgPath, "utf8");
   const safe = JSON.parse(originalConfig);
@@ -123,7 +125,7 @@ try {
   check("refusal did not replace the live TUI", tmux("display-message", "-p", "-t", "=oc827:", "#{pane_pid}").stdout === panePid);
   check("refusal did not rewrite the profile", readFileSync(cfgPath, "utf8") === safeConfig);
   writeFileSync(cfgPath, originalConfig, { mode: 0o600 });
-  check("existing bridge still handles tasks", await task("Reply with exactly PRESERVED827") === "[oc827] PRESERVED827");
+  check("existing bridge still handles tasks", await task("Reply with exactly PRESERVED827") === `[oc827] ${responsePrefix}PRESERVED827`);
   writeFileSync(join(artifact, "tui-live.txt"), pane());
   console.log("L7 lifecycle and cold fail-closed safe mode");
   await cli(["node", "stop", "oc827"]);

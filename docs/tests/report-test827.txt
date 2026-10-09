@@ -7,6 +7,16 @@ Clean-image replay: source c2d9557515e68daf874f50bf889d858ccbaff0f8,
 no source mounts, --network none, EXPECTED_SOURCE_COMMIT matched: exit 0.
 44 CLI + 35 runtime unit tests and all L0–L7 checks passed again.
 Image manifest: sha256:430f245b9944f2ecb6ad91ff888895268421c7b6fc2589aa1680d5a95a1a5664.
+Review follow-up 2026-10-09 11:42 Asia/Shanghai:
+  PR review 4226394767 correctly identified that bare NET827A/HUMAN827 pane
+  checks could match echoed user prompts. The stub now optionally prefixes its
+  assistant response with ANSWER827_; test827 requires this response-only marker
+  in the TUI, while submitted prompts never contain it. Shared test543 default
+  remains unchanged (empty prefix).
+  Container anet-test827-review: exact image above + two read-only test-file
+  mounts, --network none, exit 0; 44 CLI + 35 runtime tests and L0-L7 passed.
+  This is a mounted-test replay, not a new immutable source image. The earlier
+  clean-image pass alone did not establish assistant-specific TUI rendering.
 Environment: Docker, Node 22, Bun 1.3.14, real @opencode/cli@2.0.22,
 real source-built and exact-pair-validated agent-node, real CommHub server,
 private tmux socket /run/test827-tmux.sock. Docker runtime --network none;
