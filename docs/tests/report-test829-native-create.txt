@@ -1,5 +1,5 @@
 test829 real daemon creation — FAILED, expected delivery gate remains closed
-Date: 2026-10-09 14:30 CST
+Date: 2026-10-09 14:26–14:29 CST
 Scope: isolated Docker, no production write, no public package/release.
 Integrated parent: 268bed27 (full parents PR2550 54dac56030931fde07cd298ecce1be4a5f8c509d
 and PR2551 e67a777efc6b71fca8b9bfc72446e4b6d919b4e6).
