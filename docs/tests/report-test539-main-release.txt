@@ -1,0 +1,79 @@
+OpenCode V2 coordinated main release — 2026-10-09 CST
+Issue: https://github.com/sleep2agi/agent-network/issues/2544
+Hub: #539 / #829. Neither task is fully accepted by this release record.
+
+Source and formal release gates
+-------------------------------
+PR #2554 merged at 19:43:03 CST after 162/162 checks succeeded and the
+separate mergeability assertion passed. Locked PR head:
+8fdf716fb471a6763f32f015cc1eb90e364e3af0.
+All three official workflows build the same full main commit:
+34a97a1e095f72b06d66429691fa46d4a1be67fd.
+Main ancestry was checked before each dispatch, and again by release.yml.
+Dependency order: Hub, runtime, CLI. No branch tarballs are public artifacts.
+
+Hub @sleep2agi/commhub-server@0.9.0-preview.120:
+  https://github.com/sleep2agi/agent-network/actions/runs/37925501482
+  Complete SUCCESS. Registry verified 19:49:17 CST (152 seconds after publish).
+  Publish job 113804102525.
+  SHA256 8d61bc19ad13f6e8decad35710cf6f49cb2874a933fb345000331ec4c00fd43b
+  npm shasum 2443ea97934d84be9ad64e915b554ed983916ce7
+Runtime @sleep2agi/agent-node@2.5.0-preview.128:
+  https://github.com/sleep2agi/agent-network/actions/runs/37926131082
+  Complete SUCCESS. Registry verified 19:53:23 CST (100 seconds after publish).
+  Publish job 113805842314.
+  SHA256 b22b66e849a8d1ecfb250baaa17a99cf782cce0f069fcc4893d42818128c43cd
+  npm shasum 7cbe2ca414ce42f24e56f95da5a9f96af124804a
+CLI @sleep2agi/agent-network@2.3.0-preview.162:
+  https://github.com/sleep2agi/agent-network/actions/runs/37926575188
+  Four individual gates passed; aggregate success alone is not acceptance.
+  Publish job 113807567226; npm publish succeeded at 19:57:06 CST.
+  npm explicitly said the package is being processed and may take minutes.
+  At 20:12:13 CST, the 900-second visibility checker exited 1; workflow
+  conclusion FAILURE. This is NOT a rejected publish: version/shasum were
+  still invisible and preview remained .161. Direct version endpoint 404.
+  SHA256 40869e1497d3b325d31461c45e8473fee0ede1581f67bea01bad6750c52d6741
+  npm shasum 01c9732e27f9489a707e6dd809761ff187a1b50f
+  No duplicate dispatch/version bump was performed. Visibility UNVERIFIED.
+
+Public registry clean-install acceptance
+---------------------------------------
+NOT RUN: prerequisite CLI registry visibility did not pass. Do not advance
+to dependent install/E2E layers or call this test green. All three official
+artifact hashes are now recorded above; no candidate bytes were substituted.
+Harness input commit: 252f43fe06ff361aee6fd4d112b489d85f28c1af.
+Dockerfile: tests/test539-v2-release-candidate/Dockerfile.registry
+Runner: tests/test539-v2-release-candidate/registry-smoke.sh
+Checks public registry bytes against each official publish job's SHA256,
+then installs in an isolated image and runs with --network none.
+Only Bun is copied from the local dependency image; no candidate product
+source, installed product packages or workspace fallbacks are copied.
+Bun dependency image anet-test539:release-f4bf:
+sha256:d17e9af239ea9c4b3092bb65da3e117b1b0639c0f6459e40ba24e0094e452d26
+This dependency is explicit; this is not an empty-machine DR rehearsal.
+
+Related client progress and remaining acceptance
+-----------------------------------------------
+App PR https://github.com/sleep2agi/agent-network-app/pull/787 merged at
+19:58:53 CST after 17 SUCCESS + 1 expected nightly SKIPPED and an independent
+mergeability assertion. App main: dfc2bf97fa6d175d8e7756c6bccdd4c0fedf09a7.
+Model-change UI has a real 90-second deadline and ignores late poll results;
+it does not cancel server work or silently resubmit. Docker evidence is in
+agent-network-app/docs/tests/report-test829-model-ui-deadline.txt at commit
+973c8331badc19d7285f80f6b446019a74a96213 (tested source 4500c233e38fbdc2db5932f5edbe92f4fdd1ab9c).
+No signed desktop package or TestFlight workflow was dispatched here.
+
+Boundaries
+----------
+Latest tags remain Hub 0.9.0-preview.30, runtime 2.5.0-preview.58,
+CLI 2.3.0-preview.76 at the 20:08 CST metadata recheck. Preview tags were
+Hub .120, runtime .128, CLI .161. The CLI workflow's final 20:12 observation
+still had preview .161. Do not claim the coordinated release fully live.
+No production rollout, launcher change, global npm install, native client
+release, or TMWork operation was performed. TMA client HOLD remains in force.
+V2 remains explicit unsafe-tools preview, not a general safe-sandbox claim.
+Registry install smoke is not V2 TUI/native WebView/model-switch E2E.
+The earlier test674 worker failure remains tracked, not claimed root-fixed.
+Recovery boundaries are unchanged: this release does not alter service
+startup, ports/proxy/tunnel, secret sources, backups, or rollback topology.
+Current production data/config are not supplied by these npm artifacts.
