@@ -4,7 +4,7 @@
 // stub model); here a protocol-shaped fake (fixtures/fake-opencode-v2.ts)
 // stands in for `opencode serve`.
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { OPENCODE_V2_BACKEND } from "../opencode-backend";
@@ -113,11 +113,13 @@ describe("V2 core against a protocol-shaped fake serve", () => {
 
   async function open(extraEnv: NodeJS.ProcessEnv = {}, startupTimeoutMs = 10_000) {
     root = mkdtempSync(join(tmpdir(), "anet-543-core-"));
-    chmodSync(FAKE, 0o755);
+    const binary = join(root, "fake-opencode-v2.ts");
+    copyFileSync(FAKE, binary);
+    chmodSync(binary, 0o755);
     const warnings: string[] = [];
     session = await openVettedOpenCodeCopresence({
       backend: OPENCODE_V2_BACKEND,
-      binary: FAKE,
+      binary,
       env: { PATH: process.env.PATH ?? "", HOME: root, ...extraEnv },
       cwd: root,
       workDir: root,

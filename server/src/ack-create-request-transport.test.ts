@@ -98,6 +98,29 @@ beforeEach(() => {
 afterAll(cleanup);
 
 describe("#344 ack_create_request real in-process MCP transport", () => {
+  test("explicit launch proof survives transport while malformed booleans are rejected", async () => {
+    const requestId = 'cr_transport_verified';
+    seedRequest(requestId);
+    const { client, server } = await connectClient();
+    try {
+      const read = () => db.get<{ launch_verified_at: number | null }>(
+        'SELECT launch_verified_at FROM node_create_requests WHERE request_id=?1', requestId);
+      const bad = await client.callTool({ name: 'ack_create_request', arguments: {
+        request_id: requestId, status: 'started', child_pid: 7777, launch_verified: 'true',
+      } });
+      expectTransportValidationError(bad);
+      expect(read()?.launch_verified_at).toBeNull();
+      const good = await client.callTool({ name: 'ack_create_request', arguments: {
+        request_id: requestId, status: 'started', child_pid: 7777, launch_verified: true,
+      } });
+      expect(responseJson(good).ok).toBe(true);
+      expect(read()?.launch_verified_at).toBeGreaterThan(0);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   test("accepts runtime_capability_check_failed plus string runtime through the SDK zod gate", async () => {
     const requestId = "cr_transport_accept";
     seedRequest(requestId);

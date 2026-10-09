@@ -221,6 +221,7 @@ on:
       - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test827-opencode-v2-hub/**'
       - 'tests/test828-opencode-v2-mcp/**'
+      - 'tests/test829-opencode-create/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test828-opencode-v2-policy/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -444,6 +445,7 @@ on:
       - 'tests/test543-opencode-v2-copresence/**'
       - 'tests/test827-opencode-v2-hub/**'
       - 'tests/test828-opencode-v2-mcp/**'
+      - 'tests/test829-opencode-create/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test828-opencode-v2-policy/**'
       - 'tests/test1178-codex-upgrade-recovery/**'
@@ -2033,6 +2035,7 @@ jobs:
           # deterministic loopback model, private tmux; no paid credentials.
           - test827-opencode-v2-hub
           - test828-opencode-v2-mcp
+          - test829-opencode-create
           - test832-opencode-v2-registry
           - test828-opencode-v2-policy
           - test1191-windows-steer-contract

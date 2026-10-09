@@ -1,0 +1,32 @@
+OpenCode V2 create contract after cleanup landed on main
+Date: 2026-10-09 (Asia/Shanghai)
+
+Source: 7d46da77352e6a95f0d04c5be63e616b467637c7
+Main ancestor: 313581b1246a00e0c121e0e67234d5680b16615e (PR #2550)
+PR #2550 merge: 2026-10-09T09:45:57Z; 161 SUCCESS, zero pending/failing.
+Merge used repository assert-pr-mergeable and exact --match-head-commit.
+
+Restack inspection:
+git merge-tree --write-tree 5ea3c149496ce3a114913d62736d4f276c794c13 6ac459eb0c1a4cd136112ba0d21fb20c3770588a
+Result tree: ee5541fc3ac7bc8cb91d6b594dc34341a5e1f366
+Actual restack source tree is identical to this tree (git diff --exit-code).
+Product paths agent-node/src, agent-network and server/src also match the
+previous real-client integration source 08f7c721d8dfb2e92441de4817aecf887fd20e20.
+Other differences are integration harnesses/reports. Content equality does
+not transfer CI results or certify a release artifact.
+
+Docker regression (all commands through sg docker):
+Dependency image anet-test827:close-drain
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac
+docker build --build-arg SOURCE_COMMIT=7d46da77352e6a95f0d04c5be63e616b467637c7 -f tests/test829-opencode-create/Dockerfile.ci-regression -t anet-test829:cleanup-restack-7d4 .
+Result image sha256:ce5c8bc514ec3b89854fc8bd1b455ec433a70b3493db4f9acab522c69eaafe1f
+docker run --name anet-test829-cleanup-restack-7d4 --network none --cap-drop ALL --security-opt no-new-privileges -e EXPECTED_SOURCE_COMMIT=7d46da77352e6a95f0d04c5be63e616b467637c7 anet-test829:cleanup-restack-7d4
+UID 1000; no source mounts; isolated HOME/SQLite; no vendor OpenCode on PATH.
+Container exit=0. Raw log retained in container and /tmp/test829-ci-art/report.txt.
+
+Tests per invocation: 30,26,59,24,4,16,12,47,20,6 = 244 passed; zero failed.
+Assertions: 132,93,299,71,4,58,295,185,92,18 = 1247.
+PASS: targeted CI regressions; not real OpenCode startup or full unit domains.
+
+Boundary: fresh CI for 7d46da77 is required and was triggered by push.
+No package version bump, formal release, production restart or global install.

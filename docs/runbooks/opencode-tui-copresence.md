@@ -1,5 +1,87 @@
 # OpenCode TUI 共存运行手册
 
+## OpenCode V2 远程创建接口（#829 开发中）
+
+daemon 发现 `opencode --version` 为 V2 时，通用 runtime-readiness 只报告
+`unknown`（CLI 已发现，provider/auth 尚未确认），不把 V1 的 opencode.ai HEAD
+结果当成所有 V2 provider 的结论。本地/局域网 provider 不依赖该站点；反之，
+站点可达也不证明选定模型可用。客户端显示未检测仍允许配置，创建/启动时的
+精确包身份、显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、
+其他 runtime 的认证/网络判据不因此放宽。这里的版本字符串不是可信包身份。
+
+以下是 Hub/daemon 参数与落盘切片，**不是已经上线的客户端入口或真实 V2
+生命周期验收**。现有 CLI、原生 V2 权限、客户端界面和正式发布仍各有门禁。
+
+新接口沿用 runtime `opencode-cli`，在 `node_spec.flags` 里显式传
+`opencodeGeneration: "v2"` 和 `opencodeUnsafeTools: true`。
+V2 仍是高风险 preview：所有本地工具可用，只能用于可信任务，不能默认勾选、
+从其它 runtime/模板继承授权，或把无授权拒绝改成自动重试。
+Hub 与 daemon 都校验类型、runtime 和 opt-in；这两个字段误放顶层会被拒绝。
+旧 Hub/daemon 不认识 flags 中的字段时应明确拒绝，不能偷偷退回 V1。
+
+daemon 直接写子节点配置（不调用 CLI create）：代际写到顶层
+`opencodeGeneration`，V2 模式写为 `opencodeMode: "copresence"`；
+权限保留在 `flags.opencodeUnsafeTools`。省略代际保持旧 V1 行为，
+显式 V1 不接受这条新建接口的 unsafe 开关。已有节点不迁移。
+
+候选 V2 配置的 `opencodeMode: "copresence"` 使普通 `anet node start`
+进入 TUI/桥编排；内部桥使用 `ANET_COPRESENCE_BRIDGE=1` 防止递归启动。
+此选择不授予 unsafe 权限，V1 仍保持下文显式 `--copresence` 行为。
+daemon 对编排启动器的完成判定、远程停止/重启仍须独立验证，不代表已发布。
+
+Linux 候选实现会在原生 V2 就绪后写节点目录内的
+`opencode-launch-health.json`（0600，无凭据）。daemon 接受正常退出的
+共存启动器前，核对本轮写入时间、bridge/serve/TUI 的 PID 与启动 ticks、
+serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 复用、
+死进程或非零退出不放行。运行代际关闭/serve 退出时清理自己的记录。
+此文件是可重建的运行证据，不是需要从备份恢复的数据，不能复制旧记录
+冒充就绪。Linux daemon 创建和远程 start 完成判定使用此证据路径，其他平台未验收。
+不要把 Hub 首次注册的 `succeeded` 或 launcher 的退出 0 单独当作健康；
+应等 daemon 延迟检查结束，验证 token 仍有效，再验真实任务终态。
+没有新增常驻服务、端口、环境变量或密钥来源；既有升级/回滚流程不变。
+
+候选 Hub 为新建请求增加可空 `launch_verified_at` 列（自动加列，不回填旧数据）。
+只有绑定 daemon 在启动器退出及本轮三进程检查通过后，以真实 bridge PID
+回报 `launch_verified: true` 才记录；失败清除此证据，迟到成功不能复活失败。
+GET `/api/node-create-requests` 按原网络权限返回该列和 `child_node_id`。
+客户端必须检查本次请求、失败状态、精确节点身份及在线状态；V2 还必须
+等明确启动证据，不能从 `acked_at` 推断。V2 在旧 Hub/daemon 缺证据时仅显示尚未确认。
+客户端依据实际提交的代际启用此门；旧 V1 不要求它不提供的 V2 证据。
+该时间是一次启动检查记录，不是持续健康保证。升级/回滚仍用 main SHA 门禁，
+旧程序可忽略新增可空列；请求历史随原 Hub 数据库加密备份恢复，不伪造确认时间。
+
+远程 `start_node` 的 V2 共存候选先回报 `starting`，有界等待启动器退出，
+再验证本次三进程身份，成功后以真实 bridge PID 回报 `started`。失败、信号、
+超时或证据不匹配回报 `start_failed`，不能以启动器 kill-0 成功替代就绪。
+旧 Hub 若未声明完成回执能力，明确返回 `opencode_start_completion_unsupported`，
+应按正式升级流程升级 Hub/daemon，而非绕过判定。同一 daemon 生命周期内同请求
+重放不重复启动；不保证 daemon 重启后的持久去重。35 秒启动器超时只向本次
+持有的启动器发送 SIGTERM，不按名称清扫。失败后应检查残留，不代表完整子树
+已停止；使用已有身份校验的停止流程，禁止盲删状态文件。
+
+daemon 新建 OpenCode 节点时，先复用 CLI 的 no-follow 私密目录与 Git
+未跟踪校验，再在同一运行用户的 `HOME/.anet/opencode-runtime-bindings/`
+建立外部身份记录，最后原子写入含 token 的 0600 配置。不能只复制项目
+目录后补造绑定；已有配置只有相同 create request/node_id、alias 且绑定
+完整时才允许重试。绑定或私密路径被篡改时应调查并走显式重建，不能删除
+身份记录来绕过拒绝。CLI 与 daemon 的四个安全模块为字节一致镜像，
+由 `opencode-create-security-parity.test.ts` 阻止单边修改。
+恢复时节点私密配置及上述 HOME 绑定属于加密备份数据，不属于 Git 源码；
+必须恢复至匹配的规范项目路径，否则重新注册/创建。此补丁不改端口、
+代理、常驻服务入口、凭据来源或正式发布流程，也未完成整机恢复演练。
+
+验证入口为 `tests/test829-opencode-create/Dockerfile`，绑定完整源码 SHA，
+运行时传同一 `EXPECTED_SOURCE_COMMIT`，报告在容器
+`/tmp/art/report-test829.txt`。目前测试真实 Hub handler 存取与 daemon 写盘，
+启动进程是测试替身；不据此宣称真实 V2 上线成功。下一门需要精确版本就绪、
+真 daemon/Hub/V2 注册和任务回执、停止/再启动及客户端 UI 回读。
+
+此切片不新增常驻服务、端口、代理或密钥来源；新增可空证据列如上。仍用本文的启动流程，
+凭据由已有 Hub/节点密钥流程提供，不写入测试报告。正式升级只从经过门禁的
+main 完整 SHA 构建；回滚须回到已验证版本，先停止新增 V2 节点，不能让旧版本
+静默接管 V2 配置。数据库/节点数据来自原有备份，clone 不包含这些数据；
+本切片测试不构成灾难恢复演练证明。
+
 状态：共存功能在 preview 通道。V2 受限预览由 PR #2380 引入，首次随
 `agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107` 发布；
 这不是当前通道版本声明。升级时使用仓库版本配对表指定的精确 CLI/runtime，

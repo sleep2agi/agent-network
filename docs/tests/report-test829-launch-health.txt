@@ -1,0 +1,99 @@
+test829 — daemon V2 launcher identity verdict
+Date: 2026-10-09 15:22 +08:00
+Scope: Hub #539 / #829; Issue sleep2agi/agent-network#2544; draft PR #2551.
+No production changes, merge, npm/client release or TestFlight submission.
+
+Product source: 535c6eb0484468812e3d25c1a88ed675e9f95c0d.
+The V2 tmux launcher is not the long-lived runtime. The daemon now waits for
+its explicit successful exit (bounded to 35 seconds from launch), then checks
+private startup evidence against live Linux bridge/serve/TUI PID+start ticks,
+serve ancestry, config argv and session generation. This V2 verdict precedes
+the generic +5-second kill-0 branch, including when the launcher is still live.
+Only a matching launcher PID mapping is forgotten; verified bridge PID is
+recorded. Nonzero/signal/unknown exit and stale/missing identities fail closed.
+The record is private, atomic, ephemeral and contains no token or port.
+Runbook: docs/runbooks/opencode-tui-copresence.md. No new service or secrets.
+This is Linux startup evidence, not continuous monitoring or OS sandboxing.
+V1 and Hub token authentication semantics are not changed by this slice.
+
+Targeted non-root Docker, no vendor binary on PATH, network none:
+image anet-test829:health-535c
+sha256:45c93843d037c264c8f5739105050479bf6663161d0fa4c3c2661c485f18ae40
+container anet-test829-health-535c: exit 0, 131 tests / 740 assertions.
+  profile/writer 30/132; launcher health + V2 core 24/79;
+  security parity 4/4; CLI/mode 14/45; HTTP audience 12/295;
+  schemas/validation 47/185.
+container anet-test829-daemon-535c: exit 0, 84 tests / 213 assertions.
+  create-node-daemon and private writer wiring.
+Sleep-only config-writer fixture no longer counts as successful V2 startup.
+Unit probes cover dead/reused bridge, serve, TUI; stale timestamp/generation;
+wrong ancestry/config/session; failed launcher exit; malformed evidence;
+private record cleanup and preservation of a newer generation.
+
+Native positive integration source: 20e3dcc77ea94024fd7c05fe165cc48cdaf8612f.
+Includes unmerged registry PR #2550 and CLI/disposal PR #2545 stack: this is
+NOT proof that PR #2551 alone or current main has the complete native chain.
+image anet-test829:native-health-20e3
+sha256:99e3174d86deaefb522138a35fa908a714cd7043254dac1d14f573e032357578
+container anet-test829-native-health-20e3: exit 0.
+Real Hub/daemon/CLI and @opencode/cli 2.0.22; loopback model stub;
+private HOME, SQLite and tmux; network none; no production credentials.
+PASS environment/auth; unsafe-opt-in refusal before side effects; actual MCP
+remote create; persisted V2 config; rendered TUI; final daemon verdict;
+child token remains active; task receipt; exact [oc829] ANSWER829_REMOTE829;
+answer visible in same TUI; owned test processes exited.
+Request cr_d8b05f15-8061-4e80-b862-f3ff262daee6.
+07:17:04Z launcher PID 219; recovered bridge PID 275;
+07:17:10Z daemon: OpenCode launcher exited 0; live bridge/serve/TUI generation
+verified. The log's +5000ms denotes the check threshold, not actual duration.
+
+Deterministic negative source: b667a7350fe3ca43145c34a662241519b804cfa6.
+image anet-test829:native-health-b667-full
+sha256:4ebe19230f1c45a3b475634f1d26b69f51302588de5053ad365e90585e6da19b
+container anet-test829-native-generation-negative-b667: wrapper exit 0.
+Recipe: tests/test829-opencode-create/native-generation-negative.sh.
+Inside Docker only, replace the published evidence generation with
+ses_test829mismatch, leaving the real session unchanged, then rebuild.
+This deliberately mutated copy is NOT an unmodified-source passing claim.
+Request cr_391596ad-837a-449c-9c8d-7bbe581b0745.
+07:20:53Z daemon rejects: runtime_capability_check_failed, launcher exit=0,
+stale or mismatched generation. Native harness fails as expected, exit 1;
+wrapper verifies exact refusal, cleanup and that no L4 task layer executed.
+Hub row still reads succeeded after earlier registration, but tokenRevoked=true.
+That pre-existing Hub status/late-ack discrepancy remains OPEN; do not use
+request status alone as usable-node evidence. No auth bypass was introduced.
+
+Failed/inconclusive attempts preserved, not counted as passing gates:
+- 0ceb regression: 9 V2 fixture failures, EPERM chmod root-owned fake binary.
+  629a copies fake binary to owned temp directory before chmod; fixed.
+- 49d12738 native: functional chain passed but harness timed out, exit 124,
+  because a grandchild held stdout open. Not an overall passing suite.
+- f059 native positive exited 0, but still-live launcher bypassed the new
+  proof check; dead-TUI negative advanced too far and failed at TUI answer.
+  535c moved bounded V2 verdict before the generic kill-0 check.
+- anet-test829-native-dead-tui-20e3 exits 1: injection was too late; new
+  guard rejected the test setup before killing TUI. This does NOT prove
+  native dead-TUI refusal. Dead-PID unit coverage is separate evidence.
+- anet-test829-types-629a exits 127: tsc binary missing. No typecheck claim.
+- short-SHA b667 image was built but never run; full-SHA image above used.
+
+Dependency base anet-test827:close-drain
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac.
+Native input uses exact git archive and builds bundles inside Docker, but
+reuses cached dependency layers: exploratory integration, NOT release gate.
+Artifacts: named containers /artifacts/{report-test829-native.txt,daemon.log,
+hub.log,bridge.log,tui.txt}. Logs redact fixture tokens. Do not publish raw DB.
+Reproduce native: git archive <full native SHA> | sg docker -c 'docker build
+ -f tests/test829-opencode-create/Dockerfile.native-cached
+ --build-arg SOURCE_COMMIT=<full native SHA> -t <test-image> -'; then
+sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=<full SHA>
+ <test-image>'. Negative: same b667 image/environment, --entrypoint bash,
+command /workspace/tests/test829-opencode-create/native-generation-negative.sh.
+
+CI on 535c at 15:20 +08 had no reported failure but many pending jobs;
+not all-green. No merge/release, no product remote-stop/restart/model/client UI
+validation in this slice. Test harness process-group cleanup is not a product
+stop lifecycle test. #539/#829 remain doing.
+Next: actual daemon stop/start lifecycle gate and the Hub late-ack status
+discrepancy; then model/client UI. Releases require exact merged main SHA
+and new formal gates, never these branch-built artifacts.

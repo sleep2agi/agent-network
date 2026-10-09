@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p /tmp/test829-ci-art
+exec > >(tee /tmp/test829-ci-art/report.txt) 2>&1
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+test "$SOURCE_COMMIT" = "${EXPECTED_SOURCE_COMMIT:?}"
+test "$(id -u)" != 0
+test "$(stat -c %u /run/user/1000)" = "$(id -u)"
+test "$(stat -c %a /run/user/1000)" = 700
+if command -v opencode; then echo 'FAIL: unexpected vendor binary'; exit 1; fi
+echo "source=$SOURCE_COMMIT uid=$(id -u); no vendor OpenCode on PATH"
+export HOME=/tmp/test829-ci-home
+mkdir -m 700 "$HOME"
+cd /opt/node_modules/@sleep2agi/agent-node
+bun test src/runtime/opencode-create-profile.test.ts src/runtime/node-name-652.test.ts
+bun test src/runtime/opencode-copresence/launcher-health.test.ts src/runtime/opencode-copresence/v2-session.test.ts
+bun test src/runtime/opencode-copresence/v2-readiness.test.ts src/runtime/runtime-readiness.test.ts
+bun test src/runtime/opencode-start-completion.test.ts src/runtime/start-daemon.test.ts
+cd /workspace
+bun test agent-network/src/opencode-create-security-parity.test.ts
+bun test agent-network/src/opencode-start-mode.test.ts agent-network/src/opencode-copresence-cli.test.ts
+export COMMHUB_DB=/tmp/test829-ci-audience.db
+bun test server/src/tool-audience-http.test.ts
+export COMMHUB_DB=/tmp/test829-ci-schema.db
+bun test server/src/create-node-tool-schema.test.ts server/src/create-node-validate.test.ts
+export COMMHUB_DB=/tmp/test829-ci-late-ack.db
+bun test server/src/ack-create-request.test.ts server/src/ack-create-request-transport.test.ts
+export COMMHUB_DB=/tmp/test829-ci-create-status.db
+bun test server/src/node-create-request-status-http.test.ts
+echo 'PASS: targeted CI regressions; not real OpenCode startup or full unit domains'
