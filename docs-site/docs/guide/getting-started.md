@@ -4,7 +4,8 @@
      本页有多处**带版本号的行为断言**(某个版本上第一条命令会怎样),它们在发版那一刻
      同时变假。release gate 会拿正在发的版本和这两条戳比对,不一致就拦下发布并列出
      每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
-     只标"现状"断言;讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
+     latest 标记已核对的通道版本，preview 标记已验证的发布候选，不代表 npm 已发布；
+     讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.161 -->
 
@@ -58,7 +59,8 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-现在的 `latest`（`2.3.0-preview.76`）与 `preview`（`2.3.0-preview.161`）都打印随机密码，形如 `anet-` 加 22 位十六进制字符。
+已核对的 `latest`（`2.3.0-preview.76`）与已验证的 `preview` 发布候选（`2.3.0-preview.161`）都打印随机密码，形如 `anet-` 加 22 位十六进制字符。
+**候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
 凭据也落在 `~/.anet/server/admin-utok.json`,里面只有

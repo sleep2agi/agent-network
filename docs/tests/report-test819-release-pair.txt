@@ -62,7 +62,18 @@ Documentation gates — anet-test225:completion-packer:
     --version <candidate-version> --verify-latest-from-npm
   RESULT: all 3 candidates pass; 4 stamps across 2 docs; latest .76 unchanged.
   New notes for all 3 packages have Install and Upgrade sections with exact
-  target versions. Do not deploy the updated website before npm publication.
+  target versions.
+
+Review correction — 2026-10-09 10:52 CST:
+  PR2543 discussion_r4226124524 correctly identified that docs-site changes
+  auto-deploy on main, before the sequential npm publications can finish.
+  The earlier instruction to not deploy was not an enforceable release gate.
+  Both guides now identify .161 as a validated release candidate, explicitly
+  not a claim of current npm preview availability, and direct users to npm
+  dist-tags for installable versions. The existing candidate stamps and release
+  check remain intact; no deploy workflow or publication gate is bypassed.
+  Re-ran all three check-doc-version-claims.py release invocations above inside
+  anet-test225:completion-packer: PASS, 4 stamps / 2 docs each, latest .76.
 
 Source feature evidence remains PR2542's 157/157 CI and
 report-test822-fork-transport.txt (105 pass / 589 assertions focused chain).
