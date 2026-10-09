@@ -137,6 +137,7 @@ OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可�
 - 安全模式固定 OpenCode 1.18.34(过渡期兼容 1.18.1)，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。若未来放宽版本 pin，必须同时重新验证 wildcard 优先级并恢复可证明的默认 deny（或重新生成完整内建 deny 列表），不得直接沿用当前逐项列表。1.18.1 → 1.18.34 已按源码逐项比对(#541):环境变量开关、config 路径/managed config/指令发现、permission 模块、内建工具集合、serve/attach 参数与 session REST 路由均未变,逐项 deny 列表可沿用。
 - server 使用 detached process group；停止前复核 PID、PGRP、Linux start ticks，身份漂移时拒绝误杀。
 - `SIGINT`、`SIGTERM` 和 tmux 关闭 pane 使用的 `SIGHUP` 全部进入同一 cleanup；少了 `SIGHUP` 会在 `tmux kill-session` 后遗留 detached server。
+- Linux OpenCode 共存的正常 `node stop` 应先给已记录且 birth 匹配的 agent 最多 10 秒完成清理，再关闭终端并审计残留进程；不要以直接关闭 tmux 替代正常停止。`test827` 同时检查生成的 registry observer 和 attach launcher 已消失，因为进程退出不代表私有启动文件清理完成。这一停止顺序修复仍须经过 main 合并/正式制品门，分支测试不代表已部署。
 - 启动桥时显式传递 PATH、`ANET_AGENT_NODE_BIN` 和可选 `ANET_OPENCODE_SAFE_BASE`，不能依赖长期 tmux server 的陈旧环境。
 - 节点模型必须以非空 `provider/model` 形式传入 REST message body；copresence 启动会拒绝空值或非法形式。只写顶层 anet config、却不传 REST model，会让 OpenCode 回退到 preset 默认模型，因此禁止静默回落。
 
