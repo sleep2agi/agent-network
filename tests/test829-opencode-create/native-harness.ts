@@ -74,7 +74,7 @@ try {
   console.log('create result:', redact(JSON.stringify(created)));
   check('actual MCP create accepted with request id', created.ok && created.request_id);
   let row: any;
-  check('daemon settles create request', await until(() => { row = db.query('SELECT status, error, child_pid, child_node_id FROM node_create_requests WHERE request_id=?').get(created.request_id); return ['succeeded', 'failed', 'rejected', 'runtime_capability_check_failed', 'started'].includes(row?.status); }, 60000));
+  check('daemon settles create request', await until(() => { row = db.query('SELECT status, error, child_node_id FROM node_create_requests WHERE request_id=?').get(created.request_id); return ['succeeded', 'failed', 'rejected', 'runtime_capability_check_failed', 'started'].includes(row?.status); }, 60000));
   console.log('create status:', JSON.stringify(row));
   const cfg = JSON.parse(readFileSync(`${project}/.anet/nodes/oc829/config.json`, 'utf8'));
   check('daemon persisted V2 generation and explicit opt-in', cfg.opencodeGeneration === 'v2' && cfg.opencodeMode === 'copresence' && cfg.flags.opencodeUnsafeTools === true);
