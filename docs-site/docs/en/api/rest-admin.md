@@ -124,7 +124,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L487) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
+The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
 
@@ -147,7 +147,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L540) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
 
 Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 

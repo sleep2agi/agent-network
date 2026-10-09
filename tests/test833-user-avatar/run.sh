@@ -8,3 +8,5 @@ COMMHUB_DB=/tmp/test833-validation.db bun test src/avatar-validate.test.ts
 COMMHUB_DB=/tmp/test833-http.db bun test src/user-avatar-http.test.ts
 # Independent process and database for the existing identity/session regressions.
 COMMHUB_DB=/tmp/test833-sessions.db bun test src/auth-sessions-http.test.ts
+COMMHUB_DB=/tmp/test833-acl.db bun test src/agent-acl-http.test.ts
+COMMHUB_DB=/tmp/test833-presence.db bun test src/member-presence-http.test.ts
