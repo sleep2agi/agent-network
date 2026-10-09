@@ -16,11 +16,13 @@
 [Docs](https://anet.sh/en/) · [Download the desktop app](https://github.com/sleep2agi/agent-network-app/releases/latest) · [Get started](https://anet.sh/en/guide/getting-started) · [中文](./README.md) · **English**
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
-  <img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network desktop app: online agents on the left, a conversation with one node on the right">
+  <source media="(prefers-color-scheme: dark)" srcset="docs-site/docs/public/hero/desktop-chat-dark.png">
+  <img src="docs-site/docs/public/hero/desktop-chat-light.png" width="880" alt="Agent Network desktop app: agents grouped by role, with an example conversation showing delegation, reporting and follow-up">
 </picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="Desktop Tasks page: project filters on the left, and columns for Backlog, In progress and Done"></picture>
+Command your agents through chat, with delegation and follow-up in one window.
+
+<sub>Shared showcase images from <a href="https://anet.sh">anet.sh</a>. People, tasks and metrics shown are sample data; screenshots show the Chinese UI.</sub>
 
 </div>
 
@@ -31,10 +33,30 @@
 - 💬 **One client for all of it** — desktop (macOS / Windows) and Android: dispatch work like chat and exchange files; the Tasks page covers projects, subtasks, GitHub Issues and times to the second; the UI switches between Chinese and English; node and Hub logs are available; rules files, skills, project folders, remote model switches and restarts remain. iOS is TestFlight only, and the public link is not open yet.
 - 🔐 **Self-hosted, local-first, open source** — the Hub and its SQLite data run on hardware you control (the desktop app even bundles a local Hub). No hosted SaaS. Apache 2.0.
 
-<table><tr>
-<td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/rules-dark.webp"><img src="docs/assets/readme/rules-light.webp" alt="Reading a node's CLAUDE.md rules file in the desktop app"></picture></td>
-<td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/files-dark.webp"><img src="docs/assets/readme/files-light.webp" alt="Browsing a node's project folder in the desktop app"></picture></td>
-</tr></table>
+## From delegation to follow-up
+
+### Task board: see who is doing what
+
+Backlog, In progress and Done sit side by side, with owners, agent teammates and due-date reminders on each card.
+
+<img src="docs-site/docs/public/features/tasks-board.webp" width="880" alt="Example task board: three columns of cards showing owners, agent avatars, priorities, progress and due-date reminders">
+
+<details>
+<summary>Show more: task details and scheduled tasks</summary>
+
+### Task details: people and agents working together
+
+Keep participants, descriptions and comments together instead of scattering task context across chats.
+
+<img src="docs-site/docs/public/features/task-detail.webp" width="880" alt="Example task details: a sidebar with human and agent participants, project, due date, description and comments">
+
+### Scheduled tasks: routine work, on time
+
+Schedule briefings, health checks and reviews, then inspect the next run and execution history.
+
+<img src="docs-site/docs/public/features/scheduled-tasks.webp" width="880" alt="Example scheduled tasks: a schedule list and a daily briefing showing frequency, time zone and execution history">
+
+</details>
 
 ## Quick start in 30 seconds
 
