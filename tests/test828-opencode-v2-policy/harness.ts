@@ -171,6 +171,14 @@ try {
       },
     );
     let log = "";
+    // Register now: serve may exit before readiness fails and finally runs.
+    const exited = new Promise<void>((resolve) => {
+      child.once("exit", () => resolve());
+      child.once("error", (error) => {
+        log += `spawn error: ${error.message}\n`;
+        resolve();
+      });
+    });
     child.stdout!.on("data", (b) => (log += b));
     child.stderr!.on("data", (b) => (log += b));
     const headers = {
@@ -283,7 +291,7 @@ try {
       }
     } finally {
       child.kill("SIGTERM");
-      await new Promise<void>((r) => child.once("exit", () => r()));
+      await exited;
       writeFileSync(artifact + "/" + mode + ".log", log);
     }
   }

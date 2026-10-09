@@ -33,6 +33,18 @@ exit 0 at 2026-10-09 11:53 Asia/Shanghai; all 24 tool cases plus six 401 checks
 passed with the stricter unchanged/absent-file assertions.
 Image: sha256:76db3169bb5b33014b5976be6ad62b65cdc662dbcc70445a328426c44469f31d.
 
+Review follow-up, 2026-10-09 around 12:00 Asia/Shanghai:
+Both Docker base images are now pinned by digest. Register the child exit
+promise immediately after spawn so cleanup also completes for an already-dead
+server. A read-only executable fixture replaces opencode for the early-exit
+negative control: its version probe passes, then serve exits 7 with the saved
+log TEST828_EARLY_EXIT. Container anet-test828-exited failed as expected with
+exit 1 in 15.209 seconds, not the runner's 180-second timeout.
+Fresh standalone image replay anet-test828-reviewed (--network none, no source
+mounts) exited 0: all 24 tool cases and six unauthenticated 401 checks passed.
+Reviewed image:
+sha256:5032cfbfe868c8a2f62e18ccb3b7d60eb8abbbb76025a04e959d22c46006dc2f.
+
 Reproduce (Docker only, repository root):
   sg docker -c 'docker build -t anet-test828:native-policy -f tests/test828-opencode-v2-policy/Dockerfile .'
   sg docker -c 'docker run --name anet-test828-final --network none anet-test828:native-policy'
