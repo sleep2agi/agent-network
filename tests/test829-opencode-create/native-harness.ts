@@ -70,7 +70,22 @@ try {
   const provider = `${project}/.anet/nodes/oc829/.config/opencode`;
   mkdirSync(provider, { recursive: true, mode: 0o700 });
   writeFileSync(`${provider}/opencode.json`, JSON.stringify({ model: 'stub/stub-model', provider: { stub: { npm: '@ai-sdk/openai-compatible', name: 'Stub', options: { baseURL: 'http://127.0.0.1:18827/v1', apiKey: 'test-only' }, models: { 'stub-model': { name: 'Stub' } } } } }), { mode: 0o600 });
-  const created = await mcp('create_node', { daemon_node_id: daemonId, network_id: networkId, node_spec: { name: 'oc829', runtime: 'opencode-cli', model: 'stub/stub-model', flags: { opencodeGeneration: 'v2', opencodeUnsafeTools: true } } });
+  let created: any;
+  if (process.env.TEST829_CLIENT_DRIVER) {
+    console.log('L3 browser client -> real authenticated Hub -> real daemon');
+    const child = Bun.spawn(['node', process.env.TEST829_CLIENT_DRIVER], {
+      env, stdin: new Blob([JSON.stringify({ hub, token, networkId, daemonId })]), stdout: 'pipe', stderr: 'pipe',
+    });
+    const deadline = setTimeout(() => child.kill(), 100000);
+    let out = '', err = '', code = -1;
+    try { [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]); }
+    finally { clearTimeout(deadline); }
+    console.log(redact(out + err));
+    check('rendered client created and confirmed actual V2 node', code === 0);
+    created = JSON.parse(out.split('\n').find(l => l.startsWith('CLIENT_RESULT '))!.slice(14));
+  } else {
+    created = await mcp('create_node', { daemon_node_id: daemonId, network_id: networkId, node_spec: { name: 'oc829', runtime: 'opencode-cli', model: 'stub/stub-model', flags: { opencodeGeneration: 'v2', opencodeUnsafeTools: true } } });
+  }
   console.log('create result:', redact(JSON.stringify(created)));
   check('actual MCP create accepted with request id', created.ok && created.request_id);
   let row: any;
