@@ -1,0 +1,22 @@
+# Test-only artifact inspection. Never publish or relabel these candidate bytes.
+ARG CANDIDATE_IMAGE=anet-test539:release-f4bf
+FROM ${CANDIDATE_IMAGE} AS packed
+USER root
+RUN test "$SOURCE_COMMIT" = f4bf739a96bf7a9f89504e0796922c5ba25de6d3
+RUN mkdir -p /test-only-tarballs && \
+    cd /workspace/server && npm pack --ignore-scripts --pack-destination /test-only-tarballs && \
+    cd /workspace/agent-node && npm pack --ignore-scripts --pack-destination /test-only-tarballs && \
+    cd /workspace/agent-network && npm pack --ignore-scripts --pack-destination /test-only-tarballs && \
+    sha256sum /test-only-tarballs/*.tgz
+
+FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+COPY --from=packed /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=packed /test-only-tarballs /test-only-tarballs
+ENV npm_config_audit=false npm_config_fund=false
+RUN npm install -g /test-only-tarballs/*.tgz
+COPY tests/test539-v2-release-candidate/install-smoke.sh /test539/install-smoke.sh
+COPY tests/test539-v2-release-candidate/install-probe.mjs /test539/install-probe.mjs
+ARG TEST_SOURCE_COMMIT
+ENV TEST_SOURCE_COMMIT=$TEST_SOURCE_COMMIT
+ENV PRODUCT_SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3
+ENTRYPOINT ["bash", "/test539/install-smoke.sh"]
