@@ -172,6 +172,31 @@ describe("#622 probeRuntimeReadiness —— 状态判定", () => {
     expect(e.auth).toBe("not_required");
   });
 
+  test("V2 provider is node-specific: neither Zen connectivity nor V1 auth proves readiness", async () => {
+    for (const verdict of ["reachable", "unreachable", "hang"] as const) {
+      const d = deps({ bins: { opencode: OK("opencode v2.0.22") },
+        files: [".local/share/opencode/auth.json"], net: { "opencode.ai": verdict } });
+      const e = (await probeRuntimeReadiness(["opencode-cli"], d))["opencode-cli"];
+      expect(e.state).toBe("unknown");
+      expect(e.ok).toBe(false);
+      expect(e.cli).toBe("found");
+      expect(e.version).toBe("2.0.22");
+      expect(e.auth).toBe("unknown");
+      expect(e.network).toBe("skipped");
+      expect(e.reason).toContain("目标节点配置");
+      expect(d.calls.head).toEqual([]);
+    }
+  });
+
+  test("V1 Zen failure and missing OpenCode CLI remain blocking", async () => {
+    const v1 = deps({ bins: { opencode: OK("1.18.34") }, net: { "opencode.ai": "unreachable" } });
+    expect((await probeRuntimeReadiness(["opencode-cli"], v1))["opencode-cli"].state).toBe("no_network");
+    expect(v1.calls.head).toEqual(["https://opencode.ai"]);
+    const missing = deps();
+    expect((await probeRuntimeReadiness(["opencode-cli"], missing))["opencode-cli"].state).toBe("missing_cli");
+    expect(missing.calls.head).toEqual([]);
+  });
+
   test("codex 共享登录:只报个数,ready 时 reason 提示", async () => {
     const d = deps({ bins: { codex: OK("0.155.1") }, files: [".codex/auth.json"], shared: 27 });
     const e = (await probeRuntimeReadiness(["codex-sdk"], d))["codex-sdk"];
