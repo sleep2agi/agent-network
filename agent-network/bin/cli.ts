@@ -2276,6 +2276,17 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     console.error(`[anet] ❌ OpenCode --copresence requires runtime=opencode-cli (node "${displayName}" is runtime=${runtime}).`);
     process.exit(1);
   }
+  // Refuse before saving the profile or replacing an existing bridge/TUI.
+  // Otherwise the actionable V2 policy error is buried/truncated in the
+  // bridge tail and misreported as a 30-second launcher timeout (#827).
+  const generationRefusal = opencodeStartGenerationRefusal(resolved.profile, {
+    copresence: true,
+    configFile: join(nodesDir(), resolved.id, "config.json"),
+  });
+  if (generationRefusal) {
+    console.error(`[anet] ❌ ${generationRefusal}`);
+    process.exit(1);
+  }
   if (!tmuxAvailable()) {
     console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
     process.exit(1);
@@ -5335,6 +5346,15 @@ function printOpencodeCreationSecurityDisclosure(id: string, profile: Profile): 
     unsafeTools,
     configFile: join(nodesDir(), id, "config.json"),
   })) console.warn(line);
+  if (opencodeGenerationOfConfig(profile) === "v2") {
+    console.log(`\n[anet] ⚠ OpenCode V2 co-presence PREVIEW:`);
+    console.log(`[anet]    HIGH RISK: flags.opencodeUnsafeTools=true enables every local tool; trusted tasks only.`);
+    console.log(`[anet]    V1 permission environment switches do not enforce the V2 safety policy.`);
+    console.log(`[anet]    Cwd: project cwd. Use Docker/VM for process and filesystem isolation.`);
+    console.log(`[anet]    CommHub: agent-node receives tasks and publishes final text; a node-scoped MCP is configured.`);
+    console.log(`[anet]    Model-driven MCP tool calls require separate verification; plain messages are logged, not shown as TUI toasts.`);
+    return;
+  }
   console.log(`\n[anet] ${unsafeTools ? "⚠" : "🛡"} OpenCode tool/cwd policy:`);
   if (unsafeTools) {
     console.log(`[anet]    Built-in: bash / read / glob / grep / edit / write / list / task / skill ENABLED`);
@@ -5358,9 +5378,14 @@ async function configureOpencodeRuntime(
   interactive = Boolean(process.stdin.isTTY),
 ): Promise<void> {
   wizardOpts.runtime = "opencode-cli";
-  const currentPin = readEffectivePin();
-  console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
-  console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+  if (wizardOpts["opencode-generation"] === "v2") {
+    console.log(`[anet] 请确保已安装 OpenCode V2 (exact): ${opencodeGenerationInstallCommand("v2")}`);
+    console.log(`[anet]   V1 and V2 both install 'opencode': use separate npm prefixes and select the V2 prefix on PATH.`);
+  } else {
+    const currentPin = readEffectivePin();
+    console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
+    console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+  }
 
   if (!interactive) {
     wizardOpts._opencodePreset ||= "anthropic";
@@ -6453,6 +6478,10 @@ async function createCommand(idOverride?: string) {
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(id, profile);
+    console.log(`\nStart: anet node start ${id}${profile.opencodeMode === "copresence" ? " --copresence" : ""}`);
+    closeRL();
+    if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0);
+    return;
   } else if (profile.grokCopresence === true) {
     printGrokCopresenceWarning(id, profile.tools, "configured");
     console.log(`[anet]   One command brings up the node and its shared TUI together.`);
