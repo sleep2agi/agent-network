@@ -13,7 +13,8 @@ Copied server/{package.json,src,bin} from the clean candidate main SHA into a
 temporary Docker build context BEFORE the version-only bump. Copied the
 existing compat suite; shallow-cloned desktop-v0.2.224 into compat/apps/.
 Built with BASE_VERSION=0.9.0-preview.117, image anet-hub118-compat:test.
-Image ID: sha256:9dc9c3a940e8bcb7801fe34d1a9db08230f4f50fd3b86062898d9ed64807ef81.
+Image config digest: sha256:9dc9c3a940e8bcb7801fe34d1a9db08230f4f50fd3b86062898d9ed64807ef81.
+Image manifest ID: sha256:8a061b323f76648cbe5d4f3b094d11660cb4b7d1bf9139ab26e61d0ed1a17996.
 No test fixture changes or assertion relaxations were needed.
 
 Docker runs used sg docker, --rm --cpus=2 --network=none, no published ports:
@@ -48,3 +49,37 @@ Pending: this version PR CI/merge, exact-main-SHA formal release gates,
 registry visibility, tarball integrity and installed-package verification.
 No npm publication or production upgrade is claimed by this report.
 No running nodes, real schedules, global packages, credentials or data changed.
+
+Post-publication acceptance — 2026-10-09 08:18 CST:
+- Version PR #2536: 154/154 CI success, standalone merge gate exit 0.
+- Merged/published SHA: 0193863b1ec79ea931ec283ec5d05167d4eb43c9.
+  Fresh-main ancestry checked; server/ matches the tested PR head exactly.
+- Formal release run 37863666483: all four gates and publication successful.
+  https://github.com/sleep2agi/agent-network/actions/runs/37863666483
+- Registry preview=.118, latest=.30 unchanged. Workflow confirmed visibility
+  at 08:16:18 CST after 101 seconds / 5 attempts; no duplicate publication.
+- Tarball: commhub-server-0.9.0-preview.118.tgz from registry.npmjs.org.
+  SHA-1 ab5576731b99b1091bcbcd971a83a7b0bf3d1148 matches metadata and CI tarball.
+
+Published-package Docker replay (same image, --rm --cpus=2, no host mounts or
+published ports; network enabled only as needed for npm downloads):
+1. Download the actual npm tarball and assert SHA-1 before installation.
+2. In disposable /npm118, bun add /tmp/commhub118.tgz: 96 packages, 8.55s.
+3. Assert installed package.json.version equals 0.9.0-preview.118.
+4. Move cached /cand/server aside inside the container and symlink it to
+   /npm118/node_modules/@sleep2agi/commhub-server. readlink -f confirms the
+   executed bin/commhub.ts belongs to that freshly installed npm package.
+5. Run bash /compat/run-compat.sh once with the same APP_TAGS and policy env
+   parameters as above. No candidate source rebuild or copy-back occurs.
+
+Result: baseline .117, candidate .118; rc=0, steps=62 unexpected=0
+check_failures=0. Existing MCP schemas retained; only schedule_batch_interval
+added (86 -> 87 tools). No candidate 5xx. Existing App adapter and creator
+unread checks passed. Pre-release upgrade/rollback checks were not duplicated.
+An initial shell wrapper quoting error exited before starting the container;
+the corrected wrapper completed the entire download/install/replay above.
+
+Conclusion: #818 preview publication and isolated installed-package acceptance
+complete. Production Hub was NOT upgraded and no real schedule was changed.
+Node edits remain creator-only; #815 / Issue #2533 stay open for the explicit
+human-created-schedule authorization decision. This is not full user rollout.
