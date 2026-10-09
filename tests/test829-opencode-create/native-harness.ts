@@ -86,6 +86,17 @@ try {
   check('daemon persisted V2 generation and explicit opt-in', cfg.opencodeGeneration === 'v2' && cfg.opencodeMode === 'copresence' && cfg.flags.opencodeUnsafeTools === true);
   check('create status reports started, not capability failure', ['started', 'succeeded'].includes(row.status));
   check('native TUI rendered', await until(() => /ctrl\+p/.test(tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout)));
+  // Registration can finalize the Hub request before the daemon's 5-second
+  // launcher check. Do not advance on that transient succeeded state: a late
+  // failed ack may revoke the token while the TUI and request still look green.
+  check('daemon post-start verdict observed', await until(() =>
+    /\[create-node\].*(?:\+5000ms|runtime_capability_check_failed)/.test(logs.daemon ?? ''), 15000));
+  const settled = db.query(`SELECT r.status, t.revoked_at FROM node_create_requests r
+    LEFT JOIN api_tokens t ON t.token_id=r.child_token_id WHERE r.request_id=?`).get(created.request_id) as any;
+  console.log('post-start identity:', JSON.stringify({ status: settled?.status, tokenRevoked: Boolean(settled?.revoked_at) }));
+  check('daemon did not reject the runtime after registration',
+    !(logs.daemon ?? '').includes('runtime_capability_check_failed'));
+  check('child token remains active after daemon verdict', settled?.status === 'succeeded' && settled.revoked_at === null);
   console.log('L4 task receipt from remotely created runtime');
   const sent = await api('/api/task', { alias: 'oc829', task: 'Reply with exactly REMOTE829', network_id: networkId });
   check('task accepted', sent.ok && sent.message_id);
