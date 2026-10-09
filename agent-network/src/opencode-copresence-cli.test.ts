@@ -22,6 +22,13 @@ describe("OpenCode co-presence CLI wiring", () => {
     expect(bridge).toBeGreaterThan(save);
   });
 
+  test("policy refusal precedes profile writes and session replacement", () => {
+    const refusal = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal");
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(body.indexOf("saveProfile(resolved.id, profile)"));
+    expect(refusal).toBeLessThan(body.indexOf("killTmuxSession(name)"));
+  });
+
   test("starts only exact alias and alias-bridge tmux sessions", () => {
     expect(body).toContain("const bridgeSession = `${displayName}-桥`");
     expect(body).toContain("const tuiSession = displayName");

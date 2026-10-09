@@ -2277,6 +2277,17 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     console.error(`[anet] ❌ OpenCode --copresence requires runtime=opencode-cli (node "${displayName}" is runtime=${runtime}).`);
     process.exit(1);
   }
+  // Refuse before saving the profile or replacing an existing bridge/TUI.
+  // Otherwise the actionable V2 policy error is buried/truncated in the
+  // bridge tail and misreported as a 30-second launcher timeout (#827).
+  const generationRefusal = opencodeStartGenerationRefusal(resolved.profile, {
+    copresence: true,
+    configFile: join(nodesDir(), resolved.id, "config.json"),
+  });
+  if (generationRefusal) {
+    console.error(`[anet] ❌ ${generationRefusal}`);
+    process.exit(1);
+  }
   if (!tmuxAvailable()) {
     console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
     process.exit(1);
