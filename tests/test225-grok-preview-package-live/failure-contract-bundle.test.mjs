@@ -44,11 +44,12 @@ function reviewedSetNames(source) {
   ).exec(source);
   assert.ok(runtimeCodes && runtimeSubcodes && cliCodes && cliSubcodes,
     "packed reviewed set bindings must be present before mutation");
+  // Minified identifiers can contain `$`; these values are inserted into regexes.
   return {
-    runtimeCodes: runtimeCodes[2],
-    runtimeSubcodes: runtimeSubcodes[2],
-    cliCodes: cliCodes[1],
-    cliSubcodes: cliSubcodes[1],
+    runtimeCodes: escapeRegex(runtimeCodes[2]),
+    runtimeSubcodes: escapeRegex(runtimeSubcodes[2]),
+    cliCodes: escapeRegex(cliCodes[1]),
+    cliSubcodes: escapeRegex(cliSubcodes[1]),
   };
 }
 
@@ -79,7 +80,7 @@ test("rejects packed semantic and boundary mutations", () => {
     ["reviewed subcode literal boundary", bundle.replace("Object.freeze([\"unknown\",\"chat.stat.missing_after_arm\"", "Object.freeze([\"unknown\",\"chat.stat.unreviewed\",\"chat.stat.missing_after_arm\"")],
   ];
   for (const [label, mutated] of mutations) {
-    assert.notEqual(mutated, bundle, `${label}: mutation did not alter the real packed bundle`);
+    assert.ok(mutated !== bundle, `${label}: mutation did not alter the real packed bundle`);
     assert.throws(() => validateBuiltAgentNodeBundle(mutated), `${label}: mutated boundary was accepted`);
   }
 });

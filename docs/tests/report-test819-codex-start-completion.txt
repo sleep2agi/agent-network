@@ -53,3 +53,40 @@ Coverage limits
 - Progress clock semantics are tested without waiting 60 seconds in real time.
 - Existing complete agent-node-unit/server-unit CI collectors discover these tests;
   the standalone Docker runner contains no extra assertions or redundant CI job.
+
+PR #2540 CI follow-up (2026-10-09, source behavior unchanged)
+- Run 37865816370, test625-node-adoption: the existing runner also selects
+  start-node.test.ts, but its image did not contain the newly imported daemon
+  source. Added source-only COPY, without installing another runtime package.
+  Docker rebuild/run: 25 pass, 0 fail, 105 assertions; existing deliberately
+  reverted authority gate still witnessed red; overall container exit 0.
+  Reproduce: docker build -f tests/test625-node-adoption/Dockerfile
+    -t anet-test625:start-completion .
+    docker run --rm --cpus 2 --network none anet-test625:start-completion
+  Image manifest list: cfaf9c70d46d4eb5c0818081aae3faa1589e000ac3697f071fcd896198c337fc
+- Same CI run, test225: CLI membership mutation did not alter the packed bundle.
+  The captured minifier identifier was interpolated into a RegExp without escaping
+  `$`. Escape the four captured set names; retain all acceptance/rejection checks.
+  Avoid printing the entire bundle when mutation application fails.
+  Rebuilt only the existing Dockerfile's packer stage (not the live test stage):
+    docker build --target packer
+      --build-arg SOURCE_COMMIT=cb87a4cdf7c940c3227c8d89d6d92a3a2fe56b5d
+      -f tests/test225-grok-preview-package-live/Dockerfile
+      -t anet-test225:completion-packer .
+  Packed Node runner: 2 pass, 0 fail, all six mutations rejected; build exit 0.
+  The source commit argument identifies the candidate before these harness edits,
+  not an exact immutable SHA for this uncommitted harness overlay or a release.
+  Image manifest list: e67bece77351164b113c4e55e45402579de07fffd9cde76cd5d3237bc23eecda
+  Earlier shortcut using Bun's node:test compatibility timed out at its default
+  5-second test budget; the intended Node runner passed without timeout changes.
+- Same CI run, test625-explicit-env-crlf: health polling could not connect to
+  port 9625; the CI artifact did not include the Hub stderr log. Rebuilt its
+  unchanged Dockerfile with the same SOURCE_COMMIT argument, then ran the entire
+  existing suite with --cpus 2 --network none. RESULT: PASS, container exit 0,
+  including the existing writer-bypass, witnessed-red and restored-green steps.
+  Failure was not reproduced; no product or timeout change made for this result.
+  Reproduce: docker build --build-arg SOURCE_COMMIT=cb87a4cdf7c940c3227c8d89d6d92a3a2fe56b5d
+    -f tests/test625-explicit-env-crlf/Dockerfile -t anet-test625:env-completion .
+    docker run --rm --cpus 2 --network none anet-test625:env-completion
+  Image manifest list: 5c1a48ef6cc6788e209c0428f2991823845727f6be78e2bdfc57e159360fa81f
+All Docker commands above were executed through sg docker -c. No package published.
