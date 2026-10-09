@@ -1,0 +1,72 @@
+Hub #539/#829: refreshed real client + Hub/daemon/native V2 integration
+2026-10-09, Asia/Shanghai. Test branch only; NOT merged or published.
+
+Tested backend/integration source:
+08f7c721d8dfb2e92441de4817aecf887fd20e20
+Includes PR #2550 head 5ea3c149496ce3a114913d62736d4f276c794c13 and
+PR #2551 head 6ac459eb0c1a4cd136112ba0d21fb20c3770588a as ancestors.
+Merge conflicts were limited to QA paths/matrix and runbook text: retain
+all suites once, preserve V2-only startup-proof gate and V1 compatibility.
+Relative to #2551, product additions are #2550's CLI graceful drain and
+bounded close-cleanup retry. No independent product fix in this test branch.
+
+Client source: bad71b4f06027bc452c865b65a9d538f89a406be (PR #785).
+Client image anet-app-v2:working-bad:
+sha256:ab3eb6d9786c005ed7ecb2d0d34576243f808c9d27f1c7f44754260dc327f33d
+Its Web export and harness were explicitly copied into this image; merely
+relabeling the dependency image's older embedded client would not test it.
+Dependency image anet-test829:client-941:
+sha256:57869799497e3673da730c187a1242fd8ff30f477bc042267fcd3d3f284b7f52
+Dockerfile tests/test829-opencode-create/Dockerfile.client-nonroot.
+Backend built from git archive of exact source above; runtime/CLI bundles
+compiled in Docker build. Reused dependency layers, not a clean-install or
+formal release build. No host npm/global or production changes.
+Result image anet-test829:client-restack-08f:
+sha256:ba4f8369a69ea7a862910875539e846a5e75de191e526feca4c3872f320f63f4
+
+Common run: --network none --cap-drop ALL --security-opt no-new-privileges,
+USER node UID/GID 1000, no host source mounts. Both EXPECTED_SOURCE_COMMIT
+and EXPECTED_CLIENT_SOURCE_COMMIT equal the respective tested SHA above;
+TEST829_LIFECYCLE=1. Isolated HOME/SQLite/private tmux; real OpenCode 2.0.22;
+deterministic loopback model and disposable auth, no production credentials.
+
+Positive container anet-test829-client-restack-08f: exit 0.
+L0 exact version and user-owned 0700 runtime base PASS.
+L1 real Hub authentication refusal, CLI/daemon registration PASS.
+L2 missing V2 explicit unsafe consent refused with no create side effects PASS.
+L3 Chromium-rendered client sends actual authenticated create to real Hub,
+daemon starts native V2, page confirms exact child ID and launch proof PASS.
+Request cr_ac5a08bb-96c6-45f9-a480-39deca846b07, token remains active after
+daemon verdict, launch_verified_at=1791537420062 (after registration).
+L4 exact [oc829] ANSWER829_REMOTE829 receipt and same TUI output PASS.
+L5 stop sr_67882656b140 -> stopped, old bridge/serve/TUI PID generations
+reaped, old sessions absent, config preserved PASS.
+start str_ebf37bd466a6 -> started, new launch identity/TUI, exact subsequent
+ANSWER829_RESTART829 receipt and TUI output PASS. Harness exits cleanly.
+
+Negative container anet-test829-client-restack-08f-denied: exit 0.
+Same source/image/client, additionally --cpus 1 and TEST829_DENY_RESTART=1.
+L0-L4 and actual stop pass before removing only the stopped test node's
+explicit unsafe consent. Create cr_b7d64c83-1aaa-488b-a8ef-09205fde3141;
+stop sr_1f4206d97a16; start str_4a9f3f3844d6.
+Start terminal state start_failed, error opencode_launcher_exit:1, never
+started; no new TUI/bridge session. No post-denial task layer executed.
+Harness exits cleanly. This is current negative coverage, not a new old-code
+mutation comparison.
+
+Raw evidence: named container logs; /artifacts/report-test829-native.txt,
+client-success.png, daemon.log, hub.log, bridge.log, tui.txt, stub.log.
+Do not publish raw SQLite/auth fixture data. Backend ancestry and diff-check
+verified. No assertions were loosened to resolve merges.
+
+Limits: one Linux lifecycle per case, no multi-user stress, native WebView,
+macOS/Windows, remote model-change/fork acceptance or all chat-loading fix.
+Only OS/Tauri IPC is adapted; Hub HTTP responses and daemon readiness are
+real. Model is stubbed. Working-state-specific positive remains the separate
+rendered/pure-unit matrix; this native test does not force that initial state.
+This suite checks stopped process generations, not every filesystem residue;
+#2550 test543/test827 provide separate launch-root cleanup coverage.
+All three PR latest-head CI gates and main-only fresh release remain pending.
+No service/port/proxy/secret source/data migration change in this test slice.
+Repository runbook remains deployment/recovery authority; these images must
+not enter release channels or be described as production deployment.
