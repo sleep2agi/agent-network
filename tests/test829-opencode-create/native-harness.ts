@@ -152,9 +152,12 @@ try {
       return reply?.status === 'replied' && reply.result === '[oc829] ANSWER829_RESTART829';
     }, 60000));
     check('post-start answer visible in TUI', await until(() => tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout.includes('ANSWER829_RESTART829')));
+    const startRow = db.query('SELECT status,error FROM node_start_requests WHERE request_id=?').get(startResult.request_id) as any;
+    console.log('start status:', JSON.stringify(startRow));
+    check('start request completed', startRow?.status === 'started');
     console.log('PASS actual daemon stop/start task chain; model/client UI remain separate');
   }
-  console.log('PASS test829 real daemon create and task; remote stop/restart and client UI remain separate gates');
+  console.log('PASS test829 real daemon create and task; model/client UI remain separate gates');
 } finally {
   writeFileSync(`${artifact}/tui.txt`, tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout || '');
   const bridge = `${project}/.anet/nodes/oc829/logs/copresence-bridge.log`;

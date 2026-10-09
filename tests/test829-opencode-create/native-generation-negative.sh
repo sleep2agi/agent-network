@@ -21,6 +21,7 @@ test "$result" = 1
 test -s /artifacts/daemon.log
 grep -F 'runtime_capability_check_failed' /artifacts/daemon.log
 grep -F 'stale or mismatched generation' /artifacts/daemon.log
+grep -F '"status":"runtime_capability_check_failed"' /artifacts/report-test829-native.txt
 grep -F 'PASS: owned harness processes exited' /artifacts/report-test829-native.txt
 if grep -F 'L4 task receipt' /artifacts/report-test829-native.txt; then
   echo 'FAIL: mutation advanced beyond create gate'
