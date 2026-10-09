@@ -17,6 +17,8 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import {
   _resetAnetBinAbsForTest,
+  _resetDaemonExtraPathForTest,
+  applyDaemonExtraPath,
   buildAnetArgsDaemon,
   handleCreateNodeDoorbell,
   serializeEnvLocalDaemon,
@@ -65,6 +67,7 @@ const ENV_KEYS = ["HOME", "ANET_BIN_ABS", "ANET_DAEMON_ALLOW_ENV_BIN", "ANET_BIN
 
 beforeEach(() => {
   _resetChildrenMapForTest();
+  _resetDaemonExtraPathForTest();
   home = realpathSync(mkdtempSync(join(tmpdir(), "t652-home-")));
   workDir = join(home, "daemon");
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
@@ -83,6 +86,7 @@ afterEach(() => {
   for (const pid of killPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
   for (const k of ENV_KEYS) { if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k]; }
   _resetAnetBinAbsForTest();
+  _resetDaemonExtraPathForTest();
   rmSync(home, { recursive: true, force: true });
   rmSync(pinRoot, { recursive: true, force: true });
 });
@@ -144,9 +148,16 @@ const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
   test("#829 V2 create writes generation/mode into actual child config, not flags", async () => {
+    // This is a config-writer test, not native OpenCode startup. Supply the
+    // required version probe explicitly: the generic non-root CI image has
+    // no vendor binary. Do not rely on the developer's/global native install.
+    const fixtureBin = join(pinRoot, "probe-bin");
+    mkdirSync(fixtureBin, { mode: 0o700 });
+    writeFileSync(join(fixtureBin, "opencode"), '#!/bin/sh\nprintf "opencode v2.0.22\\n"\n', { mode: 0o755 });
+    applyDaemonExtraPath([fixtureBin]);
     const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
     const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
-    expect(acks.map(a => a.status)).toEqual(["started"]);
+    expect(acks.map(a => ({ status: a.status, error: a.error }))).toEqual([{ status: "started", error: undefined }]);
     expect(spawned).toHaveLength(1);
     const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
     expect(cfg.opencodeGeneration).toBe("v2");
