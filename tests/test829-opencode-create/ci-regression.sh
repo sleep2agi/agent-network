@@ -19,4 +19,6 @@ export COMMHUB_DB=/tmp/test829-ci-audience.db
 bun test server/src/tool-audience-http.test.ts
 export COMMHUB_DB=/tmp/test829-ci-schema.db
 bun test server/src/create-node-tool-schema.test.ts server/src/create-node-validate.test.ts
+export COMMHUB_DB=/tmp/test829-ci-late-ack.db
+bun test server/src/ack-create-request.test.ts server/src/ack-create-request-transport.test.ts
 echo 'PASS: targeted CI regressions; not real OpenCode startup or full unit domains'
