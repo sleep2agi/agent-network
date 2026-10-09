@@ -7758,10 +7758,10 @@ setInterval(() => {
 // exit. Logs only the top-level <ts>-<alias> dir name on purge — never
 // any file inside, per D7 nit ("不 log 文件名, 避免 secret 名字漏进 log").
 if (fileConfig.role === "host_supervisor") {
-  Promise.all([import("./runtime/codex-fork-capability.js"), import("./runtime/create-node-daemon.js")])
-    .then(([fork, cnd]) => {
+  import("./runtime/codex-fork-capability.js")
+    .then(fork => {
       codexForkCapabilityMonitor = fork.createCodexForkCapabilityMonitor({
-        bin: cnd.getAnetBinAbs, cwd: process.cwd(),
+        cwd: process.cwd(),
         onChange: () => { void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {}); },
       });
       codexForkCapabilityMonitor.start();

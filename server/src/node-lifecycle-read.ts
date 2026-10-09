@@ -1,6 +1,6 @@
 import { db } from "./db.js";
 import { addAgentNetworkScope, type RestNetworkScope } from "./network-scope.js";
-import { publicForkResult } from "./codex-fork-contract.js";
+import { forkRecoveryRequestSchema, publicForkResult } from "./codex-fork-contract.js";
 
 // Exact public codes only; daemon exception text must never reach node viewers.
 const publicLifecycleErrors = new Set([
@@ -101,9 +101,15 @@ export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Res
   if (!row && requestId) return fail("request_not_found", 404);
   if (!row) return Response.json({ ok: true, request: null });
   const { fork_recovery_json, fork_result_json, ...publicRow } = row;
+  let confirmed: true | null = null;
+  if (kind === "start" && typeof fork_recovery_json === "string") {
+    try {
+      if (forkRecoveryRequestSchema.safeParse(JSON.parse(fork_recovery_json)).success) confirmed = true;
+    } catch { /* damaged confirmation is unknown; keep any independently valid fork evidence */ }
+  }
   return Response.json({ ok: true, request: { kind, ...publicRow, error: publicLifecycleError(row.error),
     ...(kind === "start" && fork_recovery_json != null ? { fork_recovery: {
-      requested: true, result: publicForkResult(fork_result_json),
+      requested: confirmed, result: publicForkResult(fork_result_json),
     } } : {}),
   } });
 }

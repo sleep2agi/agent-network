@@ -19,6 +19,10 @@ Clients must negotiate the new tool schema before offering this action.
 Dispatch requires a created (not adopted) binding and the daemon's affirmative
 `daemon_capabilities.codex_fork_recovery: {protocol: 1, cli_supported: true}`.
 This snapshot is advisory: the daemon rechecks the actual pinned CLI before use.
+Both refresh and recovery execution use the uncached install-pin verifier (path,
+identity, platform permission checks and configured SHA), not the ordinary
+launcher's process-lifetime path cache. An old cached success cannot authorize
+an obsolete or integrity-invalid executable.
 Only host supervisors start the background help probe, at boot and every ten
 minutes; heartbeats read its cache without awaiting a subprocess. Before the
 first result the capability is absent. Failed/missing pin reports false; malformed
@@ -44,6 +48,9 @@ retains the original receipt; this is not durable exactly-once across restarts.
 Human readers use the existing authenticated `/api/node-lifecycle-requests`
 endpoint with `kind=start` and an exact `request_id`. It applies current node
 visibility/grants and returns optional `fork_recovery: {requested: true, result}`.
+The stored confirmation is parsed with the same strict schema as daemon pull;
+damaged/noncanonical non-NULL confirmation yields `requested: null` (unknown),
+not true or an ordinary request. Independently valid fork evidence is retained.
 No raw JSON, snapshot/rollout path, PID or token is added to the response.
 
 Stale confirmed recovery is not automatically superseded by the ordinary start

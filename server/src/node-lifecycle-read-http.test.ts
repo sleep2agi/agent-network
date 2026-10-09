@@ -156,6 +156,15 @@ test("fork receipt uses the same authenticated node visibility and redacts corru
     const corrupted = await get(path, limited.token);
     expect(corrupted.body.request.fork_recovery.result).toEqual({ state: "unknown", reason: "result_invalid" });
     expect(JSON.stringify(corrupted)).not.toContain("/private");
+    // Corrupt confirmation cannot assert requested:true, but must not erase an
+    // independently valid recorded fork (nor make the request look ordinary).
+    for (const raw of ["broken /private/secret", "null", "{}", JSON.stringify({ kind: "fork_on_missing_ordinal", confirmed: false }),
+      JSON.stringify({ kind: "fork_on_missing_ordinal", confirmed: true, snapshot: "/private/secret" })]) {
+      db.run("UPDATE node_start_requests SET fork_recovery_json=?1,fork_result_json=?2 WHERE request_id='start_read_failed'", [raw, JSON.stringify(receipt)]);
+      const invalid = await get(path, limited.token);
+      expect(invalid.body.request.fork_recovery).toEqual({ requested: null, result: receipt });
+      expect(JSON.stringify(invalid)).not.toContain("/private");
+    }
   } finally {
     db.run("DELETE FROM network_member_agent_grants WHERE user_id=?1 AND node_id=?2", [limited.user.user_id, ids.active]);
     db.run("UPDATE node_start_requests SET fork_recovery_json=NULL,fork_result_json=NULL WHERE request_id='start_read_failed'");

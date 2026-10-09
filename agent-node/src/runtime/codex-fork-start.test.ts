@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
+import { getAnetBinAbs, _resetAnetBinAbsForTest } from "./create-node-daemon.js";
 import { handleStartDoorbell } from "./start-daemon.js";
 import { supportsCodexForkRecovery, createCodexForkCapabilityMonitor } from "./codex-fork-capability.js";
 import { attachCodexForkCapability } from "./config-apply.js";
@@ -152,4 +154,44 @@ test("background capability starts absent, coalesces probes and reflects changed
   expect(changes).toBe(2); expect(probes).toBe(2);
   expect(JSON.stringify(monitor.current())).not.toContain("/private");
   monitor.stop();
+});
+
+test.each([false, true])("fresh pin replaces cached path and rejects tampering=%s for probe and recovery", async tampered => {
+  const f = fixture();
+  const prior = process.env.ANET_DAEMON_PATH_CONF;
+  const conf = join(root, "path.conf");
+  const makeBin = (name: string) => {
+    const dir = join(root, name); mkdirSync(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@sleep2agi/agent-network", bin: { anet: "anet.cjs" } }));
+    const bin = join(dir, "anet.cjs");
+    const body = `#!${process.execPath}\nconsole.log('--fork-on-resume-failure --fork-recovery-request-id --yes');\n`;
+    writeFileSync(bin, body, { mode: 0o700 });
+    writeFileSync(conf, `ANET_BIN_ABS=${bin}\nANET_BIN_SHA256=${createHash("sha256").update(body).digest("hex")}\n`);
+    return { bin, body };
+  };
+  const monitor = createCodexForkCapabilityMonitor({ cwd: root });
+  try {
+    process.env.ANET_DAEMON_PATH_CONF = conf; _resetAnetBinAbsForTest();
+    const old = makeBin("old");
+    expect(getAnetBinAbs()).toBe(old.bin);
+    await monitor.refresh(); expect(monitor.current()?.cli_supported).toBe(true);
+    const current = makeBin("current");
+    if (tampered) writeFileSync(current.bin, current.body + "// changed after SHA pin\n");
+    expect(getAnetBinAbs()).toBe(old.bin); // demonstrate why the ordinary cache cannot authorize recovery
+    await monitor.refresh(); expect(monitor.current()?.cli_supported).toBe(!tampered);
+    delete f.deps.anetBin; // exercise the actual production resolver, not an injected path
+    const pending = handleStartDoorbell({ request_id: REQUEST }, f.deps);
+    if (!tampered) {
+      await tick(); expect(f.spawns[0]?.bin).toBe(current.bin);
+      f.child.emit("exit", 0, null);
+    }
+    await pending;
+    expect(f.spawns.length).toBe(tampered ? 0 : 1);
+    expect(f.acks.at(-1).status).toBe(tampered ? "start_failed" : "started");
+    if (tampered) expect(f.probes).toEqual([]);
+  } finally {
+    monitor.stop(); _resetAnetBinAbsForTest();
+    if (prior === undefined) delete process.env.ANET_DAEMON_PATH_CONF;
+    else process.env.ANET_DAEMON_PATH_CONF = prior;
+  }
 });

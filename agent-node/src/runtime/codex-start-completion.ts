@@ -1,7 +1,7 @@
 // #819: a co-presence launcher is finite, unlike a foreground runtime. Its PID
 // proves only that launch began. The CLI's readiness checks decide completion.
 import { spawn } from "node:child_process";
-import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
+import { getAnetBinAbs, loadAndVerifyAnetBin, minimalEnv } from "./create-node-daemon.js";
 import { forgetSpawnedChildIfPid, recordSpawnedChild } from "./stop-daemon.js";
 import type { StartDoorbellDeps } from "./start-daemon.js";
 import { readCodexForkEvidence, type CodexForkEvidence } from "./codex-fork-result.js";
@@ -43,7 +43,9 @@ export async function completeCodexStart(
   async function launch(): Promise<Result> {
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     try {
-      const bin = (deps.anetBin ?? getAnetBinAbs)();
+      // Recovery must re-read the current pin and integrity checks, not the
+      // ordinary launcher's process-lifetime cached installation path.
+      const bin = (deps.anetBin ?? (recovery ? loadAndVerifyAnetBin : getAnetBinAbs))();
       if (recovery && !await (deps.probeCodexForkRecovery ?? supportsCodexForkRecovery)(bin, cwd)) {
         return { status: "start_failed", error: "codex_fork_cli_unsupported" };
       }
