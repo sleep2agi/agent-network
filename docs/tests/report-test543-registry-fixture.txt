@@ -1,0 +1,80 @@
+Hub #539/#832 — existing native V2 fixture compatibility
+2026-10-09 Asia/Shanghai. Branch test evidence, NOT a release.
+
+Failure source
+PR2549 CI run37887481212/job113681620417:
+https://github.com/sleep2agi/agent-network/actions/runs/37887481212/job/113681620417
+37 unit tests /143 assertions passed. Layer3 then failed after the bounded
+30s MCP registry wait. Existing MCP fake exposed only send_message, whereas
+the new product readiness contract requires send_task and get_task.
+Do not lower the product gate or retry model turns to satisfy this fixture.
+
+Isolated red control
+Source 41ceba5359d83c2de3d0e3dd155d48e0864a1c43, container
+anet-test543-fixture-safe-red, exit1. Image index:
+sha256:ed7f2fe719be5c45f1ab8d7400c092f9788c5e6643d02831e57407130c013c3a
+This differs from PR2549 only in replacing whole-server tmux cleanup with
+cleanup of the owned exact TUI session. No product or MCP fixture change.
+Reproduced the same Layer3 readiness timeout after 37 tests/143 assertions,
+with later layers not executed. The rejected incomplete fixture is expected
+to fail, not a flaky gate to suppress.
+
+Correction
+Source f96ef472e9d42eb04d32f25ad52009e0ba392f2f:
+- Add send_task (alias/task) and get_task (task_id) discovery declarations.
+- Assert tools/list occurred before ready and model call count did not grow
+  during startup; keep credential checks after both startup and real turns.
+- Explicitly unset inherited TMUX/TMUX_PANE. Cleanup only exact owned session.
+No agent-node/runtime/product source changes between red and green.
+This remains a transport/TUI fixture, NOT evidence of real MCP execution;
+real Hub task writes, sender identity and receipts are in test828/test832.
+
+Green result (existing assertions only; release gap below remains)
+Container anet-test543-registry-safe-green exited 0. 37 unit tests /143
+assertions passed. Native layers passed: default-safe refusal, opt-in startup,
+MCP discovery before ready with no model warmup, authenticated transport,
+shared human TUI/network turns with independent replies, provider-error
+propagation/recovery, launcher removal and serve/TUI process termination.
+Image index:
+sha256:60aba0bac19a5d6a580a4e2e0b18aae5d5268dcf3fd82938fbb1503b91ef9a68
+
+UNCLEARED RELEASE GAP — direct runtime close leaves a private launch root
+Layer7 logged: "launch-root cleanup deferred; a live descendant still
+references it". After the container exited, docker diff still listed
+/run/user/0/.anet-opencode-launch-6qTKle, including its owner metadata,
+OpenCode state and anet-commhub-registry-dAZV22/index.js. Only paths were
+inspected; generated credentials were not copied into this report.
+Current test543 asserts processes/launcher removal, not launch-root removal;
+therefore its exit0 is NOT complete lifecycle acceptance. Previous test827
+CLI graceful-stop passes do not establish direct-helper-close cleanup.
+Next narrow change: assert launch-root disappearance and investigate bounded,
+identity-checked cleanup after the attached TUI actually exits. Do not weaken
+the live-descendant guard or use broad directory/process cleanup. Product
+source is unchanged this round; #539/#832 remain doing and PRs remain draft.
+
+Reproduce
+Use a clean checkout at the full red or green SHA above. All commands in Docker:
+sg docker -c 'docker build -f tests/test543-opencode-v2-copresence/Dockerfile -t test543-fixture .'
+sg docker -c 'docker run --network none test543-fixture'
+Both executed containers have SOURCE_COMMIT metadata set to the full SHA.
+Original Dockerfile uses Bun1.3.1, @opencode/cli2.0.22; resolved Bun base
+sha256:9c5d3c92b234b4708198577d2f39aab7397a242a40da7c2f059e51b9dc62b408.
+No source mounts, external network or production credentials at runtime;
+private tmux -L test543 and isolated work/home. Raw stdout and
+/tmp/art/report-test543.txt retained in each named container. Do not copy
+generated launchers or runtime credentials into reports.
+
+Stack progress, distinct from production delivery
+Test-only PR2547 merged after all158 checks passed, head
+2880ae11ef444b413f5d21c9b026f935f33d9e0c; merge
+90589fe7359530391d4b7e739ec18aab31efc932 at 2026-10-09T05:34:04Z.
+Fetched main and verified merge ancestry. PR2549 retargeted to main.
+No product release, global package mutation or production restart.
+PR2550 Windows native smoke job113684955326 passed at05:34:39Z; the older
+PR2549 EPERM rename failure is retained, not explained or waived by that pass.
+PR2545 bounded CI retry still running at13:42CST; no further rerun requested.
+No native Windows OpenCode, safe-mode or client UI acceptance claim.
+
+Ops snapshot13:32CST: TMA云盘牛/TMAI负责人/TMAI狗/TMA客户端牛 recent heartbeats;
+TMA云牛 remains offline. No recovery claim. Skill fixture-contract lesson
+updated in anet-opencode-v2-delivery and quick_validate passed inside Docker.

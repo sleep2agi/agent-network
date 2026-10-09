@@ -14,6 +14,7 @@
 // stays flat. `export {}` keeps this a module: as a global script the `const`
 // would declare `Bun` for every file and hide their real TS2868 errors.
 export {};
+import { appendFileSync } from "fs";
 const Bun: any = (globalThis as any).Bun;
 
 const args = process.argv.slice(2);
@@ -87,7 +88,12 @@ Bun.serve({
     if (request.headers.get("authorization") !== expectedAuth) return new Response("unauthorized", { status: 401 });
     const url = new URL(request.url);
     const path = url.pathname;
+    if (process.env.TEST832_TRACE) appendFileSync(process.env.TEST832_TRACE, `${process.pid} ${path}\n`);
     if (path === "/api/info") return json({ version: "2.0.22", pid: process.pid, urls: [`http://${hostname}:${port}`] });
+    if (path === "/api/mcp") return json({ data: [{ name: "commhub", status: { status: "connected" } }] });
+    if (path === "/api/rpc/anet.commhub-readiness/ready") {
+      return json({ output: { ready: process.env.TEST832_MISSING !== "1" } });
+    }
     if (path === "/api/session" && request.method === "POST") {
       const sid = `ses_${Date.now().toString(16)}Fake${++counter}`;
       sessions.set(sid, { entries: [], inbox: [], running: false, steer: [] });

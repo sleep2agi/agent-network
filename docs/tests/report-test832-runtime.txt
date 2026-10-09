@@ -1,0 +1,83 @@
+Hub #539 / #832 — product final-registry startup gate
+2026-10-09 13:12 Asia/Shanghai
+BRANCH CANDIDATE ONLY; not merged, released or deployed.
+
+Source: c945bb44c2d7652c5fca90f7b3c047a6e1ecf463
+Base: PR2547 head 2880ae11ef444b413f5d21c9b026f935f33d9e0c
+Main ancestry: 9a0f5a85a45e0396289627fd6b40323435b17801
+Image index: sha256:28179e8543ef08745b8dbf327eb2303a9930671ce2e18924a729931cc0c3eac4
+Image manifest: sha256:b8cc8f6b6b17d834527ee7120f143068aed0a2eb33b3405c5fe415a58b17c622
+Image config: sha256:359581b4d2a77317a0dbcbae8af6eeba4132bb2cf92776b0439d1a6a58001672
+Container: anet-test832-runtime-exact (exit 0)
+Pinned inputs: @opencode/cli 2.0.22; digest-pinned Bun1.3.14/Node22;
+repository dependency lockfiles. Docker --network none, no source mounts,
+fresh private Hub/database/node tokens/home for each native case, loopback
+deterministic model only. No production credentials or global package edits.
+
+Implementation
+- Production MCP wiring installs the bundled dependency-free read-only plugin
+  into private launch-owned XDG_DATA_HOME; config points at that directory.
+- ctx.tool.list() observes the final transformed registry, not merely MCP
+  connected. Authenticated RPC returns only a boolean for send_task/get_task.
+- Production V2 core waits before session creation, ready log or TUI launcher.
+- One finite MCP-observation budget covers fetch/body; process death and
+  abort-ignoring transport tests prove bounded rejection. Connection is
+  rechecked after a true registry observation. No warmup or bypass fallback.
+- Existing launch-root cleanup owns the generated file. Permissions unchanged;
+  V2 still requires unsafeTools, not a supported safe runtime.
+
+Layered results (the run script stops on the first failure)
+L0: 69 tests / 336 assertions / 0 failures, five files:
+  v2-readiness, v2-session, opencode-backend, binary-v2,
+  opencode-v1-spawn-snapshot.
+  Includes missing/pending MCP, malformed/duplicate server lists, bad flags,
+  RPC401/403/404/500, connection loss/reconnect, registry removal, invalid
+  budgets, stuck fetch/body ignoring abort, process death, plugin permissions,
+  read-only live registry/dispose, tracked launch-root cleanup, fake-serve
+  startup ordering, no session/launcher on failure, serve reaping, V1 golden
+  and unchanged V2 unsafe-mode gate.
+L0 package: npm run build passed in Docker; runtime bundle contains observer.
+L1+: real native V2 + real isolated Hub. No discovery/model warmup.
+  delay0    readiness1124ms  task ac18812f-7ec3-4ece-bfc3-a8ff12c838ef
+  delay1200 readiness2295ms  task d3da885e-7648-4ef2-ba31-9de1a190e3a0
+  delay3500 readiness4533ms  task e61b269e-4f50-4799-bffd-2d2b00591131
+  Each: first-turn dispatch, exact persisted task/network/from_node/to_node,
+  receiver terminal reply, model get_task receipt, explicit sender-spoof
+  rejection/no new task, expected node credential. Private RPC unauth =>401.
+  Wrong valid node token: witnessed red at sender-identity assertion, exit1.
+L3 negative startup: final registry missing get_task (2200ms budget), MCP401,
+  delayed tools/list5000ms with350ms budget: all expected failures with no
+  model call. Entire suite exit0 means those negatives were witnessed, not
+  that unavailable tools were accepted.
+
+Artifacts and reproducibility
+Raw report /artifacts/report-test832-runtime.txt; native evidence results.json,
+mcp.json and redacted process logs under /artifacts and per-case directories
+negative/, delay1200/, delay3500/, missing/, rejected/, timeout/.
+All inputs are repository-owned; retaining a container is optional:
+  git checkout c945bb44c2d7652c5fca90f7b3c047a6e1ecf463
+  sg docker -c 'docker build --build-arg SOURCE_COMMIT=c945bb44c2d7652c5fca90f7b3c047a6e1ecf463 -f tests/test832-opencode-v2-registry/Dockerfile -t test832-runtime .'
+  sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=c945bb44c2d7652c5fca90f7b3c047a6e1ecf463 test832-runtime'
+Use a clean isolated checkout for reproduction, not an active node worktree.
+QA workflow has both trigger paths and the dedicated suite matrix entry.
+
+Limits / release gates still open
+- Native harness uses product wiring/wait helper; production startup ordering
+  is covered with a protocol fake. Combined full CLI/Hub/human TUI lifecycle
+  with this exact product change must still be rerun on the integrated stack.
+- No claim about paid-model autonomous choice, post-start outage recovery,
+  native macOS/Windows or V2 safe-mode support. Three repetitions are not a
+  universal reliability guarantee. Earlier test-only observer experiment is
+  separate and its connected-only candidate must not be merged.
+- PR2547 currently OPEN, 155 successful / 3 pending CI checks at13:11CST.
+  PR2545 has one L0+L1 failure (PG negative-control infrastructure setup) and
+  remains OPEN. Failure not waived; isolated reproduction still needed.
+- npm install reported existing dependency audit findings (server:5, runtime:7).
+  No lockfile/security dependency upgrades were bundled into this narrow fix.
+- Only an exact approved main SHA may be published; branch image is test-only.
+
+Operations: TMAI负责人 / TMAI狗 / TMA云盘牛 / TMA客户端牛 have fresh heartbeats.
+TMA云牛 remains offline; prior one queued restart did not produce recovery.
+No new restarts or production changes this round.
+Recovery boundaries and six recovery questions:
+docs/runbooks/opencode-v2-registry-readiness.md. No full backup restore exercise.
