@@ -22,6 +22,17 @@ daemon 直接写子节点配置（不调用 CLI create）：代际写到顶层
 此选择不授予 unsafe 权限，V1 仍保持下文显式 `--copresence` 行为。
 daemon 对编排启动器的完成判定、远程停止/重启仍须独立验证，不代表已发布。
 
+Linux 候选实现会在原生 V2 就绪后写节点目录内的
+`opencode-launch-health.json`（0600，无凭据）。daemon 接受正常退出的
+共存启动器前，核对本轮写入时间、bridge/serve/TUI 的 PID 与启动 ticks、
+serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 复用、
+死进程或非零退出不放行。运行代际关闭/serve 退出时清理自己的记录。
+此文件是可重建的运行证据，不是需要从备份恢复的数据，不能复制旧记录
+冒充就绪。仅 Linux daemon 创建完成判定有此证据路径，其他平台未验收。
+不要把 Hub 首次注册的 `succeeded` 或 launcher 的退出 0 单独当作健康；
+应等 daemon 延迟检查结束，验证 token 仍有效，再验真实任务终态。
+没有新增常驻服务、端口、环境变量或密钥来源；既有升级/回滚流程不变。
+
 daemon 新建 OpenCode 节点时，先复用 CLI 的 no-follow 私密目录与 Git
 未跟踪校验，再在同一运行用户的 `HOME/.anet/opencode-runtime-bindings/`
 建立外部身份记录，最后原子写入含 token 的 0600 配置。不能只复制项目
