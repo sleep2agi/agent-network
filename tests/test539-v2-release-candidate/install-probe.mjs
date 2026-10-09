@@ -16,6 +16,14 @@ if (process.argv[2] === 'package') {
   const db = readFileSync(`${root}/@sleep2agi/commhub-server/src/db.ts`, 'utf8');
   assert(db.includes('launch_verified_at'));
   console.log('PASS packaged registry plugin and launch-proof migration presence (not execution proof)');
+} else if (process.argv[2] === 'pair') {
+  const root = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
+  const pair = readFileSync(`${root}/@sleep2agi/agent-network/dist/src/opencode-agent-node-pair.d.ts`, 'utf8');
+  // Inspect emitted literals, not the obfuscated CLI's string table.
+  assert.match(pair, /export declare const PAIRED_AGENT_NETWORK_VERSION = "2\.3\.0-preview\.162";/);
+  assert.match(pair, /export declare const PAIRED_AGENT_NODE_VERSION = "2\.5\.0-preview\.128";/);
+  assert.match(pair, /export declare const PAIRED_AGENT_NODE_SPEC = "@sleep2agi\/agent-node@2\.5\.0-preview\.128";/);
+  console.log('PASS installed immutable CLI/runtime pair declarations');
 } else if (process.argv[2] === 'health') {
   let ready = false;
   for (let n = 0; n < 100; n++) {

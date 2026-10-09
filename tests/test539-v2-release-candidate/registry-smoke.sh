@@ -8,6 +8,7 @@ test ! -e /opt/node_modules
 test -z "${NODE_PATH:-}"
 sha256sum /registry-tarballs/*.tgz
 node /test539/install-probe.mjs package
+node /test539/install-probe.mjs pair
 test "$(anet --version | sed -n '1p')" = 'anet v2.3.0-preview.162'
 agent-node --help > /tmp/test539-runtime-help.txt
 grep -q opencode-cli /tmp/test539-runtime-help.txt
