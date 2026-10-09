@@ -1,0 +1,78 @@
+// #819: a co-presence launcher is finite, unlike a foreground runtime. Its PID
+// proves only that launch began. The CLI's readiness checks decide completion.
+import { spawn } from "node:child_process";
+import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
+import { forgetSpawnedChildIfPid, recordSpawnedChild } from "./stop-daemon.js";
+import type { StartDoorbellDeps } from "./start-daemon.js";
+
+type Result = { status: "started"; child_pid: number } | { status: "start_failed"; error: string };
+type Entry = { requestId: string; running: boolean; result: Promise<Result> };
+// One latest result per child, including a failed/lost ack. A doorbell replay in
+// this daemon lifetime must not launch a second generation. This is not durable
+// recovery across daemon restarts, nor evidence of ongoing runtime health.
+const launches = new Map<string, Entry>();
+
+export async function completeCodexStart(
+  requestId: string, nodeId: string, alias: string, dirName: string, cwd: string,
+  deps: StartDoorbellDeps,
+): Promise<void> {
+  const key = `${deps.workDir}\0${nodeId}`;
+  let entry = launches.get(key);
+  if (entry && entry.requestId !== requestId && entry.running) {
+    throw new Error("codex_start_already_running");
+  }
+  if (!entry || entry.requestId !== requestId) {
+    entry = { requestId, running: true, result: launch() };
+    launches.set(key, entry);
+    const current = entry;
+    current.result = current.result.finally(() => { current.running = false; });
+  }
+  const result = await entry.result;
+  // Transport failures propagate so the doorbell caller can release its dedup
+  // entry. Keep the actual outcome above for a same-request replay.
+  const ack = await deps.callCommHub("ack_start_request", { request_id: requestId, ...result });
+  if (!ack?.ok) throw new Error(`codex_start_ack_rejected:${ack?.error || "invalid_ack"}`);
+  deps.log(`[start-daemon] codex launcher ${result.status} alias=${alias}`);
+
+  async function launch(): Promise<Result> {
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    try {
+      const progress = () => deps.callCommHub("ack_start_request", { request_id: requestId, status: "starting" });
+      const admitted = await progress();
+      if (!admitted?.ok || admitted.status !== "starting") {
+        return { status: "start_failed", error: "codex_start_progress_not_available" };
+      }
+      let refreshing = false;
+      heartbeat = setInterval(() => {
+        if (refreshing) return;
+        refreshing = true;
+        void progress().then(r => {
+          if (!r?.ok) deps.warn("[start-daemon] codex start progress rejected");
+        }).catch(() => deps.warn("[start-daemon] codex start progress unavailable"))
+          .finally(() => { refreshing = false; });
+      }, 20_000);
+      heartbeat.unref();
+      const child = (deps.spawnChild ?? spawn)((deps.anetBin ?? getAnetBinAbs)(), ["node", "start", dirName], {
+        cwd, env: minimalEnv(), stdio: ["ignore", "ignore", "ignore"], detached: true,
+      });
+      return await new Promise<Result>(resolve => {
+        const pid = child.pid;
+        const finish = (result: Result) => {
+          if (pid) forgetSpawnedChildIfPid(nodeId, pid);
+          resolve(result);
+        };
+        child.once("error", () => finish({ status: "start_failed", error: "codex_launcher_spawn_failed" }));
+        child.once("exit", (code, signal) => finish(code === 0 && pid
+          ? { status: "started", child_pid: pid }
+          : { status: "start_failed", error: `codex_launcher_exit:${signal || code}` }));
+        if (!pid) { finish({ status: "start_failed", error: "codex_launcher_no_pid" }); return; }
+        recordSpawnedChild(nodeId, alias, pid);
+        child.unref();
+      });
+    } catch {
+      return { status: "start_failed", error: "codex_launcher_spawn_failed" };
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
+    }
+  }
+}

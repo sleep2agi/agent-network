@@ -12,6 +12,7 @@ import { adoptedChild } from "./adopt-registry.js";
 import { handleAdoptedLifecycle } from "./adopt-lifecycle.js";
 import type { AdoptDaemonDeps } from "./adopt-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
+import { completeCodexStart } from "./codex-start-completion.js";
 
 
 interface StartRequest {
@@ -20,6 +21,7 @@ interface StartRequest {
   request_id?: string;
   child_node_id?: string;
   child_alias?: string;
+  start_completion_capable?: boolean;
 }
 
 export interface StartDoorbellDeps {
@@ -123,6 +125,14 @@ export async function handleStartDoorbell(
     await deps.callCommHub("ack_start_request", {
       request_id: event.request_id, status: "start_failed", error,
     }).catch(() => {});
+    return;
+  }
+
+  // Negotiate with the Hub: older Hubs do not accept progress acknowledgements.
+  // Adopted nodes have their own lifecycle above; only managed Codex launchers
+  // exit after readiness checks and can use this completion contract.
+  if (codexCopresence && req.start_completion_capable === true) {
+    await completeCodexStart(event.request_id, req.child_node_id, req.child_alias, childDirName, childWorkDir, deps);
     return;
   }
 

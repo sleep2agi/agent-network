@@ -2,6 +2,11 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db } from "./db.js";
 import { registerTools } from "./tools.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { handleStartDoorbell } from "../../agent-node/src/runtime/start-daemon.js";
 
 const NET = "net_start_node"; const USER = "u_start_node";
 const DAEMON = "node_start_daemon"; const DAEMON_ALIAS = "start-daemon";
@@ -36,7 +41,7 @@ describe("start_node Hub -> daemon lifecycle", () => {
     const u = handlers(USER); const dispatch = await call(u.start_node, { child_node_id: CHILD, network_id: NET });
     expect(dispatch.ok).toBe(true); expect(dispatch.lifecycle_state).toBe("starting");
     const d = handlers(null, true); const pulled = await call(d.get_start_request, { request_id: dispatch.request_id });
-    expect(pulled).toMatchObject({ ok: true, child_node_id: CHILD, child_alias: CHILD_ALIAS });
+    expect(pulled).toMatchObject({ ok: true, child_node_id: CHILD, child_alias: CHILD_ALIAS, start_completion_capable: true });
     const ack = await call(d.ack_start_request, { request_id: dispatch.request_id, status: "started", child_pid: 4321 });
     expect(ack.ok).toBe(true);
     expect(db.get<any>(`SELECT lifecycle_state FROM nodes WHERE node_id=?1`, CHILD)?.lifecycle_state).toBe("active");
@@ -48,6 +53,38 @@ describe("start_node Hub -> daemon lifecycle", () => {
     expect((await call(u.start_node, { child_node_id: CHILD, network_id: NET })).error).toBe("node_not_stopped");
     db.run(`UPDATE nodes SET lifecycle_state='stopped' WHERE node_id=?1`, CHILD);
     expect((await call(u.start_node, { child_node_id: CHILD, daemon_node_id: "node_wrong", network_id: NET })).error).toBe("daemon_child_mismatch");
+  });
+  test("launcher progress refreshes stale-start clock, never marks active, and failure stays stopped", async () => {
+    const u = handlers(USER), d = handlers(null, true);
+    const dispatch = await call(u.start_node, { child_node_id: CHILD, network_id: NET });
+    const request_id = dispatch.request_id;
+    await call(d.get_start_request, { request_id });
+    db.run(`UPDATE node_start_requests SET created_at=?1, delivered_at=?1 WHERE request_id=?2`, [Date.now() - 70_000, request_id]);
+    expect(await call(d.ack_start_request, { request_id, status: "starting" })).toEqual({ ok: true, status: "starting" });
+    expect(db.get<any>(`SELECT lifecycle_state FROM nodes WHERE node_id=?1`, CHILD)?.lifecycle_state).toBe("starting");
+    expect(db.get<any>(`SELECT status FROM node_start_requests WHERE request_id=?1`, request_id)?.status).toBe("delivered");
+    expect((await call(u.start_node, { child_node_id: CHILD, network_id: NET })).error).toBe("node_already_starting");
+    expect(await call(d.ack_start_request, { request_id, status: "start_failed", error: "codex_launcher_exit:1" })).toEqual({ ok: true, status: "start_failed" });
+    expect(db.get<any>(`SELECT lifecycle_state FROM nodes WHERE node_id=?1`, CHILD)?.lifecycle_state).toBe("stopped");
+    expect(db.all<any>(`SELECT action FROM audit_log WHERE target_id=?1`, request_id).map(r => r.action)).toEqual(["start_node_dispatched"]);
+    // A heartbeat already in flight cannot resurrect a terminal request.
+    expect(await call(d.ack_start_request, { request_id, status: "starting" })).toMatchObject({ status: "start_failed", idempotent: true });
+  });
+  test.each([0, 7])("dispatch → daemon → real launcher exit %s → Hub lifecycle", async (exitCode) => {
+    const root = mkdtempSync(join(tmpdir(), "start-flow-"));
+    try {
+      mkdirSync(join(root, CHILD_ALIAS));
+      writeFileSync(join(root, CHILD_ALIAS, "config.json"), JSON.stringify({ node_id: CHILD, alias: CHILD_ALIAS, codexCopresence: true }), { mode: 0o600 });
+      const u = handlers(USER), d = handlers(null, true);
+      const dispatch = await call(u.start_node, { child_node_id: CHILD, network_id: NET });
+      await handleStartDoorbell({ request_id: dispatch.request_id }, {
+        workDir: root, nodesRoot: root, anetBin: () => process.execPath,
+        spawnChild: ((_bin, _args, opts) => spawn(process.execPath, ["-e", `setTimeout(() => process.exit(${exitCode}), 25)`], opts)) as typeof spawn,
+        callCommHub: (tool, args) => call(d[tool], args), log: () => {}, warn: () => {},
+      });
+      expect(db.get<any>(`SELECT status FROM node_start_requests WHERE request_id=?1`, dispatch.request_id)?.status).toBe(exitCode === 0 ? "started" : "start_failed");
+      expect(db.get<any>(`SELECT lifecycle_state FROM nodes WHERE node_id=?1`, CHILD)?.lifecycle_state).toBe(exitCode === 0 ? "active" : "stopped");
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
 

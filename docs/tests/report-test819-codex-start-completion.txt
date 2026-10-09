@@ -1,0 +1,92 @@
+test819 — Codex finite launcher completion (Issue #2539, Hub #819/#820)
+Date: 2026-10-09, Asia/Shanghai
+Base: f8a23f611f230cf05eef9f9c9f6b8b36a5795c44
+Scope: source candidate only; no npm publication or production deployment.
+
+Change
+- New Hub get_start_request advertises start_completion_capable.
+- Authenticated starting ack refreshes the existing stale-start clock; it does not
+  mark the child active or add completion audit evidence. Terminal requests cannot
+  be reopened by a delayed progress ack. No schema migration or permission changes.
+- New daemon waits for managed Codex launcher's exit: 0 => started,
+  nonzero/signal/async spawn error => start_failed. Progress interval: 20 seconds.
+- Same-request replay shares the launch and its terminal result in this daemon
+  lifetime. Exited launcher PID is removed from the children map.
+- Old Hub / old daemon behavior remains legacy; foreground/adopted paths unchanged.
+- Fork confirmation/result mapping API and client button are NOT implemented here.
+
+Reproduce (Docker only)
+  sg docker -c 'docker build -t anet-test819:start-completion -f tests/test819-codex-start-completion/Dockerfile .'
+  sg docker -c 'docker run --rm --cpus 2 --network none anet-test819:start-completion'
+No host workspace mounts, host ports, credentials or real nodes in the behavior run.
+Image manifest: sha256:79e04dc89361111805449fac92325587b73651e6face5e737757dd9cc228cf32
+Image config: sha256:e4af7fd21c15510cd4b28fda4006f15123b316490a7de943fa4ea49c7c1f51b3
+Bun: 1.3.14. Base image oven/bun:1.3.14 resolved to
+sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4.
+
+Final result: container exit 0
+  agent-node: 59 pass / 0 fail / 162 assertions across 3 files (258 ms)
+  server:      8 pass / 0 fail /  34 assertions across 1 file (1.53 s)
+  Total:      67 pass / 0 fail / 196 assertions
+Includes dispatch -> daemon handler -> real isolated child process exit 0 / 7
+-> real Hub handler / database state. Hub handlers are invoked in-process (not an
+HTTP transport test). The launcher fixture is not a real Codex/model/TUI session.
+Other new coverage: pending launch, signal exit, spawn error, simultaneous replay,
+lost terminal ack replay, old Hub compatibility, progress refresh and late progress.
+Existing tests cover private config identity, child workdirs and adoption boundary.
+
+Source SHA256 (host/image readback matched)
+  c4e4fadfb6b80c917a5b8b3e408d7e5036e7315d62c2b2fda56176bb36d9aae1  agent-node/src/runtime/codex-start-completion.ts
+  71c0710ee2ca70aea68ddcc7e29a24ae4a68469c4a3f7d85904e4a67b8e2f1dc  agent-node/src/runtime/start-daemon.ts
+  8616a99a635b33099b3bfdcb687ca5c06a96a98acd7678fb852bee6cd93490cc  server/src/tools.ts
+
+Harness corrections before final run
+- A pending promise expectation in the lost-ack fixture stalled before the test
+  could emit its exit event. Stopped only that disposable container; attached a
+  rejection handler first, then emitted exit, then asserted the settled result.
+- The initial image lacked pgrep (adjacent child-workdir tests printed warnings).
+  Added procps and repeated the focused suite; final run had no missing-tool warning.
+
+Coverage limits
+- No model-level recovery, native client clicks, daemon-restart replay persistence,
+  or production upgrade was tested. started is launch completion, not ongoing health.
+- Progress clock semantics are tested without waiting 60 seconds in real time.
+- Existing complete agent-node-unit/server-unit CI collectors discover these tests;
+  the standalone Docker runner contains no extra assertions or redundant CI job.
+
+PR #2540 CI follow-up (2026-10-09, source behavior unchanged)
+- Run 37865816370, test625-node-adoption: the existing runner also selects
+  start-node.test.ts, but its image did not contain the newly imported daemon
+  source. Added source-only COPY, without installing another runtime package.
+  Docker rebuild/run: 25 pass, 0 fail, 105 assertions; existing deliberately
+  reverted authority gate still witnessed red; overall container exit 0.
+  Reproduce: docker build -f tests/test625-node-adoption/Dockerfile
+    -t anet-test625:start-completion .
+    docker run --rm --cpus 2 --network none anet-test625:start-completion
+  Image manifest list: cfaf9c70d46d4eb5c0818081aae3faa1589e000ac3697f071fcd896198c337fc
+- Same CI run, test225: CLI membership mutation did not alter the packed bundle.
+  The captured minifier identifier was interpolated into a RegExp without escaping
+  `$`. Escape the four captured set names; retain all acceptance/rejection checks.
+  Avoid printing the entire bundle when mutation application fails.
+  Rebuilt only the existing Dockerfile's packer stage (not the live test stage):
+    docker build --target packer
+      --build-arg SOURCE_COMMIT=cb87a4cdf7c940c3227c8d89d6d92a3a2fe56b5d
+      -f tests/test225-grok-preview-package-live/Dockerfile
+      -t anet-test225:completion-packer .
+  Packed Node runner: 2 pass, 0 fail, all six mutations rejected; build exit 0.
+  The source commit argument identifies the candidate before these harness edits,
+  not an exact immutable SHA for this uncommitted harness overlay or a release.
+  Image manifest list: e67bece77351164b113c4e55e45402579de07fffd9cde76cd5d3237bc23eecda
+  Earlier shortcut using Bun's node:test compatibility timed out at its default
+  5-second test budget; the intended Node runner passed without timeout changes.
+- Same CI run, test625-explicit-env-crlf: health polling could not connect to
+  port 9625; the CI artifact did not include the Hub stderr log. Rebuilt its
+  unchanged Dockerfile with the same SOURCE_COMMIT argument, then ran the entire
+  existing suite with --cpus 2 --network none. RESULT: PASS, container exit 0,
+  including the existing writer-bypass, witnessed-red and restored-green steps.
+  Failure was not reproduced; no product or timeout change made for this result.
+  Reproduce: docker build --build-arg SOURCE_COMMIT=cb87a4cdf7c940c3227c8d89d6d92a3a2fe56b5d
+    -f tests/test625-explicit-env-crlf/Dockerfile -t anet-test625:env-completion .
+    docker run --rm --cpus 2 --network none anet-test625:env-completion
+  Image manifest list: 5c1a48ef6cc6788e209c0428f2991823845727f6be78e2bdfc57e159360fa81f
+All Docker commands above were executed through sg docker -c. No package published.
