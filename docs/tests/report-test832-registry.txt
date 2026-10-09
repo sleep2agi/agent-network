@@ -1,0 +1,89 @@
+Hub #539 / #832: final tool-registry observation proof
+2026-10-09 13:00 Asia/Shanghai
+EXPERIMENT ONLY. This branch still contains the rejected connected-only runtime
+candidate. Do not merge or publish this branch as a product fix.
+
+Exact source: 78f35523b3daafdf116c97ba7eb8ff540ac0cdfe
+Image manifest: sha256:53001f152071f7a4257ffe2598e2436f2f1295b664695de1487febdff61e1ccb
+Image config: sha256:f9e5f613c233fe43f1174e089d6509a6c216491693d5ba1c7948d4613cfed7ee
+Inputs: pinned @opencode/cli@2.0.22, digest-pinned Bun 1.3.14 / Node22.
+All runs: Docker --network none, fresh private Hub/node identities/directories,
+loopback deterministic model, no source mounts and no production credentials.
+
+Observation mechanism
+The previous report proved /api/mcp connected insufficient (2 of 3 cold runs
+failed). This experiment loads an isolated V2 promise plugin from the test
+directory. Its read-only RPC uses ctx.tool.list() AFTER registry transforms.
+It returns ONLY {ready:boolean}, checking commhub_send_task and commhub_get_task.
+It never executes a tool, reads a credential, changes a permission or warms the
+model. The harness polls this observation with the remaining deadline after
+the MCP connection check, then invokes the FIRST model turn directly.
+Plugin and RPC polling currently exist ONLY in the Docker harness, not the
+production runtime. No claim of shipping a readiness gate.
+
+Upstream contracts inspected at SHA 527f0b931d1f9b3ebd34e106c51b31ce5db5b075:
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/plugin/src/promise/tool.ts
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/core/src/tool/mcp.ts
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/protocol/src/groups/rpc.ts
+
+Layered results (all containers exited 0)
+- Environment and authenticated Hub/node setup pass before each higher layer.
+- Five fresh first-turn positives, no discovery/model warmup:
+  container                          MCP delay  registry polls  elapsed
+  anet-test832-registry-r1             1200 ms    5               2437 ms
+  anet-test832-registry-r2             1200 ms    5               2244 ms
+  anet-test832-registry-r3                0 ms    3               1136 ms
+  anet-test832-registry-r4             3500 ms    4               4659 ms
+  anet-test832-registry-r5             1200 ms    2               2265 ms
+  Each passed actual dispatch, authoritative stable sender/recipient node IDs,
+  receiver reply, model get_task terminal receipt, explicit sender-spoof
+  rejection/no write, and intended credential assertions.
+- anet-test832-registry-missing: connection succeeds but deliberately require a
+  nonexistent tool; bounded 2200 ms deadline fails before ANY model invocation.
+- anet-test832-registry-auth: real MCP proxy HTTP401 fails before model invocation.
+- anet-test832-registry-timeout: 5000 ms handshake delay with 350 ms budget fails
+  with actionable timeout and no model invocation.
+- Earlier working-tree diagnostic anet-test832-registry-first passed too, but
+  is NOT counted in the five exact-source repetitions above.
+
+Reproduction from the exact source
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=78f35523b3daafdf116c97ba7eb8ff540ac0cdfe -f tests/test828-opencode-v2-mcp/Dockerfile -t registry-probe .'
+sg docker -c 'docker run --network none -e TEST832_READINESS=1 -e TEST832_REGISTRY=1 -e TEST832_DELAY_MS=1200 --entrypoint bun registry-probe /test828-mcp/harness.ts'
+Repeat fresh runs with delay 0 and 3500. For negative controls add respectively:
+- TEST832_MISSING_TOOL=1 TEST832_TIMEOUT_MS=2200 TEST832_EXPECT_FAILURE=1
+- TEST832_REJECT_AUTH=1 TEST832_EXPECT_FAILURE=1
+- TEST832_DELAY_MS=5000 TEST832_TIMEOUT_MS=350 TEST832_EXPECT_FAILURE=1
+Set each variable with docker -e. Artifacts are retained at /artifacts inside
+each named container (results.json and redacted process logs); regenerate from
+this committed harness rather than relying on one machine's transient files.
+
+Limits and next gate
+5/5 proves this observed contract on these runs, not universal reliability.
+Still required: runtime plugin installation/cleanup and exact package inputs,
+whole-budget HTTP/body deadlines including abort-ignoring transports, malformed
+or unavailable observation endpoint, process death, reconnect/registry removal,
+CLI/Hub/TUI startup ordering and stop cleanup, safe-mode restrictions unchanged.
+Real paid-model selection and native platforms are not covered. No fixed sleep
+or model warmup should replace the observation. Port a narrow implementation
+onto the current reviewed branch, not this rejected experimental branch.
+
+Release/operations snapshot, 2026-10-09 ~13:00 CST
+- PR2545 OPEN: Docker E2E passed, CI still incomplete. L0+L1 report-only failed
+  in test-agent-team-whoami PostgreSQL negative-control setup with
+  "PG: database worker signalled without a reply", not an expected assertion.
+  CI job 113671550168, run 37884140154, tested merge ab2c56040424248ea85c93ee0db36969dd2068fc.
+  Failure not waived or called harmless; isolated reproduction remains.
+- PR2547 OPEN: CI incomplete. No merge/release this iteration.
+- TMAI负责人 / TMAI狗 / TMA云盘牛 / TMA客户端牛 have fresh heartbeats.
+- TMA云牛 n_0cf5abeb remains offline. vdev daemon online, but this node has
+  lifecycle_controllable=false and lifecycle_daemon_node_id=null.
+  start_node returned node_not_stopped(active). One restart request was queued
+  as cu_fb64e96d-5147-42be-b400-5830bfcd8dd4; not proof of execution/recovery.
+  Local ssh alias vdev cannot resolve; observed private address 10.249.12.47:22
+  timed out. No repeated restarts, invented binding or production package change.
+
+Recovery boundary
+This adds only a repo-owned isolated test plugin/harness. No new production
+startup file, port/proxy/tunnel mapping, env/secret source, schema or persisted
+data. Existing startup/version/rollback procedures remain unchanged. Branch
+images are test-only. No backup restore or disaster recovery was exercised.
