@@ -4,13 +4,14 @@ import assert from 'node:assert/strict';
 import { serveExport, TEST_LOCALE } from '/client-plumbing/harness.mjs';
 const chunks = []; for await (const c of process.stdin) chunks.push(c);
 const bootstrap = JSON.parse(Buffer.concat(chunks).toString());
-const { hub, token, networkId, nodeId, baseRevision } = bootstrap;
+const { hub, token, networkId, nodeId, daemonId, baseRevision, action = 'model' } = bootstrap;
+assert.ok(['model', 'stop', 'start'].includes(action));
 assert.equal(hub, 'http://127.0.0.1:9287');
 assert.equal(process.env.CLIENT_SOURCE_COMMIT, process.env.EXPECTED_CLIENT_SOURCE_COMMIT);
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE);
 const web = await serveExport('/client-web');
 const browser = await chromium.launch({ headless: true, executablePath: '/usr/bin/chromium' });
-const trace = []; const updates = [];
+const trace = []; const updates = []; let lifecycleResult;
 try {
   const ctx = await browser.newContext({ locale: TEST_LOCALE, viewport: { width: 1200, height: 900 } });
   const page = await ctx.newPage();
@@ -32,6 +33,15 @@ try {
         const envelope = JSON.parse(text.split('\n').find(l => l.startsWith('data: '))?.slice(6) ?? text);
         const result = JSON.parse(envelope.result.content[0].text);
         assert.equal(result.ok, true); updates.push(request.params.arguments);
+      }
+      if (request.params?.name === `${action}_node`) {
+        assert.deepEqual(request.params.arguments, action === 'stop'
+          ? { child_node_id: nodeId, network_id: networkId }
+          : { node_id: nodeId, daemon_node_id: daemonId, network_id: networkId });
+        const envelope = JSON.parse(text.split('\n').find(l => l.startsWith('data: '))?.slice(6) ?? text);
+        lifecycleResult = JSON.parse(envelope.result.content[0].text);
+        assert.equal(lifecycleResult.ok, true); assert.ok(lifecycleResult.request_id);
+        updates.push(request.params.arguments);
       }
     }
     return { status: response.status, statusText: response.statusText, url: response.url,
@@ -71,6 +81,7 @@ try {
     await page.waitForFunction(() => !!window.__anetLayoutSweep);
     // Navigation only; directory, capability, mutation and readback are real.
     await page.evaluate(() => window.__anetLayoutSweep.setScreen({ name: 'nodeDetail', alias: 'oc829' }));
+    if (action === 'model') {
     await page.getByRole('tab', { name: '模型与运行时', exact: true }).click();
     await page.getByPlaceholder(/模型 id\(provider\/model\)/).fill('stub/stub-model-next');
     await page.getByText('切换模型', { exact: true }).click();
@@ -81,6 +92,16 @@ try {
     await page.screenshot({ path: '/artifacts/model-client-success.png' });
     console.log(`PASS rendered model change via real Hub; client=${process.env.CLIENT_SOURCE_COMMIT}`);
     console.log('MODEL_CLIENT_RESULT ' + JSON.stringify({ ok: true }));
+    } else {
+      await page.getByRole('tab', { name: '危险操作', exact: true }).click();
+      await page.getByText(action === 'stop' ? '停止节点' : '启动节点', { exact: true }).click();
+      await page.getByText('确认', { exact: true }).click();
+      await page.getByTestId('node-danger-action-message').filter({ hasText: action === 'stop' ? '停止请求已提交' : '节点已上线。' }).waitFor({ timeout: 65000 });
+      assert.equal(updates.length, 1);
+      assert.deepEqual(errors, []);
+      await page.screenshot({ path: `/artifacts/client-${action}-success.png` });
+      console.log('LIFECYCLE_CLIENT_RESULT ' + JSON.stringify({ ok: true, request_id: lifecycleResult.request_id }));
+    }
   } catch (error) {
     await page.screenshot({ path: '/artifacts/model-client-failure.png' });
     console.error('HTTP path/status only:', JSON.stringify(trace));

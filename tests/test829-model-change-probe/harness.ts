@@ -195,7 +195,8 @@ try {
   const providerRequests = readFileSync(`${artifact}/stub.log`, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   check('initial task reached original provider model', providerRequests.some(r => r.user.includes('Reply with exactly REMOTE829') && r.model === 'stub-model'));
   const afterModel = providerRequests.filter(r => r.user.includes('Reply with exactly MODEL829'));
-  check('post-change task reached new provider model only', afterModel.length > 0 && afterModel.every(r => r.model === 'stub-model-next'));
+  const expectedModel = process.env.TEST829_WRONG_PROVIDER_EXPECTATION === '1' ? 'deliberately-wrong-model' : 'stub-model-next';
+  check('post-change task reached new provider model only', afterModel.length > 0 && afterModel.every(r => r.model === expectedModel));
   console.log(`PASS real V2 model probe; rendered UI=${Boolean(process.env.TEST829_MODEL_DRIVER)}; provider model verified`);
 
   if (process.env.TEST829_LIFECYCLE === '1') {
@@ -212,7 +213,20 @@ try {
         return fields[19] !== p.ticks;
       } catch { return true; }
     };
-    const stop = await mcp('stop_node', { child_node_id: row.child_node_id, daemon_node_id: daemonId, network_id: networkId });
+    const clientLifecycle = async (action: 'stop' | 'start') => {
+      const child = Bun.spawn(['node', process.env.TEST829_MODEL_DRIVER!], {
+        env, stdin: new Blob([JSON.stringify({ hub, token, networkId, nodeId: row.child_node_id, daemonId, action })]), stdout: 'pipe', stderr: 'pipe',
+      });
+      const deadline = setTimeout(() => child.kill(), 90000);
+      try {
+        const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+        console.log(redact(out + err));
+        check(`rendered client ${action} action`, code === 0);
+        return JSON.parse(out.split('\n').find(l => l.startsWith('LIFECYCLE_CLIENT_RESULT '))!.slice(24));
+      } finally { clearTimeout(deadline); }
+    };
+    const stop = process.env.TEST829_MODEL_DRIVER ? await clientLifecycle('stop')
+      : await mcp('stop_node', { child_node_id: row.child_node_id, daemon_node_id: daemonId, network_id: networkId });
     console.log('stop result:', redact(JSON.stringify(stop)));
     check('actual stop dispatched', stop.ok && stop.request_id);
     let stopRow: any;
@@ -231,7 +245,8 @@ try {
       writeFileSync(`${nodeDir}/config.json`, JSON.stringify(stoppedConfig), { mode: 0o600 });
       console.log('NEGATIVE CONTROL: remove explicit V2 unsafe opt-in from owned stopped test node');
     }
-    const startResult = await mcp('start_node', { child_node_id: row.child_node_id, daemon_node_id: daemonId, network_id: networkId });
+    const startResult = process.env.TEST829_MODEL_DRIVER ? await clientLifecycle('start')
+      : await mcp('start_node', { child_node_id: row.child_node_id, daemon_node_id: daemonId, network_id: networkId });
     console.log('start result:', redact(JSON.stringify(startResult)));
     check('actual start dispatched', startResult.ok && startResult.request_id);
     if (denyRestart) {
@@ -261,10 +276,10 @@ try {
     const startRow = db.query('SELECT status,error FROM node_start_requests WHERE request_id=?').get(startResult.request_id) as any;
     console.log('start status:', JSON.stringify(startRow));
     check('start request completed', startRow?.status === 'started');
-    console.log('PASS actual daemon stop/start task chain; model/client UI remain separate');
+    console.log('PASS actual daemon stop/start task chain; rendered lifecycle UI=' + Boolean(process.env.TEST829_MODEL_DRIVER));
     }
   }
-  console.log('PASS test829 real daemon create and task; model/client UI remain separate gates');
+  console.log('PASS test829 real daemon create/model/task; native desktop/mobile package validation remains separate');
 } finally {
   writeFileSync(`${artifact}/tui.txt`, tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout || '');
   const bridge = `${childProject}/.anet/nodes/oc829/logs/copresence-bridge.log`;
