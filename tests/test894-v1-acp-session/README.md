@@ -29,3 +29,30 @@ current runtime source. A cached run is not evidence that clean dependency
 acquisition currently works. No host source, credentials, home or Docker socket
 is mounted. The container runs as `bun`, and its temporary directories disappear
 after native process exit. A 60-second per-probe deadline bounds failures.
+
+## Next layer: model transport against an isolated TLS fixture
+
+After the session atomic gate passes, run the same image with
+`bash /fixture-acp/run-model.sh` as its command (same source SHA and
+`--network none`). CI runs this as a later step, never after a failed session gate.
+
+This layer retains the production safe-mode policy and built-in `openai`
+provider. A loopback CONNECT endpoint accepts ONLY `api.openai.com:443` and
+`models.opencode.ai:443`, never forwards traffic, and serves an explicitly tiny
+offline model catalog and synthetic Responses stream. It generates an ephemeral
+certificate for those names; only this container trusts it. TLS verification is
+not disabled. ACP's internal localhost HTTP traffic bypasses the fixture via
+`NO_PROXY`; neither production proxy nor host trust stores are changed.
+
+An unauthenticated fixture request must receive HTTP401 before ACP starts. A
+synthetic node-local credential then exercises the real runtime/provider request,
+exact host/path/model and ACP response consumption. A new process deliberately
+uses a wrong expected model to check the observer after a successful response.
+The known fixture reply is not present in the user prompt. Certificate, credential,
+proxy, ACP child and launch roots are disposable; no real vendor key is used.
+`TEST_DEBUG_RUNTIME=1` optionally adds upstream debug logging for diagnostics,
+but is not used in the acceptance run. Each probe has a 90-second deadline.
+
+This proves controlled transport plumbing, NOT live vendor authentication/model
+availability, model reasoning, tool enforcement, Hub delivery, native package
+acceptance or release readiness. The older session-only result stays independent.

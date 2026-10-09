@@ -35,6 +35,10 @@ jobs:
           set -euo pipefail
           docker image inspect anet-v1-deps:test anet-v1-acp:test --format '{{.Id}}' | tee test894-images.txt
           docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" anet-v1-acp:test 2>&1 | tee report-test894-v1-acp-session.txt
+      - name: Safe ACP model transport with isolated TLS fixture (not live vendor)
+        run: |
+          set -euo pipefail
+          docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" anet-v1-acp:test bash /fixture-acp/run-model.sh 2>&1 | tee report-test894-v1-acp-model.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -42,4 +46,5 @@ jobs:
           path: |
             test894-images.txt
             report-test894-v1-acp-session.txt
+            report-test894-v1-acp-model.txt
           if-no-files-found: warn
