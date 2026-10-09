@@ -1,0 +1,30 @@
+test833 — human profile avatar backend contract (not client acceptance)
+Observed: 2026-10-09 12:38 Asia/Shanghai
+Source: ca0c60e7e707029cbd72b4dc63a986a68586dfac
+Base main: 9a0f5a85a45e0396289627fd6b40323435b17801
+Image: anet-test833:ca0c60e7
+Image config: sha256:0286d85c1191d67c2187b81d4b99b814425d885beb3eeefe5b65aa349b44ff80
+Container: anet-test833-ca0c60e7 (exit 0)
+Pinned Bun: 1.3.14; dependencies from server/package-lock.json, frozen install.
+No host source mount, no credentials, no production endpoint; --network none.
+
+Command (from source worktree):
+sg docker -c 'docker build -f tests/test833-user-avatar/Dockerfile -t anet-test833:ca0c60e7 . && docker run --name anet-test833-ca0c60e7 --network none anet-test833:ca0c60e7'
+
+Layered run.sh uses set -euo pipefail (no later layer on failure):
+1. Existing-user schema migration + next-process persistence: 1 pass, 3 assertions.
+2. Existing avatar URL validation matrix: 23 pass, 55 assertions.
+3. Sequential real HTTP scenario: 1 pass, 56 assertions.
+   user authentication; invalid/node credential rejection; pool save/read;
+   second login and existing profile update preserve avatar; authorized member
+   directory projection; stranger denied; other user unchanged; malformed and
+   unknown-field/target-ID/hostile-URL writes denied without changing old value;
+   HTTP(S) reference storage; null/blank reset visible to second session.
+4. Existing login/session regression: 17 pass, 89 assertions.
+Total: 42 tests passed, 0 failed, 203 assertions.
+
+Earlier working-tree runs passed, but counts above are ONLY this exact-source run.
+No browser/mobile/native UI test, photo upload, deployment or release performed.
+Full empty-server disaster recovery and old atok_ exhaustive regression are not
+claimed. Human avatars are global per user on the Hub, not per-network overrides.
+Hub #833 / sleep2agi/agent-network-app#781 stays doing; backend is a candidate.
