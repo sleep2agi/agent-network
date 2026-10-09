@@ -71,6 +71,7 @@ const binary = execFileSync("bash", ["-c", "readlink -f \"$(command -v opencode)
 
 const mcpToken = "test543-node-token";
 const mcpSeen: string[] = [];
+const mcpMethods: string[] = [];
 const mcp = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -79,10 +80,18 @@ const mcp = Bun.serve({
     if (request.headers.get("authorization") !== `Bearer ${mcpToken}`) return new Response("unauthorized", { status: 401 });
     if (request.method !== "POST") return new Response(null, { status: 405 });
     const body: any = await request.json().catch(() => ({}));
+    mcpMethods.push(String(body.method ?? ""));
     if (String(body.method ?? "").startsWith("notifications/")) return new Response(null, { status: 202 });
     const r = (result: unknown) => Response.json({ jsonrpc: "2.0", id: body.id, result }, { headers: { "mcp-session-id": "s543" } });
     if (body.method === "initialize") return r({ protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "test543-commhub", version: "1" } });
-    if (body.method === "tools/list") return r({ tools: [{ name: "send_message", description: "send", inputSchema: { type: "object", properties: { alias: { type: "string" } } } }] });
+    // This fixture verifies transport/startup, not tool execution. Match the
+    // minimum real CommHub task contract required by the product readiness
+    // gate; do not weaken that gate to accommodate an incomplete fake.
+    if (body.method === "tools/list") return r({ tools: [
+      { name: "send_message", description: "send", inputSchema: { type: "object", properties: { alias: { type: "string" } } } },
+      { name: "send_task", description: "dispatch a task", inputSchema: { type: "object", properties: { alias: { type: "string" }, content: { type: "string" } }, required: ["alias", "content"] } },
+      { name: "get_task", description: "read a task receipt", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"] } },
+    ] });
     if (body.method === "ping") return r({});
     return Response.json({ jsonrpc: "2.0", id: body.id, error: { code: -32601, message: "nf" } });
   },
@@ -164,6 +173,7 @@ try {
     writeFileSync(join(workDir, ".config", "opencode", "opencode.json"), JSON.stringify({ provider: PROVIDER, model: MODEL }), { mode: 0o600 });
     const project = join(root, "project");
     mkdirSync(project, { recursive: true, mode: 0o700 });
+    const modelCallsBeforeStartup = stubLog().length;
     runtime = await openOpenCodeCopresenceRuntime({
       backend: OPENCODE_V2_BACKEND, cwd: project, workDir, model: MODEL, unsafeTools: true,
       binarySearchPath: process.env.PATH!, startupTimeoutMs: 30_000,
@@ -176,6 +186,8 @@ try {
     check("launcher joins with --server/--session (no attach, no --pure)",
       launcher.includes(`--server '${runtime.url}' --session '${runtime.sessionId}'`) && !launcher.includes(" attach ") && !launcher.includes("--pure"));
     check("launcher spawns the gated package binary", launcher.includes(`exec '${binary}'`));
+    check("MCP tools discovered before ready, without a model warmup", mcpMethods.includes("tools/list") && stubLog().length === modelCallsBeforeStartup);
+    check("no unauthenticated MCP startup call", !mcpSeen.some((s) => s.endsWith("auth-bad")));
   }
 
   // ── Layer 4 ────────────────────────────────────────────────────────────
@@ -186,7 +198,8 @@ try {
     check("network task reply", r1.replyText === "NET543A", r1.replyText);
     check("network turn visible in the TUI", await waitFor(() => pane().includes("NET543A"), 10_000));
     check("sender provenance visible in the TUI", pane().includes("[来自 test543-peer]"));
-    // V2 connects MCP servers lazily (first turn), so this is checked after one.
+    // Startup now waits for the final registry; retain the after-turn auth
+    // check to detect an unexpected credential change during actual use.
     check("CommHub MCP connected with the node bearer token", await waitFor(() => mcpSeen.some((s) => s.startsWith("POST auth-ok")), 15_000), mcpSeen.join(","));
     check("no unauthenticated MCP call", !mcpSeen.some((s) => s.endsWith("auth-bad")));
   }
