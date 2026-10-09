@@ -1,0 +1,76 @@
+test832 — REJECTED candidate: connected is not first-turn tool readiness
+Date: 2026-10-09 12:32 CST
+EXPERIMENT ONLY. Do not merge this candidate or publish it.
+Authority: https://github.com/sleep2agi/agent-network/issues/2544 ; Hub #539/#828/#832
+Source: 0e6c8f7c5839293d3fb93d2c617ba416965b7c88
+Branch: experiment/opencode-v2-mcp-readiness (based on PR2547 before main restack)
+Image config: sha256:32ba75a0361fe10effd1c12cabb95aab472b3945ad0b887ab37cc6872a421c94
+Runtime: fixed @opencode/cli@2.0.22, Bun1.3.14, Node22 digest-pinned bases.
+No production credentials/ports, no paid model; all Docker --network none.
+Final runs have NO source bind mounts.
+
+Hypothesis and candidate:
+- A healthy /api/info does not imply MCP readiness.
+- Poll authenticated GET /api/mcp until commhub.status.status=connected.
+- Reject failed/needs_auth/disabled/invalid schema/child exit, bounded timeout.
+- Candidate invokes this before creating session/launcher in the V2 core.
+- Real probe calls the same helper, then its FIRST model turn directly invokes
+  tools.commhub.send_task. No discovery turns and no model warmup.
+- Unit tests cover the helper, NOT full core lifecycle cleanup/launcher ordering.
+- Real negative probes assert no model turn; full integration acceptance remains open.
+
+Layered results:
+1. Isolated helper unit suite: 8 pass, 0 fail, 42 assertions.
+   Container anet-test832-unit-exact exit0.
+2. Delayed real MCP initialize (1200ms), three independent fresh containers:
+   anet-test832-first-exact   exit0: dispatch/stable IDs/receipt/spoof all passed.
+   anet-test832-first-repeat1 exit1: Unknown tool on first turn.
+   anet-test832-first-repeat2 exit1: Unknown tool on first turn.
+   Same exact image/source. Thus 1/3 passed, 2/3 failed, NOT a reliable readiness gate.
+   Each run printed gate completed and waited for delayed handshake before first model call.
+   Earlier source-mounted diagnostic anet-test832-first-probe also failed similarly.
+3. Real proxy HTTP401:
+   anet-test832-auth-exact exit0; expected rejected-readiness outcome,
+   "CommHub MCP not ready (failed); check Hub reachability and node credentials";
+   no model invocation.
+4. Delay5000ms with350ms readiness budget:
+   anet-test832-timeout-exact exit0; expected bounded readiness timeout, no model turn.
+   Earlier diagnostic exposed raw "The operation timed out."; candidate normalized it.
+   Do not call this normalization a solution to first-turn tool readiness.
+
+Reproduce:
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=0e6c8f7c5839293d3fb93d2c617ba416965b7c88 -f tests/test828-opencode-v2-mcp/Dockerfile -t anet-test832:probe .'
+sg docker -c 'docker run --network none --entrypoint bun anet-test832:probe test /opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-copresence/v2-mcp-readiness.test.ts'
+sg docker -c 'docker run --network none -e TEST832_READINESS=1 -e TEST832_DELAY_MS=1200 --entrypoint bun anet-test832:probe /test828-mcp/harness.ts'
+sg docker -c 'docker run --network none -e TEST832_READINESS=1 -e TEST832_REJECT_AUTH=1 -e TEST832_EXPECT_FAILURE=1 --entrypoint bun anet-test832:probe /test828-mcp/harness.ts'
+sg docker -c 'docker run --network none -e TEST832_READINESS=1 -e TEST832_DELAY_MS=5000 -e TEST832_TIMEOUT_MS=350 -e TEST832_EXPECT_FAILURE=1 --entrypoint bun anet-test832:probe /test828-mcp/harness.ts'
+
+Upstream evidence inspected at v2.0.22 SHA527f0b931d1f9b3ebd34e106c51b31ce5db5b075:
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/core/src/mcp/index.ts
+  Server connections start asynchronously; connected state follows initial tool list.
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/core/src/tool/mcp.ts
+  Tool registration refresh has an independent debounced path.
+https://github.com/anomalyco/opencode/blob/527f0b931d1f9b3ebd34e106c51b31ce5db5b075/packages/protocol/src/groups/mcp.ts
+  Public /api/mcp returns connection state, not the model's tool registry revision.
+Interpretation: connection and Code Mode tool inventory are distinct readiness states.
+Next: find/build an observable tool-registry completion barrier and test first-turn
+success, delayed connection, rejected auth, bounded timeout, cleanup and the real
+CLI/Hub/TUI integration. Do not replace that with fixed sleeps or model warmup.
+
+Failure artifact (results.json captured in finally; JSON parse is the harness
+rejecting a native non-JSON tool error, not a missing artifact):
+          },
+          "strict": false
+        }
+      }
+    ],
+    "observed": [
+      {
+        "role": "tool",
+        "tool_call_id": "mcp828",
+        "content": "Unknown tool 'commhub.send_task'.\nUse search to find available tools."
+      }
+    ]
+  }
+]
+
