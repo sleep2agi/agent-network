@@ -189,6 +189,7 @@ import {
   mergePatch,
   buildConfigSnapshot,
   attachRuntimeReadiness,
+  attachCodexForkCapability,
   RESTART_SENTINEL,
   type ConfigUpdate,
   type ConfigPatch,
@@ -1414,6 +1415,7 @@ function currentNodeHealth(): NodeHealthReport | undefined {
 let codexLoginHealth: ReturnType<typeof createCodexLoginHealth> | null = null;
 // #622 —— host_supervisor 的逐 runtime 自检(见 runtime/runtime-readiness.ts)。非 daemon 恒为 null。
 let runtimeReadinessMonitor: { current(): Record<string, import("./runtime/runtime-readiness.js").RuntimeReadiness> | undefined } | null = null;
+let codexForkCapabilityMonitor: ReturnType<typeof import("./runtime/codex-fork-capability.js").createCodexForkCapabilityMonitor> | null = null;
 /** What goes on the wire as `health`: the #448 layers plus the additive #594 `codex_login`.
  *  Kept separate from `currentNodeHealth()` so the model_auth gate still only sees the monitor's report. */
 function reportedNodeHealth(): (Partial<NodeHealthReport> & { codex_login?: CodexLoginHealth }) | undefined {
@@ -1832,10 +1834,10 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
-      ...attachRuntimeReadiness(
+      ...attachCodexForkCapability(attachRuntimeReadiness(
         buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
         runtimeReadinessMonitor?.current(),
-      ),
+      ), codexForkCapabilityMonitor?.current()),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
       // #1958 — informational; the hub's RFC-024 content-match reads
       // snapshot.model (still the configured value) field-by-field, so extra
@@ -7756,6 +7758,14 @@ setInterval(() => {
 // exit. Logs only the top-level <ts>-<alias> dir name on purge — never
 // any file inside, per D7 nit ("不 log 文件名, 避免 secret 名字漏进 log").
 if (fileConfig.role === "host_supervisor") {
+  Promise.all([import("./runtime/codex-fork-capability.js"), import("./runtime/create-node-daemon.js")])
+    .then(([fork, cnd]) => {
+      codexForkCapabilityMonitor = fork.createCodexForkCapabilityMonitor({
+        bin: cnd.getAnetBinAbs, cwd: process.cwd(),
+        onChange: () => { void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {}); },
+      });
+      codexForkCapabilityMonitor.start();
+    }).catch(() => warn("[codex-fork-capability] init unavailable"));
   // #622 —— 逐 runtime 自检:开机跑一轮,之后每 10 分钟(±10% 抖动)一轮,全在后台。
   // 用**子进程真正拿到的**环境(minimalEnv)判断 PATH 与 key 变量名;结果变化就补报一次心跳。
   Promise.all([import("./runtime/runtime-readiness.js"), import("./runtime/create-node-daemon.js")])

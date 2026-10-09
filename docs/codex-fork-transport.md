@@ -1,8 +1,10 @@
 # Confirmed Codex fork transport — internal candidate (#822)
 
 This is source work for core Issue #2539, not a deployment or release. The daemon
-receiver and Hub storage/read path exist in this candidate; daemon capability
-advertisement and the final compatible CLI integration gate are still pending.
+receiver, Hub storage/read path and daemon capability advertisement exist in this
+candidate. CLI request correlation (#821 / PR2541) passed its 157 CI checks and
+merged into main 102dd0f2c11a2d72b8789e9a1ba3a3fde31eca1e. This backend candidate
+still needs its own PR checks and review before merge.
 Do not enable a capability by editing a production snapshot to bypass the gate.
 
 ## Contract
@@ -17,6 +19,10 @@ Clients must negotiate the new tool schema before offering this action.
 Dispatch requires a created (not adopted) binding and the daemon's affirmative
 `daemon_capabilities.codex_fork_recovery: {protocol: 1, cli_supported: true}`.
 This snapshot is advisory: the daemon rechecks the actual pinned CLI before use.
+Only host supervisors start the background help probe, at boot and every ten
+minutes; heartbeats read its cache without awaiting a subprocess. Before the
+first result the capability is absent. Failed/missing pin reports false; malformed
+capability telemetry is dropped without rejecting the whole heartbeat.
 `get_start_request` additionally requires `fork_recovery_capable: true` for a
 recovery request. Without it the old daemon receives a rejection, not an ordinary
 start envelope. Ordinary starts and old NULL database rows retain their behavior.

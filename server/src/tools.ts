@@ -841,7 +841,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         //    应当 hub 先合)。同一份 schema 里 side_thread_capability / external_schedules
         //    是 `.strict()` 的,后果不同 —— 见 `host:` 上方那段方框注释。
         daemon_capabilities: z.object({
-          codex_fork_recovery: z.object({ protocol: z.literal(1), cli_supported: z.boolean() }).optional(),
+          codex_fork_recovery: z.object({ protocol: z.literal(1), cli_supported: z.boolean() }).optional().catch(undefined),
           adopt_capable: z.boolean().optional(),
           runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
           allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),

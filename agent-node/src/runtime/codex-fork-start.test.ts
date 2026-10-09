@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 import { handleStartDoorbell } from "./start-daemon.js";
-import { supportsCodexForkRecovery } from "./codex-fork-capability.js";
+import { supportsCodexForkRecovery, createCodexForkCapabilityMonitor } from "./codex-fork-capability.js";
+import { attachCodexForkCapability } from "./config-apply.js";
 import { writeAdoptedChild } from "./adopt-registry.js";
 import { _resetChildrenMapForTest } from "./stop-daemon.js";
 
@@ -126,4 +127,29 @@ test("capability probe executes only pinned CLI help and rejects old/failed help
     expect(await supportsCodexForkRecovery(bin, root)).toBe(expected);
   }
   expect(await supportsCodexForkRecovery(join(root, "absent"), root)).toBe(false);
+});
+
+test("background capability starts absent, coalesces probes and reflects changed or missing pin", async () => {
+  let resolveProbe!: (value: boolean) => void;
+  let probes = 0, changes = 0, bin = "/trusted/anet";
+  const monitor = createCodexForkCapabilityMonitor({ cwd: root,
+    bin: () => { if (!bin) throw Error("/private/missing-pin"); return bin; },
+    probe: async () => { probes++; return new Promise<boolean>(resolve => { resolveProbe = resolve; }); },
+    onChange: () => { changes++; },
+  });
+  const snapshot = { daemon_capabilities: { can_create_nodes: true } };
+  expect(attachCodexForkCapability(snapshot, monitor.current())).toBe(snapshot);
+  monitor.start(); const inFlight = monitor.refresh();
+  expect(probes).toBe(1); expect(monitor.current()).toBeUndefined();
+  resolveProbe(true); await inFlight;
+  expect(attachCodexForkCapability(snapshot, monitor.current()).daemon_capabilities).toEqual({
+    can_create_nodes: true, codex_fork_recovery: { protocol: 1, cli_supported: true },
+  });
+  const same = monitor.refresh(); resolveProbe(true); await same;
+  expect(changes).toBe(1);
+  bin = ""; await monitor.refresh();
+  expect(monitor.current()).toEqual({ protocol: 1, cli_supported: false });
+  expect(changes).toBe(2); expect(probes).toBe(2);
+  expect(JSON.stringify(monitor.current())).not.toContain("/private");
+  monitor.stop();
 });

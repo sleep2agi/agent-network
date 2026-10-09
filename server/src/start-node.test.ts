@@ -8,6 +8,9 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { handleStartDoorbell } from "../../agent-node/src/runtime/start-daemon.js";
 import { lifecycleRequestResponse } from "./node-lifecycle-read.js";
+import { z } from "zod/v4";
+import { createCodexForkCapabilityMonitor } from "../../agent-node/src/runtime/codex-fork-capability.js";
+import { attachCodexForkCapability, buildConfigSnapshot } from "../../agent-node/src/runtime/config-apply.js";
 
 const NET = "net_start_node"; const USER = "u_start_node";
 const DAEMON = "node_start_daemon"; const DAEMON_ALIAS = "start-daemon";
@@ -31,8 +34,8 @@ beforeEach(() => { cleanup();
 afterAll(cleanup);
 
 function handlers(user: string | null, daemon = false) {
-  const s = new McpServer({ name: "t", version: "0" }) as any; const out: any = {};
-  const orig = s.tool.bind(s); s.tool = (n: string, d: string, schema: any, h: any) => { out[n] = h; return orig(n,d,schema,h); };
+  const s = new McpServer({ name: "t", version: "0" }) as any; const out: any = { $schemas: {} };
+  const orig = s.tool.bind(s); s.tool = (n: string, d: string, schema: any, h: any) => { out[n] = h; out.$schemas[n] = schema; return orig(n,d,schema,h); };
   registerTools(s, undefined, daemon ? NET : null, user, null, daemon, daemon ? "tok_start_daemon" : null); return out;
 }
 async function call(h: any, args: any) { return JSON.parse((await h(args)).content[0].text); }
@@ -49,6 +52,30 @@ describe("confirmed fork request/result transport (#822)", () => {
     return lifecycleRequestResponse(new URL(`http://hub/api/node-lifecycle-requests?kind=start&request_id=${requestId}`),
       { networkId, networkIds: null });
   }
+  test("real capability probe survives report schema/storage and opens only the recovery gate", async () => {
+    const root = mkdtempSync(join(tmpdir(), "fork-capability-report-"));
+    try {
+      const bin = join(root, "anet-fixture");
+      writeFileSync(bin, `#!${process.execPath}\nconsole.log('--fork-on-resume-failure --fork-recovery-request-id <str_id> --yes');`, { mode: 0o700 });
+      const monitor = createCodexForkCapabilityMonitor({ bin: () => bin, cwd: root });
+      await monitor.refresh();
+      const d = handlers(null, true), u = handlers(USER);
+      const snapshot = attachCodexForkCapability(buildConfigSnapshot({ role: "host_supervisor" }, false, 0), monitor.current());
+      const wire = z.object(d.$schemas.report_status).parse({ alias: DAEMON_ALIAS, node_id: DAEMON,
+        resume_id: "fork-capability-daemon", status: "idle", config_snapshot: snapshot });
+      await call(d.report_status, wire);
+      const stored = JSON.parse(db.get<any>(`SELECT config_snapshot FROM nodes WHERE node_id=?1`, DAEMON).config_snapshot);
+      expect(stored.daemon_capabilities.codex_fork_recovery).toEqual({ protocol: 1, cli_supported: true });
+      expect((await call(u.start_node, { node_id: CHILD, fork_recovery: recovery })).ok).toBe(true);
+      // Bad diagnostics are dropped, not a reason to reject the entire heartbeat.
+      for (const bad of [null, { protocol: 2, cli_supported: true }, { protocol: 1, cli_supported: "yes" }]) {
+        const parsed = d.$schemas.report_status.config_snapshot.parse({ ...snapshot,
+          daemon_capabilities: { can_create_nodes: true, codex_fork_recovery: bad } });
+        expect(parsed.daemon_capabilities.can_create_nodes).toBe(true);
+        expect(parsed.daemon_capabilities.codex_fork_recovery).toBeUndefined();
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   test("requires explicit confirmation and affirmative capability before creating any request", async () => {
     const u = handlers(USER);
     for (const value of [null, {}, { ...recovery, confirmed: false }]) {

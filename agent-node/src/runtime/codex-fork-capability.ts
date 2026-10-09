@@ -14,3 +14,41 @@ export function supportsCodexForkRecovery(bin: string, cwd: string): Promise<boo
     });
   });
 }
+
+export type CodexForkCapability = { protocol: 1; cli_supported: boolean };
+
+/** Background syntax probe only. Heartbeats read cached evidence and never
+ * await the subprocess. Execution still rechecks the pin and CLI capability. */
+export function createCodexForkCapabilityMonitor(options: {
+  bin: () => string;
+  cwd: string;
+  onChange?: () => void;
+  probe?: typeof supportsCodexForkRecovery;
+}) {
+  let capability: CodexForkCapability | undefined;
+  let running: Promise<void> | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  function refresh(): Promise<void> {
+    if (running) return running;
+    running = (async () => {
+      let supported = false;
+      try { supported = await (options.probe ?? supportsCodexForkRecovery)(options.bin(), options.cwd); }
+      catch { /* missing/unsafe pin or failed probe: report false, no raw paths */ }
+      const changed = capability?.cli_supported !== supported;
+      capability = { protocol: 1, cli_supported: supported };
+      if (changed) options.onChange?.();
+    })().finally(() => { running = undefined; });
+    return running;
+  }
+  return {
+    current: () => capability,
+    refresh,
+    start() {
+      if (timer) return;
+      void refresh();
+      timer = setInterval(() => { void refresh(); }, 10 * 60_000);
+      timer.unref();
+    },
+    stop() { if (timer) clearInterval(timer); timer = undefined; },
+  };
+}

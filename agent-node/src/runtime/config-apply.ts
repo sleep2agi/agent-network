@@ -401,6 +401,7 @@ export function mergePatch(existing: any, patch: ConfigPatch): any {
  * is included. Only model + the 6 dashboard-editable flags + role
  * (daemon discovery, see issue #338 / RFC-026 P2). */
 export interface DaemonCapabilities {
+  codex_fork_recovery?: import("./codex-fork-capability.js").CodexForkCapability;
   /** RFC-026 §9.3 — list of runtimes this daemon advertises support
    * for (declaration only; D2 spawn fail-fast catches "declared but
    * binary missing" at create-time). */
@@ -463,6 +464,13 @@ export function attachRuntimeReadiness<T extends { daemon_capabilities?: DaemonC
 ): T {
   if (!readiness || Object.keys(readiness).length === 0) return snapshot;
   return { ...snapshot, daemon_capabilities: { ...(snapshot.daemon_capabilities ?? {}), runtime_readiness: readiness } };
+}
+
+export function attachCodexForkCapability<T extends { daemon_capabilities?: DaemonCapabilities }>(
+  snapshot: T, capability: DaemonCapabilities["codex_fork_recovery"],
+): T {
+  if (!capability) return snapshot;
+  return { ...snapshot, daemon_capabilities: { ...(snapshot.daemon_capabilities ?? {}), codex_fork_recovery: capability } };
 }
 
 /** #1353 —— `can_create_nodes === false` 时的原因代码。
