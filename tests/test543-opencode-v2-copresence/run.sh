@@ -2,6 +2,7 @@
 # #543 — OpenCode V2 co-presence preview. Runs only inside its Docker image:
 # private tmux socket (-L test543), throwaway dirs, loopback stub model, no Hub.
 set -Eeuo pipefail
+unset TMUX TMUX_PANE
 
 REPORT="${REPORT:-/tmp/art/report-test543.txt}"
 mkdir -p "$(dirname "$REPORT")"
