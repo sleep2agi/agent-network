@@ -61,3 +61,56 @@ Remaining: reconcile latest main, full new-head CI, agent-acl/member-presence
 failures, client/upload acceptance and formal main release. Existing deployment,
 ports, secrets and rollback procedures unchanged; old binaries ignore the new
 nullable column. No claim of empty-machine data recovery or production effect.
+
+2026-10-09 20:57 CST — latest-main directory contract and documentation repair
+Test source: fcf719480fc761402bb304ce8f9299d9cedee1c2
+Integrated main: 8a7e48f67178008388edffd2eec22c91198836b5
+This section does not supersede the earlier failures or turn them into passes.
+
+CI run 37931977415 (head 0063066863d803eb17491aa6fed847b78a5df737)
+failed in jobs 113824665367/113824901313/113824901368: four new trivial-line
+auth.ts pins; db.ts team-column claim drift; exact human-directory keys still
+expecting the pre-avatar shape. A node-directory assertion failed before stream
+cleanup, with a subsequent member-presence wait timing out. The same ACL key
+assertion also failed in PG ladder job 113824902664; that job had already reached
+ladder L6 and passed migration, so it was not another PRAGMA startup failure.
+
+Changes: update exact key sets to include avatar_url and assert default null;
+keep node presence exclusion, nonmember rejection and cross-network isolation.
+Extend test833 with the existing ACL and presence suites in separate DBs.
+Replace four auth.ts line pins (eight bilingual occurrences) with file links
+whose labels name the original functions. Scanned docs remain 123, baseline 0;
+unique pins 6->2 and occurrences 18->10, still asserted exactly. Update team
+column claim AND prose AND mutation target to line 449; retain wrong-line 438.
+
+Exact-source isolated Docker results:
+- test833: 108 pass, 0 fail, 463 assertions (1+23+1+17+60+6 tests).
+  Container anet-avatar-fcf7 exited 0; no production access, --network none.
+  Image index sha256:92fbdd7b7b43b9c3e7edc5971178411a2de4420987275f17b3cbc52d0e24cc88
+- test831: RESULT PASS, including bad-pin/baseline/path/tool-index mutation
+  controls; 123 docs, 2 unique pins, 10 occurrences, 0 broken/0 baseline.
+  Container anet-avatar-doc831-fcf7 exited 0.
+  Image index sha256:7a777fad2c4446f1ba3c8492618dd9577d1695940c21775e9000a2bce1bd748a
+- test846: 8 claims PASS; wrong-line, empty-manifest and path-escape controls
+  each fail as intended and restore green. Container anet-avatar-doc846-fcf7 exit 0.
+  Image index sha256:c80f6952dbb542d8cad50fa1e27e246e42010c563f92b66d87fa4a8a875e85dd
+
+Reproduce from fcf719480fc761402bb304ce8f9299d9cedee1c2:
+sg docker -c 'docker build -f tests/test833-user-avatar/Dockerfile -t anet-avatar:fcf7 . && docker run --network none anet-avatar:fcf7'
+sg docker -c 'docker build -f tests/test831-doc-source-pins/Dockerfile --build-arg TEST831_SOURCE_COMMIT=fcf719480fc761402bb304ce8f9299d9cedee1c2 --build-arg TEST831_RUNSH_BLOB=be6818dd4b099ff8e8acfd4e30a99b57a121f28b -t anet-avatar-doc831:fcf7 . && docker run --network none anet-avatar-doc831:fcf7'
+sg docker -c 'docker build -f tests/test846-doc-claims/Dockerfile --build-arg TEST846_SOURCE_COMMIT=fcf719480fc761402bb304ce8f9299d9cedee1c2 --build-arg TEST846_RUNSH_BLOB=457e7d399d741281e06ba4557f03aaf4fe1783fc -t anet-avatar-doc846:fcf7 . && docker run --network none anet-avatar-doc846:fcf7'
+
+Full server aggregation and fresh-head CI are separate gates. No UI/upload,
+native client, public package, production migration or release is claimed here.
+
+2026-10-09 20:59 CST — full server aggregation on the same fcf71948 source
+test798-server-unit-ci: executed_files=216 discovered_files=216 failed_files=0.
+Non-root uid=1000, Bun 1.3.14, Node v22.23.3, per-file isolated temporary DBs.
+Registration-password-floor mutation returned rc=1 as expected; RESULT PASS.
+Container anet-avatar-unit-fcf7 exited 0, --network none, no host source mount.
+Image index sha256:3dae2d0b2eb73f910c8b278aac22882e2e2040eba2b7beabca5fea8a7cf8d93a
+sg docker -c 'docker build -f tests/test798-server-unit-ci/Dockerfile --build-arg SOURCE_COMMIT=fcf719480fc761402bb304ce8f9299d9cedee1c2 --build-arg RUNSH_BLOB=d4a01d27d1ca0f98ba3c1f46a134edb940cae7cc -t anet-avatar-unit:fcf7 . && docker run --network none anet-avatar-unit:fcf7'
+
+The previous-head test638 aggregate job 113824903080 also failed specifically
+on the old ACL/presence key sets. This local test798 pass is not a claim that
+the different test638/PG ladder or the complete new-head CI have already passed.
