@@ -1,0 +1,76 @@
+Test829: rendered client -> real Hub -> real daemon -> real OpenCode V2
+2026-10-09 16:37 CST (UTC+08:00). Hub #539 / #829; Issue #2544.
+PASS, exit 0. Candidate integration ONLY; NOT merged or published.
+
+Runtime/Hub/CLI/harness source: 94190f52cc6cae184a46cac33aa55e6c72b75b42
+Branch test/opencode-v2-daemon-e2e stacks unmerged siblings #2545/#2550/#2551.
+It is not evidence that standalone PR #2551 or current main is ready.
+Client product/export source: 19595b59095ac822f32f673494e7bb77ed898d17
+Separate repository sleep2agi/agent-network-app, PR #785.
+
+Container anet-test829-client-941, --network none, TEST829_LIFECYCLE=1.
+Image anet-test829:client-941
+sha256:57869799497e3673da730c187a1242fd8ff30f477bc042267fcd3d3f284b7f52
+Dockerfile tests/test829-opencode-create/Dockerfile.client
+Build SOURCE_COMMIT and run EXPECTED_SOURCE_COMMIT = runtime SHA above.
+Build CLIENT_SOURCE_COMMIT and run EXPECTED_CLIENT_SOURCE_COMMIT = client SHA.
+Build CLIENT_IMAGE=anet-app-v2-options:ui-195
+sha256:151d5865c5396a696bcfe88b4f4a5218d63c6aefaca009ccafd8f4557060309a
+Base NATIVE_IMAGE=anet-test829:native-create-proof-504b
+sha256:b43d82cc8f47e7f16305ad3bf1bddce67238606205569ff2f01625555c04911f
+Both are local test inputs, not portable public release references. Their
+recipes/input evidence are in the earlier test829-create-confirmation report
+and app report-test-opencode-v2-create.txt. No runtime host source mounts.
+Full candidate server/CLI/runtime copied and rebuilt in the isolated container.
+Chromium 154.0.8037.92-1~deb12u1; fonts-noto-cjk 1:20220127+repack1-1.
+
+Scope and layered observations
+L0 actual @opencode/cli 2.0.22, Hub and loopback deterministic model healthy.
+L1 unauthenticated dispatch 401; actual CLI init/register/login/daemon init;
+   actual daemon registered with host-supervisor capability.
+L2 V2 without explicit unsafe opt-in rejected before request/config side effects.
+L3 exported client in Chromium 1200x900, real daemon list/readiness, actual
+   generation selector/consent/model input/submit. All Hub HTTP forwarded to
+   the owned authenticated server with original status/body. No Hub fixture,
+   fake readiness or forced disabled click. The existing test navigation hook
+   opens the picker; Tauri OS/HTTP IPC is adapted, not a native WebView.
+   Client displayed exactly "✓ oc829 已上线" after actual request-bound proof.
+   create cr_f47404ca-7c1e-492e-9c9a-e83cf928371a
+   child node_f47404ca-7c1e-492e-9c9a-e83cf928371a
+   registration acked_at=1791534963063; launch_verified_at=1791534966765.
+   Token remained active after daemon delayed verdict; native TUI rendered.
+L4 actual task receipt [oc829] ANSWER829_REMOTE829, same native TUI shows reply.
+L5 actual stop_node sr_2fe51938dd5b completed stopped; frozen bridge/serve/TUI
+   PID+start-ticks reaped, exact sessions gone, config preserved.
+   start_node str_e9d961513503 completed started with new generation evidence;
+   new task replied [oc829] ANSWER829_RESTART829 and appeared in the TUI.
+Owned harness process groups exited; final container exit 0 (not just PASS text).
+
+Evidence retained in container /artifacts and docker logs:
+report-test829-native.txt, client-success.png, daemon.log, hub.log, bridge.log,
+tui.txt, stub.log. Successful screenshot visually inspected. Bootstrap tokens
+passed to the browser driver on stdin, not argv/env/artifact files; logged
+service output redacted. Test HOME/SQLite/private tmux only; no production keys.
+
+Failures and corrections (do not erase failed evidence)
+- client-885: test navigation hook absent without safeAreaSim URL; harness fix.
+- client-c4f: real V2 runtime disabled by generic opencode.ai probe. Product
+  readiness now unknown, not ready, until node-specific creation/start checks;
+  V1/missing-CLI gates retained. Product fix 963573c in PR #2551.
+- client-4e4: test HOME under /run correctly failed system-dir protection.
+  Move owned Docker HOME to /home; preseed only provider at actual client default
+  child directory, leave identity/config creation to daemon. No product bypass.
+- client-5db: actual daemon launch succeeded and proof existed, but old client
+  used unfiltered light status, which omits node_id by contract. UI timed out.
+  Client 19595b5 uses existing network/alias-scoped full details and still checks
+  exact child_node_id. Fixture now mirrors light/full projection difference.
+
+Boundaries
+Linux root container wrapper, not non-root native or macOS/Windows acceptance.
+Model service deterministic loopback stub, not paid provider quality/login.
+Create uses the rendered client; subsequent task/stop/start use actual APIs,
+not the client lifecycle screens. This does not cover every client control.
+V2 remains explicitly unsafe-tools preview, not a proven security sandbox.
+No production config/service/proxy/port/secret/data changes or DR claims.
+No npm/GitHub Release/TestFlight uploads. Formal release requires merged main
+full40 SHA and fresh release gates, never these stacked branch artifacts.
