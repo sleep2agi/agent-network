@@ -16,4 +16,5 @@ bun test src/create-node-workdir.test.ts
 cd /opt/node_modules/@sleep2agi/agent-node
 bun test src/runtime/create-node-daemon.test.ts src/runtime/create-node-daemon-private-wiring.test.ts
 bun test src/runtime/node-name-652.test.ts
+bun test src/runtime/opencode-copresence/launcher-health.test.ts src/runtime/opencode-copresence/v2-session.test.ts
 echo 'PASS test829 contract/persistence slice; real runtime startup and client UI NOT covered'

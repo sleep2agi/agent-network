@@ -33,6 +33,7 @@
 
 import { spawn } from "child_process";
 import { randomBytes } from "crypto";
+import { publishLaunchHealth } from "./launcher-health";
 import { rmSync } from "fs";
 import { join } from "path";
 import {
@@ -318,6 +319,7 @@ export async function openVettedOpenCodeV2Copresence(
   let queue = Promise.resolve();
   let notifyWarned = false;
   const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
+  let clearLaunchHealth = () => {};
   try {
     const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
     if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
@@ -335,6 +337,7 @@ export async function openVettedOpenCodeV2Copresence(
     if (typeof sessionId !== "string" || !/^ses_[A-Za-z0-9]+$/.test(sessionId)) {
       throw new Error("OpenCode v2 POST /api/session returned an invalid session id");
     }
+    clearLaunchHealth = publishLaunchHealth(opts.workDir, sessionId, child.pid);
     writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir);
     log(`[opencode-copresence] v2 preview ready version=${version} session=${sessionId.slice(0, 12)} attach=${attachScriptPath}`);
     relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
@@ -476,6 +479,7 @@ export async function openVettedOpenCodeV2Copresence(
       async close(mode?: { restart?: boolean }) {
         if (closed) return;
         closed = true;
+        clearLaunchHealth();
         stopRecordedAttach(opts.workDir, { restart: mode?.restart === true, log, warn, tmux: opts.tmuxRunner });
         rmSync(attachScriptPath, { force: true });
         if (identity) await stopProcessGroup(child as any, identity);
@@ -483,10 +487,12 @@ export async function openVettedOpenCodeV2Copresence(
       },
     };
     child.once("exit", (code, signal) => {
+      clearLaunchHealth();
       if (!closed) warn(`[opencode-copresence] v2 serve exited code=${code} signal=${signal}; next task must reopen`);
     });
     return session;
   } catch (error) {
+    clearLaunchHealth();
     rmSync(attachScriptPath, { force: true });
     if (identity) await stopProcessGroup(child as any, identity).catch(() => {});
     else try { child.kill("SIGKILL"); } catch {}

@@ -26,6 +26,7 @@ import {
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
+import { inspectLaunchHealth, successfulLauncherExit } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
   requiredCliStatus,
@@ -1046,6 +1047,8 @@ export async function handleCreateNodeDoorbell(
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
   const { flags: flagsObj, codexCopresence, opencodeGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  const opencodeCopresence = req.node_spec.runtime === "opencode-cli"
+    && opencodeGeneration === "v2" && opencodeMode === "copresence";
   // Best-effort: also derive `permissionMode` etc into a `flags` block
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
@@ -1118,6 +1121,7 @@ export async function handleCreateNodeDoorbell(
   //     symptom if the real cause is insta-crash on first vendor call /
   //     missing API key / config issue)
   let childPid = -1;
+  const launchedAt = Date.now();
   // #596 — how the launcher ended, if it did. A codex co-presence launcher
   // (`anet node start` on a codexCopresence config) brings the three tmux
   // sessions up and then EXITS 0 by design; without this, the +5 s check below
@@ -1145,7 +1149,7 @@ export async function handleCreateNodeDoorbell(
       // A co-presence launcher's pid is dead weight once it exits: keeping it in
       // the children map would let a later stop signal whoever reuses the number.
       // Stop/delete reach the generation through its identity marker instead.
-      if (codexCopresence) {
+      if (codexCopresence || opencodeCopresence) {
         import("./stop-daemon.js")
           .then(({ forgetSpawnedChildIfPid }) => { forgetSpawnedChildIfPid(childNodeIdForMap, spawnedPid); })
           .catch(() => { /* best-effort */ });
@@ -1238,6 +1242,27 @@ export async function handleCreateNodeDoorbell(
       stillAlive = true;
       deps.log(`[create-node] +${FAIL_FAST_MS}ms capability check OK: pid=${childPid} still alive`);
     } catch (kerr: any) {
+      if (opencodeCopresence) {
+        for (let i = 0; i < 10 && !launcherExit; i++) await new Promise(r => setTimeout(r, 50));
+        const ex = launcherExit as { code: number | null; signal: NodeJS.Signals | null } | null;
+        const health = inspectLaunchHealth(childDir, childCfgPath, launchedAt);
+        const { forgetSpawnedChildIfPid, recordSpawnedChild } = await import("./stop-daemon.js");
+        forgetSpawnedChildIfPid(childNodeIdForMap, childPid);
+        if (successfulLauncherExit(ex) && health.ok) {
+          recordSpawnedChild(childNodeIdForMap, req.node_spec.name, health.bridgePid);
+          deps.log(`[create-node] +${FAIL_FAST_MS}ms: OpenCode launcher exited 0; live bridge/serve/TUI generation verified`);
+          await deps.callCommHub("ack_create_request", {
+            request_id, status: "started", child_pid: health.bridgePid,
+          }).catch((e: any) => deps.warn(`[create-node] ack failed: ${e?.message || e}`));
+          return;
+        }
+        const msg = `OpenCode launcher exit=${ex?.code ?? "unknown"} signal=${ex?.signal ?? "none"}; ${health.ok ? "live generation but unsuccessful launcher" : health.reason}`;
+        deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
+        await deps.callCommHub("ack_create_request", {
+          request_id, status: "runtime_capability_check_failed", error: msg, runtime: req.node_spec.runtime,
+        }).catch(() => {});
+        return;
+      }
       // #596 — a co-presence launcher that exited 0 after writing its identity
       // marker finished its job; that is a start, not a capability failure.
       if (codexCopresence) {
