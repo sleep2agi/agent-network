@@ -28,3 +28,36 @@ No browser/mobile/native UI test, photo upload, deployment or release performed.
 Full empty-server disaster recovery and old atok_ exhaustive regression are not
 claimed. Human avatars are global per user on the Hub, not per-network overrides.
 Hub #833 / sleep2agi/agent-network-app#781 stays doing; backend is a candidate.
+
+2026-10-09 20:43 CST — PostgreSQL initialization repair
+Source: c7a43a0fc979a789e602c54fe90a1d9001f03834 (candidate, not merged).
+Original CI run 37884889116 job 113672559910 reached PG then failed with
+"syntax error at or near PRAGMA" at server/src/db.ts:324. This was a product
+migration defect, not a timeout or an intended mutation-test failure.
+Replace the SQLite-only column query with the existing adapter-neutral additive
+ALTER pattern: only duplicate/already-exists errors are ignored; other errors
+still abort startup. No schema/data removal or production migration was run.
+
+Exact-source Docker results (no source mount; --network none):
+- tests/test833-user-avatar: existing-user migration/next-process persistence,
+  URL validation, real avatar HTTP and auth/session regression all PASS; exit 0.
+- tests/test674-binding-generation: SQLite and PostgreSQL each 7 positive HTTP
+  tests / 51 assertions PASS, followed by 10 expected assertion-negative
+  mutations per backend. Both RESULT lines PASS; container exit 0.
+- This proves the previously failing PG schema initialization path now works.
+  It does not prove all 11 prior CI failures fixed, nor PG old-user avatar
+  migration/persistence or the avatar HTTP matrix itself on PostgreSQL.
+
+Images / retained containers:
+anet-avatar:c7a4 / anet-avatar-c7a4
+  sha256:6ebc06b975707d5600d50beb3f0c7ae6583b17efba0764c78e4f24234cc98794
+anet-avatar-pg:c7a4 / anet-avatar-pg-c7a4
+  sha256:33cd70f2bac7311908a8af8a2abb9979d9cfbea5c4b4172498e5e571825fea41
+Reproduction from the source above:
+sg docker -c 'docker build -f tests/test833-user-avatar/Dockerfile -t anet-avatar:c7a4 . && docker run --network none anet-avatar:c7a4'
+sg docker -c 'docker build -f tests/test674-binding-generation/Dockerfile --build-arg SOURCE_COMMIT=c7a43a0fc979a789e602c54fe90a1d9001f03834 -t anet-avatar-pg:c7a4 . && docker run --init --cpus=2 --network none anet-avatar-pg:c7a4'
+
+Remaining: reconcile latest main, full new-head CI, agent-acl/member-presence
+failures, client/upload acceptance and formal main release. Existing deployment,
+ports, secrets and rollback procedures unchanged; old binaries ignore the new
+nullable column. No claim of empty-machine data recovery or production effect.
