@@ -2,7 +2,7 @@
 # #543 — minimal OpenAI-compatible chat-completions stub (streaming + non-streaming),
 # loopback only, no credentials. "Reply with exactly X" -> X; "STUB_FAIL" -> HTTP 400;
 # "STUB_DELAY_<s>" -> the turn takes <s> seconds. Every request is logged (path, tool names,
-# last user text) to argv[2] so the harness can see which tools OpenCode offered the model.
+# model, last user text) to argv[2] so the harness can verify routing and offered tools.
 import json, re, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = sys.argv[2] if len(sys.argv) > 2 else None
@@ -29,7 +29,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("content-length", 0)); body = json.loads(self.rfile.read(n) or b"{}")
         if LOG:
-            with open(LOG, "a") as f: f.write(json.dumps({"path": self.path, "tools": [t.get("function", {}).get("name") for t in body.get("tools", []) or []], "user": last_user(body)[:200]}) + "\n")
+            with open(LOG, "a") as f: f.write(json.dumps({"path": self.path, "model": body.get("model"), "tools": [t.get("function", {}).get("name") for t in body.get("tools", []) or []], "user": last_user(body)[:200]}) + "\n")
         u = last_user(body)
         if "STUB_FAIL" in u:
             self._json(400, {"error": {"message": "stub provider refused: STUB_FAIL requested", "type": "invalid_request_error"}}); return
