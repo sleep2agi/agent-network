@@ -4,13 +4,13 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'no
 import { Database } from 'bun:sqlite';
 const root = '/home/node/test883';
 const project = `${root}/project`;
-// The real client uses the daemon-advertised HOME plus the node folder.
-const childProject = process.env.TEST829_CLIENT_DRIVER ? `${root}/home/oc829` : project;
 const artifact = '/artifacts';
 mkdirSync(project, { recursive: true });
 mkdirSync(artifact, { recursive: true });
 const hub = 'http://127.0.0.1:9287';
 const env = { ...process.env, HOME: `${root}/home`, TERM: 'xterm-256color', ANET_BIN_ABS: '/workspace/agent-network/dist/bin/anet.cjs', ANET_DAEMON_ALLOW_ENV_BIN: '1' };
+// The real client uses the daemon-advertised HOME plus the node folder.
+const childProject = process.env.TEST829_CLIENT_DRIVER ? `${env.HOME}/oc829` : project;
 mkdirSync(env.HOME, { recursive: true, mode: 0o700 });
 const redact = (s: string) => s.replace(/\b(?:atok|ntok|utok)_[A-Za-z0-9_-]+/g, '[test-token]');
 const pause = (ms = 200) => new Promise(r => setTimeout(r, ms));
