@@ -37,8 +37,9 @@ serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 
 只有绑定 daemon 在启动器退出及本轮三进程检查通过后，以真实 bridge PID
 回报 `launch_verified: true` 才记录；失败清除此证据，迟到成功不能复活失败。
 GET `/api/node-create-requests` 按原网络权限返回该列和 `child_node_id`。
-客户端必须检查本次请求、失败状态、精确节点身份及在线状态；OpenCode 还必须
-等明确启动证据，不能从 `acked_at` 推断。旧 Hub/daemon 缺证据仅显示尚未确认。
+客户端必须检查本次请求、失败状态、精确节点身份及在线状态；V2 还必须
+等明确启动证据，不能从 `acked_at` 推断。V2 在旧 Hub/daemon 缺证据时仅显示尚未确认。
+客户端依据实际提交的代际启用此门；旧 V1 不要求它不提供的 V2 证据。
 该时间是一次启动检查记录，不是持续健康保证。升级/回滚仍用 main SHA 门禁，
 旧程序可忽略新增可空列；请求历史随原 Hub 数据库加密备份恢复，不伪造确认时间。
 
