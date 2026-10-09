@@ -292,7 +292,7 @@ import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-
 import { copresenceRolloutGuard, copresenceVersionProbeScript, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
 import { describeMissingOrdinalFailure, probeCodexVersionCached } from "../src/codex-rollout-history-guard";
 import { codexVersionPinMismatch, configuredCodexBin, configuredCodexVersion, resolveCopresenceCodexBin } from "../src/codex-bin-pin";
-import { resumeOrForkOnMissingOrdinal, type ForkRecoveryOptions } from "../src/codex-fork-recovery";
+import { parseForkRecoveryRequestId, resumeOrForkOnMissingOrdinal, type ForkRecoveryOptions } from "../src/codex-fork-recovery";
 import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
@@ -647,6 +647,7 @@ async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) 
 function forkRecoveryOptions(nodeId: string, displayName: string, opts: CopresenceOptions, threadId: string | undefined): ForkRecoveryOptions {
   return {
     enabled: opts.forkOnResumeFailure === true, yes: opts.yes === true, interactive: process.stdin.isTTY === true,
+    requestId: opts.forkRecoveryRequestId,
     threadId, codexHome: opts.codexHome, nodeDir: join(nodesDir(), nodeId), node: displayName,
     confirm: async (prompt) => {
       const rl = getRL();
@@ -735,6 +736,8 @@ interface CopresenceOptions {
   skipRecoveryBackup?: boolean;
   /** Board #738: fork the thread when resume fails with "missing an ordinal" (after a human's yes). */
   forkOnResumeFailure?: boolean;
+  /** Optional Hub start request correlation, not permission to fork. */
+  forkRecoveryRequestId?: string;
   /** --yes: confirms the fork when there is no terminal to ask. */
   yes?: boolean;
   /** Resolved config.env values. Each native stage receives the same set. */
@@ -4692,6 +4695,9 @@ Options:
   --fork-on-resume-failure    codex: if the thread cannot be resumed ("missing an
                               ordinal"), ask, then fork it into a new thread
                               (non-interactive: also pass --yes)
+  --fork-recovery-request-id <str_…>
+                              Correlate a codex fork mapping with a Hub start
+                              request (not confirmation or startup success)
   --copresence                Start a shared human + agent TUI\n                              (codex-app-server | opencode-cli | grok-build-cli)
                               (codex: recorded on the node, so the next start
                               needs no flag — plain 'anet node start <name>')
@@ -8211,6 +8217,11 @@ async function maybeExternalAppserverLifecycle(verb: "start" | "stop" | "restart
 
 async function startCommand() {
   const startInvokedAt = Date.now();
+  const opts = parseOpts();
+  const forkRecoveryRequestId = parseForkRecoveryRequestId(opts["fork-recovery-request-id"]);
+  if (forkRecoveryRequestId !== undefined && args.includes("--all")) {
+    throw new Error("--fork-recovery-request-id is for one node start, not --all");
+  }
   // #173 — `anet node start --all` starts every node under cwd's .anet/nodes/
   // (skip already-running, staggered, auto-resume). It delegates to the
   // `anet project up` implementation (projectUp) so the two stay in lockstep
@@ -8234,7 +8245,6 @@ async function startCommand() {
   const startPositionals = positionalArgs(args.slice(1));
   const id = startPositionals[0];
   if (!id) { showProfiles("start"); return; }
-  const opts = parseOpts();
   const forceNewSession = !!opts["new-session"];
 
   // RFC-030 P2 — `anet node start <alias> --copresence` spawns the 3-piece
@@ -8332,6 +8342,7 @@ async function startCommand() {
       newSession: forceNewSession,
       skipRecoveryBackup: opts["skip-recovery-backup"] === "true",
       forkOnResumeFailure: opts["fork-on-resume-failure"] === "true",
+      forkRecoveryRequestId,
       yes: opts.yes === "true",
       configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id)),
     });

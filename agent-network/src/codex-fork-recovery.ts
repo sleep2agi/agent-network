@@ -24,6 +24,8 @@ export const FORK_RECOVERY_SNAPSHOT_DIR = "rollout-snapshots";
 export interface ForkRecoveryOptions {
   /** --fork-on-resume-failure was passed. */
   enabled: boolean;
+  /** Correlates a mapping with one Hub start request; never grants confirmation. */
+  requestId?: string;
   /** --yes was passed (required when there is no terminal to ask). */
   yes: boolean;
   /** A human can answer a prompt (stdin is a TTY). */
@@ -42,12 +44,21 @@ export interface ForkRecoveryOptions {
 }
 
 export interface ForkMapping {
+  requestId?: string;
   oldThreadId: string;
   newThreadId: string;
   originalRollout: string;
   snapshot: string;
   sha256: string;
   at: string;
+}
+
+/** Keep this opaque: the Hub owns ID generation, not the CLI. */
+export function parseForkRecoveryRequestId(value: string | undefined): string | undefined {
+  if (value !== undefined && value.match(/^str_[A-Za-z0-9_-]{1,128}$/)?.[0] !== value) {
+    throw new Error("--fork-recovery-request-id requires a Hub start request ID (str_…)");
+  }
+  return value;
 }
 
 export function sha256OfFile(path: string): string {
@@ -126,6 +137,7 @@ export async function resumeOrForkOnMissingOrdinal<T extends { threadId: string 
   start: (forkFirst: boolean) => Promise<T>,
   o: ForkRecoveryOptions,
 ): Promise<T> {
+  const requestId = parseForkRecoveryRequestId(o.requestId);
   try {
     return await start(false);
   } catch (error) {
@@ -162,6 +174,7 @@ export async function resumeOrForkOnMissingOrdinal<T extends { threadId: string 
     const statePath = recordForkMapping(o.nodeDir, {
       oldThreadId: o.threadId, newThreadId: thread.threadId, originalRollout: original,
       snapshot: snap.path, sha256: snap.sha256, at: now.toISOString(),
+      ...(requestId === undefined ? {} : { requestId }),
     });
     log(`forked thread ${o.threadId} → ${thread.threadId} (recorded in ${statePath}); the original rollout is unchanged.`);
     return thread;

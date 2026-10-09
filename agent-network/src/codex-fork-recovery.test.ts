@@ -3,10 +3,11 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FORK_RECOVERY_SNAPSHOT_DIR, FORK_RECOVERY_STATE_FILE, recordForkMapping, resumeOrForkOnMissingOrdinal, sha256OfFile, type ForkRecoveryOptions, type ForkMapping } from "./codex-fork-recovery";
+import { FORK_RECOVERY_SNAPSHOT_DIR, FORK_RECOVERY_STATE_FILE, parseForkRecoveryRequestId, recordForkMapping, resumeOrForkOnMissingOrdinal, sha256OfFile, type ForkRecoveryOptions, type ForkMapping } from "./codex-fork-recovery";
 
 const OLD = "01a11846-d796-72f1-af68-8d9215a65dc8";
 const NEW = "01a11900-0000-7000-8000-000000000001";
+const REQUEST = "str_0123456789ab";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "t738-"));
@@ -51,6 +52,33 @@ describe("fork mapping history", () => {
     expect(JSON.parse(readFileSync(path, "utf8")).forks).toEqual([entry, next]);
   });
 
+  test("a confirmed fork correlates only the new mapping; legacy and other requests survive", async () => {
+    const f = fixture();
+    const path = recordForkMapping(f.nodeDir, entry);
+    const previous = { ...entry, requestId: "str_previous" };
+    recordForkMapping(f.nodeDir, previous);
+    const s = starter(ordinalError(f.rollout));
+    await resumeOrForkOnMissingOrdinal(s.start, opts(f, { yes: true, requestId: REQUEST }));
+    const mappings = JSON.parse(readFileSync(path, "utf8")).forks;
+    expect(mappings.slice(0, 2)).toEqual([entry, previous]);
+    expect(mappings.filter((m: ForkMapping) => m.requestId === REQUEST)).toEqual([
+      expect.objectContaining({ requestId: REQUEST, oldThreadId: OLD, newThreadId: NEW }),
+    ]);
+    expect(s.calls).toEqual([false, true]);
+  });
+
+  test("request ID is optional; malformed IDs fail before attempting a resume", async () => {
+    expect(parseForkRecoveryRequestId(undefined)).toBeUndefined();
+    expect(parseForkRecoveryRequestId(REQUEST)).toBe(REQUEST);
+    for (const requestId of ["", "true", "str_", "str_bad\n", "str_" + "a".repeat(129)]) {
+      const f = fixture();
+      const s = starter(ordinalError(f.rollout));
+      await expect(resumeOrForkOnMissingOrdinal(s.start, opts(f, { yes: true, requestId }))).rejects.toThrow("--fork-recovery-request-id");
+      expect(s.calls).toEqual([]);
+      expect(readdirSync(f.nodeDir)).toEqual([]);
+    }
+  });
+
   test.each(["{broken", "{}", '{"forks":{}}', "null"])("malformed history is preserved: %s", async (raw) => {
     const f = fixture();
     const path = join(f.nodeDir, FORK_RECOVERY_STATE_FILE);
@@ -77,12 +105,13 @@ describe("fork mapping history", () => {
 });
 
 describe("resumeOrForkOnMissingOrdinal", () => {
-  test("a successful resume is returned unchanged; no fork", async () => {
+  test.each([undefined, REQUEST])("a successful resume is returned unchanged; no fork (request %s)", async (requestId) => {
     const f = fixture();
     const calls: boolean[] = [];
-    const r = await resumeOrForkOnMissingOrdinal(async (fork) => { calls.push(fork); return { threadId: OLD }; }, opts(f, { yes: true }));
+    const r = await resumeOrForkOnMissingOrdinal(async (fork) => { calls.push(fork); return { threadId: OLD }; }, opts(f, { yes: true, requestId }));
     expect(r.threadId).toBe(OLD);
     expect(calls).toEqual([false]);
+    expect(readdirSync(f.nodeDir)).toEqual([]);
   });
 
   test("without the flag: the original error, no fork, no files", async () => {
@@ -94,20 +123,20 @@ describe("resumeOrForkOnMissingOrdinal", () => {
     expect(readdirSync(f.nodeDir)).toEqual([]);
   });
 
-  test("another resume error class: no fork even with the flag and --yes", async () => {
+  test.each([undefined, REQUEST])("another resume error class: no fork even with the flag and --yes (request %s)", async (requestId) => {
     const f = fixture();
     const err = new Error("-32600: no rollout found for thread id " + OLD);
     const s = starter(err);
-    await expect(resumeOrForkOnMissingOrdinal(s.start, opts(f, { yes: true }))).rejects.toBe(err);
+    await expect(resumeOrForkOnMissingOrdinal(s.start, opts(f, { yes: true, requestId }))).rejects.toBe(err);
     expect(s.calls).toEqual([false]);
     expect(readdirSync(f.nodeDir)).toEqual([]);
   });
 
-  test("non-interactive without --yes: no fork, no files", async () => {
+  test.each([undefined, REQUEST])("non-interactive without --yes: no fork, no files (request %s)", async (requestId) => {
     const f = fixture();
     const err = ordinalError(f.rollout);
     const s = starter(err);
-    await expect(resumeOrForkOnMissingOrdinal(s.start, opts(f))).rejects.toBe(err);
+    await expect(resumeOrForkOnMissingOrdinal(s.start, opts(f, { requestId }))).rejects.toBe(err);
     expect(s.calls).toEqual([false]);
     expect(readdirSync(f.nodeDir)).toEqual([]);
   });
@@ -135,6 +164,7 @@ describe("resumeOrForkOnMissingOrdinal", () => {
     const state = JSON.parse(readFileSync(join(f.nodeDir, FORK_RECOVERY_STATE_FILE), "utf8"));
     expect(state.forks).toHaveLength(1);
     const m = state.forks[0];
+    expect(m).not.toHaveProperty("requestId");
     expect([m.oldThreadId, m.newThreadId, m.originalRollout, m.sha256]).toEqual([OLD, NEW, f.rollout, before]);
     expect(m.snapshot.startsWith(join(f.nodeDir, FORK_RECOVERY_SNAPSHOT_DIR))).toBe(true);
     expect(sha256OfFile(m.snapshot)).toBe(before);
