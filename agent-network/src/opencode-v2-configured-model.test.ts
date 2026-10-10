@@ -57,6 +57,27 @@ test("a non-string model does not keep the previous model", () => {
   ])).toThrow(/opencode_v2_config_unreadable/);
 });
 
+test("OpenCode's provider object is copied, including the options it already stores", () => {
+  const merged = mergeOpenCodeConfigLayers([
+    layer("global", {
+      model: "stub/stub-model",
+      provider: {
+        stub: {
+          npm: "@ai-sdk/openai-compatible",
+          name: "Stub",
+          options: { baseURL: "http://127.0.0.1:18827/v1", apiKey: "test-only" },
+          models: { "stub-model": { name: "Stub" } },
+        },
+      },
+    }),
+  ]);
+  const rendered = JSON.parse(renderOpenCodeV2AlignedConfig(merged));
+  expect(rendered.provider.stub.options.apiKey).toBe("test-only");
+  expect(rendered.provider.stub.options.baseURL).toBe("http://127.0.0.1:18827/v1");
+  expect(rendered.providers).toBeUndefined();
+  expect(merged.credentialEnv).toEqual([]);
+});
+
 test("a raw credential in the native provider is refused and not copied", () => {
   expect(() => mergeOpenCodeConfigLayers([
     layer("global", {

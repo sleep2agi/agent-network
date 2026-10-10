@@ -3,7 +3,7 @@
 ## 未发布：OpenCode V2 共存创建对齐本机 Provider（2026-10-10）
 
 - 创建 OpenCode V2 共存节点时，模型和 Provider 取自这台机器上 OpenCode 自己的 `opencode.json`（`model` 与 `providers`）。请求里的模型或 `--provider` 若与之不一致，创建直接拒绝并写明两边的值，不会改用预设默认模型，也不会退回 anthropic。
-- 本机配置里该 provider 的 `providers` 条目会原样写入节点的 `opencode.json`。`--base-url` / `--api-key-env` 不能在这条路径上改写它。Codex 的 `--provider` 预设不变。
+- 本机配置里该 provider 的 `providers` 条目会原样写入节点的 `opencode.json`。OpenCode 仍在读的 `provider` 条目同样原样写入。`--base-url` / `--api-key-env` 不能在这条路径上改写它。Codex 的 `--provider` 预设不变。
 - 这不包含 Hub `create_node` 的「必须带一个斜杠」格式闸（另一项变更）。格式对了但和本机 OpenCode 不一致，仍然拒绝。
 
 ## 未发布：daemon 可远程启动已收编的 Codex 原生三段（2026-10-10）

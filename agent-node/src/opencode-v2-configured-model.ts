@@ -47,6 +47,11 @@ export interface OpenCodeConfiguredSelection {
   readonly modelId: string;
   /** Native `providers[providerId]` object, when the merged config has one. */
   readonly providerEntry?: Readonly<Record<string, unknown>>;
+  /**
+   * Native `provider[providerId]` object. OpenCode 2.0.22 still reads this
+   * key (options.baseURL / options.apiKey). It is copied as written.
+   */
+  readonly legacyProviderEntry?: Readonly<Record<string, unknown>>;
   readonly credentialEnv: readonly string[];
 }
 
@@ -208,7 +213,9 @@ function splitModel(model: string, label: string): { providerId: string; modelId
 export function mergeOpenCodeConfigLayers(layers: readonly OpenCodeConfigLayer[]): OpenCodeConfiguredSelection {
   let model: string | undefined;
   const providers: Record<string, unknown> = {};
+  const legacyProviders: Record<string, unknown> = {};
   let sawProvider = false;
+  let sawLegacy = false;
   for (const layer of layers) {
     if (Object.prototype.hasOwnProperty.call(layer.document, "model")) {
       const value = layer.document.model;
@@ -239,6 +246,24 @@ export function mergeOpenCodeConfigLayers(layers: readonly OpenCodeConfigLayer[]
         providers[id] = entry;
       }
     }
+    if (layer.document.provider !== undefined) {
+      if (!isPlain(layer.document.provider)) {
+        throw new OpenCodeV2AlignError(
+          "opencode_v2_config_unreadable",
+          `${layer.label} provider must be an object.`,
+        );
+      }
+      sawLegacy = true;
+      for (const [id, entry] of Object.entries(layer.document.provider)) {
+        if (!PROVIDER_ID.test(id) || !isPlain(entry)) {
+          throw new OpenCodeV2AlignError(
+            "opencode_v2_config_unreadable",
+            `${layer.label} has a provider entry that is not an OpenCode provider object.`,
+          );
+        }
+        legacyProviders[id] = entry;
+      }
+    }
   }
   if (!model) {
     throw new OpenCodeV2AlignError(
@@ -248,7 +273,18 @@ export function mergeOpenCodeConfigLayers(layers: readonly OpenCodeConfigLayer[]
   }
   const { providerId, modelId } = splitModel(model, "OpenCode");
   let providerEntry: Record<string, unknown> | undefined;
+  let legacyProviderEntry: Record<string, unknown> | undefined;
   let credentialEnv: string[] = [];
+  if (sawLegacy && Object.prototype.hasOwnProperty.call(legacyProviders, providerId)) {
+    const entry = legacyProviders[providerId];
+    if (!isPlain(entry)) {
+      throw new OpenCodeV2AlignError(
+        "opencode_v2_config_unreadable",
+        `OpenCode provider ${providerId} must be an object.`,
+      );
+    }
+    legacyProviderEntry = structuredClone(entry);
+  }
   if (sawProvider && Object.prototype.hasOwnProperty.call(providers, providerId)) {
     const entry = providers[providerId];
     if (!isPlain(entry)) {
@@ -266,6 +302,7 @@ export function mergeOpenCodeConfigLayers(layers: readonly OpenCodeConfigLayer[]
     providerId,
     modelId,
     ...(providerEntry ? { providerEntry } : {}),
+    ...(legacyProviderEntry ? { legacyProviderEntry } : {}),
     credentialEnv,
   };
 }
@@ -277,6 +314,9 @@ export function renderOpenCodeV2AlignedConfig(selection: OpenCodeConfiguredSelec
   };
   if (selection.providerEntry) {
     doc.providers = { [selection.providerId]: selection.providerEntry };
+  }
+  if (selection.legacyProviderEntry) {
+    doc.provider = { [selection.providerId]: selection.legacyProviderEntry };
   }
   return `${JSON.stringify(doc, null, 2)}\n`;
 }

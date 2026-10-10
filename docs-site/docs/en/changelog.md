@@ -3,7 +3,7 @@
 ## Unreleased: OpenCode V2 co-presence create matches the machine provider (2026-10-10)
 
 - Creating an OpenCode V2 co-presence node takes the model and provider from OpenCode's own `opencode.json` on this machine (`model` and `providers`). A requested model or `--provider` that differs is refused, and the refusal names both sides. Create does not substitute a preset default model or the anthropic preset.
-- The matching `providers` entry is copied into the node's `opencode.json`. `--base-url` and `--api-key-env` do not rewrite it on this path. Codex `--provider` presets are unchanged.
+- The matching `providers` entry is copied into the node's `opencode.json`. A `provider` entry OpenCode still reads is copied the same way. `--base-url` and `--api-key-env` do not rewrite it on this path. Codex `--provider` presets are unchanged.
 - This is not the Hub `create_node` format gate that requires one slash. A well-formed model that does not match this machine's OpenCode is still refused.
 
 ## Unreleased: daemon can remotely start an adopted native Codex trio (2026-10-10)
