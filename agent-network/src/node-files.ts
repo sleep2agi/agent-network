@@ -10,7 +10,7 @@
 //   🔴 3. 凭据类文件**永远不回内容**,连精确大小也不回(secretReasonFor,纯函数、有测试):
 //         .env*、*.pem、*.key、id_*、auth.json、credentials*、*.p12/*.pfx、.npmrc、.netrc、
 //         .git-credentials、.anet/ 下的 config.json、.git/ 内一切、各运行时会话库
-//         (codex-home/ .codex/ .grok/ .claude/)以及 .ssh/ .gnupg/ .aws/。
+//         (codex-home/ .codex/ .grok/ .claude/ .cursor/)以及 .ssh/ .gnupg/ .aws/。
 //         判定同时看「请求的路径」和「realpath 之后的路径」,指向凭据的软链接也挡住。
 //   🔴 4. node_modules / .git 只列出目录本身,不往里走(no_descend)。
 //
@@ -63,7 +63,7 @@ export interface NodeFileReadResult {
 }
 
 /** 目录名:本身及其内部一律当凭据(会话库 / 密钥库 / git 内部)。 */
-const SECRET_DIRS = new Set([".git", "codex-home", ".codex", ".grok", ".claude", ".ssh", ".gnupg", ".aws"]);
+const SECRET_DIRS = new Set([".git", "codex-home", ".codex", ".grok", ".claude", ".cursor", ".ssh", ".gnupg", ".aws"]);
 /** 目录名:列出但不进入,不算凭据。 */
 const SKIPPED_DIRS = new Set(["node_modules"]);
 const SECRET_EXACT = new Set(["auth.json", ".npmrc", ".netrc", ".git-credentials"]);

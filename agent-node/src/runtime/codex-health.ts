@@ -210,6 +210,23 @@ export function classifyTuiPane(
   return { ok: true, reason: "running" };
 }
 
+/**
+ * tmux session the Codex health monitor should probe.
+ * Windows native co-presence has no tmux TUI. Probing the alias there always
+ * returns session-missing, and the next report_status publishes that layer.
+ * The Hub then refuses tasks even while the native TUI is running.
+ */
+export function codexHealthTuiSession(input: {
+  platform: NodeJS.Platform;
+  copresenceBridge: boolean;
+  configuredSession?: string;
+  alias: string;
+}): string | undefined {
+  if (!input.copresenceBridge || input.platform === "win32") return undefined;
+  const configured = input.configuredSession?.trim();
+  return configured || input.alias || undefined;
+}
+
 export function probeTmuxTui(session: string): TuiHealth {
   let out: string;
   try {

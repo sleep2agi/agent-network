@@ -34,6 +34,9 @@ COPY agent-network ./agent-network
 COPY channel ./channel
 # #620 daemon-inherited-env.test.ts 逐名比对 hub-daemon.sh 的 _scrub_node_identity_env 名单。
 COPY deploy/hub/hub-daemon.sh ./deploy/hub/hub-daemon.sh
+# fleet-boot-runtimes.test.ts 读这份启动脚本的 OK_RUNTIMES。不拷进来时断言红在
+# 「文件读不到」,输出却像「allowlist 和 canonical 名单不一致」。
+COPY deploy/fleet/anet-nodes-boot.sh ./deploy/fleet/anet-nodes-boot.sh
 COPY tests/test745-agent-network-unit-ci/run.sh ./tests/test745-agent-network-unit-ci/run.sh
 
 ARG SOURCE_COMMIT
