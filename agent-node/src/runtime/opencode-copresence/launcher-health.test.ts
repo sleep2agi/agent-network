@@ -131,10 +131,12 @@ describe("bounded attach exec readiness", () => {
     `, { mode: 0o600 });
     const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
     const { renderAttachRecordShell } = await import("./attach-tui");
+    // test829's image is node:22-bookworm-slim and has no python3. `node -e`
+    // keeps `--session` and the id as the next argv element after `--`.
     writeFileSync(shellPath, [
       ...renderAttachRecordShell(join(dir, "opencode-attach.json"), "ses_window894"),
       `while [ ! -e ${q(gate)} ]; do sleep 0.01; done`,
-      "exec python3 -c 'import time; time.sleep(60)' --session ses_window894",
+      "exec node -e 'setInterval(() => {}, 1e9)' -- --session ses_window894",
     ].join("\n"), { mode: 0o700 });
     const launchedAt = Date.now();
     const bridge = spawn(process.execPath, [bridgePath, dir, "--config", config], { stdio: "ignore" });
@@ -146,12 +148,18 @@ describe("bounded attach exec readiness", () => {
         process.kill(attach.pid, "SIGTERM");
       } catch {}
     };
+    const waitFor = async (ok: () => boolean, ms: number, why: () => string) => {
+      const deadline = Date.now() + ms;
+      while (!ok() && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+      if (!ok()) throw new Error(why());
+    };
     try {
       await new Promise((resolve, reject) => { launcher.once("exit", resolve); launcher.once("error", reject); });
-      const ready = Date.now() + 5000;
-      while (Date.now() < ready && !(existsSync(join(dir, LAUNCH_HEALTH_FILE)) && existsSync(join(dir, "opencode-attach.json")))) {
-        await new Promise(r => setTimeout(r, 20));
-      }
+      await waitFor(
+        () => existsSync(join(dir, LAUNCH_HEALTH_FILE)) && existsSync(join(dir, "opencode-attach.json")),
+        2000,
+        () => `launch records missing health=${existsSync(join(dir, LAUNCH_HEALTH_FILE))} attach=${existsSync(join(dir, "opencode-attach.json"))}`,
+      );
       const before = inspectLaunchHealth(dir, config, launchedAt);
       expect(before).toEqual({ ok: false, reason: "TUI session mismatch" });
       const attach = JSON.parse(readFileSync(join(dir, "opencode-attach.json"), "utf8"));
@@ -159,12 +167,17 @@ describe("bounded attach exec readiness", () => {
       expect(classifyTuiArgv(argv, "ses_window894")).toBe("pre_exec");
       expect(readLiveProcess(attach.pid)?.ticks).toBe(String(attach.startTicks));
       writeFileSync(gate, "ready\n", { mode: 0o600 });
-      const afterDeadline = Date.now() + 5000;
-      let after = inspectLaunchHealth(dir, config, launchedAt);
-      while (!after.ok && Date.now() < afterDeadline) {
-        await new Promise(r => setTimeout(r, 20));
-        after = inspectLaunchHealth(dir, config, launchedAt);
-      }
+      await waitFor(
+        () => inspectLaunchHealth(dir, config, launchedAt).ok,
+        2000,
+        () => {
+          const health = inspectLaunchHealth(dir, config, launchedAt);
+          let cmdline = "unavailable";
+          try { cmdline = readFileSync(`/proc/${attach.pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" "); } catch {}
+          return `exec did not match (${health.ok ? "ok" : health.reason}); cmdline=${cmdline}`;
+        },
+      );
+      const after = inspectLaunchHealth(dir, config, launchedAt);
       expect(after.ok).toBe(true);
       const execArgv = readFileSync(`/proc/${attach.pid}/cmdline`, "utf8").split("\0").filter(Boolean);
       expect(classifyTuiArgv(execArgv, "ses_window894")).toBe("match");
@@ -174,5 +187,5 @@ describe("bounded attach exec readiness", () => {
       if (bridge.exitCode === null) await new Promise(r => bridge.once("exit", r));
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 });

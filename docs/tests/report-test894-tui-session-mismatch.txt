@@ -40,7 +40,8 @@ Bun 1.3.14, Linux, local non-root process test (not a native package replay):
 - 23 pass, 0 fail across launcher-health.test.ts and opencode-start-completion.test.ts
 - real process: before exec, inspect reason is exactly `TUI session mismatch`
   and argv class is `pre_exec`; after exec, the same pid and start ticks pass
-  and argv class is `match`
+  and argv class is `match`. The stand-in process is `node -e … -- --session <id>`
+  because the test829 image has node and does not install python3.
 - wrong session consumes only the remaining budget and stays unsuccessful
 - start ack for this reason is `opencode_tui_session_mismatch` and the
   deadline span equals the configured timeout
