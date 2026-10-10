@@ -197,7 +197,12 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // user 58 / 56,950 B → 57,163 B (+213). start_node adds 213 B, report_status 169 B;
   // hidden pull/ack schemas account for the remaining 948 B. Keep strict receipt validation
   // and unchanged audiences; budget only this measured addition (~130/520 B node/all margin).
-  const CEILINGS = { node: 62_500, user: 57_500, all: 79_500 } as const;
+  // Board #654 adds report_status adoption_candidates (node-only schema, no new tool).
+  // Same tree, field removed → restored: all 87 / 79,078 B → 79,591 B (+513);
+  // node 61 / 62,433 B → 62,946 B (+513); user 58 / 57,228 B unchanged
+  // (report_status is not on the user list). Budget only this measured addition
+  // (~154/509 B node/all margin).
+  const CEILINGS = { node: 63_100, user: 57_500, all: 80_100 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);

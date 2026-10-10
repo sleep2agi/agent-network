@@ -32,6 +32,7 @@ import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { flagOrphanTasks } from "./task-orphan.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
+import { listAdoptionCandidates, snapshotReportsAdoptionDiscovery } from "./adoption-candidates.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
@@ -2591,6 +2592,11 @@ return Bun.serve({
       if (!lifecycleUser) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
       return withCors(req, lifecycleRequestResponse(url, restScope));
     }
+    // Board #654: read-only hand-started adoption candidates. Not a binding.
+    if (url.pathname === "/api/adoption-candidates" && req.method === "GET") {
+      if (!lifecycleUser || !restAuth?.userId) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      return withCors(req, Response.json(listAdoptionCandidates(restScope, { userId: restAuth.userId, isAdmin })));
+    }
 
     const sideActor = resolveSideThreadActor(req, resolveRequestAuth(req, { allowQueryToken: false }), isAdmin);
     const nodeCommandActor = sideActor?.kind === "node" && sideActor.boundNodeId && sideActor.boundNetworkId
@@ -4613,6 +4619,7 @@ return Bun.serve({
           // upgraded past preview.55.
           let snapCanCreate: boolean | undefined;
           let snapAdoptCapable: boolean | undefined;
+          let snapAdoptionDiscovery = false;
           let snapBlockedReason: string | undefined;
           // #1545 —— 见 report_status schema 里 create_capability_observed_ms_ago 的注释:
           // 上报侧**故意收得宽**(无 int/min/max,免得一个诊断字段能让整份 report 被拒),
@@ -4627,6 +4634,7 @@ return Bun.serve({
               snapRole = typeof parsed?.role === "string" ? parsed.role : null;
               const caps = parsed?.daemon_capabilities;
               if (typeof caps?.adopt_capable === "boolean") snapAdoptCapable = caps.adopt_capable;
+              if (snapshotReportsAdoptionDiscovery(parsed)) snapAdoptionDiscovery = true;
               if (caps && typeof caps.can_create_nodes === "boolean") {
                 snapCanCreate = caps.can_create_nodes;
               }
@@ -4644,10 +4652,11 @@ return Bun.serve({
             } catch { /* malformed */ }
           }
           return { row: r, role: snapRole, canCreate: snapCanCreate, blockedReason: snapBlockedReason,
-            observedMsAgo: snapObservedMsAgo, readiness: snapReadiness, adoptCapable: snapAdoptCapable };
+            observedMsAgo: snapObservedMsAgo, readiness: snapReadiness, adoptCapable: snapAdoptCapable,
+            adoptionDiscovery: snapAdoptionDiscovery };
         })
         .filter(({ role }) => role === "host_supervisor")
-        .map(({ row: r, canCreate, blockedReason, observedMsAgo, readiness, adoptCapable }) => {
+        .map(({ row: r, canCreate, blockedReason, observedMsAgo, readiness, adoptCapable, adoptionDiscovery }) => {
           let online = false;
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
@@ -4691,7 +4700,10 @@ return Bun.serve({
             // Do not reveal even the new capability for a node the user cannot read.
             const visibleParams: any[] = [r.node_id];
             const visibleSql = addAgentNetworkScope("SELECT node_id FROM nodes WHERE node_id=?1", visibleParams, restScope, { alias: "alias", nodeId: "node_id" });
-            if (db.get(visibleSql, ...visibleParams)) out.adopt_capable = adoptCapable;
+            if (db.get(visibleSql, ...visibleParams)) {
+              out.adopt_capable = adoptCapable;
+              if (adoptionDiscovery) out.adoption_discovery = true;
+            }
           }
           // #1353 Fix ② — only emit the two capability keys when the
           // daemon actually reported them. Undefined vs. false is a

@@ -454,6 +454,15 @@ export interface DaemonCapabilities {
    *  🔴 不改变 `can_create_nodes` 的语义(旧 app 依赖它);这是**新增**的一格。 */
   runtime_readiness?: Record<string, RuntimeReadiness>;
   adopt_capable?: boolean;
+  /** Board #654 — hand-started nodes this daemon could adopt. Published only
+   * while discovery is running. Not a binding, and not co-presence / three-stage. */
+  adoption_candidates?: Array<{
+    node_id: string;
+    alias: string;
+    workdir: string;
+    runtime: string | null;
+    launch_hint: "bare" | "tmux" | "stopped" | "unverified";
+  }>;
 }
 
 /** #622 —— 把后台自检的最新结果挂到快照的 daemon_capabilities 上。

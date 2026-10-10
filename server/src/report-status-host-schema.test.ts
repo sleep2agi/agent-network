@@ -149,6 +149,30 @@ describe("#1545 create_capability_observed_ms_ago —— schema 必须收得宽"
  * 注释会烂。这组测试的作用**不是禁止改 strict**(两种都各有其位),而是:谁改了,
  * 谁就会在这里撞红,从而**被迫连注释一起改**。所以断言写成「和注释里那张表一致」,
  * 而不是「必须是某个值」。 */
+describe("adoption_candidates ingest does not reject the heartbeat or keep secrets", () => {
+  const caps = () => schemas.report_status.config_snapshot;
+  const base = { flags: {}, config_update_capable: false, peer_reply_inbox_capable: true };
+
+  test("a clean row is kept, a bad sibling is dropped, and token keys are stripped", () => {
+    const parsed = caps().parse({ ...base, daemon_capabilities: { adopt_capable: true, adoption_candidates: [
+      { node_id: "n_ok", alias: "演示", workdir: "/tmp/proj", runtime: "claude-agent-sdk", launch_hint: "stopped", token: "ntok_supersecret" },
+      { node_id: "n_bad", alias: "x", workdir: "relative", launch_hint: "stopped" },
+      { node_id: "n_hint", alias: "y", workdir: "/tmp/y", launch_hint: "nope" },
+    ] } });
+    expect(parsed.daemon_capabilities.adoption_candidates.filter(Boolean)).toEqual([
+      { node_id: "n_ok", alias: "演示", workdir: "/tmp/proj", runtime: "claude-agent-sdk", launch_hint: "stopped" },
+    ]);
+    expect(JSON.stringify(parsed)).not.toContain("ntok_supersecret");
+  });
+
+  test("a non-array does not reject report_status and does not keep the payload", () => {
+    const parsed = caps().parse({ ...base, daemon_capabilities: { adopt_capable: true, adoption_candidates: { token: "ntok_supersecret" } } });
+    expect(parsed.daemon_capabilities.adoption_candidates).toBeUndefined();
+    expect(JSON.stringify(parsed)).not.toContain("ntok_supersecret");
+    expect(parsed.daemon_capabilities.adopt_capable).toBe(true);
+  });
+});
+
 describe("#1545 report_status 子对象的 strict 分布(注释里那张表的可执行副本)", () => {
   const rs = () => schemas.report_status;
   const UNKNOWN = { __hub_does_not_know_this_key__: 1 };

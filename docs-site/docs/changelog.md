@@ -1,5 +1,9 @@
 # 更新日志
 
+## 未发布：收编候选发现（2026-10-10）
+
+- 配了 `adopt_roots` 的 Linux daemon 在心跳里上报本机可收编的手工节点。Hub 用用户 token 的 `GET /api/adoption-candidates` 列出；`GET /api/host-supervisors` 只多一个 `adoption_discovery` 布尔值，不带工作目录。缺这个字段不等于「没有可收编节点」。这一步不收编、不发信号、不启停，也不列出共存 / 三阶段节点。
+
 ## 未发布：客户端下载页（2026-10-10）
 
 - anet.sh 新增[下载页](/download)。macOS、Windows、Linux、Android 的安装包来自最新已发布的桌面端 release（与应用内更新同一选择）；某一平台这次没有产物时，该栏说明缺失，不继续指向旧文件。首页、导航和安装文档改指向这一页。
