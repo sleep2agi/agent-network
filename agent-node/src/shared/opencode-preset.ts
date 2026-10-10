@@ -537,3 +537,13 @@ export function writeOpencodeConfigJson(
   atomicWritePrivateFile(configPath, body, "OpenCode config file");
   return configPath;
 }
+
+/** Replace opencode.json through the same private-file writer. Callers pass
+ * the full document (for example after merging a native V2 `providers`
+ * entry). This does not interpret the body. */
+export function replaceOpencodeConfigJson(nodeWorkDir: string, body: string): string {
+  const text = body.endsWith("\n") ? body : `${body}\n`;
+  const { configPath } = preparePresetState(nodeWorkDir);
+  atomicWritePrivateFile(configPath, text, "OpenCode config file");
+  return configPath;
+}

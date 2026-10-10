@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布：Codex 与 OpenCode V2 的 provider（2026-10-10）
+
+- `anet node create` / `anet node edit` 增加 `--provider`、`--base-url`、`--api-key-env`。本版只接 Codex（`codex-sdk`、`codex-app-server`）和 OpenCode V2（`opencode-cli --opencode-generation v2 --opencode-unsafe-tools`）。预设是 `deepseek`、`minimax`、`custom-openai-compat`。
+- Codex 写入节点 `config.toml` 的 `[model_providers.*]`，`wire_api` 为 `responses`，密钥只记环境变量名。OpenCode V2 写入 OpenCode 自己的 `opencode.json` `providers`（模型列表与 `env`；自定义端点用 `@opencode/ai/providers/openai-compatible`）。密钥不进命令行、不进 `config.json`。
+- Claude、OpenCode V1、Hub vault / `create_node` 不在这版。
+
 ## 未发布：收编候选发现（2026-10-10）
 
 - 配了 `adopt_roots` 的 Linux daemon 在心跳里上报本机可收编的手工节点。Hub 用用户 token 的 `GET /api/adoption-candidates` 列出；`GET /api/host-supervisors` 只多一个 `adoption_discovery` 布尔值，不带工作目录。缺这个字段不等于「没有可收编节点」。这一步不收编、不发信号、不启停，也不列出共存 / 三阶段节点。
