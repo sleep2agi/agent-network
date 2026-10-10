@@ -80,6 +80,10 @@ startup_repair_gate /tmp/test631-startup-green
 mkdir -p /mutation/agent-network/src /mutation/agent-node/src/runtime
 cp agent-network/src/private-state.ts agent-network/src/private-state.test.ts /mutation/agent-network/src/
 cp agent-node/src/runtime/config-apply.ts agent-node/src/runtime/config-apply.test.ts /mutation/agent-node/src/runtime/
+# config-apply.ts value-imports this sibling. Leave it out and the file fails
+# to load ("Cannot find module") instead of failing the 0600 assertions, so the
+# witnessed-red grep for 384 never matches.
+cp agent-node/src/runtime/codex-config-flags.ts /mutation/agent-node/src/runtime/
 sed -i 's/0o600/0o666/g' /mutation/agent-network/src/private-state.ts /mutation/agent-node/src/runtime/config-apply.ts
 set +e
 (cd /mutation && bun test agent-network/src/private-state.test.ts agent-node/src/runtime/config-apply.test.ts) >/tmp/test631-mode-red.txt 2>&1
