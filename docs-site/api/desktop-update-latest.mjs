@@ -1,5 +1,10 @@
-const RELEASES_URL = 'https://api.github.com/repos/sleep2agi/agent-network-app/releases?per_page=50';
-const FALLBACK_URL = 'https://www.anet.sh/desktop/update/fallback.json';
+export const DESKTOP_RELEASES_URL = 'https://api.github.com/repos/sleep2agi/agent-network-app/releases?per_page=50';
+export const DESKTOP_UPDATE_FALLBACK_URL = 'https://www.anet.sh/desktop/update/fallback.json';
+export const GITHUB_JSON_HEADERS = {
+  Accept: 'application/vnd.github+json',
+  'User-Agent': 'anet-desktop-updater',
+  'X-GitHub-Api-Version': '2022-11-28',
+};
 
 const parseVersion = (tag) => {
   const match = /^desktop-v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(tag);
@@ -69,11 +74,7 @@ const fetchJson = async (fetchImpl, url, headers = {}) => {
 
 export const resolveDesktopUpdate = async (fetchImpl = fetch) => {
   try {
-    const releases = await fetchJson(fetchImpl, RELEASES_URL, {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'anet-desktop-updater',
-      'X-GitHub-Api-Version': '2022-11-28',
-    });
+    const releases = await fetchJson(fetchImpl, DESKTOP_RELEASES_URL, GITHUB_JSON_HEADERS);
     const selected = selectDesktopRelease(releases);
     if (!selected) throw new Error('no published desktop release has latest.json');
     const manifest = await fetchJson(fetchImpl, selected.manifest.url, {
@@ -88,7 +89,7 @@ export const resolveDesktopUpdate = async (fetchImpl = fetch) => {
       source: selected.release.tag_name,
     };
   } catch (error) {
-    const manifest = await fetchJson(fetchImpl, FALLBACK_URL);
+    const manifest = await fetchJson(fetchImpl, DESKTOP_UPDATE_FALLBACK_URL);
     if (!validManifest(manifest, manifest.version)) throw error;
     return { manifest, source: 'fallback' };
   }

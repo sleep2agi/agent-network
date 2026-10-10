@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased: client download page (2026-10-10)
+
+- anet.sh gains a [download page](/en/download). macOS, Windows, Linux, and Android installers come from the latest published desktop release (the same choice the in-app updater makes). A platform missing from that release is called out instead of linked to an older file. The home page, navigation, and install docs point here.
+
 ## Unreleased: Codex fork request correlation (2026-10-09)
 
 - A single co-presence node start optionally accepts `--fork-recovery-request-id`, recording the ID on a confirmed fork mapping while preserving prior history. This does not mean startup completed; Hub/daemon forwarding and the client recovery button are not connected yet. See [recovery notes](./guide/codex-copresence.md#fork-on-resume-failure).

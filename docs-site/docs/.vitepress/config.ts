@@ -63,7 +63,7 @@ export default withMermaid(defineConfig({
       lang: 'zh-CN',
       themeConfig: {
         nav: [
-          { text: '下载桌面版', link: '/#desktop-download-title' },
+          { text: '下载', link: '/download' },
           { text: '指南', link: '/guide/install' },
           { text: 'SkillHub', link: '/skillhub/' },
           { text: 'API', link: '/api/mcp-tools' },
@@ -90,6 +90,7 @@ export default withMermaid(defineConfig({
           {
             text: '客户端',
             items: [
+              { text: '下载客户端', link: '/download' },
               { text: '桌面与手机客户端', link: '/guide/desktop-app' },
               { text: '任务', link: '/guide/tasks' },
               { text: '任务标签', link: '/guide/task-tags' },
@@ -160,7 +161,7 @@ export default withMermaid(defineConfig({
       description: 'Local-first Multi-Agent Collaboration — Apache 2.0 open source, self-hosted',
       themeConfig: {
         nav: [
-          { text: 'Download', link: '/en/#desktop-download-title' },
+          { text: 'Download', link: '/en/download' },
           { text: 'Guide', link: '/en/guide/install' },
           { text: 'SkillHub', link: '/en/skillhub/' },
           { text: 'API', link: '/en/api/mcp-tools' },
@@ -187,6 +188,7 @@ export default withMermaid(defineConfig({
           {
             text: 'Clients',
             items: [
+              { text: 'Download the app', link: '/en/download' },
               { text: 'Desktop & Mobile Clients', link: '/en/guide/desktop-app' },
               { text: 'Tasks', link: '/en/guide/tasks' },
               { text: 'Task tags', link: '/en/guide/task-tags' },

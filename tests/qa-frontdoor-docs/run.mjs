@@ -149,54 +149,26 @@ for (const [language, html] of renderedHomepages) {
   for (const marker of retiredHomepageMarkers) {
     check(!html.includes(marker), `${language} rendered homepage still contains ${marker}`);
   }
-  // 🔴 这三条原本钉的是字面版本号 desktop-v0.2.13 —— 于是「首页必须提供桌面下载」
-  // 变成了「首页必须永远提供 0.2.13」。任何一次更新都会红,所以没人更新:实测到
-  // 2026-08-24 首页仍指向 19 个版本前的包,而 anet.sh 的自动更新清单已经在发 0.2.32。
-  // 一道让正确改动变红的门,最终保护的是过时,不是可用性。
-  // 现在钉形状:桌面下载必须在,版本号自由。
-  check(/releases\/tag\/desktop-v\d+\.\d+\.\d+/.test(html), `${language} rendered homepage lost the stable desktop release`);
-  check(/Agent\.Network_\d+\.\d+\.\d+_aarch64\.dmg/.test(html), `${language} rendered homepage lost the macOS download`);
-  check(/Agent\.Network_\d+\.\d+\.\d+_x64-setup\.exe/.test(html), `${language} rendered homepage lost the Windows download`);
-  // 每个平台两条线路:线路一 ModelScope(按版本目录)、线路二 GitHub。三个平台 × 两条 = 6。
-  for (const file of ["aarch64.dmg", "x64-setup.exe", "android-universal.apk"]) {
-    const ms = new RegExp(`agent-network-releases/resolve/master/desktop/\\d+\\.\\d+\\.\\d+/Agent\\.Network_\\d+\\.\\d+\\.\\d+_${file.replace(/\./g, "\\.")}`);
-    const gh = new RegExp(`releases/download/desktop-v\\d+\\.\\d+\\.\\d+/Agent\\.Network_\\d+\\.\\d+\\.\\d+_${file.replace(/\./g, "\\.")}`);
-    check(ms.test(html), `${language} rendered homepage lost the ModelScope route for ${file}`);
-    check(gh.test(html), `${language} rendered homepage lost the GitHub route for ${file}`);
-  }
+  // 首页不再把某一个 desktop-v 写死在 HTML 里。那样每次发版都要改首页,
+  // 漏改一次就继续提供过期安装包。安装包改由 /download 在打开时读取最新已发布
+  // release。首页只负责把人送过去,并且不能再夹一张旧的直链。
+  const downloadHref = language === "Chinese" ? 'href="/download' : 'href="/en/download';
+  check(html.includes(downloadHref), `${language} rendered homepage lost the link to /download`);
+  check(!/desktop-v\d+\.\d+\.\d+/.test(html), `${language} rendered homepage still pins a desktop release tag`);
+  check(!/Agent\.Network_\d+\.\d+\.\d+_/.test(html), `${language} rendered homepage still pins an installer filename`);
 }
-check(renderedHomepages[0][1].includes("线路一") && renderedHomepages[0][1].includes("线路二"), "Chinese homepage lost the 线路一/线路二 labels");
-check(renderedHomepages[1][1].includes("Mirror 1") && renderedHomepages[1][1].includes("Mirror 2"), "English homepage lost the Mirror 1/Mirror 2 labels");
-
-// 收全集再判,不取首个匹配:只看第一个 desktop-v 的话,页面上同时留着新旧两个版本
-// (改了上面忘了下面、或旧卡片没删干净)会被判成正常 —— 而那正是最像"已经更新完"
-// 的失败形态。`desktop-v` 前缀让 mobile-v 的版本号不参与,不会互相误伤。
-// 下载卡片有两条线路:ModelScope 的 `desktop/<ver>/Agent.Network_<ver>_…` 与 GitHub 的
-// `desktop-v<ver>/…`,卡片标题还印着 `v<ver>`。三种形状一起收,任何一处漏改都会让集合 >1。
-const desktopVersions = (html) => [
-  ...new Set(
-    [
-      ...html.matchAll(/desktop-v(\d+\.\d+\.\d+)/g),
-      ...html.matchAll(/\/desktop\/(\d+\.\d+\.\d+)\//g),
-      ...html.matchAll(/Agent\.Network_(\d+\.\d+\.\d+)_/g),
-    ].map((m) => m[1]),
-  ),
-];
-for (const [language, html] of renderedHomepages) {
-  const versions = desktopVersions(html);
-  check(
-    versions.length === 1,
-    `${language} rendered homepage must advertise exactly one desktop version (found ${versions.length ? versions.join(", ") : "none"})`,
-  );
-}
-// 真正值得钉的不变量:两种语言必须宣传同一个版本。字面钉版本号做不到这件事,
-// 而它恰好是最容易犯的错 —— 只改了一半的首页。
-{
-  const [zh, en] = renderedHomepages.map(([, html]) => desktopVersions(html));
-  check(
-    zh.length === 1 && en.length === 1 && zh[0] === en[0],
-    `homepages advertise different desktop versions (zh=${zh.join("|") || "none"}, en=${en.join("|") || "none"})`,
-  );
+const catalog = read("docs-site/docs/.vitepress/theme/components/DownloadCatalog.vue");
+check(catalog.includes("/api/desktop-downloads"), "download page no longer asks the live catalog");
+check(catalog.includes("线路一") && catalog.includes("线路二"), "Chinese download catalog lost the 线路一/线路二 labels");
+check(catalog.includes("Mirror 1") && catalog.includes("Mirror 2"), "English download catalog lost the Mirror 1/Mirror 2 labels");
+for (const [language, path] of [
+  ["Chinese", "docs-site/docs/.vitepress/dist/download.html"],
+  ["English", "docs-site/docs/.vitepress/dist/en/download.html"],
+]) {
+  check(existsSync(path), `${language} download page was not rendered at ${path}`);
+  const html = existsSync(path) ? read(path) : "";
+  check(html.includes("data-download-catalog"), `${language} download page lost the catalog mount`);
+  check(!/Agent\.Network_\d+\.\d+\.\d+_/.test(html), `${language} download page baked an installer filename into static HTML`);
 }
 
 check(renderedHomepages[0][1].includes("一个人，一支 Agent 军团"), "Chinese rendered homepage lost the hero tagline");
