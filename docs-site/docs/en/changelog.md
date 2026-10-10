@@ -13,6 +13,10 @@
 - Codex writes `[model_providers.*]` in the node `config.toml` with `wire_api = "responses"` and stores the credential as an environment-variable name. OpenCode V2 writes OpenCode's own `opencode.json` `providers` object (its model list and `env` names; a custom endpoint uses `@opencode/ai/providers/openai-compatible`). The key never goes on the command line or into `config.json`.
 - Claude, OpenCode V1, and the Hub vault / `create_node` path are not in this slice.
 
+## Unreleased: adoption candidate discovery (2026-10-10)
+
+- A Linux daemon with `adopt_roots` reports hand-started nodes it can adopt on its heartbeat. Hub lists them at `GET /api/adoption-candidates` for a user token; `GET /api/host-supervisors` only gains an `adoption_discovery` boolean, with no workdir. A missing flag does not mean there is nothing to adopt. This step does not adopt, signal, start, or stop, and it does not list co-presence or three-stage nodes.
+
 ## Unreleased: client download page (2026-10-10)
 
 - anet.sh gains a [download page](/en/download). macOS, Windows, Linux, and Android installers come from the latest published desktop release (the same choice the in-app updater makes). A platform missing from that release is called out instead of linked to an older file. The home page, navigation, and install docs point here.

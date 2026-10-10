@@ -277,6 +277,42 @@ curl "http://localhost:9200/api/host-supervisors" \
 
 **Network scope**: the REST auth pipeline's `restScope` (SEC-1).
 
+**`adoption_discovery`** is `true` only when that daemon reported an `adoption_candidates` array. Absence does not mean there is nothing to adopt. The list itself is [`GET /api/adoption-candidates`](#get-api-adoption-candidates), not this response.
+
+
+---
+
+### GET /api/adoption-candidates
+
+> Read-only. Hand-started nodes a daemon reported as adoptable. Does not adopt, signal, or start.
+
+```bash
+curl "http://localhost:9200/api/adoption-candidates?network_id=net_xxx" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+Header user tokens only. A daemon token, network token, or token in the URL returns 403 `user_token_required`.
+
+```json
+{
+  "ok": true,
+  "candidates": [
+    {
+      "node_id": "n_xxx",
+      "alias": "hand-node",
+      "daemon_node_id": "node_daemon_xxx",
+      "daemon_alias": "daemon",
+      "hostname": "build-1",
+      "workdir": "/home/user/project",
+      "runtime": "claude-agent-sdk",
+      "launch_hint": "tmux"
+    }
+  ],
+  "count": 1
+}
+```
+
+`launch_hint` is `bare`, `tmux`, `stopped`, or `unverified`: a hint the daemon saw, not permission to act. The workdir is included only for the node owner, a network owner/admin, or a Hub admin. Co-presence nodes are not listed. See [adoption candidate discovery](/en/deploy/daemon#adoption-candidates).
 
 ---
 

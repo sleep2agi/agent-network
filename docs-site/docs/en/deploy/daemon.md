@@ -508,7 +508,7 @@ that released-client compatibility replay has already passed.
 
 These additive fields and endpoint require a header user token (not a URL token) and the existing node
 visibility/network permissions. Daemon/network tokens gain no new read access;
-existing fields remain unchanged. This is not candidate discovery.
+existing fields remain unchanged. Those reads describe adoption and lifecycle requests that already exist; they are not candidate discovery. See [Adoption candidate discovery](#adoption-candidates).
 
 - `GET /api/nodes` adds `managed: "created" | "adopted" | "none"`, based on real
   creation records (precedence), active bindings, or neither—not ID prefixes or
@@ -544,6 +544,24 @@ Raw errors stay in the database, without leaking paths or host details to node r
 No new service, port, configuration or database migration. Use the existing
 upgrade/rollback procedures. Binding/request history comes from Hub database
 backups, not Git. No production deployment or new recovery drill is claimed.
+
+## Adoption candidate discovery (read-only) {#adoption-candidates}
+
+When a daemon is `adopt_capable`, its heartbeat may include hand-started nodes under `adopt_roots` that pass the existing v1 local identity checks. The list does not write a binding, signal a process, start, stop, or adopt. `launch_hint` (`bare` / `tmux` / `stopped` / `unverified`) is a local hint, not authority.
+
+Boundary versus adoption v2:
+
+- Co-presence nodes (codex three-stage, grok, opencode) are not candidates. Discovery does not enable the codex v2 identity check. Three-stage stop and start stay on the existing adoption path.
+- `managed` / `adoption` on `GET /api/nodes`, and `GET /api/node-lifecycle-requests`, still describe creation records and adoption or lifecycle requests that already exist.
+- Adopting still calls `request_adopt_node`. The daemon repeats the UID, path, config, and process checks. A reported workdir is not proof that those checks passed.
+
+`adopt_roots` defaults to empty. Until it is set, the daemon omits `adoption_candidates` and heartbeat behavior is unchanged.
+
+`GET /api/adoption-candidates` accepts a user token in the header only (not a URL token, and not a daemon or network token). A row is returned only when the daemon is online (heartbeat within 5 minutes), advertises `adopt_capable`, shares the node's hostname, reports the same alias, and the node has no creation record and no pending or active binding. The workdir is visible to that node's owner, a network owner/admin, or a Hub admin. Everyone else gets an empty list. The response has no token, environment, or PID. One daemon reports at most 32 rows; the endpoint returns at most 64.
+
+`GET /api/host-supervisors` adds `adoption_discovery: true` for a user token that can see the daemon, and only when the daemon actually reported an array. Absence means that daemon did not publish a discovery result. It does not mean "nothing to adopt" and it does not mean "adoption is unsupported". An empty array means discovery ran and found no candidate.
+
+No new table, port, service, or secret source. After rollback the endpoint is gone; existing bindings are unchanged.
 
 ## Related {#related}
 

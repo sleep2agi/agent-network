@@ -277,6 +277,42 @@ curl "http://localhost:9200/api/host-supervisors" \
 
 **网络作用域**：走 REST auth pipeline 的 `restScope`（SEC-1）。
 
+🔴 **`adoption_discovery`（收编候选发现）**：只在 daemon 上报了 `adoption_candidates` 数组时出现，值为 `true`。缺席不是「没有可收编节点」。清单本身在 [`GET /api/adoption-candidates`](#get-api-adoption-candidates)，不在这个响应里。
+
+
+---
+
+### GET /api/adoption-candidates
+
+> 只读。daemon 上报的、本机还能收编的手工节点。不收编、不发信号、不启动。
+
+```bash
+curl "http://localhost:9200/api/adoption-candidates?network_id=net_xxx" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+只接受请求头里的用户 token。daemon token、网络 token、URL 上的 token 返回 403 `user_token_required`。
+
+```json
+{
+  "ok": true,
+  "candidates": [
+    {
+      "node_id": "n_xxx",
+      "alias": "手工节点",
+      "daemon_node_id": "node_daemon_xxx",
+      "daemon_alias": "daemon",
+      "hostname": "build-1",
+      "workdir": "/home/user/project",
+      "runtime": "claude-agent-sdk",
+      "launch_hint": "tmux"
+    }
+  ],
+  "count": 1
+}
+```
+
+`launch_hint` 是 `bare` / `tmux` / `stopped` / `unverified` 之一，只是 daemon 看见的提示。工作目录只出现在节点主人、网络 owner/admin 或 Hub 管理员的响应里。共存节点不会出现在这里。详见 [收编候选发现](/deploy/daemon#adoption-candidates)。
 
 ---
 

@@ -460,7 +460,7 @@ daemon 专用 MCP `list_my_children` 对当前 active 的 adopted 子项额外�
 不改变已有字段或 created 子项；旧 daemon 可忽略此字段。此处不宣称实际版本兼容回放已通过。
 
 以下新增字段和接口只向请求头携带的用户 token 开放（不接受 URL token），并沿用节点列表的网络及节点可见性授权；
-不会给 daemon / 网络 token 新增读权限，也不改变旧字段。不是候选发现接口。
+不会给 daemon / 网络 token 新增读权限，也不改变旧字段。这一组只读已有的收编 / 停启记录，不是候选发现；候选发现见 [收编候选发现](#adoption-candidates)。
 
 - `GET /api/nodes` 新增 `managed: "created" | "adopted" | "none"`：分别由真实创建记录、
   active 收编绑定或均无记录决定。创建记录优先，不凭 ID 前缀或主机名猜测。
@@ -489,6 +489,24 @@ HTTP 200 或 pending 当成操作成功。返回 daemon 原因码，例如
 
 无需新配置、端口、服务或数据库迁移；升级/回滚遵循上述部署流程。绑定和请求历史仍来自
 Hub 数据库备份，Git 只恢复软件；本次未做生产升级或新的灾难恢复演练。
+
+## 收编候选发现（只读） {#adoption-candidates}
+
+daemon 在能够收编（`adopt_capable`）时，可以随心跳上报本机 `adopt_roots` 下、通过现有 v1 身份检查的手工节点。这只是一份清单：不写绑定、不发信号、不启动、不停止，也不把节点收编进来。`launch_hint`（`bare` / `tmux` / `stopped` / `unverified`）是本机提示，不是授权。
+
+和收编 v2 的边界：
+
+- 共存节点（codex 三段式、grok、opencode）不进入这份清单。daemon 发现时不打开 codex v2 身份检查；三段式的停启仍走原来的收编实现，不由这个接口代替。
+- `GET /api/nodes` 的 `managed` / `adoption`，以及 `GET /api/node-lifecycle-requests`，仍然只描述已经存在的创建记录和收编 / 停启请求。
+- 应用要真正收编，仍调用 `request_adopt_node`。daemon 会重新核验 UID、路径、配置和进程。上报过的工作目录不能当成已经核对过。
+
+`adopt_roots` 默认是空列表。不配置时 daemon 不上报 `adoption_candidates`，心跳和收编行为和以前一样。
+
+`GET /api/adoption-candidates` 只接受请求头里的用户 token（不接受 URL 上的 token，也不接受 daemon / 网络 token）。它列出同时满足这些条件的候选：daemon 在线（5 分钟内有心跳）、声明 `adopt_capable`、和节点在同一台机器上、别名与上报一致、节点本身还没有创建记录或 pending/active 绑定。工作目录只给该节点的主人、网络 owner/admin，或 Hub 管理员；其他人得到空列表。响应不含 token、环境变量或 PID。单台 daemon 最多 32 条，接口最多返回 64 条。
+
+`GET /api/host-supervisors` 只在 daemon 真的上报了数组时，给能看见该 daemon 的用户 token 增加 `adoption_discovery: true`。缺席表示这台 daemon 没有公布发现结果，不能当成「没有可收编节点」，也不能当成「不支持收编」。空数组表示发现跑过、当前没有候选。
+
+不新增表、端口、服务或密钥来源。回滚后这个接口不存在；已经生效的绑定不受影响。
 
 ## 相关 {#related}
 

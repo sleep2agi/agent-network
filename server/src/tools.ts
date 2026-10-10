@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
+import { adoptionCandidatesReportSchema } from "./adoption-candidates.js";
 import { forkRecoveryRequestSchema, forkRecoveryResultSchema, publicForkResult } from "./codex-fork-contract.js";
 import { lockNodeAlias } from "./node-token-ownership.js";
 import { clearNodeFromAgentTeams, agentTeamWhoami } from "./agent-teams.js";
@@ -844,6 +845,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         daemon_capabilities: z.object({
           codex_fork_recovery: z.object({ protocol: z.literal(1), cli_supported: z.boolean() }).optional().catch(undefined),
           adopt_capable: z.boolean().optional(),
+          adoption_candidates: adoptionCandidatesReportSchema,
           runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
           allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),
           max_concurrent_children: z.number().int().min(1).max(1000).optional(),

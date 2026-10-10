@@ -5,6 +5,10 @@ board #659; `adopt_codex_start_not_available` is an intentional refusal until
 that implementation is available. Do not present this increment as a complete
 stop/start release. No production service or deployment is changed here.
 
+Hand-started candidate discovery (`daemon_capabilities.adoption_candidates`
+and `GET /api/adoption-candidates`) does not list these three-stage nodes, or
+other co-presence nodes. It does not adopt, start, or stop them.
+
 ## Start inputs and preflight (board #659 A)
 
 After live three-stage identity verification, adoption may add `start_inputs`

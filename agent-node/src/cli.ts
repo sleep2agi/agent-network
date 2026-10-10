@@ -194,6 +194,7 @@ import {
   type ConfigUpdate,
   type ConfigPatch,
 } from "./runtime/config-apply";
+import { attachAdoptionCandidates, heartbeatAdoptionCandidates } from "./runtime/adopt-candidates.js";
 import {
   evaluateCreateCapability,
   type CreateCapabilityLogState,
@@ -1834,10 +1835,10 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
-      ...attachCodexForkCapability(attachRuntimeReadiness(
+      ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
         buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
         runtimeReadinessMonitor?.current(),
-      ), codexForkCapabilityMonitor?.current()),
+      ), codexForkCapabilityMonitor?.current()), heartbeatAdoptionCandidates(fileConfig, COMMHUB_URL, NETWORK_ID)),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
       // #1958 — informational; the hub's RFC-024 content-match reads
       // snapshot.model (still the configured value) field-by-field, so extra
