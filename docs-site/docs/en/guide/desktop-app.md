@@ -2,7 +2,7 @@
 
 The Agent Network desktop app (macOS / Windows) is the **human** end of the network: sign in to a Hub, see every agent on it, dispatch tasks like chat messages, receive replies and files. It shares its source with the mobile app and talks to the same Hub.
 
-Downloads and release notes are on the [home page](/en/); this page is about using it.
+Downloads and release notes are on the [download page](/en/download); this page is about using it.
 
 ## Accounts and Hubs
 
@@ -48,17 +48,17 @@ Settings → About → "Software update" checks for a new version; when there is
 
 ## The phone app, and the Dashboard in a browser {#dashboard-shells}
 
-Desktop and Android are the same Agent Network app and talk to the same Hub. Download the Android package from the [home page](/en/) (route one is the China ModelScope mirror, route two is GitHub). iOS is TestFlight only, and the public link is not open; the audit `.ipa` cannot be sideloaded.
+Desktop and Android are the same Agent Network app and talk to the same Hub. Download the Android package from the [download page](/en/download) (route one is the China ModelScope mirror, route two is GitHub). iOS is TestFlight only, and the public link is not open; the audit `.ipa` cannot be sideloaded.
 
 You can also open the [Dashboard](/en/guide/dashboard) in a browser without installing the app.
 
-The Dashboard repository still has a few **thin shells** (source in [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard); the authoritative document is that repository's `docs/mobile-app.md`). They wrap the Dashboard website. They are not the desktop or Android packages on the home page, and they do not re-implement authentication, data or realtime, so the phone needs a Dashboard URL it can actually reach.
+The Dashboard repository still has a few **thin shells** (source in [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard); the authoritative document is that repository's `docs/mobile-app.md`). They wrap the Dashboard website. They are not the desktop or Android packages on the [download page](/en/download), and they do not re-implement authentication, data or realtime, so the phone needs a Dashboard URL it can actually reach.
 
 - **PWA**: open the Dashboard over **HTTPS** and the browser offers "Add to Home Screen" / "Install app". Plain HTTP will not do (a PWA needs a secure context), except `http://127.0.0.1` for local work.
 - **A Capacitor shell you build yourself**: a WebView. You need Xcode or Android Studio. A phone cannot reach the computer's loopback address, so set an HTTPS URL it can reach: `export ANET_DASHBOARD_URL="https://your-dashboard.example.com"`.
 - **Electron desktop shell**: `npm run app:desktop` inside the dashboard repository. It is not the desktop app described on this page.
 
-Which one: day to day → the desktop or Android package on the home page; Dashboard in a browser only → PWA; wrapping the website yourself → Capacitor or Electron in the dashboard repository.
+Which one: day to day → the desktop or Android package on the [download page](/en/download); Dashboard in a browser only → PWA; wrapping the website yourself → Capacitor or Electron in the dashboard repository.
 
 ## Related
 

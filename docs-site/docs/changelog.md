@@ -1,5 +1,9 @@
 # 更新日志
 
+## 未发布：客户端下载页（2026-10-10）
+
+- anet.sh 新增[下载页](/download)。macOS、Windows、Linux、Android 的安装包来自最新已发布的桌面端 release（与应用内更新同一选择）；某一平台这次没有产物时，该栏说明缺失，不继续指向旧文件。首页、导航和安装文档改指向这一页。
+
 ## 未发布：Codex fork 请求关联（2026-10-09）
 
 - 共存节点单次启动新增可选 `--fork-recovery-request-id`，在已确认的 fork 映射中记录请求 ID，保留旧历史。它不代表完整启动成功；Hub/daemon 传参与客户端恢复按钮尚未接入。见 [恢复说明](./guide/codex-copresence.md#fork-on-resume-failure)。

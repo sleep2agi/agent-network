@@ -3,7 +3,7 @@
 这一页只做一件事：把 `anet` 装好。装好后按 [10 分钟跑通第一个节点](/guide/getting-started) 继续。已经装过的，走[升级指南](/guide/upgrade)。
 
 ::: tip 不想用命令行？
-[桌面应用](/guide/desktop-app)（macOS / Windows）自带本地 Hub，下载安装即可用，也能一键装好本机 daemon。下载入口在[首页](/#desktop-download-title)。
+[桌面应用](/guide/desktop-app)（macOS / Windows / Linux）自带本地 Hub，下载安装即可用，也能一键装好本机 daemon。安装包在[下载页](/download)。
 :::
 
 ## 前置：Node.js 和 Bun {#prerequisites}

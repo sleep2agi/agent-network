@@ -1040,8 +1040,8 @@
 .release-links { margin: 18px 0 0 !important; text-align: center; font-size: 0.82rem; }
 /* Per-platform card with two download routes. The card itself is not a link;
    the two buttons are. 线路一 (ModelScope, reachable from mainland China) is the
-   primary, GitHub the secondary. Both URLs are version-pinned so the version
-   printed on the card and the file behind it can never disagree. */
+   primary, GitHub the secondary. The download page builds both URLs from the
+   same latest-release filename, so the version on the card and the file match. */
 .download-card-routes { gap: 6px; }
 .download-card-routes:hover { transform: none; }
 .download-card-routes .download-platform { color: var(--vp-c-text-2); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
@@ -1099,9 +1099,22 @@
 .cli-command { overflow-x: auto; margin: 18px 0; padding: 12px 14px; border-radius: 10px; background: var(--vp-c-bg-mute); }
 .cli-command code { white-space: nowrap; font-size: 0.76rem; }
 .VPHome .VPFeatures { padding-top: 54px; }
-.VPNavBarMenuLink[href*="desktop-download-title"] { color: var(--vp-c-brand-1); font-weight: 700; }
+.VPNavBarMenuLink[href="/download"],
+.VPNavBarMenuLink[href="/en/download"] { color: var(--vp-c-brand-1); font-weight: 700; }
 .dark .desktop-download,
 .dark .mobile-download { box-shadow: 0 28px 90px -55px rgba(94, 155, 255, 0.55); }
+
+.download-page .desktop-download,
+.download-page .mobile-download {
+  max-width: none;
+  margin: 28px 0 0;
+}
+.site-download-foot {
+  margin: 0;
+  padding: 12px 24px 0;
+  text-align: center;
+  font-size: 0.85rem;
+}
 
 /* ---------- Sidebar / doc tweaks (kept) ---------- */
 .VPSidebarItem.is-active > .item > .link > .text {
@@ -1121,6 +1134,8 @@
   .product-path { margin-top: 48px; padding-left: 20px; padding-right: 20px; }
   .desktop-download,
   .mobile-download { margin-left: 16px; margin-right: 16px; padding: 28px 20px; }
+  .download-page .desktop-download,
+  .download-page .mobile-download { margin-left: 0; margin-right: 0; }
   /* #568: 必须是 minmax(0, 1fr),不能是 1fr。`1fr` 的下限是 auto = 内容的
      min-content,卡片里一行 nowrap 的 `curl … | sh` 就把整列撑到 ~400px,
      卡片宽出屏幕、正文从一行中间被 .VPHome 的 overflow 裁掉(微信里实测)。

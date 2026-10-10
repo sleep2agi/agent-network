@@ -274,7 +274,13 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/guide/codex-cheatsheet.md
 #     docs-site/docs/en/guide/codex-cheatsheet.md
 #   两页都没有 #L 源码行号 pin。本套件先在该提交上红("预期扫 121 …,实际 123")才来抬。
-[[ "$files" -eq 123 ]] || fail "预期扫 123 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-10-10:123 → 126。下载页入库(中英各一份)加一个主题组件:
+#     docs-site/docs/download.md
+#     docs-site/docs/en/download.md
+#     docs-site/docs/.vitepress/theme/components/DownloadCatalog.vue
+#   三页都没有 #L 源码行号 pin。本地 checker:scanned_doc_files=126,
+#   unique_pins=2,pin_occurrences=10。CI 先红("预期扫 123 …,实际 126")才来抬。
+[[ "$files" -eq 126 ]] || fail "预期扫 126 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
 # 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——

@@ -3,7 +3,7 @@
 This page does one thing: get `anet` installed. Then continue with [Your first node in 10 minutes](/en/guide/getting-started). Already installed? See the [Upgrade Guide](/en/guide/upgrade).
 
 ::: tip Prefer not to use a terminal?
-The [desktop app](/en/guide/desktop-app) (macOS / Windows) bundles a local Hub, works right after installing, and can set up the local daemon in one click. Downloads are on the [home page](/en/#desktop-download-title).
+The [desktop app](/en/guide/desktop-app) (macOS / Windows / Linux) bundles a local Hub, works right after installing, and can set up the local daemon in one click. Packages are on the [download page](/en/download).
 :::
 
 ## Prerequisites: Node.js and Bun {#prerequisites}
