@@ -171,6 +171,7 @@ import {
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
 } from "../src/codex-copresence-profile";
+import { writeCopresenceYoloToCodexHome } from "../src/codex-copresence-yolo";
 import {
   codexHomeStagePlan,
   codexKnownStartupPromptAction,
@@ -1241,7 +1242,9 @@ async function startWindowsCodexCopresence(
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
     console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId || "pending-user-thread"})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgs = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tui = spawn(opts.codexBin, tuiArgs, {
       cwd: process.cwd(),
       env: { ...process.env, ...codexCopresenceStageEnv(opts.configEnv, { CODEX_HOME: opts.codexHome, ANET_NODE_MARKER: marker }) },
@@ -2142,7 +2145,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   };
   const launchTui = () => {
     // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
-    const tuiArgv = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgv = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tuiInvocation = `exec ${shellQuote(opts.codexBin)} ${tuiArgv.map(shellQuote).join(" ")}`;
     const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
       CODEX_HOME: opts.codexHome,
@@ -5218,6 +5223,9 @@ function saveCreatedNode(id: string, profile: Profile) {
   rewritePlainSecretsToEnvRef(id, profile);
   writeLegacyProjectAlias(profile.node_name || id);
   saveProfile(id, profile);
+  if ((profile as { codexCopresence?: boolean }).codexCopresence === true) {
+    writeCopresenceYoloToCodexHome(join(nodesDir(), id, "codex-home"));
+  }
 }
 
 // #125 — extracted helper so create + migrate-token-to-envref + (future)

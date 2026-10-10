@@ -24,6 +24,10 @@ import {
   TIMEOUT_MS_MAX,
 } from "./config-apply.js";
 import { CODEX_CONFIG_ONLY_FLAG_KEYS, validateCodexConfigFlag } from "./codex-config-flags.js";
+import {
+  applyCodexCopresenceFlagDefaults,
+  writeCopresenceYoloToCodexHome,
+} from "./codex-copresence-yolo.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
@@ -767,10 +771,15 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
   delete flags.opencodeGeneration;
   const wanted = flags.copresence === true;
   delete flags.copresence;
-  const fullAccess = flags.copresenceFullAccess === true;
+  const fullAccessOpt = flags.copresenceFullAccess;
+  delete flags.copresenceFullAccess;
+  if (wanted && spec.runtime === "codex-app-server") {
+    applyCodexCopresenceFlagDefaults(flags);
+  }
+  const fullAccess = wanted && spec.runtime === "codex-app-server" && fullAccessOpt !== false;
   const codexExtras = {
     ...(wanted && spec.runtime === "codex-app-server" ? { codexCopresence: true as const } : {}),
-    ...(fullAccess && spec.runtime === "codex-app-server" ? { codexCopresenceFullAccess: true as const } : {}),
+    ...(fullAccess ? { codexCopresenceFullAccess: true as const } : {}),
   };
   if (generation === "v1" || generation === "v2") {
     return { flags, opencodeGeneration: generation, ...(generation === "v2" ? { opencodeMode: "copresence" as const } : {}), ...codexExtras };
@@ -1198,6 +1207,14 @@ export async function handleCreateNodeDoorbell(
       if (alignedOpenCode) replaceOpencodeConfigJson(childDir, renderOpenCodeV2AlignedConfig(alignedOpenCode));
     } else {
       atomicWriteJson(childCfgPath, childCfg);
+    }
+    if (codexCopresence && req.node_spec.runtime === "codex-app-server") {
+      try {
+        writeCopresenceYoloToCodexHome(join(childDir, "codex-home"));
+        deps.log(`[create-node] seeded co-presence yolo config.toml under ${childDir}`);
+      } catch (e: any) {
+        deps.warn(`[create-node] codex-home yolo seed failed: ${e?.message || e}`);
+      }
     }
     deps.log(`[create-node] wrote child config: ${childCfgPath}`);
   } catch (e: any) {
