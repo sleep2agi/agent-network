@@ -232,17 +232,17 @@ grep -q 'remembered co-presence for this node' "$WORK/oneoff.start" \
 pass "one-off flag is honoured and remembered"
 
 log "[L5] the sandbox the launcher actually resolved"
-# 🔴 Assert the RESOLVED sandbox, not just the persisted field. Persistence is
-#    driven by the flag; the sandbox is driven by the posture. A change that
-#    granted full access unconditionally would leave the field empty and the
-#    node wide open — and a field-only assertion reads green through it.
-[ "$(field .anet/nodes/noflag/config.json codexCopresenceFullAccess)" = "None" ] \
-  || fail "co-presence alone recorded a full-access grant"
-grep -qF -e 'sandbox=read-only' "$WORK/oneoff.start" \
-  || fail "co-presence without an explicit grant did not resolve to read-only"
-if grep -qF -e 'sandbox=danger-full-access' "$WORK/oneoff.start"; then
-  fail "co-presence resolved to danger-full-access with no grant — the default was inverted"
+# 🔴 Assert the RESOLVED sandbox, not just the persisted field. After #815 /
+#    co-presence yolo, recording `codexCopresence` is enough for full-auto
+#    (danger-full-access + never) without retyping danger flags. The grant
+#    field may still be absent until an explicit danger opt-in is remembered.
+grep -qF -e 'sandbox=danger-full-access' "$WORK/oneoff.start" \
+  || fail "co-presence after --copresence did not resolve to danger-full-access (yolo default)"
+if grep -qF -e 'sandbox=read-only' "$WORK/oneoff.start"; then
+  fail "co-presence resolved to read-only after opt-in — the yolo default was inverted"
 fi
+[ "$(field .anet/nodes/noflag/config.json codexCopresenceFullAccess)" = "None" ] \
+  || fail "plain --copresence should not require codexCopresenceFullAccess on disk yet"
 
 set +e
 $CLI node start noflag --copresence --dangerously-allow-full-access --yes-danger-full-access \
@@ -250,10 +250,10 @@ $CLI node start noflag --copresence --dangerously-allow-full-access --yes-danger
 set -e
 cat "$WORK/grant.start" >>"$REPORT"
 grep -qF -e 'sandbox=danger-full-access' "$WORK/grant.start" \
-  || fail "an explicit grant did not resolve to danger-full-access"
+  || fail "co-presence with explicit danger flags did not resolve to danger-full-access"
 [ "$(field .anet/nodes/noflag/config.json codexCopresenceFullAccess)" = "True" ] \
-  || fail "explicit grant was not recorded"
-pass "read-only is what co-presence actually resolves to; the grant is explicit and remembered"
+  || fail "explicit danger grant was not recorded on the profile"
+pass "co-presence resolves full-auto once recorded; explicit danger flags still persist the grant field"
 
 log "[L6] every missing dependency in one pass, with a command for each"
 # Hide tmux and codex from PATH rather than uninstalling them: the other layers
