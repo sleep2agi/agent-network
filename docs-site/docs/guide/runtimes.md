@@ -110,7 +110,7 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 - **人和 Agent 共用一个 Codex TUI/thread** → 向导选择 preview `codex-cli`；之后用 `anet node start <alias> --copresence` 启动或恢复（[完整指南](/guide/codex-copresence)）
 - **用 xAI Grok Build** → `grok-build-acp`（[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key）
-- **想用本机已登录的 Cursor Agent CLI** → `cursor-agent`（预览）。`anet node create <name> --runtime cursor-agent`，然后 `anet node start <name>`。每个 Hub 任务会跑 `agent -p --output-format json --trust --force`。`--force` 会在节点工作目录里允许 shell，只拿可信任务用。没有 ACP / 共享 TUI。图片附件这一版不传给 CLI。
+- **想用本机已登录的 Cursor Agent CLI** → `cursor-agent`（预览）。`anet node create <name> --runtime cursor-agent`，然后 `anet node start <name>`。每个 Hub 任务默认跑 `agent -p --output-format json --trust --force`，节点把 `dangerouslySkipPermissions` 写成 `true`，和 `--force` 一致；改成 `false` 会去掉 `--force`。`--force` 会在节点工作目录里允许 shell，只拿可信任务用。名为 `agent` 的命令必须自报是 Cursor，否则设置 `CURSOR_AGENT_BIN`。`node start` 不用尚未包含该运行时的 `npx @sleep2agi/agent-node@preview`。没有 ACP / 共享 TUI。图片附件这一版不传给 CLI。`.cursor/` 按凭据目录处理，远程文件浏览不读里面的内容。
 - **接国产 / 非内置 vendor**（GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等）→ `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
 - **混搭（推荐）** → 在同一 Hub 按角色组合可用的 runtime
 :::

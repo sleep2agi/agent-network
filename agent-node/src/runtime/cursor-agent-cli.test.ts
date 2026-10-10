@@ -5,8 +5,12 @@ import { join } from "node:path";
 import {
   buildCursorAgentArgs,
   cursorAgentChildEnv,
+  cursorAgentKillPlan,
+  cursorAgentResumeRejected,
+  cursorCliOutputLooksLikeCursor,
   parseCursorAgentJson,
   resolveCursorAgentBinary,
+  resolveCursorAgentTimeoutMs,
   killActiveCursorAgentTurn,
   runCursorAgentTurn,
 } from "./cursor-agent-cli";
@@ -25,12 +29,23 @@ describe("cursor-agent binary resolution", () => {
     expect(seen).toEqual(["cursor-agent"]);
   });
 
-  test("falls back to agent when cursor-agent is absent", () => {
+  test("falls back to agent only when that command identifies itself as Cursor", () => {
     const resolved = resolveCursorAgentBinary({
       env: {},
       lookup: (name) => name === "agent",
+      identify: () => true,
     });
     expect(resolved).toEqual({ binary: "agent", source: "agent" });
+  });
+
+  test("a generic agent executable is refused and the error does not include a path", () => {
+    expect(() => resolveCursorAgentBinary({
+      env: {},
+      lookup: (name) => name === "agent",
+      identify: () => false,
+    })).toThrow(/did not identify itself as the Cursor Agent CLI/);
+    expect(cursorCliOutputLooksLikeCursor("Cursor Agent 1.2.3")).toBe(true);
+    expect(cursorCliOutputLooksLikeCursor("agent 9.0.0")).toBe(false);
   });
 
   test("CURSOR_AGENT_BIN wins and a missing file is refused without echoing the path", () => {
@@ -52,6 +67,13 @@ describe("cursor-agent binary resolution", () => {
 });
 
 describe("cursor-agent turn contract", () => {
+  test("timeout 0 stays unlimited and a negative flag uses the default", () => {
+    expect(resolveCursorAgentTimeoutMs(0)).toBe(0);
+    expect(resolveCursorAgentTimeoutMs(15_000)).toBe(15_000);
+    expect(resolveCursorAgentTimeoutMs(undefined)).toBe(600_000);
+    expect(resolveCursorAgentTimeoutMs(-1)).toBe(600_000);
+  });
+
   test("print-mode args trust the workspace, force commands, and pass the prompt after --", () => {
     expect(buildCursorAgentArgs({
       prompt: "reply with pong",
@@ -65,6 +87,27 @@ describe("cursor-agent turn contract", () => {
       "--resume", "sess-1",
       "--", "reply with pong",
     ]);
+    expect(buildCursorAgentArgs({
+      prompt: "reply with pong",
+      cwd: "/work/node",
+      force: false,
+    })).not.toContain("--force");
+  });
+
+  test("Windows stop uses a process tree kill", () => {
+    expect(cursorAgentKillPlan("win32", 42)).toEqual({
+      kind: "taskkill",
+      file: "taskkill.exe",
+      args: ["/PID", "42", "/T", "/F"],
+    });
+    expect(cursorAgentKillPlan("linux", 42)).toEqual({ kind: "process-group" });
+  });
+
+  test("only a missing session is retried, not every error that mentions chat", () => {
+    expect(cursorAgentResumeRejected("unknown session")).toBe(true);
+    expect(cursorAgentResumeRejected("session not found")).toBe(true);
+    expect(cursorAgentResumeRejected("chat service unavailable")).toBe(false);
+    expect(cursorAgentResumeRejected("session storage timeout")).toBe(false);
   });
 
   test("child env keeps the Cursor login env and drops Hub credentials", () => {
@@ -188,5 +231,43 @@ printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"
     expect(killed).toBe(true);
     await expect(pending).rejects.toThrow(/exited/);
     expect(killActiveCursorAgentTurn()).toBe(false);
+  });
+
+  test("a chat-service error does not start a second forced turn", async () => {
+    const bin = join(root, "chat-down");
+    const logFile = join(root, "chat-down-log");
+    writeFileSync(bin, `#!/bin/sh
+printf '%s\\0' "$@" >> ${JSON.stringify(logFile)}
+printf '\\n---\\n' >> ${JSON.stringify(logFile)}
+echo 'chat service unavailable' >&2
+exit 1
+`, { mode: 0o755 });
+    chmodSync(bin, 0o755);
+    await expect(runCursorAgentTurn({
+      binary: bin,
+      prompt: "say pong",
+      cwd: root,
+      sessionId: "sess-live",
+      env: { PATH: "/usr/bin:/bin" },
+      timeoutMs: 5_000,
+    })).rejects.toThrow(/chat service unavailable/);
+    const log = readFileSync(logFile, "utf8").split("\n---\n").filter(Boolean);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toContain("--resume");
+  });
+
+  test("timeout 0 still returns a completed turn", async () => {
+    const turn = await runCursorAgentTurn({
+      binary: bin,
+      prompt: "say pong",
+      cwd: root,
+      env: cursorAgentChildEnv({
+        PATH: process.env.PATH,
+        HOME: "/home/user",
+        CURSOR_API_KEY: "cursor_test_key",
+      }),
+      timeoutMs: 0,
+    });
+    expect(turn.result).toBe("pong");
   });
 });

@@ -59,6 +59,8 @@ export function cursorAgentOnPath(name: string, env: NodeJS.ProcessEnv = process
 export function resolveCursorAgentBinary(input: {
   env?: NodeJS.ProcessEnv;
   lookup?: (name: string) => boolean;
+  /** Used only for the generic `agent` name. `cursor-agent` and CURSOR_AGENT_BIN are explicit. */
+  identify?: (name: string) => boolean;
 } = {}): ResolvedCursorAgentBinary {
   const env = input.env ?? process.env;
   const lookup = input.lookup ?? ((name: string) => cursorAgentOnPath(name, env));
@@ -70,7 +72,16 @@ export function resolveCursorAgentBinary(input: {
     return { binary: fromEnv, source: "CURSOR_AGENT_BIN" };
   }
   if (lookup("cursor-agent")) return { binary: "cursor-agent", source: "cursor-agent" };
-  if (lookup("agent")) return { binary: "agent", source: "agent" };
+  if (lookup("agent")) {
+    const identify = input.identify ?? ((name: string) => defaultCursorAgentIdentity(name, env));
+    if (!identify("agent")) {
+      throw new Error(
+        "An executable named `agent` is on PATH, but it did not identify itself as the Cursor Agent CLI. " +
+        "Install Cursor's CLI, or set CURSOR_AGENT_BIN to that executable.",
+      );
+    }
+    return { binary: "agent", source: "agent" };
+  }
   throw new Error(
     "cursor-agent runtime needs the Cursor Agent CLI on PATH (`cursor-agent`, or `agent`). " +
     "Install: https://cursor.com/docs/cli/overview — then `agent login`.",
@@ -87,13 +98,27 @@ export function cursorAgentChildEnv(parent: NodeJS.ProcessEnv): NodeJS.ProcessEn
   return env;
 }
 
+export function cursorCliOutputLooksLikeCursor(text: string): boolean {
+  return /\bcursor\b/i.test(text);
+}
+
+/** `0` is the shared validator's "no limit". Any other non-finite or negative value uses the default. */
+export function resolveCursorAgentTimeoutMs(flag: unknown, fallback = CURSOR_AGENT_TIMEOUT_MS): number {
+  if (typeof flag === "number" && Number.isFinite(flag) && flag >= 0) return flag;
+  return fallback;
+}
+
 export function buildCursorAgentArgs(input: {
   prompt: string;
   cwd: string;
   model?: string;
   sessionId?: string;
+  /** `false` omits `--force`. Omitted means the unattended preview default, which is on. */
+  force?: boolean;
 }): string[] {
-  const args = ["-p", "--output-format", "json", "--trust", "--force", "--workspace", input.cwd];
+  const args = ["-p", "--output-format", "json", "--trust"];
+  if (input.force !== false) args.push("--force");
+  args.push("--workspace", input.cwd);
   if (input.model) args.push("--model", input.model);
   if (input.sessionId) args.push("--resume", input.sessionId);
   args.push("--", input.prompt);
@@ -126,13 +151,50 @@ export function parseCursorAgentJson(stdout: string): { result: string; sessionI
   return { result: obj.result, sessionId };
 }
 
-function resumeLikelyRejected(message: string): boolean {
-  return /resume|session|chat/i.test(message);
+/** Only a rejected resume id is retried. A later outage that merely mentions
+ *  "session" or "chat" must not start a second forced turn. */
+export function cursorAgentResumeRejected(message: string): boolean {
+  return /unknown session|no such session|session not found|session does not exist|invalid session|stale session/i.test(message);
+}
+
+function captureCommandText(binary: string, args: string[], env: NodeJS.ProcessEnv): string {
+  try {
+    return String(execFileSync(binary, args, {
+      encoding: "utf8",
+      timeout: 5_000,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    }));
+  } catch (error: any) {
+    return `${error?.stdout ?? ""}\n${error?.stderr ?? ""}`;
+  }
+}
+
+function defaultCursorAgentIdentity(binary: string, env: NodeJS.ProcessEnv): boolean {
+  for (const args of [["--version"], ["--help"]]) {
+    if (cursorCliOutputLooksLikeCursor(captureCommandText(binary, args, env))) return true;
+  }
+  return false;
+}
+
+export function cursorAgentKillPlan(platform: NodeJS.Platform, pid: number):
+  | { kind: "process-group" }
+  | { kind: "taskkill"; file: "taskkill.exe"; args: string[] } {
+  if (platform === "win32") {
+    return { kind: "taskkill", file: "taskkill.exe", args: ["/PID", String(pid), "/T", "/F"] };
+  }
+  return { kind: "process-group" };
 }
 
 function killChild(child: ChildProcess) {
-  if (child.pid && process.platform !== "win32") {
-    try { process.kill(-child.pid, "SIGKILL"); return; } catch { /* fall through */ }
+  const pid = child.pid;
+  if (pid) {
+    const plan = cursorAgentKillPlan(process.platform, pid);
+    if (plan.kind === "taskkill") {
+      try { execFileSync(plan.file, plan.args, { stdio: "ignore" }); return; } catch { /* fall through */ }
+    } else {
+      try { process.kill(-pid, "SIGKILL"); return; } catch { /* fall through */ }
+    }
   }
   try { child.kill("SIGKILL"); } catch { /* already gone */ }
 }
@@ -176,10 +238,10 @@ function runOnce(input: {
       if (err) reject(err);
       else resolve(result!);
     };
-    const timer = setTimeout(() => {
+    const timer = input.timeoutMs > 0 ? setTimeout(() => {
       killChild(child);
       finish(new Error(`cursor-agent timed out after ${input.timeoutMs}ms`));
-    }, input.timeoutMs);
+    }, input.timeoutMs) : undefined;
     child.stdout?.on("data", (buf: Buffer) => {
       stdout += buf.toString("utf8");
       if (stdout.length > CURSOR_AGENT_STDOUT_CAP) {
@@ -203,6 +265,7 @@ export async function runCursorAgentTurn(input: {
   sessionId?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  force?: boolean;
 }): Promise<{ result: string; sessionId?: string }> {
   if (input.prompt.length > CURSOR_AGENT_PROMPT_CAP) {
     throw new Error(`cursor-agent prompt is ${input.prompt.length} chars; this preview accepts at most ${CURSOR_AGENT_PROMPT_CAP}`);
@@ -215,6 +278,7 @@ export async function runCursorAgentTurn(input: {
       cwd: input.cwd,
       model: input.model,
       sessionId,
+      force: input.force,
     });
     let ran: { stdout: string; stderr: string; code: number | null };
     try {
@@ -231,7 +295,7 @@ export async function runCursorAgentTurn(input: {
         ? `cursor-agent exited ${ran.code}: ${detail}`
         : `cursor-agent exited ${ran.code} with no stderr`;
       const error = new Error(message) as Error & { retryWithoutSession?: boolean };
-      error.retryWithoutSession = !!sessionId && resumeLikelyRejected(message);
+      error.retryWithoutSession = !!sessionId && cursorAgentResumeRejected(message);
       throw error;
     }
     return parseCursorAgentJson(ran.stdout);

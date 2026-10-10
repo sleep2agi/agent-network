@@ -102,6 +102,7 @@ describe("secretReasonFor (pure deny rules)", () => {
     ".anet/config.json", ".anet/nodes/demo-node/config.json", ".anet/config.json.bak-20260101",
     ".git", ".git/config", "sub/.git/HEAD",
     "codex-home", "nodes/x/codex-home/sessions/r.jsonl", ".codex/auth", ".grok/session.json", ".claude/settings.local.json",
+    ".cursor/mcp.json", ".cursor/argv.json",
     ".ssh/known_hosts", ".gnupg/pubring.kbx", ".aws/config",
   ];
   const fine = [

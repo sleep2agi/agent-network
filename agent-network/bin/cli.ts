@@ -109,6 +109,7 @@ import {
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
 import { siblingAgentNodeEntrypoint } from "../src/sibling-agent-node";
+import { chooseCursorAgentNodeLaunch } from "../src/cursor-agent-launch";
 import { hardenOpencodeAgentNodeEnv } from "../src/opencode-launch-env";
 import {
   clearOpencodeAuthJson,
@@ -3745,6 +3746,53 @@ function findSiblingAgentNode(): ReturnType<typeof siblingAgentNodeEntrypoint> {
   });
 }
 
+function probeAgentNodeHelp(command: string, argsPrefix: string[]): string | null {
+  try {
+    return execFileSync(command, [...argsPrefix, "--help"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error: any) {
+    const text = `${error?.stdout ?? ""}\n${error?.stderr ?? ""}`;
+    return text.includes("cursor-agent") ? text : null;
+  }
+}
+
+function resolveCursorAgentNodeLaunchPlan() {
+  const candidates = [];
+  const sibling = findSiblingAgentNode();
+  if (sibling) {
+    candidates.push({
+      source: "sibling" as const,
+      command: process.execPath,
+      argsPrefix: [sibling.entrypoint],
+      help: probeAgentNodeHelp(process.execPath, [sibling.entrypoint]),
+    });
+  }
+  const explicit = process.env.ANET_AGENT_NODE_BIN?.trim() ?? "";
+  if (explicit && isAbsolute(explicit) && existsSync(explicit)) {
+    candidates.push({
+      source: "explicit" as const,
+      command: process.execPath,
+      argsPrefix: [explicit],
+      help: probeAgentNodeHelp(process.execPath, [explicit]),
+    });
+  }
+  try {
+    execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" });
+    candidates.push({
+      source: "path" as const,
+      command: "agent-node",
+      argsPrefix: [] as string[],
+      help: probeAgentNodeHelp("agent-node", []),
+    });
+  } catch { /* no PATH agent-node */ }
+  const chosen = chooseCursorAgentNodeLaunch(candidates);
+  console.log(`[anet] cursor-agent agent-node source: ${chosen.source} (--help lists cursor-agent; npx preview is not used)`);
+  return chosen;
+}
+
 function describeAgentNodeOnPath(env?: NodeJS.ProcessEnv): string {
   try {
     const out = process.platform === "win32"
@@ -4250,9 +4298,10 @@ function printCursorAgentNotice() {
   console.log(`[anet] cursor-agent (preview) reuses a local Cursor Agent CLI login.`);
   console.log(`  - Install: https://cursor.com/docs/cli/overview`);
   console.log(`  - Login:   agent login`);
-  console.log(`  - Binary:  cursor-agent, or agent when that name is not on PATH`);
+  console.log(`  - Binary:  cursor-agent, or agent only if that command identifies itself as Cursor`);
   console.log(`  - Each Hub task runs print mode: -p --output-format json --trust --force`);
-  console.log(`  - No API key is written into the node config.`);
+  console.log(`  - The node stores dangerouslySkipPermissions: true, matching --force.`);
+  console.log(`  - Set that flag to false to omit --force. No API key is written into the node config.`);
   console.log(`  - --force allows shell commands in the node workspace. Trusted tasks only.`);
 }
 
@@ -5033,7 +5082,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       //     consumers may read it).
       ...(runtime === "claude-agent-sdk"
         ? { permissionMode: "auto" }
-        : runtime === "grok-build-cli" || runtime === "cursor-agent"
+        : runtime === "grok-build-cli"
           ? { dangerouslySkipPermissions: false }
           : { dangerouslySkipPermissions: true }),
       // #259 Y (2026-06-25): plumb vendor-known image capability down so
@@ -7355,6 +7404,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else if (runtime === "codex-app-server") {
       const plan = resolveCodexAgentNodeLaunchPlan();
+      cmd = plan.command;
+      commandArgs = [...plan.argsPrefix, ...agentArgs];
+    } else if (runtime === "cursor-agent") {
+      const plan = resolveCursorAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else if (findSiblingAgentNode()) {

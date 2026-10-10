@@ -23,7 +23,8 @@ import {
 import { accessSync, constants as fsConstants } from "node:fs";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
-import { resolveCursorAgentBinary, runCursorAgentTurn, cursorAgentChildEnv, killActiveCursorAgentTurn, CURSOR_AGENT_TIMEOUT_MS } from "./runtime/cursor-agent-cli";
+import { resolveCursorAgentBinary, runCursorAgentTurn, cursorAgentChildEnv, killActiveCursorAgentTurn, resolveCursorAgentTimeoutMs } from "./runtime/cursor-agent-cli";
+import { reportedSessionId } from "./runtime/reported-session-id";
 import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
 import { createStderrTurnAggregator } from "./runtime/stderr-turn-aggregator";
@@ -1698,9 +1699,12 @@ if (NODE_ID) {
 // instead of requiring a node restart.
 const register = async () => {
   const alias = await liveAlias();
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : SESSION_ID || undefined;
+  const activeSessionId = reportedSessionId(RUNTIME, {
+    grok: grokSessionId,
+    claude: claudeSessionId,
+    cursor: cursorSessionId,
+    boot: SESSION_ID,
+  });
   const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
@@ -1791,11 +1795,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     inFlight: getInFlightCount(),
     loginDead: claudeLoginDead,
   });
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : RUNTIME === "claude"
-      ? claudeSessionId
-      : SESSION_ID || undefined;
+  const activeSessionId = reportedSessionId(RUNTIME, {
+    grok: grokSessionId,
+    claude: claudeSessionId,
+    cursor: cursorSessionId,
+    boot: SESSION_ID,
+  });
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     // #1809 —— 每次状态上报都带 version(此前只有 3 分钟心跳带)。hub 在同 alias 换
@@ -5521,8 +5526,7 @@ async function processWithCursorAgent(task: string, from: string, images?: strin
     `[CommHub task from ${from}]`,
     task,
   ].filter(Boolean).join("\n\n");
-  const timeoutFlag = fileConfig.flags?.timeout;
-  const timeoutMs = typeof timeoutFlag === "number" && timeoutFlag > 0 ? timeoutFlag : CURSOR_AGENT_TIMEOUT_MS;
+  const timeoutMs = resolveCursorAgentTimeoutMs(fileConfig.flags?.timeout);
   const turn = await runCursorAgentTurn({
     binary: resolved.binary,
     prompt,
@@ -5531,6 +5535,7 @@ async function processWithCursorAgent(task: string, from: string, images?: strin
     sessionId: cursorSessionId,
     env: cursorAgentChildEnv(process.env),
     timeoutMs,
+    force: fileConfig.flags?.dangerouslySkipPermissions !== false,
   });
   if (turn.sessionId) {
     cursorSessionId = turn.sessionId;
