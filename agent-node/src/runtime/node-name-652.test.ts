@@ -16,13 +16,15 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import {
+  _prependChildPathForTest,
   _resetAnetBinAbsForTest,
   _resetDaemonExtraPathForTest,
-  applyDaemonExtraPath,
   buildAnetArgsDaemon,
   handleCreateNodeDoorbell,
+  minimalEnv,
   serializeEnvLocalDaemon,
 } from "./create-node-daemon.js";
+import { resolveOnPathReal } from "./runtime-readiness.js";
 import { verifyStoppedChildConfig } from "./start-daemon.js";
 import { _resetChildrenMapForTest, handleStopDoorbell } from "./stop-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
@@ -95,8 +97,17 @@ afterEach(() => {
 function plantOpencode(stdout: string) {
   const fixtureBin = join(pinRoot, "probe-bin");
   mkdirSync(fixtureBin, { recursive: true, mode: 0o700 });
-  writeFileSync(join(fixtureBin, "opencode"), `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stdout)}\n`, { mode: 0o755 });
-  applyDaemonExtraPath([fixtureBin]);
+  const bin = join(fixtureBin, "opencode");
+  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stdout)}\n`, { mode: 0o755 });
+  // daemonExtraPath is appended after the fixed child PATH, so it cannot
+  // shadow the opencode already on that PATH. test829's image installs
+  // @opencode/cli@2.0.22 into /usr/local/bin; appending the stub made
+  // --version read that accepted V2 pin and the create continued.
+  _prependChildPathForTest([fixtureBin]);
+  const resolved = resolveOnPathReal("opencode", minimalEnv().PATH ?? "");
+  if (resolved !== bin) {
+    throw new Error(`planted opencode is not the probed binary (resolved ${resolved ?? "nothing"})`);
+  }
 }
 
 function writeFakeAnet(root: string): string {

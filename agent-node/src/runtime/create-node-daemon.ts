@@ -467,6 +467,9 @@ export const DAEMON_EXTRA_PATH_FIELD = "daemonExtraPath";
 
 /** 子进程 PATH 与 computeChildPath 一样用 `:`,含 win32。额外目录接在整段固定 PATH 之后。 */
 let daemonExtraPathDirs: readonly string[] = [];
+/** 只给测试把「栽进去的 CLI」放到固定 PATH 之前。生产始终是空的:
+ *  daemonExtraPath 仍然追加,配置项不能盖住 /usr/local/bin。 */
+let childPathPrefixForTest: readonly string[] = [];
 
 function canonicalExtraDir(raw: string, platform: NodeJS.Platform): string | null {
   const s = raw.trim();
@@ -501,8 +504,20 @@ export function applyDaemonExtraPath(raw: unknown, platform: NodeJS.Platform = p
   return daemonExtraPathDirs;
 }
 
+/** 测试夹具目录,搜在固定 PATH 之前。空前缀时 minimalEnv 的 PATH 与未设时逐字相同。 */
+export function _prependChildPathForTest(raw: unknown, platform: NodeJS.Platform = process.platform): readonly string[] {
+  childPathPrefixForTest = parseDaemonExtraPath(raw, platform);
+  return childPathPrefixForTest;
+}
+
 export function _resetDaemonExtraPathForTest(): void {
   daemonExtraPathDirs = [];
+  childPathPrefixForTest = [];
+}
+
+function withChildPathTestPrefix(base: string): string {
+  if (childPathPrefixForTest.length === 0) return base;
+  return `${childPathPrefixForTest.join(":")}:${base}`;
 }
 
 /** 追加到固定 PATH 之后,并去掉已经在固定 PATH 里的目录。 */
@@ -553,7 +568,8 @@ export function minimalEnv(
     ...filtered,
     // #648 — fixed prefix (computeChildPath, historically aS()) first, then
     // daemonExtraPath. Not process.env.PATH, and not guessed user dirs.
-    PATH: appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform),
+    // The test prefix is empty in production, so this string stays the same.
+    PATH: withChildPathTestPrefix(appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform)),
     HOME: home,
     LANG: parentEnv.LANG || "C.UTF-8",
   };
