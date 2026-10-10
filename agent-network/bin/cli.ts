@@ -330,6 +330,11 @@ import {
   defaultCodexModelForRuntime,
 } from "../src/codex-model-default";
 import { describeCodexModelSource, resolveCodexCopresenceModel } from "../src/codex-copresence-model";
+import {
+  codexReasoningEffortConfigOverride,
+  isReasoningEffortValue,
+  writeReasoningEffortToCodexHome,
+} from "../src/codex-reasoning-effort";
 import { resolvePrimaryNetwork } from "../src/primary-network";
 
 const args = process.argv.slice(2);
@@ -1872,6 +1877,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #720 — url + bearer + `default_tools_approval_mode="approve"` for commhub only, so the
   //   first commhub tool call does not stop on an approval prompt nobody will answer.
   const commhubMcpOverrides = codexCommhubMcpOverrides(opts.hub, "quoted");
+  const profileReasoning = (profile as { reasoningEffort?: unknown }).reasoningEffort;
+  const reasoningEffortOverride = isReasoningEffortValue(profileReasoning)
+    ? ` -c ${shellQuote(codexReasoningEffortConfigOverride(profileReasoning))}`
+    : "";
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     `. ${shellQuote(envFilePath)}`,
@@ -1881,6 +1890,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       + ` -c approval_policy=${approvalPolicy}`
       + ` -c sandbox_mode=${sandboxMode}`
       + ` -c model=${shellQuote(model)}`
+      + reasoningEffortOverride
       + commhubMcpOverrides.map((o) => ` -c ${shellQuote(o)}`).join("")
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
@@ -11951,6 +11961,8 @@ async function nodeEditCommand() {
   //    与 #1698 里 grok 撞 uid_map 墙时「产品给出的修法产品自己做不到」同形。
   const modelIdx = args.indexOf("--model");
   const rawModel = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
+  const reasoningIdx = args.indexOf("--reasoning-effort");
+  const rawReasoning = reasoningIdx >= 0 ? args[reasoningIdx + 1] : undefined;
   // #1856 —— `--workdir <dir>` 写 codexProjectDir(共存节点的工作目录 = 含 .anet 的目录);preflight 的
   // workdir_consistent 缺它就 fail,而在这之前没有任何命令能给旧节点补上(提示里写的 `config apply` 根本不存在)。
   const workdirIdx = args.indexOf("--workdir");
@@ -11968,9 +11980,9 @@ async function nodeEditCommand() {
   const providerValue = providerFlag("--provider");
   const baseUrlValue = providerFlag("--base-url");
   const apiKeyEnvValue = providerFlag("--api-key-env");
-  if (!ref || (flagIdx < 0 && modelIdx < 0 && workdirIdx < 0 && !providerValue && !baseUrlValue && !apiKeyEnvValue)) {
+  if (!ref || (flagIdx < 0 && modelIdx < 0 && reasoningIdx < 0 && workdirIdx < 0 && !providerValue && !baseUrlValue && !apiKeyEnvValue)) {
     console.log(`
-anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <dir>]
+anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-effort <level>] [--workdir <dir>]
                                    [--provider <id>] [--base-url <url>] [--api-key-env <NAME>]
 
   Change an existing node's runtime, model and/or co-presence workdir. Supported runtime ids:
@@ -11978,6 +11990,10 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
 
   --model takes any id the runtime accepts; it is validated the same way
   'anet node create --model' validates it (non-empty, no whitespace).
+
+  --reasoning-effort sets Codex thinking level (codex-app-server only): none,
+  minimal, low, medium, high, or xhigh — written to config.json and
+  codex-home/config.toml as model_reasoning_effort.
 
   --provider is Codex (config.toml [model_providers.*]) or OpenCode V2
   (native opencode.json providers). The key value is never a flag: export
@@ -11998,7 +12014,12 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
   if (modelIdx >= 0 && (rawModel === undefined || rawModel.trim() === "" || rawModel.startsWith("--"))) {
     console.error("--model needs a value (an id the runtime accepts).");
     process.exit(1);
-  }  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
+  }
+  if (reasoningIdx >= 0 && (rawReasoning === undefined || rawReasoning.trim() === "" || rawReasoning.startsWith("--"))) {
+    console.error("--reasoning-effort needs a value (none, minimal, low, medium, high, or xhigh).");
+    process.exit(1);
+  }
+  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
     console.error("--workdir needs a value (an existing directory; the one that holds this node's .anet).");
     process.exit(1);
   }
@@ -12046,6 +12067,22 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`model ${currentModel ?? "(unset)"} -> ${nextModel}`);
     }
   }
+  if (reasoningIdx >= 0) {
+    if (normalizeRuntime(profile) !== "codex-app-server") {
+      console.error(`--reasoning-effort only applies to codex-app-server nodes (this node is ${normalizeRuntime(profile)}).`);
+      process.exit(1);
+    }
+    const nextRe = rawReasoning!.trim() as string;
+    if (!isReasoningEffortValue(nextRe)) {
+      console.error(`--reasoning-effort must be one of: none, minimal, low, medium, high, xhigh`);
+      process.exit(1);
+    }
+    const currentRe = (profile as { reasoningEffort?: string }).reasoningEffort;
+    if (currentRe !== nextRe) {
+      (profile as { reasoningEffort?: string }).reasoningEffort = nextRe;
+      changes.push(`reasoningEffort ${currentRe ?? "(unset)"} -> ${nextRe}`);
+    }
+  }
   if (workdirIdx >= 0) {
     let nextDir: string;
     try {
@@ -12076,6 +12113,13 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
   if (stagedProvider) rewritePlainSecretsToEnvRef(resolved.id, profile);
   saveProfile(resolved.id, profile);
   materializeRuntimeProviderOrExit(resolved.id, stagedProvider);
+  {
+    const re = (profile as { reasoningEffort?: unknown }).reasoningEffort;
+    if (reasoningIdx >= 0 && isReasoningEffortValue(re)) {
+      const { codexHome } = resolveNodeCodexHome({ nodeDir: join(nodesDir(), resolved.id), config: profile });
+      writeReasoningEffortToCodexHome(codexHome, re);
+    }
+  }
   for (const c of changes) console.log(`${resolved.id}: ${c}`);
   // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
   const running = findNodeStopCandidates(resolved.id);

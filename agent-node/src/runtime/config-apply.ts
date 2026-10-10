@@ -17,6 +17,7 @@
 // the path without terminating the test runner.
 
 import type { RuntimeReadiness } from "./runtime-readiness.js";
+import { isReasoningEffortValue, reasoningEffortValidationReason } from "./codex-reasoning-effort.js";
 import {
   closeSync,
   constants,
@@ -103,6 +104,8 @@ export type ApplyMode = "hot" | "restart" | "restart_only";
 
 export interface ConfigPatch {
   model?: string;
+  /** Codex co-presence (`codex-app-server`) — client field; persisted in config.json + CODEX_HOME/config.toml. */
+  reasoningEffort?: string;
   flags?: Record<string, unknown>;
   /** #260 P5 — dashboard-driven channel enable/disable. Restart-tier
    *  (agent-node boot forks channel workers from config.channels).
@@ -121,10 +124,21 @@ export interface ConfigUpdate {
 /** Validation outcome. `null` = pass; otherwise the rejection envelope. */
 export type ValidationResult = { field: string; reason: string } | null;
 
-export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
+export function validateLocalPatch(
+  patch: ConfigPatch,
+  opts?: { runtime?: string | null },
+): ValidationResult {
   if (patch.model !== undefined) {
     if (typeof patch.model !== "string" || patch.model.length === 0 || patch.model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
+    }
+  }
+  if (patch.reasoningEffort !== undefined) {
+    if (!isReasoningEffortValue(patch.reasoningEffort)) {
+      return { field: "reasoningEffort", reason: reasoningEffortValidationReason() };
+    }
+    if (opts?.runtime !== "codex-app-server") {
+      return { field: "reasoningEffort", reason: "only supported when node runtime is codex-app-server" };
     }
   }
   if (patch.channels !== undefined) {
@@ -186,11 +200,13 @@ export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
  * see config-apply-validate.ts. */
 export function computeApplyMode(patch: ConfigPatch): ApplyMode {
   const hasModel = patch.model !== undefined;
+  const hasReasoningEffort = patch.reasoningEffort !== undefined;
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
   const hasChannels = patch.channels !== undefined;
-  if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
+  if (!hasModel && !hasReasoningEffort && flagKeys.length === 0 && !hasChannels) return "restart_only";
   if (hasModel) return "restart";
+  if (hasReasoningEffort) return "restart";
   if (hasChannels) return "restart";
   for (const key of flagKeys) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";
@@ -368,6 +384,7 @@ function channelSpecType(spec: unknown): string | null {
 export function mergePatch(existing: any, patch: ConfigPatch): any {
   const next = JSON.parse(JSON.stringify(existing || {}));
   if (patch.model !== undefined) next.model = patch.model;
+  if (patch.reasoningEffort !== undefined) next.reasoningEffort = patch.reasoningEffort;
   if (patch.flags) {
     next.flags = { ...(next.flags || {}), ...patch.flags };
   }
@@ -497,6 +514,8 @@ export type CreateNodesBlockedReason =
 
 export interface MaskedSnapshot {
   model?: string | null;
+  /** Present for `codex-app-server` nodes when set in config.json. */
+  reasoningEffort?: string | null;
   flags: Record<string, unknown>;
   config_revision?: number;
   config_update_capable: boolean;
@@ -569,6 +588,9 @@ export function buildConfigSnapshot(
 ): MaskedSnapshot {
   const out: MaskedSnapshot = {
     model: typeof fileConfig?.model === "string" ? fileConfig.model : null,
+    reasoningEffort: fileConfig?.runtime === "codex-app-server"
+      ? (isReasoningEffortValue(fileConfig?.reasoningEffort) ? fileConfig.reasoningEffort : null)
+      : undefined,
     flags: {},
     config_revision: revision,
     config_update_capable: configUpdateCapable,

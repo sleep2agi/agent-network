@@ -1319,6 +1319,7 @@ import { installProcessSurvivalLog } from "./process-survival-log";
 //    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
+import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runtime/codex-reasoning-effort.js";
 import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -2534,6 +2535,9 @@ async function ensureCodexAppServerSession(): Promise<
       onDeferredCandidate: (threadId) => writebackCodexPendingThread(threadId, codexAppServerUrl ?? ""),
       approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
       sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
+      reasoningEffort: isReasoningEffortValue((fileConfig as { reasoningEffort?: unknown }).reasoningEffort)
+        ? (fileConfig as { reasoningEffort: string }).reasoningEffort
+        : undefined,
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN || undefined,
       codexHome: NODE_CODEX_HOME,
@@ -6919,7 +6923,7 @@ async function processConfigUpdate(): Promise<void> {
     }
 
     // Defense-in-depth local validation (hub validator drift guard).
-    const localFail = validateLocalPatch(update.patch);
+    const localFail = validateLocalPatch(update.patch, { runtime: fileConfig?.runtime });
     if (localFail) {
       warn(`[config-apply] local validate rejected ${updateId}: ${localFail.field}=${localFail.reason}`);
       await callCommHub("ack_config_update", {
@@ -6951,6 +6955,14 @@ async function processConfigUpdate(): Promise<void> {
     const merged = mergePatch(fileConfig, update.patch);
     if (RUNTIME === "opencode") writeOpencodeConfig(configFilePath, merged);
     else atomicWriteJson(configFilePath, merged);
+    if (update.patch.reasoningEffort !== undefined && merged.runtime === "codex-app-server" && configFilePath) {
+      const nodeDir = dirname(configFilePath);
+      const { codexHome } = resolveNodeCodexHome({ nodeDir, config: merged, exists: existsSync });
+      if (isReasoningEffortValue(update.patch.reasoningEffort)) {
+        applyReasoningEffortToCodexHome(codexHome, update.patch.reasoningEffort);
+        log(`[config-apply] wrote ${join(codexHome, "config.toml")} (model_reasoning_effort)`);
+      }
+    }
     log(`[config-apply] wrote ${configFilePath} (.prev backedUp=${backup.backedUp})`);
 
     if (mode === "hot") {

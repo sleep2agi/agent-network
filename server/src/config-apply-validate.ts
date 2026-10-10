@@ -7,6 +7,24 @@
 
 import { isValidTimeoutMs, TIMEOUT_MS_REASON } from "./create-node-validate.js";
 
+/** Codex co-presence only — matches client patch + app-server `reasoningEffort`. */
+export const REASONING_EFFORT_VALUES = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+
+export type ReasoningEffortPatch = (typeof REASONING_EFFORT_VALUES)[number];
+
+export function isReasoningEffortPatch(v: unknown): v is ReasoningEffortPatch {
+  return typeof v === "string" && (REASONING_EFFORT_VALUES as readonly string[]).includes(v);
+}
+
+export const REASONING_EFFORT_RUNTIME = "codex-app-server";
+
 /**
  * Fields the dashboard may change. Anything not in this list is rejected
  * by hub-side validation regardless of role — the UI cannot smuggle
@@ -141,10 +159,13 @@ export function computeApplyMode(
   model: string | undefined,
   flags: Record<string, unknown>,
   channels?: string[] | undefined,
+  reasoningEffort?: string | undefined,
 ): "hot" | "restart" | "restart_only" {
-  const fieldCount = (model !== undefined ? 1 : 0) + Object.keys(flags).length + (channels !== undefined ? 1 : 0);
+  const fieldCount = (model !== undefined ? 1 : 0) + Object.keys(flags).length + (channels !== undefined ? 1 : 0)
+    + (reasoningEffort !== undefined ? 1 : 0);
   if (fieldCount === 0) return "restart_only";
   if (model !== undefined) return "restart";
+  if (reasoningEffort !== undefined) return "restart";
   if (channels !== undefined) return "restart";
   for (const key of Object.keys(flags)) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";
@@ -186,10 +207,23 @@ export function validatePatch(
   model: string | undefined,
   flags: Record<string, unknown>,
   channels?: string[] | undefined,
+  reasoningEffort?: string | undefined,
+  nodeRuntime?: string | null,
 ): { field: string; reason: string } | null {
   if (model !== undefined) {
     if (typeof model !== "string" || model.length === 0 || model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
+    }
+  }
+  if (reasoningEffort !== undefined) {
+    if (!isReasoningEffortPatch(reasoningEffort)) {
+      return { field: "reasoningEffort", reason: `must be one of ${REASONING_EFFORT_VALUES.join("/")}` };
+    }
+    if (nodeRuntime !== REASONING_EFFORT_RUNTIME) {
+      return {
+        field: "reasoningEffort",
+        reason: `only supported when node runtime is ${REASONING_EFFORT_RUNTIME}`,
+      };
     }
   }
   if (channels !== undefined) {

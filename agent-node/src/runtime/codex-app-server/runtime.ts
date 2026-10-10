@@ -80,6 +80,8 @@ export const COMMHUB_MCP_TOKEN_ENV = "ANET_CODEX_COMMHUB_TOKEN";
 export interface OwnedAppServerConfig {
   approvalPolicy?: string;
   sandboxMode?: string;
+  /** `-c model_reasoning_effort=<v>` when set. */
+  reasoningEffort?: string;
   /**
    * When set, wires CommHub in as a streamable-HTTP MCP server so codex can
    * call `commhub_*` tools natively (send_task / send_message /
@@ -102,6 +104,7 @@ export function buildOwnedAppServerArgs(url: string, cfgOpts: OwnedAppServerConf
   const cfg: string[] = [];
   if (cfgOpts.approvalPolicy) cfg.push("-c", `approval_policy=${cfgOpts.approvalPolicy}`);
   if (cfgOpts.sandboxMode) cfg.push("-c", `sandbox_mode=${cfgOpts.sandboxMode}`);
+  if (cfgOpts.reasoningEffort) cfg.push("-c", `model_reasoning_effort=${cfgOpts.reasoningEffort}`);
   if (cfgOpts.commhubMcpUrl) {
     cfg.push("-c", `mcp_servers.commhub.url="${cfgOpts.commhubMcpUrl}"`);
     cfg.push("-c", `mcp_servers.commhub.bearer_token_env_var="${COMMHUB_MCP_TOKEN_ENV}"`);
@@ -164,6 +167,8 @@ export async function openCodexAppServerRuntime(opts: {
    * radius of auto-approved commands. Ignored for shared servers.
    */
   sandboxMode?: string;
+  /** Codex config override `model_reasoning_effort` for owned app-servers. */
+  reasoningEffort?: string;
   /**
    * CommHub hub URL (e.g. http://127.0.0.1:9200). When set with
    * commhubToken, an OWNED app-server gets CommHub wired in as a
@@ -248,6 +253,7 @@ export async function openCodexAppServerRuntime(opts: {
         const spawnArgs = buildOwnedAppServerArgs(url, {
           approvalPolicy: opts.approvalPolicy,
           sandboxMode: opts.sandboxMode,
+          reasoningEffort: opts.reasoningEffort,
           commhubMcpUrl: wireCommhub ? opts.commhubMcpUrl : undefined,
         });
         // Token via env only (never in argv/config) so it can't leak through a

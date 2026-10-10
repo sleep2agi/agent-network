@@ -161,6 +161,10 @@ describe("computeApplyMode — tier classifier (RFC-024 §4)", () => {
     expect(computeApplyMode("gpt-5", { maxTurns: 50 })).toBe("restart");
   });
 
+  test("reasoningEffort alone → restart tier", () => {
+    expect(computeApplyMode(undefined, {}, undefined, "medium")).toBe("restart");
+  });
+
   test("mixed (only hot flags) → hot", () => {
     expect(computeApplyMode(undefined, { maxTurns: 50, budget: 100 })).toBe("hot");
   });
@@ -357,5 +361,17 @@ describe("validatePatch — channels defensive gate", () => {
   test("non-array rejected", () => {
     const r = validatePatch(undefined, {}, "telegram" as any);
     expect(r?.field).toBe("channels");
+  });
+});
+
+describe("reasoningEffort — codex-app-server only", () => {
+  test("valid effort on codex-app-server passes", () => {
+    expect(validatePatch(undefined, {}, undefined, "high", "codex-app-server")).toBeNull();
+  });
+  test("invalid effort rejected", () => {
+    expect(validatePatch(undefined, {}, undefined, "max", "codex-app-server")?.field).toBe("reasoningEffort");
+  });
+  test("effort on claude runtime rejected", () => {
+    expect(validatePatch(undefined, {}, undefined, "low", "claude-agent-sdk")?.field).toBe("reasoningEffort");
   });
 });
