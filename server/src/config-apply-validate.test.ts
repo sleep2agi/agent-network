@@ -26,20 +26,28 @@ describe("ALLOWED_FLAGS — exact contract (no silent extension)", () => {
     // the BLOCKER 2 schema-mismatch issue. P2 to add a claude-code-cli
     // config-apply path.
     expect([...ALLOWED_FLAGS].sort()).toEqual([
+      "approvalPolicy",
       "budget",
+      "copresenceFullAccess",
       "dangerouslySkipPermissions",
       "maxTurns",
+      "modelReasoningEffort",
       "permissionMode",
+      "sandboxMode",
+      "skipGitRepoCheck",
       "timeout",
     ]);
   });
 });
 
 describe("SECURITY_SENSITIVE_FLAGS — privilege-elevation surface", () => {
-  test("contains the 2 privilege-elevation flags (teammateMode dropped — see ALLOWED_FLAGS comment)", () => {
+  test("contains privilege-elevation flags (teammateMode dropped — see ALLOWED_FLAGS comment)", () => {
     expect([...SECURITY_SENSITIVE_FLAGS].sort()).toEqual([
+      "approvalPolicy",
+      "copresenceFullAccess",
       "dangerouslySkipPermissions",
       "permissionMode",
+      "sandboxMode",
     ]);
   });
 
@@ -159,6 +167,10 @@ describe("computeApplyMode — tier classifier (RFC-024 §4)", () => {
 
   test("mixed (model + maxTurns) → restart (strictest wins)", () => {
     expect(computeApplyMode("gpt-5", { maxTurns: 50 })).toBe("restart");
+  });
+
+  test("modelReasoningEffort flag alone → restart tier", () => {
+    expect(computeApplyMode(undefined, { modelReasoningEffort: "medium" })).toBe("restart");
   });
 
   test("mixed (only hot flags) → hot", () => {
@@ -357,5 +369,25 @@ describe("validatePatch — channels defensive gate", () => {
   test("non-array rejected", () => {
     const r = validatePatch(undefined, {}, "telegram" as any);
     expect(r?.field).toBe("channels");
+  });
+});
+
+describe("Codex config flags (#815)", () => {
+  test("yolo bundle on codex-app-server passes", () => {
+    expect(validatePatch(undefined, {
+      approvalPolicy: "never",
+      sandboxMode: "danger-full-access",
+      skipGitRepoCheck: true,
+      copresenceFullAccess: true,
+      modelReasoningEffort: "low",
+    }, undefined, "codex-app-server")).toBeNull();
+  });
+  test("modelReasoningEffort invalid enum rejected", () => {
+    expect(validatePatch(undefined, { modelReasoningEffort: "max" }, undefined, "codex-app-server")?.field)
+      .toBe("flags.modelReasoningEffort");
+  });
+  test("codex flags on claude runtime rejected", () => {
+    expect(validatePatch(undefined, { modelReasoningEffort: "low" }, undefined, "claude-agent-sdk")?.field)
+      .toBe("flags.modelReasoningEffort");
   });
 });

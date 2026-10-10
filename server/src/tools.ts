@@ -3199,7 +3199,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     callerNetworkId: string | null,
   ): { row: any | null; sec1Ok: boolean } => {
     const row = db.get<any>(
-      "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1",
+      "SELECT node_id, alias, network_id, runtime, config_revision, config_snapshot FROM nodes WHERE node_id = ?1",
       nodeId,
     );
     if (!row) return { row: null, sec1Ok: false };
@@ -3329,7 +3329,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
-      const validationFail = validatePatch(model, flags, channels);
+      const validationFail = validatePatch(model, flags, channels, node.runtime);
       if (validationFail) {
         return {
           content: [{

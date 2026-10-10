@@ -6,6 +6,13 @@
 // caller identity, role gates).
 
 import { isValidTimeoutMs, TIMEOUT_MS_REASON } from "./create-node-validate.js";
+import {
+  REASONING_EFFORT_VALUES,
+  validateCodexConfigFlag,
+  type ModelReasoningEffort,
+} from "./codex-config-flags.js";
+
+export { REASONING_EFFORT_VALUES, type ModelReasoningEffort } from "./codex-config-flags.js";
 
 /**
  * Fields the dashboard may change. Anything not in this list is rejected
@@ -18,6 +25,12 @@ export const ALLOWED_FLAGS = new Set<string>([
   "maxTurns",
   "budget",
   "timeout",
+  // Codex (#815 / client): posture + co-presence grant + thinking level
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 // NB on teammateMode (dropped from P1 scope per #290 cross-agent
 // review): teammateMode is consumed ONLY by the claude-code-cli
@@ -45,6 +58,9 @@ export const ALLOWED_FLAGS = new Set<string>([
 export const SECURITY_SENSITIVE_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
+  "approvalPolicy",
+  "sandboxMode",
+  "copresenceFullAccess",
 ]);
 
 /**
@@ -57,6 +73,11 @@ export const RESTART_REQUIRED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
   "timeout",
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 
 /**
@@ -186,6 +207,7 @@ export function validatePatch(
   model: string | undefined,
   flags: Record<string, unknown>,
   channels?: string[] | undefined,
+  nodeRuntime?: string | null,
 ): { field: string; reason: string } | null {
   if (model !== undefined) {
     if (typeof model !== "string" || model.length === 0 || model.length > 200) {
@@ -213,6 +235,8 @@ export function validatePatch(
     if (!ALLOWED_FLAGS.has(key)) {
       return { field: `flags.${key}`, reason: "not in allowlist" };
     }
+    const codexFail = validateCodexConfigFlag(key, val, nodeRuntime ?? null);
+    if (codexFail) return codexFail;
     switch (key) {
       case "permissionMode":
         if (

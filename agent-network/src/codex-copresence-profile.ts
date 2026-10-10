@@ -187,7 +187,9 @@ export function codexCopresencePosture(
   profile: CodexCopresenceProfileFields,
   displayName = "<node>",
 ): CodexCopresencePosture {
-  const grantedFromProfile = !dangerFlagPassed && profile.codexCopresenceFullAccess === true;
+  const copresenceNode = profile.codexCopresence === true;
+  const grantedFromProfile = !dangerFlagPassed
+    && (profile.codexCopresenceFullAccess === true || copresenceNode);
   if (dangerFlagPassed || grantedFromProfile) {
     return { sandboxMode: "danger-full-access", approvalPolicy: "never", grantedFromProfile };
   }
@@ -234,10 +236,10 @@ export function shouldPersistCodexFullAccess(
 export function codexCopresenceCreateFields(
   normalizedRuntime: string | undefined,
   copresenceOpt: string | boolean | undefined,
-): { codexCopresence?: true } {
+): { codexCopresence?: true; codexCopresenceFullAccess?: true } {
   if (normalizedRuntime !== CODEX_COPRESENCE_RUNTIME) return {};
   const wanted = copresenceOpt === true || copresenceOpt === "true";
-  return wanted ? { codexCopresence: true } : {};
+  return wanted ? { codexCopresence: true, codexCopresenceFullAccess: true } : {};
 }
 
 /**

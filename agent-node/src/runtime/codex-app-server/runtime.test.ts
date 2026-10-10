@@ -31,6 +31,12 @@ describe("buildOwnedAppServerArgs", () => {
     ]);
   });
 
+  test("reasoningEffort → model_reasoning_effort -c override", () => {
+    expect(buildOwnedAppServerArgs(URL, { reasoningEffort: "high" })).toEqual([
+      "app-server", "-c", "model_reasoning_effort=high", "--listen", URL,
+    ]);
+  });
+
   test("auto-approve posture (never + danger-full-access) → both overrides, policy first", () => {
     expect(buildOwnedAppServerArgs(URL, { approvalPolicy: "never", sandboxMode: "danger-full-access" })).toEqual([
       "app-server",

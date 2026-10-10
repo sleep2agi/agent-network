@@ -17,6 +17,7 @@
 // the path without terminating the test runner.
 
 import type { RuntimeReadiness } from "./runtime-readiness.js";
+import { validateCodexConfigFlag } from "./codex-config-flags.js";
 import {
   closeSync,
   constants,
@@ -73,12 +74,22 @@ const ALLOWED_FLAGS = new Set<string>([
   "maxTurns",
   "budget",
   "timeout",
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 
 const RESTART_REQUIRED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
   "timeout",
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 
 /**
@@ -121,7 +132,10 @@ export interface ConfigUpdate {
 /** Validation outcome. `null` = pass; otherwise the rejection envelope. */
 export type ValidationResult = { field: string; reason: string } | null;
 
-export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
+export function validateLocalPatch(
+  patch: ConfigPatch,
+  opts?: { runtime?: string | null },
+): ValidationResult {
   if (patch.model !== undefined) {
     if (typeof patch.model !== "string" || patch.model.length === 0 || patch.model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
@@ -148,6 +162,8 @@ export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
     if (!ALLOWED_FLAGS.has(key)) {
       return { field: `flags.${key}`, reason: "not in local allowlist" };
     }
+    const codexFail = validateCodexConfigFlag(key, val, opts?.runtime ?? null);
+    if (codexFail) return codexFail;
     switch (key) {
       case "permissionMode":
         if (
@@ -370,6 +386,8 @@ export function mergePatch(existing: any, patch: ConfigPatch): any {
   if (patch.model !== undefined) next.model = patch.model;
   if (patch.flags) {
     next.flags = { ...(next.flags || {}), ...patch.flags };
+    if (patch.flags.copresenceFullAccess === true) next.codexCopresenceFullAccess = true;
+    else if (patch.flags.copresenceFullAccess === false) delete next.codexCopresenceFullAccess;
   }
   if (patch.channels !== undefined) {
     // Channels replace-with-preserve-paths:

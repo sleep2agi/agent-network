@@ -138,6 +138,7 @@ describe("computeApplyMode — tier classifier", () => {
   });
   test("mixed (model + maxTurns) → restart (strictest wins)", () => {
     expect(computeApplyMode({ model: "x", flags: { maxTurns: 50 } })).toBe("restart");
+    expect(computeApplyMode({ flags: { modelReasoningEffort: "medium" } })).toBe("restart");
   });
 });
 

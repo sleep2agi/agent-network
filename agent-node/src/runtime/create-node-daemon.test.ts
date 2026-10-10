@@ -1149,9 +1149,45 @@ describe("#1545 probeAnetBinReadiness —— 不抛异常地回答「现在能�
 // #584 —— daemon 不跑 `anet node create`,直接写子节点 config;`anet node start` 只认 config 顶层的
 // codexCopresence。flags.copresence 必须在这里变成那个字段,否则「Codex（TUI 共存）」起来是无头的。
 describe("#584 flags.copresence → child config codexCopresence", () => {
-  test("codex-app-server + copresence:true → codexCopresence:true, switch removed from flags", () => {
+  test("codex-app-server + copresence:true → codexCopresence + yolo defaults", () => {
     expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { permissionMode: "default", copresence: true } }))
-      .toEqual({ flags: { permissionMode: "default" }, codexCopresence: true });
+      .toEqual({
+        flags: {
+          permissionMode: "default",
+          approvalPolicy: "never",
+          sandboxMode: "danger-full-access",
+          skipGitRepoCheck: true,
+        },
+        codexCopresence: true,
+        codexCopresenceFullAccess: true,
+      });
+  });
+  test("copresence without copresenceFullAccess:false keeps yolo; explicit false opts out of full access grant", () => {
+    expect(childConfigFieldsFromSpec({
+      runtime: "codex-app-server",
+      flags: { copresence: true, copresenceFullAccess: false, approvalPolicy: "on-request" },
+    })).toEqual({
+      flags: {
+        approvalPolicy: "on-request",
+        sandboxMode: "danger-full-access",
+        skipGitRepoCheck: true,
+      },
+      codexCopresence: true,
+    });
+  });
+  test("copresenceFullAccess:true without copresence still maps full access when paired with copresence flag", () => {
+    expect(childConfigFieldsFromSpec({
+      runtime: "codex-app-server",
+      flags: { copresence: true, copresenceFullAccess: true, approvalPolicy: "never" },
+    })).toEqual({
+      flags: {
+        approvalPolicy: "never",
+        sandboxMode: "danger-full-access",
+        skipGitRepoCheck: true,
+      },
+      codexCopresence: true,
+      codexCopresenceFullAccess: true,
+    });
   });
   test("copresence:false / absent → no codexCopresence (headless stays creatable; old request shape unchanged)", () => {
     expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { copresence: false } })).toEqual({ flags: {} });

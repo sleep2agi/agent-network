@@ -168,9 +168,11 @@ import {
   codexCopresenceCreateFields,
   codexCopresenceCreateHint,
   codexCopresenceRequested,
+  CODEX_COPRESENCE_RUNTIME,
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
 } from "../src/codex-copresence-profile";
+import { writeCopresenceYoloToCodexHome } from "../src/codex-copresence-yolo";
 import {
   codexHomeStagePlan,
   codexKnownStartupPromptAction,
@@ -330,6 +332,11 @@ import {
   defaultCodexModelForRuntime,
 } from "../src/codex-model-default";
 import { describeCodexModelSource, resolveCodexCopresenceModel } from "../src/codex-copresence-model";
+import {
+  codexReasoningEffortConfigOverride,
+  isReasoningEffortValue,
+  writeReasoningEffortToCodexHome,
+} from "../src/codex-reasoning-effort";
 import { resolvePrimaryNetwork } from "../src/primary-network";
 
 const args = process.argv.slice(2);
@@ -1236,7 +1243,9 @@ async function startWindowsCodexCopresence(
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
     console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId || "pending-user-thread"})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgs = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tui = spawn(opts.codexBin, tuiArgs, {
       cwd: process.cwd(),
       env: { ...process.env, ...codexCopresenceStageEnv(opts.configEnv, { CODEX_HOME: opts.codexHome, ANET_NODE_MARKER: marker }) },
@@ -1872,6 +1881,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #720 — url + bearer + `default_tools_approval_mode="approve"` for commhub only, so the
   //   first commhub tool call does not stop on an approval prompt nobody will answer.
   const commhubMcpOverrides = codexCommhubMcpOverrides(opts.hub, "quoted");
+  const profileReasoning = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+  const reasoningEffortOverride = isReasoningEffortValue(profileReasoning)
+    ? ` -c ${shellQuote(codexReasoningEffortConfigOverride(profileReasoning))}`
+    : "";
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     `. ${shellQuote(envFilePath)}`,
@@ -1881,6 +1894,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       + ` -c approval_policy=${approvalPolicy}`
       + ` -c sandbox_mode=${sandboxMode}`
       + ` -c model=${shellQuote(model)}`
+      + reasoningEffortOverride
       + commhubMcpOverrides.map((o) => ` -c ${shellQuote(o)}`).join("")
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
@@ -2132,7 +2146,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   };
   const launchTui = () => {
     // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
-    const tuiArgv = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgv = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tuiInvocation = `exec ${shellQuote(opts.codexBin)} ${tuiArgv.map(shellQuote).join(" ")}`;
     const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
       CODEX_HOME: opts.codexHome,
@@ -2478,6 +2494,10 @@ function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
     sandboxMode: "danger-full-access",
     skipGitRepoCheck: true,
   };
+}
+
+function copresenceCreateOptTruthy(v: string | boolean | undefined): boolean {
+  return v === true || v === "true";
 }
 
 // Scan ~/.claude/projects/<cwd-key>/*.jsonl — the Claude Code sessions that
@@ -5030,6 +5050,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
+      ...(runtime === "codex-app-server" && copresenceCreateOptTruthy(opts.copresence)
+        ? codexSdkYoloFlags(opts["no-yolo"] === "true")
+        : {}),
     },
     ...(runtime === "codex-app-server" && opts["codex-app-server-url"]
       ? { codexAppServerUrl: opts["codex-app-server-url"] }
@@ -5205,6 +5228,9 @@ function saveCreatedNode(id: string, profile: Profile) {
   rewritePlainSecretsToEnvRef(id, profile);
   writeLegacyProjectAlias(profile.node_name || id);
   saveProfile(id, profile);
+  if ((profile as { codexCopresence?: boolean }).codexCopresence === true) {
+    writeCopresenceYoloToCodexHome(join(nodesDir(), id, "codex-home"));
+  }
 }
 
 // #125 — extracted helper so create + migrate-token-to-envref + (future)
@@ -11938,6 +11964,16 @@ async function verifyNodeRestarted(
 // 🔴 空值不当默认：`normalizeRuntimeStrict` 对空串返回 DEFAULT_RUNTIME，
 //    那是给「配置里没写」用的语义。用户显式敲 `--runtime ""` 是打错了，
 //    不该被悄悄解释成 claude-agent-sdk —— 所以这里先自己挡掉空值。
+function applyNodeEditReasoningEffortToml(nodeKey: string, profile: Profile, reasoningIdx: number): void {
+  const re = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+  if (reasoningIdx < 0 || !isReasoningEffortValue(re)) return;
+  const { codexHome } = resolveNodeCodexHome({
+    nodeDir: join(nodesDir(), nodeKey),
+    config: JSON.parse(JSON.stringify(profile)) as Record<string, unknown>,
+  });
+  if (codexHome) writeReasoningEffortToCodexHome(codexHome, re);
+}
+
 async function nodeEditCommand() {
   const ref = args[1];
   const flagIdx = args.indexOf("--runtime");
@@ -11951,6 +11987,8 @@ async function nodeEditCommand() {
   //    与 #1698 里 grok 撞 uid_map 墙时「产品给出的修法产品自己做不到」同形。
   const modelIdx = args.indexOf("--model");
   const rawModel = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
+  const reasoningIdx = args.indexOf("--reasoning-effort");
+  const rawReasoning = reasoningIdx >= 0 ? args[reasoningIdx + 1] : undefined;
   // #1856 —— `--workdir <dir>` 写 codexProjectDir(共存节点的工作目录 = 含 .anet 的目录);preflight 的
   // workdir_consistent 缺它就 fail,而在这之前没有任何命令能给旧节点补上(提示里写的 `config apply` 根本不存在)。
   const workdirIdx = args.indexOf("--workdir");
@@ -11968,9 +12006,9 @@ async function nodeEditCommand() {
   const providerValue = providerFlag("--provider");
   const baseUrlValue = providerFlag("--base-url");
   const apiKeyEnvValue = providerFlag("--api-key-env");
-  if (!ref || (flagIdx < 0 && modelIdx < 0 && workdirIdx < 0 && !providerValue && !baseUrlValue && !apiKeyEnvValue)) {
+  if (!ref || (flagIdx < 0 && modelIdx < 0 && reasoningIdx < 0 && workdirIdx < 0 && !providerValue && !baseUrlValue && !apiKeyEnvValue)) {
     console.log(`
-anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <dir>]
+anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-effort <level>] [--workdir <dir>]
                                    [--provider <id>] [--base-url <url>] [--api-key-env <NAME>]
 
   Change an existing node's runtime, model and/or co-presence workdir. Supported runtime ids:
@@ -11978,6 +12016,10 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
 
   --model takes any id the runtime accepts; it is validated the same way
   'anet node create --model' validates it (non-empty, no whitespace).
+
+  --reasoning-effort sets Codex thinking level (codex-app-server only): none,
+  minimal, low, medium, high, or xhigh — written to config.json and
+  codex-home/config.toml as model_reasoning_effort.
 
   --provider is Codex (config.toml [model_providers.*]) or OpenCode V2
   (native opencode.json providers). The key value is never a flag: export
@@ -11998,7 +12040,12 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
   if (modelIdx >= 0 && (rawModel === undefined || rawModel.trim() === "" || rawModel.startsWith("--"))) {
     console.error("--model needs a value (an id the runtime accepts).");
     process.exit(1);
-  }  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
+  }
+  if (reasoningIdx >= 0 && (rawReasoning === undefined || rawReasoning.trim() === "" || rawReasoning.startsWith("--"))) {
+    console.error("--reasoning-effort needs a value (none, minimal, low, medium, high, or xhigh).");
+    process.exit(1);
+  }
+  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
     console.error("--workdir needs a value (an existing directory; the one that holds this node's .anet).");
     process.exit(1);
   }
@@ -12046,6 +12093,24 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`model ${currentModel ?? "(unset)"} -> ${nextModel}`);
     }
   }
+  if (reasoningIdx >= 0) {
+    if (normalizeRuntime(profile) !== CODEX_COPRESENCE_RUNTIME) {
+      console.error(`--reasoning-effort only applies to ${CODEX_COPRESENCE_RUNTIME} nodes (this node is ${normalizeRuntime(profile)}).`);
+      process.exit(1);
+    }
+    const nextRe = rawReasoning!.trim() as string;
+    if (!isReasoningEffortValue(nextRe)) {
+      console.error(`--reasoning-effort must be one of: none, minimal, low, medium, high, xhigh`);
+      process.exit(1);
+    }
+    const fl = (profile.flags && typeof profile.flags === "object" ? profile.flags : {}) as Record<string, unknown>;
+    profile.flags = fl;
+    const currentRe = fl.modelReasoningEffort as string | undefined;
+    if (currentRe !== nextRe) {
+      fl.modelReasoningEffort = nextRe;
+      changes.push(`modelReasoningEffort ${currentRe ?? "(unset)"} -> ${nextRe}`);
+    }
+  }
   if (workdirIdx >= 0) {
     let nextDir: string;
     try {
@@ -12076,6 +12141,7 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
   if (stagedProvider) rewritePlainSecretsToEnvRef(resolved.id, profile);
   saveProfile(resolved.id, profile);
   materializeRuntimeProviderOrExit(resolved.id, stagedProvider);
+  applyNodeEditReasoningEffortToml(resolved.id, profile, reasoningIdx);
   for (const c of changes) console.log(`${resolved.id}: ${c}`);
   // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
   const running = findNodeStopCandidates(resolved.id);
