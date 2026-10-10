@@ -1,0 +1,80 @@
+# #894 V1 production runtime compatibility slice — 2026-10-10 CST
+
+Result: PASS in Docker, ordinary UID 1000, --network none (loopback only).
+Production source base: 16dc243aec726784fcdbd9e4530efa22a51ee8c0.
+Local delta at execution: new tests/test894-v1-runtime fixture and QA registration;
+no product changes relative to that SHA. SOURCE_COMMIT is the base label, NOT
+a claim that the then-uncommitted fixture was already part of that commit.
+
+Actual OpenCode package: opencode-ai@1.18.34 (version asserted at build/run).
+Actual Bun: 1.3.14; pinned base digest in independent suite Dockerfile.
+Model provider only: reused repository test543 loopback streaming fixture.
+Mode: explicit unsafeTools opt-in to permit custom loopback provider config.
+This is NOT safe-preset verification and changes no product safety policy.
+
+Image: anet894-v1:runtime-home
+Image ID: sha256:57cf967209b85f8cb6c81052d149011195743bd41867a5b502f18c04e1c56fbb
+runtime.ts SHA256:
+674ca5af5dd51f491e6219276547665c3fccd339844c0cb417a4e73fb4329307
+probe.ts SHA256:
+8316c4266ba4900338dbd035e23a19d33d948ee2bf849ca7783e655aae5599d7
+
+Invocation (from exact source + fixture checkout):
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=16dc243aec726784fcdbd9e4530efa22a51ee8c0 -f tests/test894-v1-runtime/Dockerfile -t anet894-v1:runtime-home .'
+sg docker -c 'docker run --name anet894-v1-runtime-home --network none -e EXPECTED_SOURCE_COMMIT=16dc243aec726784fcdbd9e4530efa22a51ee8c0 anet894-v1:runtime-home'
+Container exit: 0. Two separate probe processes, fresh runtime dirs each.
+
+Accepted positive, in dependency order:
+PASS: environment and provider fixture
+PASS: V1 session startup and unauthenticated rejection
+PASS: real V1 reply and attached TUI
+PASS: provider model identity
+PASS: runtime close stops TUI and removes launcher
+
+Negative: independent real runtime/TUI startup and response-only reply marker
+passed before expecting deliberately-wrong instead of stub-model. Inner exit 1:
+AssertionError: provider model mismatch
+The runner requires exit 1, the exact assertion line and the TUI/reply PASS
+prerequisite; a timeout, startup failure or unrelated assertion cannot pass it.
+PASS: wrong-model exact negative control
+
+Earlier unaccepted attempt: anet894-v1-proof exited 1 after environment-only
+PASS because /run/user was absent. Product refused before session readiness.
+Only the fixture Dockerfile was corrected: root-owned /run/user mode 0755 and
+UID/GID bun /run/user/1000 mode 0700. No guard/assertion was removed or relaxed.
+First failed run is not counted as V1 execution success.
+
+Additional Docker checks: bash syntax, QA trigger coverage and PR/push path
+symmetry passed (224 each, zero differences). Base-image checker selftest 21/21
+passed; that selftest is not a scan of every repository Dockerfile.
+
+Evidence copies retained at /tmp/anet894-v1-evidence.V6q6yA/{first-environment-failure,final}.
+These temporary copies are convenience artifacts, not rebuild inputs. The
+authoritative suite/fixture/provider and Docker instructions are in Git.
+No host credentials/HOME/tmux sockets or production services were touched.
+Private tmux server uses -L plus cleared TMUX/TMUX_PANE; no kill-server.
+Both named stopped containers were removed after copying their reports;
+evidence and rebuildable images remain. No running test workload remains.
+
+Scope not verified: real CommHub integration, create-node launcher ACK,
+packaged desktop native IPC/UI, V1 safe mode, migration or formal release.
+V2 evidence and branch/main provenance remain separate. #894 stays doing.
+
+## 04:32 CST — fixture HOME portability follow-up
+
+CI run37986232459/job114008809180 on 31f3cdd78cd57109bec5ef36a2840f20a8d20715
+failed home-path-baseline: the Dockerfile explicitly encoded the base image's
+machine-account home path. Removed only that HOME assignment; USER bun remains.
+No scanner exemptions, baseline increases, runtime changes or weaker assertions.
+Docker verified UID 1000 and HOME == os.userInfo().homedir with the new image.
+The unchanged real-runtime positive/exact-negative suite passed again, exit 0;
+this is configuration regression validation, not a new runtime capability count.
+Image anet894-v1:portable-home:
+sha256:1ac56124b582ee9d74a4760ec71f1819efe43b60436bd0bb6776a89901f33719
+SOURCE_COMMIT=31f3cdd78cd57109bec5ef36a2840f20a8d20715 plus this one-line
+Dockerfile delta; product/probe hashes above unchanged. Docker scanner selftest
+13/13 and full tracked scan passed: 3749 files, 238 occurrences in 77 files,
+none above baseline. Read-only repository/common-git mounts were used only for
+the scanner; runtime tests still had no host mounts and --network none.
+Copied report to the existing evidence directory's portable-home subdirectory,
+then removed the stopped anet894-v1-portable-home container. No production edits.

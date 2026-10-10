@@ -26,7 +26,7 @@ import {
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
-import { inspectLaunchHealth, successfulLauncherExit } from "./opencode-copresence/launcher-health.js";
+import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
   requiredCliStatus,
@@ -1240,7 +1240,9 @@ export async function handleCreateNodeDoorbell(
     const deadline = launchedAt + (deps.capabilityCheckMs === undefined ? 35_000 : FAIL_FAST_MS);
     while (!launcherExit && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
     const ex = launcherExit as { code: number | null; signal: NodeJS.Signals | null } | null;
-    const health = inspectLaunchHealth(childDir, childCfgPath, launchedAt);
+    const health = successfulLauncherExit(ex)
+      ? await waitForLaunchHealth(childDir, childCfgPath, launchedAt, deadline)
+      : inspectLaunchHealth(childDir, childCfgPath, launchedAt);
     const { forgetSpawnedChildIfPid, recordSpawnedChild } = await import("./stop-daemon.js");
     forgetSpawnedChildIfPid(childNodeIdForMap, childPid);
     if (successfulLauncherExit(ex) && health.ok) {

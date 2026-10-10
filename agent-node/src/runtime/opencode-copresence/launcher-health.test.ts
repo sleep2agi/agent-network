@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { inspectLaunchHealth, LAUNCH_HEALTH_FILE, publishLaunchHealth, readLiveProcess, successfulLauncherExit, validateLaunchHealth, type LaunchHealth } from "./launcher-health";
+import { inspectLaunchHealth, LAUNCH_HEALTH_FILE, publishLaunchHealth, readLiveProcess, successfulLauncherExit, validateLaunchHealth, waitForLaunchHealth, type LaunchHealth } from "./launcher-health";
 
 function fixture() {
   const bridge = { pid: 200, ticks: "10", parent: 100, state: "S" };
@@ -66,7 +66,54 @@ describe("daemon OpenCode live launch generation", () => {
     expect(source).toContain('child_pid: health.bridgePid, launch_verified: true');
     expect(source.match(/launch_verified: true/g)?.length).toBe(1);
     expect(source).toContain("recordSpawnedChild(childNodeIdForMap, req.node_spec.name, health.bridgePid)");
-    expect(source.indexOf("const health = inspectLaunchHealth")).toBeLessThan(source.indexOf("let stillAlive = false"));
+    expect(source).toContain("const health = successfulLauncherExit(ex)\n      ? await waitForLaunchHealth(childDir, childCfgPath, launchedAt, deadline)\n      : inspectLaunchHealth(childDir, childCfgPath, launchedAt)");
+    expect(source.indexOf("const health = successfulLauncherExit(ex)")).toBeLessThan(source.indexOf("let stillAlive = false"));
     expect(source).toContain("while (!launcherExit && Date.now() < deadline)");
+  });
+});
+
+describe("bounded attach exec readiness", () => {
+  test("rechecks unchanged full guard until exec makes the same session ready", async () => {
+    let time = 1000, calls = 0;
+    const f = fixture();
+    f.args.set(202, ["sh", "/attach.sh"]);
+    const result = await waitForLaunchHealth("/node", "/node/config.json", 999, 1200, {
+      now: () => time,
+      sleep: async ms => { time += ms; if (time === 1100) f.args.set(202, ["opencode", "--session", "ses_123"]); },
+      inspect: () => { calls++; return f.check(); },
+    });
+    expect(result).toEqual({ok: true, bridgePid: 200});
+    expect(calls).toBe(3);
+    expect(time).toBe(1100);
+  });
+  test("foreign session and reused PID never pass, remaining budget is not extended", async () => {
+    for (const mode of ["session", "pid"]) {
+      let time = 1000;
+      const sleeps: number[] = [], f = fixture();
+      if (mode === "session") f.args.set(202, ["opencode", "--session", "ses_other"]);
+      else f.live.get(202)!.ticks = "999";
+      const before = f.check();
+      const result = await waitForLaunchHealth("/node", "/node/config.json", 999, 1125, {
+        now: () => time, inspect: () => f.check(),
+        sleep: async ms => { sleeps.push(ms); time += ms; },
+      });
+      expect(result).toEqual(before);
+      expect(result.ok).toBe(false);
+      expect(sleeps).toEqual([50, 50, 25]);
+      expect(time).toBe(1125);
+    }
+  });
+  test("no waiting after deadline and no additional reads after a delayed timer", async () => {
+    for (const expired of [true, false]) {
+      let time = 1000, calls = 0, sleeps = 0;
+      const result = await waitForLaunchHealth("/node", "/config", 999, expired ? 999 : 1100, {
+        now: () => time,
+        inspect: () => { calls++; return {ok: false, reason: "TUI session mismatch"}; },
+        sleep: async () => { sleeps++; time = 1500; },
+      });
+      expect(result.ok).toBe(false);
+      expect(calls).toBe(1);
+      expect(sleeps).toBe(expired ? 0 : 1);
+    }
   });
 });

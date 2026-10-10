@@ -1,0 +1,57 @@
+name: V1 safe ACP session atomic gate
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/test894-v1-acp-session.yml'
+      - 'tests/test894-v1-acp-session/**'
+      - 'tests/test894-v1-runtime/Dockerfile'
+      - 'agent-node/package*.json'
+      - 'agent-node/src/cli.ts'
+      - 'agent-node/src/runtime/opencode-acp/**'
+      - 'agent-node/src/runtime/opencode-backend.ts'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/test894-v1-acp-session.yml'
+      - 'tests/test894-v1-acp-session/**'
+      - 'tests/test894-v1-runtime/Dockerfile'
+      - 'agent-node/package*.json'
+      - 'agent-node/src/cli.ts'
+      - 'agent-node/src/runtime/opencode-acp/**'
+      - 'agent-node/src/runtime/opencode-backend.ts'
+permissions:
+  contents: read
+jobs:
+  safe-v1-acp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned dependency fixture and current source
+        run: |
+          docker build -f tests/test894-v1-runtime/Dockerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-v1-deps:test .
+          docker build --network none -f tests/test894-v1-acp-session/Dockerfile --build-arg RUNTIME_IMAGE=anet-v1-deps:test --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-v1-acp:test .
+      - name: ACP protocol, lifecycle and selected-model regression
+        run: |
+          set -euo pipefail
+          docker run --rm --network none anet-v1-acp:test bun test src/runtime/opencode-acp 2>&1 | tee report-test894-v1-acp-unit.txt
+      - name: Real safe ACP initialization and exact wrong-session negative
+        run: |
+          set -euo pipefail
+          docker image inspect anet-v1-deps:test anet-v1-acp:test --format '{{.Id}}' | tee test894-images.txt
+          docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" anet-v1-acp:test 2>&1 | tee report-test894-v1-acp-session.txt
+      - name: Safe ACP model transport with isolated TLS fixture (not live vendor)
+        run: |
+          set -euo pipefail
+          docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" anet-v1-acp:test bash /fixture-acp/run-model.sh 2>&1 | tee report-test894-v1-acp-model.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-v1-acp-session-${{ github.sha }}
+          path: |
+            test894-images.txt
+            report-test894-v1-acp-unit.txt
+            report-test894-v1-acp-session.txt
+            report-test894-v1-acp-model.txt
+          if-no-files-found: warn

@@ -1,0 +1,67 @@
+#894 / #829 — V1 safe-default ACP session atomic gate
+Observed: 2026-10-10 05:31:06 CST (2026-10-09T21:31:06Z)
+Scope: TEST ONLY; no production, merge, release, model request or credentials.
+
+Runtime source: 93202f7530471b89b4db977a4c562d869620a8d3, unchanged.
+Candidate adds tests/test894-v1-acp-session and its dedicated CI workflow.
+Do not describe this local source-plus-fixture run as a newly built native app.
+Production runtime.ts SHA256:
+ea884f2ded23dedb30452b3f392597bae0dd4aba670593480dd68d431e41d655
+Probe SHA256:
+f4cfdb74ed07addd346dd8aedf18a3cc089c45e7e6eeccb3872627781a892797
+Driver SHA256:
+994fc18669aebb0779f3bc64ffe8fcf47b29bada8bd6e716c5131a0f141aae42
+
+Dependency image: anet894-v1:portable-home
+sha256:1ac56124b582ee9d74a4760ec71f1819efe43b60436bd0bb6776a89901f33719
+Test image: anet-v1-acp:894
+sha256:da736419b5a17629c76bea279037d0dae1d8cbd333d2d12422c2e14d582be9a7
+Dependency layer reused offline, lockfile cmp passed and current runtime source
+recopied. Fresh dependency acquisition was NOT tested. Image rebuild instructions
+and canonical dependency Dockerfile are recorded in the suite README.
+
+Docker --network none; non-root bun user; no host runtime/home/credential mounts.
+Positive, then separate actual process with wrong expected session; suite exit 0.
+PASS: exact real OpenCode 1.18.34 --version.
+PASS: production openOpencodeRuntime with omitted unsafeTools; real ACP initialize
+      and session/new return a live process and persisted ses_ identity.
+PASS: live child OPENCODE_PURE=1, project config disabled, wildcard/local/webfetch/
+      question permissions deny; fresh private child HOME and non-project cwd.
+      This proves configuration, NOT actual model-driven tool denial.
+PASS: deliberately wrong expected session fails exactly
+      "AssertionError: ACP session identity mismatch" after real session startup
+      and policy inspection succeeded; not accepted on an arbitrary failure.
+PASS: both child processes stopped and runtime-owned launch roots removed.
+Container anet894-v1-acp-session exited 0 and was removed after log collection.
+
+Initial fixture attempt: root below /tmp was rejected by the existing trusted
+launch-base ancestor guard (group/other writable). No ACP session or later layer
+was run. Fixture moved to the dependency image's private /run/user/<uid> directory.
+No product guard, assertions, runtime flags or model selection were weakened.
+
+Collected suite log SHA256:
+6d7541f20ffec98766008bee3096f51dd1871c8b1374fe068da82127adc2a95f
+Local diagnostic copy: /tmp/anet894-v1-acp.eFC51h/report-test894-v1-acp-session.txt
+This temporary copy is not a recovery dependency; the suite is in Git and CI
+uploads TEST-ONLY logs. No persistent production state is created by this gate.
+
+Separate Docker validation using cached anet-v1-label:21ffed1:
+PASS: new workflow YAML parsed with trigger/job using installed yaml package.
+PASS: repository test-suite registration guard — suites=312 registered=238,
+      exempt=18, orphans=56, baseline=56, new=0. Existing stale-exemption notes
+      retained; no baseline/exemption changes. This is not a full CI pass.
+
+Fresh app PR795 exact 3cf50cf70a02390e003914a3fa8c9a055648ff11 failure audit:
+13 failed jobs individually read. 8 Docker Hub unauthenticated quota failures:
+114031186783,114031187911,114031164108,114031187772,114031163894,
+114031187207,114031188201,114031164587.
+5 Docker Hub OAuth endpoint 504 failures (not mislabeled as 429):
+114031187231,114031187930,114031186841,114031187766,114031187760.
+Snapshot at ~05:31 CST: 13SUCCESS/13FAILURE/2 pending/1SKIPPED.
+Backend PR2559 runtime source snapshot: 163SUCCESS/4FAILURE; prior failure
+classifications and one failed targeted retry remain independent evidence.
+No CI reruns, registry substitutions or credential changes this iteration.
+
+Not covered: Hub task delivery, model authentication/response, actual tool
+enforcement, restart/history recovery, native installed app or V2 TUI.
+#894 remains 1/3, #829 remains 2/3, #539 remains in progress; no release claim.
