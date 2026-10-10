@@ -20,6 +20,7 @@ describe("Codex model defaults", () => {
       "grok-build-acp",
       "grok-build-cli",
       "opencode-cli",
+      "cursor-agent",
     ]);
     for (const runtime of NON_CODEX_RUNTIMES) {
       expect(defaultCodexModelForRuntime(runtime)).toBeUndefined();

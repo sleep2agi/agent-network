@@ -1,5 +1,9 @@
 # 更新日志
 
+## 未发布：Cursor Agent CLI 运行时（2026-10-10）
+
+- 源码预览新增 `cursor-agent`：`anet node create` 可选该运行时。节点复用本机已登录的 Cursor Agent CLI（`cursor-agent`，或自报为 Cursor 的 `agent`），每个 Hub 任务一次 print 模式调用，把结果回复给 Hub。`node stop` 会结束正在跑的那次调用。`node start` 只接受 `--help` 列出 `cursor-agent` 的 agent-node，不会去拉尚未包含它的 npm preview。尚未进入 npm `preview` / `latest`。见 [运行时](./guide/runtimes.md)。
+
 ## 未发布：客户端下载页（2026-10-10）
 
 - anet.sh 新增[下载页](/download)。macOS、Windows、Linux、Android 的安装包来自最新已发布的桌面端 release（与应用内更新同一选择）；某一平台这次没有产物时，该栏说明缺失，不继续指向旧文件。首页、导航和安装文档改指向这一页。

@@ -90,7 +90,7 @@ The wizard asks: runtime → (only for `claude-agent-sdk`) vendor → model → 
 ::: tip Easiest path for newcomers — pick `claude-code-cli` manually
 The wizard **defaults to highlighting `claude-agent-sdk`**; pressing Enter all the way lands you on the vendor + API-key path. If you've already done `claude auth login`, **manually picking `claude-code-cli`** is the zero-config fastest path.
 
-`anet node create` lists all 7 runtimes (4 stable: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`; 3 preview: `codex-app-server` (shown as `codex-cli` in the menu) / `grok-build-cli` / `opencode-cli`); the full comparison is here: [Runtime comparison](/en/guide/runtimes#runtimes-—-canonical-table).
+`anet node create` lists every runtime in the canonical table (4 stable: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`; preview also includes `codex-app-server` (shown as `codex-cli` in the menu) / `grok-build-cli` / `opencode-cli` / `cursor-agent`); the full comparison is here: [Runtime comparison](/en/guide/runtimes#runtimes-—-canonical-table).
 :::
 
 Start the node:

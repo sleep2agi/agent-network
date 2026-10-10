@@ -110,7 +110,7 @@ The wizard asks the following, in order:
 node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth
 ```
 
-**Runtime is the first fork: it decides whether you'll be asked for a vendor and what dependencies you'll need.** The picker lists all 7 runtimes; the table below covers the common ones. For npm packages, default models and the full wizard behavior, see [runtimes — canonical table](/en/guide/runtimes#runtimes-—-canonical-table):
+**Runtime is the first fork: it decides whether you'll be asked for a vendor and what dependencies you'll need.** The picker lists every runtime in the [canonical table](/en/guide/runtimes#runtimes-—-canonical-table), including preview `cursor-agent`; the table below covers the common ones. For npm packages, default models and the full wizard behavior, see that page:
 
 | Runtime | Complexity | Best for | Wizard follow-up | Extra dependencies |
 |---|---|---|---|---|

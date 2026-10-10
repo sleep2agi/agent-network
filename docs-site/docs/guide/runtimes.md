@@ -2,7 +2,7 @@
 
 > 这一页讲「怎么装、怎么认证」。想知道某个功能在哪个 runtime / 操作系统上能不能用，看 [支持矩阵](/guide/support-matrix)：那张表用三态（✅ 验过 / ❌ 验过不行 / ❓ 没验过），没验过的格子不会被写成可用。
 
-每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型、跑工具。Agent Network 内置 7 种 Runtime：4 种正式（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`），3 种预览（`codex-app-server`、`grok-build-cli`、`opencode-cli`）。`anet node create` 的选单 7 个全部列出。同一个 Hub 上可以混搭，比如一个 Claude Code CLI agent 把翻译任务派给 MiniMax agent，再让 Codex agent 写代码，最后把结果汇总回来。
+每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型、跑工具。Agent Network 内置 8 种 Runtime：4 种正式（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`），4 种预览（`codex-app-server`、`grok-build-cli`、`opencode-cli`、`cursor-agent`）。`anet node create` 的选单 8 个全部列出。同一个 Hub 上可以混搭，比如一个 Claude Code CLI agent 把翻译任务派给 MiniMax agent，再让 Codex agent 写代码，最后把结果汇总回来。
 
 ## Runtime 对比（canonical 表） {#runtime-对比-canonical-表}
 
@@ -12,6 +12,8 @@
 agent-network `≥ 2.3.0-preview.47` 在 `latest` 与 `preview` 两个通道上，`anet node create` 的 runtime 选单**都列出全部 7 个**：
 
 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `codex-app-server` / `grok-build-acp` / `grok-build-cli` / `opencode-cli`
+
+包含本页 `cursor-agent` 的构建还会多列出这一项。它是预览：复用本机已登录的 Cursor Agent CLI，用 print 模式跑 Hub 任务。还没有发到 npm 的 `latest` 通道。
 
 这些版本同时带 `anet daemon` 与 `anet grok attach`。
 
@@ -34,6 +36,7 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 | `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok login` + `GROK_CODE_XAI_API_KEY` env（该 runtime 另需该 env，非 wizard 输出） | 选完打印 `grok login` 提示，跳过 vendor |
 | `codex-cli`（内部存为 `codex-app-server`，preview） | 节点自有的 codex app-server + 桥 | Codex TUI 人机共存（人和 agent 共用一个 thread） | OpenAI Codex（默认 gpt-5.6-sol） | 已 `codex login` | 向导选中即启用共存，无第二次模式选择 |
 | `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI，固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端（统一 session / auth 抽象） | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai)，API key 从 env 读，不 prompt |
+| `cursor-agent` (preview) | spawn 本机 Cursor Agent CLI（`cursor-agent`，没有时用 `agent`）的 print 模式 | 复用已经 `agent login` 的本机 Cursor 账号，收 Hub 任务并回文字 | Cursor 账号当前默认模型；可用 `--model` 覆盖 | 已安装 [Cursor Agent CLI](https://cursor.com/docs/cli/overview) 并 `agent login`（或环境里已有 `CURSOR_API_KEY`） | 选完提示登录，跳过 vendor / API key。节点配置不保存 key |
 
 > ⚠️ **`opencode-cli` 仍是预览**：它已在 `latest` 与 `preview` 两条通道的 `anet node create` 选单里，但成熟度按预览看待。
 
@@ -107,6 +110,7 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 - **人和 Agent 共用一个 Codex TUI/thread** → 向导选择 preview `codex-cli`；之后用 `anet node start <alias> --copresence` 启动或恢复（[完整指南](/guide/codex-copresence)）
 - **用 xAI Grok Build** → `grok-build-acp`（[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
 - **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key）
+- **想用本机已登录的 Cursor Agent CLI** → `cursor-agent`（预览）。`anet node create <name> --runtime cursor-agent`，然后 `anet node start <name>`。每个 Hub 任务默认跑 `agent -p --output-format json --trust --force`，节点把 `dangerouslySkipPermissions` 写成 `true`，和 `--force` 一致；改成 `false` 会去掉 `--force`。`--force` 会在节点工作目录里允许 shell，只拿可信任务用。名为 `agent` 的命令必须自报是 Cursor，否则设置 `CURSOR_AGENT_BIN`。`node start` 不用尚未包含该运行时的 `npx @sleep2agi/agent-node@preview`。没有 ACP / 共享 TUI。图片附件这一版不传给 CLI。`.cursor/` 按凭据目录处理，远程文件浏览不读里面的内容。
 - **接国产 / 非内置 vendor**（GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等）→ `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
 - **混搭（推荐）** → 在同一 Hub 按角色组合可用的 runtime
 :::

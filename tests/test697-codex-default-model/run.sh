@@ -141,12 +141,14 @@ create_node() {
 # Derive the negative discriminator directly from the production runtime
 # catalog.  A new supported runtime must enter this denominator automatically
 # instead of relying on three hand-maintained shell/test lists.
+# The count is the conscious gate: cursor-agent is the sixth non-Codex
+# runtime and must not inherit the Codex default model.
 mapfile -t NON_CODEX_RUNTIMES < <(
   bun -e 'import { SUPPORTED_RUNTIME_NAMES } from "./agent-network/src/normalize-runtime.ts";
     const codex = new Set(["codex-sdk", "codex-app-server"]);
     for (const runtime of SUPPORTED_RUNTIME_NAMES) if (!codex.has(runtime)) console.log(runtime);'
 )
-if [[ "${#NON_CODEX_RUNTIMES[@]}" -ne 5 ]]; then
+if [[ "${#NON_CODEX_RUNTIMES[@]}" -ne 6 ]]; then
   echo "NON_CODEX_RUNTIME_DENOMINATOR_WRONG count=${#NON_CODEX_RUNTIMES[@]} values=${NON_CODEX_RUNTIMES[*]}"
   exit 1
 fi

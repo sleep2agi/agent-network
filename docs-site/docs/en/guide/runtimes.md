@@ -2,7 +2,7 @@
 
 > This page covers install and auth. For "does feature F work on runtime R / OS O", see the [Support Matrix](/en/guide/support-matrix): that table is tri-state (✅ verified / ❌ verified broken / ❓ not verified); cells that have not been verified are never shown as working.
 
-Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships 7 Runtimes: 4 stable (`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`) and 3 preview (`codex-app-server`, `grok-build-cli`, `opencode-cli`). `anet node create` lists all 7. You can mix them on a single Hub: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
+Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships 8 Runtimes: 4 stable (`claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`) and 4 preview (`codex-app-server`, `grok-build-cli`, `opencode-cli`, `cursor-agent`). `anet node create` lists all 8. You can mix them on a single Hub: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
 
 ## Runtimes — canonical table {#runtimes-—-canonical-table}
 
@@ -12,6 +12,8 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 On agent-network `≥ 2.3.0-preview.47`, the `anet node create` runtime picker **lists all seven** on both the `latest` and `preview` channels:
 
 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `codex-app-server` / `grok-build-acp` / `grok-build-cli` / `opencode-cli`
+
+Builds that include this page's `cursor-agent` row also list that preview. It reuses a local Cursor Agent CLI login and runs Hub tasks in print mode. It is not on the npm `latest` channel.
 
 Those versions also ship `anet daemon` and `anet grok attach`.
 
@@ -34,6 +36,7 @@ For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/gro
 | `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok login` done + `GROK_CODE_XAI_API_KEY` env (this runtime also needs the env; it's a runtime prereq, not a wizard output) | Wizard prints a `grok login` hint, skips vendor |
 | `codex-cli` (stored internally as `codex-app-server`, preview) | node-owned codex app-server + bridge | Codex TUI co-presence (human and agent share one thread) | OpenAI Codex (default gpt-5.6-sol) | `codex login` done | Selecting it in the wizard enables co-presence; there is no second mode question |
 | `opencode-cli` (preview) | spawn local `opencode` CLI (public sst/opencode, fixed `opencode-ai` version pin) | Use the public opencode CLI as a multi-vendor front-end (unified session / auth abstraction) | Multi-vendor: Anthropic native / OpenAI preset | Install `opencode` CLI (`npm i -g opencode-ai@<pin>`) + pick a vendor preset (Anthropic reads `ANTHROPIC_API_KEY` / OpenAI reads `OPENAI_API_KEY` env) | Wizard prompts to install opencode CLI → pick vendor preset (anthropic / openai); API key read from env, not prompted |
+| `cursor-agent` (preview) | spawn the local Cursor Agent CLI (`cursor-agent`, or `agent` when that name is absent) in print mode | Reuse an `agent login` session on this machine; receive Hub tasks and reply with text | The Cursor account's current default model; override with `--model` | [Cursor Agent CLI](https://cursor.com/docs/cli/overview) installed and `agent login` done (or `CURSOR_API_KEY` already in the environment) | Wizard prints the login hint and skips vendor / API key. The node config does not store a key |
 
 > ⚠️ **`opencode-cli` is still preview**: it is in the `anet node create` menu on both the `latest` and `preview` channels, but treat its maturity as preview.
 
@@ -111,6 +114,7 @@ For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/gro
 - **Human and Agent sharing one Codex TUI/thread** → choose preview `codex-cli` in the wizard; then `anet node start <alias> --copresence` starts or resumes it ([full guide](/en/guide/codex-copresence))
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **Use the public sst/opencode CLI as a multi-vendor front-end (unified session/auth)** → `opencode-cli` (needs the local `opencode` CLI + an Anthropic/OpenAI env key)
+- **Use a local Cursor Agent CLI that is already logged in** → `cursor-agent` (preview). `anet node create <name> --runtime cursor-agent`, then `anet node start <name>`. Each Hub task runs `agent -p --output-format json --trust --force` by default, and the node stores `dangerouslySkipPermissions: true` to match. Set that flag to `false` to omit `--force`. `--force` allows shell commands in the node workspace; trusted tasks only. A command named `agent` is used only when it identifies itself as Cursor; otherwise set `CURSOR_AGENT_BIN`. `node start` does not fall through to `npx @sleep2agi/agent-node@preview`, which does not contain this runtime yet. There is no ACP session and no shared TUI. Image attachments are not forwarded in this preview. `.cursor/` is treated as a credential directory and is not readable through remote file browsing.
 - **Reach a vendor that's not in the built-in list** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
 - **Mix and match (recommended)** → combine the available runtimes by role on one Hub
 :::

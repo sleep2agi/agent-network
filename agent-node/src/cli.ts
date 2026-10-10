@@ -7,6 +7,7 @@
  *   --runtime codex-sdk         → Codex SDK (GPT-5.4)
  *   --runtime grok-build-acp    → Grok Build ACP (xAI)
  *   --runtime grok-build-cli    → Grok Build CLI headless / co-presence TUI
+ *   --runtime cursor-agent      → Cursor Agent CLI print mode (local `agent login`)
  *
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
@@ -22,6 +23,8 @@ import {
 import { accessSync, constants as fsConstants } from "node:fs";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
+import { resolveCursorAgentBinary, runCursorAgentTurn, cursorAgentChildEnv, killActiveCursorAgentTurn, resolveCursorAgentTimeoutMs } from "./runtime/cursor-agent-cli";
+import { reportedSessionId } from "./runtime/reported-session-id";
 import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
 import { createStderrTurnAggregator } from "./runtime/stderr-turn-aggregator";
@@ -365,7 +368,7 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli | cursor-agent
                       (claude-code-cli is NOT here: it runs via \`anet node start\`, not by passing --runtime to agent-node — see the Runtime section)
   --model <name>      AI 模型 (codex 默认: ${DEFAULT_CODEX_MODEL}, claude-agent-sdk 默认: 账号默认模型)
   --hub <url>         CommHub URL
@@ -387,6 +390,7 @@ Runtime:
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
   grok-build-cli    Grok Build CLI — headless 或 grokCopresence 共存 TUI 模式
   opencode-cli      opencode CLI — Anthropic/OpenAI vendor preset via ACP
+  cursor-agent      Cursor Agent CLI — print mode, reuses a local \`agent login\`
 
 Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2
 `);
@@ -636,6 +640,9 @@ const RUNTIME_MAP: Record<string, string> = {
   // launcher name (matches claude-code-cli precedent); `opencode` is
   // the short alias. Internal bucket is `"opencode"`.
   "opencode-cli": "opencode", "opencode": "opencode",
+  // Cursor Agent CLI print mode. Canonical launcher name is `cursor-agent`;
+  // `cursor-cli` matches the other `*-cli` names. Not an ACP/TUI lane.
+  "cursor-agent": "cursor", "cursor-cli": "cursor",
   // RFC-030 — codex TUI bridge (standalone `codex app-server`). Distinct
   // bucket from `codex` (that's the @openai/codex-sdk transport). Aliases:
   // `codex-app-server` (canonical) / `codex-tui` / `codex-appserver`.
@@ -664,7 +671,7 @@ if (!Object.prototype.hasOwnProperty.call(RUNTIME_MAP, rawRuntime)) {
   console.error(`[${ALIAS}] Unsupported runtime "${rawRuntime}". Supported: ${supported}`);
   process.exit(1);
 }
-const RUNTIME = RUNTIME_MAP[rawRuntime] as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
+const RUNTIME = RUNTIME_MAP[rawRuntime] as "claude" | "codex" | "grok" | "opencode" | "codex-app-server" | "cursor";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 // `grok-build-cli` defaults to the compatible `grok -p` headless lane.
 // `grokCopresence:true` explicitly switches it to the single PTY-owner bridge
@@ -718,6 +725,17 @@ if (GROK_EXECUTION_MODE === "cli") {
 const RUNTIME_AGENT_LABEL = RUNTIME === "grok" && GROK_EXECUTION_MODE === "cli"
   ? "agent-node:grok-build-cli"
   : `agent-node:${RUNTIME}`;
+
+if (RUNTIME === "cursor") {
+  try {
+    const resolved = resolveCursorAgentBinary({ env: process.env });
+    const shown = resolved.source === "CURSOR_AGENT_BIN" ? "CURSOR_AGENT_BIN" : resolved.binary;
+    console.error(`[${ALIAS}] cursor-agent binary: ${shown}`);
+  } catch (error: any) {
+    console.error(`[${ALIAS}] ${error?.message || error}`);
+    process.exit(1);
+  }
+}
 
 if (RUNTIME === "opencode" && configFilePath && !opencodeConfigState) {
   console.error(`[${ALIAS}] OpenCode config did not pass the private no-follow boot gate.`);
@@ -1319,7 +1337,7 @@ import { installProcessSurvivalLog } from "./process-survival-log";
 import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
 import { installTeamSkills } from "./runtime/node-skills";
-import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { classifyModelAuthError, codexHealthTuiSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
@@ -1681,9 +1699,12 @@ if (NODE_ID) {
 // instead of requiring a node restart.
 const register = async () => {
   const alias = await liveAlias();
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : SESSION_ID || undefined;
+  const activeSessionId = reportedSessionId(RUNTIME, {
+    grok: grokSessionId,
+    claude: claudeSessionId,
+    cursor: cursorSessionId,
+    boot: SESSION_ID,
+  });
   const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
@@ -1774,11 +1795,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     inFlight: getInFlightCount(),
     loginDead: claudeLoginDead,
   });
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : RUNTIME === "claude"
-      ? claudeSessionId
-      : SESSION_ID || undefined;
+  const activeSessionId = reportedSessionId(RUNTIME, {
+    grok: grokSessionId,
+    claude: claudeSessionId,
+    cursor: cursorSessionId,
+    boot: SESSION_ID,
+  });
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     // #1809 —— 每次状态上报都带 version(此前只有 3 分钟心跳带)。hub 在同 alias 换
@@ -2430,6 +2452,7 @@ let grokModelSource: "readback" | "argv" | "default" | undefined;
 // subprocess exits (crash-restart path handled by resetting the
 // holder — the next turn spawns fresh).
 let opencodeSessionId: string | undefined = RUNTIME === "opencode" ? (SESSION_ID || undefined) : undefined;
+let cursorSessionId: string | undefined = RUNTIME === "cursor" ? (SESSION_ID || undefined) : undefined;
 let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRuntimeSession | null = null;
 // Set synchronously immediately after spawn, before initialize or session/new
 // resolves. shutdown() uses this handle during the handshake window.
@@ -5496,6 +5519,31 @@ let thinkQueue = Promise.resolve();
 // OLD thinkQueue ref, and the new task is killed by exit(75) mid-flight.
 let configApplyDraining = false;
 
+async function processWithCursorAgent(task: string, from: string, images?: string[]): Promise<string> {
+  const resolved = resolveCursorAgentBinary({ env: process.env });
+  const prompt = [
+    images?.length ? `(${images.length} image attachment(s) were not forwarded to the Cursor Agent CLI in this preview.)` : "",
+    `[CommHub task from ${from}]`,
+    task,
+  ].filter(Boolean).join("\n\n");
+  const timeoutMs = resolveCursorAgentTimeoutMs(fileConfig.flags?.timeout);
+  const turn = await runCursorAgentTurn({
+    binary: resolved.binary,
+    prompt,
+    cwd: process.cwd(),
+    model: MODEL || undefined,
+    sessionId: cursorSessionId,
+    env: cursorAgentChildEnv(process.env),
+    timeoutMs,
+    force: fileConfig.flags?.dangerouslySkipPermissions !== false,
+  });
+  if (turn.sessionId) {
+    cursorSessionId = turn.sessionId;
+    writebackSession(turn.sessionId);
+  }
+  return turn.result;
+}
+
 function think(
   task: string,
   from: string,
@@ -5545,6 +5593,9 @@ function think(
       }
       if (RUNTIME === "opencode") {
         return await processWithOpencode(task, from, images, evidence);
+      }
+      if (RUNTIME === "cursor") {
+        return await processWithCursorAgent(task, from, images);
       }
       if (RUNTIME === "codex-app-server") {
         return await processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt);
@@ -7359,8 +7410,10 @@ log(`  runtime: ${RUNTIME}${RUNTIME_LABEL === RUNTIME ? "" : ` (input: ${RUNTIME
 const STARTUP_MODEL_LABEL = MODEL
   || (RUNTIME === "grok"
     ? "configured by Grok CLI"
-    : RUNTIME === "codex" || RUNTIME === "codex-app-server"
+      : RUNTIME === "codex" || RUNTIME === "codex-app-server"
       ? DEFAULT_CODEX_MODEL
+      : RUNTIME === "cursor"
+        ? "Cursor account default"
       // #557 — no model configured: the claude CLI uses the ACCOUNT default,
       // whose name the node cannot know at boot (canary: claude-opus-5-5 while
       // this line said claude-sonnet-4-6). The SDK init message names it;
@@ -7550,9 +7603,12 @@ if (turnReceiptLedger) {
 // #448 —— 分层健康探针:每 30s 一次 ws 握手 + (共存节点)TUI pane 检查。任一层翻转时立即补报一次
 // 当前状态,不等 3 分钟心跳。纯报告:不改调度,不拒任务。
 if (RUNTIME === "codex-app-server") {
-  const tuiSession = process.env.ANET_COPRESENCE_BRIDGE === "1"
-    ? (process.env.ANET_CODEX_TUI_SESSION || ALIAS)
-    : undefined;
+  const tuiSession = codexHealthTuiSession({
+    platform: process.platform,
+    copresenceBridge: process.env.ANET_COPRESENCE_BRIDGE === "1",
+    configuredSession: process.env.ANET_CODEX_TUI_SESSION,
+    alias: ALIAS,
+  });
   // #461 —— app-server 看门狗:探针连续失败 / 已知退出 → 按原会话重启(共存:按启动快照在原 tmux 会话里
   // 重新拉起 + 桥重接原 thread;自有:重新 spawn + resume 原 thread),窗口内次数有上限,放弃后保持降级。
   const copresenceAppServer = process.env.ANET_COPRESENCE_BRIDGE === "1" && !!codexAppServerUrl;
@@ -7901,6 +7957,7 @@ const shutdown = async () => {
     warn(`[grok-copresence] close failed: ${e?.message || e}`);
   });
   for (const controller of activeGrokCliTurns) controller.abort();
+  killActiveCursorAgentTurn();
   const childDeadline = Date.now() + 1_500;
   while (activeGrokCliTurns.size > 0 && Date.now() < childDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));

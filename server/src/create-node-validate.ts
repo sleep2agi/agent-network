@@ -44,6 +44,7 @@ export const RUNTIMES = [
   "grok-build-acp",
   "grok-build-cli",
   "opencode-cli",
+  "cursor-agent",
 ] as const;
 export type Runtime = typeof RUNTIMES[number];
 
@@ -104,7 +105,7 @@ export function validateRuntime(s: unknown): asserts s is Runtime {
       value: typeof s === "string" ? s.slice(0, 80) : typeof s,
       allowed: [...RUNTIMES],
       // 这句提示的前提是查过的:`agent-network/src/normalize-runtime.ts` 的
-      // `RuntimeName` / `SUPPORTED_RUNTIME_NAMES` 是 7 个,包含此处不放行的那几个,
+      // `RuntimeName` / `SUPPORTED_RUNTIME_NAMES` 与上面的 RUNTIMES 是同一份名单。
       // 所以「在目标机器上直接建」确实是一条真实存在的路,不是安慰话。
       hint: "daemon 远程创建目前只放行以上 runtime；其余 runtime 可以在目标机器上直接 `anet node create --runtime <name>` 创建。",
     });

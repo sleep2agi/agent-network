@@ -197,6 +197,37 @@ describe("#622 probeRuntimeReadiness —— 状态判定", () => {
     expect(missing.calls.head).toEqual([]);
   });
 
+  test("cursor-agent: named CLI or a Cursor-identifying agent; a generic agent is missing", async () => {
+    const named = deps({
+      bins: { "cursor-agent": OK("1.2.3\n") },
+      net: { "cursor.com": "reachable" },
+      childEnv: { PATH: CHILD_PATH, HOME, LANG: "C.UTF-8", CURSOR_API_KEY: "cursor_test_key" },
+    });
+    const ready = (await probeRuntimeReadiness(["cursor-agent"], named))["cursor-agent"];
+    expect(ready.state).toBe("ready");
+    expect(ready.cli).toBe("found");
+    expect(JSON.stringify(ready)).not.toContain("cursor_test_key");
+
+    const fallback = deps({
+      bins: { agent: OK("Cursor Agent 2026.1.1\n") },
+      net: { "cursor.com": "reachable" },
+      childEnv: { PATH: CHILD_PATH, HOME, LANG: "C.UTF-8", CURSOR_API_KEY: "cursor_test_key" },
+    });
+    expect((await probeRuntimeReadiness(["cursor-agent"], fallback))["cursor-agent"].state).toBe("ready");
+
+    const generic = deps({ bins: { agent: OK("agent 9.0.0\n") } });
+    expect((await probeRuntimeReadiness(["cursor-agent"], generic))["cursor-agent"].state).toBe("missing_cli");
+
+    const noKey = deps({
+      bins: { "cursor-agent": OK("1.2.3\n") },
+      net: { "cursor.com": "reachable" },
+    });
+    const unproven = (await probeRuntimeReadiness(["cursor-agent"], noKey))["cursor-agent"];
+    expect(unproven.state).toBe("unknown");
+    expect(unproven.ok).toBe(false);
+    expect(unproven.auth).toBe("unknown");
+  });
+
   test("codex 共享登录:只报个数,ready 时 reason 提示", async () => {
     const d = deps({ bins: { codex: OK("0.155.1") }, files: [".codex/auth.json"], shared: 27 });
     const e = (await probeRuntimeReadiness(["codex-sdk"], d))["codex-sdk"];

@@ -34,6 +34,8 @@
 
 ## 一、功能 × Runtime
 
+下面这张表仍是 7 个已经打过格的 runtime。预览 `cursor-agent` 不在表里：print 模式刚接上，功能格还没有验证。安装和认证见 [Runtime 对比](/guide/runtimes)。
+
 7 个 runtime：
 `claude-agent-sdk` · `claude-code-cli` · `codex-sdk` · `codex-app-server` · `grok-build-acp` · `grok-build-cli` · `opencode-cli`
 

@@ -81,6 +81,10 @@ export const RUNTIME_DEADLINE_MS = 20_000;
 interface RuntimeSpec {
   /** PATH 上要找的命令;undefined = runtime 自带 CLI。 */
   cli?: string;
+  /** 主命令不在时再试这些名字。 */
+  cliAliases?: readonly string[];
+  /** 别名的 `--version` 必须匹配,避免把别的 `agent` 当成 Cursor。 */
+  aliasMustMatch?: RegExp;
   /** 自带 CLI 时也去 PATH 上找一下,找到就报版本(codex-sdk:PATH 上更新的 codex 会被优先使用)。 */
   optionalCli?: string;
   installHint: string;
@@ -159,6 +163,16 @@ const SPECS: Record<string, RuntimeSpec> = {
     loginHint: "",
     endpoint: "https://opencode.ai",
   },
+  "cursor-agent": {
+    cli: "cursor-agent",
+    cliAliases: ["agent"],
+    aliasMustMatch: /\bcursor\b/i,
+    installHint: `安装 Cursor Agent CLI (https://cursor.com/docs/cli/overview)。优先用命令名 cursor-agent;名为 agent 的命令必须在 --version 里写明 Cursor。${ON_CHILD_PATH}`,
+    authFiles: [],
+    authEnvKeys: ["CURSOR_API_KEY"],
+    loginHint: "运行 `agent login`,或把 CURSOR_API_KEY 放进这个 daemon 会传给子进程的环境。`agent login` 的凭据不一定落在一个固定文件里,没有 key 时自检报 unknown 而不是假装未登录",
+    endpoint: "https://cursor.com",
+  },
 };
 
 export const PROBED_RUNTIMES: readonly string[] = Object.keys(SPECS);
@@ -194,13 +208,19 @@ export async function requiredCliStatus(
 ): Promise<{ cli: "found" | "missing" | "unknown" | "not_required"; command?: string; version?: string }> {
   const spec = SPECS[runtime];
   if (!spec?.cli) return { cli: "not_required" };
-  const command = spec.cli;
-  const abs = io.resolveOnPath(command, pathValue);
-  if (!abs) return { cli: "missing", command };
-  const r = await io.execVersion(abs, childEnv, stepTimeoutMs);
-  if (r.kind === "ok") return { cli: "found", command, version: extractVersion(r.stdout) };
-  if (r.kind === "error") return { cli: "missing", command };
-  return { cli: "unknown", command };
+  const names = [spec.cli, ...(spec.cliAliases ?? [])];
+  let sawTimeout = false;
+  for (const command of names) {
+    const abs = io.resolveOnPath(command, pathValue);
+    if (!abs) continue;
+    const r = await io.execVersion(abs, childEnv, stepTimeoutMs);
+    if (r.kind === "timeout") { sawTimeout = true; continue; }
+    if (r.kind !== "ok") continue;
+    if (command !== spec.cli && spec.aliasMustMatch && !spec.aliasMustMatch.test(r.stdout)) continue;
+    return { cli: "found", command, version: extractVersion(r.stdout) };
+  }
+  if (sawTimeout) return { cli: "unknown", command: spec.cli };
+  return { cli: "missing", command: spec.cli };
 }
 
 async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: number): Promise<RuntimeReadiness> {
@@ -260,12 +280,17 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
     typeof deps.daemonEnv[k] === "string" && deps.daemonEnv[k] !== ""
     && !(typeof deps.childEnv[k] === "string" && deps.childEnv[k] !== ""));
   let authUnknownMac = false;
+  let authUnproven = false;
   if (fileHit || envHit) out.auth = "present";
   else if (spec.authOptional) out.auth = "not_required";
   else if (deps.platform === "darwin" && spec.authFiles.some((f) => f.startsWith(".claude/"))) {
     // macOS 的 Claude Code 把登录放在钥匙串里,文件不在 ≠ 没登录。不猜。
     out.auth = "unknown";
     authUnknownMac = true;
+  } else if (runtime === "cursor-agent") {
+    // `agent login` 不一定写一个我们能点名的文件。没有 CURSOR_API_KEY 不能当成未登录。
+    out.auth = "unknown";
+    authUnproven = true;
   } else out.auth = "absent";
 
   // ── 3. codex 共享登录(只出一个数字)──
@@ -305,6 +330,9 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
   } else if (cliUnknown) {
     out.state = "unknown";
     out.reason = `\`${spec.cli} --version\` 在 ${Math.round(stepTimeoutMs / 1000)} 秒内没有返回,无法确认 CLI 可用;下一轮自检会重试`;
+  } else if (authUnproven) {
+    out.state = "unknown";
+    out.reason = "Cursor CLI 已找到,但子进程环境里没有 CURSOR_API_KEY。`agent login` 的凭据不一定落在固定文件里,所以这里不把它判成未登录,也不把它判成可以创建;运行 `agent login` 或设置 CURSOR_API_KEY 后再看下一轮自检";
   } else if (authUnknownMac) {
     out.state = "unknown";
     out.reason = "macOS 上 Claude Code 的登录可能存在钥匙串里,无法只凭文件确认;如果建出来的节点报未登录,在这台机器上运行 `claude` 并执行 /login";

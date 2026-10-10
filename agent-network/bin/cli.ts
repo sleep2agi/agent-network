@@ -109,6 +109,7 @@ import {
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
 import { siblingAgentNodeEntrypoint } from "../src/sibling-agent-node";
+import { chooseCursorAgentNodeLaunch } from "../src/cursor-agent-launch";
 import { hardenOpencodeAgentNodeEnv } from "../src/opencode-launch-env";
 import {
   clearOpencodeAuthJson,
@@ -3745,6 +3746,53 @@ function findSiblingAgentNode(): ReturnType<typeof siblingAgentNodeEntrypoint> {
   });
 }
 
+function probeAgentNodeHelp(command: string, argsPrefix: string[]): string | null {
+  try {
+    return execFileSync(command, [...argsPrefix, "--help"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error: any) {
+    const text = `${error?.stdout ?? ""}\n${error?.stderr ?? ""}`;
+    return text.includes("cursor-agent") ? text : null;
+  }
+}
+
+function resolveCursorAgentNodeLaunchPlan() {
+  const candidates = [];
+  const sibling = findSiblingAgentNode();
+  if (sibling) {
+    candidates.push({
+      source: "sibling" as const,
+      command: process.execPath,
+      argsPrefix: [sibling.entrypoint],
+      help: probeAgentNodeHelp(process.execPath, [sibling.entrypoint]),
+    });
+  }
+  const explicit = process.env.ANET_AGENT_NODE_BIN?.trim() ?? "";
+  if (explicit && isAbsolute(explicit) && existsSync(explicit)) {
+    candidates.push({
+      source: "explicit" as const,
+      command: process.execPath,
+      argsPrefix: [explicit],
+      help: probeAgentNodeHelp(process.execPath, [explicit]),
+    });
+  }
+  try {
+    execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" });
+    candidates.push({
+      source: "path" as const,
+      command: "agent-node",
+      argsPrefix: [] as string[],
+      help: probeAgentNodeHelp("agent-node", []),
+    });
+  } catch { /* no PATH agent-node */ }
+  const chosen = chooseCursorAgentNodeLaunch(candidates);
+  console.log(`[anet] cursor-agent agent-node source: ${chosen.source} (--help lists cursor-agent; npx preview is not used)`);
+  return chosen;
+}
+
 function describeAgentNodeOnPath(env?: NodeJS.ProcessEnv): string {
   try {
     const out = process.platform === "win32"
@@ -4246,6 +4294,17 @@ function assertStartCompatibility(runtime: RuntimeName, profile?: Profile, nodeI
   }
 }
 
+function printCursorAgentNotice() {
+  console.log(`[anet] cursor-agent (preview) reuses a local Cursor Agent CLI login.`);
+  console.log(`  - Install: https://cursor.com/docs/cli/overview`);
+  console.log(`  - Login:   agent login`);
+  console.log(`  - Binary:  cursor-agent, or agent only if that command identifies itself as Cursor`);
+  console.log(`  - Each Hub task runs print mode: -p --output-format json --trust --force`);
+  console.log(`  - The node stores dangerouslySkipPermissions: true, matching --force.`);
+  console.log(`  - Set that flag to false to omit --force. No API key is written into the node config.`);
+  console.log(`  - --force allows shell commands in the node workspace. Trusted tasks only.`);
+}
+
 function printClaudeCodeNotice() {
   console.log(`[anet] claude-code-cli requires:`);
   console.log(`  - Claude Pro / Team / Enterprise subscription`);
@@ -4291,6 +4350,26 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
       process.exit(1);
     }
     if (phase === "start") printClaudeCodeNotice();
+    return;
+  }
+  if (runtime === "cursor-agent") {
+    const fromEnv = process.env.CURSOR_AGENT_BIN?.trim();
+    const installed = fromEnv
+      ? (fromEnv.includes("/") || fromEnv.includes("\\") ? existsSync(fromEnv) : commandExists(fromEnv))
+      : commandExists("cursor-agent") || commandExists("agent");
+    if (!installed && phase === "create") {
+      console.warn(`[anet] Warning: Cursor Agent CLI not found (looked for cursor-agent, then agent).`);
+      console.warn(`[anet] Install: https://cursor.com/docs/cli/overview`);
+      console.warn(`[anet] Login:   agent login`);
+    }
+    if (!installed && phase === "start") {
+      console.error(`[anet] ❌ Cannot start: cursor-agent requires the Cursor Agent CLI.`);
+      console.error(`[anet]    Neither \`cursor-agent\` nor \`agent\` was found in PATH.`);
+      console.error(`[anet]    Install: https://cursor.com/docs/cli/overview`);
+      console.error(`[anet]    Login:   agent login`);
+      process.exit(1);
+    }
+    if (phase === "start") printCursorAgentNotice();
     return;
   }
   // Unlike legacy runtimes, opencode-cli never executes an ambient or
@@ -5832,6 +5911,7 @@ function createRuntimeChoices() {
     { value: "codex-app-server", name: "codex-cli — Codex 共存 TUI（人和 Agent 共用一个 thread）" },
     { value: "grok-build-acp", name: "grok-build-acp — Grok（推荐 / default：headless ACP）, 复用 `grok` CLI 登录态" },
     { value: "opencode-cli", name: "opencode-cli — 公版 OpenCode CLI, Anthropic/OpenAI preset (RFC-029)" },
+    { value: "cursor-agent", name: "cursor-agent — Cursor Agent CLI（预览），复用本机 `agent login`" },
     // Owner decision 2026-09-25: Grok co-presence is experimental — listed last,
     // behind the default ACP choice, with its limitations on the same line.
     { value: "grok-build-cli", name: `grok-build-cli — Grok 共存 TUI（实验性 / experimental）— ${GROK_COPRESENCE_EXPERIMENTAL_NOTE_ZH}` },
@@ -5902,7 +5982,7 @@ async function createInteractiveCommand() {
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli
+  - runtime: claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli / cursor-agent
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -5954,6 +6034,10 @@ This wizard creates one agent node for this project:
     if (pickedRuntime === "grok-build-cli") printGrokCopresenceWarning(id, undefined, "configured");
   } else if (pickedRuntime === "opencode-cli") {
     await configureOpencodeRuntime(opts, true);
+  } else if (pickedRuntime === "cursor-agent") {
+    opts.runtime = "cursor-agent";
+    console.log(`[anet] 请确保本机已安装 Cursor Agent CLI 并登录: agent login`);
+    console.log(`[anet] 节点复用本机登录态，不在 config.json 里保存 API key。`);
   } else {
     // claude-agent-sdk — flow continues into vendor + model picker.
     const sel = await selectVendorAndModel();
@@ -6054,6 +6138,8 @@ Telegram setup:
     printOpencodeCreationSecurityDisclosure(id, profile);
   } else if (profile.grokCopresence === true) {
     printGrokCopresenceWarning(id, profile.tools, "configured");
+  } else if (normalizeRuntime(profile) === "cursor-agent") {
+    printCursorAgentNotice();
   } else {
     console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
     console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
@@ -6156,7 +6242,7 @@ async function createCommand(idOverride?: string) {
       console.error(`\n  ❌ --batch 与 --runtime 不能同用。`);
       console.error(`\n     --batch 多节点向导的运行时只能来自内置 vendor 预设`);
       console.error(`     (claude-agent-sdk / claude-code-cli / codex-sdk),它无法表达`);
-      console.error(`     opencode-cli、grok-build-acp、grok-build-cli、codex-app-server。`);
+      console.error(`     opencode-cli、grok-build-acp、grok-build-cli、codex-app-server、cursor-agent。`);
       console.error(`\n     要指定这些运行时,去掉 --batch,按单节点创建:`);
       console.error(`       anet node create <name> --runtime <runtime>\n`);
       process.exit(1);
@@ -6168,7 +6254,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-agent-sdk|claude-code-cli|codex-sdk|codex-app-server|grok-build-acp|grok-build-cli|opencode-cli] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-agent-sdk|claude-code-cli|codex-sdk|codex-app-server|grok-build-acp|grok-build-cli|opencode-cli|cursor-agent] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -6228,7 +6314,8 @@ async function createCommand(idOverride?: string) {
     || explicitRuntime === "codex-app-server"
     || explicitRuntime === "grok-build-acp"
     || explicitRuntime === "grok-build-cli"
-    || explicitRuntime === "opencode-cli";
+    || explicitRuntime === "opencode-cli"
+    || explicitRuntime === "cursor-agent";
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
   // (interactive single / batch wizard / sci-team demo) can share the picker.
@@ -6273,6 +6360,9 @@ async function createCommand(idOverride?: string) {
     }
   } else if (opts.runtime === "opencode-cli") {
     await configureOpencodeRuntime(opts, Boolean(process.stdin.isTTY));
+  } else if (opts.runtime === "cursor-agent") {
+    console.log("[anet] 请确保本机已安装 Cursor Agent CLI 并登录: agent login");
+    console.log("[anet] 节点复用本机登录态，不在 config.json 里保存 API key。");
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
     // — fall through to vendor selection. credAlreadyProvided also skips since
@@ -6479,6 +6569,13 @@ async function createCommand(idOverride?: string) {
   }
   if (normalizeRuntime(profile) === "claude-code-cli") {
     printClaudeCodeNotice();
+  }
+  if (normalizeRuntime(profile) === "cursor-agent") {
+    printCursorAgentNotice();
+    console.log(`\nStart: anet node start ${id}`);
+    closeRL();
+    if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0);
+    return;
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(id, profile);
@@ -7165,7 +7262,8 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     runtime === "claude-agent-sdk" ||
     runtime === "grok-build-acp" ||
     runtime === "grok-build-cli" ||
-    runtime === "opencode-cli"
+    runtime === "opencode-cli" ||
+    runtime === "cursor-agent"
   ) {
     // spawn agent-node
     const agentArgs = [
@@ -7306,6 +7404,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else if (runtime === "codex-app-server") {
       const plan = resolveCodexAgentNodeLaunchPlan();
+      cmd = plan.command;
+      commandArgs = [...plan.argsPrefix, ...agentArgs];
+    } else if (runtime === "cursor-agent") {
+      const plan = resolveCursorAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
     } else if (findSiblingAgentNode()) {

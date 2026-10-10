@@ -163,8 +163,8 @@ fi
 # --- v2.5 pre-sweep: 3 条件过滤 + 重名冲突检测 ---
 # v2.5: 分母 = (a) 有 config.json + (b) runtime ∈ 支持集 + (c) token 以 ntok_ 开头 = 110 节点
 #       松判据（v2.4 只查 token 存在）会漏 utok_ 陷阱：评估m马 有 token 但是 utok_ 而非 ntok_，SSE 起不来。
-# 支持的 runtime 集从 anet CLI 报错信息取得（当前 preview.39 严格 normalizer 接受这 7 个）
-OK_RUNTIMES="claude-agent-sdk claude-code-cli codex-sdk codex-app-server grok-build-acp grok-build-cli opencode-cli"
+# 支持的 runtime 集与 agent-network/src/normalize-runtime.ts 的 SUPPORTED_RUNTIME_NAMES 对齐。
+OK_RUNTIMES="claude-agent-sdk claude-code-cli codex-sdk codex-app-server grok-build-acp grok-build-cli opencode-cli cursor-agent"
 declare -A ALIAS_PATHS      # 3 条件全过的可启动节点：alias → paths (| 分隔)
 declare -A SKIP_NODES_MAP   # 3 条件之一未过：alias → 排除原因（不算缺，从 sweep + post-flight 排除）
 while IFS= read -r cfg; do

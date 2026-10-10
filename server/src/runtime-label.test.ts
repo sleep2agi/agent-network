@@ -11,6 +11,8 @@ describe("session runtime projection", () => {
     expect(normalizeSessionRuntime("agent-node:claude")).toBe("claude-agent-sdk");
     expect(normalizeSessionRuntime("agent-node:grok")).toBe("grok-build-acp");
     expect(normalizeSessionRuntime("agent-node:opencode")).toBe("opencode-cli");
+    expect(normalizeSessionRuntime("agent-node:cursor")).toBe("cursor-agent");
+    expect(normalizeSessionRuntime("agent-node:cursor-agent")).toBe("cursor-agent");
     expect(normalizeSessionRuntime("claude-code")).toBe("claude-code-cli");
   });
   test("does not invent unknown runtimes", () => {

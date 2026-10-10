@@ -20,10 +20,11 @@ export type RuntimeName =
   | "grok-build-acp"
   | "grok-build-cli"
   | "opencode-cli"
-  | "codex-app-server";
+  | "codex-app-server"
+  | "cursor-agent";
 
 /** 一个 runtime 复用的是哪种**外部登录态**，而不是 API key。 */
-export type ReusedLogin = "claude" | "codex" | "grok";
+export type ReusedLogin = "claude" | "codex" | "grok" | "cursor";
 
 /**
  * runtime → 它复用的外部登录。**只有一处定义**，VENDORS 的 `requiresAuth`
@@ -34,6 +35,7 @@ export type ReusedLogin = "claude" | "codex" | "grok";
  *   · `opencode-cli`     —— 走 ANTHROPIC_API_KEY / OPENAI_API_KEY（vendor preset 从 env 读，不 prompt）
  * 这条区分是有意写下来的：Vincent 那句「复用会员登录状态、不用自己输 key 和 url」
  * 点名的是 Claude Code / Codex / Grok 三家，opencode 不在其中，别顺手加进来。
+ * `cursor-agent` 复用的是本机 Cursor Agent CLI 登录（`agent login`），同样不写 key。
  */
 export const RUNTIME_REUSED_LOGIN: Readonly<Partial<Record<RuntimeName, ReusedLogin>>> = {
   "claude-code-cli": "claude",   // claude auth login（订阅，无 model 选择器）
@@ -41,6 +43,7 @@ export const RUNTIME_REUSED_LOGIN: Readonly<Partial<Record<RuntimeName, ReusedLo
   "codex-app-server": "codex",   // 同上；TUI 共存走同一个 codex 登录态
   "grok-build-acp": "grok",      // grok login
   "grok-build-cli": "grok",      // 同上；共存 TUI 走同一个 grok 登录态
+  "cursor-agent": "cursor",      // agent login；print 模式，无 model 选择器
 } as const;
 
 /** 该 runtime 复用哪种登录；返回 undefined 表示它用 API key。 */
@@ -59,6 +62,7 @@ export const SUPPORTED_RUNTIME_NAMES: readonly RuntimeName[] = [
   "grok-build-acp",
   "grok-build-cli",
   "opencode-cli",
+  "cursor-agent",
 ] as const;
 
 // Subset of Profile fields this helper inspects. Keeping it narrow so
@@ -106,6 +110,9 @@ function canonicalizeRuntime(runtime: string): RuntimeName | undefined {
   // `opencode` (short), `opencode-cli` (canonical, matches
   // claude-code-cli precedent).
   if (runtime === "opencode" || runtime === "opencode-cli") return "opencode-cli";
+  // Cursor Agent CLI print mode. Canonical `cursor-agent`; `cursor-cli`
+  // matches the other `*-cli` launcher names. Bare `cursor` stays unknown.
+  if (runtime === "cursor-agent" || runtime === "cursor-cli") return "cursor-agent";
   return undefined;
 }
 

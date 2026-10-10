@@ -89,7 +89,7 @@ anet node create my-bot
 ::: tip 新手最省事 — 手动选 `claude-code-cli`
 向导**默认高亮 `claude-agent-sdk`**, 一路 Enter 会落到要填 vendor + API Key 的复杂路径。如果已经 `claude auth login`, **手动选 `claude-code-cli`** = 零配置最快路径。
 
-`anet node create` 的选单列出全部 7 个 runtime（4 个正式：`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`；3 个预览：`codex-app-server`（选单里叫 `codex-cli`）/ `grok-build-cli` / `opencode-cli`）；完整对照见 [Runtime 对比](/guide/runtimes#runtime-对比-canonical-表)。
+`anet node create` 的选单列出 canonical 表里的每一个 runtime（4 个正式：`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`；预览还包括 `codex-app-server`（选单里叫 `codex-cli`）/ `grok-build-cli` / `opencode-cli` / `cursor-agent`）；完整对照见 [Runtime 对比](/guide/runtimes#runtime-对比-canonical-表)。
 :::
 
 启动节点：

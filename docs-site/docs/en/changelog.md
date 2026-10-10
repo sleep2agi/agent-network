@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased: Cursor Agent CLI runtime (2026-10-10)
+
+- Source preview adds `cursor-agent`: `anet node create` can select it. The node reuses a locally logged-in Cursor Agent CLI (`cursor-agent`, or `agent` only when that command identifies itself as Cursor), runs one print-mode turn per Hub task, and replies with the result. `node stop` ends an in-flight turn. `node start` requires an agent-node whose `--help` lists `cursor-agent` and does not fetch the published npm preview. Not on npm `preview` or `latest` yet. See [runtimes](./guide/runtimes.md).
+
 ## Unreleased: client download page (2026-10-10)
 
 - anet.sh gains a [download page](/en/download). macOS, Windows, Linux, and Android installers come from the latest published desktop release (the same choice the in-app updater makes). A platform missing from that release is called out instead of linked to an older file. The home page, navigation, and install docs point here.

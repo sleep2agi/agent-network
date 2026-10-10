@@ -7,6 +7,7 @@ import type { AddressInfo } from "node:net";
 import {
   classifyModelAuthError,
   classifyTuiPane,
+  codexHealthTuiSession,
   createCodexHealthMonitor,
   describeModelAuthBlock,
   gateStatusOnModelAuth,
@@ -169,6 +170,26 @@ describe("#448 health monitor", () => {
     m.noteModelAuthMaybeChanged();
     expect(changes.length).toBe(2);
     expect(changes[1].model_auth).toBe("revoked");
+  });
+
+  test("Windows native co-presence does not invent a tmux TUI session", () => {
+    expect(codexHealthTuiSession({
+      platform: "win32",
+      copresenceBridge: true,
+      alias: "windows-picker",
+    })).toBeUndefined();
+    expect(codexHealthTuiSession({
+      platform: "linux",
+      copresenceBridge: true,
+      configuredSession: "windows-picker",
+      alias: "other",
+    })).toBe("windows-picker");
+    expect(codexHealthTuiSession({
+      platform: "linux",
+      copresenceBridge: false,
+      configuredSession: "windows-picker",
+      alias: "other",
+    })).toBeUndefined();
   });
 
   test("the first tick reports a down app-server only if the bridge had been connected to it", async () => {
