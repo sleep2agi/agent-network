@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -46,6 +46,24 @@ test.each([[1, null], [null, "SIGTERM"]])("launcher exit %s / %s rejects without
   await tick(); f.child.emit("exit", code, signal); await run;
   expect(f.acks.map(a => a.status)).toEqual(["starting", "start_failed"]);
   expect(f.probes()).toBe(0); expect(getChildrenSnapshot()).toEqual([]);
+});
+test("start rechecks within the original deadline and publishes the TUI mismatch code", async () => {
+  const f = fixture();
+  delete f.deps.inspectOpenCodeStartHealth;
+  f.deps.opencodeStartTimeoutMs = 1000;
+  let span = 0;
+  f.deps.waitOpenCodeStartHealth = (_dir: string, _cfg: string, at: number, deadline: number) => {
+    span = deadline - at;
+    return { ok: false, reason: "TUI session mismatch" };
+  };
+  const run = handleStartDoorbell({ request_id: "str_tui" }, f.deps);
+  await tick(); f.child.emit("exit", 0, null); await run;
+  expect(span).toBe(1000);
+  expect(f.acks.at(-1)).toMatchObject({ status: "start_failed", error: "opencode_tui_session_mismatch" });
+  expect(getChildrenSnapshot()).toEqual([]);
+  const source = readFileSync(join(import.meta.dir, "opencode-start-completion.ts"), "utf8");
+  expect(source).toContain("deps.waitOpenCodeStartHealth ?? waitForLaunchHealth");
+  expect(source).toContain("launchedAt + (deps.opencodeStartTimeoutMs ?? 35_000)");
 });
 test("successful launcher with invalid generation proof is not started", async () => {
   const f = fixture(); f.deps.inspectOpenCodeStartHealth = () => ({ ok: false, reason: "stale or mismatched generation" });

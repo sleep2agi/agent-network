@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { forgetSpawnedChildIfPid, recordSpawnedChild } from "./stop-daemon.js";
-import { inspectLaunchHealth } from "./opencode-copresence/launcher-health.js";
+import { waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import type { StartDoorbellDeps } from "./start-daemon.js";
 
 type Result = { status: "started"; child_pid: number } | { status: "start_failed"; error: string };
@@ -53,14 +53,23 @@ export async function completeOpenCodeStart(
         };
         child.once("error", () => finish({ status: "start_failed", error: "opencode_launcher_spawn_failed" }));
         child.once("exit", (code, signal) => {
-          if (settled) return;
-          if (code !== 0 || signal !== null || !pid) {
-            finish({ status: "start_failed", error: `opencode_launcher_exit:${signal || code}` });
-            return;
-          }
-          const health = (deps.inspectOpenCodeStartHealth ?? inspectLaunchHealth)(nodeDir, join(nodeDir, "config.json"), launchedAt);
-          finish(health.ok ? { status: "started", child_pid: health.bridgePid }
-            : { status: "start_failed", error: `opencode_launch_health:${health.reason}` });
+          void (async () => {
+            if (settled) return;
+            if (code !== 0 || signal !== null || !pid) {
+              finish({ status: "start_failed", error: `opencode_launcher_exit:${signal || code}` });
+              return;
+            }
+            const deadline = launchedAt + (deps.opencodeStartTimeoutMs ?? 35_000);
+            const health = deps.inspectOpenCodeStartHealth
+              ? deps.inspectOpenCodeStartHealth(nodeDir, join(nodeDir, "config.json"), launchedAt)
+              : await (deps.waitOpenCodeStartHealth ?? waitForLaunchHealth)(nodeDir, join(nodeDir, "config.json"), launchedAt, deadline);
+            if (settled) return;
+            const error = !health.ok && health.reason === "TUI session mismatch"
+              ? "opencode_tui_session_mismatch"
+              : `opencode_launch_health:${health.ok ? "unsuccessful" : health.reason}`;
+            finish(health.ok ? { status: "started", child_pid: health.bridgePid }
+              : { status: "start_failed", error });
+          })();
         });
         if (!pid) { finish({ status: "start_failed", error: "opencode_launcher_no_pid" }); return; }
         recordSpawnedChild(nodeId, alias, pid);

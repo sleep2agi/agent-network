@@ -27,6 +27,7 @@ const publicLifecycleErrors = new Set([
   "adopt_tmux_socket_mismatch", "adopt_pane_invalid", "adopt_pane_unverified",
   "adopt_pane_process_mismatch", "adopt_socket_directory_unsafe", "adopt_socket_unsafe",
   "adopt_pid_changed", "adopt_pid_invalid", "adopt_pidfile_unsafe",
+  "opencode_tui_session_mismatch",
   "adopt_proc_invalid", "adopt_proc_unreadable", "adopt_platform_unsupported",
   "adopt_registry_conflict", "adopt_registry_entry_invalid", "adopt_registry_invalid",
   "adopt_registry_unsafe", "adopt_config_env_invalid", "adopt_env_file_invalid",
