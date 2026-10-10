@@ -327,6 +327,9 @@ describe("P0 runtime gate — name resolution", () => {
     // RFC-029 — opencode CLI bucket.
     expect(runtimeBucket("opencode-cli")).toBe("opencode");
     expect(runtimeBucket("opencode")).toBe("opencode");
+    expect(runtimeBucket("cursor-agent")).toBe("cursor");
+    expect(runtimeBucket("cursor-cli")).toBe("cursor");
+    expect(runtimeBucket("cursor")).toBe("cursor");
     expect(runtimeBucket("mystery")).toBe("unknown");
     expect(runtimeBucket(null)).toBe("unknown");
     expect(runtimeBucket(undefined)).toBe("unknown");

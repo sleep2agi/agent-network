@@ -1,6 +1,6 @@
 import { parseGoalCommand } from "./parser";
 
-export type GoalRoutingRuntime = "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
+export type GoalRoutingRuntime = "claude" | "codex" | "grok" | "opencode" | "codex-app-server" | "cursor";
 
 export interface ReplyMessageProvenance {
   messageType: string;

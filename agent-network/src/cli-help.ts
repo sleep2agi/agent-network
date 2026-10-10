@@ -62,8 +62,9 @@ Create a new agent node in ./.anet/nodes/<name>/ and register it on the Hub.
 
 Options:
   --runtime <id>         claude-agent-sdk (default) | claude-code-cli | codex-sdk |
-                         codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
-                         (aliases: grok = grok-build-acp)
+                         codex-app-server | grok-build-acp | grok-build-cli | opencode-cli |
+                         cursor-agent
+                         (aliases: grok = grok-build-acp, cursor-cli = cursor-agent)
   --model <id>           Model for the runtime
   --tools <list>         Extra tools to enable (e.g. WebSearch)
   --copresence           Shared human + agent TUI (codex-app-server / opencode-cli / grok)

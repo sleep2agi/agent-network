@@ -34,6 +34,8 @@ If a cell does not match what you see, please open an issue on [GitHub](https://
 
 ## 1. Feature × Runtime
 
+The table below is still the 7 runtimes that have been scored. Preview `cursor-agent` is not in it: print mode is wired, and the feature cells have not been verified. Install and auth are on the [Runtime comparison](/en/guide/runtimes).
+
 The 7 runtimes:
 `claude-agent-sdk` · `claude-code-cli` · `codex-sdk` · `codex-app-server` · `grok-build-acp` · `grok-build-cli` · `opencode-cli`
 

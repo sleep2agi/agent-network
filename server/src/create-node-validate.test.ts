@@ -293,7 +293,7 @@ describe("validateRuntime — 报错要可操作", () => {
 
 // #1298 —— daemon 远程创建放开到 7 个 runtime（Vincent 2026-08-28 定，
 // 理由是兜底排错：节点不动了，人要能进去跟 Codex / Claude Code 对话）。
-describe("#1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致", () => {
+describe("#1298 RUNTIMES —— 名单与 CLI 侧一致，且未知值仍拒绝", () => {
   test("三个共存 runtime 不再被拒", () => {
     for (const r of ["codex-app-server", "grok-build-cli", "opencode-cli"]) {
       expect(() => validateRuntime(r)).not.toThrow();
@@ -304,8 +304,9 @@ describe("#1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致", () => {
       expect(() => validateRuntime(r)).not.toThrow();
     }
   });
-  test("🔴 恰好七个 —— 多一个少一个都要有人解释", () => {
-    expect(RUNTIMES.length).toBe(7);
+  test("🔴 恰好八个 —— 多一个少一个都要有人解释", () => {
+    expect(RUNTIMES).toContain("cursor-agent");
+    expect(RUNTIMES.length).toBe(8);
     // 正控：不在名单里的仍然被拒，证明上面不是"什么都放行"
     expect(() => validateRuntime("definitely-not-a-runtime")).toThrow();
     expect(() => validateRuntime("")).toThrow();
@@ -326,7 +327,7 @@ describe("#584 flags.copresence —— 建节点时的共存开关", () => {
     expect(() => validateFlagsForRuntime("codex-app-server", { copresence: true })).not.toThrow();
     expect(() => validateFlagsForRuntime("claude-agent-sdk", { permissionMode: "default" })).not.toThrow();
     expect(() => validateFlagsForRuntime("claude-agent-sdk", undefined)).not.toThrow();
-    for (const rt of ["claude-agent-sdk", "claude-code-cli", "codex-sdk", "grok-build-acp", "grok-build-cli", "opencode-cli"]) {
+    for (const rt of ["claude-agent-sdk", "claude-code-cli", "codex-sdk", "grok-build-acp", "grok-build-cli", "opencode-cli", "cursor-agent"]) {
       try { validateFlagsForRuntime(rt, { copresence: true }); throw new Error(`did not throw for ${rt}`); }
       catch (e) {
         expect((e as ValidationError).code).toBe("flag_not_applicable_to_runtime");

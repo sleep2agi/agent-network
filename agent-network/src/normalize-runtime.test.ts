@@ -120,6 +120,21 @@ describe("normalizeRuntime — explicit choices are preserved", () => {
     expect(normalizeRuntime({ runtime: "opencode" } as any)).toBe("opencode-cli");
   });
 
+  test("explicit 'cursor-agent' → cursor-agent", () => {
+    expect(normalizeRuntime("cursor-agent")).toBe("cursor-agent");
+    expect(normalizeRuntimeStrict("cursor-agent")).toBe("cursor-agent");
+  });
+
+  test("alias 'cursor-cli' → cursor-agent", () => {
+    expect(normalizeRuntime("cursor-cli")).toBe("cursor-agent");
+    expect(normalizeRuntimeStrict("cursor-cli")).toBe("cursor-agent");
+  });
+
+  test("bare 'cursor' stays unknown and does not become cursor-agent", () => {
+    expect(normalizeRuntime("cursor")).toBe("claude-agent-sdk");
+    expect(() => normalizeRuntimeStrict("cursor")).toThrow(/unsupported runtime/);
+  });
+
   // RFC-030 — codex TUI bridge (standalone `codex app-server`). Canonical
   // `codex-app-server` plus aliases `codex-tui` / `codex-appserver`. These
   // must NOT collapse into `codex-sdk` (a different runtime).

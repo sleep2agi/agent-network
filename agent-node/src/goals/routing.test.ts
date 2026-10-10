@@ -8,7 +8,7 @@ import {
   shouldCreateScheduledGoal,
 } from "./routing";
 
-const RUNTIMES = ["codex-app-server", "codex", "claude", "grok", "opencode"] as const;
+const RUNTIMES = ["codex-app-server", "codex", "claude", "grok", "opencode", "cursor"] as const;
 
 describe("shouldCreateScheduledGoal — Dashboard native slash pass-through", () => {
   test("authenticated Dashboard /goal and /loop pass through for every agent-node runtime", () => {

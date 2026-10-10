@@ -86,7 +86,13 @@ const OPENCODE_RUNTIME_NAMES = new Set([
   "opencode-cli",
 ]);
 
-export type RuntimeBucket = "claude" | "codex" | "grok" | "opencode" | "unknown";
+const CURSOR_RUNTIME_NAMES = new Set([
+  "cursor",
+  "cursor-agent",
+  "cursor-cli",
+]);
+
+export type RuntimeBucket = "claude" | "codex" | "grok" | "opencode" | "cursor" | "unknown";
 
 /** Map any user-facing runtime name to its canonical bucket (mirrors cli.ts RUNTIME_MAP). */
 export function runtimeBucket(rt: string | undefined | null): RuntimeBucket {
@@ -95,6 +101,7 @@ export function runtimeBucket(rt: string | undefined | null): RuntimeBucket {
   if (CODEX_RUNTIME_NAMES.has(rt)) return "codex";
   if (GROK_RUNTIME_NAMES.has(rt)) return "grok";
   if (OPENCODE_RUNTIME_NAMES.has(rt)) return "opencode";
+  if (CURSOR_RUNTIME_NAMES.has(rt)) return "cursor";
   return "unknown";
 }
 
