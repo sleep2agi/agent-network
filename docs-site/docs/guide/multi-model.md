@@ -83,29 +83,31 @@ anet node start coder
 
 `codex-sdk` 不读取 `--tools` 参数。登录方式见 [codex-sdk](/guide/runtimes#codex-sdk)。
 
-Codex 与 OpenCode V2 可以用 `--provider` 接 DeepSeek、MiniMax，或一个自定义 OpenAI 兼容端点。两边的预设 id 相同，写进各自运行时自己的配置，不是同一份文件：
+Codex 可以用 `--provider` 接 DeepSeek、MiniMax，或一个自定义 OpenAI 兼容端点，写入 Codex 自己的 `config.toml`。OpenCode V2 共存创建不另写这套预设：它复制本机 OpenCode 已经配置的 `model` 和 `providers`，不一致就拒绝。
 
 | runtime | 配置 | 本版预设 |
 | --- | --- | --- |
 | `codex-sdk`、`codex-app-server`（向导里的 `codex-cli`） | `config.toml` 的 `model_provider` 与 `[model_providers.<id>]`（`wire_api = "responses"`，密钥只写环境变量名） | `deepseek`、`minimax`、`custom-openai-compat` |
-| `opencode-cli` 且 `--opencode-generation v2 --opencode-unsafe-tools` | OpenCode 自己的 `opencode.json` `providers`（目录里的模型、`env` 变量名；自定义端点用 `@opencode/ai/providers/openai-compatible`） | 同上 |
+| `opencode-cli` 且 `--opencode-generation v2 --opencode-unsafe-tools` | 本机 OpenCode 已有的 `opencode.json`：`model` 与 `providers`。创建只复制这一份，不另写一套预设 | 必须与本机已配置的 provider id 一致 |
 
-密钥不要写进命令行。先 `export` 预设对应的变量（DeepSeek 是 `DEEPSEEK_API_KEY`，MiniMax 是 `MINIMAX_API_KEY`），或用 `--api-key-env` 指定变量名。值进节点的 0600 `.env`，不进 `config.json`。
+密钥不要写进命令行。Codex 先 `export` 预设对应的变量（DeepSeek 是 `DEEPSEEK_API_KEY`，MiniMax 是 `MINIMAX_API_KEY`），或用 `--api-key-env` 指定变量名。OpenCode V2 使用本机 `providers.*.env` 里已经写明的变量名，不能用 `--api-key-env` 换一个。值进节点的 0600 `.env`，不进 `config.json`。
 
 ```bash
 export DEEPSEEK_API_KEY='<your-key>'
 anet node create ds --runtime codex-sdk --provider deepseek
 
+# 先在 OpenCode 自己的 opencode.json 里写好 model 与 providers，再创建。
+# 下面假设本机 model 已是 minimax/MiniMax-M3，且 providers.minimax.env 含 MINIMAX_API_KEY。
 export MINIMAX_API_KEY='<your-key>'
 anet node create mx --runtime opencode-cli --opencode-generation v2 \
-  --opencode-unsafe-tools --provider minimax
+  --opencode-unsafe-tools --model minimax/MiniMax-M3 --provider minimax
 
 export GATEWAY_API_KEY='<your-key>'
 anet node create gw --runtime codex-app-server --provider custom-openai-compat \
   --base-url https://llm.example.com/v1 --api-key-env GATEWAY_API_KEY --model my-model
 ```
 
-Codex 这条路使用 Responses API（`wire_api = "responses"`）。只实现了 `/v1/chat/completions` 的网关接不上 Codex；那种网关走 OpenCode V2 的 `custom-openai-compat`。OpenCode V1 的安全预设仍然会丢掉自定义 provider，本版 `--provider` 不改变这一点。Claude 运行时也不走这组标志。
+Codex 这条路使用 Responses API（`wire_api = "responses"`）。只实现了 `/v1/chat/completions` 的网关接不上 Codex；那种网关要先写进 OpenCode 自己的 `providers`（自定义端点的 package 仍是 `@opencode/ai/providers/openai-compatible`），V2 共存创建再按上面的规则复制。OpenCode V1 的安全预设仍然会丢掉自定义 provider。Claude 运行时也不走这组标志。
 
 ### 内置的 Anthropic 兼容提供商 {#built-in-anthropic-compatible}
 

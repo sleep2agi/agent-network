@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布：OpenCode V2 共存创建对齐本机 Provider（2026-10-10）
+
+- 创建 OpenCode V2 共存节点时，模型和 Provider 取自这台机器上 OpenCode 自己的 `opencode.json`（`model` 与 `providers`）。请求里的模型或 `--provider` 若与之不一致，创建直接拒绝并写明两边的值，不会改用预设默认模型，也不会退回 anthropic。
+- 本机配置里该 provider 的 `providers` 条目会原样写入节点的 `opencode.json`。OpenCode 仍在读的 `provider` 条目同样原样写入。`--base-url` / `--api-key-env` 不能在这条路径上改写它。Codex 的 `--provider` 预设不变。
+- 这不包含 Hub `create_node` 的「必须带一个斜杠」格式闸（另一项变更）。格式对了但和本机 OpenCode 不一致，仍然拒绝。
+
 ## 未发布：daemon 可远程启动已收编的 Codex 原生三段（2026-10-10）
 
 - 已收编的 Codex 原生布局，启动前检查通过后，daemon 调用受信任的 `anet node start`。新的 marker、三段进程和保存的回环端口都对上，才向 Hub 确认已启动。`external-appserver` 布局的远程启动仍然拒绝。不证明 Codex 程序版本或 rollout，收编节点的一键重启也仍然拒绝（先停止再启动）。
@@ -14,7 +20,7 @@
 ## 未发布：Codex 与 OpenCode V2 的 provider（2026-10-10）
 
 - `anet node create` / `anet node edit` 增加 `--provider`、`--base-url`、`--api-key-env`。本版只接 Codex（`codex-sdk`、`codex-app-server`）和 OpenCode V2（`opencode-cli --opencode-generation v2 --opencode-unsafe-tools`）。预设是 `deepseek`、`minimax`、`custom-openai-compat`。
-- Codex 写入节点 `config.toml` 的 `[model_providers.*]`，`wire_api` 为 `responses`，密钥只记环境变量名。OpenCode V2 写入 OpenCode 自己的 `opencode.json` `providers`（模型列表与 `env`；自定义端点用 `@opencode/ai/providers/openai-compatible`）。密钥不进命令行、不进 `config.json`。
+- Codex 写入节点 `config.toml` 的 `[model_providers.*]`，`wire_api` 为 `responses`，密钥只记环境变量名。OpenCode V2 共存创建不再用这组预设覆盖本机 OpenCode 配置，规则见「OpenCode V2 共存创建对齐本机 Provider」。密钥不进命令行、不进 `config.json`。
 - Claude、OpenCode V1、Hub vault / `create_node` 不在这版。
 
 ## 未发布：收编候选发现（2026-10-10）

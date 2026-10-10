@@ -86,6 +86,8 @@ import {
   opencodeStartGenerationRefusal,
 } from "../src/opencode-generation-create";
 import { opencodeGenerationOfConfig, opencodeGenerationSupport } from "../src/opencode-versions";
+import { planOpencodeV2Create } from "../src/opencode-v2-create-align";
+import { OpenCodeV2AlignError } from "../src/opencode-v2-configured-model";
 import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
@@ -5314,8 +5316,55 @@ async function ensureNodeToken(profile: Profile, id: string): Promise<Profile> {
 // 0o600 by writeOpencodeAuthJson. If the env key is missing we emit
 // a node-scoped upstream login command rather than suggesting a second create
 // of an alias that now already exists.
+function alignOpencodeV2CreateOrExit(profile: Profile, opts: Record<string, any>): void {
+  if (normalizeRuntime(profile) !== "opencode-cli" || opencodeGenerationOfConfig(profile) !== "v2") return;
+  try {
+    const requestedModel = typeof opts.model === "string" && opts.model !== "true" ? opts.model : undefined;
+    const planned = planOpencodeV2Create({
+      projectDir: process.cwd(),
+      homeDir: opencodeBindingHome(),
+      xdgConfigHome: process.env.XDG_CONFIG_HOME,
+      requestedModel,
+      requestedProvider: typeof opts.provider === "string" ? opts.provider : undefined,
+      requestedBaseUrl: typeof opts["base-url"] === "string" ? opts["base-url"] : undefined,
+      requestedApiKeyEnv: typeof opts["api-key-env"] === "string" ? opts["api-key-env"] : undefined,
+      argv: process.argv,
+      env: process.env,
+    });
+    profile.model = planned.selection.model;
+    opts._opencodeV2AlignedJson = planned.opencodeJson;
+    const env = { ...(profile.env ?? {}) };
+    for (const name of planned.credentialEnv) {
+      const value = process.env[name];
+      if (typeof value !== "string" || value.length === 0) {
+        throw new OpenCodeV2AlignError(
+          "opencode_v2_provider_credential_missing",
+          `OpenCode provider ${JSON.stringify(planned.selection.providerId)} requires ${name}, which is not set.`,
+        );
+      }
+      env[name] = value;
+    }
+    profile.env = env;
+    console.log(`[anet] OpenCode V2 model ${planned.selection.model} (provider ${planned.selection.providerId}) matches this machine's OpenCode config.`);
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
 function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts: Record<string, any>): void {
   if (normalizeRuntime(profile) !== "opencode-cli") return;
+  if (opencodeGenerationOfConfig(profile) === "v2") {
+    const body = wizardOpts._opencodeV2AlignedJson;
+    if (typeof body !== "string" || !body.includes(`"model"`)) {
+      console.error("[anet] ❌ OpenCode V2 create has no aligned provider/model. Refusing to write a fallback preset.");
+      process.exit(1);
+    }
+    const { replaceOpencodeConfigJson } = require("../src/opencode-preset") as typeof import("../src/opencode-preset");
+    const configPath = replaceOpencodeConfigJson(join(nodesDir(), id), body);
+    console.log(`[anet] OpenCode V2 config copied from this machine's OpenCode config: ${configPath}`);
+    return;
+  }
   const presetId = wizardOpts._opencodePreset || "anthropic";
   const { findOpencodePreset, readPresetKeyFromEnv, writeOpencodeAuthJson, writeOpencodeConfigJson } =
     // Lazy-loaded so a create wizard for another runtime doesn't
@@ -5454,6 +5503,9 @@ async function configureOpencodeRuntime(
   if (wizardOpts["opencode-generation"] === "v2") {
     console.log(`[anet] 请确保已安装 OpenCode V2 (exact): ${opencodeGenerationInstallCommand("v2")}`);
     console.log(`[anet]   V1 and V2 both install 'opencode': use separate npm prefixes and select the V2 prefix on PATH.`);
+    console.log(`[anet]   V2 co-presence uses the model and provider already in this machine's OpenCode config.`);
+    console.log(`[anet]   A different --model or --provider is refused. There is no fallback provider.`);
+    return;
   } else {
     const currentPin = readEffectivePin();
     console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
@@ -6061,7 +6113,8 @@ API key:
   }
 
   const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
-  const stagedProvider = stageRuntimeProviderOrExit(profile, opts);
+  alignOpencodeV2CreateOrExit(profile, opts);
+  const stagedProvider = opencodeGenerationOfConfig(profile) === "v2" ? null : stageRuntimeProviderOrExit(profile, opts);
 
   // #138 fix — @inquirer/prompts select() cleanup leaves process.stdin in a
   // state where the subsequent readline `ask()` doesn't keep the event loop
@@ -6500,7 +6553,8 @@ async function createCommand(idOverride?: string) {
   }
 
   const profile = createProfileFromOpts(id, opts);
-  const stagedProvider = stageRuntimeProviderOrExit(profile, opts);
+  alignOpencodeV2CreateOrExit(profile, opts);
+  const stagedProvider = opencodeGenerationOfConfig(profile) === "v2" ? null : stageRuntimeProviderOrExit(profile, opts);
 
   // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
   // No silent fallback to utok_; that just defers the failure to runtime.

@@ -82,6 +82,12 @@ try {
   await cli(["init", "--hub", hub]);
   await cli(["register", "--username", "t827", "--password", "test827-password"]);
   await cli(["login", "--username", "t827", "--password", "test827-password"]);
+  const globalOpenCode = join(process.env.HOME!, ".config", "opencode");
+  mkdirSync(globalOpenCode, { recursive: true, mode: 0o700 });
+  writeFileSync(join(globalOpenCode, "opencode.json"), JSON.stringify({
+    model: "stub/stub-model",
+    provider: { stub: { npm: "@ai-sdk/openai-compatible", name: "Stub", options: { baseURL: "http://127.0.0.1:18827/v1", apiKey: "test-only" }, models: { "stub-model": { name: "Stub" } } } },
+  }), { mode: 0o600 });
   const created = await cli(["node", "create", "oc827", "--runtime", "opencode-cli", "--opencode-generation", "v2", "--opencode-unsafe-tools", "--model", "stub/stub-model"]);
   check("V2 create names its exact package, not V1", created.output.includes("@opencode/cli@2.0.22") && !created.output.includes("npm install -g opencode-ai@"));
   check("V2 create does not promise Claude/ACP policy", !/Claude Code preset|question DISABLED|not given CommHub MCP tools/.test(created.output));

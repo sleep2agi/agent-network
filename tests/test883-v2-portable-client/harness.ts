@@ -75,10 +75,17 @@ try {
   check('V2 without explicit unsafe opt-in refused', !denied.request_id && JSON.stringify(denied).includes('opencodeUnsafeTools'));
   check('no create request or node config on refusal', count() === before && !existsSync(`${project}/.anet/nodes/refused829/config.json`));
   console.log('L3 real daemon remote create -> native V2 startup');
-  // Only provider fixture is preseeded; node identity/config must come from daemon.
+  // The daemon copies this machine's OpenCode config. Identity still comes from the create.
+  const machineOpenCode = {
+    model: 'stub/stub-model',
+    provider: { stub: { npm: '@ai-sdk/openai-compatible', name: 'Stub', options: { baseURL: 'http://127.0.0.1:18827/v1', apiKey: 'test-only' }, models: { 'stub-model': { name: 'Stub' } } } },
+  };
+  const globalOpenCode = `${env.HOME}/.config/opencode`;
+  mkdirSync(globalOpenCode, { recursive: true, mode: 0o700 });
+  writeFileSync(`${globalOpenCode}/opencode.json`, JSON.stringify(machineOpenCode), { mode: 0o600 });
   const provider = `${childProject}/.anet/nodes/oc829/.config/opencode`;
   mkdirSync(provider, { recursive: true, mode: 0o700 });
-  writeFileSync(`${provider}/opencode.json`, JSON.stringify({ model: 'stub/stub-model', provider: { stub: { npm: '@ai-sdk/openai-compatible', name: 'Stub', options: { baseURL: 'http://127.0.0.1:18827/v1', apiKey: 'test-only' }, models: { 'stub-model': { name: 'Stub' } } } } }), { mode: 0o600 });
+  writeFileSync(`${provider}/opencode.json`, JSON.stringify(machineOpenCode), { mode: 0o600 });
   let created: any;
   if (process.env.TEST829_CLIENT_DRIVER) {
     console.log('L3 browser client -> real authenticated Hub -> real daemon');

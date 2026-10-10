@@ -26,6 +26,14 @@ import {
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
+import {
+  assertOpenCodeV2RequestedModel,
+  OpenCodeV2AlignError,
+  readOpenCodeConfiguredSelection,
+  renderOpenCodeV2AlignedConfig,
+  type OpenCodeConfiguredSelection,
+} from "../opencode-v2-configured-model.js";
+import { replaceOpencodeConfigJson } from "../shared/opencode-preset.js";
 import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
@@ -1057,6 +1065,47 @@ export async function handleCreateNodeDoorbell(
   try { ensureGlobalAnetConfig(resolveChildHome(process.env, process.platform), deps.hubUrl); }
   catch (e: any) { deps.warn(`[create-node] global config write failed (continuing): ${e?.message || e}`); }
 
+  // V2 co-presence must use the OpenCode model and provider already configured
+  // on this machine. #2567's format gate (exactly one slash) already ran in
+  // buildAnetArgsDaemon and rejects a missing or malformed model before this
+  // check. A present model that does not match the machine config is rejected
+  // here, before the node config is written. It is not replaced with a preset.
+  let alignedOpenCode: OpenCodeConfiguredSelection | undefined;
+  const openCodeV2Create = req.node_spec.runtime === "opencode-cli"
+    && req.node_spec.flags?.opencodeGeneration === "v2"
+    && req.node_spec.flags?.opencodeUnsafeTools === true;
+  if (openCodeV2Create) {
+    try {
+      const homeDir = resolveChildHome(process.env, process.platform);
+      alignedOpenCode = readOpenCodeConfiguredSelection({
+        projectDir: childWorkDir,
+        homeDir,
+        xdgConfigHome: process.env.XDG_CONFIG_HOME,
+      });
+      const requested = typeof req.node_spec.model === "string" && req.node_spec.model.trim()
+        ? req.node_spec.model.trim()
+        : undefined;
+      assertOpenCodeV2RequestedModel(alignedOpenCode, requested);
+      const blob = req.env_blob ?? {};
+      for (const name of alignedOpenCode.credentialEnv) {
+        if (typeof blob[name] !== "string" || blob[name].length === 0) {
+          throw new OpenCodeV2AlignError(
+            "opencode_v2_provider_credential_missing",
+            `OpenCode provider ${JSON.stringify(alignedOpenCode.providerId)} requires ${name}, which was not in the create env. The value is not printed.`,
+          );
+        }
+      }
+      deps.log(`[create-node] OpenCode V2 model ${alignedOpenCode.model} matches this machine's OpenCode config`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.warn(`[create-node] ${message}`);
+      await deps.callCommHub("ack_create_request", {
+        request_id, status: "rejected", error: `validate: ${message}`.slice(0, 800),
+      }).catch(() => {});
+      return;
+    }
+  }
+
   // Step 1 — write child config.json directly.
   //
   // P1 simplification: we bypass `anet node create` (which requires a
@@ -1107,7 +1156,12 @@ export async function handleCreateNodeDoorbell(
       node_name: req.node_spec.name,
       alias: req.node_spec.name,
       runtime: req.node_spec.runtime,
-      ...(req.node_spec.model ? { model: req.node_spec.model } : {}),
+      ...(alignedOpenCode
+        ? { model: alignedOpenCode.model }
+        : req.node_spec.model ? { model: req.node_spec.model } : {}),
+      ...(alignedOpenCode && alignedOpenCode.credentialEnv.length
+        ? { env: Object.fromEntries(alignedOpenCode.credentialEnv.map((name) => [name, { _envRef: name }])) }
+        : {}),
       hub: deps.hubUrl,
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),
@@ -1117,6 +1171,7 @@ export async function handleCreateNodeDoorbell(
     };
     if (req.node_spec.runtime === "opencode-cli") {
       writeCreatedOpencodeProfile(childDir, childCfg);
+      if (alignedOpenCode) replaceOpencodeConfigJson(childDir, renderOpenCodeV2AlignedConfig(alignedOpenCode));
     } else {
       atomicWriteJson(childCfgPath, childCfg);
     }

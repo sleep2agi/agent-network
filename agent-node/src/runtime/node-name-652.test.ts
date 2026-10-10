@@ -66,7 +66,7 @@ let workDir = "";
 let pinRoot = "";
 const killPids: number[] = [];
 const savedEnv: Record<string, string | undefined> = {};
-const ENV_KEYS = ["HOME", "ANET_BIN_ABS", "ANET_DAEMON_ALLOW_ENV_BIN", "ANET_BIN_SHA256", "ANET_DAEMON_PATH_CONF", "ANET_DAEMON_STRICT_ROOT_BIN"];
+const ENV_KEYS = ["HOME", "XDG_CONFIG_HOME", "ANET_BIN_ABS", "ANET_DAEMON_ALLOW_ENV_BIN", "ANET_BIN_SHA256", "ANET_DAEMON_PATH_CONF", "ANET_DAEMON_STRICT_ROOT_BIN"];
 
 beforeEach(() => {
   _resetChildrenMapForTest();
@@ -77,6 +77,7 @@ beforeEach(() => {
   pinRoot = mkdtempSync(join(tmpdir(), "t652-pin-"));
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
   process.env.HOME = home;
+  delete process.env.XDG_CONFIG_HOME;
   process.env.ANET_DAEMON_PATH_CONF = join(pinRoot, "missing-path.conf");
   process.env.ANET_DAEMON_ALLOW_ENV_BIN = "1";
   process.env.ANET_BIN_ABS = writeFakeAnet(pinRoot);
@@ -160,13 +161,13 @@ function writeFakeAnet(root: string): string {
 
 interface Spawned { bin: string; args: string[]; cwd: string }
 
-async function runCreate(spec: Record<string, unknown>, requestId: string) {
+async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>) {
   const acks: Record<string, any>[] = [];
   const spawned: Spawned[] = [];
   await handleCreateNodeDoorbell({ request_id: requestId }, {
     callCommHub: async (tool: string, args: Record<string, unknown>) => {
       if (tool === "get_create_request") {
-        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652" };
+        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652", ...(envBlob ? { env_blob: envBlob } : {}) };
       }
       if (tool === "ack_create_request") { acks.push(args); return { ok: true }; }
       throw new Error(`unexpected tool ${tool}`);
@@ -203,11 +204,19 @@ function walk(root: string): string[] {
 const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
+  function plantMachineModel(body: Record<string, unknown>): void {
+    const dir = join(home, ".config", "opencode");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(dir, "opencode.json"), `${JSON.stringify(body)}\n`, { mode: 0o600 });
+  }
+
   test("#829 V2 create writes generation/mode into actual child config, not flags", async () => {
     // Config write, not native OpenCode startup. plantOpencode is the version
     // the gate must see, including when this image already has @opencode/cli
-    // on the fixed child PATH.
+    // on the fixed child PATH. The model must already be the machine's OpenCode
+    // model; create copies it.
     plantOpencode("opencode v2.0.22");
+    plantMachineModel({ $schema: "https://opencode.ai/config.json", model: "stub/model" });
     const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
     const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
     // sleep is deliberately NOT a healthy V2 generation. This test proves
@@ -217,7 +226,11 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
     expect(cfg.opencodeGeneration).toBe("v2");
     expect(cfg.opencodeMode).toBe("copresence");
+    expect(cfg.model).toBe("stub/model");
     expect(cfg.flags).toEqual({ opencodeUnsafeTools: true, timeout: 600000 });
+    const native = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", ".config", "opencode", "opencode.json"), "utf8"));
+    expect(native.model).toBe("stub/model");
+    expect(native.providers).toBeUndefined();
     expect(readOpencodeRuntimeBinding(join(workDir, ".anet", "nodes", "v2-child"), home))
       .toEqual({ schemaVersion: 1, runtime: "opencode-cli", projectRoot: workDir, nodeId: "v2-child" });
     expect(flags.opencodeGeneration).toBe("v2");
@@ -295,6 +308,81 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(bare.acks[0].error).toContain("opencode_v2_requires_provider_model");
     expect(bare.spawned).toHaveLength(0);
   });
+
+  test("V2 create rejects a model that is not the machine OpenCode model, before write or spawn", async () => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({
+      model: "deepseek/deepseek-v4-flash",
+      providers: { deepseek: { name: "DeepSeek", env: ["DEEPSEEK_API_KEY"], models: { "deepseek-v4-flash": { name: "flash" } } } },
+    });
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2mismatch", { DEEPSEEK_API_KEY: "sk-test-not-a-real-key" });
+    expect(acks).toHaveLength(1);
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_model_mismatch");
+    expect(acks[0].error).toContain("stub/model");
+    expect(acks[0].error).toContain("deepseek/deepseek-v4-flash");
+    expect(acks[0].error).not.toContain("sk-test-not-a-real-key");
+    expect(spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"))).toBe(false);
+  });
+
+  test("V2 create with no machine model is a missing-config refusal, not a started node", async () => {
+    plantOpencode("opencode v2.0.22");
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2missing");
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_configured_model_missing");
+    expect(spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"))).toBe(false);
+  });
+
+  test("V2 create copies the machine provider when the requested model matches", async () => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({
+      model: "deepseek/deepseek-v4-flash",
+      providers: { deepseek: { name: "DeepSeek", env: ["DEEPSEEK_API_KEY"], models: { "deepseek-v4-flash": { name: "flash" } } } },
+    });
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      model: "deepseek/deepseek-v4-flash",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2match", { DEEPSEEK_API_KEY: "sk-test-not-a-real-key" });
+    expect(acks.map((ack) => ack.status)).toEqual(["runtime_capability_check_failed"]);
+    expect(spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
+    expect(cfg.model).toBe("deepseek/deepseek-v4-flash");
+    expect(cfg.env.DEEPSEEK_API_KEY).toEqual({ _envRef: "DEEPSEEK_API_KEY" });
+    expect(JSON.stringify(cfg)).not.toContain("sk-test-not-a-real-key");
+    const native = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", ".config", "opencode", "opencode.json"), "utf8"));
+    expect(native.model).toBe("deepseek/deepseek-v4-flash");
+    expect(native.providers.deepseek.env).toEqual(["DEEPSEEK_API_KEY"]);
+    expect(JSON.stringify(native)).not.toContain("sk-test-not-a-real-key");
+  });
+
+  test("V2 create does not adopt a machine model when the request omits one", async () => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({ model: "deepseek/deepseek-v4-flash" });
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2omit");
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_requires_provider_model");
+    expect(spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"))).toBe(false);
+  });
+
   test("「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels", async () => {
     // The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`
     // (sleep2agi/agent-network-app create-node-workdir.ts). That folder must be what lands on disk.
