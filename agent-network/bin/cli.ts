@@ -5130,6 +5130,15 @@ function loadOpencodeNodeDotenv(nodeId: string): Record<string, string> {
   return raw === undefined ? {} : parseNodeDotenv(raw);
 }
 
+// OpenCode stores the node secret file through the private-profile reader.
+// The runtime id stays in this helper: nodeEditCommand must not grow its own
+// runtime-id literals (#1698 scans that function body).
+function loadNodeDotenvForProfile(nodeId: string, profile: Profile): Record<string, string> {
+  return normalizeRuntime(profile) === "opencode-cli"
+    ? loadOpencodeNodeDotenv(nodeId)
+    : loadNodeDotenv(nodeId);
+}
+
 // #193 envRef Option A — ensure the user's project-level `.anet/.gitignore`
 // covers per-node .env secret stores. Idempotent.
 function ensureNodeDotenvGitignore(): void {
@@ -11998,9 +12007,7 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`workdir ${currentDir ?? "(unset)"} -> ${nextDir}`);
     }
   }
-  const dotenv = normalizeRuntime(profile) === "opencode-cli"
-    ? loadOpencodeNodeDotenv(resolved.id)
-    : loadNodeDotenv(resolved.id);
+  const dotenv = loadNodeDotenvForProfile(resolved.id, profile);
   const stagedProvider = stageRuntimeProviderOrExit(profile, {
     provider: providerValue,
     "base-url": baseUrlValue,
