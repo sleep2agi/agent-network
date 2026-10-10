@@ -4105,6 +4105,7 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN,
       commhubAlias: ALIAS,
+      providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
       onSession: async (id) => {
         opencodeSessionId = id;
         writebackSession(id);

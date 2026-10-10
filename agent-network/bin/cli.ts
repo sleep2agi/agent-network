@@ -119,6 +119,12 @@ import {
   writeOpencodePrivateProfileFile,
 } from "../src/opencode-preset";
 import {
+  applyStagedProviderToProfile,
+  materializeStagedProvider,
+  stageProviderRequest,
+  type StagedProvider,
+} from "../src/provider-apply";
+import {
   buildOpencodeAuthLoginArgs,
   readOpencodeAuthLoginCredential,
   revalidateOpencodeAuthLoginSandbox,
@@ -5341,6 +5347,60 @@ function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts
   console.log(`[anet]   Code tools require flags.opencodeUnsafeTools=true for trusted tasks; use Docker/VM for isolation.`);
 }
 
+function providerStdinLine(): string | undefined {
+  if (process.stdin.isTTY) return undefined;
+  const text = readFileSync(0, "utf8");
+  return text.split(/\r?\n/, 1)[0] ?? "";
+}
+
+/** Validate --provider before the node is written. The secret lands in
+ * profile.env so the existing envRef rewrite stores it; the runtime file is
+ * written later by materializeRuntimeProviderOrExit. */
+function stageRuntimeProviderOrExit(
+  profile: Profile,
+  opts: Record<string, any>,
+  dotenv?: Record<string, string>,
+): StagedProvider | null {
+  const provider = typeof opts.provider === "string" ? opts.provider : undefined;
+  const baseUrl = typeof opts["base-url"] === "string" ? opts["base-url"] : undefined;
+  const apiKeyEnv = typeof opts["api-key-env"] === "string" ? opts["api-key-env"] : undefined;
+  if (!provider && !baseUrl && !apiKeyEnv) return null;
+  try {
+    const staged = stageProviderRequest({
+      runtime: normalizeRuntime(profile),
+      opencodeGeneration: typeof profile.opencodeGeneration === "string" ? profile.opencodeGeneration : undefined,
+      opencodeUnsafeTools: profile.flags?.opencodeUnsafeTools === true,
+      provider,
+      baseUrl,
+      apiKeyEnv,
+      model: typeof opts.model === "string" && opts.model !== "true" ? opts.model : undefined,
+      argv: process.argv,
+      shellEnv: process.env,
+      dotenv,
+      readStdin: providerStdinLine,
+    });
+    if (staged) applyStagedProviderToProfile(profile, staged);
+    return staged;
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
+function materializeRuntimeProviderOrExit(id: string, staged: StagedProvider | null): void {
+  if (!staged) return;
+  try {
+    materializeStagedProvider(join(nodesDir(), id), staged.resolved);
+    const where = staged.resolved.family === "codex"
+      ? "codex-home/config.toml [model_providers.*]"
+      : "opencode.json providers";
+    console.log(`[anet] provider ${staged.resolved.presetId} written to ${where} (credential env ${staged.resolved.envKey}; value not printed)`);
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
 function printOpencodeCreationSecurityDisclosure(id: string, profile: Profile): void {
   const unsafeTools = profile.flags?.opencodeUnsafeTools === true;
   // #540 — a Zen free model under the safe preset fails every task upstream.
@@ -5992,6 +6052,7 @@ API key:
   }
 
   const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
+  const stagedProvider = stageRuntimeProviderOrExit(profile, opts);
 
   // #138 fix — @inquirer/prompts select() cleanup leaves process.stdin in a
   // state where the subsequent readline `ask()` doesn't keep the event loop
@@ -6043,6 +6104,7 @@ Telegram setup:
     writeTelegramChannelConfig(id, telegramConfig.botToken, telegramConfig.allowId);
   }
   writeOpencodePresetIfRequested(id, profile, opts);
+  materializeRuntimeProviderOrExit(id, stagedProvider);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
@@ -6429,6 +6491,7 @@ async function createCommand(idOverride?: string) {
   }
 
   const profile = createProfileFromOpts(id, opts);
+  const stagedProvider = stageRuntimeProviderOrExit(profile, opts);
 
   // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
   // No silent fallback to utok_; that just defers the failure to runtime.
@@ -6464,6 +6527,7 @@ async function createCommand(idOverride?: string) {
 
   saveCreatedNode(id, profile);
   writeOpencodePresetIfRequested(id, profile, opts);
+  materializeRuntimeProviderOrExit(id, stagedProvider);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   const netLabel = gc.network_name || gc.network_id || "global";
@@ -11828,15 +11892,33 @@ async function nodeEditCommand() {
   // workdir_consistent 缺它就 fail,而在这之前没有任何命令能给旧节点补上(提示里写的 `config apply` 根本不存在)。
   const workdirIdx = args.indexOf("--workdir");
   const rawWorkdir = workdirIdx >= 0 ? args[workdirIdx + 1] : undefined;
-  if (!ref || (flagIdx < 0 && modelIdx < 0 && workdirIdx < 0)) {
+  const providerFlag = (flag: string): string | undefined => {
+    const i = args.indexOf(flag);
+    if (i < 0) return undefined;
+    const value = args[i + 1];
+    if (value === undefined || value.startsWith("--")) {
+      console.error(`${flag} needs a value`);
+      process.exit(1);
+    }
+    return value;
+  };
+  const providerValue = providerFlag("--provider");
+  const baseUrlValue = providerFlag("--base-url");
+  const apiKeyEnvValue = providerFlag("--api-key-env");
+  if (!ref || (flagIdx < 0 && modelIdx < 0 && workdirIdx < 0 && !providerValue && !baseUrlValue && !apiKeyEnvValue)) {
     console.log(`
 anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <dir>]
+                                   [--provider <id>] [--base-url <url>] [--api-key-env <NAME>]
 
   Change an existing node's runtime, model and/or co-presence workdir. Supported runtime ids:
     ${SUPPORTED_RUNTIME_NAMES.join(", ")}
 
   --model takes any id the runtime accepts; it is validated the same way
   'anet node create --model' validates it (non-empty, no whitespace).
+
+  --provider is Codex (config.toml [model_providers.*]) or OpenCode V2
+  (native opencode.json providers). The key value is never a flag: export
+  the variable named by --api-key-env (or the preset's default).
 
   Note: the change is written to the node's config; a running node keeps its
   current runtime/model until it is restarted (anet node restart <name>).
@@ -11916,11 +11998,23 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`workdir ${currentDir ?? "(unset)"} -> ${nextDir}`);
     }
   }
+  const dotenv = normalizeRuntime(profile) === "opencode-cli"
+    ? loadOpencodeNodeDotenv(resolved.id)
+    : loadNodeDotenv(resolved.id);
+  const stagedProvider = stageRuntimeProviderOrExit(profile, {
+    provider: providerValue,
+    "base-url": baseUrlValue,
+    "api-key-env": apiKeyEnvValue,
+    model: modelIdx >= 0 ? (profile as any).model : undefined,
+  }, dotenv);
+  if (stagedProvider) changes.push(`provider ${stagedProvider.resolved.presetId} via ${stagedProvider.resolved.envKey}`);
   if (changes.length === 0) {
     console.log(`${resolved.id} already matches what you asked for — nothing to change.`);
     return;
   }
+  if (stagedProvider) rewritePlainSecretsToEnvRef(resolved.id, profile);
   saveProfile(resolved.id, profile);
+  materializeRuntimeProviderOrExit(resolved.id, stagedProvider);
   for (const c of changes) console.log(`${resolved.id}: ${c}`);
   // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
   const running = findNodeStopCandidates(resolved.id);
