@@ -5,7 +5,7 @@ import {
   handleStopDoorbell,
   recordSpawnedChild,
 } from "./stop-daemon";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync, writeFileSync, existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -356,6 +356,77 @@ describe("handleStopDoorbell — delete action with delete_config", () => {
     // chmod 700 on the backup dir.
     const mode = statSync(join(deletedRoot, trash[0])).mode & 0o777;
     expect(mode).toBe(0o700);
+  });
+
+  // qa-rfc027 A.5 — wrapper dies, grandchild's exit hook (process-survival-log)
+  // mkdirSync's <node>/logs. If rename happens while that pid is still listed,
+  // the original workdir comes back beside the backup. Delete must wait the
+  // pid out, and must drop a logs-only directory that still loses the race.
+  test("delete waits out a still-exiting grandchild, then drops logs-only residue", async () => {
+    const workdirRoot = join(scratch, "nodes-exit");
+    const deletedRoot = join(scratch, "deleted-exit");
+    mkdirSync(workdirRoot, { recursive: true });
+    const childDir = join(workdirRoot, "alias-exit");
+    mkdirSync(childDir);
+    writeFileSync(join(childDir, "config.json"), JSON.stringify({ token: "ntok_secret" }), { mode: 0o600 });
+
+    recordSpawnedChild("node_exit", "alias-exit", 5557);
+    const { acks, fakeSignals, deps } = makeDeps({
+      workdirRoot, deletedRoot,
+      getStopReturn: {
+        ok: true, request_id: "sr_exit",
+        child_node_id: "node_exit", child_alias: "alias-exit",
+        action: "delete", delete_config: true, grace_seconds: 10, force: false,
+      },
+    });
+    let polls = 0;
+    let movedAtPoll = -1;
+    (deps as any).listMatchingChildPids = async () => {
+      polls += 1;
+      return polls < 3 ? [4242] : [];
+    };
+    (deps as any).renameDir = (src: string, dst: string) => {
+      movedAtPoll = polls;
+      renameSync(src, dst);
+      mkdirSync(join(src, "logs"), { recursive: true });
+      writeFileSync(join(src, "logs", "2026-10-10.log"), "exit\n");
+    };
+    await handleStopDoorbell({ request_id: "sr_exit" }, deps);
+    expect(movedAtPoll).toBeGreaterThanOrEqual(3);
+    expect(fakeSignals.some(s => s.pid === 4242 && s.sig === "SIGTERM")).toBe(true);
+    expect(fakeSignals.some(s => s.pid === 4242 && s.sig === "SIGKILL")).toBe(true);
+    expect(existsSync(childDir)).toBe(false);
+    expect(acks[0].args.status).toBe("stopped");
+    expect(existsSync(join(acks[0].args.backup_path, "config.json"))).toBe(true);
+  });
+
+  test("delete leaves a recreated workdir that already has config.json", async () => {
+    const workdirRoot = join(scratch, "nodes-new");
+    const deletedRoot = join(scratch, "deleted-new");
+    mkdirSync(workdirRoot, { recursive: true });
+    const childDir = join(workdirRoot, "alias-new");
+    mkdirSync(childDir);
+    writeFileSync(join(childDir, "config.json"), JSON.stringify({ token: "ntok_old" }), { mode: 0o600 });
+
+    recordSpawnedChild("node_new", "alias-new", 5558);
+    const { acks, deps } = makeDeps({
+      workdirRoot, deletedRoot,
+      getStopReturn: {
+        ok: true, request_id: "sr_new",
+        child_node_id: "node_new", child_alias: "alias-new",
+        action: "delete", delete_config: true, grace_seconds: 10, force: false,
+      },
+    });
+    (deps as any).renameDir = (src: string, dst: string) => {
+      renameSync(src, dst);
+      mkdirSync(src, { recursive: true });
+      writeFileSync(join(src, "config.json"), JSON.stringify({ token: "ntok_new" }));
+    };
+    await handleStopDoorbell({ request_id: "sr_new" }, deps);
+    expect(acks[0].args.status).toBe("stopped");
+    expect(acks[0].args.backup_path).toMatch(/\/\d+-alias-new$/);
+    expect(existsSync(join(childDir, "config.json"))).toBe(true);
+    expect(readFileSync(join(acks[0].args.backup_path, "config.json"), "utf8")).toContain("ntok_old");
   });
 
   test("delete_config=false → no backup dir, no source move", async () => {
