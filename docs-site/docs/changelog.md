@@ -1,5 +1,12 @@
 # 更新日志
 
+## 未发布：OpenCode V2 创建要对上已接受的安装（2026-10-10）
+
+- `create_node` 显式指定 `flags.opencodeGeneration` 为 `v1` 或 `v2` 时，daemon 在写节点配置之前核对 PATH 上的 `opencode --version` 是否属于该代际已接受的安装（V2 为 `@opencode/cli@2.0.22`）。对不上则拒绝，错误码 `opencode_generation_mismatch`。省略代际仍按 V1 创建。`--version` 超时不在这一步拒绝。
+- V2 的 `model` 必须是 OpenCode 自己的 `provider/model`（恰好一个斜杠）。这个接口不接收另一套 provider 预设，密钥留在目标节点已有的 OpenCode 配置里。缺模型时错误码是 `opencode_v2_requires_provider_model`，且仍先要求 `opencodeUnsafeTools: true`。
+- `opencode-cli` 的就绪结果可带 `generation` 与 `accepted`。V2 的 `state` 仍是 `unknown`，不因网站可达变成 `ready`。节点配置快照的 `flags` 会回显代际、模式和 unsafe 同意；这三项不能用 `update_node_config` 修改。
+- 这不是 npm 包发布。参见 #2544。
+
 ## 未发布：Codex 与 OpenCode V2 的 provider（2026-10-10）
 
 - `anet node create` / `anet node edit` 增加 `--provider`、`--base-url`、`--api-key-env`。本版只接 Codex（`codex-sdk`、`codex-app-server`）和 OpenCode V2（`opencode-cli --opencode-generation v2 --opencode-unsafe-tools`）。预设是 `deepseek`、`minimax`、`custom-openai-compat`。

@@ -29,6 +29,7 @@ import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
 import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
+  opencodeExplicitGenerationMismatch,
   requiredCliStatus,
   resolveOnPathReal,
   STEP_TIMEOUT_MS,
@@ -691,6 +692,24 @@ export function validateOpenCodeCreateFlags(runtime: string, flags: Record<strin
   }
 }
 
+/** Mirrors Hub validateOpenCodeV2ProviderModel. Unsafe opt-in throws first. */
+export function validateOpenCodeV2ProviderModelDaemon(spec: Pick<DaemonNodeSpec, "runtime" | "model" | "flags">): void {
+  const flags = spec.flags || {};
+  if (spec.runtime !== "opencode-cli") return;
+  if (flags.opencodeGeneration !== "v2" || flags.opencodeUnsafeTools !== true) return;
+  const model = spec.model;
+  const native = typeof model === "string"
+    && model.length > 0
+    && model.length <= 100
+    && MODEL_RE.test(model)
+    && !MODEL_DOT_ONLY_SEGMENT.test(model)
+    && model.includes("/")
+    && model.indexOf("/") === model.lastIndexOf("/");
+  if (!native) {
+    throw new Error("opencode_v2_requires_provider_model:OpenCode V2 uses the installed OpenCode provider/model (exactly one slash). This API does not take an anet provider preset.");
+  }
+}
+
 /**
  * #584 —— 把 node_spec.flags 拆成「写进子节点 config 的那份」和「建节点时的开关」。
  *
@@ -736,6 +755,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
   if (spec.model) args.push("--model", spec.model);
   validateOpenCodeCreateFlags(spec.runtime, spec.flags || {});
+  validateOpenCodeV2ProviderModelDaemon(spec);
   for (const [k, v] of Object.entries(spec.flags || {})) {
     if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence", "opencodeGeneration", "opencodeUnsafeTools"].includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
@@ -952,6 +972,19 @@ export async function handleCreateNodeDoorbell(
     deps.warn(`[create-node] ${error}`);
     await deps.callCommHub("ack_create_request", {
       request_id, status: "rejected", error: error.slice(0, 800),
+    }).catch(() => {});
+    return;
+  }
+  // Explicit v1/v2 must match an accepted install of that generation.
+  // Omitted generation stays legacy V1. Timeout (cli=unknown) does not reject.
+  const generationMismatch = opencodeExplicitGenerationMismatch(
+    req.node_spec.flags?.opencodeGeneration,
+    cliStatus,
+  );
+  if (generationMismatch) {
+    deps.warn(`[create-node] ${generationMismatch}`);
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "rejected", error: generationMismatch.slice(0, 800),
     }).catch(() => {});
     return;
   }

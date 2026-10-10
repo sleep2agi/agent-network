@@ -198,6 +198,33 @@ export function validateFlagsForRuntime(runtime: string, flags: Record<string, u
   }
 }
 
+/**
+ * V2 co-presence start requires OpenCode's own `provider/model`.
+ * Call only after the unsafe-opt-in check: a missing opt-in stays
+ * `opencode_v2_requires_unsafe_opt_in`. This API does not take an anet
+ * provider preset or a vault key (#2565 owns presets).
+ */
+export function validateOpenCodeV2ProviderModel(
+  runtime: string,
+  model: unknown,
+  flags: Record<string, unknown> | undefined | null,
+): void {
+  if (runtime !== "opencode-cli" || !flags || typeof flags !== "object") return;
+  if (flags.opencodeGeneration !== "v2" || flags.opencodeUnsafeTools !== true) return;
+  const native = typeof model === "string"
+    && model.length > 0
+    && model.length <= 100
+    && MODEL_RE.test(model)
+    && !MODEL_DOT_ONLY_SEGMENT.test(model)
+    && model.includes("/")
+    && model.indexOf("/") === model.lastIndexOf("/");
+  if (!native) {
+    throw new ValidationError("opencode_v2_requires_provider_model", {
+      reason: "OpenCode V2 uses the installed OpenCode provider/model (exactly one slash, for example provider/model). This API does not take an anet provider preset.",
+    });
+  }
+}
+
 // §4.4.7 — env_refs 7-step gate. networkSecretsGet is injected so
 // callers can supply either a real DB lookup (hub) or a fixture (tests).
 // The 6th step also reports the resolved value size; we return the
@@ -360,5 +387,6 @@ export function buildAnetArgs(spec: NodeSpec): string[] {
     }
     validateFlagsForRuntime(spec.runtime, spec.flags);
   }
+  validateOpenCodeV2ProviderModel(spec.runtime, spec.model, spec.flags);
   return args;
 }

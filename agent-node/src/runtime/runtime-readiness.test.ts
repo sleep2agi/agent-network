@@ -15,6 +15,7 @@ import {
   createRuntimeReadinessMonitor,
   extractVersion,
   httpHeadReal,
+  opencodeExplicitGenerationMismatch,
   probeRuntimeReadiness,
   proxyFor,
   realReadinessDeps,
@@ -170,6 +171,8 @@ describe("#622 probeRuntimeReadiness —— 状态判定", () => {
     const e = (await probeRuntimeReadiness(["opencode-cli"], d))["opencode-cli"];
     expect(e.state).toBe("ready");
     expect(e.auth).toBe("not_required");
+    expect(e.generation).toBeUndefined();
+    expect(e.accepted).toBeUndefined();
   });
 
   test("V2 provider is node-specific: neither Zen connectivity nor V1 auth proves readiness", async () => {
@@ -184,17 +187,51 @@ describe("#622 probeRuntimeReadiness —— 状态判定", () => {
       expect(e.auth).toBe("unknown");
       expect(e.network).toBe("skipped");
       expect(e.reason).toContain("目标节点配置");
+      expect(e.generation).toBe("v2");
+      expect(e.accepted).toBe(true);
       expect(d.calls.head).toEqual([]);
     }
   });
 
+  test("unaccepted OpenCode 2.x stays unknown and names the accepted pin", async () => {
+    const d = deps({ bins: { opencode: OK("opencode v2.0.99") }, net: { "opencode.ai": "reachable" } });
+    const e = (await probeRuntimeReadiness(["opencode-cli"], d))["opencode-cli"];
+    expect(e.state).toBe("unknown");
+    expect(e.ok).toBe(false);
+    expect(e.generation).toBe("v2");
+    expect(e.accepted).toBe(false);
+    expect(e.network).toBe("skipped");
+    expect(e.reason).toContain("@opencode/cli@2.0.22");
+    expect(e.reason).toContain("会被拒绝");
+    expect(d.calls.head).toEqual([]);
+  });
+
   test("V1 Zen failure and missing OpenCode CLI remain blocking", async () => {
     const v1 = deps({ bins: { opencode: OK("1.18.34") }, net: { "opencode.ai": "unreachable" } });
-    expect((await probeRuntimeReadiness(["opencode-cli"], v1))["opencode-cli"].state).toBe("no_network");
+    const v1entry = (await probeRuntimeReadiness(["opencode-cli"], v1))["opencode-cli"];
+    expect(v1entry.state).toBe("no_network");
+    expect(v1entry.generation).toBe("v1");
+    expect(v1entry.accepted).toBe(true);
     expect(v1.calls.head).toEqual(["https://opencode.ai"]);
     const missing = deps();
     expect((await probeRuntimeReadiness(["opencode-cli"], missing))["opencode-cli"].state).toBe("missing_cli");
     expect(missing.calls.head).toEqual([]);
+  });
+
+  test("explicit generation mismatches only a found CLI", () => {
+    expect(opencodeExplicitGenerationMismatch(undefined, { cli: "found", version: "2.0.22" })).toBeNull();
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "unknown" })).toBeNull();
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "missing" })).toBeNull();
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "found", version: "2.0.22" })).toBeNull();
+    const wrongGen = opencodeExplicitGenerationMismatch("v2", { cli: "found", version: "1.18.34" });
+    expect(wrongGen).toMatch(/^opencode_generation_mismatch/);
+    expect(wrongGen).toContain("@opencode/cli@2.0.22");
+    expect(wrongGen).toContain("OpenCode's own config");
+    expect(wrongGen).toContain("anet provider preset");
+    expect(wrongGen).not.toContain("/home/");
+    const wrongV1 = opencodeExplicitGenerationMismatch("v1", { cli: "found", version: "2.0.22" });
+    expect(wrongV1).toContain("opencode-ai@1.18.34");
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "found" })).toMatch(/^opencode_generation_mismatch/);
   });
 
   test("codex 共享登录:只报个数,ready 时 reason 提示", async () => {

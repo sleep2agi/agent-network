@@ -216,6 +216,18 @@ daemon 会在子节点 config 里写 `codexCopresence: true`，之后的 `anet n
 - 只对 `codex-app-server` 有效；其他 runtime 带这个键会被 Hub 拒绝（`flag_not_applicable_to_runtime`）。
 - 不认识这个键的旧 Hub / 旧 daemon 会拒绝请求（`flag_key_unknown`），不会悄悄建出无头节点。
 
+### 经 daemon 创建 OpenCode V2 共存节点 {#opencode-v2-via-daemon}
+
+`runtime` 仍是 `opencode-cli`。要建 V2 共存节点，`create_node` 的 `node_spec.flags` 同时带 `"opencodeGeneration": "v2"` 和 `"opencodeUnsafeTools": true`，`model` 必须是 OpenCode 自己的 `provider/model`（恰好一个斜杠）：
+
+```json
+{"name": "oc-v2", "runtime": "opencode-cli", "model": "provider/model", "flags": {"opencodeGeneration": "v2", "opencodeUnsafeTools": true}}
+```
+
+这个接口不接收 anet 的 provider 预设，密钥留在目标节点已有的 OpenCode 配置里。daemon 在写子节点配置之前，要求 PATH 上的 `opencode --version` 是本发行接受的 `@opencode/cli@2.0.22`。显式 `v1` 同样必须对上接受的 `opencode-ai` 版本（当前 pin `1.18.34`，过渡版 `1.18.1`）。对不上的错误码是 `opencode_generation_mismatch`。省略 `opencodeGeneration` 仍按旧的 V1 创建，不因为机器上碰巧是 V2 二进制而拒绝。`--version` 超时不在这一步拒绝。
+
+读回：daemon 上报的配置快照 `flags` 会带上 `opencodeGeneration`、`opencodeMode`、`opencodeUnsafeTools`，只读。`update_node_config` 不能改这三项。`runtime_readiness` 里的 `opencode-cli` 可带 `generation` 与 `accepted`；V2 的 `state` 仍是 `unknown`（provider 与登录取决于目标节点配置）。`accepted: false` 表示这个 2.x 不是接受的 pin，显式创建会被拒绝。
+
 ### 任务超时 `flags.timeout` 的单位是毫秒 {#create-node-timeout-ms}
 
 `create_node` 的 `node_spec.flags.timeout` 是**毫秒**：daemon 原样写进子节点 config，节点按毫秒读

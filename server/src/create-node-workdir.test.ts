@@ -119,6 +119,19 @@ describe("create_node + workdir", () => {
     expect(pulled.node_spec.flags).toEqual(flags);
   });
 
+  test("#829 V2 without native provider/model rejected before request or child token mint", async () => {
+    seed({ runtimes_supported: ["opencode-cli"] });
+    const tokenCount = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE network_id = ?1", NET)!.n;
+    const before = tokenCount();
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
+    const missing = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: { name: "v2-child", runtime: "opencode-cli", flags } });
+    expect(missing.error).toBe("opencode_v2_requires_provider_model");
+    const bare = await call(tools().create_node, { daemon_node_id: DAEMON_ID, node_spec: { name: "v2-child", runtime: "opencode-cli", model: "opencode", flags } });
+    expect(bare.error).toBe("opencode_v2_requires_provider_model");
+    expect(rowCount()).toBe(0);
+    expect(tokenCount()).toBe(before);
+  });
+
   test("#829 missing opt-in rejected before request or child token mint", async () => {
     seed({ runtimes_supported: ["opencode-cli"] });
     const tokenCount = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE network_id = ?1", NET)!.n;

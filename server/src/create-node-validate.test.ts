@@ -3,7 +3,7 @@ import {
   ValidationError,
   validateName, validateRuntime, validateModel, validateFlagValue, RUNTIMES,
   validateEnvRefs, validateChannelsP1, serializeEnvLocal, buildAnetArgs,
-  MAX_ENV_KEYS_PER_NODE, validateFlagsForRuntime, COPRESENCE_FLAG_RUNTIMES,
+  MAX_ENV_KEYS_PER_NODE, validateFlagsForRuntime, validateOpenCodeV2ProviderModel, COPRESENCE_FLAG_RUNTIMES,
 } from "./create-node-validate.js";
 
 const okSecret = (k: string, _net: string, key: string) => k === key ? `value-of-${k}` : undefined;
@@ -215,6 +215,31 @@ describe("buildAnetArgs (§4.2.2 F2 — fully validated argv)", () => {
     });
     expect(args).toContain("--permission-mode");
     expect(args[args.indexOf("--permission-mode") + 1]).toBe("plan");
+  });
+  test("OpenCode V2 requires provider/model only after unsafe opt-in", () => {
+    let unsafe = "";
+    try {
+      buildAnetArgs({ name: "v2", runtime: "opencode-cli", flags: { opencodeGeneration: "v2" } });
+    } catch (e) { unsafe = (e as ValidationError).code; }
+    expect(unsafe).toBe("opencode_v2_requires_unsafe_opt_in");
+    let missing = "";
+    try {
+      buildAnetArgs({ name: "v2", runtime: "opencode-cli", flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } });
+    } catch (e) { missing = (e as ValidationError).code; }
+    expect(missing).toBe("opencode_v2_requires_provider_model");
+    let bare = "";
+    try {
+      buildAnetArgs({ name: "v2", runtime: "opencode-cli", model: "opencode", flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } });
+    } catch (e) { bare = (e as ValidationError).code; }
+    expect(bare).toBe("opencode_v2_requires_provider_model");
+    const args = buildAnetArgs({
+      name: "v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    });
+    expect(args).toContain("stub/model");
+    expect(() => validateOpenCodeV2ProviderModel("opencode-cli", undefined, { opencodeGeneration: "v2" })).not.toThrow();
+    expect(() => validateOpenCodeV2ProviderModel("claude-agent-sdk", undefined, { opencodeGeneration: "v2", opencodeUnsafeTools: true })).not.toThrow();
+    expect(buildAnetArgs({ name: "x", runtime: "opencode-cli" })).toEqual(["node", "create", "x", "--runtime", "opencode-cli"]);
   });
   test("omitted model is allowed and does not emit --model", () => {
     const args = buildAnetArgs({

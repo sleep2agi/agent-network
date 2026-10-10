@@ -232,6 +232,18 @@ missing is reported at start (the request ends as `runtime_capability_check_fail
 - Only valid for `codex-app-server`; the Hub rejects the key on any other runtime (`flag_not_applicable_to_runtime`).
 - An older Hub or daemon that does not know the key rejects the request (`flag_key_unknown`) instead of quietly creating a headless node.
 
+### Creating an OpenCode V2 co-presence node through the daemon {#opencode-v2-via-daemon}
+
+`runtime` stays `opencode-cli`. To create a V2 co-presence node, `create_node`'s `node_spec.flags` must include both `"opencodeGeneration": "v2"` and `"opencodeUnsafeTools": true`, and `model` must be OpenCode's own `provider/model` (exactly one slash):
+
+```json
+{"name": "oc-v2", "runtime": "opencode-cli", "model": "provider/model", "flags": {"opencodeGeneration": "v2", "opencodeUnsafeTools": true}}
+```
+
+This API does not take an anet provider preset; keys stay in the OpenCode config already on the target node. Before the daemon writes the child config, `opencode --version` on PATH must be the accepted `@opencode/cli@2.0.22`. An explicit `v1` must likewise match an accepted `opencode-ai` version (current pin `1.18.34`, transition `1.18.1`). A mismatch is `opencode_generation_mismatch`. Omitting `opencodeGeneration` still creates a legacy V1 node, even if the binary on the machine happens to be V2. A `--version` timeout is not rejected at this step.
+
+Readback: the daemon's config snapshot `flags` echo `opencodeGeneration`, `opencodeMode`, and `opencodeUnsafeTools` as read-only fields. `update_node_config` cannot change those three. `runtime_readiness` for `opencode-cli` may include `generation` and `accepted`. V2 `state` stays `unknown` (provider and login depend on the target node's own configuration). `accepted: false` means this 2.x is not the accepted pin, so an explicit create is refused.
+
 ### Task timeout: `flags.timeout` is in milliseconds {#create-node-timeout-ms}
 
 `create_node`'s `node_spec.flags.timeout` is in **milliseconds**: the daemon writes it into the child's config

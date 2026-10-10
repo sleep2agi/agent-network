@@ -92,6 +92,13 @@ afterEach(() => {
   rmSync(pinRoot, { recursive: true, force: true });
 });
 
+function plantOpencode(stdout: string) {
+  const fixtureBin = join(pinRoot, "probe-bin");
+  mkdirSync(fixtureBin, { recursive: true, mode: 0o700 });
+  writeFileSync(join(fixtureBin, "opencode"), `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stdout)}\n`, { mode: 0o755 });
+  applyDaemonExtraPath([fixtureBin]);
+}
+
 function writeFakeAnet(root: string): string {
   const pkg = join(root, "pkg");
   const binDir = join(pkg, "bin");
@@ -152,10 +159,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     // This is a config-writer test, not native OpenCode startup. Supply the
     // required version probe explicitly: the generic non-root CI image has
     // no vendor binary. Do not rely on the developer's/global native install.
-    const fixtureBin = join(pinRoot, "probe-bin");
-    mkdirSync(fixtureBin, { mode: 0o700 });
-    writeFileSync(join(fixtureBin, "opencode"), '#!/bin/sh\nprintf "opencode v2.0.22\\n"\n', { mode: 0o755 });
-    applyDaemonExtraPath([fixtureBin]);
+    plantOpencode("opencode v2.0.22");
     const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
     const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
     // sleep is deliberately NOT a healthy V2 generation. This test proves
@@ -181,6 +185,64 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(acks[0].error).toContain("opencode_v2_requires_unsafe_opt_in");
     expect(spawned).toHaveLength(0);
     expect(readFileSync(join(dir, "config.json"), "utf8")).toBe(original);
+  });
+
+  test("#829 explicit generation must match an accepted install before write", async () => {
+    plantOpencode("opencode v1.18.34");
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
+    const v1bin = await runCreate({ name: "v2-on-v1", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2onv1");
+    expect(v1bin.acks[0].status).toBe("rejected");
+    expect(v1bin.acks[0].error).toMatch(/^opencode_generation_mismatch/);
+    expect(v1bin.acks[0].error).toContain("@opencode/cli@2.0.22");
+    expect(v1bin.spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-on-v1", "config.json"))).toBe(false);
+
+    plantOpencode("opencode v2.0.22");
+    const v2bin = await runCreate({
+      name: "v1-on-v2", runtime: "opencode-cli", model: "opencode/mimo",
+      flags: { opencodeGeneration: "v1" },
+    }, "cr_v1onv2");
+    expect(v2bin.acks[0].status).toBe("rejected");
+    expect(v2bin.acks[0].error).toContain("opencode_generation_mismatch");
+    expect(v2bin.acks[0].error).toContain("opencode-ai@1.18.34");
+    expect(v2bin.spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v1-on-v2", "config.json"))).toBe(false);
+
+    plantOpencode("no-version-here");
+    const unparsed = await runCreate({
+      name: "v2-unparsed", runtime: "opencode-cli", model: "stub/model", flags,
+    }, "cr_v2unparsed");
+    expect(unparsed.acks[0].status).toBe("rejected");
+    expect(unparsed.acks[0].error).toContain("opencode_generation_mismatch");
+    expect(unparsed.spawned).toHaveLength(0);
+  });
+
+  test("#829 omitted generation stays legacy V1 even when the binary is V2", async () => {
+    plantOpencode("opencode v2.0.22");
+    const { acks, spawned } = await runCreate({
+      name: "legacy-v1", runtime: "opencode-cli", model: "opencode/mimo",
+    }, "cr_v2legacy");
+    expect(acks[0].status).toBe("started");
+    expect(String(acks[0].error ?? "")).not.toContain("opencode_generation_mismatch");
+    expect(spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "legacy-v1", "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBeUndefined();
+    expect(cfg.runtime).toBe("opencode-cli");
+  });
+
+  test("#829 V2 without provider/model is rejected before write", async () => {
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
+    const missing = await runCreate({ name: "v2-nomodel", runtime: "opencode-cli", flags }, "cr_v2nomodel");
+    expect(missing.acks[0].status).toBe("rejected");
+    expect(missing.acks[0].error).toContain("opencode_v2_requires_provider_model");
+    expect(missing.spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-nomodel", "config.json"))).toBe(false);
+    const bare = await runCreate({
+      name: "v2-bare", runtime: "opencode-cli", model: "opencode", flags,
+    }, "cr_v2bare");
+    expect(bare.acks[0].status).toBe("rejected");
+    expect(bare.acks[0].error).toContain("opencode_v2_requires_provider_model");
+    expect(bare.spawned).toHaveLength(0);
   });
   test("「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels", async () => {
     // The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`

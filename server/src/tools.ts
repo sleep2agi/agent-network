@@ -39,6 +39,7 @@ import {
   FLAG_KEYS,
   validateFlagValue,
   validateFlagsForRuntime,
+  validateOpenCodeV2ProviderModel,
   ValidationError,
 } from "./create-node-validate.js";
 import {
@@ -4438,6 +4439,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           validateFlagValue(k, v);
         }
         validateFlagsForRuntime(node_spec.runtime, node_spec.flags);
+        validateOpenCodeV2ProviderModel(node_spec.runtime, node_spec.model, node_spec.flags);
       } catch (e) {
         return validationFailReply(e);
       }

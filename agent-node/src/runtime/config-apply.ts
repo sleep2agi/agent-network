@@ -639,5 +639,14 @@ export function buildConfigSnapshot(
   for (const k of ALLOWED_FLAGS) {
     if (k in f) out.flags[k] = f[k];
   }
+  // Read-only echo for OpenCode manage/readback. These are not editable:
+  // they stay out of ALLOWED_FLAGS, so update_node_config still rejects them.
+  if (fileConfig?.runtime === "opencode-cli") {
+    const generation = fileConfig.opencodeGeneration;
+    if (generation === "v1" || generation === "v2") out.flags.opencodeGeneration = generation;
+    const mode = fileConfig.opencodeMode;
+    if (mode === "headless" || mode === "copresence") out.flags.opencodeMode = mode;
+    if (typeof f.opencodeUnsafeTools === "boolean") out.flags.opencodeUnsafeTools = f.opencodeUnsafeTools;
+  }
   return out;
 }

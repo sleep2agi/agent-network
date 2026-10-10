@@ -5,9 +5,7 @@
 daemon 发现 `opencode --version` 为 V2 时，通用 runtime-readiness 只报告
 `unknown`（CLI 已发现，provider/auth 尚未确认），不把 V1 的 opencode.ai HEAD
 结果当成所有 V2 provider 的结论。本地/局域网 provider 不依赖该站点；反之，
-站点可达也不证明选定模型可用。客户端显示未检测仍允许配置，创建/启动时的
-精确包身份、显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、
-其他 runtime 的认证/网络判据不因此放宽。这里的版本字符串不是可信包身份。
+站点可达也不证明选定模型可用。客户端显示未检测仍允许配置。显式 `opencodeGeneration` 为 `v1` 或 `v2` 时，daemon 在写子节点配置之前拒绝与该代际已接受版本不符的安装（`opencode_generation_mismatch`；V2 接受 `@opencode/cli@2.0.22`）。省略代际仍是 V1，不因 PATH 上是 V2 二进制而拒绝。`--version` 超时不在这一步拒绝。V2 还要求 `model` 为 OpenCode 自己的 `provider/model`（恰好一个斜杠，`opencode_v2_requires_provider_model`）；本接口不套用 anet provider 预设。就绪结果对 `opencode-cli` 可带 `generation` 与 `accepted`，V2 的 `state` 仍是 `unknown`。配置快照 `flags` 回显代际、模式和 unsafe 同意，只读，不能用 `update_node_config` 修改。显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、其他 runtime 的认证/网络判据不因此放宽。`--version` 文本不是包文件身份。
 
 以下是 Hub/daemon 参数与落盘切片，**不是已经上线的客户端入口或真实 V2
 生命周期验收**。现有 CLI、原生 V2 权限、客户端界面和正式发布仍各有门禁。
