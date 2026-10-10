@@ -2495,6 +2495,10 @@ function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
   };
 }
 
+function copresenceCreateOptTruthy(v: string | boolean | undefined): boolean {
+  return v === true || v === "true";
+}
+
 // Scan ~/.claude/projects/<cwd-key>/*.jsonl — the Claude Code sessions that
 // belong to this directory. Newest first. Shared by `anet session ls` and the
 // `anet node create` resume picker (#115).
@@ -5045,7 +5049,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
-      ...(runtime === "codex-app-server" && (opts.copresence === "true" || opts.copresence === true)
+      ...(runtime === "codex-app-server" && copresenceCreateOptTruthy(opts.copresence)
         ? codexSdkYoloFlags(opts["no-yolo"] === "true")
         : {}),
     },
@@ -12129,8 +12133,11 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-
   {
     const re = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
     if (reasoningIdx >= 0 && isReasoningEffortValue(re)) {
-      const { codexHome } = resolveNodeCodexHome({ nodeDir: join(nodesDir(), resolved.id), config: profile });
-      writeReasoningEffortToCodexHome(codexHome, re);
+      const { codexHome } = resolveNodeCodexHome({
+        nodeDir: join(nodesDir(), resolved.id),
+        config: JSON.parse(JSON.stringify(profile)) as Record<string, unknown>,
+      });
+      if (codexHome) writeReasoningEffortToCodexHome(codexHome, re);
     }
   }
   for (const c of changes) console.log(`${resolved.id}: ${c}`);
