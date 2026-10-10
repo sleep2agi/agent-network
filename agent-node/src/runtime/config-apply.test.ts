@@ -72,6 +72,11 @@ describe("validateLocalPatch — defense-in-depth", () => {
     const r = validateLocalPatch({ flags: { godmode: true } as any });
     expect(r?.field).toBe("flags.godmode");
   });
+  test("OpenCode generation and unsafe consent are not editable flags", () => {
+    expect(validateLocalPatch({ flags: { opencodeGeneration: "v2" } as any })?.field).toBe("flags.opencodeGeneration");
+    expect(validateLocalPatch({ flags: { opencodeUnsafeTools: true } as any })?.field).toBe("flags.opencodeUnsafeTools");
+    expect(validateLocalPatch({ flags: { opencodeMode: "copresence" } as any })?.field).toBe("flags.opencodeMode");
+  });
   test("permissionMode invalid enum rejected", () => {
     const r = validateLocalPatch({ flags: { permissionMode: "leetmode" } as any });
     expect(r?.field).toBe("flags.permissionMode");
@@ -379,6 +384,31 @@ describe("buildConfigSnapshot — masked report (no secrets)", () => {
     // Critical: no env / token leak.
     expect("env" in snap).toBe(false);
     expect("token" in snap).toBe(false);
+  });
+
+  test("opencode-cli echoes generation, mode and unsafe consent without making them editable", () => {
+    const snap = buildConfigSnapshot({
+      runtime: "opencode-cli",
+      model: "stub/model",
+      opencodeGeneration: "v2",
+      opencodeMode: "copresence",
+      flags: { opencodeUnsafeTools: true, timeout: 600000, mysteryFlag: "x" },
+    }, true, 4);
+    expect(snap.flags.opencodeGeneration).toBe("v2");
+    expect(snap.flags.opencodeMode).toBe("copresence");
+    expect(snap.flags.opencodeUnsafeTools).toBe(true);
+    expect(snap.flags.timeout).toBe(600000);
+    expect("mysteryFlag" in snap.flags).toBe(false);
+    const other = buildConfigSnapshot({
+      runtime: "codex-app-server",
+      opencodeGeneration: "v2",
+      opencodeMode: "copresence",
+      flags: { opencodeUnsafeTools: true, mysteryFlag: "x" },
+    }, false, 0);
+    expect(other.flags.opencodeGeneration).toBeUndefined();
+    expect(other.flags.opencodeMode).toBeUndefined();
+    expect(other.flags.opencodeUnsafeTools).toBeUndefined();
+    expect("mysteryFlag" in other.flags).toBe(false);
   });
 
   test("missing model → null (not undefined, dashboard renders explicitly)", () => {

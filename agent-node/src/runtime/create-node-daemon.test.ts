@@ -179,6 +179,28 @@ describe("buildAnetArgsDaemon now reaches flag value validation", () => {
       name: "x", runtime: "claude-agent-sdk", model: "",
     })).toThrow(/model_invalid/);
   });
+  test("OpenCode V2 requires a native provider/model after the unsafe opt-in", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2" },
+    })).toThrow(/opencode_v2_requires_unsafe_opt_in/);
+    expect(() => buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    })).toThrow(/opencode_v2_requires_provider_model/);
+    expect(() => buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli", model: "opencode",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    })).toThrow(/opencode_v2_requires_provider_model/);
+    const args = buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    });
+    expect(args).toContain("--model");
+    expect(args).toContain("stub/model");
+    expect(args).toContain("--opencode-generation");
+    expect(args).toContain("--opencode-unsafe-tools");
+  });
   test("provider/model (OpenCode co-presence) passes; two slashes, edge slashes and dot-only segments are rejected", () => {
     const args = buildAnetArgsDaemon({ name: "x", runtime: "opencode-cli", model: "opencode/mimo-v2.5-free" });
     expect(args).toContain("opencode/mimo-v2.5-free");

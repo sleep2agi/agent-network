@@ -48,9 +48,13 @@ passing identity test cannot stand in for any of these checks. Missing
 evidence keeps the existing gate closed; it is not permission to broaden it.
 
 The CLI/daemon/client entrypoints and signed client release have their own
-acceptance under #829 and #539. Package publication or a merged UI patch
-does not change this capability decision. The table consolidates existing
-evidence; it makes no new upstream-version or registry-availability claim.
+acceptance under #829 and #539. Daemon create now rejects an explicit
+generation whose installed `opencode --version` is not an accepted pin for
+that generation, and requires a native `provider/model` for V2. Provider
+presets and the signed client release remain separate. Package publication
+or a merged UI patch does not change this capability decision. The table
+consolidates existing evidence; it makes no new upstream-version or
+registry-availability claim.
 
 ## Restore, validate and roll back
 

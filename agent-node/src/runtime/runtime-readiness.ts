@@ -24,6 +24,7 @@ import { connect as netConnect } from "node:net";
 import { join, delimiter as pathDelimiter } from "node:path";
 import { connect as tlsConnect } from "node:tls";
 import { codexFingerprintIndexDir, fingerprintRefreshToken } from "../codex-auth-fingerprint.js";
+import { isAcceptedOpencodeVersionFor, opencodeGenerationSupport } from "./opencode-versions.js";
 
 export type ReadinessState = "ready" | "missing_cli" | "not_logged_in" | "no_network" | "unknown";
 export type NetworkVerdict = "reachable" | "unreachable" | "skipped";
@@ -45,6 +46,10 @@ export interface RuntimeReadiness {
   network?: NetworkVerdict;
   /** codex 专属:本机已有多少个**别的**节点在用同一条 codex 登录(刷新链)。 */
   shared_login_count?: number;
+  /** opencode-cli only. Accepted pin of that generation, not an authorization to create. */
+  generation?: "v1" | "v2";
+  /** True only when `version` is an accepted pin for `generation`. */
+  accepted?: boolean;
 }
 
 export type ExecResult =
@@ -203,6 +208,26 @@ export async function requiredCliStatus(
   return { cli: "unknown", command };
 }
 
+/**
+ * Explicit create generation vs the installed `opencode --version`.
+ * Returns null unless the request names v1 or v2 AND the CLI was found.
+ * A missing or unparsed version on an explicit request is a mismatch.
+ * Omitted generation (legacy V1) and cli timeout/missing do not mismatch.
+ */
+export function opencodeExplicitGenerationMismatch(
+  requested: unknown,
+  cli: { cli: string; version?: string },
+): string | null {
+  if (requested !== "v1" && requested !== "v2") return null;
+  if (cli.cli !== "found") return null;
+  if (cli.version && isAcceptedOpencodeVersionFor(requested, cli.version)) return null;
+  const support = opencodeGenerationSupport(requested);
+  const pin = support.pin ?? "none";
+  const accepted = support.acceptedVersions.join(", ") || "none";
+  const seen = cli.version ?? "(unparsed)";
+  return `opencode_generation_mismatch: installed opencode ${seen} is not an accepted ${requested} of ${support.packageName}@${pin} (accepted: ${accepted}). Provider and model stay in OpenCode's own config; this check does not apply an anet provider preset.`;
+}
+
 async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: number): Promise<RuntimeReadiness> {
   const checked_at = new Date(deps.now()).toISOString();
   const spec = SPECS[runtime];
@@ -244,12 +269,18 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
   // Zen endpoint and auth-file probes cannot establish V2 readiness: an
   // offline/LAN provider can work while opencode.ai is unreachable, and a
   // reachable website does not prove model authentication. Keep this unknown,
-  // not ready. Exact package identity, consent and launch checks still run at
-  // creation/start; a --version string here is observational, not authorization.
+  // not ready. `accepted` only classifies the --version token against the pin
+  // table; create re-checks before writing a node.
   if (runtime === "opencode-cli" && out.cli === "found" && /^2\./.test(out.version ?? "")) {
     out.auth = "unknown";
     out.network = "skipped";
-    out.reason = "检测到 OpenCode V2;provider、模型和登录取决于目标节点配置,不能用 opencode.ai 的连通性确认。创建时仍需校验准确版本、显式工具授权和启动结果";
+    out.generation = "v2";
+    const support = opencodeGenerationSupport("v2");
+    const accepted = !!out.version && isAcceptedOpencodeVersionFor("v2", out.version);
+    out.accepted = accepted;
+    out.reason = accepted
+      ? "检测到 OpenCode V2;provider、模型和登录取决于目标节点配置,不能用 opencode.ai 的连通性确认。创建时仍需校验准确版本、显式工具授权和启动结果"
+      : `检测到 OpenCode 2.x（${out.version ?? "未解析"}），不是本发行接受的 ${support.packageName}@${support.pin}；显式创建 v2 会被拒绝。provider 与模型仍用 OpenCode 自己的配置，本检查不套用 anet provider 预设`;
     return out;
   }
 
@@ -318,6 +349,10 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
       parts.push(`本机已有 ${out.shared_login_count} 个节点共用这个 codex 登录,新节点会加入同一条刷新链,其中一个刷新后其余可能被顶掉登录;建好后可用 \`anet node codex login-status\` 查看,并为新节点单独执行 codex login`);
     }
     out.reason = parts.length > 0 ? `可以创建。${parts.join(";")}` : "可以创建";
+  }
+  if (runtime === "opencode-cli" && out.cli === "found" && out.version && isAcceptedOpencodeVersionFor("v1", out.version)) {
+    out.generation = "v1";
+    out.accepted = true;
   }
   return out;
 }

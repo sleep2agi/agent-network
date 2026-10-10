@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: OpenCode V2 create must match an accepted install (2026-10-10)
+
+- When `create_node` sets `flags.opencodeGeneration` to `v1` or `v2`, the daemon checks that `opencode --version` on PATH is an accepted install of that generation before it writes the node (V2 is `@opencode/cli@2.0.22`). A mismatch is rejected with `opencode_generation_mismatch`. Omitting the generation still creates a V1 node. A `--version` timeout is not rejected at this step.
+- A V2 `model` must be OpenCode's own `provider/model` (exactly one slash). This API does not take a separate provider preset; keys stay in the OpenCode config already on the target node. A missing model is `opencode_v2_requires_provider_model`, and `opencodeUnsafeTools: true` is still required first.
+- `opencode-cli` readiness may include `generation` and `accepted`. V2 `state` stays `unknown` and does not become `ready` because a website answers. The node config snapshot echoes generation, mode, and the unsafe consent on `flags`; `update_node_config` cannot change those three.
+- This is not an npm package publish. See #2544.
+
 ## Unreleased: client download page (2026-10-10)
 
 - anet.sh gains a [download page](/en/download). macOS, Windows, Linux, and Android installers come from the latest published desktop release (the same choice the in-app updater makes). A platform missing from that release is called out instead of linked to an older file. The home page, navigation, and install docs point here.
