@@ -1,0 +1,70 @@
+#894 / #829 — cancel-flow TUI session mismatch root cause
+
+TEST ONLY. No merge, npm publish, production change, or Hub card edit.
+
+## What failed
+
+The Linux native cancel-flow package reached create, then stopped before any
+cancel click. The launcher had exited 0. Bridge, serve, and attach records
+agreed on one generation. The daemon still rejected the launch with
+`TUI session mismatch`. A later run of the same package created successfully,
+so the failure was not a permanently wrong session id. The failing process
+argv was not kept, so that package log alone does not prove the cause.
+
+## Cause
+
+`renderAttachRecordShell` records the attach shell's own pid and start ticks,
+then the shell `exec`s OpenCode. `validateLaunchHealth` requires `/proc/<pid>/cmdline`
+to contain `--session` and the generation as the next element. Until `exec`,
+that pid is still the shell, so the class is `pre_exec` and the guard returns
+`TUI session mismatch`. After `exec`, the same pid and start ticks carry
+`--session <generation>` and the same guard passes. A different generation or
+a single `--session=<id>` token stays `wrong_session` and must not pass.
+
+Create and remote start/restart both used to read that cmdline once, at
+launcher exit. Remote start is the manage path used when a cancelled stop is
+later confirmed and the node is started again. Both now repeat the unchanged
+guard only until the original deadline (35 seconds from launch, or the caller
+timeout). A deadline that has already passed does not sleep and does not add
+time. Nonzero launcher exits do not enter the wait.
+
+If start still fails for this reason, the stored error is the public code
+`opencode_tui_session_mismatch`. The lifecycle read returns that code.
+`TUI session mismatch` and `opencode_launch_health:TUI session mismatch`
+stay redacted as `lifecycle_error`.
+
+## Evidence
+
+Bun 1.3.14, Linux, local non-root process test (not a native package replay):
+
+- 23 pass, 0 fail across launcher-health.test.ts and opencode-start-completion.test.ts
+- real process: before exec, inspect reason is exactly `TUI session mismatch`
+  and argv class is `pre_exec`; after exec, the same pid and start ticks pass
+  and argv class is `match`
+- wrong session consumes only the remaining budget and stays unsuccessful
+- start ack for this reason is `opencode_tui_session_mismatch` and the
+  deadline span equals the configured timeout
+
+Server lifecycle HTTP test, same Bun, fixture database only:
+
+- 14 pass, 0 fail, including the new public code and redaction of the raw sentence
+
+Published Hub contract inputs, checked with
+`python3 scripts/check-hub-v2-protocol-inputs.py` against
+edc68a4ca87bbb7ca4944093e8ff113a17078624 (the preview.120 release commit):
+
+- create-node-validate.ts, db.ts, tools.ts, server.ts hashes match
+  docs/tests/hub-v2-protocol-inputs.json
+- tarball sha512 is the value already enforced by app PR795
+- current main db.ts and server.ts are not those bytes; do not retarget the
+  published-package check at HEAD
+
+App PR795 head 7ec7a31004b4088887bc32cd6468dcb0962c0ad1 had no failing or
+pending required checks at investigation time. This repository change does
+not rebuild that package.
+
+## Not claimed
+
+No new native deb, no re-run of the installed-package cancel UI, no V1 model
+acceptance, and no statement that exec always finishes inside the deadline on
+a loaded machine. Client UI end-to-end remains outside this change.

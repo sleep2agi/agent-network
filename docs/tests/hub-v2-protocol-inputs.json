@@ -1,0 +1,13 @@
+{
+  "package": "@sleep2agi/commhub-server",
+  "version": "0.9.0-preview.120",
+  "tarball": "commhub-server-0.9.0-preview.120.tgz",
+  "sha512": "lluvIp478F3UiFXC8v4Dy8x1uvb/UhgXPWvRi5R2ii3lB4nYEqFn4KUZBO6mH7WRoEQBaGnqKhNFWLekTxpsOw==",
+  "sourceCommit": "edc68a4ca87bbb7ca4944093e8ff113a17078624",
+  "files": {
+    "src/create-node-validate.ts": "810da01a47fcb1a970e2311f3c8a0cbd5914ef14db2dc70a21dfe2aa5b96b2f8",
+    "src/db.ts": "ebe5c5955fbe76c775aaea8d2d304e39e8677de6dff18c9b6c58ef54b65b2a94",
+    "src/tools.ts": "647b20aa780219217d9c51920e9ab3af6bede10c5929edd6a55e123db5c6172d",
+    "src/server.ts": "575820c3a0bb44105ea687bf3c3524523d8b1ffa48ebe7d3c08551afd0e0c696"
+  }
+}

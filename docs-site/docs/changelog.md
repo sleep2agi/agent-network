@@ -4,6 +4,10 @@
 
 - anet.sh 新增[下载页](/download)。macOS、Windows、Linux、Android 的安装包来自最新已发布的桌面端 release（与应用内更新同一选择）；某一平台这次没有产物时，该栏说明缺失，不继续指向旧文件。首页、导航和安装文档改指向这一页。
 
+## 未发布：OpenCode 启动要等到 TUI 进程替换完成（2026-10-10）
+
+- Linux 上，OpenCode 共存启动器退出 0 时，attach 进程可能还是写记录的 shell，命令行里还没有 `--session`。创建和远程 start/restart 会在原有截止时间内重复检查，等到同一个进程 exec 之后；错 session 或非零退出仍然失败。远程 start 若仍不匹配，错误码是 `opencode_tui_session_mismatch`。这不是原生安装包或客户端界面验收。
+
 ## 未发布：Codex fork 请求关联（2026-10-09）
 
 - 共存节点单次启动新增可选 `--fork-recovery-request-id`，在已确认的 fork 映射中记录请求 ID，保留旧历史。它不代表完整启动成功；Hub/daemon 传参与客户端恢复按钮尚未接入。见 [恢复说明](./guide/codex-copresence.md#fork-on-resume-failure)。

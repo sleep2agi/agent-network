@@ -44,6 +44,9 @@ export interface StartDoorbellDeps {
   readProcCmdline?: (pid: number) => string | null;
   opencodeStartTimeoutMs?: number;
   inspectOpenCodeStartHealth?: typeof inspectLaunchHealth;
+  waitOpenCodeStartHealth?: (
+    dir: string, configPath: string, launchedAt: number, deadline: number,
+  ) => Promise<{ ok: true; bridgePid: number } | { ok: false; reason: string }>;
 }
 
 /** #1448 finding-6 — /proc/<pid>/cmdline 是否 token 精确匹配 `--alias <alias>`

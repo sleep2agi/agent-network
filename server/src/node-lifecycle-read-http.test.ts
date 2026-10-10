@@ -60,8 +60,9 @@ test("public errors redact free text for granted viewers on every projection", a
       "bin: ENOENT: /private/fixture/bin/anet on fixture-host",
       "adopt_unknown_secret", "adopt_start_timeout: /private/fixture", "", "adopt_start_timeout", null,
       "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",
+      "TUI session mismatch", "opencode_launch_health:TUI session mismatch", "opencode_tui_session_mismatch",
     ]) {
-      const expected = error === null || ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed"].includes(error) ? error : "lifecycle_error";
+      const expected = error === null || ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed", "opencode_tui_session_mismatch"].includes(error) ? error : "lifecycle_error";
       for (const [kind, table, request] of [
         ["adopt", "node_daemon_bindings", "adopt_read_active"],
         ["start", "node_start_requests", "start_read_failed"],

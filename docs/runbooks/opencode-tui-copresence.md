@@ -33,7 +33,15 @@ Linux 候选实现会在原生 V2 就绪后写节点目录内的
 `opencode-launch-health.json`（0600，无凭据）。daemon 接受正常退出的
 共存启动器前，核对本轮写入时间、bridge/serve/TUI 的 PID 与启动 ticks、
 serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 复用、
-死进程或非零退出不放行。运行代际关闭/serve 退出时清理自己的记录。
+死进程或非零退出不放行。attach 脚本在 `exec` 之前就用自己的 PID 写下
+`opencode-attach.json`，所以启动器退出 0 的瞬间 `/proc` 里可能还是 shell，
+没有 `--session <generation>` 这两个参数。这个窗口的判据仍是
+`TUI session mismatch`，它不是另一条 session。创建和远程 start/restart
+只在原有截止时间（默认 35 秒，从本次启动起算，不是退出后再加一段）内
+重复同一套检查，等到 exec 之后的 argv；错 session、复用 PID、非零退出
+不会因为等到超时而通过。远程 start 若最终仍是这条 mismatch，回执错误码是
+`opencode_tui_session_mismatch`，生命周期读接口原样返回该码；带路径的
+daemon 原文仍然折叠成 `lifecycle_error`。运行代际关闭/serve 退出时清理自己的记录。
 此文件是可重建的运行证据，不是需要从备份恢复的数据，不能复制旧记录
 冒充就绪。Linux daemon 创建和远程 start 完成判定使用此证据路径，其他平台未验收。
 不要把 Hub 首次注册的 `succeeded` 或 launcher 的退出 0 单独当作健康；
