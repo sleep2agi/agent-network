@@ -2,7 +2,7 @@ import { expect } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { containerTest as test, fixtureTmux } from "./fixture-tmux.js";
-import { pinFixtureAnet } from "./fixture-anet.js";
+import { pinFixtureAnet } from "./pin-fixture-anet.js";
 import { codexTmuxEnv, listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
 import { handleAdoptDoorbell } from "../../agent-node/src/runtime/adopt-daemon.js";
 import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifecycle.js";

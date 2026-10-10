@@ -8,7 +8,7 @@ import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifec
 import { adoptedChild } from "../../agent-node/src/runtime/adopt-registry.js";
 import { preflightCodexStart } from "../../agent-node/src/runtime/adopt-codex-start-preflight.js";
 import { readAdoptionProc } from "../../agent-node/src/runtime/adopt-proc.js";
-import { pinFixtureAnet } from "./fixture-anet.js";
+import { pinFixtureAnet } from "./pin-fixture-anet.js";
 
 async function listener() {
   const server=createServer();
