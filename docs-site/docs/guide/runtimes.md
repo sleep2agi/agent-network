@@ -91,9 +91,9 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 > 剥掉，内置 id 的 `npm` 包也不可覆盖。凭据仍按 `anthropic` preset 走（create 时读 `ANTHROPIC_API_KEY`，
 > 或 `anet opencode auth-login <node> --provider anthropic`）。
 >
-> OpenCode **V2** 另有一条不改安全预设的路：`--opencode-generation v2 --opencode-unsafe-tools --provider <deepseek|minimax|custom-openai-compat>`。
-> 它写入 OpenCode 自己的 `providers`（模型列表与 `env` 变量名；自定义端点的 package 是 `@opencode/ai/providers/openai-compatible`），
-> 不另造一套 ANet provider。`--provider` 不会顺便打开 unsafe-tools。V1 安全模式仍然会丢掉自定义 provider。
+> OpenCode **V2** 共存节点用的是这台机器上 OpenCode 已经写在 `opencode.json` 里的 `model`（`provider/model`）和 `providers`。
+> 创建时如果 `--model` 或 `--provider` 和这份配置不一致，命令拒绝并写出两边的值，不会改成预设默认模型，也不会退回 anthropic。
+> `--provider` 只能重复本机已有的 provider id，不会打开 unsafe-tools，也不能用 `--base-url` 改写 OpenCode 自己的 provider。V1 安全模式仍然会丢掉自定义 provider。
 >
 > 三条部署前置：① `opencode-ai@<pin>` 要在 umask 0022 的独立 npm 前缀里装（前缀目录带组写位会被包身份校验拒，
 > 报 `unsafe directory ownership or mode`）；② 机器上没有 `/run/user/<uid>` 时默认安全根不可用，用 `ANET_OPENCODE_SAFE_BASE`

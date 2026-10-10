@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased: OpenCode V2 co-presence create matches the machine provider (2026-10-10)
+
+- Creating an OpenCode V2 co-presence node takes the model and provider from OpenCode's own `opencode.json` on this machine (`model` and `providers`). A requested model or `--provider` that differs is refused, and the refusal names both sides. Create does not substitute a preset default model or the anthropic preset.
+- The matching `providers` entry is copied into the node's `opencode.json`. `--base-url` and `--api-key-env` do not rewrite it on this path. Codex `--provider` presets are unchanged.
+- This is not the Hub `create_node` format gate that requires one slash. A well-formed model that does not match this machine's OpenCode is still refused.
+
 ## Unreleased: daemon can remotely start an adopted native Codex trio (2026-10-10)
 
 - After preflight passes, the daemon starts an adopted native Codex co-presence node with the trusted `anet node start`. It tells the Hub the node is started only after the new marker, all three stages, and the saved loopback port match. Remote start of an `external-appserver` layout stays refused. This does not prove the Codex binary version or rollout, and one-click restart of an adopted node stays refused (stop, then start).
@@ -14,7 +20,7 @@
 ## Unreleased: Codex and OpenCode V2 providers (2026-10-10)
 
 - `anet node create` and `anet node edit` accept `--provider`, `--base-url`, and `--api-key-env`. This slice is Codex (`codex-sdk`, `codex-app-server`) and OpenCode V2 (`opencode-cli --opencode-generation v2 --opencode-unsafe-tools`) only. Presets are `deepseek`, `minimax`, and `custom-openai-compat`.
-- Codex writes `[model_providers.*]` in the node `config.toml` with `wire_api = "responses"` and stores the credential as an environment-variable name. OpenCode V2 writes OpenCode's own `opencode.json` `providers` object (its model list and `env` names; a custom endpoint uses `@opencode/ai/providers/openai-compatible`). The key never goes on the command line or into `config.json`.
+- Codex writes `[model_providers.*]` in the node `config.toml` with `wire_api = "responses"` and stores the credential as an environment-variable name. OpenCode V2 co-presence create no longer lets these presets replace the machine's OpenCode config; see “OpenCode V2 co-presence create matches the machine provider” above. The key never goes on the command line or into `config.json`.
 - Claude, OpenCode V1, and the Hub vault / `create_node` path are not in this slice.
 
 ## Unreleased: adoption candidate discovery (2026-10-10)

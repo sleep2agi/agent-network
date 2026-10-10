@@ -105,14 +105,16 @@ V2 应安装在独立、所有者可信且不可组写的前缀，再让启动�
 不要通过覆盖生产全局 V1 来试用 V2。切回 V1 使用独立 V1 节点和对应 PATH；
 V2 session 没有承诺可降级为 V1 session。
 
-V2 创建命令（仅用于可信工作区和可信任务，先理解工具权限风险）：
+V2 创建命令（仅用于可信工作区和可信任务，先理解工具权限风险）。
+
+模型和 Provider 必须已经写在这台机器的 OpenCode 配置里（全局 `~/.config/opencode/opencode.json`，或项目 `opencode.json` / `.opencode/opencode.json`，后写的覆盖先写的；`.opencode` 覆盖同目录的直接文件）。`model` 是 OpenCode 自己的 `provider/model` 字符串。有对应的 `providers.<id>` 时，创建会把这一条原样复制进节点，不另造一套 provider 结构。`--model` 或 `--provider` 与这份配置不一致时，创建拒绝并写出请求值和本机值。没有配置 `model` 时同样拒绝，不会退回 anthropic 或预设默认模型。
 
 ```bash
 anet node create opencode-v2 \
   --runtime opencode-cli \
   --opencode-generation v2 \
   --opencode-unsafe-tools \
-  --model '<provider>/<model>'
+  --model '<与本机 OpenCode 相同的 provider/model>'
 anet node start opencode-v2 --copresence
 tmux attach -t '=opencode-v2'
 anet node stop opencode-v2

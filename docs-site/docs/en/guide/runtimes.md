@@ -93,9 +93,9 @@ For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/gro
 > is stripped by the credential allowlist, and the `npm` package of a built-in id cannot be overridden. Credentials still go
 > through the `anthropic` preset (`ANTHROPIC_API_KEY` read at create time, or `anet opencode auth-login <node> --provider anthropic`).
 >
-> OpenCode **V2** has a separate path that does not weaken the safe preset: `--opencode-generation v2 --opencode-unsafe-tools --provider <deepseek|minimax|custom-openai-compat>`.
-> It writes OpenCode's own `providers` object (its model list and `env` names; a custom endpoint uses `@opencode/ai/providers/openai-compatible`).
-> There is no second ANet provider schema. `--provider` does not imply unsafe-tools. V1 safe mode still drops custom providers.
+> OpenCode **V2** co-presence uses the `model` (`provider/model`) and `providers` already in this machine's OpenCode `opencode.json`.
+> If `--model` or `--provider` disagrees with that config, create refuses and names both sides. It does not substitute a preset default model or fall back to anthropic.
+> `--provider` may only restate the provider id OpenCode already has. It does not turn on unsafe-tools, and `--base-url` cannot rewrite OpenCode's provider. V1 safe mode still drops custom providers.
 >
 > Three deployment prerequisites: ① install `opencode-ai@<pin>` into a dedicated npm prefix under
 > umask 0022 (a group-writable prefix fails the package identity check with `unsafe directory ownership or mode`);
