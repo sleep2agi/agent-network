@@ -13,7 +13,20 @@ RUN cd /workspace/agent-node && bun install --ignore-scripts
 COPY agent-node /workspace/agent-node
 
 COPY docs-site/package.json docs-site/package-lock.json /workspace/docs-site/
-RUN cd /workspace/docs-site && bun install --ignore-scripts
+# bun 1.3.14 sometimes fails this layer with
+# "Fail extracting tarball for mermaid" on an unchanged lockfile
+# (job 114198259550, head 472393cc; the same image built on main).
+# Drop the install cache so a truncated tarball is not reused.
+RUN set -eu; \
+    cd /workspace/docs-site; \
+    ok=0; \
+    for attempt in 1 2 3; do \
+      if bun install --ignore-scripts; then ok=1; break; fi; \
+      echo "docs-site bun install attempt ${attempt} failed" >&2; \
+      rm -rf "${HOME}/.bun/install/cache"; \
+      sleep $((attempt * 2)); \
+    done; \
+    test "$ok" = 1
 COPY docs-site /workspace/docs-site
 
 COPY agent-network/bin/goal-wake-log-render.ts /workspace/agent-network/bin/goal-wake-log-render.ts
