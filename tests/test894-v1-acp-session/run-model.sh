@@ -5,6 +5,7 @@ test "$SOURCE_COMMIT" = "${EXPECTED_SOURCE_COMMIT:-}"
 echo "source: $SOURCE_COMMIT"
 sha256sum /fixture-acp/probe-model.ts /fixture-acp/provider-proxy.py
 timeout 90s bun /fixture-acp/probe-model.ts
+TEST_UNAVAILABLE_MODEL=1 timeout 90s bun /fixture-acp/probe-model.ts
 set +e
 TEST_WRONG_MODEL=1 timeout 90s bun /fixture-acp/probe-model.ts >/tmp/model-negative.txt 2>&1
 code=$?

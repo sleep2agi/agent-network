@@ -43,6 +43,8 @@ for attempt in range(50):
   execFileSync('python3', ['-c', preflight], { env: { ...process.env, NO_PROXY: '', no_proxy: '' }, stdio: 'inherit' });
   console.log('PASS: isolated fixture verified TLS and unauthenticated HTTP401');
   for (const dir of [join(workDir, '.config/opencode'), join(workDir, '.local/share/opencode')]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // Deliberately conflicting default: only session/set_model may select the
+  // non-default model. Never seed the expected answer into persistent config.
   writeFileSync(join(workDir, '.config/opencode/opencode.json'), JSON.stringify({ model: 'openai/gpt-4.1' }), { mode: 0o600 });
   writeFileSync(join(workDir, '.local/share/opencode/auth.json'), JSON.stringify({ openai: { type: 'api', key: 'test-only-v1-acp' } }), { mode: 0o600 });
   // Only this disposable container process trusts its ephemeral fixture cert.
@@ -54,11 +56,28 @@ for attempt in range(50):
   process.env.no_proxy = process.env.NO_PROXY;
   process.env.SSL_CERT_FILE = cert;
   process.env.NODE_EXTRA_CA_CERTS = cert;
+  const unavailable = process.env.TEST_UNAVAILABLE_MODEL === '1';
+  let published = false;
+  let selectionError: unknown;
   const runtime = await openOpencodeRuntime({ cwd, workDir, launchBase: launches,
+    model: unavailable ? 'openai/not-in-fixture' : 'openai/gpt-4.1-selected',
+    onSession: () => { published = true; },
     ...(process.env.TEST_DEBUG_RUNTIME === '1' ? { backend: { ...OPENCODE_V1_BACKEND,
       acpArgs: () => [...OPENCODE_V1_BACKEND.acpArgs(), '--print-logs', '--log-level', 'DEBUG'] } } : {}),
     expectedVersion: '1.18.34', binarySearchPath: process.env.PATH,
-    onClient: value => { client = value; value.on('stderr', diagnostic); }, log: diagnostic, warn: diagnostic });
+    onClient: value => { client = value; value.on('stderr', diagnostic); }, log: diagnostic, warn: diagnostic })
+    .catch(error => { selectionError = error; if (!unavailable) throw error; return undefined; });
+  if (unavailable) {
+    assert.equal(runtime, undefined, 'unavailable selection must not open a session');
+    assert.match(String(selectionError), /refusing default-model fallback/);
+    assert.match(String(selectionError), /model not found: openai\/not-in-fixture/);
+    assert.equal(published, false, 'unavailable selection must not publish a session');
+    assert.equal(client?.isRunning, false, 'failed model selection must stop ACP');
+    const requests = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(requests.filter(row => row.authorized).length, 0, 'no provider generation after rejected selection');
+    console.log('PASS: real ACP rejects unavailable model before publication and generation');
+  } else {
+  assert.ok(runtime);
   assert.match(runtime.sessionId, /^ses_/);
   const env = Object.fromEntries(readFileSync(`/proc/${client!.processId}/environ`, 'utf8').split('\0').filter(Boolean).map(entry => {
     const i = entry.indexOf('='); return [entry.slice(0, i), entry.slice(i + 1)];
@@ -66,17 +85,24 @@ for attempt in range(50):
   assert.equal(env.OPENCODE_PURE, '1');
   assert.equal(JSON.parse(env.OPENCODE_PERMISSION)['*'], 'deny');
   console.log('PASS: real ACP session retains safe-default wildcard deny');
-  const result = await opencodeThink(runtime, { cwd, workDir, prompt: 'Return a short test reply.',
+  const result = await opencodeThink(runtime, { cwd, workDir, prompt: 'ANET_MODEL_BINDING_MAIN_PROMPT: Return a short test reply.',
     idleTimeoutMs: 15000, disableThinkingOnlyRescue: true, log: () => {}, warn: () => {} });
   assert.equal(result.replyText, 'FIXTURE_ONLY_V1_ACP_RESPONSE');
   console.log('PASS: real ACP consumes fixture-only model response');
   const requests = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   const modelRequests = requests.filter(row => row.authorized);
   assert.ok(modelRequests.length > 0, 'runtime sent authenticated fixture request');
-  const expected = process.env.TEST_WRONG_MODEL === '1' ? 'deliberately-wrong' : 'gpt-4.1';
-  assert.ok(modelRequests.every(row => row.model === expected), 'safe ACP provider model mismatch');
+  const expected = process.env.TEST_WRONG_MODEL === '1' ? 'deliberately-wrong' : 'gpt-4.1-selected';
+  // OpenCode generates titles independently using its small/default model.
+  // Check the actual user-turn request, not an unrelated title request.
+  const mainRequests = modelRequests.filter(row => Array.isArray(row.input)
+    && row.input.some((part: any) => part.role === 'system' && String(part.content).startsWith('You are opencode,'))
+    && JSON.stringify(row.input).includes('ANET_MODEL_BINDING_MAIN_PROMPT'));
+  assert.equal(mainRequests.length, 1, 'exactly one actual main-turn request');
+  assert.ok(mainRequests.every(row => row.model === expected), 'safe ACP provider model mismatch');
   assert.ok(modelRequests.every(row => row.path === '/v1/responses' && row.host === 'api.openai.com'));
   console.log('PASS: fixture authentication, exact model and Responses route');
+  }
 } catch (error) {
   for (const message of diagnostics.slice(-20)) console.error(message);
   throw error;

@@ -28,7 +28,9 @@ class Model(BaseHTTPRequestHandler):
         raw = json.dumps({'openai': {'id': 'openai', 'name': 'Fixture OpenAI',
                                     'env': ['OPENAI_API_KEY'], 'npm': '@ai-sdk/openai',
                                     'api': 'https://api.openai.com/v1',
-                                    'models': {'gpt-4.1': model}}}).encode()
+                                    'models': {'gpt-4.1': model,
+                                               'gpt-4.1-selected': {**model, 'id': 'gpt-4.1-selected',
+                                                                    'name': 'Fixture selected model'}}}}).encode()
         self.send_response(200)
         self.send_header('content-type', 'application/json')
         self.send_header('content-length', str(len(raw)))

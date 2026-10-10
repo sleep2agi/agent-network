@@ -46,7 +46,14 @@ not disabled. ACP's internal localhost HTTP traffic bypasses the fixture via
 
 An unauthenticated fixture request must receive HTTP401 before ACP starts. A
 synthetic node-local credential then exercises the real runtime/provider request,
-exact host/path/model and ACP response consumption. A new process deliberately
+exact host/path/model and ACP response consumption. The node explicitly selects
+`openai/gpt-4.1-selected` through the production ACP opener while persistent
+OpenCode configuration defaults to `openai/gpt-4.1`. The observer identifies the
+main task request independently of OpenCode's title generation and requires the
+selected non-default model. A separate fresh process selects an unavailable
+model: upstream must reject it before session publication or any authenticated
+generation, and the runtime must kill its child and remove the launch root.
+A new process deliberately
 uses a wrong expected model to check the observer after a successful response.
 The known fixture reply is not present in the user prompt. Certificate, credential,
 proxy, ACP child and launch roots are disposable; no real vendor key is used.
@@ -56,3 +63,16 @@ but is not used in the acceptance run. Each probe has a 90-second deadline.
 This proves controlled transport plumbing, NOT live vendor authentication/model
 availability, model reasoning, tool enforcement, Hub delivery, native package
 acceptance or release readiness. The older session-only result stays independent.
+
+The associated `runtime.test.ts` protocol tests cover new/resumed sessions,
+explicitly lost-session fallback, missing-method/model errors, legacy omission,
+ack-before-publication and cleanup. They also check that the headless CLI passes
+its resolved node model to the opener. All run in the same isolated Docker image;
+protocol stubs alone are not evidence of real OpenCode behavior.
+
+No new service, port, secret source, database migration or production state is
+introduced. Existing node `model` configuration remains authoritative; the ACP
+selection is reapplied to each new/loaded session. A model rejected by OpenCode
+fails the task instead of silently running the default. Deployment and rollback
+remain the existing exact-SHA CLI/node pair procedures; this test-only image is
+not a release or a backup of node credentials/conversations.
