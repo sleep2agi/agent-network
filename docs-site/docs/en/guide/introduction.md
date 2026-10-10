@@ -22,16 +22,25 @@ The Hub, Dashboard, and SQLite data run on hardware you control. Members and tas
 
 ## Runtimes and model providers
 
-A runtime controls how `agent-node` drives an AI. A provider controls the model and billing. They are different choices.
+A runtime controls how `agent-node` drives an AI. A provider controls the model and billing. They are different choices. The table is the full `anet node create` picker: seven runtimes. Install and auth are on [Choosing a Runtime](/en/guide/runtimes). Models and providers are on [Models & Providers](/en/guide/multi-model).
 
-| Runtime | Use it when |
-|---|---|
-| `claude-code-cli` | You already use Claude Code CLI and want its interactive capabilities |
-| `claude-agent-sdk` | You call Anthropic or an Anthropic-compatible API |
-| `codex-sdk` | You use Codex for coding tasks |
-| `grok-build-acp` | You use the Grok Build ACP interface |
+**Support level** is its own column. It is the maturity of that runtime (stable / preview / experimental). The sidebar [Support Matrix](/en/guide/support-matrix) answers a different question: whether a feature has been verified on a runtime or operating system (✅ / ❌ / ❓). This page does not copy that matrix.
 
-Stable behavior follows npm `latest`; preview features require an explicit channel install described in [Version channels](/en/guide/upgrade#channels). See [Runtimes](/en/guide/runtimes) for details.
+| Runtime | Support level | Use it when |
+|---|---|---|
+| `claude-code-cli` | stable | You already use Claude Code CLI and want its subscription login and interactive capabilities |
+| `claude-agent-sdk` | stable | You call Anthropic or an Anthropic-compatible API |
+| `codex-sdk` | stable | You use Codex for headless coding tasks |
+| `grok-build-acp` | stable | You use the Grok Build ACP interface for unattended tasks |
+| `codex-app-server` | preview | Codex TUI co-presence (the picker label is `codex-cli`). See [Codex TUI Co-presence](/en/guide/codex-copresence) |
+| `opencode-cli` | preview | Public OpenCode multi-vendor front end. V1 and V2 share this id; see below |
+| `grok-build-cli` | experimental | Grok TUI co-presence, trusted tasks only. See [Grok Nodes](/en/guide/grok) |
+
+OpenCode V1 and V2 are both the runtime `opencode-cli`, not two runtime ids. V1 is the default generation (package `opencode-ai`) and can run headless or in co-presence. V2 (package `@opencode/cli`) is created with `--opencode-generation v2` and is on the npm `preview` channel only: co-presence only, and it also requires `--opencode-unsafe-tools` (every local tool enabled; trusted tasks only). On npm `latest`, `opencode-cli` is V1.
+
+`cursor-agent` (alias `cursor-cli`) is still an unmerged source preview: [PR #2561](https://github.com/sleep2agi/agent-network/pull/2561) is marked do-not-merge and do-not-publish. The published `latest` and `preview` pickers both omit it. Until it is merged and released, read its support level as upcoming: not stable, and not a runtime already shipped on the preview channel.
+
+Those seven ids appear in the `anet node create` picker on both npm `latest` and `preview`. A preview or experimental support level means the entry is listed, and its maturity stays at that level. Channel install steps are in [Version channels](/en/guide/upgrade#channels).
 
 ## Shortest setup path
 

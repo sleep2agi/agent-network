@@ -7,6 +7,12 @@
 - `opencode-cli` readiness may include `generation` and `accepted`. V2 `state` stays `unknown` and does not become `ready` because a website answers. The node config snapshot echoes generation, mode, and the unsafe consent on `flags`; `update_node_config` cannot change those three.
 - This is not an npm package publish. See #2544.
 
+## Unreleased: Codex and OpenCode V2 providers (2026-10-10)
+
+- `anet node create` and `anet node edit` accept `--provider`, `--base-url`, and `--api-key-env`. This slice is Codex (`codex-sdk`, `codex-app-server`) and OpenCode V2 (`opencode-cli --opencode-generation v2 --opencode-unsafe-tools`) only. Presets are `deepseek`, `minimax`, and `custom-openai-compat`.
+- Codex writes `[model_providers.*]` in the node `config.toml` with `wire_api = "responses"` and stores the credential as an environment-variable name. OpenCode V2 writes OpenCode's own `opencode.json` `providers` object (its model list and `env` names; a custom endpoint uses `@opencode/ai/providers/openai-compatible`). The key never goes on the command line or into `config.json`.
+- Claude, OpenCode V1, and the Hub vault / `create_node` path are not in this slice.
+
 ## Unreleased: client download page (2026-10-10)
 
 - anet.sh gains a [download page](/en/download). macOS, Windows, Linux, and Android installers come from the latest published desktop release (the same choice the in-app updater makes). A platform missing from that release is called out instead of linked to an older file. The home page, navigation, and install docs point here.

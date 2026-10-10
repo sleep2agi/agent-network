@@ -7,6 +7,12 @@
 - `opencode-cli` 的就绪结果可带 `generation` 与 `accepted`。V2 的 `state` 仍是 `unknown`，不因网站可达变成 `ready`。节点配置快照的 `flags` 会回显代际、模式和 unsafe 同意；这三项不能用 `update_node_config` 修改。
 - 这不是 npm 包发布。参见 #2544。
 
+## 未发布：Codex 与 OpenCode V2 的 provider（2026-10-10）
+
+- `anet node create` / `anet node edit` 增加 `--provider`、`--base-url`、`--api-key-env`。本版只接 Codex（`codex-sdk`、`codex-app-server`）和 OpenCode V2（`opencode-cli --opencode-generation v2 --opencode-unsafe-tools`）。预设是 `deepseek`、`minimax`、`custom-openai-compat`。
+- Codex 写入节点 `config.toml` 的 `[model_providers.*]`，`wire_api` 为 `responses`，密钥只记环境变量名。OpenCode V2 写入 OpenCode 自己的 `opencode.json` `providers`（模型列表与 `env`；自定义端点用 `@opencode/ai/providers/openai-compatible`）。密钥不进命令行、不进 `config.json`。
+- Claude、OpenCode V1、Hub vault / `create_node` 不在这版。
+
 ## 未发布：客户端下载页（2026-10-10）
 
 - anet.sh 新增[下载页](/download)。macOS、Windows、Linux、Android 的安装包来自最新已发布的桌面端 release（与应用内更新同一选择）；某一平台这次没有产物时，该栏说明缺失，不继续指向旧文件。首页、导航和安装文档改指向这一页。

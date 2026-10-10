@@ -22,16 +22,25 @@ Hub、Dashboard 和 SQLite 数据都运行在你控制的机器上。不同 Netw
 
 ## Runtime 与模型供应商
 
-Runtime 决定 `agent-node` 如何驱动 AI；供应商决定模型和计费。两者不是一回事。
+Runtime 决定 `agent-node` 如何驱动 AI；供应商决定模型和计费。两者不是一回事。下表是 `anet node create` 选单里的全部 7 个 runtime。安装和认证见[选择 Runtime](/guide/runtimes)，模型和供应商见[模型与供应商](/guide/multi-model)。
 
-| Runtime | 适合什么情况 |
-|---|---|
-| `claude-code-cli` | 已有 Claude Code CLI，希望复用其交互能力 |
-| `claude-agent-sdk` | 通过 Anthropic API 或兼容接口调用模型 |
-| `codex-sdk` | 使用 Codex 处理代码任务 |
-| `grok-build-acp` | 使用 Grok Build 的 ACP 接口 |
+**支持程度**单独成列，只表示这个 runtime 本身的成熟度（稳定 / preview / 实验）。侧栏的[支持矩阵](/guide/support-matrix)回答的是另一件事：某个功能在某个 runtime 或操作系统上有没有验证过（✅ / ❌ / ❓）。这里不复制那张表。
 
-稳定版能力以 npm `latest` 为准；preview 功能必须按[版本说明](/guide/upgrade#channels)单独安装。完整差异见 [Runtime 选择](/guide/runtimes)。
+| Runtime | 支持程度 | 适合什么情况 |
+|---|---|---|
+| `claude-code-cli` | 稳定 | 已有 Claude Code CLI，希望复用订阅登录和交互能力 |
+| `claude-agent-sdk` | 稳定 | 通过 Anthropic API 或兼容接口调用模型 |
+| `codex-sdk` | 稳定 | 用 Codex 处理后台代码任务 |
+| `grok-build-acp` | 稳定 | 用 Grok Build 的 ACP 接口，无人值守接任务 |
+| `codex-app-server` | preview | Codex TUI 人机共存（选单里显示为 `codex-cli`）。见[共存指南](/guide/codex-copresence) |
+| `opencode-cli` | preview | 公版 OpenCode 多厂商前端。V1 与 V2 共用这个 id，见下 |
+| `grok-build-cli` | 实验 | Grok TUI 人机共存，只接收可信任务。见[Grok 节点](/guide/grok) |
+
+OpenCode 的 V1 和 V2 都是 runtime `opencode-cli`，不是两个 runtime id。V1 是默认代际（包 `opencode-ai`），headless 和人机共存都可以。V2（包 `@opencode/cli`）用 `--opencode-generation v2` 创建，目前只在 npm `preview` 通道：只做人机共存，还要 `--opencode-unsafe-tools`（本机工具全开，只用于可信任务）。npm `latest` 上的 `opencode-cli` 仍是 V1。
+
+`cursor-agent`（别名 `cursor-cli`）仍是未合并的源码预览，见 [PR #2561](https://github.com/sleep2agi/agent-network/pull/2561)（该 PR 写明不要合并、不要发布）。已发布的 `latest` 和 `preview` 选单都不含它。在它合入并发布之前，支持程度按「即将」理解：不是稳定，也不是已经随 preview 通道发布的 runtime。
+
+上面 7 个 id 在 npm `latest` 和 `preview` 的选单里都会出现。标成 preview 或实验的，出现在选单里仍按该列的成熟度看待。通道怎么装见[版本说明](/guide/upgrade#channels)。
 
 ## 最短上手路径
 

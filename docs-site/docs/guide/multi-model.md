@@ -83,6 +83,30 @@ anet node start coder
 
 `codex-sdk` 不读取 `--tools` 参数。登录方式见 [codex-sdk](/guide/runtimes#codex-sdk)。
 
+Codex 与 OpenCode V2 可以用 `--provider` 接 DeepSeek、MiniMax，或一个自定义 OpenAI 兼容端点。两边的预设 id 相同，写进各自运行时自己的配置，不是同一份文件：
+
+| runtime | 配置 | 本版预设 |
+| --- | --- | --- |
+| `codex-sdk`、`codex-app-server`（向导里的 `codex-cli`） | `config.toml` 的 `model_provider` 与 `[model_providers.<id>]`（`wire_api = "responses"`，密钥只写环境变量名） | `deepseek`、`minimax`、`custom-openai-compat` |
+| `opencode-cli` 且 `--opencode-generation v2 --opencode-unsafe-tools` | OpenCode 自己的 `opencode.json` `providers`（目录里的模型、`env` 变量名；自定义端点用 `@opencode/ai/providers/openai-compatible`） | 同上 |
+
+密钥不要写进命令行。先 `export` 预设对应的变量（DeepSeek 是 `DEEPSEEK_API_KEY`，MiniMax 是 `MINIMAX_API_KEY`），或用 `--api-key-env` 指定变量名。值进节点的 0600 `.env`，不进 `config.json`。
+
+```bash
+export DEEPSEEK_API_KEY='<your-key>'
+anet node create ds --runtime codex-sdk --provider deepseek
+
+export MINIMAX_API_KEY='<your-key>'
+anet node create mx --runtime opencode-cli --opencode-generation v2 \
+  --opencode-unsafe-tools --provider minimax
+
+export GATEWAY_API_KEY='<your-key>'
+anet node create gw --runtime codex-app-server --provider custom-openai-compat \
+  --base-url https://llm.example.com/v1 --api-key-env GATEWAY_API_KEY --model my-model
+```
+
+Codex 这条路使用 Responses API（`wire_api = "responses"`）。只实现了 `/v1/chat/completions` 的网关接不上 Codex；那种网关走 OpenCode V2 的 `custom-openai-compat`。OpenCode V1 的安全预设仍然会丢掉自定义 provider，本版 `--provider` 不改变这一点。Claude 运行时也不走这组标志。
+
 ### 内置的 Anthropic 兼容提供商 {#built-in-anthropic-compatible}
 
 MiniMax、DeepSeek、书生、小米 MiMo 的配置方式相同，只是 `ANTHROPIC_BASE_URL` 和 model 不同：
