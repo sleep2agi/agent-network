@@ -1,6 +1,6 @@
 import { expect } from "bun:test";
 import { containerTest as test, fixtureTmux } from "./fixture-tmux.js";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { codexTmuxEnv, listCodexPanes } from "../../agent-node/src/runtime/adopt-codex-tmux.js";
 import { handleAdoptDoorbell } from "../../agent-node/src/runtime/adopt-daemon.js";
@@ -8,6 +8,7 @@ import { handleAdoptedLifecycle } from "../../agent-node/src/runtime/adopt-lifec
 import { adoptedChild } from "../../agent-node/src/runtime/adopt-registry.js";
 import { preflightCodexStart } from "../../agent-node/src/runtime/adopt-codex-start-preflight.js";
 import { readAdoptionProc } from "../../agent-node/src/runtime/adopt-proc.js";
+import { pinFixtureAnet } from "./fixture-anet.js";
 
 async function listener() {
   const server=createServer();
@@ -37,6 +38,7 @@ test(`start preflight: ${layout} real stages, receipt/decoy unchanged, no launch
     callCommHub:async(tool:string,args:any)=>{calls.push({tool,args});return tool==="get_adopt_request"?req:tool==="list_my_children"?
       {ok:true,children:[{managed:"adopted",child_node_id:config.node_id,alias:scope.alias,binding_request_id:authority}]}:{ok:true};}};
   const release = `${workdir}/fixture-release`;
+  const unpin = await pinFixtureAnet(workdir);
   const fixturePanes = new Set<string>();
   async function waitForFixtureStages() {
     // new-session returns before its shell has exec'd the identity-bearing
@@ -78,9 +80,15 @@ test(`start preflight: ${layout} real stages, receipt/decoy unchanged, no launch
     const busy=createServer();await new Promise<void>(r=>busy.listen(port.port,"127.0.0.1",r));
     try {await expect(preflightCodexStart(entry,identity,scope,req.request_id,()=>true)).rejects.toThrow("adopt_codex_port_unavailable");}
     finally {await new Promise<void>(r=>busy.close(()=>r()));}
-    // A remains closed even when all preliminary checks pass.
+    writeFileSync(`${nodeDir}/launch-plan.json`, JSON.stringify({action:"fail"}), {mode:0o600});
     await handleAdoptedLifecycle({request_id:"start_fixture",child_node_id:config.node_id,child_alias:scope.alias,action:"start"},deps);
-    expect(calls.at(-1).args).toMatchObject({status:"start_failed",error:"adopt_codex_start_not_available"});
+    if (layout === "external-appserver") {
+      expect(calls.at(-1).args).toMatchObject({status:"start_failed",error:"adopt_codex_external_start_unproven"});
+      expect(existsSync(`${nodeDir}/launch-log`)).toBe(false);
+    } else {
+      expect(calls.at(-1).args).toMatchObject({status:"start_failed",error:"adopt_codex_launch_failed"});
+      expect(readFileSync(`${nodeDir}/launch-log`,"utf8")).toContain(scope.alias);
+    }
     authority=undefined; // Today's Hub: no binding generation projection.
     await handleAdoptedLifecycle({request_id:"start_old_hub",child_node_id:config.node_id,child_alias:scope.alias,action:"start"},deps);
     expect(calls.at(-1).args).toMatchObject({status:"start_failed",error:"adopt_codex_binding_generation_unproven"});
@@ -95,6 +103,7 @@ test(`start preflight: ${layout} real stages, receipt/decoy unchanged, no launch
     for(let i=0;i<40 && listCodexPanes(scope).find(r=>r[2]===target[2])?.[4]!=="1";i++)await new Promise(r=>setTimeout(r,25));
     await expect(preflightCodexStart(entry,identity,scope,req.request_id,()=>true)).rejects.toThrow("adopt_codex_session_conflict");
   } finally {
+    unpin();
     fixture.cleanup();
   }
 });

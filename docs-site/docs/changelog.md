@@ -1,5 +1,9 @@
 # 更新日志
 
+## 未发布：daemon 可远程启动已收编的 Codex 原生三段（2026-10-10）
+
+- 已收编的 Codex 原生布局，启动前检查通过后，daemon 调用受信任的 `anet node start`。新的 marker、三段进程和保存的回环端口都对上，才向 Hub 确认已启动。`external-appserver` 布局的远程启动仍然拒绝。不证明 Codex 程序版本或 rollout，收编节点的一键重启也仍然拒绝（先停止再启动）。
+
 ## 未发布：OpenCode V2 创建要对上已接受的安装（2026-10-10）
 
 - `create_node` 显式指定 `flags.opencodeGeneration` 为 `v1` 或 `v2` 时，daemon 在写节点配置之前核对 PATH 上的 `opencode --version` 是否属于该代际已接受的安装（V2 为 `@opencode/cli@2.0.22`）。对不上则拒绝，错误码 `opencode_generation_mismatch`。省略代际仍按 V1 创建。`--version` 超时不在这一步拒绝。

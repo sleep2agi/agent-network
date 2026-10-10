@@ -1,9 +1,12 @@
 # Codex three-stage adoption (board #657 / #658 / #659 A)
 
-This increment adds **adoption and stop**, not start. Three-stage start is
-board #659; `adopt_codex_start_not_available` is an intentional refusal until
-that implementation is available. Do not present this increment as a complete
-stop/start release. No production service or deployment is changed here.
+Adoption, stop, and **native** three-stage start are implemented. External-appserver
+start still returns `adopt_codex_external_start_unproven`: that launcher does not
+publish the adoption marker, so the daemon does not call it. Native start invokes
+the pinned `anet node start`, then acknowledges only after the rotated marker,
+three stages, and the saved loopback listen all match. It does not prove the Codex
+binary version or rollout ordinal, and it does not add restart. No production
+service or deployment is changed here.
 
 Hand-started candidate discovery (`daemon_capabilities.adoption_candidates`
 and `GET /api/adoption-candidates`) does not list these three-stage nodes, or
@@ -27,27 +30,21 @@ live stages/escaped marker processes and occupied role names (including dead
 panes), and probes the explicit port. It checks the local binding again after
 the asynchronous probe. The probe briefly binds and closes a listening socket;
 it does not reserve the port for later startup. No signal, tmux mutation,
-registry write or `.hub-stopped` deletion occurs. A passing preflight still
-returns `adopt_codex_start_not_available`: stage execution belongs to #659 B.
+registry write or `.hub-stopped` deletion occurs. A passing preflight continues into native stage execution. External-appserver
+still stops before any spawn.
 
-**Unresolved prerequisite before B can enable startup:** today's daemon-scoped
-`list_my_children` projects active node/alias, but not binding `request_id`.
-`get_adopt_request` reads pending requests only. Neither proves that a local
-receipt belongs to the current active generation. The preflight expects a
-fresh token-bound `binding_request_id` projection; absent/different values
-return `adopt_codex_binding_generation_unproven`. This PR does not invent that
-Hub field, expand Hub permissions, or claim its test stub is a real Hub contract.
-The exact additive Hub contract and HTTP isolation/revocation tests must land
-before execution is enabled. Local receipt IDs must never fill that omission.
+Native start re-reads `list_my_children.binding_request_id` before launch and
+again before the receipt write. A missing or different generation returns
+`adopt_codex_binding_generation_unproven`. Local receipt IDs never fill that
+field. `get_start_request` must still be open; a superseded request returns
+`adopt_codex_start_superseded` and the new stages are stopped.
 
-B must also verify the executable, exact thread/rollout and readiness/port
-ownership, repeat identity/authority checks at each action boundary, and handle
-marker rotation. Preflight is not a reusable authorization token. C adds
-bounded cleanup and restoration. #671's stale manual-restart receipt and
-cross-boot recovery remain separate. No launcher, deployment, port mapping,
-secret source or backup source changes in A; the recovery rules below still
-apply. The extended `test658-codex-adopt-stop` Docker suite (already registered
-in qa.yml and scripts/qa.sh) includes preflight fixtures and mutation checks.
+Still open after this slice: proving the Codex executable and rollout ordinal,
+external-appserver start, and restart. Marker rotation is recorded only after
+the three stages and the loopback listen match. A failed launch restores the
+previous marker file and does not supersede `.hub-stopped`. Preflight is not a
+reusable authorization token. The extended `test658-codex-adopt-stop` Docker
+suite covers the native launch, the listen refusal, and the generation rollback.
 
 ## Authority and evidence
 

@@ -15,6 +15,7 @@ import { readCodexScope, readCodexStopScope } from "./adopt-codex-scope.js";
 import { assertCodexAbsentAfterReboot } from "./adopt-codex-reboot.js";
 import { assertCodexStopped, stopCodexStages } from "./adopt-codex-stop.js";
 import { preflightCodexStart } from "./adopt-codex-start-preflight.js";
+import { startAdoptedNativeCodex } from "./adopt-codex-start.js";
 
 export interface AdoptLifecycleRequest { request_id: string; child_node_id: string; child_alias: string; action: "start" | "stop" | "delete"; }
 const queues = new Map<string, Promise<unknown>>();
@@ -61,8 +62,10 @@ async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: Ad
     if (req.action === "start") {
       await preflightCodexStart(entry, identity, scope, bindingRequestId,
         () => adoptedChild(deps.workDir, req.child_alias)?.request_id === entry.request_id);
-      // Board #659 A only. A successful preflight is NOT a successful start.
-      throw Error("adopt_codex_start_not_available");
+      // external-appserver's launcher does not publish ANET_NODE_MARKER.
+      if (scope.layout !== "native") throw Error("adopt_codex_external_start_unproven");
+      return startAdoptedNativeCodex({ req, entry, identity, scope, deps,
+        stillCurrent: () => adoptedChild(deps.workDir, req.child_alias)?.request_id === entry.request_id });
     }
     const stoppedMarker = join(identity.nodeDir, ".hub-stopped");
     const receiptBefore = stoppedReceipt(stoppedMarker, deps.uid);

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased: daemon can remotely start an adopted native Codex trio (2026-10-10)
+
+- After preflight passes, the daemon starts an adopted native Codex co-presence node with the trusted `anet node start`. It tells the Hub the node is started only after the new marker, all three stages, and the saved loopback port match. Remote start of an `external-appserver` layout stays refused. This does not prove the Codex binary version or rollout, and one-click restart of an adopted node stays refused (stop, then start).
+
 ## Unreleased: OpenCode V2 create must match an accepted install (2026-10-10)
 
 - When `create_node` sets `flags.opencodeGeneration` to `v1` or `v2`, the daemon checks that `opencode --version` on PATH is an accepted install of that generation before it writes the node (V2 is `@opencode/cli@2.0.22`). A mismatch is rejected with `opencode_generation_mismatch`. Omitting the generation still creates a V1 node. A `--version` timeout is not rejected at this step.
