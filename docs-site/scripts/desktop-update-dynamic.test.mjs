@@ -17,6 +17,10 @@ const release = (tag, { draft = false, asset = true } = {}) => ({
     name: 'win.exe',
     url: `https://asset.test/${tag}/win`,
     browser_download_url: `https://download.test/${tag}/win.exe`,
+  }, {
+    name: 'linux.deb',
+    url: `https://asset.test/${tag}/linux`,
+    browser_download_url: `https://download.test/${tag}/linux.deb`,
   }] : [],
 });
 const manifest = (version) => ({
@@ -24,6 +28,8 @@ const manifest = (version) => ({
   platforms: {
     'darwin-aarch64': { signature: 'mac', url: `https://asset.test/desktop-v${version}/mac` },
     'windows-x86_64': { signature: 'win', url: `https://asset.test/desktop-v${version}/win` },
+    'linux-x86_64': { signature: 'linux', url: `https://asset.test/desktop-v${version}/linux` },
+    'linux-x86_64-deb': { signature: 'linux', url: `https://asset.test/desktop-v${version}/linux` },
   },
 });
 
@@ -53,6 +59,14 @@ assert.equal(dynamic.source, 'desktop-v0.2.33-3');
 assert.equal(dynamic.manifest.version, '0.2.33-3');
 assert.equal(dynamic.manifest.platforms['darwin-aarch64'].url, 'https://download.test/desktop-v0.2.33-3/mac.tar.gz');
 assert.equal(dynamic.manifest.platforms['windows-x86_64'].url, 'https://download.test/desktop-v0.2.33-3/win.exe');
+assert.deepEqual(dynamic.manifest.platforms['linux-x86_64'], {
+  signature: 'linux',
+  url: 'https://download.test/desktop-v0.2.33-3/linux.deb',
+});
+assert.deepEqual(dynamic.manifest.platforms['linux-x86_64-deb'], {
+  signature: 'linux',
+  url: 'https://download.test/desktop-v0.2.33-3/linux.deb',
+});
 assert.equal(calls.length, 2);
 
 const fallbackFetch = async (url) => {
@@ -74,4 +88,4 @@ const vercelConfig = JSON.parse(fs.readFileSync(new URL('../vercel.json', import
 assert.match(handlerSource, /setHeader\('Cache-Control', 'no-store, max-age=0'\)/);
 assert.equal(vercelConfig.headers[0].headers[0].value, 'no-store, max-age=0');
 
-console.log('desktop updater dynamic route: 12 checks passed');
+console.log('desktop updater dynamic route: 14 checks passed');

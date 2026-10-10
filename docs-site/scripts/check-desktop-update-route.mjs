@@ -32,6 +32,11 @@ assert.ok(fallback.platforms?.['windows-x86_64']?.signature);
 //    shape rule also catches "correct file, wrong version", which is the other
 //    way this file goes stale.
 const assetName = (url) => url.split('/').pop() ?? '';
+// Shared with the loop below. A Linux fallback entry ends in .deb; a bare
+// release asset id (digits only) must still fail this pattern.
+const DOWNLOADABLE_ASSET = /\.(tar\.gz|dmg|exe|msi|deb)$/;
+assert.match('ANet_0.2.223_amd64.deb', DOWNLOADABLE_ASSET);
+assert.doesNotMatch('569210828', DOWNLOADABLE_ASSET);
 for (const [platform, entry] of Object.entries(fallback.platforms ?? {})) {
   const url = entry?.url ?? '';
   const name = assetName(url);
@@ -44,7 +49,7 @@ for (const [platform, entry] of Object.entries(fallback.platforms ?? {})) {
     `${platform}: url ends in an asset id (${name}) — map release asset ids back to filenames; this link 404s for users`,
   );
   assert.ok(
-    /\.(tar\.gz|dmg|exe|msi)$/.test(name),
+    DOWNLOADABLE_ASSET.test(name),
     `${platform}: url must end in a downloadable asset filename, got ${name || '(empty)'}`,
   );
   assert.ok(
