@@ -168,6 +168,7 @@ import {
   codexCopresenceCreateFields,
   codexCopresenceCreateHint,
   codexCopresenceRequested,
+  CODEX_COPRESENCE_RUNTIME,
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
 } from "../src/codex-copresence-profile";
@@ -11963,6 +11964,16 @@ async function verifyNodeRestarted(
 // 🔴 空值不当默认：`normalizeRuntimeStrict` 对空串返回 DEFAULT_RUNTIME，
 //    那是给「配置里没写」用的语义。用户显式敲 `--runtime ""` 是打错了，
 //    不该被悄悄解释成 claude-agent-sdk —— 所以这里先自己挡掉空值。
+function applyNodeEditReasoningEffortToml(nodeKey: string, profile: Profile, reasoningIdx: number): void {
+  const re = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+  if (reasoningIdx < 0 || !isReasoningEffortValue(re)) return;
+  const { codexHome } = resolveNodeCodexHome({
+    nodeDir: join(nodesDir(), nodeKey),
+    config: JSON.parse(JSON.stringify(profile)) as Record<string, unknown>,
+  });
+  if (codexHome) writeReasoningEffortToCodexHome(codexHome, re);
+}
+
 async function nodeEditCommand() {
   const ref = args[1];
   const flagIdx = args.indexOf("--runtime");
@@ -12083,8 +12094,8 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-
     }
   }
   if (reasoningIdx >= 0) {
-    if (normalizeRuntime(profile) !== "codex-app-server") {
-      console.error(`--reasoning-effort only applies to codex-app-server nodes (this node is ${normalizeRuntime(profile)}).`);
+    if (normalizeRuntime(profile) !== CODEX_COPRESENCE_RUNTIME) {
+      console.error(`--reasoning-effort only applies to ${CODEX_COPRESENCE_RUNTIME} nodes (this node is ${normalizeRuntime(profile)}).`);
       process.exit(1);
     }
     const nextRe = rawReasoning!.trim() as string;
@@ -12130,16 +12141,7 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-
   if (stagedProvider) rewritePlainSecretsToEnvRef(resolved.id, profile);
   saveProfile(resolved.id, profile);
   materializeRuntimeProviderOrExit(resolved.id, stagedProvider);
-  {
-    const re = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
-    if (reasoningIdx >= 0 && isReasoningEffortValue(re)) {
-      const { codexHome } = resolveNodeCodexHome({
-        nodeDir: join(nodesDir(), resolved.id),
-        config: JSON.parse(JSON.stringify(profile)) as Record<string, unknown>,
-      });
-      if (codexHome) writeReasoningEffortToCodexHome(codexHome, re);
-    }
-  }
+  applyNodeEditReasoningEffortToml(resolved.id, profile, reasoningIdx);
   for (const c of changes) console.log(`${resolved.id}: ${c}`);
   // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
   const running = findNodeStopCandidates(resolved.id);
