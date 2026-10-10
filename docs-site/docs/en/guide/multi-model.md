@@ -83,6 +83,30 @@ anet node start coder
 
 `codex-sdk` does not read the `--tools` option. For login options see [codex-sdk](/en/guide/runtimes#codex-sdk).
 
+Codex and OpenCode V2 accept `--provider` for DeepSeek, MiniMax, or a custom OpenAI-compatible endpoint. The preset ids match, and each runtime writes its own native file:
+
+| runtime | file | presets in this release |
+| --- | --- | --- |
+| `codex-sdk`, `codex-app-server` (the `codex-cli` alias) | `config.toml` `model_provider` and `[model_providers.<id>]` (`wire_api = "responses"`; the key is an env var name) | `deepseek`, `minimax`, `custom-openai-compat` |
+| `opencode-cli` with `--opencode-generation v2 --opencode-unsafe-tools` | OpenCode's own `opencode.json` `providers` (its model list and `env` names; a custom endpoint uses `@opencode/ai/providers/openai-compatible`) | the same ids |
+
+Do not put the key on the command line. `export` the preset variable first (`DEEPSEEK_API_KEY` or `MINIMAX_API_KEY`), or name another variable with `--api-key-env`. The value is stored in the node's mode-0600 `.env`, not in `config.json`.
+
+```bash
+export DEEPSEEK_API_KEY='<your-key>'
+anet node create ds --runtime codex-sdk --provider deepseek
+
+export MINIMAX_API_KEY='<your-key>'
+anet node create mx --runtime opencode-cli --opencode-generation v2 \
+  --opencode-unsafe-tools --provider minimax
+
+export GATEWAY_API_KEY='<your-key>'
+anet node create gw --runtime codex-app-server --provider custom-openai-compat \
+  --base-url https://llm.example.com/v1 --api-key-env GATEWAY_API_KEY --model my-model
+```
+
+The Codex path speaks the Responses API (`wire_api = "responses"`). A gateway that only implements `/v1/chat/completions` will not serve Codex; point that gateway at OpenCode V2 `custom-openai-compat`. OpenCode V1 safe mode still drops custom providers, and `--provider` does not change that. Claude runtimes do not take these flags.
+
 ### Built-in Anthropic-compatible providers {#built-in-anthropic-compatible}
 
 MiniMax, DeepSeek, InternLM and Xiaomi MiMo are configured the same way; only `ANTHROPIC_BASE_URL` and the model differ:

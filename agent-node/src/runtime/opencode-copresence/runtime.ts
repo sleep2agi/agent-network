@@ -197,6 +197,9 @@ export interface OpenOpenCodeCopresenceOptions {
   onSession?: (sessionId: string) => void | Promise<void>;
   log?: (message: string) => void;
   warn?: (message: string) => void;
+  /** config.json env key names. OpenCode V2 forwards a provider credential
+   * only when its native `providers.*.env` entry names one of these. */
+  providerEnvKeys?: readonly string[];
 }
 
 /** Handle to the workspace instructions file this generation wrote, so
@@ -1038,6 +1041,14 @@ export async function openOpenCodeCopresenceRuntime(
   };
   try {
     wireOpenCodeDefaultModel(childEnv, model);
+    if (backend.generation === "v2") {
+      const { wireOpenCodeV2NativeProviders } = await import("../opencode-v2-native-provider");
+      wireOpenCodeV2NativeProviders(childEnv, {
+        workDir,
+        parentEnv: process.env,
+        configEnvKeys: opts.providerEnvKeys ?? [],
+      });
+    }
     if (opts.commhubMcpUrl || opts.commhubToken) {
       if (!opts.commhubMcpUrl || !opts.commhubToken) {
         throw new Error("OpenCode copresence requires both CommHub MCP URL and token");
