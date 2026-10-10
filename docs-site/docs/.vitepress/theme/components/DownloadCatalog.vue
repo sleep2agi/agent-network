@@ -122,9 +122,9 @@ onMounted(async () => {
       <a href="https://github.com/sleep2agi/agent-network-app/releases">GitHub Releases</a>
     </p>
     <template v-else-if="catalog">
-      <p class="download-note">
-        <strong>{{ catalog.tag }}</strong>
-        <template v-if="catalog.source === 'fallback'"> · {{ copy.fallback }}</template>
+      <p class="download-release">
+        <strong class="download-release-tag">{{ catalog.tag }}</strong>
+        <span v-if="catalog.source === 'fallback'" class="download-release-fallback">{{ copy.fallback }}</span>
       </p>
       <section
         v-for="platform in copy.platforms"
@@ -134,8 +134,10 @@ onMounted(async () => {
         :aria-labelledby="`${platform.id}-title`"
       >
         <div class="desktop-download-copy">
-          <span class="download-platform"><strong>{{ platform.title }}</strong> · v{{ catalog.version }}</span>
-          <h2 :id="`${platform.id}-title`">{{ platform.title }}</h2>
+          <div class="download-platform-head">
+            <h2 :id="`${platform.id}-title`">{{ platform.title }}</h2>
+            <span class="download-platform-version">v{{ catalog.version }}</span>
+          </div>
           <p>{{ platform.note }}</p>
         </div>
         <div v-if="installAssets(platform.id).length" class="download-grid">
