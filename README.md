@@ -16,11 +16,13 @@
 [文档](https://anet.sh) · [下载桌面版](https://github.com/sleep2agi/agent-network-app/releases/latest) · [快速上手](https://anet.sh/guide/getting-started) · **中文** · [English](./README.en.md)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
-  <img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network 桌面端：左侧是在线 Agent 列表，右侧是与一个节点的对话">
+  <source media="(prefers-color-scheme: dark)" srcset="docs-site/docs/public/hero/desktop-chat-dark.png">
+  <img src="docs-site/docs/public/hero/desktop-chat-light.png" width="880" alt="Agent Network 桌面端：按职责分组的 Agent 队员，以及派活、汇报和跟进的示例对话">
 </picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="桌面端任务页：左侧按项目筛选，右侧是需求池、进行中、完成三列看板"></picture>
+像聊天一样指挥 Agent，派活和跟进都在同一个窗口。
+
+<sub>配图与 <a href="https://anet.sh">anet.sh</a> 共用展示素材；图中人物、任务和指标均为示例数据。</sub>
 
 </div>
 
@@ -31,10 +33,30 @@
 - 💬 **一个客户端管全部** —— 桌面（macOS / Windows）和 Android：聊天派活、收发文件；任务页管理项目、子任务、GitHub Issue 和到秒的时间；界面可切换中英文；可看节点与 Hub 日志；规则文件、技能、项目目录、远程切模型和重启仍在。iOS 只走 TestFlight，公开链接还没开。
 - 🔐 **自托管、本地优先、开源** —— Hub 和 SQLite 数据跑在你自己的机器上（桌面端还自带一个本地 Hub），不做 SaaS 托管；Apache 2.0。
 
-<table><tr>
-<td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/rules-dark.webp"><img src="docs/assets/readme/rules-light.webp" alt="在桌面端阅读节点的 CLAUDE.md 规则文件"></picture></td>
-<td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/files-dark.webp"><img src="docs/assets/readme/files-light.webp" alt="在桌面端浏览节点的项目文件夹"></picture></td>
-</tr></table>
+## 从派活到跟进
+
+### 任务看板：谁在做、做到哪，一眼看清
+
+需求池、进行中、完成并排展示，负责人、Agent 队员和到期提醒落在同一张卡片上。
+
+<img src="docs-site/docs/public/features/tasks-board.webp" width="880" alt="任务看板示例：三列任务卡片展示负责人、Agent 头像、优先级、进度和到期提醒">
+
+<details>
+<summary>展开查看：任务详情与定时任务</summary>
+
+### 任务详情：人和 Agent 在同一处协作
+
+参与人、描述和评论放在一起，任务上下文不用散落在聊天记录里。
+
+<img src="docs-site/docs/public/features/task-detail.webp" width="880" alt="任务详情示例：侧栏展示人类与 Agent 参与人、项目、预计完成时间、描述和评论">
+
+### 定时任务：例行工作按时执行
+
+为简报、巡检和复盘设好计划，查看下一次执行时间和历史记录。
+
+<img src="docs-site/docs/public/features/scheduled-tasks.webp" width="880" alt="定时任务示例：左侧是计划列表，右侧展示每日简报的执行频率、时区与执行记录">
+
+</details>
 
 ## 30 秒上手
 
