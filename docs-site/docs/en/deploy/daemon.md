@@ -451,7 +451,7 @@ a new stop automatically invalidates it. Failed starts and malformed/foreign evi
 Deploy the updated CLI and boot script together. Older scanners conservatively retain the stop. These
 files are local state: restoring a backup with changed file identity keeps the stop until an explicit start.
 Rollback does not automatically restart stopped nodes. Services, ports, secret sources and orchestration
-are unchanged; this does not implement board #659 B remote three-stage startup.
+are unchanged. Native layout remote start runs the trusted `anet node start` and acknowledges only after the new marker, three stages, and loopback listen match. `external-appserver` start stays refused. This does not prove the Codex version or rollout, and adopted restart stays refused.
 
 Deployment is an operator action, not performed by this PR. Record the current CLI version and the
 boot service's actual ExecStart path; back up its installed script and review drift against the repository.
@@ -469,7 +469,7 @@ Stop / Start for adopted nodes is available from agent-node ≥ `2.5.0-preview.1
 From commhub-server ≥ `0.9.0-preview.109`, the Hub answers a restart of an adopted node with `adopted_restart_requires_daemon`, asking you to Stop and then Start (`.108` and earlier have no such refusal).
 From the original workspace, run `anet daemon adopt <alias> --daemon <daemon-id>` to inspect the plan.
 `--yes` only requests adoption; wait for independent daemon verification and an active Hub binding.
-The daemon's `adopt_roots` defaults to empty (deny). Co-presence nodes are not supported.
+The daemon's `adopt_roots` defaults to empty (deny). Native Codex co-presence can be started remotely; `external-appserver` remote start stays refused.
 
 - Stop rechecks configuration, UID and `/proc` birth identity and signals only the verified process tree.
 - Successful stop writes `<nodeDir>/.hub-stopped`. `anet project up` and the repository boot sweep keep the node down without clearing its PID file.

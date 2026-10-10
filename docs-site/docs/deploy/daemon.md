@@ -402,7 +402,7 @@ daemon 没有自己的 stop / delete / status 子命令，直接用节点命令�
 Hub 从 commhub-server ≥ `0.9.0-preview.109` 起对收编节点的重启返回 `adopted_restart_requires_daemon`，提示先停止再启动（`.108` 及更早没有这道拒绝门）。
 在节点原工作目录执行 `anet daemon adopt <alias> --daemon <daemon-id>` 先看计划，
 加 `--yes` 仅请求收编，必须等 daemon 独立核验、Hub 绑定成为 active 才生效。
-daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂不支持。
+daemon 配置的 `adopt_roots` 默认空，即不允许收编。codex 原生三段布局可以远程启动；`external-appserver` 布局的远程启动仍拒绝。
 
 - 停止前重新核验节点配置、UID 和 `/proc` 起始时间，只停止已核验的进程树。
 - 停止成功写入 `<nodeDir>/.hub-stopped`；`anet project up` 和仓库开机扫描会保留停止状态及 PID 文件。
@@ -434,7 +434,7 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 会自动使旧凭据失效。失败启动、身份不符、损坏文件保持停止。更新时须同时部署新版 CLI
 和仓库开机脚本；未更新的旧扫描器仍保守地保持停止。凭据属于本地状态，恢复备份后若文件
 身份改变则保持停止，需要显式重新启动；回滚不会自动拉起原本停止的节点。本改动不改变
-常驻服务、端口、密钥来源或启动编排，不实现 #659 B 的三段远程启动。
+常驻服务、端口、密钥来源或启动编排。原生布局的远程启动调用受信任的 `anet node start`，核对新 marker、三段进程和回环监听后才确认；`external-appserver` 仍拒绝。不证明 codex 版本或 rollout，也不把收编节点的 restart 放开。
 
 部署由运维执行，不由此 PR 自动部署：先记录当前 CLI 版本、开机服务的实际 ExecStart 路径，
 备份已安装脚本并对照仓库副本审查差异；从已合入 main 的精确提交发布并安装对应 CLI，

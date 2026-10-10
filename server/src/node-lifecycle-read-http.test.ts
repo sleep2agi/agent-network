@@ -60,9 +60,20 @@ test("public errors redact free text for granted viewers on every projection", a
       "bin: ENOENT: /private/fixture/bin/anet on fixture-host",
       "adopt_unknown_secret", "adopt_start_timeout: /private/fixture", "", "adopt_start_timeout", null,
       "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",
+      "adopt_codex_external_start_unproven", "adopt_codex_launch_failed", "adopt_codex_launch_timeout",
+      "adopt_codex_port_unproven", "adopt_codex_start_superseded", "adopt_codex_binding_generation_unproven",
+      "adopt_codex_start_evidence_missing", "adopt_codex_start_evidence_changed",
+      "adopt_codex_session_conflict", "adopt_codex_port_unavailable", "adopt_codex_stage_still_running",
+      "adopt_codex_identity_unproven",
       "TUI session mismatch", "opencode_launch_health:TUI session mismatch", "opencode_tui_session_mismatch",
     ]) {
-      const expected = error === null || ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed", "opencode_tui_session_mismatch"].includes(error) ? error : "lifecycle_error";
+      const publicCodes = ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed", "opencode_tui_session_mismatch",
+        "adopt_codex_external_start_unproven", "adopt_codex_launch_failed", "adopt_codex_launch_timeout",
+        "adopt_codex_port_unproven", "adopt_codex_start_superseded", "adopt_codex_binding_generation_unproven",
+        "adopt_codex_start_evidence_missing", "adopt_codex_start_evidence_changed",
+        "adopt_codex_session_conflict", "adopt_codex_port_unavailable", "adopt_codex_stage_still_running",
+        "adopt_codex_identity_unproven"];
+      const expected = error === null || publicCodes.includes(error) ? error : "lifecycle_error";
       for (const [kind, table, request] of [
         ["adopt", "node_daemon_bindings", "adopt_read_active"],
         ["start", "node_start_requests", "start_read_failed"],
