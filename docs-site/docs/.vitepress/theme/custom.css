@@ -1104,10 +1104,186 @@
 .dark .desktop-download,
 .dark .mobile-download { box-shadow: 0 28px 90px -55px rgba(94, 155, 255, 0.55); }
 
+/* Download catalog inside the docs shell.
+   The homepage reuses .desktop-download / .download-card as large marketing
+   blocks. On /download those same classes sit in the doc column, so the
+   overrides below are scoped to .download-page and must not leak to .VPHome.
+
+   outline: false does not drop the aside column (VitePress keys that off
+   frontmatter.aside). The download pages set aside: false, then this cap
+   keeps the catalog a docs-width column next to the sidebar. Do not shrink
+   .VPContent padding-left below the sidebar's used width: above 1440px the
+   sidebar is wider than --vp-sidebar-width, and a smaller padding slides the
+   title under the nav. */
+@media (min-width: 960px) {
+  .VPDoc:has(.download-page) .content {
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 4px;
+  }
+  .VPDoc:has(.download-page) .content-container {
+    max-width: 760px;
+    margin-left: 0;
+    margin-right: auto;
+  }
+  .VPDoc:has(.download-page) .vp-doc > p {
+    max-width: 68ch;
+  }
+}
+
 .download-page .desktop-download,
 .download-page .mobile-download {
   max-width: none;
-  margin: 28px 0 0;
+  margin: 18px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.download-page .desktop-download + .desktop-download {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--vp-c-divider);
+}
+.dark .download-page .desktop-download,
+.dark .download-page .mobile-download {
+  background: transparent;
+  box-shadow: none;
+}
+.download-page .download-platform-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.download-page .desktop-download h2 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 1.2rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+.download-page .download-platform-version {
+  flex: none;
+  color: var(--vp-c-text-2);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+.download-page .desktop-download-copy > p {
+  max-width: none;
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+.download-page .download-release {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 2px 0 0;
+  padding: 7px 12px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.download-page .download-release-tag {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.download-page .download-release-fallback {
+  color: var(--vp-c-text-2);
+  font-size: 0.82rem;
+}
+.download-page .download-grid {
+  container-type: inline-size;
+  container-name: download-grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+.download-page .download-card {
+  min-height: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--vp-c-bg);
+  box-shadow: var(--vp-shadow-1);
+}
+.download-page .download-card-primary {
+  background: var(--vp-c-bg);
+}
+.download-page .download-card:hover,
+.download-page .download-card-routes:hover {
+  transform: none;
+  box-shadow: var(--vp-shadow-2);
+}
+.download-page .download-card-routes {
+  gap: 2px;
+}
+.download-page .download-card-routes .download-platform strong {
+  font-size: 0.98rem;
+}
+.download-page .download-card-routes small {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.download-page .download-routes {
+  gap: 8px;
+  margin-top: 10px;
+}
+.download-page .download-route {
+  flex: 0 1 auto;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+.download-page .release-links {
+  margin: 18px 0 0 !important;
+  text-align: left;
+}
+.download-page .download-card-pending strong {
+  margin-top: 4px;
+  font-size: 0.95rem;
+}
+
+/* Wide enough for the filename and both route buttons on one row.
+   Narrower catalogs keep the stacked card so labels can wrap. */
+@container download-grid (min-width: 680px) {
+  .download-page .download-card-routes {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 16px;
+    row-gap: 2px;
+    align-items: center;
+    padding: 12px 16px;
+  }
+  .download-page .download-card-routes .download-platform {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .download-page .download-card-routes small {
+    grid-column: 1;
+    grid-row: 2;
+    margin-top: 0;
+  }
+  .download-page .download-card-routes .download-routes {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-content: flex-end;
+    margin-top: 0;
+  }
 }
 .site-download-foot {
   margin: 0;
@@ -1135,7 +1311,29 @@
   .desktop-download,
   .mobile-download { margin-left: 16px; margin-right: 16px; padding: 28px 20px; }
   .download-page .desktop-download,
-  .download-page .mobile-download { margin-left: 0; margin-right: 0; }
+  .download-page .mobile-download {
+    margin: 16px 0 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .download-page .download-platform-head { align-items: flex-start; }
+  .download-page .download-card-routes {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .download-page .download-routes {
+    flex-direction: column;
+    align-items: stretch;
+    margin-top: 10px;
+  }
+  .download-page .download-route {
+    flex: 1 1 auto;
+    justify-content: center;
+    white-space: normal;
+  }
   /* #568: 必须是 minmax(0, 1fr),不能是 1fr。`1fr` 的下限是 auto = 内容的
      min-content,卡片里一行 nowrap 的 `curl … | sh` 就把整列撑到 ~400px,
      卡片宽出屏幕、正文从一行中间被 .VPHome 的 overflow 裁掉(微信里实测)。
