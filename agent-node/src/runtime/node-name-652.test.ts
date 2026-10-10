@@ -11,17 +11,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import {
-  _prependChildPathForTest,
   _resetAnetBinAbsForTest,
   _resetDaemonExtraPathForTest,
+  applyDaemonExtraPath,
   buildAnetArgsDaemon,
+  computeChildPath,
   handleCreateNodeDoorbell,
-  minimalEnv,
   serializeEnvLocalDaemon,
 } from "./create-node-daemon.js";
 import { resolveOnPathReal } from "./runtime-readiness.js";
@@ -85,7 +85,19 @@ beforeEach(() => {
   _resetAnetBinAbsForTest();
 });
 
+/** Fixture placed ahead of a vendor `opencode` already on the fixed child PATH. */
+let shadowedOpencode: { target: string; backup: string | null } | null = null;
+
+function restoreShadowedOpencode() {
+  const shadowed = shadowedOpencode;
+  shadowedOpencode = null;
+  if (!shadowed) return;
+  rmSync(shadowed.target, { force: true });
+  if (shadowed.backup) renameSync(shadowed.backup, shadowed.target);
+}
+
 afterEach(() => {
+  restoreShadowedOpencode();
   for (const pid of killPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
   for (const k of ENV_KEYS) { if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k]; }
   _resetAnetBinAbsForTest();
@@ -95,18 +107,43 @@ afterEach(() => {
 });
 
 function plantOpencode(stdout: string) {
+  restoreShadowedOpencode();
   const fixtureBin = join(pinRoot, "probe-bin");
   mkdirSync(fixtureBin, { recursive: true, mode: 0o700 });
-  const bin = join(fixtureBin, "opencode");
-  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stdout)}\n`, { mode: 0o755 });
-  // daemonExtraPath is appended after the fixed child PATH, so it cannot
-  // shadow the opencode already on that PATH. test829's image installs
-  // @opencode/cli@2.0.22 into /usr/local/bin; appending the stub made
-  // --version read that accepted V2 pin and the create continued.
-  _prependChildPathForTest([fixtureBin]);
-  const resolved = resolveOnPathReal("opencode", minimalEnv().PATH ?? "");
-  if (resolved !== bin) {
-    throw new Error(`planted opencode is not the probed binary (resolved ${resolved ?? "nothing"})`);
+  const script = `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stdout)}\n`;
+  writeFileSync(join(fixtureBin, "opencode"), script, { mode: 0o755 });
+  applyDaemonExtraPath([fixtureBin]);
+  // daemonExtraPath is appended after the fixed child PATH, so it cannot hide
+  // a vendor binary already there. test829's image installs
+  // @opencode/cli@2.0.22 onto that PATH; the generation gate runs whichever
+  // `opencode` resolveOnPath finds first. Put this fixture in the first
+  // fixed-PATH directory when one is already present, and put the original back
+  // afterwards. Production PATH order stays append-only.
+  const fixed = computeChildPath();
+  const fixedHit = resolveOnPathReal("opencode", fixed);
+  if (!fixedHit) return;
+  const firstDir = fixed.split(":").find(Boolean);
+  if (!firstDir) return;
+  const target = join(firstDir, "opencode");
+  const backup = existsSync(target) ? `${target}.t652-bak` : null;
+  if (backup) {
+    if (existsSync(backup)) throw new Error(`plantOpencode: refusing to clobber ${backup}`);
+    renameSync(target, backup);
+  }
+  try {
+    writeFileSync(target, script, { mode: 0o755 });
+    chmodSync(target, 0o755);
+  } catch (e) {
+    if (backup) renameSync(backup, target);
+    else rmSync(target, { force: true });
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(`plantOpencode: fixed PATH already has ${fixedHit}; cannot place the fixture at ${target}: ${detail}`);
+  }
+  shadowedOpencode = { target, backup };
+  const hit = resolveOnPathReal("opencode", fixed);
+  if (hit !== target) {
+    restoreShadowedOpencode();
+    throw new Error(`plantOpencode: generation gate would run ${hit ?? "(none)"}, not the fixture at ${target}`);
   }
 }
 
@@ -167,9 +204,9 @@ const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
   test("#829 V2 create writes generation/mode into actual child config, not flags", async () => {
-    // This is a config-writer test, not native OpenCode startup. Supply the
-    // required version probe explicitly: the generic non-root CI image has
-    // no vendor binary. Do not rely on the developer's/global native install.
+    // Config write, not native OpenCode startup. plantOpencode is the version
+    // the gate must see, including when this image already has @opencode/cli
+    // on the fixed child PATH.
     plantOpencode("opencode v2.0.22");
     const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
     const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
@@ -204,6 +241,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     const v1bin = await runCreate({ name: "v2-on-v1", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2onv1");
     expect(v1bin.acks[0].status).toBe("rejected");
     expect(v1bin.acks[0].error).toMatch(/^opencode_generation_mismatch/);
+    expect(v1bin.acks[0].error).toContain("installed opencode 1.18.34");
     expect(v1bin.acks[0].error).toContain("@opencode/cli@2.0.22");
     expect(v1bin.spawned).toHaveLength(0);
     expect(existsSync(join(workDir, ".anet", "nodes", "v2-on-v1", "config.json"))).toBe(false);
@@ -215,6 +253,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     }, "cr_v1onv2");
     expect(v2bin.acks[0].status).toBe("rejected");
     expect(v2bin.acks[0].error).toContain("opencode_generation_mismatch");
+    expect(v2bin.acks[0].error).toContain("installed opencode 2.0.22");
     expect(v2bin.acks[0].error).toContain("opencode-ai@1.18.34");
     expect(v2bin.spawned).toHaveLength(0);
     expect(existsSync(join(workDir, ".anet", "nodes", "v1-on-v2", "config.json"))).toBe(false);
@@ -225,6 +264,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     }, "cr_v2unparsed");
     expect(unparsed.acks[0].status).toBe("rejected");
     expect(unparsed.acks[0].error).toContain("opencode_generation_mismatch");
+    expect(unparsed.acks[0].error).toContain("installed opencode (unparsed)");
     expect(unparsed.spawned).toHaveLength(0);
   });
 
