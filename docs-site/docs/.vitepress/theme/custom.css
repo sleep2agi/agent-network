@@ -1109,24 +1109,20 @@
    blocks. On /download those same classes sit in the doc column, so the
    overrides below are scoped to .download-page and must not leak to .VPHome.
 
-   Above 1440px VitePress centers a 1440px frame
-   (padding-left: (100vw - 1440px) / 2 + sidebar). With outline disabled that
-   padding is an empty gutter between the sidebar and the cards. Pull this
-   page back to the sidebar and cap the column so the cards stay a docs-width
-   catalog instead of stretching across the viewport. */
-@media (min-width: 1440px) {
-  .VPContent.has-sidebar:has(.vp-doc .download-page) {
-    padding-left: var(--vp-sidebar-width);
-    padding-right: 0;
-  }
-}
+   outline: false does not drop the aside column (VitePress keys that off
+   frontmatter.aside). The download pages set aside: false, then this cap
+   keeps the catalog a docs-width column next to the sidebar. Do not shrink
+   .VPContent padding-left below the sidebar's used width: above 1440px the
+   sidebar is wider than --vp-sidebar-width, and a smaller padding slides the
+   title under the nav. */
 @media (min-width: 960px) {
   .VPDoc:has(.download-page) .content {
     margin-left: 0;
     margin-right: 0;
+    padding-left: 4px;
   }
   .VPDoc:has(.download-page) .content-container {
-    max-width: 800px;
+    max-width: 760px;
     margin-left: 0;
     margin-right: auto;
   }

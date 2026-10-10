@@ -2,6 +2,7 @@
 title: Download
 description: Download the latest Agent Network desktop and mobile clients.
 outline: false
+aside: false
 ---
 
 # Download Agent Network

@@ -2,6 +2,7 @@
 title: 下载
 description: 下载 Agent Network 桌面与手机客户端的最新安装包。
 outline: false
+aside: false
 ---
 
 # 下载 Agent Network
