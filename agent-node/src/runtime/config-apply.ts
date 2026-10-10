@@ -17,7 +17,7 @@
 // the path without terminating the test runner.
 
 import type { RuntimeReadiness } from "./runtime-readiness.js";
-import { isReasoningEffortValue, reasoningEffortValidationReason } from "./codex-reasoning-effort.js";
+import { validateCodexConfigFlag } from "./codex-config-flags.js";
 import {
   closeSync,
   constants,
@@ -74,12 +74,22 @@ const ALLOWED_FLAGS = new Set<string>([
   "maxTurns",
   "budget",
   "timeout",
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 
 const RESTART_REQUIRED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
   "timeout",
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 
 /**
@@ -104,8 +114,6 @@ export type ApplyMode = "hot" | "restart" | "restart_only";
 
 export interface ConfigPatch {
   model?: string;
-  /** Codex co-presence (`codex-app-server`) — client field; persisted in config.json + CODEX_HOME/config.toml. */
-  reasoningEffort?: string;
   flags?: Record<string, unknown>;
   /** #260 P5 — dashboard-driven channel enable/disable. Restart-tier
    *  (agent-node boot forks channel workers from config.channels).
@@ -133,14 +141,6 @@ export function validateLocalPatch(
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
     }
   }
-  if (patch.reasoningEffort !== undefined) {
-    if (!isReasoningEffortValue(patch.reasoningEffort)) {
-      return { field: "reasoningEffort", reason: reasoningEffortValidationReason() };
-    }
-    if (opts?.runtime !== "codex-app-server") {
-      return { field: "reasoningEffort", reason: "only supported when node runtime is codex-app-server" };
-    }
-  }
   if (patch.channels !== undefined) {
     if (!Array.isArray(patch.channels)) {
       return { field: "channels", reason: "must be an array of strings" };
@@ -162,6 +162,8 @@ export function validateLocalPatch(
     if (!ALLOWED_FLAGS.has(key)) {
       return { field: `flags.${key}`, reason: "not in local allowlist" };
     }
+    const codexFail = validateCodexConfigFlag(key, val, opts?.runtime ?? null);
+    if (codexFail) return codexFail;
     switch (key) {
       case "permissionMode":
         if (
@@ -200,13 +202,11 @@ export function validateLocalPatch(
  * see config-apply-validate.ts. */
 export function computeApplyMode(patch: ConfigPatch): ApplyMode {
   const hasModel = patch.model !== undefined;
-  const hasReasoningEffort = patch.reasoningEffort !== undefined;
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
   const hasChannels = patch.channels !== undefined;
-  if (!hasModel && !hasReasoningEffort && flagKeys.length === 0 && !hasChannels) return "restart_only";
+  if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
   if (hasModel) return "restart";
-  if (hasReasoningEffort) return "restart";
   if (hasChannels) return "restart";
   for (const key of flagKeys) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";
@@ -384,9 +384,10 @@ function channelSpecType(spec: unknown): string | null {
 export function mergePatch(existing: any, patch: ConfigPatch): any {
   const next = JSON.parse(JSON.stringify(existing || {}));
   if (patch.model !== undefined) next.model = patch.model;
-  if (patch.reasoningEffort !== undefined) next.reasoningEffort = patch.reasoningEffort;
   if (patch.flags) {
     next.flags = { ...(next.flags || {}), ...patch.flags };
+    if (patch.flags.copresenceFullAccess === true) next.codexCopresenceFullAccess = true;
+    else if (patch.flags.copresenceFullAccess === false) delete next.codexCopresenceFullAccess;
   }
   if (patch.channels !== undefined) {
     // Channels replace-with-preserve-paths:
@@ -514,8 +515,6 @@ export type CreateNodesBlockedReason =
 
 export interface MaskedSnapshot {
   model?: string | null;
-  /** Present for `codex-app-server` nodes when set in config.json. */
-  reasoningEffort?: string | null;
   flags: Record<string, unknown>;
   config_revision?: number;
   config_update_capable: boolean;
@@ -588,9 +587,6 @@ export function buildConfigSnapshot(
 ): MaskedSnapshot {
   const out: MaskedSnapshot = {
     model: typeof fileConfig?.model === "string" ? fileConfig.model : null,
-    reasoningEffort: fileConfig?.runtime === "codex-app-server"
-      ? (isReasoningEffortValue(fileConfig?.reasoningEffort) ? fileConfig.reasoningEffort : null)
-      : undefined,
     flags: {},
     config_revision: revision,
     config_update_capable: configUpdateCapable,

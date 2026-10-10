@@ -2535,8 +2535,8 @@ async function ensureCodexAppServerSession(): Promise<
       onDeferredCandidate: (threadId) => writebackCodexPendingThread(threadId, codexAppServerUrl ?? ""),
       approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
       sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
-      reasoningEffort: isReasoningEffortValue((fileConfig as { reasoningEffort?: unknown }).reasoningEffort)
-        ? (fileConfig as { reasoningEffort: string }).reasoningEffort
+      reasoningEffort: isReasoningEffortValue((fileConfig.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort)
+        ? String((fileConfig.flags as { modelReasoningEffort: string }).modelReasoningEffort)
         : undefined,
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN || undefined,
@@ -6955,11 +6955,12 @@ async function processConfigUpdate(): Promise<void> {
     const merged = mergePatch(fileConfig, update.patch);
     if (RUNTIME === "opencode") writeOpencodeConfig(configFilePath, merged);
     else atomicWriteJson(configFilePath, merged);
-    if (update.patch.reasoningEffort !== undefined && merged.runtime === "codex-app-server" && configFilePath) {
+    const effort = (update.patch.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+    if (effort !== undefined && merged.runtime === "codex-app-server" && configFilePath) {
       const nodeDir = dirname(configFilePath);
       const { codexHome } = resolveNodeCodexHome({ nodeDir, config: merged, exists: existsSync });
-      if (isReasoningEffortValue(update.patch.reasoningEffort)) {
-        applyReasoningEffortToCodexHome(codexHome, update.patch.reasoningEffort);
+      if (isReasoningEffortValue(effort)) {
+        applyReasoningEffortToCodexHome(codexHome, effort);
         log(`[config-apply] wrote ${join(codexHome, "config.toml")} (model_reasoning_effort)`);
       }
     }

@@ -23,6 +23,7 @@ import {
   TIMEOUT_MS_MIN,
   TIMEOUT_MS_MAX,
 } from "./config-apply.js";
+import { CODEX_CONFIG_ONLY_FLAG_KEYS, validateCodexConfigFlag } from "./codex-config-flags.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
@@ -682,6 +683,11 @@ export function validateFlagValueDaemon(k: string, v: unknown): void {
       if (typeof v !== "boolean") throw new Error(`flag_value_invalid:${k}:must be boolean`);
       return;
     default:
+      if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) {
+        const fail = validateCodexConfigFlag(k, v, null);
+        if (fail) throw new Error(`flag_value_invalid:${k}:${fail.reason}`);
+        return;
+      }
       throw new Error(`flag_key_unknown:${k}`);
   }
 }
@@ -746,19 +752,30 @@ export function validateOpenCodeV2ProviderModelDaemon(spec: Pick<DaemonNodeSpec,
 export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" | "flags">): {
   flags: Record<string, unknown>;
   codexCopresence?: true;
+  codexCopresenceFullAccess?: true;
   opencodeGeneration?: "v1" | "v2";
   opencodeMode?: "copresence";
 } {
   const flags: Record<string, unknown> = { ...(spec.flags || {}) };
   validateOpenCodeCreateFlags(spec.runtime, flags);
+  for (const [k, v] of Object.entries(flags)) {
+    if (!CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
+    const fail = validateCodexConfigFlag(k, v, spec.runtime);
+    if (fail) throw new Error(`flag_value_invalid:${k}:${fail.reason}`);
+  }
   const generation = flags.opencodeGeneration;
   delete flags.opencodeGeneration;
   const wanted = flags.copresence === true;
   delete flags.copresence;
+  const fullAccess = flags.copresenceFullAccess === true;
+  const codexExtras = {
+    ...(wanted && spec.runtime === "codex-app-server" ? { codexCopresence: true as const } : {}),
+    ...(fullAccess && spec.runtime === "codex-app-server" ? { codexCopresenceFullAccess: true as const } : {}),
+  };
   if (generation === "v1" || generation === "v2") {
-    return { flags, opencodeGeneration: generation, ...(generation === "v2" ? { opencodeMode: "copresence" as const } : {}) };
+    return { flags, opencodeGeneration: generation, ...(generation === "v2" ? { opencodeMode: "copresence" as const } : {}), ...codexExtras };
   }
-  return wanted && spec.runtime === "codex-app-server" ? { flags, codexCopresence: true } : { flags };
+  return { flags, ...codexExtras };
 }
 
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
@@ -781,7 +798,12 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   validateOpenCodeCreateFlags(spec.runtime, spec.flags || {});
   validateOpenCodeV2ProviderModelDaemon(spec);
   for (const [k, v] of Object.entries(spec.flags || {})) {
-    if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence", "opencodeGeneration", "opencodeUnsafeTools"].includes(k)) {
+    const allowed = [
+      "permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout",
+      "copresence", "opencodeGeneration", "opencodeUnsafeTools",
+      ...CODEX_CONFIG_ONLY_FLAG_KEYS,
+    ];
+    if (!allowed.includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
     }
     // §4.2.2 daemon double-layer: defense in depth (per 通信牛 PR
@@ -796,6 +818,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
       if (v === true) args.push("--copresence");   // CLI 的布尔开关,不吃值
       continue;
     }
+    if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
     args.push(`--${kebab(k)}`, String(v));
   }
   return args;
@@ -1144,7 +1167,7 @@ export async function handleCreateNodeDoorbell(
   }
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
-  const { flags: flagsObj, codexCopresence, opencodeGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  const { flags: flagsObj, codexCopresence, codexCopresenceFullAccess, opencodeGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
   const opencodeCopresence = req.node_spec.runtime === "opencode-cli"
     && opencodeGeneration === "v2" && opencodeMode === "copresence";
   // Best-effort: also derive `permissionMode` etc into a `flags` block
@@ -1166,6 +1189,7 @@ export async function handleCreateNodeDoorbell(
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),
       ...(codexCopresence ? { codexCopresence } : {}),
+      ...(codexCopresenceFullAccess ? { codexCopresenceFullAccess } : {}),
       ...(opencodeGeneration ? { opencodeGeneration } : {}),
       ...(opencodeMode ? { opencodeMode } : {}),
     };

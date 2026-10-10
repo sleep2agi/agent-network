@@ -3239,8 +3239,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // interpret. validatePatch then re-rejects if the caller bypassed
         // narrowing.
         channels: z.array(z.unknown()).max(16).optional(),
-        /** Codex co-presence (`codex-app-server`) only — maps to `model_reasoning_effort` in CODEX_HOME/config.toml. Restart-tier. */
-        reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]).optional(),
       }).describe("Fields to update. Empty patch → no-op (use restart_node for that)."),
       network_id: z.string().max(200).optional(),
     },
@@ -3260,7 +3258,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       const model = typeof patch.model === "string" ? patch.model : undefined;
-      const reasoningEffort = typeof patch.reasoningEffort === "string" ? patch.reasoningEffort : undefined;
       const flags = (patch.flags && typeof patch.flags === "object") ? patch.flags as Record<string, unknown> : {};
       // Narrow untrusted `channels` at the boundary (typeof + allowlist +
       // dedup + case-fold), and distinguish two very different cases
@@ -3332,7 +3329,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
-      const validationFail = validatePatch(model, flags, channels, reasoningEffort, node.runtime);
+      const validationFail = validatePatch(model, flags, channels, node.runtime);
       if (validationFail) {
         return {
           content: [{
@@ -3410,10 +3407,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Compute apply_mode + persist + push doorbell.
       const updateId = `cu_${uuidv4()}`;
-      const applyMode = computeApplyMode(model, flags, channels, reasoningEffort);
+      const applyMode = computeApplyMode(model, flags, channels);
       const patchJson = JSON.stringify({
         ...(model !== undefined ? { model } : {}),
-        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
         flags,
         ...(channels !== undefined ? { channels } : {}),
       });
@@ -6746,7 +6742,6 @@ export function finalizePendingMatchingUpdates(
   if (pending.length === 0) return { finalizedCount: 0, finalizedIds: [] };
 
   const snapModel: string | null | undefined = snapshot?.model;
-  const snapReasoningEffort: string | null | undefined = snapshot?.reasoningEffort;
   const snapFlags: Record<string, unknown> = (snapshot?.flags && typeof snapshot.flags === "object") ? snapshot.flags : {};
   // #260 P5 — snapshot.channels is the (sorted, bare-type) channel set
   // the node currently has forked. agent-node's buildConfigSnapshot
@@ -6770,9 +6765,6 @@ export function finalizePendingMatchingUpdates(
     if (row.apply_mode !== "restart_only") {
       if (patch.model !== undefined) {
         if (snapModel !== patch.model) { matches = false; }
-      }
-      if (matches && patch.reasoningEffort !== undefined) {
-        if (snapReasoningEffort !== patch.reasoningEffort) { matches = false; }
       }
       if (matches && patch.flags && typeof patch.flags === "object") {
         for (const [k, v] of Object.entries(patch.flags as Record<string, unknown>)) {

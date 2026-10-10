@@ -1877,7 +1877,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #720 — url + bearer + `default_tools_approval_mode="approve"` for commhub only, so the
   //   first commhub tool call does not stop on an approval prompt nobody will answer.
   const commhubMcpOverrides = codexCommhubMcpOverrides(opts.hub, "quoted");
-  const profileReasoning = (profile as { reasoningEffort?: unknown }).reasoningEffort;
+  const profileReasoning = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
   const reasoningEffortOverride = isReasoningEffortValue(profileReasoning)
     ? ` -c ${shellQuote(codexReasoningEffortConfigOverride(profileReasoning))}`
     : "";
@@ -5040,6 +5040,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
+      ...(runtime === "codex-app-server" && (opts.copresence === "true" || opts.copresence === true)
+        ? codexSdkYoloFlags(opts["no-yolo"] === "true")
+        : {}),
     },
     ...(runtime === "codex-app-server" && opts["codex-app-server-url"]
       ? { codexAppServerUrl: opts["codex-app-server-url"] }
@@ -12077,10 +12080,12 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-
       console.error(`--reasoning-effort must be one of: none, minimal, low, medium, high, xhigh`);
       process.exit(1);
     }
-    const currentRe = (profile as { reasoningEffort?: string }).reasoningEffort;
+    const fl = (profile.flags && typeof profile.flags === "object" ? profile.flags : {}) as Record<string, unknown>;
+    profile.flags = fl;
+    const currentRe = fl.modelReasoningEffort as string | undefined;
     if (currentRe !== nextRe) {
-      (profile as { reasoningEffort?: string }).reasoningEffort = nextRe;
-      changes.push(`reasoningEffort ${currentRe ?? "(unset)"} -> ${nextRe}`);
+      fl.modelReasoningEffort = nextRe;
+      changes.push(`modelReasoningEffort ${currentRe ?? "(unset)"} -> ${nextRe}`);
     }
   }
   if (workdirIdx >= 0) {
@@ -12114,7 +12119,7 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-
   saveProfile(resolved.id, profile);
   materializeRuntimeProviderOrExit(resolved.id, stagedProvider);
   {
-    const re = (profile as { reasoningEffort?: unknown }).reasoningEffort;
+    const re = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
     if (reasoningIdx >= 0 && isReasoningEffortValue(re)) {
       const { codexHome } = resolveNodeCodexHome({ nodeDir: join(nodesDir(), resolved.id), config: profile });
       writeReasoningEffortToCodexHome(codexHome, re);

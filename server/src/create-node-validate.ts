@@ -9,6 +9,7 @@
 
 import { isReservedEnvKey } from "./shared/reserved-env.js";
 import { checkNodeName } from "./shared/node-name.js";
+import { CODEX_CONFIG_ONLY_FLAG_KEYS, validateCodexConfigFlag } from "./codex-config-flags.js";
 
 export class ValidationError extends Error {
   constructor(public code: string, public detail?: Record<string, unknown>) {
@@ -52,7 +53,11 @@ export type Runtime = typeof RUNTIMES[number];
 // 🔴 故意放在 flags 里而不是 node_spec 顶层:老 hub 的 zod 会静默丢弃未知顶层字段、老 daemon 也静默忽略
 //    —— 那正是 #584 的形状(用户选了共存,拿到无头节点,没有任何报错)。flags 的未知键在老 hub(这份
 //    FLAG_KEYS)和老 daemon(buildAnetArgsDaemon)都**拒绝**,新 app 撞到老组件得到的是一条报错。
-export const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence", "opencodeGeneration", "opencodeUnsafeTools"] as const;
+export const FLAG_KEYS = [
+  "permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout",
+  "copresence", "opencodeGeneration", "opencodeUnsafeTools",
+  "approvalPolicy", "sandboxMode", "skipGitRepoCheck", "copresenceFullAccess", "modelReasoningEffort",
+] as const;
 
 /** #584 —— 只有这些 runtime 认 `flags.copresence`。目前只有 codex-app-server 的共存靠 config 字段
  *  (`codexCopresence`)决定;grok-build-cli / opencode-cli 各有自己的字段,接进来之前一律拒,不静默吞。 */
@@ -170,6 +175,11 @@ export function validateFlagValue(k: string, v: unknown): void {
       if (typeof v !== "boolean") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be boolean" });
       return;
     default:
+      if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) {
+        const fail = validateCodexConfigFlag(k, v, null);
+        if (fail) throw new ValidationError("flag_value_invalid", { field: k, reason: fail.reason });
+        return;
+      }
       throw new ValidationError("flag_key_unknown", { field: k });
   }
 }
@@ -195,6 +205,11 @@ export function validateFlagsForRuntime(runtime: string, flags: Record<string, u
     throw new ValidationError("flag_not_applicable_to_runtime", {
       field: "copresence", runtime, applicable: [...COPRESENCE_FLAG_RUNTIMES],
     });
+  }
+  for (const [k, v] of Object.entries(flags)) {
+    if (!CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
+    const fail = validateCodexConfigFlag(k, v, runtime);
+    if (fail) throw new ValidationError("flag_value_invalid", { field: k, reason: fail.reason });
   }
 }
 
@@ -383,6 +398,7 @@ export function buildAnetArgs(spec: NodeSpec): string[] {
       // `anet node create --copresence` 是布尔开关,不吃值。
       if (k === "copresence") { if (v === true) args.push("--copresence"); continue; }
       if (k === "opencodeUnsafeTools") { if (v === true) args.push("--opencode-unsafe-tools"); continue; }
+      if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
       args.push(`--${kebab(k)}`, String(v));
     }
     validateFlagsForRuntime(spec.runtime, spec.flags);

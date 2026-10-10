@@ -4325,7 +4325,6 @@ return Bun.serve({
         network_id: node.network_id,
         config_revision: node.config_revision || 0,
         model: snapshot.model ?? null,
-        reasoningEffort: snapshot.reasoningEffort ?? null,
         flags: snapshot.flags ?? {},
         config_update_capable: snapshot.config_update_capable ?? false,
       }));

@@ -1153,6 +1153,15 @@ describe("#584 flags.copresence → child config codexCopresence", () => {
     expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { permissionMode: "default", copresence: true } }))
       .toEqual({ flags: { permissionMode: "default" }, codexCopresence: true });
   });
+  test("copresenceFullAccess:true → codexCopresenceFullAccess on config root", () => {
+    expect(childConfigFieldsFromSpec({
+      runtime: "codex-app-server",
+      flags: { copresenceFullAccess: true, approvalPolicy: "never" },
+    })).toEqual({
+      flags: { approvalPolicy: "never", copresenceFullAccess: true },
+      codexCopresenceFullAccess: true,
+    });
+  });
   test("copresence:false / absent → no codexCopresence (headless stays creatable; old request shape unchanged)", () => {
     expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { copresence: false } })).toEqual({ flags: {} });
     expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { permissionMode: "plan" } }))

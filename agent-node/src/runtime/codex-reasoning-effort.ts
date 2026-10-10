@@ -5,19 +5,13 @@ import { join } from "node:path";
 
 export const CODEX_MODEL_REASONING_EFFORT_KEY = "model_reasoning_effort";
 
-export const REASONING_EFFORT_VALUES = [
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-] as const;
+import { isModelReasoningEffort, REASONING_EFFORT_VALUES, type ModelReasoningEffort } from "./codex-config-flags.js";
 
-export type ReasoningEffortValue = (typeof REASONING_EFFORT_VALUES)[number];
+export { REASONING_EFFORT_VALUES, type ModelReasoningEffort };
+export type ReasoningEffortValue = ModelReasoningEffort;
 
 export function isReasoningEffortValue(v: unknown): v is ReasoningEffortValue {
-  return typeof v === "string" && (REASONING_EFFORT_VALUES as readonly string[]).includes(v);
+  return isModelReasoningEffort(v);
 }
 
 export function reasoningEffortValidationReason(): string {
