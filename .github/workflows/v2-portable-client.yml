@@ -30,7 +30,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Build from tracked source and run isolated positive then negative
-        run: sg docker -c 'ARTIFACT_DIR=/tmp/test883-artifacts bash tests/test883-v2-portable-client/ci.sh'
+        run: |
+          mkdir -p /tmp/test883-artifacts
+          export ARTIFACT_DIR=/tmp/test883-artifacts
+          bash tests/test883-v2-portable-client/ci.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
