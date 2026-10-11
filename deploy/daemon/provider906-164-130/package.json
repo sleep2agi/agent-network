@@ -1,0 +1,9 @@
+{
+  "name": "anet-provider906-private-pair",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@sleep2agi/agent-network": "file:./sleep2agi-agent-network-2.3.0-preview.164.tgz",
+    "@sleep2agi/agent-node": "file:./sleep2agi-agent-node-2.5.0-preview.130.tgz"
+  }
+}
