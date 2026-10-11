@@ -10,7 +10,7 @@
 // `status: "ready"` is a snapshot, and that snapshot stays completeness
 // unknown / invocation unverified.
 
-import { resolve } from "node:path";
+import { posix, win32 } from "node:path";
 import { z } from "zod/v4";
 import { db, uuidv4 } from "./db.js";
 import { getUserNetworkRole } from "./auth.js";
@@ -25,7 +25,54 @@ export const CATALOG_ERROR_CODES = [
 export type CatalogErrorCode = (typeof CATALOG_ERROR_CODES)[number];
 
 const identifier = z.string().min(1).max(512).refine(value => !/[\s\u0000-\u001f\u007f]/.test(value) && !SECRET.test(value));
-const directoryText = z.string().min(1).max(1024).refine(value => value === resolve(value) && !/[\u0000-\u001f\u007f]/.test(value));
+const CONTROL = /[\u0000-\u001f\u007f]/;
+const WINDOWS_DRIVE = /^[A-Za-z]:[\\/]/;
+
+/** Absolute in the path's own format. Hub `path.resolve` is not used: on a
+ * POSIX Hub it treats `C:\project` as a relative path under the process cwd. */
+function windowsStrictAbsolute(value: string): boolean {
+  if (!WINDOWS_DRIVE.test(value)) return false;
+  const parts = value.slice(2).split(/[\\/]/);
+  if (parts[0] !== "" || parts.length < 2) return false;
+  return parts.slice(1).every(part => part !== "" && part !== "." && part !== "..");
+}
+
+export function strictNativeAbsoluteDirectory(value: string): boolean {
+  if (value.length < 1 || value.length > 1024 || CONTROL.test(value)) return false;
+  if (WINDOWS_DRIVE.test(value)) return windowsStrictAbsolute(value);
+  if (value.startsWith("/")) return posix.resolve(value) === value;
+  return false;
+}
+
+function tildeWorkdir(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\");
+}
+
+/** Compare a stored create workdir with the directory the daemon reported.
+ * Windows keys ignore slash style and case. POSIX keys are lexical (`..` and
+ * a trailing slash collapse) and are not realpath'd — Hub does not see the
+ * daemon disk. A `~` / `~/…` workdir has no Hub-side home to expand; a
+ * native-absolute report is accepted because the daemon already refused the
+ * read unless that path is the endpoint it owns. A compromised daemon can
+ * name another absolute path for a tilde row, same as a null workdir. */
+export function catalogDirectoriesMatch(stored: string, reported: string): boolean {
+  if (!strictNativeAbsoluteDirectory(reported)) return false;
+  const storedTrim = stored.trim();
+  if (tildeWorkdir(storedTrim)) return true;
+  const storedWindows = WINDOWS_DRIVE.test(storedTrim);
+  const reportedWindows = WINDOWS_DRIVE.test(reported);
+  if (storedWindows !== reportedWindows) return false;
+  if (storedWindows) {
+    const left = win32.resolve(storedTrim);
+    const right = win32.resolve(reported);
+    return /^[A-Za-z]:\\/.test(left) && left.toLowerCase() === right.toLowerCase();
+  }
+  if (storedTrim.startsWith("/") && reported.startsWith("/")) return posix.resolve(storedTrim) === posix.resolve(reported);
+  return false;
+}
+
+const directoryText = z.string().min(1).max(1024).refine(strictNativeAbsoluteDirectory);
 
 export const opencodeCatalogSnapshotSchema = z.object({
   scope: z.object({
@@ -268,7 +315,7 @@ export function ackOpenCodeCatalog(daemonNodeId: string, body: unknown):
   // A stored workdir must match. A null workdir (legacy create) has no
   // hub-side path to compare; the daemon binds that read to the project
   // directory it already owns. Hub does not see that filesystem.
-  const directoryOk = row.directory ? resolve(snapshot.scope.directory) === resolve(row.directory) : true;
+  const directoryOk = row.directory ? catalogDirectoriesMatch(row.directory, snapshot.scope.directory) : true;
   if (snapshot.scope.networkId !== row.networkId || snapshot.scope.daemonId !== row.daemonNodeId || !directoryOk || !consistent(snapshot)) {
     result.status = "failed";
     result.error = "invalid_response";

@@ -5,6 +5,7 @@
 - 网络成员可以用 `read_opencode_catalog` 让 host_supervisor daemon 读取它已经在跑的 OpenCode V2 回环目录。`ok` 且 `status: pending` 只表示 Hub 已授权并记在内存里。门铃是尽力推送：没有订阅者就不会送达。只有 `get_opencode_catalog` 的 `status: ready` 才是快照，而且 completeness 仍是 unknown、invocationVerified 仍是 false。
 - 这条路径不启动 OpenCode、不提示输入、不跟随重定向。身份和代际只来自 Hub 里已有的创建记录。请求不能带 url、authorization、directory、settings、headers 或 body。
 - 没有客户端挑选界面，也不是 npm 发布。收编节点不在这一片。创建记录没有 workdir 时，目录由 daemon 绑定到它已经拥有的项目目录，Hub 看不到那台机器的文件系统。
+- 确认快照里的目录按路径自己的格式判断是不是绝对路径。Hub 在 POSIX 上也不会把 daemon 的 `C:\project` 当成相对路径丢掉。`C:/project` 与 `C:\project` 视为同一目录。创建记录里的 `~/…` 由 daemon 展开后再和回环目录比较；Hub 不展开别人的家目录。软链工作目录在快照里仍用创建记录里的那条绝对路径。
 
 ## 未发布：daemon 删除节点后会话一并清掉（2026-10-11）
 

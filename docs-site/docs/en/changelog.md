@@ -5,6 +5,7 @@
 - A network member can call `read_opencode_catalog` so the host_supervisor daemon reads the OpenCode V2 loopback it is already running. `ok` with `status: pending` means the Hub authorized the read and stored it in memory. The doorbell is best-effort: with no subscriber it is not delivered. Only `get_opencode_catalog` with `status: ready` is a snapshot, and completeness stays unknown and invocationVerified stays false.
 - This path does not start OpenCode, prompt, or follow redirects. Identity and generation come only from the Hub's existing create record. The request cannot carry url, authorization, directory, settings, headers, or body.
 - There is no client picker, and this is not an npm release. Adopted nodes are not in this slice. When the create record has no workdir, the daemon binds the read to the project directory it already owns. The Hub does not see that machine's filesystem.
+- A snapshot directory is absolute in its own format. A POSIX Hub does not reject a daemon's `C:\project` as a relative path. `C:/project` and `C:\project` are the same directory. The daemon expands a stored `~/…` workdir before comparing it with the loopback directory. The Hub does not expand another machine's home. A symlink workdir is reported as the absolute path stored on the create record.
 
 ## Unreleased: daemon-mediated delete also drops the node's session (2026-10-11)
 

@@ -222,4 +222,47 @@ describe("hub authorizes an owned OpenCode V2 catalog read", () => {
       ok: false, status: "expired", error: "unavailable",
     });
   });
+
+  test("acks a Windows absolute directory without Hub path.resolve", () => {
+    seed();
+    db.run(`UPDATE node_create_requests SET workdir = ?1 WHERE request_id = ?2`, ["C:\\project", V2_REQ]);
+    const queued = queue(USER, V2);
+    expect(queued.ok).toBe(true);
+    if (!queued.ok) return;
+    takeOpenCodeCatalogRequest(queued.request_id, DAEMON);
+    expect(ackOpenCodeCatalog(DAEMON, { request_id: queued.request_id, snapshot: snapshot("project") })).toEqual({ ok: false, error: "invalid_ack" });
+    expect(ackOpenCodeCatalog(DAEMON, { request_id: queued.request_id, snapshot: snapshot("C:relative") })).toEqual({ ok: false, error: "invalid_ack" });
+    expect(getOpenCodeCatalogResult({ callerUserId: USER, callerIsNode: false, networkId: NET, requestId: queued.request_id }).status).toBe("pending");
+    expect(ackOpenCodeCatalog(DAEMON, { request_id: queued.request_id, snapshot: snapshot("C:/project") })).toEqual({ ok: true, status: "ready" });
+    const got = getOpenCodeCatalogResult({ callerUserId: USER, callerIsNode: false, networkId: NET, requestId: queued.request_id });
+    expect(got.ok).toBe(true);
+    if (!got.ok || got.status !== "ready") return;
+    expect(got.snapshot.scope.directory).toBe("C:/project");
+
+    const other = queue(USER, V2);
+    expect(other.ok).toBe(true);
+    if (!other.ok) return;
+    takeOpenCodeCatalogRequest(other.request_id, DAEMON);
+    expect(ackOpenCodeCatalog(DAEMON, { request_id: other.request_id, snapshot: snapshot("D:\\other") })).toEqual({
+      ok: true, status: "failed", error: "invalid_response",
+    });
+  });
+
+  test("a tilde workdir matches a native absolute report, and lexical .. collapses", () => {
+    seed();
+    db.run(`UPDATE node_create_requests SET workdir = ?1 WHERE request_id = ?2`, ["~/project", V2_REQ]);
+    const queued = queue(USER, V2);
+    expect(queued.ok).toBe(true);
+    if (!queued.ok) return;
+    takeOpenCodeCatalogRequest(queued.request_id, DAEMON);
+    expect(ackOpenCodeCatalog(DAEMON, { request_id: queued.request_id, snapshot: snapshot("/home/user/project") })).toEqual({ ok: true, status: "ready" });
+
+    db.run(`UPDATE node_create_requests SET workdir = ?1 WHERE request_id = ?2`, ["/tmp/foo/../bar", V2_REQ]);
+    const lexical = queue(USER, V2);
+    expect(lexical.ok).toBe(true);
+    if (!lexical.ok) return;
+    takeOpenCodeCatalogRequest(lexical.request_id, DAEMON);
+    expect(ackOpenCodeCatalog(DAEMON, { request_id: lexical.request_id, snapshot: snapshot("/tmp/foo/../bar") })).toEqual({ ok: false, error: "invalid_ack" });
+    expect(ackOpenCodeCatalog(DAEMON, { request_id: lexical.request_id, snapshot: snapshot("/tmp/bar") })).toEqual({ ok: true, status: "ready" });
+  });
 });

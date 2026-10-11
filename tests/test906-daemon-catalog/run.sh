@@ -7,5 +7,5 @@ if [ -n "${EXPECTED_SOURCE_COMMIT:-}" ]; then
 fi
 printf 'source=%s\n' "${SOURCE_COMMIT:-local-worktree}"
 test "$(opencode --version)" = 'opencode v2.0.22'
-bun test agent-node/src/runtime/opencode-v2-catalog.test.ts agent-node/src/runtime/opencode-v2-catalog-endpoint.test.ts agent-node/src/runtime/opencode-v2-catalog-daemon.test.ts
+bun test agent-node/src/runtime/opencode-v2-catalog.test.ts agent-node/src/runtime/opencode-v2-catalog-endpoint.test.ts agent-node/src/runtime/opencode-v2-catalog-daemon.test.ts agent-node/src/runtime/opencode-catalog-dispatch.test.ts
 bun tests/test906-daemon-catalog/native.ts
