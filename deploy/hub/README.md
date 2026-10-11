@@ -167,16 +167,21 @@ curl -s localhost:9200/health          # version 与 sessions_count
 ### #906 的精确版本部署配置
 
 `hub-daemon.sh` 默认值仍对应 CLI 的兼容基线，不是线上最新版本。
-`hub-provider906.sh` 是 `.121` 的无密钥部署配置：选择
-`~/.commhub/runtime-v105-preview121`，保留目标 Hub 原本开启的 side-thread
+`hub-provider906.sh` 当前是 `.122` 的无密钥部署配置：选择
+`~/.commhub/runtime-v106-preview122`，保留目标 Hub 原本开启的 side-thread
 功能（显式设置 `COMMHUB_ENABLE_SIDE_THREADS=0` 仍有效）。不能只覆盖启动器
 而未安装这个精确 runtime。发布源是 main
-`b4413131b73c52c286beec46509773716698d89f`，包是
-`@sleep2agi/commhub-server@0.9.0-preview.121`；来源和离线迁移结果见
-`docs/tests/report-test906-hub121-preflight.txt`。预检通过不代表已部署。
+`231bf8c9711aacd9b2f78afce7c58a1873f3d280`，包是
+`@sleep2agi/commhub-server@0.9.0-preview.122`；正式运行 `38121256184`
+已完成 npm 发布与 registry 回读。锁文件使用同字节 GitHub 原包：
+`commhub-server-v0.9.0-preview.122/sleep2agi-commhub-server-0.9.0-preview.122.tgz`，
+SHA256 `a47a12d03db41fbf5bd2a95a0c0f4a2107d771c17aa3487c58c490fb000c553a`。
+来源和新增表/字段的离线迁移结果见
+`docs/tests/report-test906-hub122-preflight.txt`。预检通过不代表已部署。
+此前 `.121` 的历史证据保存在 `report-test906-hub121-preflight.txt`，不能当作 `.122` 验收。
 
 该部署的完整 npm 输入锁在 `deploy/hub/provider906/package*.json`，包括发布包
-的 registry URL 与 integrity。空目录安装时复制这两个文件到上述 sibling
+的 GitHub URL 与 integrity。空目录安装时复制这两个文件到上述 sibling
 runtime，然后在该目录执行 `npm ci --ignore-scripts --no-audit --no-fund`。
 不要只按版本重新解析浮动的传递依赖；保留旧 runtime 和密钥来源不变。
 
@@ -187,11 +192,24 @@ runtime，然后在该目录执行 `npm ci --ignore-scripts --no-audit --no-fund
 PM2 定义、端口、反代、数据库路径与 `hub.env` 密钥来源不变，不使用
 `--update-env`。按上文五条核对真实运行版本、心跳和 ack，再记录实际切换。
 
-本次回滚目标是已保留的 `runtime-v104-preview115`。切换前备份原启动脚本；
+本次回滚目标是已保留的 `runtime-v105-preview121`。切换前备份原启动脚本；
 需要回滚时恢复该备份并仅重启 `commhub-hub`，不删除 runtime 或数据库表。
 软件回滚不撤销已应用的 Provider 配置；数据库内容和 vault 原始密钥仍需要
 独立加密备份，Git 不含这些材料。此配置不改变 CLI `PINNED_SERVER_VERSION`，
 也不升级任何 Daemon 或节点。
+
+`.122` 比 `.121` 新增 `daemon_provider_logins` 意图表和
+`node_create_requests.clone_json` 字段；OAuth token 仍只留在 Daemon，
+不写 Hub 数据库。切换前将当前 SQLite 做一致性 `VACUUM INTO` 备份，
+只向隔离 Docker 挂载离线备份副本，保留原库、vault 密钥及旧 runtime。
+服务启动入口和共享启动器如上；继续使用既有 PM2 `commhub-hub` 定义、
+9200 端口与原反代/隧道（不修改拓扑），原 `~/.commhub/hub.env` 是
+由该主机管理员安全保管的密钥源，不得提交 Git 或拷贝其他节点身份。
+实际切换只重启该 Hub；随后以 `/health` 的 `.122`、监听进程命令行、
+近期节点心跳/任务 ack 校验真实生效。回滚恢复原启动器并只重启 Hub，
+保留新增状态；存在未终结登录意图时先确认 Daemon 侧结果，不直接重放。
+生产数据、vault 密钥和账号不由 clone 仓库恢复，必须从管理员的加密备份
+或重新认证获取。备份策略和路径沿用本 runbook 前述生产备份步骤。
 
 ## 混版风险(必读)
 
