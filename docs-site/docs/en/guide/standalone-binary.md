@@ -34,7 +34,7 @@ On main, dispatch [cli-binary.yml](https://github.com/sleep2agi/agent-network/bl
 
 ```bash
 SHA=   # git rev-parse origin/main, 40 hex characters
-VERSION=   # for example 2.3.0-preview.164; this is the bundle version, not an npm publish
+VERSION=   # bundle version for the GitHub release cli-bin-v<version>; this is not an npm publish
 
 gh workflow run cli-binary.yml --ref main \
   -f commit="$SHA" \

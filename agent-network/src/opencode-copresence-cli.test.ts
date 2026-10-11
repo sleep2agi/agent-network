@@ -70,11 +70,16 @@ describe("OpenCode co-presence CLI wiring", () => {
   test("bridge 的输出落到节点日志目录，而不是只留在 tmux pane 里", () => {
     expect(body).toContain("copresence-bridge.log");
     // fd 重定向用不带命令的 `exec`（只改 fd、不替换进程），后面那条
-    // `exec node …` 仍然原样接管 —— 进程身份不变，node stop 的 pgid 语义不受影响。
+    // `exec ${cliPrefix} node start` 才替换进程。cliPrefix 来自 reinvokeShell，
+    // 命令最前是 process.execPath，所以接管的仍是这次 anet。
     const teeAt = body.indexOf("exec > >(tee -a");
-    const execAt = body.indexOf("exec ${shellQuote(process.execPath)}");
+    const execAt = body.indexOf("exec ${cliPrefix} node start");
     expect(teeAt).toBeGreaterThan(-1);
     expect(execAt).toBeGreaterThan(teeAt);
+    expect(body).toContain("const cliPrefix = reinvokeShell([], false, cliEntry)");
+    const reinvokeAt = cli.indexOf("function reinvokeShell(");
+    const reinvokeBody = cli.slice(reinvokeAt, cli.indexOf("\n}\n", reinvokeAt));
+    expect(reinvokeBody).toContain("execPath: process.execPath");
   });
 
   test("超时后的输出交给诊断模块，且区分「桥死了」和「桥还活着」", () => {

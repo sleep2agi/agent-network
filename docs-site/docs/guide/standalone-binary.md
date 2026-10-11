@@ -34,7 +34,7 @@ standalone bundle v<工作流传入的 version>
 
 ```bash
 SHA=   # git rev-parse origin/main，40 位
-VERSION=   # 例如 2.3.0-preview.164；这是 bundle 版本，不是 npm publish
+VERSION=   # bundle 版本，对应 GitHub release cli-bin-v<version>；不是 npm 发包
 
 gh workflow run cli-binary.yml --ref main \
   -f commit="$SHA" \
