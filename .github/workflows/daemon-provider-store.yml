@@ -12,6 +12,16 @@ on:
 permissions:
   contents: read
 jobs:
+  managed-login:
+    name: daemon-managed-login (Docker, no account sign-in)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login lifecycle and native empty-account protocol (offline)
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.login -t anet-provider-management:test906-login .'
+          sg docker -c 'docker run --init --rm --network none anet-provider-management:test906-login'
   store:
     name: daemon-provider-store (Docker)
     runs-on: ubuntu-latest

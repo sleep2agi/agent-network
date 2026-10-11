@@ -59,3 +59,37 @@ complete account-switch feature. Future credentials belong to the private
 daemon state/approved encrypted backups, never Git; an empty machine otherwise
 requires the account owner to sign in again. No recovery claim has been tested.
 Containers ran --init --rm --network none and exited; no production state mounted.
+
+2026-10-11 13:55 +08 — daemon-owned session manager, same draft PR2581
+Added serialized start/read/cancel/save operations and scoped saved-account
+metadata. The same start request reuses one ceremony; another request cannot
+overwrite an active login. Save requires the controller's confirmed ChatGPT
+state plus a private auth file, closes the process, and retains only that draft's
+home in place. No existing node credential is copied. Account metadata contains
+an opaque ID, user label, daemon/network scope and timestamp, not tokens/email.
+Listing persisted records after restart explicitly says auth_state=not_checked;
+it is not a fresh credential validation or a node binding. Unsaved cancellation
+discards the owned draft; a saved account cannot be cancelled as a login attempt.
+
+Docker: 10 PASS / 0 FAIL / 38 expectations. Three new manager cases cover
+idempotent/concurrent start and unsatisfied-save rejection; confirmed save/retry
+and scoped recovery; cancel/cleanup leaving a neighboring account intact.
+Existing controller/factory checks and the actual Codex 0.159.2 empty-account
+startup probe passed in the same image. The new manager success path uses
+synthetic RPC/account fixtures, NOT a real human OAuth completion. No inference.
+Strict targeted TypeScript 6.0.3 passed in Docker for manager + dependencies.
+Added this small offline suite to the existing daemon-provider CI workflow.
+Final source rerun after fixed-error/partial-marker cleanup edits: same 10/0/38,
+native probe PASS. Containers exited and were removed (--init --rm --network none).
+
+Recovery: no new service/port/production route is enabled in this increment.
+Saved metadata is anet-account.json inside the newly created login home; the
+private auth.json remains Codex-owned. A future daemon boot handler must provide
+the registered daemon's private root (including Windows ACL setup), own the
+manager lifecycle, and call close during orderly shutdown. Abruptly interrupted
+drafts without a valid scoped marker are not listed as saved accounts. Existing
+files are not a substitute for approved encrypted backup; without it an empty
+machine requires fresh user sign-in. No full-machine recovery drill claimed.
+Remaining: actual daemon/Hub authorization and RPC wiring, client login UI,
+account-to-Provider binding and single-node switch/rollback. This draft is NOT
+a usable or released account-switch feature and is not included in app 0.2.237.
