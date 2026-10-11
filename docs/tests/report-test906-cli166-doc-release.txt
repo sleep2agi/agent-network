@@ -1,0 +1,39 @@
+#906 CLI166 doc-claim release correction
+OBSERVED_AT=2026-10-11T13:44:53Z
+
+Original main source ad381202cbba00c80efc30522801dedd810fbbea, formal
+run38143893530: build, install-path/5smoke cases, pinned audit and release
+notes PASS; doc-version gate FAIL because both bilingual getting-started
+pages still stamped and described preview165. Publication SKIPPED.
+The original166 artifact remains TEST ONLY and must not be publicly released.
+
+Fix: preview stamp AND corresponding body165 ->166 in both pages. Checked
+latest76 and historical references retained. No product/API/credential change,
+release workflow change, guard relaxation or public dist-tag movement.
+
+Exact original formal artifact, TEST ONLY:
+- 2123379 bytes; SHA25621ebbb0c1b9b01c6331f6af2daef5bddec12d33a01f58671c84f673e4f861ed6.
+- Formal build log confirms checkoutad381202 and release-source binding.
+- Existing incident probe parameterized EXPECTED_CLI_VERSION with exact version
+  assertion retained; original password and second-start assertions unchanged.
+- Docker --rm --network none, artifact and script mounted read-only, cached
+  locked-input test906-create image c95d95bd1f989582429e7828601e4fd28fdf67ecd76db4b6a1164336729d61fd.
+- Actual packaged CLI3/3 PASS: version166; default random anet-22hex printed and
+  supplied to synthetic register; repeat start reuses fixture token without
+  registration or password printing. Fixture HTTP/auth is not real OAuth or
+  production authentication. No credential printed in test output.
+- Existing Python checker selftest19/19 PASS in Docker. Original release-mode
+  run function on fixed candidate scans four stamps in two pages, PASS.
+  --verify-latest-from-npm remains a formal release responsibility, not claimed
+  by this local offline check. No broad suite rerun.
+
+Harness diagnostics (not product failures or PASS): Python slim main entry
+needed git discovery; called its unchanged run function with explicit mounted
+repo instead. First unprivileged container could not traverse the owner-only
+artifact directory; root inside isolated container could read its RO mount.
+Both failed attempts exited and --rm removed them; no host permissions changed.
+
+Next: normal main merge, then rebuild166 from that exact main SHA and repeat
+formal gates; version166 has not been published, so this is not an immutable
+package republish. Old failed-gate artifact is not reused as a public release.
+No global npm installation, live service change or persistent test process.

@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 
 const root = mkdtempSync(join(tmpdir(), "test906-cli-doc-"));
-execFileSync("tar", ["-xzf", "/artifact/sleep2agi-agent-network-2.3.0-preview.165.tgz", "-C", root]);
+const version = process.env.EXPECTED_CLI_VERSION || "2.3.0-preview.165";
+assert.match(version, /^2\.3\.0-preview\.[0-9]+$/);
+execFileSync("tar", ["-xzf", `/artifact/sleep2agi-agent-network-${version}.tgz`, "-C", root]);
 const pkg = join(root, "package");
 symlinkSync("/work/agent-network/node_modules", join(pkg, "node_modules"));
-assert.equal(JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")).version, "2.3.0-preview.165");
-console.log("PASS exact CLI candidate version .165");
+assert.equal(JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")).version, version);
+console.log(`PASS exact CLI candidate version ${version}`);
 let registrations = 0;
 let capturedPassword;
 const server = createServer(async (req, res) => {
