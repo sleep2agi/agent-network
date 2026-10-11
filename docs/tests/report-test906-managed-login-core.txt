@@ -217,3 +217,16 @@ Cached Docker build images retained for the next affected-path check.
   preflight suite: 28 PASS / 48 expectations. Full application recheck pending.
 - No production credentials, host global packages, daemon restarts or external
   inference used. Tests and source-built containers are not released artifacts.
+
+2026-10-11 14:46 +08 native core follow-up:
+Source: 5d2608284eb283bf97f63e5f354ccc8316337184 (PR2581, TEST-ONLY).
+Image: anet-provider:test906-native-account-apply, config digest
+sha256:e715bb65cf09c64a759c533b8d41c53157f45e3886e2bb321737036b48dce16a.
+Run: docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1
+  anet-provider:test906-native-account-apply
+PASS real Hub -> daemon -> CLI -> native Codex same-thread API key / managed
+account A / managed account B / API key. Exact account/model/provider/revision
+readback and custody markers checked. Two synthetic API-key model turns only;
+managed account data unsigned, routing fixture local, no real OAuth/external
+inference or account entitlement verified. Final CLI stop executed; isolated
+container removed by --rm. Production daemons and credentials untouched.
