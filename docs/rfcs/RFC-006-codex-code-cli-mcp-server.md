@@ -388,7 +388,7 @@ export class CodexCliRemoteControlRuntime {
 
 ### 4.2 ServerNotification 流 (anet bridge → commhub report_progress)
 
-per [/tmp/codex-schema/ServerNotification.json](实测 dump) 63 events, anet bridge 关注 mapping:
+per `/tmp/codex-schema/ServerNotification.json`（实测 dump）63 events, anet bridge 关注 mapping:
 
 | codex ServerNotification | RFC-003 NodeEvent.kind |
 |---|---|
