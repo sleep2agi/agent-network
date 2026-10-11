@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased: daemon-mediated delete also drops the node's session (2026-10-11)
+
+- When a node was deleted through its daemon, the Hub finalize removed the `nodes` row but left the `sessions` row as `offline`, so `/api/status` and client lists built on it kept showing the deleted node (desktop: stuck under "删除请求已提交"). Finalize now deletes that node's session by `node_id`, matching REST `DELETE /api/nodes/:id`. Matching on `node_id` rather than alias leaves a same-alias node rebuilt before the finalize untouched. Offline sessions already left behind are not cleaned up automatically.
+
 ## Unreleased: daemon-created children keep USER and proxy variables (2026-10-11)
 
 - When the daemon spawns a child, it now copies `USER`, `LOGNAME`, and `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` (both spellings) from its own environment, in addition to `PATH`, `HOME`, and `LANG`. Unset or empty values are not copied.

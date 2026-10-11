@@ -419,6 +419,46 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
     expect(JSON.parse(audits[0].detail).backup_path).toBe("/home/u/.anet/deleted/1719647200000-sd-child-a");
   });
 
+  // Daemon-mediated delete used to drop only the nodes row. The child's sessions
+  // row stayed behind as "offline", so /api/status — and every client list built
+  // on it — kept showing the deleted node forever (desktop: the node stays put
+  // under 「删除请求已提交」). REST DELETE /api/nodes/:id already drops both.
+  test("daemon ack 'stopped' on delete branch → the child's session row is gone too", async () => {
+    setupAlphaNetwork();
+    db.run(
+      "INSERT INTO sessions (resume_id, alias, node_id, network_id, status) VALUES (?1, ?2, ?3, ?4, 'idle')",
+      ["resume-sd-child-a", CHILD_A_ALIAS, CHILD_A_ID, NET_A],
+    );
+    const userTools = buildHandlers(USER_A_ID);
+    const dispatch = await call(userTools.delete_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A, confirm_alias: CHILD_A_ALIAS,
+    });
+    expect(dispatch.ok).toBe(true);
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    await call(daemonTools.ack_stop_request, { request_id: dispatch.request_id as string, status: "stopped", exit_signal: "SIGTERM" });
+    const left = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM sessions WHERE node_id = ?1", CHILD_A_ID);
+    expect(Number(left?.n ?? 0)).toBe(0);
+  });
+
+  test("delete finalize drops the session by node_id, sparing a same-alias rebuilt node", async () => {
+    setupAlphaNetwork();
+    const userTools = buildHandlers(USER_A_ID);
+    const dispatch = await call(userTools.delete_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A, confirm_alias: CHILD_A_ALIAS,
+    });
+    expect(dispatch.ok).toBe(true);
+    // Before the ack lands, a new node takes the same alias and registers.
+    const REBUILT_ID = "node_sd_child_a_rebuilt";
+    db.run(
+      "INSERT INTO sessions (resume_id, alias, node_id, network_id, status) VALUES (?1, ?2, ?3, ?4, 'idle')",
+      ["resume-sd-child-a-rebuilt", CHILD_A_ALIAS, REBUILT_ID, NET_A],
+    );
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    await call(daemonTools.ack_stop_request, { request_id: dispatch.request_id as string, status: "stopped", exit_signal: "SIGTERM" });
+    const rebuilt = db.get<{ status: string }>("SELECT status FROM sessions WHERE node_id = ?1", REBUILT_ID);
+    expect(rebuilt?.status).toBe("idle");
+  });
+
   // #1448 finding-4 — stop/delete 必须校验 daemon 是 child 的权威创建者(镜像 start)。
   // 改前只校验 daemon 存在+同网 → 同网调用方传错 daemon_node_id,门铃路由到错 daemon。
   // f3 合入后错 daemon 会 sweep 空 + ack stopped → hub 假收敛 stopped 而 child 仍在跑。

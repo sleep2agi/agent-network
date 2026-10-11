@@ -5581,6 +5581,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               );
             }
             db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
+            // Same as REST DELETE /api/nodes/:id: without this the sessions row
+            // stays "offline" and /api/status lists the deleted node forever.
+            // By node_id, not alias — a same-alias rebuild keeps its session.
+            db.run(`DELETE FROM sessions WHERE node_id = ?1`, [row.child_node_id]);
             clearNodeFromAgentTeams(row.child_node_id); // #764
             auditCreateNodeStrict({
               action: "delete_node_completed",
@@ -5606,7 +5610,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 🔴 关键的是最后那半句「据此做了什么」。#1286 里 hub 的代码路径经核对是
       // 正确的,缺的正是「它到底走没走那条分支」—— 只说「收到了 ack」回答不了。
       const did = status === "stopped" && row.action === "delete"
-        ? "revoked ntok + DELETE FROM nodes"
+        ? "revoked ntok + DELETE FROM nodes + sessions"
         : status === "stopped" && row.action === "stop"
         ? "lifecycle_state=stopped"
         : status === "stop_failed"

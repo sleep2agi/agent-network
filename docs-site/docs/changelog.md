@@ -1,5 +1,9 @@
 # 更新日志
 
+## 未发布：daemon 删除节点后会话一并清掉（2026-10-11）
+
+- 经 daemon 删除的节点，Hub 在收尾时只删了 `nodes` 行，`sessions` 行留成 `offline`。`/api/status` 和基于它的客户端列表因此一直显示已删除的节点（桌面端停在「删除请求已提交」）。现在收尾时按 `node_id` 一并删除该节点的会话，与 REST `DELETE /api/nodes/:id` 一致。按 `node_id` 而非别名删，删除收尾前用同名重建的节点不受影响。之前已残留的离线会话不会自动清除。
+
 ## 未发布：daemon 创建的子节点保留 USER 与代理变量（2026-10-11）
 
 - daemon 拉起子节点时，除 `PATH`、`HOME`、`LANG` 外，还从 daemon 自己的环境复制 `USER`、`LOGNAME` 和 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY`（大小写两种写法）。没设或为空的不复制。
