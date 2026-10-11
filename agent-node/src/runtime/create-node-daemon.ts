@@ -8,7 +8,7 @@
 // in their own processes (detached) and get their own supervisor wrap
 // once they hit `anet node start`.
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
@@ -24,6 +24,7 @@ import {
   TIMEOUT_MS_MAX,
 } from "./config-apply.js";
 import { CODEX_CONFIG_ONLY_FLAG_KEYS, validateCodexConfigFlag } from "./codex-config-flags.js";
+import { validProviderInitialization } from '../shared/provider-initialization.js';
 import {
   applyCodexCopresenceFlagDefaults,
   writeCopresenceYoloToCodexHome,
@@ -680,6 +681,9 @@ const PERMISSION_MODES = new Set(["default", "acceptEdits", "plan", "bypassPermi
 // or fork argv. Per 通信牛 PR #299 BLOCKER #2.
 export function validateFlagValueDaemon(k: string, v: unknown): void {
   switch (k) {
+    case 'daemonProvider':
+      if (!validProviderInitialization(v)) throw new Error('flag_value_invalid:daemonProvider');
+      return;
     case "opencodeGeneration":
       if (v !== "v1" && v !== "v2") throw new Error(`flag_value_invalid:${k}:must be v1 or v2`);
       return;
@@ -788,6 +792,7 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
   opencodeMode?: "copresence";
 } {
   const flags: Record<string, unknown> = { ...(spec.flags || {}) };
+  delete flags.daemonProvider;
   validateOpenCodeCreateFlags(spec.runtime, flags);
   for (const [k, v] of Object.entries(flags)) {
     if (!CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
@@ -829,6 +834,11 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   if (spec.model !== undefined && spec.model !== null &&
       (spec.model.length === 0 || spec.model.length > 100 || !MODEL_RE.test(spec.model) || MODEL_DOT_ONLY_SEGMENT.test(spec.model))) throw new Error("model_invalid");
   if (Array.isArray(spec.channels) && spec.channels.length > 0) throw new Error("channels_not_supported_in_p1");
+  if (spec.flags?.daemonProvider !== undefined && (spec.runtime !== 'codex-app-server' || spec.flags.copresence !== true)) {
+    throw new Error('flag_not_applicable_to_runtime:daemonProvider');
+  }
+  if (spec.flags?.daemonProvider !== undefined && (!validProviderInitialization(spec.flags.daemonProvider)
+    || spec.model !== spec.flags.daemonProvider.model)) throw new Error('provider_create_model_mismatch');
   const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
   if (spec.model) args.push("--model", spec.model);
   validateOpenCodeCreateFlags(spec.runtime, spec.flags || {});
@@ -837,6 +847,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
     const allowed = [
       "permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout",
       "copresence", "opencodeGeneration", "opencodeUnsafeTools",
+      "daemonProvider",
       ...CODEX_CONFIG_ONLY_FLAG_KEYS,
     ];
     if (!allowed.includes(k)) {
@@ -854,7 +865,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
       if (v === true) args.push("--copresence");   // CLI 的布尔开关,不吃值
       continue;
     }
-    if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
+    if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k) || k === 'daemonProvider') continue;
     args.push(`--${kebab(k)}`, String(v));
   }
   return args;
@@ -894,6 +905,7 @@ export interface CreateNodeDeps {
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   workDir: string;                     // §4.2.3 WORK_DIR enforced cwd
   hubUrl: string;                       // daemon propagates its hub to child via global config
+  providerScope?: { alias: string; networkId: string; daemonId: string };
   log: (msg: string) => void;
   warn: (msg: string) => void;
   serializeEnvLocal: (env: Record<string, string>) => string;
@@ -1064,6 +1076,10 @@ export async function handleCreateNodeDoorbell(
     await deps.callCommHub("ack_create_request", {
       request_id, status: "rejected", error: `validate: ${e?.message || e}`,
     }).catch(() => {});
+    return;
+  }
+  if (req.node_spec.flags?.daemonProvider && !deps.providerScope) {
+    await deps.callCommHub('ack_create_request', { request_id, status: 'rejected', error: 'provider_create_scope_unavailable' }).catch(() => {});
     return;
   }
 
@@ -1256,13 +1272,20 @@ export async function handleCreateNodeDoorbell(
       ...(opencodeGeneration ? { opencodeGeneration } : {}),
       ...(opencodeMode ? { opencodeMode } : {}),
     };
-    if (req.node_spec.runtime === "opencode-cli") {
+    let initializedReplay = false;
+    if (req.node_spec.flags?.daemonProvider) {
+      try { initializedReplay = JSON.parse(readFileSync(childCfgPath, 'utf8')).daemonProviderCreation?.request_id === request_id; } catch { /* new child */ }
+    }
+    if (initializedReplay) {
+      // Preserve an already initialized child on a lost create ACK; the initializer
+      // checks the exact request/model before permitting any subsequent launch.
+    } else if (req.node_spec.runtime === "opencode-cli") {
       writeCreatedOpencodeProfile(childDir, childCfg);
       if (alignedOpenCode) replaceOpencodeConfigJson(childDir, renderOpenCodeV2AlignedConfig(alignedOpenCode));
     } else {
       atomicWriteJson(childCfgPath, childCfg);
     }
-    if (codexCopresence && req.node_spec.runtime === "codex-app-server") {
+    if (!initializedReplay && codexCopresence && req.node_spec.runtime === "codex-app-server") {
       try {
         writeCopresenceYoloToCodexHome(join(childDir, "codex-home"));
         deps.log(`[create-node] seeded co-presence yolo config.toml under ${childDir}`);
@@ -1297,6 +1320,30 @@ export async function handleCreateNodeDoorbell(
       deps.warn(`[create-node] secrets.env write failed: ${e?.message || e}`);
       // not fatal — proceed to start; hub will see status=succeeded but
       // child might fail on first vendor call. Acceptable for P1.
+    }
+  }
+
+  if (req.node_spec.flags?.daemonProvider) {
+    try {
+      const input = JSON.stringify({ request_id, alias: req.node_spec.name, network_id: deps.providerScope!.networkId,
+        daemon_node_id: deps.providerScope!.daemonId, selection: req.node_spec.flags.daemonProvider });
+      const raw = await new Promise<string>((resolve, reject) => {
+        const child = execFile(process.execPath, [anetBin, 'daemon', 'provider', 'initialize', deps.providerScope!.alias],
+          { cwd: deps.workDir, env: minimalEnv(), timeout: STEP_TIMEOUT_MS, maxBuffer: 64 * 1024, encoding: 'utf8', windowsHide: true },
+          (error, stdout) => error ? reject(new Error('provider_initialization_unavailable')) : resolve(stdout));
+        child.stdin?.on('error', () => reject(new Error('provider_initialization_unavailable')));
+        child.stdin?.end(input);
+      });
+      const result = JSON.parse(raw), receipt = result.initialization, wanted = req.node_spec.flags.daemonProvider;
+      if (!validProviderInitialization(wanted) || result.ok !== true || receipt?.status !== 'initialized' || receipt.request_id !== request_id
+        || receipt.node_id !== `node_${request_id.slice(3)}` || receipt.provider_revision !== wanted.revision
+        || receipt.provider_id !== wanted.provider_id || receipt.auth_id !== wanted.auth_id || receipt.model !== wanted.model
+        || receipt.verification !== 'configuration_only') throw new Error('provider_initialization_unconfirmed');
+    } catch {
+      // Initialization failure is terminal BEFORE spawn: never launch with a
+      // default login or a silently omitted provider selection.
+      await deps.callCommHub('ack_create_request', { request_id, status: 'failed', error: 'provider_initialization_unconfirmed' }).catch(() => {});
+      return;
     }
   }
 

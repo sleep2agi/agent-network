@@ -15,6 +15,7 @@ import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
 import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
 import { runDaemonProviderApply } from '../src/daemon-provider-apply-command.js';
+import { runDaemonProviderInitialize } from '../src/daemon-provider-initialize.js';
 import { stoppedReceiptAtStart, isHubStopped } from "../src/stopped-receipt.js";
 import { formatScrubbedEnvLine, scrubInheritedSessionIdentityEnv } from "../src/daemon-inherited-env.js";
 import { dirname, isAbsolute, join, resolve } from "path";
@@ -11069,7 +11070,7 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
       break;
     }
     case "provider": {
-      const providerCommand = args[2] === 'apply' ? runDaemonProviderApply : runDaemonProvider;
+      const providerCommand = args[2] === 'apply' ? runDaemonProviderApply : args[2] === 'initialize' ? runDaemonProviderInitialize : runDaemonProvider;
       const code = await providerCommand(args.slice(2), { nodesDir: nodesDir(), readInput: () => {
         if (process.stdin.isTTY) throw new Error("private stdin required");
         return readProviderInput();

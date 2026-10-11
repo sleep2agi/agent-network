@@ -1,0 +1,23 @@
+name: Provider creation core
+on:
+  pull_request:
+    paths:
+      - 'agent-network/src/daemon-provider-initialize*'
+      - 'agent-network/src/shared/provider-initialization.ts'
+      - 'agent-node/src/shared/provider-initialization.ts'
+      - 'server/src/shared/provider-initialization.ts'
+      - 'server/src/create-node-validate.ts'
+      - 'agent-node/src/runtime/create-node-daemon.ts'
+      - 'agent-node/src/cli.ts'
+      - 'agent-network/bin/cli.ts'
+      - 'tests/test906-provider-create/**'
+      - '.github/workflows/provider-create-core.yml'
+permissions:
+  contents: read
+jobs:
+  initialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fresh child initialization before launch and stale-revision rejection (Docker)
+        run: sg docker -c 'sh tests/test906-provider-create/run.sh'

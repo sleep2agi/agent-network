@@ -1,0 +1,37 @@
+TEST-ONLY #906 Daemon Provider initialization before fresh Codex creation
+Observed: 2026-10-11T11:07Z (19:07 Asia/Shanghai)
+Source base: 18600a6214acdc346c2035f497c6388eed234973, feature changes in this commit.
+Command: sg docker -c 'sh tests/test906-provider-create/run.sh'
+Pinned bases: tests/test906-provider-create/Dockerfile (Bun 1.3.14 / Node 22.22.2).
+Final image config: sha256:87199c8cea026f0c1c20706c1459ea7c732f5ec1c1bc3c2822c28eb974032e69
+Environment: Docker UID10001, --network none, synthetic private fixture credentials.
+
+Build: isolated strict initialize helper typecheck PASS; actual CLI bundle PASS.
+Core: 4 PASS / 0 FAIL / 36 expect calls.
+- Actual compiled CLI initializes scoped fresh child with selected API-key model,
+  private files, secret-free receipt/argv, retained execution posture, no auth copy.
+- Wrong scope/revision/model refuses before credentials/config metadata writes.
+- Hub/daemon selection validation and three shared schemas match; malformed/key
+  payload and unsupported runtime/model mismatch reject without serialization.
+- Actual create doorbell invokes pinned CLI before reaching spawn callback;
+  stale revision produces zero additional spawn attempts.
+
+The spawn callback intentionally throws TEST-ONLY-stop-before-runtime-launch
+after checking initialized config. This is NOT native runtime startup, OAuth,
+real Provider inference, model entitlements, end-to-end UI creation, installer
+or public release proof. No full-repository typecheck claim.
+
+Earlier first attempt: 3 pass / 1 fail before initialization, missing_cli,
+because test probe was only in inherited PATH. Corrected fixture to use actual
+daemonExtraPath. No product dependency guard/positive assertion was weakened.
+Final rebuild/rerun above also includes Hub model equality and schema equality.
+
+Cleanup: synthetic temp roots removed in finally; Docker run --rm removed test
+containers. Local TEST-ONLY image retained for diagnosis, not uploaded. No host
+global npm change, production config/session/credential write or restart.
+Recovery scope/limitations: docs/daemon-provider-creation.md.
+
+Restack confirmation: rebased onto merged remote-collection main
+f14722f8260f2129d8799e0ed4da89333b781d36; rebuilt actual CLI (339 modules)
+and reran the same suite: 4 PASS / 0 FAIL / 36 expect calls.
+Rebuilt image config: sha256:556828f227322fefde8341b5cc4e0e7fd874c918f2e29ec4c42c8fec95fbd527

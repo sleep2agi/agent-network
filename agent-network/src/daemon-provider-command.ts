@@ -4,7 +4,7 @@ import { DaemonProviderError, DaemonProviderStore } from "./daemon-provider-stor
 import { scanDaemonCodex } from './daemon-codex-inventory';
 import { collectDaemonProvider } from './daemon-provider-collect';
 
-export const DAEMON_PROVIDER_USAGE = "anet daemon provider <list|scan|put|collect|apply> <daemon> [--revision N] [--request dps_UUID] (put/collect/scan/apply read private JSON from stdin; no key in argv)";
+export const DAEMON_PROVIDER_USAGE = "anet daemon provider <list|scan|put|collect|apply|initialize> <daemon> [--revision N] [--request dps_UUID] (put/collect/scan/apply/initialize read private JSON from stdin; no key in argv)";
 export function readProviderInput(fd = 0): string {
   const chunks: Buffer[] = [];
   let total = 0;
