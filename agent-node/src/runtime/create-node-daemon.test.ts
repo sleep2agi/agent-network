@@ -4,6 +4,7 @@ import {
   buildAnetArgsDaemon,
   childConfigFieldsFromSpec,
   minimalEnv,
+  daemonChildEnv,
   computeChildPath,
   loadAndVerifyAnetBin,
   probeAnetBinReadiness,
@@ -14,9 +15,33 @@ import {
   _resetWindowsPosixModeWarnLatchForTest,
 } from "./create-node-daemon.js";
 import { win32 as pathWin32 } from "node:path";
-import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync, readFileSync, statSync } from "node:fs";
+import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync, readFileSync, statSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+
+describe("desktop daemon runtime pin", () => {
+  test("child CLI keeps the exact executing runtime, without parent credentials", () => {
+    const dir = mkdtempSync(join(tmpdir(), "anet-runtime-pin-"));
+    try {
+      const bin = join(dir, "cli.js"); writeFileSync(bin, "// fixture");
+      const env = daemonChildEnv({ HOME: dir, USERPROFILE: dir, ANET_AGENT_NODE_BIN: bin, COMMHUB_TOKEN: "must-not-inherit" }, bin);
+      expect(env.ANET_AGENT_NODE_BIN).toBe(bin);
+      expect(env.COMMHUB_TOKEN).toBeUndefined();
+      expect(daemonChildEnv({ HOME: dir, USERPROFILE: dir }, bin).ANET_AGENT_NODE_BIN).toBeUndefined();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  test("a relative or different runtime pin is rejected before spawn", () => {
+    const dir = mkdtempSync(join(tmpdir(), "anet-runtime-pin-"));
+    try {
+      const running = join(dir, "cli.js"), other = join(dir, "other.js");
+      writeFileSync(running, "// running"); writeFileSync(other, "// other");
+      for (const pin of ["cli.js", other]) {
+        expect(() => daemonChildEnv({ HOME: dir, USERPROFILE: dir, ANET_AGENT_NODE_BIN: pin }, running)).toThrow("currently running daemon");
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
 
 describe("create_node pending reconciliation after SSE connect", () => {
   test("pulls and handles pending requests that arrived while SSE was disconnected", async () => {

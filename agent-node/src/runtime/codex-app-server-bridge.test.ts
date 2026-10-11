@@ -232,6 +232,35 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     await client2.close(); await app2.stop();
   });
 
+  test("an idle managed TUI can begin after the recovery budget without being disconnected", async () => {
+    const app2 = await startFakeApp(); const client2 = new CodexAppServerClient({ url: app2.url }); await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2, deferThreadUntilTui: true, deferredThreadTimeoutMs: 10, waitForFirstTuiMessage: true });
+    let error: unknown; const boot = bridge2.bootstrap().catch(e => { error = e; });
+    await Bun.sleep(40);
+    expect(error).toBeUndefined();
+    expect(app2.received.some((m) => (m as any).method === "thread/start")).toBe(false);
+    app2.broadcast({ jsonrpc: "2.0", method: "thread/started", params: { thread: { id: "thread_idle_tui", threadSource: "user" } } });
+    await boot;
+    expect(error).toBeUndefined(); expect(bridge2.getThreadId()).toBe("thread_idle_tui");
+    await client2.close(); await app2.stop();
+  });
+
+  test("a managed TUI wait terminates if its app-server disconnects", async () => {
+    const app2 = await startFakeApp(); const client2 = new CodexAppServerClient({ url: app2.url }); await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2, deferThreadUntilTui: true, waitForFirstTuiMessage: true });
+    const waiting = new Promise<void>(resolve => bridge2.once("thread_waiting", () => resolve()));
+    const boot = bridge2.bootstrap().then(() => null, error => error);
+    try {
+      await waiting;
+      await client2.close();
+      const error = await boot;
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain("closed before its TUI thread");
+    } finally {
+      await client2.close(); await app2.stop();
+    }
+  });
+
   test("deferred binding rejects two distinct user-owned thread identities", async () => {
     const app2 = await startFakeApp({ onRequest: (msg, respond) => {
       if (msg.method === "initialize") respond({ result: {} });

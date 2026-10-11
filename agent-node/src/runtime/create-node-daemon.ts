@@ -610,6 +610,26 @@ export function minimalEnv(
   return base;
 }
 
+/** Keep the desktop's verified runtime pin when a child CLI launches a bridge.
+ * It must name the daemon we are actually executing, never a child-supplied
+ * environment value. The CLI still enforces its exact paired-package contract.
+ */
+export function daemonChildEnv(
+  parentEnv: NodeJS.ProcessEnv = process.env,
+  runningEntrypoint: string | undefined = process.argv[1],
+): NodeJS.ProcessEnv {
+  const env = minimalEnv({}, process.platform, parentEnv);
+  const explicit = parentEnv.ANET_AGENT_NODE_BIN;
+  if (!explicit) return env;
+  if (!isAbsolute(explicit) || !runningEntrypoint
+      || realpathSync(explicit) !== realpathSync(runningEntrypoint)
+      || !statSync(explicit).isFile()) {
+    throw new Error("ANET_AGENT_NODE_BIN must identify the currently running daemon runtime");
+  }
+  env.ANET_AGENT_NODE_BIN = realpathSync(explicit);
+  return env;
+}
+
 // ── §4.2.2 daemon-side spec validators (mirror of create-node-validate) ──
 // We duplicate the structural validation here so an attacker who
 // compromises hub still can't smuggle a bad spec past the daemon.
@@ -1285,7 +1305,7 @@ export async function handleCreateNodeDoorbell(
     // #652 — start by directory name: exact within this .anet root, and always ASCII.
     const child = launch(anetBin, ["node", "start", childDirName], {
       cwd: childWorkDir,
-      env: minimalEnv(),
+      env: daemonChildEnv(),
     });
     childPid = child.pid || -1;
     const spawnedPid = childPid;

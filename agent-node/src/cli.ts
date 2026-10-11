@@ -2531,6 +2531,7 @@ async function ensureCodexAppServerSession(): Promise<
       serverUrl: codexAppServerUrl,
       threadId: codexAppServerThreadId,
       deferThreadUntilTui: process.env.ANET_COPRESENCE_BRIDGE === "1" && !codexAppServerThreadId,
+      waitForFirstTuiMessage: process.env.ANET_COPRESENCE_BRIDGE === "1" && !codexAppServerThreadId && !codexPendingThreadId,
       initialDeferredThreadId: codexPendingThreadId,
       onDeferredCandidate: (threadId) => writebackCodexPendingThread(threadId, codexAppServerUrl ?? ""),
       approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,

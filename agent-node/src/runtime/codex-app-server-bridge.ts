@@ -66,6 +66,8 @@ export interface CodexAppServerBridgeOptions {
    */
   shouldStartQueued?: (task: { taskId: string; text: string; from?: string }) => Promise<boolean>;
   deferredThreadTimeoutMs?: number;
+  /** A managed fresh TUI may stay idle until its first human message. */
+  waitForFirstTuiMessage?: boolean;
   /**
    * Deadline for each startup `thread/resume` of a persisted thread. Defaults
    * to 300 s (see codex-app-server/resume-timeout.ts); the JSON-RPC client's
@@ -198,6 +200,7 @@ export class CodexAppServerBridge extends EventEmitter {
   private deferredReject: ((error: Error) => void) | null = null;
   private deferredBindingId: string | null = null;
   private readonly deferredThreadTimeoutMs: number;
+  private readonly waitForFirstTuiMessage: boolean;
   private readonly resumeTimeoutMs: number;
   private readonly resumeAttempts: number;
   private readonly deferredResumeAttempts: number;
@@ -255,6 +258,7 @@ export class CodexAppServerBridge extends EventEmitter {
       opts.fullHistoryReconciliationIntervalMs ?? 60_000;
     this.deferThreadUntilTui = opts.deferThreadUntilTui === true;
     this.deferredThreadTimeoutMs = opts.deferredThreadTimeoutMs ?? opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
+    this.waitForFirstTuiMessage = opts.waitForFirstTuiMessage === true;
     this.resumeTimeoutMs = opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
     this.resumeAttempts = Math.max(1, opts.resumeAttempts ?? DEFAULT_RESUME_ATTEMPTS);
     // An explicit attempt cap remains a test/debug seam. Production is
@@ -377,9 +381,12 @@ export class CodexAppServerBridge extends EventEmitter {
     } else if (this.deferThreadUntilTui) {
       this.emit("thread_waiting", { reason: "waiting-for-tui-thread" });
       this.threadId = await new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("waiting-for-tui-thread timed out")), this.deferredThreadTimeoutMs);
-        const done = (value: string) => { clearTimeout(timer); resolve(value); };
-        const fail = (error: Error) => { clearTimeout(timer); reject(error); };
+        // The recovery deadline starts when there is a thread to recover.
+        // A fresh, connected TUI does not have one until the first message.
+        const timer = this.waitForFirstTuiMessage ? undefined
+          : setTimeout(() => reject(new Error("waiting-for-tui-thread timed out")), this.deferredThreadTimeoutMs);
+        const done = (value: string) => { clearTimeout(timer); this.deferredReject = null; resolve(value); };
+        const fail = (error: Error) => { clearTimeout(timer); this.deferredResolve = null; this.deferredReject = null; reject(error); };
         this.deferredResolve = done;
         this.deferredReject = fail;
         if (this.initialDeferredThreadId) void this.bindDeferredThread(this.initialDeferredThreadId);
@@ -866,6 +873,7 @@ export class CodexAppServerBridge extends EventEmitter {
     );
 
     this.client.on("close", () => {
+      this.deferredReject?.(new Error("Codex app-server closed before its TUI thread was ready"));
       // Transport gone: release the claim so a future reconnect (Phase 1)
       // can restart cleanly. Queue is intentionally preserved — those tasks
       // were never accepted by the server.

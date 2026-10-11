@@ -1,0 +1,16 @@
+**
+!agent-network/
+!agent-network/src/
+!agent-network/src/**
+!agent-network/bin/
+!agent-network/bin/**
+!agent-node/
+!agent-node/src/
+!agent-node/src/**
+!server/
+!server/src/
+!server/src/shared/
+!server/src/shared/**
+!tests/
+!tests/test-macos-codex-daemon-startup/
+!tests/test-macos-codex-daemon-startup/**

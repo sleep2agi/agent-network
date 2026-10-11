@@ -147,6 +147,7 @@ export async function openCodexAppServerRuntime(opts: {
   /** Persisted thread id from node config; empty → create a fresh thread. */
   threadId?: string;
   deferThreadUntilTui?: boolean;
+  waitForFirstTuiMessage?: boolean;
   initialDeferredThreadId?: string;
   onDeferredCandidate?: (threadId: string) => void | Promise<void>;
   /** codex binary (default "codex"); honored only when we spawn. */
@@ -303,6 +304,7 @@ export async function openCodexAppServerRuntime(opts: {
     const resumeTimeoutMs = resolveResumeTimeoutMs(process.env, warn);
     const bridge = new CodexAppServerBridge({
       client, threadId: opts.threadId, deferThreadUntilTui: opts.deferThreadUntilTui,
+      waitForFirstTuiMessage: opts.waitForFirstTuiMessage,
       initialDeferredThreadId: opts.initialDeferredThreadId,
       onDeferredCandidate: opts.onDeferredCandidate,
       isDeferredThreadMaterialized: opts.codexHome

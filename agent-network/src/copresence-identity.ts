@@ -115,6 +115,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { chmodIfPosix } from "./posix-modes";
+import { darwinBootId, darwinEnumerator } from "./darwin-process-identity";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -236,6 +237,7 @@ export function markerFilePath(nodesDir: string, nodeId: string): string {
 // ─── Boot ID (host identity for PID-reuse detection) ─────────────────────
 
 export function readBootId(): string {
+  if (process.platform === "darwin") return darwinBootId();
   try {
     return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
   } catch {
@@ -351,7 +353,7 @@ export function readMarker(nodesDir: string, nodeId: string): ReadMarkerResult {
   // tree, shared home dir, cross-platform sync) but we cannot act on it —
   // refuse cleanly with a clear cause so the cli falls through to the legacy
   // sweep.
-  if (process.platform !== "linux") {
+  if (process.platform !== "linux" && process.platform !== "darwin") {
     return {
       kind: "refuse",
       cause: "PLATFORM_UNSUPPORTED",
@@ -401,6 +403,7 @@ export function removeMarker(nodesDir: string, nodeId: string): void {
 // ─── Enumeration (real /proc-based implementation) ───────────────────────
 
 export function realEnumerator(): ProcessEnumerator {
+  if (process.platform === "darwin") return darwinEnumerator();
   return {
     listAllPids(): number[] {
       const entries = readdirSync("/proc");

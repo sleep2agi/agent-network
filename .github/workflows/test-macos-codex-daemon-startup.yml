@@ -1,0 +1,24 @@
+name: Codex daemon startup regression
+on:
+  pull_request:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'tests/test-macos-codex-daemon-startup/**'
+      - '.github/workflows/test-macos-codex-daemon-startup.yml'
+  push:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'tests/test-macos-codex-daemon-startup/**'
+      - '.github/workflows/test-macos-codex-daemon-startup.yml'
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t anet-codex-startup -f tests/test-macos-codex-daemon-startup/Dockerfile .
+      - run: docker run --rm --network=none anet-codex-startup

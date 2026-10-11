@@ -1,0 +1,27 @@
+macOS daemon-created Codex co-presence startup
+
+Reproduced on Darwin arm64 with Codex CLI 0.161.0:
+- Hub preview.120 rejects flags.copresenceFullAccess.
+- Hub preview.121 / agent-node preview.129 accept the creation request.
+- The managed TUI stops at its update menu before connecting.
+- Linux-only pane identity harvest records no macOS pane identities.
+- An existing synthetic boot marker prevents identity-gated stop/delete.
+- A fresh bridge applies a five-minute recovery deadline while waiting for
+  the first human TUI message.
+
+Changes validated so far:
+- CLI TypeScript typecheck passed.
+- CLI and agent-node production bundles built.
+- Native Darwin boot UUID remained stable across reads.
+- Native self PID, real UID, birth, state, enumeration and environment read
+  succeeded; environment contents were never printed.
+- A pre-fix temporary node was reaped by independently verified kernel marker
+  and CODEX_HOME membership: two process groups exited, no residual PIDs.
+- CLI delete removed that temporary node and its Hub record/config.
+- A newly created Codex node registered and recorded all three native pane
+  identities; TUI was at its input screen with no update menu.
+
+Docker regression and the post-five-minute lifetime/deletion check are pending.
+Local Docker could pull the pinned image but stalled starting even an empty
+`bun --version` container. The dedicated workflow runs the regression in CI.
+No inference turn was sent; model response behavior is outside this report.

@@ -30,7 +30,7 @@ describe("Codex pending-thread crash-window launcher recovery", () => {
     expect(pending).toEqual({ version: 1, threadId, serverUrl: "ws://127.0.0.1:24701", marker: newMarker });
     const promoted = requirePromotedCodexPendingThread({ codexThreadId: threadId }, threadId);
     expect(codexTuiLaunchArgs("ws://127.0.0.1:24701", "gpt-5", promoted))
-      .toEqual(["resume", "--remote", "ws://127.0.0.1:24701", threadId, "-m", "gpt-5"]);
+      .toEqual(["resume", "--remote", "ws://127.0.0.1:24701", threadId, "-m", "gpt-5", "-c", "check_for_update_on_startup=false"]);
   });
 
   test("mismatched old server/marker, incomplete promotion, and invalid identity fail closed", () => {
@@ -46,18 +46,18 @@ describe("Codex pending-thread crash-window launcher recovery", () => {
   // #505 — codex 0.155.1: "Permission overrides are not supported when resuming a remote task."
   test("resume path never carries the permission override, even with full access granted", () => {
     const argv = codexTuiLaunchArgs("ws://127.0.0.1:24701", "gpt-5", threadId, true);
-    expect(argv).toEqual(["resume", "--remote", "ws://127.0.0.1:24701", threadId, "-m", "gpt-5"]);
+    expect(argv).toEqual(["resume", "--remote", "ws://127.0.0.1:24701", threadId, "-m", "gpt-5", "-c", "check_for_update_on_startup=false"]);
     expect(argv.some((a) => a.startsWith("--dangerously") || a === "-s" || a === "--sandbox"
       || a === "-a" || a === "--ask-for-approval")).toBe(false);
   });
 
   test("fresh path keeps the override when full access is granted, and omits it otherwise", () => {
     expect(codexTuiLaunchArgs("ws://127.0.0.1:24701", "gpt-5", undefined, true))
-      .toEqual(["--remote", "ws://127.0.0.1:24701", "-m", "gpt-5", "--dangerously-bypass-approvals-and-sandbox"]);
+      .toEqual(["--remote", "ws://127.0.0.1:24701", "-m", "gpt-5", "-c", "check_for_update_on_startup=false", "--dangerously-bypass-approvals-and-sandbox"]);
     expect(codexTuiLaunchArgs("ws://127.0.0.1:24701", "gpt-5", undefined, false))
-      .toEqual(["--remote", "ws://127.0.0.1:24701", "-m", "gpt-5"]);
+      .toEqual(["--remote", "ws://127.0.0.1:24701", "-m", "gpt-5", "-c", "check_for_update_on_startup=false"]);
     expect(codexTuiLaunchArgs("ws://127.0.0.1:24701", "gpt-5"))
-      .toEqual(["--remote", "ws://127.0.0.1:24701", "-m", "gpt-5"]);
+      .toEqual(["--remote", "ws://127.0.0.1:24701", "-m", "gpt-5", "-c", "check_for_update_on_startup=false"]);
   });
 
   test("a still-listening old generation blocks migration before replacement launch", async () => {

@@ -69,11 +69,12 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
-    "smol-toml": "1.9.1",
     "@inquirer/prompts": "^8.4.3",
     "@larksuiteoapi/node-sdk": "^1.42.0",
+    "koffi": "3.3.3",
     "markdown-it": "^14.1.0",
     "puppeteer-core": "^24.10.2",
+    "smol-toml": "1.9.1",
     "ws": "^8.22.0"
   },
   "devDependencies": {

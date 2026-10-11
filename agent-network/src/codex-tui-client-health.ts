@@ -67,6 +67,9 @@ export function codexTuiLaunchArgs(remote: string, model: string, threadId?: str
     ? (THREAD_ID.test(threadId) ? ["resume", "--remote", remote, threadId, "-m", model] : [])
     : ["--remote", remote, "-m", model];
   if (args.length === 0) throw new Error("refusing invalid Codex TUI thread identity");
+  // ANet owns this unattended TUI. An update menu blocks connection before
+  // the launcher can prove readiness; scope the setting to this invocation.
+  args.push("-c", "check_for_update_on_startup=false");
   if (dangerFullAccess && !threadId) args.push("--dangerously-bypass-approvals-and-sandbox");
   return args;
 }
