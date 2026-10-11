@@ -114,6 +114,9 @@ class NativeRpc {
   }
 }
 const peers: NativeRpc[] = [];
+// #1020 reuses the native harness, but only runs the new named-key→node core.
+// Default #906 retains its full independent managed-account checks.
+const referenceCore = process.env.TEST1020_HUB_REFERENCE_CORE === '1';
 let started = false, passed = false;
 const alias = 'native906-child', daemonAlias = 'native906-daemon';
 try {
@@ -149,10 +152,24 @@ try {
   const deps = { workDir: work, alias: daemonAlias, networkId: net, daemonId, serverUrl: url, token: daemon.token };
   const reconcile = () => run('node', ['/work/native-reconcile.mjs'], JSON.stringify(deps), 570_000);
   console.log('STAGE HTTP save provider through Node daemon handler');
-  const saved = await human('daemon_provider_snapshot', { action: 'put', network_id: net, id: daemonId, revision: 0,
+  let providerId = 'custom', authId = 'work';
+  let saved: any;
+  if (referenceCore) {
+    assert.equal((await human('upsert_network_secret', { network_id: net, key: 'SHARED_API_KEY', value: 'fixture-new-only' })).ok, true);
+    const shared = await human('daemon_provider_snapshot', { action: 'hub_put', network_id: net, id: 'shared', revision: 0,
+      provider: { id: 'shared', label: 'Shared fixture', enabled: true, protocol: 'openai-responses',
+        baseUrl: `https://127.0.0.1:${endpoint.port}/selected`, models: ['fixture-new'], secretKeyRef: 'SHARED_API_KEY' } });
+    assert.equal(shared.ok, true); assert.equal(shared.provider.secret_key_ref, 'SHARED_API_KEY');
+    assert(!JSON.stringify(shared).includes('fixture-new-only'));
+    saved = await human('daemon_provider_snapshot', { action: 'hub_bind', network_id: net, id: 'shared', revision: 1,
+      provider: { daemon_node_id: daemonId, daemon_revision: 0, confirm: true } });
+    assert.equal(saved.ok, true); providerId = saved.provider_reference.daemon_provider_id; authId = 'hub_key';
+  } else {
+  saved = await human('daemon_provider_snapshot', { action: 'put', network_id: net, id: daemonId, revision: 0,
     provider: { id: 'custom', label: 'Fixture new', enabled: true, runtimes: [{ runtime: 'codex-tui', auth: [
       { id: 'work', kind: 'api_key', models: ['fixture-new'], baseUrl: `https://127.0.0.1:${endpoint.port}/selected`, key: 'fixture-new-only' },
     ] }] } });
+  }
   assert.equal(saved.ok, true); await reconcile();
   assert.equal((await human('daemon_provider_snapshot', { action: 'read', network_id: net, id: saved.request_id })).status, 'succeeded');
   const untilIdle = Date.now() + 30_000;
@@ -163,7 +180,7 @@ try {
   }
   console.log('STAGE HTTP apply exact selection through real CLI lifecycle');
   const application = await human('daemon_provider_snapshot', { action: 'apply', network_id: net, id: daemonId, revision: 1,
-    provider: { node_id: childId, node_revision: providerNodeRevision(nodeDir), provider_id: 'custom', auth_id: 'work', model: 'fixture-new', confirm_restart: true } });
+    provider: { node_id: childId, node_revision: providerNodeRevision(nodeDir), provider_id: providerId, auth_id: authId, model: 'fixture-new', confirm_restart: true } });
   assert.equal(application.ok, true); await reconcile();
   const result = await human('daemon_provider_snapshot', { action: 'read', network_id: net, id: application.request_id });
   assert.equal(result.status, 'succeeded', `application status=${result.status} error=${result.error}`);
@@ -183,6 +200,10 @@ try {
   assert.equal(existsSync(join(nodeDir, 'provider-application.json')), false);
   await live.stop();
 
+  if (referenceCore) {
+    passed = true;
+    console.log('PASS named Hub vault key → referenced Provider → confirmed Daemon → explicit apply → native Codex same thread; exact model/endpoint/key proved by two local synthetic turns, no vendor call');
+  } else {
   // Same real node/session: API key -> managed login A -> managed login B -> key.
   // The signed-in shape is an unsigned fixture; no official model turn is sent.
   const store = new DaemonProviderStore(daemonDir);
@@ -243,6 +264,7 @@ try {
   assert.equal(requests.length, 2, 'no official model request was made');
   passed = true;
   console.log('PASS real Hub → daemon → CLI → native Codex same-thread API key / managed account A / B / API key; local account identity/model readback; two synthetic API-key turns, unsigned account fixtures, no real OAuth or external inference');
+  }
 } catch (error) {
   console.error(scrub(String(error)));
   console.error('MODEL_REQUESTS', JSON.stringify(requests.map(r => ({ path: r.path, model: r.model,

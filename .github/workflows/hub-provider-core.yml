@@ -10,6 +10,7 @@ on:
       - 'server/src/node-permissions.ts'
       - 'server/src/tool-audience.ts'
       - 'tests/test907-hub-provider/**'
+      - 'tests/test906-daemon-provider-management/native-application.ts'
       - '.github/workflows/hub-provider-core.yml'
 permissions:
   contents: read
@@ -20,3 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Registered Hub tool, encrypted catalog, daemon dispatch and CLI receipt (Docker)
         run: sg docker -c 'sh tests/test907-hub-provider/run.sh'
+      - name: Named vault key to native node application core (Docker, synthetic local endpoint)
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.native -t anet:test1020-native-ref .'
+          sg docker -c 'docker run --rm --init --network none --add-host chatgpt.com:127.0.0.1 -e TEST1020_HUB_REFERENCE_CORE=1 anet:test1020-native-ref'

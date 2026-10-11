@@ -99,3 +99,12 @@ can read stored references but cannot author this new input. Restore encrypted
 database and master key together through the existing backup procedure. The
 isolated core fixture checks exact synthetic key bytes in the Daemon's local
 application callback, without network inference or production changes.
+
+For the dependent native node-apply proof, run the existing
+`tests/test906-daemon-provider-management/Dockerfile.native` image with
+`TEST1020_HUB_REFERENCE_CORE=1`, `--network none` and
+`--add-host chatgpt.com:127.0.0.1`. It checks the named-key reference through a
+confirmed Daemon bind, explicit node apply and same-thread real Codex resume
+against container-local synthetic HTTPS endpoints. The default fixture still
+runs its full account lifecycle assertions. Neither mode validates vendor
+entitlements or production accounts; see `docs/tests/report-test1020-hub-provider-ref.txt`.
