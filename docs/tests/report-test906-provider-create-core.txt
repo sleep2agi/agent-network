@@ -35,3 +35,21 @@ Restack confirmation: rebased onto merged remote-collection main
 f14722f8260f2129d8799e0ed4da89333b781d36; rebuilt actual CLI (339 modules)
 and reran the same suite: 4 PASS / 0 FAIL / 36 expect calls.
 Rebuilt image config: sha256:556828f227322fefde8341b5cc4e0e7fd874c918f2e29ec4c42c8fec95fbd527
+
+2026-10-11T11:53Z original PR2600 required CI correction:
+Head2b6492b3b1ad1ca57ceb016cbbd7b909cf456476, job114461207734
+in run38135839730 failed: package-local Docker unit image omits server sources;
+static integration imports in src/daemon-provider-initialize.test.ts caused
+Cannot find module ../../server/src/create-node-validate before test execution.
+Job metadata pins2b6492b3; its tested merge/source log pins077485dd361797c730b1eb92b45550a57082655a.
+That run2117PASS/11SKIP/1FAIL/1ERROR is not a full unit pass or an environment
+network failure. Moved the unchanged four cross-package cases/36 assertions to
+tests/test906-provider-create/core.test.ts, copied by this dedicated Dockerfile.
+Package-local source suite retains two direct initialization/revision tests;
+no cross-package import or skip is substituted for the original integration.
+No product code, assertion threshold or source permission guard changed.
+Final full-source Docker rebuild: isolated strict helper typecheck+actual CLI
+bundle PASS;6/6 PASS,44 expectations across dedicated4+package-local2.
+Image configc787b05fc7f84f68b7f188325fd89cebc36ecbfcc2f47f05515c9f1618b81a17.
+Containers --rm, synthetic state removed. Remote new-head CI remains independent;
+no whole2129-test rerun or public artifact claim from this bounded correction.

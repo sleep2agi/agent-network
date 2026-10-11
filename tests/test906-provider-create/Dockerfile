@@ -10,6 +10,7 @@ RUN cd agent-node && npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-network ./agent-network
 COPY agent-node ./agent-node
 COPY server/src ./server/src
+COPY tests/test906-provider-create/core.test.ts ./tests/test906-provider-create/core.test.ts
 RUN cd agent-network && ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution bundler src/daemon-provider-initialize.ts
 RUN cd agent-network && bun build bin/cli.ts --target node --outfile dist/bin/cli.js --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*'
 COPY --chmod=755 agent-network/bin/anet.cjs /work/agent-network/dist/bin/anet.cjs
@@ -17,4 +18,4 @@ RUN chmod go-w /work /work/agent-network /work/agent-network/dist /work/agent-ne
 RUN useradd --create-home --uid 10001 runner
 USER runner
 ENV ANET_BIN_ABS=/work/agent-network/dist/bin/anet.cjs ANET_DAEMON_ALLOW_ENV_BIN=1
-CMD ["bun", "test", "--bail", "agent-network/src/daemon-provider-initialize.test.ts"]
+CMD ["bun", "test", "--bail", "agent-network/src/daemon-provider-initialize.test.ts", "tests/test906-provider-create/core.test.ts"]
