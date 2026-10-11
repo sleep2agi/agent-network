@@ -1,6 +1,12 @@
 # Hub Provider — implementation slice, not a published release
 
-`hub_provider_config` is a real network-scoped MCP tool. Metadata and encrypted
+`daemon_provider_snapshot` now has network-scoped `hub_read`, `hub_put` and
+`hub_bind` actions. `hub_read` uses `id=hub` plus `network_id`; `hub_put` uses
+`id=provider.id`, CAS `revision`, and the configuration in `provider`;
+`hub_bind` uses the source `id`/`revision` and
+`provider={daemon_node_id,daemon_revision,confirm:true}`. Existing daemon actions
+keep their wire contract. This shares the transport, not the ownership scope.
+Metadata and encrypted
 credentials are not a local client demo and not a model inference proxy.
 
 - `read`: any authenticated network member reads redacted current-network

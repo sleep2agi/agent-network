@@ -23,7 +23,6 @@ import { NODE_TOOL_CLASS, nodeIdentity, nodePermissionsFlag, broadcastVerdict, h
 export type ToolAudience = "both" | "node" | "protocol" | "user";
 
 export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
-  hub_provider_config: 'user',
   daemon_provider_snapshot: "user",
   pull_daemon_provider_snapshots: "protocol", ack_daemon_provider_snapshot: "protocol",
   request_adopt_node: "user", unadopt_node: "user",

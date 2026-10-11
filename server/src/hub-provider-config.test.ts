@@ -35,12 +35,12 @@ function client(kind = 'human') {
   return async (name: string, args: any = {}) => JSON.parse((await handlers[name](args)).content[0].text);
 }
 const provider = () => ({ id: 'shared', label: 'Shared model', enabled: true, protocol: 'openai-responses', baseUrl: 'https://provider.example/v1', models: ['fixture-model'], key });
-const save = (human: ReturnType<typeof client>, value = provider(), revision = 0) => human('hub_provider_config', { action: 'put', network_id: net, revision, provider: value });
-const bind = (human: ReturnType<typeof client>) => human('hub_provider_config', { action: 'bind', network_id: net, id: 'shared', revision: 1, daemon_node_id: daemonId, daemon_revision: 0, confirm: true });
+const save = (human: ReturnType<typeof client>, value = provider(), revision = 0) => human('daemon_provider_snapshot', { action: 'hub_put', id: value.id, network_id: net, revision, provider: value });
+const bind = (human: ReturnType<typeof client>, target = daemonId, revision = 1) => human('daemon_provider_snapshot', { action: 'hub_bind', network_id: net, id: 'shared', revision, provider: { daemon_node_id: target, daemon_revision: 0, confirm: true } });
 test('actual Hub tool atomically saves encrypted Provider; metadata read and conflict never echo key', async () => {
   const human = client(); const result = await save(human); expect(result.ok).toBe(true);
   expect(result.provider).toMatchObject({ id: 'shared', revision: 1, source: 'hub', credential_present: true, compatible_runtimes: ['codex-tui'] });
-  const read = await human('hub_provider_config', { action: 'read', network_id: net }); expect(read.providers).toHaveLength(1);
+  const read = await human('daemon_provider_snapshot', { action: 'hub_read', id: 'hub', network_id: net }); expect(read.providers).toHaveLength(1);
   expect(JSON.stringify([result, read])).not.toContain(key);
   expect(await save(human)).toMatchObject({ ok: false, error: 'hub_provider_revision_conflict' });
   const secret = db.get<any>('SELECT ciphertext FROM network_secrets WHERE network_id=?1', net);
@@ -61,8 +61,8 @@ test('scope/role boundaries: no node or anonymous writes, no viewer distribution
   expect(await save(client('daemon'))).toMatchObject({ ok: false, error: 'user_token_required' });
   expect(await save(client('anonymous'))).toMatchObject({ ok: false, error: 'user_token_required' });
   const human = client(); await save(human);
-  expect(await human('hub_provider_config', { action: 'read', network_id: 'foreign' })).toMatchObject({ ok: false, error: 'provider_access_denied' });
-  expect(await human('hub_provider_config', { action: 'bind', network_id: net, id: 'shared', revision: 1, daemon_node_id: 'foreign', daemon_revision: 0, confirm: true })).toMatchObject({ ok: false, error: 'daemon_not_found' });
+  expect(await human('daemon_provider_snapshot', { action: 'hub_read', id: 'hub', network_id: 'foreign' })).toMatchObject({ ok: false, error: 'provider_access_denied' });
+  expect(await bind(human, 'foreign')).toMatchObject({ ok: false, error: 'daemon_not_found' });
   db.run("UPDATE network_members SET role='viewer' WHERE network_id=?1 AND user_id=?2", [net, user]);
   expect(await bind(human)).toMatchObject({ ok: false, error: 'provider_access_denied' });
   expect(await save(human)).toMatchObject({ ok: false, error: 'provider_owner_required' });
@@ -71,7 +71,7 @@ test('protocol mismatch never queues Codex; editing source cancels pending distr
   const human = client(); await save(human, { ...provider(), protocol: 'openai-chat-completions' });
   expect(await bind(human)).toMatchObject({ ok: false, error: 'runtime_protocol_not_supported' });
   await save(human, provider(), 1);
-  const queued = await human('hub_provider_config', { action: 'bind', network_id: net, id: 'shared', revision: 2, daemon_node_id: daemonId, daemon_revision: 0, confirm: true });
+  const queued = await bind(human, daemonId, 2);
   expect(queued.ok).toBe(true); await save(human, { ...provider(), enabled: false }, 2);
   const read = await human('daemon_provider_snapshot', { action: 'read', id: queued.request_id, network_id: net });
   expect(read).toMatchObject({ status: 'failed', error: 'hub_provider_source_changed' });

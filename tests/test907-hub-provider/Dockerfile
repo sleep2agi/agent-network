@@ -18,4 +18,4 @@ RUN chmod go-w /work /work/agent-network /work/agent-network/dist /work/agent-ne
 RUN useradd --create-home --uid 10001 runner
 ENV ANET_BIN_ABS=/work/agent-network/dist/bin/anet.cjs ANET_DAEMON_ALLOW_ENV_BIN=1 COMMHUB_DB=/tmp/test907.db
 USER runner
-CMD ["bun", "test", "--bail", "server/src/hub-provider-config.test.ts"]
+CMD ["sh", "-c", "bun test --bail server/src/hub-provider-config.test.ts && COMMHUB_DB=/tmp/test907-audience.db bun test --bail server/src/tool-audience-http.test.ts"]

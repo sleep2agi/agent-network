@@ -37,3 +37,19 @@ the locked agent-network tsc binary. It exits2 with errors across server and
 imported runtime/test modules (including existing tools.ts sites outside this
 change). This is NOT a full typecheck PASS and no fresh baseline equivalence is
 claimed. The dedicated four-test suite remains independently passing.
+
+2026-10-11T11:44Z corrective rebuild after required CI failure:
+PR2601 old head2714dd73: daemon-provider-store run38135796443/job114459274055
+failed tools/list byte ceilings (new tool: all86175/user60371). Product core
+was not the failing assertion. Removed the extra registered tool and reused
+daemon_provider_snapshot with explicit hub_read/hub_put/hub_bind actions;
+the existing human-only classification and module scope checks are unchanged.
+No role ceiling was increased. First compact description still failed all
+85505 >85500 by5 bytes; final description produces all85387/node63281/user59583.
+Final command: sg docker -c 'sh tests/test907-hub-provider/run.sh'.
+Rebuilt image config2303cc2388ea0151458f631cde8ba36a9e1b3f6462b2fe1518fbc60f1e3ebd89.
+Actual registered dispatch -> queue -> private CLI catalog -> redacted receipt:
+4/4 PASS, 24 expectations. Existing audience HTTP regression: 12/12 PASS,
+320 expectations, including all three unmodified role byte ceilings.
+No mounts in this final rebuild; containers removed, synthetic state only.
+This does not replace pending exact-head remote CI or formal deployment.

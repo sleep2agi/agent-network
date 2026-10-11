@@ -4128,26 +4128,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   const providerHuman = (net?: string) => ({ userId: enforceUserId, isNode: callerTokenIsNetwork, networkId: getNetworkId(net) });
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
-  server.registerTool('hub_provider_config', {
-    description: 'Human network Provider catalog. read metadata; owner put encrypted key/config; admin bind explicitly queues a selected daemon, not node apply. Only Codex Responses binding in this slice.',
-    inputSchema: z.object({ action: z.enum(['read', 'put', 'bind']), network_id: z.string().max(200).optional(),
-      revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), id: z.string().max(64).optional(),
-      daemon_node_id: z.string().max(200).optional(), daemon_revision: z.number().int().min(0).optional(), confirm: z.boolean().optional() }).strict() as any,
-  }, async (args: any) => {
-    const human = providerHuman(args.network_id);
-    const result = args.action === 'read' ? readHubProviders(human) : args.action === 'put' ? putHubProvider(human, args.revision, args.provider)
-      : bindHubProvider(human, { id: args.id, revision: args.revision, daemon_node_id: args.daemon_node_id, daemon_revision: args.daemon_revision, confirm: args.confirm });
-    if (args.action === 'bind' && result.ok && 'request_id' in result) {
-      const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', args.daemon_node_id, human.networkId!);
-      if (target) pushEvent(target.alias, { type: 'daemon_provider_snapshot', request_id: result.request_id }, human.networkId!);
-    }
-    return providerReply(result);
-  });
   server.tool(
-    "daemon_provider_snapshot", "Admin Provider: refresh/put/collect/apply/login use daemon id; read uses request id. collect: revision+identifier-only owned source selection; put: revision+provider; apply: revision+node selection; login: provider={action:start|read|cancel|save|accounts,session_id?,label?}. No login tokens.",
-    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
+    "daemon_provider_snapshot", "Provider: daemon refresh/put/collect/apply/login; read=request id. login provider={action:start|read|cancel|save|accounts,session_id?,label?}. hub_read=catalog; hub_put=owner config; hub_bind=id+revision,provider={daemon_node_id,daemon_revision,confirm:true}. No login tokens.",
+    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
+      if (action === 'hub_read') return providerReply(readHubProviders(human));
+      if (action === 'hub_put') return providerReply(putHubProvider(human, revision!, provider));
+      if (action === 'hub_bind') {
+        const selection = provider as { daemon_node_id?: string; daemon_revision?: number; confirm?: boolean } | undefined;
+        const result = bindHubProvider(human, { id, revision: revision!, daemon_node_id: selection?.daemon_node_id!, daemon_revision: selection?.daemon_revision!, confirm: selection?.confirm! });
+        if (result.ok && 'request_id' in result) {
+          const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', selection?.daemon_node_id!, human.networkId!);
+          if (target) pushEvent(target.alias, { type: 'daemon_provider_snapshot', request_id: result.request_id }, human.networkId!);
+        }
+        return providerReply(result);
+      }
       if (action === "read") return providerReply(getProviderSnapshot(human, id, include_discovery));
       const daemon_node_id = id;
       const result = action === 'login' ? requestProviderLogin(human, daemon_node_id, provider)
