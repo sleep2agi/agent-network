@@ -51,3 +51,24 @@ Boundaries / next step
   retain old entry backups, then targeted commhub-hub restart and fresh health/fleet
   receipts. No business-node restarts, model calls or production test dispatch.
 - Real vault use, OAuth entitlement, native installer and disaster recovery not proven here.
+
+Actual cutover increment, OBSERVED_AT=2026-10-11T13:42Z
+- PR2604 merged13:40:32Z, exact main fb2e5c81ac361d5554530af1925dae41542b5039;
+  required10/10 PASS and Hub deployment profile (Docker) PASS.
+- Exact main launcher copies installed0700 and cmp-equal to Git. Original entry
+  backups retained in the above owner-only backup directory; old v106122 retained.
+- At13:40:50Z only commhub-hub restarted, no --update-env. Actual listener9200
+  Bun PID3094572, PPID1613 existing PM2, cmdline selects runtime-v107-preview124.
+  Health .124, secured, sessions320; SSE113 after41seconds.
+- Fresh natural heartbeat receipts: daemon-dev13:41:42, daemon-vdev13:41:01,
+  storage13:41:00, TMAI dog13:41:02, client13:41:35, HR13:41:00 UTC.
+  Their runtime versions/inflight/queue remain independently reported; no business
+  process was restarted. Pre-existing TMAI owner offline since07:11:49 remains so.
+- Read-only task_events after cutover: two task.send.delivered and two task.started,
+  latest13:41:48. No new task.ack yet; not replaced with a production fixture.
+- Bounded latest200-line out/err windows: vault-key-missing/invalid and
+  panic/segfault/port-in-use match counts zero. No entire large log read is used
+  as evidence. No secret values output, no production model/Provider write test.
+- Initial observability attempts used a nonexistent tasks.acked_at column and
+  attempted whole-log string read: both failed read-only and changed no state.
+  Corrected to task_events and bounded tail; those failed reads are not PASS checks.
