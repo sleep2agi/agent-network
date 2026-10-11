@@ -62,3 +62,11 @@ base-launcher.sh backups mode0700 in the same backup directory. Secret/env,
 ports, proxy and data source unchanged. Runtime and launcher sources separate.
 Client243 formal desktop38153297202 and Android38153299528 run from exact
 maina90cfd2d978678ddc3bbd3c497540af46fef4288, not yet published.
+
+NATURAL LIFECYCLE OBSERVED_AT=2026-10-11T16:04:27Z
+Non-mutating operational observation, not a production fixture/test: standalone
+read-only SQLite query (no db.ts import/migration) for this network since
+15:59:02Z gives task.send.delivered15/task.started17/task.replied19; latest
+reply16:04:27Z. Separate task.ack0. No content/auth/token values read, no tasks
+created/replayed and no events altered. Log-only absence did not establish
+absence of persisted start/reply receipts; natural communications continued.
