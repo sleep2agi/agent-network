@@ -1,46 +1,36 @@
 OpenCode V2 catalog — Daemon/Hub wiring slice
 Date: 2026-10-11
-Base: d03b9ab3 (PR #2574 adapter foundation)
-Runner: bun 1.3.14 on this host. Docker was not available here, so this is not the CI container run. CI still builds tests/test906-daemon-catalog and runs the same bun files plus native.ts inside that image.
+Docker image: tests/test906-daemon-catalog (Dockerfile + run.sh)
+Image built from commit dc4a9292711085f8c5bbe23bb30582d55361b8a0
+Runner: docker run --rm -e EXPECTED_SOURCE_COMMIT=dc4a9292711085f8c5bbe23bb30582d55361b8a0
+The script requires /.dockerenv, a 40-character SOURCE_COMMIT equal to that value, and `opencode --version` = `opencode v2.0.22`. All three passed. RUN_RC=0.
 
-Native binary: opencode v2.0.22 from @opencode/cli@2.0.22, loopback 127.0.0.1:24906, disposable temp directory.
+source=dc4a9292711085f8c5bbe23bb30582d55361b8a0
 
-test906 unit files (catalog reader, endpoint file, owned-reader):
-  16 pass, 0 fail, 75 expect() calls
+bun test (reader, endpoint, owned reader, doorbell):
+  17 pass, 0 fail, 83 expect() calls, 4 files
 
-native.ts against that binary:
+Doorbell file opencode-catalog-dispatch.test.ts, included in those 17:
+  doorbell reads the owned loopback and acks a whitelist snapshot
+  missing endpoint and a directory mismatch ack an error without a fetch
+  a pull failure is not acked, and the dispatcher does not spawn
+  symlink node directories are not an owned match
+
+Owned-reader path cases in the same run:
+  tilde and symlink workdirs match the endpoint, and the snapshot keeps the authorized absolute path
+
+native.ts against opencode v2.0.22 inside the same container:
   PASS L1 real V2 rejects wrong authentication
   PASS L2 real V2 snapshot: providers=2 models=12; NOT invocation verified
   PASS L3 daemon owned reader against the same native server
   PASS L4 missing endpoint is unavailable and does not start another server
+  cleanup: private native child exited; disposable fixture removed
 
-Hub authorization (server/src/opencode-v2-catalog.test.ts), isolated COMMHUB_DB:
-  3 pass. Member queue → daemon pull (no url/authorization/settings/headers/body) → owned reader → ack → get status ready.
-  Snapshot stayed invocationVerified false and completeness unknown. Viewer allowed. Outsider, node token, v1, and unsafe-off refused.
-  {ok:true, status:pending} asserted before any ack. Expired read returned unavailable, not a snapshot.
+Hub authorization is not in this image. On the same commit, host bun 1.3.14 with an isolated COMMHUB_DB:
+  server/src/opencode-v2-catalog.test.ts — 5 pass, 0 fail, 52 expect() calls
+  Includes Windows `C:/project` accepted for a stored `C:\project`, relative and `C:relative` rejected as invalid_ack, `D:\other` failed as invalid_response, `~/project` matched `/home/user/project`, and lexical `..` collapsed.
 
-Daemon doorbell unit (opencode-catalog-dispatch.test.ts) included in the 16 above:
-  owned loopback acked a whitelist snapshot; missing file and directory mismatch acked errors with zero fetches; pull failure was not acked; dispatcher source has no spawn.
+This report commit does not change the suite. CI rebuilds the same image with the tip SHA.
 
-V2 session unit (fake serve): 18 pass. Ready writes mode 0600 endpoint; close removes it; MCP readiness failure leaves no file.
-
-Also green on this host: tool-audience + mcp-context-cost + daemon-token-owner (40 pass); node permission class bookkeeping; test629 inventory_count=82 sdk 1.32.0; check-doc-symbol-pins (docs and docs-site); check-mcp-tool-index-coverage (91/91 both languages).
-
-Not run here: tests/test827–833 Docker images. The new file is opencode-v2-catalog-endpoint.json inside the node work directory. test827 watches the XDG data root, not that directory. The session unit test covers create and remove.
-
-Not claimed: client picker, npm publish, invocation verified, completeness known, adopted-node catalog reads, hub filesystem check when the create row stored no workdir.
-
-Rebase onto main b4413131 (#2575 provider daemon management), 2026-10-11.
-Conflict files: docs-site/docs/api/mcp-tools.md and server/src/tool-audience-http.test.ts.
-Both the #906 provider index and the OpenCode V2 catalog index stayed. Provider registrations were added to the test629 inventory in source order.
-
-bun 1.3.14 on this host, after that rebase:
-  agent-node catalog files (reader, endpoint, owned reader, doorbell, v2 session): 34 pass, 0 fail
-  hub authorization: 3 pass
-  tool-audience: 12 pass. all 94 tools / 84,273 B; node 61 / 62,556 B; user 61 / 58,684 B
-  mcp-context-cost: 5 pass. user list 61 tools / 58,684 B
-  daemon identity boundary: 15 pass, including get_opencode_catalog_request and ack_opencode_catalog
-  node permission class bookkeeping: pass
-  test629 inventory_count=85 sdk 1.32.0
-  check-doc-symbol-pins (docs and docs-site) and check-mcp-tool-index-coverage (94/94, both languages) green
-native.ts was not re-run here (no opencode binary in this environment). CI still runs it in tests/test906-daemon-catalog.
+Prior host-only note (superseded for the catalog path; kept so the rebase remeasure is not dropped):
+  After rebase onto main b4413131, host bun 1.3.14 recorded agent-node catalog files 34 pass, hub authorization 3 pass (before the Windows/tilde cases), tool-audience 12 pass (all 94 / 84,273 B, node 61 / 62,556 B, user 61 / 58,684 B), mcp-context-cost 5 pass, daemon identity 15 pass, test629 inventory_count=85 sdk 1.32.0, doc pins and MCP index 94/94. Byte ceilings in server/src/tool-audience-http.test.ts are user 58,956, all 84,782, node 63,100. That host run did not execute this Docker image. native.ts was not re-run on that host.
