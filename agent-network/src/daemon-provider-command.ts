@@ -19,7 +19,8 @@ export function readProviderInput(fd = 0): string {
 export function runDaemonProvider(args: string[], deps: { nodesDir: string; readInput: () => string; print: (text: string) => void }): number {
   const [action, daemon, ...rest] = args;
   if (!["list", "scan", "put", "prepare-login"].includes(action) || !daemon || !/^[\p{L}\p{N}][\p{L}\p{N}_.-]{0,99}$/u.test(daemon)
-    || (["list", "scan", "prepare-login"].includes(action) && rest.length !== 0)
+    || (["list", "prepare-login"].includes(action) && rest.length !== 0)
+    || (action === 'scan' && !(rest.length === 0 || (rest.length === 1 && rest[0] === '--discover-local')))
     || (action === "put" && (![2, 4].includes(rest.length) || rest[0] !== "--revision" || !/^(0|[1-9][0-9]*)$/.test(rest[1])
       || (rest.length === 4 && (rest[2] !== '--request' || !/^dps_[a-f0-9-]{36}$/.test(rest[3])))))) {
     deps.print(DAEMON_PROVIDER_USAGE); return 2;
@@ -31,7 +32,7 @@ export function runDaemonProvider(args: string[], deps: { nodesDir: string; read
       const snapshot = store.list();
       const input = deps.readInput();
       if (Buffer.byteLength(input) > 64 * 1024) throw new DaemonProviderError('input_too_large');
-      const codex_inventory = scanDaemonCodex(deps.nodesDir, JSON.parse(input), snapshot.network_id);
+      const codex_inventory = scanDaemonCodex(deps.nodesDir, JSON.parse(input), snapshot.network_id, undefined, rest[0] === '--discover-local');
       deps.print(JSON.stringify({ ok: true, ...snapshot, codex_inventory }));
     } else if (action === "list") deps.print(JSON.stringify({ ok: true, ...store.list() }));
     else {

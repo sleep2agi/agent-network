@@ -59,12 +59,12 @@ export async function writeLocalProvider(deps: Pick<SnapshotDeps, 'workDir' | 'a
   if (!ok || snapshot.revision !== request.expected_revision + 1) throw new Error('provider_write_unavailable');
   return validateDaemonProviderSnapshot(snapshot, deps.networkId, deps.daemonId);
 }
-export async function readLocalProviderSnapshot(deps: Pick<SnapshotDeps, "workDir" | "alias" | "networkId" | "daemonId">, targets?: unknown[]) {
+export async function readLocalProviderSnapshot(deps: Pick<SnapshotDeps, "workDir" | "alias" | "networkId" | "daemonId">, targets?: unknown[], discoverLocal = false) {
   if (!/^[\p{L}\p{N}][\p{L}\p{N}_.-]{0,99}$/u.test(deps.alias) || !deps.networkId || !deps.daemonId) throw new Error("provider_snapshot_unavailable");
   // Existing daemon boot trust root pins the executable. Use Node directly,
   // minimal env (no inherited API keys / NODE_OPTIONS), no shell or secret argv.
   const raw = await new Promise<string>((resolve, reject) => {
-    const child = execFile(process.execPath, [getAnetBinAbs(), "daemon", "provider", targets ? "scan" : "list", deps.alias],
+    const child = execFile(process.execPath, [getAnetBinAbs(), "daemon", "provider", targets ? "scan" : "list", deps.alias, ...(targets && discoverLocal ? ['--discover-local'] : [])],
       { cwd: deps.workDir, env: minimalEnv(), timeout: 10_000, maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true },
       (error, stdout) => error ? reject(new Error("provider_snapshot_unavailable")) : resolve(stdout));
     if (targets) {
@@ -92,7 +92,8 @@ export function reconcileProviderSnapshots(deps: SnapshotDeps): Promise<void> {
     do {
       state.again = false;
       const acceptWrites = secureProviderTransport(deps.serverUrl);
-      const pending = await deps.callCommHub("pull_daemon_provider_snapshots", acceptWrites ? { accept_writes: true, accept_applications: true, accept_logins: true } : {});
+      const pending = await deps.callCommHub("pull_daemon_provider_snapshots", { accept_local_discovery: true,
+        ...(acceptWrites ? { accept_writes: true, accept_applications: true, accept_logins: true } : {}) });
       if (!pending?.ok || !Array.isArray(pending.requests)) return; // old Hub capability: unsupported is not success
       for (const request of pending.requests.slice(0, 20)) {
         if (typeof request?.request_id !== "string" || !/^dp[sal]_[a-f0-9-]{36}$/.test(request.request_id)
@@ -114,7 +115,7 @@ export function reconcileProviderSnapshots(deps: SnapshotDeps): Promise<void> {
           } else {
             if (request.operation !== undefined) throw new Error('unsupported_operation');
             if (request.scan_targets !== undefined && (!Array.isArray(request.scan_targets) || request.scan_targets.length > 200)) throw new Error('invalid_scan_targets');
-            snapshot = validateDaemonProviderSnapshot(await (deps.readSnapshot ? deps.readSnapshot() : readLocalProviderSnapshot(deps, request.scan_targets)), deps.networkId, deps.daemonId);
+            snapshot = validateDaemonProviderSnapshot(await (deps.readSnapshot ? deps.readSnapshot() : readLocalProviderSnapshot(deps, request.scan_targets, request.discover_local === true)), deps.networkId, deps.daemonId);
           }
         } catch {
           await deps.callCommHub("ack_daemon_provider_snapshot", { request_id: request.request_id, failed: true });

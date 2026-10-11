@@ -12,6 +12,16 @@ on:
 permissions:
   contents: read
 jobs:
+  existing-discovery:
+    name: daemon-existing-codex-discovery (Docker, read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Private legacy layout and HTTP daemon discovery core
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.discovery -t anet-provider-management:test906-discovery .'
+          sg docker -c 'docker run --init --rm --network none anet-provider-management:test906-discovery'
   managed-login:
     name: daemon-managed-login (Docker, no account sign-in)
     runs-on: ubuntu-latest

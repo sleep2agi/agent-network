@@ -4122,10 +4122,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   server.tool(
     "daemon_provider_snapshot", "Admin Provider: refresh/put/apply/login use daemon id; read uses request id. put: revision+provider; apply: revision+node selection; login: provider={action:start|read|cancel|save|accounts,session_id?,label?}. No login tokens.",
-    { action: z.enum(["refresh", "read", "put", "apply", "login"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional() },
-    async ({ action, id, network_id, revision, provider }) => {
+    { action: z.enum(["refresh", "read", "put", "apply", "login"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
+    async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
-      if (action === "read") return providerReply(getProviderSnapshot(human, id));
+      if (action === "read") return providerReply(getProviderSnapshot(human, id, include_discovery));
       const daemon_node_id = id;
       const result = action === 'login' ? requestProviderLogin(human, daemon_node_id, provider)
         : action === 'apply' ? requestProviderApplication(human, daemon_node_id, revision!, provider)
@@ -4138,8 +4138,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
   server.tool(
-    "pull_daemon_provider_snapshots", "Daemon Provider work; advertise only implemented secure write/apply/login capabilities.", { accept_writes: z.boolean().optional(), accept_applications: z.boolean().optional(), accept_logins: z.boolean().optional() },
-    async ({ accept_writes, accept_applications, accept_logins }) => providerReply(pullProviderSnapshots(resolveCallerDaemonTokenBound(), accept_writes, accept_applications, accept_logins)),
+    "pull_daemon_provider_snapshots", "Daemon Provider work; advertise only implemented secure write/apply/login capabilities.", { accept_writes: z.boolean().optional(), accept_applications: z.boolean().optional(), accept_logins: z.boolean().optional(), accept_local_discovery: z.boolean().optional() },
+    async ({ accept_writes, accept_applications, accept_logins, accept_local_discovery }) => providerReply(pullProviderSnapshots(resolveCallerDaemonTokenBound(), accept_writes, accept_applications, accept_logins, accept_local_discovery)),
   );
   server.tool(
     "ack_daemon_provider_snapshot", "Target daemon acknowledges redacted Provider configuration readback; fixed failure code only.",

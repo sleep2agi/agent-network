@@ -156,18 +156,21 @@ export function requestProviderLogin(h: Human, daemonId: string, intent: unknown
     return { ok: true as const, request_id: requestId, status: 'pending', expires_at: now + 120_000 };
   } catch { return denied('provider_snapshot_busy'); }
 }
-export function getProviderSnapshot(h: Human, requestId: string) {
+export function getProviderSnapshot(h: Human, requestId: string, includeDiscovery = false) {
   const refusal = authorize(h); if (refusal) return refusal;
   expire(h.networkId!);
   const row = db.get<Row>(`SELECT * FROM daemon_provider_snapshots WHERE request_id=?1 AND network_id=?2`, requestId, h.networkId!);
   if (!row) return denied("request_not_found");
+  const snapshot = !/^dp[al]_/.test(row.request_id) && row.snapshot_json ? JSON.parse(row.snapshot_json) : null;
+  // Old clients validate an exact contract. Their default projection stays unchanged.
+  if (!includeDiscovery && snapshot?.codex_inventory) delete snapshot.codex_inventory.local_discovery;
   return { ok: true, request_id: row.request_id, daemon_node_id: row.daemon_node_id, status: row.status,
     expires_at: row.expires_at, observed_at: row.observed_at, error: row.error,
-    snapshot: !/^dp[al]_/.test(row.request_id) && row.snapshot_json ? JSON.parse(row.snapshot_json) : null,
+    snapshot,
     ...(row.request_id.startsWith('dpl_') ? { login: row.snapshot_json ? JSON.parse(row.snapshot_json) : null } : {}),
     ...(row.request_id.startsWith('dpa_') ? { application: row.snapshot_json ? JSON.parse(row.snapshot_json) : null } : {}) };
 }
-export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApplications = false, acceptLogins = false) {
+export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApplications = false, acceptLogins = false, acceptDiscovery = false) {
   if (!d.ok) return denied("caller_not_a_daemon");
   if (!daemonExists(d.networkId, d.daemonNodeId)) return denied("caller_not_a_daemon");
   expire(d.networkId, d.daemonNodeId);
@@ -194,7 +197,7 @@ export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApp
     }
     if (!acceptWrites && db.get('SELECT request_id FROM daemon_provider_writes WHERE request_id=?1', r.request_id)) return [];
     const write = privateWrite(r.request_id, d.networkId, d.daemonNodeId);
-    return [write ? { ...r, operation: 'put', ...write } : { ...r, scan_targets: providerScanTargets(d.networkId, d.daemonNodeId) }];
+    return [write ? { ...r, operation: 'put', ...write } : { ...r, scan_targets: providerScanTargets(d.networkId, d.daemonNodeId), ...(acceptDiscovery ? { discover_local: true } : {}) }];
   }) }; } catch { return denied('provider_write_unavailable'); }
 }
 export function ackProviderSnapshot(d: Daemon, requestId: string, snapshot?: unknown, failed = false, appliedRevision?: number, application?: unknown, login?: unknown) {
@@ -244,6 +247,16 @@ export function ackProviderSnapshot(d: Daemon, requestId: string, snapshot?: unk
         const targets = new Map(providerScanTargets(d.networkId, d.daemonNodeId).map(n => [n.node_id, n.alias]));
         const rows = (safe as any).codex_inventory.rows;
         if (rows.length !== targets.size || rows.some((r: any) => targets.get(r.node_id) !== r.alias)) return denied('invalid_provider_snapshot');
+        const local = (safe as any).codex_inventory.local_discovery;
+        if (local) {
+          const registered = new Map(db.all<{ node_id: string; alias: string }>('SELECT node_id,alias FROM nodes WHERE network_id=?1', d.networkId).map(n => [n.node_id, n.alias]));
+          const ownership = buildControllableMap(
+            db.all<{ request_id: string; daemon_node_id: string }>('SELECT request_id,daemon_node_id FROM node_create_requests WHERE network_id=?1', d.networkId),
+            db.all<{ node_id: string; daemon_node_id: string }>("SELECT node_id,daemon_node_id FROM node_daemon_bindings WHERE network_id=?1 AND status='active'", d.networkId));
+          // Filesystem discovery is not control authority. Other-daemon and
+          // unregistered identities cannot enter this network's public receipt.
+          local.rows = local.rows.filter((r: any) => registered.get(r.node_id) === r.alias && !ownership.has(r.node_id));
+        }
       } catch { return denied('invalid_provider_snapshot'); }
     }
     try {
