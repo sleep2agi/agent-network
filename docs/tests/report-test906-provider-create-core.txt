@@ -53,3 +53,13 @@ bundle PASS;6/6 PASS,44 expectations across dedicated4+package-local2.
 Image configc787b05fc7f84f68b7f188325fd89cebc36ecbfcc2f47f05515c9f1618b81a17.
 Containers --rm, synthetic state removed. Remote new-head CI remains independent;
 no whole2129-test rerun or public artifact claim from this bounded correction.
+Incremental composition, observed2026-10-11T12:06Z:
+Merged main8f820d578acfd6e552f9592c73c346b3057eb739 into the creation branch
+(pre-merge head efd25f0360a5fdf37da4006614348485bf75bd45).
+Only conflict was QA paths; preserve both test906-provider-create and
+test907-hub-provider in push and PR triggers. Product files merged cleanly.
+Rebuilt dedicated Docker: strict helper tsc and actual339-module CLI build PASS,
+6/6 tests,44 expects PASS, UID10001, network none, container removed.
+Image config7ef88068fbab2cc0e1c5f5a8d90c695ffc8bfb4be921ca80817269535f0e241f.
+Still TEST ONLY: no native runtime launch, real OAuth/entitlement or publication.
+

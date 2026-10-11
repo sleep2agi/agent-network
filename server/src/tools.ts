@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
+import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { adoptionCandidatesReportSchema } from "./adoption-candidates.js";
@@ -4128,10 +4129,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const providerHuman = (net?: string) => ({ userId: enforceUserId, isNode: callerTokenIsNetwork, networkId: getNetworkId(net) });
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   server.tool(
-    "daemon_provider_snapshot", "Admin Provider: refresh/put/collect/apply/login use daemon id; read uses request id. collect: revision+identifier-only owned source selection; put: revision+provider; apply: revision+node selection; login: provider={action:start|read|cancel|save|accounts,session_id?,label?}. No login tokens.",
-    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
+    "daemon_provider_snapshot", "Provider: daemon refresh/put/collect/apply/login; read=request id. login provider={action:start|read|cancel|save|accounts,session_id?,label?}. hub_read=catalog; hub_put=owner config; hub_bind=id+revision,provider={daemon_node_id,daemon_revision,confirm:true}. No login tokens.",
+    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
+      if (action === 'hub_read') return providerReply(readHubProviders(human));
+      if (action === 'hub_put') return providerReply(putHubProvider(human, revision!, provider));
+      if (action === 'hub_bind') {
+        const selection = provider as { daemon_node_id?: string; daemon_revision?: number; confirm?: boolean } | undefined;
+        const result = bindHubProvider(human, { id, revision: revision!, daemon_node_id: selection?.daemon_node_id!, daemon_revision: selection?.daemon_revision!, confirm: selection?.confirm! });
+        if (result.ok && 'request_id' in result) {
+          const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', selection?.daemon_node_id!, human.networkId!);
+          if (target) pushEvent(target.alias, { type: 'daemon_provider_snapshot', request_id: result.request_id }, human.networkId!);
+        }
+        return providerReply(result);
+      }
       if (action === "read") return providerReply(getProviderSnapshot(human, id, include_discovery));
       const daemon_node_id = id;
       const result = action === 'login' ? requestProviderLogin(human, daemon_node_id, provider)

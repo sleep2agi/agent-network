@@ -1,0 +1,22 @@
+name: Hub Provider core
+on:
+  pull_request:
+    paths:
+      - 'server/src/hub-provider-config*'
+      - 'server/src/tools.ts'
+      - 'server/src/db.ts'
+      - 'server/src/vault.ts'
+      - 'server/src/daemon-provider-snapshots.ts'
+      - 'server/src/node-permissions.ts'
+      - 'server/src/tool-audience.ts'
+      - 'tests/test907-hub-provider/**'
+      - '.github/workflows/hub-provider-core.yml'
+permissions:
+  contents: read
+jobs:
+  hub-provider:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Registered Hub tool, encrypted catalog, daemon dispatch and CLI receipt (Docker)
+        run: sg docker -c 'sh tests/test907-hub-provider/run.sh'
