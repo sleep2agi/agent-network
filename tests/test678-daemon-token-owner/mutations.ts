@@ -9,7 +9,9 @@ async function runMutation(label: string, file: string, from: string, to: string
     const process_ = Bun.spawn(["bun", "test", "src/daemon-token-owner-http.test.ts", "-t", testName], { stdout: "pipe", stderr: "pipe" });
     const [out, err, rc] = await Promise.all([new Response(process_.stdout).text(), new Response(process_.stderr).text(), process_.exited]);
     if (!rc || !(out + err).includes(`(fail) ${testName}`) || !(out + err).includes("expect(received)")) throw Error(`NOT assertion-red ${label}\n${out}${err}`);
-    if (label === "resolver" && ((out + err).match(/\(fail\) daemon identity boundary:/g) || []).length !== 13) throw Error(`not all 13 identity boundaries witnessed red\n${out}${err}`);
+    // One failure per daemon-facing handler in daemon-token-owner-http.test.ts.
+    // get_opencode_catalog_request and ack_opencode_catalog share this resolver.
+    if (label === "resolver" && ((out + err).match(/\(fail\) daemon identity boundary:/g) || []).length !== 15) throw Error(`not all 15 identity boundaries witnessed red\n${out}${err}`);
     console.log(`WITNESSED_RED ${label} rc=${rc} assertion=${testName}`);
   } finally { writeFileSync(file, original); }
 }
