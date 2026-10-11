@@ -167,7 +167,8 @@ curl -s localhost:9200/health          # version 与 sessions_count
 ### #906 的精确版本部署配置
 
 `hub-daemon.sh` 默认值仍对应 CLI 的兼容基线，不是线上最新版本。
-`hub-provider906.sh` 当前是 `.122` 的无密钥部署配置：选择
+以下 `.122` 段落是已部署历史；当前 `.124` 配置与回滚见本节末尾。
+`hub-provider906.sh` 的历史 `.122` 无密钥部署配置选择
 `~/.commhub/runtime-v106-preview122`，保留目标 Hub 原本开启的 side-thread
 功能（显式设置 `COMMHUB_ENABLE_SIDE_THREADS=0` 仍有效）。不能只覆盖启动器
 而未安装这个精确 runtime。发布源是 main
@@ -210,6 +211,33 @@ PM2 定义、端口、反代、数据库路径与 `hub.env` 密钥来源不变�
 保留新增状态；存在未终结登录意图时先确认 Daemon 侧结果，不直接重放。
 生产数据、vault 密钥和账号不由 clone 仓库恢复，必须从管理员的加密备份
 或重新认证获取。备份策略和路径沿用本 runbook 前述生产备份步骤。
+
+### #906 / #907 当前 `.124` 配置（待实际切换）
+
+当前 Git 入口 `hub-provider906.sh` 选择 `runtime-v107-preview124`；原
+`runtime-v106-preview122` 保留为回滚目标。包从精确 main
+`ad381202cbba00c80efc30522801dedd810fbbea` 的正式运行 `38142238557`
+构建，四道门及发布/registry 核实全部通过。匿名下载与正式构建 tarball
+SHA256 相同：`e4391276facfcd5908c9e773ee6e0898ce14402247458ca068e8ce4e6b1d9748`。
+`deploy/hub/provider906/package*.json` 记录实际 npm URL、完整 integrity 和
+传递依赖锁；复制到空 sibling 目录再 `npm ci --ignore-scripts --no-audit
+--no-fund`，不覆盖旧安装或使用浮动依赖。
+
+本版本新增 `hub_provider_configs` / `hub_provider_bindings`，保留既有登录
+意图及 Provider 状态。切换前按上文生成一致性离线备份，在独立 Docker
+中用正式包验证迁移、旧行数及启动/认证读；不将活库或 `hub.env` 挂入测试。
+上述预检通过、且部署入口已合入 main 后，才安装 Git 的共享启动器和版本
+配置（0700），逐一核对字节，保留原入口备份；只重启 `commhub-hub`，不加
+`--update-env`。按实际监听进程、`/health` `.124`、新心跳/ack 和错误日志
+核对，而不是只看 PM2 online。端口9200、反代/隧道、DB 路径和权限不变。
+
+密钥仍来自主机管理员的 owner-only `~/.commhub/hub.env`；Hub Provider
+vault 要求原 `ANET_HUB_SECRET_VAULT_KEY` 为32字节的64位十六进制值。
+仅检查是否符合格式，不输出值、不换身份或新造密钥替换旧密文来源。
+DB 和该原始密钥必须通过独立加密备份恢复，具体保险库记录名仍未覆盖，
+Git clone 不含数据或登录账号。回滚恢复原入口选择保留的 `.122` 并仅
+重启 Hub；保留新增表和待处理状态，软件回滚不撤销已完成的绑定。
+当前为可评审部署输入，不宣称已切换、真实 vault/模型权益或空机恢复完成。
 
 ## 混版风险(必读)
 

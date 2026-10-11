@@ -7,14 +7,14 @@ import { Database } from 'bun:sqlite';
 // the published tarball and the running Hub's Bun executable, all read-only.
 assert.equal(Bun.version, '1.4.0');
 assert.equal(process.env.DATABASE_URL, undefined);
-const expected = '92L4EYUC1gkuADAsAcwWy+iKdLZTYuBqkqWuyZr5gI5I9SDYr2Nm4zGjtxkbvSXaful8FCoGp5Dmgq5RmlvGew==';
-const tarball = '/input/hub122.tgz';
+const expected = 'HGfaAk1PDWW7ColScS6kGSyOLOvtRHj6v9WHTI4WnOuxkInxQ2m4tcns6zeACRcW+HqjH08LpApJh0pElg/vZQ==';
+const tarball = '/input/hub124.tgz';
 assert.equal(createHash('sha512').update(readFileSync(tarball)).digest('base64'), expected);
 mkdirSync('/tmp/package-input');
 assert.equal(Bun.spawnSync(['tar', '-xzf', tarball, '-C', '/tmp/package-input']).exitCode, 0);
 const pkg = JSON.parse(readFileSync('/tmp/package-input/package/package.json', 'utf8'));
 assert.equal(pkg.name, '@sleep2agi/commhub-server');
-assert.equal(pkg.version, '0.9.0-preview.122');
+assert.equal(pkg.version, '0.9.0-preview.124');
 // db.ts's read-cache imports node-health-store, which requires this lockfile
 // dependency. Supply its exact tarball offline; never let Bun auto-install it.
 assert.equal(createHash('sha512').update(readFileSync('/input/zod.tgz')).digest('base64'),
@@ -27,7 +27,7 @@ const tables = ['sessions', 'tasks', 'nodes', 'networks', 'requirements', 'api_t
 const before = new Database('/tmp/migration.db', { readonly: true });
 assert.deepEqual(before.query('PRAGMA integrity_check').values(), [['ok']]);
 const counts = Object.fromEntries(tables.map(t => [t, before.query(`SELECT COUNT(*) n FROM ${t}`).get().n]));
-const providerTables = ['daemon_provider_snapshots', 'daemon_provider_writes', 'daemon_provider_applications'];
+const providerTables = ['daemon_provider_snapshots', 'daemon_provider_writes', 'daemon_provider_applications', 'daemon_provider_logins', 'hub_provider_configs', 'hub_provider_bindings'];
 const providerCounts = Object.fromEntries(providerTables.map(t => [t,
   before.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t)
     ? before.query(`SELECT COUNT(*) n FROM ${t}`).get().n : 0]));
@@ -40,10 +40,9 @@ for (const t of tables) assert.equal(db.get(`SELECT COUNT(*) n FROM ${t}`).n, co
 for (const t of providerTables) {
   assert.equal(db.get(`SELECT COUNT(*) n FROM ${t}`).n, providerCounts[t], `${t}: preserved rows`);
 }
-assert.equal(db.get('SELECT COUNT(*) n FROM daemon_provider_logins').n, 0, 'new login intent table empty');
 assert.ok(db.all('PRAGMA table_info(node_create_requests)').some(c => c.name === 'clone_json'), 'clone column exists');
 db.close();
 const after = new Database('/tmp/migration.db', { readonly: true });
 assert.deepEqual(after.query('PRAGMA integrity_check').values(), [['ok']]);
 after.close();
-console.log(JSON.stringify({ result: 'PASS', version: pkg.version, bun: Bun.version, preservedCounts: counts, providerCounts, loginTableEmpty: true, cloneColumn: true, scope: 'offline schema migration only; no live service or authentication test' }));
+console.log(JSON.stringify({ result: 'PASS', version: pkg.version, bun: Bun.version, preservedCounts: counts, providerCounts, loginRowsPreserved: true, cloneColumn: true, scope: 'offline schema migration only; no live service or authentication test' }));
