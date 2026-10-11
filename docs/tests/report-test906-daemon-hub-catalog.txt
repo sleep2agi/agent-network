@@ -29,3 +29,18 @@ Also green on this host: tool-audience + mcp-context-cost + daemon-token-owner (
 Not run here: tests/test827–833 Docker images. The new file is opencode-v2-catalog-endpoint.json inside the node work directory. test827 watches the XDG data root, not that directory. The session unit test covers create and remove.
 
 Not claimed: client picker, npm publish, invocation verified, completeness known, adopted-node catalog reads, hub filesystem check when the create row stored no workdir.
+
+Rebase onto main b4413131 (#2575 provider daemon management), 2026-10-11.
+Conflict files: docs-site/docs/api/mcp-tools.md and server/src/tool-audience-http.test.ts.
+Both the #906 provider index and the OpenCode V2 catalog index stayed. Provider registrations were added to the test629 inventory in source order.
+
+bun 1.3.14 on this host, after that rebase:
+  agent-node catalog files (reader, endpoint, owned reader, doorbell, v2 session): 34 pass, 0 fail
+  hub authorization: 3 pass
+  tool-audience: 12 pass. all 94 tools / 84,273 B; node 61 / 62,556 B; user 61 / 58,684 B
+  mcp-context-cost: 5 pass. user list 61 tools / 58,684 B
+  daemon identity boundary: 15 pass, including get_opencode_catalog_request and ack_opencode_catalog
+  node permission class bookkeeping: pass
+  test629 inventory_count=85 sdk 1.32.0
+  check-doc-symbol-pins (docs and docs-site) and check-mcp-tool-index-coverage (94/94, both languages) green
+native.ts was not re-run here (no opencode binary in this environment). CI still runs it in tests/test906-daemon-catalog.
