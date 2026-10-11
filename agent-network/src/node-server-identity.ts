@@ -47,6 +47,29 @@ export function nodeIdentityFromConfig(path: string | undefined): NodeIdentityFr
   return out;
 }
 
+/**
+ * Claude Code CLI resume id for `report_status.session_id`.
+ *
+ * The launcher passes the same uuid as `claude --session-id` / `--resume`
+ * via `ANET_RUNTIME_SESSION_ID`. That wins. A blank env falls through to
+ * `config.session` (written before spawn). A non-blank env that does not
+ * fit the hub limit is omitted — falling through would report a different id
+ * than the one the process was started with. No session yet ⇒ undefined.
+ */
+export function runtimeSessionIdForReport(envValue: unknown, configPath: string | undefined): string | undefined {
+  if (typeof envValue === "string" && envValue.trim()) return field(envValue);
+  if (!configPath) return undefined;
+  let cfg: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    cfg = parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  return field(cfg.session);
+}
+
 // ── 认领前先看一眼 hub 上这个 node_id 现在是谁的 ──────────────────────────
 //
 // 🔴 生产实测:一个 claude-code 节点配置里的 node_id,在 hub 上已经是**另一个节点**的行

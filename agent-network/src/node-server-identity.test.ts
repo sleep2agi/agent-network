@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nodeIdentityFromConfig } from "./node-server-identity";
+import { nodeIdentityFromConfig, runtimeSessionIdForReport } from "./node-server-identity";
 
 const dir = mkdtempSync(join(tmpdir(), "node-server-identity-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -57,6 +57,46 @@ describe("nodeIdentityFromConfig", () => {
     expect(nodeIdentityFromConfig(cfg("[1,2]"))).toEqual({});
     expect(nodeIdentityFromConfig(cfg("null"))).toEqual({});
     expect(nodeIdentityFromConfig(cfg('"n_4"'))).toEqual({});
+  });
+});
+
+describe("runtimeSessionIdForReport", () => {
+  const session = "6ac06f64-1111-4000-8000-000000000001";
+
+  it("env is the --session-id / --resume uuid and wins over config", () => {
+    const p = cfg(JSON.stringify({ session: "from-config" }));
+    expect(runtimeSessionIdForReport(session, p)).toBe(session);
+  });
+
+  it("blank env falls through to config.session", () => {
+    const p = cfg(JSON.stringify({ session, token: "ntok_secret" }));
+    expect(runtimeSessionIdForReport(undefined, p)).toBe(session);
+    expect(runtimeSessionIdForReport("   ", p)).toBe(session);
+    expect(runtimeSessionIdForReport("", p)).toBe(session);
+  });
+
+  it("no env and no session ⇒ omit (do not invent, and do not use other fields)", () => {
+    const p = cfg(JSON.stringify({ node_id: "n_1", grokSession: "g", codexThreadId: "t" }));
+    expect(runtimeSessionIdForReport(undefined, p)).toBeUndefined();
+    expect(runtimeSessionIdForReport(undefined, undefined)).toBeUndefined();
+  });
+
+  it("a non-blank env that does not fit the hub limit is omitted instead of falling through to a different config id", () => {
+    const p = cfg(JSON.stringify({ session }));
+    expect(runtimeSessionIdForReport("x".repeat(201), p)).toBeUndefined();
+    expect(runtimeSessionIdForReport(123, p)).toBe(session);
+  });
+
+  it("config session over 200 / non-string / bad file is omitted", () => {
+    expect(runtimeSessionIdForReport(undefined, cfg(JSON.stringify({ session: "s".repeat(201) })))).toBeUndefined();
+    expect(runtimeSessionIdForReport(undefined, cfg(JSON.stringify({ session: "s".repeat(200) })))).toBe("s".repeat(200));
+    expect(runtimeSessionIdForReport(undefined, cfg(JSON.stringify({ session: 1 })))).toBeUndefined();
+    expect(runtimeSessionIdForReport(undefined, cfg("{nope"))).toBeUndefined();
+    expect(runtimeSessionIdForReport(undefined, join(dir, "missing-session.json"))).toBeUndefined();
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(runtimeSessionIdForReport(`  ${session}  `, undefined)).toBe(session);
   });
 });
 

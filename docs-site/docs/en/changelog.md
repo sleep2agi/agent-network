@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased: node status carries the resumeable runtime session id (2026-10-11)
+
+- A running node reports the resumeable session id on `report_status.session_id`. Full `GET /api/status` returns it as `sessions[].session_id`. `?light=1` does not include the column. When the runtime has no session yet the field is omitted. This is not the Hub row key `resume_id` (`sdk-…` / `cc-…`).
+- Claude Code CLI reports the `claude --session-id` / `--resume` uuid. claude-agent-sdk reports the SDK session id. Codex SDK / stdio reports the thread id (or the boot session used to resume, until a thread exists). codex-app-server reports `codexThreadId`. Grok reports the ACP / CLI session id. OpenCode reports the ACP / co-presence session id.
+- The desktop Model & Runtime page can show this next to version by reading `sessions[].session_id`. This repo does not change the client.
+
 ## Unreleased: OpenCode V2 co-presence create matches the machine provider (2026-10-10)
 
 - Creating an OpenCode V2 co-presence node takes the model and provider from OpenCode's own `opencode.json` on this machine (`model` and `providers`). A requested model or `--provider` that differs is refused, and the refusal names both sides. Create does not substitute a preset default model or the anthropic preset.

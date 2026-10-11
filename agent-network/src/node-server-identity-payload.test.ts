@@ -61,6 +61,13 @@ describe("node-server 的身份载荷(三处)", () => {
     for (const b of blocks) expect(b).toContain("model: NODE_MODEL");
   });
 
+  it("🔴 三处都带 session_id —— Claude --session-id / --resume；没有就不编", () => {
+    const missing = blocks.filter(b => !b.includes("session_id: RUNTIME_SESSION_ID"));
+    expect(missing.length).toBe(0);
+    expect(CODE).toContain("runtimeSessionIdForReport(process.env.ANET_RUNTIME_SESSION_ID, CONFIG_PATH)");
+    expect(CODE).not.toContain("session_id: RESUME_ID");
+  });
+
   it("🔴 三处都带 config_path —— 加第四处注册点时漏了会红", () => {
     const missing = blocks.filter(b => !b.includes("config_path: CONFIG_PATH"));
     expect(missing.length).toBe(0);

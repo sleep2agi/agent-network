@@ -113,7 +113,7 @@ import { decideReplyAlias, replyAliasArgs } from "./reply-originator.js";
 import { clampOutboundPriority, decideOutboundRewrite, parseActiveNetworkTask } from "./active-network-task.js";
 import { getHostTelemetry } from "./host-telemetry.js";
 import { getProcessTelemetry } from "./process-telemetry.js";
-import { checkNodeIdClaim, nodeIdentityFromConfig, type NodeIdClaimState } from "./node-server-identity.js";
+import { checkNodeIdClaim, nodeIdentityFromConfig, runtimeSessionIdForReport, type NodeIdClaimState } from "./node-server-identity.js";
 
 // ── Load ~/.anet/config.json for token fallback ──────
 function loadAnetConfig(): Record<string, string> {
@@ -225,6 +225,9 @@ const CONFIG_PATH = nodeConfigPath();
 // (见 node-server-identity.ts 顶部)。
 const NODE_IDENTITY = nodeIdentityFromConfig(CONFIG_PATH);
 const NODE_MODEL = NODE_IDENTITY.model;
+// Claude `--session-id` / `--resume` uuid. Undefined until the launcher (or
+// config.session) actually has one — never the Hub row key `RESUME_ID`.
+const RUNTIME_SESSION_ID = runtimeSessionIdForReport(process.env.ANET_RUNTIME_SESSION_ID, CONFIG_PATH);
 const NODE_ID = NODE_IDENTITY.node_id;
 const NODE_NAME = NODE_IDENTITY.node_name;
 // node_id 只在确认「hub 上这个 id 没有、或就是我」之后才报(见 node-server-identity.ts 的认领检查)。
@@ -648,6 +651,7 @@ async function reregister(): Promise<void> {
       node_id: reportNodeId,
       node_name: NODE_NAME,
       model: NODE_MODEL,
+      session_id: RUNTIME_SESSION_ID,
       // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
       // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
       host: getHostTelemetry(),
@@ -879,6 +883,7 @@ async function main() {
     node_id: reportNodeId,
     node_name: NODE_NAME,
     model: NODE_MODEL,
+    session_id: RUNTIME_SESSION_ID,
     // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
     // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
     host: getHostTelemetry(),
@@ -909,6 +914,7 @@ async function main() {
       node_id: reportNodeId,
       node_name: NODE_NAME,
       model: NODE_MODEL,
+      session_id: RUNTIME_SESSION_ID,
       // #1727 —— claude-code 裸节点没有 agent-node 进程,六个监控字段没人产;
       // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
       host: getHostTelemetry(),

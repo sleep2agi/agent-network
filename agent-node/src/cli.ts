@@ -26,6 +26,7 @@ import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/openc
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
 import { createStderrTurnAggregator } from "./runtime/stderr-turn-aggregator";
 import { resolveLogLevel } from "./log-level";
+import { runtimeResumeSessionId } from "./runtime-session-id";
 import {
   copresenceCapabilities as grokCopresenceCapabilities,
   assertCopresenceSupported as assertGrokCopresenceSupported,
@@ -1065,8 +1066,33 @@ const CHANNELS = channelSpecs.map((spec) => {
   }
 });
 
+// Live resume id for report_status.session_id. The lets this reads
+// (claudeSessionId, grokSessionId, …) are assigned before any call.
+// publishRuntimeSessionIfNew stays a no-op until reportStatus exists and
+// register() has armed it, so a session learned during pre-register warmup
+// is still carried by the first report.
+let runtimeSessionPublishArmed = false;
+let lastPublishedRuntimeSessionId: string | undefined;
+let publishRuntimeSessionIfNew: () => void = () => {};
+
+function currentRuntimeSessionId(): string | undefined {
+  return runtimeResumeSessionId({
+    runtime: RUNTIME,
+    claudeSessionId,
+    grokSessionId,
+    opencodeSessionId,
+    codexAppServerThreadId,
+    codexSdkThreadId: typeof codexThread?.id === "string" ? codexThread.id : undefined,
+    codexStdioRecordedThreadId,
+    bootSessionId: SESSION_ID,
+    codexStdioDirect: process.env.ANET_CODEX_STDIO_DIRECT === "1",
+  });
+}
+
 // ── Session 写回 config.json ──
 function writebackSession(sessionId: string) {
+  // Caller has already stored the id on the live variable this runtime reports.
+  publishRuntimeSessionIfNew();
   if (!configFilePath || !sessionId) return;
   try {
     if (RUNTIME === "opencode") {
@@ -1107,6 +1133,7 @@ function writebackGrokBinaryPin(binary: string, versionLine: string, pathEnv: st
 
 function writebackGrokSession(sessionId: string) {
   grokSessionId = sessionId;
+  publishRuntimeSessionIfNew();
   if (!configFilePath || !sessionId) return;
   try {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
@@ -1125,6 +1152,7 @@ function writebackGrokSession(sessionId: string) {
 // runtimes use) so a restart resumes the same codex conversation.
 function writebackCodexThread(threadId: string) {
   codexAppServerThreadId = threadId;
+  publishRuntimeSessionIfNew();
   if (!configFilePath || !threadId) return;
   try {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
@@ -1683,9 +1711,8 @@ if (NODE_ID) {
 // instead of requiring a node restart.
 const register = async () => {
   const alias = await liveAlias();
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : SESSION_ID || undefined;
+  const activeSessionId = currentRuntimeSessionId();
+  lastPublishedRuntimeSessionId = activeSessionId;
   const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
@@ -1776,11 +1803,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     inFlight: getInFlightCount(),
     loginDead: claudeLoginDead,
   });
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : RUNTIME === "claude"
-      ? claudeSessionId
-      : SESSION_ID || undefined;
+  const activeSessionId = currentRuntimeSessionId();
+  lastPublishedRuntimeSessionId = activeSessionId;
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     // #1809 —— 每次状态上报都带 version(此前只有 3 分钟心跳带)。hub 在同 alias 换
@@ -1847,6 +1871,13 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       ...(RUNTIME === "grok" && grokEffectiveModel ? { model_effective: grokEffectiveModel, model_source: grokModelSource } : {}),
     },
   });
+};
+publishRuntimeSessionIfNew = () => {
+  if (!runtimeSessionPublishArmed) return;
+  const id = currentRuntimeSessionId();
+  if (!id || id === lastPublishedRuntimeSessionId) return;
+  lastPublishedRuntimeSessionId = id;
+  void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
 };
 // #672 — flip the dot now, without a task string. The sentence is written
 // by the idle report after this turn, when nothing is in flight.
@@ -7534,6 +7565,7 @@ if (RUNTIME === "codex" || RUNTIME === "codex-app-server") {
   }
 }
 await register();
+runtimeSessionPublishArmed = true;
 log("已注册到 CommHub");
 
 // Subscribe before the human TUI starts. Lazy-on-first-task attachment can

@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布：节点状态带上可恢复的运行时 session id（2026-10-11）
+
+- 运行中的节点在 `report_status.session_id` 上报可恢复的会话 id。全量 `GET /api/status` 的 `sessions[].session_id` 原样返回；`?light=1` 不含这一列。还没有会话就省略，不编一个。这不是 Hub 行键 `resume_id`（`sdk-…` / `cc-…`）。
+- Claude Code CLI 报的是 `claude --session-id` / `--resume` 的 uuid。claude-agent-sdk 报 SDK 的 session id。Codex SDK / stdio 报 thread id（还没有 thread 时，报启动时用来 resume 的 session）。codex-app-server 报 `codexThreadId`。Grok 报 ACP / CLI 的 session id。OpenCode 报 ACP / 共存 session id。
+- 桌面端「模型与运行时」要显示这一格，需要读 `sessions[].session_id`。本仓库不改客户端。
+
 ## 未发布：OpenCode V2 共存创建对齐本机 Provider（2026-10-10）
 
 - 创建 OpenCode V2 共存节点时，模型和 Provider 取自这台机器上 OpenCode 自己的 `opencode.json`（`model` 与 `providers`）。请求里的模型或 `--provider` 若与之不一致，创建直接拒绝并写明两边的值，不会改用预设默认模型，也不会退回 anthropic。

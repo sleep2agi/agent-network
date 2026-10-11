@@ -34,8 +34,10 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
       "resume_id": "sdk-n_xxx",
       "alias": "coder-1",
       "status": "idle",
-      "agent": "agent-node:codex-sdk",
+      "agent": "agent-node:codex-app-server",
       "model": "your-model-id",
+      "version": "2.5.0-preview.126",
+      "session_id": "6ac06f64-1111-4000-8000-000000000001",
       "task": null,
       "progress": null,
       "last_seen_at": "2026-04-12 10:00:00"

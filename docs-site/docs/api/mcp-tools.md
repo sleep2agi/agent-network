@@ -219,7 +219,7 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `version` | string | | Agent 版本 |
 | `tmux_name` | string | | tmux session 名 |
 | `node_id` | string | | 节点稳定标识。**注意**：传了 `node_id` 才会把 `model` / `node_name` / `runtime`（从 `agent` 字段拆）upsert 到 `nodes` 表（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `upsertNodeWithSec1Guard`（`report_status` 段内 `if (node_id)` 之下的调用点，以及 registerTools 之后的同名 helper））。`model` 参数本身**不依赖 `node_id`** —— `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 在 `report_status` 段搜 `INSERT INTO sessions`（写这几列的是 `report_status`，不是本节这个 tool） 与 `model = COALESCE(?20, sessions.model)`）；只有 `node_name` 没有 `sessions` 列、必须靠 `node_id` 走 `nodes` 表 |
-| `session_id` | string | | 运行时 session/thread ID |
+| `session_id` | string | | 可恢复的运行时会话 id（Claude Code 的 `--session-id` / `--resume`、Codex thread id、Grok `sessionId`、OpenCode session id）。还没有会话就省略，不要编。不是 Hub 行键 `resume_id`（`sdk-…` / `cc-…`）。全量 `GET /api/status` 的 `sessions[].session_id` 原样返回；`?light=1` 不含这一列 |
 | `config_path` | string | | 配置文件路径 |
 | `channels` | string | | Channel 列表（JSON 数组字符串） |
 | `model` | string | | AI 模型名称（仅当 `node_id` 也传时写入 `nodes.model`） |

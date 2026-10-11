@@ -7845,6 +7845,14 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     } catch (err: any) {
       console.warn(`[anet] 团队技能安装失败：${err?.message || err}`);
     }
+    // The uuid just placed on `--session-id` / `--resume`. node-server reports
+    // it as report_status.session_id. Set after the id is final, and delete any
+    // inherited value so a parent shell cannot publish a different one. Over
+    // 200 chars is omitted: hub would reject the whole report_status.
+    const runtimeSessionId = typeof profile.session === "string" ? profile.session.trim() : "";
+    if (runtimeSessionId && runtimeSessionId.length <= 200) env.ANET_RUNTIME_SESSION_ID = runtimeSessionId;
+    else delete env.ANET_RUNTIME_SESSION_ID;
+
     await new Promise<void>(async (resolve) => {
       let child: ReturnType<typeof spawn>;
       try {
