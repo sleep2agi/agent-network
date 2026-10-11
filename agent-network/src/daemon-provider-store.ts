@@ -15,6 +15,8 @@ type Provider = { id: string; label: string; enabled: boolean; runtimes: Runtime
 type Scope = { network_id: string; daemon_node_id: string };
 type State = Scope & { schema: 1; revision: number; providers: Provider[];
   last_write?: { request_id: string; input_hash: string; revision: number } };
+export type ApplicationProfile = { providerId: string; authId: string; model: string } & (
+  { kind: 'api_key'; baseUrl: string; key: string } | { kind: 'chatgpt'; accountId: string });
 
 export class DaemonProviderError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -89,7 +91,7 @@ function parseProvider(value: unknown, previous?: Provider): Provider {
 
 // Read through a no-follow fd and enforce owner-only, single-link files. Never
 // repair a foreign/linked file as a side effect of a read operation.
-function readPrivateJson(path: string): unknown {
+export function readPrivateJson(path: string): unknown {
   const before = lstatSync(path);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) fail("unsafe_private_file");
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
@@ -159,12 +161,16 @@ export class DaemonProviderStore {
   /** Presence only, never entitlement. Resolve an opaque saved-login ID solely
    * inside this daemon's owned directory; callers cannot supply a credential path. */
   private savedAccountPresent(id: string): boolean {
-    if (!accountId(id)) return false;
+    return this.savedAccountHome(id) !== null;
+  }
+  /** Local-only resolver. Never serialize this credential directory into a receipt. */
+  savedAccountHome(id: string): string | null {
+    if (!accountId(id)) return null;
     const root = join(this.root, 'codex-logins');
     try {
       const stat = lstatSync(root);
       if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(root) !== resolve(root)
-        || (process.getuid && stat.uid !== process.getuid()) || (process.platform !== 'win32' && (stat.mode & 0o077))) return false;
+        || (process.getuid && stat.uid !== process.getuid()) || (process.platform !== 'win32' && (stat.mode & 0o077))) return null;
       for (const child of readdirSync(root, { withFileTypes: true })) {
         if (!child.isDirectory() || !/^login-[A-Za-z0-9]+$/.test(child.name)) continue;
         const home = join(root, child.name), dir = lstatSync(home);
@@ -175,12 +181,12 @@ export class DaemonProviderStore {
           if (record.version !== 1 || record.account_id !== id || record.network_id !== this.scope.network_id
             || record.daemon_node_id !== this.scope.daemon_node_id) continue;
           const auth = readPrivateJson(join(home, 'auth.json')) as any;
-          return !!auth && auth.auth_mode === 'chatgpt' && !!auth.tokens && typeof auth.tokens.access_token === 'string'
-            && !!auth.tokens.access_token && typeof auth.tokens.refresh_token === 'string' && !!auth.tokens.refresh_token;
+          if (auth && auth.auth_mode === 'chatgpt' && auth.tokens && typeof auth.tokens.access_token === 'string'
+            && auth.tokens.access_token && typeof auth.tokens.refresh_token === 'string' && auth.tokens.refresh_token) return home;
         } catch { /* incomplete or unsafe account is not bindable */ }
       }
     } catch { /* absent/unsafe login root is not a credential */ }
-    return false;
+    return null;
   }
   /** Internal daemon bootstrap; this private path must never enter Hub replies. */
   prepareLoginDirectory() {
@@ -197,6 +203,13 @@ export class DaemonProviderStore {
   /** Local application lease. Secrets stay inside the daemon callback, never in list/scan. */
   async withApiKey<T>(selection: { revision: number; providerId: string; authId: string; model: string },
     apply: (profile: { providerId: string; authId: string; model: string; baseUrl: string; key: string }) => Promise<T>): Promise<T> {
+    return this.withApplicationProfile(selection, async profile => {
+      if (profile.kind !== 'api_key') fail('api_key_profile_required');
+      return apply(profile);
+    });
+  }
+  async withApplicationProfile<T>(selection: { revision: number; providerId: string; authId: string; model: string },
+    apply: (profile: ApplicationProfile) => Promise<T>): Promise<T> {
     if (!Number.isSafeInteger(selection.revision) || selection.revision < 0) fail('invalid_revision');
     if (!existsSync(this.root)) fail('provider_not_found');
     this.checkRoot();
@@ -210,9 +223,15 @@ export class DaemonProviderStore {
       const provider = state.providers.find(p => p.id === selection.providerId);
       if (!provider?.enabled) fail('provider_not_enabled');
       const auth = provider.runtimes.find(r => r.runtime === 'codex-tui')?.auth.find(a => a.id === selection.authId);
-      if (!auth || auth.kind !== 'api_key' || !auth.key || !auth.baseUrl) fail('api_key_profile_required');
+      if (!auth) fail('authentication_profile_required');
       if (!auth.models.includes(selection.model)) fail('model_not_configured');
-      return await apply({ providerId: provider.id, authId: auth.id, model: selection.model, baseUrl: auth.baseUrl, key: auth.key });
+      const common = { providerId: provider.id, authId: auth.id, model: selection.model };
+      if (auth.kind === 'chatgpt') {
+        if (!auth.account_id || !this.savedAccountPresent(auth.account_id)) fail('saved_account_unavailable');
+        return await apply({ ...common, kind: 'chatgpt', accountId: auth.account_id });
+      }
+      if (!auth.key || !auth.baseUrl) fail('api_key_profile_required');
+      return await apply({ ...common, kind: 'api_key', baseUrl: auth.baseUrl, key: auth.key });
     } finally { closeSync(fd); unlinkSync(lock); }
   }
   upsert(value: unknown, expectedRevision: number, requestId?: string) {

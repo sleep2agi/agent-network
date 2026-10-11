@@ -30,7 +30,8 @@ async function checkPendingIdle(daemonDir: string, request: ProviderApplicationR
   if (actual?.operation !== 'apply' || actual.expires_at <= Date.now() || actual.alias !== request.alias
     || actual.expected_revision !== request.revision || !validProviderApplicationSelection(selected)
     || selected.node_id !== request.nodeId || selected.node_revision !== request.nodeRevision
-    || selected.provider_id !== request.providerId || selected.auth_id !== request.authId || selected.model !== request.model) throw new DaemonProviderError('application_request_not_pending');
+    || selected.provider_id !== request.providerId || selected.auth_id !== request.authId || selected.model !== request.model
+    || selected.account_id !== request.accountId) throw new DaemonProviderError('application_request_not_pending');
   const status = await call('get_session_status', { alias: request.alias });
   const stamp = status.session?.last_seen_at ?? status.session?.updated_at;
   const seenAt = typeof stamp === 'string' ? Date.parse(/(?:Z|[+-]\d\d:\d\d)$/.test(stamp) ? stamp : stamp.replace(' ', 'T') + 'Z') : NaN;
@@ -57,7 +58,8 @@ export async function runDaemonProviderApply(args: string[], deps: {
     const selection = value.selection;
     const request: ProviderApplicationRequest = { requestId: value.request_id, networkId: scope.network_id, daemonId: scope.daemon_node_id,
       nodeId: selection.node_id, alias: value.alias, revision: value.expected_revision, nodeRevision: selection.node_revision,
-      providerId: selection.provider_id, authId: selection.auth_id, model: selection.model, confirmRestart: true };
+      providerId: selection.provider_id, authId: selection.auth_id, model: selection.model, confirmRestart: true,
+      ...(selection.account_id ? { accountId: selection.account_id } : {}) };
     const target = resolveDaemonProviderTarget(deps.nodesDir, { node_id: request.nodeId, alias: request.alias }, request.networkId);
     const lifecycle = providerApplicationLifecycle(target.dir, request,
       deps.run ?? providerCliRunner(process.execPath, process.argv[1], process.env),

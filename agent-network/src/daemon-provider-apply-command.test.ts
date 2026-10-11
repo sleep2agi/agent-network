@@ -10,9 +10,10 @@ import { REQUIRED_CHECKS } from './codex-lifecycle-receipt';
 // Actual CLI application dispatcher/filesystem, injected lifecycle subprocesses.
 // This is NOT a native Codex process acceptance test.
 test('apply command core: exact launch readback, lost ACK replay, busy refusal and failed-model rollback', async () => {
-  for (const mode of ['ok', 'busy', 'wrong-model'] as const) {
+  for (const mode of ['ok', 'busy', 'wrong-model', 'official', 'wrong-account'] as const) {
     const root = mkdtempSync(join(tmpdir(), 'provider-command906-'));
     let hub: ReturnType<typeof Bun.serve> | undefined;
+    let runtime: ReturnType<typeof Bun.serve> | undefined;
     try {
       const nodes = join(root, '.anet/nodes'), daemon = join(nodes, 'supervisor'), node = join(nodes, 'child');
       mkdirSync(daemon, { recursive: true, mode: 0o700 }); mkdirSync(join(node, 'codex-home'), { recursive: true, mode: 0o700 });
@@ -25,7 +26,28 @@ test('apply command core: exact launch readback, lost ACK replay, busy refusal a
         { id: 'work', kind: 'api_key', models: ['new'], baseUrl: 'https://example.test/v1', key: 'TEST-ONLY-secret' },
       ] }] }, 0);
       const request = { request_id: 'dpa_11111111-1111-4111-8111-111111111111', expected_revision: 1, alias: 'child', network_id: 'net_a', daemon_node_id: 'daemon_a',
-        selection: { node_id: 'node_a', node_revision: providerNodeRevision(node), provider_id: 'custom', auth_id: 'work', model: 'new', confirm_restart: true } };
+        selection: { node_id: 'node_a', node_revision: providerNodeRevision(node), provider_id: 'custom', auth_id: 'work', model: 'new', confirm_restart: true } as Record<string, any> };
+      let accountReads = 0;
+      if (mode === 'official' || mode === 'wrong-account') {
+        const store = new DaemonProviderStore(daemon), accountId = 'aaaaaaaa-1111-4111-8111-111111111111';
+        const home = join(store.prepareLoginDirectory().root, 'login-fixture'); mkdirSync(home, { mode: 0o700 });
+        write(join(home, 'anet-account.json'), { version: 1, account_id: accountId, network_id: 'net_a', daemon_node_id: 'daemon_a' });
+        write(join(home, 'auth.json'), { auth_mode: 'chatgpt', tokens: { account_id: accountId, access_token: 'TEST-ONLY-access', refresh_token: 'TEST-ONLY-refresh' } });
+        store.upsert({ id: 'openai', label: 'OpenAI', enabled: true, runtimes: [{ runtime: 'codex-tui', auth: [
+          { id: 'login', kind: 'chatgpt', account_id: accountId, models: ['new'] },
+        ] }] }, 1);
+        request.expected_revision = 2;
+        request.selection = { ...request.selection, provider_id: 'openai', auth_id: 'login', account_id: accountId };
+        runtime = Bun.serve({ hostname: '127.0.0.1', port: 0,
+          fetch(req, server) { return server.upgrade(req) ? undefined : new Response('bad'); },
+          websocket: { message(ws, raw) {
+            const m = JSON.parse(String(raw));
+            if (m.method === 'initialize') ws.send(JSON.stringify({ id: m.id, result: {} }));
+            if (m.method === 'account/read') { accountReads++;
+              ws.send(JSON.stringify({ id: m.id, result: { requiresOpenaiAuth: true, account: { type: mode === 'official' ? 'chatgpt' : 'apiKey' } } })); }
+          } },
+        });
+      }
       const calls: string[][] = [], output: string[] = [];
       hub = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async incoming => {
         expect(incoming.headers.get('Authorization')).toBe('Bearer TEST-ONLY-hub-token');
@@ -44,7 +66,7 @@ test('apply command core: exact launch readback, lost ACK replay, busy refusal a
             expect(argv).toContain('--no-inherit-codex-home');
             launched++;
             const config = JSON.parse(readFileSync(join(node, 'config.json'), 'utf8'));
-            write(join(node, 'config.json'), { ...config, codexRecoveryVerification: { method: 'thread/resume', threadId: 'fixture-thread', verifiedAt: new Date().toISOString(),
+            write(join(node, 'config.json'), { ...config, ...(runtime ? { codexAppServerPort: runtime.port } : {}), codexRecoveryVerification: { method: 'thread/resume', threadId: 'fixture-thread', verifiedAt: new Date().toISOString(),
               model: mode === 'wrong-model' && launched === 1 ? 'wrong' : config.model,
               modelProvider: argv.includes('--codex-model-provider') ? argv[argv.indexOf('--codex-model-provider') + 1] : config.codexModelProvider } });
           }
@@ -54,10 +76,11 @@ test('apply command core: exact launch readback, lost ACK replay, busy refusal a
         } };
       const result = await runDaemonProviderApply(['apply', 'supervisor'], deps);
       expect(output.join('')).not.toContain('TEST-ONLY');
-      if (mode === 'ok') {
+      if (mode === 'ok' || mode === 'official') {
         expect(result).toBe(0); expect(JSON.parse(output[0]).application).toMatchObject({ status: 'applied', model: 'new', node_id: 'node_a' });
         expect(calls.map(a => a.slice(0, 3).join(' '))).toEqual(['node stop node_a', 'node start node_a', 'node codex verify']);
         expect(await runDaemonProviderApply(['apply', 'supervisor'], deps)).toBe(0); expect(calls).toHaveLength(3);
+        if (mode === 'official') { expect(accountReads).toBe(1); expect(JSON.parse(output[0]).application.account_id).toBe(request.selection.account_id); }
       } else {
         expect(result).toBe(1);
         const config = JSON.parse(readFileSync(join(node, 'config.json'), 'utf8'));
@@ -65,6 +88,6 @@ test('apply command core: exact launch readback, lost ACK replay, busy refusal a
         if (mode === 'busy') expect(calls).toHaveLength(0);
         else { expect(launched).toBe(2); expect(JSON.parse(output[0]).error).toBe('application_failed_rolled_back'); }
       }
-    } finally { hub?.stop(true); rmSync(root, { recursive: true, force: true }); }
+    } finally { runtime?.stop(true); hub?.stop(true); rmSync(root, { recursive: true, force: true }); }
   }
 });

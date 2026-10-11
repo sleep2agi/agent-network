@@ -160,6 +160,20 @@ test('application transport: scoped intent, capability gate, exact public receip
   const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
   expect(read.status).toBe('succeeded'); expect(read.application).toEqual(receipt); expect(read.snapshot).toBeNull();
   expect(db.get('SELECT * FROM daemon_provider_applications WHERE request_id=?1', r.request_id)).toBeNull();
+  const accountId = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const officialSelection = { ...selection, provider_id: 'openai', auth_id: 'work-login', account_id: accountId };
+  const official = await human('daemon_provider_snapshot', { ...args, provider: officialSelection });
+  expect(official.ok).toBe(true);
+  const officialDispatch = await daemon('pull_daemon_provider_snapshots', { accept_applications: true });
+  expect(officialDispatch.requests[0].selection).toEqual(officialSelection);
+  const officialReceipt = { ...receipt, request_id: official.request_id, provider_id: 'openai', auth_id: 'work-login',
+    account_id: accountId, runtime_provider: 'openai', applied_at: Date.now() };
+  for (const wrong of [{ ...officialReceipt, account_id: 'bbbbbbbb-1111-4111-8111-111111111111' },
+    { ...officialReceipt, account_id: undefined }, { ...officialReceipt, runtime_provider: receipt.runtime_provider }]) {
+    expect((await daemon('ack_daemon_provider_snapshot', { request_id: official.request_id, application: wrong })).error).toBe('invalid_application_receipt');
+  }
+  expect((await daemon('ack_daemon_provider_snapshot', { request_id: official.request_id, application: officialReceipt })).status).toBe('succeeded');
+  expect((await human('daemon_provider_snapshot', { action: 'read', id: official.request_id, network_id: net })).application).toEqual(officialReceipt);
   const stale = await human('daemon_provider_snapshot', args);
   db.run("UPDATE node_daemon_bindings SET daemon_node_id='other' WHERE request_id='binding_apply906'");
   expect((await daemon('pull_daemon_provider_snapshots', { accept_applications: true })).requests).toEqual([]);

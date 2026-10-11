@@ -223,7 +223,7 @@ export function ackProviderSnapshot(d: Daemon, requestId: string, snapshot?: unk
         const intent = applicationIntent(requestId);
         if (!intent || !boundApplicationTarget(d.networkId, d.daemonNodeId, intent.selection)
           || !validProviderApplicationReceipt(application, requestId, intent.expected_revision, intent.selection)
-          || (application as any).runtime_provider !== `anet_${createHash('sha256').update(JSON.stringify([intent.selection.provider_id, intent.selection.auth_id])).digest('hex').slice(0, 20)}`
+          || (application as any).runtime_provider !== (intent.selection.account_id ? 'openai' : `anet_${createHash('sha256').update(JSON.stringify([intent.selection.provider_id, intent.selection.auth_id])).digest('hex').slice(0, 20)}`)
           || (application as any).applied_at < row.created_at - 30_000) return denied('invalid_application_receipt');
       } catch { return denied('invalid_application_receipt'); }
     }

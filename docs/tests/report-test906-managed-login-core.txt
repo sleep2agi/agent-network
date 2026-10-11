@@ -165,3 +165,36 @@ Docker evidence:
 Remaining: exclusively apply selected saved login to a node, retain the latest
 rotated credential on switch-away, account/model runtime verification and rollback.
 Do not reuse a static refresh-token copy across nodes. No switch completion claim.
+
+2026-10-11 14:28 +08 managed-account application increment (TEST-ONLY):
+- Official selection carries exact account_id through client/Hub/runtime/CLI;
+  receipt must return the same account reference with built-in openai, exact model,
+  node and revision. API-key receipt protocol remains unchanged.
+- New local custody: bind one saved refresh chain to one node; capture auth only
+  after verified stop, park the current refreshed auth on switch-away, refuse
+  another node/active stale copy. Rollback parks a newly refreshed selected account
+  before restoring the original, and same-account rollback keeps refreshed tokens.
+- Actual loopback account/read RPC is required after startup (refreshToken=false),
+  alongside existing thread/provider/model verification and private file fingerprint.
+  This proves local mode/identity configuration, not remote authorization or entitlement.
+
+Evidence (Docker only, synthetic credentials, no production mounts/inference):
+1. Store source suite: 19 PASS / 0 FAIL / 70 expectations.
+2. Application + CLI dispatcher/lifecycle + loopback account-readback: 15 PASS /
+   0 FAIL / 145 expectations, mounted current agent-network/src read-only over
+   anet-provider:test906-account-apply. The CLI test uses injected stop/start/verify
+   subprocesses, actual private files, fixture Hub HTTP and real loopback WebSocket;
+   it is NOT evidence of a real Codex account switch.
+3. Hub transport suite: 15 PASS / 0 FAIL / 136 expectations. Includes official
+   application intent dispatch, exact account receipt, wrong-account/missing-account/
+   wrong-provider rejection. Those application receipts are fixtures. Existing
+   saved-account binding uses the actual compiled CLI.
+4. Dockerfile.transport rebuilt the final CLI (335 modules) and runtime (405) after
+   the transaction changes. No local global package changes.
+5. Client counterpart: PR836; UI confirmation/receipt test reported separately.
+
+Remaining release gates: actual Codex managed-account/native core acceptance,
+exact version guidance, CI review/merge and main-SHA release. No human OAuth,
+production restart, native installer acceptance, model inference or release claimed.
+Cleanup: all local test containers --rm; fixture DB/directories are container-only.
+Cached Docker build images retained for the next affected-path check.

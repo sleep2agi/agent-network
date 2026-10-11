@@ -4,12 +4,14 @@ import { execFile } from 'node:child_process';
 import { providerNodeRevision, readProviderNodeConfig, readProviderNodeToml, type ProviderApplicationLifecycle, type ProviderApplicationRequest } from './daemon-provider-application';
 import { DaemonProviderError } from './daemon-provider-store';
 import { receiptVerdict } from './codex-lifecycle-receipt';
+import { verifyChatgptAppserver } from './daemon-provider-account-readback';
 
 export type ProviderCliRunner = (argv: string[], cwd: string, timeout: number) => Promise<string>;
 export function providerCliRunner(binary: string, script: string, env: NodeJS.ProcessEnv): ProviderCliRunner {
   // The caller supplies the already pinned executable, not a Hub-provided path.
   const clean = { ...env };
-  for (const key of ['CODEX_HOME', 'ANET_NODE_MARKER', 'ANET_COPRESENCE_BRIDGE', 'TMUX', 'TMUX_PANE', 'NODE_OPTIONS']) delete clean[key];
+  for (const key of ['CODEX_HOME', 'ANET_NODE_MARKER', 'ANET_COPRESENCE_BRIDGE', 'TMUX', 'TMUX_PANE', 'NODE_OPTIONS',
+    'OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL']) delete clean[key];
   return (argv, cwd, timeout) => new Promise((ok, bad) => {
     execFile(binary, [script, ...argv], { cwd, env: clean, timeout, maxBuffer: 1024 * 1024, encoding: 'utf8', windowsHide: true },
       (error, stdout) => error ? bad(new DaemonProviderError('node_lifecycle_failed')) : ok(stdout));
@@ -68,6 +70,14 @@ export function providerApplicationLifecycle(nodeDir: string, request: ProviderA
       const { config, verification } = await start();
       return { nodeId: config.node_id, model: verification.model, runtimeProvider: verification.modelProvider,
         nodeRevision: providerNodeRevision(nodeDir) };
+    },
+    verifyChatgpt: async () => {
+      const config = readProviderNodeConfig(nodeDir);
+      if (config.node_id !== request.nodeId || config.network_id !== request.networkId
+        || !Number.isSafeInteger(config.codexAppServerPort) || config.codexAppServerPort < 1 || config.codexAppServerPort > 65535) {
+        throw new DaemonProviderError('runtime_account_unconfirmed');
+      }
+      await verifyChatgptAppserver(`ws://127.0.0.1:${config.codexAppServerPort}`);
     },
     restore: async () => {
       const { verification } = await start(true);
