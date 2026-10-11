@@ -19,3 +19,17 @@ run as UID10001 after the root in-container build. Container removed, images
 cached. No host/global package edits, real keys, OAuth, inference or native launch.
 This does not claim built/runtime132 package or Hub124 tarball acceptance; those
 must still be main-SHA rebuilt and checked by the formal package release gates.
+
+Incremental release-notes preflight, 2026-10-11 (Asia/Shanghai):
+Fresh source read found Gate3 had no per-version runtime132 or Hub124 file,
+and its fallback searched for v-prefixed versions absent from the shared notes.
+Added exact per-package Install/Upgrade/recovery notes; no product code changed.
+Command through sg docker, existing independent test906 image, read-only source:
+  docker run --rm --network none \
+    -v /dev/shm/anet-provider-release-906:/candidate:ro \
+    c95d95bd1f989582429e7828601e4fd28fdf67ecd76db4b6a1164336729d61fd \
+    sh /candidate/tests/test906-provider-create/release-notes-check.sh
+Gate3's file-source shape and exact Install-version checks passed3/3:
+CLI166, runtime132, Hub124. Docker exit0; ephemeral container removed.
+This verifies release-note inputs, not tarball build/install, live npm pins,
+formal main ancestry, registry availability, model entitlement or publication.
