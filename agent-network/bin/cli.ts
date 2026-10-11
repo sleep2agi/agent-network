@@ -119,7 +119,10 @@ import {
   findOpencodePreset,
   prepareOpencodeNodeForProfileWrite,
   readOpencodePrivateProfileFile,
+  readPresetKeyFromEnv,
+  replaceOpencodeConfigJson,
   writeOpencodeAuthJson,
+  writeOpencodeConfigJson,
   writeOpencodePrivateProfileFile,
 } from "../src/opencode-preset";
 import {
@@ -154,6 +157,20 @@ import { connectGrokAttach } from "../src/grok-attach-client";
 import { ambientTypeScriptTranspiler, nodeServerPayloadFor } from "../src/node-server-payload";
 import { installTeamSkills } from "../src/node-skills";
 import { applyNodeServerPayload } from "../src/node-server-version";
+import {
+  STANDALONE_BUILD_STAMP,
+  STANDALONE_HUB_ARG,
+  anetVersionFromStamp,
+  applyStandaloneDetectedVersions,
+  cliReinvokeArgs,
+  cliReinvokeShell,
+  formatAnetVersionBanner,
+  isStandaloneBuild,
+  standaloneBundleVersion,
+  standaloneHubLaunch,
+  standaloneNodeArgs,
+  standaloneNodeServerJs,
+} from "../src/standalone-bin";
 import {
   agentNodeHelpSupportsGrokCopresence,
   buildGrokAgentNodeEnv,
@@ -355,6 +372,33 @@ function dashboardLaunchRecordPath(port: string | number) { return join(home, ".
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function skillCachePath() { return join(home, ".anet", "skillhub", "catalog-cache.json"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+
+function standaloneNow(): boolean {
+  return isStandaloneBuild(STANDALONE_BUILD_STAMP);
+}
+
+/** Re-invoke this CLI. npm/node keeps script path + execArgv; the compiled binary does not. */
+function reinvokeArgv(cliArgs: string[], includeExecArgv: boolean, scriptPath?: string): string[] {
+  return cliReinvokeArgs({
+    standalone: standaloneNow(),
+    execArgv: process.execArgv,
+    scriptPath: scriptPath ?? (process.argv[1] ?? ""),
+    cliArgs,
+    includeExecArgv,
+  });
+}
+
+function reinvokeShell(cliArgs: string[], includeExecArgv: boolean, scriptPath?: string): string {
+  return cliReinvokeShell({
+    standalone: standaloneNow(),
+    execPath: process.execPath,
+    execArgv: process.execArgv,
+    scriptPath: scriptPath ?? (process.argv[1] ?? ""),
+    cliArgs,
+    includeExecArgv,
+    quote: shellQuote,
+  });
+}
 /**
  * Pane target (`<session>:<window>.<pane>`) for a session, or null.
  *
@@ -808,7 +852,7 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
     const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
     const fd = openPrivateAppendLog(hubLog);
     try {
-      const child = spawn(process.execPath, [process.argv[1] ?? "", "hub", "start", "--port", hubPort], {
+      const child = spawn(process.execPath, reinvokeArgv(["hub", "start", "--port", hubPort], false), {
         cwd: process.cwd(), detached: true, windowsHide: true,
         stdio: ["ignore", fd, fd], env: { ...process.env },
       });
@@ -844,8 +888,7 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
       //    wait below times out against a perfectly healthy server. Observed:
       //    node on 9299, "Server: http://127.0.0.1:9200", 60s timeout.
       const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
-      const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`
-        + ` hub start --port ${shellQuote(hubPort)}`;
+      const selfCmd = reinvokeShell(["hub", "start", "--port", hubPort], false);
       // 🔴 tmux does NOT hand a new session this process's environment — the
       //    child inherits the tmux SERVER's, which was frozen whenever that
       //    server started. Without forwarding it, an operator who set
@@ -1224,9 +1267,9 @@ async function startWindowsCodexCopresence(
     };
     delete bridgeEnv.COMMHUB_TOKEN;
     delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
-    managed.push(await windowsManagedProcess("bridge", process.execPath, [
-      process.argv[1] ?? "", "node", "start", displayName,
-    ], bridgeEnv, bridgeLog));
+    managed.push(await windowsManagedProcess("bridge", process.execPath, reinvokeArgv([
+      "node", "start", displayName,
+    ], false), bridgeEnv, bridgeLog));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed, marker);
     const bridgeReceipt = pendingRecoveryId
       ? bridgeClientHealthReceipt(wsUrl, pendingRecoveryId)
@@ -1415,7 +1458,7 @@ async function startGrokCopresenceOrchestration(
       process.exit(1);
     }
   }
-  const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`;
+  const selfCmd = reinvokeShell([], false);
 
   // ── piece ① the node (owns the grok leader and the attach socket) ────────
   // GROK_COPRESENCE_CHILD_ENV keeps this inner start from re-entering the
@@ -2072,7 +2115,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // codepath as the non-copresence case — no fork of the bridge dispatch.
     // #1856 PR-D — 桥再入用**当前这份 anet**(execPath + execArgv + argv[1]),不用 PATH 上的 `anet`:
     // 真机上 PATH 里是另一个版本,它不认这份 profile,把桥当成 claude-code-cli 起了;沿用 PATH 等于让桥的运行时取决于环境。
-    const selfInvoke = [process.execPath, ...process.execArgv, process.argv[1]].map(shellQuote).join(" ");
+    const selfInvoke = reinvokeShell([], true);
     // #535 (audit P1-2) — when the bridge died its tmux session went with it, and the printed
     // `tmux attach` pointed at nothing: the real error was gone. Its output now also goes to
     // <node>/codex-bridge.log (0600, truncated each start, capped), and a failure prints the tail.
@@ -2340,7 +2383,8 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   rmSync(attachScript, { force: true });
   rmSync(bridgeLog, { force: true });
 
-  const cliEntry = resolve(process.argv[1]);
+  const cliEntry = standaloneNow() ? (process.argv[1] ?? "") : resolve(process.argv[1]);
+  const cliPrefix = reinvokeShell([], false, cliEntry);
   const bridgeCommand = [
     `export PATH=${shellQuote(process.env.PATH ?? "")}`,
     ...(process.env.ANET_AGENT_NODE_BIN
@@ -2354,7 +2398,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     // This internal start owns the runtime, not a second TUI/bridge pair.
     `export ANET_COPRESENCE_BRIDGE=1`,
     `exec > >(tee -a ${shellQuote(bridgeLog)}) 2>&1`,
-    `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
+    `exec ${cliPrefix} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
   ].join(" ; ");
   execTmux([
@@ -2685,24 +2729,33 @@ function findBundledNodeServerJs(): string | null {
   return null;
 }
 
+/** Disk candidate, or the prebundled payload stamped into the standalone binary. */
+function readNodeServerBundle(): { text: string; filename: string } | null {
+  const src = findBundledNodeServerJs();
+  if (src) return { text: readFileSync(src, "utf-8"), filename: src };
+  const embedded = standaloneNodeServerJs(STANDALONE_BUILD_STAMP);
+  if (!embedded) return null;
+  return { text: embedded, filename: "node-server.js" };
+}
+
 function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean }): "wrote" | "exists" | "no-source" | "kept-newer" {
   const exists = existsSync(targetPath);
   if (exists && !opts.overwrite) return "exists";
-  const src = findBundledNodeServerJs();
-  if (!src) return "no-source";
+  const bundled = readNodeServerBundle();
+  if (!bundled) return "no-source";
   // The target is always `.js` — agent-node's spawn gate pins the CommHub MCP
   // payload to exactly `<project>/.anet/node-server.js` — so a `.ts` source
   // must be transpiled on the way, not copied verbatim. See issue #1216: the
   // verbatim copy produced a file that could not be parsed, and the failure
   // surfaced three layers away as "CommHub MCP readiness preflight failed (1)".
   const payload = nodeServerPayloadFor(
-    readFileSync(src, "utf-8"),
-    src,
+    bundled.text,
+    bundled.filename,
     ambientTypeScriptTranspiler(),
   );
   // #549 — never downgrade a newer existing file (an older anet resuming a
   // node used to strip rules-file support and node_id reporting this way).
-  const applied = applyNodeServerPayload(targetPath, payload, src);
+  const applied = applyNodeServerPayload(targetPath, payload, bundled.filename);
   return applied === "kept-newer" ? "kept-newer" : "wrote";
 }
 
@@ -3112,6 +3165,10 @@ function packageJsonPath() {
 }
 
 function getAnetVersion(): string {
+  // Compiled binaries see import.meta.url under /$bunfs and have no package.json
+  // on that virtual path. The stamp is null for npm/node, so this stays a disk read.
+  const embedded = anetVersionFromStamp(STANDALONE_BUILD_STAMP);
+  if (embedded) return embedded;
   try { return JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version || ""; }
   catch { return ""; }
 }
@@ -3373,12 +3430,14 @@ function detectGlobalNpmPackage(pkgName: string, displayName: string, source = "
 }
 
 function detectInstalledPackages() {
-  const pkg = JSON.parse(readFileSync(packageJsonPath(), "utf-8"));
+  // Standalone: do not touch /$bunfs package.json. npm/node: same read as before.
+  const embeddedAnet = anetVersionFromStamp(STANDALONE_BUILD_STAMP);
+  const pkgVersion = embeddedAnet ?? (JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version as string);
   const versions = {
     anet: {
       name: "anet",
       displayName: "anet",
-      version: pkg.version as string,
+      version: pkgVersion,
       state: "ok" as VersionState,
     },
     agentNode: detectCommandVersion("agent-node", "agent-node", "global"),
@@ -3413,7 +3472,7 @@ function detectInstalledPackages() {
     versions.commhubServer = detectGlobalNpmPackage("@sleep2agi/commhub-server", "commhub-server", "global");
   }
 
-  return versions;
+  return applyStandaloneDetectedVersions(versions, STANDALONE_BUILD_STAMP);
 }
 
 function formatDetectedVersion(pkg: DetectedVersion): string {
@@ -3469,7 +3528,7 @@ function detectAgentNodeSubDeps(): { claudeAgentSdk: string | null; codexSdk: st
 
 function printVersionReport() {
   const versions = detectInstalledPackages();
-  console.log(`anet v${versions.anet.version}\n`);
+  process.stdout.write(formatAnetVersionBanner(versions.anet.version, standaloneBundleVersion(STANDALONE_BUILD_STAMP)));
 
   console.log("Components (auto-fetched on first use, you don't need to install them manually):");
   console.log(`  ${formatLazyComponent(versions.agentNode)}`);
@@ -3761,7 +3820,7 @@ function opencodeUsePinSource(): string {
 type AgentNodeLaunchPlan = {
   command: string;
   argsPrefix: string[];
-  source: "explicit" | "sibling" | "global" | "preview" | "paired";
+  source: "explicit" | "sibling" | "global" | "preview" | "paired" | "bundled";
   probeEnv: NodeJS.ProcessEnv;
 };
 
@@ -3795,7 +3854,9 @@ function agentNodeHelp(plan: AgentNodeLaunchPlan): string {
   return execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000 : 5_000,
+    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000
+      : plan.source === "bundled" ? 60_000
+      : 5_000,
     env: plan.probeEnv,
   });
 }
@@ -3831,9 +3892,26 @@ function opencodeAgentNodeError(detail: string): Error {
  * A merely capable older preview is insufficient: historical builds could
  * advertise opencode-cli without this release's isolation guarantees.
  */
+function bundledAgentNodeLaunchPlan(probeEnv: NodeJS.ProcessEnv): AgentNodeLaunchPlan {
+  return {
+    command: process.execPath,
+    argsPrefix: standaloneNodeArgs([]),
+    source: "bundled",
+    probeEnv,
+  };
+}
+
 function resolveOpencodeAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (opencodeAgentNodeLaunchPlan) return opencodeAgentNodeLaunchPlan;
   const probeEnv = hardenOpencodeAgentNodeEnv(process.env, process.env.PATH);
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(probeEnv);
+    if (!planSupportsOpencode(plan)) {
+      throw opencodeAgentNodeError("embedded agent-node lacks opencode-cli");
+    }
+    opencodeAgentNodeLaunchPlan = plan;
+    return plan;
+  }
   const forbiddenRoots = discoverOpencodeForbiddenRoots();
   const explicit = process.env.ANET_AGENT_NODE_BIN;
 
@@ -3899,6 +3977,12 @@ function resolveOpencodeAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
 }
 
 function revalidateOpencodeAgentNodeLaunchPlan(plan: AgentNodeLaunchPlan): AgentNodeLaunchPlan {
+  if (plan.source === "bundled") {
+    if (!planSupportsOpencode(plan)) {
+      throw opencodeAgentNodeError("embedded agent-node no longer advertises opencode-cli");
+    }
+    return plan;
+  }
   const entrypoint = validateAgentNodePackageEntrypoint(
     plan.argsPrefix[0],
     OPENCODE_AGENT_NODE_SPEC,
@@ -3921,6 +4005,14 @@ function pairedAgentNodeError(detail: string): Error {
 function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (codexAgentNodeLaunchPlan) return codexAgentNodeLaunchPlan;
   const probeEnv = { ...process.env };
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(probeEnv);
+    if (!agentNodeHelpSupportsCodexAppServer(agentNodeHelp(plan))) {
+      throw pairedAgentNodeError("embedded agent-node lacks codex-app-server capability");
+    }
+    codexAgentNodeLaunchPlan = plan;
+    return plan;
+  }
   const forbiddenRoots = discoverOpencodeForbiddenRoots();
   const explicit = process.env.ANET_AGENT_NODE_BIN;
   let rawEntrypoint: string;
@@ -4059,6 +4151,14 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (grokAgentNodeLaunchPlan) return grokAgentNodeLaunchPlan;
   prepareGrokPreviewResolverConfigs(home);
   const resolverEnv = buildGrokPreviewResolverEnv(process.env, home);
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(resolverEnv);
+    if (!planSupportsRuntime(plan, "grok-build-cli")) {
+      throw new Error("embedded agent-node lacks the required Grok co-presence capability");
+    }
+    grokAgentNodeLaunchPlan = plan;
+    return plan;
+  }
 
   const explicit = process.env.ANET_AGENT_NODE_BIN;
   if (explicit) {
@@ -5394,16 +5494,11 @@ function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts
       console.error("[anet] ❌ OpenCode V2 create has no aligned provider/model. Refusing to write a fallback preset.");
       process.exit(1);
     }
-    const { replaceOpencodeConfigJson } = require("../src/opencode-preset") as typeof import("../src/opencode-preset");
     const configPath = replaceOpencodeConfigJson(join(nodesDir(), id), body);
     console.log(`[anet] OpenCode V2 config copied from this machine's OpenCode config: ${configPath}`);
     return;
   }
   const presetId = wizardOpts._opencodePreset || "anthropic";
-  const { findOpencodePreset, readPresetKeyFromEnv, writeOpencodeAuthJson, writeOpencodeConfigJson } =
-    // Lazy-loaded so a create wizard for another runtime doesn't
-    // pay the import cost.
-    require("../src/opencode-preset") as typeof import("../src/opencode-preset");
   const preset = findOpencodePreset(presetId);
   if (!preset) {
     console.warn(`[anet] ⚠ unknown opencode preset '${presetId}' — skipping auth.json write.`);
@@ -6845,6 +6940,16 @@ function ensureMcpJson(profile: Profile) {
       break;
     }
   }
+  if (!found) {
+    const embedded = standaloneNodeServerJs(STANDALONE_BUILD_STAMP);
+    if (embedded) {
+      mkdirSync(anetDir, { recursive: true });
+      if (applyNodeServerPayload(serverTs, embedded, "node-server.js") === "wrote") {
+        console.log(`[anet] Updated .anet/node-server.js`);
+      }
+      found = true;
+    }
+  }
   if (!found && !existsSync(serverTs)) {
     console.warn(`[anet] ⚠ Cannot find node-server.ts source. CommHub channel may not work.`);
     console.warn(`[anet] Fix: npm install -g @sleep2agi/agent-network@latest`);
@@ -7457,7 +7562,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
     let commandArgs = agentArgs;
-    if (runtime === "opencode-cli") {
+    if (standaloneNow()) {
+      cmd = process.execPath;
+      commandArgs = standaloneNodeArgs(agentArgs);
+      console.log("[anet] using the agent-node embedded in this standalone binary");
+    } else if (runtime === "opencode-cli") {
       const plan = resolveOpencodeAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
@@ -7589,7 +7698,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         const child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn(runCommand, runCommandArgs, {
           env: childEnv,
           stdio: "inherit",
-          shell: runtime === "opencode-cli" ? false : process.platform === "win32",
+          shell: standaloneNow() ? false : runtime === "opencode-cli" ? false : process.platform === "win32",
         }));
         if (runtime === "opencode-cli") activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
@@ -8280,7 +8389,7 @@ async function startExternalAppserverNode(
     try {
       execTmux([
         "new-session", "-d", "-s", plan.sessions.appsrv, "-c", plan.nodeDir, ...codexEnv,
-        "bash", "-c", appserverShellCommand(plan, process.execPath),
+        "bash", "-c", appserverShellCommand(plan, process.execPath, standaloneNow() ? "standalone-bin" : "js-eval"),
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${plan.sessions.appsrv} failed: ${e?.message || e}`);
@@ -8950,7 +9059,7 @@ function codexRestartActions(ctx: CodexLifecycleCtx, peer: { id: string; profile
     start: async () => {
       const prof = (loadStoredProfile(resolved.id) ?? profile) as Record<string, any>;
       // execArgv 跟着走:开发态用 tsx 跑 .ts 时子进程也要带 loader;发布态(dist/bin/cli.js)execArgv 为空,行为不变。
-      const argv = [...process.execArgv, process.argv[1], "node", "start", displayName, "--copresence", "--tui-first"];
+      const argv = reinvokeArgv(["node", "start", displayName, "--copresence", "--tui-first"], true);
       if (prof.codexCopresenceFullAccess) argv.push("--dangerously-allow-full-access", "--yes-danger-full-access");
       const env = { ...process.env }; delete env.ANET_COPRESENCE_BRIDGE; delete env.ANET_NODE_MARKER;
       // #448 — the launcher computes CODEX_HOME from the node; do not hand it whatever this shell carries.
@@ -10277,6 +10386,8 @@ async function serverCommand() {
       // bun 单独从来不够。原来的 OR 会让 bun-only 的机器通过前置检查,
       // 然后在 spawn 处失败,并报「it disappeared from PATH」—— 而它从来没在过。
       // 实测:release zip 装的 bun 不带 bunx;只加一条 bunx 软链,hub 立刻起来(#766)。
+      // The standalone executable embeds the Hub and does not take this branch.
+      if (!standaloneNow()) {
       if (!commandExists("bunx")) {
         // bun 在、bunx 不在 —— 这是最常见也最容易被误诊的一种,单独给话术。
         if (commandExists("bun")) {
@@ -10298,6 +10409,7 @@ async function serverCommand() {
         console.error(`\n     More info: https://bun.sh/install\n`);
         process.exit(1);
       }
+      }
       // #511 — resolve which commhub-server to launch, and say where it came from.
       const versionFlag = opts.version ?? opts["hub-version"];
       if (versionFlag === "true" || (versionFlag && versionFlag !== "latest" && versionFlag !== "preview" && !isExactSemver(versionFlag))) {
@@ -10309,7 +10421,42 @@ async function serverCommand() {
         console.error(`\n  ❌ --channel must be "latest" or "preview" (got "${channelFlag}").\n`);
         process.exit(1);
       }
-      const hubVersion = resolveHubServerVersion({
+      const env: Record<string, string> = {
+        ...process.env as any,
+        PORT: port,
+        HOST: host,
+        ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
+      };
+      let hubVersion: ReturnType<typeof resolveHubServerVersion>;
+      if (standaloneNow()) {
+        const explicitVersion = versionFlag && versionFlag !== "true" ? versionFlag : null;
+        const decided = standaloneHubLaunch(STANDALONE_BUILD_STAMP, {
+          explicitVersion,
+          port,
+          host,
+          devOpen,
+        });
+        if (!decided.ok) {
+          console.error(`\n  ❌ ${decided.message}\n`);
+          process.exit(1);
+        }
+        if (channelFlag) {
+          decided.warnings.push(`standalone binary ignores --channel ${channelFlag} and runs the embedded hub`);
+        }
+        hubVersion = {
+          version: decided.version,
+          source: "explicit",
+          channel: null,
+          cached: false,
+          origin: decided.origin,
+          warnings: decided.warnings,
+        };
+        console.log(`  ${formatHubVersionBanner(hubVersion)}`);
+        for (const w of hubVersion.warnings) console.error(`\n  ⚠️  ${w}\n`);
+        console.log(`  Starting embedded CommHub Server on port ${port} (bind ${host})...`);
+        child = spawn(process.execPath, decided.args, { env, stdio: "inherit" });
+      } else {
+      const hubVersionResolved = resolveHubServerVersion({
         explicit: versionFlag || null,
         channelFlag: channelFlag || null,
         anetVersion: getAnetVersion() || "",
@@ -10317,19 +10464,15 @@ async function serverCommand() {
         exec: (cmd, cmdArgs) => runLauncherSync(cmd, cmdArgs, { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "pipe"] }).toString(),
         cacheDir: bunInstallCacheDir(),
       });
+      hubVersion = hubVersionResolved;
       console.log(`  ${formatHubVersionBanner(hubVersion)}`);
       for (const w of hubVersion.warnings) console.error(`\n  ⚠️  ${w}\n`);
       console.log(`  Starting CommHub Server on port ${port} (bind ${host})...`);
-      const env: Record<string, string> = {
-        ...process.env as any,
-        PORT: port,
-        HOST: host,
-        ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
-      };
       // Always an exact version (resolved above) — see PINNED_SERVER_VERSION.
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${hubVersion.version}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawnLauncher("bunx", serverArgs, { env, stdio: "inherit" });
+      }
       // #235 — Belt-and-braces: even with the preflight above, race
       // conditions (PATH being modified mid-process, partial install) can
       // still produce an async ENOENT 'error' event. Without this handler
@@ -10337,11 +10480,15 @@ async function serverCommand() {
       // preflight's UX promise. Log + exit gracefully.
       child.on("error", (err: any) => {
         if (err?.code === "ENOENT") {
+          if (standaloneNow()) {
+            console.error(`\n  ❌ Failed to spawn the embedded hub (${process.execPath} ${STANDALONE_HUB_ARG}).`);
+          } else {
           console.error(`\n  ❌ Failed to spawn bunx.`);
           // 不再说 "disappeared from PATH":那条归因会把人引去查 PATH 与
           // 「谁卸载了 bun」,而绝大多数情况是这台机器从来没有过 bunx(#766)。
           console.error(`     This usually means Bun was uninstalled or PATH changed mid-process.`);
           console.error(`     Try: which bunx && bunx --version`);
+          }
         } else {
           console.error(`\n  ❌ commhub-server spawn error: ${err?.message || err}`);
         }
@@ -10359,6 +10506,12 @@ async function serverCommand() {
         } catch {}
       }
       if (!ready) {
+        if (standaloneNow()) {
+          console.error(`  ❌ Embedded CommHub Server failed to start. Check the output above for the real error.`);
+          child?.kill();
+          markFailed();
+          return;
+        }
         // commhub-server is TypeScript w/ a bun shebang; it requires Bun.
         // Most Node-only systems hit this exact failure.
         let bunInstalled = false;
@@ -10381,7 +10534,8 @@ async function serverCommand() {
       }
       console.log(`  ✅ Server running on ${hubUrl} (commhub-server v${serverVersion || "?"})`);
       if (serverVersion && serverVersion !== hubVersion.version) {
-        console.error(`\n  ⚠️  Asked bunx for commhub-server ${hubVersion.version} but the server reports v${serverVersion}.\n`);
+        const asked = standaloneNow() ? "the embedded hub" : "bunx";
+        console.error(`\n  ⚠️  Asked ${asked} for commhub-server ${hubVersion.version} but the server reports v${serverVersion}.\n`);
       }
       if (devOpen) {
         console.log(`  ⚠️  DEV OPEN MODE`);

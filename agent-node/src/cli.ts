@@ -340,16 +340,23 @@ if (argv.length === 1 && argv[0] === "--print-entrypoint") {
 }
 
 let PKG_VERSION = "2.1.0";
-try {
-  // Try relative to the script location (works for both dev and npm install)
-  const scriptDir = new URL(".", import.meta.url).pathname;
-  for (const rel of ["../package.json", "../../package.json"]) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
-      if (pkg.version) { PKG_VERSION = pkg.version; break; }
-    } catch {}
-  }
-} catch {}
+// Set only by the standalone `anet` binary before it imports this entry.
+// npm/node leaves it unset and keeps the package.json walk below.
+const embeddedAgentNodeVersion = process.env.ANET_EMBEDDED_AGENT_NODE_VERSION?.trim() ?? "";
+if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embeddedAgentNodeVersion)) {
+  PKG_VERSION = embeddedAgentNodeVersion;
+} else {
+  try {
+    // Try relative to the script location (works for both dev and npm install)
+    const scriptDir = new URL(".", import.meta.url).pathname;
+    for (const rel of ["../package.json", "../../package.json"]) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
+        if (pkg.version) { PKG_VERSION = pkg.version; break; }
+      } catch {}
+    }
+  } catch {}
+}
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {

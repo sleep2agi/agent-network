@@ -84,6 +84,7 @@ export default withMermaid(defineConfig({
               { text: '什么是 Agent Network', link: '/guide/introduction' },
               { text: '基本概念', link: '/guide/basics' },
               { text: '安装', link: '/guide/install' },
+              { text: '单文件可执行文件', link: '/guide/standalone-binary' },
               { text: '10 分钟跑通第一个节点', link: '/guide/getting-started' },
             ]
           },
@@ -183,6 +184,7 @@ export default withMermaid(defineConfig({
               { text: 'What is Agent Network', link: '/en/guide/introduction' },
               { text: 'Basic Concepts', link: '/en/guide/basics' },
               { text: 'Install', link: '/en/guide/install' },
+              { text: 'Standalone executable', link: '/en/guide/standalone-binary' },
               { text: 'Your First Node in 10 Minutes', link: '/en/guide/getting-started' },
             ]
           },

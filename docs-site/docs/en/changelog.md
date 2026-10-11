@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: standalone anet executable (build only, not published) (2026-10-11)
+
+- New unified entry `agent-network/bin/anet-bin.ts`. `bun build --compile` produces one executable: the default path is the CLI, `__hub` is the embedded Hub, and `__node` is the embedded agent-node. The npm `bin` is still `dist/bin/anet.cjs`. npm publishing in `release.yml` is unchanged.
+- The compile stamps the agent-network, agent-node, and commhub-server versions. `anet --version` prints those three and a separate bundle version for that build. Under npm / node, versions still come from package.json on disk, and self-spawn arguments stay as they were.
+- Inside the compiled binary the Hub starts as `anet __hub` instead of `bunx`, and agent-node starts as `anet __node`. claude-agent-sdk, the Codex SDK, and node-pty are not inside the file.
+- GitHub Actions workflow `cli-binary.yml` can build linux-x64 and darwin-arm64 on demand. `publish` defaults to off. A GitHub release `cli-bin-v<version>` is uploaded only when publish is explicitly enabled. This change does not publish. The macOS artifact is unsigned and is not an installable download.
+
 ## Unreleased: Hub can queue a catalog read for an owned OpenCode V2 node (2026-10-11)
 
 - A network member can call `read_opencode_catalog` so the host_supervisor daemon reads the OpenCode V2 loopback it is already running. `ok` with `status: pending` means the Hub authorized the read and stored it in memory. The doorbell is best-effort: with no subscriber it is not delivered. Only `get_opencode_catalog` with `status: ready` is a snapshot, and completeness stays unknown and invocationVerified stays false.

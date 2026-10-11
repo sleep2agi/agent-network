@@ -134,7 +134,11 @@ if (AUTH_TOKEN) {
 const MCP_LABEL_MAX_BYTES = 1024 * 1024;
 
 // Read version from package.json so banners and /health stay in sync.
+// ANET_EMBEDDED_COMMHUB_VERSION is set only by the standalone anet binary
+// (bin/anet-bin.ts). npm/bunx leaves it unset and keeps the disk read.
 const SERVER_VERSION = (() => {
+  const embedded = process.env.ANET_EMBEDDED_COMMHUB_VERSION?.trim() ?? "";
+  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embedded)) return embedded;
   try {
     const url = new URL("../package.json", import.meta.url);
     return JSON.parse(require("fs").readFileSync(url, "utf8")).version || "?";

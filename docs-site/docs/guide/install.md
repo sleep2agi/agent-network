@@ -6,6 +6,10 @@
 [桌面应用](/guide/desktop-app)（macOS / Windows / Linux）自带本地 Hub，下载安装即可用，也能一键装好本机 daemon。安装包在[下载页](/download)。
 :::
 
+::: tip 没有 Node 的机器
+单文件 `anet` 是另一条安装路径，不替代上面的 npm 安装。构建方式、做不到的事、以及为什么现在还没有公开下载，见[单文件可执行文件](/guide/standalone-binary)。
+:::
+
 ## 前置：Node.js 和 Bun {#prerequisites}
 
 | 依赖 | 版本 | 怎么装 |

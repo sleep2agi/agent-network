@@ -1,5 +1,12 @@
 # 更新日志
 
+## 未发布：单文件 anet 可执行文件（只构建，不发布）（2026-10-11）
+
+- 新增统一入口 `agent-network/bin/anet-bin.ts`。`bun build --compile` 把它打成一个可执行文件：默认走 CLI，`__hub` 走内嵌的 Hub，`__node` 走内嵌的 agent-node。npm 的 `bin` 仍是 `dist/bin/anet.cjs`。`release.yml` 的 npm 发布没有改。
+- 编译时写入 agent-network、agent-node、commhub-server 三个包的版本。`anet --version` 打印这三个版本，并另起一行报告本次构建的 bundle 版本。用 npm / node 跑时，版本仍从磁盘上的 package.json 读取，自启动参数与原来一致。
+- 编译后的二进制里，Hub 用 `anet __hub` 启动，不再调用 `bunx`。agent-node 用 `anet __node`。claude-agent-sdk、Codex SDK 和 node-pty 不打进这个文件。
+- GitHub Actions 工作流 `cli-binary.yml` 可手动构建 linux-x64 与 darwin-arm64。`publish` 默认关闭。只有显式打开才会上传到 GitHub release `cli-bin-v<version>`。这次变更不触发发布。macOS 产物未签名，不能当安装包分发。
+
 ## 未发布：Hub 可排队读取已归属的 OpenCode V2 目录（2026-10-11）
 
 - 网络成员可以用 `read_opencode_catalog` 让 host_supervisor daemon 读取它已经在跑的 OpenCode V2 回环目录。`ok` 且 `status: pending` 只表示 Hub 已授权并记在内存里。门铃是尽力推送：没有订阅者就不会送达。只有 `get_opencode_catalog` 的 `status: ready` 才是快照，而且 completeness 仍是 unknown、invocationVerified 仍是 false。

@@ -176,8 +176,20 @@ export function tokenInSessionSnippet(configPath: string, jsRuntime: string): st
     `if [ -z "$ANET_CODEX_COMMHUB_TOKEN" ]; then echo "[anet] warning: config.json has no token; the app-server's commhub MCP will not authenticate" >&2; fi`;
 }
 
-export function appserverShellCommand(plan: ExternalAppserverPlan, jsRuntime: string): string {
-  const tokenExport = tokenInSessionSnippet(plan.configPath, jsRuntime); // MUTATION-ANCHOR:token-in-session
+/** Same token handoff, via the standalone binary's internal argv (it is not `node -e`). */
+export function standaloneBinTokenSnippet(configPath: string, anetBin: string): string {
+  return `ANET_CODEX_COMMHUB_TOKEN="$(ANET_EXTAPP_CONFIG=${q(configPath)} ${q(anetBin)} __print-config-token)"; export ANET_CODEX_COMMHUB_TOKEN; ` +
+    `if [ -z "$ANET_CODEX_COMMHUB_TOKEN" ]; then echo "[anet] warning: config.json has no token; the app-server's commhub MCP will not authenticate" >&2; fi`;
+}
+
+export function appserverShellCommand(
+  plan: ExternalAppserverPlan,
+  jsRuntime: string,
+  mode: "js-eval" | "standalone-bin" = "js-eval",
+): string {
+  const tokenExport = mode === "standalone-bin"
+    ? standaloneBinTokenSnippet(plan.configPath, jsRuntime)
+    : tokenInSessionSnippet(plan.configPath, jsRuntime); // MUTATION-ANCHOR:token-in-session
   return [
     dotenvSnippet(plan.workspaceDir),
     NO_PROXY_SNIPPET,
