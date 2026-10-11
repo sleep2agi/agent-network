@@ -60,7 +60,7 @@ features:
   <div class="product-path-heading"><span class="eyebrow">TWO WAYS TO START</span><h2>桌面端开箱即用，CLI 保留全部能力</h2></div>
   <div class="product-path-grid">
     <article class="product-path-card"><span class="path-number">01</span><h3>桌面应用</h3><p>适合日常使用。图形化管理 Agent、会话、文件、定时任务和服务器。</p><a href="/download">获取最新版 →</a></article>
-    <article class="product-path-card"><span class="path-number">02</span><h3>anet CLI</h3><p>适合开发者与服务器部署。精确控制 Hub、节点、Runtime 和自动化流程。</p><div class="cli-command"><code>curl -fsSL https://anet.sh/install.sh | sh</code></div><a href="/guide/getting-started">阅读安装指南 →</a></article>
+    <article class="product-path-card"><span class="path-number">02</span><h3>anet CLI</h3><p>适合开发者与服务器部署。精确控制 Hub、节点、Runtime 和自动化流程。</p><div class="cli-command"><code>curl -fsSL https://anet.sh/install.sh | sh</code></div><a href="/guide/getting-started">阅读安装指南 →</a><a href="/guide/opencode">OpenCode V2 指南（preview，创建路径已有） →</a></article>
   </div>
 </section>
 

@@ -215,7 +215,9 @@ test("all production token issuers explicitly mark the rollout epoch", () => {
       expect(match[1]).toContain("node_identity_epoch"); count++;
     }
   }
-  expect(count).toBe(9);
+  // Hub #938: clone_node mints a child ntok_ with node_identity_epoch=2,
+  // the same column create_node already writes. 9 issuers → 10.
+  expect(count).toBe(10);
   expect(readFileSync(`${root}/agent-network/bin/cli.ts`, "utf8")).toContain("'admin-reset', 'user', 1)");
 });
 

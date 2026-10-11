@@ -429,6 +429,11 @@ init + start in one step (default name: "daemon").`,
        anet daemon ls
 
 List locally configured daemon nodes (configuration only, not liveness).`,
+  "daemon provider": `Usage: anet daemon provider <list|scan|put|apply> <daemon> [--revision N] [--request dps_UUID]
+
+list reads the daemon-scoped Provider configuration (no secrets).
+scan, put, and apply read private JSON from stdin. No key is accepted in argv.
+put saves that JSON; it does not apply it to a runtime.`,
 
   // ── network ──
   "network ls": `Usage: anet network ls

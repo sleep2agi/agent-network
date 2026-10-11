@@ -125,11 +125,12 @@ against each other and a mismatch is rejected. You normally do not pass `network
 
 Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and quota: [Schedules](/en/guide/schedules#agent-managed).
 
-**Node lifecycle — driven by the `anet` CLI / Dashboard** · 6
+**Node lifecycle — driven by the `anet` CLI / Dashboard** · 7
 
 | Tool | What it does |
 |------|------|
 | `create_node` | Create and start a node on a host daemon |
+| `clone_node` | Clone an existing daemon child into a new node on that same daemon: new alias, new ntok_, source token not copied |
 | `delete_node` | Stop child, revoke ntok, delete the hub row (config backed up by default) |
 | `stop_node` | Stop the agent-node child, keep the config dir |
 | `start_node` | Start a stopped child node through its host daemon |

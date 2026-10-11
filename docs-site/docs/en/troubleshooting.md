@@ -228,7 +228,7 @@ anet upgrade --dry-run
 | Long Grok ACP task times out | Check `flags.grokAcpTimeoutMs` / `GROK_ACP_TIMEOUT_MS` in the runtime guide |
 | Codex co-presence loses history after restart | Upgrade to preview.43+; plain `anet node start <alias>` reads the saved `codexThreadId` and performs `thread/resume`. If an old bridge survives, first run `anet node stop <alias>` from an external terminal |
 
-OpenCode is currently a task runtime, not a shared TUI. Shared Grok TUI support has not shipped. Follow [Runtimes](/en/guide/runtimes), not old versions or historical changelog commands.
+`opencode-cli` can share a TUI: V1 can also run headless, V2 is co-presence only, and V2 is still preview. Steps: [OpenCode V2](/en/guide/opencode). The shared Grok TUI is experimental; see [Grok nodes](/en/guide/grok). Follow [Runtimes](/en/guide/runtimes), not old versions or historical changelog commands.
 
 ## Logs
 

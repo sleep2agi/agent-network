@@ -275,7 +275,7 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   schedule_create: "schedule", schedule_update: "schedule", schedule_cancel: "schedule", schedule_run_now: "schedule",
   schedule_batch_interval: "schedule",
   // 写节点 / 技能 / 探测:只读、受限不行;正常由 RFC-036 等既有规则管
-  update_node_config: "node_write", write_node_rules_file: "node_write", restart_node: "node_write", create_node: "node_write",
+  update_node_config: "node_write", write_node_rules_file: "node_write", restart_node: "node_write", create_node: "node_write", clone_node: "node_write",
   stop_node: "node_write", delete_node: "node_write", start_node: "node_write", submit_skill: "node_write", probe_provider_model: "node_write",
   // 只有人能做
   upsert_network_secret: "human_only", upsert_provider: "human_only", update_provider: "human_only",

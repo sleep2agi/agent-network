@@ -11,6 +11,10 @@ RUN apt-get update \
 WORKDIR /workspace
 COPY agent-network /workspace/agent-network
 COPY agent-node /workspace/agent-node
+# bin/cli.ts imports smol-toml through the daemon provider modules. This image
+# bundles the CLI without a prior install, so the package has to be on disk
+# or `bun build` stops at Could not resolve: "smol-toml".
+RUN cd /workspace/agent-network && bun install --ignore-scripts
 COPY tests/test233-grok-main-integration /test233
 RUN chmod 755 /test233/run.sh
 

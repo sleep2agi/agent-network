@@ -7140,6 +7140,16 @@ async function connectSSE() {
                     recentlyHandledRequestIds: recentlyHandledCreateRequestIds,
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
+                    handleCloneNodeDoorbell: (event: { request_id: string }) => import("./runtime/clone-node.js").then(({ handleCloneNodeDoorbell }) => handleCloneNodeDoorbell(event, {
+                      callCommHub,
+                      workDir: process.cwd(),
+                      hubUrl: COMMHUB_URL,
+                      log: (m: string) => log(m),
+                      warn: (m: string) => warn(m),
+                      serializeEnvLocal: serializeEnvLocalDaemon,
+                      allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                        ? fileConfig.allowed_runtimes : null,
+                    })),
                     handleCreateNodeDoorbell: (event: { request_id: string }) => handleCreateNodeDoorbell(
                       event,
                       {
@@ -7284,6 +7294,35 @@ async function connectSSE() {
               }).catch((e: any) => {
                 recentlyHandledCreateRequestIds.delete(requestId);
                 warn(`create-node-daemon import failed: ${e?.message || e}`);
+              });
+            }
+            // Hub #938 — same daemon, new node. Shares the create dedupe set
+            // so a reconnect reconcile does not spawn the clone twice.
+            if (ev.type === "clone_node" && fileConfig.role === "host_supervisor") {
+              const requestId = typeof ev.request_id === "string" ? ev.request_id : "";
+              if (!requestId || recentlyHandledCreateRequestIds.has(requestId)) continue;
+              recentlyHandledCreateRequestIds.add(requestId);
+              log(`← SSE clone_node ${requestId}`);
+              Promise.all([
+                import("./runtime/clone-node.js"),
+                import("./runtime/create-node-daemon.js"),
+              ]).then(([{ handleCloneNodeDoorbell }, { serializeEnvLocalDaemon }]) => {
+                return handleCloneNodeDoorbell(
+                  { request_id: requestId },
+                  {
+                    callCommHub,
+                    workDir: process.cwd(),
+                    hubUrl: COMMHUB_URL,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                    serializeEnvLocal: serializeEnvLocalDaemon,
+                    allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                      ? fileConfig.allowed_runtimes : null,
+                  },
+                );
+              }).catch((e: any) => {
+                recentlyHandledCreateRequestIds.delete(requestId);
+                warn(`clone-node failed: ${e?.message || e}`);
               });
             }
             // RFC-027 §2.4 — stop/delete doorbell. host_supervisor daemons

@@ -91,6 +91,8 @@ The wizard asks: runtime → (only for `claude-agent-sdk`) vendor → model → 
 The wizard **defaults to highlighting `claude-agent-sdk`**; pressing Enter all the way lands you on the vendor + API-key path. If you've already done `claude auth login`, **manually picking `claude-code-cli`** is the zero-config fastest path.
 
 `anet node create` lists all 7 runtimes (4 stable: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`; 3 preview: `codex-app-server` (shown as `codex-cli` in the menu) / `grok-build-cli` / `opencode-cli`); the full comparison is here: [Runtime comparison](/en/guide/runtimes#runtimes-—-canonical-table).
+
+OpenCode V2 is not an eighth runtime, and the wizard does not select it by default. It is still `opencode-cli`, it needs an explicit `--opencode-generation v2 --opencode-unsafe-tools`, and it only runs as co-presence. Maturity is still preview (npm `latest` does not have this create flag yet). Steps, Hub dialogue, and the model catalog that is not wired through yet: [OpenCode V2](/en/guide/opencode).
 :::
 
 Start the node:

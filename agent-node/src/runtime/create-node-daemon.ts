@@ -901,11 +901,14 @@ interface ListPendingCreateRequestsResult {
   ok?: boolean;
   error?: string;
   requests?: PendingCreateRequest[];
+  clone_requests?: PendingCreateRequest[];
 }
 
 export interface ReconcilePendingCreateRequestsDeps {
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   handleCreateNodeDoorbell: (event: { request_id: string }) => Promise<void>;
+  /** Hub #938 — pending clone rows come back beside create rows. Absent on older hubs. */
+  handleCloneNodeDoorbell?: (event: { request_id: string }) => Promise<void>;
   recentlyHandledRequestIds?: Set<string>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
@@ -934,6 +937,23 @@ export async function reconcilePendingCreateRequestsOnConnect(
       deps.warn(`[create-node] pending reconcile handler failed for ${requestId}: ${e?.message || e}`);
     }
   }
+  const clones = Array.isArray(res.clone_requests) ? res.clone_requests : [];
+  if (clones.length > 0 && !deps.handleCloneNodeDoorbell) {
+    deps.warn(`[clone-node] ${clones.length} pending clone request(s) not replayed (no clone handler)`);
+  }
+  for (const row of clones) {
+    const requestId = typeof row?.request_id === "string" ? row.request_id : "";
+    if (!requestId || !deps.handleCloneNodeDoorbell) continue;
+    if (deps.recentlyHandledRequestIds?.has(requestId)) continue;
+    deps.recentlyHandledRequestIds?.add(requestId);
+    try {
+      await deps.handleCloneNodeDoorbell({ request_id: requestId });
+      handled += 1;
+    } catch (e: any) {
+      deps.recentlyHandledRequestIds?.delete(requestId);
+      deps.warn(`[clone-node] pending reconcile handler failed for ${requestId}: ${e?.message || e}`);
+    }
+  }
   if (handled > 0) deps.log(`[create-node] pending reconcile handled ${handled} request(s)`);
 }
 
@@ -960,6 +980,7 @@ interface GetCreateRequestResult {
   node_spec?: DaemonNodeSpec;
   child_token?: string;
   env_blob?: Record<string, string>;
+  clone?: { source_alias?: string };
 }
 
 /** #596 — a codex co-presence launcher (`anet node start` on a codexCopresence
@@ -983,6 +1004,12 @@ export async function handleCreateNodeDoorbell(
 ): Promise<void> {
   const { request_id } = event;
   const req: GetCreateRequestResult = await deps.callCommHub("get_create_request", { request_id });
+  if (req?.error === "clone_request") {
+    // A clone row must stay pending for handleCloneNodeDoorbell. Acking it
+    // failed here would revoke the new token.
+    deps.warn(`[create-node] ${request_id} is a clone request; not acking from the create handler`);
+    return;
+  }
   if (!req?.ok || !req.node_spec || !req.child_token) {
     deps.warn(`[create-node] get_create_request failed: ${req?.error || "unknown"}`);
     await deps.callCommHub("ack_create_request", {

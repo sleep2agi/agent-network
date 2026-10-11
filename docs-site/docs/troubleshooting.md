@@ -228,7 +228,7 @@ anet upgrade --dry-run
 | Grok ACP 长任务超时 | 按 runtime 指南核 `flags.grokAcpTimeoutMs` / `GROK_ACP_TIMEOUT_MS` |
 | Codex 共存重启后历史消失 | 升级到 preview.43+；普通 `anet node start <alias>` 会读取已保存的 `codexThreadId` 并执行 `thread/resume`。若旧 bridge 尚存活，先从外部终端 `anet node stop <alias>` |
 
-OpenCode 当前是任务 runtime，不是共享 TUI；Grok 共享 TUI 尚未发布。以 [Runtime 对比](/guide/runtimes)为准，不要照旧版本或 changelog 历史命令操作。
+`opencode-cli` 可以做人机共存：V1 还能 headless，V2 只接受共存，并且仍是 preview。步骤见 [OpenCode V2](/guide/opencode)。Grok 共享 TUI 是实验能力，见 [Grok 节点](/guide/grok)。以 [Runtime 对比](/guide/runtimes)为准，不要照旧版本或 changelog 历史命令操作。
 
 ## 日志
 

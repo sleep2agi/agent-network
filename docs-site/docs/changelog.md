@@ -1,5 +1,17 @@
 # 更新日志
 
+## 未发布：同一 daemon 上克隆子节点（2026-10-11）
+
+- 新 Hub 工具 `clone_node`：把已经由这台 daemon 创建的子节点，在同一台 daemon 上做成一个新节点。新别名、新 `ntok_`。源节点的 token、`secrets.env`、`auth.json` 不复制。非 commhub 频道（常带机器人凭据）不复制。
+- `workdir_policy` 默认 `new_empty`：在源工作目录的同一父目录下新建空目录，不复制源目录里的文件。源节点没有自己的项目目录、就住在 daemon 的当前目录时，新目录放在 `<daemon cwd>/clone-work/<文件夹>`。`share_source` 是显式选项，两个节点共用源工作目录，token 仍然是新的。
+- `copy_session` 默认 true。Claude、Codex、Grok 只在本机真有会话文件时连同会话 id 一起复制；没有文件就不写 id。OpenCode 的会话在它自己的服务里，只能复制 id，两边指向同一份服务端记录，不是私有副本。本机 `anet node clone` 仍然不复制会话。
+- 指定另一台 daemon 会被拒绝（`cross_daemon_refused`）。`ok: true` 只表示请求已入队并尝试门铃，不表示子节点已经注册，也不表示会话文件已经复制。这不是 npm 发布。Hub 请求 #938。
+
+## 未发布：OpenCode V2 用户指南（2026-10-11）
+
+- anet.sh 增加 [OpenCode V2](/guide/opencode)（中英），侧栏放在 Grok 旁边。它说明 `opencode-cli` 的 V2 创建、共存启动、Hub 对话和 daemon 约束。
+- 创建路径按已发布的 preview 通道写。模型目录读取器（#2574）写明只在 main 上，尚未接到 daemon、Hub 或客户端，也不是一条用户命令。npm `latest` 仍没有 `--opencode-generation`。
+
 ## 未发布：OpenCode V2 共存创建对齐本机 Provider（2026-10-10）
 
 - 创建 OpenCode V2 共存节点时，模型和 Provider 取自这台机器上 OpenCode 自己的 `opencode.json`（`model` 与 `providers`）。请求里的模型或 `--provider` 若与之不一致，创建直接拒绝并写明两边的值，不会改用预设默认模型，也不会退回 anthropic。

@@ -815,6 +815,15 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// Hub #938 — clone_node reuses this table (same token mint, sweeper, and
+// register finalize) but must not be replayed as a blank create_node.
+// NULL/empty = ordinary create. Non-empty JSON = clone directives.
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN clone_json TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,
 // 叠在 send_desktop_message 的代码级三闸之上:canWrite / `!effectiveNetId` return /
 // getUserNetworkRole,tools.ts)。「不产生 network_id=NULL 孤儿」现是代码级保证 + #1492

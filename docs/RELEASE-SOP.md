@@ -87,9 +87,9 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(**43 行**,其中 42 个首格是纯路径,门只认这 42 个 ——
+> 逐次发版必须重新核对的位置(**49 行**,其中 48 个首格是纯路径,门只认这 48 个 ——
 > 不要把 zh/en 合成一行数,分母数错会漏核。
-> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42 → 39 → 43。**加新的信道断言时,同时把它加进这张表**,
+> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42 → 39 → 43 → 49。**加新的信道断言时,同时把它加进这张表**,
 > 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
 >
 > | 文件 | 行 | 断言 |
@@ -104,6 +104,8 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/troubleshooting/is-this-node-alive.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/grok.md` | 见门输出 | Grok 节点页(原 grok-tui + grok-copresence 合并)：共存随 npm 发布包提供(latest 与 preview)、agent-node 版本下界断言——发版时核对仍真 |
 > | `docs-site/docs/en/guide/grok.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/opencode.md` | 见门输出 | OpenCode V2 指南：当日 npm `preview` / `latest` 具体版本，以及创建标志进入 preview 线的下界；模型目录读取器不在已发布 preview 包里。dist-tag 一动，版本句变假，发版时重核 |
+> | `docs-site/docs/en/guide/opencode.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/upgrade.md` | 见门输出 | 初始管理员密码一节写「现在的 `latest` 与 `preview` 都在 `≥ 2.2.22-preview.4` 范围」（原 versioning 页并入）——是下界断言，发新版不会变假 |
 > | `docs-site/docs/en/guide/upgrade.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/install.md` | 见门输出 | 安装页(原 windows / deploy/npm / one-shot-install 并入)：Bun preflight「`2.3.0-preview.47` 及以后」与 Windows 跨盘修复「`2.3.0-preview.29` 及以后」都是下界断言，发新版不会变假 |

@@ -4650,7 +4650,7 @@ Daemon (host_supervisor — required by the dashboard's node-creation wizard):
   anet daemon start <name>                                Start an existing daemon
   anet daemon list                                        List locally-configured daemons
   anet daemon provider list <name>                        Read daemon-scoped Provider configuration (no secrets)
-  anet daemon provider put <name> --revision N             Save private Provider JSON from stdin (not runtime apply)
+  anet daemon provider put <name> --revision N            Save private Provider JSON from stdin (not runtime apply)
 
 Config & tokens:
   anet config [path|json]      Show config summary, path, or raw JSON

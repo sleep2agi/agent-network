@@ -41,7 +41,7 @@ Profile 的 `runtime` 字段：**stable 4 runtime + preview 额外 2 runtime**�
 | `codex-sdk` | stable | OpenAI Codex SDK（`codex login`） |
 | `grok-build-acp` | stable | xAI Grok Build ACP server（`grok login`） |
 | `codex-app-server` | preview | Codex app-server 桥接（RFC-030 in-flight） |
-| `opencode-cli` | preview | OpenCode CLI 共存（RFC-029 in-flight） |
+| `opencode-cli` | preview | 同一个 runtime。默认 V1（`opencode-ai`）。V2 共存用 `--opencode-generation v2 --opencode-unsafe-tools`（`@opencode/cli@2.0.22`，只在 preview 通道；没有安全预设）。目录读取器 #2574 未接到 daemon / Hub / 客户端。见 [OpenCode V2](https://anet.sh/guide/opencode) |
 
 早期文档里的 `claude-code` / `codex` / `agent-sdk` 已重命名（`anet doctor --fix` 自动迁移）。
 

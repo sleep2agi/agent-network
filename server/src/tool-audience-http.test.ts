@@ -163,7 +163,7 @@ describe("what each caller sees", () => {
 
   test("node modes: readonly / restricted drop broadcast + node writes + human-only; enforce drops human-only for normal nodes", async () => {
     const ro = new Set((await listTools(T.node_readonly)).names);
-    for (const n of ["broadcast", "update_node_config", "create_node", "upsert_provider"]) expect([n, ro.has(n)]).toEqual([n, false]);
+    for (const n of ["broadcast", "update_node_config", "create_node", "clone_node", "upsert_provider"]) expect([n, ro.has(n)]).toEqual([n, false]);
     for (const n of ["send_task", "requirements_update", "report_status", "get_all_status"]) expect([n, ro.has(n)]).toEqual([n, true]); // 看参数才拒的照列
     expect(new Set((await listTools(T.node_normal)).names).has("upsert_provider")).toBe(true); // log 模式:调得通,照列
     process.env.COMMHUB_NODE_PERMISSIONS = "enforce";
@@ -202,14 +202,15 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // node 61 / 62,433 B → 62,946 B (+513); user 58 / 57,228 B unchanged
   // (report_status is not on the user list). Budget only this measured addition
   // (~154/509 B node/all margin).
-  // #906 registers daemon_provider_snapshot (user) plus pull/ack (protocol; omitted
-  // from the default node and user lists). Measured on this tree after the
-  // description trims already in the change: all 90 / 80,307 B; node 61 / 62,556 B;
-  // user 59 / 57,372 B. Node stays under 63,100 (544 B) and user under 57,500 (128 B).
-  // `all` is 207 B over 80,100. The two protocol descriptions are 179 B together, so
-  // shortening them cannot pay for their schemas. Raise only `all` to 80,800
-  // (493 B margin, same order as the previous all margin).
-  const CEILINGS = { node: 63_100, user: 57_500, all: 80_800 } as const;
+  // #906 registers daemon_provider_snapshot (user) plus pull/ack (protocol).
+  // Measured there: all 90 / 80,307 B; node 61 / 62,556 B; user 59 / 57,372 B,
+  // ceilings 80,800 / 63,100 / 57,500.
+  // Hub #938 adds clone_node (audience both, so it lands on the node list and
+  // the user list) plus optional expect_clone on get_create_request (protocol,
+  // so only the full list). Measured on this combined tree:
+  // all 91 / 81,228 B; node 62 / 63,281 B; user 60 / 58,169 B.
+  // Ceilings keep about 400 B of margin and nothing else.
+  const CEILINGS = { node: 63_700, user: 58_600, all: 81_700 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);

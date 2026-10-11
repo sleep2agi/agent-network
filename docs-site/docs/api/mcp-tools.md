@@ -109,11 +109,12 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 
 仅节点令牌；人用 app 或 `/api/scheduled-tasks`。权限与配额见[定时任务](/guide/schedules#agent-managed)。
 
-**节点生命周期（`anet` CLI / Dashboard 调用）** · 6 个
+**节点生命周期（`anet` CLI / Dashboard 调用）** · 7 个
 
 | 工具 | 说明 |
 |------|------|
 | `create_node` | 在 host-daemon 上创建并启动节点 |
+| `clone_node` | 把同一台 daemon 上已有的子节点做成新节点：新别名、新 ntok_，不复制源 token |
 | `delete_node` | 停子进程 + 吊销 ntok + 删 hub 行（默认备份配置） |
 | `stop_node` | 停 agent-node 子进程，保留配置目录 |
 | `start_node` | 通过 host-daemon 启动已停止的子节点 |

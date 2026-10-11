@@ -1,14 +1,19 @@
 # OpenCode TUI 共存运行手册
 
-## OpenCode V2 远程创建接口（#829 开发中）
+用户向导（anet.sh，中英）在 `docs-site/docs/guide/opencode.md`。本手册保留操作边界和尚未验收的部分，不把向导里的创建命令再抄成第二套。
+
+## 本地创建、远程切片、目录读取，三件不同的事
+
+**本地 CLI 创建是当前操作入口。** `anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools` 会写下 `opencodeGeneration: "v2"`、`opencodeMode: "copresence"`、`flags.opencodeUnsafeTools: true`。不带 `--opencode-unsafe-tools` 时创建和启动都拒绝。不带 `--opencode-generation` 仍是 V1。这条路径随 preview 线发布（自 `agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107`）。2026-10-11 量到 npm `preview` = `2.3.0-preview.162`、`latest` = `2.3.0-preview.76`；`.76` 没有这条标志。dist-tag 会动，以 `anet -v` 为准。成熟度仍是 preview：没有 V2 安全预设。
+
+**Hub/daemon 的 flag 切片已经在仓库里，但不是桌面客户端入口，也不是完整生命周期验收**（#829 / #539 仍开着）。字段必须在 `node_spec.flags`。下面几段写的是这层代码拒绝什么、落盘什么。Hub 首次注册的 `succeeded` 或启动器退出 0 单独都不算健康。
+
+**目录读取（#2574）是第三件。** `agent-node/src/runtime/opencode-v2-catalog.ts` 的 `readOpenCodeCatalog` 只读调用方已经持有的 loopback V2 server（`/api/provider`、`/api/model`、`/api/model/default`）。快照 `invocationVerified` 恒为 false，`completeness` 为 `unknown`。它还没接到 daemon 派发、Hub 授权、心跳或客户端选模型，也不是用户命令，并且不在上面的已发布 preview 包里。创建节点仍然复制本机 `opencode.json`，不调用这个读取器。详见 [opencode-v2-registry-readiness.md](opencode-v2-registry-readiness.md) 的目录一节。
 
 daemon 发现 `opencode --version` 为 V2 时，通用 runtime-readiness 只报告
 `unknown`（CLI 已发现，provider/auth 尚未确认），不把 V1 的 opencode.ai HEAD
 结果当成所有 V2 provider 的结论。本地/局域网 provider 不依赖该站点；反之，
 站点可达也不证明选定模型可用。客户端显示未检测仍允许配置。显式 `opencodeGeneration` 为 `v1` 或 `v2` 时，daemon 在写子节点配置之前拒绝与该代际已接受版本不符的安装（`opencode_generation_mismatch`；V2 接受 `@opencode/cli@2.0.22`）。省略代际仍是 V1，不因 PATH 上是 V2 二进制而拒绝。`--version` 超时不在这一步拒绝。V2 还要求 `model` 为 OpenCode 自己的 `provider/model`（恰好一个斜杠，`opencode_v2_requires_provider_model`）；本接口不套用 anet provider 预设。就绪结果对 `opencode-cli` 可带 `generation` 与 `accepted`，V2 的 `state` 仍是 `unknown`。配置快照 `flags` 回显代际、模式和 unsafe 同意，只读，不能用 `update_node_config` 修改。显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、其他 runtime 的认证/网络判据不因此放宽。`--version` 文本不是包文件身份。
-
-以下是 Hub/daemon 参数与落盘切片，**不是已经上线的客户端入口或真实 V2
-生命周期验收**。现有 CLI、原生 V2 权限、客户端界面和正式发布仍各有门禁。
 
 新接口沿用 runtime `opencode-cli`，在 `node_spec.flags` 里显式传
 `opencodeGeneration: "v2"` 和 `opencodeUnsafeTools: true`。
@@ -121,9 +126,7 @@ anet node stop opencode-v2
 ```
 
 V2 忽略 V1 的 `OPENCODE_PERMISSION` 等环境开关。没有显式 opt-in 时应看到
-拒绝提示，而不是删除校验或把安全模式改成宽松模式。原生 V2 安全策略、
-daemon/API/客户端 V2 创建入口与模型主动调用 CommHub 工具的完整验收，
-仍由 Hub #539 / GitHub #2544 跟踪；这里的 CLI 示例不代表这些入口已支持。
+拒绝提示，而不是删除校验或把安全模式改成宽松模式。上面的 CLI 是本地创建路径，不代表桌面客户端、目录选模型或「模型主动调用 CommHub 工具」已经验收。原生 V2 安全策略、客户端 V2 创建入口和模型主动调用工具的完整验收仍由 Hub #539 / GitHub #2544 跟踪。
 
 V2 使用 `opencode --server <url> --session <id>`，不是 V1 的 `attach`。
 网络任务经 `/api/session/:id/prompt`、`delivery=queue` 提交，在消息历史中

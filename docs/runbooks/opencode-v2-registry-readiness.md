@@ -24,6 +24,25 @@ transport ignores AbortSignal. It rechecks connection after registry success;
 this is a startup observation, not a guarantee against future disconnects.
 Post-readiness reconnect/recovery remains the existing runtime lifecycle.
 
+## Native catalog snapshot (#2574 / #906)
+
+`agent-node/src/runtime/opencode-v2-catalog.ts` (`readOpenCodeCatalog` /
+`normalizeOpenCodeCatalog`) reads an already-owned authenticated loopback
+server: `/api/provider`, `/api/model`, `/api/model/default`, scoped by
+`directory`. It does not start or reload a server, read `auth.json`, send a
+prompt, or run a paid model probe. The normalized snapshot keeps public ids
+only (`invocationVerified: false`, `completeness: "unknown"`, including an
+empty snapshot).
+
+Merged on main in #2574. Not wired to daemon dispatch, Hub authorization,
+heartbeat, or client model selection. Caller-supplied scope labels do not
+authorize access. It is not a user command and was not in the published
+preview package measured on 2026-10-11 (`@sleep2agi/agent-network@2.3.0-preview.162`).
+Node create still copies this machine's `opencode.json`. It does not call
+this reader. Do not present snapshot counts as verified usable models.
+Evidence: `docs/tests/report-test906-native-catalog.txt`. Parent #906 / #901
+acceptance stays open.
+
 ## V2 capability decision (#828)
 
 Decision recorded on 2026-10-09 for **`@opencode/cli@2.0.22` only**:

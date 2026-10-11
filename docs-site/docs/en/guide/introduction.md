@@ -33,10 +33,10 @@ A runtime controls how `agent-node` drives an AI. A provider controls the model 
 | `codex-sdk` | stable | You use Codex for headless coding tasks |
 | `grok-build-acp` | stable | You use the Grok Build ACP interface for unattended tasks |
 | `codex-app-server` | preview | Codex TUI co-presence (the picker label is `codex-cli`). See [Codex TUI Co-presence](/en/guide/codex-copresence) |
-| `opencode-cli` | preview | Public OpenCode multi-vendor front end. V1 and V2 share this id; see below |
+| `opencode-cli` | preview | Public OpenCode multi-vendor front end. V1 and V2 share this id; see below. V2 steps: [OpenCode V2](/en/guide/opencode) |
 | `grok-build-cli` | experimental | Grok TUI co-presence, trusted tasks only. See [Grok Nodes](/en/guide/grok) |
 
-OpenCode V1 and V2 are both the runtime `opencode-cli`, not two runtime ids. V1 is the default generation (package `opencode-ai`) and can run headless or in co-presence. V2 (package `@opencode/cli`) is created with `--opencode-generation v2` and is on the npm `preview` channel only: co-presence only, and it also requires `--opencode-unsafe-tools` (every local tool enabled; trusted tasks only). On npm `latest`, `opencode-cli` is V1.
+OpenCode V1 and V2 are both the runtime `opencode-cli`, not two runtime ids. V1 is the default generation (package `opencode-ai`) and can run headless or in co-presence. V2 (package `@opencode/cli`) is created with `--opencode-generation v2` and is on the npm `preview` channel only: co-presence only, and it also requires `--opencode-unsafe-tools` (every local tool enabled; trusted tasks only). On npm `latest`, `opencode-cli` is V1. Create, Hub dialogue, the daemon, and the model catalog that is not wired through yet: [OpenCode V2](/en/guide/opencode).
 
 `cursor-agent` (alias `cursor-cli`) is still an unmerged source preview: [PR #2561](https://github.com/sleep2agi/agent-network/pull/2561) is marked do-not-merge and do-not-publish. The published `latest` and `preview` pickers both omit it. Until it is merged and released, read its support level as upcoming: not stable, and not a runtime already shipped on the preview channel.
 

@@ -107,7 +107,7 @@ anet node create gw --runtime codex-app-server --provider custom-openai-compat \
   --base-url https://llm.example.com/v1 --api-key-env GATEWAY_API_KEY --model my-model
 ```
 
-Codex 这条路使用 Responses API（`wire_api = "responses"`）。只实现了 `/v1/chat/completions` 的网关接不上 Codex；那种网关要先写进 OpenCode 自己的 `providers`（自定义端点的 package 仍是 `@opencode/ai/providers/openai-compatible`），V2 共存创建再按上面的规则复制。OpenCode V1 的安全预设仍然会丢掉自定义 provider。Claude 运行时也不走这组标志。
+Codex 这条路使用 Responses API（`wire_api = "responses"`）。只实现了 `/v1/chat/completions` 的网关接不上 Codex；那种网关要先写进 OpenCode 自己的 `providers`（自定义端点的 package 仍是 `@opencode/ai/providers/openai-compatible`），V2 共存创建再按上面的规则复制。OpenCode V1 的安全预设仍然会丢掉自定义 provider。Claude 运行时也不走这组标志。V2 的安装、Hub 对话、daemon 和尚未接线的模型目录见 [OpenCode V2](/guide/opencode)。
 
 ### 内置的 Anthropic 兼容提供商 {#built-in-anthropic-compatible}
 

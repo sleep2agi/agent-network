@@ -597,3 +597,4 @@ bridge 启动前先 `cd` 到节点工作目录。禁止用短前缀、「最近�
 - [节点 Runtime](/guide/runtimes)
 - [CLI：`anet node start`](/guide/cli#anet-node-start)
 - [Grok 节点](/guide/grok)
+- [OpenCode V2](/guide/opencode)

@@ -55,6 +55,7 @@ import {
   auditCreateNodeStrict,
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
 } from "./create-node.js";
+import { decideClone, factsFromRows, parseWorkdirPolicy } from "./clone-node.js";
 import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
   VaultError,
@@ -4611,6 +4612,156 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
 
+  // Hub #938 — clone a child that already lives on a daemon into a new
+  // node on THAT daemon. New alias, new ntok_. Session copy is done by
+  // the daemon from the source config on disk; this tool only records
+  // the policy and the runtime's session capability (see clone-node.ts).
+  server.tool(
+    "clone_node",
+    "Clone a daemon child into a new node on the same daemon. New name and new token. copy_session defaults to true. workdir_policy new_empty (default) or share_source. Hub #938.",
+    {
+      source_node_id: z.string().min(1).max(200),
+      name: z.string().min(1).max(256),
+      copy_session: z.boolean().optional(),
+      workdir_policy: z.enum(["new_empty", "share_source"]).optional(),
+      daemon_node_id: z.string().min(1).max(200).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ source_node_id, name, copy_session, workdir_policy, daemon_node_id, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      const callerRole = enforceUserId && effectiveNetId
+        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+        : null;
+      if (callerRole !== "admin" && callerRole !== "owner") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_create_node", required_role: "admin", caller_role: callerRole }) }] };
+      }
+      const { row: source, sec1Ok } = resolveTargetNode(source_node_id, effectiveNetId);
+      if (!source) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: source_node_id }) }] };
+      }
+      if (!sec1Ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
+      }
+      const createRow = db.get<{ daemon_node_id: string; runtime: string; model: string | null; flags_json: string; child_name: string }>(
+        `SELECT daemon_node_id, runtime, model, flags_json, child_name
+           FROM node_create_requests
+          WHERE child_node_id = ?1 AND network_id = ?2 AND status = 'succeeded'
+          ORDER BY created_at DESC LIMIT 1`,
+        source_node_id, source.network_id || effectiveNetId || "default",
+      );
+      const net = source.network_id || effectiveNetId || "default";
+      const nameRows = db.all<{ alias: string | null; node_name: string | null }>(
+        `SELECT alias, node_name FROM nodes WHERE network_id = ?1`,
+        net,
+      );
+      const existingNames = nameRows.flatMap((r) => [r.alias, r.node_name].filter((x): x is string => !!x));
+      const owning = createRow?.daemon_node_id ?? "";
+      const inflight = owning
+        ? db.all<{ child_name: string }>(
+          `SELECT child_name FROM node_create_requests WHERE daemon_node_id = ?1 AND status IN ('pending', 'delivered')`,
+          owning,
+        ).map((r) => r.child_name)
+        : [];
+      let policy: ReturnType<typeof parseWorkdirPolicy>;
+      try { policy = parseWorkdirPolicy(workdir_policy); }
+      catch (e) { return validationFailReply(e); }
+      const facts = factsFromRows({
+        node: source,
+        createRow: createRow ?? null,
+        existingNames,
+        inflightNames: inflight,
+      });
+      let decision;
+      try {
+        decision = decideClone(facts, {
+          newName: name,
+          copySession: copy_session !== false,
+          workdirPolicy: policy,
+          requestedDaemonId: daemon_node_id ?? null,
+        });
+      } catch (e) {
+        return validationFailReply(e);
+      }
+      if (!decision.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: decision.error, ...decision.detail }) }] };
+      }
+      const { row: daemon, sec1Ok: daemonOk } = resolveTargetNode(decision.daemonNodeId, effectiveNetId);
+      if (!daemon || !daemonOk) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_not_found", daemon_node_id: decision.daemonNodeId }) }] };
+      }
+      if (!enforceUserId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "auth_required" }) }] };
+      }
+      const childToken = generateNetworkToken();
+      const childTokenId = generateId("tok");
+      const requestId = newRequestId();
+      const networkIdForChild = daemon.network_id || net;
+      const cloneMeta = {
+        source_node_id,
+        source_alias: facts.alias,
+        copy_session: decision.copySession,
+        workdir_policy: decision.workdirPolicy,
+        channels: decision.channels,
+      };
+      db.run(
+        `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, role, request_id, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 2)`,
+        [childTokenId, hashToken(childToken), enforceUserId, networkIdForChild, `node:${decision.name}`, "network", "child", requestId],
+      );
+      putPendingEnvBlob({
+        request_id: requestId,
+        daemon_node_id: decision.daemonNodeId,
+        env_blob: {},
+        child_token: childToken,
+        child_token_id: childTokenId,
+      });
+      db.run(
+        `INSERT INTO node_create_requests
+           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, clone_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', 'pending', ?8, ?9, ?10, ?11)`,
+        [
+          requestId, decision.daemonNodeId, decision.name, networkIdForChild,
+          decision.runtime, decision.model, JSON.stringify(decision.flags),
+          childTokenId, Date.now(), callerTokenId || "unknown", JSON.stringify(cloneMeta),
+        ],
+      );
+      pushEvent(daemon.alias, { type: "clone_node", request_id: requestId }, networkIdForChild);
+      auditCreateNode({
+        action: "clone_node_dispatch_attempted",
+        user_id: enforceUserId,
+        network_id: networkIdForChild,
+        target_id: requestId,
+        detail: {
+          daemon_node_id: decision.daemonNodeId,
+          source_node_id,
+          child_name: decision.name,
+          runtime: decision.runtime,
+          copy_session: decision.copySession,
+          workdir_policy: decision.workdirPolicy,
+          session_mode: decision.sessionContract.mode,
+        },
+      });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          ok: true,
+          request_id: requestId,
+          daemon_node_id: decision.daemonNodeId,
+          child_name: decision.name,
+          copy_session: decision.copySession,
+          workdir_policy: decision.workdirPolicy,
+          session_contract: decision.sessionContract,
+          contract: {
+            token: "new ntok_ minted for the clone; the source token is not copied",
+            workdir: decision.workdirPolicy === "new_empty"
+              ? "new empty directory under the source workdir's parent (or <daemon cwd>/clone-work when the source has no project workdir)"
+              : "share the source workdir (explicit)",
+            session: decision.sessionContract.detail,
+          },
+        }) }],
+      };
+    },
+  );
+
   // #1362 — daemon-side compensation for missed SSE doorbells. pushEvent is
   // intentionally best-effort; after a daemon connects or reconnects, it pulls
   // any still-pending requests bound to its own daemon token.
@@ -4629,10 +4780,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           WHERE daemon_node_id = ?1
             AND network_id = ?2
             AND status = 'pending'
+            AND COALESCE(clone_json, '') = ''
           ORDER BY created_at ASC`,
         callerDaemon.daemonNodeId, callerDaemon.networkId,
       );
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, count: rows.length, requests: rows }) }] };
+      // Hub #938 — clone rows stay out of `requests` so an older daemon
+      // that replays every pending create does not spawn a blank node.
+      const clone_requests = db.all<{ request_id: string; child_name: string; created_at: number }>(
+        `SELECT request_id, child_name, created_at
+           FROM node_create_requests
+          WHERE daemon_node_id = ?1
+            AND network_id = ?2
+            AND status = 'pending'
+            AND COALESCE(clone_json, '') != ''
+          ORDER BY created_at ASC`,
+        callerDaemon.daemonNodeId, callerDaemon.networkId,
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        count: rows.length,
+        requests: rows,
+        clone_count: clone_requests.length,
+        clone_requests,
+      }) }] };
     },
   );
 
@@ -4700,21 +4870,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // isn't a host_supervisor, reject.
   server.tool(
     "get_create_request",
-    "Daemon pulls a pending create-node request (called when SSE create_node doorbell arrives). RFC-026.",
+    "Daemon pulls a pending create-node request (called when SSE create_node doorbell arrives). RFC-026. expect_clone pulls a clone_node row.",
     {
       request_id: z.string().min(1).max(200),
+      expect_clone: z.boolean().optional(),
     },
-    async ({ request_id }) => {
+    async ({ request_id, expect_clone }) => {
       const callerDaemon = resolveCallerDaemonTokenBound();
       if (!callerDaemon.ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
       }
 
-      const row = db.get<{ request_id: string; daemon_node_id: string; status: string; child_token_id: string | null; network_id: string }>(
-        `SELECT request_id, daemon_node_id, status, child_token_id, network_id FROM node_create_requests WHERE request_id = ?1`,
+      const row = db.get<{ request_id: string; daemon_node_id: string; status: string; child_token_id: string | null; network_id: string; clone_json: string | null }>(
+        `SELECT request_id, daemon_node_id, status, child_token_id, network_id, clone_json FROM node_create_requests WHERE request_id = ?1`,
         request_id,
       );
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      const isClone = typeof row.clone_json === "string" && row.clone_json.trim().length > 0;
+      // Do not consume the env blob or flip status when the wrong handler asks.
+      if (isClone && expect_clone !== true) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "clone_request" }) }] };
+      }
+      if (!isClone && expect_clone === true) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_a_clone" }) }] };
+      }
       // §4.1.4 — strict daemon binding by token-derived node_id.
       if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
@@ -4764,6 +4943,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           },
           child_token: blob.child_token,
           env_blob: blob.env_blob,
+          ...(isClone ? { clone: JSON.parse(row.clone_json as string) } : {}),
         }) }],
       };
     },

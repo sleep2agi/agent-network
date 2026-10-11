@@ -90,6 +90,8 @@ anet node create my-bot
 向导**默认高亮 `claude-agent-sdk`**, 一路 Enter 会落到要填 vendor + API Key 的复杂路径。如果已经 `claude auth login`, **手动选 `claude-code-cli`** = 零配置最快路径。
 
 `anet node create` 的选单列出全部 7 个 runtime（4 个正式：`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`；3 个预览：`codex-app-server`（选单里叫 `codex-cli`）/ `grok-build-cli` / `opencode-cli`）；完整对照见 [Runtime 对比](/guide/runtimes#runtime-对比-canonical-表)。
+
+OpenCode V2 不是第 8 个 runtime，向导也不会默认选它。它仍是 `opencode-cli`，要显式 `--opencode-generation v2 --opencode-unsafe-tools`，并且只做人机共存。成熟度仍是 preview（npm `latest` 上还没有这条创建标志）。步骤、Hub 对话和还没接上的模型目录见 [OpenCode V2](/guide/opencode)。
 :::
 
 启动节点：
