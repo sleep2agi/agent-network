@@ -1,0 +1,21 @@
+TEST ONLY — candidate pair, observed2026-10-11T12:09Z /20:09+08.
+Source parent15dd263e2c854afd1797f0e5a4b60a91876ae110; uncommitted change was
+only package+lock root versions (.166/.132/.124), candidate notes and this check.
+None of these branch artifacts were published or installed outside Docker.
+
+Command through sg docker:
+  docker run --rm --network none --user root \
+    -v /dev/shm/anet-provider-release-906:/candidate:ro \
+    anet-provider:test906-create \
+    sh /candidate/tests/test906-provider-create/release-pair-check.sh
+
+Base image config7ef88068fbab2cc0e1c5f5a8d90c695ffc8bfb4be921ca80817269535f0e241f,
+built from the same product source for the composition check. Metadata only
+replaced inside the ephemeral container; dependency resolution was unchanged.
+Actual CLI rebuilt339 modules and printed anet v2.3.0-preview.166.
+All3 package versions plus both corresponding lock roots matched exactly.
+Actual compiled-CLI creation suite and package-local unit: 6/6,44expects PASS,
+run as UID10001 after the root in-container build. Container removed, images
+cached. No host/global package edits, real keys, OAuth, inference or native launch.
+This does not claim built/runtime132 package or Hub124 tarball acceptance; those
+must still be main-SHA rebuilt and checked by the formal package release gates.
