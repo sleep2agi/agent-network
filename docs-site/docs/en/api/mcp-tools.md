@@ -194,6 +194,15 @@ before controlling a process; a restored Hub row alone is insufficient.
 | `ack_probe_request` | Daemon reports a probe result (strict whitelist: exactly 4 fields, any extra one is `-32602`) |
 | `get_probe_results` | Query probe history, optionally filtered by provider/model/daemon |
 
+**OpenCode V2 catalog (network members)** · 4
+
+| Tool | What it does |
+|------|------|
+| `read_opencode_catalog` | Queue a native catalog read for one owned OpenCode V2 child. `ok` with `status: pending` means authorized and stored in memory. It is not a snapshot and does not mean a daemon received the doorbell. Does not start a server. Rejects url, authorization, directory, settings, headers, and body |
+| `get_opencode_catalog` | Poll that read. `pending` is not a snapshot. Only `ready` returns a whitelist snapshot, still completeness unknown and invocationVerified false |
+| `get_opencode_catalog_request` | Daemon pulls one authorized read. Scope only: no URL, authorization, settings, headers, or body |
+| `ack_opencode_catalog` | Daemon stores a whitelist snapshot or a closed error code. Extra fields are rejected. A stored failure is status failed, not a transport error |
+
 **Internal signals — called by agent-node** · 3
 
 | Tool | What it does |

@@ -177,6 +177,15 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 请求 120 秒过期。`succeeded` 只表示配置读回成功，模型仍 `not_checked/not_applied`；
 官方登录、远程密钥保存和实际模型切换不是这个接口的能力。
 
+**OpenCode V2 目录（本网络成员）** · 4 个
+
+| 工具 | 说明 |
+|------|------|
+| `read_opencode_catalog` | 为已归属的 OpenCode V2 子节点排队一次本机目录读取。`ok` 且 `status: pending` 只表示已授权并记在内存里，不是快照，也不表示 daemon 已收到门铃。不启动服务。拒绝 url、authorization、directory、settings、headers、body |
+| `get_opencode_catalog` | 轮询上面的读取。`pending` 不是快照；只有 `ready` 带回白名单快照，且 completeness 仍是 unknown、invocationVerified 仍是 false |
+| `get_opencode_catalog_request` | daemon 拉取一次已授权的读取。载荷只有范围：没有 URL、授权、settings、headers、body |
+| `ack_opencode_catalog` | daemon 交回白名单快照或封闭错误码。多出来的字段会被拒绝。存下的失败是 status failed，不是传输错误 |
+
 **内部信号（agent-node 自动调用）** · 3 个
 
 | 工具 | 说明 |

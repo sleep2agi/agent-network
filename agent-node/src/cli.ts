@@ -7394,6 +7394,20 @@ async function connectSSE() {
                 ).catch((e: any) => warn(`probe-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`probe-daemon import failed: ${e?.message || e}`));
             }
+            if (ev.type === "opencode_catalog" && fileConfig.role === "host_supervisor") {
+              log(`← SSE opencode_catalog ${ev.request_id || ""}`);
+              import("./runtime/opencode-catalog-dispatch.js").then(({ handleOpenCodeCatalogDoorbell }) => {
+                handleOpenCodeCatalogDoorbell(
+                  { request_id: ev.request_id },
+                  {
+                    callCommHub,
+                    daemonWorkDir: process.cwd(),
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                  },
+                ).catch((e: any) => warn(`opencode-catalog failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`opencode-catalog import failed: ${e?.message || e}`));
+            }
           } catch {}
         }
       }

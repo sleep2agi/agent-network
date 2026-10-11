@@ -1,0 +1,31 @@
+OpenCode V2 catalog — Daemon/Hub wiring slice
+Date: 2026-10-11
+Base: d03b9ab3 (PR #2574 adapter foundation)
+Runner: bun 1.3.14 on this host. Docker was not available here, so this is not the CI container run. CI still builds tests/test906-daemon-catalog and runs the same bun files plus native.ts inside that image.
+
+Native binary: opencode v2.0.22 from @opencode/cli@2.0.22, loopback 127.0.0.1:24906, disposable temp directory.
+
+test906 unit files (catalog reader, endpoint file, owned-reader):
+  16 pass, 0 fail, 75 expect() calls
+
+native.ts against that binary:
+  PASS L1 real V2 rejects wrong authentication
+  PASS L2 real V2 snapshot: providers=2 models=12; NOT invocation verified
+  PASS L3 daemon owned reader against the same native server
+  PASS L4 missing endpoint is unavailable and does not start another server
+
+Hub authorization (server/src/opencode-v2-catalog.test.ts), isolated COMMHUB_DB:
+  3 pass. Member queue → daemon pull (no url/authorization/settings/headers/body) → owned reader → ack → get status ready.
+  Snapshot stayed invocationVerified false and completeness unknown. Viewer allowed. Outsider, node token, v1, and unsafe-off refused.
+  {ok:true, status:pending} asserted before any ack. Expired read returned unavailable, not a snapshot.
+
+Daemon doorbell unit (opencode-catalog-dispatch.test.ts) included in the 16 above:
+  owned loopback acked a whitelist snapshot; missing file and directory mismatch acked errors with zero fetches; pull failure was not acked; dispatcher source has no spawn.
+
+V2 session unit (fake serve): 18 pass. Ready writes mode 0600 endpoint; close removes it; MCP readiness failure leaves no file.
+
+Also green on this host: tool-audience + mcp-context-cost + daemon-token-owner (40 pass); node permission class bookkeeping; test629 inventory_count=82 sdk 1.32.0; check-doc-symbol-pins (docs and docs-site); check-mcp-tool-index-coverage (91/91 both languages).
+
+Not run here: tests/test827–833 Docker images. The new file is opencode-v2-catalog-endpoint.json inside the node work directory. test827 watches the XDG data root, not that directory. The session unit test covers create and remove.
+
+Not claimed: client picker, npm publish, invocation verified, completeness known, adopted-node catalog reads, hub filesystem check when the create row stored no workdir.

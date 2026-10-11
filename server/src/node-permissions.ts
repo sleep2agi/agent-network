@@ -254,6 +254,7 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   get_config_update: "always", ack_config_update: "always", get_rules_file_request: "always", ack_rules_file_request: "always", get_rules_file_result: "always",
   get_create_request: "always", ack_create_request: "always", get_stop_request: "always", ack_stop_request: "always",
   get_start_request: "always", ack_start_request: "always", get_probe_request: "always", ack_probe_request: "always",
+  get_opencode_catalog_request: "always", ack_opencode_catalog: "always",
   list_my_pending_create_requests: "always", list_my_pending_lifecycle_requests: "always", list_my_children: "always",
   request_adopt_node: "human_only", unadopt_node: "human_only",
   get_adopt_request: "always", ack_adopt_request: "always",
@@ -280,4 +281,5 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   // 只有人能做
   upsert_network_secret: "human_only", upsert_provider: "human_only", update_provider: "human_only",
   projects_create: "human_only", projects_update: "human_only", review_skill: "human_only",
+  read_opencode_catalog: "human_only", get_opencode_catalog: "human_only",
 };

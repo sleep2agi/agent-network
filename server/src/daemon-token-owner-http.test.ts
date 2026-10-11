@@ -92,6 +92,8 @@ const endpoints: [string, Record<string, unknown>][] = [
   ["list_my_children", {}], ["get_adopt_request", {}], ["ack_adopt_request", { status: "adopted" }],
   ["get_probe_request", { probe_id: "probe_fixture_absent" }],
   ["ack_probe_request", { probe_id: "probe_fixture_absent", status: "ok", latency_ms: 1 }],
+  ["get_opencode_catalog_request", { request_id: "cat_fixture_absent" }],
+  ["ack_opencode_catalog", { request_id: "cat_fixture_absent", error: "unavailable" }],
 ];
 for (const [name, arguments_] of endpoints) {
   test(`daemon identity boundary: ${name}`, async () => {

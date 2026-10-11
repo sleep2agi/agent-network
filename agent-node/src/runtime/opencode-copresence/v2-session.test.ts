@@ -6,7 +6,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
+import { readOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 import { OPENCODE_V2_BACKEND } from "../opencode-backend";
 import { OpenCodeProviderError } from "../opencode-provider-error";
 import { OpenCodeCopresenceTimeoutError, openVettedOpenCodeCopresence, type OpenCodeCopresenceSession } from "./runtime";
@@ -142,6 +143,7 @@ describe("V2 core against a protocol-shaped fake serve", () => {
       const requests = readFileSync(trace, "utf8");
       expect(requests).toContain("/api/rpc/anet.commhub-readiness/ready");
       expect(requests).not.toContain("/api/session");
+      expect(existsSync(join(root!, "opencode-v2-catalog-endpoint.json"))).toBe(false);
       const pid = Number(requests.split(" ")[0]);
       expect(() => process.kill(pid, 0)).toThrow();
     } finally { rmSync(traceRoot, { recursive: true, force: true }); }
@@ -156,8 +158,10 @@ describe("V2 core against a protocol-shaped fake serve", () => {
       const requests = readFileSync(trace, "utf8");
       expect(requests.indexOf("/api/rpc/anet.commhub-readiness/ready")).toBeLessThan(requests.indexOf("/api/session"));
       expect(existsSync(session.attachScriptPath)).toBe(true);
+      expect(existsSync(join(root!, "opencode-v2-catalog-endpoint.json"))).toBe(true);
       await session.close();
       expect(existsSync(session.attachScriptPath)).toBe(false);
+      expect(existsSync(join(root!, "opencode-v2-catalog-endpoint.json"))).toBe(false);
       expect(() => process.kill(Number(requests.split(" ")[0]), 0)).toThrow();
     } finally { rmSync(traceRoot, { recursive: true, force: true }); }
   });
@@ -180,6 +184,13 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     expect(launcher).toContain(`--server '${session.url}' --session '${session.sessionId}'`);
     expect(launcher).not.toContain(" attach ");
     expect(launcher).not.toContain("--pure");
+    const endpoint = readOpenCodeV2CatalogEndpoint(root!);
+    const password = /OPENCODE_SERVER_PASSWORD='([^']+)'/.exec(launcher)![1]!;
+    expect(statSync(join(root!, "opencode-v2-catalog-endpoint.json")).mode & 0o777).toBe(0o600);
+    expect(endpoint?.url).toBe(session.url);
+    expect(endpoint?.directory).toBe(resolve(root!));
+    expect(endpoint?.authorization).toBe(`Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`);
+    expect(JSON.stringify(endpoint)).not.toContain(password);
   });
 
   test("a network task gets its own reply, with sender provenance in the visible turn", async () => {

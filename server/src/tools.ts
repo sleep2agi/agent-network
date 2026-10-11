@@ -73,6 +73,13 @@ import {
   startPendingProbeGcTimer,
   startProbeSweeperTimer,
 } from "./probe.js";
+import {
+  ackOpenCodeCatalog,
+  getOpenCodeCatalogResult,
+  opencodeCatalogAckSchema,
+  queueOpenCodeCatalogRead,
+  takeOpenCodeCatalogRequest,
+} from "./opencode-v2-catalog.js";
 import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
 import {
   ALLOWED_FLAGS,
@@ -6381,6 +6388,80 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       } catch (e) {
         return probeFailReply(e);
       }
+    },
+  );
+
+  // OpenCode V2 catalog. Human tokens queue; the owning daemon pulls scope
+  // only and acks a whitelist snapshot. pending is stored authorization, not
+  // a snapshot and not proof the doorbell was received.
+  server.registerTool(
+    "read_opencode_catalog",
+    {
+      description: "Queue a native OpenCode V2 catalog read for one owned child. ok with status pending means authorized and stored in memory, not a snapshot and not proof a daemon received the doorbell. Does not start a server. url, authorization, directory, settings, headers, and body are rejected.",
+      inputSchema: z.object({
+        daemon_node_id: z.string().min(1).max(200),
+        node_id: z.string().min(1).max(200),
+        network_id: z.string().max(200).optional(),
+      }).strict() as any,
+    },
+    async (args: { daemon_node_id: string; node_id: string; network_id?: string }) => {
+      const networkId = getNetworkId(args.network_id);
+      const queued = queueOpenCodeCatalogRead({
+        callerUserId: enforceUserId ?? null,
+        callerIsNode: callerTokenIsNetwork,
+        networkId,
+        daemonNodeId: args.daemon_node_id,
+        nodeId: args.node_id,
+      });
+      if (!queued.ok) return { content: [{ type: "text" as const, text: JSON.stringify(queued) }] };
+      pushEvent(queued.daemon_alias, { type: "opencode_catalog", request_id: queued.request_id }, queued.network_id);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "pending", request_id: queued.request_id }) }] };
+    },
+  );
+
+  server.registerTool(
+    "get_opencode_catalog",
+    {
+      description: "Poll one queued OpenCode V2 catalog read. status pending is not a snapshot. Only status ready returns a whitelist snapshot, still completeness unknown and invocationVerified false.",
+      inputSchema: z.object({
+        request_id: z.string().min(1).max(200),
+        network_id: z.string().max(200).optional(),
+      }).strict() as any,
+    },
+    async (args: { request_id: string; network_id?: string }) => {
+      const result = getOpenCodeCatalogResult({
+        callerUserId: enforceUserId ?? null,
+        callerIsNode: callerTokenIsNetwork,
+        networkId: getNetworkId(args.network_id),
+        requestId: args.request_id,
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.registerTool(
+    "get_opencode_catalog_request",
+    {
+      description: "Daemon pulls one authorized OpenCode V2 catalog read. Scope only: no URL, authorization, settings, headers, or body.",
+      inputSchema: z.object({ request_id: z.string().min(1).max(200) }).strict() as any,
+    },
+    async (args: { request_id: string }) => {
+      const callerDaemon = _resolveCallerDaemonTokenBound({ callerTokenIsNetwork, callerTokenId, enforceNetworkId });
+      if (!callerDaemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(takeOpenCodeCatalogRequest(args.request_id, callerDaemon.daemonNodeId)) }] };
+    },
+  );
+
+  server.registerTool(
+    "ack_opencode_catalog",
+    {
+      description: "Daemon stores a whitelist OpenCode V2 catalog snapshot or a closed error code. Extra fields are rejected. A stored failure is status failed, not a transport error.",
+      inputSchema: opencodeCatalogAckSchema as any,
+    },
+    async (args: unknown) => {
+      const callerDaemon = _resolveCallerDaemonTokenBound({ callerTokenIsNetwork, callerTokenId, enforceNetworkId });
+      if (!callerDaemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(ackOpenCodeCatalog(callerDaemon.daemonNodeId, args)) }] };
     },
   );
 

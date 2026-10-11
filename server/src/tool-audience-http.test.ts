@@ -202,15 +202,12 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // node 61 / 62,433 B → 62,946 B (+513); user 58 / 57,228 B unchanged
   // (report_status is not on the user list). Budget only this measured addition
   // (~154/509 B node/all margin).
-  // #906 registers daemon_provider_snapshot (user) plus pull/ack (protocol).
-  // Measured there: all 90 / 80,307 B; node 61 / 62,556 B; user 59 / 57,372 B,
-  // ceilings 80,800 / 63,100 / 57,500.
-  // Hub #938 adds clone_node (audience both, so it lands on the node list and
-  // the user list) plus optional expect_clone on get_create_request (protocol,
-  // so only the full list). Measured on this combined tree:
-  // all 91 / 81,228 B; node 62 / 63,281 B; user 60 / 58,169 B.
-  // Ceilings keep about 400 B of margin and nothing else.
-  const CEILINGS = { node: 63_700, user: 58_600, all: 81_700 } as const;
+  // #906 plus Hub #938 clone_node (all 91 / 81,228 B; node 62 / 63,281 B;
+  // user 60 / 58,169 B). OpenCode V2 catalog adds 2 user tools and 2 protocol
+  // tools. Measured on this combined tree: all 95 / 85,069 B; node 62 / 63,281 B
+  // unchanged (protocol tools stay off the node list); user 62 / 59,409 B.
+  // Ceilings keep about 400 B and nothing else.
+  const CEILINGS = { node: 63_700, user: 59_810, all: 85_500 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);

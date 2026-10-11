@@ -67,6 +67,7 @@ import { readLinuxProcessGroupIdentity } from "./process-group";
 import { relaunchPreviousAttach, stopRecordedAttach } from "./attach-tui";
 import { resolve } from "path";
 import { installV2RegistryPlugin, waitForOpenCodeV2Commhub } from "./v2-readiness";
+import { removeOpenCodeV2CatalogEndpoint, writeOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 
 const USERNAME = "opencode";
 const HISTORY_PAGE_LIMIT = 200;
@@ -320,6 +321,9 @@ export async function openVettedOpenCodeV2Copresence(
   let notifyWarned = false;
   const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
   let clearLaunchHealth = () => {};
+  const clearCatalogEndpoint = () => {
+    try { removeOpenCodeV2CatalogEndpoint(opts.workDir); } catch { /* already gone */ }
+  };
   try {
     const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
     if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
@@ -339,6 +343,15 @@ export async function openVettedOpenCodeV2Copresence(
     }
     clearLaunchHealth = publishLaunchHealth(opts.workDir, sessionId, child.pid);
     writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir);
+    try {
+      writeOpenCodeV2CatalogEndpoint(opts.workDir, {
+        url,
+        authorization: `Basic ${Buffer.from(`${USERNAME}:${password}`).toString("base64")}`,
+        directory: resolve(opts.cwd),
+      });
+    } catch {
+      warn("[opencode-copresence] v2 catalog endpoint was not recorded");
+    }
     log(`[opencode-copresence] v2 preview ready version=${version} session=${sessionId.slice(0, 12)} attach=${attachScriptPath}`);
     relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
 
@@ -480,6 +493,7 @@ export async function openVettedOpenCodeV2Copresence(
         if (closed) return;
         closed = true;
         clearLaunchHealth();
+        clearCatalogEndpoint();
         stopRecordedAttach(opts.workDir, { restart: mode?.restart === true, log, warn, tmux: opts.tmuxRunner });
         rmSync(attachScriptPath, { force: true });
         if (identity) await stopProcessGroup(child as any, identity);
@@ -488,11 +502,13 @@ export async function openVettedOpenCodeV2Copresence(
     };
     child.once("exit", (code, signal) => {
       clearLaunchHealth();
+      clearCatalogEndpoint();
       if (!closed) warn(`[opencode-copresence] v2 serve exited code=${code} signal=${signal}; next task must reopen`);
     });
     return session;
   } catch (error) {
     clearLaunchHealth();
+    clearCatalogEndpoint();
     rmSync(attachScriptPath, { force: true });
     if (identity) await stopProcessGroup(child as any, identity).catch(() => {});
     else try { child.kill("SIGKILL"); } catch {}

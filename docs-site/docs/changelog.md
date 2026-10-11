@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布：Hub 可排队读取已归属的 OpenCode V2 目录（2026-10-11）
+
+- 网络成员可以用 `read_opencode_catalog` 让 host_supervisor daemon 读取它已经在跑的 OpenCode V2 回环目录。`ok` 且 `status: pending` 只表示 Hub 已授权并记在内存里。门铃是尽力推送：没有订阅者就不会送达。只有 `get_opencode_catalog` 的 `status: ready` 才是快照，而且 completeness 仍是 unknown、invocationVerified 仍是 false。
+- 这条路径不启动 OpenCode、不提示输入、不跟随重定向。身份和代际只来自 Hub 里已有的创建记录。请求不能带 url、authorization、directory、settings、headers 或 body。
+- 没有客户端挑选界面，也不是 npm 发布。收编节点不在这一片。创建记录没有 workdir 时，目录由 daemon 绑定到它已经拥有的项目目录，Hub 看不到那台机器的文件系统。
+
 ## 未发布：daemon 删除节点后会话一并清掉（2026-10-11）
 
 - 经 daemon 删除的节点，Hub 在收尾时只删了 `nodes` 行，`sessions` 行留成 `offline`。`/api/status` 和基于它的客户端列表因此一直显示已删除的节点（桌面端停在「删除请求已提交」）。现在收尾时按 `node_id` 一并删除该节点的会话，与 REST `DELETE /api/nodes/:id` 一致。按 `node_id` 而非别名删，删除收尾前用同名重建的节点不受影响。之前已残留的离线会话不会自动清除。
