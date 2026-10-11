@@ -41,3 +41,24 @@ Next: ordinary merge of deployment inputs/runbook, install exact main Git
 launchers, retain original entries, narrowly restart commhub-hub and observe
 actual health/process/natural heartbeat+ack. No new schema or child-token401
 fix claimed. Provider reference support and #1027 remain separate.
+
+ACTIVATION RECEIPT OBSERVED_AT=2026-10-11T16:00:07Z (2026-10-12 00:00+08)
+Normal PR2609 merged main30f803318a8bcfc3b3737c2b577d9fe5faee1b40;
+10/10 required checks and affected Hub deployment Docker profile SUCCESS.
+Fresh main fetch/ancestor check, both installed Git launchers cmp equal/mode0700.
+Only pm2 restart commhub-hub, no --update-env; no daemon/business-node action.
+Actual port9200 Bun PID3216148, PPID1613 PM2, cwd original .commhub,
+entry runtime-v108-preview125. Production Bun1.4.0 binary SHA equals preflight
+33d56b070be6a9e3da0ab013038b43d1645d0534ca811ecdba4472599117eb4b.
+Health125/sessions321/security secured; natural SSE113 by uptime28seconds.
+At uptime63 PM2 online/restarts82 (one intentional restart from81), no additional.
+Both daemons/cloud/dog/client/TMHR last_seen newer than activation; ops owner
+still original offline last_seen07:11:49Z, no identity restoration claimed.
+Read only incremental log bytes since restart: vault_master_key_missing0,
+panic0; no new task.ack yet. Keep natural acknowledgement observation pending,
+do not generate live fixture traffic to turn this into PASS.
+Old124 install and same owner-only before.db retained; launcher-124.sh and
+base-launcher.sh backups mode0700 in the same backup directory. Secret/env,
+ports, proxy and data source unchanged. Runtime and launcher sources separate.
+Client243 formal desktop38153297202 and Android38153299528 run from exact
+maina90cfd2d978678ddc3bbd3c497540af46fef4288, not yet published.

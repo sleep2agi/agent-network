@@ -167,7 +167,7 @@ curl -s localhost:9200/health          # version 与 sessions_count
 ### #906 的精确版本部署配置
 
 `hub-daemon.sh` 默认值仍对应 CLI 的兼容基线，不是线上最新版本。
-以下 `.122` 段落是已部署历史；当前 `.124` 配置与回滚见本节末尾。
+以下 `.122` / `.124` 段落是已部署历史；当前 `.125` 配置与回滚见本节末尾。
 `hub-provider906.sh` 的历史 `.122` 无密钥部署配置选择
 `~/.commhub/runtime-v106-preview122`，保留目标 Hub 原本开启的 side-thread
 功能（显式设置 `COMMHUB_ENABLE_SIDE_THREADS=0` 仍有效）。不能只覆盖启动器
@@ -248,9 +248,9 @@ PID1613；`/health` 返回`.124`、320会话、secured。41秒内SSE恢复113连
 具体预检与切换边界见 `docs/tests/report-test906-hub124-preflight.txt`；不宣称
 真实 vault/模型权益验证、客户端241已发布或空机恢复演练完成。
 
-### #1020 `.125` 配置（正式包已发布，尚未切换）
+### #1020 `.125` 配置（2026-10-11 已切换）
 
-本次候选将 `hub-provider906.sh` 默认目录改为
+本次 `hub-provider906.sh` 默认目录改为
 `runtime-v108-preview125`；保留上述已运行 `.124` 的
 `runtime-v107-preview124` 作为回滚目标。软件源码已合入精确 main
 `519af0236985957bb0ff70685052673bdd0b2373`，正式发布运行是
@@ -258,6 +258,23 @@ PID1613；`/health` 返回`.124`、320会话、secured。41秒内SSE恢复113连
 2026-10-11 23:48（东八区）Docker 匿名下载的正式 npm tarball 与
 CI 制品字节摘要匹配：1229363字节、SHA256
 `f289b40562f5f2a87f38cb6cf9dc8a439efb23c7b56930375bcb688dc9fac555`。
+
+2026-10-11 23:59（东八区）已按上述流程窄切换。部署配置来自正常合入
+main 的 `30f803318a8bcfc3b3737c2b577d9fe5faee1b40`（PR2609），与软件
+包源 `519af023` 分别记录；Git 启动器与安装副本逐一 `cmp` 相同，0700。
+仅 `pm2 restart commhub-hub`，没有 `--update-env`，未重启 Daemon 或业务节点。
+监听9200的实际 Bun PID3216148，父PM2 PID1613，命令行选择上述 `.125`
+固化安装；Bun1.4.0 实际二进制摘要与 Docker 预检相同。健康接口返回 `.125`、
+321会话及 `security=secured`，28秒自然恢复113条SSE连接；到次日00:00，
+两Daemon及云盘牛、TMAI狗、客户端牛、TMHR均有切换后的新心跳。
+TMAI负责人保留升级前的认证故障离线状态，不冒称修复。初始观察窗新增日志
+中 vault 缺失和 panic 均0，尚无新 `task.ack`，继续观察自然回执，不派生产测试。
+PM2 restart计数仅本次人为操作81→82，观察窗没有额外重启。
+一致性DB备份及旧入口位于 owner-only
+`~/.commhub/backups/provider1020-p125-SrAkL8/`；旧 `.124` 安装保留。
+具体字节、隔离预检和激活证据见
+`docs/tests/report-test1020-hub125-preflight.txt`。此升级不宣称解决 #1027
+子节点token401，也不代表客户端 `.243` 已发布或生产模型权益验证。
 精确 URL、SHA512 integrity 和未变的传递依赖锁已记录在
 `provider906/package*.json`；本节不能作为“已经部署”的证据。
 
