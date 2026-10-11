@@ -62,8 +62,10 @@ function validateWrite(provider: any, networkId: string, daemonId: string) {
       if (a.kind === 'chatgpt' && key !== undefined) throw new Error('invalid_provider');
       if (key !== undefined && (typeof key !== 'string' || !key || key.length > 8192 || /[\s\x00-\x1f\x7f]/.test(key))) throw new Error('invalid_provider');
       // Only CLI write fields may be supplied; public-state flags are not writable.
-      if (Object.keys(a).some(k => !['id','kind','models','baseUrl','key'].includes(k))) throw new Error('invalid_provider');
-      return { ...rest, credential_present: a.kind === 'api_key', verification: 'not_checked', application: 'not_applied' };
+      if (Object.keys(a).some(k => !['id','kind','models','baseUrl','key','account_id'].includes(k))) throw new Error('invalid_provider');
+      // A bound login write must be confirmed present by its owning daemon;
+      // this projection is the expected receipt, not an independent Hub claim.
+      return { ...rest, credential_present: a.kind === 'api_key' || (a.kind === 'chatgpt' && a.account_id !== undefined), verification: 'not_checked', application: 'not_applied' };
     }),
   })) };
   validateDaemonProviderSnapshot({ network_id: networkId, daemon_node_id: daemonId, source: 'daemon', revision: 0, providers: [publicProvider] }, networkId, daemonId);

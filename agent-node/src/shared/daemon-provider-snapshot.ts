@@ -28,13 +28,16 @@ export function validateDaemonProviderSnapshot(value: unknown, networkId: string
       obj(r, ["runtime", "auth"]); if (r.runtime !== "codex-tui") fail();
       const auths = arr(r.auth, 32); unique(auths, "id");
       for (const a of auths) {
-        obj(a, ["id", "kind", "models", "baseUrl", "credential_present", "verification", "application"]);
+        obj(a, ["id", "kind", "models", "baseUrl", "account_id", "credential_present", "verification", "application"]);
         if (!id(a.id) || a.verification !== "not_checked" || a.application !== "not_applied") fail();
         const models = arr(a.models, 200);
         if (new Set(models).size !== models.length || models.some(m => typeof m !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(m))) fail();
         if (a.kind === "chatgpt") {
-          if (p.id !== "openai" || a.baseUrl !== undefined || a.credential_present !== false) fail();
+          if (p.id !== "openai" || a.baseUrl !== undefined || typeof a.credential_present !== 'boolean') fail();
+          if (a.account_id !== undefined && (typeof a.account_id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(a.account_id))) fail();
+          if (a.credential_present && !a.account_id) fail();
         } else if (a.kind === "api_key") {
+          if (a.account_id !== undefined) fail();
           if (a.credential_present !== true || typeof a.baseUrl !== "string" || a.baseUrl.length > 2048) fail();
           let u: URL; try { u = new URL(a.baseUrl); } catch { return fail(); }
           if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) fail();

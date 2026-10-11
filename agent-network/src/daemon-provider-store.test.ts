@@ -22,6 +22,39 @@ const official = () => ({ id: "openai", label: "OpenAI", enabled: true,
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("#906 daemon Provider persistence", () => {
+  test('saved login binds only to its owning daemon, without exposing credentials', () => {
+    const { store } = setup();
+    const { root } = store.prepareLoginDirectory();
+    const home = join(root, 'login-fixture'); mkdirSync(home, { mode: 0o700 });
+    const account = '11111111-1111-4111-8111-111111111111';
+    const record = { version: 1, network_id: 'net_a', daemon_node_id: 'daemon_a', account_id: account };
+    writeFileSync(join(home, 'anet-account.json'), JSON.stringify(record), { mode: 0o600 });
+    writeFileSync(join(home, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: SECRET, refresh_token: 'TEST-ONLY-refresh' } }), { mode: 0o600 });
+    const p: any = official(); p.runtimes[0].auth[0].account_id = account;
+    const result = store.upsert(p, 0);
+    expect(result.providers[0].runtimes[0].auth[0]).toMatchObject({ account_id: account, credential_present: true, verification: 'not_checked', application: 'not_applied' });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    expect(JSON.stringify(result)).not.toContain(root);
+    // Login removed after configuration: readback retains the reference, not a false presence claim.
+    rmSync(join(home, 'auth.json'));
+    expect(store.list().providers[0].runtimes[0].auth[0].credential_present).toBe(false);
+    expect(() => store.upsert(p, 1)).toThrow('saved_account_unavailable');
+    expect(store.list().revision).toBe(1);
+  });
+  test('foreign saved login and path-shaped account refs cannot be bound', () => {
+    const { store } = setup(), { root } = store.prepareLoginDirectory();
+    const home = join(root, 'login-fixture'); mkdirSync(home, { mode: 0o700 });
+    const account = '11111111-1111-4111-8111-111111111111';
+    writeFileSync(join(home, 'anet-account.json'), JSON.stringify({ version: 1, network_id: 'net_a', daemon_node_id: 'daemon_b', account_id: account }), { mode: 0o600 });
+    writeFileSync(join(home, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: SECRET, refresh_token: 'TEST-ONLY-refresh' } }), { mode: 0o600 });
+    const p: any = official(); p.runtimes[0].auth[0].account_id = account;
+    expect(() => store.upsert(p, 0)).toThrow('saved_account_unavailable');
+    p.runtimes[0].auth[0].account_id = '../other-node/auth.json';
+    expect(() => store.upsert(p, 0)).toThrow('invalid_account_id');
+    const key: any = keyProvider(); key.runtimes[0].auth[0].account_id = account;
+    expect(() => store.upsert(key, 0)).toThrow('unsupported_auth_combination');
+    expect(store.list().revision).toBe(0);
+  });
   test("list is read-only and starts unknown, with no auto-created state", () => {
     const { dir, store } = setup();
     expect(store.list()).toEqual({ network_id: "net_a", daemon_node_id: "daemon_a", source: "daemon", revision: 0, providers: [] });

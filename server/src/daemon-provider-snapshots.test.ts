@@ -49,6 +49,31 @@ function client(kind = "human", network = net) {
 const snapshot = () => ({ network_id: net, daemon_node_id: node, revision: 0, source: "daemon", providers: [] });
 const request = () => client()("daemon_provider_snapshot", { action: "refresh", network_id: net, id: node });
 
+test('saved ChatGPT account binding traverses Hub and compiled daemon CLI without credentials', async () => {
+  process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
+  const work = mkdtempSync(join(root, 'bind-')), dir = join(work, '.anet/nodes', alias);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const prepared = new DaemonProviderStore(dir).prepareLoginDirectory();
+  const home = join(prepared.root, 'login-fixture'); mkdirSync(home, { mode: 0o700 });
+  const account = '11111111-1111-4111-8111-111111111111';
+  writeFileSync(join(home, 'anet-account.json'), JSON.stringify({ version: 1, network_id: net, daemon_node_id: node, account_id: account }), { mode: 0o600 });
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'TEST-ONLY-access', refresh_token: 'TEST-ONLY-refresh' } }), { mode: 0o600 });
+  const provider = { id: 'openai', label: 'OpenAI', enabled: true, runtimes: [{ runtime: 'codex-tui', auth: [
+    { id: 'work', kind: 'chatgpt', account_id: account, models: ['model-fixture'] },
+  ] }] };
+  const human = client(), daemon = client('daemon');
+  const r = await human('daemon_provider_snapshot', { action: 'put', id: node, network_id: net, revision: 0, provider });
+  expect(r.ok).toBe(true);
+  await reconcileProviderSnapshots({ workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {}, callCommHub: daemon });
+  const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
+  expect(read.status).toBe('succeeded');
+  expect(read.snapshot.providers[0].runtimes[0].auth[0]).toMatchObject({ account_id: account, credential_present: true, verification: 'not_checked', application: 'not_applied' });
+  expect(JSON.stringify(read)).not.toContain('TEST-ONLY-access');
+  expect(JSON.stringify(read)).not.toContain('TEST-ONLY-refresh');
+  expect(JSON.stringify(read)).not.toContain(home);
+});
+
 test('managed login: admin intent → capable target daemon → session manager → bounded public receipt', async () => {
   const work = mkdtempSync(join(root, 'login-'));
   const dir = join(work, '.anet/nodes', alias); mkdirSync(dir, { recursive: true, mode: 0o700 });

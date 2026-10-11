@@ -140,3 +140,28 @@ the additive intent table and new private account marker; rollback does not
 delete saved credentials. Pending logins may expire and require a fresh ceremony.
 Encrypted data backup or user re-login remains necessary after machine loss.
 Client login UI and account-to-node switch/rollback are still not implemented.
+
+2026-10-11 14:18 +08 saved-account binding increment:
+The saved login can now be referenced by opaque account_id under the same daemon's
+OpenAI/codex-tui ChatGPT profile/models. Daemon validates saved record scope and
+private credential presence; foreign/path/API-key references are rejected. Presence
+does not imply current authorization, model entitlement, or node application.
+Client counterpart is app PR836; it includes binding and keeps node switching off.
+
+Docker evidence:
+- daemon-provider-store.test.ts: 19 PASS / 0 FAIL / 70 expectations, including
+  owned binding, missing credential after save, foreign daemon, path and API-key
+  account-reference refusal, existing key-mode persistence cases.
+- server/src/daemon-provider-snapshots.test.ts: 15 PASS / 0 FAIL / 129 expectations.
+  New core: actual Hub handlers -> daemon reconciler -> newly compiled CLI ->
+  bound-model public snapshot. Account credentials are TEST-ONLY; no OAuth/inference.
+- CLI/runtime rebuilt with Dockerfile.transport. Test ran with final server/src
+  mounted read-only over that image to include expected credential-presence receipt
+  normalization. CLI/runtime binaries match the binding implementation.
+- Existing mirrored server/runtime snapshot contract parity passed in that suite.
+- All test containers --rm, offline, own /tmp DB/configs; no production mounts or
+  restarts. No new npm/main release from this feature branch.
+
+Remaining: exclusively apply selected saved login to a node, retain the latest
+rotated credential on switch-away, account/model runtime verification and rollback.
+Do not reuse a static refresh-token copy across nodes. No switch completion claim.

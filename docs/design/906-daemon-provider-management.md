@@ -215,3 +215,31 @@ https://learn.chatgpt.com/docs/auth#alternative-model-providers 。
 不新增服务、端口、密钥来源。建表由仓库 db.ts 负责；软件回滚保留表，旧 daemon 不领取
 应用请求。数据库来自既有加密备份；节点配置恢复仍依赖前述私有事务日志/加密备份，
 不能靠 clone 仓库重建身份或凭据，也不能将请求超时等同于节点已回滚。
+
+### 托管 ChatGPT 登录与模型配置绑定（PR2581，尚未发布）
+
+客户端在 Daemon 的 Provider 页发起设备码登录。Hub 只暂存有界登录意图和短期设备码回执；
+官方浏览器验证必须由人完成。启动进程和私有目录由该 Daemon 自己创建，
+不接收远程 credential path、不导入其他节点的 auth.json。实现入口：
+`agent-node/src/runtime/daemon-provider-login.ts`、`daemon-codex-logins.ts`。
+保存后在 `provider-store/codex-logins/login-*/anet-account.json` 写入随机 account_id、
+network/daemon 归属及显示名称；凭据保留同一新登录目录的 auth.json。
+
+配置条目可以引用 `openai -> codex-tui -> chatgpt -> account_id -> models`。
+Daemon 在写入配置时检查同一 network/daemon 的私有保存记录和凭据存在性；不跨 Daemon 查找，
+不接受路径代替 account_id。回读只含不透明 account_id 和 credential_present，
+仍为 verification=not_checked、application=not_applied；模型列表是配置而非额度/权限证明。
+删除或损坏凭据后，回读保留配置引用但不再声称凭据存在。API-key 条目不能携带 account_id。
+账号绑定与普通配置启停复用既有 revision/CAS 及 Hub 加密写入协议，不能覆盖并发修改。
+
+本阶段尚不开放 ChatGPT 节点应用；既有 API-key 应用入口不因此绕过账号检查。
+后续节点应用必须处理单条刷新链的独占归属、切走时保存最新刷新状态、切回及失败回滚，
+不能把已保存登录静态复制到多个运行节点。应复用现有节点 stop/start/verify 和账号指纹
+能力，但旧 `account install` 的宿主级注册表、隔离推理探针不等于 Daemon 级托管账号流程。
+
+恢复六问：沿既有 Daemon/SSE 常驻入口，不增服务/端口/反代/隧道；Hub 凭据仍来自已有
+部署秘密来源，OAuth 凭据来自本人浏览器登录；软件仅从 main 精确 SHA 发布后更换，并回读
+所选 Daemon 的 account_id/Provider revision 验证；软件回滚保留新增私有账号目录和表，
+不会注销账号或恢复生产数据。凭据目录必须由现有加密备份覆盖或重新登录，Git 不含这些值。
+目前未做生产空机恢复演练，不宣称可恢复。官方语义依据：
+https://learn.chatgpt.com/docs/auth 和 https://learn.chatgpt.com/docs/app-server 。
