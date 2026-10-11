@@ -48,7 +48,14 @@ No new service/listener/proxy or external secret source. Existing authoritative
 Hub and Daemon deployment procedures and launch scripts remain in
 docs-site/docs/deploy/daemon.md and deploy/hub/. Provider catalog and receipt
 tables follow the Hub DB migration path; keep the Hub encrypted database backup
-and its vault-key source. Daemon local Provider/account state remains private
+and its vault-key source. Hub Provider operations require
+`ANET_HUB_SECRET_VAULT_KEY` (32 bytes encoded as 64 hex characters), obtained
+from the deployment's existing secret store, never committed to Git. Restore
+the original key together with encrypted data; a missing key reports
+`vault_master_key_missing`, and generating a different key does not recover
+existing secrets. The concrete encrypted-backup/key-store location must be
+provided by that deployment's operator; this report does not establish it.
+Daemon local Provider/account state remains private
 data and needs secure backup or owner sign-in, not a Git clone.
 Retain original launch/config and software pair to roll back only selected
 software; rollback does not erase installed credentials or undo completed
