@@ -23,3 +23,12 @@ remain absent. This is NOT full#906 completion, NOT client239 inclusion, NOT
 evidence publicCLI165 supports collection. No node restarted; disposable
 container exited; worktree and test image retained. Source/node credential data
 remain outside Git; recovery scope documented in docs/daemon-provider-collection.md.
+
+18:25+08 CI increment: PR2598 collection job at exact f7e24405f SUCCESS.
+The native-application suite failed before applying Provider: its offline npx
+fixture still accepted onlyruntime130 while source CLI now requires131. The
+fixture now derives the one permitted exact package version from the bundled
+source-built package.json; no arbitrary-version or real-registry fallback.
+Narrow --rm/--network none Docker fixture check: exact131 resolves, old130
+refused. Full native suite remains to be checked on the corrected head.
+This is a test-input correction, not a native/real-account success claim.
