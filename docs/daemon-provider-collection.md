@@ -17,9 +17,28 @@ overrides are not silently converted. Existing managed profiles are preserved;
 collecting into an occupied authentication ID is refused. Optional request IDs
 make a lost acknowledgement replay idempotent.
 
-The local CLI core is implemented. Hub binding authorization/queue routing,
-the client collect button and creation using the daemon catalog remain to be
+The local CLI and remote Hub/daemon transport are implemented in test branches.
+The client collect button and creation using the daemon catalog remain to be
 wired; do not advertise this as a completed client feature or in public165.
+
+## Remote collection contract
+
+A network owner/admin explicitly calls `daemon_provider_snapshot` with
+`action: collect`, `id: daemon_node_id`, `network_id`, `revision`, and the
+identifier-only selection in `provider`. There is no remote key or path input.
+Hub validates source identity/alias binding at enqueue, pull and receipt.
+The existing short-lived encrypted write queue is reused (no schema migration).
+An older daemon advertising only `accept_writes` never consumes collection.
+The new daemon advertises `accept_collections` only over HTTPS or loopback HTTP,
+then invokes its pinned CLI `collect` with the selection on stdin.
+
+Source revision CAS and the daemon store revision are checked locally; a lost
+ACK reuses the same durable request instead of incrementing twice. A successful
+public receipt confirms an API-key profile with its configured model, not
+actual model access or an applied configuration. Source ownership changes
+before execution refuse the queued work. Failed/expired work clears queue data.
+Readback remains the existing `action: read` request-ID protocol. This change
+does not collect ChatGPT accounts, restart a node, or silently adopt an identity.
 
 ## Operations and recovery
 

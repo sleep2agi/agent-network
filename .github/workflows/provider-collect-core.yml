@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'agent-network/src/daemon-provider-collect*'
+      - 'agent-network/src/shared/provider-collection.ts'
       - 'agent-network/src/daemon-provider-command.ts'
       - 'agent-network/src/daemon-provider-application.ts'
       - 'tests/test906-provider-collect/**'

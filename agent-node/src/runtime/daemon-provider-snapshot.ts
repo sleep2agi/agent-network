@@ -6,6 +6,7 @@ import { validateDaemonProviderSnapshot } from "../shared/daemon-provider-snapsh
 import { requiredCliStatus, resolveOnPathReal, execVersionReal } from './runtime-readiness.js';
 import { validProviderApplicationSelection, validProviderApplicationReceipt } from '../shared/provider-application.js';
 import { handleProviderLogin } from './daemon-provider-login.js';
+import { validProviderCollection } from '../shared/provider-collection.js';
 
 export type SnapshotDeps = {
   callCommHub: (name: string, args: Record<string, unknown>) => Promise<any>;
@@ -40,15 +41,17 @@ export async function applyLocalProvider(deps: Pick<SnapshotDeps, 'workDir' | 'a
   return result.application;
 }
 export async function writeLocalProvider(deps: Pick<SnapshotDeps, 'workDir' | 'alias' | 'networkId' | 'daemonId'>,
-  request: { request_id: string; expected_revision: number; provider: unknown }) {
+  request: { request_id: string; expected_revision: number; provider?: unknown; operation?: string; selection?: unknown }) {
   // Preflight validates registered daemon identity before any mutation of its private store.
   await readLocalProviderSnapshot(deps);
   if (!/^dps_[a-f0-9-]{36}$/.test(request.request_id) || !Number.isSafeInteger(request.expected_revision)
     || request.expected_revision < 0) throw new Error('provider_write_unavailable');
-  const input = JSON.stringify(request.provider);
+  const collecting = request.operation === 'collect';
+  if (collecting && !validProviderCollection(request.selection)) throw new Error('invalid_provider_collection');
+  const input = JSON.stringify(collecting ? request.selection : request.provider);
   if (!input || Buffer.byteLength(input) > 64 * 1024) throw new Error('provider_write_unavailable');
   const raw = await new Promise<string>((resolve, reject) => {
-    const child = execFile(process.execPath, [getAnetBinAbs(), 'daemon', 'provider', 'put', deps.alias,
+    const child = execFile(process.execPath, [getAnetBinAbs(), 'daemon', 'provider', collecting ? 'collect' : 'put', deps.alias,
       '--revision', String(request.expected_revision), '--request', request.request_id],
       { cwd: deps.workDir, env: minimalEnv(), timeout: 10_000, maxBuffer: 1024 * 1024, encoding: 'utf8', windowsHide: true },
       (error, stdout) => error ? reject(new Error('provider_write_unavailable')) : resolve(stdout));
@@ -93,7 +96,7 @@ export function reconcileProviderSnapshots(deps: SnapshotDeps): Promise<void> {
       state.again = false;
       const acceptWrites = secureProviderTransport(deps.serverUrl);
       const pending = await deps.callCommHub("pull_daemon_provider_snapshots", { accept_local_discovery: true,
-        ...(acceptWrites ? { accept_writes: true, accept_applications: true, accept_logins: true } : {}) });
+        ...(acceptWrites ? { accept_writes: true, accept_collections: true, accept_applications: true, accept_logins: true } : {}) });
       if (!pending?.ok || !Array.isArray(pending.requests)) return; // old Hub capability: unsupported is not success
       for (const request of pending.requests.slice(0, 20)) {
         if (typeof request?.request_id !== "string" || !/^dp[sal]_[a-f0-9-]{36}$/.test(request.request_id)
@@ -109,7 +112,7 @@ export function reconcileProviderSnapshots(deps: SnapshotDeps): Promise<void> {
           } else if (request.operation === 'apply') {
             if (!acceptWrites) throw new Error('insecure_transport');
             application = await applyLocalProvider(deps, request);
-          } else if (request.operation === 'put') {
+          } else if (request.operation === 'put' || request.operation === 'collect') {
             if (!acceptWrites) throw new Error('insecure_transport');
             snapshot = await writeLocalProvider(deps, request);
           } else {
@@ -123,7 +126,7 @@ export function reconcileProviderSnapshots(deps: SnapshotDeps): Promise<void> {
         }
         await deps.callCommHub("ack_daemon_provider_snapshot", { request_id: request.request_id,
           ...(login ? { login } : application ? { application } : { snapshot }),
-          ...(request.operation === 'put' ? { applied_revision: request.expected_revision + 1 } : {}) });
+          ...(request.operation === 'put' || request.operation === 'collect' ? { applied_revision: request.expected_revision + 1 } : {}) });
       }
     } while (state.again);
   })().catch(() => { deps.warn("[daemon-provider] readback unavailable; pending requests can retry on reconnect"); })

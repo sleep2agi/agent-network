@@ -9,6 +9,7 @@ import { encryptSecret, decryptSecret, VaultError } from './vault';
 import { buildControllableMap } from './node-lifecycle-controllable';
 import { validProviderApplicationSelection, validProviderApplicationReceipt, type ProviderApplicationSelection } from './shared/provider-application';
 import { validLoginIntent, validLoginReceipt } from './shared/daemon-provider-login';
+import { validProviderCollection, type ProviderCollection } from './shared/provider-collection';
 
 export function providerScanTargets(networkId: string, daemonId: string) {
   const ownership = buildControllableMap(
@@ -95,8 +96,37 @@ function privateWrite(requestId: string, networkId: string, daemonId: string) {
   if (!row) return null;
   const payload = JSON.parse(decryptSecret({ ciphertext: Buffer.from(row.ciphertext), iv: Buffer.from(row.iv), tag: Buffer.from(row.tag) }));
   if (payload.network_id !== networkId || payload.daemon_node_id !== daemonId) throw new Error('scope_mismatch');
+  if (payload.operation === 'collect') {
+    if (!validProviderCollection(payload.selection)) throw Error('invalid_provider_collection');
+    return { expected_revision: row.expected_revision, operation: 'collect' as const, selection: payload.selection };
+  }
   validateWrite(payload.provider, networkId, daemonId);
-  return { expected_revision: row.expected_revision, provider: payload.provider };
+  return { expected_revision: row.expected_revision, operation: 'put' as const, provider: payload.provider };
+}
+function boundCollectionTarget(networkId: string, daemonId: string, selection: ProviderCollection) {
+  return selection.node_id !== daemonId && providerScanTargets(networkId, daemonId)
+    .some(n => n.node_id === selection.node_id && n.alias === selection.alias);
+}
+export function requestProviderCollection(h: Human, daemonId: string, revision: number, selection: unknown) {
+  const refusal = authorize(h); if (refusal) return refusal;
+  if (!daemonExists(h.networkId!, daemonId)) return denied('daemon_not_found');
+  if (!Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) return denied('invalid_revision');
+  if (!validProviderCollection(selection)) return denied('invalid_provider_collection');
+  try {
+    if (!boundCollectionTarget(h.networkId!, daemonId, selection)) return denied('collection_target_not_bound');
+    expire(h.networkId!, daemonId);
+    if (db.get("SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1 AND daemon_node_id=?2 AND status='pending'", h.networkId!, daemonId)) return denied('provider_snapshot_busy');
+    // Reuse the short-lived write queue, but no credential is supplied to Hub.
+    const enc = encryptSecret(JSON.stringify({ network_id: h.networkId, daemon_node_id: daemonId, operation: 'collect', selection }));
+    const requestId = `dps_${randomUUID()}`, now = Date.now();
+    db.transaction(() => {
+      db.run("INSERT INTO daemon_provider_snapshots (request_id,network_id,daemon_node_id,requested_by,status,created_at,expires_at) VALUES (?1,?2,?3,?4,'pending',?5,?6)",
+        [requestId, h.networkId!, daemonId, h.userId!, now, now + 120_000]);
+      db.run('INSERT INTO daemon_provider_writes (request_id,expected_revision,ciphertext,iv,tag) VALUES (?1,?2,?3,?4,?5)',
+        [requestId, revision, enc.ciphertext, enc.iv, enc.tag]);
+    });
+    return { ok: true as const, request_id: requestId, status: 'pending', expires_at: now + 120_000 };
+  } catch (error) { return denied(error instanceof VaultError ? error.code : 'provider_collection_unavailable'); }
 }
 function applicationIntent(requestId: string) {
   const row = db.get<{ expected_revision: number; selection_json: string }>('SELECT * FROM daemon_provider_applications WHERE request_id=?1', requestId);
@@ -170,7 +200,7 @@ export function getProviderSnapshot(h: Human, requestId: string, includeDiscover
     ...(row.request_id.startsWith('dpl_') ? { login: row.snapshot_json ? JSON.parse(row.snapshot_json) : null } : {}),
     ...(row.request_id.startsWith('dpa_') ? { application: row.snapshot_json ? JSON.parse(row.snapshot_json) : null } : {}) };
 }
-export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApplications = false, acceptLogins = false, acceptDiscovery = false) {
+export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApplications = false, acceptLogins = false, acceptDiscovery = false, acceptCollections = false) {
   if (!d.ok) return denied("caller_not_a_daemon");
   if (!daemonExists(d.networkId, d.daemonNodeId)) return denied("caller_not_a_daemon");
   expire(d.networkId, d.daemonNodeId);
@@ -195,9 +225,16 @@ export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApp
       }
       return [{ ...r, operation: 'apply', ...application!, alias: target.alias }];
     }
-    if (!acceptWrites && db.get('SELECT request_id FROM daemon_provider_writes WHERE request_id=?1', r.request_id)) return [];
     const write = privateWrite(r.request_id, d.networkId, d.daemonNodeId);
-    return [write ? { ...r, operation: 'put', ...write } : { ...r, scan_targets: providerScanTargets(d.networkId, d.daemonNodeId), ...(acceptDiscovery ? { discover_local: true } : {}) }];
+    if (write?.operation === 'collect') {
+      if (!acceptCollections) return []; // old write-capable daemons cannot consume collection as put/scan
+      if (!boundCollectionTarget(d.networkId, d.daemonNodeId, write.selection)) {
+        db.run("UPDATE daemon_provider_snapshots SET status='failed',error='collection_target_not_bound',observed_at=?1 WHERE request_id=?2 AND status='pending'", [Date.now(), r.request_id]);
+        db.run('DELETE FROM daemon_provider_writes WHERE request_id=?1', [r.request_id]);
+        return [];
+      }
+    } else if (write && !acceptWrites) return [];
+    return [write ? { ...r, ...write } : { ...r, scan_targets: providerScanTargets(d.networkId, d.daemonNodeId), ...(acceptDiscovery ? { discover_local: true } : {}) }];
   }) }; } catch { return denied('provider_write_unavailable'); }
 }
 export function ackProviderSnapshot(d: Daemon, requestId: string, snapshot?: unknown, failed = false, appliedRevision?: number, application?: unknown, login?: unknown) {
@@ -264,12 +301,20 @@ export function ackProviderSnapshot(d: Daemon, requestId: string, snapshot?: unk
       if (write) {
         const actual = safe as any;
         if (appliedRevision !== write.expected_revision + 1 || actual.revision !== appliedRevision) return denied('provider_write_unconfirmed');
+        if (write.operation === 'collect') {
+          if (!boundCollectionTarget(d.networkId, d.daemonNodeId, write.selection)) return denied('collection_target_not_bound');
+          const saved = actual.providers.find((p: any) => p.id === write.selection.provider_id);
+          const auth = saved?.runtimes.find((r: any) => r.runtime === 'codex-tui')?.auth.find((a: any) => a.id === write.selection.auth_id);
+          if (saved?.label !== write.selection.label.trim() || auth?.kind !== 'api_key' || auth.credential_present !== true
+            || auth.models.length !== 1 || auth.verification !== 'not_checked' || auth.application !== 'not_applied') return denied('provider_write_unconfirmed');
+        } else {
         const expected = validateWrite(write.provider, d.networkId, d.daemonNodeId);
         const saved = actual.providers.find((p: any) => p.id === expected.id);
         // CLI canonicalizes label and endpoint. No credential is compared or returned here.
         expected.label = expected.label.trim();
         for (const r of expected.runtimes) for (const a of r.auth) if (a.baseUrl) a.baseUrl = new URL(a.baseUrl).toString().replace(/\/$/, '');
         if (!isDeepStrictEqual(saved, expected)) return denied('provider_write_unconfirmed');
+        }
       }
     } catch { return denied('provider_write_unconfirmed'); }
   }

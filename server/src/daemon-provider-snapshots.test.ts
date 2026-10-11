@@ -13,6 +13,7 @@ import { registerTools } from "./tools";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { reconcileProviderSnapshots, readLocalProviderSnapshot } from "../../agent-node/src/runtime/daemon-provider-snapshot";
 import { DaemonProviderStore } from "../../agent-network/src/daemon-provider-store";
+import { providerNodeRevision } from '../../agent-network/src/daemon-provider-application';
 import { register, createNetworkTokenForNode } from "./auth";
 
 const net = "net_dps906", user = "u_dps906", node = "node_dps906", token = "token_dps906", alias = "daemon906";
@@ -216,6 +217,56 @@ test('write core chain: encrypted Hub request → target daemon CLI → durable 
   expect(new DaemonProviderStore(dir).list().providers[0].label).toBe('DeepSeek');
   db.run("UPDATE network_members SET role='member' WHERE user_id=?1 AND network_id=?2", [user, net]);
   expect((await human('daemon_provider_snapshot', { action: 'put', id: node, network_id: net, revision: 1, provider })).error).toBe('provider_admin_required');
+});
+
+test('collection core chain: bound source → capable daemon CLI → durable replay → redacted Provider', async () => {
+  process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
+  const work = mkdtempSync(join(root, 'collect-')), dir = join(work, '.anet/nodes', alias);
+  const childId = 'n_collect906', childAlias = 'source906', source = join(work, '.anet/nodes', childAlias);
+  mkdirSync(dir, { recursive: true, mode: 0o700 }); mkdirSync(join(source, 'codex-home'), { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const key = 'TEST-ONLY-collect-private-key';
+  writeFileSync(join(source, 'config.json'), JSON.stringify({ node_id: childId, alias: childAlias, network_id: net,
+    runtime: 'codex-app-server', codexHome: join(source, 'codex-home'), env: { TEST_PROVIDER_KEY: { _envRef: 'TEST_PROVIDER_KEY' } } }), { mode: 0o600 });
+  writeFileSync(join(source, '.env'), `TEST_PROVIDER_KEY=${key}\n`, { mode: 0o600 });
+  writeFileSync(join(source, 'codex-home/config.toml'), 'model_provider = "deepseek"\nmodel = "fixture-model"\n[model_providers.deepseek]\nbase_url = "https://api.example.test/v1"\nenv_key = "TEST_PROVIDER_KEY"\nwire_api = "responses"\n', { mode: 0o600 });
+  db.run("INSERT INTO nodes (node_id,node_name,alias,network_id,runtime) VALUES (?1,?2,?2,?3,'codex-app-server')", [childId, childAlias, net]);
+  db.run("INSERT INTO node_daemon_bindings (request_id,network_id,node_id,daemon_node_id,workdir,requested_by,status,created_at,updated_at) VALUES ('binding_collect906',?1,?2,?3,?4,?5,'active',1,1)", [net, childId, node, work, user]);
+  const selection = { node_id: childId, alias: childAlias, node_revision: providerNodeRevision(source), provider_id: 'deepseek', auth_id: 'imported', label: 'DeepSeek' };
+  const before = providerNodeRevision(source), human = client(), daemon = client('daemon');
+  const requestArgs = { action: 'collect', id: node, network_id: net, revision: 0, provider: selection };
+  expect((await daemon('daemon_provider_snapshot', requestArgs)).error).toBe('user_token_required');
+  expect((await human('daemon_provider_snapshot', { ...requestArgs, provider: { ...selection, alias: 'another' } })).error).toBe('collection_target_not_bound');
+  expect((await human('daemon_provider_snapshot', { ...requestArgs, provider: { ...selection, key } })).error).toBe('invalid_provider_collection');
+  const r = await human('daemon_provider_snapshot', requestArgs); expect(r.ok).toBe(true);
+  expect((await daemon('pull_daemon_provider_snapshots', { accept_writes: true })).requests).toEqual([]);
+  expect((await daemon('pull_daemon_provider_snapshots', { accept_collections: true })).requests[0]).toMatchObject({ operation: 'collect', selection });
+  let drop = true;
+  const deps = { workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {},
+    callCommHub: async (name: string, args: any) => {
+      expect(JSON.stringify(args)).not.toContain(key);
+      if (name === 'ack_daemon_provider_snapshot' && drop) { drop = false; throw Error('lost acknowledgement'); }
+      return daemon(name, args);
+    } };
+  await reconcileProviderSnapshots(deps);
+  expect(new DaemonProviderStore(dir).list().revision).toBe(1);
+  await reconcileProviderSnapshots(deps);
+  const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
+  expect(read.status).toBe('succeeded'); expect(read.snapshot.revision).toBe(1);
+  expect(read.snapshot.providers[0].runtimes[0].auth[0]).toMatchObject({ id: 'imported', kind: 'api_key', models: ['fixture-model'], credential_present: true, verification: 'not_checked', application: 'not_applied' });
+  expect(JSON.stringify(read)).not.toContain(key);
+  expect(db.get('SELECT * FROM daemon_provider_writes WHERE request_id=?1', r.request_id)).toBeNull();
+  expect(providerNodeRevision(source)).toBe(before); // source config/session/credential is never changed
+  const stale = await human('daemon_provider_snapshot', { ...requestArgs, revision: 1, provider: { ...selection, auth_id: 'second' } });
+  db.run("UPDATE node_daemon_bindings SET daemon_node_id='other' WHERE request_id='binding_collect906'");
+  expect((await daemon('pull_daemon_provider_snapshots', { accept_collections: true })).requests).toEqual([]);
+  expect((await human('daemon_provider_snapshot', { action: 'read', id: stale.request_id, network_id: net })).error).toBe('collection_target_not_bound');
+});
+
+test('collection intent contract mirrors CLI, daemon and Hub exactly', () => {
+  const hub = readFileSync(new URL('./shared/provider-collection.ts', import.meta.url), 'utf8');
+  expect(hub).toBe(readFileSync(new URL('../../agent-node/src/shared/provider-collection.ts', import.meta.url), 'utf8'));
+  expect(hub).toBe(readFileSync(new URL('../../agent-network/src/shared/provider-collection.ts', import.meta.url), 'utf8'));
 });
 
 test("human authorization precedes dispatch; unknown, nodes and non-admins cannot request", async () => {
