@@ -246,6 +246,7 @@ export function streamVerdict(id: NodeIdentity, target: AgentRef | "network"): V
 // ── MCP:每个工具归一类(test 钉住「每个注册的工具都归了类」,新工具忘了归类会红) ──
 export type ToolClass = "always" | "read" | "dispatch" | "broadcast" | "requirements" | "schedule" | "node_write" | "human_only";
 export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
+  hub_provider_config: "human_only",
   daemon_provider_snapshot: "human_only",
   pull_daemon_provider_snapshots: "always", ack_daemon_provider_snapshot: "always",
   // 回复 / 上报 / 自己的收件箱 / 生命周期协议(节点自己的请求)—— 任何模式都能做

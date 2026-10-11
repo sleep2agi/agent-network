@@ -936,6 +936,19 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_providers_network ON providers(network_id);
 `);
+// #907 network-owned Provider configuration. Keys remain in network_secrets.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS hub_provider_configs (
+    network_id TEXT NOT NULL, provider_id TEXT NOT NULL, revision INTEGER NOT NULL,
+    config_json TEXT NOT NULL, secret_key_ref TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(network_id, provider_id)
+  );
+  CREATE TABLE IF NOT EXISTS hub_provider_bindings (
+    request_id TEXT PRIMARY KEY, network_id TEXT NOT NULL, provider_id TEXT NOT NULL,
+    provider_revision INTEGER NOT NULL, daemon_node_id TEXT NOT NULL,
+    daemon_provider_id TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
+`);
 db.exec(`
   CREATE TABLE IF NOT EXISTS provider_models (
     model_id        TEXT PRIMARY KEY,

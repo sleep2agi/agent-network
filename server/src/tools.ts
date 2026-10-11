@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
+import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { adoptionCandidatesReportSchema } from "./adoption-candidates.js";
@@ -4127,6 +4128,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   const providerHuman = (net?: string) => ({ userId: enforceUserId, isNode: callerTokenIsNetwork, networkId: getNetworkId(net) });
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
+  server.registerTool('hub_provider_config', {
+    description: 'Human network Provider catalog. read metadata; owner put encrypted key/config; admin bind explicitly queues a selected daemon, not node apply. Only Codex Responses binding in this slice.',
+    inputSchema: z.object({ action: z.enum(['read', 'put', 'bind']), network_id: z.string().max(200).optional(),
+      revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), id: z.string().max(64).optional(),
+      daemon_node_id: z.string().max(200).optional(), daemon_revision: z.number().int().min(0).optional(), confirm: z.boolean().optional() }).strict() as any,
+  }, async (args: any) => {
+    const human = providerHuman(args.network_id);
+    const result = args.action === 'read' ? readHubProviders(human) : args.action === 'put' ? putHubProvider(human, args.revision, args.provider)
+      : bindHubProvider(human, { id: args.id, revision: args.revision, daemon_node_id: args.daemon_node_id, daemon_revision: args.daemon_revision, confirm: args.confirm });
+    if (args.action === 'bind' && result.ok && 'request_id' in result) {
+      const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', args.daemon_node_id, human.networkId!);
+      if (target) pushEvent(target.alias, { type: 'daemon_provider_snapshot', request_id: result.request_id }, human.networkId!);
+    }
+    return providerReply(result);
+  });
   server.tool(
     "daemon_provider_snapshot", "Admin Provider: refresh/put/collect/apply/login use daemon id; read uses request id. collect: revision+identifier-only owned source selection; put: revision+provider; apply: revision+node selection; login: provider={action:start|read|cancel|save|accounts,session_id?,label?}. No login tokens.",
     { action: z.enum(["refresh", "read", "put", "collect", "apply", "login"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },

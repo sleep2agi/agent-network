@@ -1,0 +1,39 @@
+TEST ONLY — Hub Provider core, 2026-10-11 19:17 Asia/Shanghai
+
+Source: /dev/shm/anet-hub-provider-907, feat/907-hub-provider, uncommitted.
+Container image: anet-provider:test907-hub
+Image config: f71d29a51d152fdf3bd68568362d9d667368a88cf0dd9af55e566c1fae05396b
+Pinned Bun 1.3.14 and Node 22.22.2; synthetic database and credentials only.
+No host test dependencies, production state, real login or real inference used.
+
+Initial run: save/read passed; queue receipt stayed pending. The fixture
+omitted serverUrl, so the real daemon correctly declined credential writes.
+Added a synthetic HTTPS serverUrl to the fixture; kept the transport guard.
+Rerun: read-only mounted that test file over the previously built image.
+Command: sg docker -c 'docker run --rm -v /dev/shm/anet-hub-provider-907/server/src/hub-provider-config.test.ts:/work/server/src/hub-provider-config.test.ts:ro anet-provider:test907-hub'
+
+Result: 4 pass, 0 fail, 24 expectations, 1.75 seconds.
+1. Actual registered Hub tool: encrypted save, redacted read, revision conflict.
+2. Actual Hub queue -> daemon reconciler -> pinned CLI private Provider store
+   -> matched redacted receipt. This is distribution, NOT node application.
+3. Node/anonymous/viewer restrictions and network/daemon isolation.
+4. Unsupported protocol does not dispatch Codex configuration; source edits
+   cancel pending dispatch without claiming to revoke installed copies.
+
+Cleanup: docker run --rm; isolated test database and temporary state remain
+inside the removed container. Test image retained as a local development cache.
+Not validated: client UI, real remote HTTPS connectivity, native runtime start,
+OAuth, model permissions, inference, full repository checks or release gates.
+No public artifact produced.
+
+19:24 Asia/Shanghai final source rebuild (including explicit human_only tool
+classification) completed with the checked-in run.sh and --network none.
+Image config: a55683cc57c415a5361ccf7a7be84a9c901ec8ad34a292b75d59cb0cdee543a6
+Result: 4 pass, 0 fail, 24 expectations, 2.82 seconds. No source mount used.
+Frontend tests and server full-typecheck status remain independent.
+
+Full server TypeScript diagnostic was attempted inside this final image with
+the locked agent-network tsc binary. It exits2 with errors across server and
+imported runtime/test modules (including existing tools.ts sites outside this
+change). This is NOT a full typecheck PASS and no fresh baseline equivalence is
+claimed. The dedicated four-test suite remains independently passing.
