@@ -215,8 +215,6 @@ fail-closed，不拿空串去 grep——空串 grep 恒真会把断言变成永�
 - `docs-site/docs/v0.8.0/**`（整套历史归档版本的 docs）
 - `docs/archive/**`
 - `docs/evolution-log.md`
-- `docs/upgrade-v2.md`
-- `docs/sdk-upgrade-*.md`（baseline 报告）
 - `tests/test-npm-security/`、`tests/test28-demo-debate-v2.1.2/`、
   `agent-network/tests/docker-e2e/run-e2e.sh`（测试 fixture 钉死版本）
 

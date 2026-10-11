@@ -6,8 +6,8 @@
 > 
 > **新用户请走当前快速安装路径**：
 > - 公开站：https://anet.sh/guide/getting-started
-> - 仓库内：[../README.md](../README.md) → `npm i -g @sleep2agi/agent-network@latest`
-> - 升级指南：[../docs-site/docs/guide/upgrade.md](../docs-site/docs/guide/upgrade.md)
+> - 仓库内：[../README.md](../../README.md) → `npm i -g @sleep2agi/agent-network@latest`
+> - 升级指南：[../docs-site/docs/guide/upgrade.md`](../../docs-site/docs/guide/upgrade.md)
 > 
 > 下方步骤仅供从 1.3.x 跨大版本升级的存量用户参考，新安装不适用。
 

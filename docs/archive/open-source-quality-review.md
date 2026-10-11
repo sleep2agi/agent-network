@@ -2,9 +2,9 @@
 
 日期：2026-05-11
 
-范围：静态阅读仓库、检查 npm 打包边界、检查 CI 与测试文档、对 docs-site 运行 `npm audit --json`。本报告不是完整安全审计；安全风险另见 [`open-source-security-risk-report.md`](open-source-security-risk-report.md)，历史文档与旧代码清理另见 [`claude-code-cleanup-review.md`](claude-code-cleanup-review.md)。
+范围：静态阅读仓库、检查 npm 打包边界、检查 CI 与测试文档、对 docs-site 运行 `npm audit --json`。本报告不是完整安全审计；安全风险另见 [`open-source-security-risk-report.md`](../open-source-security-risk-report.md)，历史文档与旧代码清理另见 [`claude-code-cleanup-review.md`](claude-code-cleanup-review.md)。
 
-> **当前状态（2026-05-12 更新）**：本报告 P0/P1 项已基本处理完毕，项目已于 2026-05-11 正式开源（Apache 2.0）。详细处理对照见兄弟报告 [`open-source-security-risk-report.md`](open-source-security-risk-report.md) 顶部 banner。docs-loop 每 5 分钟一轮持续跟进剩余文档质量项，进度见 [issue #10](https://github.com/sleep2agi/agent-network/issues/10)。
+> **当前状态（2026-05-12 更新）**：本报告 P0/P1 项已基本处理完毕，项目已于 2026-05-11 正式开源（Apache 2.0）。详细处理对照见兄弟报告 [`open-source-security-risk-report.md`](../open-source-security-risk-report.md) 顶部 banner。docs-loop 每 5 分钟一轮持续跟进剩余文档质量项，进度见 [issue #10](https://github.com/sleep2agi/agent-network/issues/10)。
 
 ## 总体结论
 
@@ -101,7 +101,7 @@ type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
 但仓库里仍有大量 `@preview` 或旧 preview 版本事实，例如：
 
 - `docs/getting-started.md`
-- `docs/upgrade-v2.md`
+- `docs/archive/upgrade-v2.md`
 - `docs/design-auth-network.md`
 - `docs/design-cli-dashboard-ux.md`
 - `docs/evolution-log.md`
@@ -512,7 +512,7 @@ npm run build
 
 验收标准：
 
-- `rg -n "@preview" README.md README.en.md docs-site/docs docs/getting-started.md docs/upgrade-v2.md` 只剩明确允许的 preview/历史段落。
+- `rg -n "@preview" README.md README.en.md docs-site/docs docs/getting-started.md docs/archive/upgrade-v2.md` 只剩明确允许的 preview/历史段落。
 - `npm pack --dry-run` 后每个公开 export 都能从临时安装目录导入。
 - `agent-network/bin/cli.ts` 进入 typecheck。
 - SDK 文档示例里的 `hub.reply()` 能在 tarball 安装环境跑通。
