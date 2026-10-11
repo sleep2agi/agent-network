@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync } from 'node:fs';
-import { CodexStdioClient } from './codex-stdio-client';
+import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createCodexLoginDraft } from './codex-login-draft';
 
 // This is a protocol/isolated-start check, NOT a human login success test.
 const home = '/tmp/test906-login-draft';
@@ -12,14 +12,15 @@ const schemaDir = '/tmp/test906-login-schema';
 assert.equal(Bun.spawnSync(['codex', 'app-server', 'generate-json-schema', '--out', schemaDir]).exitCode, 0);
 const params = JSON.parse(readFileSync(`${schemaDir}/v2/LoginAccountParams.json`, 'utf8'));
 assert.ok(params.oneOf.some((v: any) => v.properties?.type?.enum?.includes('chatgptDeviceCode')));
-const client = new CodexStdioClient();
-client.on('error', () => {});
-client.start({ binary: '/usr/local/bin/codex', cwd: home, replaceEnv: true,
-  env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: home, CODEX_HOME: home } });
+const draft = await createCodexLoginDraft(home, '/usr/local/bin/codex');
 try {
-  await client.request('initialize', { clientInfo: { name: 'anet_login_contract', title: 'ANet isolated login check', version: '0.1' } });
-  client.notify('initialized', {});
-  const result = await client.request<any>('account/read', { refreshToken: false });
-  assert.equal(result.account, null, 'no inherited API key or host account');
-  console.log('PASS native Codex 0.159.2 device-code schema + isolated account/read (no real login)');
-} finally { await client.close(); }
+  // The product factory has initialized the actual app-server and required
+  // account/read.account === null; it has NOT issued account/login/start.
+  assert.deepEqual(draft.login.view(), { status: 'idle' });
+  assert.notEqual(draft.home, home);
+  assert.equal(statSync(draft.home).mode & 0o777, 0o700);
+  assert.equal(statSync(`${draft.home}/config.toml`).mode & 0o777, 0o600);
+  assert.match(readFileSync(`${draft.home}/config.toml`, 'utf8'), /cli_auth_credentials_store = "file"/);
+  console.log('PASS native Codex 0.159.2 product draft factory + isolated account/read; no login or inference');
+} finally { await draft.discard(); }
+assert.deepEqual(readdirSync(home), [], 'only the owned draft was removed');

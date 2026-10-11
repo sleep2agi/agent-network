@@ -27,3 +27,35 @@ switch or inference is claimed. Those are still required to finish #906.
 
 Reproduce core + native contract:
   sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.login -t anet-provider:test906-login-core . && docker run --init --rm --network none anet-provider:test906-login-core'
+
+2026-10-11 13:48 +08 — isolated draft factory increment (same draft PR2581)
+Official sources re-read: https://learn.chatgpt.com/docs/app-server (managed
+device-code protocol), https://learn.chatgpt.com/docs/auth (file-backed private
+CODEX_HOME and forced ChatGPT login). This is the existing local/open-source
+app-server path, not a hosted/commercial authentication broker.
+
+Added createCodexLoginDraft: takes an existing daemon-owned private root,
+creates its own 0700 child and 0600 config, uses explicit file credential storage,
+starts Codex with an allowlisted environment and isolated HOME/CODEX_HOME,
+initializes the actual RPC connection and requires account/read.account=null.
+It does not start OAuth implicitly. Abandoned drafts can be discarded; only
+the exact owned temporary child is removed, not the daemon root or other accounts.
+
+Docker results: 7 PASS / 0 FAIL / 21 expectations (4 prior controller cases
++ 3 factory cases: environment isolation, symlink rejection, failed spawn cleanup).
+Actual Codex 0.159.2 factory check PASS: parent API-key sentinel and foreign
+CODEX_HOME did not supply an account; private file/dir modes checked; idle login
+state returned; discard removed the child and left the parent intact.
+No live login/start, human account verification, real credentials or inference.
+Strict targeted TypeScript 6.0.3 check passed for factory/controller/stdio client
+in Docker. First invocation stopped before checking at TS5112 because the reused
+test image had tsconfig.json; rerun with explicit --ignoreConfig succeeded.
+
+Recovery/remaining integration: no new service, port, route, production config
+or database change. The draft process is owned by its caller; the caller must
+close/discard it. This increment does not yet add a daemon handler, account
+registry, Hub RPC, UI, or binding to existing nodes. Do not merge/release as a
+complete account-switch feature. Future credentials belong to the private
+daemon state/approved encrypted backups, never Git; an empty machine otherwise
+requires the account owner to sign in again. No recovery claim has been tested.
+Containers ran --init --rm --network none and exited; no production state mounted.
