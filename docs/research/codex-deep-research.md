@@ -4,7 +4,7 @@
 > **日期**: 2026-05-13
 > **状态**: Deep research doc (per Vincent telegram 4117+4118 "真深入研究 codex 不是表面 plan")
 > **触发**: Vincent 4108-4110 拍板 Phase 1 Path B ws daemon 后, 4117+4118 raise: implement 之前先 evidence-verify §3 design assumption
-> **关联**: [RFC-006 b42eada amend](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-006-codex-code-cli-mcp-server.md) / [`docs/anet-codex-remote-control-plan.md`](./anet-codex-remote-control-plan.md) Path B 调研 / [`docs/anet-codex-mcp-server-plan.md`](./anet-codex-mcp-server-plan.md) 通信龙 Path C 调研
+> **关联**: [RFC-006 b42eada amend](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-006-codex-code-cli-mcp-server.md) / [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) Path B 调研 / [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) 通信龙 Path C 调研
 
 ## TL;DR
 
