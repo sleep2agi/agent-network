@@ -41,7 +41,7 @@ deploy/fleet/grok-commdog.md	20
 deploy/dashboard/dash-start.sh	1
 deploy/dashboard/ecosystem.config.cjs	1
 deploy/tunnel/frpc.service	1
-docs/anet-codex-code-cli-design.md	1
+docs/design/anet-codex-code-cli-design.md	1
 docs/plans/anet-codex-mcp-server-plan.md	1
 docs/plans/anet-codex-remote-control-plan.md	1
 docs/research/codex-cli-direct-comm-research.md	1

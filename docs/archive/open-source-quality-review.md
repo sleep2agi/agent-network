@@ -103,7 +103,7 @@ type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
 - `docs/getting-started.md`
 - `docs/archive/upgrade-v2.md`
 - `docs/design-auth-network.md`
-- `docs/design-cli-dashboard-ux.md`
+- `docs/design/design-cli-dashboard-ux.md`
 - `docs/evolution-log.md`
 - `docs-site/docs/changelog.md`
 - `docs-site/docs/en/changelog.md`
