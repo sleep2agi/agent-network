@@ -230,3 +230,16 @@ readback and custody markers checked. Two synthetic API-key model turns only;
 managed account data unsigned, routing fixture local, no real OAuth/external
 inference or account entitlement verified. Final CLI stop executed; isolated
 container removed by --rm. Production daemons and credentials untouched.
+
+2026-10-11 14:53 +08 candidate integration check:
+- Integrated main 5f8961c8b1d786eba5187a6ad6f8c79838ee014b, then prepared exact
+  CLI .164 / runtime .130 / Hub .122 at 32bc668b5 (release candidate, not published).
+- Pair suite: 6 PASS / 23 expectations. Initial invocation lacked a writable
+  /run/user/10001; repeated with container-only uid10001 tmpfs, no assertion change.
+- Fresh candidate Dockerfile.native image config
+  sha256:9bddacb1b6e7fbf2fea3627eb8dcbb39d4e60df87e9070df75806365fe3ddae3:
+  same native Hub/daemon/CLI key -> managed A -> B -> key core PASS, exit0.
+  Same synthetic-account/local-routing limits as above. Final node stop completed;
+  --rm removed the isolated container. No production state or credentials touched.
+- Published artifacts are still .163/.129/.121. CI and main publication gates
+  remain; never distribute this feature-branch image or tarball as a release.
