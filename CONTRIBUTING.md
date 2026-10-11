@@ -73,7 +73,7 @@ Direct PRs without prior discussion are welcome but might be redirected if they 
 
 ## How changes get merged (lightweight pipeline)
 
-Substantive changes (`agent-network/` / `server/` / `agent-node/` / `agent-network-dashboard/` / root-level `*.md`) should go through a **Pull Request**:
+Substantive changes (`agent-network/` / `server/` / `agent-node/` / root-level `*.md`) should go through a **Pull Request**. Dashboard code and docs live in [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard) — PRs here cannot change them.
 
 1. Branch off `origin/main` (suggested name: `fix/issue-<N>-<slug>` or `feat/<short-name>`)
 2. Implement + commit + push the branch
@@ -82,9 +82,9 @@ Substantive changes (`agent-network/` / `server/` / `agent-node/` / `agent-netwo
 5. At least 1 maintainer reviews, squash-merges
 6. GitHub auto-deletes the head branch on merge
 
-Docs-only updates (`docs/**`, `docs-site/docs/**`) can be pushed directly to `main` for now — there is an automated docs-loop that maintains them with high frequency; gating them through PR review would block that.
+Docs-only updates (`docs/**`, `docs-site/docs/**`) go through the same PR flow — the "docs-loop" that used to push them straight to `main` no longer exists in this repo (no workflow, no script), and the doc gates catch mistakes either way: `lint (docs integrity)` on any PR touching `*.md`, `docs locale parity` on `docs-site/docs/**`, `doc-symbol-anchors` and `home-path-baseline` on every PR. A docs-only PR is cheap to land; a silent direct push is unreviewed and unguarded.
 
-For the longer-term design (CI checks, branch protection, CODEOWNERS, preview release automation, etc.), see [#15](https://github.com/sleep2agi/agent-network/issues/15) — being rolled out incrementally as the project grows.
+The PR pipeline (CI checks, branch protection, squash-merge) that issue [#15](https://github.com/sleep2agi/agent-network/issues/15) designed is now in force; that issue is closed.
 
 ## PR checklist
 
