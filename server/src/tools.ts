@@ -4133,7 +4133,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
-      if (action === 'hub_read') return providerReply(readHubProviders(human));
+      if (action === 'hub_read') return providerReply(readHubProviders(human, (provider as any)?.include_secret_refs === true));
       if (action === 'hub_put') return providerReply(putHubProvider(human, revision!, provider));
       if (action === 'hub_bind') {
         const selection = provider as { daemon_node_id?: string; daemon_revision?: number; confirm?: boolean } | undefined;

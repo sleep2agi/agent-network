@@ -70,3 +70,32 @@ on #907; this slice does not complete the whole requirement.
 Core evidence: `tests/test907-hub-provider/`,
 `docs/tests/report-test907-hub-provider.txt`. These use isolated synthetic
 credentials/database and the real handlers/CLI, not production inference.
+
+## Saved Hub key references (#1020, implementation continuation)
+
+`hub_put` accepts `provider.secretKeyRef` instead of `provider.key`. The reference
+is an existing current-network vault name (`[A-Z][A-Z0-9_]{0,63}`), not an identity
+token or a secret value. Supplying both fields or a missing name is refused.
+Owner-only saving and explicit per-Daemon distribution are unchanged.
+
+New clients opt into reference metadata with
+`hub_read` / `provider={include_secret_refs:true}`. The receipt adds
+`secret_reference_supported:true` and each Provider's `secret_key_ref` name,
+never its value. Old readers receive the original metadata shape. A client must
+not treat an older Hub's successful catalog read as support for reference writes;
+Hub `0.9.0-preview.125` is the required release target, not yet a published claim.
+
+Selecting a different reference updates the stored reference atomically with
+the configuration revision. Entering a new plaintext key instead detaches to
+the Provider's private vault name; it never overwrites a separately named key.
+Rotating a named key changes what a **future confirmed bind** reads. It does not
+automatically rotate installed Daemons, cancel already fetched writes, apply to
+nodes, or revoke a vendor key. Explicitly redistribute as needed.
+
+No new service, port, environment variable or database migration is introduced.
+Startup/routing/master-key/backup sources remain the six coordinates above.
+Software rollback keeps vault and catalog data; previous Hub catalog/bind code
+can read stored references but cannot author this new input. Restore encrypted
+database and master key together through the existing backup procedure. The
+isolated core fixture checks exact synthetic key bytes in the Daemon's local
+application callback, without network inference or production changes.
