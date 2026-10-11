@@ -33,3 +33,30 @@ Gate3's file-source shape and exact Install-version checks passed3/3:
 CLI166, runtime132, Hub124. Docker exit0; ephemeral container removed.
 This verifies release-note inputs, not tarball build/install, live npm pins,
 formal main ancestry, registry availability, model entitlement or publication.
+
+Incremental exact source pairing, observed2026-10-11T13:01Z /21:01+08:
+Source parent a4add9cf6eea757bcef1936ae2382d4838846429.
+Read found package166/runtime132 metadata but source resolver pins165/131.
+The earlier metadata-only creation check above did NOT prove resolver pairing.
+Added the existing exact-pair unit before build/creation, copied candidate pair
+source/test into the ephemeral cached-source image, retaining dependencies.
+Before fix: Docker exit1 at the first version assertion (expected166/got165);
+no later build/creation ran. Changed ONLY source pair pins to166/132.
+Initial fixed run hit Docker fixture EACCES creating /run/user/10001; prepared
+that UID10001-owned private directory inside Docker, no host directory change.
+Final same command/image c95d95bd1f989582429e7828601e4fd28fdf67ecd76db4b6a1164336729d61fd:
+  exact-pair unit6/6 PASS,23expects; stale PATH and package identity checks kept.
+  actual CLI339-module rebuild printed anet v2.3.0-preview.166.
+  candidate package+lock metadata3/3 PASS.
+  isolated-child compiled CLI/core6/6 PASS,44expects; no login copy/fallback.
+Docker exit0, --rm container removed; source mount read-only, no host installs.
+This is TEST ONLY, not formal tarball acceptance, native Windows/macOS/Android
+acceptance, model execution or publication. Exact main rebuild remains required.
+
+Remote old-head Windows evidence, separate from the passing Docker check:
+run38140364513/job114474164977 tested merge652f80e7352f6c5c2ee19d280b2914a2bd3cc3cf
+(a4add9cf6 into main8fc900e2). Static/unit25/25 passed and runtime built;
+unmaterialized first start then timed out in PTY after60000ms during recovery.
+Log ends after resource admission, before thread/bridge/TUI readiness.
+Not classified as infrastructure-only or cured by version pins without new
+Windows evidence. No timeout increase, assertion removal or blanket rerun.
