@@ -56,6 +56,15 @@ export function readProviderNodeConfig(nodeDir: string): Record<string, any> {
 export function readProviderNodeToml(nodeDir: string) {
   return parse(privateText(join(nodeDir, 'codex-home/config.toml')) ?? '');
 }
+/** Private, local configured credentials only. Never inherit the caller's env. */
+export function readProviderNodeEnv(nodeDir: string): Record<string, string> {
+  const values: Record<string, string> = Object.create(null);
+  for (const line of (privateText(join(nodeDir, '.env')) ?? '').split(/\r?\n/)) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (match) values[match[1]] = match[2];
+  }
+  return values;
+}
 
 export type ProviderApplicationRequest = {
   requestId: string; networkId: string; daemonId: string; nodeId: string; alias: string;

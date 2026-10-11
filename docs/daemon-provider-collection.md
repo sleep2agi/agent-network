@@ -1,0 +1,40 @@
+# Existing Provider collection — implementation slice, not yet published
+
+`anet daemon provider collect <daemon> --revision N` reads a JSON selection
+from stdin: `node_id`, `alias`, `node_revision`, `provider_id`, `auth_id`, `label`.
+The revision comes from the existing Codex scan. The command resolves the
+source from local registered identity, not a caller-supplied filesystem path.
+It saves the configured API-key endpoint/model into the selected daemon's
+private store and returns the normal redacted Provider snapshot. It does not
+restart the source, copy auth.json, call a model, or establish model entitlement.
+
+This slice covers Codex TUI (`codex-app-server`) with a private node-owned home,
+Responses-compatible configured provider and a key in the source's private
+config/env file. Missing local keys never fall back to the caller's environment.
+ChatGPT logins require the existing managed account authorization flow, not
+cloning another node's refresh-token chain. External/shared homes and profile
+overrides are not silently converted. Existing managed profiles are preserved;
+collecting into an occupied authentication ID is refused. Optional request IDs
+make a lost acknowledgement replay idempotent.
+
+The local CLI core is implemented. Hub binding authorization/queue routing,
+the client collect button and creation using the daemon catalog remain to be
+wired; do not advertise this as a completed client feature or in public165.
+
+## Operations and recovery
+
+No new resident service or port is added. Daemon startup, CLI/runtime private
+pair installation, verification and rollback remain under the checked-in
+`deploy/daemon/` authority and `docs-site/docs/deploy/daemon.md`.
+Source secrets come only from that source's owner-only config.json/.env; no
+secret value belongs in Git, command arguments, logs or scan receipts.
+
+The result lives in the target daemon's `provider-store/state.json` (schema1).
+Verify by `provider list` and the resulting revision; configured is not applied.
+Version changes use an exact main-built package pair, never this branch build.
+Rollback the private software pair using the existing deployment procedure;
+collection leaves source configuration/session untouched. If restoration of
+the catalog is needed, restore its owner-only state file from an encrypted,
+identity-matched data backup. Repository clone restores code, not credentials
+or source/daemon data. No new backup facility or disaster-recovery exercise is
+claimed by this change.
