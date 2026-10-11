@@ -8,6 +8,7 @@ import { validateDaemonProviderSnapshot } from "./shared/daemon-provider-snapsho
 import { encryptSecret, decryptSecret, VaultError } from './vault';
 import { buildControllableMap } from './node-lifecycle-controllable';
 import { validProviderApplicationSelection, validProviderApplicationReceipt, type ProviderApplicationSelection } from './shared/provider-application';
+import { validLoginIntent, validLoginReceipt } from './shared/daemon-provider-login';
 
 export function providerScanTargets(networkId: string, daemonId: string) {
   const ownership = buildControllableMap(
@@ -38,12 +39,17 @@ function daemonExists(networkId: string, nodeId: string): boolean {
   try { return JSON.parse(node?.config_snapshot || "{}").role === "host_supervisor"; } catch { return false; }
 }
 function expire(networkId: string, daemonId?: string) {
+  // Device-code instructions are short-lived; do not leave them in audit history.
+  db.run(`UPDATE daemon_provider_snapshots SET status='expired', snapshot_json=NULL, error='request_expired'
+    WHERE network_id=?1 AND request_id LIKE 'dpl_%' AND expires_at <= ?2`, [networkId, Date.now()]);
   db.run(`UPDATE daemon_provider_snapshots SET status='expired', error='request_expired'
     WHERE network_id=?1 AND status='pending' AND expires_at <= ?2
     AND (?3 IS NULL OR daemon_node_id=?3)`, [networkId, Date.now(), daemonId ?? null]);
   db.run(`DELETE FROM daemon_provider_writes WHERE request_id IN
     (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1 AND status!='pending')`, [networkId]);
   db.run(`DELETE FROM daemon_provider_applications WHERE request_id IN
+    (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1 AND status!='pending')`, [networkId]);
+  db.run(`DELETE FROM daemon_provider_logins WHERE request_id IN
     (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1 AND status!='pending')`, [networkId]);
   db.run(`DELETE FROM daemon_provider_snapshots WHERE network_id=?1 AND expires_at < ?2`, [networkId, Date.now() - 7 * 86400_000]);
 }
@@ -133,6 +139,21 @@ export function requestProviderSnapshot(h: Human, daemonId: string) {
   if (!accepted) return denied("provider_snapshot_busy");
   return { ok: true as const, request_id: accepted.request_id, status: "pending", expires_at: accepted.expires_at };
 }
+export function requestProviderLogin(h: Human, daemonId: string, intent: unknown) {
+  const refusal = authorize(h); if (refusal) return refusal;
+  if (!daemonExists(h.networkId!, daemonId)) return denied('daemon_not_found');
+  if (!validLoginIntent(intent)) return denied('invalid_login_intent');
+  expire(h.networkId!, daemonId);
+  const requestId = `dpl_${randomUUID()}`, now = Date.now();
+  try {
+    db.transaction(() => {
+      db.run(`INSERT INTO daemon_provider_snapshots (request_id,network_id,daemon_node_id,requested_by,status,created_at,expires_at)
+        VALUES (?1,?2,?3,?4,'pending',?5,?6)`, [requestId, h.networkId!, daemonId, h.userId!, now, now + 120_000]);
+      db.run('INSERT INTO daemon_provider_logins (request_id,intent_json) VALUES (?1,?2)', [requestId, JSON.stringify(intent)]);
+    });
+    return { ok: true as const, request_id: requestId, status: 'pending', expires_at: now + 120_000 };
+  } catch { return denied('provider_snapshot_busy'); }
+}
 export function getProviderSnapshot(h: Human, requestId: string) {
   const refusal = authorize(h); if (refusal) return refusal;
   expire(h.networkId!);
@@ -140,16 +161,24 @@ export function getProviderSnapshot(h: Human, requestId: string) {
   if (!row) return denied("request_not_found");
   return { ok: true, request_id: row.request_id, daemon_node_id: row.daemon_node_id, status: row.status,
     expires_at: row.expires_at, observed_at: row.observed_at, error: row.error,
-    snapshot: !row.request_id.startsWith('dpa_') && row.snapshot_json ? JSON.parse(row.snapshot_json) : null,
+    snapshot: !/^dp[al]_/.test(row.request_id) && row.snapshot_json ? JSON.parse(row.snapshot_json) : null,
+    ...(row.request_id.startsWith('dpl_') ? { login: row.snapshot_json ? JSON.parse(row.snapshot_json) : null } : {}),
     ...(row.request_id.startsWith('dpa_') ? { application: row.snapshot_json ? JSON.parse(row.snapshot_json) : null } : {}) };
 }
-export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApplications = false) {
+export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApplications = false, acceptLogins = false) {
   if (!d.ok) return denied("caller_not_a_daemon");
   if (!daemonExists(d.networkId, d.daemonNodeId)) return denied("caller_not_a_daemon");
   expire(d.networkId, d.daemonNodeId);
   const requests = db.all<{ request_id: string; expires_at: number }>(`SELECT request_id,expires_at FROM daemon_provider_snapshots
     WHERE network_id=?1 AND daemon_node_id=?2 AND status='pending' ORDER BY created_at LIMIT 20`, d.networkId, d.daemonNodeId);
   try { return { ok: true, requests: requests.flatMap<Record<string, unknown>>(r => {
+    if (r.request_id.startsWith('dpl_')) {
+      if (!acceptLogins) return [];
+      const row = db.get<{ intent_json: string }>('SELECT intent_json FROM daemon_provider_logins WHERE request_id=?1', r.request_id);
+      const intent = row && JSON.parse(row.intent_json);
+      if (!validLoginIntent(intent)) throw Error('invalid_login_intent');
+      return [{ ...r, operation: 'login', intent }];
+    }
     if (r.request_id.startsWith('dpa_')) {
       if (!acceptApplications) return []; // old daemons must not consume applications as scans
       const application = applicationIntent(r.request_id);
@@ -166,13 +195,25 @@ export function pullProviderSnapshots(d: Daemon, acceptWrites = false, acceptApp
     return [write ? { ...r, operation: 'put', ...write } : { ...r, scan_targets: providerScanTargets(d.networkId, d.daemonNodeId) }];
   }) }; } catch { return denied('provider_write_unavailable'); }
 }
-export function ackProviderSnapshot(d: Daemon, requestId: string, snapshot?: unknown, failed = false, appliedRevision?: number, application?: unknown) {
+export function ackProviderSnapshot(d: Daemon, requestId: string, snapshot?: unknown, failed = false, appliedRevision?: number, application?: unknown, login?: unknown) {
   if (!d.ok || !daemonExists(d.networkId, d.daemonNodeId)) return denied("caller_not_a_daemon");
   expire(d.networkId, d.daemonNodeId);
   const row = db.get<Row>(`SELECT * FROM daemon_provider_snapshots WHERE request_id=?1 AND network_id=?2 AND daemon_node_id=?3`, requestId, d.networkId, d.daemonNodeId);
   if (!row) return denied("request_not_found");
   // First accepted receipt wins; reconnect replay cannot rewrite prior evidence.
   if (row.status !== "pending") return { ok: row.status === "succeeded" || row.status === "failed", status: row.status };
+  if (requestId.startsWith('dpl_')) {
+    if (snapshot !== undefined || application !== undefined || appliedRevision !== undefined || (failed && login !== undefined)) return denied('invalid_login_receipt');
+    const intentRow = db.get<{ intent_json: string }>('SELECT intent_json FROM daemon_provider_logins WHERE request_id=?1', requestId);
+    const intent = intentRow && JSON.parse(intentRow.intent_json);
+    if (!failed && (!validLoginIntent(intent) || !validLoginReceipt(login, intent, d.networkId, d.daemonNodeId))) return denied('invalid_login_receipt');
+    db.run(`UPDATE daemon_provider_snapshots SET status=?1,snapshot_json=?2,error=?3,observed_at=?4
+      WHERE request_id=?5 AND status='pending'`, [failed ? 'failed' : 'succeeded', failed ? null : JSON.stringify(login),
+      failed ? 'provider_login_unavailable' : null, Date.now(), requestId]);
+    db.run('DELETE FROM daemon_provider_logins WHERE request_id=?1', [requestId]);
+    return { ok: true, status: failed ? 'failed' : 'succeeded' };
+  }
+  if (login !== undefined) return denied('invalid_login_receipt');
   if (requestId.startsWith('dpa_')) {
     if (snapshot !== undefined || appliedRevision !== undefined || (failed && application !== undefined)) return denied('invalid_application_receipt');
     if (!failed) {

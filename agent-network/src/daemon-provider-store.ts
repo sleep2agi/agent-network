@@ -152,6 +152,18 @@ export class DaemonProviderStore {
         })) })) })) };
   }
   list() { return this.publicState(this.read()); }
+  /** Internal daemon bootstrap; this private path must never enter Hub replies. */
+  prepareLoginDirectory() {
+    ensurePrivateDirectory(this.root);
+    this.checkRoot();
+    const root = join(this.root, 'codex-logins');
+    if (existsSync(root)) {
+      const stat = lstatSync(root);
+      if (stat.isSymbolicLink() || !stat.isDirectory() || realpathSync(root) !== resolve(root)) fail('unsafe_login_directory');
+    }
+    ensurePrivateDirectory(root);
+    return { ...this.scope, root };
+  }
   /** Local application lease. Secrets stay inside the daemon callback, never in list/scan. */
   async withApiKey<T>(selection: { revision: number; providerId: string; authId: string; model: string },
     apply: (profile: { providerId: string; authId: string; model: string; baseUrl: string; key: string }) => Promise<T>): Promise<T> {

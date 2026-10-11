@@ -17,7 +17,7 @@ const recordName = 'anet-account.json';
  * Saved records describe accounts, not their current validity or node bindings.
  */
 export class DaemonCodexLogins {
-  private current?: { id: string; draft: Draft; account?: Account };
+  private current?: { id: string; draft: Draft; account?: Account; cancelled?: boolean };
   private tail: Promise<unknown> = Promise.resolve();
   constructor(private readonly root: string, private readonly scope: Scope,
     private readonly factory: () => Promise<Draft> = () => createCodexLoginDraft(root)) {
@@ -34,6 +34,7 @@ export class DaemonCodexLogins {
   }
   private view(): DaemonLoginView {
     const entry = this.current!;
+    if (entry.cancelled) return { request_id: entry.id, status: 'cancelled' };
     return { request_id: entry.id, ...entry.draft.login.view(),
       ...(entry.account ? { account_id: entry.account.account_id } : {}) };
   }
@@ -42,7 +43,7 @@ export class DaemonCodexLogins {
       if (!uuid.test(requestId)) throw new Error('invalid_login_request');
       if (this.current?.id === requestId) return this.view();
       if (this.current) {
-        const state = this.current.draft.login.view().status;
+        const state = this.view().status;
         if (!this.current.account && !['failed', 'cancelled'].includes(state)) throw new Error('login_in_progress');
         if (!this.current.account) await this.current.draft.discard();
       }
@@ -66,18 +67,19 @@ export class DaemonCodexLogins {
     return this.serial(async () => {
       const entry = this.entry(requestId);
       if (entry.account) throw new Error('account_already_saved');
+      if (entry.cancelled) return this.view();
       await entry.draft.login.cancel();
       // A user may discard a successful but not-yet-saved ceremony too.
       await entry.draft.discard();
-      this.current = undefined;
-      return { request_id: requestId, status: 'cancelled' };
+      entry.cancelled = true;
+      return this.view();
     });
   }
   save(requestId: string, label: string): Promise<DaemonLoginView> {
     return this.serial(async () => {
       const entry = this.entry(requestId);
       if (entry.account) return this.view(); // retry after lost response
-      if (entry.draft.login.view().status !== 'authenticated') throw new Error('login_not_authenticated');
+      if (entry.cancelled || entry.draft.login.view().status !== 'authenticated') throw new Error('login_not_authenticated');
       if (typeof label !== 'string' || !label.trim() || label.length > 100 || /[\x00-\x1f\x7f]/.test(label)) {
         throw new Error('invalid_account_label');
       }

@@ -71,6 +71,7 @@ test('cancel removes only the owned unsaved draft and closes its process', async
     expect(await f.manager.cancel(id)).toEqual({ request_id: id, status: 'cancelled' });
     expect(f.rpc.closed).toBe(true);
     expect(readdirSync(f.root)).toEqual(['existing-account']);
-    await expect(f.manager.read(id)).rejects.toThrow('login_not_found');
+    expect((await f.manager.read(id)).status).toBe('cancelled');
+    expect((await f.manager.cancel(id)).status).toBe('cancelled');
   } finally { await f.cleanup(); }
 });

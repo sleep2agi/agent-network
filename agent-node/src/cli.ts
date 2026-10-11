@@ -7921,6 +7921,7 @@ const shutdown = async () => {
   sideThreadOwnedSession?.client.close();
   sideThreadOwnedSession?.proc?.kill("SIGTERM");
   log("shutting down...");
+  await import('./runtime/daemon-provider-login.js').then(m => m.closeProviderLogins()).catch(() => {});
   await closeOpencodeRuntime("signal shutdown");
   await grokCopresenceRuntimeSession?.close().catch((e: any) => {
     warn(`[grok-copresence] close failed: ${e?.message || e}`);

@@ -18,15 +18,16 @@ export function readProviderInput(fd = 0): string {
 }
 export function runDaemonProvider(args: string[], deps: { nodesDir: string; readInput: () => string; print: (text: string) => void }): number {
   const [action, daemon, ...rest] = args;
-  if (!["list", "scan", "put"].includes(action) || !daemon || !/^[\p{L}\p{N}][\p{L}\p{N}_.-]{0,99}$/u.test(daemon)
-    || (["list", "scan"].includes(action) && rest.length !== 0)
+  if (!["list", "scan", "put", "prepare-login"].includes(action) || !daemon || !/^[\p{L}\p{N}][\p{L}\p{N}_.-]{0,99}$/u.test(daemon)
+    || (["list", "scan", "prepare-login"].includes(action) && rest.length !== 0)
     || (action === "put" && (![2, 4].includes(rest.length) || rest[0] !== "--revision" || !/^(0|[1-9][0-9]*)$/.test(rest[1])
       || (rest.length === 4 && (rest[2] !== '--request' || !/^dps_[a-f0-9-]{36}$/.test(rest[3])))))) {
     deps.print(DAEMON_PROVIDER_USAGE); return 2;
   }
   try {
     const store = new DaemonProviderStore(join(deps.nodesDir, daemon));
-    if (action === "scan") {
+    if (action === 'prepare-login') deps.print(JSON.stringify({ ok: true, ...store.prepareLoginDirectory() }));
+    else if (action === "scan") {
       const snapshot = store.list();
       const input = deps.readInput();
       if (Buffer.byteLength(input) > 64 * 1024) throw new DaemonProviderError('input_too_large');

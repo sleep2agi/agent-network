@@ -5,6 +5,7 @@ import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { validateDaemonProviderSnapshot } from "../shared/daemon-provider-snapshot.js";
 import { requiredCliStatus, resolveOnPathReal, execVersionReal } from './runtime-readiness.js';
 import { validProviderApplicationSelection, validProviderApplicationReceipt } from '../shared/provider-application.js';
+import { handleProviderLogin } from './daemon-provider-login.js';
 
 export type SnapshotDeps = {
   callCommHub: (name: string, args: Record<string, unknown>) => Promise<any>;
@@ -12,6 +13,7 @@ export type SnapshotDeps = {
   serverUrl?: string;
   warn: (message: string) => void;
   readSnapshot?: () => Promise<unknown>;
+  login?: (intent: unknown) => Promise<unknown>;
 };
 export function secureProviderTransport(value?: string): boolean {
   try { const u = new URL(value || ''); return !u.username && !u.password &&
@@ -90,15 +92,20 @@ export function reconcileProviderSnapshots(deps: SnapshotDeps): Promise<void> {
     do {
       state.again = false;
       const acceptWrites = secureProviderTransport(deps.serverUrl);
-      const pending = await deps.callCommHub("pull_daemon_provider_snapshots", acceptWrites ? { accept_writes: true, accept_applications: true } : {});
+      const pending = await deps.callCommHub("pull_daemon_provider_snapshots", acceptWrites ? { accept_writes: true, accept_applications: true, accept_logins: true } : {});
       if (!pending?.ok || !Array.isArray(pending.requests)) return; // old Hub capability: unsupported is not success
       for (const request of pending.requests.slice(0, 20)) {
-        if (typeof request?.request_id !== "string" || !/^dp[sa]_[a-f0-9-]{36}$/.test(request.request_id)
+        if (typeof request?.request_id !== "string" || !/^dp[sal]_[a-f0-9-]{36}$/.test(request.request_id)
           || !Number.isSafeInteger(request.expires_at) || request.expires_at <= Date.now()) continue;
         let snapshot: unknown;
         let application: unknown;
+        let login: unknown;
         try {
-          if (request.operation === 'apply') {
+          if (request.operation === 'login') {
+            if (!acceptWrites) throw Error('insecure_transport');
+            await readLocalProviderSnapshot(deps);
+            login = await (deps.login ? deps.login(request.intent) : handleProviderLogin(deps, request.intent));
+          } else if (request.operation === 'apply') {
             if (!acceptWrites) throw new Error('insecure_transport');
             application = await applyLocalProvider(deps, request);
           } else if (request.operation === 'put') {
@@ -114,7 +121,7 @@ export function reconcileProviderSnapshots(deps: SnapshotDeps): Promise<void> {
           continue;
         }
         await deps.callCommHub("ack_daemon_provider_snapshot", { request_id: request.request_id,
-          ...(application ? { application } : { snapshot }),
+          ...(login ? { login } : application ? { application } : { snapshot }),
           ...(request.operation === 'put' ? { applied_revision: request.expected_revision + 1 } : {}) });
       }
     } while (state.again);

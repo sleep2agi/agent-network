@@ -550,6 +550,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_applications (
   selection_json TEXT NOT NULL
 )`);
 
+// Login commands contain only intent. OAuth tokens never enter Hub storage.
+db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_logins (
+  request_id TEXT PRIMARY KEY, intent_json TEXT NOT NULL
+)`);
+
 // At most one row per node may be in a non-terminal state at a time
 // (single-flight enforced at the tool layer; this table just stores).
 //

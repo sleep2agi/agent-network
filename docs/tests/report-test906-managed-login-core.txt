@@ -93,3 +93,50 @@ machine requires fresh user sign-in. No full-machine recovery drill claimed.
 Remaining: actual daemon/Hub authorization and RPC wiring, client login UI,
 account-to-Provider binding and single-node switch/rollback. This draft is NOT
 a usable or released account-switch feature and is not included in app 0.2.237.
+
+2026-10-11 14:01 +08 — Hub/daemon login command wiring (same draft)
+Implemented daemon_provider_snapshot action=login with provider intent
+{action:start|read|cancel|save|accounts,session_id?,label?}. Existing user/admin
+authorization and token-bound daemon identity remain in force. Old daemons do
+not receive login requests unless accept_logins is advertised. The runtime only
+advertises this on HTTPS/loopback-secure transport, validates its pinned local
+CLI scope, and owns the login manager for the daemon lifetime. Shutdown closes
+owned login processes and refuses new ceremonies. Cancel now replays its same
+receipt when the Hub acknowledgement was lost. No new endpoint/port or service.
+
+Private initialization is through the pinned CLI internal command
+anet daemon provider prepare-login <registered-daemon-alias>.
+DaemonProviderStore validates registered config, then uses existing private
+directory/Windows ACL helpers for provider-store/codex-logins. Root is never a
+remote input and never included in a Hub receipt. Saved account subdirectories
+remain there. Hub's additive daemon_provider_logins table stores only intent;
+responses contain status and short-lived device instructions, never auth.json
+or OAuth tokens. Expiry maintenance scrubs login responses after their 120s
+request window (on protocol access); the managed ceremony itself is bounded by
+the existing ten-minute deadline. Save does not apply an account to any node.
+
+Docker transport/core: 16 PASS / 0 FAIL / 142 expectations; 12 audience checks
+PASS / 0 FAIL / 304 expectations. New core route uses actual registered Hub
+handlers, reconciler, session manager, then compiled CLI bootstrap for account
+listing. OAuth completion is synthetic; actual account login was NOT attempted.
+Core standalone manager/controller/factory: 10 PASS / 0 FAIL / 39 expectations.
+Runtime and CLI bundles compiled in Docker. Production filesystem not mounted;
+all DBs, configs and credentials are TEST-ONLY within --rm offline containers.
+Final transport test mounted current server/src and agent-node/src read-only
+over the built image; compiled CLI matches the unchanged bootstrap implementation.
+
+Two failures were corrected without relaxing assertions: expiry fixture used
+epoch zero (correctly triggering seven-day retention deletion instead of merely
+expiring instructions), changed to now-1; tool-list user payload exceeded its
+57500-byte ceiling by 51 bytes, fixed by shortening description, now 57487 bytes.
+The docs symbol-pin check found zero drift among eight evaluated pins, but eight
+were skipped and one commit ref unavailable in the Docker read-only worktree;
+do not call this a full pin check. No production mutation or release in this PR.
+
+Upgrade/rollback: this is still draft source. Ship only exact main CLI/runtime/Hub
+after integration gates; bootstrap requires the new CLI, so old pair fails
+explicitly, never falls back to another account root. Existing releases ignore
+the additive intent table and new private account marker; rollback does not
+delete saved credentials. Pending logins may expire and require a fresh ceremony.
+Encrypted data backup or user re-login remains necessary after machine loss.
+Client login UI and account-to-node switch/rollback are still not implemented.
