@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { DaemonProviderError, DaemonProviderStore, readPrivateJson } from './daemon-provider-store';
 import { atomicWritePrivateFile, atomicWritePrivateJson } from './private-state';
 
-const fail = (code: string): never => { throw new DaemonProviderError(code); };
+function fail(code: string): never { throw new DaemonProviderError(code); }
 export function chatgptCredentialFingerprint(raw: string): string {
   let auth: any;
   try { auth = JSON.parse(raw); } catch { fail('saved_account_invalid'); }

@@ -214,7 +214,7 @@ export async function applyDaemonProvider(nodeDir: string, store: DaemonProvider
           }
           await lifecycle.restore();
           if (custody?.previousFingerprint) {
-            if (!lifecycle.verifyChatgpt) fail('account_verification_unavailable');
+            if (!lifecycle.verifyChatgpt) return fail('account_verification_unavailable');
             await lifecycle.verifyChatgpt();
             const restoredAuth = privateText(authPath);
             if (!restoredAuth || chatgptCredentialFingerprint(restoredAuth) !== custody.previousFingerprint) fail('runtime_restore_unconfirmed');

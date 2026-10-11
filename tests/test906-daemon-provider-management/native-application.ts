@@ -9,6 +9,9 @@ import { db } from '../../server/src/db';
 import { register, createNetworkTokenForNode } from '../../server/src/auth';
 import { bootServer } from '../../server/src/server';
 import { providerNodeRevision } from '../../agent-network/src/daemon-provider-application';
+import { DaemonProviderStore } from '../../agent-network/src/daemon-provider-store';
+import { nativeAccountFixture } from './native-account-fixture';
+import { startNativeRoutingFixture } from './native-routing-fixture';
 
 const root = mkdtempSync(join(tmpdir(), 'native906-'));
 const work = join(root, 'project'), userHome = join(root, 'home');
@@ -16,6 +19,7 @@ for (const dir of [work, userHome]) mkdirSync(dir, { mode: 0o700 });
 process.env.COMMHUB_UPLOADS_DIR = join(root, 'uploads');
 process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
 const hub = bootServer({ port: 0, hostname: '127.0.0.1' });
+const routing = startNativeRoutingFixture();
 const url = `http://127.0.0.1:${hub.port}`;
 const requests: { path: string; auth: string | null; model: string }[] = [];
 const endpoint = Bun.serve({ hostname: '127.0.0.1', port: 0,
@@ -177,8 +181,68 @@ try {
   assert.deepEqual(requests[0], { path: '/old/responses', auth: 'Bearer fixture-old-only', model: 'fixture-old' });
   assert.deepEqual(requests[1], { path: '/selected/responses', auth: 'Bearer fixture-new-only', model: 'fixture-new' });
   assert.equal(existsSync(join(nodeDir, 'provider-application.json')), false);
+  await live.stop();
+
+  // Same real node/session: API key -> managed login A -> managed login B -> key.
+  // The signed-in shape is an unsigned fixture; no official model turn is sent.
+  const store = new DaemonProviderStore(daemonDir);
+  const accountIds = ['aaaaaaaa-1111-4111-8111-111111111111', 'bbbbbbbb-1111-4111-8111-111111111111'];
+  const accountHomes = accountIds.map((id, i) => {
+    const savedHome = join(store.prepareLoginDirectory().root, `login-native${i}`);
+    mkdirSync(savedHome, { mode: 0o700 });
+    const auth = nativeAccountFixture(id, `fixture-${i}@example.invalid`);
+    secrets.push(auth.tokens.access_token, auth.tokens.refresh_token);
+    write(join(savedHome, 'auth.json'), auth);
+    write(join(savedHome, 'anet-account.json'), { version: 1, network_id: net, daemon_node_id: daemonId,
+      account_id: id, label: `Fixture ${i}`, created_at: Date.now() });
+    return savedHome;
+  });
+  const official = await human('daemon_provider_snapshot', { action: 'put', network_id: net, id: daemonId, revision: 1,
+    provider: { id: 'openai', label: 'OpenAI', enabled: true, runtimes: [{ runtime: 'codex-tui', auth: accountIds.map(id => ({
+      id, kind: 'chatgpt', account_id: id, models: ['gpt-6.1-sol'],
+    })) }] } });
+  assert.equal(official.ok, true); await reconcile();
+  assert.equal((await human('daemon_provider_snapshot', { action: 'read', network_id: net, id: official.request_id })).status, 'succeeded');
+  const waitIdle = async () => {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const status = await rpc(daemon.token!)('get_session_status', { alias });
+      if (status.session?.status === 'idle' && status.inbox_pending === 0) return;
+      await Bun.sleep(500);
+    }
+    throw Error('native node did not become idle');
+  };
+  for (let i = 0; i < accountIds.length; i++) {
+    console.log(`STAGE real CLI managed account ${i + 1}`);
+    await waitIdle();
+    const selected = await human('daemon_provider_snapshot', { action: 'apply', network_id: net, id: daemonId, revision: 2,
+      provider: { node_id: childId, node_revision: providerNodeRevision(nodeDir), provider_id: 'openai', auth_id: accountIds[i],
+        account_id: accountIds[i], model: 'gpt-6.1-sol', confirm_restart: true } });
+    assert.equal(selected.ok, true); await reconcile();
+    const receipt = await human('daemon_provider_snapshot', { action: 'read', network_id: net, id: selected.request_id });
+    assert.equal(receipt.status, 'succeeded', `official application status=${receipt.status} error=${receipt.error}`);
+    assert.equal(receipt.application.account_id, accountIds[i]); assert.equal(receipt.application.runtime_provider, 'openai');
+    const configured = JSON.parse(readFileSync(join(nodeDir, 'config.json'), 'utf8'));
+    assert.equal(configured.codexThreadId, threadId);
+    const accountPeer = new NativeRpc(home, configured.codexAppServerUrl); peers.push(accountPeer); await accountPeer.init();
+    const account = await accountPeer.request('account/read', { refreshToken: false });
+    assert.equal(account.account.type, 'chatgpt'); assert.equal(account.account.email, `fixture-${i}@example.invalid`);
+    const resumedOfficial = await accountPeer.request('thread/resume', { threadId });
+    assert.equal(resumedOfficial.modelProvider, 'openai'); assert.equal(resumedOfficial.model, 'gpt-6.1-sol');
+    await accountPeer.stop();
+    assert.equal(JSON.parse(readFileSync(join(accountHomes[i], 'anet-account.json'), 'utf8')).active, true);
+    if (i) assert.equal(JSON.parse(readFileSync(join(accountHomes[i - 1], 'anet-account.json'), 'utf8')).active, false);
+  }
+  console.log('STAGE real CLI managed account back to API key');
+  await waitIdle();
+  const back = await human('daemon_provider_snapshot', { action: 'apply', network_id: net, id: daemonId, revision: 2,
+    provider: { node_id: childId, node_revision: providerNodeRevision(nodeDir), provider_id: 'custom', auth_id: 'work', model: 'fixture-new', confirm_restart: true } });
+  assert.equal(back.ok, true); await reconcile();
+  assert.equal((await human('daemon_provider_snapshot', { action: 'read', network_id: net, id: back.request_id })).status, 'succeeded');
+  assert.equal(JSON.parse(readFileSync(join(accountHomes[1], 'anet-account.json'), 'utf8')).active, false);
+  assert.equal(requests.length, 2, 'no official model request was made');
   passed = true;
-  console.log('PASS real Hub HTTP → Node daemon handler → pinned CLI stop/start/verify → native Codex same thread → selected HTTPS endpoint/key/model; two synthetic turns, no external inference');
+  console.log('PASS real Hub → daemon → CLI → native Codex same-thread API key / managed account A / B / API key; local account identity/model readback; two synthetic API-key turns, unsigned account fixtures, no real OAuth or external inference');
 } catch (error) {
   console.error(scrub(String(error)));
   console.error('MODEL_REQUESTS', JSON.stringify(requests.map(r => ({ path: r.path, model: r.model,
@@ -208,6 +272,6 @@ try {
 finally {
   for (const peer of peers) await peer.stop();
   if (started) { try { await run('node', [cli, 'node', 'stop', alias], '', 60_000); } catch (error) { passed = false; console.error(scrub(String(error))); } }
-  endpoint.stop(true); hub.stop(true); rmSync(root, { recursive: true, force: true });
+  routing.stop(); endpoint.stop(true); hub.stop(true); rmSync(root, { recursive: true, force: true });
   process.exit(passed ? 0 : 1);
 }

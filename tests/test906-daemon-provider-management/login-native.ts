@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { createCodexLoginDraft } from './codex-login-draft';
+import { CodexStdioClient } from './codex-stdio-client';
+import { nativeAccountFixture } from './native-account-fixture';
+import { startNativeRoutingFixture } from './native-routing-fixture';
 
 // This is a protocol/isolated-start check, NOT a human login success test.
 const home = '/tmp/test906-login-draft';
@@ -24,3 +27,22 @@ try {
   console.log('PASS native Codex 0.159.2 product draft factory + isolated account/read; no login or inference');
 } finally { await draft.discard(); }
 assert.deepEqual(readdirSync(home), [], 'only the owned draft was removed');
+
+// Next atomic layer: actual Codex reads the managed file shape. No browser flow,
+// token refresh or model request; Docker --network none prevents external calls.
+const savedHome = mkdtempSync('/tmp/test906-native-account-');
+const peer = new CodexStdioClient();
+const routing = startNativeRoutingFixture();
+try {
+  writeFileSync(`${savedHome}/config.toml`, 'model_provider="openai"\nforced_login_method="chatgpt"\ncli_auth_credentials_store="file"\n', { mode: 0o600 });
+  writeFileSync(`${savedHome}/auth.json`, JSON.stringify(nativeAccountFixture('aaaaaaaa-1111-4111-8111-111111111111', 'fixture@example.invalid')), { mode: 0o600 });
+  peer.start({ binary: '/usr/local/bin/codex', replaceEnv: true, env: { PATH: process.env.PATH, HOME: savedHome, CODEX_HOME: savedHome } });
+  await peer.request('initialize', { clientInfo: { name: 'anet-managed-account-fixture', version: '1' } });
+  peer.notify('initialized', {});
+  const read = await peer.request<any>('account/read', { refreshToken: false });
+  assert.equal(read.account?.type, 'chatgpt');
+  assert.equal(read.account?.email, 'fixture@example.invalid');
+  assert.equal(read.requiresOpenaiAuth, true);
+  assert.ok(routing.checks() > 0, 'actual Codex resolved workspace routing against the HTTPS fixture');
+  console.log('PASS native Codex 0.159.2 managed auth-file account/read; unsigned fixture, no real login/refresh/inference');
+} finally { await peer.close(); routing.stop(); rmSync(savedHome, { recursive: true, force: true }); }

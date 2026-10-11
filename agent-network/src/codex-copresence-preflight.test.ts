@@ -9,6 +9,16 @@ import {
   type StatLike,
 } from "./codex-copresence-preflight";
 
+test("native restored account composer proves paint without a retained banner", () => {
+  const screen = "• fixture reply\n› Ask Codex to do anything\n  GPT-6.1-Sol default · /project\n  ? for shortcuts     ⚠ 3 warnings · f2 to view";
+  expect(codexTuiPaneState(screen)).toBe("usable");
+  expect(codexTuiPaneState("› Ask Codex to do anything")).toBe("not-painted");
+  expect(codexTuiPaneState("? for shortcuts")).toBe("not-painted");
+  expect(codexTuiPaneState(screen + "\nSign in with ChatGPT")).toBe("sign-in");
+  expect(codexTuiPaneState(screen + "\nDo you trust the files in this folder")).toBe("trust-prompt");
+  expect(codexTuiPaneState(screen + "\nUpdate available!")).toBe("update-prompt");
+});
+
 const join = (a: string, b: string) => `${a}/${b}`;
 function stats(map: Record<string, number>) {
   return (p: string): StatLike | null => (p in map ? { mtimeMs: map[p] } : null);

@@ -11,7 +11,7 @@ COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 RUN cd agent-node && npm ci --ignore-scripts --no-audit --no-fund
 RUN apt-get update && apt-get install -y --no-install-recommends tmux procps iproute2 openssl ca-certificates curl && rm -rf /var/lib/apt/lists/*
 RUN npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@0.159.2
-RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/fixture-key.pem -out /usr/local/share/ca-certificates/provider906.crt -days 3650 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' && chmod 644 /tmp/fixture-key.pem && update-ca-certificates
+RUN openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/fixture-key.pem -out /usr/local/share/ca-certificates/provider906.crt -days 3650 -subj '/CN=localhost' -addext 'subjectAltName=DNS:chatgpt.com,DNS:localhost,IP:127.0.0.1' && chmod 644 /tmp/fixture-key.pem && update-ca-certificates
 COPY server ./server
 COPY agent-network ./agent-network
 COPY agent-node ./agent-node
@@ -24,6 +24,8 @@ RUN mkdir -p /opt/test906/node_modules/@sleep2agi/agent-node && cp -r /work/agen
 COPY --chmod=755 tests/test906-daemon-provider-management/native-npx.sh /usr/local/bin/npx
 COPY --chmod=755 tests/test906-daemon-provider-management/native-tmux.sh /usr/local/bin/tmux
 COPY tests/test906-daemon-provider-management/native-application.ts /work/tests/test906-daemon-provider-management/native-application.ts
+COPY tests/test906-daemon-provider-management/native-account-fixture.ts /work/tests/test906-daemon-provider-management/native-account-fixture.ts
+COPY tests/test906-daemon-provider-management/native-routing-fixture.ts /work/tests/test906-daemon-provider-management/native-routing-fixture.ts
 COPY tests/test906-daemon-provider-management/native-reconcile.mjs /work/native-reconcile.mjs
 RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx && chmod go-w /work /work/agent-network /work/agent-network/dist /work/agent-network/dist/bin && useradd --create-home --uid 10001 runner
 ENV ANET_BIN_ABS=/work/agent-network/dist/bin/anet.cjs ANET_DAEMON_ALLOW_ENV_BIN=1 COMMHUB_DB=/tmp/test906-native.db

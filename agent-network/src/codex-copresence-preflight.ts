@@ -187,7 +187,12 @@ export function codexTuiPaneState(onScreen: string, everSeen: string = onScreen)
   for (const m of BLOCKER_MARKERS) {
     if (m.needles.some((n) => onScreen.includes(n))) return m.blocker;
   }
-  if (!PAINTED_MARKERS.some((n) => everSeen.includes(n))) return "not-painted";
+  // Native 0.159.2 may restore a ChatGPT thread without retaining the welcome
+  // banner in tmux history. Require the current composer AND its footer, not
+  // arbitrary historical text or a generic picker arrow. Blockers still win.
+  const resumedComposer = /^\s*› Ask Codex to do anything\s*$/m.test(onScreen)
+    && /^\s*\? for shortcuts\b/m.test(onScreen);
+  if (!resumedComposer && !PAINTED_MARKERS.some((n) => everSeen.includes(n))) return "not-painted";
   if (!INPUT_READY_MARKERS.some((n) => onScreen.includes(n))) return "input-not-ready";
   return "usable";
 }

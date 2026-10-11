@@ -6,6 +6,8 @@ on:
       - 'agent-node/src/runtime/codex-stdio-client.ts'
       - 'tests/test906-daemon-provider-management/Dockerfile.login'
       - 'tests/test906-daemon-provider-management/login-native.ts'
+      - 'tests/test906-daemon-provider-management/native-account-fixture.ts'
+      - 'tests/test906-daemon-provider-management/native-routing-fixture.ts'
       - '.github/workflows/provider-login-core.yml'
   push:
     branches: [main]
@@ -14,6 +16,8 @@ on:
       - 'agent-node/src/runtime/codex-stdio-client.ts'
       - 'tests/test906-daemon-provider-management/Dockerfile.login'
       - 'tests/test906-daemon-provider-management/login-native.ts'
+      - 'tests/test906-daemon-provider-management/native-account-fixture.ts'
+      - 'tests/test906-daemon-provider-management/native-routing-fixture.ts'
       - '.github/workflows/provider-login-core.yml'
 permissions:
   contents: read
@@ -27,4 +31,4 @@ jobs:
       - run: >-
           sg docker -c 'docker build
           -f tests/test906-daemon-provider-management/Dockerfile.login
-          -t provider-login-core . && docker run --init --rm --network none provider-login-core'
+          -t provider-login-core . && docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1 provider-login-core'

@@ -198,3 +198,22 @@ exact version guidance, CI review/merge and main-SHA release. No human OAuth,
 production restart, native installer acceptance, model inference or release claimed.
 Cleanup: all local test containers --rm; fixture DB/directories are container-only.
 Cached Docker build images retained for the next affected-path check.
+
+2026-10-11 14:43 +08 affected-path increment (TEST-ONLY):
+- Fixed strict TypeScript narrowing in account custody and rollback verification.
+  Dockerfile.cli compiled CLI roundtrip and full CLI tsc --noEmit passed.
+- Docker native login test passed both empty private draft and saved synthetic
+  auth account/read with the real Codex binary. Workspace-routing response comes
+  from the checked-in container-only HTTPS fixture, --network none plus explicit
+  chatgpt.com loopback mapping. Unsigned auth is NOT real OAuth/entitlement proof.
+- Login/lifecycle/vault unit slice: 10 PASS / 39 expectations. Application/readback
+  affected slice: 14 PASS / 80 expectations.
+- Full native application trial first stopped at a retired fixture-model prompt;
+  that isolated container was removed. Fixture model updated to GPT-6.1-Sol.
+  Second trial rendered the correct model and prior thread but did not complete
+  startup: restored account TUI omitted the historical OpenAI Codex banner.
+- Narrow readiness fix recognizes the current exact composer together with its
+  shortcuts footer; sign-in, trust and update blockers retain precedence. Docker
+  preflight suite: 28 PASS / 48 expectations. Full application recheck pending.
+- No production credentials, host global packages, daemon restarts or external
+  inference used. Tests and source-built containers are not released artifacts.
