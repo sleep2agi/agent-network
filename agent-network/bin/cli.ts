@@ -14,6 +14,8 @@ import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempS
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
 import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
+import { runDaemonSecret } from '../src/scoped-secrets.js';
+import { readScopedNodeEnv } from '../src/shared/scoped-secret-env.js';
 import { runDaemonProviderApply } from '../src/daemon-provider-apply-command.js';
 import { runDaemonProviderInitialize } from '../src/daemon-provider-initialize.js';
 import { stoppedReceiptAtStart, isHubStopped } from "../src/stopped-receipt.js";
@@ -5203,8 +5205,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
 // process.env and FATAL-fails the parent CLI when the referenced var is
 // missing — same UX as agent-node's own resolver, just earlier in the chain
 // so we don't fork into a crashing child.
-function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string, dotenvMap?: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
+function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string, dotenvMap?: Record<string, string>, scopedEnv?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = Object.fromEntries(Object.entries(scopedEnv ?? {})
+    .filter(([key]) => !Object.hasOwn(process.env, key)));
   if (!profileEnv || typeof profileEnv !== "object") return out;
   for (const [k, v] of Object.entries(profileEnv)) {
     if (typeof v === "string") {
@@ -5237,12 +5240,13 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
 // per line, no quotes, no shell expansion. Returns {} if the file is missing
 // or unreadable. Caller logs the *key count* — never the values.
 function loadNodeDotenv(nodeId: string): Record<string, string> {
+  const scoped = readScopedNodeEnv(join(nodesDir(), nodeId));
   const path = join(nodesDir(), nodeId, ".env");
   repairPrivateFilePermissions(path);
-  if (!existsSync(path)) return {};
+  if (!existsSync(path)) return scoped;
   try {
-    return parseNodeDotenv(readFileSync(path, "utf-8"));
-  } catch { return {}; }
+    return { ...scoped, ...parseNodeDotenv(readFileSync(path, "utf-8")) };
+  } catch { return scoped; }
 }
 
 function parseNodeDotenv(raw: string): Record<string, string> {
@@ -5260,8 +5264,9 @@ function parseNodeDotenv(raw: string): Record<string, string> {
 }
 
 function loadOpencodeNodeDotenv(nodeId: string): Record<string, string> {
+  const scoped = readScopedNodeEnv(join(nodesDir(), nodeId));
   const raw = readOpencodePrivateProfileFile(join(nodesDir(), nodeId), ".env");
-  return raw === undefined ? {} : parseNodeDotenv(raw);
+  return { ...scoped, ...(raw === undefined ? {} : parseNodeDotenv(raw)) };
 }
 
 // OpenCode stores the node secret file through the private-profile reader.
@@ -7527,7 +7532,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     if (Object.keys(_dotenvSDK).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
-    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK, readScopedNodeEnv(join(nodesDir(), nodeId))));
 
     // #448 — CODEX_HOME for codex runtimes comes from this node's own config/dir,
     // never from the launching env (a tmux server or daemon env can carry another
@@ -7796,7 +7801,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     if (Object.keys(_dotenvCC).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvCC).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
-    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC));
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC, readScopedNodeEnv(join(nodesDir(), nodeId))));
     // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
     // stable per-node value (node-server.ts:75 otherwise falls through to
     // randomUUID() at every start, orphaning the old session row on any
@@ -8650,7 +8655,7 @@ async function startCommand() {
       forkOnResumeFailure: opts["fork-on-resume-failure"] === "true",
       forkRecoveryRequestId,
       yes: opts.yes === "true",
-      configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id)),
+      configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id), readScopedNodeEnv(join(nodesDir(), resolvedForCopresence.id))),
     });
     return;
   }
@@ -11218,6 +11223,14 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
     return;
   }
   switch (sub) {
+    case 'secret': {
+      const code = runDaemonSecret(args.slice(2), { nodesDir: nodesDir(), readInput: () => {
+        if (process.stdin.isTTY) throw Error('private stdin required');
+        return readProviderInput();
+      }, print: console.log });
+      if (code === 2) markUsageError(); else if (code) markFailed();
+      break;
+    }
     case "adopt": case "unadopt": case "adopted": {
       const code = await runDaemonAdopt(sub, args.slice(2), { cwd: process.cwd(), home: homedir(), login: loadGlobal(), fetch, print: console.log });
       if (code === 2) markUsageError(); else if (code) markFailed();

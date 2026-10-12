@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
+import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets } from './scoped-secrets.js';
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { adoptionCandidatesReportSchema } from "./adoption-candidates.js";
@@ -841,6 +842,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // discovery (#337 extracts this field). "host_supervisor" =
         // anet daemon. Default-stripping zod would drop this otherwise.
         role: z.string().max(64).optional().nullable(),
+        scoped_secrets_capable: z.boolean().optional(),
         // RFC-026 §9.3 / #338 PR3 — daemon self-declare nested under
         // `daemon_capabilities` (canonical shape per existing hub reads
         // at tools.ts:2010/2075 — PR1/PR2 placed these top-level, hub
@@ -4129,10 +4131,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const providerHuman = (net?: string) => ({ userId: enforceUserId, isNode: callerTokenIsNetwork, networkId: getNetworkId(net) });
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   server.tool(
-    "daemon_provider_snapshot", "Provider: daemon refresh/put/collect/apply/login; read=request id. login provider={action:start|read|cancel|save|accounts,session_id?,label?}. hub_read=catalog; hub_put=owner config; hub_bind=id+revision,provider={daemon_node_id,daemon_revision,confirm:true}. No login tokens.",
-    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
+    "daemon_provider_snapshot", "Daemon Provider actions; read=id. Login provider={action,session_id?,label?}, no tokens. hub_*=owner catalog/distribute. secret_*=env persistence, provider={node_id?,key?,value?}; next full start.",
+    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
+      // Separate scoped-secret contract using the existing management lane.
+      // No additional tools in model context; ordinary Provider actions unchanged.
+      if (action === 'secret_read') return providerReply(getScopedSecrets(human, id));
+      if (action === 'secret_list' || action === 'secret_put' || action === 'secret_delete') {
+        const input = provider as { node_id?: string | null; key?: string; value?: string } | undefined;
+        const result = requestScopedSecrets(human, id, input?.node_id ?? null, action === 'secret_list' ? 'list' : action === 'secret_put' ? 'put' : 'delete', input?.key, input?.value, revision);
+        if (result.ok) {
+          const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', id, human.networkId!);
+          if (target) pushEvent(target.alias, { type: 'scoped_secrets', request_id: result.request_id }, human.networkId!);
+        }
+        return providerReply(result);
+      }
       if (action === 'hub_read') return providerReply(readHubProviders(human, (provider as any)?.include_secret_refs === true));
       if (action === 'hub_put') return providerReply(putHubProvider(human, revision!, provider));
       if (action === 'hub_bind') {
@@ -4158,13 +4172,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
   server.tool(
-    "pull_daemon_provider_snapshots", "Daemon Provider work; advertise only implemented secure write/collect/apply/login capabilities.", { accept_writes: z.boolean().optional(), accept_applications: z.boolean().optional(), accept_logins: z.boolean().optional(), accept_local_discovery: z.boolean().optional(), accept_collections: z.boolean().optional() },
-    async ({ accept_writes, accept_applications, accept_logins, accept_local_discovery, accept_collections }) => providerReply(pullProviderSnapshots(resolveCallerDaemonTokenBound(), accept_writes, accept_applications, accept_logins, accept_local_discovery, accept_collections)),
+    "pull_daemon_provider_snapshots", "Daemon Provider work; advertise only implemented secure write/collect/apply/login capabilities.", { accept_writes: z.boolean().optional(), accept_applications: z.boolean().optional(), accept_logins: z.boolean().optional(), accept_local_discovery: z.boolean().optional(), accept_collections: z.boolean().optional(), accept_secrets: z.boolean().optional() },
+    async ({ accept_writes, accept_applications, accept_logins, accept_local_discovery, accept_collections, accept_secrets }) => {
+      const caller = resolveCallerDaemonTokenBound();
+      const result = pullProviderSnapshots(caller, accept_writes, accept_applications, accept_logins, accept_local_discovery, accept_collections);
+      return providerReply(result.ok && accept_secrets ? { ...result, secret_requests: pullScopedSecrets(caller) } : result);
+    },
   );
   server.tool(
     "ack_daemon_provider_snapshot", "Target daemon acknowledges redacted Provider configuration readback; fixed failure code only.",
     { request_id: z.string().min(1).max(200), snapshot: z.unknown().optional(), failed: z.boolean().optional(), applied_revision: z.number().int().min(0).optional(), application: z.unknown().optional(), login: z.unknown().optional() },
-    async ({ request_id, snapshot, failed, applied_revision, application, login }) => providerReply(ackProviderSnapshot(resolveCallerDaemonTokenBound(), request_id, snapshot, failed, applied_revision, application, login)),
+    async ({ request_id, snapshot, failed, applied_revision, application, login }) => providerReply(request_id.startsWith('dsk_')
+      ? ackScopedSecrets(resolveCallerDaemonTokenBound(), request_id, snapshot, failed)
+      : ackProviderSnapshot(resolveCallerDaemonTokenBound(), request_id, snapshot, failed, applied_revision, application, login)),
   );
 
   // Helper — map a ValidationError thrown from create-node-validate

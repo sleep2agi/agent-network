@@ -568,6 +568,11 @@ try {
     explicitConfigKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
     log: (line) => console.log(line),
   });
+  const { readScopedNodeEnv } = await import('./shared/scoped-secret-env.js');
+  const scopedEnv = nodeSecretsDir ? readScopedNodeEnv(nodeSecretsDir) : {};
+  for (const [key, value] of Object.entries(scopedEnv)) {
+    if (!Object.hasOwn(process.env, key) && typeof fileConfig.env?.[key] !== 'string') process.env[key] = value;
+  }
 } catch (e: any) {
   console.error(`[agent-node] ${e?.message || e}`);
   process.exit(1);
@@ -1842,6 +1847,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
+      ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
       ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
         buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
@@ -7138,6 +7144,9 @@ async function connectSSE() {
               processRulesFileRequests(rulesFileDeps())
                 .catch((e: any) => warn(`[rules-file] connect catch-up failed: ${e?.message || e}`));
               if (fileConfig.role === "host_supervisor") {
+                import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({
+                  callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, warn,
+                })).catch(()=>warn('[daemon-secrets] module unavailable'));
                 import("./runtime/daemon-provider-snapshot.js").then(({ reconcileProviderSnapshots }) => reconcileProviderSnapshots({
                   callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, serverUrl: COMMHUB_URL,
                   warn: (m: string) => warn(m),
@@ -7390,6 +7399,11 @@ async function connectSSE() {
                 callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, serverUrl: COMMHUB_URL,
                 warn: (m: string) => warn(m),
               })).catch(() => warn("[daemon-provider] readback module unavailable"));
+            }
+            if (ev.type === 'scoped_secrets' && fileConfig.role === 'host_supervisor') {
+              import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({
+                callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, warn,
+              })).catch(()=>warn('[daemon-secrets] module unavailable'));
             }
             if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {
               log(`← SSE probe_provider ${ev.probe_id || ""}`);

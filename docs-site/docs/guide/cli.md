@@ -450,6 +450,14 @@ Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销
 
 ## Preview 专属能力
 
+**开发中、尚未发布（#1053）**：Daemon/节点环境密钥管理不再只依赖演示表单。
+客户端经 `daemon_provider_snapshot` 的 `secret_*` 管理动作发起 owner/admin 请求，所属 Daemon 用
+`anet daemon secret <daemon>` 低层适配器读取私有 JSON stdin，回读只有名称/来源。
+该适配器不接受命令行密钥值，也不启动或重启节点。Daemon 默认值由节点继承，
+节点同名值优先；已有显式进程/config/Provider 配置保持优先。
+值在节点下次**完整启动**时加载，单独重启 Bridge 不等于原生 TUI/server 已更新。
+完整契约与恢复边界见仓库 `docs/scoped-secrets.md`；0.2.248 演示入口不能计为已支持。
+
 以下能力存在于当前 preview，不应写成 stable 已支持：
 
 | 命令 | 作用 |
