@@ -4131,7 +4131,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const providerHuman = (net?: string) => ({ userId: enforceUserId, isNode: callerTokenIsNetwork, networkId: getNetworkId(net) });
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   server.tool(
-    "daemon_provider_snapshot", "Daemon Provider actions; read=id. Login provider={action,session_id?,label?}, no tokens. hub_*=owner catalog/distribute. secret_*=env persistence, provider={node_id?,key?,value?}; next full start.",
+    "daemon_provider_snapshot", "Provider read/write/login (no tokens). hub_*=owner catalog/distribute. secret_*=Daemon env; node_secret_*=node env. provider={node_id?,key?,value?}; next full start.",
     { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read", "node_secret_list", "node_secret_put", "node_secret_delete"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
