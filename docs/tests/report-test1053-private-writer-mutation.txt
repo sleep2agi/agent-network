@@ -46,3 +46,21 @@ Recovery/cleanup
   was observed. Do not re-publish immutable135, install it as repaired, or claim
   current publication equals delivery. Runtime136 is the narrow replacement
   candidate; Hub127/CLI169 product bytes are not changed by this fix.
+
+2026-10-12 10:11+08 exact-pair correction — pending new cloud evidence
+- Exactfcd7fd9f real-client run38193857400/job114632161003 failed at child
+  startup. Retrieved artifact11723175645 (ZIP digest is not a package SHA).
+  positive/bridge.log explicitly rejects runtime136 because CLI source still
+  pins exact135, before launch/attach records. This is an omitted release-pair
+  update, not an environment timeout and not a reason to extend the UI wait.
+- Bump the paired CLI package/lock/resolver to170 and runtime resolver to136
+  together; keep exact ownership/version checks. Update bilingual candidate
+  version claims and exact per-package release notes. Runtime136 remains
+  the same narrow legacy marker correction; public Hub127 remains unchanged.
+- CLI169 main GitHub download38193906192 is SUCCESS and bytes match its
+  original formal main artifact, but it is not the repaired runtime136 pair.
+  Its npm verification38193199217 timed out after accepted publish; no reissue.
+- App249 draft889 currently pins169/136 and must remain held until170's exact
+  formal bytes replace that installer URL/hash. Its Mac fixture20/20 PASS
+  proves installer flow with adapters, not real OpenCode/runtime compatibility.
+- New core/pair/legacy checks only in GitHub Actions; no local testing.

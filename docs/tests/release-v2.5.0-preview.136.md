@@ -1,6 +1,6 @@
 # Runtime 2.5.0-preview.136 — legacy Daemon child startup correction, candidate
 
-Pairs with formal main CLI 2.3.0-preview.169 and Hub 0.9.0-preview.127.
+Pairs exactly with candidate CLI 2.3.0-preview.170 and formal main Hub 0.9.0-preview.127.
 An older Daemon config without network_id now writes the child source marker
 with the token-bound Hub create request's network, not an empty string.
 No account, key, conversation or existing config is migrated. Present private
@@ -16,7 +16,7 @@ npm install -g @sleep2agi/agent-node@2.5.0-preview.136
 
 ## Upgrade
 
-Use runtime .136 instead of .135 for the CLI .169 / Hub .127 software pair.
+Use runtime .136 instead of .135 with the exact CLI .170 / Hub .127 software pair.
 Keep the previous private installation and protected configuration backup.
 No latest promotion or business-node restart is implicit. Activation must
 verify the exact selected Daemon identity, process version, SSE and redacted
