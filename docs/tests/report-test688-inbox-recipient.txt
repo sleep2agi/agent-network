@@ -13,6 +13,12 @@ unchanged 85,500-byte ceiling. Shortened inbox descriptions and omitted the
 new optional field's description; did not raise any ceiling. Updated the two
 message-lifecycle symbol links displaced by tools.ts lines. New-head CI pending.
 
+Second GitHub head ee2dda00b: dedicated HTTP/ACK compatibility core passed
+(30 SQLite + 30 PostgreSQL + 44 regressions). Symbol links passed. Tools-list
+budget was still four bytes over (85,504); shortened the two inbox alias labels
+by sixteen bytes and included that same existing byte-ceiling case in the
+focused workflow. No limits/permission assertions were changed.
+
 2026-10-13 07:07+08: SQLite 30/30 and PostgreSQL 30/30 passed,
 162 expect calls per backend. Container networking was disabled; HTTP stayed
 on loopback, with synthetic users/tokens and ephemeral databases only.

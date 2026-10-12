@@ -7,6 +7,7 @@ on:
       - 'server/src/create-node.ts'
       - 'server/src/node-caller-identity-http.test.ts'
       - 'server/src/mcp-write-network-resolution.test.ts'
+      - 'server/src/tool-audience*'
       - 'tests/node-caller-identity/**'
       - '.github/workflows/inbox-recipient-core.yml'
 permissions:
@@ -23,3 +24,5 @@ jobs:
         run: docker run --rm --init --network none -e CALLER_CASES=green inbox-recipient-test
       - name: Existing task ACK and write-scope regressions
         run: docker run --rm --init --network none --entrypoint bash inbox-recipient-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/inbox-regressions.db bun test src/task-consumption.test.ts src/mcp-write-network-resolution.test.ts'
+      - name: Preserve the existing tools-list byte ceilings
+        run: docker run --rm --init --network none --entrypoint bash inbox-recipient-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/inbox-metadata.db bun test src/tool-audience-http.test.ts -t "bytes per role"'

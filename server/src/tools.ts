@@ -1424,7 +1424,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "get_inbox",
     "Read your inbox.",
     {
-      alias: z.string().min(1).max(200).describe("Session alias"),
+      alias: z.string().min(1).max(200).describe("Alias"),
       limit: z.number().min(1).max(100).optional().default(10),
       network_id: z.string().max(200).optional(),
     },
@@ -1465,7 +1465,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "ack_inbox",
     "ACK your inbox.",
     {
-      alias: z.string().min(1).max(200).describe("Session alias"),
+      alias: z.string().min(1).max(200).describe("Alias"),
       message_id: z.string().min(1).max(200),
       response: z.string().max(10000).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
