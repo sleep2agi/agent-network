@@ -269,6 +269,73 @@ async function mcpSend(token: string, task: string, from: string | undefined) {
   return tool(token, "send_task", args);
 }
 
+test("inbox recipient: bound identity wins over the token name", async () => {
+  const id = `inbox-bound-${stamp}`;
+  db.run("INSERT INTO inbox (id, session_name, type, content, network_id) VALUES (?1, ?2, 'message', 'own inbox', ?3)", [id, otherAlias, NET]);
+  const read = await tool(otherTok.token, "get_inbox", { alias: otherAlias });
+  expect(read.ok).toBe(true);
+  expect(read.messages.some((row: any) => row.id === id)).toBe(true);
+  expect((await tool(otherTok.token, "ack_inbox", { alias: otherAlias, message_id: id })).ok).toBe(true);
+  expect(db.get<{ acked: number }>("SELECT acked FROM inbox WHERE id = ?1", id)?.acked).toBe(1);
+});
+
+test("inbox recipient: another node and invalid node identities cannot read or ACK", async () => {
+  const id = `inbox-denied-${stamp}`;
+  db.run("INSERT INTO inbox (id, session_name, type, content, network_id) VALUES (?1, ?2, 'message', 'private inbox', ?3)", [id, victimAlias, NET]);
+  for (const caller of [otherTok, squatter, boundMissing]) {
+    const read = await tool(caller.token, "get_inbox", { alias: victimAlias });
+    expect(read.ok).toBe(false);
+    expect(read.error).toBe("inbox_identity_mismatch");
+    expect(read.messages).toBeUndefined();
+    const ack = await tool(caller.token, "ack_inbox", { alias: victimAlias, message_id: id });
+    expect(ack.ok).toBe(false);
+    expect(ack.error).toBe("inbox_identity_mismatch");
+    expect(db.get<{ acked: number }>("SELECT acked FROM inbox WHERE id = ?1", id)?.acked).toBe(0);
+  }
+  expect((await tool(victimTok.token, "ack_inbox", { alias: victimAlias, message_id: id })).ok).toBe(true);
+});
+
+test("inbox recipient: same alias stays inside the token network", async () => {
+  const home = `inbox-net-home-${stamp}`, foreign = `inbox-net-foreign-${stamp}`;
+  db.run("INSERT INTO inbox (id, session_name, type, content, network_id) VALUES (?1, ?2, 'message', 'home', ?3)", [home, sharedAlias, NET2]);
+  db.run("INSERT INTO inbox (id, session_name, type, content, network_id) VALUES (?1, ?2, 'message', 'foreign', ?3)", [foreign, sharedAlias, NET]);
+  const read = await tool(sharedHome.token, "get_inbox", { alias: sharedAlias, network_id: NET });
+  expect(read.ok).toBe(true);
+  expect(read.messages.some((row: any) => row.id === home)).toBe(true);
+  expect(read.messages.some((row: any) => row.id === foreign)).toBe(false);
+  expect((await tool(sharedHome.token, "ack_inbox", { alias: sharedAlias, message_id: foreign, network_id: NET })).ok).toBe(false);
+  expect(db.get<{ acked: number }>("SELECT acked FROM inbox WHERE id = ?1", foreign)?.acked).toBe(0);
+});
+
+test("inbox recipient: legacy ownerless identity and authorized human access remain", async () => {
+  const id = `inbox-legacy-${stamp}`;
+  db.run("INSERT INTO inbox (id, session_name, type, content, network_id) VALUES (?1, ?2, 'message', 'legacy', ?3)", [id, ownerlessAlias, NET]);
+  expect((await tool(ownerlessTok.token, "get_inbox", { alias: ownerlessAlias })).ok).toBe(true);
+  expect((await tool(ownerToken, "get_inbox", { alias: ownerlessAlias, network_id: NET })).ok).toBe(true);
+  expect((await tool(ownerToken, "ack_inbox", { alias: ownerlessAlias, message_id: id, network_id: NET })).ok).toBe(true);
+});
+
+test("inbox recipient: a full-access member cannot act as another owner's node", async () => {
+  const member = register(`inboxmem${stamp}`, "InboxMember123!", undefined, "seed");
+  expect(member.ok).toBe(true);
+  expect(addNetworkMember(NET, member.user!.user_id, "member", ownerId).ok).toBe(true);
+  db.run("UPDATE network_members SET agent_access = 'all' WHERE user_id = ?1 AND network_id = ?2", [member.user!.user_id, NET]);
+  const id = `inbox-member-${stamp}`;
+  db.run("INSERT INTO inbox (id, session_name, type, content, network_id) VALUES (?1, ?2, 'message', 'private', ?3)", [id, victimAlias, NET]);
+  for (const name of ["get_inbox", "ack_inbox"]) {
+    const args: Record<string, unknown> = { alias: victimAlias, network_id: NET };
+    if (name === "ack_inbox") args.message_id = id;
+    const result = await tool(member.token!, name, args);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("inbox_identity_mismatch");
+  }
+  expect(db.get<{ acked: number }>("SELECT acked FROM inbox WHERE id = ?1", id)?.acked).toBe(0);
+  const own = `inbox-member-own-${stamp}`;
+  db.run("INSERT INTO inbox (id, session_name, type, content, network_id) VALUES (?1, ?2, 'message', 'own', ?3)", [own, member.user!.username, NET]);
+  expect((await tool(member.token!, "get_inbox", { alias: member.user!.username, network_id: NET })).ok).toBe(true);
+  expect((await tool(member.token!, "ack_inbox", { alias: member.user!.username, message_id: own, network_id: NET })).ok).toBe(true);
+});
+
 test("caller identity boundary: mcp send omits from_session", async () => {
   const task = `boundary omit ${stamp}`;
   const sent = await mcpSend(squatter.token, task, undefined);

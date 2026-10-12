@@ -1,0 +1,24 @@
+name: Inbox recipient core
+on:
+  pull_request:
+    paths:
+      - 'server/src/inbox-caller.ts'
+      - 'server/src/tools.ts'
+      - 'server/src/create-node.ts'
+      - 'server/src/node-caller-identity-http.test.ts'
+      - 'tests/node-caller-identity/**'
+      - '.github/workflows/inbox-recipient-core.yml'
+permissions:
+  contents: read
+jobs:
+  inbox-recipient:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build isolated HTTP test image
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t inbox-recipient-test -f tests/node-caller-identity/Dockerfile .
+      - name: SQLite and PostgreSQL recipient boundaries
+        run: docker run --rm --init --network none -e CALLER_CASES=green inbox-recipient-test
+      - name: Existing task ACK and write-scope regressions
+        run: docker run --rm --init --network none --entrypoint bash inbox-recipient-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/inbox-regressions.db bun test src/task-consumption.test.ts src/mcp-write-network-resolution.test.ts'
