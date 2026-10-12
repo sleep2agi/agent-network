@@ -1422,11 +1422,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_inbox",
-    "Get pending commands for your session.",
+    "Read your inbox.",
     {
       alias: z.string().min(1).max(200).describe("Session alias"),
       limit: z.number().min(1).max(100).optional().default(10),
-      network_id: z.string().max(200).optional().describe("Network scope (required for another recipient with multi-network user tokens)"),
+      network_id: z.string().max(200).optional(),
     },
     async ({ alias, limit, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
@@ -1463,7 +1463,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "ack_inbox",
-    "Acknowledge receipt of a command.",
+    "ACK your inbox.",
     {
       alias: z.string().min(1).max(200).describe("Session alias"),
       message_id: z.string().min(1).max(200),

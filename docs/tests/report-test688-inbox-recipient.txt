@@ -4,6 +4,15 @@ Candidate base: 7589316b069d788e1f94a06b5483d5f2af22cf23 (main).
 Status: implementation candidate; local Docker HTTP verification passed.
 GitHub exact-head checks, main merge and public release remain pending.
 
+First GitHub run (38320496983): SQLite/PG HTTP suites passed; the separate
+44-test compatibility step had one failure: its multi-network member ACK
+fixture lacked recipient ownership. The network-resolution case now assigns
+the fixture recipient to that member; the HTTP unauthorized-member assertions
+remain unchanged. First hub-provider run also caught tools/list exceeding the
+unchanged 85,500-byte ceiling. Shortened inbox descriptions and omitted the
+new optional field's description; did not raise any ceiling. Updated the two
+message-lifecycle symbol links displaced by tools.ts lines. New-head CI pending.
+
 2026-10-13 07:07+08: SQLite 30/30 and PostgreSQL 30/30 passed,
 162 expect calls per backend. Container networking was disabled; HTTP stayed
 on loopback, with synthetic users/tokens and ephemeral databases only.

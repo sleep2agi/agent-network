@@ -6,6 +6,7 @@ on:
       - 'server/src/tools.ts'
       - 'server/src/create-node.ts'
       - 'server/src/node-caller-identity-http.test.ts'
+      - 'server/src/mcp-write-network-resolution.test.ts'
       - 'tests/node-caller-identity/**'
       - '.github/workflows/inbox-recipient-core.yml'
 permissions:
