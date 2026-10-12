@@ -64,3 +64,36 @@ OBSERVED_AT=2026-10-12 11:01+08
   Provider/config/rollback acceptance remains pending; do not close1053/1045
   from heartbeat alone. Client249 selected platforms publicly delivered
   separately; mirror and target activation are not inherited from build success.
+
+## Daemon receipt increment — 2026-10-12 11:48+08
+
+- TMHR read-only task20529e90-ecfe-4ad5-ada5-efec069e5b77 replied03:48:03Z:
+  daemon-vdev actual CLI170/runtime136 remain running; original node identity,
+  workdir/config hash unchanged, old private installation and0600 backup kept.
+  Owner reports fresh idle/inflight0/queue0 and successful redacted Provider
+  readback. Independent Hub03:46 read confirms136 and uptime902sec.
+- Original upgrade task1110d499 remains FAILED due11:30 receipt deadline;
+  this later audit does not rewrite that history. No additional install/restart/
+  inference performed by TMHR. Live PID numbers are not included in its reply.
+  SSE evidence is established Hub connection plus fresh heartbeat, not a
+  separately executed protocol-level regression or real model entitlement.
+- Original1053 delivery5/5 and1045 delivery3/3 can close on formal publication
+  and target installation evidence plus the existing Actions core. No added
+  production-secret/inference/SSE test is required to expand their last item.
+  Generic key receipt still means next full node startup, not current TUI env.
+- Local daemon-dev remains133 at PID3420628/PPID1, cwdcomm-ou, directory mismatch
+  warning, no original-name tmux/CLI wrapper. Its current config SHA256
+  7207b7cb129919513b5641cc9718dca7fa4fda178666ea3d57558f9d0a42a84b differs
+  from historical4cf8ee...; preserve it. Asked the current workspace Owner to
+  confirm launch/maintenance ownership before touching the live process.
+- Installed inactive private pair provider906-cli170-runtime136, mode700,
+  generated package/lock600, npm --save-exact --ignore-scripts,250 packages.
+  Original public CLI/runtime tarball hashes above verified; mainf86012a is
+  still an ancestor. No global package/config/env/identity change. Inactive
+  preparation is NOT activation or a newly executed local test. Old167/133
+  and current live process retained while ownership is being coordinated.
+- Startup/upgrade/rollback authority remains published main CLI daemon start,
+  docs-site/docs/deploy/daemon.md and existing fleet runbook. No new custom
+  launcher/port/secret source/boot topology. Exact transitive private-lock
+  archival and off-host data/key-backup inventory remain recovery gaps; this
+  is not an empty-machine recovery drill. No private data/token added to Git.
