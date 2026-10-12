@@ -1,4 +1,35 @@
-#906 CLI172/runtime138 release pairing — CANDIDATE / NOT PUBLISHED
+#906 CLI172/runtime138 release pairing — PAIR CORE PASS / MAIN / NOT PUBLISHED
+
+Observed2026-10-12 20:59+08:
+- PR2656 head723206ea660f64ee2d9ae7fe18cede1b18d9fb7a.
+- Docker Actions38251590593/job114819018758 SUCCESS: 10 tests across3 files,
+  27 assertions, zero failures. Exact pair and both package/lock consistency.
+- Tested merge5e873bc067289a26606a95a2ab6a4075bc7d7cba; no product recovery
+  code changed. Native recovery/export proof remains in PR2652/2654 reports.
+- Ten current required merge contexts SUCCESS; ordinary head-locked squash,
+  no admin/bypass/budget or guard modification. Other optional checks pending.
+- PR2656 merged12:56:20Z (20:56:20+08), main source
+  b61c0e490659e94ad1e487cc8086cb73dfa8f6ad.
+- PR2655 legacy-export evidence report merged12:55:25Z, main84b028f9a4273a9e6c76c29367d7d0806efd0cc5.
+- Runtime138 formal release.yml run38252273421 was dispatched on main with
+  commit=b61c0e490659e94ad1e487cc8086cb73dfa8f6ad and publish=true. Latest
+  observed build job114821349416 QUEUED; not a build/install/publish PASS.
+- CLI172 formal publication NOT DISPATCHED: wait for actual runtime138 bytes.
+  Anonymous exact-version registry checks returned404 before publication;
+  existing CLI171/runtime137 remain unchanged. No preview/latest movement.
+- Superseded headf84654340da0e0b9097e793d1cf99b0be3b81b48:31 unfinished
+  owned PR runs cancelled after individual branch/head/event/status rechecks.
+  Total34 old-head runs now completed/cancelled; the other3 cancellation
+  reasons were not independently diagnosed. No old-head PASS reused.
+- Merged owned PR2654 optional report-only QA38250521001 and superseded
+  owned main18697437e7373f236803da2ff039f67f55e75d09 QA38248706388 confirmed
+  completed/cancelled. Previously successful jobs retained, not whole-QA PASS.
+  Neither current-main counterpart nor publication gates cancelled.
+- No local product test/container, global npm write, production capture,
+  daemon/business-node restart, login/credential/model/config change.
+- Worktrees retained. No package/public-byte/activation claim yet.
+
+--- Original candidate plan, retained as historical ---
 
 Only package+lock versions, immutable pair, bilingual guidance and release
 notes changed. Hub128, product checkpoint/export implementation and production
