@@ -1,0 +1,39 @@
+#1045/#829 release candidate OpenCode stop correction — NOT PUBLISHED
+OBSERVED_AT=2026-10-12 09:09+08
+
+Original evidence
+- PR2636@335fa4d756551fc198fa37c81bdd5f746d7828c8 real-client
+  run38186392245/job114609511816 failed: processes were gone but
+  old TUI/bridge tmux sessions remained. No environment-only attribution.
+- stop-daemon.ts copresenceTeardownFor only recognized Codex markers.
+  OpenCode launcher exits normally; orphan process cleanup alone need not
+  remove the detached terminal shell. The existing full CLI stop was skipped.
+
+Narrow correction
+- Matching managed local node_id + opencode-cli/copresence uses the same
+  pinned CLI stop in the recorded child workdir. No raw tmux invocation added.
+- Existing CLI process ownership/stop verification is unchanged. The Codex
+  marker requirement is unchanged; foreign identity/headless do not route.
+- Failure of CLI teardown yields stop_failed before delete/config relocation.
+- Existing source launch/stop authority stays in agent-network/bin/cli.ts and
+  agent-node/src/runtime/stop-daemon.ts; no production launcher/ports/proxy/
+  secrets/backup schema change. Retain old CLI168/runtime134 for rollback.
+
+Docker-only focused evidence
+- Existing independently built anet:test1053-portable dependency image,
+  network none, non-root runner, only the two changed source/test files
+  mounted read-only at /candidate/agent-node/src/runtime/.
+- stop-daemon-copresence.test.ts: 18 PASS /0 FAIL /44 expectations.
+  Includes three added OpenCode routing/failure/identity-headless groups.
+- First invocation used wrong image path /workspace: module resolution error,
+  no tests ran; corrected to actual /candidate. Not a product regression.
+- The dependency image lacks pgrep: existing mocked routing cases emit that
+  warning. This proves routing/receipt ordering, NOT real process/session
+  cleanup; unchanged test883 real-client is the next Docker E2E gate.
+- Do not lower test883 assertions, label old failure PASS or publish this
+  branch. CI exact source real-client success remains required before merge.
+
+Cleanup
+- Disposable --rm container, synthetic temp configs removed by afterEach.
+- No host tmux, global npm, production identity, account or node changed.
+- Source/recipe/reports retained in Git; no production recovery claim.

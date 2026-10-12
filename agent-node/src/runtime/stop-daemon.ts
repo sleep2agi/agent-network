@@ -17,6 +17,8 @@
 //     fork, fixed argv, no shell, cwd = the child's workdir. That command
 //     only reaps processes carrying the node's ANET_NODE_MARKER; see
 //     copresenceTeardownFor below for why pid signals cannot reach them.
+//     OpenCode co-presence also uses that pinned CLI: its existing stop path
+//     freezes process ownership, drains the bridge, then verifies tmux cleanup.
 //   - backup_path naming = `<Date.now()>-<alias>` so the same alias can
 //     be deleted-and-recreated without collision (scenario K).
 //   - chmod 700 immediately after rename, even if source dir was looser
@@ -237,7 +239,12 @@ function hasLocalChildRecord(workdirRoot: string, alias: string, child_node_id: 
   return true;
 }
 
-/** #596 — 这个 child 是不是一个**正在占着身份标记**的 Codex TUI 共存节点。
+/** Whether a locally managed co-presence child needs the complete CLI stop.
+ * OpenCode uses its matching local node_id + runtime/mode; the CLI owns the
+ * process-generation and terminal cleanup. Codex retains the marker gate
+ * below (a missing Codex marker must never become permission to kill by name).
+ *
+ * #596 — 这个 child 是不是一个**正在占着身份标记**的 Codex TUI 共存节点。
  *
  *  共存节点的 `anet node start` 只是启动器:它把 app-server / 桥 / TUI 起在三个 tmux
  *  会话里(`<alias>-appsrv` / `<alias>-桥` / `<alias>`),写下
@@ -256,8 +263,13 @@ export function copresenceTeardownFor(workdirRoot: string, alias: string, child_
   try {
     if (!lstatSync(cfgPath).isFile()) return false;
     const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-    if (cfg?.codexCopresence !== true) return false;
     if (cfg?.node_id !== child_node_id) return false;
+    // OpenCode's launcher also exits after creating detached tmux sessions.
+    // An orphan sweep can reap the bridge yet leave its terminal shell behind.
+    // Use the existing full CLI lifecycle for THIS managed local config, not
+    // a new daemon-side session-name sweep. Codex still requires its marker.
+    if (cfg?.runtime === "opencode-cli" && cfg?.opencodeMode === "copresence") return true;
+    if (cfg?.codexCopresence !== true) return false;
   } catch { return false; }
   try { lstatSync(join(workdirRoot, alias, "copresence-identity.json")); }
   catch { return false; }
@@ -299,7 +311,7 @@ async function teardownCopresenceIfAny(
   if (!alias || !copresenceTeardownFor(workdirRoot, alias, child_node_id)) return null;
   // workdirRoot = <childWorkDir>/.anet/nodes —— `anet node stop` 按 cwd 解析 .anet/nodes。
   const childWorkDir = dirname(dirname(workdirRoot));
-  deps.log(`[stop-daemon] codex co-presence child ${alias}: identity marker present → \`anet node stop ${alias}\` in ${childWorkDir}`);
+  deps.log(`[stop-daemon] co-presence child ${alias}: managed local config → pinned \`anet node stop ${alias}\` in ${childWorkDir}`);
   const run = deps.stopCopresenceNode ?? defaultStopCopresenceNode;
   let r: CopresenceTeardownResult;
   try { r = await run(alias, childWorkDir); }
