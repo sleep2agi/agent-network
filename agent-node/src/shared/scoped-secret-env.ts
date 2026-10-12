@@ -18,6 +18,11 @@ export function readScopedNodeEnv(nodeDir: string): Record<string, string> {
   const ref = scopedSecretJson(marker), config = scopedSecretJson(join(nodeDir, 'config.json'));
   if (ref.schema !== 1 || typeof ref.daemon_dir !== 'string' || !ref.node_id || !ref.network_id
     || config.node_id !== ref.node_id || config.network_id !== ref.network_id) throw Error('secret_scope_mismatch');
+  // A source marker prepares future inheritance; it does not mean any secrets
+  // exist. Legacy Daemons without a private store must not block plain startup.
+  // Once a store exists, every directory/identity/permission guard below applies.
+  const path = join(ref.daemon_dir, 'scoped-secrets.json');
+  if (!existsSync(path)) return {};
   const dir = lstatSync(ref.daemon_dir);
   if (!dir.isDirectory() || realpathSync(ref.daemon_dir) !== resolve(ref.daemon_dir)
     || (process.getuid && dir.uid !== process.getuid()) || (process.platform !== 'win32' && (dir.mode & 0o022))) throw Error('unsafe_secret_directory');
@@ -30,8 +35,6 @@ export function readScopedNodeEnv(nodeDir: string): Record<string, string> {
     if (entry?.adopted !== true || entry.node_id !== ref.node_id || entry.request_id !== ref.adopted_request_id
       || resolve(entry.nodeDir) !== resolve(nodeDir)) throw Error('secret_binding_revoked');
   }
-  const path = join(ref.daemon_dir, 'scoped-secrets.json');
-  if (!existsSync(path)) return {};
   const s = scopedSecretJson(path);
   if (s.schema !== 1 || s.network_id !== ref.network_id || s.daemon_node_id !== ref.daemon_node_id
     || !Number.isSafeInteger(s.revision) || s.revision < 0

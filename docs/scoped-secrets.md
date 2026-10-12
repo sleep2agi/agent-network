@@ -25,6 +25,10 @@ No extra tools enter model context; neither scopes nor permissions are merged.
 - A Daemon receipt confirms local persistence, not a running process update.
   Existing native TUI/server processes require a full node restart by the user;
   no automatic restart, provider switch, production inference or account copy.
+- A source marker with no Daemon store means no inherited keys and does not
+  require migrating a legacy Daemon just to start an ordinary child. Once the
+  store exists, its private permissions and exact parent/node/network identity
+  are mandatory; an unsafe or mismatched store is never treated as empty.
 - Adopted-node inheritance references the local adoption request; a removed or
   replaced adoption registry entry refuses the old source on the next start.
   Regular newly created children receive their Daemon reference at creation.
