@@ -52,7 +52,7 @@
 ## 历史与归置中
 
 - [evolution-log.md](evolution-log.md) — 已停更，版本沿革看 [docs-site changelog](../docs-site/docs/changelog.md)
-- [open-source-quality-review.md](open-source-quality-review.md) · [open-source-security-risk-report.md](open-source-security-risk-report.md) — 2026-05 开源前的评审，[SECURITY.md](../SECURITY.md) 仍引后者作审计记录
+- [open-source-quality-review.md](archive/open-source-quality-review.md) · [open-source-security-risk-report.md](open-source-security-risk-report.md) — 2026-05 开源前的评审，[SECURITY.md](../SECURITY.md) 仍引后者作审计记录
 - 顶层若干历史文档正按 #1035 归入 `archive/ research/ plans/ design/`（PR #2613–#2616）；合入前以各文件顶部 banner 为准
 
 ## 相关门禁（CI）
