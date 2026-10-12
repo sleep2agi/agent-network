@@ -1,6 +1,35 @@
-#906 V1 private session checkpoint core — candidate, NATIVE CORE NOT PASSED
+#906 V1 private session checkpoint core — main source, NATIVE CORE PASS / NOT RELEASED
 SOURCE_BASE=e269eb5d80adfb2eccdb859f20c3e8e99e106adc
 OBSERVED_AT=2026-10-12T12:05:00Z
+
+Latest result (2026-10-12T12:23:13Z; supersedes pending observations below):
+- PR2652 exact head 45bd04aad7bdea5f06847eac427fe3c3351eba72.
+- Actions run38248290924 SUCCESS for both actual pinned V1 versions:
+  1.18.1 job114807656132 completed core at12:22:37Z;
+  1.18.34 job114807656526 completed core at12:21:08Z.
+- Tested merge 64439399f40a5fbec01722477605e7ad64e0a215.
+- Each version: 5 unit cases / 13 assertions; native fixture save, normal
+  close, local import into a fresh launch, same session and preserved history,
+  a subsequent fixture model turn, wrong-owner non-overwrite, and cleanup.
+- Native forged old session permission/share were not inherited. External
+  file references (including tool attachments) are rejected, not migrated.
+- Actual 10 required GitHub checks all SUCCESS. Normal SHA-locked squash
+  merged20:23:12+08 to main18697437e7373f236803da2ff039f67f55e75d09.
+- Main tree and tested merge tree both40fa05e8a66e6552910bbc53a7c0c0dedd8a45e8.
+- No admin/bypass or guard/permission changes. Other optional CI was still
+  running/queued, not counted as all-green. This proves the scoped core only.
+- TEST-ONLY log artifacts (ZIP digests, NOT binary/package digests):
+  11747870176, v1181,719B,
+    sha256:dd78fe0be7be822e5e9fd4de3745653eb7248ace57729be7bf96b55cc373ae1e;
+  11746544877, v11834,718B,
+    sha256:5e1f2cb9bda7cf7c07e0ce0b7e050599599d7698e3b8547ac9315f16e9f3abb1.
+- No new npm/binary release or installed native app claim. The old .118 node
+  was NOT restarted; first legacy snapshot export/migration remains a gap.
+- No local product test, real credential/OAuth/vendor-model, production
+  process/config/account change. Source worktrees retained; no local process
+  or container created by this iteration remains to clean up.
+
+--- Historical implementation plan and CI observations, preserved ---
 
 Implementation scope:
 - Immutable node/network-bound 0600 JSON checkpoint; no persistent DB reuse.
