@@ -380,6 +380,11 @@ CLI 精确版本及 **inner tarball** SHA256（不是 artifact ZIP digest）。�
 原 build 和四道门全部 SUCCESS、包名/版本/字节；下载前和公开前再次核查当前 main
 祖先关系。只创建新的不可变 `cli-v<version>` tag，不覆盖已有 tag/asset。
 
+workflow_dispatch 的工作流 head 可因 main 后续报告提交而不同于实际 checkout 源。
+此时下载门还必须从原 build job 的认证日志核对唯一 checkout SHA，以及已成功的
+main source guard 的 PUBLISH/RELEASE_COMMIT 输入；缺失、歧义或不匹配一律拒绝。
+不能仅凭工作流 head、用户填写的 SHA 或相同包版本替代实际构建来源。
+
 ```bash
 gh workflow run cli-gated-download.yml --ref main \
   -f commit=FULL_40_CHARACTER_MAIN_SOURCE_SHA \

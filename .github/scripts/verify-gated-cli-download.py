@@ -16,10 +16,45 @@ GATES = (
 )
 
 
-def validate_run(run, jobs, commit, run_id):
+def validate_checkout_source(run, build, commit, run_id, build_log):
+    """Bind a differing workflow head to its authenticated original build log.
+    A caller-supplied SHA or matching package bytes alone is not source proof.
+    """
+    if (not build_log or build.get("run_id") != int(run_id)
+            or build.get("head_sha") != run.get("head_sha")
+            or not isinstance(build.get("id"), int) or build["id"] <= 0):
+        raise ValueError("original build source evidence missing")
+    steps = [s for s in build.get("steps", []) if s.get("name") == "Verify and bind release source"]
+    if len(steps) != 1 or steps[0].get("conclusion") != "success":
+        raise ValueError("original build source guard not successful")
+    # GitHub job logs carry an ISO timestamp per line. Accept only this
+    # format, not arbitrary grep hits from build output or caller metadata.
+    lines = []
+    for line in build_log.splitlines():
+        match = re.match(r"^\d{4}-\d{2}-\d{2}T[0-9:.]+Z (.*)$", line.lstrip("\ufeff"))
+        if match:
+            lines.append(match[1])
+    checkouts = [i for i, line in enumerate(lines) if line == "[command]/usr/bin/git log -1 --format=%H"]
+    groups = [i for i, line in enumerate(lines) if line ==
+              '##[group]Run if [[ "$PUBLISH" == true ]]; then bash .github/scripts/verify-release-main.sh; fi']
+    if len(checkouts) != 1 or len(groups) != 1 or checkouts[0] >= groups[0]:
+        raise ValueError("original build checkout evidence ambiguous")
+    if checkouts[0] + 1 >= len(lines) or lines[checkouts[0] + 1] != commit:
+        raise ValueError("actual build checkout differs from requested source")
+    end = next((i for i in range(groups[0] + 1, len(lines)) if lines[i] == "##[endgroup]"), None)
+    if end is None:
+        raise ValueError("original source guard log incomplete")
+    env = lines[groups[0] + 1:end]
+    if ([line.strip() for line in env if line.strip().startswith("RELEASE_COMMIT:")]
+            != ["RELEASE_COMMIT: " + commit]
+            or [line.strip() for line in env if line.strip().startswith("PUBLISH:")] != ["PUBLISH: true"]):
+        raise ValueError("original source guard input differs")
+
+
+def validate_run(run, jobs, commit, run_id, build_log=None):
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("full40 main source required")
-    if (run.get("id") != int(run_id) or run.get("head_sha") != commit
+    if (run.get("id") != int(run_id)
             or run.get("head_branch") != "main"
             or run.get("event") != "workflow_dispatch"
             or run.get("path") != ".github/workflows/release.yml"):
@@ -28,6 +63,9 @@ def validate_run(run, jobs, commit, run_id):
         matches = [j for j in jobs["jobs"] if j.get("name") == name]
         if len(matches) != 1 or matches[0].get("conclusion") != "success":
             raise ValueError("required package gate not successful: " + name)
+    if run.get("head_sha") != commit:
+        build = next(j for j in jobs["jobs"] if j.get("name") == "build tarball")
+        validate_checkout_source(run, build, commit, run_id, build_log)
 
 
 def validate_tarball(path, version, expected_sha):
@@ -49,9 +87,11 @@ def main():
     parser = argparse.ArgumentParser()
     for key in ("commit", "run-id", "version", "sha256", "directory"):
         parser.add_argument("--" + key, required=True)
+    parser.add_argument("--build-log")
     args = parser.parse_args()
     validate_run(json.loads(Path("release-run.json").read_text()),
-                 json.loads(Path("release-jobs.json").read_text()), args.commit, args.run_id)
+                 json.loads(Path("release-jobs.json").read_text()), args.commit, args.run_id,
+                 Path(args.build_log).read_text() if args.build_log else None)
     packages = list(Path(args.directory).glob("*.tgz"))
     if len(packages) != 1:
         raise ValueError("exactly one gated tarball required")
