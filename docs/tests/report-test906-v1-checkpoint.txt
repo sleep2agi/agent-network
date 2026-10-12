@@ -1,4 +1,4 @@
-#906 V1 private session checkpoint core — candidate, NOT TESTED YET
+#906 V1 private session checkpoint core — candidate, NATIVE CORE NOT PASSED
 SOURCE_BASE=e269eb5d80adfb2eccdb859f20c3e8e99e106adc
 OBSERVED_AT=2026-10-12T12:05:00Z
 
@@ -23,6 +23,19 @@ Validation planned, Actions only:
 - No current PASS, native installation, production upgrade or release claim.
 - No local product suite, no credentials or real conversation read, no live
   model call, no production process/config/account/model change.
+
+First Actions observation (not inherited by a later head):
+- PR2652 head 5fba34b0f4fb8252d66e47a871708a059f486101;
+  tested merge 164fa44b526808b9f86fdf43b0161cc1e3f91944.
+- Run38247048386/job114803438245 native1.18.34: four unit tests / 11
+  assertions passed. Native production entry then failed its environment
+  preflight because the new fixture lacked /run/user/1000. No native
+  save/import/model turn reached. Native1.18.1 job was still queued.
+- Fixture now creates the same owned 0700 runtime base as test894; no
+  runtime preflight or isolation check changed.
+- qa-trigger-coverage run38247048125 failed the new suite's missing QA
+  trigger registration; pull_request/push paths now both include the suite.
+- No product assertion, baseline, threshold or permission check relaxed.
 
 Authoritative upstream source reviewed in preceding scope inspection:
 - v1.18.1 source 99f638d8293f6985726ba509da602296c4963497
