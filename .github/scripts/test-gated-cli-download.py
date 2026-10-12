@@ -79,6 +79,14 @@ class Gates(unittest.TestCase):
             with self.assertRaises(ValueError):
                 guard.validate_run(run, bad, self.sha, "123", log)
 
+    def test_matching_workflow_head_cannot_override_wrong_checkout_proof(self):
+        run, jobs, log = self.different_workflow_head()
+        run["head_sha"] = self.sha
+        jobs["jobs"][0]["head_sha"] = self.sha
+        guard.validate_run(run, jobs, self.sha, "123", log)
+        with self.assertRaises(ValueError):
+            guard.validate_run(run, jobs, self.sha, "123", log.replace("Z " + self.sha, "Z " + "c" * 40))
+
 
 if __name__ == "__main__":
     unittest.main()

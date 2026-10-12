@@ -63,7 +63,7 @@ def validate_run(run, jobs, commit, run_id, build_log=None):
         matches = [j for j in jobs["jobs"] if j.get("name") == name]
         if len(matches) != 1 or matches[0].get("conclusion") != "success":
             raise ValueError("required package gate not successful: " + name)
-    if run.get("head_sha") != commit:
+    if build_log is not None or run.get("head_sha") != commit:
         build = next(j for j in jobs["jobs"] if j.get("name") == "build tarball")
         validate_checkout_source(run, build, commit, run_id, build_log)
 

@@ -15,6 +15,6 @@ five build/package gates, current-main ancestry (twice), inner SHA and CLI
 identity/version remain required. Missing/ambiguous/failed proof rejects.
 
 Actions uses the existing independent gated-cli-download Docker contract only.
-Eight focused cases; existing wrong-source, branch, event, gates and short-SHA
+Nine focused cases; existing wrong-source, branch, event, gates and short-SHA
 negative cases retained. No local product test or repeat native/install matrix.
 Current candidate result PENDING. No production/account/model operation.
