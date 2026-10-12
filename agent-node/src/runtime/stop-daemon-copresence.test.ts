@@ -146,6 +146,25 @@ describe("OpenCode co-presence uses the full pinned CLI stop", () => {
     writeOpenCode(NODE_ID, "headless");
     expect(sd.copresenceTeardownFor(workdirRoot, ALIAS, NODE_ID)).toBe(false);
   });
+  test("stale launcher map entry delegates FIRST without signalling the current bridge", async () => {
+    writeOpenCode();
+    sd.recordSpawnedChild(NODE_ID, ALIAS, 424242);
+    const h = harness("stop");
+    await sd.handleStopDoorbell({ request_id: "sr_cp" }, h.deps);
+    expect(h.calls).toEqual([{ alias: ALIAS, cwd: workDir }]);
+    expect(h.signals).toEqual([]);
+    expect(h.events).toEqual(["teardown", "ack:stopped"]);
+    expect(sd.getChildrenSnapshot()).toEqual([]);
+  });
+  test("failed early OpenCode teardown neither signals stale map pid nor deletes config", async () => {
+    const dir = writeOpenCode();
+    sd.recordSpawnedChild(NODE_ID, ALIAS, 424242);
+    const h = harness("delete", { ok: false, detail: "owned process survived" });
+    await sd.handleStopDoorbell({ request_id: "sr_cp" }, h.deps);
+    expect(h.signals).toEqual([]);
+    expect(h.events).toEqual(["teardown", "ack:stop_failed"]);
+    expect(existsSync(join(dir, "config.json"))).toBe(true);
+  });
 });
 
 describe("#596 handleStopDoorbell — co-presence child, no children-map entry (launcher already exited)", () => {

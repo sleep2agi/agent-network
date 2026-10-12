@@ -257,18 +257,24 @@ function hasLocalChildRecord(workdirRoot: string, alias: string, child_node_id: 
  *  🔴 标记文件不在就**不**交给 `anet node stop`:那条命令在没有标记时会退回按 tmux 会话名
  *     清扫(legacy 路径)—— 那正是「只凭 alias 杀进程」。标记在启动器起任何会话**之前**就落盘
  *     (agent-network/bin/cli.ts「marker file is written now」),所以没有标记 = 没有本节点的会话。 */
+function managedOpenCodeCopresence(workdirRoot: string, alias: string, child_node_id: string): boolean {
+  const [path] = expectedChildConfigPaths(workdirRoot, alias);
+  if (!path) return false;
+  try {
+    if (!lstatSync(path).isFile()) return false;
+    const cfg = JSON.parse(readFileSync(path, "utf8"));
+    return cfg?.node_id === child_node_id && cfg?.runtime === "opencode-cli" && cfg?.opencodeMode === "copresence";
+  } catch { return false; }
+}
+
 export function copresenceTeardownFor(workdirRoot: string, alias: string, child_node_id: string): boolean {
+  if (managedOpenCodeCopresence(workdirRoot, alias, child_node_id)) return true;
   const [cfgPath] = expectedChildConfigPaths(workdirRoot, alias);
   if (!cfgPath) return false;
   try {
     if (!lstatSync(cfgPath).isFile()) return false;
     const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
     if (cfg?.node_id !== child_node_id) return false;
-    // OpenCode's launcher also exits after creating detached tmux sessions.
-    // An orphan sweep can reap the bridge yet leave its terminal shell behind.
-    // Use the existing full CLI lifecycle for THIS managed local config, not
-    // a new daemon-side session-name sweep. Codex still requires its marker.
-    if (cfg?.runtime === "opencode-cli" && cfg?.opencodeMode === "copresence") return true;
     if (cfg?.codexCopresence !== true) return false;
   } catch { return false; }
   try { lstatSync(join(workdirRoot, alias, "copresence-identity.json")); }
@@ -504,8 +510,18 @@ export async function handleStopDoorbell(
     }
   };
   let exit_signal: string = "UNKNOWN";
+  const fullOpenCodeStop = managedOpenCodeCopresence(workdirRoot, entryDirName, child_node_id);
   try {
-    if (isAlive(entry.pid, signalProcess)) {
+    if (fullOpenCodeStop) {
+      // The map can still hold the PRE-model-restart launcher. Do not sweep
+      // its current bridge first: that discards the parent/child identities
+      // before CLI can freeze and drain them. Full CLI stop owns all teardown.
+      const why = await teardownCopresenceIfAny(entryDirName, child_node_id, workdirRoot, deps);
+      if (why) {
+        await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: why }).catch(() => {});
+        return;
+      }
+    } else if (isAlive(entry.pid, signalProcess)) {
       sendGroupSignal(entry.pid, "SIGTERM");
       exit_signal = "SIGTERM";
       deps.log(`[stop-daemon] sent SIGTERM to pgid=${resolvePgid(entry.pid)} (from recorded pid=${entry.pid}) alias=${entry.alias} grace=${grace_seconds}s (covers wrapper + agent-node grandchild)`);
@@ -541,7 +557,7 @@ export async function handleStopDoorbell(
   // #596 — the recorded pid is the co-presence launcher; its process group
   // never contained the tmux sessions. Signal first (a launcher still mid-start
   // stops creating sessions), then reap the generation by its identity marker.
-  const cpErrHit = await teardownCopresenceIfAny(entryDirName, child_node_id, workdirRoot, deps);
+  const cpErrHit = fullOpenCodeStop ? null : await teardownCopresenceIfAny(entryDirName, child_node_id, workdirRoot, deps);
   if (cpErrHit) {
     await deps.callCommHub("ack_stop_request", {
       request_id, status: "stop_failed", exit_signal, error: cpErrHit,

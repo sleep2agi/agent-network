@@ -235,7 +235,17 @@ try {
       return stopRow?.status === 'stopped';
     }, 30000));
     console.log('stop status:', JSON.stringify(stopRow));
-    check('old bridge serve TUI identities reaped', await until(() => identities.every(generationGone), 15000));
+    const reaped = await until(() => identities.every(generationGone), 15000);
+    if (!reaped) console.log('owned stop residuals:', JSON.stringify(identities.map((p, index) => {
+      let observed: unknown = 'absent';
+      try {
+        const stat = readFileSync(`/proc/${p.pid}/stat`, 'utf8');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+        observed = { state: fields[0], parent: fields[1], ticks: fields[19] };
+      } catch { /* disappeared during this read */ }
+      return { role: ['bridge', 'serve', 'tui'][index], ...p, observed };
+    })));
+    check('old bridge serve TUI identities reaped', reaped);
     check('old TUI and bridge sessions absent', tmux('has-session', '-t', '=oc829').status !== 0 && tmux('has-session', '-t', '=oc829-桥').status !== 0);
     check('config preserved after stop', existsSync(`${nodeDir}/config.json`));
     const denyRestart = process.env.TEST829_DENY_RESTART === '1';
