@@ -19,4 +19,4 @@ ENV ANET_BIN_ABS=/candidate/agent-network/dist/bin/anet.cjs
 RUN bun build agent-network/bin/cli.ts --target=node --outfile=/candidate/agent-network/dist/bin/cli.js --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && cp agent-network/bin/anet.cjs agent-network/dist/bin/anet.cjs && chmod 755 agent-network/dist/bin/anet.cjs
 RUN useradd --create-home --uid 10001 runner
 USER runner
-CMD ["sh", "-c", "bun test --bail agent-network/src/scoped-secrets.test.ts && bun test --bail tests/test1053-scoped-secrets/hub-runtime.test.ts"]
+CMD ["sh", "tests/test1053-scoped-secrets/run.sh"]
