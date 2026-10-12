@@ -34,4 +34,7 @@ Limits and follow-up:
 - Next implementation must preserve history through a supported, scoped
   recovery path without weakening fresh-root ownership or version validation.
 - Docs CI will validate this patch separately; no local product suite is run.
+- First head 89a46fea failed docs-integrity only because the two new CLI
+  version-bound statements were absent from RELEASE-SOP's assertion inventory.
+  Both documents are now registered; no scanner, baseline or assertion relaxed.
 - Cleanup: no new process/container, production probe or restart to undo.
