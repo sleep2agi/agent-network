@@ -164,7 +164,8 @@ tmux attach -t '=opencode-指挥狗'
 anet node stop opencode-指挥狗
 ```
 
-恢复时必须继续使用 `--copresence`；普通 `anet node start` 只启动任务 runtime，不会创建可进入的 TUI：
+重新启动 TUI 拓扑时继续使用 `--copresence`；这不是恢复原 session。
+普通 `anet node start` 不保证创建可进入的 TUI：
 
 ```bash
 anet node start opencode-指挥狗 --copresence
@@ -183,6 +184,32 @@ TUI 已退出但桥仍在线，`tmux attach -t <alias>` 会把 `<alias>` 模糊�
 若只是误入桥，先按 `Ctrl-b`、`d` 离开，再用精确命令进入。若精确命令报告
 TUI 不存在，可重新执行 `anet node start <alias> --copresence` 重建桥和 TUI；
 不要用 `pkill -f`、`killall` 或模糊 tmux 匹配停止节点。
+
+<a id="v1-restart-and-upgrade"></a>
+
+### V1 重启与软件升级：当前不恢复原 session
+
+截至正式 CLI `2.3.0-preview.171` / runtime `2.5.0-preview.137`，
+V1 共存每次启动通过 `POST /session` 新建会话。配置中的 `session` 虽然会
+写回，但不会作为恢复参数传入共存启动；`node resume --session` 也不能改变
+这条行为。不要把身份和工作目录不变、Hub 心跳恢复，写成原对话已恢复。
+
+还有一层数据边界：`buildOpencodeChildEnv` 为每次启动创建全新的 XDG 数据
+目录，`cleanupOpencodeChildEnv` 在所属进程退出后清理它。`unsafe-tools`
+也不放宽此边界。只补一个 session ID 参数不足以恢复旧目录中的历史；
+不得以复用旧数据库目录或绕过路径校验假装修复。V2 持久 server 候选不是
+已发布的 V1 恢复能力，也不能通过修改节点代际把 V1 会话迁移成 V2。
+
+如果原会话必须继续，先保留现有运行实例；tmux 脱离/再进入不触发升级。
+窄升级需要先有经过验收的原会话恢复方案，否则应明确说明重新开始会话的
+影响，不能无提示切换。正常停止会关闭本节点拥有的 attach TUI 和 server；
+进程记录只授予该节点的停止权，不得按名字清扫其他节点。
+
+本段是源码盘点及操作限制说明，没有新增服务、端口、代理、环境变量或
+凭据来源，也没有改变升级和回滚程序。正式软件仍从经门禁的完整 main SHA
+构建；旧私有安装及原配置应保留用于软件回滚，但回滚软件不能找回已清理的
+一次性会话历史。节点身份/配置及需保留的会话数据属于受控加密备份数据，
+不是 clone 仓库就能恢复；本轮没有验证历史导出/备份恢复或整机重建。
 
 ## V1 实现拓扑
 

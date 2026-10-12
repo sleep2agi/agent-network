@@ -151,7 +151,7 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet node start <name> --tmux` | Start or attach to a node in tmux |
 | `anet node stop <name>` | Stop the node and its same-name tmux session |
 | `anet node restart <name>` | Stop and start one node |
-| `anet node resume <name> [--session <id>]` | Resume the saved or specified session |
+| `anet node resume <name> [--session <id>]` | Request the saved or specified session; recovery depends on the runtime, including the V1 co-presence limitation below |
 | `anet node delete <name> --force` | Delete the local node configuration and the node's row on the Hub |
 | `anet node rename <ref> <new>` | Rename a node already registered with the Hub |
 | `anet node clone <src> <new>` | Copy a node's settings into a node with a **new identity** (see "Clone a node" below) |
@@ -163,6 +163,15 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet info <name>` | Show node configuration, process, and recent tasks |
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
+
+**Restarting OpenCode V1 co-presence does not restore its previous session.**
+As of CLI `2.3.0-preview.171` / runtime `2.5.0-preview.137`, co-presence startup
+creates a new session; a saved `session` or `--session` does not reopen the old
+one. Stopping closes this node's owned TUI/server, and the next launch uses a
+fresh runtime data directory. To continue the current session, keep the node
+running and detach/reattach tmux rather than trying restart/resume or a software
+upgrade. See the repository runbook's
+[V1 restart and upgrade boundary](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md#v1-restart-and-upgrade).
 
 `anet node ls --all` ignores the current directory. It reads the Hub as you (your `anet login`) via
 `/api/status` + `/api/host-supervisors` and lists the nodes of the current Network (or the one named by

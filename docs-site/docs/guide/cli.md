@@ -151,7 +151,7 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet node start <name> --tmux` | 在 tmux 中启动或连接节点 |
 | `anet node stop <name>` | 停止节点及其同名 tmux session |
 | `anet node restart <name>` | 停止后重新启动单个节点 |
-| `anet node resume <name> [--session <id>]` | 使用保存的会话或指定会话恢复 |
+| `anet node resume <name> [--session <id>]` | 请求恢复保存或指定的会话；能否恢复取决于 runtime，下方说明 V1 共存限制 |
 | `anet node delete <name> --force` | 删除本地节点配置，并删掉它在 Hub 上的那一行 |
 | `anet node rename <ref> <new>` | 重命名已在 Hub 注册的节点 |
 | `anet node clone <src> <new>` | 复制节点设置，生成一个**新身份**的节点（见下文「复制节点」） |
@@ -163,6 +163,14 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
+
+**OpenCode V1 共存的重启不是原会话恢复。** 截至 CLI `2.3.0-preview.171` /
+runtime `2.5.0-preview.137`，共存启动会创建新 session；保存的 `session` 或
+`--session` 不会让它重新进入旧会话。停止会关闭本节点拥有的 TUI/server，
+新启动的运行数据目录也是全新的。若需继续原会话，请保持现有节点运行，
+只从 tmux 脱离再进入，不要用 restart/resume 或软件换版本试探恢复。
+完整边界见仓库运行手册
+[V1 重启与软件升级](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md#v1-restart-and-upgrade)。
 
 `anet node ls --all` 不看当前目录，而是用你 `anet login` 的身份读 Hub（`/api/status` + `/api/host-supervisors`），
 把当前 Network（或 `--network <id|name>` 指定的那个，按 id、名字或唯一 id 前缀匹配）里的节点按机器分组列出：
