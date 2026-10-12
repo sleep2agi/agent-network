@@ -1,4 +1,52 @@
-#906 CLI172/runtime138 release pairing — PAIR CORE PASS / MAIN / NOT PUBLISHED
+#906 CLI172/runtime138 release pairing — PUBLIC PAIR / NO ACTIVATION
+
+Observed2026-10-12 21:49+08, package source for BOTH targets:
+b61c0e490659e94ad1e487cc8086cb73dfa8f6ad (main ancestor).
+
+Runtime2.5.0-preview.138:
+- Formal run38252273421 build114821349416; gates114823810747/114823810506/
+  114823810618/114823810610 all SUCCESS, publish114827553712 SUCCESS.
+- Full anonymous canonical npm tarball downloaded and cmp matched the exact
+  main artifact,593514B; SHA256101c9a85622db3c6934e48ec5239d105e1b315cc0f7d53a183056b6514ccfd7f.
+- SHA1 75f620dbe4e450e95afa7aedc5d77e9111621757 matches registry metadata.
+- Registry preview138; latest2.5.0-preview.58 unchanged. Public time
+  2026-10-12T13:17:36.259Z. Metadata200 briefly preceded a tarball404;
+  only the subsequent full canonical byte download counted as availability.
+
+CLI2.3.0-preview.172:
+- Original release run38255025281 workflow headffa0cc6d9b39a120978806ca18d10dd3b649d3f9,
+  explicit checkout/build sourceb61c above (verified original build log).
+- Build114830755624 and gates114831101500/114831101450/114831101460/
+  114831101420 all SUCCESS. npm publish step SUCCESS, but original whole run
+  FAILURE after910s registry readback timeout. Preserve that failure; no npm
+  republish, new version or false original-job PASS.
+- Later full anonymous canonical npm tarball downloaded/cmp matched the
+  original formal main artifact,2118019B; SHA2566f19a3b63ce70d5157cf2ea1f5b036662a4f47920f857e5eecb7f755d3ec759a.
+- SHA1 d51478d2fb53689fa14671c676b1b8a90e40d1d8 matches registry metadata;
+  preview172, latest2.3.0-preview.76 unchanged. Public time13:40:11.261Z.
+
+Official GitHub CLI fallback:
+- Reviewed source-identity correction PR2658 mainaf0eff51c295af34ef6b81215520dc261adac66d;
+  raw-log file transport PR2659 main69922aabb774d655a9b0a6577ab14e9dba1937dc.
+  Existing independent Docker9-case contracts and ten required gates passed.
+- Failed runs38255441306 (workflow head/source mismatch) and38256720733
+  (gh ANSI log output protection, before Python guard) retained. No assets
+  created by either; no main/branch/gates/hash/identity check removed.
+- Run38258070406 workflow head69922a above, package sourceb61c, original
+  source run38255025281. Contract114841199361/publish114841452881 SUCCESS.
+- Immutable tag cli-v2.3.0-preview.172 -> exact b61c main package source.
+  Non-draft prerelease published13:47:36Z (21:47:36+08).
+- Full anonymous GitHub tarball downloaded/cmp matched the same main/npm
+  bytes and SHA2566f19a3b6...ec759a,2118019B. Download:
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.172/sleep2agi-agent-network-2.3.0-preview.172.tgz
+
+No native client installer/signature, real OAuth/vendor model, legacy production
+history export, node/daemon software activation or full machine recovery proof.
+No local product test/global npm modification/production restart/account/model
+change. Public archive caches retained for byte comparison; worktrees retained.
+Existing clients and old runtimes remain unchanged until separately activated.
+
+--- Earlier pair acceptance and pending states, retained as historical ---
 
 Observed2026-10-12 20:59+08:
 - PR2656 head723206ea660f64ee2d9ae7fe18cede1b18d9fb7a.
