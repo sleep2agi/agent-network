@@ -6,6 +6,7 @@ on:
       - 'agent-node/src/runtime/opencode-copresence/**'
       - 'agent-node/src/runtime/opencode-acp/child-env.ts'
       - 'tests/test906-v1-checkpoint/**'
+      - 'deploy/node/**'
       - '.github/workflows/v1-checkpoint-core.yml'
   workflow_dispatch:
 permissions:
@@ -22,7 +23,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Build exact source and pinned native TEST-ONLY fixture
         run: sg docker -c 'docker build --target ${{ matrix.target }} --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f tests/test906-v1-checkpoint/Dockerfile -t v1-checkpoint-test .'
-      - name: Save, fresh launch import, same session and history
+      - name: Legacy export, fresh launch import, same session and history
         run: |
           set -euo pipefail
           sg docker -c 'docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" v1-checkpoint-test' 2>&1 | tee report-test906-v1-checkpoint-${{ matrix.target }}.txt

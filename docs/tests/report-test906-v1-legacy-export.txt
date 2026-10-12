@@ -1,0 +1,18 @@
+#906 V1 first legacy export — SOURCE CANDIDATE / ACTIONS PENDING
+
+Source entry: deploy/node/export-opencode-v1-session.ts, Linux only.
+GET-only existing owned bridge/server; explicit PIDs and private config identity.
+No Hub writes, stops, model calls, account files or credential copying.
+Idle/stable double capture + final process/config check; exclusive 0600 save.
+Live capture is unclean, NOT a lease against later human TUI input.
+Operator must arrange a quiet window before capture and old-bridge stop.
+
+Actions: reuse test906-v1-checkpoint only, pinned native 1.18.1 / 1.18.34.
+Non-root Docker, --network none, local synthetic model/history only.
+Core: legacy runtime without snapshot -> owned export -> fresh native import
+same session/history -> one new synthetic turn -> cleanup.
+Wrong PID/session and existing snapshot rejection; original config/processes
+retained. Six focused checkpoint unit cases; no wider suite added.
+No local product test; no production capture/upgrade/restart or actual model.
+No CI PASS, package/publication, TUI UI or disaster-recovery claim yet.
+Previous PR2652 native checkpoint success is separate, not new export proof.

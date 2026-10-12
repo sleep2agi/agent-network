@@ -1,4 +1,4 @@
-import { constants, closeSync, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { constants, closeSync, fstatSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { randomBytes } from "crypto";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -80,7 +80,7 @@ export function readV1Checkpoint(workDir: string, identity: V1CheckpointIdentity
 }
 
 export function writeV1Checkpoint(workDir: string, identity: V1CheckpointIdentity,
-  data: V1SessionData, cleanShutdown: boolean): void {
+  data: V1SessionData, cleanShutdown: boolean, options: { exclusive?: boolean } = {}): void {
   privateStat(lstatSync(workDir), true);
   if (!identity.nodeId || !identity.networkId) throw new Error("OpenCode V1 checkpoint requires immutable node/network identity");
   validateV1SessionData(data, data?.info?.id);
@@ -95,7 +95,12 @@ export function writeV1Checkpoint(workDir: string, identity: V1CheckpointIdentit
   try { writeFileSync(fd, body); fsyncSync(fd); }
   catch (error) { rmSync(temp, { force: true }); throw error; }
   finally { closeSync(fd); }
-  try { renameSync(temp, path); }
+  try {
+    // First legacy capture must never replace an existing recovery point,
+    // including one created concurrently after preflight.
+    if (options.exclusive) linkSync(temp, path);
+    else renameSync(temp, path);
+  }
   finally { rmSync(temp, { force: true }); }
 }
 

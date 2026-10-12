@@ -74,4 +74,13 @@ describe("V1 checkpoint core", () => {
       expect(() => writeV1Checkpoint(f.dir, owner, data, true)).toThrow();
     } finally { f.close(); }
   });
+  test("first legacy capture exclusively creates and never replaces history", () => {
+    const f = fixture();
+    try {
+      writeV1Checkpoint(f.dir, owner, data, false, { exclusive: true });
+      const path = join(f.dir, "opencode-v1-session.json"), before = readFileSync(path);
+      expect(() => writeV1Checkpoint(f.dir, owner, data, false, { exclusive: true })).toThrow();
+      expect(readFileSync(path)).toEqual(before);
+    } finally { f.close(); }
+  });
 });
