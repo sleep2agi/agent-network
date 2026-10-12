@@ -16,6 +16,12 @@ export interface V1Checkpoint extends V1CheckpointIdentity {
 const NAME = "opencode-v1-session.json";
 const LIMIT = 64 * 1024 * 1024;
 
+function validateEmbeddedFile(part: any): void {
+  if (part?.type === "file" && (typeof part.url !== "string" || !part.url.startsWith("data:"))) {
+    throw new Error("OpenCode V1 checkpoint cannot restore external file references");
+  }
+}
+
 function privateStat(stat: Stats, directory = false) {
   if ((directory ? !stat.isDirectory() : !stat.isFile()) || stat.isSymbolicLink()
     || stat.uid !== process.getuid?.() || (stat.mode & 0o777) !== (directory ? 0o700 : 0o600)
@@ -45,9 +51,8 @@ export function validateV1SessionData(data: V1SessionData, sessionId: string): v
       // Old writable state must not turn a file URL into a read outside the
       // fresh workspace. Embedded media is self-contained; local/remote file
       // migration requires a separate explicit materialization path.
-      if (part.type === "file" && (typeof part.url !== "string" || !part.url.startsWith("data:"))) {
-        throw new Error("OpenCode V1 checkpoint cannot restore external file references");
-      }
+      validateEmbeddedFile(part);
+      if (Array.isArray(part.state?.attachments)) part.state.attachments.forEach(validateEmbeddedFile);
       parts.add(part.id);
     }
   }
@@ -82,7 +87,8 @@ export function writeV1Checkpoint(workDir: string, identity: V1CheckpointIdentit
   const path = join(workDir, NAME);
   try { privateStat(lstatSync(path)); }
   catch (error: any) { if (error?.code !== "ENOENT") throw error; }
-  const body = JSON.stringify({ version: 1, ...identity, savedAt: new Date().toISOString(), cleanShutdown, data });
+  const body = JSON.stringify({ version: 1, nodeId: identity.nodeId, networkId: identity.networkId,
+    savedAt: new Date().toISOString(), cleanShutdown, data });
   if (Buffer.byteLength(body) > LIMIT) throw new Error("OpenCode V1 checkpoint exceeds 64 MiB");
   const temp = `${path}.tmp-${randomBytes(8).toString("hex")}`;
   const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);

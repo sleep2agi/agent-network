@@ -58,6 +58,9 @@ describe("V1 checkpoint core", () => {
       const files = structuredClone(data);
       Object.assign(files.messages[0].parts[0], { type: "file", url: "file:///private/auth.json" });
       expect(() => writeV1Checkpoint(f.dir, owner, files, false)).toThrow("external file references");
+      const tool = structuredClone(data);
+      Object.assign(tool.messages[0].parts[0], { type: "tool", state: { attachments: files.messages[0].parts } });
+      expect(() => writeV1Checkpoint(f.dir, owner, tool, false)).toThrow("external file references");
     } finally { f.close(); }
   });
   test("snapshot symlink is not followed", () => {
