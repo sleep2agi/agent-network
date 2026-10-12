@@ -843,6 +843,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // anet daemon. Default-stripping zod would drop this otherwise.
         role: z.string().max(64).optional().nullable(),
         scoped_secrets_capable: z.boolean().optional(),
+        // Preserve the runtime's independent-key capability through MCP input
+        // parsing; unknown z.object fields are otherwise silently stripped.
+        node_secrets_capable: z.boolean().optional(),
         // RFC-026 §9.3 / #338 PR3 — daemon self-declare nested under
         // `daemon_capabilities` (canonical shape per existing hub reads
         // at tools.ts:2010/2075 — PR1/PR2 placed these top-level, hub
