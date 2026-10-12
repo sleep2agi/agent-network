@@ -42,6 +42,12 @@ export function validateV1SessionData(data: V1SessionData, sessionId: string): v
         || part.sessionID !== sessionId || part.messageID !== id) {
         throw new Error("OpenCode V1 checkpoint part identity mismatch");
       }
+      // Old writable state must not turn a file URL into a read outside the
+      // fresh workspace. Embedded media is self-contained; local/remote file
+      // migration requires a separate explicit materialization path.
+      if (part.type === "file" && (typeof part.url !== "string" || !part.url.startsWith("data:"))) {
+        throw new Error("OpenCode V1 checkpoint cannot restore external file references");
+      }
       parts.add(part.id);
     }
   }
@@ -93,7 +99,10 @@ export function importV1Checkpoint(binary: string, env: NodeJS.ProcessEnv, cwd: 
   const root = env.XDG_DATA_HOME;
   if (!root) throw new Error("OpenCode V1 checkpoint import requires a fresh data root");
   const path = join(root, `anet-session-import-${randomBytes(8).toString("hex")}.json`);
-  writeFileSync(path, JSON.stringify(checkpoint.data), { mode: 0o600, flag: "wx" });
+  // Session-local permission overrides and sharing state are not history.
+  // Always use the current launch's policy, never imported authorization.
+  const { permission: _permission, share: _share, ...info } = checkpoint.data.info;
+  writeFileSync(path, JSON.stringify({ info, messages: checkpoint.data.messages }), { mode: 0o600, flag: "wx" });
   try {
     const result = spawnSync(binary, ["import", path], { cwd, env, timeout: 30_000,
       maxBuffer: 1024 * 1024, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });

@@ -37,6 +37,17 @@ First Actions observation (not inherited by a later head):
   trigger registration; pull_request/push paths now both include the suite.
 - No product assertion, baseline, threshold or permission check relaxed.
 
+Second head a5240092735421182482674bb190c83b2d731fe2:
+- Run38247500565/job114804977727 native1.18.1 and job114804977883
+  native1.18.34 both SUCCESS; tested merge ffe610ca9a77b5fecef174bc5957e7ee33610ca3.
+- Each: 4 unit cases / 11 assertions; actual native same-session/history
+  import, wrong-identity rejection, a new resumed fixture model turn, cleanup.
+- Pre-merge review added removal of imported session permission/share metadata
+  and rejection of external file parts, preserving the current launch policy.
+  Native probes now verify forged old authorization/sharing is not inherited;
+  one focused external-file unit case added. This new head must pass the same
+  two native core jobs; old-head PASS is not inherited. No wider matrix added.
+
 Authoritative upstream source reviewed in preceding scope inspection:
 - v1.18.1 source 99f638d8293f6985726ba509da602296c4963497
 - v1.18.34 source aec0b9a6d8898f68f923aaf08b7306d931fd9d76

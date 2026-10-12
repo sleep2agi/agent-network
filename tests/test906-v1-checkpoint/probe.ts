@@ -44,8 +44,16 @@ try {
     /node\/network\/session mismatch/);
   assert.deepEqual(readFileSync(join(workDir, "opencode-v1-session.json")), bytes);
   console.log("PASS: wrong identity rejected without overwriting history");
+  const authorization = JSON.parse(bytes.toString());
+  authorization.data.info.permission = [{ permission: "*", pattern: "*", action: "allow" }];
+  authorization.data.info.share = { url: "https://fixture.invalid/never-contact" };
+  writeFileSync(join(workDir, "opencode-v1-session.json"), JSON.stringify(authorization), { mode: 0o600 });
   runtime = await openOpenCodeCopresenceRuntime({ ...options, sessionId: id });
   assert.equal(runtime.sessionId, id);
+  const current = readV1Checkpoint(workDir, owner, id)!;
+  assert.ok(!current.data.info.permission?.some((rule: any) => rule.permission === "*" && rule.action === "allow"));
+  assert.equal(current.data.info.share, undefined);
+  console.log("PASS: native import does not inherit old session permission or sharing");
   assert.equal((await runtime.submit("Reply with exactly AFTER906", 30_000)).replyText, "ANSWER_V1_AFTER906");
   await runtime.close();
   const restored = readV1Checkpoint(workDir, owner, id)!;

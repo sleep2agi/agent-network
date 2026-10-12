@@ -52,6 +52,14 @@ describe("V1 checkpoint core", () => {
       expect(readFileSync(path)).toEqual(before);
     } finally { f.close(); }
   });
+  test("external file parts cannot escape fresh launch isolation", () => {
+    const f = fixture();
+    try {
+      const files = structuredClone(data);
+      Object.assign(files.messages[0].parts[0], { type: "file", url: "file:///private/auth.json" });
+      expect(() => writeV1Checkpoint(f.dir, owner, files, false)).toThrow("external file references");
+    } finally { f.close(); }
+  });
   test("snapshot symlink is not followed", () => {
     const f = fixture();
     try {
