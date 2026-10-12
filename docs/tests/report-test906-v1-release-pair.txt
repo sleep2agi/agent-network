@@ -1,0 +1,13 @@
+#906 CLI172/runtime138 release pairing — CANDIDATE / NOT PUBLISHED
+
+Only package+lock versions, immutable pair, bilingual guidance and release
+notes changed. Hub128, product checkpoint/export implementation and production
+unchanged. Existing source core PR2652 and PR2654 passed fixed native1.18.1 and
+1.18.34 in Docker Actions; no repeat native matrix for this version-only slice.
+
+Pair core uses Dockerfile.pair in Actions, no network at runtime, ordinary UID;
+actual resolver pair assertions plus both package/lock consistency tests.
+Current result PENDING. Formal main-only runtime/CLI publication gates will
+rebuild and verify install/notes/pins/docs before publishing, not reuse PR bytes.
+No local product suite, global npm write, daemon or business-node restart.
+Report publication, anonymous bytes and selected-node activation separately.

@@ -106,7 +106,7 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/guide/grok.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/opencode.md` | 见门输出 | OpenCode V2 指南：当日 npm `preview` / `latest` 具体版本，以及创建标志进入 preview 线的下界；模型目录读取器不在已发布 preview 包里。dist-tag 一动，版本句变假，发版时重核 |
 > | `docs-site/docs/en/guide/opencode.md` | 见门输出 | 同上(英文) |
-> | `docs-site/docs/guide/cli.md` | 见门输出 | V1 共存恢复限制以 CLI .171 / runtime .137 为检查快照；新增恢复实现后更新限制，不把新版本号或心跳当作原会话恢复证明 |
+> | `docs-site/docs/guide/cli.md` | 见门输出 | V1 旧 CLI .171 / runtime .137 不恢复；新 .172/.138 候选需私有快照及首次旧桥导出，发布前不可下载，不把新版本号或心跳当作原会话恢复证明 |
 > | `docs-site/docs/en/guide/cli.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/upgrade.md` | 见门输出 | 初始管理员密码一节写「现在的 `latest` 与 `preview` 都在 `≥ 2.2.22-preview.4` 范围」（原 versioning 页并入）——是下界断言，发新版不会变假 |
 > | `docs-site/docs/en/guide/upgrade.md` | 见门输出 | 同上(英文) |

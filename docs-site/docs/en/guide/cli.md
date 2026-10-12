@@ -164,13 +164,16 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
 
-**Restarting OpenCode V1 co-presence does not restore its previous session.**
-As of CLI `2.3.0-preview.171` / runtime `2.5.0-preview.137`, co-presence startup
-creates a new session; a saved `session` or `--session` does not reopen the old
-one. Stopping closes this node's owned TUI/server, and the next launch uses a
-fresh runtime data directory. To continue the current session, keep the node
-running and detach/reattach tmux rather than trying restart/resume or a software
-upgrade. See the repository runbook's
+**OpenCode V1 co-presence recovery requires this node's valid history checkpoint.**
+Old CLI `2.3.0-preview.171` / runtime `2.5.0-preview.137` cannot restore it.
+The new candidate pair CLI `2.3.0-preview.172` / runtime `2.5.0-preview.138`
+imports a private checkpoint into fresh launch data and verifies the original
+session/history; failed import does not silently create a new session. A legacy
+node without a checkpoint still creates a new session: capture its history from
+the running original bridge during a coordinated task/TUI quiet window before
+the first upgrade. Crash recovery covers only the last successful checkpoint;
+external file references are not migrated. Candidates are not downloadable
+until exact-main publication gates pass. See the repository runbook's
 [V1 restart and upgrade boundary](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md#v1-restart-and-upgrade).
 
 `anet node ls --all` ignores the current directory. It reads the Hub as you (your `anet login`) via

@@ -164,11 +164,13 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
 
-**OpenCode V1 共存的重启不是原会话恢复。** 截至 CLI `2.3.0-preview.171` /
-runtime `2.5.0-preview.137`，共存启动会创建新 session；保存的 `session` 或
-`--session` 不会让它重新进入旧会话。停止会关闭本节点拥有的 TUI/server，
-新启动的运行数据目录也是全新的。若需继续原会话，请保持现有节点运行，
-只从 tmux 脱离再进入，不要用 restart/resume 或软件换版本试探恢复。
+**OpenCode V1 共存恢复需要该节点的有效历史快照。** 旧 CLI `2.3.0-preview.171` /
+runtime `2.5.0-preview.137` 不恢复旧 session。新配对候选 CLI
+`2.3.0-preview.172` / runtime `2.5.0-preview.138` 支持在新的运行数据目录
+导入节点私有快照并核对原 session/history；导入失败不静默新建。没有快照的
+旧节点仍会新建会话，不能直接重启试探恢复：首次升级前需要按手册在原桥
+运行且任务/TUI空闲的窗口导出。崩溃恢复只保证最近成功保存的快照；外部
+文件引用暂不支持迁移。候选通过 main 正式发布门前不是可下载版本。
 完整边界见仓库运行手册
 [V1 重启与软件升级](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md#v1-restart-and-upgrade)。
 
