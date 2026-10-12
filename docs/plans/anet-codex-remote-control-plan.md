@@ -4,7 +4,7 @@
 > **日期**: 2026-05-13
 > **状态**: 草案 — 深度调研 doc（per Vincent telegram 4090+4093+4095 派单的 dual parallel deep research, 跟通信龙的 mcp-server stdio 方案 doc 并行）
 > **触发**: Vincent 4090 "你对这个足够熟悉吗" 触发 self-audit + 4093+4095 派 通信SDK马 (我) 出 remote-control ws 方案 deep doc / 通信龙 出 mcp-server stdio 方案 deep doc, Vincent compare 选 ship
-> **关联**: [RFC-006](./rfcs/RFC-006-codex-code-cli-mcp-server.md) Phase 2 路径 / RFC-005 (Superseded) / commit 6429bc0 codex CLI 通信研究 / commit 24b744e 通信龙 deep design doc
+> **关联**: [RFC-006(../rfcs/RFC-006-codex-code-cli-mcp-server.md) Phase 2 路径 / RFC-005 (Superseded) / commit 6429bc0 codex CLI 通信研究 / commit 24b744e 通信龙 deep design doc
 
 ## TL;DR
 

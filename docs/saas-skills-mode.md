@@ -52,7 +52,7 @@
 ### ❌ Not fit（用别的）
 
 - **超低延迟（<200ms）**：anet 走 SDK + 工具，单 turn 几秒起步，不适合实时聊天 API
-- **超大并发（>千 QPS / 单 hub）**：SQLite + 单进程 commhub 不是高吞吐设计 — 走多 hub 分片或换 PostgreSQL（但当前路线坚持 SQLite，见 [`v3-postgresql-design.md`](v3-postgresql-design.md) 标的 \"暂搁置\"）
+- **超大并发（>千 QPS / 单 hub）**：SQLite + 单进程 commhub 不是高吞吐设计 — 走多 hub 分片或换 PostgreSQL（但当前路线坚持 SQLite，见 [`v3-postgresql-design.md`](archive/v3-postgresql-design.md) 标的 \"暂搁置\"）
 - **要严格的 multi-tenant 配额**：anet 自身没有 quota / 限流（你的 API 网关需要自己做）
 
 ## 3. SaaS 模式架构

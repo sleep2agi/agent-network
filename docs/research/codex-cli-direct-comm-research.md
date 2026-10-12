@@ -6,7 +6,7 @@
 | 提出 | 2026-05-13 |
 | 作者 | 通信SDK马 |
 | 任务来源 | Vincent telegram 3871 → 通信龙转单 |
-| 关联 | [Phase 1 SDK 升级 baseline](sdk-upgrade-2026-05-12-baseline.md) / [SDK-VERSION-DRIFT-MEMO](https://github.com/sleep2agi/agent-network/blob/main/docs/sdk-upgrade-2026-05-12-baseline.md) R39 已分析 `codex --config` inline 注入 |
+| 关联 | [Phase 1 SDK 升级 baseline](../archive/sdk-upgrade-2026-05-12-baseline.md) / [SDK-VERSION-DRIFT-MEMO](https://github.com/sleep2agi/agent-network/blob/main/docs/archive/sdk-upgrade-2026-05-12-baseline.md) R39 已分析 `codex --config` inline 注入 |
 
 ## 摘要
 

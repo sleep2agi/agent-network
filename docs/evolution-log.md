@@ -1,5 +1,12 @@
 # Agent Network Evolution Log
 
+> ⚠️ **本文已停更。** 下面只有 2026-05-11 ~ 05-12 开源前后 v0.8.0 → v0.8.2 三条记录，
+> 之后的版本沿革不再往这里追加 —— 以
+> [`docs-site/docs/changelog.md`](../docs-site/docs/changelog.md)（中文）/
+> [`docs-site/docs/en/changelog.md`](../docs-site/docs/en/changelog.md)（English）
+> 和各 release 的 notes 为准。
+> 本文保留，只为说明 v0.8 那三天里每条改动的动机；引用其中任何命令或版本号前先核对当前文档。
+
 ## v0.8.2 Telegram Channel + claude-code-cli Session Resume (2026-05-12) — COMPLETE
 
 ### Stats

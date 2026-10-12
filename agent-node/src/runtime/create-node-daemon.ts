@@ -1331,6 +1331,21 @@ export async function handleCreateNodeDoorbell(
     }
   }
 
+  // New children read the owning Daemon's current defaults on each full start.
+  // No key value enters config.json or the create request's public receipt.
+  if (deps.providerScope) {
+    try {
+      atomicWriteJson(join(childWorkDir, '.anet', 'nodes', childDirName, 'secrets-source.json'), {
+        schema: 1, daemon_dir: join(deps.workDir, '.anet', 'nodes', deps.providerScope.alias),
+        network_id: deps.providerScope.networkId, daemon_node_id: deps.providerScope.daemonId,
+        node_id: `node_${request_id.replace(/^cr_/, '')}`,
+      });
+    } catch {
+      await deps.callCommHub('ack_create_request', { request_id, status: 'failed', error: 'secret_source_write_failed' }).catch(()=>{});
+      return;
+    }
+  }
+
   if (req.node_spec.flags?.daemonProvider) {
     try {
       const input = JSON.stringify({ request_id, alias: req.node_spec.name, network_id: deps.providerScope!.networkId,

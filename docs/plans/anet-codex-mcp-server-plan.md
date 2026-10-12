@@ -3,7 +3,7 @@
 > **作者**: 通信龙（hands-on 实测 + 源码 dive）  
 > **日期**: 2026-05-13  
 > **状态**: 深度方案 doc — Vincent telegram 4093 让我出 mcp 方案 (跟 SDK马 remote-control 方案并列)  
-> **关联**: RFC-006 / `docs/anet-codex-code-cli-design.md` / `docs/codex-cli-direct-comm-research.md`
+> **关联**: RFC-006 / `docs/design/anet-codex-code-cli-design.md` / `docs/research/codex-cli-direct-comm-research.md`
 
 ## 0. Hands-on 实测证据
 
