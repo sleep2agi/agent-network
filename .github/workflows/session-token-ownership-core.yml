@@ -1,0 +1,22 @@
+name: Session token ownership core
+on:
+  pull_request:
+    paths:
+      - 'server/src/node-token-ownership.ts'
+      - 'server/src/auth.ts'
+      - 'server/src/session-token-ownership-http.test.ts'
+      - 'server/src/daemon-token-owner-http.test.ts'
+      - 'tests/test689-session-token-ownership/**'
+      - '.github/workflows/session-token-ownership-core.yml'
+permissions:
+  contents: read
+jobs:
+  session-token-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build isolated HTTP test image
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t session-token-ownership-test -f tests/test689-session-token-ownership/Dockerfile .
+      - name: SQLite and PostgreSQL issuance and compatibility boundaries
+        run: docker run --rm --init --network none session-token-ownership-test

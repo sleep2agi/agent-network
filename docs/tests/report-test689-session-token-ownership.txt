@@ -1,0 +1,15 @@
+Scope: CommHub requirement #689, session registration authority at node-token refresh.
+Base main: 3fcee2c46d3c26ad0e8c3f9f233d6d46fc603f2d.
+
+Change: consult same-network session registrations when no matching nodes row exists. Retain network owner/admin and member Hub-admin recovery, and a unique active unbound network node-token holder (legacy/current issuance epochs). Expired, revoked, renamed general, wrong-scope, missing-bound and conflicting holder evidence does not grant refresh authority. Existing nodes ownership and pre-existing modern reservation checks are unchanged. No schema/dependency changes.
+
+Local Docker HTTP verification: PASS.
+Command: timeout 105s sg docker -c 'docker build --build-arg SOURCE_COMMIT=working-tree-3fcee2c46 -t commniu-session689-test -f tests/test689-session-token-ownership/Dockerfile . && docker run --rm --init --network none commniu-session689-test'
+SQLite: 36 pass, 0 fail across the new session suite and existing daemon-token owner regression suite.
+PostgreSQL: 36 pass, 0 fail across the same suites.
+Assertions include denied issuance without token/node/session/audit writes, verified holder refresh, administrator recovery, requested-network isolation, existing owner gates and restricted/viewer boundaries.
+Build and both backend runs completed within the 105-second local budget. Fixtures and PostgreSQL credentials are container-only; no production database, credentials or sockets are mounted.
+The final version metadata is preview.130; exact-head CI rebuilds and verifies that final candidate. Local source verification alone does not claim CI, publication or live activation.
+
+Exact-head CI/main/release/activation: pending at candidate preparation.
+Authoritative deployment and rollback procedures remain in deploy/hub/README.md. This source candidate does not change the current production launcher or runtime.
