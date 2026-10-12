@@ -382,6 +382,42 @@ Git 负责软件、配置结构与过程；生产 DB、vault 原密钥、账号�
 加密备份或重新认证。原保险库记录名 NOT COVERED 的缺口保留，未做新
 空机演练，不能声称 clone 就能恢复数据或本次已完成全链恢复。
 
+### #1075 `.128` 配置（2026-10-12 待激活）
+
+`.127` 的实际激活记录在 `docs/tests/report-test1053-hub127-profile.txt`；
+16:54+08 实读生产 `/health` 仍为 `.127`、secured、330 会话。
+本次 profile 选择新 sibling `runtime-v111-preview128`，保留已运行的
+`runtime-v110-preview127` 和原入口作回滚。软件来自完整 main
+`e83cfc7d3b949a8751c43ee2f1c0614a2315dcf4`，正式发布运行
+`38225130040` 的构建、四门、npm 发布与 registry 回读均 SUCCESS。
+匿名完整 tarball 与该 main 制品相同：1233005 字节，SHA256
+`b75ebaa668249148dfa26c4fc8c93d87bc8bfb34ee2fd163fe497b1dd8a096c1`。
+`provider906/package*.json` 锁定真实公开 URL 和 SHA512 integrity，
+传递依赖不变。不要从分支安装启动器或用浮动依赖重建此版本。
+
+`.128` 增加无 Daemon 节点的环境密钥授权请求；节点以自身身份 pull/ack，
+需节点 runtime `2.5.0-preview.137` 上报明确能力，客户端 `.251` 提供入口。
+现有 Daemon 请求通道、旧身份令牌、账号和会话保持不变。从已部署 `.127`
+的软件 source 到 `.128`，DB/schema/migration 文件没有变化。新请求是
+Hub 内存 TTL 状态；重启会丢失未确认请求，不盲重放。节点私有密钥文件不在
+Hub 数据库中；仅升级 Hub 不等于旧节点已获得新能力或真实模型权益已验证。
+
+常驻入口继续由现有 PM2 `commhub-hub` 使用本目录 Git 权威 launcher；
+启动、固化安装、当前一致性 `VACUUM INTO` 备份与安装字节检查按上文执行。
+本 profile 的 Actions Docker 检查验证目录、显式回滚和 feature flag，
+是假执行器，不冒实际数据迁移测试；另复用本版本的正式安装门和 #1075
+注册工具→节点私有持久存储→实际 runtime 子进程使用的 Actions Docker 核心。
+先通过检查并正常合入 main，再复制 package/lock 安装新 sibling，部署 Git
+launcher（0700、逐一 cmp），只重启 Hub，不带 `--update-env` 或重启业务节点。
+用监听进程、`.128` 健康读数、自然心跳/任务事件和错误日志核真实生效。
+
+反代、隧道、9200 端口、PM2 定义和数据库路径不变。密钥从原 owner-only
+`hub.env` 安全加载；不读取/传播值、不新生成 vault 主密钥。回滚恢复保留的
+`.127` 入口，只重启 Hub，保留 live DB、私有安装和节点会话，不回退用户数据。
+Hub DB、vault 原密钥及节点私有密钥须由管理员的独立加密备份恢复；Git clone
+不含这些数据或账号。主密钥保险库记录名仍 NOT COVERED，不宣称空机恢复
+演练完成。软件公开、本 profile 入库与生产激活三个门分别记录。
+
 ## 混版风险(必读)
 
 `docs/release/versioning-and-compatibility.md` 的 **C2 契约**:

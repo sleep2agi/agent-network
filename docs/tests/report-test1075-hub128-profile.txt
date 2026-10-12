@@ -1,0 +1,21 @@
+#1075 Hub128 deployment profile — source preparation only
+Observed: 2026-10-12 16:55+08.
+
+Software main e83cfc7d3b949a8751c43ee2f1c0614a2315dcf4;
+release38225130040 complete SUCCESS including build, four gates, npm readback.
+Anonymous whole tarball matches the gated main artifact:
+1233005B SHA256 b75ebaa668249148dfa26c4fc8c93d87bc8bfb34ee2fd163fe497b1dd8a096c1.
+Dependencies unchanged; actual public version/URL/SRI only in deployment lock.
+Git source127->128 DB/schema/migration diff is empty; no added database migration.
+
+Current production read-only health remains Hub127, secured,330sessions.
+This change selects sibling v111/128 and explicit rollback v110/127 in the
+existing Git launcher. PM2/ports/tunnels/base launcher/key sources unchanged.
+Actions Docker existing launcher check is pending on source push; fake Bun/ss
+only, not real DB recovery or deployment acceptance. Original test1075 and formal
+package install gates are reused; no local product tests or extra matrix.
+
+No production restart/install, credential read/rotation, global npm update or
+business-node change. The profile must normally merge main before deployment.
+Six recovery boundaries and consistent-backup/rollback instructions are recorded
+in deploy/hub/README.md; off-machine vault backup inventory gap remains explicit.
