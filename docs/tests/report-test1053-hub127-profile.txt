@@ -1,0 +1,22 @@
+#1053/#1045 Hub127 deployment profile — source preparation, NOT ACTIVATED
+OBSERVED_AT=2026-10-12 11:01+08
+
+- Production read-only snapshot: localhost9200 /health200, secured, Hub126,
+  sessions330; listener BunPID3381400, cwd existing private Hub directory.
+  Deployed profile still selects runtime-v109-preview126, mode700;
+  original hub.env mode600. No credential contents read or reported.
+- Software127 published from exact main31b0dbdae3192f471c8812574c118795658120f0,
+  release38193173842 SUCCESS. Anonymous metadata exact version/SRI and unchanged
+  dependency set verified; tarball bytes/hash match preceding publication proof.
+- Narrow change: profile selects sibling v110/127; exact dependency lock updated
+  without transitive churn; existing launcher fixture expects127 with126 rollback.
+  Side-thread explicit0 behavior, base launcher, PM2, ports and secret source unchanged.
+- Git diff126 source42fcf114... to127 source31b0dbda lists only Provider/secret
+  handlers and contracts; no DB/schema/adapter file changes. No actual production
+  DB backup was uploaded to Actions, no model or secret request sent.
+- Existing Actions Hub deployment profile Docker job will verify launch path
+  and explicit rollback. It uses fake Bun/ss and synthetic private env; not a
+  real Hub migration or production activation proof. No local tests executed.
+- Current process/configuration/data unchanged. Source PR, CI acceptance,
+  normal main merge, private installation, backup and actual activation must
+  remain distinct. Do not install branch launchers into production.

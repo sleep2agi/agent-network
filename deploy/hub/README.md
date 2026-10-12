@@ -167,7 +167,8 @@ curl -s localhost:9200/health          # version 与 sessions_count
 ### #906 的精确版本部署配置
 
 `hub-daemon.sh` 默认值仍对应 CLI 的兼容基线，不是线上最新版本。
-以下 `.122` / `.124` 段落是已部署历史；当前 `.125` 配置与回滚见本节末尾。
+以下 `.122` / `.124` / `.125` 段落是已部署历史；`.126` 已激活，
+`.127` 的待激活精确配置与回滚见本节末尾。
 `hub-provider906.sh` 的历史 `.122` 无密钥部署配置选择
 `~/.commhub/runtime-v106-preview122`，保留目标 Hub 原本开启的 side-thread
 功能（显式设置 `COMMHUB_ENABLE_SIDE_THREADS=0` 仍有效）。不能只覆盖启动器
@@ -344,6 +345,42 @@ SHA256 `9ab55f1ff33c1802749ee647998d7d016fc04e81fe0112df282c595436cb3817`。
 初始日志观察未见独立 `task.ack`，不将此项算已验或制造生产测试。
 详细证据见 `docs/tests/report-test1027-hub126-activation.txt`。两台 Daemon
 的升级及三 runtime 子节点创建验收独立记录，不由本次 Hub 激活外推。
+
+### #1053 / #1045 `.127` 配置（待激活，不是生产已升级）
+
+此 profile 选择新的 sibling `runtime-v110-preview127`，保留已运行
+`.126` 的 `runtime-v109-preview126` 与旧入口回滚。正式软件来自 main
+`31b0dbdae3192f471c8812574c118795658120f0`，发布运行 `38193173842`
+构建、四门及 npm/匿名核实均 SUCCESS。完整公共 tarball 与原 main 制品
+逐字节相同：1232566 字节、SHA256
+`ef9ed47cff0a1d6b65ef100dbf684f4e2c430e802ee75809bdb4db3c62fc6e54`。
+本目录 `provider906/package*.json` 记录精确 npm URL / SHA512 integrity；
+传递依赖与 `.126` 完全相同，不重新解析浮动依赖。
+
+`.127` 提供 Daemon/节点环境密钥短期授权请求以及明确配置 HTTP 的
+Provider 兼容；配套 CLI `.170` / runtime `.136`，客户端 `.249` 不会
+自动升级远程服务或重启节点。从 `.126` 软件 main 到本次 `.127` main
+的 `server/src/db.ts`、数据库 adapter 与 schema/migration 没有变化；
+新的密钥请求是内存 TTL 状态，Hub 重启会令未确认请求丢失，不能盲重放。
+本段及 profile CI 不是实际生产激活、真实密钥消费或数据恢复验收。
+
+安装、原一致性备份、入口字节校验和窄切换沿上面的原操作流程；profile
+必须先通过现有 GitHub Actions Docker 启动目录/显式回滚检查并正常合入
+main。复制精确 package/lock 到新 sibling 后 `npm ci --ignore-scripts
+--no-audit --no-fund`；旧目录、当前 DB 和 owner-only 配置不被覆盖。
+新的生产备份应做 integrity/行数核对，不把旧快照冒充当前数据。
+软件发行已有独立 Docker 真实启动/认证核心证据；生产数据与 `hub.env`
+绝不上传 CI，用户要求测试由 Actions 执行时不另起本地测试容器。
+若发现真实 schema/adapter 差异则停在 inactive，另行安排隔离迁移验证。
+
+正常激活仍只重启既有 PM2 `commhub-hub`，不加 `--update-env`；原 Bun、
+9200、反代/隧道、DB 路径及主机管理员保管的 `hub.env` 密钥来源不变。
+先确认原 vault key 可加载且不换值，再按监听 PID 的真实入口、health
+`.127`、错误日志和自然节点心跳/回执核验，不能只看 PM2 online。
+失败恢复备份的 `.126` 入口并仅重启 Hub，不回退用户会话或删除 DB。
+Git 负责软件、配置结构与过程；生产 DB、vault 原密钥、账号仍需独立
+加密备份或重新认证。原保险库记录名 NOT COVERED 的缺口保留，未做新
+空机演练，不能声称 clone 就能恢复数据或本次已完成全链恢复。
 
 ## 混版风险(必读)
 
