@@ -1,0 +1,16 @@
+2026-10-12 16:31 Asia/Shanghai — release preparation, NOT publication
+------------------------------------------------------------------
+Original #1075 / Issue2646. Source feature PR2647 merged fb4a9b57b after
+Docker core/compatibility and all10 required branch checks succeeded.
+Selected screenshot target通信欧2号/n_724853fc has durable node_id/network_id
+and runtime118, so the independent storage contract fits without an identity
+migration. Config inspected only selected metadata, never token/key values.
+No selected-node install/restart or production Hub activation performed.
+Candidates Hub128/runtime137/CLI171 are currently unoccupied, NOT public.
+Six package/lock roots and exact pair updated together, no dependency change;
+bilingual preview claims and three independent Install/Upgrade notes retained.
+Release via existing release.yml: full40 merged-main input and four gates,
+dependency order Hub->runtime->CLI; all publication only from main. New client
+pins and software activation wait for verified formal bytes. No repeated
+native feature suite or local product tests for metadata; actual CI pending.
+Public client250 remains independent and complete; it does not include1075.
