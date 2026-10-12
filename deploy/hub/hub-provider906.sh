@@ -2,8 +2,8 @@
 # Versioned #906 deployment profile. Installs no packages and changes no data.
 # Keep the previous runtime directory for rollback; see README.md.
 set -uo pipefail
-# .128 exact main software; previous .127 v110 is retained for rollback.
-export HUB_RUNTIME_DIR="${HUB_RUNTIME_DIR:-$HOME/.commhub/runtime-v111-preview128}"
+# .129 exact main software; previous .128 v111 is retained for rollback.
+export HUB_RUNTIME_DIR="${HUB_RUNTIME_DIR:-$HOME/.commhub/runtime-v112-preview129}"
 # Preserve the feature already enabled on the target Hub; an explicit 0 wins.
 export COMMHUB_ENABLE_SIDE_THREADS="${COMMHUB_ENABLE_SIDE_THREADS:-1}"
 exec bash "${HUB_BASE_LAUNCHER:-$HOME/.local/bin/hub-daemon-base.sh}"

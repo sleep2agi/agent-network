@@ -164,6 +164,36 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### #688 / #1075 `.129` 配置（待激活）
+
+本轮精确软件 main 为 `45a7cff26b389bc9e09301bf1729922d9a6ae052`，
+正式发布运行 `38322287810` 的构建、四道门、preview 发布及 registry
+回读全部 SUCCESS。匿名完整 tarball 与该 main 的 gated 包逐字节相同：
+1,234,902 字节，SHA256
+`0dc85276a093caf33f55431969d3cc680c0519a8624cdf34c23447d919fa558c`。
+本目录 `provider906/package*.json` 锁定实际 npm URL、SHA512 integrity；
+传递依赖未重新解析或变更。npm latest 渠道保持原值。
+
+profile 选择新 sibling `runtime-v112-preview129`，保留当前
+`runtime-v111-preview128` 与旧入口用于回滚。软件包含收件/ACK 调用者
+校验和节点密钥能力的心跳 schema 修复；没有 DB/adapter/schema 变化。
+常驻启动、Bun、PM2、9200、反代/隧道和原 owner-only `hub.env` 来源保持。
+复制精确 lock 后以 `npm ci --ignore-scripts --no-audit --no-fund` 固化安装。
+当前一致性 SQLite 备份留在主机 owner-only backups，不能上传至 CI；
+现有 Docker 离线 preflight 可通过 `HUB_PREFLIGHT_VERSION` 与
+`HUB_PREFLIGHT_INTEGRITY` 指定本次公开包的独立预期值，旧 `.126` 默认仍可用。
+
+profile 必须先通过 Actions Docker 目录选择/显式回滚检查并正常合入
+main，才可原子安装为现有 PM2 入口；逐字节核对 Git 与安装副本。
+仅 `pm2 restart commhub-hub`，不加 `--update-env`；随后核对真实
+监听 PID/包目录、health `.129`、自然节点心跳/ACK 和新增错误日志。
+若失败则恢复备份的 `.128` profile 并仅重启 Hub，保留两个 runtime、
+DB 和旧状态。内存中未确认的密钥请求会过期/丢失，不能盲重放。
+
+软件发布和 profile 检查不代表已激活或密钥实际读写已验。原 vault
+密钥、账号和 DB 内容仍依赖管理员的加密备份或重新认证；Git 只重建
+软件和过程，不提供这些数据，也不宣称本轮完成灾难恢复演练。
+
 ### #906 的精确版本部署配置
 
 `hub-daemon.sh` 默认值仍对应 CLI 的兼容基线，不是线上最新版本。
