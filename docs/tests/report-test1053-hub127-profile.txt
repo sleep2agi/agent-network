@@ -1,4 +1,4 @@
-#1053/#1045 Hub127 deployment profile — source preparation, NOT ACTIVATED
+#1053/#1045 Hub127 deployment profile — source preparation and activation
 OBSERVED_AT=2026-10-12 11:01+08
 
 - Production read-only snapshot: localhost9200 /health200, secured, Hub126,
@@ -20,3 +20,47 @@ OBSERVED_AT=2026-10-12 11:01+08
 - Current process/configuration/data unchanged. Source PR, CI acceptance,
   normal main merge, private installation, backup and actual activation must
   remain distinct. Do not install branch launchers into production.
+
+## Activation increment — 2026-10-12 11:34+08
+
+- Source-preparation snapshot above remains historical, not the current state.
+  PR2641 head479d79f05003b1cc898aae4d3f94dc244f764677 passed10 mandatory
+  backend checks and existing Actions Docker launcher job114645584763 /
+  run38198227403. Normal main squash3f956831eb949636b97ef964d5c4bd3ce9d97426
+  merged03:08:25Z. Synthetic launcher check is NOT a real-data migration test.
+- Installed exact package/lock into private sibling runtime-v110-preview127;
+  npm ci --ignore-scripts, no global installation or install scripts. Public
+  software remains main31b0dbdae3192f471c8812574c118795658120f0, SHA256
+  ef9ed47cff0a1d6b65ef100dbf684f4e2c430e802ee75809bdb4db3c62fc6e54.
+- Owner-private backup directory backups/scoped1053-p127.v4sV7M contains
+  previous profile/base and consistent VACUUM snapshots (mode600). Latest
+  cutover snapshot:747225088B, integrity ok,330 sessions/78778 tasks. No
+  credential/database contents uploaded to Git or Actions. Data restore is
+  operator-owned; these snapshots are not an off-machine disaster-recovery drill.
+- Atomically deployed the exact Gitmain profile (mode700), base launcher and
+  original hub.env unchanged. Only pm2 restart commhub-hub, no --update-env;
+  no Daemon/business node/account/session change. Activated03:19:35.611Z
+  (11:19:35.611+08), BunPID3381400 ->3775153, original PM2 parent1613.
+- Actual process selects runtime-v110-preview127. Repeated /health200:
+  version0.9.0-preview.127, secured,330 sessions; restartcount84->85 stable.
+  Around11:25:125 SSE connections,116 recent5min heartbeats (before/after),
+  114 identities with heartbeats after activation. Natural persisted events:
+  delivered19/started19/replied21/failed1; independent task.ack0. The failed
+  task is unclassified, zero ACK events are NOT an ACK PASS. No synthetic
+  production traffic or model inference sent to inflate acceptance.
+- Rollback: restore owner-private before126 profile with mode700 and restart
+  only commhub-hub; retain old runtime-v109-preview126 and current live DB.
+  Do not rewind live sessions/Provider state. Six recovery questions and the
+  unchanged key source are in deploy/hub/README.md; off-machine master-key
+  recovery inventory remains NOT_COVERED, not a claim of full recoverability.
+- A diagnostic attempt to read entire1.16GB stdout failed in the reader with
+  RangeError; Hub stayed healthy. Bounded last1MiB stdout contains this startup
+  marker with zero scoped-vault-missing/panic matches. Stderr tail has no startup
+  marker: scoped counts UNKNOWN, not zero. No log deletion/prune performed.
+- No local tests/Docker executed. Existing Actions core/release gates reused;
+  local integrity/process/heartbeat reads above are deployment observations.
+  Daemon-vdev fresh11:32 heartbeat shows runtime136/original identity/idle0,
+  but TMHR task1110d499 ended failed without full upgrade receipt. CLI/PID/SSE/
+  Provider/config/rollback acceptance remains pending; do not close1053/1045
+  from heartbeat alone. Client249 selected platforms publicly delivered
+  separately; mirror and target activation are not inherited from build success.
