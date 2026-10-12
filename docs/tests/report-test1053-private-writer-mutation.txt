@@ -1,0 +1,28 @@
+#1053 private-writer mutation diagnostic correction — cloud only
+OBSERVED_AT=2026-10-12 09:55+08
+
+Original cloud observation
+- Exact34229879a071054c02e544c8376baad2189e0316, QA run38192680727,
+  test635 job114629258691:205pass/0fail/464expectations in3files.
+- Real non-root foreign-UID refusal succeeds; preread mutation is red.
+- Script then exits1 before writer-bypass receipt. Its grep still expects2,
+  while create-node-daemon-private-wiring.test.ts now pins3 atomic JSON
+  writes, including the new private names-only secrets-source marker.
+- No mutation log artifact was exported from that runner. The source/log
+  evidence identifies the stale diagnostic; don't claim the full suite PASS
+  until the corrected existing Docker suite succeeds in GitHub Actions.
+
+Narrow change
+- Only align the diagnostic's expected count2→3. Same mutated writer site,
+  mandatory nonzero test exit, atomic-writer assertion, raw-write rejection,
+  permission/owner checks and pre-read negative control remain unchanged.
+- No product file, package/version, baseline, publication input or runtime
+  semantics changed. No new test suite/matrix; existing QA runs the recipe.
+- User requested Actions-only testing: no local tests or Docker run.
+
+Recovery/cleanup
+- No new service/launcher/ports/proxy/tunnel/environment/credential source.
+  Existing deployment scripts and protected data backups remain authority.
+- No production state, account, secret, global package or process changed.
+- This correction does not rebuild or relabel the formal main source
+  31b0dbdae3192f471c8812574c118795658120f0 package family.
