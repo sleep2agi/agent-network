@@ -1337,7 +1337,9 @@ export async function handleCreateNodeDoorbell(
     try {
       atomicWriteJson(join(childWorkDir, '.anet', 'nodes', childDirName, 'secrets-source.json'), {
         schema: 1, daemon_dir: join(deps.workDir, '.anet', 'nodes', deps.providerScope.alias),
-        network_id: deps.providerScope.networkId, daemon_node_id: deps.providerScope.daemonId,
+        // Legacy Daemon configs may omit network_id. get_create_request is
+        // token-bound and returns the owning network checked by the Hub.
+        network_id: deps.providerScope.networkId || req.network_id, daemon_node_id: deps.providerScope.daemonId,
         node_id: `node_${request_id.replace(/^cr_/, '')}`,
       });
     } catch {

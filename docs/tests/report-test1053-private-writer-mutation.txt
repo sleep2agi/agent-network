@@ -1,5 +1,5 @@
 #1053 private-writer mutation diagnostic correction — cloud only
-OBSERVED_AT=2026-10-12 09:55+08
+OBSERVED_AT=2026-10-12 09:53+08
 
 Original cloud observation
 - Exact34229879a071054c02e544c8376baad2189e0316, QA run38192680727,
@@ -26,3 +26,23 @@ Recovery/cleanup
 - No production state, account, secret, global package or process changed.
 - This correction does not rebuild or relabel the formal main source
   31b0dbdae3192f471c8812574c118795658120f0 package family.
+
+09:57+08 increment — legacy network source gap (not an all-green claim)
+- Source34229879 QA lifecycle job114629258120 remains failed: SDK children
+  die before registration. Earlier inactive-parent fix alone was insufficient.
+- Daemon NETWORK_ID is empty for that old hand-written config. The new source
+  marker used this empty local value, while the child's config already used
+  req.network_id from token-bound get_create_request. readScopedNodeEnv rejects
+  the resulting scope mismatch before child startup. This is product wiring,
+  not an environment failure; the runner has no child exception artifact.
+- Narrow correction uses the same Hub-bound request network only when the
+  local Daemon network is absent. Hub get_create_request checks exact token
+  Daemon identity and matching request network before returning this field.
+  Configured-store parent network/identity/owner checks remain unchanged.
+- One case added to existing node-name-652 unit fixture proves actual marker
+  persistence and empty-store reader acceptance. Real SDK lifecycle replay and
+  existing secrets core remain GitHub Actions-only pending evidence.
+- npm publish for runtime135 was already accepted before this later failure
+  was observed. Do not re-publish immutable135, install it as repaired, or claim
+  current publication equals delivery. Runtime136 is the narrow replacement
+  candidate; Hub127/CLI169 product bytes are not changed by this fix.

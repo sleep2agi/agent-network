@@ -30,6 +30,8 @@ import { _resetChildrenMapForTest, handleStopDoorbell } from "./stop-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
 import { NODE_NAME_CASES, nodeFolderSlug } from "../shared/node-name.js";
 import { readOpencodeRuntimeBinding } from "../shared/opencode-runtime-binding.js";
+import { readScopedNodeEnv } from "../shared/scoped-secret-env.js";
+import type { CreateNodeDeps } from "./create-node-daemon.js";
 
 const CN = "测试";
 const CN_DIR = nodeFolderSlug(CN);   // node-<6 hex>
@@ -161,19 +163,20 @@ function writeFakeAnet(root: string): string {
 
 interface Spawned { bin: string; args: string[]; cwd: string }
 
-async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>) {
+async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>, providerScope?: CreateNodeDeps['providerScope']) {
   const acks: Record<string, any>[] = [];
   const spawned: Spawned[] = [];
   await handleCreateNodeDoorbell({ request_id: requestId }, {
     callCommHub: async (tool: string, args: Record<string, unknown>) => {
       if (tool === "get_create_request") {
-        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652", ...(envBlob ? { env_blob: envBlob } : {}) };
+        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652", ...(envBlob ? { env_blob: envBlob } : {}), ...(providerScope ? {network_id:'net_legacy_1053'} : {}) };
       }
       if (tool === "ack_create_request") { acks.push(args); return { ok: true }; }
       throw new Error(`unexpected tool ${tool}`);
     },
     workDir,
     hubUrl: "http://127.0.0.1:9",
+    ...(providerScope ? {providerScope} : {}),
     log: () => {},
     warn: () => {},
     serializeEnvLocal: serializeEnvLocalDaemon,
@@ -204,6 +207,18 @@ function walk(root: string): string[] {
 const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
+  test("#1053 legacy Daemon source marker uses the Hub-bound request network", async () => {
+    const {acks, spawned} = await runCreate({name:'legacy-secret-child',runtime:'claude-agent-sdk'},
+      'cr_legacysecret1053', undefined, {alias:'legacy-daemon',networkId:'',daemonId:'node_legacy_daemon'});
+    expect(acks.map(a=>a.status)).toEqual(['started']);
+    expect(spawned).toHaveLength(1);
+    const dir=join(workDir,'.anet','nodes','legacy-secret-child');
+    expect(JSON.parse(readFileSync(join(dir,'secrets-source.json'),'utf8')).network_id).toBe('net_legacy_1053');
+    // No private store means no inherited values; do not require migration of
+    // the legacy parent's config to start the otherwise unchanged child.
+    expect(readScopedNodeEnv(dir)).toEqual({});
+  });
+
   function plantMachineModel(body: Record<string, unknown>): void {
     const dir = join(home, ".config", "opencode");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
