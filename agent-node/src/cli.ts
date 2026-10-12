@@ -4122,6 +4122,10 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       expectedVersion: INITIAL_OPENCODE_VERSION,
       binarySearchPath: INITIAL_LAUNCH_PATH,
       title: `${ALIAS} · Agent Network shared TUI`,
+      checkpoint: (OPENCODE_GENERATION ?? "v1") === "v1" && NODE_ID && NETWORK_ID
+        ? { nodeId: NODE_ID, networkId: NETWORK_ID } : undefined,
+      sessionId: opencodeSessionId,
+      newSession: NEW_SESSION,
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN,
       commhubAlias: ALIAS,

@@ -1,0 +1,31 @@
+#906 V1 private session checkpoint core — candidate, NOT TESTED YET
+SOURCE_BASE=e269eb5d80adfb2eccdb859f20c3e8e99e106adc
+OBSERVED_AT=2026-10-12T12:05:00Z
+
+Implementation scope:
+- Immutable node/network-bound 0600 JSON checkpoint; no persistent DB reuse.
+- Exact vetted V1 local import into fresh launch data, followed by session and
+  message/part verification. Import/identity failure does not create a new session.
+- Startup, completed network turn and graceful stop update the checkpoint.
+- Unclean/final-save failure recovery is explicitly last-checkpoint-only.
+- Legacy nodes lacking a snapshot keep the previous new-session behavior with
+  an explicit warning. First legacy history export/migration is NOT IMPLEMENTED.
+- --new-session intentionally ignores the prior snapshot; V2/ACP unchanged.
+
+Validation planned, Actions only:
+- tests/test906-v1-checkpoint/Dockerfile targets v1181 and v11834;
+  opencode-ai fixed at 1.18.1 and 1.18.34, fixture-only model/auth/history.
+- Four checkpoint unit cases: owned roundtrip, wrong identity/history, failed
+  write keeps previous bytes, and symlink refusal.
+- Actual production native entry: save a fixture turn, close, create fresh
+  launch data, import same session, verify history and submit one new turn.
+- Source SHA binding, non-root container, network none at runtime, cleanup.
+- No current PASS, native installation, production upgrade or release claim.
+- No local product suite, no credentials or real conversation read, no live
+  model call, no production process/config/account/model change.
+
+Authoritative upstream source reviewed in preceding scope inspection:
+- v1.18.1 source 99f638d8293f6985726ba509da602296c4963497
+- v1.18.34 source aec0b9a6d8898f68f923aaf08b7306d931fd9d76
+- packages/opencode/src/cli/cmd/import.ts preserves session/message/part IDs;
+  import rebinds project/directory. Source review is not native package PASS.

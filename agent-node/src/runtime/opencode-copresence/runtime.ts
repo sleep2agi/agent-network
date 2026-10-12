@@ -40,6 +40,8 @@ import {
 } from "./attach-tui";
 import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
 import { Agent, type Dispatcher } from "undici";
+import { importV1Checkpoint, readV1Checkpoint, verifyV1ImportedHistory, writeV1Checkpoint,
+  type V1CheckpointIdentity } from "./v1-checkpoint";
 
 export { OPENCODE_DEFAULT_TASK_TIMEOUT_MS };
 
@@ -166,6 +168,10 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   model?: string;
   title?: string;
   startupTimeoutMs?: number;
+  /** V1 only: optional immutable identity enables private session checkpoints. */
+  checkpoint?: V1CheckpointIdentity;
+  sessionId?: string;
+  newSession?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -190,6 +196,9 @@ export interface OpenOpenCodeCopresenceOptions {
   commhubToken?: string;
   commhubAlias?: string;
   startupTimeoutMs?: number;
+  checkpoint?: V1CheckpointIdentity;
+  sessionId?: string;
+  newSession?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -683,6 +692,14 @@ export async function openVettedOpenCodeCopresence(
     OPENCODE_SERVER_USERNAME: USERNAME,
     OPENCODE_SERVER_PASSWORD: password,
   };
+  const checkpoint = opts.checkpoint && !opts.newSession
+    ? readV1Checkpoint(opts.workDir, opts.checkpoint, opts.sessionId) : undefined;
+  if (checkpoint) {
+    importV1Checkpoint(opts.binary, childEnv, opts.cwd, checkpoint);
+    if (!checkpoint.cleanShutdown) warn("[opencode-copresence] restoring the last checkpoint after an unclean exit; later human turns may be absent");
+  } else if (opts.checkpoint && opts.sessionId && !opts.newSession) {
+    warn("[opencode-copresence] saved session has no V1 checkpoint (legacy launch); startup creates a new session, not a history recovery");
+  }
   const child = spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port }), {
     cwd: opts.cwd,
     env: childEnv,
@@ -708,13 +725,26 @@ export async function openVettedOpenCodeCopresence(
 
   try {
     await waitForHealth(child, url, password, opts.startupTimeoutMs ?? 20_000);
-    const created = await fetchJson(url, password, "/session", {
+    const created = checkpoint
+      ? await fetchJson(url, password, `/session/${checkpoint.data.info.id}`)
+      : await fetchJson(url, password, "/session", {
       method: "POST",
       body: JSON.stringify({ title: opts.title ?? "Agent Network shared TUI" }),
     });
     if (typeof created?.id !== "string" || !/^ses_[A-Za-z0-9]+$/.test(created.id)) {
       throw new Error("OpenCode POST /session returned an invalid session id");
     }
+    if (checkpoint) verifyV1ImportedHistory(checkpoint, { info: created,
+      messages: await fetchJson(url, password, `/session/${created.id}/message`, {}, 30_000) });
+    const saveCheckpoint = async (cleanShutdown: boolean) => {
+      if (!opts.checkpoint) return;
+      const info = await fetchJson(url, password, `/session/${created.id}`);
+      const messages = await fetchJson(url, password, `/session/${created.id}/message`, {}, 30_000);
+      writeV1Checkpoint(opts.workDir, opts.checkpoint, { info, messages }, cleanShutdown);
+    };
+    // A successful startup checkpoint marks the now-live generation unclean.
+    // A normal close overwrites it after reading all current human/network turns.
+    await saveCheckpoint(false);
     writeAttachScript(
       backend,
       attachScriptPath,
@@ -933,6 +963,9 @@ export async function openVettedOpenCodeCopresence(
           // turned any pure tool-call turn — a valid completed opencode
           // outcome — into a false failure report on CommHub. Removed.
           const replyText = parseMessageReply(message);
+          // A history-storage failure must not turn a completed tool/model
+          // operation into a failed task that callers might replay.
+          await saveCheckpoint(false).catch(() => warn("[opencode-copresence] checkpoint save failed; last saved history retained"));
           return {
             replyText,
             stdout: JSON.stringify(message),
@@ -944,6 +977,11 @@ export async function openVettedOpenCodeCopresence(
       },
       async close(mode?: { restart?: boolean }) {
         if (closed) return;
+        // Capture human turns too before normal teardown. An unavailable
+        // server/disk leaves the previous unclean checkpoint intact; a stop
+        // must still tear down owned processes rather than orphaning a server.
+        if (session.isRunning) await saveCheckpoint(true).catch(() =>
+          warn("[opencode-copresence] final checkpoint failed; recovery is limited to last saved history"));
         closed = true;
         // #1957 — stop the human TUI this launcher recorded (exact pid +
         // start ticks), before the serve it is attached to goes away. On a
@@ -1079,6 +1117,9 @@ export async function openOpenCodeCopresenceRuntime(
       model,
       title: opts.title,
       startupTimeoutMs: opts.startupTimeoutMs,
+      checkpoint: opts.checkpoint,
+      sessionId: opts.sessionId,
+      newSession: opts.newSession,
       tmuxRespawn: opts.tmuxRespawn,
       tmuxRunner: opts.tmuxRunner,
       log: opts.log,

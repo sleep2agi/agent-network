@@ -1,0 +1,34 @@
+name: V1 session checkpoint core
+on:
+  pull_request:
+    paths:
+      - 'agent-node/src/cli.ts'
+      - 'agent-node/src/runtime/opencode-copresence/**'
+      - 'agent-node/src/runtime/opencode-acp/child-env.ts'
+      - 'tests/test906-v1-checkpoint/**'
+      - '.github/workflows/v1-checkpoint-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checkpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [v1181, v11834]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build exact source and pinned native TEST-ONLY fixture
+        run: sg docker -c 'docker build --target ${{ matrix.target }} --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f tests/test906-v1-checkpoint/Dockerfile -t v1-checkpoint-test .'
+      - name: Save, fresh launch import, same session and history
+        run: |
+          set -euo pipefail
+          sg docker -c 'docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" v1-checkpoint-test' 2>&1 | tee report-test906-v1-checkpoint-${{ matrix.target }}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-v1-checkpoint-${{ matrix.target }}-${{ github.sha }}
+          path: report-test906-v1-checkpoint-${{ matrix.target }}.txt
+          if-no-files-found: warn
