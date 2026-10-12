@@ -25,6 +25,19 @@ OBSERVED_AT=2026-10-12 09:09+08
   Next09:35+08 evidence checkpoint; only if it passes, earliest backend
   09:50–10:10 / selected clients10:20–10:45, subject to package/runner gates.
 
+09:38+08 diagnostic-guard correction (no product/oracle change)
+- PR2636@d9bf1ac350fc06ed217ef91594f3aa1cfcb5bc27 mutation pins
+  run38192340339/job114627577790 failed: the newly inline dynamic proc read
+  in a harness that also writes fixtures was counted as an unchecked mutator.
+- Moved that same read-only diagnostic to the existing process-generation.ts
+  helper module, which contains no writes. generationGone, its zombie rule,
+  all15s waits and actual stop/restart assertions remain unchanged.
+- Full checker in Docker python3.12-slim, candidate read-only, network none,
+  uid1000:377shell files+146script mutators /695anchors /8forms; unchecked4
+  equals baseline4, GREEN. No baseline/guard/parser edit or raised allowance.
+- This scanner result is not a real-client PASS; current behavioral gate
+  and test571 legacy compatibility replay remain separate pending evidence.
+
 Original evidence
 - PR2636@335fa4d756551fc198fa37c81bdd5f746d7828c8 real-client
   run38186392245/job114609511816 failed: processes were gone but

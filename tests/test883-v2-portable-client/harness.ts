@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
-import { generationGone } from './process-generation';
+import { generationGone, observeGeneration } from './process-generation';
 const root = '/home/node/test883';
 const project = `${root}/project`;
 const artifact = '/artifacts';
@@ -236,15 +236,9 @@ try {
     }, 30000));
     console.log('stop status:', JSON.stringify(stopRow));
     const reaped = await until(() => identities.every(generationGone), 15000);
-    if (!reaped) console.log('owned stop residuals:', JSON.stringify(identities.map((p, index) => {
-      let observed: unknown = 'absent';
-      try {
-        const stat = readFileSync(`/proc/${p.pid}/stat`, 'utf8');
-        const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
-        observed = { state: fields[0], parent: fields[1], ticks: fields[19] };
-      } catch { /* disappeared during this read */ }
-      return { role: ['bridge', 'serve', 'tui'][index], ...p, observed };
-    })));
+    if (!reaped) console.log('owned stop residuals:', JSON.stringify(identities.map((p, index) => ({
+      role: ['bridge', 'serve', 'tui'][index], ...p, observed: observeGeneration(p.pid),
+    }))));
     check('old bridge serve TUI identities reaped', reaped);
     check('old TUI and bridge sessions absent', tmux('has-session', '-t', '=oc829').status !== 0 && tmux('has-session', '-t', '=oc829-桥').status !== 0);
     check('config preserved after stop', existsSync(`${nodeDir}/config.json`));
