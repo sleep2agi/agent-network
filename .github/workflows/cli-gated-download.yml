@@ -76,7 +76,8 @@ jobs:
           gh api "repos/$GH_REPO/actions/runs/$GATED_RUN/jobs?per_page=100" > release-jobs.json
           build_job=$(jq -r '.jobs[] | select(.name == "build tarball") | .id' release-jobs.json)
           [[ "$build_job" =~ ^[0-9]+$ ]]
-          gh api "repos/$GH_REPO/actions/jobs/$build_job/logs" > release-build.log
+          # Raw ANSI stays in a private job file, never rendered to a terminal.
+          gh api --allow-escape-sequences "repos/$GH_REPO/actions/jobs/$build_job/logs" > release-build.log
           gh run download "$GATED_RUN" --name gated-tarball --dir download
           python3 "$RUNNER_TEMP/verify-gated-cli-download.py" \
             --commit "$RELEASE_COMMIT" --run-id "$GATED_RUN" --version "$VERSION" \
