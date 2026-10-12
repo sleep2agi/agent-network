@@ -1848,6 +1848,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
+      ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
       ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
         buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
@@ -7143,6 +7144,11 @@ async function connectSSE() {
               // 仍 pending,门铃却没人听);连上后补拉一次,没有就是一次空拉。
               processRulesFileRequests(rulesFileDeps())
                 .catch((e: any) => warn(`[rules-file] connect catch-up failed: ${e?.message || e}`));
+              if (nodeSecretsDir && fileConfig.node_id && fileConfig.network_id) {
+                import('./runtime/node-secrets.js').then(({reconcileNodeSecrets})=>reconcileNodeSecrets({
+                  callCommHub,nodeDir:nodeSecretsDir,nodeId:NODE_ID,networkId:NETWORK_ID,warn,
+                })).catch(()=>warn('[node-secrets] module unavailable'));
+              }
               if (fileConfig.role === "host_supervisor") {
                 import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({
                   callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, warn,
@@ -7399,6 +7405,11 @@ async function connectSSE() {
                 callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, serverUrl: COMMHUB_URL,
                 warn: (m: string) => warn(m),
               })).catch(() => warn("[daemon-provider] readback module unavailable"));
+            }
+            if (ev.type === 'node_secrets' && nodeSecretsDir && fileConfig.node_id && fileConfig.network_id) {
+              import('./runtime/node-secrets.js').then(({reconcileNodeSecrets})=>reconcileNodeSecrets({
+                callCommHub,nodeDir:nodeSecretsDir,nodeId:NODE_ID,networkId:NETWORK_ID,warn,
+              })).catch(()=>warn('[node-secrets] module unavailable'));
             }
             if (ev.type === 'scoped_secrets' && fileConfig.role === 'host_supervisor') {
               import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({

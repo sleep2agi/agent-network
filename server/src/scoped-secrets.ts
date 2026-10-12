@@ -6,7 +6,7 @@ import { providerScanTargets } from './daemon-provider-snapshots';
 import { validScopedSecretKey } from './shared/scoped-secret-contract';
 type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
 type Daemon = { ok: false; error: string } | { ok: true; networkId: string; daemonNodeId: string; daemonAlias: string };
-type Request = { request_id: string; network_id: string; daemon_node_id: string; node_id: string | null;
+type Request = { request_id: string; network_id: string; daemon_node_id: string | null; node_id: string | null;
   action: 'list' | 'put' | 'delete'; key?: string; value?: string; revision?: number;
   status: 'pending' | 'succeeded' | 'failed' | 'expired'; expires_at: number; snapshot?: any; error?: string };
 const requests = new Map<string, Request>();
@@ -26,6 +26,50 @@ function expire() {
   }
 }
 const timer = setInterval(expire, 10_000); timer.unref();
+function nodeSupported(network: string, node: string) {
+  const row = db.get<{ config_snapshot: string }>('SELECT config_snapshot FROM nodes WHERE network_id=?1 AND node_id=?2', network, node);
+  try { return JSON.parse(row?.config_snapshot ?? '{}').node_secrets_capable === true; } catch { return false; }
+}
+// Independent node lane: no supervisor lookup, binding, or Daemon credential.
+export function requestNodeSecrets(h: Human, node: string, action: Request['action'], key?: string, value?: string, revision?: number) {
+  const refusal = authorize(h); if (refusal) return refusal;
+  if (!nodeSupported(h.networkId!, node)) return denied('node_secrets_upgrade_required');
+  if (action !== 'list' && (!validScopedSecretKey(key) || !Number.isSafeInteger(revision) || revision! < 0
+    || (action === 'put' && (typeof value !== 'string' || !value || Buffer.byteLength(value) > 8192 || value.includes('\0'))))) return denied('invalid_secret_input');
+  expire();
+  if ([...requests.values()].some(r => r.network_id === h.networkId && r.daemon_node_id === null && r.node_id === node && r.status === 'pending')) return denied('secret_store_busy');
+  if (requests.size >= 1000) return denied('secret_queue_busy');
+  const r: Request = { request_id: `nsk_${randomUUID()}`, network_id: h.networkId!, daemon_node_id: null,
+    node_id: node, action, ...(action === 'list' ? {} : { key, revision, ...(action === 'put' ? { value } : {}) }),
+    expires_at: Date.now() + 120_000, status: 'pending' };
+  requests.set(r.request_id, r);
+  return { ok: true as const, request_id: r.request_id, status: r.status, expires_at: r.expires_at };
+}
+export function pullNodeSecrets(d: Daemon) {
+  if (!d.ok || !nodeSupported(d.networkId, d.daemonNodeId)) return denied('caller_not_a_secret_node');
+  expire();
+  return { ok: true, requests: [...requests.values()].filter(r => r.network_id === d.networkId && r.daemon_node_id === null
+    && r.node_id === d.daemonNodeId && r.status === 'pending').map(({ status, snapshot, error, ...input }) => input) };
+}
+export function ackNodeSecrets(d: Daemon, id: string, snapshot: any, failed = false) {
+  if (!d.ok || !nodeSupported(d.networkId, d.daemonNodeId)) return denied('caller_not_a_secret_node');
+  expire(); const r = requests.get(id);
+  if (!r || r.network_id !== d.networkId || r.daemon_node_id !== null || r.node_id !== d.daemonNodeId) return denied('request_not_found');
+  if (r.status !== 'pending') return { ok: r.status === 'succeeded' || r.status === 'failed', status: r.status };
+  if (!failed) {
+    if (!snapshot || Object.keys(snapshot).some(k => !['network_id','daemon_node_id','node_id','revision','activation','keys'].includes(k))
+      || snapshot.network_id !== r.network_id || snapshot.daemon_node_id !== null || snapshot.node_id !== r.node_id
+      || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 || snapshot.activation !== 'next_start'
+      || !Array.isArray(snapshot.keys) || snapshot.keys.length > 128 || new Set(snapshot.keys.map((x:any)=>x?.key)).size !== snapshot.keys.length
+      || snapshot.keys.some((x:any)=>!x || Object.keys(x).some(k=>!['key','source'].includes(k)) || !validScopedSecretKey(x.key) || x.source !== 'node')
+      || (r.action !== 'list' && snapshot.revision !== r.revision! + 1)
+      || (r.action === 'put' && !snapshot.keys.some((x:any)=>x.key === r.key))
+      || (r.action === 'delete' && snapshot.keys.some((x:any)=>x.key === r.key))) return denied('invalid_secret_receipt');
+    r.snapshot = snapshot;
+  }
+  r.status = failed ? 'failed' : 'succeeded'; if (failed) r.error = 'secret_operation_unavailable'; delete r.value;
+  return { ok: true, status: r.status };
+}
 export function requestScopedSecrets(h: Human, daemon: string, node: string | null, action: Request['action'], key?: string, value?: string, revision?: number) {
   const refusal = authorize(h); if (refusal) return refusal;
   if (!daemonSupported(h.networkId!, daemon)) return denied('scoped_secrets_upgrade_required');

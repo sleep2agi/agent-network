@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
-import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets } from './scoped-secrets.js';
+import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
 import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { adoptionCandidatesReportSchema } from "./adoption-candidates.js";
@@ -4132,12 +4132,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   server.tool(
     "daemon_provider_snapshot", "Daemon Provider actions; read=id. Login provider={action,session_id?,label?}, no tokens. hub_*=owner catalog/distribute. secret_*=env persistence, provider={node_id?,key?,value?}; next full start.",
-    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
+    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read", "node_secret_list", "node_secret_put", "node_secret_delete"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
       // Separate scoped-secret contract using the existing management lane.
       // No additional tools in model context; ordinary Provider actions unchanged.
       if (action === 'secret_read') return providerReply(getScopedSecrets(human, id));
+      if (action === 'node_secret_list' || action === 'node_secret_put' || action === 'node_secret_delete') {
+        const input = provider as { key?: string; value?: string } | undefined;
+        const result = requestNodeSecrets(human, id, action === 'node_secret_list' ? 'list' : action === 'node_secret_put' ? 'put' : 'delete', input?.key, input?.value, revision);
+        if (result.ok) {
+          const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', id, human.networkId!);
+          if (target) pushEvent(target.alias, { type: 'node_secrets', request_id: result.request_id }, human.networkId!);
+        }
+        return providerReply(result);
+      }
       if (action === 'secret_list' || action === 'secret_put' || action === 'secret_delete') {
         const input = provider as { node_id?: string | null; key?: string; value?: string } | undefined;
         const result = requestScopedSecrets(human, id, input?.node_id ?? null, action === 'secret_list' ? 'list' : action === 'secret_put' ? 'put' : 'delete', input?.key, input?.value, revision);
@@ -4172,9 +4181,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
   server.tool(
-    "pull_daemon_provider_snapshots", "Daemon Provider work; advertise only implemented secure write/collect/apply/login capabilities.", { accept_writes: z.boolean().optional(), accept_applications: z.boolean().optional(), accept_logins: z.boolean().optional(), accept_local_discovery: z.boolean().optional(), accept_collections: z.boolean().optional(), accept_secrets: z.boolean().optional() },
-    async ({ accept_writes, accept_applications, accept_logins, accept_local_discovery, accept_collections, accept_secrets }) => {
+    "pull_daemon_provider_snapshots", "Provider/secret work; opt into implemented capabilities only.", { accept_writes: z.boolean().optional(), accept_applications: z.boolean().optional(), accept_logins: z.boolean().optional(), accept_local_discovery: z.boolean().optional(), accept_collections: z.boolean().optional(), accept_secrets: z.boolean().optional(), accept_node_secrets: z.boolean().optional() },
+    async ({ accept_writes, accept_applications, accept_logins, accept_local_discovery, accept_collections, accept_secrets, accept_node_secrets }) => {
       const caller = resolveCallerDaemonTokenBound();
+      if (accept_node_secrets) return providerReply(pullNodeSecrets(caller));
       const result = pullProviderSnapshots(caller, accept_writes, accept_applications, accept_logins, accept_local_discovery, accept_collections);
       return providerReply(result.ok && accept_secrets ? { ...result, secret_requests: pullScopedSecrets(caller) } : result);
     },
@@ -4182,7 +4192,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.tool(
     "ack_daemon_provider_snapshot", "Target daemon acknowledges redacted Provider configuration readback; fixed failure code only.",
     { request_id: z.string().min(1).max(200), snapshot: z.unknown().optional(), failed: z.boolean().optional(), applied_revision: z.number().int().min(0).optional(), application: z.unknown().optional(), login: z.unknown().optional() },
-    async ({ request_id, snapshot, failed, applied_revision, application, login }) => providerReply(request_id.startsWith('dsk_')
+    async ({ request_id, snapshot, failed, applied_revision, application, login }) => providerReply(request_id.startsWith('nsk_')
+      ? ackNodeSecrets(resolveCallerDaemonTokenBound(), request_id, snapshot, failed)
+      : request_id.startsWith('dsk_')
       ? ackScopedSecrets(resolveCallerDaemonTokenBound(), request_id, snapshot, failed)
       : ackProviderSnapshot(resolveCallerDaemonTokenBound(), request_id, snapshot, failed, applied_revision, application, login)),
   );

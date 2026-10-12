@@ -62,3 +62,48 @@ No extra tools enter model context; neither scopes nor permissions are merged.
 
 Tests use only synthetic credentials in isolated Docker. Non-main artifacts
 are TEST-ONLY. No production changes are part of this request.
+
+## Independent nodes (#1075)
+
+Node Hub identity tokens are independent of a Daemon. The original `secret_*`
+lane above still manages Daemon defaults and bound-child overrides unchanged.
+For an unbound node, the client sends `node_secret_list`, `node_secret_put` or
+`node_secret_delete` through the same management tool, with `id` equal to the
+selected node ID. `secret_read` observes its `nsk_` receipt. Human owner/admin
+authorization remains required; runtime callers cannot submit human writes.
+
+The target advertises `config_snapshot.node_secrets_capable` only when it has
+a durable config directory, node ID and network ID. An older Hub/runtime or
+incomplete durable identity is unsupported, not a requirement to bind a Daemon.
+The existing token-bound pull/ack transport opts into `accept_node_secrets`;
+only the selected node can pull/ack that request. SSE `node_secrets` and reconnect
+catch-up trigger the private management handler, not model tasks or ordinary
+message injection. Secret values remain in the short-lived management request;
+names/revision/source only appear in receipts. This is not Hub token rotation.
+
+`<node directory>/node-secrets.json` stores the identity-bound revision and
+values using the existing private atomic writer. `readScopedNodeEnv` in the CLI
+and runtime consumes it on a full start without a Daemon source marker. It
+overrides inherited defaults, but existing explicit process/config/Provider
+credentials retain their precedence. The initial client uses this lane for
+unbound nodes only; bound-node and Daemon pages keep their previous transport.
+Saving never restarts a native TUI/server or changes account/model/Provider.
+
+Recovery uses the same checked-in `anet node start` launcher, ports and Hub
+configuration as ordinary nodes; no new listener, proxy or tunnel is added.
+Upgrade the Hub, CLI/runtime and client from verified exact-main releases,
+then check the names-only node receipt and the selected node's actual usage.
+No new release version is declared available by this source-only change.
+Keep old installations and encrypted state backups for rollback; older software
+does not consume the new file. Values must come from the operator's secret
+manager or encrypted data backup, not Git. Preserve existing `secrets.env`,
+config and Daemon inheritance markers; this change does not migrate or delete
+them. A stale `.node-secrets.lock` may be removed only after confirming no writer
+is running. Repository clone restores software, not secrets, OAuth sessions,
+production databases or pending in-memory requests.
+
+The bounded Actions Docker fixture is `tests/test1075-node-secrets`: real Hub
+handlers, the node-local writer, modification/deletion and actual runtime startup
+child consumption with synthetic credentials and no Daemon binding. Client
+protocol/typecheck and exported unbound-node UI use its existing Docker suite.
+Source/CI acceptance is distinct from formal package release and installation.
