@@ -382,7 +382,7 @@ Git 负责软件、配置结构与过程；生产 DB、vault 原密钥、账号�
 加密备份或重新认证。原保险库记录名 NOT COVERED 的缺口保留，未做新
 空机演练，不能声称 clone 就能恢复数据或本次已完成全链恢复。
 
-### #1075 `.128` 配置（2026-10-12 待激活）
+### #1075 `.128` 配置（2026-10-12 已激活）
 
 `.127` 的实际激活记录在 `docs/tests/report-test1053-hub127-profile.txt`；
 16:54+08 实读生产 `/health` 仍为 `.127`、secured、330 会话。
@@ -417,6 +417,22 @@ launcher（0700、逐一 cmp），只重启 Hub，不带 `--update-env` 或重�
 Hub DB、vault 原密钥及节点私有密钥须由管理员的独立加密备份恢复；Git clone
 不含这些数据或账号。主密钥保险库记录名仍 NOT COVERED，不宣称空机恢复
 演练完成。软件公开、本 profile 入库与生产激活三个门分别记录。
+
+17:02:34（东八区）已按本流程激活。部署配置来自正常 main 合入
+`1224c5e194cd7c9acf91c6a592655d034462b5bb`（PR2649，10 required 和
+Hub deployment profile Docker SUCCESS），软件 source 仍为上面的
+`e83cfc7d`。私有 sibling 安装100包、未运行安装脚本；旧 profile/base
+及一致性 `VACUUM INTO` 备份保存在 owner-only
+`~/.commhub/backups/node-secrets1075-p128.uXNwN6/`。备份756965376字节、
+0600，integrity ok、330sessions/79568tasks；不是离机灾备恢复演练。
+Git profile 与部署副本 cmp 相同，base 未变。仅重启 `commhub-hub`，
+无 `--update-env`、Daemon/业务节点或账号变更。实际 Bun PID4014410
+（旧3775153），入口为 v111/128；健康 `.128`、secured、330会话，
+SSE自然恢复126且抽查八节点都有切换后新心跳。初始新增日志区段中
+vault主密钥缺失/panic/segfault匹配0，PM2人为85→86；未执行专门
+SSE协议/模型/生产密钥测试，独立 `task.ack` 未计PASS。负责人原身份
+认证HOLD独立保留，心跳不是其登录验收。目标无绑定节点仍需升级
+runtime137，客户端251构建独立记录，不由Hub激活外推。
 
 ## 混版风险(必读)
 
