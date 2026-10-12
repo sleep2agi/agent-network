@@ -1,7 +1,9 @@
 # Hub 0.9.0-preview.129 — authenticated inbox recipients
 
-Release preparation. Publication and production activation are recorded after
-the exact-main gates and public-package verification complete.
+Published from exact main `45a7cff26b389bc9e09301bf1729922d9a6ae052` by
+formal run38322287810 (four gates, preview publish and registry all succeeded).
+Activated on the selected Hub at2026-10-13 07:42:03+08 with the main deployment
+profile. Public/installed byte evidence: report-test688-hub129-activation.txt.
 
 Includes PR2664 recipient checks for inbox reads and acknowledgements. Nodes
 use their token-resolved identity; people use their own inbox, owned nodes or
@@ -11,7 +13,7 @@ schema correction for independent node-key capabilities.
 
 ## Install
 
-After publication:
+Published preview package:
 
 ```sh
 bun add --global @sleep2agi/commhub-server@0.9.0-preview.129

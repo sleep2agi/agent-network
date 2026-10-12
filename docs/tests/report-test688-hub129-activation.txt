@@ -39,3 +39,34 @@ natural heartbeat and appended-error observations. On failure restore the
 saved128 profile and only restart Hub; keep both runtimes and original DB.
 No schema/dependencies, ports/proxy, vault key, business-node or account changes.
 Git does not contain live data, keys, accounts or unconfirmed secret requests.
+
+Actual activation — 2026-10-13 07:42:03+08
+
+PR2666 head1892574a330dd11d1c1330433d494691362eb85b passed ten required
+checks and profile Docker38323128765; normal SHA-lock squash merged main
+b7993870774ee3477812f16bea74400549f412a2 at07:40:56+08, no bypass/rule
+changes. Software main45a7cff26 and deployment mainb79938707 both verified
+ancestors before deployment; profile merge tree equals reviewed head.
+
+Installed the exact Gitmain profile atomically, mode700/cmp equal; existing
+base equals Git, runtime package/lock equal Git inputs, public/installed343
+files equal. Only pm2 restart commhub-hub, no --update-env. Real PID4014410
+->427293, parent PM21613, unchanged Bun1.4.0 executable, entry112/129.
+health129/secured/330 sessions, SSE118 at07:42:16 and120 at07:44:38;
+115 natural heartbeats after activation. PM2 restarts86->87 reflects exactly
+this operation, no additional restart observed. hub.env inode/size/mtime
+unchanged; values never read. Same stdout/stderr inodes; appended windows
+contain129 entry marker and zero vault_master_key_missing/panic/segfault.
+
+Readonly real MCP via this node's existing identity: own get_inbox succeeds;
+nonexistent verification alias get_inbox/ack_inbox reject with
+inbox_identity_mismatch, no real message/other recipient accessed or ACKed.
+The verification alias is absent from sessions. Observed natural task events
+since activation:3 delivered,2 started; independent task.ack and terminal
+events not observed, not labeled PASS. No model/OAuth, all-runtime, long-term
+stability or disaster-recovery assertion. Original128 rollback remains ready.
+
+#688 closed4/4 in CommHub. #1075 independently stays4/5: two natural node
+heartbeats persisted node_secrets_capable=1, but actual authorized-user
+target names-only metadata readback not executed. No borrowed user token,
+real key mutation, business-node restart or automatic pending-write replay.
