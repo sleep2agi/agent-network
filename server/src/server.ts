@@ -3672,9 +3672,7 @@ return Bun.serve({
       // TUI*) as that node. Same table, same token, one transport hardened and
       // its sibling not.
       //
-      // User tokens keep the previous behaviour: the Dashboard legitimately
-      // posts as its logged-in user, and tightening that is a separate change
-      // with its own compatibility surface.
+      // Human dispatches use the authenticated username on both transports.
       // The decision itself lives in rest-identity.ts as a pure function so the
       // shipped path and the tested path are the same code.
       const identity = resolveRestFromSession({
@@ -3695,7 +3693,9 @@ return Bun.serve({
       }
       const fromSession = identity.fromSession;
       const ttlSeconds = (body as any).ttl_seconds || 3600;
-      const fromNodeId = resolveRestNodeIdForAlias(fromSession, taskNetId);
+      const fromNodeId = restAuth && !requestToken(req).startsWith("ntok_")
+        ? null
+        : resolveRestNodeIdForAlias(fromSession, taskNetId);
       const targetNodeId = target.session?.node_id ?? null;
       const actualTo = restActualTo(target, taskNetId);
       // #221 — fold top-level `attachments` into `meta.attachments` so

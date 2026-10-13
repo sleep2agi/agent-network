@@ -1,0 +1,26 @@
+name: Task sender core
+on:
+  pull_request:
+    paths:
+      - 'server/src/rest-identity*'
+      - 'server/src/tools.ts'
+      - 'server/src/server.ts'
+      - 'server/src/task-sender-http.test.ts'
+      - 'server/src/task-auth-origin-http.test.ts'
+      - 'server/src/task-network-resolution-http.test.ts'
+      - 'tests/test696-task-sender/**'
+      - '.github/workflows/task-sender-core.yml'
+permissions:
+  contents: read
+jobs:
+  task-sender:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build isolated HTTP test image
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t task-sender-test -f tests/test696-task-sender/Dockerfile .
+      - name: SQLite and PostgreSQL sender contracts and assertion witnesses
+        run: docker run --rm --init --network none task-sender-test
+      - name: Existing transport and origin contracts
+        run: docker run --rm --init --network none --entrypoint bash task-sender-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/sender-regressions.db bun test src/rest-identity.test.ts src/task-auth-origin-http.test.ts src/task-network-resolution-http.test.ts'

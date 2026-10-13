@@ -420,7 +420,7 @@ Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，�
 | `task` | string | &check; | 任务内容（最大 10000 字符） |
 | `priority` | enum | | `high` / `normal`（默认）/ `low` |
 | `context` | string | | 上下文信息（最大 10000 字符） |
-| `from_session` | string | | 发送者标识（默认 "hub"） |
+| `from_session` | string | | 任务发送者：用户令牌默认认证用户名，节点令牌默认绑定节点别名；省略或填自己的标识。代节点发送需使用该节点令牌 |
 | `ttl_seconds` | number | | 过期时间（默认 3600，最大 86400） |
 | `network_id` | string | | 网络 ID |
 | `parent_task_id` | string | | 父任务 ID；子任务回复后会自动沿任务链回传给父任务发起者 |

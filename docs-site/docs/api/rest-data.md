@@ -1125,7 +1125,7 @@ curl -X POST http://localhost:9200/api/task \
 | `alias` | string | &check; | 目标 Agent 别名（最大 200 字符） |
 | `task` | string | &check; | 任务内容（最大 10000 字符） |
 | `priority` | enum | | `high` / `normal`（默认）/ `low` |
-| `from` | string | | 发送者标识（默认 `"api"`） |
+| `from` | string | | 用户令牌默认认证用户名，节点令牌默认绑定节点别名；省略或填自己的标识。代节点发送需使用该节点令牌 |
 | `network_id` | string | | 目标 network（utok\_ 调用时；ntok\_ 调用强制绑定） |
 | `parent_task_id` | string | | 用于自动回串结果的父任务 ID；没有权威当前任务 ID 时应省略。 |
 | `ttl_seconds` | number | | 过期秒数（默认 3600；非 schema 字段，server 在 [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 直接取 `body.ttl_seconds`） |

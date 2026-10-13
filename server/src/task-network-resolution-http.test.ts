@@ -87,7 +87,6 @@ async function post(principal: Principal, marker: string, networkId?: string) {
     headers: { Authorization: `Bearer ${principal.token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       alias: principal.target,
-      from: "api",
       task: marker,
       priority: "high",
       ...(networkId ? { network_id: networkId } : {}),

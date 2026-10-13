@@ -50,6 +50,22 @@ export function nodeAliasForToken(token: string, tokenName: string | null | unde
   return alias || null;
 }
 
+/** Human dispatches use the authenticated username; node credentials represent nodes. */
+export function resolveUserTaskFromSession(username: string | null | undefined, requestedFrom: unknown): RestIdentityResult {
+  const fromSession = username?.trim() || "api";
+  const requested = typeof requestedFrom === "string" ? requestedFrom.trim() : "";
+  if (requested && requested !== fromSession) {
+    return {
+      ok: false,
+      error: "from_session_identity_mismatch",
+      message: "user token task sender must match the authenticated username",
+      tokenAlias: fromSession,
+      requestedFromSession: requested,
+    };
+  }
+  return { ok: true, fromSession };
+}
+
 export function resolveRestFromSession(input: RestIdentityInput): RestIdentityResult {
   const requested = typeof input.requestedFrom === "string" ? input.requestedFrom.trim() : "";
   let alias: string | null;
@@ -96,16 +112,14 @@ export function resolveRestFromSession(input: RestIdentityInput): RestIdentityRe
     return { ok: true, fromSession: "api" };
   }
 
-  // A user-token client normally does not need to repeat its identity in every
-  // request. Prefer an explicit, backwards-compatible claim when present;
-  // otherwise attribute the task to the authenticated username. Falling back
-  // to the transport label `api` is reserved for legacy auth contexts where
-  // the server genuinely has no user identity.
+  // Authenticated human callers are always represented by their username.
+  // Keep the unscoped development / legacy transport path separate.
   if (!alias) {
     const authenticatedUsername = typeof input.authenticatedUsername === "string"
       ? input.authenticatedUsername.trim()
       : "";
-    return { ok: true, fromSession: requested || authenticatedUsername || "api" };
+    if (authenticatedUsername) return resolveUserTaskFromSession(authenticatedUsername, input.requestedFrom);
+    return { ok: true, fromSession: requested || "api" };
   }
 
   // Node token claiming somebody else — refuse rather than silently rewrite,

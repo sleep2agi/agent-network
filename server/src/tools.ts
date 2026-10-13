@@ -23,6 +23,7 @@ import { deferOfflineIfAnotherCopyConnected } from "./node-identity-conflict.js"
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { resolveInboxCaller } from "./inbox-caller.js";
+import { resolveUserTaskFromSession } from "./rest-identity.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
@@ -1829,7 +1830,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       meta: z.any().optional().describe("Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
-    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => {
+      const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch;
+      const humanSender = !callerTokenIsNetwork && !!enforceUserId;
+      const userIdentity = humanSender ? resolveUserTaskFromSession(callerAlias, _fromIn) : null;
+      if (userIdentity && !userIdentity.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false, error: userIdentity.error, message: userIdentity.message,
+          token_alias: userIdentity.tokenAlias, requested_from_session: userIdentity.requestedFromSession,
+        }) }] };
+      }
+      const from_session = userIdentity?.ok ? userIdentity.fromSession : defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       const authOrigin: TaskAuthOrigin = callerTokenIsNetwork
         ? "node"
@@ -1865,7 +1876,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // network A dispatch and chain-reply into the wrong tenant. The
       // explicit-parent path is verified below in F2.
       let parentTaskId: string | null = parentIn ?? null;
-      if (!parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
+      if (!humanSender && !parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
         try {
           const recentParams: any[] = [from_session];
           let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered')"; // board668-parent-delivered-only
@@ -1996,7 +2007,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
-      const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
+      const fromNodeId = humanSender ? null : resolveNodeIdForAlias(from_session, effectiveNetId);
       const targetNodeId = target.session?.node_id ?? null;
       const resolvedActualTo = actualTo(target, effectiveNetId);
       // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).
@@ -2021,7 +2032,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         touchSql = addScope(touchSql, touchParams, effectiveNetId);
         db.run(touchSql, touchParams);
         // #1548 —— 能派活的发送方不可能真的 blocked;此处出 blocked → idle。
-        releaseBlockedSession(from_session, effectiveNetId);
+        if (!humanSender) releaseBlockedSession(from_session, effectiveNetId);
       });
       logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${targetAlias} (parent=${parentTaskId.slice(0,8)})` : `→ ${targetAlias}`);
       // Only stamp the dedup index after the inbox/tasks transaction
