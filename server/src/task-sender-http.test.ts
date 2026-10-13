@@ -37,7 +37,7 @@ beforeAll(async () => {
   const second = user("member"); member = second; foreignNet = second.networkId;
   admin = user("admin"); viewer = user("viewer");
   db.run("UPDATE users SET role = 'user' WHERE user_id IN (?1, ?2, ?3)", [owner.userId, member.userId, viewer.userId]);
-  db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", admin.userId);
+  db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", [admin.userId]);
   for (const [c, role] of [[member, "member"], [admin, "admin"], [viewer, "viewer"]] as const) {
     expect(addNetworkMember(net, c.userId, role, owner.userId, { agentAccess: "all" }).ok).toBe(true);
   }
