@@ -8,6 +8,10 @@ on:
       - 'server/src/rename.ts'
       - 'server/src/rest-identity.ts'
       - 'server/src/server.ts'
+      - 'server/src/node-token-identity.ts'
+      - 'server/src/node-daemon-bindings.ts'
+      - 'server/src/stop-delete-node.test.ts'
+      - 'server/src/node-daemon-bindings.test.ts'
       - 'server/src/node-caller-identity-http.test.ts'
       - 'server/src/mcp-write-network-resolution.test.ts'
       - 'server/src/tool-audience*'
@@ -26,6 +30,6 @@ jobs:
       - name: SQLite and PostgreSQL recipient boundaries
         run: docker run --rm --init --network none inbox-recipient-test
       - name: Existing task ACK and write-scope regressions
-        run: docker run --rm --init --network none --entrypoint bash inbox-recipient-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/inbox-regressions.db bun test src/task-consumption.test.ts src/mcp-write-network-resolution.test.ts'
+        run: docker run --rm --init --network none --entrypoint bash inbox-recipient-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/inbox-regressions.db bun test src/task-consumption.test.ts src/mcp-write-network-resolution.test.ts src/node-daemon-bindings.test.ts src/stop-delete-node.test.ts'
       - name: Preserve the existing tools-list byte ceilings
         run: docker run --rm --init --network none --entrypoint bash inbox-recipient-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/inbox-metadata.db bun test src/tool-audience-http.test.ts -t "bytes per role"'

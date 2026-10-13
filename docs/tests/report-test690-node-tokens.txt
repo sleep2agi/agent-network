@@ -1,0 +1,5 @@
+Requirement #690 — Node lifecycle credential identity
+
+Candidate: isolated worktree from main2cf9372559ff3d8f39d083336d877ca2fec69cfc.
+Real HTTP in Docker: SQLite52/PostgreSQL52 PASS, including nine lifecycle identity cases per backend. The first fixture run was rejected by the existing daemon ID pattern; the fixture was corrected without changing validation.
+Targeted assertion witnesses and existing lifecycle/transport regressions run in CI. Ten required checks and exact-main formal release are mandatory before public deployment. No production data or credentials are used by these source tests. Dispatch-time token freeze and verified legacy node identity remain supported; rename rejects ambiguous node registries.

@@ -100,3 +100,28 @@ await runMutation("renamecommit", "src/rename.ts",
   'const conflict = db.get<any>(\n    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2 UNION ALL SELECT 1 FROM nodes WHERE network_id = ?1 AND alias = ?2", txn.network_id, txn.new_alias);',
   'const conflict = db.get<any>(\n    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2", txn.network_id, txn.new_alias);',
   "rename registry: commit rejects a node created after prepare");
+
+await runMutation("daemonidentity", "src/node-daemon-bindings.ts",
+  'return activeNodeTokenIds(daemon.node_id, daemon.network_id).length ? null : "daemon_offline";',
+  'return db.get("SELECT token_id FROM api_tokens WHERE name=?1 AND network_id=?2 AND revoked_at IS NULL", `node:${daemon.alias}`, daemon.network_id) ? null : "daemon_offline";',
+  "token lifecycle: adoption rejects a different node's same-name credential");
+await runMutation("freezetoken", "src/tools.ts",
+  'const childTokenId = activeNodeTokenIds(node.node_id, node.network_id)[0] ?? null;',
+  'const childTokenId = db.get<{token_id:string}>("SELECT token_id FROM api_tokens WHERE network_id=?1 AND name=?2 AND revoked_at IS NULL",node.network_id,`node:${node.alias}`)?.token_id ?? null;',
+  "token lifecycle: delete frozen revokes only the target credential");
+await runMutation("legacyrevoke", "src/node-token-identity.ts",
+  'ids = activeNodeTokenIds(nodeId, networkId);',
+  'const node=db.get<{alias:string}>("SELECT alias FROM nodes WHERE node_id=?1",nodeId); ids=db.all<{token_id:string}>("SELECT token_id FROM api_tokens WHERE network_id=?1 AND name=?2 AND revoked_at IS NULL",networkId,`node:${node?.alias}`).map(t=>t.token_id);',
+  "token lifecycle: delete legacy null revokes only the target credential");
+await runMutation("frozenrevoke", "src/node-token-identity.ts",
+  '? [frozenTokenId] : activeNodeTokenIds(nodeId, networkId);',
+  '? [frozenTokenId] : [frozenTokenId];',
+  "token lifecycle: delete wrong frozen revokes only the target credential");
+await runMutation("renametokens", "src/rename.ts",
+  'for (const tokenId of tokenIds) db.run(\n      "UPDATE api_tokens SET name = ?1 WHERE token_id = ?2 AND network_id = ?3",\n      [`node:${txn.new_alias}`, tokenId, txn.network_id]);',
+  'db.run("UPDATE api_tokens SET name=?1 WHERE network_id=?2 AND name=?3",[`node:${txn.new_alias}`,txn.network_id,`node:${txn.old_alias}`]);',
+  "token lifecycle: rename updates verified labels and preserves unrelated credentials");
+await runMutation("renameambiguous", "src/rename.ts",
+  'if (nodes.length > 1) return { ok: false, error: "node_alias_ambiguous" };',
+  '',
+  "token lifecycle: rename refuses ambiguous node rows before and after prepare");

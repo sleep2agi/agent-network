@@ -288,6 +288,96 @@ const report = (tok: Tok, alias: string, nodeId: string, networkId: string, extr
     ...extra,
   });
 
+function lifecycleFixture(key: string) {
+  const daemonId = `node_life_daemon_${key}_${stamp}`, daemonAlias = `life-daemon-${key}-${stamp}`;
+  const childId = `node_life_${key}_${stamp}`, childAlias = `life-child-${key}-${stamp}`;
+  seedNode(daemonId, daemonAlias, NET, ownerId); seedNode(childId, childAlias, NET, ownerId);
+  seedSession(daemonId, daemonAlias, NET);
+  db.run("UPDATE nodes SET hostname='lifecycle-host',config_snapshot=?1 WHERE node_id=?2",
+    [JSON.stringify({ role: "host_supervisor", daemon_capabilities: { adopt_capable: true } }), daemonId]);
+  db.run("UPDATE nodes SET hostname='lifecycle-host',config_snapshot='{}' WHERE node_id=?1", [childId]);
+  db.run("UPDATE sessions SET last_seen_at=datetime('now') WHERE node_id=?1", [daemonId]);
+  return { daemonId, daemonAlias, childId, childAlias };
+}
+
+test("token lifecycle: adoption rejects a different node's same-name credential", async () => {
+  const f = lifecycleFixture("adopt-denied");
+  const otherNode = `n_life_other_${stamp}`;
+  seedNode(otherNode, `life-other-${stamp}`, NET, outsiderId);
+  mint(outsiderId, NET, f.daemonAlias, 2, otherNode);
+  mint(outsiderId, NET, f.daemonAlias, 0, null);
+  const result = await tool(ownerToken, "request_adopt_node", { node_id: f.childId, daemon_node_id: f.daemonId, workdir: "/workspace/fixture" });
+  expect(result.error).toBe("daemon_offline");
+  expect(db.get("SELECT request_id FROM node_daemon_bindings WHERE node_id=?1", f.childId)).toBeNull();
+});
+
+for (const shape of ["bound", "unbound"] as const) {
+  test(`token lifecycle: adoption accepts verified ${shape} credentials`, async () => {
+    const f = lifecycleFixture(`adopt-${shape}`);
+    mint(ownerId, NET, shape === "bound" ? victimAlias : f.daemonAlias, shape === "bound" ? 2 : 0, shape === "bound" ? f.daemonId : null);
+    const result = await tool(ownerToken, "request_adopt_node", { node_id: f.childId, daemon_node_id: f.daemonId, workdir: "/workspace/fixture" });
+    expect(result.ok).toBe(true);
+  });
+}
+
+for (const shape of ["frozen", "legacy null", "wrong frozen", "same alias rebuild"] as const) {
+  test(`token lifecycle: delete ${shape} revokes only the target credential`, async () => {
+    const key = shape.replaceAll(" ", "-"); const f = lifecycleFixture(key);
+    const daemonTok = mint(ownerId, NET, f.daemonAlias, 2, f.daemonId);
+    const wrong = mint(outsiderId, NET, f.childAlias, 0, null);
+    const childTok = mint(ownerId, NET, shape === "frozen" ? victimAlias : f.childAlias, 2, f.childId);
+    db.run(`INSERT INTO node_create_requests(request_id,daemon_node_id,child_name,child_node_id,network_id,runtime,flags_json,env_keys,status,child_token_id,created_at,created_by_token)
+            VALUES(?1,?2,?3,?4,?5,'fixture','{}','[]','started',?6,?7,'fixture')`,
+      [`cr_${f.childId.slice(5)}`, f.daemonId, f.childAlias, f.childId, NET, childTok.tokenId, Date.now()]);
+    const dispatched = await tool(ownerToken, "delete_node", { child_node_id: f.childId, daemon_node_id: f.daemonId, network_id: NET, confirm_alias: f.childAlias });
+    expect(dispatched.ok).toBe(true);
+    expect(db.get<{ child_token_id: string }>("SELECT child_token_id FROM node_stop_requests WHERE request_id=?1", dispatched.request_id)?.child_token_id).toBe(childTok.tokenId);
+    if (shape === "legacy null" || shape === "wrong frozen") db.run("UPDATE node_stop_requests SET child_token_id=?1 WHERE request_id=?2", [shape === "wrong frozen" ? wrong.tokenId : null, dispatched.request_id]);
+    let rebuilt: Tok | null = null;
+    if (shape === "same alias rebuild") {
+      db.run("DELETE FROM nodes WHERE node_id=?1", [f.childId]);
+      const newId = `n_life_rebuilt_${stamp}`;seedNode(newId, f.childAlias, NET, ownerId);
+      rebuilt = mint(ownerId, NET, f.childAlias, 2, newId);
+    }
+    const ack = await tool(daemonTok.token, "ack_stop_request", { request_id: dispatched.request_id, status: "stopped" });
+    expect(ack.ok).toBe(true);
+    const revoked = (id: string) => db.get<{ revoked_at: string | null }>("SELECT revoked_at FROM api_tokens WHERE token_id=?1", id)?.revoked_at;
+    expect(revoked(childTok.tokenId)).not.toBeNull();
+    expect(revoked(wrong.tokenId)).toBeNull();
+    if (rebuilt) expect(revoked(rebuilt.tokenId)).toBeNull();
+    expect(db.get("SELECT node_id FROM nodes WHERE node_id=?1", f.childId)).toBeNull();
+  });
+}
+
+test("token lifecycle: rename updates verified labels and preserves unrelated credentials", async () => {
+  const alias = `life-rename-${stamp}`, nodeId = `n_life_rename_${stamp}`, target = `life-renamed-${stamp}`;
+  seedNode(nodeId, alias, NET, ownerId);seedSession(nodeId, alias, NET);
+  const unrelated = mint(outsiderId, NET, alias, 0, null);
+  const bound = mint(ownerId, NET, victimAlias, 2, nodeId);
+  const legacy = mint(ownerId, NET, alias, 0, null);
+  const foreign = mint(outsiderId, NET2, alias, 0, null);
+  const before = [unrelated,foreign].map(t => tokenName(t.tokenId));
+  const prepare = await api(ownerToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: alias, new_alias: target });
+  expect(prepare.body.ok).toBe(true);
+  expect((await api(ownerToken, "POST", "/api/node-rename/commit", { txn_id: prepare.body.txn_id })).body.ok).toBe(true);
+  expect(tokenName(bound.tokenId)).toBe(`node:${target}`);
+  expect(tokenName(legacy.tokenId)).toBe(`node:${target}`);
+  expect([unrelated,foreign].map(t => tokenName(t.tokenId))).toEqual(before);
+});
+
+test("token lifecycle: rename refuses ambiguous node rows before and after prepare", async () => {
+  const alias=`life-dup-rename-${stamp}`, nodeId=`n_life_dupr_${stamp}`, target=`life-dup-target-${stamp}`;
+  seedNode(nodeId,alias,NET,ownerId);seedSession(nodeId,alias,NET);
+  const mine=mint(ownerId,NET,alias,2,nodeId);
+  const prepared=await api(ownerToken,"POST","/api/node-rename/prepare",{network_id:NET,old_alias:alias,new_alias:target});expect(prepared.body.ok).toBe(true);
+  seedNode(`n_life_dupo_${stamp}`,alias,NET,outsiderId);
+  expect((await api(ownerToken,"POST","/api/node-rename/commit",{txn_id:prepared.body.txn_id})).body.error).toBe("node_alias_ambiguous");
+  expect((await api(ownerToken,"POST","/api/node-rename/prepare",{network_id:NET,old_alias:alias,new_alias:target})).body.error).toBe("node_alias_ambiguous");
+  expect(tokenName(mine.tokenId)).toBe(`node:${alias}`);
+  expect(db.get("SELECT status FROM rename_txn WHERE txn_id=?1",prepared.body.txn_id)).toEqual({status:"prepared"});
+  await api(ownerToken,"POST","/api/node-rename/abort",{txn_id:prepared.body.txn_id});
+});
+
 beforeAll(async () => {
   process.env.COMMHUB_UPLOADS_DIR = join(dir, "uploads");
   process.env.HOST = "127.0.0.1";

@@ -15,6 +15,7 @@ import { assertNodeHealthy } from "./node-health-guard.js";
 import { noteModelAuthHealth } from "./model-auth-notify.js";
 import { numberedAliasInClause, parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
+import { activeNodeTokenIds, revokeNodeTokens } from "./node-token-identity.js";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
@@ -5400,12 +5401,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // #1448 finding-5 — 记下该 child **当前活着的** ntok 的 token_id,让 ack 精确按
     // token_id 撤销,而非按 name='node:<alias>' 广撤。后者会在「同 alias 节点在这次
     // delete 未收敛的窗口内被重建(拿到同名新 token)」时,把新 token 一并误撤。这里
-    // 在派发时刻定住身份;若此刻没有活 token(异常),存 null,ack 退回按 name 撤(旧语义)。
-    const childTokenRow = db.get<{ token_id: string }>(
-      `SELECT token_id FROM api_tokens WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
-      node.network_id, `node:${node.alias}`,
-    );
-    const childTokenId = childTokenRow?.token_id ?? null;
+    // 在派发时刻定住经解析器验证的节点身份；旧请求也不按名字广撤。
+    const childTokenId = activeNodeTokenIds(node.node_id, node.network_id)[0] ?? null;
 
     // §4.5 D8 — lifecycle UPDATE + audit INSERTs + request INSERT atomic.
     // PR1.1: use db.transaction() (SQLiteAdapter wraps better-sqlite3's
@@ -5643,24 +5640,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             });
           } else if (status === "stopped" && row.action === "delete") {
             // Revoke the child's ntok, then DELETE the nodes row.
-            // #1448 finding-5 — 精确按派发时定住的 child_token_id 撤(镜像
-            // ack_create_request 的 token_id 精撤)。旧行(升级前派发,child_token_id
-            // 为 NULL)fallback 回按 name='node:<alias>' 撤——旧语义,不引入回归。
-            // 按 token_id 撤避免了「同 alias 在本次 delete 窗口内被重建、拿到同名新
-            // token」时把新 token 一并误撤。
-            if (row.child_token_id) {
-              db.run(
-                `UPDATE api_tokens SET revoked_at = datetime('now')
-                   WHERE token_id = ?1 AND revoked_at IS NULL`,
-                [row.child_token_id],
-              );
-            } else {
-              db.run(
-                `UPDATE api_tokens SET revoked_at = datetime('now')
-                   WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
-                [row.network_id, `node:${row.child_alias}`],
-              );
-            }
+            // Validate the frozen token's immutable identity; legacy requests
+            // resolve only credentials belonging to this node before deleting it.
+            revokeNodeTokens(row.child_node_id, row.network_id, row.child_token_id);
             db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
             // Same as REST DELETE /api/nodes/:id: without this the sessions row
             // stays "offline" and /api/status lists the deleted node forever.
