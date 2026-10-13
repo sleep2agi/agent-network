@@ -39,11 +39,15 @@ beforeAll(async () => {
   db.run("UPDATE users SET role = 'user' WHERE user_id IN (?1, ?2, ?3)", [owner.userId, member.userId, viewer.userId]);
   db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", admin.userId);
   for (const [c, role] of [[member, "member"], [admin, "admin"], [viewer, "viewer"]] as const) {
-    expect(addNetworkMember(net, c.userId, role, owner.userId).ok).toBe(true);
+    expect(addNetworkMember(net, c.userId, role, owner.userId, { agentAccess: "all" }).ok).toBe(true);
   }
   node(target, targetId, owner.userId);
   nodeToken = node(memberNode, memberNodeId, member.userId);
-  node(member.username, collisionId, owner.userId, "blocked");
+  // Legacy rows may predate the current username reservation on node creation.
+  db.run(`INSERT INTO nodes (node_id, alias, node_name, network_id, owner_user_id)
+    VALUES (?1, ?2, ?2, ?3, ?4)`, [collisionId, member.username, net, owner.userId]);
+  db.run(`INSERT INTO sessions (resume_id, alias, node_id, network_id, status, last_seen_at)
+    VALUES (?1, ?2, ?3, ?4, 'blocked', datetime('now'))`, [`resume_${collisionId}`, member.username, collisionId, net]);
   db.run(`INSERT INTO tasks (task_id, from_name, to_name, to_node_id, network_id, status, content)
     VALUES (?1, 'hub', ?2, ?3, ?4, 'delivered', 'fixture pending')`, [`parent_${stamp}`, member.username, collisionId, net]);
   const plain = createToken(member.userId, "sender-cli");
