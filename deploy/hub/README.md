@@ -164,12 +164,12 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### #689 `.130` 部署准备（切换验收待完成）
+### #689 `.130` 部署（2026-10-13 已激活）
 
 精确软件 main `7f12230b7eb064aa56131bbc17fc21c944f9a6d0`（PR2668），
-正式发布运行 `38326074270` 的构建与四道门通过；公开 registry 回读及现役
-切换证据完成后追加至 `report-test689-hub130-activation.txt`。本轮 source
-核心 Docker CI SQLite/PostgreSQL 各 36 项通过；不把合入源码视为现役升级。
+正式发布运行 `38326074270` 的构建、四道门、preview 发布与 registry
+回读均 SUCCESS；验收见 `report-test689-hub130-activation.txt`。本轮 source
+核心 Docker CI SQLite/PostgreSQL 各 36 项通过。
 
 当前目录的 `provider906/package*.json` 将 sibling 输入钉为 `.130`，
 包 SHA256 `91fde58a1c8411a1e4d242faa55fea19fb7a9fa844aaa070c3075bdc98976f80`；
@@ -188,6 +188,17 @@ Actions Docker 目录/显式回滚验证并正常合入 main，之后才原子�
 备份的 `.129` profile 并仅重启 Hub。软件无 schema/adapter/dependency
 变化；数据、账号与 vault key 仍依赖私有备份/原认证来源，Git 不提供
 这些业务状态。本轮不宣称灾难恢复、真实模型或全网 ACK 已验收。
+
+2026-10-13 08:21:23（东八区）已按上述步骤激活，部署源 main
+`d8537c633dc3573419c1bd1d8b28ea5c394212c1`（PR2669），软件源仍为
+`7f12230b7eb064aa56131bbc17fc21c944f9a6d0`。installed 344 个包文件
+与公开/gated 包逐字节相同；生产 Bun1.4.0 的 offline preflight 保留
+331 sessions / 81264 tasks / 302 nodes 等全部表计数与 provider 行。
+真实 PID459109、parent1613、入口 v113-preview130，health130/secured。
+PM2 restart87→88，仅本次手动重启；环境文件元数据与 base launcher
+保持。切换后已见自然心跳、投递和回复终态，自有 inbox 读取正常；
+日志追加窗 vault_master_key_missing/panic/segfault 为0。未以短观察
+替代全网 ACK、长期稳定性、真实账号/模型或节点密钥 metadata 验收。
 
 ### #688 / #1075 `.129` 配置（2026-10-13 已激活）
 
