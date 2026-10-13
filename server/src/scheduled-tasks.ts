@@ -8,8 +8,7 @@ import { canMessageAgent, type AgentRef } from "./agent-access.js";
 import { dispatchVerdict } from "./node-permissions.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
-import { parseDbTimestampMs } from "./db-timestamp.js";
-import { blockerTimedOut, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
+import { blockerTimedOut, blockerTimeoutClock, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
 import { evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
 import { scheduledTargetOffline, sendOfflineNotice, type OfflineNotice } from "./scheduled-offline.js";
 
@@ -413,8 +412,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       // received:节点那边有没有把这条任务取走过(inbox 行被 ack,或任务已进 acked/running)。
       // 跳过记录带上它,客户端才分得清「节点还没收到」和「节点在处理」—— 前者是投递故障,
       // 后者才是真的上一次还没做完。
-      const findOpen = () => db.get<{ task_id: string; received: number; created_at: string; status: string }>(
-        `SELECT r.task_id, t.created_at, t.status,
+      const findOpen = () => db.get<{ task_id: string; received: number; created_at: string; consumed_at: string | null; started_at: string | null; status: string }>(
+        `SELECT r.task_id, t.created_at, t.consumed_at, t.started_at, t.status,
                 CASE WHEN t.status IN ('acked', 'running')
                        OR EXISTS (SELECT 1 FROM inbox i WHERE (i.task_id = r.task_id OR i.id = r.task_id) AND i.acked = 1)
                      THEN 1 ELSE 0 END AS received
@@ -428,9 +427,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       // #464 — a blocker open past the stuck timeout is ended as `expired` (the existing terminal state) and
       // this occurrence dispatches normally. Bounded: each pass ends one exact open task or stops.
       for (let guard = 0; open && guard < 20 && blockerTimedOut(open, row.schedule_json, advanceAfter); guard++) {
-        const limitMs = stuckTimeoutMs(row.schedule_json);
-        const ageMs = advanceAfter.getTime() - parseDbTimestampMs(open.created_at);
-        if (!expireStuckBlocker(open.task_id, row.network_id, ageMs, limitMs)) break;
+        const { ageMs, limitMs, source } = blockerTimeoutClock(open, row.schedule_json, advanceAfter);
+        if (!expireStuckBlocker(open.task_id, row.network_id, ageMs, limitMs, source)) break;
         timedOut.push({ taskId: open.task_id, fromStatus: open.status });
         // Each stuck episode gets exactly one notice: if the stuck notice already went out (N skips), stay quiet.
         if (skipsBlockedBy(row.schedule_id, open.task_id) < stuckNoticeSkips()) {

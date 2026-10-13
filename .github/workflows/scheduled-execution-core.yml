@@ -1,0 +1,18 @@
+name: Scheduled execution core
+on:
+  pull_request:
+    paths:
+      - 'server/src/scheduled-*.ts'
+      - 'server/src/db.ts'
+      - 'tests/test1112-scheduled-execution-clock/**'
+      - '.github/workflows/scheduled-execution-core.yml'
+permissions:
+  contents: read
+jobs:
+  scheduled-execution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t scheduled-execution-test -f tests/test1112-scheduled-execution-clock/Dockerfile .
+      - run: docker run --rm --init --network none scheduled-execution-test
