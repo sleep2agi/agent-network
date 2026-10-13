@@ -1004,7 +1004,7 @@ const renewActivity = (token: string, contexts: Array<{task_id: string; thread_i
 
 test("activity lease: exact task renewal changes only the activity clock; duplicate consumption does not renew", async () => {
   const c = activityTask(leaseId, leaseAlias); await consumeActivityTask(c);
-  db.run("UPDATE tasks SET last_activity_at = datetime('now', '-2 hours') WHERE task_id = ?1", c.task_id);
+  db.run("UPDATE tasks SET last_activity_at = datetime('now', '-2 hours') WHERE task_id = ?1", [c.task_id]);
   const before = activitySnap(c.task_id);
   expect((await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: [c.task_id], task_contexts: [c] })).ok).toBe(true);
   expect(activitySnap(c.task_id)).toEqual(before);
@@ -1033,7 +1033,7 @@ for (const shape of ["wrong thread", "wrong turn", "foreign node", "foreign netw
     const c = activityTask(leaseId, leaseAlias); if(shape !== "not consumed") await consumeActivityTask(c);
     if(shape === "foreign node") db.run("UPDATE tasks SET to_node_id=?1 WHERE task_id=?2", [otherId,c.task_id]);
     if(shape === "foreign network") db.run("UPDATE tasks SET network_id=?1 WHERE task_id=?2", [NET2,c.task_id]);
-    if(shape === "legacy null node") db.run("UPDATE tasks SET to_node_id=NULL WHERE task_id=?1",c.task_id);
+    if(shape === "legacy null node") db.run("UPDATE tasks SET to_node_id=NULL WHERE task_id=?1",[c.task_id]);
     const before=activitySnap(c.task_id); const context={...c};
     if(shape === "wrong thread") context.thread_id="sibling_thread";
     if(shape === "wrong turn") context.turn_id="sibling_turn";
@@ -1066,7 +1066,7 @@ test("activity lease: injected second-write failure rolls back the first write o
 });
 test("activity lease: revoked credential cannot report activity",async()=>{
  const tok=mint(ownerId,NET,leaseAlias,2,leaseId),c=activityTask(leaseId,leaseAlias);await consumeActivityTask(c);const before=activitySnap(c.task_id);
- db.run("UPDATE api_tokens SET revoked_at=datetime('now') WHERE token_id=?1",tok.tokenId);
+ db.run("UPDATE api_tokens SET revoked_at=datetime('now') WHERE token_id=?1",[tok.tokenId]);
  const response=await fetch(`${base}/mcp`,{method:"POST",headers:{Authorization:`Bearer ${tok.token}`,"Content-Type":"application/json",Accept:"application/json, text/event-stream"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"mark_tasks_consumed",arguments:{task_ids:[c.task_id],task_contexts:[c],activity_only:true}}})});
  expect(response.status).toBe(401);expect(activitySnap(c.task_id)).toEqual(before);
 });

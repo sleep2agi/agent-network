@@ -1697,7 +1697,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "mark_tasks_consumed",
-    "Internal agent-node signal: exact tasks produced attributable turn-start/activity evidence in this token-bound node's runtime.",
+    "Internal token-bound task consumption; activity_only reports original-turn activity.",
     { ...taskRuntimeEvidenceSchema, activity_only: z.boolean().optional() },
     async ({ task_ids, task_contexts, activity_only }) => activity_only
       ? { content: [{ type: "text" as const, text: JSON.stringify(markTaskActivity({ tokenId: callerTokenId, networkId: enforceNetworkId, nodeToken: callerTokenIsNetwork, identityRejected: callerIdentityRejected, taskIds: task_ids, contexts: task_contexts ?? [] })) }] }
