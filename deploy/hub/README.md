@@ -164,18 +164,20 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### `.132` 部署候选（2026-10-13）
+### `.132` 部署（2026-10-13 已激活）
 
 源码 PR2674 已正常合入 main `c49e9316826a064f1db715319fcc7adbde12527a`，MCP/REST 任务发送方
 使用凭据解析出的节点 ID；改名同时核对节点与会话注册表。核心 HTTP、断言
 变异、ACK/权限回归及旧 agent-node .110/.121 兼容均通过。
-正式 main 发布运行 `38335516515` 仍须四道门、preview 发布及 registry
-回读全部成功，不能只认构建任务通过。公开包必须逐字节等于该 main gated 包，
+正式 main 发布运行 `38335516515` 的构建、四道门、preview 发布及 registry
+回读全部成功。公开包与该 main gated 包逐字节一致，
 SHA256 `c2e3503a7819032c2e89ef73cfdf6235f0e48573ef5e4a268dc00775f9edf145`。
 
 `provider906/package*.json` 钉 `.132` 及该 main 制品 SRI，传递依赖保持
 原 lock；profile 选择 `runtime-v115-preview132`，回滚保留
-`runtime-v114-preview131`。本段是部署候选，尚未声明生产已切换。
+`runtime-v114-preview131`。部署权威 main `53e23e7421138967e0f6534aa6e1ad1fb8d66c42`
+于2026-10-13 10:17:29+08激活；证据见
+`docs/tests/report-test691-hub132-activation.txt`。
 
 权威启动脚本、PM2、Bun1.4.0、数据库路径、端口/反代和 owner-only 密钥
 来源沿用本 runbook。先以私有 `VACUUM INTO` 备份运行
