@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { addNetworkMember, createNetworkTokenForNode, createToken, register } from "./auth.js";
-import { db } from "./db.js";
+import { backfillMessageNodeIds, db } from "./db.js";
 
 if (!process.env.COMMHUB_DB && !process.env.COMMHUB_TEST_PG_URL) throw new Error("isolated database required");
 const stamp = `${process.pid}_${Date.now()}`;
@@ -67,7 +67,7 @@ afterAll(() => { server?.stop(true); });
 
 async function dispatch(transport: Transport, token: string, requested?: string, networkId = net) {
   const marker = `sender-case-${stamp}-${++markerSeq}`;
-  const args: Record<string, unknown> = { alias: target, task: marker, network_id: networkId };
+  const args: Record<string, unknown> = { alias: target, task: marker, network_id: networkId, meta: { source: "sender-fixture" } };
   if (requested !== undefined) args[transport === "rest" ? "from" : "from_session"] = requested;
   const res = await fetch(`${base}${transport === "rest" ? "/api/task" : "/mcp"}`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json",
@@ -128,5 +128,16 @@ for (const transport of ["rest", "mcp"] as const) {
     expect(r.task?.from_node_id).toBeNull();
     expect(r.task?.parent_task_id).toBeNull();
     expect(db.get<{ status: string }>("SELECT status FROM sessions WHERE node_id = ?1", collisionId)?.status).toBe("blocked");
+  });
+  test(`authenticated sender: ${transport} preserves human attribution during backfill`, async () => {
+    await dispatch(transport, member.token);
+    backfillMessageNodeIds();
+    expect(db.all<{ from_node_id: string | null }>(
+      "SELECT from_node_id FROM tasks WHERE from_name = ?1", member.username).every(t => t.from_node_id === null)).toBe(true);
+    const legacyId = `legacy_sender_${transport}_${stamp}`;
+    db.run(`INSERT INTO tasks (task_id, from_name, to_name, network_id, content)
+      VALUES (?1, ?2, ?3, ?4, 'legacy fixture')`, [legacyId, memberNode, target, net]);
+    backfillMessageNodeIds();
+    expect(db.get<{ from_node_id: string | null }>("SELECT from_node_id FROM tasks WHERE task_id = ?1", legacyId)?.from_node_id).toBe(memberNodeId);
   });
 }

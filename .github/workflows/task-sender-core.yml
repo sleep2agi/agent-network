@@ -4,6 +4,7 @@ on:
     paths:
       - 'server/src/rest-identity*'
       - 'server/src/tools.ts'
+      - 'server/src/db.ts'
       - 'server/src/server.ts'
       - 'server/src/task-sender-http.test.ts'
       - 'server/src/task-auth-origin-http.test.ts'

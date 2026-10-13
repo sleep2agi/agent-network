@@ -1271,7 +1271,7 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_from_node ON tasks(from_node
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_to_node ON tasks(to_node_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_node ON inbox(node_id)"); } catch {}
 
-function backfillMessageNodeIds() {
+export function backfillMessageNodeIds() {
   let inboxDirect = 0;
   let inboxRenamed = 0;
   let tasksToDirect = 0;
@@ -1391,6 +1391,7 @@ function backfillMessageNodeIds() {
         LIMIT 1
       )
       WHERE from_node_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
         AND EXISTS (
           SELECT 1 FROM sessions s
           WHERE s.node_id IS NOT NULL
@@ -1416,6 +1417,7 @@ function backfillMessageNodeIds() {
         LIMIT 1
       )
       WHERE from_node_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
         AND EXISTS (
           SELECT 1 FROM rename_txn r
           JOIN sessions s
