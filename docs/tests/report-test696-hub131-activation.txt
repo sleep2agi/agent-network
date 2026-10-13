@@ -1,0 +1,44 @@
+Hub preview.131 source / main publication / selected-runtime activation
+Observed: 2026-10-13 09:34 Asia/Shanghai
+
+Source PR2671 head933e0fd46e28cef29d1e076e533e1699cfbffb86
+Source main9fc79fab1d697f665bf3e95d7c420a27e284a4dd
+Final source HTTP core CI38329624560 SUCCESS:
+  SQLite32/32, PostgreSQL32/32, five assertion witnesses per backend,
+  22 existing transport/origin contracts; existing caller core38329624347 PASS.
+The tested merge checkoutdfd67d7e6d5256f880aea992061b580c83d629d9 equals
+the source main tree. Final source and deployment PRs each passed10 required checks.
+
+Publication / deployment main e81debac14db091da41ea02272dd2184b3b1744f
+PR2672 Docker profile CI38331210850 SUCCESS; fake executor only, no live Hub.
+Formal release38331511688: build + four gates + preview publish + registry checks
+SUCCESS. Anonymous whole tarball equals this exact-main gated artifact.
+Package bytes1239717
+SHA256 5384ecb96e40954d2a6d749ab05c5ca2e38827b70e079542cda6e308b26e4dba
+SHA512 integrity 2qUT9xD4Oo/xwsPBxbGak5XRBYtsxdiBQbf7arPj4jQXmYAX7smTS9actkvlDtj6uEXYpKm0yhoDuHAN74P/wQ==
+Channel preview=0.9.0-preview.131; latest remains0.9.0-preview.30.
+All345 installed package files equal public bytes. Transitive lock unchanged.
+
+Private consistent backup: ~/.commhub/backups/sender696-p131-l7pjp3tc
+Owner-only directory700 / database600; database741597184 bytes, integrity ok.
+Actual Bun1.4.0 Docker offline preflight PASS:
+  sessions331/tasks81384/nodes302/networks7/requirements1104/api_tokens640/
+  user_inbox2663; Provider table counts preserved. No private data uploaded to CI.
+Scope: offline schema/backfill import; no live service/authentication test.
+
+Activated2026-10-13T01:32:15.234847Z (09:32:15+08)
+Selected Hub PID459109 ->515557; PM2 restart88 ->89.
+Real entry ~/.commhub/runtime-v114-preview131/node_modules/@sleep2agi/commhub-server/bin/commhub.ts
+Health preview.131 / secured. Env inode/mtime/mode and base launcher unchanged;
+deployed profile equals exact main bytes. Only commhub-hub restarted.
+Previous runtime-v113-preview130 and old profile/database backup retained.
+09:34:52+08 short observation: SSE125,111 fresh heartbeats,2 replied events,
+6 delivered events, one ACK and one started event; restart remains89.
+Appended log window: no new vault_master_key_missing/panic/segfault markers.
+Some delivery-stale warnings remain queued/ACKed or later replied. The current
+scheduler invocation was expired by the existing created-at based stuck policy;
+the original terminal is preserved and late receipts are handled separately.
+
+This validates the selected software/process and a bounded recovery window.
+It does not establish all-fleet ACKs, long-term stability, actual model/provider
+execution, client original-machine results, key metadata acceptance or full DR.

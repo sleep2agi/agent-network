@@ -164,13 +164,14 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### `.131` 部署配置（待操作员激活）
+### `.131` 部署（2026-10-13 已激活）
 
 软件实现 main `9fc79fab1d697f665bf3e95d7c420a27e284a4dd`（PR2671），
 HTTP/MCP 任务署名按认证身份记录，人类署名与节点回填、隐式父任务保持
-分离；SQLite/PostgreSQL 核心和既有传输回归已通过。正式公开仍需完整
-main SHA 的四道发布门、preview 发布与匿名 registry 回读成功。
-`provider906/package*.json` 钉 `.131`，预计公开包必须与正式 gated 包
+分离；SQLite/PostgreSQL 核心和既有传输回归已通过。正式公开/部署
+main `e81debac14db091da41ea02272dd2184b3b1744f`（PR2672），运行
+`38331511688` 的构建、四道门、preview 发布与 registry 回读全部成功。
+`provider906/package*.json` 钉 `.131`，公开包与正式 gated 包
 逐字节一致，SHA256
 `5384ecb96e40954d2a6d749ab05c5ca2e38827b70e079542cda6e308b26e4dba`。
 传递依赖保持精确原 lock，不重新解析。
@@ -188,7 +189,17 @@ owner-only `~/.commhub/hub.env` 安全供给，不改值或生成新 vault key�
 `--update-env`。核真实 PID/入口、health `.131`、自然心跳和追加错误日志。
 失败则恢复 `.130` profile，仅重启 Hub；保留两个 runtime 和原 DB。
 账号、业务数据、vault key 依赖私有备份/原认证来源，Git 不提供这些
-业务状态。配置提交不代表现役已切换或灾难恢复/真实模型已验收。
+业务状态。灾难恢复、全网 ACK、长期稳定性及真实模型未由此验收。
+
+2026-10-13 09:32:15（东八区）已按上述步骤激活；完整证据见
+`docs/tests/report-test696-hub131-activation.txt`。345 个安装包文件
+与匿名公开/gated 包相同；一致性备份完整性为 ok，实际 Bun1.4 离线
+预检保留 331 sessions / 81384 tasks / 302 nodes 等全部所检表行数。
+真实 PID515557、入口 v114-preview131、health131/secured，PM2 restart
+88→89；env 元数据及 base launcher 保持，profile 与精确 main 相同。
+短窗已见自然心跳、投递和回复，追加日志没有新 vault key 缺失或崩溃
+标记。少量投递 stale warning 和既有调度 stuck timeout 另按元数据记账，
+不把服务恢复说明成全网任务已经完成。
 
 ### #689 `.130` 部署（2026-10-13 已激活）
 
