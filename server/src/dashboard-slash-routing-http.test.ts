@@ -14,6 +14,7 @@ const TARGET_RESUME_ID = `resume_dashboard_slash_target_${process.pid}`;
 let server: any;
 let base = "";
 let userToken = "";
+let userName = "";
 let nodeToken = "";
 let networkId = "";
 let requestSequence = 0;
@@ -25,6 +26,7 @@ let requestSequence = 0;
 beforeAll(async () => {
   process.env.COMMHUB_DB = process.env.COMMHUB_DB || join(PRIVATE_DB_DIR, "hub.db");
   const username = `dashboard_slash_${Date.now()}`;
+  userName = username;
   const registered = register(username, "DashboardSlash123!", undefined, "seed");
   expect(registered.ok).toBe(true);
   userToken = registered.token!;
@@ -81,7 +83,7 @@ async function postAndRead(token: string, from: string, task: string) {
 describe("real Hub → authenticated Dashboard slash routing", () => {
   test("Dashboard /goal and /loop remain exact native payloads for every runtime", async () => {
     for (const command of ["/goal 更新一下文档", "/loop 5m native loop"] as const) {
-      const row = await postAndRead(userToken, "dashboard-user", command);
+      const row = await postAndRead(userToken, userName, command);
       expect(row.content).toBe(command);
       expect(isInteractiveDashboardTask(row)).toBe(true);
       for (const runtime of ["codex-app-server", "codex", "claude", "grok", "opencode"] as const) {
@@ -92,7 +94,7 @@ describe("real Hub → authenticated Dashboard slash routing", () => {
 
   test("Dashboard /agoal and /aloop use the Agent Network scheduler", async () => {
     for (const command of ["/agoal 5m update docs", "/aloop 5m update docs"] as const) {
-      const row = await postAndRead(userToken, "dashboard-user", command);
+      const row = await postAndRead(userToken, userName, command);
       expect(isInteractiveDashboardTask(row)).toBe(true);
       expect(shouldCreateScheduledGoal(row.content, "codex-app-server", true)).toBe(true);
     }
