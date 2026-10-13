@@ -164,6 +164,32 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### `.131` 部署配置（待操作员激活）
+
+软件实现 main `9fc79fab1d697f665bf3e95d7c420a27e284a4dd`（PR2671），
+HTTP/MCP 任务署名按认证身份记录，人类署名与节点回填、隐式父任务保持
+分离；SQLite/PostgreSQL 核心和既有传输回归已通过。正式公开仍需完整
+main SHA 的四道发布门、preview 发布与匿名 registry 回读成功。
+`provider906/package*.json` 钉 `.131`，预计公开包必须与正式 gated 包
+逐字节一致，SHA256
+`5384ecb96e40954d2a6d749ab05c5ca2e38827b70e079542cda6e308b26e4dba`。
+传递依赖保持精确原 lock，不重新解析。
+
+profile 选择 `runtime-v114-preview131`，回滚保留 `runtime-v113-preview130`。
+启动权威仍为本目录 base launcher/profile/ecosystem；Bun1.4.0、PM2
+`commhub-hub`、9200 及既有反代/隧道保持。密钥仍由管理员从原
+owner-only `~/.commhub/hub.env` 安全供给，不改值或生成新 vault key。
+
+先做 owner-only 一致性 SQLite 备份和完整性核对，在现有 Docker 离线
+预检中用实际 Bun1.4 与公开包确认行数/Provider 状态保留。精确 lock
+复制到 inactive sibling，用 `npm ci --ignore-scripts --no-audit --no-fund`
+安装并核包文件。profile 必须通过 Actions Docker 目录/显式回滚检查，
+正常合入 main 后才原子安装为 PM2 入口；只重启 `commhub-hub`，不加
+`--update-env`。核真实 PID/入口、health `.131`、自然心跳和追加错误日志。
+失败则恢复 `.130` profile，仅重启 Hub；保留两个 runtime 和原 DB。
+账号、业务数据、vault key 依赖私有备份/原认证来源，Git 不提供这些
+业务状态。配置提交不代表现役已切换或灾难恢复/真实模型已验收。
+
 ### #689 `.130` 部署（2026-10-13 已激活）
 
 精确软件 main `7f12230b7eb064aa56131bbc17fc21c944f9a6d0`（PR2668），
