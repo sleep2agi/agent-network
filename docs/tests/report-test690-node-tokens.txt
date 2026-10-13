@@ -5,3 +5,5 @@ Real HTTP in Docker: SQLite54/PostgreSQL54 PASS, including eleven lifecycle iden
 Targeted assertion witnesses and existing lifecycle/transport regressions run in CI. Ten required checks and exact-main formal release are mandatory before public deployment. No production data or credentials are used by these source tests. Dispatch-time token freeze and verified legacy node identity remain supported; rename rejects ambiguous node registries.
 
 Six targeted assertion witness cases passed on each backend; the heartbeat identity witness and supported legacy null-ID case were added after review.
+
+Final CI:caller38338314085 (108 HTTP,34 witnesses,103 regressions,1 byte ceiling),sender38338314269 (64 HTTP,10 witnesses,25 regressions),ten required and old client compatibility PASS. Source main65923509c55f54e14082ac3804ae883d37723f44 equals the tested merge tree. Public/main release38338523163 and selected activation are recorded in report-test690-hub133-activation.txt.

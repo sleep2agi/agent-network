@@ -5,13 +5,17 @@ identity, including supported legacy unbound credentials. Dispatch-time delete
 freezes remain in place; older requests resolve the target identity without a
 broad name-based credential change. Rename rejects ambiguous node registries.
 
-This is a candidate until the exact merged main commit passes the four formal
-release gates, preview publication and registry checks. No schema, dependency,
+Published from exact main `65923509c55f54e14082ac3804ae883d37723f44`
+by formal run38338523163 (build, four gates, preview publication and
+registry checks all succeeded). Selected production activation was confirmed
+2026-10-13 11:04:28+08 with deployment main
+`446fa719a0e6542396ca5f66079d03c7028f5ec2`; evidence:
+report-test690-hub133-activation.txt. No schema, dependency,
 port, provider or credential-source changes are required.
 
 ## Install
 
-After publication:
+Published preview package:
 
 ```sh
 bun add --global @sleep2agi/commhub-server@0.9.0-preview.133

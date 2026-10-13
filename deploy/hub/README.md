@@ -164,20 +164,22 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### `.133` 部署候选（2026-10-13）
+### `.133` 部署（2026-10-13 已激活）
 
 源码 PR2677 已正常合入 main `65923509c55f54e14082ac3804ae883d37723f44`。
 Daemon 就绪的凭据和心跳、删除请求的凭据冻结/旧请求兜底、改名凭据标签
 均按权威节点身份处理，保留合法旧 unbound 及唯一 null-ID 心跳兼容；
 改名遇到多条同名节点记录时拒绝。真实 HTTP108、34次断言变异、103项
 ACK/权限/收编/stop-delete 回归、发送方核心与旧 .110/.121 兼容均通过。
-正式 main 发布运行 `38338523163` 仍须四道门、preview 发布及 registry
-回读全部成功。公开包须逐字节等于该 main gated 制品，SHA256
+正式 main 发布运行 `38338523163` 的构建、四道门、preview 发布及 registry
+回读全部成功。公开包与该 main gated 制品逐字节一致，SHA256
 `70b0b96fb95ec68ddfb55eafb6f2715a948fac0b9b7b36e026a82f3bfdd93ad6`。
 
 `provider906/package*.json` 钉 `.133` 和该 main 制品 SRI，全部传递依赖
 保持原 lock；profile 选择 `runtime-v116-preview133`，回滚保留
-`runtime-v115-preview132`。本段是部署候选，尚未声明现役切换。
+`runtime-v115-preview132`。部署 main `446fa719a0e6542396ca5f66079d03c7028f5ec2`
+于2026-10-13 11:04:28+08确认生效，证据：
+`docs/tests/report-test690-hub133-activation.txt`。
 
 权威 base launcher、PM2、Bun1.4.0、数据库、端口/反代及 owner-only 密钥
 来源沿用本 runbook。先取私有 VACUUM INTO 一致性备份，运行
