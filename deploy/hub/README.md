@@ -164,6 +164,18 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### `.135` 部署输入（待现场激活）
+
+#1113 活动续租候选已正常main `47816a61095f196cf726f194f482739bc09f6a82`。
+Hub135/Node139/CLI173同一源码，先发布Node139再公开exact-pair CLI173。
+Hub正式运行38345772164需四道门与preview发布/registry全绿、公开字节与main
+制品相同；profile/managed lock准备选择 `runtime-v118-preview135`，保留
+`runtime-v117-preview134` 回滚，传递依赖保持原lock。安装独立prefix、一致
+私有备份与离线schema预检通过后，才切选定Hub。当前只是准备输入，不声明
+现场生效。原base/env、端口/代理与私有密钥来源沿用本runbook，完整key DR
+仍NOT_COVERED。客户端正常139启动及原turn真实pulse验收单列，当前通信牛
+Node121未重启，不由Hub135升级代签其采用139。
+
 ### `.134` 部署（2026-10-13 已激活）
 
 #1112 修复排队占用调度执行预算：消费时间优先，旧节点回落开始时间，未执行

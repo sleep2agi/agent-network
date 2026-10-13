@@ -13,8 +13,8 @@ writeFileSync(fakeBun, '#!/bin/sh\nprintf "ENTRY=%s\\nSIDE_THREADS=%s\\n" "$1" "
 writeFileSync(fakeSs, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
 writeFileSync(envFile, 'ANET_HUB_SECRET_VAULT_KEY=isolated-fixture-only\n', { mode: 0o600 });
 const entry = runtime => join(runtime, 'node_modules/@sleep2agi/commhub-server/bin/commhub.ts');
-const current = join(homedir(), '.commhub/runtime-v117-preview134');
-const rollback = join(root, 'runtime-v116-preview133');
+const current = join(homedir(), '.commhub/runtime-v118-preview135');
+const rollback = join(root, 'runtime-v117-preview134');
 for (const runtime of [current, rollback]) {
   mkdirSync(join(runtime, 'node_modules/@sleep2agi/commhub-server/bin'), { recursive: true });
   writeFileSync(entry(runtime), '// isolated fixture; never executed\n');
@@ -25,4 +25,4 @@ const run = overrides => execFileSync('bash', ['/repo/deploy/hub/hub-provider906
 assert.match(run({}), new RegExp(`ENTRY=${entry(current)}\\nSIDE_THREADS=1`));
 const reverted = run({ HUB_RUNTIME_DIR: rollback, COMMHUB_ENABLE_SIDE_THREADS: '0' });
 assert.ok(reverted.includes(`ENTRY=${entry(rollback)}\nSIDE_THREADS=0`));
-console.log('PASS: profile selects .134; explicit rollback selects .133; explicit side-thread setting preserved. Fake executor only, no Hub started.');
+console.log('PASS: profile selects .135; explicit rollback selects .134; explicit side-thread setting preserved. Fake executor only, no Hub started.');
