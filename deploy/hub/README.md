@@ -164,6 +164,17 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### `.134` 部署输入（待现场激活）
+
+本轮 #1112 调度排队时间修复：源码 PR2680 正常合入 main
+`c641a82626d16c1ad627fb977011f14835ec9b2c`，正式 main 发布运行
+`38342053049` 绑定该 SHA。profile/managed lock 准备选择
+`runtime-v117-preview134`，回退保留 `runtime-v116-preview133`，依赖图保持不变。
+部署需等四发布门成功、公开制品与 main gated tarball 字节一致，才可从此 profile
+的合入提交独立安装。当前此提交只记录准备输入，不声明现场已升级。
+升级仍执行一致私有备份与离线 schema 预检；原环境和 base 保持，六项恢复边界
+沿用下方流程。密钥来源仍为 NOT_COVERED。实际生效证据随后记录。
+
 ### `.133` 部署（2026-10-13 已激活）
 
 源码 PR2677 已正常合入 main `65923509c55f54e14082ac3804ae883d37723f44`。
