@@ -1,5 +1,8 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 if (!existsSync("/.dockerenv")) throw new Error("container only");
+if (!["principal", "mcp", "rest", "mcpnode", "restnode"].includes(process.env.MUTATION_CASE ?? "")) {
+  throw new Error("unknown mutation case");
+}
 async function runMutation(name: string, file: string, anchor: string, replacement: string, filter: string, expected: number) {
 if (process.env.MUTATION_CASE !== name) return;
 const original = readFileSync(file, "utf8");
