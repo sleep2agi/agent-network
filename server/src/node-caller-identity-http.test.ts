@@ -320,6 +320,25 @@ for (const shape of ["bound", "unbound"] as const) {
   });
 }
 
+test("token lifecycle: another node's heartbeat cannot make the daemon ready", async () => {
+  const f=lifecycleFixture("heartbeat-denied");
+  mint(ownerId,NET,f.daemonAlias,2,f.daemonId);
+  const other=`node_life_heartbeat_other_${stamp}`;
+  seedNode(other,f.daemonAlias,NET,outsiderId);
+  db.run("DELETE FROM sessions WHERE node_id=?1",[f.daemonId]);
+  seedSession(other,f.daemonAlias,NET);
+  db.run("UPDATE sessions SET last_seen_at=datetime('now') WHERE node_id=?1",[other]);
+  const result=await tool(ownerToken,"request_adopt_node",{node_id:f.childId,daemon_node_id:f.daemonId,workdir:"/workspace/fixture"});
+  expect(result.error).toBe("daemon_offline");
+});
+
+test("token lifecycle: a unique legacy null-ID heartbeat remains supported", async () => {
+  const f=lifecycleFixture("heartbeat-legacy");
+  mint(ownerId,NET,f.daemonAlias,0,null);
+  db.run("UPDATE sessions SET node_id=NULL WHERE node_id=?1",[f.daemonId]);
+  expect((await tool(ownerToken,"request_adopt_node",{node_id:f.childId,daemon_node_id:f.daemonId,workdir:"/workspace/fixture"})).ok).toBe(true);
+});
+
 for (const shape of ["frozen", "legacy null", "wrong frozen", "same alias rebuild"] as const) {
   test(`token lifecycle: delete ${shape} revokes only the target credential`, async () => {
     const key = shape.replaceAll(" ", "-"); const f = lifecycleFixture(key);

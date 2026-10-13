@@ -42,7 +42,12 @@ function daemonReady(daemon: Node | null, node: Node): string | null {
   const snap = snapshot(daemon);
   if (snap.role !== "host_supervisor" || snap.daemon_capabilities?.adopt_capable !== true) return "daemon_not_adopt_capable";
   if (!node.hostname || daemon.hostname !== node.hostname) return "hostname_mismatch";
-  const session = db.get<{ last_seen_at: string }>(`SELECT last_seen_at FROM sessions WHERE alias=?1 AND network_id=?2`, daemon.alias, daemon.network_id);
+  const session = db.get<{ last_seen_at: string }>(
+    `SELECT last_seen_at FROM sessions WHERE alias=?1 AND network_id=?2
+       AND (node_id=?3 OR (node_id IS NULL AND NOT EXISTS (
+         SELECT 1 FROM nodes n WHERE n.network_id=?2 AND n.alias=?1 AND n.node_id!=?3)))`,
+    daemon.alias, daemon.network_id, daemon.node_id,
+  );
   const seen = parseDbTimestampMs(session?.last_seen_at ?? "");
   if (!Number.isFinite(seen) || Date.now() - seen > 300_000) return "daemon_offline";
   return activeNodeTokenIds(daemon.node_id, daemon.network_id).length ? null : "daemon_offline";
