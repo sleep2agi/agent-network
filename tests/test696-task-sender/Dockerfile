@@ -5,6 +5,7 @@ COPY server/package.json server/package-lock.json ./
 RUN bun install --frozen-lockfile
 COPY server/src ./src
 COPY server/bin ./bin
+COPY agent-node/src /work/agent-node/src
 COPY tests/test696-task-sender /work/tests/test696-task-sender
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT

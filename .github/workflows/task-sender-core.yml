@@ -9,6 +9,7 @@ on:
       - 'server/src/task-sender-http.test.ts'
       - 'server/src/task-auth-origin-http.test.ts'
       - 'server/src/task-network-resolution-http.test.ts'
+      - 'server/src/dashboard-slash-routing-http.test.ts'
       - 'tests/test696-task-sender/**'
       - '.github/workflows/task-sender-core.yml'
 permissions:
@@ -24,4 +25,4 @@ jobs:
       - name: SQLite and PostgreSQL sender contracts and assertion witnesses
         run: docker run --rm --init --network none task-sender-test
       - name: Existing transport and origin contracts
-        run: docker run --rm --init --network none --entrypoint bash task-sender-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/sender-regressions.db bun test src/rest-identity.test.ts src/task-auth-origin-http.test.ts src/task-network-resolution-http.test.ts'
+        run: docker run --rm --init --network none --entrypoint bash task-sender-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/sender-regressions.db bun test src/rest-identity.test.ts src/task-auth-origin-http.test.ts src/task-network-resolution-http.test.ts src/dashboard-slash-routing-http.test.ts'
