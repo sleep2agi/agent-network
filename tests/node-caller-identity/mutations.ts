@@ -127,5 +127,5 @@ await runMutation("renameambiguous", "src/rename.ts",
   "token lifecycle: rename refuses ambiguous node rows before and after prepare");
 await runMutation("daemonheartbeat", "src/node-daemon-bindings.ts",
   'AND (node_id=?3 OR (node_id IS NULL AND NOT EXISTS (\n         SELECT 1 FROM nodes n WHERE n.network_id=?2 AND n.alias=?1 AND n.node_id!=?3)))',
-  'AND (?3 IS NOT NULL)',
+  'AND (CAST(?3 AS TEXT) IS NOT NULL)',
   "token lifecycle: another node's heartbeat cannot make the daemon ready");
