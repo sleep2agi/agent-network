@@ -60,7 +60,7 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-The checked `latest` (`2.3.0-preview.76`) and current `preview` release candidate (`2.3.0-preview.173`) both print a random password: `anet-` followed by 22 hex characters. The candidate is published only after its installation gate passes.
+The checked `latest` (`2.3.0-preview.76`) prints a random password: `anet-` followed by 22 hex characters. Candidate `2.3.0-preview.173` has identical CLI default bootstrap code to the checked `.172`, so that behavior is preserved by source continuity. This installation gate uses an explicit password; the default path was not rerun separately. Publication requires all release gates to pass.
 **Candidate validation does not mean publication.** Run `npm view @sleep2agi/agent-network dist-tags` for the currently installable channel versions; do not treat the candidate number as the current npm `preview`.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 

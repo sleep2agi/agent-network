@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.76`）与本次 `preview` 发布候选（`2.3.0-preview.173`）都打印随机密码，形如 `anet-` 加 22 位十六进制字符。候选版本须通过安装门后才发布。
+已核对的 `latest`（`2.3.0-preview.76`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.173`）的 CLI 默认初始化代码与已核对的 `.172` 完全相同，因此保留该行为；本次安装门使用显式密码，未额外重跑默认密码路径。候选须通过全部发布门后才公开。
 **候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
