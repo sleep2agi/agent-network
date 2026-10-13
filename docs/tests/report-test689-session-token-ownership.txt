@@ -7,9 +7,11 @@ Local Docker HTTP verification: PASS.
 Command: timeout 105s sg docker -c 'docker build --build-arg SOURCE_COMMIT=working-tree-3fcee2c46 -t commniu-session689-test -f tests/test689-session-token-ownership/Dockerfile . && docker run --rm --init --network none commniu-session689-test'
 SQLite: 36 pass, 0 fail across the new session suite and existing daemon-token owner regression suite.
 PostgreSQL: 36 pass, 0 fail across the same suites.
-Assertions include denied issuance without token/node/session/audit writes, verified holder refresh, administrator recovery, requested-network isolation, existing owner gates and restricted/viewer boundaries.
+Assertions include denied issuance without new tokens, node/session identity mutations or business audit entries, verified holder refresh, administrator recovery, requested-network isolation, existing owner gates and restricted/viewer boundaries.
 Build and both backend runs completed within the 105-second local budget. Fixtures and PostgreSQL credentials are container-only; no production database, credentials or sockets are mounted.
 The final version metadata is preview.130; exact-head CI rebuilds and verifies that final candidate. Local source verification alone does not claim CI, publication or live activation.
 
 Exact-head CI/main/release/activation: pending at candidate preparation.
 Authoritative deployment and rollback procedures remain in deploy/hub/README.md. This source candidate does not change the current production launcher or runtime.
+
+Initial PR CI: qa-trigger-coverage refused the new suite missing from the central QA path filter. Both pull-request and main filters now include the suite. Core product code remains unchanged; final-head CI is pending after this correction. Denied-operation snapshots cover identity/issuance fields, not routine authentication last-used telemetry.
