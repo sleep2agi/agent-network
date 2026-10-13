@@ -245,6 +245,7 @@ db.exec(`
     started_at        TEXT,
     runtime_submitted_at TEXT,
     consumed_at       TEXT,
+    last_activity_at  TEXT,
     thread_id         TEXT,
     turn_id           TEXT,
     completed_at      TEXT,
@@ -1557,6 +1558,8 @@ try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
 // started_at (legacy report_status/content matching). Old binaries ignore them.
 try { db.exec("ALTER TABLE tasks ADD COLUMN runtime_submitted_at TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN consumed_at TEXT"); } catch {}
+// #1113: exact original-turn activity. NULL keeps the old execution-clock fallback.
+try { db.exec("ALTER TABLE tasks ADD COLUMN last_activity_at TEXT"); } catch {}
 // Exact vendor-runtime boundary for SideThread-capable clients. These values
 // are written only by the token-bound target node after attributable runtime
 // evidence; the Hub never derives them from task text or caller input.

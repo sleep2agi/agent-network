@@ -4,6 +4,7 @@ on:
     paths:
       - 'server/src/inbox-caller.ts'
       - 'server/src/tools.ts'
+      - 'server/src/task-activity.ts'
       - 'server/src/create-node.ts'
       - 'server/src/rename.ts'
       - 'server/src/rest-identity.ts'

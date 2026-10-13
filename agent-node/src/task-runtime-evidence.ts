@@ -5,6 +5,13 @@ export interface TaskRuntimeContext {
   turnId: string;
 }
 
+export function taskActivityPayload(taskId: string, context: TaskRuntimeContext) {
+  return {
+    task_ids: [taskId], activity_only: true,
+    task_contexts: [{ task_id: taskId, thread_id: context.threadId, turn_id: context.turnId }],
+  };
+}
+
 export interface TaskRuntimeEvidenceReporterOptions {
   taskId: string | null;
   report: (
@@ -13,6 +20,8 @@ export interface TaskRuntimeEvidenceReporterOptions {
     context?: TaskRuntimeContext,
   ) => Promise<unknown>;
   debug?: (message: string) => void;
+  reportActivity?: (taskId: string, context: TaskRuntimeContext) => Promise<unknown>;
+  now?: () => number;
 }
 
 export interface TaskRuntimeEvidenceReporter {
@@ -20,6 +29,8 @@ export interface TaskRuntimeEvidenceReporter {
   submitted(): void;
   /** Exact turn-start or attributable runtime activity was observed. */
   consumed(context?: TaskRuntimeContext): void;
+  /** Genuine activity for the already-consumed original turn, bounded to one report per 30 seconds. */
+  activity(context: TaskRuntimeContext & { taskId: string }): void;
 }
 
 export function logicalTaskIdFromInbox(message: {
@@ -50,11 +61,20 @@ export function createTaskRuntimeEvidenceReporter(
   opts: TaskRuntimeEvidenceReporterOptions,
 ): TaskRuntimeEvidenceReporter {
   const attempted = new Set<TaskRuntimeEvidenceLevel>();
+  const now = opts.now ?? Date.now;
+  let consumedContext: TaskRuntimeContext | undefined;
+  let consumedReport: Promise<unknown> | undefined;
+  let lastActivityAttemptAt = 0;
+  let activityInFlight = false;
 
   const fire = (level: TaskRuntimeEvidenceLevel, context?: TaskRuntimeContext) => {
     if (!opts.taskId || attempted.has(level)) return;
     attempted.add(level);
-    void opts.report(level, opts.taskId, context).catch((cause: unknown) => {
+    if (level === "consumed") {
+      consumedContext = context;
+      lastActivityAttemptAt = now();
+    }
+    const pending = opts.report(level, opts.taskId, context).catch((cause: unknown) => {
       // The tools are additive. Old Hubs and transient reporting failures
       // must not break the model turn; leaving a false-negative NULL is safer
       // than inventing a timestamp or retrying the model task.
@@ -63,10 +83,24 @@ export function createTaskRuntimeEvidenceReporter(
         `${cause instanceof Error ? cause.message : String(cause)}`,
       );
     });
+    if (level === "consumed") consumedReport = pending;
   };
 
   return {
     submitted: () => fire("submitted"),
     consumed: (context) => fire("consumed", context),
+    activity: (context) => {
+      if (!opts.taskId || !opts.reportActivity || !consumedContext || activityInFlight) return;
+      if (context.taskId !== opts.taskId) return;
+      if (context.threadId !== consumedContext.threadId || context.turnId !== consumedContext.turnId) return;
+      const at = now();
+      if (at - lastActivityAttemptAt < 30_000) return;
+      lastActivityAttemptAt = at;
+      activityInFlight = true;
+      void Promise.resolve(consumedReport)
+        .then(() => opts.reportActivity!(opts.taskId!, context))
+        .catch(() => opts.debug?.(`[runtime-evidence] activity report failed task=${opts.taskId!.slice(0, 8)}`))
+        .finally(() => { activityInFlight = false; });
+    },
   };
 }

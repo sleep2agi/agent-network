@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { addNetworkMember, createNetworkTokenForNode, register } from "./auth.js";
 import { db, generateNetworkToken, hashToken } from "./db.js";
+import { createTaskRuntimeEvidenceReporter, taskActivityPayload } from "../../agent-node/src/task-runtime-evidence";
 
 const dir = mkdtempSync(join(tmpdir(), "anet-caller-identity-"));
 const activeDbPath = process.env.COMMHUB_DB ?? (process.env.COMMHUB_TEST_PG_URL ? "postgres" : undefined);
@@ -984,3 +985,99 @@ test("duplicate ownerless row keeps an unbound epoch 0 token online", async () =
   first.abort();
   second.abort();
 }, 15_000);
+
+
+const leaseAlias = `leasebase${stamp}`, leaseId = `n_leasebase_${stamp}`;
+let leaseTok: Tok;
+beforeAll(() => { seedNode(leaseId,leaseAlias,NET,ownerId);seedSession(leaseId,leaseAlias,NET);leaseTok=mint(ownerId,NET,leaseAlias,2,leaseId); });
+
+function activityTask(nodeId: string, alias: string, network = NET) {
+  const id = `task_activity_${crypto.randomUUID()}`;
+  db.run("INSERT INTO tasks (task_id, from_name, to_node_id, to_name, status, content, network_id) VALUES (?1, 'scheduler', ?2, ?3, 'running', 'activity fixture', ?4)", [id, nodeId, alias, network]);
+  return { task_id: id, thread_id: `thread_${id}`, turn_id: `turn_${id}` };
+}
+const activitySnap = (id: string) => db.get<any>("SELECT status, consumed_at, runtime_submitted_at, started_at, thread_id, turn_id, last_activity_at FROM tasks WHERE task_id = ?1", id);
+async function consumeActivityTask(context: {task_id: string; thread_id: string; turn_id: string}) {
+  expect((await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: [context.task_id], task_contexts: [context] })).ok).toBe(true);
+}
+const renewActivity = (token: string, contexts: Array<{task_id: string; thread_id: string; turn_id: string}>) => tool(token, "mark_tasks_consumed", { task_ids: contexts.map(c => c.task_id), task_contexts: contexts, activity_only: true });
+
+test("activity lease: exact task renewal changes only the activity clock; duplicate consumption does not renew", async () => {
+  const c = activityTask(leaseId, leaseAlias); await consumeActivityTask(c);
+  db.run("UPDATE tasks SET last_activity_at = datetime('now', '-2 hours') WHERE task_id = ?1", c.task_id);
+  const before = activitySnap(c.task_id);
+  expect((await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: [c.task_id], task_contexts: [c] })).ok).toBe(true);
+  expect(activitySnap(c.task_id)).toEqual(before);
+  const out = await renewActivity(leaseTok.token, [c]); expect(out.ok).toBe(true);
+  const after = activitySnap(c.task_id);
+  expect(after.last_activity_at).not.toBe(before.last_activity_at);
+  expect({...after, last_activity_at: before.last_activity_at}).toEqual(before);
+  expect(out.tasks[0].last_activity_at).toBe(after.last_activity_at);
+});
+
+test("activity lease: bound node wins over a same-name session and cannot renew the other node", async () => {
+  const alias = `leasebound${stamp}`, mine = `n_leasebound_${stamp}`, other = `n_leaseother_${stamp}`;
+  seedNode(mine, alias, NET, ownerId); seedSession(mine, alias, NET);
+  const tok = mint(ownerId, NET, leaseAlias, 2, mine), own = activityTask(mine, alias);
+  expect((await tool(tok.token, "mark_tasks_consumed", {task_ids: [own.task_id], task_contexts: [own]})).ok).toBe(true);
+  seedNode(other, alias, NET, ownerId); db.run("UPDATE sessions SET node_id=?1 WHERE alias=?2 AND network_id=?3",[other,alias,NET]);
+  expect((await renewActivity(tok.token, [own])).ok).toBe(true);
+  const foreign = activityTask(other, alias);
+  db.run("UPDATE tasks SET consumed_at=datetime('now'),thread_id=?1,turn_id=?2 WHERE task_id=?3", [foreign.thread_id,foreign.turn_id,foreign.task_id]);
+  expect((await renewActivity(tok.token,[foreign])).error).toBe("task_not_owned");
+  expect(activitySnap(foreign.task_id).last_activity_at).toBeNull();
+});
+
+for (const shape of ["wrong thread", "wrong turn", "foreign node", "foreign network", "legacy null node", "not consumed", "missing context", "user token"] as const) {
+  test(`activity lease: rejects ${shape} without changing the task`, async () => {
+    const c = activityTask(leaseId, leaseAlias); if(shape !== "not consumed") await consumeActivityTask(c);
+    if(shape === "foreign node") db.run("UPDATE tasks SET to_node_id=?1 WHERE task_id=?2", [otherId,c.task_id]);
+    if(shape === "foreign network") db.run("UPDATE tasks SET network_id=?1 WHERE task_id=?2", [NET2,c.task_id]);
+    if(shape === "legacy null node") db.run("UPDATE tasks SET to_node_id=NULL WHERE task_id=?1",c.task_id);
+    const before=activitySnap(c.task_id); const context={...c};
+    if(shape === "wrong thread") context.thread_id="sibling_thread";
+    if(shape === "wrong turn") context.turn_id="sibling_turn";
+    const out=await tool(shape === "user token" ? ownerToken : leaseTok.token,"mark_tasks_consumed",{task_ids:[c.task_id],task_contexts:shape === "missing context" ? [] : [context],activity_only:true});
+    expect(out.ok).toBe(false); expect(activitySnap(c.task_id)).toEqual(before);
+  });
+}
+for(const status of ["replied","failed","cancelled","expired"]){
+  test(`activity lease: ${status} terminal never receives activity or reopens`,async()=>{
+    const c=activityTask(leaseId,leaseAlias);await consumeActivityTask(c);db.run("UPDATE tasks SET status=?1 WHERE task_id=?2",[status,c.task_id]);const before=activitySnap(c.task_id);
+    expect((await renewActivity(leaseTok.token,[c])).error).toBe("task_activity_terminal");expect(activitySnap(c.task_id)).toEqual(before);
+  });
+}
+test("activity lease: conflicting batch is rejected with zero partial writes",async()=>{
+  const first=activityTask(leaseId,leaseAlias),second=activityTask(leaseId,leaseAlias);await consumeActivityTask(first);await consumeActivityTask(second);
+  const before=activitySnap(first.task_id),before2=activitySnap(second.task_id);
+  expect((await renewActivity(leaseTok.token,[first,{...second,turn_id:"old_turn"}])).ok).toBe(false);
+  expect(activitySnap(first.task_id)).toEqual(before);expect(activitySnap(second.task_id)).toEqual(before2);
+});
+
+test("activity lease: injected second-write failure rolls back the first write on the real backend",async()=>{
+ const first=activityTask(leaseId,leaseAlias),second=activityTask(leaseId,leaseAlias);await consumeActivityTask(first);await consumeActivityTask(second);
+ const trigger=`activity_fail_${stamp}`,fn=`activity_fn_${stamp}`;
+ if(db.dialect === "postgres")db.exec(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.task_id='${second.task_id}' THEN RAISE EXCEPTION 'test1113_injected_activity_failure'; END IF; RETURN NEW; END; $$; CREATE TRIGGER ${trigger} BEFORE UPDATE OF last_activity_at ON tasks FOR EACH ROW EXECUTE FUNCTION ${fn}()`);
+ else db.exec(`CREATE TRIGGER ${trigger} BEFORE UPDATE OF last_activity_at ON tasks WHEN NEW.task_id='${second.task_id}' BEGIN SELECT RAISE(ABORT,'test1113_injected_activity_failure'); END`);
+ const before=activitySnap(first.task_id),before2=activitySnap(second.task_id);let failed=false;
+ try{await renewActivity(leaseTok.token,[first,second]);}catch(e){failed=String(e).includes("test1113_injected_activity_failure");}
+ finally{if(db.dialect === "postgres")db.exec(`DROP TRIGGER ${trigger} ON tasks; DROP FUNCTION ${fn}()`);else db.exec(`DROP TRIGGER ${trigger}`);}
+ expect(failed).toBe(true);expect(activitySnap(first.task_id)).toEqual(before);expect(activitySnap(second.task_id)).toEqual(before2);
+});
+test("activity lease: revoked credential cannot report activity",async()=>{
+ const tok=mint(ownerId,NET,leaseAlias,2,leaseId),c=activityTask(leaseId,leaseAlias);await consumeActivityTask(c);const before=activitySnap(c.task_id);
+ db.run("UPDATE api_tokens SET revoked_at=datetime('now') WHERE token_id=?1",tok.tokenId);
+ const response=await fetch(`${base}/mcp`,{method:"POST",headers:{Authorization:`Bearer ${tok.token}`,"Content-Type":"application/json",Accept:"application/json, text/event-stream"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"mark_tasks_consumed",arguments:{task_ids:[c.task_id],task_contexts:[c],activity_only:true}}})});
+ expect(response.status).toBe(401);expect(activitySnap(c.task_id)).toEqual(before);
+});
+
+test("activity lease: real runtime reporter payload traverses authenticated HTTP into the exact task clock",async()=>{
+ const c=activityTask(leaseId,leaseAlias);let clock=0;const errors:string[]=[];
+ const reporter=createTaskRuntimeEvidenceReporter({taskId:c.task_id,now:()=>clock,
+  report:(_level,id,context)=>tool(leaseTok.token,"mark_tasks_consumed",{task_ids:[id],task_contexts:[{task_id:id,thread_id:context!.threadId,turn_id:context!.turnId}]}),
+  reportActivity:(id,context)=>tool(leaseTok.token,"mark_tasks_consumed",taskActivityPayload(id,context)),debug:message=>errors.push(message)});
+ reporter.consumed({threadId:c.thread_id,turnId:c.turn_id});await until(()=>!!activitySnap(c.task_id).consumed_at,"consumption stamped");
+ const before=activitySnap(c.task_id);clock=30_000;reporter.activity({taskId:"other_task",threadId:c.thread_id,turnId:c.turn_id});await new Promise(resolve=>setTimeout(resolve,5));expect(activitySnap(c.task_id)).toEqual(before);
+ reporter.activity({taskId:c.task_id,threadId:c.thread_id,turnId:c.turn_id});await until(()=>!!activitySnap(c.task_id).last_activity_at,"runtime activity stamped");
+ expect(errors).toEqual([]);expect(activitySnap(c.task_id).consumed_at).toBe(before.consumed_at);expect(activitySnap(c.task_id).status).toBe("running");
+});

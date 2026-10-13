@@ -59,6 +59,7 @@ export function stuckTimeoutMs(scheduleJson: string): number {
 export type StuckBlockerClock = {
   created_at: string;
   consumed_at?: string | null;
+  last_activity_at?: string | null;
   started_at?: string | null;
 };
 
@@ -77,6 +78,12 @@ export function blockerTimeoutClock(blocker: StuckBlockerClock, scheduleJson: st
     if (!value) continue;
     const at = parseDbTimestampMs(value);
     if (Number.isFinite(at) && at <= nowMs && (!Number.isFinite(created) || at >= created)) {
+      if (source === "consumed_at" && blocker.last_activity_at) {
+        const activity = parseDbTimestampMs(blocker.last_activity_at);
+        if (Number.isFinite(activity) && activity >= at && activity <= nowMs) {
+          return { ageMs: nowMs - activity, limitMs: stuckTimeoutMs(scheduleJson), source: "last_activity_at" };
+        }
+      }
       return { ageMs: nowMs - at, limitMs: stuckTimeoutMs(scheduleJson), source };
     }
   }
@@ -153,7 +160,7 @@ export function stuckNoticeText(n: StuckNotice): { title: string; text: string }
     return {
       title: "定时任务被卡住",
       text: `定时任务「${n.scheduleName}」被上一次的执行卡住了:任务 ${n.taskId} 于 ${started} 派给节点 ${n.alias},到现在还没有完成,之后的 ${n.skips} 次执行都被跳过。\n\n`
-        + `从实际开始执行起超过 ${fmtDuration(n.timeoutMs)} 后会被自动按超时结束;尚未开始的任务从派发起计时,所有执行仍受总时限保护。下一次照常派发。等不及可以在任务列表里取消这条任务。`,
+        + `距上次任务活动或实际开始执行超过 ${fmtDuration(n.timeoutMs)} 后会被自动按超时结束;尚未开始的任务从派发起计时,所有执行仍受总时限保护。下一次照常派发。等不及可以在任务列表里取消这条任务。`,
     };
   }
   return {

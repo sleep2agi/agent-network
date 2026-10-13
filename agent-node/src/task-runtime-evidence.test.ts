@@ -199,3 +199,33 @@ describe("agent-node inbox wiring", () => {
     expect(codexStdio).toContain("is not authoritative ownership");
   });
 });
+
+
+describe("exact task activity lease reporter",()=>{
+ const context={taskId:"own",threadId:"owned_thread",turnId:"owned_turn"};
+ const flush=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
+ test("activity requires consumption/context and is throttled across event floods",async()=>{
+  let clock=0;const events:string[]=[];
+  const r=createTaskRuntimeEvidenceReporter({taskId:"own",now:()=>clock,report:async()=>{},reportActivity:async(id)=>{events.push(id)}});
+  clock=31_000;r.activity(context);await flush();expect(events).toEqual([]);
+  r.consumed(context);clock+=29_999;r.activity(context);await flush();expect(events).toEqual([]);
+  clock++;for(let i=0;i<100;i++)r.activity(context);await flush();expect(events).toEqual(["own"]);
+  clock+=30_000;r.activity({...context,taskId:"other_task"});r.activity({...context,turnId:"old_turn"});r.activity({...context,threadId:"other_thread"});await flush();expect(events).toHaveLength(1);
+  r.activity(context);await flush();expect(events).toEqual(["own","own"]);
+ });
+ test("pending consumption is ordered before activity; pending activity does not pile up",async()=>{
+  let clock=0;let consumeDone!:()=>void,activityDone!:()=>void;const events:string[]=[];
+  const r=createTaskRuntimeEvidenceReporter({taskId:"own",now:()=>clock,report:()=>new Promise<void>(resolve=>{consumeDone=resolve}),reportActivity:()=>{events.push("activity");return new Promise<void>(resolve=>{activityDone=resolve})}});
+  r.consumed(context);clock=30_000;r.activity(context);await flush();expect(events).toEqual([]);
+  consumeDone();await flush();expect(events).toEqual(["activity"]);
+  clock+=60_000;r.activity(context);await flush();expect(events).toHaveLength(1);activityDone();await flush();
+  r.activity(context);await flush();expect(events).toHaveLength(2);activityDone();
+ });
+ test("failed activity is bounded and never replays the model or consumption",async()=>{
+  let clock=0,consumed=0,activity=0;const logs:string[]=[];
+  const r=createTaskRuntimeEvidenceReporter({taskId:"own",now:()=>clock,report:async()=>{consumed++},reportActivity:async()=>{activity++;throw new Error("old Hub")},debug:s=>logs.push(s)});
+  r.consumed(context);clock=30_000;r.activity(context);await flush();expect(activity).toBe(1);expect(logs).toHaveLength(1);expect(consumed).toBe(1);
+  clock=59_999;r.activity(context);await flush();expect(activity).toBe(1);
+  clock=60_000;r.activity(context);await flush();expect(activity).toBe(2);expect(consumed).toBe(1);
+ });
+});

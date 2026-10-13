@@ -412,8 +412,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       // received:节点那边有没有把这条任务取走过(inbox 行被 ack,或任务已进 acked/running)。
       // 跳过记录带上它,客户端才分得清「节点还没收到」和「节点在处理」—— 前者是投递故障,
       // 后者才是真的上一次还没做完。
-      const findOpen = () => db.get<{ task_id: string; received: number; created_at: string; consumed_at: string | null; started_at: string | null; status: string }>(
-        `SELECT r.task_id, t.created_at, t.consumed_at, t.started_at, t.status,
+      const findOpen = () => db.get<{ task_id: string; received: number; created_at: string; consumed_at: string | null; started_at: string | null; last_activity_at: string | null; status: string }>(
+        `SELECT r.task_id, t.created_at, t.consumed_at, t.started_at, t.last_activity_at, t.status,
                 CASE WHEN t.status IN ('acked', 'running')
                        OR EXISTS (SELECT 1 FROM inbox i WHERE (i.task_id = r.task_id OR i.id = r.task_id) AND i.acked = 1)
                      THEN 1 ELSE 0 END AS received

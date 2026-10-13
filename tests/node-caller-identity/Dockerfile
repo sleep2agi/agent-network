@@ -5,6 +5,7 @@ COPY server/package.json server/package-lock.json ./
 RUN bun install --frozen-lockfile
 COPY server/src ./src
 COPY server/bin ./bin
+COPY agent-node/src/task-runtime-evidence.ts /work/agent-node/src/task-runtime-evidence.ts
 COPY tests/node-caller-identity /work/tests/node-caller-identity
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT

@@ -286,3 +286,27 @@ describe("#1112 execution clock", () => {
     expect(blockerTimedOut({ created_at: "2026-10-13 01:00:00", consumed_at: "2026-10-13 02:00:00" }, schedule, now)).toBe(true);
   });
 });
+
+
+describe("#1113 activity idle clock",()=>{
+ test("fresh exact-task activity protects a long consumed turn, silent activity still expires",()=>{
+  const s=seedSchedule(),first=fire(s),now=new Date(),at=(m:number)=>new Date(now.getTime()-m*60_000).toISOString();
+  db.run("UPDATE tasks SET status='running',created_at=?1,consumed_at=?2,last_activity_at=?3 WHERE task_id=?4",[at(180),at(120),at(1),first.taskId]);
+  expect(fire(s,now).status).toBe("skipped");expect(taskRow(first.taskId!).status).toBe("running");
+  db.run("UPDATE tasks SET last_activity_at=?1 WHERE task_id=?2",[at(61),first.taskId]);expect(fire(s,now).status).toBe("delivered");
+  expect(runRow(first.runId).error_message).toContain("since last_activity_at");
+ });
+ test("fresh activity cannot evade the absolute total cap",()=>{
+  const s=seedSchedule(),first=fire(s),now=new Date(),at=(m:number)=>new Date(now.getTime()-m*60_000).toISOString();
+  db.run("UPDATE tasks SET status='running',created_at=?1,consumed_at=?2,last_activity_at=?3 WHERE task_id=?4",[at(1441),at(1440),at(1),first.taskId]);
+  expect(fire(s,now).status).toBe("delivered");expect(runRow(first.runId).error_message).toContain("total cap");
+ });
+ test("activity without consumption, before consumption or in the future never renews",()=>{
+  const now=new Date("2026-10-13T04:00:00Z"),schedule=JSON.stringify({type:"interval",every_seconds:60});
+  for(const row of [
+   {created_at:"2026-10-13 01:00:00",last_activity_at:"2026-10-13 03:59:00"},
+   {created_at:"2026-10-13 01:00:00",consumed_at:"2026-10-13 02:00:00",last_activity_at:"2026-10-13 01:59:00"},
+   {created_at:"2026-10-13 01:00:00",consumed_at:"2026-10-13 02:00:00",last_activity_at:"2026-10-13 04:01:00"},
+  ])expect(blockerTimedOut(row,schedule,now)).toBe(true);
+ });
+});

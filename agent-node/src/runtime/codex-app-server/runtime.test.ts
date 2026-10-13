@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { EventEmitter } from "events";
+import { createTaskRuntimeEvidenceReporter } from "../../task-runtime-evidence";
 import {
   buildOwnedAppServerArgs,
   COMMHUB_MCP_TOKEN_ENV,
@@ -296,6 +297,18 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       "submitted:task_exact_evidence",
       "consumed:task_exact_evidence",
     ]);
+  });
+
+  test("owned runtime events drive the task lease reporter; other tasks and old turns cannot renew",async()=>{
+    const bridge=new ActivityBridge(),session={bridge} as unknown as CodexAppServerRuntimeSession;
+    const pulses:string[]=[];const reporter=createTaskRuntimeEvidenceReporter({taskId:"lease_runtime",report:async()=>{},reportActivity:async(id)=>{pulses.push(id)}});
+    const thinking=codexAppServerThink(session,{taskId:"lease_runtime",text:"work",timeoutMs:120_000,queueTimeoutMs:500,reconciliationIntervalMs:0,
+      onConsumed:ev=>reporter.consumed({threadId:"thread_owned",turnId:ev.turnId}),
+      onActivity:ev=>reporter.activity({taskId:ev.taskId,threadId:"thread_owned",turnId:ev.turnId})});
+    await advance(30_000);bridge.emit("task_activity",{taskId:"other",turnId:"turn_lease_runtime",kind:"agent_delta"});await flushMicrotasks();expect(pulses).toEqual([]);
+    bridge.emit("task_activity",{taskId:"lease_runtime",turnId:"old",kind:"agent_delta"});await flushMicrotasks();expect(pulses).toEqual([]);
+    bridge.emit("task_activity",{taskId:"lease_runtime",turnId:"turn_lease_runtime",kind:"agent_delta"});await flushMicrotasks();expect(pulses).toEqual(["lease_runtime"]);
+    bridge.emit("task_reply",{taskId:"lease_runtime",text:"done"});await settledNow(thinking);
   });
 
   test("exact task activity resets the response idle deadline for a long-running turn", async () => {

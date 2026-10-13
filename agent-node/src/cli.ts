@@ -94,6 +94,7 @@ import {
 } from "./runtime/readable-attachment-prompt";
 import {
   createTaskRuntimeEvidenceReporter,
+  taskActivityPayload,
   logicalTaskIdFromInbox,
   type TaskRuntimeEvidenceReporter,
 } from "./task-runtime-evidence";
@@ -4213,6 +4214,7 @@ async function processWithCodexAppServer(
     steerIfExternalTurn,
     log,
     onActivity: (event) => {
+      evidence?.activity({ taskId: event.taskId, threadId: session.bridge.getThreadId(), turnId: event.turnId });
       const now = Date.now();
       if (now - lastActivityHeartbeatAt < 30_000) return;
       lastActivityHeartbeatAt = now;
@@ -5733,6 +5735,7 @@ async function processTask(
   let grokFailureSubcode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
     taskId,
+    reportActivity: (exactTaskId, context) => callCommHub("mark_tasks_consumed", taskActivityPayload(exactTaskId, context), 0),
     report: (level, exactTaskId, context) => {
       commhubCompensation?.recordLifecycle(exactTaskId, level);
       return callCommHub(
