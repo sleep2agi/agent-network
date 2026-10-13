@@ -75,6 +75,92 @@ let p10Owner: Tok;
 type Sub = { events: any[]; done: boolean; abort: () => void; ready: Promise<void> };
 const openSubs: Sub[] = [];
 
+for (const transport of ["mcp", "rest"] as const) {
+  for (const shape of ["bound duplicate", "unbound duplicate", "no session", "other network"] as const) {
+    test(`node attribution: ${transport} ${shape} retains the credential's node ID`, async () => {
+      const key = `${transport}-${shape.replaceAll(" ", "-")}-${stamp}`;
+      const alias = `idvsender-${key}`;
+      const mine = `n_idv_sender_${key}`;
+      const member = register(`idvmem-${key}`, "CallerMember123!", undefined, "seed");
+      if (!member.ok || !member.user) throw new Error("member fixture failed");
+      const memberId = member.user.user_id;
+      const joined = addNetworkMember(NET, memberId, "member", ownerId, { agentAccess: "all" });
+      if (!joined.ok) throw new Error(joined.error);
+      seedNode(mine, alias, NET, memberId);
+      if (shape.includes("duplicate")) {
+        const ownerNode = `n_idv_owner_${key}`;
+        seedNode(ownerNode, alias, NET, ownerId);
+        seedSession(ownerNode, alias, NET); // the active session belongs to a different row
+      }
+      if (shape === "other network") {
+        const foreignNode = `n_idv_foreign_${key}`;
+        seedNode(foreignNode, alias, NET2, outsiderId);
+        seedSession(foreignNode, alias, NET2);
+      }
+      const tok = mint(memberId, NET, shape === "bound duplicate" ? victimAlias : alias,
+        shape === "unbound duplicate" ? 0 : 2, shape === "unbound duplicate" ? null : mine);
+      const content = `sender identity ${key}`;
+      const sent = transport === "mcp"
+        ? await mcpSend(tok.token, content, undefined)
+        : (await api(tok.token, "POST", "/api/task", { alias: sinkAlias, task: content, network_id: NET })).body;
+      expect(sent.ok).toBe(true);
+      const row = db.get("SELECT from_name, from_node_id, network_id FROM tasks WHERE content = ?1", content);
+      expect(row).toEqual({ from_name: alias, from_node_id: mine, network_id: NET });
+    });
+  }
+}
+
+for (const owner of ["own", "another"] as const) {
+  test(`rename registry: prepare rejects ${owner} node without a session`, async () => {
+    const target = `idvreserved-${owner}-${stamp}`;
+    seedNode(`n_idv_reserved_${owner}_${stamp}`, target, NET, owner === "own" ? ownerId : outsiderId);
+    const before = db.get("SELECT COUNT(*) AS n FROM rename_txn");
+    const result = await api(ownerToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: victimAlias, new_alias: target });
+    expect(result.status).toBe(400);
+    expect(result.body.ok).toBe(false);
+    expect(db.get("SELECT COUNT(*) AS n FROM rename_txn")).toEqual(before);
+    expect(sessionSnap(victimAlias, NET)?.node_id).toBe(victimId);
+  });
+}
+
+test("rename registry: commit rejects a node created after prepare", async () => {
+  const target = `idvrace-${stamp}`;
+  const prepared = await api(ownerToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: victimAlias, new_alias: target });
+  expect(prepared.body.ok).toBe(true);
+  const nodeId = `n_idv_race_${stamp}`;
+  seedNode(nodeId, target, NET, outsiderId);
+  const result = await api(ownerToken, "POST", "/api/node-rename/commit", { txn_id: prepared.body.txn_id });
+  expect(result.status).toBe(400);
+  expect(result.body.ok).toBe(false);
+  expect(sessionSnap(victimAlias, NET)?.node_id).toBe(victimId);
+  expect(db.get("SELECT alias FROM nodes WHERE node_id = ?1", nodeId)).toEqual({ alias: target });
+  expect(db.get("SELECT status FROM rename_txn WHERE txn_id = ?1", prepared.body.txn_id)).toEqual({ status: "prepared" });
+  await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id });
+});
+
+test("rename registry: another network's node does not reserve the local alias", async () => {
+  const target = `idvforeign-target-${stamp}`;
+  seedNode(`n_idv_foreign_target_${stamp}`, target, NET2, outsiderId);
+  const prepared = await api(ownerToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: victimAlias, new_alias: target });
+  expect(prepared.body.ok).toBe(true);
+  expect((await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id })).body.ok).toBe(true);
+});
+
+test("rename registry: a free alias commits and preserves node identity", async () => {
+  const alias = `idvrename-old-${stamp}`;
+  const target = `idvrename-new-${stamp}`;
+  const nodeId = `n_idv_rename_${stamp}`;
+  seedNode(nodeId, alias, NET, ownerId);
+  seedSession(nodeId, alias, NET);
+  const prepared = await api(ownerToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: alias, new_alias: target });
+  expect(prepared.body.ok).toBe(true);
+  const committed = await api(ownerToken, "POST", "/api/node-rename/commit", { txn_id: prepared.body.txn_id });
+  expect(committed.body.ok).toBe(true);
+  expect(sessionSnap(target, NET)?.node_id).toBe(nodeId);
+  expect(sessionSnap(alias, NET)).toBeNull();
+  expect(db.get("SELECT alias FROM nodes WHERE node_id = ?1", nodeId)).toEqual({ alias: target });
+});
+
 function subscribe(path: string, token: string, headers: Record<string, string> = {}): Sub {
   const ctrl = new AbortController();
   const sub: Sub = { events: [], done: false, abort: () => ctrl.abort(), ready: Promise.resolve() };
@@ -163,6 +249,16 @@ function minted(userId: string, networkId: string, alias: string, nodeId: string
   const row = createNetworkTokenForNode(userId, networkId, alias, nodeId);
   if (!row.ok || !row.token || !row.token_id) throw new Error(`mint ${alias}: ${row.error ?? "no token"}`);
   return { token: row.token, tokenId: row.token_id };
+}
+
+function seedNode(nodeId: string, alias: string, networkId: string, userId: string) {
+  db.run(`INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id)
+          VALUES (?1, ?2, ?2, ?3, ?4)`, [nodeId, alias, networkId, userId]);
+}
+
+function seedSession(nodeId: string, alias: string, networkId: string) {
+  db.run(`INSERT INTO sessions (resume_id, alias, node_id, network_id, status)
+          VALUES (?1, ?2, ?3, ?4, 'idle')`, [`sdk-${nodeId}`, alias, nodeId, networkId]);
 }
 
 function taskCount(content: string): number {

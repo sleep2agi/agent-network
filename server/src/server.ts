@@ -3695,7 +3695,9 @@ return Bun.serve({
       const ttlSeconds = (body as any).ttl_seconds || 3600;
       const fromNodeId = restAuth && !requestToken(req).startsWith("ntok_")
         ? null
-        : resolveRestNodeIdForAlias(fromSession, taskNetId);
+        : requestToken(req).startsWith("ntok_")
+          ? (identity.nodeId ?? null)
+          : resolveRestNodeIdForAlias(fromSession, taskNetId);
       const targetNodeId = target.session?.node_id ?? null;
       const actualTo = restActualTo(target, taskNetId);
       // #221 — fold top-level `attachments` into `meta.attachments` so

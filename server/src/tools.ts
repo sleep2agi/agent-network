@@ -58,6 +58,7 @@ import {
   auditCreateNode,
   auditCreateNodeStrict,
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
+  resolveNodeCaller,
 } from "./create-node.js";
 import { decideClone, factsFromRows, parseWorkdirPolicy } from "./clone-node.js";
 import {
@@ -2007,7 +2008,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
-      const fromNodeId = humanSender ? null : resolveNodeIdForAlias(from_session, effectiveNetId);
+      const senderIdentity = callerTokenIsNetwork ? resolveNodeCaller(callerTokenId) : null;
+      const fromNodeId = humanSender ? null : callerTokenIsNetwork
+        ? (senderIdentity?.ok && senderIdentity.kind === "node" && senderIdentity.networkId === effectiveNetId ? senderIdentity.nodeId : null)
+        : resolveNodeIdForAlias(from_session, effectiveNetId);
       const targetNodeId = target.session?.node_id ?? null;
       const resolvedActualTo = actualTo(target, effectiveNetId);
       // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).

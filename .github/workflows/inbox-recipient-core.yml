@@ -5,6 +5,9 @@ on:
       - 'server/src/inbox-caller.ts'
       - 'server/src/tools.ts'
       - 'server/src/create-node.ts'
+      - 'server/src/rename.ts'
+      - 'server/src/rest-identity.ts'
+      - 'server/src/server.ts'
       - 'server/src/node-caller-identity-http.test.ts'
       - 'server/src/mcp-write-network-resolution.test.ts'
       - 'server/src/tool-audience*'
@@ -21,7 +24,7 @@ jobs:
       - name: Build isolated HTTP test image
         run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t inbox-recipient-test -f tests/node-caller-identity/Dockerfile .
       - name: SQLite and PostgreSQL recipient boundaries
-        run: docker run --rm --init --network none -e CALLER_CASES=green inbox-recipient-test
+        run: docker run --rm --init --network none inbox-recipient-test
       - name: Existing task ACK and write-scope regressions
         run: docker run --rm --init --network none --entrypoint bash inbox-recipient-test -lc 'unset DATABASE_URL COMMHUB_TEST_PG_URL; COMMHUB_DB=/tmp/inbox-regressions.db bun test src/task-consumption.test.ts src/mcp-write-network-resolution.test.ts'
       - name: Preserve the existing tools-list byte ceilings

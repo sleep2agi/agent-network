@@ -33,7 +33,7 @@ export interface RestIdentityInput {
 }
 
 export type RestIdentityResult =
-  | { ok: true; fromSession: string }
+  | { ok: true; fromSession: string; nodeId?: string | null }
   | {
       ok: false;
       error: "from_session_identity_mismatch";
@@ -69,10 +69,12 @@ export function resolveUserTaskFromSession(username: string | null | undefined, 
 export function resolveRestFromSession(input: RestIdentityInput): RestIdentityResult {
   const requested = typeof input.requestedFrom === "string" ? input.requestedFrom.trim() : "";
   let alias: string | null;
+  let nodeId: string | null = null;
   if (input.token.startsWith("ntok_") && input.tokenId) {
     const resolved = resolveNodeCaller(input.tokenId);
     if (resolved.ok) {
       alias = resolved.alias;
+      nodeId = resolved.kind === "node" ? resolved.nodeId : null;
     } else if (resolved.reason === "not_a_node_token") { // board679-plain-ntok-rest
       // Name is not `node:` yet. Main signs that as api, and refuses a claim.
       // not_owner / bound_node_missing / ambiguous stay the hard reject.
@@ -135,5 +137,5 @@ export function resolveRestFromSession(input: RestIdentityInput): RestIdentityRe
   }
 
   // Node token, no claim or a matching one: bind to the token's own alias.
-  return { ok: true, fromSession: alias };
+  return { ok: true, fromSession: alias, ...(input.tokenId ? { nodeId } : {}) };
 }

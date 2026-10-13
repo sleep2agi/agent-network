@@ -31,7 +31,7 @@ await runMutation("rest", "src/rest-identity.ts",
   "if (false) return resolveUserTaskFromSession(authenticatedUsername, input.requestedFrom);",
   "authenticated sender: rest .* rejects another identity without writes", 6);
 await runMutation("mcpnode", "src/tools.ts",
-  "const fromNodeId = humanSender ? null : resolveNodeIdForAlias(from_session, effectiveNetId);",
+  "const fromNodeId = humanSender ? null : callerTokenIsNetwork\n        ? (senderIdentity?.ok && senderIdentity.kind === \"node\" && senderIdentity.networkId === effectiveNetId ? senderIdentity.nodeId : null)\n        : resolveNodeIdForAlias(from_session, effectiveNetId);",
   "const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);",
   "authenticated sender: mcp member uses its username", 1);
 await runMutation("restnode", "src/server.ts",

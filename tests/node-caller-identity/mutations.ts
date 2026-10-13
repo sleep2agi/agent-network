@@ -25,6 +25,10 @@ async function runMutation(label: string, file: string, from: string, to: string
     if (!rc || !log.includes("expect(received)")) throw Error(`NOT assertion-red ${label}\n${log}`);
     if (label === "owner") {
       if (boundaryFails !== BOUNDARY_FAILS) throw Error(`expected ${BOUNDARY_FAILS} boundary failures, saw ${boundaryFails}\n${log}`);
+    } else if (["sendermcp", "senderrest", "renameprepare"].includes(label)) {
+      const expected = label === "renameprepare" ? 2 : 4;
+      const count = log.split(`(fail) ${testName}`).length - 1;
+      if (count !== expected) throw Error(`expected ${expected} named assertion failures, saw ${count}\n${log}`);
     } else if (!namedFail) {
       throw Error(`NOT assertion-red ${label}\n${log}`);
     }
@@ -80,3 +84,19 @@ await runMutation(
   "} else if (false) { // board679-plain-ntok-rest",
   "unreported registration token signs as api",
 );
+
+await runMutation("sendermcp", "src/tools.ts",
+  'const fromNodeId = humanSender ? null : callerTokenIsNetwork\n        ? (senderIdentity?.ok && senderIdentity.kind === "node" && senderIdentity.networkId === effectiveNetId ? senderIdentity.nodeId : null)\n        : resolveNodeIdForAlias(from_session, effectiveNetId);',
+  'const fromNodeId = humanSender ? null : resolveNodeIdForAlias(from_session, effectiveNetId);',
+  "node attribution: mcp");
+await runMutation("senderrest", "src/server.ts",
+  '? (identity.nodeId ?? null)', '? resolveRestNodeIdForAlias(fromSession, taskNetId)',
+  "node attribution: rest");
+await runMutation("renameprepare", "src/rename.ts",
+  'const newInSessions = db.get<any>(\n    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2 UNION ALL SELECT 1 FROM nodes WHERE network_id = ?1 AND alias = ?2", networkId, newAlias);',
+  'const newInSessions = db.get<any>(\n    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2", networkId, newAlias);',
+  "rename registry: prepare rejects");
+await runMutation("renamecommit", "src/rename.ts",
+  'const conflict = db.get<any>(\n    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2 UNION ALL SELECT 1 FROM nodes WHERE network_id = ?1 AND alias = ?2", txn.network_id, txn.new_alias);',
+  'const conflict = db.get<any>(\n    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2", txn.network_id, txn.new_alias);',
+  "rename registry: commit rejects a node created after prepare");

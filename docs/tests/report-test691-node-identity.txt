@@ -1,0 +1,6 @@
+Requirement #691 — Node identity completion
+
+Candidate: isolated worktree from main5a3cc817635a12efcb8eb3a7757d0b6a179a08c7.
+Local isolated HTTP smoke: SQLite43 + PostgreSQL43 tests passed, including eight credential-node attribution cases and five rename registry cases per backend. Production database and credentials were not accessed by these tests.
+Four targeted assertion witnesses and full existing sender/caller contracts run in Docker CI. A green source branch is test evidence only; public publication must rebuild the exact merged main SHA with every formal gate successful.
+No schema/dependency/provider/port changes. Unregistered credentials keep null sender node IDs; authenticated human attribution stays unchanged.
