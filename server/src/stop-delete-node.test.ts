@@ -742,7 +742,6 @@ describe("inbox-enqueue lifecycle_state guard (RFC-027 §2.3 race-free)", () => 
     const r = await call(tools.send_task, {
       alias: CHILD_A_ALIAS,
       task: "racey post-SIGTERM task",
-      from_session: "sender-x",
       network_id: NET_A,
     });
     expect(r.ok).toBe(false);
