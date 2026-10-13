@@ -164,6 +164,29 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### `.133` 部署候选（2026-10-13）
+
+源码 PR2677 已正常合入 main `65923509c55f54e14082ac3804ae883d37723f44`。
+Daemon 就绪的凭据和心跳、删除请求的凭据冻结/旧请求兜底、改名凭据标签
+均按权威节点身份处理，保留合法旧 unbound 及唯一 null-ID 心跳兼容；
+改名遇到多条同名节点记录时拒绝。真实 HTTP108、34次断言变异、103项
+ACK/权限/收编/stop-delete 回归、发送方核心与旧 .110/.121 兼容均通过。
+正式 main 发布运行 `38338523163` 仍须四道门、preview 发布及 registry
+回读全部成功。公开包须逐字节等于该 main gated 制品，SHA256
+`70b0b96fb95ec68ddfb55eafb6f2715a948fac0b9b7b36e026a82f3bfdd93ad6`。
+
+`provider906/package*.json` 钉 `.133` 和该 main 制品 SRI，全部传递依赖
+保持原 lock；profile 选择 `runtime-v116-preview133`，回滚保留
+`runtime-v115-preview132`。本段是部署候选，尚未声明现役切换。
+
+权威 base launcher、PM2、Bun1.4.0、数据库、端口/反代及 owner-only 密钥
+来源沿用本 runbook。先取私有 VACUUM INTO 一致性备份，运行
+`tests/test906-hub-upgrade-preflight` 的隔离离线预检；仅在公开全包验证及
+预检成功后安装本目录 profile，重启选定 `commhub-hub`，保留 base、环境
+文件、旧 runtime 与业务节点身份。验证真实进程入口、secured health、
+稳定重启计数及自然心跳/任务事件；失败恢复旧 profile，私有数据和原值密钥
+仍从独立备份/安全来源恢复，短观察不代签全舰执行或灾难恢复。
+
 ### `.132` 部署（2026-10-13 已激活）
 
 源码 PR2674 已正常合入 main `c49e9316826a064f1db715319fcc7adbde12527a`，MCP/REST 任务发送方
