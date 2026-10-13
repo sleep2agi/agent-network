@@ -164,16 +164,26 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### `.134` 部署输入（待现场激活）
+### `.134` 部署（2026-10-13 已激活）
 
-本轮 #1112 调度排队时间修复：源码 PR2680 正常合入 main
-`c641a82626d16c1ad627fb977011f14835ec9b2c`，正式 main 发布运行
-`38342053049` 绑定该 SHA。profile/managed lock 准备选择
-`runtime-v117-preview134`，回退保留 `runtime-v116-preview133`，依赖图保持不变。
-部署需等四发布门成功、公开制品与 main gated tarball 字节一致，才可从此 profile
-的合入提交独立安装。当前此提交只记录准备输入，不声明现场已升级。
-升级仍执行一致私有备份与离线 schema 预检；原环境和 base 保持，六项恢复边界
-沿用下方流程。密钥来源仍为 NOT_COVERED。实际生效证据随后记录。
+#1112 修复排队占用调度执行预算：消费时间优先，旧节点回落开始时间，未执行
+回落派发时间；执行预算及派发总上限仍有界。持续精确任务活动续租留在 #1113，
+母卡 #1105 不提前结案。源码 PR2680/main `c641a82626d16c1ad627fb977011f14835ec9b2c`；
+专用 Docker CI38341909946 和10个必需门通过，SQLite38/PG29及4次断言反证通过。
+正式 main 发布 `38342053049` 构建、四道门、preview发布及registry回读成功。
+公开包与该 main gated 制品逐字节一致，SHA256 `14cd606f422f098b97d4003f51d53803231b90bf83c693d67323aa966fc1d61f`。
+
+部署 PR2681/main `875137cbe333fd83da97a8f008d1c84186ad8c26`；profile 与 managed lock 选择
+`runtime-v117-preview134`，保留 `runtime-v116-preview133` 回滚，全部传递依赖
+保持原 lock。专用 launcher Docker 和10个必需门通过；346安装文件与公开包一致。
+原私有一致备份及离线schema迁移预检成功后，于 `2026-10-13T03:36:09.412881+00:00` 确认现役
+secured134、真实v117入口、PID607441/restart92。
+原base及环境文件保持，业务节点不切runtime/thread/model/provider/login。
+
+有界自然观察、快照计数和备份证据见
+`docs/tests/report-test1112-hub134-activation.txt`。常驻启动/PM2、端口/反代、
+环境来源、升级验证、回滚及数据恢复边界沿用下方runbook。私有数据仍须独立
+备份，密钥来源仍为 NOT_COVERED；短观察不等于全舰执行或完整灾难恢复。
 
 ### `.133` 部署（2026-10-13 已激活）
 
