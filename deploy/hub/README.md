@@ -164,6 +164,31 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### #689 `.130` 部署准备（切换验收待完成）
+
+精确软件 main `7f12230b7eb064aa56131bbc17fc21c944f9a6d0`（PR2668），
+正式发布运行 `38326074270` 的构建与四道门通过；公开 registry 回读及现役
+切换证据完成后追加至 `report-test689-hub130-activation.txt`。本轮 source
+核心 Docker CI SQLite/PostgreSQL 各 36 项通过；不把合入源码视为现役升级。
+
+当前目录的 `provider906/package*.json` 将 sibling 输入钉为 `.130`，
+包 SHA256 `91fde58a1c8411a1e4d242faa55fea19fb7a9fa844aaa070c3075bdc98976f80`；
+部署前必须确认公开下载与正式 main gated 包完全一致。传递依赖没有重新解析。
+profile 选择 `runtime-v113-preview130`，回滚保留 `runtime-v112-preview129`。
+启动权威仍为本目录 base launcher/profile/ecosystem；Bun1.4.0、PM2
+`commhub-hub`、9200 与既有反代/隧道、DB 路径保持。密钥仍由管理员从
+原 owner-only `~/.commhub/hub.env` 供给，不改值或新生成 vault key。
+
+先做 owner-only `VACUUM INTO` 一致性备份、完整性核对与现有 Docker
+离线迁移预检，再复制精确 lock，以 `npm ci --ignore-scripts --no-audit
+--no-fund` 安装 inactive sibling 并逐字节核对公开包。profile 必须通过
+Actions Docker 目录/显式回滚验证并正常合入 main，之后才原子安装为
+现有 PM2 入口。仅 `pm2 restart commhub-hub`，不加 `--update-env`。
+切换后核对真实 PID/入口、health `.130`、心跳与错误日志；失败则恢复
+备份的 `.129` profile 并仅重启 Hub。软件无 schema/adapter/dependency
+变化；数据、账号与 vault key 仍依赖私有备份/原认证来源，Git 不提供
+这些业务状态。本轮不宣称灾难恢复、真实模型或全网 ACK 已验收。
+
 ### #688 / #1075 `.129` 配置（2026-10-13 已激活）
 
 本轮精确软件 main 为 `45a7cff26b389bc9e09301bf1729922d9a6ae052`，
@@ -171,7 +196,7 @@ curl -s localhost:9200/health          # version 与 sessions_count
 回读全部 SUCCESS。匿名完整 tarball 与该 main 的 gated 包逐字节相同：
 1,234,902 字节，SHA256
 `0dc85276a093caf33f55431969d3cc680c0519a8624cdf34c23447d919fa558c`。
-本目录 `provider906/package*.json` 锁定实际 npm URL、SHA512 integrity；
+该轮 PR2666 的 `provider906/package*.json` 锁定实际 npm URL、SHA512 integrity；
 传递依赖未重新解析或变更。npm latest 渠道保持原值。
 
 profile 选择新 sibling `runtime-v112-preview129`，保留当前

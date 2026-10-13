@@ -1,0 +1,7 @@
+Software source: main 7f12230b7eb064aa56131bbc17fc21c944f9a6d0, PR2668.
+Final source head 6b7c48072ee2129d69228458754862fcf860a1bf. Core run38325758372 passed 36 SQLite + 36 PostgreSQL HTTP tests; all10 required protections passed. Tested PR merge b3f08a93ed12363ebc9cb8f73472ce9b35421ae8 has exactly the same tree as source head and software main.
+Formal main release run38326074270: build and four gates SUCCESS at deployment preparation; preview publish/registry evidence pending.
+Gated package bytes1237375 SHA25691fde58a1c8411a1e4d242faa55fea19fb7a9fa844aaa070c3075bdc98976f80. Publish integrity is pinned in provider906/package-lock.json; public whole-package comparison is required before merge/activation.
+Source changes no DB/schema/adapter/dependencies from129. Deployment candidate selects inactive v113-preview130, retains v112-preview129, and updates fake-executor directory/rollback checks. Production Bun, PM2 identity, port/proxy, environment/key sources and data paths retain their existing inputs.
+Consistent private SQLite backup prepared2026-10-13T00:13:54Z: integrityok, sessions331, tasks81264. Backup and credentials never go to CI; only the offline backup goes to isolated migration preflight, without production environment values.
+Deployment CI/main, public registry, installed-byte verification, offline preflight and real activation: pending at preparation. No live upgrade is claimed by this candidate. Activation procedure and six recovery boundaries: deploy/hub/README.md.
