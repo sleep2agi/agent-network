@@ -33,7 +33,7 @@ requirements1107/api_tokens640/user_inbox2679 and Provider table counts.
 
 Activation:2026-10-13T02:17:22.686637+00:00
 Only commhub-hub restarted; selected PID515557 -> 548351, restart89 ->90.
-Actual entrypoint:/home/vansin/.commhub/runtime-v115-preview132/node_modules/@sleep2agi/commhub-server/bin/commhub.ts
+Actual entrypoint:$HOME/.commhub/runtime-v115-preview132/node_modules/@sleep2agi/commhub-server/bin/commhub.ts
 Installed profile equals exact deployment-main authority. Existing base launcher
 SHA2564a16946c9e8687940110364e68fc8cc20e51fa3c7de0af2c047effb0b78993d8
 and owner-only hub.env inode/size/mtime/permissions are preserved. No environment
