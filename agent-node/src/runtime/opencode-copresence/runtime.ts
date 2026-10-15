@@ -182,6 +182,8 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
   tmuxRunner?: import("./attach-tui").TmuxRunner;
+  /** Attach to an already-running shared OpenCode server instead of spawning one. */
+  sharedServer?: { url: string; password: string };
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }
@@ -212,6 +214,8 @@ export interface OpenOpenCodeCopresenceOptions {
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
   tmuxRunner?: import("./attach-tui").TmuxRunner;
+  /** Attach to an already-running shared OpenCode server instead of spawning one. */
+  sharedServer?: { url: string; password: string };
   onSession?: (sessionId: string) => void | Promise<void>;
   log?: (message: string) => void;
   warn?: (message: string) => void;
@@ -1150,6 +1154,7 @@ export async function openOpenCodeCopresenceRuntime(
       newSession: opts.newSession,
       tmuxRespawn: opts.tmuxRespawn,
       tmuxRunner: opts.tmuxRunner,
+      sharedServer: opts.sharedServer,
       log: opts.log,
       warn: opts.warn,
     });

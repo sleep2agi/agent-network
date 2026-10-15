@@ -4217,9 +4217,14 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
           hubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, hubToken: AUTH_TOKEN,
           binary: INITIAL_OPENCODE_BIN, binarySearchPath: INITIAL_LAUNCH_PATH, expectedVersion: INITIAL_OPENCODE_VERSION,
         }) : undefined;
+    const sharedServer = (OPENCODE_GENERATION ?? "v1") === "v2"
+      ? (await import("./runtime/opencode-copresence/v2-session")).loadSharedOpenCodeServer()
+      : undefined;
+    if (sharedServer) log(`[opencode-copresence] reusing shared server ${sharedServer.url}`);
     const opened = await openOpenCodeCopresenceRuntime({
       // #543 — V1 nodes pass the V1 backend, i.e. exactly the pre-#543 default.
       backend: opencodeBackendFor(OPENCODE_GENERATION ?? "v1"),
+      sharedServer,
       cwd: process.cwd(),
       workDir: NODE_DIR,
       model: MODEL,

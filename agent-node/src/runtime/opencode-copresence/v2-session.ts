@@ -31,8 +31,10 @@
 //   notify          V2 has no /tui/* routes (405) — informational messages
 //                   are logged only in this preview.
 
-import { spawn } from "child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { randomBytes } from "crypto";
+import { readFileSync } from "fs";
+import { homedir } from "os";
 import { publishLaunchHealth } from "./launcher-health";
 import { rmSync } from "fs";
 import { join } from "path";
@@ -70,6 +72,33 @@ import { installV2RegistryPlugin, waitForOpenCodeV2Commhub } from "./v2-readines
 import { removeOpenCodeV2CatalogEndpoint, writeOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 
 const USERNAME = "opencode";
+
+export function loadSharedOpenCodeServer(
+  env: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+): { url: string; password: string } | undefined {
+  const url = env.ANET_OPENCODE_SHARED_SERVER_URL?.trim();
+  const passwordFile = env.ANET_OPENCODE_SHARED_SERVER_PASSWORD_FILE?.trim();
+  if (!url && !passwordFile) return undefined;
+  if (!url || !passwordFile) {
+    throw new Error("OpenCode shared server requires both URL and password file");
+  }
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new Error("OpenCode shared server URL is invalid"); }
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error("OpenCode shared server URL must be credential-free HTTP(S)");
+  }
+  if (!passwordFile.startsWith("/") || passwordFile.split("/").includes("..")) {
+    throw new Error("OpenCode shared server password file must be an absolute private path");
+  }
+  if (passwordFile.startsWith("/tmp/") || passwordFile.startsWith("/run/")) {
+    throw new Error("OpenCode shared server password file must not live on tmpfs");
+  }
+  const password = readFileSync(passwordFile, "utf8").trim();
+  if (!password) throw new Error("OpenCode shared server password file is empty");
+  void home;
+  return { url: parsed.toString().replace(/\/$/, ""), password };
+}
 const HISTORY_PAGE_LIMIT = 200;
 const HISTORY_MAX_PAGES = 25;
 const POLL_INTERVAL_MS = 250;
@@ -224,6 +253,18 @@ export function wireOpenCodeV2CommhubMcp(
   return instructions;
 }
 
+async function waitForSharedV2Health(url: string, password: string, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const info = await fetchOpenCodeJson(url, password, "/api/info", {}, 500);
+      if (typeof info?.version === "string") return info.version;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`OpenCode shared server readiness timed out after ${timeoutMs}ms`);
+}
+
 async function waitForV2Health(
   child: ReturnType<typeof spawn>,
   url: string,
@@ -290,28 +331,31 @@ export async function openVettedOpenCodeV2Copresence(
   const model = parseModelRef(requiredModel)!;
   const log = opts.log ?? (() => {});
   const warn = opts.warn ?? (() => {});
-  const port = await reserveLoopbackPort();
-  const url = `http://127.0.0.1:${port}`;
-  const password = randomBytes(32).toString("base64url");
+  const shared = opts.sharedServer;
+  const port = shared ? 0 : await reserveLoopbackPort();
+  const url = shared?.url ?? `http://127.0.0.1:${port}`;
+  const password = shared?.password ?? randomBytes(32).toString("base64url");
   const childEnv: NodeJS.ProcessEnv = {
     ...opts.env,
     OPENCODE_SERVER_USERNAME: USERNAME,
     OPENCODE_SERVER_PASSWORD: password,
   };
-  const child = spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port }), {
+  const child = shared ? undefined : spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port }), {
     cwd: opts.cwd,
     env: childEnv,
     stdio: ["pipe", "pipe", "pipe"],
     detached: process.platform === "linux",
   });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
+  if (child) {
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+  }
   let startupOutput = "";
-  child.stdout.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
-  child.stderr.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
-  if (!child.pid) throw new Error("OpenCode v2 serve spawn returned no pid");
-  const identity = readLinuxProcessGroupIdentity(child.pid);
-  if (process.platform === "linux" && (!identity || identity.pgrp !== child.pid)) {
+  child?.stdout.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
+  child?.stderr.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
+  if (child && !child.pid) throw new Error("OpenCode v2 serve spawn returned no pid");
+  const identity = child?.pid ? readLinuxProcessGroupIdentity(child.pid) : undefined;
+  if (child && process.platform === "linux" && (!identity || identity.pgrp !== child.pid)) {
     try { child.kill("SIGKILL"); } catch {}
     throw new Error("OpenCode v2 serve failed the detached process-group identity handshake");
   }
@@ -325,10 +369,12 @@ export async function openVettedOpenCodeV2Copresence(
     try { removeOpenCodeV2CatalogEndpoint(opts.workDir); } catch { /* already gone */ }
   };
   try {
-    const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
+    const version = shared
+      ? await waitForSharedV2Health(url, password, opts.startupTimeoutMs ?? 20_000)
+      : await waitForV2Health(child!, url, password, opts.startupTimeoutMs ?? 20_000);
     if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
       await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000,
-        () => child.exitCode === null && child.signalCode === null);
+        () => shared ? true : child!.exitCode === null && child!.signalCode === null);
     }
     const created = await fetchOpenCodeJson(url, password, "/api/session", {
       method: "POST",
@@ -341,7 +387,7 @@ export async function openVettedOpenCodeV2Copresence(
     if (typeof sessionId !== "string" || !/^ses_[A-Za-z0-9]+$/.test(sessionId)) {
       throw new Error("OpenCode v2 POST /api/session returned an invalid session id");
     }
-    clearLaunchHealth = publishLaunchHealth(opts.workDir, sessionId, child.pid);
+    clearLaunchHealth = child?.pid ? publishLaunchHealth(opts.workDir, sessionId, child.pid) : () => {};
     writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir);
     try {
       writeOpenCodeV2CatalogEndpoint(opts.workDir, {
@@ -360,7 +406,7 @@ export async function openVettedOpenCodeV2Copresence(
       sessionId,
       attachScriptPath,
       get isRunning() {
-        return !closed && child.exitCode === null && child.signalCode === null;
+        return shared ? !closed : !closed && child!.exitCode === null && child!.signalCode === null;
       },
       async notify(message: string, _timeoutMs?: number, sender?: string) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
@@ -496,11 +542,12 @@ export async function openVettedOpenCodeV2Copresence(
         clearCatalogEndpoint();
         stopRecordedAttach(opts.workDir, { restart: mode?.restart === true, log, warn, tmux: opts.tmuxRunner });
         rmSync(attachScriptPath, { force: true });
+        if (shared) return;
         if (identity) await stopProcessGroup(child as any, identity);
-        else try { child.kill("SIGKILL"); } catch {}
+        else try { child?.kill("SIGKILL"); } catch {}
       },
     };
-    child.once("exit", (code, signal) => {
+    child?.once("exit", (code, signal) => {
       clearLaunchHealth();
       clearCatalogEndpoint();
       if (!closed) warn(`[opencode-copresence] v2 serve exited code=${code} signal=${signal}; next task must reopen`);
@@ -510,8 +557,10 @@ export async function openVettedOpenCodeV2Copresence(
     clearLaunchHealth();
     clearCatalogEndpoint();
     rmSync(attachScriptPath, { force: true });
-    if (identity) await stopProcessGroup(child as any, identity).catch(() => {});
-    else try { child.kill("SIGKILL"); } catch {}
+    if (!shared) {
+      if (identity) await stopProcessGroup(child as any, identity).catch(() => {});
+      else try { child?.kill("SIGKILL"); } catch {}
+    }
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
       startupOutput: startupOutput.slice(-1_000),
     });
