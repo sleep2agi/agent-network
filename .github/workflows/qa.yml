@@ -1459,6 +1459,10 @@ jobs:
         # docs-only PR 时只跑镜像里有 docs-site 的 L1 套件;其他 PR 这里是空串 = 全部。
         env:
           QA_L1_ONLY: ${{ needs.changes.outputs.l1_only }}
+          # build 并行路数(**显式**,因为脚本默认 0=串行,见 scripts/qa.sh)。
+          # 起步 2;升 4 要凭本 job 的 `L1-TIMING v1 total=` 对照后再改。
+          # 用仓库变量可免 PR 调参:Settings → Variables → QA_L1_BUILD_PAR。
+          QA_L1_BUILD_PAR: ${{ vars.QA_L1_BUILD_PAR || '2' }}
         run: bash scripts/qa.sh --l1
 
       - name: Dump test logs on failure

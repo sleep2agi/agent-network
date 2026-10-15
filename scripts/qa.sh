@@ -504,12 +504,15 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
   #    所以要拿更大收益,后续应做**流水线**(build 不阻塞、run 一发即起,保留交错),
   #    而不是把 N 调大 —— 那是另一个片,单独测。
   #
-  # `QA_L1_BUILD_PAR=0` 恢复旧的纯串行行为(用于对照与排障)。
-  # 默认 **2**:按 通信牛 的口径「CI 从 2 路试起,再凭实测决定是否升到 4 路」。
-  QA_L1_BUILD_PAR="${QA_L1_BUILD_PAR:-2}"
-  case "$QA_L1_BUILD_PAR" in ''|*[!0-9]*) QA_L1_BUILD_PAR=2 ;; esac
+  # 🔴 默认 **0 = 串行**,即**默认行为与改动前完全一致**(通信牛 2026-10-16 口径:
+  #    「A 请恢复为默认串行、CI 显式 2 路起步;4 路及 7–9 分钟待实测」)。
+  #    并行只在**显式**设置时才启用 —— CI 侧由 qa.yml 的 L1 step 显式给 2 路
+  #    (见 .github/workflows/qa.yml 的 `QA_L1_BUILD_PAR`),这样本机/其他调用者的
+  #    行为不会被这次改动偷偷改变,也便于「同 job total」对照。
+  QA_L1_BUILD_PAR="${QA_L1_BUILD_PAR:-0}"
+  case "$QA_L1_BUILD_PAR" in ''|*[!0-9]*) QA_L1_BUILD_PAR=0 ;; esac
   QA_L1_BUILD_PAR=$((10#$QA_L1_BUILD_PAR))
-  note "L1 build 并发 = ${QA_L1_BUILD_PAR}(0 = 串行;用 QA_L1_BUILD_PAR 覆盖)"
+  note "L1 build 并发 = ${QA_L1_BUILD_PAR}(0 = 串行=默认;用 QA_L1_BUILD_PAR 覆盖)"
   rm -f /tmp/qa-l1-*.buildfail
   _build_pids=()
   _wait_build_slot() {
