@@ -99,6 +99,24 @@ Every PR to `main` runs [`bash scripts/qa.sh`](./scripts/qa.sh) (L0 unit + L1 Do
 - The matrix + strategy live in [docs/qa/](./docs/qa/) — see [docs/qa/README.md](./docs/qa/README.md) for adding new tests (6-step flow).
 - v0 ship-readiness snapshot: [docs/qa/v0-summary.md](./docs/qa/v0-summary.md). Roadmap (which way the gate is going next): [docs/qa/v1-roadmap.md](./docs/qa/v1-roadmap.md).
 
+### Hard absolute timeouts need a margin note (`TEST-MARGIN v1`, report-only, #1627)
+
+A test whose **absolute** timeout sits close to its real duration goes red first on a slow
+runner, and the failure names the suite, not the timeout — so it reads like a real defect
+(#1627; #1320 already settled that the job layer must not fight this by squeezing
+`timeout-minutes`). So:
+
+- When you add or touch one — bun's `--timeout <ms>`, the `timeout:` option, or the numeric
+  third argument of `test(...)`/`it(...)` — leave the evidence next to it: a comment
+  containing `margin:` with the observed p99 and the multiple, e.g.
+  `// margin: p99 ~12s over 200 runs, 3.7x`. No observed p99 yet? Then move the test off a
+  hard cap instead of guessing one.
+- `python3 scripts/test-margin-report.py` inventories every declaration and prints one
+  fixed-format line (`TEST-MARGIN v1 declared=… annotated=… unannotated=… implicit_default=…`).
+  `--list` prints all of them; `--selftest` witnesses that a missing note is actually flagged.
+  It is **static and report-only**: no Docker, exit 0 always. Promotion to a ratchet gate is a
+  separate decision, not this script.
+
 ### tmux in tests: always `-L`/`-S` and `env -u TMUX`; never `kill-server` (#505)
 
 A test or script running inside a tmux pane inherits `$TMUX`, and `$TMUX` beats

@@ -1,0 +1,396 @@
+# report-1627 — TEST-MARGIN v1 (hard absolute timeouts: inventory + margin annotation)
+
+Date:   2026-10-15 (UTC)
+Base:   d3bd8c87968b617417eaba20bea4f10179f0da9c
+Source: ffa14d9c3bc4c4e3c8937a36f2f3c950bb1c7213  (branch feat/opencode-server-reuse-1293)
+
+## selftest (witnesses flag / not-flag both ways)
+```
+selftest ok: flagged 1 unannotated, cleared 1 annotated, ignored 0 declarations
+```
+
+## default view (risk-ordered head)
+```
+TEST-MARGIN v1 declared=338 annotated=0 unannotated=338 at_default=106
+  # riskiest unannotated absolute timeouts (report-only; add a `margin:`
+  # comment with the observed p99 and the multiple, or move the test off a hard cap):
+  - agent-network/src/node-server-payload.test.ts:70 20000ms (third-arg) [at bun default]
+  - agent-network/src/node-server-payload.test.ts:103 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:28 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:37 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:53 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:61 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/clone-node.test.ts:140 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:474 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:627 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/codex-login-draft.test.ts:30 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/daemon-extra-path.test.ts:72 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:770 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:936 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:973 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1399 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1746 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2570 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2594 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2630 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2686 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2756 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2770 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:685 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:751 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:792 20000ms (third-arg) [at bun default]
+  # … 313 more; re-run with --list
+```
+
+## full inventory (--list)
+```
+TEST-MARGIN v1 declared=338 annotated=0 unannotated=338 at_default=106
+  # riskiest unannotated absolute timeouts (report-only; add a `margin:`
+  # comment with the observed p99 and the multiple, or move the test off a hard cap):
+  - agent-network/src/node-server-payload.test.ts:70 20000ms (third-arg) [at bun default]
+  - agent-network/src/node-server-payload.test.ts:103 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:28 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:37 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:53 20000ms (third-arg) [at bun default]
+  - agent-node/src/claude-code-cli-help-text.test.ts:61 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/clone-node.test.ts:140 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:474 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:627 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/codex-login-draft.test.ts:30 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/daemon-extra-path.test.ts:72 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:770 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:936 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:973 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1399 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1746 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2570 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2594 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2630 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2686 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2756 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2770 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:685 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:751 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:792 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:835 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:879 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:895 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:921 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:945 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:962 20000ms (third-arg) [at bun default]
+  - server/src/boot-side-effect.test.ts:56 20000ms (third-arg) [at bun default]
+  - server/src/health-redaction.test.ts:224 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:127 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:139 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:154 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:169 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:179 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:195 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:216 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:227 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:245 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:257 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:272 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:286 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:306 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:318 20000ms (third-arg) [at bun default]
+  - server/src/node-files-transport.test.ts:327 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:113 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:129 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:152 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:163 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:172 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:187 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:200 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:217 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:231 20000ms (third-arg) [at bun default]
+  - server/src/node-logs-transport.test.ts:249 20000ms (third-arg) [at bun default]
+  - server/src/node-request-retention.test.ts:105 20000ms (third-arg) [at bun default]
+  - server/src/node-request-retention.test.ts:141 20000ms (third-arg) [at bun default]
+  - server/src/node-request-retention.test.ts:157 20000ms (third-arg) [at bun default]
+  - server/src/node-request-retention.test.ts:178 20000ms (third-arg) [at bun default]
+  - server/src/node-request-retention.test.ts:204 20000ms (third-arg) [at bun default]
+  - server/src/node-request-retention.test.ts:240 20000ms (third-arg) [at bun default]
+  - server/src/node-skills-transport.test.ts:117 20000ms (third-arg) [at bun default]
+  - server/src/node-skills-transport.test.ts:128 20000ms (third-arg) [at bun default]
+  - server/src/node-skills-transport.test.ts:144 20000ms (third-arg) [at bun default]
+  - server/src/node-skills-transport.test.ts:159 20000ms (third-arg) [at bun default]
+  - server/src/node-skills-transport.test.ts:170 20000ms (third-arg) [at bun default]
+  - server/src/node-skills-transport.test.ts:182 20000ms (third-arg) [at bun default]
+  - server/src/node-skills-transport.test.ts:196 20000ms (third-arg) [at bun default]
+  - server/src/report-status-handover-capabilities-http.test.ts:92 20000ms (third-arg) [at bun default]
+  - server/src/report-status-handover-capabilities-http.test.ts:110 20000ms (third-arg) [at bun default]
+  - server/src/report-status-handover-capabilities-http.test.ts:117 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:106 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:121 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:134 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:144 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:157 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:166 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:179 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:191 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:210 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-duplicate-alias.test.ts:224 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:108 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:118 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:126 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:135 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:150 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:162 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:171 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:186 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-session-target.test.ts:197 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:93 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:124 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:150 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:166 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:179 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:187 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:198 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:206 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:218 20000ms (third-arg) [at bun default]
+  - server/src/rules-file-transport.test.ts:229 20000ms (third-arg) [at bun default]
+  - server/src/scheduled-tasks-http.test.ts:315 20000ms (third-arg) [at bun default]
+  - server/src/tools-list-json-schema.test.ts:32 20000ms (third-arg) [at bun default]
+  - server/src/tools-list-json-schema.test.ts:50 20000ms (third-arg) [at bun default]
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:634 5000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:553 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:576 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:662 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1075 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1105 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1949 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1967 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1997 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2044 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2191 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2212 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2233 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2251 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2269 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2291 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2309 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2325 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2344 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2361 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2412 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2430 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2448 8000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2465 8000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:223 8000ms (third-arg)
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:789 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:603 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:640 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:693 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:750 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1476 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1639 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1666 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1702 10000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1014 12000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1147 12000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1220 12000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1565 12000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2119 12000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2140 12000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2167 12000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2385 12000ms (third-arg)
+  - agent-network/src/windows-codex-copresence.test.ts:80 15000ms (third-arg)
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:437 15000ms (third-arg)
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:533 15000ms (third-arg)
+  - agent-node/src/runtime/codex-app-server/start-resource-gate.test.ts:806 15000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:866 15000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:897 15000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:995 15000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1291 15000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1516 15000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:1607 15000ms (third-arg)
+  - agent-node/src/runtime/node-name-652.test.ts:430 15000ms (third-arg)
+  - agent-node/src/runtime/node-name-652.test.ts:468 15000ms (third-arg)
+  - agent-node/src/runtime/node-name-652.test.ts:489 15000ms (third-arg)
+  - agent-node/src/runtime/node-name-652.test.ts:498 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:366 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:446 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:459 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:469 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:475 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:494 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:518 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:540 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:570 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:593 15000ms (third-arg)
+  - agent-node/src/runtime/opencode-copresence/runtime.test.ts:615 15000ms (third-arg)
+  - server/src/boot-side-effect.test.ts:40 15000ms (third-arg)
+  - server/src/node-caller-identity-http.test.ts:620 15000ms (third-arg)
+  - server/src/node-caller-identity-http.test.ts:667 15000ms (third-arg)
+  - server/src/node-caller-identity-http.test.ts:937 15000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2089 16000ms (third-arg)
+  - agent-node/src/runtime/grok-copresence/runtime.test.ts:2730 25000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:145 30000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:160 30000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:173 30000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:183 30000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:205 30000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:220 30000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:231 30000ms (third-arg)
+  - agent-network/src/cli-auth-session.test.ts:243 30000ms (third-arg)
+  - agent-network/src/cli-exit-codes.test.ts:138 30000ms (third-arg)
+  - agent-network/src/codex-copresence-recovery.test.ts:94 30000ms (third-arg)
+  - agent-network/src/hub-stop.test.ts:285 30000ms (third-arg)
+  - agent-network/src/hub-stop.test.ts:297 30000ms (third-arg)
+  - agent-network/src/hub-stop.test.ts:310 30000ms (third-arg)
+  - agent-network/src/node-server-payload.test.ts:19 30000ms (third-arg)
+  - agent-network/src/subcommand-help-coverage.test.ts:252 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:93 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:102 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:114 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:129 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:136 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:143 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:150 30000ms (third-arg)
+  - agent-node/src/runtime-effective-label.test.ts:157 30000ms (third-arg)
+  - agent-node/src/runtime/codex-app-server/owned-codex-home.test.ts:48 30000ms (third-arg)
+  - agent-node/src/runtime/codex-app-server/owned-codex-home.test.ts:67 30000ms (third-arg)
+  - agent-node/src/runtime/opencode-acp/runtime.test.ts:522 30000ms (third-arg)
+  - agent-node/src/runtime/opencode-v1-spawn-snapshot.test.ts:250 30000ms (third-arg)
+  - server/src/admin-delete-network-http.test.ts:40 30000ms (third-arg)
+  - server/src/admin-networks-http.test.ts:32 30000ms (third-arg)
+  - server/src/adoption-candidates-http.test.ts:32 30000ms (third-arg)
+  - server/src/agent-acl-groups-http.test.ts:71 30000ms (third-arg)
+  - server/src/agent-acl-http.test.ts:98 30000ms (third-arg)
+  - server/src/agent-acl-slice3-http.test.ts:81 30000ms (third-arg)
+  - server/src/api-host-supervisors-fallback.test.ts:45 30000ms (third-arg)
+  - server/src/auth-password-change-cli-tokens-http.test.ts:75 30000ms (third-arg)
+  - server/src/auth-sessions-http.test.ts:45 30000ms (third-arg)
+  - server/src/auth-validate.test.ts:17 30000ms (third-arg)
+  - server/src/auth-weak-password-login.test.ts:55 30000ms (third-arg)
+  - server/src/commhub-bin-args.test.ts:68 30000ms (third-arg)
+  - server/src/dashboard-slash-routing-http.test.ts:26 30000ms (third-arg)
+  - server/src/department-groups-http.test.ts:33 30000ms (third-arg)
+  - server/src/department-groups-sync-http.test.ts:44 30000ms (third-arg)
+  - server/src/departments-http.test.ts:34 30000ms (third-arg)
+  - server/src/dm-file-scope-http.test.ts:48 30000ms (third-arg)
+  - server/src/external-schedule-edits-http.test.ts:58 30000ms (third-arg)
+  - server/src/group-membership-events-http.test.ts:70 30000ms (third-arg)
+  - server/src/group-messages-http.test.ts:79 30000ms (third-arg)
+  - server/src/health-redaction.test.ts:37 30000ms (third-arg)
+  - server/src/host-supervisor-identity-http.test.ts:12 30000ms (third-arg)
+  - server/src/mcp-projects-events-http.test.ts:45 30000ms (third-arg)
+  - server/src/mcp-route-label-http.test.ts:41 30000ms (third-arg)
+  - server/src/member-audit-network-id-http.test.ts:38 30000ms (third-arg)
+  - server/src/member-presence-http.test.ts:87 30000ms (third-arg)
+  - server/src/messages-ack-by-agent-http.test.ts:48 30000ms (third-arg)
+  - server/src/network-name-http.test.ts:20 30000ms (third-arg)
+  - server/src/node-attrs.test.ts:52 30000ms (third-arg)
+  - server/src/node-caller-identity-http.test.ts:401 30000ms (third-arg)
+  - server/src/node-health-dispatch-http.test.ts:73 30000ms (third-arg)
+  - server/src/node-identity-conflict-http.test.ts:115 30000ms (third-arg)
+  - server/src/node-lifecycle-read-http.test.ts:18 30000ms (third-arg)
+  - server/src/node-token-privilege-http.test.ts:32 30000ms (third-arg)
+  - server/src/observer-avatar-http.test.ts:43 30000ms (third-arg)
+  - server/src/project-dir-warn-clear-http.test.ts:52 30000ms (third-arg)
+  - server/src/project-viewer-can-http.test.ts:43 30000ms (third-arg)
+  - server/src/report-status-handover-capabilities-http.test.ts:69 30000ms (third-arg)
+  - server/src/requirement-due-reminders-http.test.ts:99 30000ms (third-arg)
+  - server/src/requirement-events-http.test.ts:48 30000ms (third-arg)
+  - server/src/requirement-participant-notify-http.test.ts:83 30000ms (third-arg)
+  - server/src/requirement-tag-ops-http.test.ts:51 30000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:67 30000ms (third-arg)
+  - server/src/requirements-comment-http.test.ts:47 30000ms (third-arg)
+  - server/src/requirements-errors-mcp-http.test.ts:37 30000ms (third-arg)
+  - server/src/requirements-etag-http.test.ts:20 30000ms (third-arg)
+  - server/src/requirements-http.test.ts:25 30000ms (third-arg)
+  - server/src/requirements-last-event-http.test.ts:66 30000ms (third-arg)
+  - server/src/requirements-list-slim-http.test.ts:59 30000ms (third-arg)
+  - server/src/requirements-owner-strict-mcp-http.test.ts:42 30000ms (third-arg)
+  - server/src/requirements-people-http.test.ts:32 30000ms (third-arg)
+  - server/src/requirements-priority-lowest.test.ts:52 30000ms (third-arg)
+  - server/src/requirements-search-http.test.ts:28 30000ms (third-arg)
+  - server/src/requirements-seq-http.test.ts:21 30000ms (third-arg)
+  - server/src/requirements-start-date.test.ts:47 30000ms (third-arg)
+  - server/src/requirements-stats-http.test.ts:58 30000ms (third-arg)
+  - server/src/requirements-status-participants-http.test.ts:47 30000ms (third-arg)
+  - server/src/rest-explicit-columns-http.test.ts:95 30000ms (third-arg)
+  - server/src/route-callers-http.test.ts:42 30000ms (third-arg)
+  - server/src/scheduled-backoff-http.test.ts:45 30000ms (third-arg)
+  - server/src/scheduled-outcome-guidance-http.test.ts:45 30000ms (third-arg)
+  - server/src/scheduled-reply-unread-http.test.ts:93 30000ms (third-arg)
+  - server/src/scheduled-requirement-wake-http.test.ts:46 30000ms (third-arg)
+  - server/src/scheduled-tasks-http.test.ts:59 30000ms (third-arg)
+  - server/src/scheduled-work-outcome-http.test.ts:44 30000ms (third-arg)
+  - server/src/send-dedup-request-id.test.ts:57 30000ms (third-arg)
+  - server/src/side-thread-http-integration.test.ts:63 30000ms (third-arg)
+  - server/src/skillhub-http.test.ts:35 30000ms (third-arg)
+  - server/src/status-alias-filter-http.test.ts:35 30000ms (third-arg)
+  - server/src/status-alias-resolver-http.test.ts:68 30000ms (third-arg)
+  - server/src/status-node-id-filter-http.test.ts:42 30000ms (third-arg)
+  - server/src/status-read-cache-http.test.ts:59 30000ms (third-arg)
+  - server/src/task-access-http.test.ts:64 30000ms (third-arg)
+  - server/src/task-auth-origin-http.test.ts:23 30000ms (third-arg)
+  - server/src/task-diagnostic-http.test.ts:56 30000ms (third-arg)
+  - server/src/task-expiry-notice-http.test.ts:112 30000ms (third-arg)
+  - server/src/task-lifecycle-watcher.test.ts:30 30000ms (third-arg)
+  - server/src/task-lifecycle-watcher.test.ts:138 30000ms (third-arg)
+  - server/src/task-network-resolution-http.test.ts:53 30000ms (third-arg)
+  - server/src/task-orphan-http.test.ts:106 30000ms (third-arg)
+  - server/src/task-queue-ahead-http.test.ts:83 30000ms (third-arg)
+  - server/src/task-rejection-log-http.test.ts:47 30000ms (third-arg)
+  - server/src/task-sender-http.test.ts:35 30000ms (third-arg)
+  - server/src/task-stale-open-http.test.ts:112 30000ms (third-arg)
+  - server/src/tasks-pagination-http.test.ts:35 30000ms (third-arg)
+  - server/src/uploads-http.test.ts:31 30000ms (third-arg)
+  - server/src/user-avatar-http.test.ts:7 30000ms (third-arg)
+  - tests/test1075-node-secrets/wire.test.ts:23 30000ms (third-arg)
+  - tests/test658-codex-adopt-stop/start-execute.test.ts:86 30000ms (third-arg)
+  - tests/test658-codex-adopt-stop/start-execute.test.ts:131 30000ms (third-arg)
+  - server/src/sqlite-close-checkpoint.test.ts:39 40000ms (third-arg)
+  - agent-network/src/cli-secret-masking.test.ts:129 60000ms (third-arg)
+  - agent-network/src/cli-secret-masking.test.ts:138 60000ms (third-arg)
+  - agent-node/src/runtime/codex-app-server/runtime.test.ts:603 60000ms (third-arg)
+  - agent-node/src/runtime/commhub-poll-compensator.test.ts:159 60000ms (third-arg)
+  - agent-node/src/runtime/opencode-v1-spawn-snapshot.test.ts:287 60000ms (third-arg)
+  - server/src/agent-access-batch.test.ts:179 60000ms (third-arg)
+  - server/src/agent-groups-perf.test.ts:104 60000ms (third-arg)
+  - server/src/agent-team-whoami-http.test.ts:27 60000ms (third-arg)
+  - server/src/agent-teams-http.test.ts:50 60000ms (third-arg)
+  - server/src/binding-generation-http.test.ts:25 60000ms (third-arg)
+  - server/src/daemon-token-owner-http.test.ts:30 60000ms (third-arg)
+  - server/src/department-heads-http.test.ts:41 60000ms (third-arg)
+  - server/src/network-token-membership-http.test.ts:48 60000ms (third-arg)
+  - server/src/node-permissions-http.test.ts:75 60000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:88 60000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:115 60000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:130 60000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:163 60000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:194 60000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:217 60000ms (third-arg)
+  - server/src/requirements-abandoned-http.test.ts:227 60000ms (third-arg)
+  - server/src/requirements-upgrade-e2e.test.ts:48 60000ms (third-arg)
+  - server/src/schedule-agent-mcp-http.test.ts:55 60000ms (third-arg)
+  - server/src/session-token-ownership-http.test.ts:40 60000ms (third-arg)
+  - server/src/task-consumption.test.ts:140 60000ms (third-arg)
+  - server/src/task-late-reply-http.test.ts:43 60000ms (third-arg)
+  - server/src/task-stale-open-http.test.ts:243 60000ms (third-arg)
+  - server/src/tool-audience-http.test.ts:77 60000ms (third-arg)
+  - agent-node/src/runtime/windows-tui-health.test.ts:64 90000ms (third-arg)
+  - server/src/agent-access-batch.test.ts:144 120000ms (third-arg)
+  - server/src/agent-access-batch.test.ts:193 120000ms (third-arg)
+  - server/src/agent-access-batch.test.ts:199 120000ms (third-arg)
+  - server/src/auth-password-change-cli-tokens-http.test.ts:240 120000ms (third-arg)
+  - server/src/mcp-context-cost-http.test.ts:51 120000ms (third-arg)
+  - server/src/requirements-list-mcp-slim-http.test.ts:40 120000ms (third-arg)
+  - server/src/requirements-people-mcp-http.test.ts:73 120000ms (third-arg)
+  - server/src/status-read-cache-http.test.ts:115 120000ms (third-arg)
+  - server/src/task-queue-ahead-scale.test.ts:55 120000ms (third-arg)
+  - server/src/task-queue-ahead-scale.test.ts:167 120000ms (third-arg)
+  - server/src/tool-audience-http.test.ts:128 120000ms (third-arg)
+  - agent-network/src/subcommand-help-coverage.test.ts:263 300000ms (third-arg)
+```
+
+## notes
+- Static only: no Docker, no test run, always exit 0 (report-only).
+- `annotated` counts a declaration with `margin:` or `p99` in a comment on the same
+  or the two preceding lines. The observed 0 is the baseline this card is about.
+- `at_default` = declarations explicitly pinned at bun's 20000ms default: no headroom
+  by construction, so they are listed first.
+- Promotion to a ratchet gate is a separate decision (see CONTRIBUTING.md).
