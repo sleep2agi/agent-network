@@ -486,10 +486,43 @@ esac
 note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)"
   note "L1 并发上限 = ${QA_L1_MAX_PAR}(0 = 不限;用 QA_L1_MAX_PAR 覆盖)"
   rm -f /tmp/qa-l1-timing.tsv
-  pids=()
-  declare -A pid_to_test
+  # ── 阶段 1/2：**并行 build**（#1593 → Vincent 2026-10-16「测试太重了，精简一下」）──
+  #
+  # 为什么先做这一步而不是删测试:实测一次 L1(83 套件、1192s)里
+  # **串行 build 合计 1041s(87%)**,而 run 早已并行(8 路,墙钟约 250s)。
+  # 也就是说「重」的主要来源不是测试条数,而是**构镜像这一段没有并行**。
+  # 这里只改调度:一条测试都不删,失败语义、build-arg 推导、每套件 build 日志
+  # 与 `· build done … [Ns]` 读数全部保持原样。
+  #
+  # 🔴 两阶段的**代价**必须说清(通信牛 2026-10-16「7–9 分钟暂作目标,需实测」):
+  #    旧结构里 build 与 run 是**交错**的 —— test823-l1-concurrency-cap 的 run
+  #    长达 **565s**,它被藏在 1041s 的 build 阶段里;两阶段把「所有 build」放到
+  #    「所有 run」之前,那 565s 就**露出来**成为 run 阶段的下限。
+  #    ⇒ 收益不是「1041s ÷ N」:2 路 ≈ 520s(build) + run 阶段(≥565s,含 8 路并行)
+  #      ⇒ 约 13–18 分钟;4 路 ≈ 260s + ≥565s ⇒ 约 10–13 分钟。
+  #      真正的下限是 **test823 那 565s**(不删/不改它,就不可能低于它)。
+  #    所以要拿更大收益,后续应做**流水线**(build 不阻塞、run 一发即起,保留交错),
+  #    而不是把 N 调大 —— 那是另一个片,单独测。
+  #
+  # `QA_L1_BUILD_PAR=0` 恢复旧的纯串行行为(用于对照与排障)。
+  # 默认 **2**:按 通信牛 的口径「CI 从 2 路试起,再凭实测决定是否升到 4 路」。
+  QA_L1_BUILD_PAR="${QA_L1_BUILD_PAR:-2}"
+  case "$QA_L1_BUILD_PAR" in ''|*[!0-9]*) QA_L1_BUILD_PAR=2 ;; esac
+  QA_L1_BUILD_PAR=$((10#$QA_L1_BUILD_PAR))
+  note "L1 build 并发 = ${QA_L1_BUILD_PAR}(0 = 串行;用 QA_L1_BUILD_PAR 覆盖)"
+  rm -f /tmp/qa-l1-*.buildfail
+  _build_pids=()
+  _wait_build_slot() {
+    while [[ "$QA_L1_BUILD_PAR" -gt 0 ]]; do
+      local live=0
+      for _bp in "${_build_pids[@]:-}"; do
+        [[ -n "$_bp" ]] && kill -0 "$_bp" 2>/dev/null && live=$((live+1))
+      done
+      (( live < QA_L1_BUILD_PAR )) && return 0
+      sleep 0.2
+    done
+  }
   for t in "${L1_TESTS[@]}"; do
-    # Build (cached if recent)
     note "build $t"
     # build-arg 的名字**从套件自己的 Dockerfile 里读**,不靠套件名推导 ——
     # 硬编码 if/elif 链的失效方式是静默的:把套件加进 L1_TESTS 却忘了加分支,
@@ -527,14 +560,29 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     #    (绿 11.9-12.3s vs 撞守卫 25.2-29.0s,两簇分得很开),但**答不了「慢在谁身上」**。
     #    当晚 9 次 L0+L1 里 5 次撞 30 分钟守卫、152 分钟零产出(74%),
     #    而唯一能下钻的量都还是推出来的。加这一行,下次就是读数不是推算。
-    _b0=$SECONDS
-    if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
-      printf '· build fail %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
+    (
+      _b0=$SECONDS
+      if dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
+        printf '· build done %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
+      else
+        printf '· build fail %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
+        : > "/tmp/qa-l1-$t.buildfail"
+      fi
+    ) &
+    _build_pids+=($!)
+    _wait_build_slot
+  done
+  wait
+  # ── 阶段 2/2：run（**与改动前逐字相同**，只多一道 build 失败前置跳过）──
+  pids=()
+  declare -A pid_to_test
+  for t in "${L1_TESTS[@]}"; do
+    if [[ -f "/tmp/qa-l1-$t.buildfail" ]]; then
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
       FAILED=$((FAILED+1))
       continue
     fi
-    printf '· build done %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
+    # (阶段 2 起：以下为改动前的 run 逻辑，未改动)
     # Run in background —— 但要有并发上限。
     #
     # 原来这里是无节制后台化:L1_TESTS 有多少条,就同时拉起多少个容器。
