@@ -236,6 +236,41 @@ describe("dispatchInboxBatch", () => {
     await Promise.all([...gates.values()]);
   });
 
+  test("a priority row cannot exceed the detached admission cap", async () => {
+    // #1268: the global cap (`activeKeys.size < opts.maxConcurrent`) is only
+    // *observable* on the priority path. For an ordinary head the reserved-slot
+    // gate (`activeOrdinaryKeys.size >= maxConcurrent - reserved`) breaks the
+    // pump first, so dropping the cap changes nothing an ordinary-only case can
+    // see — and test584's `detached-admission-cap-is-real` mutation went
+    // falsely green. A priority head skips that break, so this is the case that
+    // pins the cap.
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const entered: number[] = [];
+    const dispatcher = createDetachedInboxDispatcher<number>({
+      maxConcurrent: 1,
+      key: String,
+      prioritize: () => true,
+      onError: () => {},
+    });
+
+    const admission = dispatcher.submit([1, 2], async (value) => {
+      entered.push(value);
+      if (value === 1) await firstBlocked;
+    });
+    // Admission is synchronous: the second priority row must wait for the
+    // first slot to settle even though it would outrank an ordinary row.
+    expect(admission).toMatchObject({ active: 1, queued: 1, accepted: 2 });
+    expect(entered).toEqual([1]);
+    expect(dispatcher.stats()).toEqual({ active: 1, queued: 1 });
+
+    releaseFirst();
+    await firstBlocked;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(entered).toEqual([1, 2]);
+    expect(dispatcher.stats()).toEqual({ active: 0, queued: 0 });
+  });
+
   test("durable reply drain waits until detached Codex rows finish", () => {
     expect(shouldDrainPendingReplies("codex-app-server", 1)).toBe(false);
     expect(shouldDrainPendingReplies("codex-app-server", 0)).toBe(true);

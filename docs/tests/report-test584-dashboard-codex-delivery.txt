@@ -90,3 +90,41 @@ requires independent review, a bridge-only rollout that preserves the current TU
 and app-server, and one new real Dashboard nonce proven through: authenticated DB
 row → live SSE/steer while a TUI turn is active → automatic task reply → inbox ack
 → Dashboard readback.
+
+--------------------------------------------------------------------------------
+#1268 addendum — 2026-10-15 (Asia/Shanghai)
+Base: origin/main 2404bc53d148d78a30954fc448c9926b00b0af00
+Why: on this base the suite was FAILING (L0-L4 green, L5 red) with
+     `MUTATION_FALSE_GREEN: detached-admission-cap-is-real`.
+
+Root cause of the false green (oracle gap, not a product regression)
+- run.sh applies `activeKeys.size < opts.maxConcurrent` -> `true` in
+  agent-node/src/inbox-dispatch.ts and expects agent-node/src/inbox-dispatch.test.ts
+  to notice. No test noticed.
+- Why it was invisible: for an ORDINARY queue head, the reserved-slot gate
+  (`if (!queue[0].priority && activeOrdinaryKeys.size >= opts.maxConcurrent - reserved) break;`,
+  inbox-dispatch.ts:107) breaks the pump before the global cap can matter. Removing
+  the cap therefore changes nothing any ordinary-only case can observe.
+- A PRIORITY head skips that break, which makes the global cap the only thing
+  bounding admission — and so the only case that pins it. Before this change the
+  test file never used `prioritize` or `reservedPrioritySlots` at all.
+
+Change (observation point added; the mutation is NOT changed or relaxed)
+- New case "a priority row cannot exceed the detached admission cap":
+  maxConcurrent 1, two priority rows; admission must stay {active:1, queued:1}
+  synchronously, and the second row must start only after the first slot settles.
+- No assertion removed, no negative control deleted, no mutation anchor rewritten.
+
+Witnessed-red evidence (same checkout, same anchor replacement mutate.ts performs)
+- Unmutated: `bun test agent-node/src/inbox-dispatch.test.ts` -> 14 pass, 0 fail, 36 expect() calls.
+- Mutated:   `bun test agent-node/src/inbox-dispatch.test.ts` -> 13 pass, 1 fail —
+  the new case reads `{active: 2, queued: 0}` where `{active: 1, queued: 1}` is
+  required, i.e. the mutation is detectable again.
+
+Full-suite evidence (Docker, exact suite, real hub + real HTTP):
+  command: QA_L1_ONLY=test584-dashboard-codex-delivery bash scripts/qa.sh --l1
+  ✓ L1 test584-dashboard-codex-delivery (RESULT: PASS)  [L1+99s..173s, 74s] rc=0
+  ✓ ALL PASS in 174s
+  L2: 104 tests passed, 0 failed
+  L5: all 15 mutations rc=1, including
+      MUTATION_RED: detached-admission-cap-is-real rc=1   <- was MUTATION_FALSE_GREEN on 2404bc53
