@@ -512,19 +512,22 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
   QA_L1_BUILD_PAR="${QA_L1_BUILD_PAR:-0}"
   case "$QA_L1_BUILD_PAR" in ''|*[!0-9]*) QA_L1_BUILD_PAR=0 ;; esac
   QA_L1_BUILD_PAR=$((10#$QA_L1_BUILD_PAR))
-  note "L1 build 并发 = ${QA_L1_BUILD_PAR}(0 = 串行=默认;用 QA_L1_BUILD_PAR 覆盖)"
-  rm -f /tmp/qa-l1-*.buildfail
+  # 🔴 #1332 阻塞 1（通信牛 在 7fd09c9a 上复现）：`0` 曾被当成「不限」——
+  #    原来的 `while [[ $QA_L1_BUILD_PAR -gt 0 ]]` 在 0 时**整段跳过**，
+  #    于是 3 个 build 同时起。这里把 0 显式归一为 **1 路 = 串行**，
+  #    并且**下游只用 _build_cap**，不再直接读 QA_L1_BUILD_PAR。
+  if [[ "$QA_L1_BUILD_PAR" -eq 0 ]]; then _build_cap=1; else _build_cap=$QA_L1_BUILD_PAR; fi
+  note "L1 build 并发 = ${_build_cap}(0 = 串行;用 QA_L1_BUILD_PAR 覆盖)"
+  _build_names=()
   _build_pids=()
-  _wait_build_slot() {
-    while [[ "$QA_L1_BUILD_PAR" -gt 0 ]]; do
-      local live=0
-      for _bp in "${_build_pids[@]:-}"; do
-        [[ -n "$_bp" ]] && kill -0 "$_bp" 2>/dev/null && live=$((live+1))
-      done
-      (( live < QA_L1_BUILD_PAR )) && return 0
-      sleep 0.2
+  _build_live() {
+    local _n=0
+    for _bp in "${_build_pids[@]:-}"; do
+      [[ -n "$_bp" ]] && kill -0 "$_bp" 2>/dev/null && _n=$((_n+1))
     done
+    printf '%s' "$_n"
   }
+  _wait_build_slot() { while [[ "$(_build_live)" -ge "$_build_cap" ]]; do sleep 0.2; done; }
   for t in "${L1_TESTS[@]}"; do
     note "build $t"
     # build-arg 的名字**从套件自己的 Dockerfile 里读**,不靠套件名推导 ——
@@ -569,22 +572,34 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
         printf '· build done %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
       else
         printf '· build fail %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
-        : > "/tmp/qa-l1-$t.buildfail"
+        exit 1
       fi
     ) &
+    _build_names+=("$t")
     _build_pids+=($!)
     _wait_build_slot
   done
-  wait
+  # 🔴 #1332 阻塞 2（通信牛 复现）：**逐 worker 用 `wait <pid>` 的退出码回收**，
+  #    不再依赖 `/tmp/qa-l1-<t>.buildfail` 文件 —— 那个标记在目标不可写时
+  #    （例如磁盘写满）**静默失败**，而裸 `wait` 忽略 worker 退出码 ⇒
+  #    构建失败的套件仍会被 run 阶段全部执行并打印 ALL PASS/exit 0。
+  #    这里的 pid 都还没被 reap（本段之前没有裸 `wait`），所以退出码一定拿得到。
+  _build_failed=()
+  for _i in "${!_build_pids[@]}"; do
+    _brc=0; wait "${_build_pids[$_i]}" || _brc=$?
+    if [[ "$_brc" -ne 0 ]]; then
+      _build_failed+=("${_build_names[$_i]}")
+      fail "L1 ${_build_names[$_i]} — build failed (worker exit ${_brc}), see /tmp/qa-l1-${_build_names[$_i]}-build.log"
+      FAILED=$((FAILED+1))
+    fi
+  done
   # ── 阶段 2/2：run（**与改动前逐字相同**，只多一道 build 失败前置跳过）──
   pids=()
   declare -A pid_to_test
   for t in "${L1_TESTS[@]}"; do
-    if [[ -f "/tmp/qa-l1-$t.buildfail" ]]; then
-      fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
-      FAILED=$((FAILED+1))
-      continue
-    fi
+    _skip=0
+    for _bf in "${_build_failed[@]:-}"; do [[ "$_bf" == "$t" ]] && _skip=1; done
+    [[ "$_skip" -eq 1 ]] && continue   # 构建失败已在阶段 1 记过 fail 并计过 FAILED
     # (阶段 2 起：以下为改动前的 run 逻辑，未改动)
     # Run in background —— 但要有并发上限。
     #
