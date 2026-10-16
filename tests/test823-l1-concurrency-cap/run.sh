@@ -49,6 +49,13 @@ cat > "$BIN/docker" <<'STUB'
 # 所以 build 尽量快,run 拉长,让并发真正显现出来。
 # 只有真正的 `docker run` 才记事件。任何其它子命令(build/ps/rmi…)
 # 都不该计入并发峰值 —— 否则峰值会被无关调用抬高,断言就不再是在测闸门。
+# ── #1332：build 也要能观察（写**独立**事件文件，避免抬高既有 run 峰值断言）──
+if [ "${1:-}" = "build" ]; then
+  printf 'SB %s %s\n' "$(date +%s%N)" "$$" >> "$T823_EVB"
+  sleep 0.4
+  printf 'EB %s %s\n' "$(date +%s%N)" "$$" >> "$T823_EVB"
+  exit "${T823_BUILD_RC:-0}"
+fi
 [ "${1:-}" = "run" ] || exit 0
 printf 'S %s %s\n' "$(date +%s%N)" "$$" >> "$T823_EV"
 sleep 1.2
@@ -71,12 +78,21 @@ chmod +x "$BIN/npm"
 
 export PATH="$BIN:$PATH"
 export T823_EV="$EV"
+EVB=/tmp/t823-events-build
+export T823_EVB="$EVB"
 
 peak() {                      # 从事件流算最大重叠
   sort -k2,2n "$1" | awk '
     $1=="S" { c++; if (c>m) m=c }
     $1=="E" { c-- }
     END     { print m+0 }'
+}
+
+peak_build() {                # build 事件流的最大重叠（#1332）
+  sort -k2,2n "$1" | awk '
+    $1=="SB" { c++; if (c>m) m=c }
+    $1=="EB" { c-- }
+    END      { print m+0 }'
 }
 
 nproc_val=$(nproc 2>/dev/null || echo 4)
@@ -183,6 +199,62 @@ check zero_eff "$eff" 0 "0 保留为「不限」的逃生口"
 # 拿 cap=2 的峰值当对照:不限时必须明显更高。
 if [[ "$p" -gt 2 ]]; then say "  ok   zero_conc: 不限时峰值 $p > cap2 的 2,确实放开了并发"
 else say "  FAIL zero_conc: 不限时峰值只有 $p,与 cap=2 无区别 —— 「不限」没有被验证"; fails=$((fails+1)); fi
+
+# ── #1332 —— 构建并发（QA_L1_BUILD_PAR）与构建失败回收 ─────────────────
+#
+# 这两条是 通信牛 2026-10-16 在 PR 2793 的 head 7fd09c9a 上用隔离桩复现的 P1：
+#   ① 默认 `0` 实际**不限**并发（3 个样本同时构建）；
+#   ② 构建失败且失败标记写不出时，仍执行对应 run，并以 ALL PASS / exit 0 收尾。
+#
+# 🔴 0 的语义在这里与 `QA_L1_MAX_PAR` **故意相反**：
+#    · 运行上限 `QA_L1_MAX_PAR=0` = **不限**（既有逃生口，上面 zero 用例守着）；
+#    · 构建上限 `QA_L1_BUILD_PAR=0` = **串行(fail-safe)**。
+#    方向是为 fail-open 反着的：构建侧一个笔误/漏传只会**更保守**（串行），
+#    不会像运行侧那样静默放开并发。这条差异必须留在注释里，否则下一个人会
+#    按「0=不限」去理解，把 bug 当特性。
+T823_ONLY=${T823_ONLY:-"test1627-test-margin test823-l1-concurrency-cap test612-start-admission"}
+
+run_case_build() {   # $1=名 $2=QA_L1_BUILD_PAR $3=可选 T823_BUILD_RC  ⇒ 回 "rc|build峰值"
+  local name=$1 bpar=$2 brc=${3-}
+  local _t0; _t0=$(date +%s%N)
+  : > "$EVB"
+  local out=/tmp/t823-$name.log rc=0
+  # 本用例只圈 3 个套件（QA_L1_ONLY）：并发与失败回收是**规模无关**的性质，
+  # 而 run_case 每调用一次就要遍历全部套件 —— 那样每条见证都要几分钟。
+  QA_L1_BUILD_PAR="$bpar" T823_BUILD_RC="$brc" QA_L1_ONLY="$T823_ONLY" \
+    bash "$ROOT/scripts/qa.sh" --l1 > "$out" 2>&1 || rc=$?
+  printf '%s=%sms\n' "$name" "$(( ($(date +%s%N) - _t0) / 1000000 ))" >> "$T823_TIMING"
+  echo "$rc|$(peak_build "$EVB")"
+}
+
+say ""
+say "## #1332 构建并发与失败回收"
+
+IFS='|' read -r _rc _pb <<< "$(run_case_build build_default '')"
+say "- 默认(未设)  rc=$_rc build峰值=$_pb"
+check build_default "$_pb" 1 "默认必须是串行（0=串行，不是「不限」）"
+
+IFS='|' read -r _rc _pb <<< "$(run_case_build build2 2)"
+say "- buildpar=2  rc=$_rc build峰值=$_pb"
+check build2 "$_pb" 2 "显式 2 路时 build 峰值应为 2（证明 cap 真的生效）"
+
+IFS='|' read -r _rc _pb <<< "$(run_case_build buildfail 0 9)"
+say "- build 恒返回 9（buildpar=0）rc=$_rc build峰值=$_pb"
+if [[ "$_rc" -ne 0 ]]; then say "  ok   buildfail: 构建失败让 qa.sh 非零退出（rc=$_rc）"
+else say "  FAIL buildfail: 构建失败却以 rc=0 收尾 —— #1332 阻塞 2 复发"; fails=$((fails+1)); fi
+if grep -q 'ALL PASS' /tmp/t823-buildfail.log; then
+  say "  FAIL buildfail: 构建失败时仍打印 ALL PASS"; fails=$((fails+1))
+else say "  ok   buildfail: 未打印 ALL PASS"; fi
+if grep -q 'build failed' /tmp/t823-buildfail.log; then
+  say "  ok   buildfail: 打出 build failed 行"
+else say "  FAIL buildfail: 没有 build failed 行"; fails=$((fails+1)); fi
+
+# 静态见证：#1332 阻塞 2 的**根因**是「失败标记文件在目标不可写时静默失败」。
+# 修法是把这个机制**整体删掉**（失败改由 `wait <pid>` 的退出码回收）。
+# 所以这里断言：qa.sh 里**不再出现**那个标记文件的名字 —— 机制不在，洞就不在。
+if grep -q 'buildfail' "$ROOT/scripts/qa.sh"; then
+  say "  FAIL static: qa.sh 仍在引用失败标记文件机制（#1332 的洞）"; fails=$((fails+1))
+else say "  ok   static: qa.sh 不再依赖标记文件（失败由 worker 退出码回收）"; fi
 
 say ""
 say "failures=$fails"

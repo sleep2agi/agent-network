@@ -580,7 +580,7 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     _wait_build_slot
   done
   # 🔴 #1332 阻塞 2（通信牛 复现）：**逐 worker 用 `wait <pid>` 的退出码回收**，
-  #    不再依赖 `/tmp/qa-l1-<t>.buildfail` 文件 —— 那个标记在目标不可写时
+  #    不再依赖失败标记文件 —— 那个标记在目标不可写时
   #    （例如磁盘写满）**静默失败**，而裸 `wait` 忽略 worker 退出码 ⇒
   #    构建失败的套件仍会被 run 阶段全部执行并打印 ALL PASS/exit 0。
   #    这里的 pid 都还没被 reap（本段之前没有裸 `wait`），所以退出码一定拿得到。
