@@ -133,7 +133,7 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     const stop = orchestrateWindowsManagedStop([root], env);
     expect(stop.verdict.kind).toBe("unverifiable");     // 曾误判 stopped（把观测缺口当空集合）
     expect(stop.mustKeepRecord).toBe(true);
-    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("snapshot was empty");
+    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("not obtained, empty, or not understood");
   });
 
   test("🔴 [Codex P1] 非零 kill 且快照**无法取得/不可解析** ⇒ 必须 unknown", () => {
@@ -154,7 +154,7 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(findUnaccountedDescendants([], [8100, 8744])).toEqual([]);
     // 快照解析：合法/垃圾
     expect(parseWindowsProcessSnapshot("SNAP:9999=8744,1=0")).toEqual([{ pid: 9999, ppid: 8744 }, { pid: 1, ppid: 0 }]);
-    expect(parseWindowsProcessSnapshot("SNAP:")).toEqual([]);
+    expect(parseWindowsProcessSnapshot("SNAP:")).toBeNull();   // 空枚举不得当完整快照
     expect(parseWindowsProcessSnapshot("garbage")).toBeNull();
     // 快照脚本**不**内建根种子（遍历在 JS 侧，种子由调用方给出）
     expect(windowsProcessSnapshotScript()).toContain("Select-Object ProcessId,ParentProcessId");
