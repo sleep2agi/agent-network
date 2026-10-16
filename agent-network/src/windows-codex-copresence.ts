@@ -507,7 +507,7 @@ export function orchestrateWindowsManagedStop(
     try { snapshot = parseWindowsProcessSnapshot((runPowerShell ?? defaultPowerShellRunner)(windowsProcessSnapshotScript())); }
     catch { snapshot = null; }
     if (snapshot === null) {
-      reconGaps.push(`tree not reconciled: process snapshot not obtained or not understood`);
+      reconGaps.push(`tree not reconciled: process snapshot not obtained, empty, or not understood`);
     } else if (snapshot.length === 0) {
       // 🔴 全机 CIM 枚举**零行**不能证明"受管树已消失"：执行查询本身就会产生 powershell 进程，
       //    空结果更可能是**观测缺口**。不得把观察缺口当空集合 ⇒ unknown。
@@ -546,7 +546,9 @@ export function parseWindowsProcessSnapshot(raw: string): Array<{ pid: number; p
   const out = String(raw ?? "").trim();
   if (!out.startsWith(WINDOWS_SNAPSHOT_PROTOCOL)) return null;
   const body = out.slice(WINDOWS_SNAPSHOT_PROTOCOL.length);
-  if (!body) return [];
+  // 🔴 空枚举**不是**"完整快照"：执行查询本身就会产生 powershell 进程，零行更可能是观测缺口。
+  //    因此这里返回 null（不可用），由调用方判 unknown，**不**返回一个可被误当作"全空"的数组。
+  if (!body) return null;
   const rows: Array<{ pid: number; ppid: number }> = [];
   for (const part of body.split(",")) {
     const matched = /^(\d+)=(\d+)$/.exec(part.trim());
