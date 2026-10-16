@@ -15,6 +15,34 @@ import { spawn, spawnSync } from "node:child_process";
 //   4) **超时/信号不得冒充 B/C 的预期非零**：`rc==null` 或 `signal!=null` ⇒ 显式失败。
 //   5) C 必须**真正进入新的 unverifiable 分支**（断言其诊断），不得以旧 ownership 预检失败冒充。
 //   6) 每个场景 `finally` 清理本夹具拥有且**出生身份匹配**的进程并还原配置。
+
+/** 🔴 校验一次 `report_status` 的 MCP 响应：只认本次报告(id=2)，解析 content[].text 内层 JSON，
+ *  要求 ok===true 且 alias/resume_id 与期望目标**完全一致**；缺失/非法/不匹配/ok:false 一律拒绝。 */
+export function verifyReportStatusResponse(raw, expected) {
+  const frames = String(raw ?? "").split(/\r?\n/).filter((l) => l.startsWith("data: ")).map((l) => l.slice(6));
+  const candidates = (frames.length ? frames : [String(raw ?? "")]).filter((x) => x && x.trim().startsWith("{"));
+  let handled = null;
+  for (const c of candidates) {
+    let j = null;
+    try { j = JSON.parse(c); } catch { continue; }
+    if (j.jsonrpc !== "2.0" || j.id !== 2) continue;                 // 只认本次 report_status 的响应
+    if (Object.prototype.hasOwnProperty.call(j, "error")) throw new Error(`MCP error reply: ${JSON.stringify(j.error)}`);
+    if (j.result && j.result.isError === true) throw new Error(`MCP tool reported isError: ${JSON.stringify(j.result)}`);
+    if (j.result) { handled = j.result; break; }
+  }
+  if (!handled) throw new Error("no report_status(id=2) MCP result in upstream body");
+  let inner = null;
+  for (const c of (Array.isArray(handled.content) ? handled.content : [])) {
+    if (typeof c?.text !== "string") continue;
+    try { const j = JSON.parse(c.text); if (j && typeof j === "object") { inner = j; break; } } catch {}
+  }
+  if (!inner) throw new Error("MCP result carried no parsable inner JSON");
+  if (inner.ok !== true) throw new Error(`Hub report_status not ok:true (${JSON.stringify(inner).slice(0, 200)})`);
+  if (inner.alias !== expected.alias) throw new Error(`alias mismatch (got ${inner.alias}, expected ${expected.alias})`);
+  if (inner.resume_id !== expected.resumeId) throw new Error(`resume_id mismatch (got ${inner.resume_id}, expected ${expected.resumeId})`);
+  return inner;
+}
+
 export async function runStopEffectsScenarios({ cli, env, project, root, userHome, join, terminal }) {
   const shimDir = process.env.ANET_TEST1337_SHIM_DIR;
   const bun = process.env.ANET_TEST751_BUN;
@@ -205,6 +233,18 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         params: { name: "report_status", arguments: { resume_id: expected.resumeId, alias: expected.alias, status: "offline" } } });
       if (offlineNotifications.length !== 1) throw new Error("test1337 self-check: target-node offline was NOT counted");
       console.log(`PASS test1337 self-check: unrelated-node offline rejected; target-node counted (upstream=${offlineNotifications[0].upstreamStatus})`);
+
+      // 🔴 同一条 parser 的**最小对照**：ok:false 与**错目标**必须被拒绝，正形必须被接受。
+      const mk = (body) => JSON.stringify({ jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: JSON.stringify(body) }] } });
+      const expectReject = (label, raw) => {
+        try { verifyReportStatusResponse(raw, expected); } catch { console.log(`PASS test1337 self-check: ${label} rejected`); return; }
+        throw new Error(`test1337 self-check: ${label} was accepted (must be rejected)`);
+      };
+      expectReject("ok:false (alias_identity_mismatch)", mk({ ok: false, error: "alias_identity_mismatch" }));
+      expectReject("wrong-target (different alias/resume_id)", mk({ ok: true, alias: "someone-else", resume_id: "sdk-someone-else" }));
+      const good = verifyReportStatusResponse(mk({ ok: true, alias: expected.alias, resume_id: expected.resumeId }), expected);
+      if (good.ok !== true) throw new Error("test1337 self-check: positive control not accepted");
+      console.log("PASS test1337 self-check: ok:false and wrong-target rejected; positive shape accepted");
       offlineNotifications.length = 0;
     }
 
@@ -227,36 +267,8 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         if (typeof status !== "number" || status < 200 || status >= 300) {
           throw new Error(`test1337 A: upstream did not accept the notification (status=${status})`);
         }
-        // 🔴 并**解析 MCP 响应**，确认精确 alias/resume_id 的 report_status 处理成功（不是只看状态码）。
-        const raw = r.offline[0].upstreamBody ?? "";
-        const frames = raw.split(/\r?\n/).filter((l) => l.startsWith("data: ")).map((l) => l.slice(6));
-        const candidates = (frames.length ? frames : [raw]).filter((x) => x && x.trim().startsWith("{"));
-        let handled = null;
-        for (const c of candidates) {
-          try {
-            const j = JSON.parse(c);
-            if (j.jsonrpc !== "2.0" || j.id !== 2) continue; // this report_status response only
-            if (Object.prototype.hasOwnProperty.call(j, "error")) throw new Error(`MCP error reply: ${JSON.stringify(j.error)}`);
-            if (j.result && j.result.isError === true) throw new Error(`MCP tool reported isError: ${JSON.stringify(j.result)}`);
-            if (j.result) handled = j.result;
-          } catch (e) {
-            if (String(e).startsWith("Error: MCP")) throw e;
-          }
-        }
-        if (!handled) throw new Error(`test1337 A: could not parse a successful MCP result for report_status from upstream body: ${JSON.stringify(raw.slice(0, 300))}`);
-        // 🔴 还要校验 MCP result **内层** JSON（Hub 的 report_status 返回 content[0].text = JSON({ok:true, alias, …})）：
-        //    必须 ok:true，且返回的 alias/resume_id 与本 fixture 的**期望目标一致** —— 仅"有 result"不够。
-        let inner = null;
-        for (const c of (Array.isArray(handled.content) ? handled.content : [])) {
-          if (typeof c?.text !== "string") continue;
-          try { const j = JSON.parse(c.text); if (j && typeof j === "object") { inner = j; break; } } catch {}
-        }
-        if (!inner) throw new Error(`test1337 A: MCP result carried no parsable inner JSON: ${JSON.stringify(handled).slice(0, 300)}`);
-        if (inner.ok !== true) throw new Error(`test1337 A: Hub report_status not ok:true (${JSON.stringify(inner).slice(0, 300)})`);
-        if (inner.alias !== expected.alias) throw new Error(`test1337 A: returned alias mismatch (got ${inner.alias}, expected ${expected.alias})`);
-        if (inner.resume_id !== expected.resumeId) {
-          throw new Error(`test1337 A: returned resume_id mismatch (got ${inner.resume_id}, expected ${expected.resumeId})`);
-        }
+        // 🔴 解析 MCP 响应并**严格校验**（id=2；content[].text 内层 JSON 的 ok/alias/resume_id）。
+        const inner = verifyReportStatusResponse(r.offline[0].upstreamBody ?? "", expected);
         console.log(`       (A inner: Hub ok:true, alias=${inner.alias}, resume_id=${inner.resume_id} — matches expected target)`);
         console.log(`       (A: upstream responded ${status} to the target-bound offline notification)`);
         console.log(`       (A evidence: target-bound offline alias=${r.offline[0]?.alias} resumeId=${r.offline[0]?.resumeId}; upstream=${r.offline[0].upstreamStatus} (2xx); MCP result parsed=yes; unrelated-node notifications excluded by self-check)`);
