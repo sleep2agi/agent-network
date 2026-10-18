@@ -88,6 +88,7 @@ import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
+import { readEnvTransportLog } from "./env-transport-gate.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
@@ -2772,6 +2773,30 @@ return Bun.serve({
         return withCors(req, Response.json(providers, { status: 403 }));
       }
       return withCors(req, Response.json({ ...providers, network_id: networkId }));
+    }
+
+    // ── #1510: the log-only view of the secret transport gate ──
+    //
+    // Answers "how many secret writes WOULD a plain-HTTP refusal have blocked,
+    // and on which node" before anyone turns the gate on. Same audience and
+    // shape as the node-permission report: network owner/admin, aggregated.
+    const envTransportLog = url.pathname.match(/^\/api\/networks\/([^/]+)\/env-transport-log$/);
+    if (envTransportLog && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = decodeURIComponent(envTransportLog[1]);
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      if (!isAdmin && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const sinceRaw = url.searchParams.get("since");
+      const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Date.now() - 7 * 86_400_000;
+      if (!Number.isFinite(sinceMs)) return withCors(req, Response.json({ ok: false, error: "invalid_since" }, { status: 400 }));
+      const rows = readEnvTransportLog(networkId, new Date(sinceMs).toISOString().slice(0, 13));
+      return withCors(req, Response.json({
+        ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(),
+        total: rows.reduce((n, r) => n + r.hits, 0), rows,
+      }));
     }
 
     // ── #1491 E1: the node-secret write lane over REST ──

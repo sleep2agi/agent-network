@@ -4,6 +4,8 @@ import { db } from './db';
 import { getUserNetworkRole } from './auth';
 import { providerScanTargets } from './daemon-provider-snapshots';
 import { validScopedSecretKey } from './shared/scoped-secret-contract';
+import { observeSecretWrite, transportOf } from './env-transport-gate.js';
+import { refusesPlainTransport } from './env-transport-policy.js';
 type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
 type Daemon = { ok: false; error: string } | { ok: true; networkId: string; daemonNodeId: string; daemonAlias: string };
 type Request = { request_id: string; network_id: string; daemon_node_id: string | null; node_id: string | null;
@@ -37,6 +39,13 @@ export function requestNodeSecrets(h: Human, node: string, action: Request['acti
   if (action !== 'list' && (!validScopedSecretKey(key) || !Number.isSafeInteger(revision) || revision! < 0
     || (action === 'put' && (typeof value !== 'string' || !value || Buffer.byteLength(value) > 8192 || value.includes('\0'))))) return denied('invalid_secret_input');
   expire();
+  // #1510 — transport gate (log-only by default). A `put` carries the secret, so
+  // that is the only action worth observing; delete/list leak nothing.
+  if (action === 'put') {
+    const transport = transportOf(h.networkId!, node);
+    if (refusesPlainTransport(transport)) return denied('secret_transport_plain');
+    observeSecretWrite(h.networkId!, node, `node_secret_${action}`);
+  }
   if ([...requests.values()].some(r => r.network_id === h.networkId && r.daemon_node_id === null && r.node_id === node && r.status === 'pending')) return denied('secret_store_busy');
   if (requests.size >= 1000) return denied('secret_queue_busy');
   const r: Request = { request_id: `nsk_${randomUUID()}`, network_id: h.networkId!, daemon_node_id: null,
@@ -77,6 +86,12 @@ export function requestScopedSecrets(h: Human, daemon: string, node: string | nu
   if (action !== 'list' && (!validScopedSecretKey(key)
     || !Number.isSafeInteger(revision) || revision! < 0 || (action === 'put' && (typeof value !== 'string' || !value || Buffer.byteLength(value) > 8192 || value.includes('\0'))))) return denied('invalid_secret_input');
   expire();
+  // #1510 — same observation on the daemon lane (the daemon applies the value).
+  if (action === 'put') {
+    const transport = transportOf(h.networkId!, daemon);
+    if (refusesPlainTransport(transport)) return denied('secret_transport_plain');
+    observeSecretWrite(h.networkId!, daemon, `secret_${action}`);
+  }
   if ([...requests.values()].some(r => r.network_id === h.networkId && r.daemon_node_id === daemon && r.status === 'pending')) return denied('secret_store_busy');
   if (requests.size >= 1000) return denied('secret_queue_busy');
   const r: Request = { request_id: `dsk_${randomUUID()}`, network_id: h.networkId!, daemon_node_id: daemon,

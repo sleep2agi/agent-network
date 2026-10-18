@@ -2396,3 +2396,17 @@ try { db.exec("ALTER TABLE sessions ADD COLUMN secret_keys TEXT"); } catch {}
 // the node itself. Appended at EOF like the other post-1.0 columns so the doc
 // and test846 line anchors below it never drift.
 try { db.exec("ALTER TABLE sessions ADD COLUMN env_transport TEXT"); } catch {}
+
+// #1510 — hourly count of secret writes that a transport gate WOULD have refused
+// (nodes reporting a plain-HTTP hub link). Log-only until an operator decides.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS env_transport_would_refuse (
+    network_id TEXT NOT NULL,
+    node_id    TEXT NOT NULL,
+    route      TEXT NOT NULL,
+    hour       TEXT NOT NULL,
+    hits       INTEGER NOT NULL DEFAULT 0,
+    sample     TEXT,
+    PRIMARY KEY (network_id, node_id, route, hour)
+  );
+`);
