@@ -18,8 +18,10 @@ RUN apk add --no-cache tmux bash coreutils >/dev/null
 WORKDIR /repo
 ARG TEST812_SOURCE_COMMIT=unknown
 ENV TEST812_SOURCE_COMMIT=$TEST812_SOURCE_COMMIT
-ARG TEST812_RUNSH_BLOB=unknown
-ENV TEST812_RUNSH_BLOB=$TEST812_RUNSH_BLOB
+# qa.sh 只在 Dockerfile 里看到字面量 `ARG RUNSH_BLOB` 时才传入 run.sh 的 git blob。
+# run.sh 断言的环境变量名仍是 TEST812_RUNSH_BLOB。
+ARG RUNSH_BLOB=unknown
+ENV TEST812_RUNSH_BLOB=$RUNSH_BLOB
 
 # 被测对象:文档本身
 COPY docs/node-liveness-criterion.md /repo/docs/node-liveness-criterion.md
