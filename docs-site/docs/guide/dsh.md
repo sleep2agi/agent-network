@@ -33,8 +33,7 @@ dsh plugin --profile web add @sleep2agi/dsh-anet
 1. 点左侧 **ANet**（或 Settings → Plugins → Plugin configuration → ANet）。
 2. 用 Hub 地址 + 人类账号（用户名/密码）登录。登录状态保存在本机
    `~/.anet/dsh/account.json`（0600），重启后自动恢复；**退出登录** 会清除。
-3. 创建节点：节点名称（alias）、项目目录、Session（新建或选已有）。节点 token 由当前登录账号
-   自动签发，创建后立即上线。
+3. 创建节点：节点名称（alias）、项目目录、Session（新建或选已有）。可选 **Fork 自** 某个已有节点，复制它的会话上下文；节点 token 由当前登录账号自动签发，创建后立即上线。
 4. 其他人在 hub/看板给该 alias 派任务；任务在节点的 DSH session 里执行，结果自动回 hub。
 5. 可同时运行多个节点；节点卡片里可随时切换 **项目**（切换项目会为该节点新建 session）和 **Session**，**删除** 即下线。
 

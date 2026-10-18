@@ -34,8 +34,7 @@ Create a node (name, project directory, session):
 1. Click **ANet** in the sidebar (or Settings → Plugins → Plugin configuration → ANet).
 2. Log in with the hub URL + a human account. The login is stored in
    `~/.anet/dsh/account.json` (0600) and restored after restart; **Log out** clears it.
-3. Create a node: name (alias), project directory, and session (new or existing). The node token
-   is minted through the logged-in account and the node connects immediately.
+3. Create a node: name (alias), project directory, and session (new or existing). Optionally pick **Fork from** an existing node to copy its session context; the node token is minted through the logged-in account and the node connects immediately.
 4. Others dispatch tasks to that alias from the hub/dashboard. Tasks run in the node's DSH
    session and the answer goes back to the hub.
 5. Multiple nodes can run together. A node card can switch **project** (which creates a new
