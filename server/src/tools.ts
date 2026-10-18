@@ -1927,8 +1927,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // (db.ts) write back into A's task result + inbox — cross-tenant
       // write. Verify ownership, reject on mismatch.
       if (parentIn) {
-        const parentRow = db.get<{ network_id: string | null }>(
-          "SELECT network_id FROM tasks WHERE task_id = ?1",
+        const parentRow = db.get<{ network_id: string | null; from_name: string; to_name: string }>(
+          "SELECT network_id, from_name, to_name FROM tasks WHERE task_id = ?1",
           [parentIn]
         );
         if (!parentRow) {
@@ -1943,6 +1943,24 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             ok: false, error: "cross_network_parent",
             message: "parent_task_id belongs to a different network",
           }) }] };
+        } else {
+          // Node-TMAI#4 (D): same-network is NOT sufficient. The dispatcher
+          // must be a party to the task it claims as parent — either its
+          // originator or its assignee. Without this, a same-network caller
+          // could attach its dispatch to any third party's task and the
+          // chain would later surface that child's result to the third
+          // party's originator. Compare canonical aliases so a committed
+          // rename on either side cannot defeat the check.
+          const parentFromAlias = resolveCanonicalAlias(effectiveNetId, parentRow.from_name).alias;
+          const parentToAlias = resolveCanonicalAlias(effectiveNetId, parentRow.to_name).alias;
+          const childFromAlias = resolveCanonicalAlias(effectiveNetId, from_session).alias;
+          if (childFromAlias !== parentFromAlias && childFromAlias !== parentToAlias) {
+            console.log(`[${ts()}] 🚫 send_task: non-participant parent rejected, parent=${parentIn.slice(0, 8)} caller=${childFromAlias}`);
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              ok: false, error: "parent_not_participant",
+              message: "parent_task_id is not a task this sender took part in",
+            }) }] };
+          }
         }
       }
 

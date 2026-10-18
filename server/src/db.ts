@@ -2043,6 +2043,72 @@ export function chainReplyToParent(
   maxDepth = 5,
   callerNetId?: string | null,
 ): ChainReplyResult {
+  // Node-TMAI#4 (E/F): bind the ORIGIN of the result once, up front.
+  //
+  // The walk below climbs from the child towards the root, so the loop
+  // variable is the CURRENT HOP's child and it changes on every iteration.
+  // That is hop identity, not result identity. Conflating the two was the
+  // defect this key used to carry: keying the de-dup index on the loop
+  // variable let a descendant's upward notice burn an intermediate task's
+  // key, so that task's own later completion looked like a "replay" and was
+  // silently dropped (grandparent <- parent <- leaf, then the parent
+  // finishes for real => 0 notices). Three notions are now kept apart:
+  //
+  //   * originChildId / originAlias / originReply — the ONE task whose
+  //     result this call carries; fixed for the whole walk.
+  //   * originStamp — the DELIVERY of that result (its terminal
+  //     transition), kept only as a human-readable audit value.
+  //   * attemptKey — the ATTEMPT that produced the result: the inbox
+  //     transport row that queued it. See the block below for why the
+  //     delivery stamp alone is not usable as the key.
+  //   * hopKind — "completion" (the origin's own result reaching its
+  //     direct parent) vs "descendant" (a forwarded notice at a higher
+  //     ancestor). The two can never share a de-dup slot.
+  const origin = db.get<{
+    to_name: string;
+    completed_at: string | null;
+    delivered_at: string | null;
+    started_at: string | null;
+  }>(
+    "SELECT to_name, completed_at, delivered_at, started_at FROM tasks WHERE task_id = ?1",
+    childTaskId
+  );
+  const originChildId = childTaskId;
+  const originAlias = origin?.to_name ?? childTaskId.slice(0, 8);
+  const originStamp = (origin?.completed_at ?? origin?.delivered_at ?? origin?.started_at ?? "n/a")
+    .replace(/[^0-9A-Za-z]/g, "-");
+  const originReply = replyText;
+
+  // Node-TMAI#4 (F, round 3): the de-dup key must identify the ATTEMPT, and
+  // no delivery timestamp can do that. `completed_at` / `delivered_at` are
+  // written with `datetime('now')` — second granularity — so two legitimate
+  // attempts of one task_id (the second one created by `retry_task`) can
+  // complete inside the same second and carry an identical stamp. The later
+  // result then looked like a replay of the earlier one and was swallowed.
+  //
+  // A retry or a reassign queues a fresh inbox transport row for the same
+  // task_id, inside the same transaction as the task reset: `retry_task`
+  // first runs `UPDATE tasks SET status='delivered', result=NULL,
+  // completed_at=NULL, ...` and only then `INSERT INTO inbox` with a new id;
+  // `reassign_task` acks the old row, updates the task, then inserts the new
+  // one. db.ts #520 keeps transport-row identity separate from logical task
+  // identity for precisely this reason ("runtime evidence/replies survive
+  // those redeliveries"). This candidate therefore takes the newest
+  // transport row of the task as its attempt identity: it changes on every
+  // retry/reassign and survives a re-delivery of the same attempt, and it
+  // needs no schema change.
+  //
+  // That is the identity source THIS CANDIDATE adopts; it is not a verified
+  // account of every asynchronous late-reply or retention path, and those
+  // are out of scope here. A row that was never dispatched (synthetic or
+  // imported) has no transport row and falls back to its delivery stamp,
+  // which preserves the old behaviour for those.
+  const dispatch = db.get<{ transport_id: string | null }>(
+    "SELECT id AS transport_id FROM inbox WHERE task_id = ?1 ORDER BY rowid DESC LIMIT 1",
+    childTaskId
+  );
+  const attemptKey = dispatch?.transport_id ?? `undispatched-${originStamp}`;
+
   let currentChildId: string | null = childTaskId;
   let currentReply = replyText;
   let depth = 0;
@@ -2056,6 +2122,9 @@ export function chainReplyToParent(
 
   while (currentChildId && depth < maxDepth) {
     depth++;
+    // Narrow the loop cursor once. It is the walk position for this hop and
+    // nothing else; the result's origin is pinned outside the loop above.
+    const hopChildId: string = currentChildId;
     type ChildRow = { parent_task_id: string | null; to_name: string; from_name: string; content: string };
     type ParentRow = { task_id: string; from_name: string; to_name: string; status: string; result: string | null; network_id: string | null; parent_task_id: string | null };
     const child: ChildRow | null = db.get<ChildRow>(
@@ -2081,28 +2150,63 @@ export function chainReplyToParent(
       }
     }
 
+    // The origin's own result reaching its direct parent is the "executor
+    // completion" notice; anything higher up is a "descendant notice"
+    // forwarded on the origin's behalf. They are different events and must
+    // never occupy the same de-dup slot.
+    const hopKind = depth === 1 ? "completion" : "descendant";
     const childAlias = child.to_name;
     const marker = `\n\n[via ${childAlias} 子任务结果]\n${currentReply}`;
     const newResult = parent.result ? parent.result + marker : `[via ${childAlias} 子任务结果]\n${currentReply}`;
 
+    // Node-TMAI#4 (E/F): one ATTEMPT of a child result may be recorded
+    // against a parent at most once. The key binds the ORIGIN of the result
+    // (not the loop variable), the attempt (its inbox transport row), the
+    // parent and the hop kind. A replayed reply therefore cannot fan out
+    // into a second audit row and a second notice, while a fresh attempt of
+    // the same task (a legal retry) still gets through.
+    const recordKey = `auto-chain:${hopKind}:${parent.task_id}:${originChildId}:${attemptKey}`;
+    let recorded = false;
+
     db.transaction(() => {
-      // Bump parent status to replied if still open. The task transition and
-      // its scheduler-run mirror share this transaction, so a crash cannot
-      // leave one terminal while the other remains delivered.
+      const already = db.get<{ c: number }>(
+        "SELECT COUNT(*) AS c FROM task_events WHERE task_id = ?1 AND event_key = ?2",
+        [parent.task_id, recordKey]
+      );
+      if ((already?.c ?? 0) > 0) return;
+
+      // An OPEN parent is completed by the chain: this is the #690 contract —
+      // a scheduled/dispatched parent whose executor answered through a child
+      // must reach a terminal state, and its scheduler-run mirror follows it
+      // in the same transaction.
       if (parent.status === "delivered" || parent.status === "acked" || parent.status === "running" || parent.status === "created") {
         db.run(
           "UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now') WHERE task_id = ?3",
           [replyStatus, newResult.slice(0, 8000), parent.task_id]
         );
         syncScheduledRunForTask(parent.task_id, parent.network_id);
-        logTaskEvent(parent.task_id, parent.status, replyStatus, "auto-chain", `from ${childAlias}`);
-      } else {
-        db.run(
-          "UPDATE tasks SET result = ?1, completed_at = datetime('now') WHERE task_id = ?2",
-          [newResult.slice(0, 8000), parent.task_id]
+        logTaskEvent(
+          parent.task_id, parent.status, replyStatus, "auto-chain",
+          `from ${childAlias}; origin ${originChildId.slice(0, 8)}, attempt=${attemptKey}`,
+          recordKey,
         );
-        logTaskEvent(parent.task_id, parent.status, parent.status, "auto-chain-append", `from ${childAlias}`);
+      } else {
+        // A TERMINAL parent is never rewritten. It used to have its `result`
+        // appended and its `completed_at` moved forward long after it had
+        // finished (observed: 22 minutes later), so an answer given to the
+        // parent could silently become part of somebody else's result. The
+        // child result is still recorded — as an audit row plus a notice to
+        // the parent's author — but the parent row stays byte-identical.
+        logTaskEvent(
+          parent.task_id, parent.status, parent.status, "auto-chain-append",
+          `from ${childAlias}; origin ${originChildId.slice(0, 8)}, attempt=${attemptKey}; terminal parent left untouched`,
+          recordKey,
+        );
       }
+      // The audit row for this (parent, child) link now exists. Only a call
+      // that actually recorded one may unlock the caller's SSE push; a
+      // deduped replay returns early above and leaves this false.
+      recorded = true;
 
       if (parent.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
         try {
@@ -2114,20 +2218,22 @@ export function chainReplyToParent(
           db.run(
             `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
              VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
-            [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
+            [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} ${hopKind === "descendant" ? "后代结果转呈" : "子任务完成"}]\n${originReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
           );
         } catch {}
       }
     });
 
-    // This iteration actually wrote a parent row (and possibly an
-    // inbox notification). Record that so the caller can gate its
-    // SSE push on a real chain.
-    chained = true;
+    // An audit row (and possibly an inbox notification) was recorded for
+    // this parent-child link. The caller gates its SSE push on this.
+    if (recorded) chained = true;
 
-    // Recurse up the chain.
-    currentChildId = parent.task_id;
+    // Recurse up the chain. Only the HOP cursor advances: the origin and
+    // its delivery stay pinned, so no hop can absorb another's identity
+    // and each notice carries the origin reply once instead of nesting
+    // every ancestor's copy of it.
     currentReply = newResult;
+    currentChildId = parent.task_id;
   }
   return { chained };
 }
@@ -2240,12 +2346,12 @@ function taskEventTypeForStatus(toStatus: string): string {
   }
 }
 
-export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
+export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string, eventKey?: string) {
   try {
     db.run(
-      `INSERT INTO task_events (task_id, from_status, to_status, event_type, actor, detail, network_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
-      [taskId, fromStatus, toStatus, taskEventTypeForStatus(toStatus), actor, detail ?? null]
+      `INSERT INTO task_events (task_id, from_status, to_status, event_type, event_key, actor, detail, network_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
+      [taskId, fromStatus, toStatus, taskEventTypeForStatus(toStatus), eventKey ?? null, actor, detail ?? null]
     );
   } catch {}
 }
