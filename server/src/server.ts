@@ -87,6 +87,7 @@ import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startS
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders } from "./hub-provider-config.js";
+import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
@@ -2771,6 +2772,69 @@ return Bun.serve({
         return withCors(req, Response.json(providers, { status: 403 }));
       }
       return withCors(req, Response.json({ ...providers, network_id: networkId }));
+    }
+
+    // ── #1491 E1: the node-secret write lane over REST ──
+    //
+    // The lane already exists end to end (tools.ts `node_secret_*` →
+    // scoped-secrets.ts → node doorbell → agent-node reconcileNodeSecrets), but
+    // it is MCP-only and request/ack shaped: a caller enqueues a request, the
+    // node applies it at its next start and acks with a snapshot. The client has
+    // no way to drive that, which is the only reason it still "cannot manage a
+    // node's env".
+    //
+    // Two endpoints, deliberately thin: enqueue, then poll. Authorization stays
+    // where it already is — requestNodeSecrets allows owner/admin only, so a
+    // plain member (or any node token) is refused by the lane itself.
+    const nodeSecretReq = url.pathname.match(/^\/api\/nodes\/([^/]+)\/secrets$/);
+    const nodeSecretGet = url.pathname.match(/^\/api\/nodes\/([^/]+)\/secrets\/([^/]+)$/);
+    if ((nodeSecretReq || nodeSecretGet) && !restAuth) {
+      return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+    }
+    if (nodeSecretReq && req.method === "POST") {
+      if (restAuth!.networkId) return userTokenRequired(req);
+      const networkId = singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const nodeId = decodeURIComponent(nodeSecretReq[1]);
+      if (!nodeId) return withCors(req, Response.json({ ok: false, error: "node_id_required" }, { status: 400 }));
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      const action = body?.action;
+      if (action !== "list" && action !== "put" && action !== "delete") {
+        return withCors(req, Response.json({ ok: false, error: "invalid_action", message: "action must be list | put | delete" }, { status: 400 }));
+      }
+      // A `put` without a revision is a client bug, not a server decision: the
+      // node rejects it anyway, and silently inventing 0 would overwrite a file
+      // the operator edited in the meantime.
+      if (action !== "list" && !Number.isSafeInteger(body?.revision)) {
+        return withCors(req, Response.json({ ok: false, error: "revision_required", message: "put/delete need the revision from the last list" }, { status: 400 }));
+      }
+      const result = requestNodeSecrets(
+        { userId: restAuth!.userId ?? null, isNode: false, networkId },
+        nodeId, action, body?.key, body?.value, body?.revision,
+      );
+      if (!result.ok) {
+        const status = result.error === "secret_admin_required" ? 403
+          : result.error === "node_secrets_upgrade_required" ? 409
+          : result.error === "secret_store_busy" || result.error === "secret_queue_busy" ? 409
+          : 400;
+        return withCors(req, Response.json(result, { status }));
+      }
+      return withCors(req, Response.json(result));
+    }
+    if (nodeSecretGet && req.method === "GET") {
+      if (restAuth!.networkId) return userTokenRequired(req);
+      const networkId = singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const result = getScopedSecrets(
+        { userId: restAuth!.userId ?? null, isNode: false, networkId },
+        decodeURIComponent(nodeSecretGet[2]),
+      );
+      if (!result.ok) {
+        const status = result.error === "secret_admin_required" ? 403 : 404;
+        return withCors(req, Response.json(result, { status }));
+      }
+      return withCors(req, Response.json(result));
     }
 
     if (url.pathname === "/api/dm" || url.pathname === "/api/dm/threads") {
